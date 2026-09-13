@@ -82,11 +82,19 @@ describe("context mode persistence", () => {
       logDebug: vi.fn(),
     });
 
+    // The additive project switch must survive the same canonical descriptor store as context mode.
+    await service.updateProjectSecureSessionsEnabled("manager", false);
+    const afterDisabled = await new AgentDescriptorStore({
+      dataDir: config.paths.dataDir, storeFilePath: config.paths.agentsStoreFile,
+    }).load();
+    expect(afterDisabled.profiles?.[0]?.secureSessionsEnabled).toBe(false);
+    await service.updateProjectSecureSessionsEnabled("manager", true);
     await service.updateProjectContextMode("manager", "fresh");
     const afterProject = await new AgentDescriptorStore({
       dataDir: config.paths.dataDir,
       storeFilePath: config.paths.agentsStoreFile,
     }).load();
+    expect(afterProject.profiles?.[0]?.secureSessionsEnabled).toBe(true);
     expect(afterProject.profiles?.[0]?.defaultContextMode).toBe("fresh");
     expect(afterProject.agents[0]?.contextModeOverride).toBeUndefined();
 

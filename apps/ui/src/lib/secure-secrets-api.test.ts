@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import {
   SecureSecretsError,
+  fetchProjectSecureSessionsSettings,
+  updateProjectSecureSessionsSettings,
   checkSecureMaterialEntryAvailability,
   connectBitwardenPasswordManager,
   connectBitwardenProvider,
@@ -876,4 +878,15 @@ describe('secure secrets API', () => {
         'One or more selected projects already have the maximum number of automatic grants. Remove one before adding another.',
     })
   })
+})
+
+it('uses the secure control transport and validates project settings responses', async () => {
+  const fetchImpl = vi.fn(async () => jsonResponse({ profileId: 'project-a', enabled: false }))
+  const client = makeClient(fetchImpl)
+  await expect(updateProjectSecureSessionsSettings(client, 'project-a', false)).resolves.toEqual({ profileId: 'project-a', enabled: false })
+  expect(fetchImpl).toHaveBeenCalledWith('/api/secure-secrets/projects/project-a/settings', expect.objectContaining({ method: 'PUT', body: '{"enabled":false}', cache: 'no-store', credentials: 'include' }))
+  await expect(fetchProjectSecureSessionsSettings(client, 'project-a')).resolves.toEqual({ profileId: 'project-a', enabled: false })
+  fetchImpl.mockResolvedValue(jsonResponse({ profileId: 'other-project', enabled: true }))
+  await expect(fetchProjectSecureSessionsSettings(client, 'project-a')).rejects.toThrow()
+  await expect(updateProjectSecureSessionsSettings(makeClient(fetchImpl, 'collab'), 'project-a', true)).rejects.toMatchObject({ code: 'SECURE_BUILDER_ONLY' })
 })

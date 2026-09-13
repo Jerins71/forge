@@ -56,6 +56,18 @@ import type {
 export abstract class SwarmManagerSecureSessionsFacade extends SwarmManagerGoalFacade {
   protected abstract getFacadeServices(): SwarmManagerFacadeServices;
 
+  getProjectSecureSessionsSettings(profileId: string) {
+    return this.secureSessions.getProjectSecureSessionsSettings(profileId);
+  }
+
+  updateProjectSecureSessionsSettings(profileId: string, enabled: boolean) {
+    return this.secureSessions.updateProjectSecureSessionsSettings(profileId, enabled);
+  }
+
+  isSecureSessionsEnabledForAgent(agentId: string): boolean {
+    return this.secureSessions.isSecureSessionsEnabledForAgent(agentId);
+  }
+
   listSecureSecretProviders(): Promise<SecureSecretProviderSummary[]> {
     return this.secureSessions.listSecureSecretProviders();
   }

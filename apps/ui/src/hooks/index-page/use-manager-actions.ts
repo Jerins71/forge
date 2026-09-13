@@ -57,6 +57,8 @@ export function useManagerActions({
   isValidatingDirectory: boolean
   isPickingDirectory: boolean
   scaffoldForgeResources: boolean
+  newManagerSecureSessionsEnabled: boolean
+  handleNewManagerSecureSessionsEnabledChange: (enabled: boolean) => void
   handleNewManagerNameChange: (value: string) => void
   handleNewManagerCwdChange: (value: string) => void
   handleNewManagerModelSelectionChange: (value: ManagerExactModelSelection) => void
@@ -100,6 +102,7 @@ export function useManagerActions({
   const [newManagerReasoningLevel, setNewManagerReasoningLevel] = useState<ManagerReasoningLevel | undefined>(undefined)
   const [createManagerError, setCreateManagerError] = useState<string | null>(null)
   const [scaffoldForgeResources, setScaffoldForgeResources] = useState(true)
+  const [newManagerSecureSessionsEnabled, setNewManagerSecureSessionsEnabled] = useState(false)
   const [isCreatingManager, setIsCreatingManager] = useState(false)
   const [isValidatingDirectory, setIsValidatingDirectory] = useState(false)
 
@@ -286,6 +289,7 @@ export function useManagerActions({
     setNewManagerModelSelection(undefined)
     setNewManagerReasoningLevel(undefined)
     setScaffoldForgeResources(true)
+    setNewManagerSecureSessionsEnabled(false)
     setBrowseError(null)
     setCreateManagerError(null)
     resetCloneFields()
@@ -442,6 +446,7 @@ export function useManagerActions({
             repositoryFolder: folder,
             modelSelection: newManagerModelSelection,
             reasoningLevel: newManagerReasoningLevel,
+            secureSessionsEnabled: newManagerSecureSessionsEnabled,
           },
           {
             onProgress: (progress) => {
@@ -474,6 +479,7 @@ export function useManagerActions({
         setNewManagerModelSelection(undefined)
         setNewManagerReasoningLevel(undefined)
         setScaffoldForgeResources(true)
+        setNewManagerSecureSessionsEnabled(false)
         setBrowseError(null)
         setCreateManagerError(null)
         resetCloneFields()
@@ -521,6 +527,7 @@ export function useManagerActions({
         cwd: validation.path || cwd,
         modelSelection: newManagerModelSelection,
         reasoningLevel: newManagerReasoningLevel,
+        secureSessionsEnabled: newManagerSecureSessionsEnabled,
       })
 
       navigateToRoute({ view: 'chat', agentId: manager.agentId, surface: 'builder' })
@@ -540,6 +547,7 @@ export function useManagerActions({
       setNewManagerModelSelection(undefined)
       setNewManagerReasoningLevel(undefined)
       setScaffoldForgeResources(true)
+      setNewManagerSecureSessionsEnabled(false)
       setBrowseError(null)
       setCreateManagerError(null)
       resetCloneFields()
@@ -556,6 +564,7 @@ export function useManagerActions({
     newManagerCwd,
     newManagerModelSelection,
     newManagerReasoningLevel,
+    newManagerSecureSessionsEnabled,
     newManagerName,
     repositoryBasePath,
     repositoryFolder,
@@ -631,6 +640,7 @@ export function useManagerActions({
     newManagerCwd,
     newManagerModelSelection,
     newManagerReasoningLevel,
+    newManagerSecureSessionsEnabled,
     scaffoldForgeResources,
     createManagerError,
     browseError,
@@ -642,6 +652,7 @@ export function useManagerActions({
     handleNewManagerModelSelectionChange,
     handleNewManagerReasoningLevelChange,
     handleScaffoldForgeResourcesChange,
+    handleNewManagerSecureSessionsEnabledChange: setNewManagerSecureSessionsEnabled,
     handleOpenCreateManagerDialog,
     handleCreateManagerDialogOpenChange,
     handleBrowseDirectory,

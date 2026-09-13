@@ -332,6 +332,11 @@ export class SwarmConfigurationCoordinator {
     return this.settings.updateSessionDelegation(sessionAgentId, updates);
   }
 
+  updateProjectSecureSessionsEnabled(profileId: string, enabled: boolean): Promise<void> {
+    this.options.access.assertProfileNotArchived(profileId);
+    return this.settings.updateProjectSecureSessionsEnabled(profileId, enabled);
+  }
+
   updateProjectContextMode(
     profileId: string,
     mode: Parameters<SwarmSettingsService["updateProjectContextMode"]>[1],

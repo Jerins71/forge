@@ -45,6 +45,14 @@ Ordinary web clients have no local browser host, and Forge does not forward the 
 
 ### Secure Sessions
 
+Each local project has a **Project Settings → Secure Sessions** switch. New projects
+ask whether to enable it and default to off. Existing persisted projects without the
+setting retain their previous enabled behavior. Turning it off removes secure tool
+schemas from Pi agents, denies further protected execution, and stops that project's
+secure environments. Saved secrets and project mappings are retained. If cleanup
+fails, access stays disabled and Project Settings offers a retry.
+
+
 Secure Sessions are configured through **Settings → Secrets** rather than environment
 variables. Forge Desktop encrypts local values, Bitwarden Secrets Manager machine
 credentials, and one-time Bitwarden Password Manager unlock entries before the local

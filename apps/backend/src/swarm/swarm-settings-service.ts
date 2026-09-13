@@ -521,6 +521,21 @@ export class SwarmSettingsService {
     this.options.emitAgentsSnapshot();
   }
 
+  async updateProjectSecureSessionsEnabled(profileId: string, enabled: boolean): Promise<void> {
+    const profile = this.options.profiles.get(profileId);
+    if (!profile) throw new Error(`Unknown manager profile: ${profileId}`);
+    if (typeof enabled !== "boolean") throw new Error("enabled must be a boolean");
+    const previous = { secureSessionsEnabled: profile.secureSessionsEnabled, updatedAt: profile.updatedAt };
+    const patch = { secureSessionsEnabled: enabled, updatedAt: getNow(this.options.now)() };
+    await this.runDescriptorTransaction(async store => {
+      store.patchProfile(profileId, patch);
+    }, async () => {
+      try { Object.assign(profile, patch); await this.options.saveStore(); }
+      catch (error) { Object.assign(profile, previous); throw error; }
+    });
+    this.options.emitProfilesSnapshot();
+  }
+
   async updateProjectContextMode(profileId: string, mode: ContextMode): Promise<ManagerProfile> {
     const profile = this.options.profiles.get(profileId);
     if (!profile) throw new Error(`Unknown manager profile: ${profileId}`);

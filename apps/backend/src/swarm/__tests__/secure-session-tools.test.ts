@@ -760,3 +760,11 @@ describe("secure session agent tools", () => {
     ).not.toContain(LEAK_MARKER);
   });
 });
+
+it("omits all secret tools from disabled project managers and workers", () => {
+  for (const actor of [manager(), worker()]) {
+    const tools = buildSwarmTools(host({ isSecureSessionsEnabledForAgent: () => false }), actor);
+    expect(tools.map(tool => tool.name)).not.toEqual(expect.arrayContaining(["secure_session_status"]));
+    expect(tools.some(tool => ["secure_session_status", "request_secret_access", "request_ssh_host_trust"].includes(tool.name))).toBe(false);
+  }
+});

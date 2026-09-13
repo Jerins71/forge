@@ -135,6 +135,7 @@ import { normalizeOptionalAgentId } from "./swarm-manager-utils.js";
 import { SwarmManagerSessionAttentionFacade } from "./swarm-manager-session-attention-facade.js";
 
 export interface CreateManagerInput {
+  secureSessionsEnabled?: boolean;
   name: string;
   cwd: string;
   model?: SwarmModelPreset;
@@ -457,10 +458,7 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
     return this.services.sessions.stopAllAgents(callerAgentId, targetManagerId);
   }
 
-  createManager(
-    callerAgentId: string,
-    input: CreateManagerInput,
-  ): ReturnType<SessionLifecycleCoordinator["createManager"]> {
+  createManager(callerAgentId: string, input: CreateManagerInput): ReturnType<SessionLifecycleCoordinator["createManager"]> {
     return this.services.sessions.createManager(callerAgentId, input);
   }
 

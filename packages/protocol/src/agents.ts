@@ -158,6 +158,11 @@ export type AgentModelOrigin = (typeof AGENT_MODEL_ORIGINS)[number]
 export const SESSION_MODEL_UPDATE_MODES = ['inherit', 'override'] as const
 export type SessionModelUpdateMode = (typeof SESSION_MODEL_UPDATE_MODES)[number]
 
+export interface ProjectSecureSessionsSettings {
+  profileId: string
+  enabled: boolean
+}
+
 export interface ManagerProfile {
   profileId: string
   displayName: string
@@ -166,6 +171,8 @@ export interface ManagerProfile {
   /** Bounded transport identity. Backend persistence still stores closed ManagerPosture. */
   defaultManagerPosture?: WorkModeId
   defaultDelegationRosterId?: string
+  /** Absent preserves Secure Sessions for projects created before this setting. */
+  secureSessionsEnabled?: boolean
   /** Absent means inherit the product summary default. */
   defaultContextMode?: ContextMode
   createdAt: string

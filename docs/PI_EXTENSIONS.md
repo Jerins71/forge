@@ -48,6 +48,29 @@ A successful transition updates both the session's active messages and the agent
 
 These hooks are Forge runtime integration, not a separate extension coordination system. Project extensions still receive the existing compaction lifecycle notifications. Context v2 model eligibility is a runtime policy, not evidence that every eligible model has passed behavioral evaluation; see [Context management](CONFIGURATION.md#context-management) for the supported surfaces and tools.
 
+## Deferred browser tools
+
+Eligible local Builder Pi managers initially receive `discover_tools` instead of the full
+Automatic Browser schemas. `discover_tools({bundles:["browser"]})` activates the typed
+`browser_*` tools for the next model request, including another request in the same user
+turn. Calling it without `bundles` lists the available bundle without opening a browser.
+Workers and restricted runtime surfaces do not gain browser access through discovery.
+
+Forge registers eligible tools with Pi once, then controls visibility with the existing
+active-tool set. Execution continues through the ordinary tool registry, Forge extension
+hooks, secure result guards, and output budgeting. This defers model-facing schemas;
+it does not defer importing the browser implementation or expand browser authorization.
+
+Activation is local to the actor's retained native session branch. A successful discovery
+result carries a versioned receipt; resume and reload reconstruct activation from that
+branch. Navigating to a point before discovery removes the browser schemas again. A
+restored receipt activates current registered browser definitions, never saved executable
+code. Unloaded bundles remain deferred across extension reloads. Trusted extensions should
+avoid overriding Forge's `discover_tools` name or manually activating deferred browser tools.
+
+Set `FORGE_PI_TOOL_DISCOVERY=off` before creating a runtime to restore eager browser schemas
+for diagnosis. Other runtime integrations keep their current tool exposure.
+
 ## Extension Auto-Discovery
 
 Pi automatically discovers extensions and skills from well-known directories. Forge creates these directories on startup:

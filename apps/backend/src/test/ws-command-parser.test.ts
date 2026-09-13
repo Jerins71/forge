@@ -1406,3 +1406,16 @@ describe('ws command parser session commands', () => {
     })).toBeUndefined()
   })
 })
+
+it('preserves true and false Secure Sessions choices for both project creation commands', () => {
+  const commands = [
+    { type: 'create_manager', name: 'Project', cwd: '/tmp', model: 'pi-5.6' },
+    { type: 'create_repository_project', name: 'Project', repositoryUrl: 'https://example.test/repo.git', repositoryBasePath: '/tmp', repositoryFolder: 'repo', modelSelection: { provider: 'openai', modelId: 'gpt-5.5' }, requestId: 'create-project' },
+  ]
+  for (const command of commands) {
+    for (const secureSessionsEnabled of [true, false]) {
+      expect(parseJsonCommand({ ...command, secureSessionsEnabled })).toMatchObject({ ok: true, command: { secureSessionsEnabled } })
+    }
+    expect(parseJsonCommand({ ...command, secureSessionsEnabled: 'false' })).toMatchObject({ ok: false })
+  }
+})

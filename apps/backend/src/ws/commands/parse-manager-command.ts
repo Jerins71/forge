@@ -50,6 +50,10 @@ export function parseManagerCommand(maybe: ClientCommandCandidate): ParsedClient
     const model = (maybe as { model?: unknown }).model;
     const modelSelection = (maybe as { modelSelection?: unknown }).modelSelection;
     const reasoningLevel = (maybe as { reasoningLevel?: unknown }).reasoningLevel;
+    const secureSessionsEnabled = (maybe as { secureSessionsEnabled?: unknown }).secureSessionsEnabled;
+    if (secureSessionsEnabled !== undefined && typeof secureSessionsEnabled !== "boolean") {
+      return fail(`${maybe.type}.secureSessionsEnabled must be a boolean`);
+    }
     const requestId = (maybe as { requestId?: unknown }).requestId;
 
     if (typeof name !== "string" || name.trim().length === 0) {
@@ -84,6 +88,7 @@ export function parseManagerCommand(maybe: ClientCommandCandidate): ParsedClient
       ...(model !== undefined ? { model } : {}),
       ...(parsedModelSelection ? { modelSelection: parsedModelSelection } : {}),
       reasoningLevel,
+      ...(secureSessionsEnabled !== undefined ? { secureSessionsEnabled } : {}),
       requestId
     });
   }
@@ -95,6 +100,10 @@ export function parseManagerCommand(maybe: ClientCommandCandidate): ParsedClient
     const repositoryFolder = (maybe as { repositoryFolder?: unknown }).repositoryFolder;
     const modelSelection = (maybe as { modelSelection?: unknown }).modelSelection;
     const reasoningLevel = (maybe as { reasoningLevel?: unknown }).reasoningLevel;
+    const secureSessionsEnabled = (maybe as { secureSessionsEnabled?: unknown }).secureSessionsEnabled;
+    if (secureSessionsEnabled !== undefined && typeof secureSessionsEnabled !== "boolean") {
+      return fail(`${maybe.type}.secureSessionsEnabled must be a boolean`);
+    }
     const requestId = (maybe as { requestId?: unknown }).requestId;
 
     if (typeof name !== "string" || name.trim().length === 0) {
@@ -134,6 +143,7 @@ export function parseManagerCommand(maybe: ClientCommandCandidate): ParsedClient
       repositoryFolder: repositoryFolder.trim(),
       modelSelection: parsedModelSelection,
       reasoningLevel,
+      ...(secureSessionsEnabled !== undefined ? { secureSessionsEnabled } : {}),
       requestId: requestId.trim(),
     });
   }

@@ -151,3 +151,10 @@ describe("persisted profile posture boundary", () => {
     }
   });
 });
+
+it("preserves legacy absence and explicit Secure Sessions choices; malformed persisted values fail closed", () => {
+  for (const [value, expected] of [[undefined, undefined], [true, true], [false, false], ["true", false]] as const) {
+    const decoded = decodeAgentsStoreFile(JSON.stringify({ agents: [], profiles: [{ ...profile("forge"), secureSessionsEnabled: value }] }), storeOptions());
+    expect(decoded.store.profiles?.[0]?.secureSessionsEnabled).toBe(expected);
+  }
+});

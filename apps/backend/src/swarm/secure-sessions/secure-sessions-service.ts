@@ -4,6 +4,7 @@ import path from "node:path";
 import type {
   BitwardenPasswordManagerSettings,
   SetSecureSessionAccessRequest,
+  ProjectSecureSessionsSettings,
   GrantSecureSecretLeaseInput,
   GrantSecureSecretLeaseRequest,
   GrantSecureSecretLeasesRequest,
@@ -150,8 +151,10 @@ interface SecureSessionsServiceOptions {
     profileId: string;
     archivedAt?: string;
     profileType?: "user" | "system";
+    secureSessionsEnabled?: boolean;
   }>;
   hasProfile: (profileId: string) => boolean;
+  updateProjectEnabled?: (profileId: string, enabled: boolean) => Promise<void>;
   isProfileArchived: (profileId: string) => boolean;
   isSessionArchived: (agentId: string) => boolean;
   requireBuilderSession: (agentId: string, action: string) => AgentDescriptor;
@@ -2158,12 +2161,67 @@ export class SecureSessionsService {
     return () => this.stopSecureSessionForLifecycle(forkId, { deleteState: true });
   }
 
+  getProjectSecureSessionsSettings(profileId: string): ProjectSecureSessionsSettings {
+    this.requireActiveProfile(profileId);
+    const profile = [...this.options.listProfiles()].find(candidate => candidate.profileId === profileId);
+    return { profileId, enabled: profile?.secureSessionsEnabled !== false };
+  }
+
+  isSecureSessionsEnabledForAgent(agentId: string): boolean {
+    const caller = this.options.getDescriptor(agentId);
+    const owner = caller?.role === "worker" ? this.options.getDescriptor(caller.managerId) : caller;
+    const profileId = owner?.profileId;
+    if (!profileId) return false;
+    const profile = [...this.options.listProfiles()].find(candidate => candidate.profileId === profileId);
+    return Boolean(profile && profile.secureSessionsEnabled !== false);
+  }
+
+  async updateProjectSecureSessionsSettings(profileId: string, enabled: boolean): Promise<ProjectSecureSessionsSettings> {
+    if (typeof enabled !== "boolean") throw new SecureSessionsServiceError("SECURE_REQUEST_INVALID");
+    return this.withAuthorityMutation(async () => {
+      this.requireActiveProfile(profileId);
+      if (!this.options.updateProjectEnabled) throw new SecureSessionsServiceError("SECURE_OPERATION_FAILED");
+      // Persist denial before teardown. A cleanup failure must never reopen access.
+      await this.options.updateProjectEnabled(profileId, enabled);
+      let failed = false;
+      try {
+        if (!enabled) {
+          const store = await this.store();
+          for (const state of store.listSessionStates().filter(candidate => candidate.profileId === profileId)) {
+            const manager = this.options.getDescriptor(state.sessionAgentId);
+            if (!manager || !isBuilderManager(manager)) continue;
+            try {
+              const stopped = await this.withSessionMutation(manager.agentId, () => this.stopSecurePrincipalUnlocked(
+                managerPrincipal(manager), { baseRevision: store.getSnapshot(manager.agentId).state.revision, stopProcesses: true },
+                { preserveSessionSecrets: true, recycleRuntime: false },
+              ));
+              failed ||= stopped.environmentStatus === "degraded";
+            } catch { failed = true; }
+          }
+        }
+      } finally {
+        // Busy agents retain their current turn, but every new secure call checks the project policy.
+        const recycles = await Promise.allSettled([...this.options.listDescriptors()]
+          .filter(agent => agent.profileId === profileId)
+          .map(agent => this.options.applyModeRuntimeRecycle(agent.agentId)));
+        failed ||= recycles.some(result => result.status === "rejected");
+      }
+      if (failed) throw new SecureSessionsServiceError("SECURE_OPERATION_FAILED");
+      return this.getProjectSecureSessionsSettings(profileId);
+    });
+  }
+
+  private assertProjectSecureSessionsEnabled(agentId: string): void {
+    if (!this.isSecureSessionsEnabledForAgent(agentId)) throw new SecureSessionsServiceError("SECURE_ACCESS_BLOCKED");
+  }
+
   private assertAccessAllowed(
     store: SecureSessionStore,
     managerId: string,
     callerId: string,
     secretIds: readonly string[] = [],
   ): void {
+    this.assertProjectSecureSessionsEnabled(managerId);
     const policy = store.getAccessPolicy(managerId);
     if (policy.paused || policy.blockedAgentIds.includes(callerId)
       || secretIds.some((id) => policy.blockedSecretIds.includes(id))) {
@@ -2246,6 +2304,7 @@ export class SecureSessionsService {
   async prepareSecureRuntimeBinding(descriptor: AgentDescriptor): Promise<SecureRuntimeBinding | undefined> {
     let principal: SecurePrincipal;
     try { principal = this.resolveSecurePrincipal(descriptor.agentId); } catch { return undefined; }
+    if (!this.isSecureSessionsEnabledForAgent(descriptor.agentId)) return undefined;
     if (!supportsSecureRuntimeProvider(descriptor.model.provider)) return undefined;
     const store = await this.store();
     const managerId = principal.descriptor.agentId;
@@ -2271,6 +2330,7 @@ export class SecureSessionsService {
         || descriptorWorkerAssignmentId(caller) !== assignmentId) {
         throw new SecureSessionsServiceError("SECURE_OPERATION_FAILED");
       }
+      this.assertProjectSecureSessionsEnabled(descriptor.agentId);
     };
     const currentBinding = () => {
       assertCaller();
@@ -2350,6 +2410,7 @@ export class SecureSessionsService {
     const workers = this.listEligibleSecureWorkers(manager);
     return await this.withAuthorityMutation(async () =>
       await this.withSessionMutation(manager.agentId, async () => {
+        this.assertProjectSecureSessionsEnabled(manager.agentId);
         const principal = managerPrincipal(manager);
         const wasActive = this.activeSessions.has(manager.agentId);
         const store = await this.store();
@@ -3433,6 +3494,7 @@ export class SecureSessionsService {
   }
 
   async getSecureSessionAgentView(callerAgentId: string): Promise<SecureSessionAgentView> {
+    this.assertProjectSecureSessionsEnabled(callerAgentId);
     const principal = this.resolveSecurePrincipal(callerAgentId);
     const store = await this.store();
     const snapshot = await this.getSecureSessionSnapshot(principal.descriptor.agentId);
@@ -3603,6 +3665,7 @@ export class SecureSessionsService {
     toolCallId: string,
     input: RequestSecureSshHostTrustInput,
   ): Promise<"trusted" | "requested"> {
+    this.assertProjectSecureSessionsEnabled(callerAgentId);
     bounded(toolCallId, 256);
     const requestedBy = this.options.getDescriptor(callerAgentId);
     if (!requestedBy) {
@@ -3619,6 +3682,7 @@ export class SecureSessionsService {
       await this.withSessionMutation(
         principal.descriptor.agentId,
         async () => {
+          this.assertProjectSecureSessionsEnabled(callerAgentId);
           const currentPrincipal = this.resolveSecurePrincipal(callerAgentId);
           const store = await this.store();
           const sessionAgentId = currentPrincipal.descriptor.agentId;
@@ -3770,6 +3834,7 @@ export class SecureSessionsService {
     } catch {
       return undefined;
     }
+    if (!this.isSecureSessionsEnabledForAgent(descriptor.agentId)) return undefined;
     const authoritySessionAgentId = principal.descriptor.agentId;
     const active = this.activeSessions.get(authoritySessionAgentId);
     if (!active || active.closed) return undefined;
@@ -3817,6 +3882,7 @@ export class SecureSessionsService {
       ) {
         throw new SecureSessionsServiceError("SECURE_OPERATION_FAILED");
       }
+      this.assertProjectSecureSessionsEnabled(descriptor.agentId);
       return current;
     };
     return {
@@ -5564,8 +5630,9 @@ export class SecureSessionsService {
   }
 
   private hasProjectRuntimeProtection(store: SecureSessionStore, profileId: string): boolean {
-    return this.listEffectiveProjectDefaultsForProfile(store, profileId).length > 0
-      || store.listSshTrustedHosts(profileId).length > 0;
+    const profile = [...this.options.listProfiles()].find(candidate => candidate.profileId === profileId);
+    return profile?.secureSessionsEnabled !== false && (this.listEffectiveProjectDefaultsForProfile(store, profileId).length > 0
+      || store.listSshTrustedHosts(profileId).length > 0);
   }
 
   private async recycleNewlyProtectedProjectRuntimes(profileIds: ReadonlySet<string>): Promise<void> {
@@ -5676,6 +5743,7 @@ export class SecureSessionsService {
   ): SecureSessionProjectDefault[] {
     const profile = [...this.options.listProfiles()]
       .find((candidate) => candidate.profileId === profileId);
+    if (profile?.secureSessionsEnabled === false) return [];
     return profile && profile.profileType !== "system"
       ? store.listEffectiveProjectDefaults(profileId)
       : store.listProjectDefaults(profileId);

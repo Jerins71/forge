@@ -58,6 +58,7 @@ export interface SwarmToolSideEffectEvent {
 }
 
 export interface SwarmToolHost extends HistoryRecallToolHost {
+  isSecureSessionsEnabledForAgent?(agentId: string): boolean;
   listAgents(): AgentDescriptor[];
   getContextMode(callerAgentId: string): ContextMode;
   getSessionContextMode?(callerAgentId: string): SessionContextModeSnapshot;

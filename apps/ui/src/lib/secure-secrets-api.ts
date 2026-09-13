@@ -2,6 +2,7 @@ import type { SettingsApiClient } from '@/components/settings/settings-api-clien
 import { encryptRemoteSecureValue } from './secure-browser-control-api'
 import type {
   GetSecureSecretSettingsResponse,
+  ProjectSecureSessionsSettings,
   SecureSecretBinding,
   SecureSecretAutomaticGrantPolicy,
   BitwardenPasswordManagerSettings,
@@ -843,4 +844,31 @@ function withSecureControl(init?: RequestInit): RequestInit | undefined {
   const headers = new Headers(init?.headers)
   headers.set('X-Forge-Secure-Control', token)
   return { ...init, headers }
+}
+
+/** Project policy travels through the same authenticated control path as secret settings. */
+export async function fetchProjectSecureSessionsSettings(
+  client: SettingsApiClient, profileId: string,
+): Promise<ProjectSecureSessionsSettings> {
+  assertBuilderTarget(client)
+  return parseProjectSecureSessionsSettings(await requestJson(client,
+    `/api/secure-secrets/projects/${encodeURIComponent(profileId)}/settings`), profileId)
+}
+
+export async function updateProjectSecureSessionsSettings(
+  client: SettingsApiClient, profileId: string, enabled: boolean,
+): Promise<ProjectSecureSessionsSettings> {
+  assertBuilderTarget(client)
+  return parseProjectSecureSessionsSettings(await requestJson(client,
+    `/api/secure-secrets/projects/${encodeURIComponent(profileId)}/settings`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }),
+    }), profileId)
+}
+
+function parseProjectSecureSessionsSettings(value: unknown, profileId: string): ProjectSecureSessionsSettings {
+  const payload = value as Partial<ProjectSecureSessionsSettings> | null
+  if (!payload || payload.profileId !== profileId || typeof payload.enabled !== 'boolean') {
+    throw new SecureSecretsError('SECURE_OPERATION_FAILED')
+  }
+  return { profileId, enabled: payload.enabled }
 }

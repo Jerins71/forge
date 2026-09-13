@@ -58,6 +58,7 @@ export async function handleManagerCommand(context: ManagerCommandRouteContext):
       const manager = await swarmManager.createManager(managerContextId, {
         name: command.name,
         cwd: command.cwd,
+        ...(command.secureSessionsEnabled !== undefined ? { secureSessionsEnabled: command.secureSessionsEnabled } : {}),
         ...(command.model !== undefined ? { model: command.model } : {}),
         ...(command.modelSelection ? { modelSelection: command.modelSelection } : {}),
         ...(command.reasoningLevel !== undefined ? { reasoningLevel: command.reasoningLevel } : {}),
@@ -119,6 +120,7 @@ export async function handleManagerCommand(context: ManagerCommandRouteContext):
         repositoryBasePath: command.repositoryBasePath,
         repositoryFolder: command.repositoryFolder,
         modelSelection: command.modelSelection,
+        secureSessionsEnabled: command.secureSessionsEnabled,
         ...(command.reasoningLevel !== undefined ? { reasoningLevel: command.reasoningLevel } : {}),
         managerContextId,
         socket,

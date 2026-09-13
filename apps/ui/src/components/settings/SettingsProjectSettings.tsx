@@ -5,7 +5,7 @@ import type {
   ManagerProfile,
   ManagerReasoningLevel,
 } from '@forge/protocol'
-import { Edit3, FolderOpen, RefreshCw, ShieldCheck } from 'lucide-react'
+import { Edit3, FolderOpen, RefreshCw } from 'lucide-react'
 import { ChangeCwdDialog } from '@/components/chat/ChangeCwdDialog'
 import { ChangeModelDialog } from '@/components/chat/agent-sidebar/dialogs/ChangeModelDialog'
 import { RenameProfileDialog } from '@/components/chat/agent-sidebar/dialogs/RenameProfileDialog'
@@ -13,6 +13,7 @@ import type { ServerDirectoryBrowserClient } from '@/components/chat/ServerDirec
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { DirectoryValidationResult } from '@/lib/ws-client'
+import { ProjectSecureSessionsSettings } from './ProjectSecureSessionsSettings'
 import { ContextManagementSettings } from './ContextManagementSettings'
 import type { SettingsApiClient } from './settings-api-client'
 import { SettingsProjectResources } from './SettingsProjectResources'
@@ -125,18 +126,12 @@ export function SettingsProjectSettings({
           </CardHeader>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-4">
-            <div>
-              <CardTitle>Project secrets</CardTitle>
-              <CardDescription>Manage access to saved secrets for this project.</CardDescription>
-            </div>
-            <Button size="sm" variant="outline" onClick={() => actions?.onOpenProjectSecrets?.(profile.profileId)} disabled={!actions?.onOpenProjectSecrets}>
-              <ShieldCheck className="mr-2 size-3.5" />
-              Manage
-            </Button>
-          </CardHeader>
-        </Card>
+        <ProjectSecureSessionsSettings
+          key={`${apiClient.target.apiBaseUrl}:${profile.profileId}`}
+          profile={profile}
+          apiClient={apiClient}
+          onManage={actions?.onOpenProjectSecrets ? () => actions.onOpenProjectSecrets?.(profile.profileId) : undefined}
+        />
       </div>
 
       <ContextManagementSettings

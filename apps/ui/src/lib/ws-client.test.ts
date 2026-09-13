@@ -706,7 +706,12 @@ describe('ManagerWsClient', () => {
       subscriptionId: expect.any(String),
     })
     expect(client.getState().connectionEpoch).toBe(1)
-    emitServerEvent(socket, { type: 'profiles_snapshot', profiles: [] })
+    const profile = { profileId: 'project-a', displayName: 'Project A', defaultSessionAgentId: 'manager',
+      defaultModel: { provider: 'openai', modelId: 'gpt-5.5', thinkingLevel: 'high' }, createdAt: '2026-09-13', updatedAt: '2026-09-13', secureSessionsEnabled: false }
+    emitServerEvent(socket, { type: 'profiles_snapshot', profiles: [profile] })
+    expect(client.getState().profiles[0]?.secureSessionsEnabled).toBe(false)
+    emitServerEvent(socket, { type: 'profiles_snapshot', profiles: [{ ...profile, secureSessionsEnabled: true }] })
+    expect(client.getState().profiles[0]?.secureSessionsEnabled).toBe(true)
     expect(client.getState().hasReceivedProfilesSnapshot).toBe(true)
     emitServerEvent(socket, { type: 'builder_sidebar_order_updated', revision: 5 })
     expect(client.getState().builderSidebarOrderRevision).toBe(5)

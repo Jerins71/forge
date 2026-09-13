@@ -375,7 +375,9 @@ function createMockPiSession() {
     steer: vi.fn(async () => undefined),
     interrupt: vi.fn(async () => undefined),
     abort: vi.fn(async () => undefined),
-    sessionManager: {},
+    dispose: vi.fn(),
+    reload: vi.fn(async () => undefined),
+    sessionManager: { getBranch: vi.fn(() => []) },
     systemPrompt: "system prompt",
   };
 }
@@ -437,6 +439,31 @@ function setupPiModel(provider = "openai-codex", modelId = "gpt-5.5") {
 }
 
 describe("RuntimeFactory", () => {
+  it("registers the eligible browser bundle but exposes discovery until it is loaded", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "forge-runtime-discovery-"));
+    setupPiModel();
+    const session = createMockPiSession();
+    let active: string[] = [];
+    let registered: Array<{ name: string }> = [];
+    session.getActiveToolNames.mockImplementation(() => active);
+    session.setActiveToolsByName.mockImplementation(names => { active = names; });
+    session.getAllTools.mockImplementation(() => registered as never);
+    piCodingAgentMockState.createAgentSession.mockImplementation(async options => {
+      registered = options.customTools;
+      active = registered.map(tool => tool.name);
+      return { session, extensionsResult: { extensions: [], errors: [] } };
+    });
+    const runtime = await createFactory(rootDir).createRuntimeForDescriptor(createManagerDescriptor(rootDir), "System", 1);
+    const browser = registered.filter(tool => tool.name.startsWith("browser_"));
+    expect(browser).toHaveLength(13);
+    expect(active).toContain("discover_tools");
+    expect(active.some(name => name.startsWith("browser_"))).toBe(false);
+    const discovery = registered.find(tool => tool.name === "discover_tools") as unknown as { execute: (...args: unknown[]) => Promise<unknown> };
+    await discovery.execute("load", { bundles: ["browser"] });
+    expect(active.filter(name => name.startsWith("browser_"))).toHaveLength(13);
+    await runtime.terminate({ abort: true });
+  });
+
   beforeEach(() => {
     resetCursorSdkLoaderForTests();
     delete process.env.CURSOR_API_KEY;

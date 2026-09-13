@@ -87,7 +87,7 @@ export type ClientCommand =
   | ApiProxyCommand
   | { type: 'kill_agent'; agentId: string }
   | { type: 'stop_all_agents'; managerId: string; requestId?: string }
-  | ({ type: 'create_manager'; name: string; cwd: string; reasoningLevel?: ManagerReasoningLevel; requestId?: string } & ManagerModelSelectionInput)
+  | ({ type: 'create_manager'; name: string; cwd: string; secureSessionsEnabled?: boolean; reasoningLevel?: ManagerReasoningLevel; requestId?: string } & ManagerModelSelectionInput)
   | ({ type: 'create_repository_project' } & CreateRepositoryProjectCommandFields)
   | ({ type: 'cancel_repository_project_creation' } & CancelRepositoryProjectCreationCommandFields)
   | { type: 'delete_manager'; managerId: string; requestId?: string }

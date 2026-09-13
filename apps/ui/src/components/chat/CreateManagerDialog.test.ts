@@ -459,3 +459,17 @@ describe('CreateManagerDialog', () => {
     })
   })
 })
+
+it('asks local projects to opt into Secure Sessions and keeps the checkbox controlled', async () => {
+  const onSecureSessionsEnabledChange = vi.fn()
+  const props = defaultProps({ secureSessionsEnabled: false, onSecureSessionsEnabledChange })
+  await act(async () => { root = createRoot(container); root.render(createElement(CreateManagerDialog, props)) })
+  const checkbox = document.body.querySelector<HTMLButtonElement>('#project-secure-sessions')!
+  expect(checkbox.getAttribute('aria-checked')).toBe('false')
+  await act(async () => checkbox.click())
+  expect(onSecureSessionsEnabledChange).toHaveBeenCalledWith(true)
+  await act(async () => root!.render(createElement(CreateManagerDialog, { ...props, secureSessionsEnabled: true })))
+  expect(checkbox.getAttribute('aria-checked')).toBe('true')
+  await act(async () => root!.render(createElement(CreateManagerDialog, { ...props, originId: 'remote-project' })))
+  expect(document.body.querySelector('#project-secure-sessions')).toBeNull()
+})

@@ -1,3 +1,4 @@
+import { createProjectSecureSessionsRoutes } from "./http/routes/project-secure-sessions-routes.js";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
@@ -779,6 +780,7 @@ export class SwarmWebSocketServer {
               vaultService: secureTransportService,
               secureControlAvailable: this.secureControlToken.length >= 32,
             }),
+            ...createProjectSecureSessionsRoutes({ service: this.swarmManager }),
             ...createSecureSecretRoutes({ service: secureTransportService }),
             ...createSecureSessionRoutes({ service: secureTransportService }),
           ]

@@ -531,6 +531,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       listDescriptors: () => Array.from(this.descriptors.values()),
       listProfiles: () => this.agentDirectory.listProfiles(),
       hasProfile: (profileId) => this.profiles.has(profileId),
+      updateProjectEnabled: (profileId, enabled) => this.configurationCoordinator.updateProjectSecureSessionsEnabled(profileId, enabled),
       isProfileArchived: (profileId) => Boolean(this.profiles.get(profileId)?.archivedAt),
       isSessionArchived: (agentId) => Boolean(this.descriptors.get(agentId)?.archivedAt),
       requireBuilderSession: (agentId, action) => this.agentDirectory.getRequiredBuilderSessionDescriptor(agentId, action),
@@ -1357,12 +1358,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
     runtimeToken = this.runtimeController.allocateRuntimeToken(descriptor.agentId),
     options?: RuntimeCreationOptions
   ): Promise<SwarmAgentRuntime> {
-    return this.runtimeController.createRuntimeForDescriptor(
-      descriptor,
-      systemPrompt,
-      runtimeToken,
-      options,
-    );
+    return this.runtimeController.createRuntimeForDescriptor(descriptor, systemPrompt, runtimeToken, options);
   }
   protected async resolveProjectExecutableTrustPlanForRuntime(options: {
     descriptor: AgentDescriptor;

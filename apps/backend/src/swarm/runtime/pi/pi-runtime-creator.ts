@@ -1,3 +1,4 @@
+import { createPiBrowserDiscovery, installPiProjectToolPolicy } from "./pi-tool-discovery.js";
 import { installOpenRouterRequestPolicy } from "./openrouter-request-policy.js";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
@@ -371,7 +372,10 @@ export class PiRuntimeCreator {
       projectExecutableTrustPlan.trustedPiSettingsPaths,
       projectExecutableTrustPlan.trusted
     );
-    const contextTools: ToolDefinition[] = [];
+    const browserTools = runtimeSwarmTools.filter(tool => tool.name.startsWith("browser_"));
+    const browserDiscovery = browserTools.length > 0 && process.env.FORGE_PI_TOOL_DISCOVERY !== "off"
+      ? createPiBrowserDiscovery(browserTools) : undefined;
+    const contextTools: ToolDefinition[] = browserDiscovery ? [browserDiscovery.tool] : [];
     let taskNotesStartupContext: string | undefined;
     // Use the established tool plan's history eligibility instead of inventing a
     // second list of excluded system, collaboration, and plugin runtimes.
@@ -436,13 +440,15 @@ export class PiRuntimeCreator {
       forgePiToolBridgeFactory: planForgePiToolBridgeFactory({
         forgeExtensionHost: this.deps.forgeExtensionHost,
         preparedForgeBindings,
-        baseSwarmTools: secureBaseSwarmTools,
+        baseSwarmTools: [...secureBaseSwarmTools, ...contextTools],
         host: this.deps.host,
         descriptor
       }),
       compactionFailureScopeKey,
       toolOutputBudgetExtensionFactory: toolOutputBudget.extensionFactory,
     });
+    // Keep output budgeting last so discovery results use the same final reducer.
+    if (browserDiscovery) extensionFactories.splice(-1, 0, browserDiscovery.extensionFactory);
     const resourcePlan = planPiResourceLoaderOptions({
       descriptor,
       pathsPlan,
@@ -528,6 +534,7 @@ export class PiRuntimeCreator {
     // Must precede generationTelemetry.install(): telemetry captures this stream.
     // Keeping policy underneath telemetry also protects SDK compaction after restore.
     installOpenRouterRequestPolicy(session);
+    installPiProjectToolPolicy(session, () => this.deps.host.isSecureSessionsEnabledForAgent?.(descriptor.agentId) !== false);
     const runtimeCallbacks: SwarmRuntimeCallbacks = {
       onStatusChange: async (agentId, status, pendingCount, contextUsage) => {
         await this.deps.callbacks.onStatusChange(runtimeToken, agentId, status, pendingCount, contextUsage);
@@ -644,14 +651,16 @@ export class PiRuntimeCreator {
       });
     }
 
-    const activeToolNames = secureRuntimeBinding
+    const initialActiveToolNames = secureRuntimeBinding
       ? secureAllowedToolNames
       : resolvePiActiveToolNamesForDescriptor(
           descriptor,
           session.getActiveToolNames(),
           runtimeSwarmTools.map((tool) => tool.name),
         );
-    session.setActiveToolsByName(activeToolNames);
+    session.setActiveToolsByName(initialActiveToolNames);
+    browserDiscovery?.attach(session);
+    const activeToolNames = session.getActiveToolNames();
 
     this.deps.logDebug("runtime:create:ready", {
       runtime: "pi",
@@ -674,6 +683,7 @@ export class PiRuntimeCreator {
         agentDir: runtimeAgentDir,
         memoryFile: memoryResources.memoryContextFile.path,
         projectExecutablesTrusted: projectExecutableTrustPlan.trusted,
+        ...(browserDiscovery ? { toolDiscovery: browserDiscovery.snapshot() } : {}),
         pooledCredentialProvider: pooledCredentialId ? descriptor.model.provider : undefined,
       },
     });

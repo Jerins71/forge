@@ -7,6 +7,7 @@ export interface CreateRepositoryProjectCommandFields {
   repositoryFolder: string
   modelSelection: ManagerExactModelSelection
   reasoningLevel?: ManagerReasoningLevel
+  secureSessionsEnabled?: boolean
   /** Required on the wire for create_repository_project. */
   requestId: string
 }

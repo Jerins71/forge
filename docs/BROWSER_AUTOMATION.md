@@ -6,6 +6,15 @@ Automatic Browser and External Chrome remain supported on Windows, but the Windo
 
 The separate [`agent-browser` Skill](#agent-browser-skill) keeps its own CLI and browser lifecycle.
 
+## Pi tool discovery
+
+Local Builder Pi managers load the Automatic Browser through
+`discover_tools({bundles:["browser"]})`. The initial model request includes a compact
+browser capability description; the `browser_*` schemas appear on the next request
+after loading. Discovery does not open a tab, start recording, or change tab authority.
+The normal typed tools and all target restrictions below continue to apply. See
+[deferred browser tools](PI_EXTENSIONS.md#deferred-browser-tools) for reload and resume behavior.
+
 ## Automatic target policy
 
 Each logical browser tab has a sticky private target affinity:

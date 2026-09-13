@@ -47,6 +47,7 @@ export interface CreateRepositoryProjectInput {
   repositoryFolder: string
   modelSelection: ManagerExactModelSelection
   reasoningLevel?: ManagerReasoningLevel
+  secureSessionsEnabled?: boolean
   managerContextId: string
   socket: WebSocket
 }
@@ -273,6 +274,7 @@ export class RepositoryProjectCreationService {
             name,
             cwd: repositoryPath,
             modelSelection: input.modelSelection,
+            secureSessionsEnabled: input.secureSessionsEnabled,
             ...(input.reasoningLevel !== undefined ? { reasoningLevel: input.reasoningLevel } : {}),
           })
 

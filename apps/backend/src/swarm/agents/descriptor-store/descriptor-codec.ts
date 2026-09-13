@@ -88,6 +88,7 @@ function decodePersistedProfiles(
     const {
       defaultManagerPosture,
       defaultContextMode,
+      secureSessionsEnabled,
       ...rest
     } = candidate as ManagerProfile & Record<string, unknown>;
     const profileHint = typeof rest.profileId === "string" ? `profileId=${rest.profileId}` : "profileId=<unknown>";
@@ -108,6 +109,10 @@ function decodePersistedProfiles(
       );
     } else if (defaultContextMode !== undefined) {
       normalized.defaultContextMode = defaultContextMode;
+    }
+    if (secureSessionsEnabled !== undefined) {
+      normalized.secureSessionsEnabled = secureSessionsEnabled === true;
+      if (typeof secureSessionsEnabled !== "boolean") droppedUnknown = true;
     }
     if (droppedUnknown) {
       profiles.push(cloneProfile(normalized as unknown as ManagerProfile));

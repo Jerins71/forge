@@ -6311,6 +6311,8 @@ async function grant(
 }
 
 function createHarness(options: {
+  projectSettings?: Record<string, boolean>;
+  failProjectSettingsSave?: boolean;
   maxProjectDefaults?: number | (() => number);
   blockProviderStatus?: boolean;
   blockSourceResolution?: boolean;
@@ -6355,6 +6357,7 @@ function createHarness(options: {
     ["manager-a", descriptor("manager-a", "profile-a", "/workspace-a")],
     ["manager-b", descriptor("manager-b", "profile-b", "/workspace-b")],
   ]);
+  const projectSettings = new Map(Object.entries(options.projectSettings ?? {}));
   const archivedProfiles = new Set(options.archivedProfiles ?? []);
   const systemProfiles = new Set(options.systemProfiles ?? []);
   const archivedSessions = new Set(options.archivedSessions ?? []);
@@ -6568,9 +6571,14 @@ function createHarness(options: {
       ),
     )].map((profileId) => ({
       profileId,
+      secureSessionsEnabled: projectSettings.get(profileId),
       ...(archivedProfiles.has(profileId) ? { archivedAt: NOW } : {}),
       ...(systemProfiles.has(profileId) ? { profileType: "system" as const } : {}),
     })),
+    updateProjectEnabled: async (profileId, enabled) => {
+      if (options.failProjectSettingsSave) throw new Error("save failed");
+      projectSettings.set(profileId, enabled);
+    },
     hasProfile: (profileId) => [...descriptors.values()].some(
       (descriptor) => descriptor.profileId === profileId,
     ),
@@ -7102,5 +7110,80 @@ describe("secure fork provisioning rollback", () => {
       const executed = await binding.executeBash({command:"true",cwd:"/workspace-a",secretAliases:["review-fork-secret"],onData:()=>{}}).then(()=>true,()=>false);
       expect({paused,executed}).toEqual({paused:true,executed:false});
     } finally {await h.close();await rm(dataDir,{recursive:true,force:true});}
+  });
+});
+
+describe("project Secure Sessions policy", () => {
+  async function saveDefault(h: ReturnType<typeof createHarness>) {
+    const secret = await h.service.createLocalSecureSecret({ displayAlias: "project-policy",
+      encryptedMaterial: Buffer.from(ALPHA).toString("base64"), scope: { kind: "profile", profileId: "profile-a" },
+      bindings: [{ deliveryKind: "environment", targetName: "PROJECT_POLICY_TOKEN" }] });
+    await h.service.setSecureSecretProjectDefault(secret.secretId, { profileId: "profile-a", enabled: true });
+    return secret;
+  }
+  const command = (value = "true") => ({ command: value, cwd: "/workspace-a", secretAliases: ["project-policy"], onData: vi.fn() });
+
+  it("preserves legacy behavior and blocks disabled projects before creating bindings, requests or environments", async () => {
+    const h = createHarness({ projectSettings: { "profile-a": false } });
+    await saveDefault(h);
+    expect(h.service.getProjectSecureSessionsSettings("profile-a").enabled).toBe(false);
+    expect(h.service.getProjectSecureSessionsSettings("profile-b").enabled).toBe(true);
+    expect(await h.service.prepareSecureRuntimeBinding(h.descriptors.get("manager-a")!)).toBeUndefined();
+    await expect(h.service.startSecureSession("manager-a")).rejects.toMatchObject({ code: "SECURE_ACCESS_BLOCKED" });
+    await expect(h.service.getSecureSessionAgentView("manager-a")).rejects.toMatchObject({ code: "SECURE_ACCESS_BLOCKED" });
+    await expect(h.service.requestSecureSshHostTrust("manager-a", "request", {} as never)).rejects.toMatchObject({ code: "SECURE_ACCESS_BLOCKED" });
+    expect(h.execution.ensured).toEqual([]);
+    await h.close();
+  });
+
+  it("revokes a busy project and its old binding, preserves defaults and leaves other projects running", async () => {
+    const h = createHarness();
+    const destroy = h.execution.destroyTask.bind(h.execution);
+    vi.spyOn(h.execution, "destroyTask").mockImplementation(async task => {
+      const confirmed = await destroy(task);
+      if (confirmed) h.execution.rejectBlockedExecution(task.taskId);
+      return confirmed;
+    });
+    const secret = await saveDefault(h);
+    await h.service.startSecureSession("manager-b");
+    const binding = (await h.service.prepareSecureRuntimeBinding(h.descriptors.get("manager-a")!))!;
+    const executing = binding.executeBash(command("wait-for-destroy")).catch(() => undefined);
+    await h.execution.waitForBlockedExecution("manager-a");
+    h.setRecycleDisposition("deferred");
+    await h.service.updateProjectSecureSessionsSettings("profile-a", false);
+    await executing;
+    expect(h.execution.destroyed).toContain("manager-a");
+    expect(h.execution.destroyed).not.toContain("manager-b");
+    await expect(async () => binding.executeBash(command())).rejects.toThrow();
+    expect(await h.service.prepareSecureRuntimeBinding(h.descriptors.get("manager-a")!)).toBeUndefined();
+    expect(h.store.getSecret(secret.secretId)).not.toBeNull();
+    expect(h.store.listProjectDefaults()).toEqual(expect.arrayContaining([expect.objectContaining({ profileId: "profile-a", secretId: secret.secretId })]));
+    h.setRecycleDisposition("recycled");
+    await h.service.updateProjectSecureSessionsSettings("profile-a", true);
+    const restored = (await h.service.prepareSecureRuntimeBinding(h.descriptors.get("manager-a")!))!;
+    await restored.executeBash(command());
+    expect(h.recycles).toContain("manager-a");
+    await h.close();
+  });
+
+  it("retains denial and cleans other sessions when one teardown fails", async () => {
+    const h = createHarness({ destroyFailures: ["manager-a"] });
+    h.descriptors.set("manager-b", descriptor("manager-b", "profile-a", "/workspace-b"));
+    await h.service.startSecureSession("manager-a");
+    await h.service.startSecureSession("manager-b");
+    await expect(h.service.updateProjectSecureSessionsSettings("profile-a", false)).rejects.toMatchObject({ code: "SECURE_OPERATION_FAILED" });
+    expect(h.service.getProjectSecureSessionsSettings("profile-a").enabled).toBe(false);
+    expect(h.execution.destroyed).toEqual(expect.arrayContaining(["manager-a", "manager-b"]));
+    await expect(h.service.startSecureSession("manager-a")).rejects.toMatchObject({ code: "SECURE_ACCESS_BLOCKED" });
+    await h.close();
+  });
+
+  it("does not destroy environments when saving the project setting fails", async () => {
+    const h = createHarness({ failProjectSettingsSave: true });
+    await h.service.startSecureSession("manager-a");
+    await expect(h.service.updateProjectSecureSessionsSettings("profile-a", false)).rejects.toThrow("save failed");
+    expect(h.service.getProjectSecureSessionsSettings("profile-a").enabled).toBe(true);
+    expect(h.execution.destroyed).toEqual([]);
+    await h.close();
   });
 });

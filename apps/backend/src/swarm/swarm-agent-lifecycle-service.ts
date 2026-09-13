@@ -1484,7 +1484,7 @@ export class SwarmAgentLifecycleService {
 
   async createManager(
     callerAgentId: string,
-    input: { name: string; cwd: string; model?: SwarmModelPreset; modelSelection?: ManagerExactModelSelection; reasoningLevel?: SwarmReasoningLevel }
+    input: { name: string; cwd: string; model?: SwarmModelPreset; modelSelection?: ManagerExactModelSelection; reasoningLevel?: SwarmReasoningLevel; secureSessionsEnabled?: boolean }
   ): Promise<AgentDescriptor> {
     const callerDescriptor = this.options.descriptors.get(callerAgentId);
     if (!callerDescriptor || callerDescriptor.role !== "manager") {
@@ -1496,6 +1496,9 @@ export class SwarmAgentLifecycleService {
       throw new Error(`Manager is not running: ${callerAgentId}`);
     }
 
+    if (input.secureSessionsEnabled !== undefined && typeof input.secureSessionsEnabled !== "boolean") {
+      throw new Error("create_manager.secureSessionsEnabled must be a boolean");
+    }
     const requestedName = input.name?.trim();
     if (!requestedName) {
       throw new Error("create_manager requires a non-empty name");
@@ -1560,7 +1563,8 @@ export class SwarmAgentLifecycleService {
       defaultModel: { ...initialModel },
       createdAt: descriptor.createdAt,
       updatedAt: descriptor.createdAt,
-      sortOrder: 0
+      sortOrder: 0,
+      secureSessionsEnabled: input.secureSessionsEnabled ?? false,
     };
 
     let runtime: SwarmAgentRuntime | undefined;

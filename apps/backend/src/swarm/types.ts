@@ -91,6 +91,8 @@ export interface ManagerProfile {
   defaultManagerPosture?: ManagerPosture;
   defaultDelegationRosterId?: string;
   /** Absent means inherit the product summary default. */
+  /** Absent preserves Secure Sessions for projects created before this setting. */
+  secureSessionsEnabled?: boolean;
   defaultContextMode?: ContextMode;
   createdAt: string;
   updatedAt: string;

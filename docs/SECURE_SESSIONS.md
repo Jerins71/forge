@@ -13,6 +13,21 @@ This feature is designed for the practical middle ground between two unsafe extr
 giving the model a password and building a special-purpose tool for every command that
 might need one.
 
+## Enable a project
+
+Choose **Enable Secure Sessions** when creating a local project, or use the
+**Secure Sessions** switch in that project's settings. New projects default to off;
+projects saved before this switch was introduced keep their previous enabled behavior.
+Enabling the feature permits the existing grant flow; it does not grant new secrets by itself.
+
+While disabled, managers and workers receive no Forge secure tool schemas in new Pi
+runtimes. A running Pi agent loses those schemas on its next model request, and its
+captured secure tools cannot authorize further execution. Disabling stops the project's
+secure environments and revokes active leases through the existing session owner.
+Saved secrets, SSH host trust, and project grant mappings remain available for later use.
+If teardown fails, the setting stays off; retry in Project Settings to finish cleanup.
+Other projects keep their own settings and sessions.
+
 ## Shared project secret access
 
 The protected environment belongs to one local Builder manager session. That manager session

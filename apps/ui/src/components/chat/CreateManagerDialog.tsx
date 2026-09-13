@@ -66,6 +66,8 @@ interface CreateManagerDialogProps {
   newManagerModelSelection: ManagerExactModelSelection | undefined
   newManagerReasoningLevel: ManagerReasoningLevel | undefined
   scaffoldForgeResources: boolean
+  secureSessionsEnabled?: boolean
+  onSecureSessionsEnabledChange?: (enabled: boolean) => void
   createManagerError: string | null
   browseError: string | null
   /** When false, hide Clone repository (remote / collab surfaces). */
@@ -115,6 +117,8 @@ export function CreateManagerDialog({
   newManagerModelSelection,
   newManagerReasoningLevel,
   scaffoldForgeResources,
+  secureSessionsEnabled = false,
+  onSecureSessionsEnabledChange,
   createManagerError,
   browseError,
   cloneRepositoryEnabled = false,
@@ -245,7 +249,7 @@ export function CreateManagerDialog({
       }}
     >
       <DialogContent
-        className="sm:max-w-xl"
+        className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-xl"
         onEscapeKeyDown={(event) => {
           if (dismissBlocked) event.preventDefault()
         }}
@@ -492,6 +496,26 @@ export function CreateManagerDialog({
               Higher reasoning uses more tokens but improves complex task performance.
             </p>
           </div>
+
+          {originId === LOCAL_ORIGIN_ID && onSecureSessionsEnabledChange ? (
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="project-secure-sessions"
+                checked={secureSessionsEnabled}
+                onCheckedChange={(checked) => onSecureSessionsEnabledChange(checked === true)}
+                disabled={isCreatingManager}
+                aria-describedby="project-secure-sessions-description"
+              />
+              <div className="grid gap-1">
+                <Label htmlFor="project-secure-sessions" className="text-xs font-medium cursor-pointer">
+                  Enable Secure Sessions
+                </Label>
+                <p id="project-secure-sessions-description" className="text-xs text-muted-foreground">
+                  Let this project’s agents request and use saved secrets. You can change this in Project Settings.
+                </p>
+              </div>
+            </div>
+          ) : null}
 
           <div className="flex items-start gap-2">
             <Checkbox

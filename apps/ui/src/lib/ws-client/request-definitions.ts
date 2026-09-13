@@ -271,7 +271,7 @@ export function buildStopAllAgentsCommand(managerId: string, requestId: string):
 }
 
 export function buildCreateManagerCommand(
-  input: { name: string; cwd: string; model?: ManagerModelPreset; modelSelection?: ManagerExactModelSelection; reasoningLevel?: ManagerReasoningLevel },
+  input: { name: string; cwd: string; model?: ManagerModelPreset; modelSelection?: ManagerExactModelSelection; reasoningLevel?: ManagerReasoningLevel; secureSessionsEnabled?: boolean },
   requestId: string,
 ): ClientCommand {
   const name = requireTrimmedValue(input.name, 'Manager name is required.')
@@ -291,6 +291,7 @@ export function buildCreateManagerCommand(
       cwd,
       modelSelection: input.modelSelection,
       reasoningLevel: input.reasoningLevel,
+      ...(input.secureSessionsEnabled !== undefined ? { secureSessionsEnabled: input.secureSessionsEnabled } : {}),
       requestId,
     }
   }
@@ -305,6 +306,7 @@ export function buildCreateManagerCommand(
     cwd,
     model: input.model,
     reasoningLevel: input.reasoningLevel,
+    ...(input.secureSessionsEnabled !== undefined ? { secureSessionsEnabled: input.secureSessionsEnabled } : {}),
     requestId,
   }
 }
@@ -317,6 +319,7 @@ export function buildCreateRepositoryProjectCommand(
     repositoryFolder: string
     modelSelection: ManagerExactModelSelection
     reasoningLevel?: ManagerReasoningLevel
+    secureSessionsEnabled?: boolean
   },
   requestId: string,
 ): ClientCommand {
@@ -340,6 +343,7 @@ export function buildCreateRepositoryProjectCommand(
     repositoryFolder,
     modelSelection: input.modelSelection,
     reasoningLevel: input.reasoningLevel,
+    ...(input.secureSessionsEnabled !== undefined ? { secureSessionsEnabled: input.secureSessionsEnabled } : {}),
     requestId,
   }
 }

@@ -47,6 +47,26 @@ describe("secure session server transport", () => {
     )).toBe(true);
 
     await server.start();
+    const projectSettingsUrl = `http://${config.host}:${config.port}/api/secure-secrets/projects/manager/settings`;
+    const projectSettings = await fetch(projectSettingsUrl);
+    expect(await projectSettings.json()).toEqual({ profileId: "manager", enabled: false });
+    const unauthorizedProjectChange = await fetch(projectSettingsUrl, {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }),
+    });
+    expect(unauthorizedProjectChange.status).toBe(403);
+    const hostileProjectChange = await fetch(projectSettingsUrl, {
+      method: "PUT", headers: { "content-type": "application/json", "x-forge-secure-control": secureControlToken, Origin: "https://evil.example" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(hostileProjectChange.status).toBe(403);
+    // This test project must now explicitly opt into the secure flows it exercises.
+    const enabledProject = await fetch(projectSettingsUrl, {
+      method: "PUT", headers: { "content-type": "application/json", "x-forge-secure-control": secureControlToken },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(enabledProject.status).toBe(200);
+    expect(await enabledProject.json()).toEqual({ profileId: "manager", enabled: true });
+    expect(manager.isSecureSessionsEnabledForAgent(worker.agentId)).toBe(true);
     const settingsUrl = `http://${config.host}:${config.port}/api/settings/secure-secrets`;
     try {
       for (const headers of [

@@ -3,6 +3,7 @@ import {
   buildBrowserRecordingStartCommand,
   buildBrowserRecordingStopCommand,
   buildCreateManagerCommand,
+  buildCreateRepositoryProjectCommand,
   buildHydrateArchiveLastUsedCommand,
   buildProfileArchiveActionCommand,
   buildSessionActionCommand,
@@ -186,4 +187,10 @@ describe('delegation settings command builders', () => {
       requestId: 'req-session-delegation',
     })
   })
+})
+
+it.each([true, false])('serializes the project Secure Sessions choice (%s) for local and cloned projects', (secureSessionsEnabled) => {
+  const input = { name: 'Project', modelSelection: { provider: 'openai', modelId: 'gpt-5.5' }, secureSessionsEnabled }
+  expect(buildCreateManagerCommand({ ...input, cwd: '/tmp' }, 'create')).toMatchObject({ secureSessionsEnabled })
+  expect(buildCreateRepositoryProjectCommand({ ...input, repositoryUrl: 'https://example.test/repo.git', repositoryBasePath: '/tmp', repositoryFolder: 'repo' }, 'clone')).toMatchObject({ secureSessionsEnabled })
 })

@@ -1020,6 +1020,8 @@ export function BuilderSurface({
     newManagerCwd,
     newManagerModelSelection,
     newManagerReasoningLevel,
+    newManagerSecureSessionsEnabled,
+    handleNewManagerSecureSessionsEnabledChange,
     scaffoldForgeResources,
     createManagerError,
     browseError,
@@ -1745,7 +1747,7 @@ export function BuilderSurface({
     secureBrowserControl, clientRef, secureAuthorityAgentId, reportSecureMutationError])
 
   const secureSessionPicker = useMemo<SecureSessionPickerConfig | undefined>(() => {
-    if (!activeAgentId) return undefined
+    if (!activeAgentId || activeAgentProfile?.secureSessionsEnabled === false) return undefined
     const config: SecureSessionPickerConfig = {
       originId: activeOriginId,
       availability: secureSessionAvailability,
@@ -1779,6 +1781,7 @@ export function BuilderSurface({
     }
     return shouldShowSecureSessionPicker(config) ? config : undefined
   }, [
+    activeAgentProfile?.secureSessionsEnabled,
     activeAgentId,
     lockedBitwardenProvider,
     secureBrowserControl,
@@ -2747,6 +2750,8 @@ export function BuilderSurface({
           newManagerCwd,
           newManagerModelSelection,
           newManagerReasoningLevel,
+          secureSessionsEnabled: newManagerSecureSessionsEnabled,
+          onSecureSessionsEnabledChange: handleNewManagerSecureSessionsEnabledChange,
           scaffoldForgeResources,
           createManagerError,
           browseError,
