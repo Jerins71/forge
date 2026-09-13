@@ -646,10 +646,13 @@ export class ExternalChromeHostCoordinator {
     try {
       const raw = await fs.readFile(this.recoveryMarkerPath, 'utf8')
       if (Buffer.byteLength(raw) > 2_048) return false
-      const marker = JSON.parse(raw) as { reason?: unknown; status?: unknown }
-      // Retain this marker: profiles reconnect independently, and a Desktop crash
-      // must repeat the reload proof rather than trust volatile completion.
-      return marker.reason === 'desktop-quit' && marker.status === 'quiesced'
+      const marker = JSON.parse(raw) as { status?: unknown }
+      // Every lifecycle barrier asks the Extension worker to quiesce before the
+      // marker is written. Matching payload bytes and a fresh authority snapshot
+      // do not reopen that worker's operations gate, including when exact release
+      // proof failed after prepareUpdate. Retain the marker because profiles
+      // reconnect independently and each must prove a reload.
+      return marker.status === 'quiesced' || marker.status === 'release-unproven'
     } catch {
       return false
     }

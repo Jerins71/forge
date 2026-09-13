@@ -629,7 +629,13 @@ class RuntimeConnection {
         reject(error)
       })
     })
-    if ('error' in response) throw new Error(response.error.data?.code ?? response.error.message)
+    if ('error' in response) {
+      const code = response.error.data?.code
+      const message = typeof code === 'string' && code !== response.error.message
+        ? `${code}: ${response.error.message}`
+        : response.error.message
+      throw new Error(message.slice(0, 1_024))
+    }
     if (!('result' in response)) throw new Error('extension returned an invalid response')
     return response.result as ExternalChromeResultByMethod[Method]
   }

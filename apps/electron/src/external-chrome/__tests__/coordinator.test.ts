@@ -217,7 +217,11 @@ async function lifecycleExtensionLoop(
 }
 
 describe('ExternalChromeHostCoordinator', () => {
-  it.each([false, true])('reloads each clean-quit profile after authenticated reconnect (identical pending deployment: %s)', async (identicalPending) => {
+  it.each([
+    [false, 'quiesced'],
+    [true, 'quiesced'],
+    [false, 'release-unproven'],
+  ] as const)('reloads each lifecycle-marked profile after authenticated reconnect (identical pending deployment: %s; marker: %s)', async (identicalPending, markerStatus) => {
     const { dataRoot, deployer } = await root()
     const registration = new FakeRegistration()
     const coordinators: ExternalChromeHostCoordinator[] = []
@@ -261,6 +265,11 @@ describe('ExternalChromeHostCoordinator', () => {
       await first.quiesce('desktop-quit')
       await Promise.all(loops)
       expect(requests.filter(({ method }) => method === 'forge.runtime.prepareUpdate')).toHaveLength(2)
+      if (markerStatus === 'release-unproven') {
+        await writeFile(marker, `${JSON.stringify({
+          schemaVersion: 1, reason: 'desktop-quit', status: markerStatus, at: new Date().toISOString(),
+        })}\n`)
+      }
 
       const restarted = createCoordinator(702)
       await restarted.resumeIfEnabled()

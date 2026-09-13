@@ -272,6 +272,25 @@ describe('authenticated External Chrome Desktop relay runtime', () => {
     },
   )
 
+  it('preserves the bounded Extension error message after an acquisition RPC is rejected', async () => {
+    const { runtime, client } = await connectedRuntime()
+    const acquiring = runtime.acquireTarget({
+      sessionAgentId: 'session-a', profileId: 'profile-a', operation: 'open', preferredTabId: null,
+      reuseExisting: false, createIfNeeded: true, deadlineAt: Date.now() + 1_000, ownerEpoch: 77,
+    })
+    const request = await client.receive()
+    expect(request).toMatchObject({ method: 'forge.browser.acquire' })
+    await client.send({ jsonrpc: '2.0', id: request!.id, error: {
+      code: -32030, message: 'runtime is quiesced', data: { code: 'lease-lost', retryable: false },
+    } })
+    await expect(acquiring).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'lease-lost', message: 'lease-lost: runtime is quiesced', retryable: false },
+      metadata: { phase: 'acquisition', mutationState: 'possible' },
+    })
+    runtime.deactivate(); client.close()
+  })
+
   it('ignores a valid late response by method tombstone and keeps the authenticated runtime healthy', async () => {
     const { runtime, client } = await connectedRuntime()
     const session = { sessionAgentId: 'session-a', profileId: 'profile-a' }
