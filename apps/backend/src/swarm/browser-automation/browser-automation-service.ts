@@ -191,6 +191,7 @@ export class BrowserAutomationService {
     profileId: string,
     operation: Operation,
     input: BrowserAutomationInputByOperation[Operation],
+    routing?: { requiredTargetAffinity?: "managed-electron" },
   ): Promise<BrowserAutomationInvocationResult<Operation>> {
     const key = sessionKey(profileId, sessionAgentId);
     const lifecycle = this.lifecycleChains.get(key);
@@ -243,7 +244,9 @@ export class BrowserAutomationService {
       try {
         response = await this.broker.request({
           sessionAgentId, profileId, tabId: target?.tabId ?? (operation === "open" ? requestedTabId ?? null : null), operation,
-          input: input as Record<string, unknown>, timeoutMs: readTimeout(input),
+          input: input as Record<string, unknown>,
+          ...(routing?.requiredTargetAffinity ? { requiredTargetAffinity: routing.requiredTargetAffinity } : {}),
+          timeoutMs: readTimeout(input),
           artifactDirectory: operation === "recordingStop" ? this.store.getArtifactsDirectory(profileId, sessionAgentId) : null,
         });
       } catch (error) {

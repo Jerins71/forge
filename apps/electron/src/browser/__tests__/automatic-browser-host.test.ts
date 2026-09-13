@@ -178,6 +178,26 @@ describe('AutomaticBrowserHost', () => {
     expect(external.executions[0]?.tabId).not.toBe('selected')
   })
 
+  it('routes required managed Browser workspace opens without changing automatic tool selection', async () => {
+    const managed = new FakeManagedAdapter()
+    const external = new FakeExternalAdapter()
+    const ensureManagedTarget = vi.fn(async () => 'managed-new')
+    const host = createHost(managed, external, ensureManagedTarget)
+
+    await host.perform(request('open', { show: false, reuseExistingTab: true }, null))
+    const managedOpen = request('open', { show: false, reuseExistingTab: false }, null)
+    managedOpen.requiredTargetAffinity = 'managed-electron'
+    await expect(host.perform(managedOpen)).resolves.toMatchObject({
+      ok: true,
+      updatedTab: { targetAffinity: 'managed-electron', tabId: 'managed-new' },
+    })
+
+    expect(external.acquisitions).toHaveLength(1)
+    expect(external.authorityReleases).toMatchObject([{ authority: { tabId: 'chrome-tab-1' }, reason: 'idle' }])
+    expect(ensureManagedTarget).toHaveBeenCalledOnce()
+    expect(managed.requests).toMatchObject([{ operation: 'open', tabId: 'managed-new' }])
+  })
+
   it('reselects profile-wide Chrome inventory on explicit tabless open and keeps subsequent operations sticky', async () => {
     const managed = new FakeManagedAdapter()
     const external = new FakeExternalAdapter()

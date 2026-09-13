@@ -177,6 +177,9 @@ function parseProtocolVersions(value: unknown): { minimum: number; maximum: numb
 
 function parseFeatures(value: unknown): NonNullable<BrowserHostCapabilities["features"]> {
   const features = record(value, "registration.capabilities.features");
+  const managedOpenRouting = features.managedOpenRouting === undefined
+    ? undefined
+    : boolean(features.managedOpenRouting, "registration.capabilities.features.managedOpenRouting");
   return {
     resize: boolean(features.resize, "registration.capabilities.features.resize"),
     recording: boolean(features.recording, "registration.capabilities.features.recording"),
@@ -184,6 +187,7 @@ function parseFeatures(value: unknown): NonNullable<BrowserHostCapabilities["fea
     downloadEvents: boolean(features.downloadEvents, "registration.capabilities.features.downloadEvents"),
     downloadArtifacts: boolean(features.downloadArtifacts, "registration.capabilities.features.downloadArtifacts"),
     downloadOpen: boolean(features.downloadOpen, "registration.capabilities.features.downloadOpen"),
+    ...(managedOpenRouting === undefined ? {} : { managedOpenRouting }),
   };
 }
 

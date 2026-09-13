@@ -21,7 +21,7 @@ function registration(version = 2): BrowserHostRegistration {
     hostId: "automatic-desktop", clientInstanceId: "desktop", registeredAt: "2026-07-27T00:00:00.000Z",
     capabilities: {
       protocolVersions: { minimum: version, maximum: version }, supportedOperations: ["status", "open", "snapshot"], maxResponseBytes: 1_000_000,
-      features: { resize: true, recording: true, capturePage: true, downloadEvents: true, downloadArtifacts: true, downloadOpen: true },
+      features: { resize: true, recording: true, capturePage: true, downloadEvents: true, downloadArtifacts: true, downloadOpen: true, managedOpenRouting: true },
     },
   };
 }
@@ -63,7 +63,9 @@ describe("browser websocket protocol v2", () => {
 
   it("parses only target-agnostic v2 registration and rejects unknown capability fields", () => {
     expect(parseClientCommand(Buffer.from(JSON.stringify({ type: "browser_host_register", requestId: "v2", registration: registration() }))))
-      .toMatchObject({ ok: true, command: { registration: { capabilities: { protocolVersions: { minimum: 2, maximum: 2 } } } } });
+      .toMatchObject({ ok: true, command: { registration: { capabilities: {
+        protocolVersions: { minimum: 2, maximum: 2 }, features: { managedOpenRouting: true },
+      } } } });
     const selected = registration(); (selected.capabilities as any).unexpectedSelector = "external-chrome";
     expect(parseClientCommand(Buffer.from(JSON.stringify({ type: "browser_host_register", requestId: "selected", registration: selected }))))
       .toEqual({ ok: false, error: "registration.capabilities contains an unsupported field" });
@@ -161,6 +163,26 @@ describe("browser websocket protocol v2", () => {
     }]);
   });
 
+  it("refuses managed tab creation before dispatch when the host lacks required-affinity routing", async () => {
+    const { sent, common } = await harness();
+    const legacy = registration();
+    delete legacy.capabilities.features?.managedOpenRouting;
+    await handleBrowserCommand({ ...common, command: { type: "browser_host_register", requestId: "register", registration: legacy } });
+    sent.length = 0;
+
+    await handleBrowserCommand({
+      ...common,
+      command: { type: "browser_tab_open", requestId: "open", sessionAgentId: "manager-1", profileId: "profile-1" },
+    });
+
+    expect(sent).toEqual([{
+      type: "error",
+      code: "BROWSER_TAB_OPEN_BROWSER_MANAGED_OPEN_UNSUPPORTED",
+      message: "Opening an in-app browser tab requires a newer Forge Desktop. Update Forge Desktop to continue.",
+      requestId: "open",
+    }]);
+  });
+
   it("registers one host, hydrates the same v2 projection, and routes a tabless open", async () => {
     const { service, sent, common } = await harness();
     await handleBrowserCommand({ ...common, command: { type: "browser_host_register", requestId: "register", registration: registration() } });
@@ -172,7 +194,7 @@ describe("browser websocket protocol v2", () => {
     sent.length = 0;
     const opening = handleBrowserCommand({ ...common, command: { type: "browser_tab_open", requestId: "open", sessionAgentId: "manager-1", profileId: "profile-1" } });
     const request = await nextRequest(sent);
-    expect(request).toMatchObject({ operation: "open", tabId: null });
+    expect(request).toMatchObject({ operation: "open", tabId: null, requiredTargetAffinity: "managed-electron" });
     const opened = tab(request);
     await handleBrowserCommand({ ...common, command: { type: "browser_host_response", response: {
       requestId: request.requestId, sessionAgentId: request.sessionAgentId, profileId: request.profileId, tabId: null,

@@ -263,17 +263,23 @@ async function handleTabCommand(
     sendFailure(options, command, "BROWSER_UNAVAILABLE", "Browser controls require the local Electron host on this connection.");
     return;
   }
+  if (command.type === "browser_tab_open" && host.capabilities?.features?.managedOpenRouting !== true) {
+    sendFailure(options, command, "BROWSER_MANAGED_OPEN_UNSUPPORTED", "Opening an in-app browser tab requires a newer Forge Desktop. Update Forge Desktop to continue.");
+    return;
+  }
 
   try {
     if (command.type === "browser_tab_open") {
       const before = await service.getSessionSnapshot(profileId, command.sessionAgentId);
       const previousActive = before.activeTabId;
       const previousDefault = before.defaultTabId;
+      // Browser workspace tabs are embedded by definition. Agent browser tools
+      // still omit this routing requirement and retain Automatic Browser policy.
       const result = await service.invoke(command.sessionAgentId, profileId, "open", {
-          ...(command.url ? { url: command.url } : {}),
+        ...(command.url ? { url: command.url } : {}),
         show: false,
         reuseExistingTab: false,
-      });
+      }, { requiredTargetAffinity: "managed-electron" });
       if (!result.ok) throw new BrowserCommandFailure(result.error.code, result.error.message);
       if (command.activate === false) {
         await service.setTabSelection(profileId, command.sessionAgentId, previousActive, previousDefault);

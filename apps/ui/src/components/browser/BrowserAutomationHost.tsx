@@ -226,7 +226,7 @@ export const BrowserAutomationHost = forwardRef<BrowserAutomationHostHandle, Bro
           runtimeVersions: { electron: 'desktop', chromium: 'embedded', playwright: bridge.capabilities.playwrightVersion },
           features: {
             resize: true, recording: bridge.capabilities.supportsRecording, capturePage: true,
-            downloadEvents: false, downloadArtifacts: false, downloadOpen: false,
+            downloadEvents: false, downloadArtifacts: false, downloadOpen: false, managedOpenRouting: true,
           },
           maxResponseBytes: 8 * 1024 * 1024,
         },

@@ -278,6 +278,8 @@ export interface BrowserHostCapabilities {
     downloadEvents: boolean
     downloadArtifacts: boolean
     downloadOpen: boolean
+    /** Host honors requiredTargetAffinity for local managed-tab opens. */
+    managedOpenRouting?: boolean
   }
   /** Runtime versions are host-specific; External Chrome need not emulate Electron fields. */
   runtimeVersions?: {
@@ -664,6 +666,12 @@ interface BrowserAutomationRequestRouting {
   profileId: string
   /** Resolved logical target, or null when Desktop must ensure one. */
   tabId: string | null
+  /**
+   * Hard local-host allocation requirement for an untargeted open. The in-app
+   * Browser workspace uses this to create an embedded tab; agent browser tools
+   * omit it and retain Automatic Browser selection.
+   */
+  requiredTargetAffinity?: 'managed-electron'
   hostId: string
   hostGeneration: number
   deadlineAt: string

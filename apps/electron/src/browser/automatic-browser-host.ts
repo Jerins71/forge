@@ -149,6 +149,7 @@ export class AutomaticBrowserHost {
         downloadEvents: false,
         downloadArtifacts: false,
         downloadOpen: false,
+        managedOpenRouting: true,
       },
       targets: {
         'managed-electron': targetCapability(true, managed),
@@ -325,6 +326,17 @@ export class AutomaticBrowserHost {
     if (Date.parse(request.deadlineAt) <= this.now()) return failureResponse(request, 'timeout', 'Browser request deadline has elapsed.', true)
 
     const session = { sessionAgentId: request.sessionAgentId, profileId: request.profileId }
+    const requiredAffinity: unknown = request.requiredTargetAffinity
+    if (requiredAffinity !== undefined) {
+      if (requiredAffinity !== 'managed-electron' || request.operation !== 'open' || request.tabId !== null) {
+        return failureResponse(request, 'invalid-input', 'Required browser target affinity is valid only for an untargeted managed open.', false)
+      }
+      // Moving the human-facing Browser workspace back to an embedded tab must
+      // not leave a hidden Chrome control burst alive behind it.
+      await this.releaseBurst(session, 'idle')
+      return this.performManaged(request, null)
+    }
+
     const explicit = request.tabId !== null
     const explicitAffinity = request.tabId ? this.targetAffinities.get(targetKey(session, request.tabId)) : undefined
     if (explicit && !explicitAffinity) {

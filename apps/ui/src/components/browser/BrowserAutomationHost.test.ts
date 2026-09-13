@@ -78,6 +78,7 @@ describe('BrowserAutomationHost', () => {
     render()
     expect(registered?.capabilities.protocolVersions).toEqual({ minimum: 2, maximum: 2 })
     expect(registered?.capabilities.supportedOperations).toContain('recordingStop')
+    expect(registered?.capabilities.features?.managedOpenRouting).toBe(true)
   })
 
   it('forwards allocation to main without renderer provisional interception', async () => {

@@ -28,6 +28,7 @@ export interface BrowserHostBrokerRequest {
   tabId: string | null;
   operation: BrowserAutomationOperation;
   input: Record<string, unknown>;
+  requiredTargetAffinity?: "managed-electron";
   timeoutMs?: number;
   artifactDirectory?: string | null;
   requestId?: string;
@@ -209,6 +210,7 @@ export class BrowserHostBroker {
       sessionAgentId: options.sessionAgentId,
       profileId: options.profileId,
       tabId: options.tabId,
+      ...(options.requiredTargetAffinity ? { requiredTargetAffinity: options.requiredTargetAffinity } : {}),
       operation: options.operation,
       input: options.input,
       hostId: host.registration.hostId,
