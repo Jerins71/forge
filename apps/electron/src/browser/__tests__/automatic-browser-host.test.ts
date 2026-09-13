@@ -571,6 +571,51 @@ describe('AutomaticBrowserHost', () => {
     expect(external.acquisitions).toHaveLength(2)
   })
 
+  it('passively observes only exact successful Chrome snapshots without changing authority timing', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    const managed = new FakeManagedAdapter()
+    const external = new FakeExternalAdapter()
+    const observeSuccessfulExternalSnapshot = vi.fn()
+    const host = new AutomaticBrowserHost({
+      managedAdapter: managed,
+      externalAdapter: external,
+      observeSuccessfulExternalSnapshot,
+      authorityBurst: { initialIdleMs: 10 },
+    })
+
+    await expect(host.perform(request('snapshot', {}, null))).resolves.toMatchObject({ ok: true })
+    expect(observeSuccessfulExternalSnapshot).toHaveBeenCalledWith({
+      session: { sessionAgentId: 'session', profileId: 'profile' },
+      tabId: 'chrome-tab-1',
+      hostGeneration: 1,
+      screenshot: { mimeType: 'image/png', data: 'eA==', width: 1, height: 1 },
+    })
+    expect(external.acquisitions).toHaveLength(1)
+    expect(external.executions).toHaveLength(1)
+    expect(external.authorityReleases).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(external.authorityReleases).toMatchObject([{ reason: 'idle', authority: { tabId: 'chrome-tab-1' } }])
+  })
+
+  it('drops mismatched Chrome snapshot pixels and isolates observer failures from tool results', async () => {
+    const managed = new FakeManagedAdapter()
+    const external = new FakeExternalAdapter()
+    const exact = request('snapshot', {}, 'chrome-exact')
+    const mismatched = success(exact, 'external-chrome')
+    if (mismatched.ok && mismatched.operation === 'snapshot') mismatched.result.tabId = 'chrome-foreign'
+    external.executionResults.push({ response: mismatched })
+    const observer = vi.fn(() => { throw new Error('preview unavailable') })
+    const host = new AutomaticBrowserHost({ managedAdapter: managed, externalAdapter: external, observeSuccessfulExternalSnapshot: observer })
+    host.synchronizeSessions([session([tab('chrome-exact', 'external-chrome')], 'chrome-exact')])
+
+    await expect(host.perform(exact)).resolves.toMatchObject({ ok: true, result: { tabId: 'chrome-foreign' } })
+    expect(observer).not.toHaveBeenCalled()
+    await expect(host.perform(request('snapshot', {}, 'chrome-exact'))).resolves.toMatchObject({ ok: true })
+    expect(observer).toHaveBeenCalledOnce()
+    expect(external.executions).toHaveLength(2)
+  })
+
   it('keeps screenshot overflow read-only failures replay-safe through policy formatting', async () => {
     const managed = new FakeManagedAdapter()
     const external = new FakeExternalAdapter()

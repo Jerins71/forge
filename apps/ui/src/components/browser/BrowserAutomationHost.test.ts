@@ -1,11 +1,11 @@
 /** @vitest-environment jsdom */
 
-import { act, createElement } from 'react'
+import { act, createElement, createRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserAutomationRequest, BrowserHostLifecycleRequest, BrowserHostRegistration, BrowserTabSnapshot } from '@forge/protocol'
 import { createInitialManagerWsState } from '@/lib/ws-state'
-import { BrowserAutomationHost } from './BrowserAutomationHost'
+import { BrowserAutomationHost, type BrowserAutomationHostHandle } from './BrowserAutomationHost'
 import { projectRuntimeBrowserTabState } from './browser-runtime-state'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -17,6 +17,7 @@ let lifecycle: ((request: BrowserHostLifecycleRequest) => Promise<unknown>) | nu
 const invoke = vi.fn()
 const invokeLifecycle = vi.fn()
 const ensureProvisional = vi.fn()
+const openPreview = vi.fn()
 let stateChanged: ((tab: BrowserTabSnapshot) => void) | null
 
 beforeEach(() => {
@@ -24,6 +25,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
   window.electronBridge = {
     windowRole: 'main', platform: 'darwin', backendWsUrl: 'ws://local',
+    browserPreview: { open: openPreview },
     browserAutomation: {
       capabilities: { supportedOperations: ['status'], playwrightVersion: '1.60.0', supportsRecording: true },
       reconcile: vi.fn(async () => ({ applied: true, tabCount: 0 })), ensureProvisional, commitProvisional: vi.fn(), abortProvisional: vi.fn(),
@@ -34,7 +36,7 @@ beforeEach(() => {
 })
 afterEach(() => { act(() => root.unmount()); container.remove(); delete window.electronBridge; vi.clearAllMocks() })
 
-function render(onRuntimeTabStateChanged?: (tab: BrowserTabSnapshot) => void) {
+function render(onRuntimeTabStateChanged?: (tab: BrowserTabSnapshot) => void, includeExternal = false) {
   const state = createInitialManagerWsState('session-1')
   const now = new Date(0).toISOString()
   const tab: BrowserTabSnapshot = {
@@ -44,8 +46,9 @@ function render(onRuntimeTabStateChanged?: (tab: BrowserTabSnapshot) => void) {
     viewportSetting: { mode: 'fill' }, renderedViewport: null, error: null, createdAt: now, updatedAt: now,
   }
   const inactive = { ...tab, tabId: 'managed-2', url: 'https://inactive.test/old', title: 'Inactive old' }
+  const external = { ...tab, targetAffinity: 'external-chrome' as const, tabId: 'ext.profile.7', url: '', title: 'Must not leak', physicalVisible: false }
   state.browserSessions['session-1'] = {
-    schemaVersion: 2, sessionAgentId: 'session-1', profileId: 'profile-1', hostingState: 'hosted', tabs: [tab, inactive],
+    schemaVersion: 2, sessionAgentId: 'session-1', profileId: 'profile-1', hostingState: 'hosted', tabs: includeExternal ? [tab, inactive, external] : [tab, inactive],
     activeTabId: tab.tabId, defaultTabId: tab.tabId, panelVisible: true, recentActions: [], revision: 1,
     createdAt: now, updatedAt: now,
   }
@@ -55,8 +58,9 @@ function render(onRuntimeTabStateChanged?: (tab: BrowserTabSnapshot) => void) {
     }),
     getState: () => state,
   }
-  act(() => root.render(createElement(BrowserAutomationHost, { client: client as never, state, selectedSessionAgentId: 'session-1', selectedProfileId: 'profile-1', panelVisible: true, onRuntimeTabStateChanged })))
-  return { state, tab, inactive }
+  const ref = createRef<BrowserAutomationHostHandle>()
+  act(() => root.render(createElement(BrowserAutomationHost, { ref, client: client as never, state, selectedSessionAgentId: 'session-1', selectedProfileId: 'profile-1', panelVisible: true, onRuntimeTabStateChanged })))
+  return { state, tab, inactive, external, ref }
 }
 
 const request: BrowserAutomationRequest = {
@@ -89,6 +93,47 @@ describe('BrowserAutomationHost', () => {
     render()
     await act(async () => { await lifecycle?.(lifecycleRequest) })
     expect(invokeLifecycle).toHaveBeenCalledWith(lifecycleRequest)
+  })
+
+  it('publishes one sanitized full-affinity preview scope and opens exact cards through the main bridge', async () => {
+    const publish = vi.fn(async () => undefined)
+    window.electronBridge!.browserWorkspace = {
+      capability: { popoutAvailable: true },
+      getSnapshot: vi.fn(async () => null),
+      publish,
+      sendCommand: vi.fn(),
+      popOut: vi.fn(),
+      dock: vi.fn(),
+      bringToFront: vi.fn(),
+      reportViewport: vi.fn(),
+      onProjection: vi.fn(() => vi.fn()),
+      onModeChanged: vi.fn(() => vi.fn()),
+      onFocusChanged: vi.fn(() => vi.fn()),
+    }
+    const { state, tab, ref } = render(undefined, true)
+    state.browserSessions['session-1']!.tabs[0] = { ...tab, title: '  Visible\n\u0000title  ', physicalVisible: true }
+    await act(async () => {
+      root.render(createElement(BrowserAutomationHost, { ref, client: {
+        registerBrowserAutomationHost: vi.fn(() => vi.fn()), getState: () => state,
+      } as never, state, selectedSessionAgentId: 'session-1', selectedProfileId: 'profile-1', panelVisible: true }))
+      await Promise.resolve()
+    })
+    expect(publish).toHaveBeenLastCalledWith(expect.objectContaining({
+      sessionAgentId: 'session-1',
+      profileId: 'profile-1',
+      previewScope: expect.objectContaining({
+        sessionRevision: 1,
+        tabs: [
+          expect.objectContaining({ tabId: 'managed-1', label: 'Visible title', presented: true }),
+          expect.objectContaining({ tabId: 'managed-2', label: 'Inactive old', presented: false }),
+          { tabId: 'ext.profile.7', targetAffinity: 'external-chrome', lifecycle: 'ready', label: null, presented: false },
+        ],
+      }),
+    }))
+    await act(async () => { await ref.current?.preview('ext.profile.7') })
+    expect(openPreview).toHaveBeenCalledWith(expect.objectContaining({
+      sessionAgentId: 'session-1', profileId: 'profile-1', tabId: 'ext.profile.7',
+    }))
   })
 
   it('projects active and inactive main-process metadata immediately without stealing selection', () => {

@@ -17,6 +17,7 @@ import {
   type BrowserTabRegistration,
   type BrowserWebContentsLike,
   type ManagedElectronTargetAdapterOptions,
+  type ManagedPreviewCaptureResult,
   type PreparedRecording,
 } from './managed-electron-target-adapter.js'
 import type { BrowserPresentationAcknowledgement, BrowserPresentationRequest } from './browser-bridge-contract.js'
@@ -29,6 +30,7 @@ export interface BrowserAutomationManagerOptions extends ManagedElectronTargetAd
   externalChromeAdapter?: BrowserTargetAdapter
   ensureManagedTarget?: AutomaticBrowserHostOptions['ensureManagedTarget']
   authorityBurst?: AutomaticBrowserHostOptions['authorityBurst']
+  observeSuccessfulExternalSnapshot?: AutomaticBrowserHostOptions['observeSuccessfulExternalSnapshot']
 }
 
 /** Composition facade retaining the complete Managed Browser control API behind one automatic host. */
@@ -43,6 +45,7 @@ export class BrowserAutomationManager {
       externalAdapter: options.externalChromeAdapter,
       ensureManagedTarget: options.ensureManagedTarget,
       authorityBurst: options.authorityBurst,
+      observeSuccessfulExternalSnapshot: options.observeSuccessfulExternalSnapshot,
       now: options.now,
     })
   }
@@ -62,6 +65,7 @@ export class BrowserAutomationManager {
 
   hasTab(tabId: string): boolean { return this.managed.hasTab(tabId) }
   captureScreenshot(tabId: string): Promise<string> { return this.managed.captureScreenshot(tabId) }
+  tryCapturePreviewFrame(tabId: string): Promise<ManagedPreviewCaptureResult> { return this.managed.tryCapturePreviewFrame(tabId) }
   markGuestCrashed(tabId: string, reason?: string): void { this.managed.markGuestCrashed(tabId, reason) }
   setTabPresentation(request: BrowserPresentationRequest): BrowserPresentationAcknowledgement {
     return this.managed.setTabPresentation(request)

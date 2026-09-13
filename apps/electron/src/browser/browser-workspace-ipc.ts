@@ -1,7 +1,9 @@
+import { BROWSER_TARGET_AFFINITIES, type BrowserPreviewScope } from '@forge/protocol'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import { BrowserHostError } from './browser-errors.js'
 import {
   BROWSER_WORKSPACE_IPC,
+  type BrowserWorkspaceCommand,
   type BrowserWorkspaceCommandRequest,
   type ManagedBrowserWorkspaceMode,
   type ManagedBrowserWorkspaceProjection,
@@ -24,15 +26,18 @@ export function installBrowserWorkspaceIpc(options: {
   popOut(epoch: number): Promise<ManagedBrowserWorkspaceMode>
   dock(epoch: number): Promise<ManagedBrowserWorkspaceMode>
   bringToFront(): void
+  publishPreviewScope?(publication: { workspaceEpoch: number; sessionAgentId: string; profileId: string; scope: BrowserPreviewScope } | null): void
 }): {
   dispose(): void
   publishMode(mode: ManagedBrowserWorkspaceMode): void
   publishFocus(focused: boolean): void
+  requestMainCommand(input: { workspaceEpoch: number; sessionAgentId: string; profileId: string; command: BrowserWorkspaceCommand }): Promise<unknown>
   getProjection(): ManagedBrowserWorkspaceProjection | null
 } {
   const pending = new Map<string, PendingCommand>()
   let projection: ManagedBrowserWorkspaceProjection | null = null
   let disposed = false
+  let localCommandSequence = 0
   const handled: string[] = []
 
   const mainWindow = (): BrowserWindow => {
@@ -46,10 +51,16 @@ export function installBrowserWorkspaceIpc(options: {
     return value
   }
   const requireMain = (event: IpcMainInvokeEvent): void => {
-    if (event.sender.id !== mainWindow().webContents.id) throw new BrowserHostError('invalid-input', 'Workspace authority is restricted to the main Forge renderer')
+    const expected = mainWindow().webContents
+    if (event.sender !== expected || event.senderFrame === null || event.senderFrame !== event.sender.mainFrame) {
+      throw new BrowserHostError('invalid-input', 'Workspace authority is restricted to the main Forge renderer')
+    }
   }
   const requirePopout = (event: IpcMainInvokeEvent): void => {
-    if (event.sender.id !== popoutWindow().webContents.id) throw new BrowserHostError('invalid-input', 'This command is restricted to the current Managed Browser pop-out')
+    const expected = popoutWindow().webContents
+    if (event.sender !== expected || event.senderFrame === null || event.senderFrame !== event.sender.mainFrame) {
+      throw new BrowserHostError('invalid-input', 'This command is restricted to the current Managed Browser pop-out')
+    }
   }
   const handle = (channel: string, listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown): void => {
     options.ipcMain.handle(channel, listener as Parameters<IpcMain['handle']>[1])
@@ -61,15 +72,16 @@ export function installBrowserWorkspaceIpc(options: {
     const next = validateProjection(value)
     if (projection && next.workspaceEpoch < projection.workspaceEpoch) return
     projection = { ...next, mode: options.getMode() }
-    send(options.getPopoutWindow(), BROWSER_WORKSPACE_IPC.projection, projection)
+    options.publishPreviewScope?.(projection.previewScope && projection.sessionAgentId && projection.profileId
+      ? { workspaceEpoch: projection.workspaceEpoch, sessionAgentId: projection.sessionAgentId, profileId: projection.profileId, scope: projection.previewScope }
+      : null)
+    send(options.getPopoutWindow(), BROWSER_WORKSPACE_IPC.projection, popoutProjection(projection))
   })
   handle(BROWSER_WORKSPACE_IPC.snapshot, (event) => {
     requirePopout(event)
-    return projection ? { ...projection, mode: options.getMode() } : null
+    return popoutProjection(projection ? { ...projection, mode: options.getMode() } : null)
   })
-  handle(BROWSER_WORKSPACE_IPC.command, async (event, value) => {
-    requirePopout(event)
-    const request = validateCommand(value, projection)
+  const dispatchCommand = (request: BrowserWorkspaceCommandRequest): Promise<unknown> => {
     const authoritative = mainWindow()
     if (pending.has(request.requestId)) throw new BrowserHostError('invalid-input', 'Duplicate browser workspace command request')
     const deadline = Date.parse(request.deadlineAt)
@@ -94,6 +106,10 @@ export function installBrowserWorkspaceIpc(options: {
       clearTimeout(timer)
       reject(new BrowserHostError('host-disconnected', 'Authoritative Forge renderer is unavailable', true))
     })
+  }
+  handle(BROWSER_WORKSPACE_IPC.command, async (event, value) => {
+    requirePopout(event)
+    return dispatchCommand(validateCommand(value, projection))
   })
   handle(BROWSER_WORKSPACE_IPC.commandReply, (event, value) => {
     requireMain(event)
@@ -149,15 +165,27 @@ export function installBrowserWorkspaceIpc(options: {
       for (const channel of handled) options.ipcMain.removeHandler(channel)
       rejectPending('Browser workspace IPC disposed')
       projection = null
+      options.publishPreviewScope?.(null)
     },
     publishMode(mode) {
       if (projection) projection = { ...projection, mode }
       send(options.getMainWindow(), BROWSER_WORKSPACE_IPC.mode, mode)
       send(options.getPopoutWindow(), BROWSER_WORKSPACE_IPC.mode, mode)
-      send(options.getPopoutWindow(), BROWSER_WORKSPACE_IPC.projection, projection)
+      send(options.getPopoutWindow(), BROWSER_WORKSPACE_IPC.projection, popoutProjection(projection))
     },
     publishFocus(focused) {
       send(options.getMainWindow(), BROWSER_WORKSPACE_IPC.focus, focused)
+    },
+    requestMainCommand(input) {
+      const request = validateCommand({
+        requestId: `browser-preview-${Date.now().toString(36)}-${(++localCommandSequence).toString(36)}`,
+        workspaceEpoch: input.workspaceEpoch,
+        sessionAgentId: input.sessionAgentId,
+        profileId: input.profileId,
+        deadlineAt: new Date(Date.now() + 10_000).toISOString(),
+        command: input.command,
+      }, projection)
+      return dispatchCommand(request)
     },
     getProjection: () => projection,
   }
@@ -171,7 +199,55 @@ function validateProjection(value: unknown): ManagedBrowserWorkspaceProjection {
   if (projection.profileId !== null && (typeof projection.profileId !== 'string' || projection.profileId.length === 0)) throw new BrowserHostError('invalid-input', 'Browser workspace profile is invalid')
   if ((projection.sessionAgentId === null) !== (projection.profileId === null)) throw new BrowserHostError('invalid-input', 'Browser workspace identity is incomplete')
   if (projection.snapshot && (projection.snapshot.sessionAgentId !== projection.sessionAgentId || projection.snapshot.profileId !== projection.profileId)) throw new BrowserHostError('tab-session-mismatch', 'Browser workspace snapshot identity is inconsistent')
+  if (projection.previewScope !== undefined) validatePreviewScope(projection.previewScope, projection)
   return projection
+}
+
+function validatePreviewScope(scope: BrowserPreviewScope, projection: ManagedBrowserWorkspaceProjection): void {
+  if (!scope || typeof scope !== 'object' || !Number.isSafeInteger(scope.sessionRevision) || scope.sessionRevision < 0
+    || (scope.hostGeneration !== null && (!Number.isSafeInteger(scope.hostGeneration) || scope.hostGeneration < 0))
+    || typeof scope.connected !== 'boolean' || !Array.isArray(scope.tabs) || scope.tabs.length > 64) {
+    throw new BrowserHostError('invalid-input', 'Browser preview scope is invalid')
+  }
+  if (scope.hostGeneration !== projection.host.hostGeneration || scope.connected !== projection.connected
+    || projection.snapshot?.revision !== scope.sessionRevision || !projection.sessionAgentId || !projection.profileId) {
+    throw new BrowserHostError('tab-session-mismatch', 'Browser preview scope is inconsistent with the workspace publication')
+  }
+  const tabIds = new Set<string>()
+  const managedTabs = new Map<string, BrowserPreviewScope['tabs'][number]>()
+  let presentedCount = 0
+  for (const tab of scope.tabs) {
+    if (!tab || typeof tab !== 'object' || typeof tab.tabId !== 'string' || tab.tabId.length === 0 || tab.tabId.length > 256
+      || tabIds.has(tab.tabId) || !BROWSER_TARGET_AFFINITIES.includes(tab.targetAffinity)
+      || !['restoring', 'loading', 'ready', 'failed', 'closed'].includes(tab.lifecycle)
+      || (tab.label !== null && (typeof tab.label !== 'string' || tab.label.length === 0 || tab.label.length > 512 || /[\u0000-\u001f\u007f-\u009f]/.test(tab.label)))
+      || typeof tab.presented !== 'boolean' || (tab.lifecycle === 'closed' && tab.presented)
+      || (tab.targetAffinity === 'external-chrome' && (tab.label !== null || tab.presented))
+      || (tab.targetAffinity === 'managed-electron' && tab.label === null)) {
+      throw new BrowserHostError('invalid-input', 'Browser preview tab membership is invalid')
+    }
+    tabIds.add(tab.tabId)
+    if (tab.presented) presentedCount += 1
+    if (tab.targetAffinity === 'managed-electron') managedTabs.set(tab.tabId, tab)
+  }
+  const projectedTabs = projection.snapshot?.tabs ?? []
+  if (presentedCount > 1 || managedTabs.size !== projectedTabs.length) {
+    throw new BrowserHostError('tab-session-mismatch', 'Browser preview managed membership is inconsistent with the workspace snapshot')
+  }
+  for (const tab of projectedTabs) {
+    const member = managedTabs.get(tab.tabId)
+    if (!member || tab.targetAffinity !== 'managed-electron' || member.lifecycle !== tab.lifecycle
+      || member.presented !== (tab.physicalVisible === true)) {
+      throw new BrowserHostError('tab-session-mismatch', 'Browser preview managed membership is inconsistent with the workspace snapshot')
+    }
+  }
+}
+
+function popoutProjection(projection: ManagedBrowserWorkspaceProjection | null): ManagedBrowserWorkspaceProjection | null {
+  if (!projection) return null
+  const { previewScope: _previewScope, ...managed } = projection
+  void _previewScope
+  return managed
 }
 
 function validateCommand(value: unknown, projection: ManagedBrowserWorkspaceProjection | null): BrowserWorkspaceCommandRequest {

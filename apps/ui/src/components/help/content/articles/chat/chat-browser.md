@@ -4,14 +4,24 @@ On Windows, Automatic Browser and External Chrome remain available as a beta fea
 
 Forge chooses the available local target automatically:
 
-- A Chrome-backed tab stays in Chrome. The Browser rail shows a compact card with **Show in Chrome**.
-- An embedded tab appears inside Forge and includes navigation, viewport, screenshot, recording, and dock/pop-out controls.
+- A Chrome-backed tab stays in Chrome. The Browser rail shows a compact card with **Preview** and **Show in Chrome**.
+- An embedded tab appears inside Forge and includes navigation, viewport, screenshot, recording, dock/pop-out, and **Preview** controls.
 
 When the Forge extension is enabled and authenticated, Forge can access eligible ordinary web tabs across that Chrome profile. `browser_status` provides a bounded **eligibleTabs** inventory across ready authenticated profiles; its bounded URL/title/profile/window/activity/focus/last-access details may transiently reach the manager/model for selection, but are not shown in Browser workspace UI or copied into canonical renderer state and are redacted from persistence. For a tabless `browser_open` (reuse enabled by default), Forge selects the active or most recently accessed eligible tab without requiring Chrome or the operating system to be focused. Pass an inventory `tabId` to select that exact tab. With `reuseExistingTab: false`, or when no eligible tab exists, Forge may create an inactive neutral `about:blank` tab for one authorized initial navigation. After an open selects a logical tab, non-open operations remain sticky; explicit Chrome-backed tabs do not migrate and unsupported operations fail on that tab.
 
 Normal supported navigation stays on the same Chrome-backed tab. Forge may briefly retain internal control between nearby actions, but you do not attach or release anything yourself. A trusted click, key press, touch, or wheel gesture interrupts agent control; Forge settles the in-flight command and requires a fresh snapshot before another potentially changing action. Ordinary idle pointer movement does not interrupt. **Take Control** releases the exact Chrome authority for terminal human takeover. DevTools or another debugger, a restricted or unproven target, a lost tab, transport uncertainty, timeout, update, turn end, or shutdown can also interrupt and reconcile it. Forge never silently migrates an explicit Chrome target or replays an action that may have changed the page; retry only after inspecting the current tab.
 
 There is no Chrome profile confirmation prompt or picker, host picker, tab attachment flow, or lease-management UI. Chrome-internal and other restricted pages remain excluded by the platform capability.
+
+## Floating read-only previews
+
+Choose **Preview** on an embedded or Chrome-backed tab to add it to the floating **Forge Browser Previews** window. One deck can hold up to four cards. It is separate from the interactive embedded-browser pop-out: preview pixels do not accept page clicks, typing, scrolling, refresh, recording, or Take Control.
+
+A currently presented embedded tab normally updates from a bounded native-viewport capture. Other embedded cards can show their last image with **Source paused** or **Preview unavailable**; Forge does not move, focus, unhide, resize, or keep a source awake to manufacture a preview.
+
+A Chrome card is not live and does not poll. It waits for the next successful agent snapshot of that exact tab, labels the image by when Forge received it, marks it older after 30 seconds, and discards it after five minutes. Opening or leaving the card visible does not attach the debugger, extend control, or request another snapshot.
+
+Use the deck controls to pause updates, discard and hide content, or pin the window on top. Pin starts off. Hide, screen lock, system suspend, session/host changes, tab removal, closing the deck, and Desktop shutdown clear or invalidate preview pixels. Preview images stay in bounded local memory; Forge does not save them to browser state, conversation history, artifacts, Remote Projects, or Collaboration.
 
 ## Chrome setup
 

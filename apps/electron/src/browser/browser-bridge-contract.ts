@@ -5,6 +5,13 @@ import type {
   BrowserHostLifecycleResponse,
   BrowserHostConnectionSnapshot,
   BrowserRenderedViewport,
+  BrowserPreviewDeckSnapshot,
+  BrowserPreviewFrameAvailable,
+  BrowserPreviewFramePayload,
+  BrowserPreviewFramePullRequest,
+  BrowserPreviewOpenRequest,
+  BrowserPreviewScope,
+  BrowserPreviewShellCommand,
   BrowserSessionSnapshot,
   BrowserTabSnapshot,
   BrowserViewportSetting,
@@ -28,6 +35,12 @@ export const BROWSER_IPC = {
   recordingFrame: 'forge:browser-recording-frame', stateChanged: 'forge:browser-state-changed',
 } as const
 
+export const BROWSER_PREVIEW_IPC = {
+  open: 'forge:browser-preview-open', snapshot: 'forge:browser-preview-snapshot',
+  command: 'forge:browser-preview-command', pullFrame: 'forge:browser-preview-pull-frame',
+  snapshotChanged: 'forge:browser-preview-snapshot-changed', frameAvailable: 'forge:browser-preview-frame-available',
+} as const
+
 export const BROWSER_WORKSPACE_IPC = {
   publish: 'forge:browser-workspace-publish', snapshot: 'forge:browser-workspace-snapshot',
   projection: 'forge:browser-workspace-projection', command: 'forge:browser-workspace-command',
@@ -37,7 +50,7 @@ export const BROWSER_WORKSPACE_IPC = {
   focus: 'forge:browser-workspace-focus', viewport: 'forge:browser-workspace-viewport',
 } as const
 
-export type ElectronWindowRole = 'main' | 'managed-browser-popout'
+export type ElectronWindowRole = 'main' | 'managed-browser-popout' | 'browser-preview'
 export type ManagedBrowserWorkspaceMode = 'docked' | 'opening' | 'popped-out' | 'docking' | 'unavailable'
 
 export interface BrowserPresentationRequest {
@@ -68,6 +81,8 @@ export interface ManagedBrowserWorkspaceProjection {
   popoutAvailable: boolean
   connected: boolean
   publishedAt: string
+  /** Main-only full-affinity membership. Electron strips it before pop-out delivery. */
+  previewScope?: BrowserPreviewScope
 }
 
 export type BrowserWorkspaceCommand =
@@ -110,6 +125,15 @@ export interface BrowserAutomationBridge {
   reveal(sessionAgentId: string, profileId: string, tabId: string): Promise<{ targetAffinity: 'managed-electron' | 'external-chrome'; revealed: boolean; tabId: string }>
   takeControl(sessionAgentId: string, profileId: string, tabId: string): Promise<{ released: boolean; tabId: string }>
   onStateChanged(listener: (tab: BrowserTabSnapshot) => void): () => void
+}
+
+export interface BrowserPreviewBridge {
+  open?(request: BrowserPreviewOpenRequest): Promise<BrowserPreviewDeckSnapshot>
+  getSnapshot?(): Promise<BrowserPreviewDeckSnapshot | null>
+  pullFrame?(request: BrowserPreviewFramePullRequest): Promise<BrowserPreviewFramePayload | null>
+  sendCommand?(command: BrowserPreviewShellCommand): Promise<void>
+  onSnapshotChanged?(listener: (snapshot: BrowserPreviewDeckSnapshot) => void): () => void
+  onFrameAvailable?(listener: (available: BrowserPreviewFrameAvailable) => void): () => void
 }
 
 export interface BrowserWorkspaceBridge {

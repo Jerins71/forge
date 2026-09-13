@@ -8,6 +8,7 @@ import type {
   BrowserHostLifecycleResponse,
   BrowserHostRegistration,
   BrowserHostSessionStateReport,
+  BrowserPreviewScope,
   BrowserSessionSnapshot,
   BrowserTabSnapshot,
   BrowserViewportSetting,
@@ -38,6 +39,7 @@ export interface BrowserAutomationHostHandle {
   popOut(): Promise<void>
   dock(): Promise<void>
   bringToFront(): Promise<void>
+  preview(tabId: string): Promise<void>
 }
 
 interface BrowserAutomationHostProps {
@@ -387,9 +389,9 @@ export const BrowserAutomationHost = forwardRef<BrowserAutomationHostHandle, Bro
 
     useEffect(() => {
       if (!workspace?.publish) return
-      const snapshot = selectedSessionAgentId
-        ? managedSessionProjection(state.browserSessions[selectedSessionAgentId])
-        : null
+      const selectedSession = selectedSessionAgentId ? state.browserSessions[selectedSessionAgentId] : null
+      const snapshot = managedSessionProjection(selectedSession)
+      const connected = Boolean(client && state.connected && selectedSessionAgentId && snapshot)
       void workspace.publish({
         workspaceEpoch: workspaceEpochRef.current,
         sessionAgentId: snapshot ? selectedSessionAgentId : null,
@@ -398,8 +400,9 @@ export const BrowserAutomationHost = forwardRef<BrowserAutomationHostHandle, Bro
         host: state.browserHost,
         mode: workspaceModeRef.current,
         popoutAvailable: workspace.capability.popoutAvailable,
-        connected: Boolean(client && state.connected && selectedSessionAgentId && snapshot),
+        connected,
         publishedAt: new Date().toISOString(),
+        ...(selectedSession ? { previewScope: browserPreviewScope(selectedSession, state.browserHost.hostGeneration, connected) } : {}),
       }).catch(() => undefined)
     }, [client, selectedProfileId, selectedSessionAgentId, state.browserHost, state.browserSessions, state.connected, workspace])
 
@@ -411,9 +414,9 @@ export const BrowserAutomationHost = forwardRef<BrowserAutomationHostHandle, Bro
         onWorkspaceModeChange?.(mode)
         // Native owner changed without a host generation change. Re-publish and
         // let the presentation effect verify non-empty physical bounds.
-        const session = selectedSessionRef.current
-          ? managedSessionProjection(stateRef.current.browserSessions[selectedSessionRef.current])
-          : null
+        const selectedSession = selectedSessionRef.current ? stateRef.current.browserSessions[selectedSessionRef.current] : null
+        const session = managedSessionProjection(selectedSession)
+        const connected = Boolean(clientRef.current && stateRef.current.connected && selectedSessionRef.current && session)
         if (workspace.publish) void workspace.publish({
           workspaceEpoch: workspaceEpochRef.current,
           sessionAgentId: session ? selectedSessionRef.current : null,
@@ -422,8 +425,9 @@ export const BrowserAutomationHost = forwardRef<BrowserAutomationHostHandle, Bro
           host: stateRef.current.browserHost,
           mode,
           popoutAvailable: workspace.capability.popoutAvailable,
-          connected: Boolean(clientRef.current && stateRef.current.connected && selectedSessionRef.current && session),
+          connected,
           publishedAt: new Date().toISOString(),
+          ...(selectedSession ? { previewScope: browserPreviewScope(selectedSession, stateRef.current.browserHost.hostGeneration, connected) } : {}),
         }).catch(() => undefined)
       })
     }, [onWorkspaceModeChange, workspace])
@@ -463,6 +467,13 @@ export const BrowserAutomationHost = forwardRef<BrowserAutomationHostHandle, Bro
       popOut: async () => { await workspace?.popOut(workspaceEpochRef.current) },
       dock: async () => { await workspace?.dock(workspaceEpochRef.current) },
       bringToFront: async () => { await workspace?.bringToFront() },
+      preview: async (tabId) => {
+        const browserPreview = window.electronBridge?.browserPreview
+        const sessionAgentId = selectedSessionRef.current
+        const profileId = selectedProfileRef.current
+        if (!browserPreview?.open || !sessionAgentId || !profileId) throw new Error('Browser Preview is unavailable')
+        await browserPreview.open({ workspaceEpoch: workspaceEpochRef.current, sessionAgentId, profileId, tabId })
+      },
     }), [executeWorkspaceCommand, workspace])
 
     return null
@@ -481,6 +492,26 @@ function managedSessionProjection(session: BrowserSessionSnapshot | null | undef
     activeTabId: session.activeTabId && tabIds.has(session.activeTabId) ? session.activeTabId : null,
     defaultTabId: session.defaultTabId && tabIds.has(session.defaultTabId) ? session.defaultTabId : null,
   }
+}
+
+function browserPreviewScope(session: BrowserSessionSnapshot, hostGeneration: number | null, connected: boolean): BrowserPreviewScope {
+  return {
+    hostGeneration,
+    sessionRevision: session.revision,
+    connected,
+    tabs: session.tabs.map((tab) => ({
+      tabId: tab.tabId,
+      targetAffinity: tab.targetAffinity,
+      lifecycle: tab.lifecycle,
+      label: tab.targetAffinity === 'managed-electron' ? sanitizePreviewLabel(tab.title) : null,
+      presented: tab.targetAffinity === 'managed-electron' && tab.physicalVisible === true,
+    })),
+  }
+}
+
+function sanitizePreviewLabel(value: string): string {
+  const sanitized = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim()
+  return (sanitized || 'Managed tab').slice(0, 512)
 }
 
 function managedSessionMap(sessions: Record<string, BrowserSessionSnapshot>): Map<string, BrowserSessionSnapshot> {

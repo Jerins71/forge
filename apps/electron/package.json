@@ -18,6 +18,7 @@
     "test:browser-fixture": "pnpm build && node ./scripts/browser-fixture-smoke.mjs",
     "test:browser-popout-reparent": "pnpm build && node ./scripts/browser-popout-reparent-smoke.mjs",
     "test:browser-popout-product": "pnpm build && node ./scripts/managed-browser-popout-product-smoke.mjs",
+    "test:browser-preview-capture": "pnpm build && node ./scripts/browser-preview-capture-smoke.mjs",
     "test:browser-package": "pnpm build && node ./scripts/browser-package-content-smoke.mjs",
     "test:external-chrome-package": "node ./scripts/external-chrome-package-content-smoke.mjs",
     "test:secure-vault-async": "node ./scripts/secure-vault-async-smoke.mjs",

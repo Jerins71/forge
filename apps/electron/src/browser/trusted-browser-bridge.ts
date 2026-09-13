@@ -1,11 +1,26 @@
 /* Recording coordination follows T3 Code browserRecording.ts at 9a0a0716 (MIT). */
-import type { BrowserAutomationFailure, BrowserAutomationRequest, BrowserAutomationResponse, BrowserHostLifecycleRequest, BrowserHostLifecycleResponse, BrowserTabSnapshot } from '@forge/protocol'
+import type {
+  BrowserAutomationFailure,
+  BrowserAutomationRequest,
+  BrowserAutomationResponse,
+  BrowserHostLifecycleRequest,
+  BrowserHostLifecycleResponse,
+  BrowserPreviewDeckSnapshot,
+  BrowserPreviewFrameAvailable,
+  BrowserPreviewFramePayload,
+  BrowserPreviewFramePullRequest,
+  BrowserPreviewOpenRequest,
+  BrowserPreviewShellCommand,
+  BrowserTabSnapshot,
+} from '@forge/protocol'
 import type { IpcRenderer, IpcRendererEvent } from 'electron'
 import {
   BROWSER_IPC,
+  BROWSER_PREVIEW_IPC,
   browserBridgeCapabilities,
   BROWSER_WORKSPACE_IPC,
   type BrowserAutomationBridge,
+  type BrowserPreviewBridge,
   type BrowserPresentationAcknowledgement,
   type BrowserPresentationRequest,
   type BrowserWorkspaceBridge,
@@ -171,6 +186,40 @@ export function createTrustedBrowserBridge(ipcRenderer: IpcRenderer): BrowserAut
       ipcRenderer.on(BROWSER_IPC.stateChanged, handler)
       return () => ipcRenderer.removeListener(BROWSER_IPC.stateChanged, handler)
     },
+  }
+}
+
+export function createTrustedBrowserPreviewBridge(ipcRenderer: IpcRenderer, role: ElectronWindowRole): BrowserPreviewBridge {
+  const invoke = async <T>(channel: string, value?: unknown): Promise<T> => {
+    const envelope = await ipcRenderer.invoke(channel, ...(value === undefined ? [] : [value])) as {
+      __forgeBrowserPreviewIpcResult?: boolean
+      ok?: boolean
+      value?: T
+      error?: BrowserAutomationFailure
+    }
+    if (!envelope?.__forgeBrowserPreviewIpcResult) {
+      throw new BrowserIpcError({ code: 'malformed-response', message: `Browser Preview IPC ${channel} returned no typed envelope`, retryable: false })
+    }
+    if (!envelope.ok) {
+      throw new BrowserIpcError(envelope.error ?? { code: 'execution-failed', message: `Browser Preview IPC ${channel} failed`, retryable: false })
+    }
+    return envelope.value as T
+  }
+  const listen = <T>(channel: string, listener: (value: T) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, value: T): void => listener(value)
+    ipcRenderer.on(channel, handler)
+    return () => ipcRenderer.removeListener(channel, handler)
+  }
+  if (role === 'main') {
+    return { open: (request: BrowserPreviewOpenRequest) => invoke<BrowserPreviewDeckSnapshot>(BROWSER_PREVIEW_IPC.open, request) }
+  }
+  if (role !== 'browser-preview') return {}
+  return {
+    getSnapshot: () => invoke<BrowserPreviewDeckSnapshot | null>(BROWSER_PREVIEW_IPC.snapshot),
+    pullFrame: (request: BrowserPreviewFramePullRequest) => invoke<BrowserPreviewFramePayload | null>(BROWSER_PREVIEW_IPC.pullFrame, request),
+    sendCommand: (command: BrowserPreviewShellCommand) => invoke<void>(BROWSER_PREVIEW_IPC.command, command),
+    onSnapshotChanged: (listener: (snapshot: BrowserPreviewDeckSnapshot) => void) => listen(BROWSER_PREVIEW_IPC.snapshotChanged, listener),
+    onFrameAvailable: (listener: (available: BrowserPreviewFrameAvailable) => void) => listen(BROWSER_PREVIEW_IPC.frameAvailable, listener),
   }
 }
 

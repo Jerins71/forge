@@ -5,6 +5,13 @@ import type {
   BrowserHostLifecycleResponse,
   BrowserHostConnectionSnapshot,
   BrowserRenderedViewport,
+  BrowserPreviewDeckSnapshot,
+  BrowserPreviewFrameAvailable,
+  BrowserPreviewFramePayload,
+  BrowserPreviewFramePullRequest,
+  BrowserPreviewOpenRequest,
+  BrowserPreviewScope,
+  BrowserPreviewShellCommand,
   BrowserSessionSnapshot,
   BrowserTabSnapshot,
   BrowserViewportSetting,
@@ -47,7 +54,7 @@ export interface ExternalChromeBridge {
   revealExtensionFolder(): Promise<ExternalChromeControlResult>
 }
 
-export type ElectronWindowRole = 'main' | 'managed-browser-popout'
+export type ElectronWindowRole = 'main' | 'managed-browser-popout' | 'browser-preview'
 export type ManagedBrowserWorkspaceMode = 'docked' | 'opening' | 'popped-out' | 'docking' | 'unavailable'
 export interface BrowserViewportMetrics { workspaceEpoch: number; rect: { x: number; y: number; width: number; height: number }; innerWidth: number; innerHeight: number; deviceScaleFactor?: number }
 export interface BrowserPresentationRequest {
@@ -80,6 +87,7 @@ export interface BrowserAutomationBridge {
 export interface ManagedBrowserWorkspaceProjection {
   workspaceEpoch: number; sessionAgentId: string | null; profileId: string | null; snapshot: BrowserSessionSnapshot | null
   host: BrowserHostConnectionSnapshot; mode: ManagedBrowserWorkspaceMode; popoutAvailable: boolean; connected: boolean; publishedAt: string
+  previewScope?: BrowserPreviewScope
 }
 export type BrowserWorkspaceCommand =
   | { type: 'open'; autoOpenAttemptKey?: string }
@@ -94,6 +102,14 @@ export type BrowserWorkspaceCommand =
   | { type: 'recordingStart'; tabId: string }
   | { type: 'recordingStop'; tabId: string; recordingId: string }
 export interface BrowserWorkspaceCommandRequest { requestId: string; workspaceEpoch: number; sessionAgentId: string; profileId: string; deadlineAt: string; command: BrowserWorkspaceCommand }
+export interface BrowserPreviewBridge {
+  open?(request: BrowserPreviewOpenRequest): Promise<BrowserPreviewDeckSnapshot>
+  getSnapshot?(): Promise<BrowserPreviewDeckSnapshot | null>
+  pullFrame?(request: BrowserPreviewFramePullRequest): Promise<BrowserPreviewFramePayload | null>
+  sendCommand?(command: BrowserPreviewShellCommand): Promise<void>
+  onSnapshotChanged?(listener: (snapshot: BrowserPreviewDeckSnapshot) => void): () => void
+  onFrameAvailable?(listener: (available: BrowserPreviewFrameAvailable) => void): () => void
+}
 export interface BrowserWorkspaceBridge {
   capability: { popoutAvailable: boolean }
   getSnapshot(): Promise<ManagedBrowserWorkspaceProjection | null>
@@ -121,6 +137,7 @@ export interface ElectronBridge {
   getVersion?(): string
   platform: string
   browserAutomation?: BrowserAutomationBridge
+  browserPreview?: BrowserPreviewBridge
   browserWorkspace?: BrowserWorkspaceBridge
   externalChrome?: ExternalChromeBridge
   showOpenDialog?(options: { title?: string; defaultPath?: string; properties?: Array<'openFile' | 'openDirectory' | 'multiSelections' | 'showHiddenFiles'> }): Promise<{ canceled: boolean; filePaths: string[] }>

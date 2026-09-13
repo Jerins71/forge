@@ -128,7 +128,13 @@ class FakeWebContents extends EventEmitter implements BrowserWebContentsLike {
   reloads: string[] = []
   syntheticSequence: string | undefined
   nativeCaptures = 0
-  async capturePage(): Promise<BrowserImageLike> { this.nativeCaptures += 1; return new FakeImage() }
+  captureCalls: Array<{ rect: { x: number; y: number; width: number; height: number } | undefined; options: { stayHidden?: boolean; stayAwake?: boolean } | undefined }> = []
+  capturePageImplementation: (() => Promise<BrowserImageLike>) | null = null
+  async capturePage(rect?: { x: number; y: number; width: number; height: number }, options?: { stayHidden?: boolean; stayAwake?: boolean }): Promise<BrowserImageLike> {
+    this.nativeCaptures += 1
+    this.captureCalls.push({ rect, options })
+    return this.capturePageImplementation?.() ?? new FakeImage()
+  }
   send(channel: string, value: unknown): void {
     if (channel !== 'forge:browser-guest-synthetic-input') return
     const sequence = value && typeof value === 'object' ? (value as { sequence?: unknown }).sequence : undefined
@@ -242,6 +248,84 @@ describe('BrowserAutomationManager', () => {
     expect(webview.debugger.commands.filter((method) => method === 'Accessibility.enable')).toHaveLength(1)
     expect(webview.debugger.commands.filter((method) => method === 'Page.enable')).toHaveLength(1)
     expect(webview.debugger.commands).toContain('Input.setIgnoreInputEvents')
+  })
+
+  it('captures bounded native preview frames with stayHidden while preserving human screenshot semantics', async () => {
+    const { manager, webview } = await setup()
+    await expect(manager.captureScreenshot('tab-1')).resolves.toMatch(/^data:image\/png;base64,/)
+    await expect(manager.tryCapturePreviewFrame('tab-1')).resolves.toEqual({
+      status: 'captured',
+      data: Buffer.from('89504e470d0a1a0a', 'hex').toString('base64'),
+      width: 640,
+      height: 360,
+    })
+    expect(webview.captureCalls).toEqual([
+      { rect: undefined, options: undefined },
+      { rect: undefined, options: { stayHidden: true } },
+    ])
+  })
+
+  it('gives in-flight human captures and recording reservations preview admission priority', async () => {
+    const { manager, webview } = await setup()
+    let resolveHumanCapture!: (image: BrowserImageLike) => void
+    const humanCaptureImage = new Promise<BrowserImageLike>((resolve) => { resolveHumanCapture = resolve })
+    webview.capturePageImplementation = () => humanCaptureImage
+    const humanCapture = manager.captureScreenshot('tab-1')
+
+    await expect(manager.tryCapturePreviewFrame('tab-1')).resolves.toEqual({ status: 'busy' })
+    expect(webview.nativeCaptures).toBe(1)
+    resolveHumanCapture(new FakeImage())
+    await expect(humanCapture).resolves.toMatch(/^data:image\/png;base64,/)
+
+    const recordingStart = request('recordingStart', {}) as BrowserAutomationRequest & { operation: 'recordingStart' }
+    await manager.prepareRecording(recordingStart)
+    await expect(manager.tryCapturePreviewFrame('tab-1')).resolves.toEqual({ status: 'busy' })
+    expect(webview.nativeCaptures).toBe(1)
+    manager.cancelRecording()
+  })
+
+  it('skips preview capture during automation and allows admitted preview capture to finish independently', async () => {
+    const { manager, webview } = await setup()
+    webview.debugger.waitMatches = false
+    const waiting = manager.execute(request('waitFor', { text: 'never', timeoutMs: 2_000 }))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    await expect(manager.tryCapturePreviewFrame('tab-1')).resolves.toEqual({ status: 'busy' })
+    expect(webview.nativeCaptures).toBe(0)
+    webview.ipc.emit(BROWSER_GUEST_HUMAN_INPUT_CHANNEL, {}, { kind: 'key', key: 'x', code: 'KeyX' })
+    await expect(waiting).resolves.toMatchObject({ ok: false, error: { code: 'control-interrupted' } })
+
+    const capture = Promise.withResolvers<BrowserImageLike>()
+    webview.capturePageImplementation = () => capture.promise
+    const preview = manager.tryCapturePreviewFrame('tab-1')
+    await expect(manager.execute(request('evaluate', { expression: 'Promise.resolve({ok:true})', awaitPromise: true, returnByValue: true })))
+      .resolves.toMatchObject({ ok: true, result: { value: { ok: true } } })
+    capture.resolve(new FakeImage())
+    await expect(preview).resolves.toMatchObject({ status: 'captured', width: 640, height: 360 })
+  })
+
+  it('rejects empty, oversized, and invalid native preview images without throwing', async () => {
+    const { manager, webview } = await setup()
+    webview.capturePageImplementation = async () => ({
+      isEmpty: () => true,
+      getSize: () => ({ width: 1, height: 1 }),
+      resize: () => new FakeImage(),
+      toPNG: () => Buffer.alloc(0),
+    })
+    await expect(manager.tryCapturePreviewFrame('tab-1')).resolves.toEqual({ status: 'unavailable' })
+    webview.capturePageImplementation = async () => ({
+      isEmpty: () => false,
+      getSize: () => ({ width: Number.POSITIVE_INFINITY, height: 1 }),
+      resize: () => new FakeImage(),
+      toPNG: () => Buffer.from('png'),
+    })
+    await expect(manager.tryCapturePreviewFrame('tab-1')).resolves.toEqual({ status: 'unavailable' })
+    webview.capturePageImplementation = async () => ({
+      isEmpty: () => false,
+      getSize: () => ({ width: 640, height: 360 }),
+      resize: () => new FakeImage(),
+      toPNG: () => Buffer.alloc(512 * 1_024 + 1),
+    })
+    await expect(manager.tryCapturePreviewFrame('tab-1')).resolves.toEqual({ status: 'unavailable' })
   })
 
   it('fails snapshot capture when the measured viewport is below the 8px minimum', async () => {

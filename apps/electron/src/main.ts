@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, safeStorage, shell } from 'electron'
 import { fork, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
@@ -27,8 +27,10 @@ import { installBrowserIpc } from './browser/browser-ipc.js'
 import { BrowserSessionRegistry } from './browser/browser-session.js'
 import { ManagedBrowserViewHost } from './browser/managed-browser-view-host.js'
 import { installBrowserWorkspaceIpc } from './browser/browser-workspace-ipc.js'
+import { BrowserPreviewHost } from './browser/browser-preview-host.js'
+import { installBrowserPreviewIpc } from './browser/browser-preview-ipc.js'
 import { isDockManagedBrowserShortcut, isManagedBrowserPopoutAvailable } from './browser/managed-browser-platform.js'
-import type { ManagedBrowserWorkspaceMode } from './browser/browser-bridge-contract.js'
+import type { ElectronWindowRole, ManagedBrowserWorkspaceMode } from './browser/browser-bridge-contract.js'
 import { LifecycleLog } from './lifecycle-log.js'
 import { installElectronDevelopmentProcessControl } from './dev-process-control.js'
 import {
@@ -90,7 +92,7 @@ type BackendBootstrap = {
   platform: string
   appRuntime: 'development' | 'installed'
   appStartedAt: string
-  windowRole: 'main' | 'managed-browser-popout'
+  windowRole: ElectronWindowRole
   managedBrowserPopoutAvailable: boolean
   secureControlToken: string
   /** Backend-resolved, post-migration canonical root. Optional for old Desktop clients. */
@@ -100,8 +102,12 @@ type BackendBootstrap = {
 let mainWindow: BrowserWindow | null = null
 let mainRendererRecovery: MainRendererRecoveryController | null = null
 let browserPopoutWindow: BrowserWindow | null = null
+let browserPreviewWindow: BrowserWindow | null = null
+let browserPreviewHost: BrowserPreviewHost | null = null
 let browserViewHost: ManagedBrowserViewHost | null = null
 let browserWorkspaceIpc: ReturnType<typeof installBrowserWorkspaceIpc> | null = null
+let disposeBrowserPreviewIpc: (() => void) | null = null
+let disposeBrowserPreviewListeners: (() => void) | null = null
 let browserWorkspaceMode: ManagedBrowserWorkspaceMode = isManagedBrowserPopoutAvailable() ? 'docked' : 'unavailable'
 let browserTransition: Promise<ManagedBrowserWorkspaceMode> = Promise.resolve(browserWorkspaceMode)
 let allowPopoutClose = false
@@ -574,6 +580,7 @@ async function prepareQuitForUpdate(): Promise<void> {
     appIsQuitting = true
     allowPopoutClose = true
     if (browserPopoutWindow && !browserPopoutWindow.isDestroyed()) browserPopoutWindow.close()
+    disposeBrowserPreviewRuntime()
     lifecycleLog.record('electron_quit_prepared_for_update')
     sleepBlockerService?.dispose()
     browserWorkspaceIpc?.dispose()
@@ -661,14 +668,25 @@ if (!hasSingleInstanceLock) {
 
   ipcMain.on(BACKEND_READY_CHANNEL, (event) => {
     const bootstrap = backendBootstrap ?? backendSupervisor.bootstrap
-    const windowRole = browserPopoutWindow && !browserPopoutWindow.isDestroyed() && event.sender.id === browserPopoutWindow.webContents.id
-      ? 'managed-browser-popout'
-      : 'main'
+    if (event.senderFrame === null || event.senderFrame !== event.sender.mainFrame) {
+      event.returnValue = null
+      return
+    }
+    const senderId = event.sender.id
+    const windowRole: ElectronWindowRole | null = mainWindow && !mainWindow.isDestroyed() && senderId === mainWindow.webContents.id
+      ? 'main'
+      : browserPopoutWindow && !browserPopoutWindow.isDestroyed() && senderId === browserPopoutWindow.webContents.id
+        ? 'managed-browser-popout'
+        : browserPreviewWindow && !browserPreviewWindow.isDestroyed() && senderId === browserPreviewWindow.webContents.id
+          ? 'browser-preview'
+          : null
+    if (windowRole === null) {
+      event.returnValue = null
+      return
+    }
     event.returnValue = windowRole === 'main'
       ? { ...bootstrap, windowRole, managedBrowserPopoutAvailable: isManagedBrowserPopoutAvailable() }
       : {
-          backendUrl: bootstrap.backendUrl,
-          backendWsUrl: bootstrap.backendWsUrl,
           version: bootstrap.version,
           platform: bootstrap.platform,
           appRuntime: bootstrap.appRuntime,
@@ -885,6 +903,7 @@ if (!hasSingleInstanceLock) {
         await host.commitProvisional(tab.tabId, host.currentWorkspaceEpoch)
         return tab.tabId
       },
+      observeSuccessfulExternalSnapshot: (observation) => browserPreviewHost?.observeExternalSnapshot(observation),
     })
     browserViewHost = new ManagedBrowserViewHost({
       manager: browserManager,
@@ -895,7 +914,27 @@ if (!hasSingleInstanceLock) {
         sendToRendererWindow(mainWindow, 'forge:browser-guest-crashed', { tabId, reason })
       },
     })
+    browserPreviewHost = new BrowserPreviewHost({
+      manager: browserManager,
+      getWindow: () => browserPreviewWindow,
+      createWindow: createBrowserPreviewWindow,
+      promoteManaged: async (input) => {
+        const workspace = browserWorkspaceIpc
+        if (!workspace) throw new Error('Browser workspace is unavailable')
+        await workspace.requestMainCommand({ ...input, command: { type: 'activate', tabId: input.tabId } })
+        bringManagedBrowserToFront()
+      },
+      revealChrome: async (input) => {
+        await browserManager.revealTarget({ sessionAgentId: input.sessionAgentId, profileId: input.profileId }, input.tabId)
+      },
+    })
     disposeBrowserHost = installBrowserIpc({ ipcMain, mainWindow, manager: browserManager, viewHost: browserViewHost })
+    disposeBrowserPreviewIpc = installBrowserPreviewIpc({
+      ipcMain,
+      getMainWindow: () => mainWindow,
+      getPreviewWindow: () => browserPreviewWindow,
+      host: browserPreviewHost,
+    })
     disposeExternalChromeIpc = installExternalChromeIpc({
       ipcMain,
       mainWindow,
@@ -915,7 +954,15 @@ if (!hasSingleInstanceLock) {
       popOut: popOutManagedBrowser,
       dock: dockManagedBrowser,
       bringToFront: bringManagedBrowserToFront,
+      publishPreviewScope: (publication) => browserPreviewHost?.publishScope(publication),
     })
+    const clearPreviewContent = (): void => browserPreviewHost?.clearSensitiveContent()
+    powerMonitor.on('lock-screen', clearPreviewContent)
+    powerMonitor.on('suspend', clearPreviewContent)
+    disposeBrowserPreviewListeners = () => {
+      powerMonitor.off('lock-screen', clearPreviewContent)
+      powerMonitor.off('suspend', clearPreviewContent)
+    }
     installManagedBrowserFocusAggregation(mainWindow)
     initAutoUpdater({
       mainWindow,
@@ -971,6 +1018,7 @@ if (!hasSingleInstanceLock) {
     appIsQuitting = true
     allowPopoutClose = true
     if (browserPopoutWindow && !browserPopoutWindow.isDestroyed()) browserPopoutWindow.close()
+    disposeBrowserPreviewRuntime()
     sleepBlockerService?.dispose()
     browserWorkspaceIpc?.dispose()
     browserWorkspaceIpc = null
@@ -1042,6 +1090,7 @@ function createMainWindow(): BrowserWindow {
       allowPopoutClose = true
       browserPopoutWindow.close()
     }
+    disposeBrowserPreviewRuntime()
   })
   window.on('closed', () => {
     if (mainWindow === window) {
@@ -1049,6 +1098,7 @@ function createMainWindow(): BrowserWindow {
       mainRendererRecovery = null
       browserWorkspaceIpc?.dispose()
       browserWorkspaceIpc = null
+      disposeBrowserPreviewRuntime()
       disposeBrowserHost?.()
       disposeBrowserHost = null
       disposeExternalChromeIpc?.()
@@ -1102,6 +1152,118 @@ function createMainWindow(): BrowserWindow {
   })
 
   return window
+}
+
+async function createBrowserPreviewWindow(): Promise<BrowserWindow> {
+  if (browserPreviewWindow && !browserPreviewWindow.isDestroyed()) return browserPreviewWindow
+  const saved = loadWindowState({
+    key: 'browser-preview-window-state',
+    minWidth: 320,
+    minHeight: 240,
+    defaultState: { width: 460, height: 360, isMaximized: false, isFullScreen: false },
+  })
+  const window = new BrowserWindow({
+    title: 'Forge Browser Previews',
+    width: saved.width,
+    height: saved.height,
+    ...(saved.x !== undefined && saved.y !== undefined ? { x: saved.x, y: saved.y } : {}),
+    minWidth: 320,
+    minHeight: 240,
+    show: false,
+    alwaysOnTop: false,
+    fullscreenable: false,
+    ...(process.platform !== 'darwin' && { autoHideMenuBar: true }),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webviewTag: false,
+      backgroundThrottling: true,
+      partition: 'forge-browser-preview-shell',
+      safeDialogs: true,
+    },
+  })
+  browserPreviewWindow = window
+  trackWindowState(window, { key: 'browser-preview-window-state', minWidth: 320, minHeight: 240 })
+  installBrowserPreviewContentSecurityPolicy(window)
+  window.webContents.session.setPermissionCheckHandler(() => false)
+  window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  window.webContents.on('will-attach-webview', (event) => event.preventDefault())
+  window.webContents.on('will-navigate', (event, url) => {
+    if (!isTrustedRendererUrl(url)) event.preventDefault()
+  })
+  const visibilityChanged = (): void => browserPreviewHost?.handleWindowVisibilityChanged()
+  window.on('show', visibilityChanged)
+  window.on('hide', visibilityChanged)
+  window.on('minimize', visibilityChanged)
+  window.on('restore', visibilityChanged)
+  window.on('closed', () => {
+    if (browserPreviewWindow === window) browserPreviewWindow = null
+    browserPreviewHost?.handleWindowClosed()
+  })
+  const closeFailedWindow = (): void => {
+    if (!window.isDestroyed()) window.close()
+  }
+  window.webContents.on('render-process-gone', closeFailedWindow)
+  window.webContents.on('did-fail-load', closeFailedWindow)
+  window.webContents.on('before-input-event', (event, input) => {
+    const closeShortcut = input.type === 'keyDown' && input.key.toLowerCase() === 'w'
+      && (process.platform === 'darwin' ? input.meta : input.control)
+    if (!closeShortcut && !(input.type === 'keyDown' && input.key === 'Escape')) return
+    event.preventDefault()
+    window.close()
+  })
+  await window.loadURL(resolveRendererUrl())
+  return window
+}
+
+function installBrowserPreviewContentSecurityPolicy(window: BrowserWindow): void {
+  const previewWebContentsId = window.webContents.id
+  const connectSource = app.isPackaged
+    ? "'none'"
+    : (() => {
+        const renderer = new URL(electronDevServerUrl)
+        const socketProtocol = renderer.protocol === 'https:' ? 'wss:' : 'ws:'
+        return `'self' ${socketProtocol}//${renderer.host}`
+      })()
+  const policy = [
+    "default-src 'none'",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "frame-src 'none'",
+    "form-action 'none'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self'",
+    "img-src blob:",
+    `connect-src ${connectSource}`,
+  ].join('; ')
+  window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    if (details.webContentsId !== previewWebContentsId || details.resourceType !== 'mainFrame') {
+      callback({ responseHeaders: details.responseHeaders })
+      return
+    }
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [policy],
+      },
+    })
+  })
+}
+
+function disposeBrowserPreviewRuntime(): void {
+  disposeBrowserPreviewListeners?.()
+  disposeBrowserPreviewListeners = null
+  disposeBrowserPreviewIpc?.()
+  disposeBrowserPreviewIpc = null
+  browserPreviewHost?.dispose()
+  browserPreviewHost = null
+  const window = browserPreviewWindow
+  browserPreviewWindow = null
+  if (window && !window.isDestroyed()) window.close()
 }
 
 async function createBrowserPopoutWindow(): Promise<BrowserWindow> {

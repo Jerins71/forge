@@ -60,15 +60,26 @@ An External Chrome snapshot measures the complete JSON-RPC response in UTF-8 bef
 
 If the successful JSON-RPC response would exceed the negotiated bounded response envelope, the extension deterministically compacts only optional snapshot data: it drops console, network, and action-timeline diagnostics; bounds accessibility nodes; keeps a bounded prefix of visible text; and retains the largest fitting prefix of interactive elements. If that still does not fit, accessibility data, interactive elements, and visible text may be omitted as a final fallback. The screenshot is never dropped, recompressed, or replaced. A compacted response includes `compaction.omitted` with positive counts for each omitted source category; `compaction` is absent when nothing was omitted. If the screenshot itself cannot fit the envelope, Forge returns `response-too-large` with the stable screenshot-only limitation rather than overflowing the relay. Callers should branch on the stable error code and retryability; diagnostic `details` are bounded metadata, not required for this outcome.
 
-Physical viewport resize and recording start/stop are embedded-only. Chrome also has no managed download workflow, saved download artifacts, opening of downloaded files, standalone screenshot export controls, or dock/pop-out view. A Chrome snapshot can still return bounded transient page and PNG data to the active operation.
+Physical viewport resize and recording start/stop are embedded-only. Chrome also has no managed download workflow, saved download artifacts, opening of downloaded files, standalone screenshot export controls, or interactive dock/pop-out page view. A Chrome snapshot can still return bounded transient page and PNG data to the active operation, and its latest successful image can appear in an explicitly opened read-only Preview card.
 
 The Desktop activity rail has one **Browser** workspace:
 
-- an embedded tab renders in Forge with navigation, viewport, transient screenshot, recording, and dock/pop-out controls;
-- a Chrome-backed tab stays in Chrome and appears as a compact card with **Show in Chrome**; and
+- an embedded tab renders in Forge with navigation, viewport, transient screenshot, recording, dock/pop-out, and **Preview** controls;
+- a Chrome-backed tab stays in Chrome and appears as a compact card with **Preview** and **Show in Chrome**; and
 - controls that the current target cannot support are hidden rather than presented as a second-host choice.
 
 **Show in Chrome** does not depend on a long-lived attachment. Forge first settles any active operation burst, reacquires the exact sticky Chrome tab with transient authority, reveals it, and releases that exact authority again. If the exact target cannot be reacquired, reveal fails rather than opening or migrating another tab.
+
+### Floating Browser Preview deck
+
+Forge Desktop can open one floating **Forge Browser Previews** window with up to four explicitly selected, read-only cards. This deck observes existing canonical tabs; it does not create a duplicate page or replace the interactive embedded pop-out.
+
+- A presented embedded tab uses a bounded native-viewport capture, normally no more than once per second after the renderer consumes the previous frame. Capture keeps the source hidden when it was already hidden and never focuses, unhides, reparents, resizes, or keeps the page awake. A non-presented embedded tab retains its last frame and reports **Source paused** or **Preview unavailable** rather than claiming to update.
+- A Chrome card performs no capture request of its own. It starts with **Waiting for agent snapshot** and mirrors only a successful exact-target PNG from a normal agent `snapshot` operation that occurs while the card is open. It says **received**, not captured or live; marks the image older after 30 seconds; and clears it after five minutes.
+- The deck accepts no page clicks, typing, scrolling, refresh, resize, recording, or Take Control action. **Open browser** activates the exact embedded tab through the existing workspace path. **Show in Chrome** invokes the existing exact-target reveal path only after that explicit button gesture.
+- Pause stops managed attempts and ignores new Chrome snapshot observations. Hide content discards retained pixels. Screen lock, system suspend, selected workspace/host changes, tab removal, window close, and shutdown also clear or invalidate the relevant in-memory frames. Pin on top is off for each new deck and does not persist.
+
+Preview pixels stay in bounded main/renderer memory and are delivered over a preview-only pull IPC. They are not written to browser state, conversation history, artifacts, logs, the backend, Remote Projects, or Collaboration. The sandboxed preview renderer receives no backend URL/token, Automatic Browser command bridge, workspace command bridge, Chrome setup bridge, file APIs, or secure-vault APIs.
 
 The workspace renderer registers one Desktop host with the local Builder backend and forwards bounded calls through trusted IPC. It transiently relays complete `browser_status` inventory responses between the trusted bridge and backend, but does not project that inventory into Browser workspace UI or canonical renderer state. The renderer exposes no tab-attachment, group, lease, or authority controls.
 
@@ -128,7 +139,7 @@ Before writing schema-v2 state, Forge redacts Chrome-backed page URLs and titles
 
 Schema-v1 state migrates conservatively. Proven embedded tabs become `managed-electron` tabs. Unproven Chrome hints, old lease-like records, and reveal intent that points only at a dropped target are discarded or satisfied rather than reinterpreted as authority.
 
-Embedded cookies and site storage live in a persistent profile-scoped Electron partition and can outlive a session; Forge does not currently ship a clear-data control. Chrome site identity remains in Chrome's profile. Transient screenshots are not standalone artifacts. Successfully stopped recordings live under the session's `artifacts/browser/` directory and are embedded-only. Clearing conversation history does not clear browser state, a fork starts with independent browser state, archive/restore preserves metadata and completed recordings, and deleting a session removes its browser metadata and recordings but not the profile-scoped Electron partition.
+Embedded cookies and site storage live in a persistent profile-scoped Electron partition and can outlive a session; Forge does not currently ship a clear-data control. Chrome site identity remains in Chrome's profile. Transient screenshots and Preview frames are not standalone artifacts; Preview frames are RAM-only and are discarded on the privacy/lifecycle boundaries above. Successfully stopped recordings live under the session's `artifacts/browser/` directory and are embedded-only. Clearing conversation history does not clear browser state, a fork starts with independent browser state, archive/restore preserves metadata and completed recordings, and deleting a session removes its browser metadata and recordings but not the profile-scoped Electron partition.
 
 ## Optional Chrome setup
 

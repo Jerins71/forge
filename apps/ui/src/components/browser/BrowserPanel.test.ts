@@ -86,6 +86,21 @@ describe('BrowserPanel automatic experience', () => {
     expect(container.querySelector('button[aria-label*="Managed Browser"]')).toBeNull()
   })
 
+  it('opens read-only previews for both managed and Chrome tabs when Desktop exposes the command', () => {
+    const managedCommands = port()
+    managedCommands.preview = vi.fn()
+    render(snapshot([managedTab]), managedCommands)
+    act(() => (container.querySelector('button[aria-label="Open read-only browser preview"]') as HTMLButtonElement).click())
+    expect(managedCommands.preview).toHaveBeenCalledWith(managedTab.tabId)
+
+    const chromeCommands = port()
+    chromeCommands.preview = vi.fn()
+    render(snapshot([externalTab]), chromeCommands)
+    const preview = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Preview')!
+    act(() => preview.click())
+    expect(chromeCommands.preview).toHaveBeenCalledWith(externalTab.tabId)
+  })
+
   it('labels a retained Chrome debugger as agent-attached idle rather than human control', () => {
     render(snapshot([{ ...externalTab, controller: 'agent-idle' }]))
     expect(container.textContent).toContain('Agent attached · idle')

@@ -41,9 +41,18 @@ export interface AutomaticBrowserHostCapabilities extends BrowserHostCapabilitie
   }>>
 }
 
+export interface AutomaticBrowserSnapshotObservation {
+  session: BrowserTargetSession
+  tabId: string
+  hostGeneration: number
+  screenshot: Extract<BrowserAutomationResponse, { ok: true; operation: 'snapshot' }>['result']['screenshot']
+}
+
 export interface AutomaticBrowserHostOptions {
   managedAdapter: BrowserTargetAdapter & { targetAffinity: 'managed-electron' }
   externalAdapter?: BrowserTargetAdapter
+  /** Synchronous main-local observation only; it cannot affect operation or authority lifecycle. */
+  observeSuccessfulExternalSnapshot?: (observation: AutomaticBrowserSnapshotObservation) => void
   /** Main-process allocation hook. It is intentionally private from renderer and wire callers. */
   ensureManagedTarget?: (
     request: BrowserAutomationRequest,
@@ -94,6 +103,7 @@ export class AutomaticBrowserHost {
   private readonly managed: AutomaticBrowserHostOptions['managedAdapter']
   private readonly external?: BrowserTargetAdapter
   private readonly ensureManagedTarget?: AutomaticBrowserHostOptions['ensureManagedTarget']
+  private readonly observeSuccessfulExternalSnapshot?: AutomaticBrowserHostOptions['observeSuccessfulExternalSnapshot']
   private readonly now: () => number
   private readonly setTimer: NonNullable<AutomaticBrowserHostOptions['setTimer']>
   private readonly clearTimer: NonNullable<AutomaticBrowserHostOptions['clearTimer']>
@@ -113,6 +123,7 @@ export class AutomaticBrowserHost {
     this.managed = options.managedAdapter
     this.external = options.externalAdapter
     this.ensureManagedTarget = options.ensureManagedTarget
+    this.observeSuccessfulExternalSnapshot = options.observeSuccessfulExternalSnapshot
     this.now = options.now ?? Date.now
     this.setTimer = options.setTimer ?? setTimeout
     this.clearTimer = options.clearTimer ?? clearTimeout
@@ -509,7 +520,8 @@ export class AutomaticBrowserHost {
       burst.timer = null
     }
 
-    const targeted = { ...request, tabId: burst.authority.tabId } as BrowserAutomationRequest
+    const exactTabId = burst.authority.tabId
+    const targeted = { ...request, tabId: exactTabId } as BrowserAutomationRequest
     let execution: BrowserTargetExecution
     try {
       execution = await external.executeWithAuthority({ authority: burst.authority, request: targeted })
@@ -521,7 +533,19 @@ export class AutomaticBrowserHost {
     }
     const response = this.acceptResponse(targeted, execution.response, 'external-chrome')
     if (response.ok) {
-      if (request.operation === 'snapshot') burst.requiresReobserve = false
+      if (request.operation === 'snapshot') {
+        burst.requiresReobserve = false
+        if (response.operation === 'snapshot' && response.tabId === exactTabId && response.result.tabId === exactTabId) {
+          try {
+            this.observeSuccessfulExternalSnapshot?.({
+              session: burst.session,
+              tabId: exactTabId,
+              hostGeneration: targeted.hostGeneration,
+              screenshot: response.result.screenshot,
+            })
+          } catch { /* Preview observation cannot alter a successful operation or authority release. */ }
+        }
+      }
       burst.operations += 1
       this.scheduleBurstRelease(burst)
       return response

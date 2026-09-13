@@ -32,8 +32,9 @@ function fixture(quiesce = vi.fn(async () => {})) {
   const backend = gate()
   const app = { exit: vi.fn() }
   const backendSupervisor = { stop: vi.fn(() => backend.promise) }
+  const disposeBrowserPreviewRuntime = vi.fn()
   const context = vm.createContext({
-    app, backendSupervisor, externalChromeCoordinator: { quiesce },
+    app, backendSupervisor, externalChromeCoordinator: { quiesce }, disposeBrowserPreviewRuntime,
     lifecycleLog: { record: vi.fn() }, console: { warn: vi.fn() },
     stopPackagedRemoteUiServer: vi.fn(async () => {}),
     browserPopoutWindow: null, sleepBlockerService: null, browserWorkspaceIpc: null,
@@ -53,7 +54,7 @@ function fixture(quiesce = vi.fn(async () => {})) {
     context.onBeforeQuit(event)
     return event
   }
-  return { backend, app, backendSupervisor, context, quit, quiesce }
+  return { backend, app, backendSupervisor, context, quit, quiesce, disposeBrowserPreviewRuntime }
 }
 
 describe('Electron quit cleanup', () => {
@@ -65,6 +66,7 @@ describe('Electron quit cleanup', () => {
     expect(fx.quit().preventDefault).toHaveBeenCalledOnce()
     expect(fx.app.exit).not.toHaveBeenCalled()
     expect(fx.quiesce).toHaveBeenCalledOnce()
+    expect(fx.disposeBrowserPreviewRuntime).toHaveBeenCalledOnce()
     fx.backend.resolve()
     await vi.waitFor(() => expect(fx.app.exit).toHaveBeenCalledExactlyOnceWith(0))
   })
@@ -78,6 +80,7 @@ describe('Electron quit cleanup', () => {
     await preparation
     expect(fx.quit().preventDefault).not.toHaveBeenCalled()
     expect(fx.backendSupervisor.stop).toHaveBeenCalledOnce()
+    expect(fx.disposeBrowserPreviewRuntime).toHaveBeenCalledOnce()
     expect(fx.app.exit).not.toHaveBeenCalled()
   })
 
@@ -86,6 +89,7 @@ describe('Electron quit cleanup', () => {
     expect(fx.quit().preventDefault).toHaveBeenCalledOnce()
     await vi.waitFor(() => expect(fx.backendSupervisor.stop).toHaveBeenCalledOnce())
     expect(fx.context.console.warn).toHaveBeenCalledOnce()
+    expect(fx.disposeBrowserPreviewRuntime).toHaveBeenCalledOnce()
     expect(fx.quit().preventDefault).toHaveBeenCalledOnce()
     fx.backend.resolve()
     await vi.waitFor(() => expect(fx.app.exit).toHaveBeenCalledExactlyOnceWith(0))

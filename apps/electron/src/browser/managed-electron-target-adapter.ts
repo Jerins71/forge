@@ -26,6 +26,9 @@ import {
   BROWSER_AUTOMATION_MAX_SCREENSHOT_WIDTH,
   BROWSER_AUTOMATION_MAX_VISIBLE_TEXT_LENGTH,
   BROWSER_AUTOMATION_OPERATIONS,
+  BROWSER_PREVIEW_MANAGED_MAX_HEIGHT,
+  BROWSER_PREVIEW_MANAGED_MAX_PNG_BYTES,
+  BROWSER_PREVIEW_MANAGED_MAX_WIDTH,
   resolveBrowserViewportPreset,
 } from '@forge/protocol'
 import { BrowserHostError, asBrowserHostError } from './browser-errors.js'
@@ -72,6 +75,10 @@ export interface BrowserImageLike {
   toPNG(): Buffer
 }
 
+export type ManagedPreviewCaptureResult =
+  | { status: 'captured'; data: string; width: number; height: number }
+  | { status: 'busy' | 'unavailable' }
+
 export interface BrowserWebContentsLike {
   readonly id: number
   readonly debugger: BrowserDebuggerLike
@@ -94,7 +101,7 @@ export interface BrowserWebContentsLike {
   reload(): void
   reloadIgnoringCache(): void
   setZoomFactor(factor: number): void
-  capturePage(): Promise<BrowserImageLike>
+  capturePage(rect?: { x: number; y: number; width: number; height: number }, options?: { stayHidden?: boolean; stayAwake?: boolean }): Promise<BrowserImageLike>
   send(channel: string, ...args: unknown[]): void
   focus(): void
   close(options?: { waitForBeforeUnload?: boolean }): void
@@ -141,6 +148,9 @@ interface TabRuntime {
   presentationGeneration: number
   presentationSequence: number
   operationGeneration: number
+  activeOperations: number
+  humanCaptureInFlight: number
+  previewCaptureInFlight: boolean
   destroyed: boolean
   createdForOpen: boolean
 }
@@ -267,6 +277,9 @@ export class ManagedElectronTargetAdapter implements BrowserTargetAdapter {
       presentationGeneration: 0,
       presentationSequence: 0,
       operationGeneration: 0,
+      activeOperations: 0,
+      humanCaptureInFlight: 0,
+      previewCaptureInFlight: false,
       destroyed: false,
       createdForOpen: registration.created,
     }
@@ -287,17 +300,57 @@ export class ManagedElectronTargetAdapter implements BrowserTargetAdapter {
 
   async captureScreenshot(tabId: string): Promise<string> {
     const tab = this.requireTab(tabId)
-    const image = await tab.webContents.capturePage()
-    if (image.isEmpty()) throw new BrowserHostError('execution-failed', 'Browser screenshot was empty')
-    let bounded = image
-    if (image.getSize().width > BROWSER_AUTOMATION_MAX_SCREENSHOT_WIDTH) {
-      bounded = image.resize({ width: BROWSER_AUTOMATION_MAX_SCREENSHOT_WIDTH })
+    tab.humanCaptureInFlight += 1
+    try {
+      const image = await tab.webContents.capturePage()
+      if (image.isEmpty()) throw new BrowserHostError('execution-failed', 'Browser screenshot was empty')
+      let bounded = image
+      if (image.getSize().width > BROWSER_AUTOMATION_MAX_SCREENSHOT_WIDTH) {
+        bounded = image.resize({ width: BROWSER_AUTOMATION_MAX_SCREENSHOT_WIDTH })
+      }
+      const png = bounded.toPNG()
+      if (png.byteLength === 0 || png.byteLength > MAX_SCREENSHOT_PNG_BYTES) {
+        throw new BrowserHostError('response-too-large', 'Browser screenshot exceeded the native capture limit')
+      }
+      return `data:image/png;base64,${png.toString('base64')}`
+    } finally {
+      tab.humanCaptureInFlight = Math.max(0, tab.humanCaptureInFlight - 1)
     }
-    const png = bounded.toPNG()
-    if (png.byteLength === 0 || png.byteLength > MAX_SCREENSHOT_PNG_BYTES) {
-      throw new BrowserHostError('response-too-large', 'Browser screenshot exceeded the native capture limit')
+  }
+
+  /** Best-effort native preview. It never queues behind browser automation or changes page visibility. */
+  async tryCapturePreviewFrame(tabId: string): Promise<ManagedPreviewCaptureResult> {
+    const tab = this.tabs.get(tabId)
+    if (!tab || tab.destroyed || tab.webContents.isDestroyed()) return { status: 'unavailable' }
+    if (tab.activeOperations > 0 || tab.humanCaptureInFlight > 0 || tab.previewCaptureInFlight
+      || this.activeRecording?.tabId === tabId) return { status: 'busy' }
+    tab.previewCaptureInFlight = true
+    try {
+      const image = await tab.webContents.capturePage(undefined, { stayHidden: true })
+      if (image.isEmpty()) return { status: 'unavailable' }
+      const source = image.getSize()
+      if (!Number.isFinite(source.width) || !Number.isFinite(source.height) || source.width <= 0 || source.height <= 0) {
+        return { status: 'unavailable' }
+      }
+      const scale = Math.min(
+        1,
+        BROWSER_PREVIEW_MANAGED_MAX_WIDTH / source.width,
+        BROWSER_PREVIEW_MANAGED_MAX_HEIGHT / source.height,
+      )
+      const bounded = scale < 1 ? image.resize({ width: Math.max(1, Math.round(source.width * scale)) }) : image
+      const size = bounded.getSize()
+      const png = bounded.toPNG()
+      if (png.byteLength === 0 || png.byteLength > BROWSER_PREVIEW_MANAGED_MAX_PNG_BYTES
+        || size.width <= 0 || size.height <= 0
+        || size.width > BROWSER_PREVIEW_MANAGED_MAX_WIDTH || size.height > BROWSER_PREVIEW_MANAGED_MAX_HEIGHT) {
+        return { status: 'unavailable' }
+      }
+      return { status: 'captured', data: png.toString('base64'), width: size.width, height: size.height }
+    } catch {
+      return { status: 'unavailable' }
+    } finally {
+      tab.previewCaptureInFlight = false
     }
-    return `data:image/png;base64,${png.toString('base64')}`
   }
 
   markGuestCrashed(tabId: string, reason = 'Managed browser renderer crashed'): void {
@@ -981,6 +1034,7 @@ export class ManagedElectronTargetAdapter implements BrowserTargetAdapter {
     }
     if (tab.destroyed || tab.webContents.isDestroyed()) { release(); throw new BrowserHostError('tab-not-found', 'Browser tab was destroyed') }
     if (this.now() >= deadline) { release(); throw new BrowserHostError('timeout', 'Browser request deadline has elapsed', true) }
+    tab.activeOperations += 1
     const epoch = tab.controlEpoch
     const operationGeneration = ++tab.operationGeneration
     const startedAt = new Date(this.now()).toISOString()
@@ -1018,6 +1072,7 @@ export class ManagedElectronTargetAdapter implements BrowserTargetAdapter {
       this.finishAction(tab, event.id, error instanceof BrowserHostError && error.code === 'control-interrupted' ? 'interrupted' : 'failed', error instanceof BrowserHostError ? error.code : 'execution-failed')
       throw error
     } finally {
+      tab.activeOperations = Math.max(0, tab.activeOperations - 1)
       if (!tab.destroyed && operationGeneration === tab.operationGeneration) {
         tab.snapshot = { ...tab.snapshot, controller: 'none' }
         this.emitTabState(tab)

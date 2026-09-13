@@ -11,6 +11,7 @@ files:
   - '!dist/browser-fixture-smoke-main*'
   - '!dist/browser-popout-reparent-smoke-main*'
   - '!dist/managed-browser-popout-fixture-main*'
+  - '!dist/browser-preview-capture-smoke-main*'
   - node_modules/playwright-core/**/*
   - package.json
 extraResources:

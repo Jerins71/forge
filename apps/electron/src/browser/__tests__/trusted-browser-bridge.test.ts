@@ -1,7 +1,7 @@
 import type { BrowserAutomationRequest, BrowserAutomationResponse } from '@forge/protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BROWSER_IPC } from '../browser-bridge-contract.js'
-import { createTrustedBrowserBridge } from '../trusted-browser-bridge.js'
+import { BROWSER_IPC, BROWSER_PREVIEW_IPC } from '../browser-bridge-contract.js'
+import { createTrustedBrowserBridge, createTrustedBrowserPreviewBridge } from '../trusted-browser-bridge.js'
 
 class FakeMediaRecorder {
   static isTypeSupported(): boolean { return true }
@@ -103,6 +103,47 @@ describe('trusted browser recording bridge', () => {
     await expect(first).resolves.toMatchObject({
       requestId: 'stop-1', hostId: 'host-1', hostGeneration: 3, sessionAgentId: 'session-1', profileId: 'profile-1', tabId: 'tab-1', operation: 'recordingStop', ok: true,
     })
+  })
+})
+
+describe('trusted browser preview bridge', () => {
+  it('constructs mutually exclusive main and preview capabilities with typed envelopes', async () => {
+    const listeners = new Map<string, (...args: unknown[]) => void>()
+    const ipcRenderer = {
+      on: vi.fn((channel: string, listener: (...args: unknown[]) => void) => listeners.set(channel, listener)),
+      removeListener: vi.fn(),
+      invoke: vi.fn(async (channel: string) => ({
+        __forgeBrowserPreviewIpcResult: true,
+        ok: true,
+        value: channel === BROWSER_PREVIEW_IPC.snapshot ? null : undefined,
+      })),
+    }
+    const main = createTrustedBrowserPreviewBridge(ipcRenderer as never, 'main')
+    expect(main.open).toBeTypeOf('function')
+    expect(main.getSnapshot).toBeUndefined()
+    await main.open?.({ workspaceEpoch: 1, sessionAgentId: 'session', profileId: 'profile', tabId: 'tab' })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(BROWSER_PREVIEW_IPC.open, {
+      workspaceEpoch: 1, sessionAgentId: 'session', profileId: 'profile', tabId: 'tab',
+    })
+
+    const preview = createTrustedBrowserPreviewBridge(ipcRenderer as never, 'browser-preview')
+    expect(preview.open).toBeUndefined()
+    await expect(preview.getSnapshot?.()).resolves.toBeNull()
+    const listener = vi.fn()
+    const dispose = preview.onFrameAvailable?.(listener)
+    listeners.get(BROWSER_PREVIEW_IPC.frameAvailable)?.({}, { previewGeneration: 1, tabId: 'tab', sequence: 2 })
+    expect(listener).toHaveBeenCalledWith({ previewGeneration: 1, tabId: 'tab', sequence: 2 })
+    dispose?.()
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(BROWSER_PREVIEW_IPC.frameAvailable, expect.any(Function))
+
+    expect(createTrustedBrowserPreviewBridge(ipcRenderer as never, 'managed-browser-popout')).toEqual({})
+  })
+
+  it('rejects malformed preview envelopes', async () => {
+    const bridge = createTrustedBrowserPreviewBridge({
+      on: vi.fn(), removeListener: vi.fn(), invoke: vi.fn(async () => ({ ok: true })),
+    } as never, 'browser-preview')
+    await expect(bridge.getSnapshot?.()).rejects.toMatchObject({ name: 'BrowserIpcError', code: 'malformed-response' })
   })
 })
 

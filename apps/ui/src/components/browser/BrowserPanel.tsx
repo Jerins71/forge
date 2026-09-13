@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { ArrowLeft, ArrowRight, Camera, Circle, ExternalLink, Globe2, PanelTopClose, Plus, RefreshCw, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Camera, Circle, ExternalLink, Eye, Globe2, PanelTopClose, Plus, RefreshCw, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react'
 import {
   BROWSER_VIEWPORT_PRESETS,
   resolveBrowserViewportPreset,
@@ -30,6 +30,7 @@ export interface BrowserWorkspaceCommandPort {
   stopRecording(tabId: string, recordingId: string): Promise<void>
   reveal(tabId: string): Promise<void>
   takeControl(tabId: string): Promise<void>
+  preview?(tabId: string): Promise<void>
   popOut?(): Promise<void>
   dock?(): Promise<void>
 }
@@ -164,6 +165,7 @@ export function BrowserPanel({
           <IconButton label="Zoom in" disabled={controlsUnavailable || !activeTab} onClick={() => activeTab && void run(() => commands.zoom(activeTab.tabId, activeTab.zoomFactor + .1))}><ZoomIn /></IconButton>
           <IconButton label="Screenshot" disabled={controlsUnavailable || !activeTab} onClick={() => activeTab && void run(async () => setScreenshot(await commands.capture(activeTab.tabId)))}><Camera /></IconButton>
           <IconButton label={activeTab?.recording ? 'Stop recording' : 'Start recording'} disabled={controlsUnavailable || !activeTab || !host.capabilities?.features?.recording} onClick={() => activeTab && void run(() => activeTab.recording ? commands.stopRecording(activeTab.tabId, activeTab.recording.recordingId) : commands.startRecording(activeTab.tabId))}><Circle className={cn(activeTab?.recording && 'fill-red-500 text-red-500')} /></IconButton>
+          {commands.preview ? <IconButton label="Open read-only browser preview" disabled={controlsUnavailable || !activeTab} onClick={() => activeTab && void run(() => commands.preview?.(activeTab.tabId))}><Eye /></IconButton> : null}
           {popoutAvailable && (commands.popOut || commands.dock) ? (
             popped
               ? <IconButton label="Dock Automatic Browser in main window" onClick={() => void run(() => commands.dock?.())}><PanelTopClose /></IconButton>
@@ -193,6 +195,7 @@ export function BrowserPanel({
           <div className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
             <span>This tab is open in Chrome.</span>
             {activeTab ? <TabStatus tab={activeTab} /> : null}
+            {commands.preview ? <button type="button" className="rounded border px-3 py-1.5 text-foreground hover:bg-muted focus-visible:ring-2" onClick={() => activeTab && void run(() => commands.preview?.(activeTab.tabId))}>Preview</button> : null}
             <button type="button" className="rounded border px-3 py-1.5 text-foreground hover:bg-muted focus-visible:ring-2" onClick={() => activeTab && void run(() => commands.reveal(activeTab.tabId))}>Show in Chrome</button>
             <button type="button" className="rounded border px-3 py-1.5 text-foreground hover:bg-muted focus-visible:ring-2" onClick={() => activeTab && void run(() => commands.takeControl(activeTab.tabId))}>Take Control</button>
             <HelpTrigger contextKey="chat.browser" size="sm" className="size-8" />
@@ -248,6 +251,7 @@ function createLegacyLocalPort(client: ManagerWsClient | null, sessionAgentId: s
     stopRecording: async (tabId, recordingId) => { if (hostRef?.current) await hostRef.current.stopRecording(tabId, recordingId); else await client?.stopBrowserRecording(sessionAgentId, tabId, recordingId) },
     reveal: (tabId) => handle().reveal(tabId),
     takeControl: (tabId) => handle().takeControl(tabId),
+    preview: hostRef && window.electronBridge?.browserPreview?.open ? (tabId) => handle().preview(tabId) : undefined,
     popOut: hostRef ? () => handle().popOut() : undefined,
     dock: hostRef ? () => handle().dock() : undefined,
   }
