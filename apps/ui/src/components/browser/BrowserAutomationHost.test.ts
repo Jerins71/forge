@@ -17,7 +17,6 @@ let lifecycle: ((request: BrowserHostLifecycleRequest) => Promise<unknown>) | nu
 const invoke = vi.fn()
 const invokeLifecycle = vi.fn()
 const ensureProvisional = vi.fn()
-const openPreview = vi.fn()
 let stateChanged: ((tab: BrowserTabSnapshot) => void) | null
 
 beforeEach(() => {
@@ -25,7 +24,6 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
   window.electronBridge = {
     windowRole: 'main', platform: 'darwin', backendWsUrl: 'ws://local',
-    browserPreview: { open: openPreview },
     browserAutomation: {
       capabilities: { supportedOperations: ['status'], playwrightVersion: '1.60.0', supportsRecording: true },
       reconcile: vi.fn(async () => ({ applied: true, tabCount: 0 })), ensureProvisional, commitProvisional: vi.fn(), abortProvisional: vi.fn(),
@@ -96,7 +94,7 @@ describe('BrowserAutomationHost', () => {
     expect(invokeLifecycle).toHaveBeenCalledWith(lifecycleRequest)
   })
 
-  it('publishes one sanitized full-affinity preview scope and opens exact cards through the main bridge', async () => {
+  it('publishes one sanitized full-affinity scope for main-local automatic preview admission', async () => {
     const publish = vi.fn(async () => undefined)
     window.electronBridge!.browserWorkspace = {
       capability: { popoutAvailable: true },
@@ -131,10 +129,7 @@ describe('BrowserAutomationHost', () => {
         ],
       }),
     }))
-    await act(async () => { await ref.current?.preview('ext.profile.7') })
-    expect(openPreview).toHaveBeenCalledWith(expect.objectContaining({
-      sessionAgentId: 'session-1', profileId: 'profile-1', tabId: 'ext.profile.7',
-    }))
+    expect(ref.current).not.toHaveProperty('preview')
   })
 
   it('projects active and inactive main-process metadata immediately without stealing selection', () => {

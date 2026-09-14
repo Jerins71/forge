@@ -14,12 +14,10 @@ import {
   type BrowserPreviewFrameAvailable,
   type BrowserPreviewFramePayload,
   type BrowserPreviewFramePullRequest,
-  type BrowserPreviewOpenRequest,
   type BrowserPreviewScope,
   type BrowserPreviewScopeTab,
-  type BrowserPreviewShellCommand,
 } from '@forge/protocol'
-import type { AutomaticBrowserSnapshotObservation } from './automatic-browser-host.js'
+import type { AutomaticBrowserControlObservation, AutomaticBrowserSnapshotObservation } from './automatic-browser-host.js'
 import type { BrowserAutomationManager } from './browser-automation-manager.js'
 import { BrowserHostError } from './browser-errors.js'
 import { BROWSER_PREVIEW_IPC } from './browser-bridge-contract.js'
@@ -41,18 +39,31 @@ interface PreviewFrame {
   pulled: boolean
 }
 
+interface PendingExternalFrame {
+  data: string
+  width: number
+  height: number
+  receivedAt: number
+}
+
 interface PreviewCard {
   tab: BrowserPreviewScopeTab
   frame: PreviewFrame | null
   state: BrowserPreviewDeckSnapshot['cards'][number]['state']
 }
 
+interface PreviewControl {
+  tabId: string
+  targetAffinity: BrowserPreviewScopeTab['targetAffinity']
+  state: 'active' | 'idle'
+  sequence: number
+  confirmed: boolean
+}
+
 export interface BrowserPreviewHostOptions {
   manager: BrowserAutomationManager
   /** Authoritative main renderer that owns the embedded preview surface. */
   getWindow(): BrowserWindow | null
-  promoteManaged(input: { workspaceEpoch: number; sessionAgentId: string; profileId: string; tabId: string }): Promise<void>
-  revealChrome(input: { sessionAgentId: string; profileId: string; tabId: string }): Promise<void>
   now?: () => number
   setTimer?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
   clearTimer?: (timer: ReturnType<typeof setTimeout>) => void
@@ -64,15 +75,14 @@ const CAPTURE_INTERVAL_MS = 1_000
 export class BrowserPreviewHost {
   private readonly manager: BrowserAutomationManager
   private readonly getWindow: BrowserPreviewHostOptions['getWindow']
-  private readonly promoteManaged: BrowserPreviewHostOptions['promoteManaged']
-  private readonly revealChrome: BrowserPreviewHostOptions['revealChrome']
   private readonly now: () => number
   private readonly setTimer: NonNullable<BrowserPreviewHostOptions['setTimer']>
   private readonly clearTimer: NonNullable<BrowserPreviewHostOptions['clearTimer']>
   private readonly cards = new Map<string, PreviewCard>()
+  private readonly controls = new Map<string, PreviewControl>()
+  private readonly pendingExternalFrames = new Map<string, PendingExternalFrame>()
   private scope: PublishedPreviewScope | null = null
   private previewGeneration = 0
-  private paused = false
   private hiddenContent = false
   private captureTimer: ReturnType<typeof setTimeout> | null = null
   private expiryTimer: ReturnType<typeof setTimeout> | null = null
@@ -80,13 +90,12 @@ export class BrowserPreviewHost {
   private captureContentEpoch = 0
   private frameSequence = 0
   private roundRobinIndex = 0
+  private controlSequence = 0
   private disposed = false
 
   constructor(options: BrowserPreviewHostOptions) {
     this.manager = options.manager
     this.getWindow = options.getWindow
-    this.promoteManaged = options.promoteManaged
-    this.revealChrome = options.revealChrome
     this.now = options.now ?? (() => performance.now())
     this.setTimer = options.setTimer ?? setTimeout
     this.clearTimer = options.clearTimer ?? clearTimeout
@@ -105,50 +114,55 @@ export class BrowserPreviewHost {
       && previous.profileId === publication.profileId
       && previous.scope.hostGeneration === publication.scope.hostGeneration
     if (sameAuthority && publication.scope.sessionRevision < previous.scope.sessionRevision) return
-    const identityChanged = previous !== null && !sameAuthority
-    if (identityChanged) this.invalidate()
+    if (previous !== null && !sameAuthority) this.invalidate()
     this.scope = publication
-    const members = new Map(publication.scope.tabs.map((tab) => [tab.tabId, tab]))
-    let changed = false
-    for (const [tabId, card] of this.cards) {
-      const tab = members.get(tabId)
-      if (!tab || tab.lifecycle === 'closed' || tab.targetAffinity !== card.tab.targetAffinity) {
-        this.cards.delete(tabId)
-        changed = true
-        continue
-      }
-      if (tab.label !== card.tab.label || tab.lifecycle !== card.tab.lifecycle || tab.presented !== card.tab.presented) {
-        card.tab = tab
-        card.state = this.resumedState(card)
-        changed = true
-      }
+    if (!publication.scope.connected) {
+      this.controls.clear()
+      this.pendingExternalFrames.clear()
     }
-    this.scheduleExpiry()
-    if (changed) this.publishSnapshot()
-    if (this.cards.size > 0) this.scheduleCapture()
+    this.reconcileCards()
   }
 
-  async open(request: BrowserPreviewOpenRequest): Promise<BrowserPreviewDeckSnapshot> {
-    this.assertAlive()
-    const scope = this.requireScope(request)
-    const tab = scope.scope.tabs.find((candidate) => candidate.tabId === request.tabId && candidate.lifecycle !== 'closed')
-    if (!tab) throw new BrowserHostError('tab-not-found', 'Browser preview tab is no longer canonical')
-    if (!this.cards.has(tab.tabId)) {
-      if (this.cards.size >= BROWSER_PREVIEW_MAX_CARDS) throw new BrowserHostError('invalid-input', `Browser Preview supports at most ${BROWSER_PREVIEW_MAX_CARDS} cards`)
-      if (this.cards.size === 0) {
-        this.previewGeneration += 1
-        this.paused = false
-        this.hiddenContent = false
+  observeAgentControl(observation: AutomaticBrowserControlObservation): void {
+    const scope = this.scope
+    if (!scope || this.disposed
+      || scope.sessionAgentId !== observation.session.sessionAgentId
+      || scope.profileId !== observation.session.profileId) return
+    if (observation.state === 'released') {
+      if (observation.tabId === null) {
+        this.controls.clear()
+        this.pendingExternalFrames.clear()
+      } else {
+        this.controls.delete(observation.tabId)
+        this.pendingExternalFrames.delete(observation.tabId)
       }
-      this.cards.set(tab.tabId, {
-        tab,
-        frame: null,
-        state: tab.targetAffinity === 'external-chrome' ? 'waiting' : 'delayed',
-      })
+      this.reconcileCards()
+      return
     }
-    this.publishSnapshot()
-    this.scheduleCapture(0)
-    return this.snapshot()
+    if (!scope.scope.connected || scope.scope.hostGeneration !== observation.hostGeneration) return
+    const existing = this.controls.get(observation.tabId)
+    if (!existing && this.controls.size >= BROWSER_PREVIEW_MAX_CARDS) {
+      const oldestIdle = [...this.controls.values()]
+        .filter((control) => control.state === 'idle')
+        .sort((left, right) => left.sequence - right.sequence)[0]
+      if (!oldestIdle) return
+      this.controls.delete(oldestIdle.tabId)
+      this.pendingExternalFrames.delete(oldestIdle.tabId)
+    }
+    const member = scope.scope.tabs.find((tab) => tab.tabId === observation.tabId
+      && tab.targetAffinity === observation.targetAffinity && tab.lifecycle !== 'closed')
+    this.controls.set(observation.tabId, {
+      tabId: observation.tabId,
+      targetAffinity: observation.targetAffinity,
+      state: observation.state,
+      sequence: observation.state === 'active' || !existing ? ++this.controlSequence : existing.sequence,
+      confirmed: existing?.confirmed === true || Boolean(member),
+    })
+    this.reconcileCards()
+  }
+
+  get currentContentEpoch(): number {
+    return this.captureContentEpoch
   }
 
   getSnapshot(): BrowserPreviewDeckSnapshot | null {
@@ -174,64 +188,28 @@ export class BrowserPreviewHost {
     }
   }
 
-  async handleCommand(command: BrowserPreviewShellCommand): Promise<void> {
-    this.assertGeneration(command.previewGeneration)
-    if (command.type === 'remove') {
-      this.cards.delete(command.tabId)
-      this.scheduleExpiry()
-      if (this.cards.size === 0) this.stopCaptureTimer()
-      this.publishSnapshot()
-      return
-    }
-    if (command.type === 'set-paused') {
-      this.paused = command.paused
-      for (const card of this.cards.values()) card.state = command.paused ? 'paused' : this.resumedState(card)
-      this.publishSnapshot()
-      if (!command.paused) this.scheduleCapture(0)
-      return
-    }
-    if (command.type === 'set-hidden-content') {
-      this.hiddenContent = command.hidden
-      if (command.hidden) this.clearFrames('paused')
-      else {
-        for (const card of this.cards.values()) card.state = this.resumedState(card)
-        this.publishSnapshot()
-        this.scheduleCapture(0)
-      }
-      return
-    }
-    const card = this.cards.get(command.tabId)
-    const scope = this.scope
-    if (!card || !scope) throw new BrowserHostError('tab-not-found', 'Browser preview card is unavailable')
-    if (command.type === 'promote') {
-      if (card.tab.targetAffinity !== 'managed-electron') throw new BrowserHostError('invalid-input', 'Only a managed Browser card can be opened in Forge')
-      await this.promoteManaged({
-        workspaceEpoch: scope.workspaceEpoch,
-        sessionAgentId: scope.sessionAgentId,
-        profileId: scope.profileId,
-        tabId: card.tab.tabId,
-      })
-      return
-    }
-    if (card.tab.targetAffinity !== 'external-chrome') throw new BrowserHostError('invalid-input', 'Only a Chrome Browser card can be revealed in Chrome')
-    await this.revealChrome({ sessionAgentId: scope.sessionAgentId, profileId: scope.profileId, tabId: card.tab.tabId })
-  }
-
   observeExternalSnapshot(observation: AutomaticBrowserSnapshotObservation): void {
     const scope = this.scope
-    if (!scope || this.disposed || this.paused || this.hiddenContent || !this.windowCanReceiveFrames()) return
+    if (!scope || this.disposed || this.hiddenContent || observation.contentEpoch !== this.captureContentEpoch
+      || !this.windowCanReceiveFrames()) return
     if (scope.sessionAgentId !== observation.session.sessionAgentId || scope.profileId !== observation.session.profileId
       || scope.scope.hostGeneration !== observation.hostGeneration) return
     const card = this.cards.get(observation.tabId)
     const member = scope.scope.tabs.find((tab) => tab.tabId === observation.tabId)
     const screenshot = observation.screenshot
-    if (!card || !member || member.targetAffinity !== 'external-chrome' || card.tab.targetAffinity !== 'external-chrome'
-      || screenshot.mimeType !== 'image/png' || screenshot.data.length === 0
-      || screenshot.data.length > EXTERNAL_CHROME_MAX_SCREENSHOT_BASE64_BYTES
-      || screenshot.width < 1 || screenshot.height < 1
-      || screenshot.width > BROWSER_AUTOMATION_MAX_SCREENSHOT_WIDTH
-      || screenshot.height > BROWSER_AUTOMATION_MAX_SCREENSHOT_HEIGHT) return
-    this.storeFrame(card, screenshot.data, screenshot.width, screenshot.height)
+    if (screenshot.mimeType !== 'image/png' || !this.externalFrameWithinBounds(
+      screenshot.data,
+      screenshot.width,
+      screenshot.height,
+    )) return
+    if (card && member?.targetAffinity === 'external-chrome' && card.tab.targetAffinity === 'external-chrome') {
+      this.storeFrame(card, screenshot.data, screenshot.width, screenshot.height)
+      return
+    }
+    const control = this.controls.get(observation.tabId)
+    if (!card && !member && control?.targetAffinity === 'external-chrome' && !control.confirmed) {
+      this.storePendingExternalFrame(observation.tabId, screenshot.data, screenshot.width, screenshot.height)
+    }
   }
 
   handleWindowVisibilityChanged(): void {
@@ -242,24 +220,22 @@ export class BrowserPreviewHost {
   }
 
   clearSensitiveContent(): void {
-    if (this.cards.size === 0) return
     this.hiddenContent = true
     this.clearFrames('paused')
+  }
+
+  restoreSensitiveContent(): void {
+    if (!this.hiddenContent) return
+    this.hiddenContent = false
+    for (const card of this.cards.values()) card.state = this.resumedState(card)
+    this.publishSnapshot()
+    this.scheduleCapture(0)
   }
 
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
     this.invalidate()
-  }
-
-  private requireScope(request: BrowserPreviewOpenRequest): PublishedPreviewScope {
-    const scope = this.scope
-    if (!scope || !scope.scope.connected || scope.workspaceEpoch !== request.workspaceEpoch
-      || scope.sessionAgentId !== request.sessionAgentId || scope.profileId !== request.profileId) {
-      throw new BrowserHostError('stale-host-generation', 'Browser preview targets a stale or unavailable workspace', true)
-    }
-    return scope
   }
 
   private assertAlive(): void {
@@ -273,14 +249,78 @@ export class BrowserPreviewHost {
     }
   }
 
+  private reconcileCards(): void {
+    const scope = this.scope
+    const previousOrder = [...this.cards.keys()]
+    const wasEmpty = this.cards.size === 0
+    const members = new Map(scope?.scope.tabs.map((tab) => [tab.tabId, tab]) ?? [])
+    const eligible: Array<{ control: PreviewControl; tab: BrowserPreviewScopeTab }> = []
+    if (scope?.scope.connected) {
+      for (const [tabId, control] of this.controls) {
+        const tab = members.get(tabId)
+        if (!tab || tab.lifecycle === 'closed' || tab.targetAffinity !== control.targetAffinity) {
+          if (control.confirmed) {
+            this.controls.delete(tabId)
+            this.pendingExternalFrames.delete(tabId)
+          }
+          continue
+        }
+        control.confirmed = true
+        eligible.push({ control, tab })
+      }
+    }
+    eligible.sort((left, right) => {
+      if (left.control.state !== right.control.state) return left.control.state === 'active' ? -1 : 1
+      return right.control.sequence - left.control.sequence
+    })
+
+    const nextCards = new Map<string, PreviewCard>()
+    let changed = false
+    for (const { tab } of eligible.slice(0, BROWSER_PREVIEW_MAX_CARDS)) {
+      const existing = this.cards.get(tab.tabId)
+      if (!existing || existing.tab.targetAffinity !== tab.targetAffinity) {
+        const pending = tab.targetAffinity === 'external-chrome'
+          ? this.takePendingExternalFrame(tab.tabId)
+          : null
+        nextCards.set(tab.tabId, {
+          tab,
+          frame: pending ? { ...pending, sequence: ++this.frameSequence, pulled: false } : null,
+          state: pending ? 'updating' : tab.targetAffinity === 'external-chrome' ? 'waiting' : 'delayed',
+        })
+        changed = true
+        continue
+      }
+      if (tab.label !== existing.tab.label || tab.lifecycle !== existing.tab.lifecycle || tab.presented !== existing.tab.presented) {
+        existing.tab = tab
+        existing.state = this.resumedState(existing)
+        changed = true
+      }
+      nextCards.set(tab.tabId, existing)
+    }
+    if (nextCards.size !== this.cards.size) changed = true
+    const nextOrder = [...nextCards.keys()]
+    if (!changed && previousOrder.some((tabId, index) => tabId !== nextOrder[index])) changed = true
+    this.cards.clear()
+    for (const [tabId, card] of nextCards) this.cards.set(tabId, card)
+
+    if (wasEmpty && this.cards.size > 0) {
+      this.previewGeneration += 1
+      changed = true
+    }
+    if (this.cards.size === 0) this.stopCaptureTimer()
+    this.scheduleExpiry()
+    if (changed) this.publishSnapshot()
+    if (this.cards.size > 0) this.scheduleCapture(changed ? 0 : CAPTURE_INTERVAL_MS)
+  }
+
   private resumedState(card: PreviewCard): PreviewCard['state'] {
-    if (this.paused || this.hiddenContent) return 'paused'
+    if (this.hiddenContent) return 'paused'
     if (card.tab.targetAffinity === 'external-chrome') return card.frame ? 'updating' : 'waiting'
     return card.frame ? 'updating' : 'delayed'
   }
 
   private scheduleCapture(delay = CAPTURE_INTERVAL_MS): void {
-    if (this.captureTimer || this.captureInFlight || this.paused || this.hiddenContent || !this.windowCanReceiveFrames()
+    if (this.captureTimer || this.captureInFlight || this.hiddenContent || !this.windowCanReceiveFrames()
       || this.managedCaptureCandidates().length === 0) return
     this.captureTimer = this.setTimer(() => {
       this.captureTimer = null
@@ -305,14 +345,14 @@ export class BrowserPreviewHost {
   private async capture(tabId: string): Promise<void> {
     const card = this.cards.get(tabId)
     if (!card || card.tab.targetAffinity !== 'managed-electron'
-      || this.captureInFlight || this.paused || this.hiddenContent || !this.windowCanReceiveFrames()) return
+      || this.captureInFlight || this.hiddenContent || !this.windowCanReceiveFrames()) return
     this.captureInFlight = true
     const contentEpoch = this.captureContentEpoch
     try {
       const result = await this.manager.tryCapturePreviewFrame(tabId)
       const current = this.cards.get(tabId)
       if (current !== card || contentEpoch !== this.captureContentEpoch
-        || this.paused || this.hiddenContent || !this.windowCanReceiveFrames()) return
+        || this.hiddenContent || !this.windowCanReceiveFrames()) return
       if (result.status === 'captured') this.storeFrame(card, result.data, result.width, result.height)
       else {
         card.state = result.status === 'busy' ? 'delayed' : 'unavailable'
@@ -324,6 +364,21 @@ export class BrowserPreviewHost {
     }
   }
 
+  private storePendingExternalFrame(tabId: string, data: string, width: number, height: number): void {
+    const nextBytes = Buffer.byteLength(data, 'utf8')
+    if (!this.externalFrameWithinBounds(data, width, height)
+      || nextBytes + this.retainedImageBytes(tabId) > BROWSER_PREVIEW_TOTAL_IMAGE_BYTES) return
+    this.pendingExternalFrames.set(tabId, { data, width, height, receivedAt: this.now() })
+    this.scheduleExpiry()
+  }
+
+  private takePendingExternalFrame(tabId: string): PendingExternalFrame | null {
+    const pending = this.pendingExternalFrames.get(tabId)
+    this.pendingExternalFrames.delete(tabId)
+    if (!pending || this.now() - pending.receivedAt >= BROWSER_PREVIEW_EXTERNAL_EXPIRE_MS) return null
+    return pending
+  }
+
   private storeFrame(card: PreviewCard, data: string, width: number, height: number): void {
     const nextBytes = Buffer.byteLength(data, 'utf8')
     if (!this.frameWithinSourceBounds(card, nextBytes, width, height)) {
@@ -331,8 +386,7 @@ export class BrowserPreviewHost {
       this.publishSnapshot()
       return
     }
-    const otherBytes = [...this.cards.values()].reduce((total, candidate) => total + (candidate === card ? 0 : Buffer.byteLength(candidate.frame?.data ?? '', 'utf8')), 0)
-    if (nextBytes === 0 || nextBytes + otherBytes > BROWSER_PREVIEW_TOTAL_IMAGE_BYTES) {
+    if (nextBytes === 0 || nextBytes + this.retainedImageBytes(card.tab.tabId) > BROWSER_PREVIEW_TOTAL_IMAGE_BYTES) {
       card.state = 'unavailable'
       this.publishSnapshot()
       return
@@ -354,7 +408,6 @@ export class BrowserPreviewHost {
       workspaceEpoch: scope.workspaceEpoch,
       sessionAgentId: scope.sessionAgentId,
       profileId: scope.profileId,
-      paused: this.paused,
       hiddenContent: this.hiddenContent,
       cards: [...this.cards.values()].map((card) => ({
         tabId: card.tab.tabId,
@@ -380,6 +433,7 @@ export class BrowserPreviewHost {
   private clearFrames(state: PreviewCard['state']): void {
     this.captureContentEpoch += 1
     this.stopExpiryTimer()
+    this.pendingExternalFrames.clear()
     for (const card of this.cards.values()) {
       card.frame = null
       card.state = state
@@ -390,7 +444,10 @@ export class BrowserPreviewHost {
   private invalidate(): void {
     this.stopCaptureTimer()
     this.stopExpiryTimer()
+    this.captureContentEpoch += 1
     this.scope = null
+    this.controls.clear()
+    this.pendingExternalFrames.clear()
     this.cards.clear()
     this.previewGeneration += 1
     this.publishSnapshot()
@@ -412,6 +469,10 @@ export class BrowserPreviewHost {
       const expiresAt = card.frame.receivedAt + BROWSER_PREVIEW_EXTERNAL_EXPIRE_MS
       nextExpiry = nextExpiry === null ? expiresAt : Math.min(nextExpiry, expiresAt)
     }
+    for (const frame of this.pendingExternalFrames.values()) {
+      const expiresAt = frame.receivedAt + BROWSER_PREVIEW_EXTERNAL_EXPIRE_MS
+      nextExpiry = nextExpiry === null ? expiresAt : Math.min(nextExpiry, expiresAt)
+    }
     if (nextExpiry === null) return
     this.expiryTimer = this.setTimer(() => {
       this.expiryTimer = null
@@ -430,6 +491,9 @@ export class BrowserPreviewHost {
       card.state = 'expired'
       changed = true
     }
+    for (const [tabId, frame] of this.pendingExternalFrames) {
+      if (now - frame.receivedAt >= BROWSER_PREVIEW_EXTERNAL_EXPIRE_MS) this.pendingExternalFrames.delete(tabId)
+    }
     if (changed) this.publishSnapshot()
     this.scheduleExpiry()
   }
@@ -438,6 +502,26 @@ export class BrowserPreviewHost {
     if (!this.expiryTimer) return
     this.clearTimer(this.expiryTimer)
     this.expiryTimer = null
+  }
+
+  private externalFrameWithinBounds(data: string, width: number, height: number): boolean {
+    return data.length > 0
+      && Buffer.byteLength(data, 'utf8') <= EXTERNAL_CHROME_MAX_SCREENSHOT_BASE64_BYTES
+      && Number.isSafeInteger(width) && Number.isSafeInteger(height)
+      && width >= 1 && height >= 1
+      && width <= BROWSER_AUTOMATION_MAX_SCREENSHOT_WIDTH
+      && height <= BROWSER_AUTOMATION_MAX_SCREENSHOT_HEIGHT
+  }
+
+  private retainedImageBytes(excludingTabId: string): number {
+    let total = 0
+    for (const card of this.cards.values()) {
+      if (card.tab.tabId !== excludingTabId) total += Buffer.byteLength(card.frame?.data ?? '', 'utf8')
+    }
+    for (const [tabId, frame] of this.pendingExternalFrames) {
+      if (tabId !== excludingTabId) total += Buffer.byteLength(frame.data, 'utf8')
+    }
+    return total
   }
 
   private frameWithinSourceBounds(card: PreviewCard, bytes: number, width: number, height: number): boolean {

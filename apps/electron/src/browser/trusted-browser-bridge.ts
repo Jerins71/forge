@@ -9,8 +9,6 @@ import type {
   BrowserPreviewFrameAvailable,
   BrowserPreviewFramePayload,
   BrowserPreviewFramePullRequest,
-  BrowserPreviewOpenRequest,
-  BrowserPreviewShellCommand,
   BrowserTabSnapshot,
 } from '@forge/protocol'
 import type { IpcRenderer, IpcRendererEvent } from 'electron'
@@ -212,10 +210,8 @@ export function createTrustedBrowserPreviewBridge(ipcRenderer: IpcRenderer, role
   }
   if (role !== 'main') return {}
   return {
-    open: (request: BrowserPreviewOpenRequest) => invoke<BrowserPreviewDeckSnapshot>(BROWSER_PREVIEW_IPC.open, request),
     getSnapshot: () => invoke<BrowserPreviewDeckSnapshot | null>(BROWSER_PREVIEW_IPC.snapshot),
     pullFrame: (request: BrowserPreviewFramePullRequest) => invoke<BrowserPreviewFramePayload | null>(BROWSER_PREVIEW_IPC.pullFrame, request),
-    sendCommand: (command: BrowserPreviewShellCommand) => invoke<void>(BROWSER_PREVIEW_IPC.command, command),
     onSnapshotChanged: (listener: (snapshot: BrowserPreviewDeckSnapshot | null) => void) => listen(BROWSER_PREVIEW_IPC.snapshotChanged, listener),
     onFrameAvailable: (listener: (available: BrowserPreviewFrameAvailable) => void) => listen(BROWSER_PREVIEW_IPC.frameAvailable, listener),
   }

@@ -79,7 +79,7 @@ export const chatArticles: HelpArticle[] = [
     id: 'chat-browser',
     title: 'Automatic Browser',
     category: 'chat',
-    summary: 'Use Forge’s Automatic Browser, Chrome-backed tabs, and floating read-only previews.',
+    summary: 'Use Forge’s Automatic Browser, Chrome-backed tabs, and automatic floating previews.',
     content: chatBrowserContent,
     keywords: [
       'browser',
@@ -95,8 +95,8 @@ export const chatArticles: HelpArticle[] = [
       'screenshot',
       'preview',
       'floating preview',
+      'automatic preview',
       'read-only preview',
-      'pin on top',
       'recording',
       'viewport',
       'agent control',

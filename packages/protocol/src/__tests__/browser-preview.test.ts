@@ -10,8 +10,6 @@ import {
   BROWSER_PREVIEW_TOTAL_IMAGE_BYTES,
   type BrowserPreviewDeckSnapshot,
   type BrowserPreviewFramePayload,
-  type BrowserPreviewOpenRequest,
-  type BrowserPreviewShellCommand,
 } from '../index.js'
 
 describe('browser preview desktop-local contract', () => {
@@ -25,11 +23,7 @@ describe('browser preview desktop-local contract', () => {
     expect(BROWSER_PREVIEW_CARD_STATES).toEqual(['waiting', 'updating', 'paused', 'delayed', 'unavailable', 'expired'])
   })
 
-  it('keeps pixels out of open requests and shell commands', () => {
-    expectTypeOf<BrowserPreviewOpenRequest>().toMatchTypeOf<{
-      workspaceEpoch: number; sessionAgentId: string; profileId: string; tabId: string
-    }>()
-    expectTypeOf<BrowserPreviewShellCommand>().not.toMatchTypeOf<{ data: string }>()
+  it('keeps pixels out of automatic membership snapshots', () => {
     expectTypeOf<BrowserPreviewDeckSnapshot>().not.toMatchTypeOf<{ data: string }>()
     expectTypeOf<BrowserPreviewFramePayload>().toMatchTypeOf<{
       mimeType: 'image/png'; data: string; ageMsAtDelivery: number

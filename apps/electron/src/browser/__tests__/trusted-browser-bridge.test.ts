@@ -107,7 +107,7 @@ describe('trusted browser recording bridge', () => {
 })
 
 describe('trusted browser preview bridge', () => {
-  it('gives the authoritative main renderer the embedded preview capabilities with typed envelopes', async () => {
+  it('gives the authoritative main renderer automatic preview state capabilities with typed envelopes', async () => {
     const listeners = new Map<string, (...args: unknown[]) => void>()
     const ipcRenderer = {
       on: vi.fn((channel: string, listener: (...args: unknown[]) => void) => listeners.set(channel, listener)),
@@ -119,12 +119,9 @@ describe('trusted browser preview bridge', () => {
       })),
     }
     const main = createTrustedBrowserPreviewBridge(ipcRenderer as never, 'main')
-    expect(main.open).toBeTypeOf('function')
+    expect(main).not.toHaveProperty('open')
+    expect(main).not.toHaveProperty('sendCommand')
     expect(main.getSnapshot).toBeTypeOf('function')
-    await main.open?.({ workspaceEpoch: 1, sessionAgentId: 'session', profileId: 'profile', tabId: 'tab' })
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(BROWSER_PREVIEW_IPC.open, {
-      workspaceEpoch: 1, sessionAgentId: 'session', profileId: 'profile', tabId: 'tab',
-    })
     await expect(main.getSnapshot?.()).resolves.toBeNull()
     const listener = vi.fn()
     const dispose = main.onFrameAvailable?.(listener)

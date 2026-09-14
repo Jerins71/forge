@@ -45,14 +45,34 @@ export interface AutomaticBrowserSnapshotObservation {
   session: BrowserTargetSession
   tabId: string
   hostGeneration: number
+  contentEpoch: number
   screenshot: Extract<BrowserAutomationResponse, { ok: true; operation: 'snapshot' }>['result']['screenshot']
 }
+
+export type AutomaticBrowserControlObservation =
+  | {
+    session: BrowserTargetSession
+    tabId: string
+    hostGeneration: number
+    targetAffinity: BrowserTargetAffinity
+    state: 'active' | 'idle'
+  }
+  | {
+    session: BrowserTargetSession
+    tabId: string | null
+    hostGeneration: number | null
+    targetAffinity: BrowserTargetAffinity | null
+    state: 'released'
+    reason: 'turn-ended' | 'take-control' | 'operation-failed' | 'lifecycle'
+  }
 
 export interface AutomaticBrowserHostOptions {
   managedAdapter: BrowserTargetAdapter & { targetAffinity: 'managed-electron' }
   externalAdapter?: BrowserTargetAdapter
-  /** Synchronous main-local observation only; it cannot affect operation or authority lifecycle. */
+  /** Synchronous main-local observations only; they cannot affect operation or authority lifecycle. */
+  captureExternalSnapshotContentEpoch?: () => number
   observeSuccessfulExternalSnapshot?: (observation: AutomaticBrowserSnapshotObservation) => void
+  observeAgentControl?: (observation: AutomaticBrowserControlObservation) => void
   /** Main-process allocation hook. It is intentionally private from renderer and wire callers. */
   ensureManagedTarget?: (
     request: BrowserAutomationRequest,
@@ -84,6 +104,7 @@ interface AuthorityBurst {
   requiresReobserve: boolean
   timer: ReturnType<typeof setTimeout> | null
   pendingReleaseReason: 'idle' | 'operation-failed' | 'turn-ended' | 'take-control' | Extract<BrowserHostLifecycleRequest, { kind: 'release-session' }>['reason'] | null
+  previewReleased: boolean
 }
 
 interface ExternalAttemptOptions {
@@ -103,7 +124,9 @@ export class AutomaticBrowserHost {
   private readonly managed: AutomaticBrowserHostOptions['managedAdapter']
   private readonly external?: BrowserTargetAdapter
   private readonly ensureManagedTarget?: AutomaticBrowserHostOptions['ensureManagedTarget']
+  private readonly captureExternalSnapshotContentEpoch?: AutomaticBrowserHostOptions['captureExternalSnapshotContentEpoch']
   private readonly observeSuccessfulExternalSnapshot?: AutomaticBrowserHostOptions['observeSuccessfulExternalSnapshot']
+  private readonly observeAgentControl?: AutomaticBrowserHostOptions['observeAgentControl']
   private readonly now: () => number
   private readonly setTimer: NonNullable<AutomaticBrowserHostOptions['setTimer']>
   private readonly clearTimer: NonNullable<AutomaticBrowserHostOptions['clearTimer']>
@@ -116,6 +139,7 @@ export class AutomaticBrowserHost {
   private readonly sessions = new Map<string, SessionPolicyState>()
   private readonly sessionQueues = new Map<string, Promise<void>>()
   private readonly bursts = new Map<string, AuthorityBurst>()
+  private readonly previewControlEpochs = new Map<string, number>()
   private ownerEpoch = 0
   private destroyed = false
 
@@ -123,7 +147,9 @@ export class AutomaticBrowserHost {
     this.managed = options.managedAdapter
     this.external = options.externalAdapter
     this.ensureManagedTarget = options.ensureManagedTarget
+    this.captureExternalSnapshotContentEpoch = options.captureExternalSnapshotContentEpoch
     this.observeSuccessfulExternalSnapshot = options.observeSuccessfulExternalSnapshot
+    this.observeAgentControl = options.observeAgentControl
     this.now = options.now ?? Date.now
     this.setTimer = options.setTimer ?? setTimeout
     this.clearTimer = options.clearTimer ?? clearTimeout
@@ -184,8 +210,10 @@ export class AutomaticBrowserHost {
   }
 
   perform(request: BrowserAutomationRequest): Promise<BrowserAutomationResponse> {
-    return this.serialize(sessionKey(request), async () => {
-      const response = await this.performSerialized(request)
+    const key = sessionKey(request)
+    const previewControlEpoch = this.previewControlEpochs.get(key) ?? 0
+    return this.serialize(key, async () => {
+      const response = await this.performSerialized(request, previewControlEpoch)
       const enriched = request.operation === 'status' ? await this.withExternalInventory(request, response) : response
       return correlateCallerTab(request, enriched)
     })
@@ -197,13 +225,14 @@ export class AutomaticBrowserHost {
 
   async handleLifecycle(request: BrowserHostLifecycleRequest): Promise<BrowserHostLifecycleResponse> {
     const session = { sessionAgentId: request.sessionAgentId, profileId: request.profileId }
+    this.invalidatePreviewControl(session, request.kind === 'turn-ended' ? 'turn-ended' : 'lifecycle')
     return this.serialize(sessionKey(session), async () => {
       try {
         if (request.kind === 'turn-ended') {
-          await this.endTurn(session, request.turnId)
+          await this.endTurnAfterPreviewInvalidation(session, request.turnId)
           return { ...request, ok: true }
         }
-        await this.releaseSession(session, request.reason)
+        await this.releaseSessionAfterPreviewInvalidation(session, request.reason)
         return { ...request, ok: true }
       } catch (error) {
         return {
@@ -221,6 +250,16 @@ export class AutomaticBrowserHost {
   }
 
   async endTurn(session: BrowserTargetSession, turnId: string): Promise<void> {
+    this.invalidatePreviewControl(session, 'turn-ended')
+    await this.endTurnAfterPreviewInvalidation(session, turnId)
+  }
+
+  async releaseSession(session: BrowserTargetSession, reason: Extract<BrowserHostLifecycleRequest, { kind: 'release-session' }>['reason']): Promise<void> {
+    this.invalidatePreviewControl(session, 'lifecycle')
+    await this.releaseSessionAfterPreviewInvalidation(session, reason)
+  }
+
+  private async endTurnAfterPreviewInvalidation(session: BrowserTargetSession, turnId: string): Promise<void> {
     await this.releaseBurst(session, 'turn-ended')
     await Promise.all([
       this.managed.endTurn?.(session, turnId),
@@ -228,7 +267,10 @@ export class AutomaticBrowserHost {
     ])
   }
 
-  async releaseSession(session: BrowserTargetSession, reason: Extract<BrowserHostLifecycleRequest, { kind: 'release-session' }>['reason']): Promise<void> {
+  private async releaseSessionAfterPreviewInvalidation(
+    session: BrowserTargetSession,
+    reason: Extract<BrowserHostLifecycleRequest, { kind: 'release-session' }>['reason'],
+  ): Promise<void> {
     if (reason === 'delete') {
       // Delete is terminal: attempt revocation, then forget every host-side
       // reference even when an adapter can no longer acknowledge stale state.
@@ -284,6 +326,14 @@ export class AutomaticBrowserHost {
         const released = isAutomaticExternalBrowserAdapter(external)
           ? await external.releaseTargetAuthority(session, tabId, 'take-control')
           : false
+        this.publishControl({
+          session,
+          tabId,
+          hostGeneration: null,
+          targetAffinity: 'external-chrome',
+          state: 'released',
+          reason: 'take-control',
+        })
         return { released, tabId }
       })
     }
@@ -321,7 +371,10 @@ export class AutomaticBrowserHost {
     ])
   }
 
-  private async performSerialized(request: BrowserAutomationRequest): Promise<BrowserAutomationResponse> {
+  private async performSerialized(
+    request: BrowserAutomationRequest,
+    previewControlEpoch: number,
+  ): Promise<BrowserAutomationResponse> {
     if (this.destroyed) return failureResponse(request, 'host-disconnected', 'Browser host is shutting down.', true)
     if (Date.parse(request.deadlineAt) <= this.now()) return failureResponse(request, 'timeout', 'Browser request deadline has elapsed.', true)
 
@@ -334,7 +387,7 @@ export class AutomaticBrowserHost {
       // Moving the human-facing Browser workspace back to an embedded tab must
       // not leave a hidden Chrome control burst alive behind it.
       await this.releaseBurst(session, 'idle')
-      return this.performManaged(request, null)
+      return this.performManaged(request, previewControlEpoch, null)
     }
 
     const explicit = request.tabId !== null
@@ -347,7 +400,7 @@ export class AutomaticBrowserHost {
       const external = this.external
       if (request.operation === 'open' && request.tabId !== null && isCanonicalExternalTabId(request.tabId)
         && isAutomaticExternalBrowserAdapter(external) && supports(external, 'open')) {
-        return this.performExternal(request, external, {
+        return this.performExternal(request, previewControlEpoch, external, {
           explicit: true, preferredTabId: request.tabId, reuseExisting: true, forceReacquire: true, createIfNeeded: false,
         })
       }
@@ -355,7 +408,7 @@ export class AutomaticBrowserHost {
         phase: 'discovery', mutationState: 'not-started', fallbackReason: 'no-eligible-target',
       }, false))
     }
-    if (explicitAffinity) return this.performAtAffinity(request, explicitAffinity, true)
+    if (explicitAffinity) return this.performAtAffinity(request, previewControlEpoch, explicitAffinity, true)
 
     const managedOnly = MANAGED_ONLY_OPERATIONS.has(request.operation)
     const state = this.sessions.get(sessionKey(session))
@@ -366,21 +419,21 @@ export class AutomaticBrowserHost {
       ? this.targetAffinities.get(targetKey(session, selectedTabId))
       : undefined
 
-    if (managedOnly) return this.performManaged(request, selectedAffinity === 'managed-electron' ? selectedTabId : null)
-    if (request.operation === 'status' && !selectedAffinity) return this.performManaged(request, null)
+    if (managedOnly) return this.performManaged(request, previewControlEpoch, selectedAffinity === 'managed-electron' ? selectedTabId : null)
+    if (request.operation === 'status' && !selectedAffinity) return this.performManaged(request, previewControlEpoch, null)
     if (request.operation === 'open' && request.input.reuseExistingTab && selectedAffinity) {
       const external = this.external
       if (isAutomaticExternalBrowserAdapter(external) && supports(external, request.operation)) {
         // A tabless open is an explicit profile-wide re-selection boundary.
         // Non-open operations continue to use exact sticky affinity.
         if (selectedAffinity === 'external-chrome') {
-          return this.performExternal(request, external, {
+          return this.performExternal(request, previewControlEpoch, external, {
             explicit: false, preferredTabId: null, reuseExisting: true, forceReacquire: true,
           })
         }
         // A managed fallback must not pin later explicit selection. Inventory
         // selection replaces it; absence may create only because open requested it.
-        return this.performExternal(request, external, {
+        return this.performExternal(request, previewControlEpoch, external, {
           explicit: false,
           preferredTabId: null,
           reuseExisting: true,
@@ -392,19 +445,19 @@ export class AutomaticBrowserHost {
     }
     if (selectedAffinity) {
       const selectedRequest = { ...request, tabId: selectedTabId } as BrowserAutomationRequest
-      return this.performAtAffinity(selectedRequest, selectedAffinity, false)
+      return this.performAtAffinity(selectedRequest, previewControlEpoch, selectedAffinity, false)
     }
 
     const external = this.external
     if (isAutomaticExternalBrowserAdapter(external) && supports(external, request.operation)) {
-      return this.performExternal(request, external, {
+      return this.performExternal(request, previewControlEpoch, external, {
         explicit: false,
         preferredTabId: null,
         reuseExisting: request.operation === 'open' ? request.input.reuseExistingTab : true,
         createIfNeeded: request.operation === 'open',
       })
     }
-    return this.performManaged(request, null)
+    return this.performManaged(request, previewControlEpoch, null)
   }
 
   private async withExternalInventory(
@@ -436,10 +489,11 @@ export class AutomaticBrowserHost {
 
   private performAtAffinity(
     request: BrowserAutomationRequest,
+    previewControlEpoch: number,
     affinity: BrowserTargetAffinity,
     explicit: boolean,
   ): Promise<BrowserAutomationResponse> {
-    if (affinity === 'managed-electron') return this.performManaged(request, request.tabId)
+    if (affinity === 'managed-electron') return this.performManaged(request, previewControlEpoch, request.tabId)
     const external = this.external
     if (!external || !supports(external, request.operation)) {
       return Promise.resolve(failureResponse(request, 'unsupported-operation', `Chrome targets do not support ${request.operation}.`, false, policyDetails({
@@ -447,13 +501,14 @@ export class AutomaticBrowserHost {
       }, false)))
     }
     if (!isAutomaticExternalBrowserAdapter(external)) return external.execute(request).then((response) => this.acceptResponse(request, response, 'external-chrome'))
-    return this.performExternal(request, external, {
+    return this.performExternal(request, previewControlEpoch, external, {
       explicit, preferredTabId: request.tabId, reuseExisting: true,
     })
   }
 
   private async performExternal(
     request: BrowserAutomationRequest,
+    previewControlEpoch: number,
     external: AutomaticExternalBrowserAdapter,
     options: ExternalAttemptOptions,
   ): Promise<BrowserAutomationResponse> {
@@ -511,7 +566,7 @@ export class AutomaticBrowserHost {
       })
       if (!acquired.ok) {
         if (!explicit && acquired.metadata.mutationState === 'not-started') {
-          return this.performManaged(request, managedFallbackTabId, acquired.metadata.fallbackReason)
+          return this.performManaged(request, previewControlEpoch, managedFallbackTabId, acquired.metadata.fallbackReason)
         }
         return failureResponse(request, acquired.error.code, acquired.error.message, acquired.error.retryable, {
           ...acquired.error.details,
@@ -525,6 +580,7 @@ export class AutomaticBrowserHost {
         requiresReobserve: false,
         timer: null,
         pendingReleaseReason: null,
+        previewReleased: false,
       }
       this.bursts.set(burstKey, burst)
     } else if (burst.timer) {
@@ -534,6 +590,21 @@ export class AutomaticBrowserHost {
 
     const exactTabId = burst.authority.tabId
     const targeted = { ...request, tabId: exactTabId } as BrowserAutomationRequest
+    const previewControlIsCurrent = (): boolean => this.bursts.get(burstKey) === burst
+      && burst.pendingReleaseReason === null && !burst.previewReleased
+      && (this.previewControlEpochs.get(burstKey) ?? 0) === previewControlEpoch
+    if (previewControlIsCurrent()) {
+      this.publishControl({
+        session: burst.session,
+        tabId: exactTabId,
+        hostGeneration: targeted.hostGeneration,
+        targetAffinity: 'external-chrome',
+        state: 'active',
+      })
+    }
+    const snapshotContentEpoch = request.operation === 'snapshot'
+      ? this.readExternalSnapshotContentEpoch()
+      : null
     let execution: BrowserTargetExecution
     try {
       execution = await external.executeWithAuthority({ authority: burst.authority, request: targeted })
@@ -547,12 +618,14 @@ export class AutomaticBrowserHost {
     if (response.ok) {
       if (request.operation === 'snapshot') {
         burst.requiresReobserve = false
-        if (response.operation === 'snapshot' && response.tabId === exactTabId && response.result.tabId === exactTabId) {
+        if (previewControlIsCurrent() && response.operation === 'snapshot'
+          && response.tabId === exactTabId && response.result.tabId === exactTabId) {
           try {
             this.observeSuccessfulExternalSnapshot?.({
               session: burst.session,
               tabId: exactTabId,
               hostGeneration: targeted.hostGeneration,
+              contentEpoch: snapshotContentEpoch!,
               screenshot: response.result.screenshot,
             })
           } catch { /* Preview observation cannot alter a successful operation or authority release. */ }
@@ -560,6 +633,15 @@ export class AutomaticBrowserHost {
       }
       burst.operations += 1
       this.scheduleBurstRelease(burst)
+      if (previewControlIsCurrent()) {
+        this.publishControl({
+          session: burst.session,
+          tabId: exactTabId,
+          hostGeneration: targeted.hostGeneration,
+          targetAffinity: 'external-chrome',
+          state: 'idle',
+        })
+      }
       return response
     }
 
@@ -571,6 +653,15 @@ export class AutomaticBrowserHost {
       burst.requiresReobserve = true
       burst.operations += 1
       this.scheduleBurstRelease(burst)
+      if (previewControlIsCurrent()) {
+        this.publishControl({
+          session: burst.session,
+          tabId: exactTabId,
+          hostGeneration: targeted.hostGeneration,
+          targetAffinity: 'external-chrome',
+          state: 'idle',
+        })
+      }
       return withPolicyFailure(response, metadata, true)
     }
 
@@ -580,11 +671,12 @@ export class AutomaticBrowserHost {
     await this.releaseAndForgetBurst(burstKey, burst, 'operation-failed', Date.parse(request.deadlineAt)).catch(() => undefined)
     const terminal = withPolicyFailure(response, metadata, metadata.noReplay === true || metadata.mutationState !== 'not-started')
     if (explicit || metadata.noReplay === true || metadata.mutationState !== 'not-started') return terminal
-    return this.performManaged(request, managedFallbackTabId, metadata.fallbackReason)
+    return this.performManaged(request, previewControlEpoch, managedFallbackTabId, metadata.fallbackReason)
   }
 
   private async performManaged(
     request: BrowserAutomationRequest,
+    previewControlEpoch: number,
     preferredTabId: string | null,
     fallbackReason?: AutomaticBrowserFallbackReason,
   ): Promise<BrowserAutomationResponse> {
@@ -599,13 +691,45 @@ export class AutomaticBrowserHost {
       }) ?? null
     }
     const targeted = { ...request, tabId } as BrowserAutomationRequest
-    const response = this.acceptResponse(targeted, await this.managed.execute(targeted), 'managed-electron')
-    if (!response.ok && fallbackReason) {
-      return withPolicyFailure(response, {
-        phase: 'acquisition', mutationState: 'not-started', fallbackReason,
-      }, false)
+    const controlledTabId = request.operation === 'status' ? null : tabId
+    const previewControlIsCurrent = (): boolean => (this.previewControlEpochs.get(sessionKey(request)) ?? 0) === previewControlEpoch
+    if (controlledTabId && previewControlIsCurrent()) {
+      this.publishControl({
+        session: { sessionAgentId: request.sessionAgentId, profileId: request.profileId },
+        tabId: controlledTabId,
+        hostGeneration: request.hostGeneration,
+        targetAffinity: 'managed-electron',
+        state: 'active',
+      })
     }
-    return response
+    let succeeded = false
+    try {
+      const response = this.acceptResponse(targeted, await this.managed.execute(targeted), 'managed-electron')
+      succeeded = response.ok
+      if (!response.ok && fallbackReason) {
+        return withPolicyFailure(response, {
+          phase: 'acquisition', mutationState: 'not-started', fallbackReason,
+        }, false)
+      }
+      return response
+    } finally {
+      if (controlledTabId && previewControlIsCurrent()) {
+        this.publishControl(succeeded ? {
+          session: { sessionAgentId: request.sessionAgentId, profileId: request.profileId },
+          tabId: controlledTabId,
+          hostGeneration: request.hostGeneration,
+          targetAffinity: 'managed-electron',
+          state: 'idle',
+        } : {
+          session: { sessionAgentId: request.sessionAgentId, profileId: request.profileId },
+          tabId: controlledTabId,
+          hostGeneration: null,
+          targetAffinity: 'managed-electron',
+          state: 'released',
+          reason: 'operation-failed',
+        })
+      }
+    }
   }
 
   private acceptResponse(
@@ -670,6 +794,20 @@ export class AutomaticBrowserHost {
       this.clearTimer(burst.timer)
       burst.timer = null
     }
+    if (reason !== 'idle' && !burst.previewReleased) {
+      burst.previewReleased = true
+      this.publishControl({
+        session: burst.session,
+        tabId: burst.authority.tabId,
+        hostGeneration: null,
+        targetAffinity: 'external-chrome',
+        state: 'released',
+        reason: reason === 'take-control' ? 'take-control'
+          : reason === 'operation-failed' ? 'operation-failed'
+            : reason === 'turn-ended' ? 'turn-ended'
+              : 'lifecycle',
+      })
+    }
     burst.pendingReleaseReason ??= reason
     if (isAutomaticExternalBrowserAdapter(this.external)) {
       await this.external.releaseAuthority(burst.session, burst.authority, burst.pendingReleaseReason, deadlineAt)
@@ -679,6 +817,47 @@ export class AutomaticBrowserHost {
       burst.timer = null
     }
     if (this.bursts.get(key) === burst) this.bursts.delete(key)
+  }
+
+  private invalidatePreviewControl(
+    session: BrowserTargetSession,
+    reason: 'turn-ended' | 'lifecycle',
+  ): void {
+    const key = sessionKey(session)
+    this.previewControlEpochs.set(key, (this.previewControlEpochs.get(key) ?? 0) + 1)
+    const burst = this.bursts.get(key)
+    if (burst && !burst.previewReleased) {
+      burst.previewReleased = true
+      this.publishControl({
+        session,
+        tabId: burst.authority.tabId,
+        hostGeneration: null,
+        targetAffinity: 'external-chrome',
+        state: 'released',
+        reason,
+      })
+    }
+    this.publishControl({
+      session,
+      tabId: null,
+      hostGeneration: null,
+      targetAffinity: null,
+      state: 'released',
+      reason,
+    })
+  }
+
+  private readExternalSnapshotContentEpoch(): number {
+    try {
+      const epoch = this.captureExternalSnapshotContentEpoch?.() ?? 0
+      return Number.isSafeInteger(epoch) && epoch >= 0 ? epoch : Number.NaN
+    } catch {
+      return Number.NaN
+    }
+  }
+
+  private publishControl(observation: AutomaticBrowserControlObservation): void {
+    try { this.observeAgentControl?.(observation) } catch { /* Preview observation cannot alter browser control. */ }
   }
 
   private serialize<T>(key: string, operation: () => Promise<T>): Promise<T> {

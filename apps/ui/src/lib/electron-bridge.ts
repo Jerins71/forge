@@ -9,9 +9,7 @@ import type {
   BrowserPreviewFrameAvailable,
   BrowserPreviewFramePayload,
   BrowserPreviewFramePullRequest,
-  BrowserPreviewOpenRequest,
   BrowserPreviewScope,
-  BrowserPreviewShellCommand,
   BrowserSessionSnapshot,
   BrowserTabSnapshot,
   BrowserViewportSetting,
@@ -103,10 +101,8 @@ export type BrowserWorkspaceCommand =
   | { type: 'recordingStop'; tabId: string; recordingId: string }
 export interface BrowserWorkspaceCommandRequest { requestId: string; workspaceEpoch: number; sessionAgentId: string; profileId: string; deadlineAt: string; command: BrowserWorkspaceCommand }
 export interface BrowserPreviewBridge {
-  open?(request: BrowserPreviewOpenRequest): Promise<BrowserPreviewDeckSnapshot>
   getSnapshot?(): Promise<BrowserPreviewDeckSnapshot | null>
   pullFrame?(request: BrowserPreviewFramePullRequest): Promise<BrowserPreviewFramePayload | null>
-  sendCommand?(command: BrowserPreviewShellCommand): Promise<void>
   onSnapshotChanged?(listener: (snapshot: BrowserPreviewDeckSnapshot | null) => void): () => void
   onFrameAvailable?(listener: (available: BrowserPreviewFrameAvailable) => void): () => void
 }

@@ -289,7 +289,6 @@ export function BuilderSurface({
       zoom: async (tabId, factor) => host().setZoom(tabId, factor), capture: (tabId) => host().captureScreenshot(tabId),
       startRecording: (tabId) => host().startRecording(tabId), stopRecording: (tabId, recordingId) => host().stopRecording(tabId, recordingId),
       reveal: (tabId) => host().reveal(tabId), takeControl: (tabId) => host().takeControl(tabId),
-      ...(window.electronBridge?.browserPreview?.open ? { preview: (tabId: string) => host().preview(tabId) } : {}),
       popOut: () => host().popOut(), dock: () => host().dock(),
     }
   }, [])
@@ -2397,7 +2396,6 @@ export function BuilderSurface({
                 commandPort={browserCommandPort}
                 mode={browserWorkspaceMode}
                 popoutAvailable={Boolean(window.electronBridge?.browserWorkspace?.capability.popoutAvailable)}
-                onPreviewOpened={panels.handleReturnToChatWorkspace}
               />
             ) : (
               <ChatWorkspace
@@ -2659,10 +2657,7 @@ export function BuilderSurface({
               />
             )}
             {activeView === 'chat' && !panels.isInlineDiffViewerOpen ? (
-              <BrowserPreviewSurface
-                hidden={panels.isBrowserOpen}
-                onOpenManagedBrowser={panels.handleOpenBrowserFromReveal}
-              />
+              <BrowserPreviewSurface hidden={panels.isBrowserOpen} />
             ) : null}
           </div>
 

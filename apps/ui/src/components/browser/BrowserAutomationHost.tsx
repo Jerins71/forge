@@ -39,7 +39,6 @@ export interface BrowserAutomationHostHandle {
   popOut(): Promise<void>
   dock(): Promise<void>
   bringToFront(): Promise<void>
-  preview(tabId: string): Promise<void>
 }
 
 interface BrowserAutomationHostProps {
@@ -467,13 +466,6 @@ export const BrowserAutomationHost = forwardRef<BrowserAutomationHostHandle, Bro
       popOut: async () => { await workspace?.popOut(workspaceEpochRef.current) },
       dock: async () => { await workspace?.dock(workspaceEpochRef.current) },
       bringToFront: async () => { await workspace?.bringToFront() },
-      preview: async (tabId) => {
-        const browserPreview = window.electronBridge?.browserPreview
-        const sessionAgentId = selectedSessionRef.current
-        const profileId = selectedProfileRef.current
-        if (!browserPreview?.open || !sessionAgentId || !profileId) throw new Error('Browser Preview is unavailable')
-        await browserPreview.open({ workspaceEpoch: workspaceEpochRef.current, sessionAgentId, profileId, tabId })
-      },
     }), [executeWorkspaceCommand, workspace])
 
     return null

@@ -15,7 +15,7 @@ import {
   EXTERNAL_CHROME_NAVIGATION_NOT_DISPATCHED_DETAILS,
   externalChromeControlCollisionDetails,
 } from '@forge/protocol'
-import { AutomaticBrowserHost } from '../automatic-browser-host.js'
+import { AutomaticBrowserHost, type AutomaticBrowserControlObservation } from '../automatic-browser-host.js'
 import type {
   AutomaticExternalBrowserAdapter,
   BrowserTargetAdapter,
@@ -101,6 +101,39 @@ class FakeExternalAdapter implements AutomaticExternalBrowserAdapter {
 afterEach(() => vi.useRealTimers())
 
 describe('AutomaticBrowserHost', () => {
+  it('publishes exact managed and Chrome control lifecycles without making preview admission a renderer gesture', async () => {
+    const managed = new FakeManagedAdapter()
+    const external = new FakeExternalAdapter()
+    const observations: AutomaticBrowserControlObservation[] = []
+    const host = createHost(managed, external, undefined, (observation) => observations.push(structuredClone(observation)))
+    host.synchronizeSessions([session([tab('managed-1', 'managed-electron')], 'managed-1')])
+
+    await host.perform(request('click', { x: 1, y: 1 }, 'managed-1'))
+    expect(observations).toMatchObject([
+      { tabId: 'managed-1', targetAffinity: 'managed-electron', state: 'active', hostGeneration: 1 },
+      { tabId: 'managed-1', targetAffinity: 'managed-electron', state: 'idle', hostGeneration: 1 },
+    ])
+
+    observations.length = 0
+    vi.spyOn(managed, 'execute').mockImplementationOnce(async (failedRequest) => failure(failedRequest, 'execution-failed'))
+    await expect(host.perform(request('click', { x: 2, y: 2 }, 'managed-1'))).resolves.toMatchObject({ ok: false })
+    expect(observations).toMatchObject([
+      { tabId: 'managed-1', targetAffinity: 'managed-electron', state: 'active' },
+      { tabId: 'managed-1', targetAffinity: 'managed-electron', state: 'released', reason: 'operation-failed' },
+    ])
+
+    observations.length = 0
+    host.synchronizeSessions([session([tab('chrome-1', 'external-chrome')], 'chrome-1')])
+    await host.perform(request('snapshot', {}, 'chrome-1'))
+    await host.endTurn({ sessionAgentId: 'session', profileId: 'profile' }, 'turn-1')
+    expect(observations).toMatchObject([
+      { tabId: 'chrome-1', targetAffinity: 'external-chrome', state: 'active', hostGeneration: 1 },
+      { tabId: 'chrome-1', targetAffinity: 'external-chrome', state: 'idle', hostGeneration: 1 },
+      { tabId: 'chrome-1', targetAffinity: 'external-chrome', state: 'released', reason: 'turn-ended' },
+      { tabId: null, targetAffinity: null, state: 'released', reason: 'turn-ended' },
+    ])
+  })
+
   it('routes explicit target affinity without silently moving browser identity', async () => {
     const managed = new FakeManagedAdapter()
     const external = new FakeExternalAdapter()
@@ -437,6 +470,27 @@ describe('AutomaticBrowserHost', () => {
     expect(external.authorityReleases).toMatchObject([{ reason: 'operation-failed' }])
   })
 
+  it('releases failed-operation preview state even when authority cleanup cannot acknowledge', async () => {
+    const managed = new FakeManagedAdapter()
+    const external = new FakeExternalAdapter()
+    const observations: AutomaticBrowserControlObservation[] = []
+    const original = request('click', { x: 1, y: 1, timeoutMs: 100 }, 'chrome-failed')
+    external.executionResults.push({
+      response: failure(original, 'host-disconnected'),
+      failure: { phase: 'execution', mutationState: 'possible', fallbackReason: 'transport-disconnected' },
+    })
+    external.releaseFailures.push(new Error('release acknowledgement lost'))
+    const host = createHost(managed, external, undefined, (observation) => observations.push(structuredClone(observation)))
+    host.synchronizeSessions([session([tab('chrome-failed', 'external-chrome')], 'chrome-failed')])
+
+    await expect(host.perform(original)).resolves.toMatchObject({ ok: false })
+    expect(external.authorityReleases).toMatchObject([{ reason: 'operation-failed' }])
+    expect(observations).toMatchObject([
+      { tabId: 'chrome-failed', state: 'active' },
+      { tabId: 'chrome-failed', state: 'released', reason: 'operation-failed' },
+    ])
+  })
+
   it('retains authority for an adaptive operation burst, then releases at bounded idle', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(0)
@@ -537,11 +591,120 @@ describe('AutomaticBrowserHost', () => {
     expect(external.authorityReleases).toMatchObject([{ reason: 'take-control', authority: { tabId: 'chrome-tab-1' } }])
   })
 
+  it('does not re-admit preview state when an operation completes after Take Control', async () => {
+    const managed = new FakeManagedAdapter()
+    const external = new FakeExternalAdapter()
+    const observations: AutomaticBrowserControlObservation[] = []
+    const snapshotObserver = vi.fn()
+    const execution = Promise.withResolvers<BrowserTargetExecution>()
+    const started = Promise.withResolvers<void>()
+    let targeted!: BrowserAutomationRequest
+    vi.spyOn(external, 'executeWithAuthority').mockImplementationOnce(async (input) => {
+      targeted = structuredClone(input.request)
+      started.resolve()
+      return execution.promise
+    })
+    const host = new AutomaticBrowserHost({
+      managedAdapter: managed,
+      externalAdapter: external,
+      observeAgentControl: (observation) => observations.push(structuredClone(observation)),
+      observeSuccessfulExternalSnapshot: snapshotObserver,
+    })
+    host.synchronizeSessions([session([tab('chrome-late', 'external-chrome')], 'chrome-late')])
+
+    const performing = host.perform(request('snapshot', {}, 'chrome-late'))
+    await started.promise
+    await expect(host.takeControl({ sessionAgentId: 'session', profileId: 'profile' }, 'chrome-late'))
+      .resolves.toEqual({ released: true, tabId: 'chrome-late' })
+    execution.resolve({ response: success(targeted, 'external-chrome') })
+    await expect(performing).resolves.toMatchObject({ ok: true })
+
+    expect(snapshotObserver).not.toHaveBeenCalled()
+    expect(observations).toMatchObject([
+      { tabId: 'chrome-late', state: 'active' },
+      { tabId: 'chrome-late', state: 'released', reason: 'take-control' },
+    ])
+    expect(observations.some((observation) => observation.state === 'idle')).toBe(false)
+  })
+
+  it.each([
+    { lifecycleRequest: lifecycle('turn-ended'), releaseReason: 'turn-ended' as const },
+    { lifecycleRequest: lifecycle('release-session'), releaseReason: 'lifecycle' as const },
+  ])('invalidates external preview state when $lifecycleRequest.kind arrives during an operation', async ({
+    lifecycleRequest,
+    releaseReason,
+  }) => {
+    const managed = new FakeManagedAdapter()
+    const external = new FakeExternalAdapter()
+    const observations: AutomaticBrowserControlObservation[] = []
+    const snapshotObserver = vi.fn()
+    const execution = Promise.withResolvers<BrowserTargetExecution>()
+    const started = Promise.withResolvers<void>()
+    let targeted!: BrowserAutomationRequest
+    vi.spyOn(external, 'executeWithAuthority').mockImplementationOnce(async (input) => {
+      targeted = structuredClone(input.request)
+      started.resolve()
+      return execution.promise
+    })
+    const host = new AutomaticBrowserHost({
+      managedAdapter: managed,
+      externalAdapter: external,
+      observeAgentControl: (observation) => observations.push(structuredClone(observation)),
+      observeSuccessfulExternalSnapshot: snapshotObserver,
+    })
+    host.synchronizeSessions([session([tab('chrome-late', 'external-chrome')], 'chrome-late')])
+
+    const performing = host.perform(request('snapshot', {}, 'chrome-late'))
+    await started.promise
+    const releasing = host.handleLifecycle(lifecycleRequest)
+    expect(observations).toMatchObject([
+      { tabId: 'chrome-late', state: 'active' },
+      { tabId: 'chrome-late', state: 'released', reason: releaseReason },
+      { tabId: null, state: 'released', reason: releaseReason },
+    ])
+
+    execution.resolve({ response: success(targeted, 'external-chrome') })
+    await expect(performing).resolves.toMatchObject({ ok: true })
+    await expect(releasing).resolves.toMatchObject({ ok: true })
+    expect(snapshotObserver).not.toHaveBeenCalled()
+    expect(observations.some((observation) => observation.state === 'idle')).toBe(false)
+  })
+
+  it('suppresses managed preview completion after terminal lifecycle ingress', async () => {
+    const managed = new FakeManagedAdapter()
+    const external = new FakeExternalAdapter()
+    const observations: AutomaticBrowserControlObservation[] = []
+    const execution = Promise.withResolvers<BrowserAutomationResponse>()
+    const started = Promise.withResolvers<void>()
+    let targeted!: BrowserAutomationRequest
+    vi.spyOn(managed, 'execute').mockImplementationOnce(async (requestValue) => {
+      targeted = structuredClone(requestValue)
+      started.resolve()
+      return execution.promise
+    })
+    const host = createHost(managed, external, undefined, (observation) => observations.push(structuredClone(observation)))
+    host.synchronizeSessions([session([tab('managed-late', 'managed-electron')], 'managed-late')])
+
+    const performing = host.perform(request('click', { x: 1, y: 1 }, 'managed-late'))
+    await started.promise
+    const releasing = host.handleLifecycle(lifecycle('release-session'))
+    expect(observations).toMatchObject([
+      { tabId: 'managed-late', state: 'active' },
+      { tabId: null, state: 'released', reason: 'lifecycle' },
+    ])
+
+    execution.resolve(success(targeted, 'managed-electron'))
+    await expect(performing).resolves.toMatchObject({ ok: true })
+    await expect(releasing).resolves.toMatchObject({ ok: true })
+    expect(observations.some((observation) => observation.state === 'idle')).toBe(false)
+  })
+
   it('takes control through an exact durable tab checkpoint after in-memory host restart', async () => {
     const managed = new FakeManagedAdapter()
     const external = new FakeExternalAdapter()
+    const observations: AutomaticBrowserControlObservation[] = []
     external.recoveredTargetRelease = true
-    const host = createHost(managed, external)
+    const host = createHost(managed, external, undefined, (observation) => observations.push(structuredClone(observation)))
     host.synchronizeSessions([session([tab('chrome-recovered', 'external-chrome')], 'chrome-recovered')])
 
     await expect(host.takeControl({ sessionAgentId: 'session', profileId: 'profile' }, 'chrome-recovered'))
@@ -550,6 +713,9 @@ describe('AutomaticBrowserHost', () => {
       session: { sessionAgentId: 'session', profileId: 'profile' },
       tabId: 'chrome-recovered',
       reason: 'take-control',
+    }])
+    expect(observations).toMatchObject([{
+      tabId: 'chrome-recovered', targetAffinity: 'external-chrome', state: 'released', reason: 'take-control',
     }])
   })
 
@@ -596,19 +762,24 @@ describe('AutomaticBrowserHost', () => {
     vi.setSystemTime(0)
     const managed = new FakeManagedAdapter()
     const external = new FakeExternalAdapter()
-    const observeSuccessfulExternalSnapshot = vi.fn()
+    const order: string[] = []
+    const observeSuccessfulExternalSnapshot = vi.fn(() => order.push('snapshot'))
     const host = new AutomaticBrowserHost({
       managedAdapter: managed,
       externalAdapter: external,
+      captureExternalSnapshotContentEpoch: () => 7,
       observeSuccessfulExternalSnapshot,
+      observeAgentControl: (observation) => order.push(`control:${observation.state}`),
       authorityBurst: { initialIdleMs: 10 },
     })
 
     await expect(host.perform(request('snapshot', {}, null))).resolves.toMatchObject({ ok: true })
+    expect(order).toEqual(['control:active', 'snapshot', 'control:idle'])
     expect(observeSuccessfulExternalSnapshot).toHaveBeenCalledWith({
       session: { sessionAgentId: 'session', profileId: 'profile' },
       tabId: 'chrome-tab-1',
       hostGeneration: 1,
+      contentEpoch: 7,
       screenshot: { mimeType: 'image/png', data: 'eA==', width: 1, height: 1 },
     })
     expect(external.acquisitions).toHaveLength(1)
@@ -616,6 +787,36 @@ describe('AutomaticBrowserHost', () => {
     expect(external.authorityReleases).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(10)
     expect(external.authorityReleases).toMatchObject([{ reason: 'idle', authority: { tabId: 'chrome-tab-1' } }])
+  })
+
+  it('binds a deferred Chrome snapshot observation to the content epoch captured before execution', async () => {
+    const managed = new FakeManagedAdapter()
+    const external = new FakeExternalAdapter()
+    const observed = vi.fn()
+    const contentEpoch = { value: 4 }
+    const execution = Promise.withResolvers<BrowserTargetExecution>()
+    const started = Promise.withResolvers<void>()
+    let targeted!: BrowserAutomationRequest
+    vi.spyOn(external, 'executeWithAuthority').mockImplementationOnce(async (input) => {
+      targeted = structuredClone(input.request)
+      started.resolve()
+      return execution.promise
+    })
+    const host = new AutomaticBrowserHost({
+      managedAdapter: managed,
+      externalAdapter: external,
+      captureExternalSnapshotContentEpoch: () => contentEpoch.value,
+      observeSuccessfulExternalSnapshot: observed,
+    })
+    host.synchronizeSessions([session([tab('chrome-epoch', 'external-chrome')], 'chrome-epoch')])
+
+    const performing = host.perform(request('snapshot', {}, 'chrome-epoch'))
+    await started.promise
+    contentEpoch.value = 5
+    execution.resolve({ response: success(targeted, 'external-chrome') })
+    await expect(performing).resolves.toMatchObject({ ok: true })
+
+    expect(observed).toHaveBeenCalledWith(expect.objectContaining({ tabId: 'chrome-epoch', contentEpoch: 4 }))
   })
 
   it('drops mismatched Chrome snapshot pixels and isolates observer failures from tool results', async () => {
@@ -771,8 +972,9 @@ function createHost(
   managed: FakeManagedAdapter,
   external: FakeExternalAdapter,
   ensureManagedTarget?: (request: BrowserAutomationRequest) => Promise<string | null>,
+  observeAgentControl?: (observation: AutomaticBrowserControlObservation) => void,
 ): AutomaticBrowserHost {
-  return new AutomaticBrowserHost({ managedAdapter: managed, externalAdapter: external, ensureManagedTarget })
+  return new AutomaticBrowserHost({ managedAdapter: managed, externalAdapter: external, ensureManagedTarget, observeAgentControl })
 }
 
 function request(

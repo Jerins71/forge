@@ -9,9 +9,7 @@ import type {
   BrowserPreviewFrameAvailable,
   BrowserPreviewFramePayload,
   BrowserPreviewFramePullRequest,
-  BrowserPreviewOpenRequest,
   BrowserPreviewScope,
-  BrowserPreviewShellCommand,
   BrowserSessionSnapshot,
   BrowserTabSnapshot,
   BrowserViewportSetting,
@@ -36,8 +34,7 @@ export const BROWSER_IPC = {
 } as const
 
 export const BROWSER_PREVIEW_IPC = {
-  open: 'forge:browser-preview-open', snapshot: 'forge:browser-preview-snapshot',
-  command: 'forge:browser-preview-command', pullFrame: 'forge:browser-preview-pull-frame',
+  snapshot: 'forge:browser-preview-snapshot', pullFrame: 'forge:browser-preview-pull-frame',
   snapshotChanged: 'forge:browser-preview-snapshot-changed', frameAvailable: 'forge:browser-preview-frame-available',
 } as const
 
@@ -128,10 +125,8 @@ export interface BrowserAutomationBridge {
 }
 
 export interface BrowserPreviewBridge {
-  open?(request: BrowserPreviewOpenRequest): Promise<BrowserPreviewDeckSnapshot>
   getSnapshot?(): Promise<BrowserPreviewDeckSnapshot | null>
   pullFrame?(request: BrowserPreviewFramePullRequest): Promise<BrowserPreviewFramePayload | null>
-  sendCommand?(command: BrowserPreviewShellCommand): Promise<void>
   onSnapshotChanged?(listener: (snapshot: BrowserPreviewDeckSnapshot | null) => void): () => void
   onFrameAvailable?(listener: (available: BrowserPreviewFrameAvailable) => void): () => void
 }

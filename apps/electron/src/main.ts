@@ -900,7 +900,9 @@ if (!hasSingleInstanceLock) {
         await host.commitProvisional(tab.tabId, host.currentWorkspaceEpoch)
         return tab.tabId
       },
+      captureExternalSnapshotContentEpoch: () => browserPreviewHost?.currentContentEpoch ?? Number.NaN,
       observeSuccessfulExternalSnapshot: (observation) => browserPreviewHost?.observeExternalSnapshot(observation),
+      observeAgentControl: (observation) => browserPreviewHost?.observeAgentControl(observation),
     })
     browserViewHost = new ManagedBrowserViewHost({
       manager: browserManager,
@@ -914,15 +916,6 @@ if (!hasSingleInstanceLock) {
     browserPreviewHost = new BrowserPreviewHost({
       manager: browserManager,
       getWindow: () => mainWindow,
-      promoteManaged: async (input) => {
-        const workspace = browserWorkspaceIpc
-        if (!workspace) throw new Error('Browser workspace is unavailable')
-        await workspace.requestMainCommand({ ...input, command: { type: 'activate', tabId: input.tabId } })
-        bringManagedBrowserToFront()
-      },
-      revealChrome: async (input) => {
-        await browserManager.revealTarget({ sessionAgentId: input.sessionAgentId, profileId: input.profileId }, input.tabId)
-      },
     })
     disposeBrowserHost = installBrowserIpc({ ipcMain, mainWindow, manager: browserManager, viewHost: browserViewHost })
     disposeBrowserPreviewIpc = installBrowserPreviewIpc({
@@ -951,18 +944,39 @@ if (!hasSingleInstanceLock) {
       bringToFront: bringManagedBrowserToFront,
       publishPreviewScope: (publication) => browserPreviewHost?.publishScope(publication),
     })
-    const clearPreviewContent = (): void => browserPreviewHost?.clearSensitiveContent()
+    let previewScreenLocked = false
+    let previewSuspended = false
+    const clearPreviewForLock = (): void => {
+      previewScreenLocked = true
+      browserPreviewHost?.clearSensitiveContent()
+    }
+    const clearPreviewForSuspend = (): void => {
+      previewSuspended = true
+      browserPreviewHost?.clearSensitiveContent()
+    }
+    const restorePreviewAfterUnlock = (): void => {
+      previewScreenLocked = false
+      if (!previewSuspended) browserPreviewHost?.restoreSensitiveContent()
+    }
+    const restorePreviewAfterResume = (): void => {
+      previewSuspended = false
+      if (!previewScreenLocked) browserPreviewHost?.restoreSensitiveContent()
+    }
     const previewVisibilityChanged = (): void => browserPreviewHost?.handleWindowVisibilityChanged()
     const previewRendererWindow = mainWindow
-    powerMonitor.on('lock-screen', clearPreviewContent)
-    powerMonitor.on('suspend', clearPreviewContent)
+    powerMonitor.on('lock-screen', clearPreviewForLock)
+    powerMonitor.on('suspend', clearPreviewForSuspend)
+    powerMonitor.on('unlock-screen', restorePreviewAfterUnlock)
+    powerMonitor.on('resume', restorePreviewAfterResume)
     previewRendererWindow?.on('show', previewVisibilityChanged)
     previewRendererWindow?.on('hide', previewVisibilityChanged)
     previewRendererWindow?.on('minimize', previewVisibilityChanged)
     previewRendererWindow?.on('restore', previewVisibilityChanged)
     disposeBrowserPreviewListeners = () => {
-      powerMonitor.off('lock-screen', clearPreviewContent)
-      powerMonitor.off('suspend', clearPreviewContent)
+      powerMonitor.off('lock-screen', clearPreviewForLock)
+      powerMonitor.off('suspend', clearPreviewForSuspend)
+      powerMonitor.off('unlock-screen', restorePreviewAfterUnlock)
+      powerMonitor.off('resume', restorePreviewAfterResume)
       previewRendererWindow?.off('show', previewVisibilityChanged)
       previewRendererWindow?.off('hide', previewVisibilityChanged)
       previewRendererWindow?.off('minimize', previewVisibilityChanged)

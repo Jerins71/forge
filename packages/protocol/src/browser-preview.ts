@@ -36,19 +36,11 @@ export interface BrowserPreviewScopeTab {
   presented: boolean
 }
 
-export interface BrowserPreviewOpenRequest {
-  workspaceEpoch: number
-  sessionAgentId: string
-  profileId: string
-  tabId: string
-}
-
 export interface BrowserPreviewDeckSnapshot {
   previewGeneration: number
   workspaceEpoch: number
   sessionAgentId: string
   profileId: string
-  paused: boolean
   hiddenContent: boolean
   cards: BrowserPreviewCardSnapshot[]
 }
@@ -84,10 +76,3 @@ export interface BrowserPreviewFramePayload extends BrowserPreviewFrameAvailable
   /** Monotonic age calculated by main at frame delivery. */
   ageMsAtDelivery: number
 }
-
-export type BrowserPreviewShellCommand =
-  | { type: 'remove'; previewGeneration: number; tabId: string }
-  | { type: 'set-paused'; previewGeneration: number; paused: boolean }
-  | { type: 'set-hidden-content'; previewGeneration: number; hidden: boolean }
-  | { type: 'promote'; previewGeneration: number; tabId: string }
-  | { type: 'reveal'; previewGeneration: number; tabId: string }

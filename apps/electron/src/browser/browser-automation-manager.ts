@@ -30,7 +30,9 @@ export interface BrowserAutomationManagerOptions extends ManagedElectronTargetAd
   externalChromeAdapter?: BrowserTargetAdapter
   ensureManagedTarget?: AutomaticBrowserHostOptions['ensureManagedTarget']
   authorityBurst?: AutomaticBrowserHostOptions['authorityBurst']
+  captureExternalSnapshotContentEpoch?: AutomaticBrowserHostOptions['captureExternalSnapshotContentEpoch']
   observeSuccessfulExternalSnapshot?: AutomaticBrowserHostOptions['observeSuccessfulExternalSnapshot']
+  observeAgentControl?: AutomaticBrowserHostOptions['observeAgentControl']
 }
 
 /** Composition facade retaining the complete Managed Browser control API behind one automatic host. */
@@ -45,7 +47,9 @@ export class BrowserAutomationManager {
       externalAdapter: options.externalChromeAdapter,
       ensureManagedTarget: options.ensureManagedTarget,
       authorityBurst: options.authorityBurst,
+      captureExternalSnapshotContentEpoch: options.captureExternalSnapshotContentEpoch,
       observeSuccessfulExternalSnapshot: options.observeSuccessfulExternalSnapshot,
+      observeAgentControl: options.observeAgentControl,
       now: options.now,
     })
   }

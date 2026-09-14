@@ -1,8 +1,4 @@
-import type {
-  BrowserPreviewFramePullRequest,
-  BrowserPreviewOpenRequest,
-  BrowserPreviewShellCommand,
-} from '@forge/protocol'
+import type { BrowserPreviewFramePullRequest } from '@forge/protocol'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import { BROWSER_PREVIEW_IPC } from './browser-bridge-contract.js'
 import { BrowserHostError, asBrowserHostError } from './browser-errors.js'
@@ -32,10 +28,6 @@ export function installBrowserPreviewIpc(options: {
     channels.push(channel)
   }
 
-  handle(BROWSER_PREVIEW_IPC.open, (event, value) => {
-    requireWindow(event, options.getMainWindow(), 'Opening Browser Preview is restricted to the authoritative Forge renderer')
-    return options.host.open(parseOpenRequest(value))
-  })
   handle(BROWSER_PREVIEW_IPC.snapshot, (event) => {
     requireWindow(event, options.getMainWindow(), 'Browser Preview state is restricted to the authoritative Forge renderer')
     return options.host.getSnapshot()
@@ -44,23 +36,9 @@ export function installBrowserPreviewIpc(options: {
     requireWindow(event, options.getMainWindow(), 'Browser Preview frames are restricted to the authoritative Forge renderer')
     return options.host.pullFrame(parsePullRequest(value))
   })
-  handle(BROWSER_PREVIEW_IPC.command, (event, value) => {
-    requireWindow(event, options.getMainWindow(), 'Browser Preview commands are restricted to the authoritative Forge renderer')
-    return options.host.handleCommand(parseCommand(value))
-  })
 
   return () => {
     for (const channel of channels) options.ipcMain.removeHandler(channel)
-  }
-}
-
-function parseOpenRequest(value: unknown): BrowserPreviewOpenRequest {
-  const record = exactRecord(value, ['profileId', 'sessionAgentId', 'tabId', 'workspaceEpoch'], 'Browser Preview open request')
-  return {
-    workspaceEpoch: safeInteger(record.workspaceEpoch, 'Browser Preview workspace epoch'),
-    sessionAgentId: boundedString(record.sessionAgentId, 'Browser Preview session', 128),
-    profileId: boundedString(record.profileId, 'Browser Preview profile', 128),
-    tabId: boundedString(record.tabId, 'Browser Preview tab', 256),
   }
 }
 
@@ -71,28 +49,6 @@ function parsePullRequest(value: unknown): BrowserPreviewFramePullRequest {
     tabId: boundedString(record.tabId, 'Browser Preview tab', 256),
     sequence: safeInteger(record.sequence, 'Browser Preview frame sequence'),
   }
-}
-
-function parseCommand(value: unknown): BrowserPreviewShellCommand {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BrowserHostError('invalid-input', 'Browser Preview command must be an object')
-  const record = value as Record<string, unknown>
-  const type = record.type
-  const previewGeneration = safeInteger(record.previewGeneration, 'Browser Preview generation')
-  if (type === 'remove' || type === 'promote' || type === 'reveal') {
-    exactKeys(record, ['previewGeneration', 'tabId', 'type'], 'Browser Preview command')
-    return { type, previewGeneration, tabId: boundedString(record.tabId, 'Browser Preview tab', 256) }
-  }
-  if (type === 'set-paused') {
-    exactKeys(record, ['paused', 'previewGeneration', 'type'], 'Browser Preview command')
-    if (typeof record.paused !== 'boolean') throw new BrowserHostError('invalid-input', 'Browser Preview paused value is invalid')
-    return { type, previewGeneration, paused: record.paused }
-  }
-  if (type === 'set-hidden-content') {
-    exactKeys(record, ['hidden', 'previewGeneration', 'type'], 'Browser Preview command')
-    if (typeof record.hidden !== 'boolean') throw new BrowserHostError('invalid-input', 'Browser Preview hidden-content value is invalid')
-    return { type, previewGeneration, hidden: record.hidden }
-  }
-  throw new BrowserHostError('invalid-input', 'Browser Preview command type is invalid')
 }
 
 function exactRecord(value: unknown, keys: string[], label: string): Record<string, unknown> {
