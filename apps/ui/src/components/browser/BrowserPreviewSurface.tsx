@@ -75,7 +75,10 @@ export function BrowserPreviewSurface({ hidden = false }: { hidden?: boolean }) 
     const retained: Record<string, RenderedFrame> = {}
     for (const [tabId, frame] of Object.entries(framesRef.current)) {
       const card = cardsById.get(tabId)
-      if (next && !generationChanged && !next.hiddenContent && card?.hasFrame && frame.sequence <= card.frameSequence) retained[tabId] = frame
+      const sequenceIsCurrent = card?.targetAffinity === 'external-chrome'
+        ? frame.sequence === card.frameSequence
+        : Boolean(card && frame.sequence <= card.frameSequence)
+      if (next && !generationChanged && !next.hiddenContent && card?.hasFrame && sequenceIsCurrent) retained[tabId] = frame
       else URL.revokeObjectURL(frame.url)
     }
     replaceFrames(retained)
@@ -156,8 +159,9 @@ export function BrowserPreviewSurface({ hidden = false }: { hidden?: boolean }) 
     }
   }, [applySnapshot, bridge, pump])
 
+  const visibleCards = snapshot?.cards.filter((card) => card.targetAffinity === 'managed-electron' || Boolean(frames[card.tabId])) ?? []
   const hasCustomPosition = position !== null
-  const cardCount = snapshot?.cards.length ?? 0
+  const cardCount = visibleCards.length
   useEffect(() => {
     if (!hasCustomPosition) return
     const constrain = (): void => setPosition((current) => {
@@ -218,9 +222,9 @@ export function BrowserPreviewSurface({ hidden = false }: { hidden?: boolean }) 
     setPosition(clampPosition({ x: start.x + movement.x, y: start.y + movement.y }, surfaceRef.current, overlayRef.current))
   }
 
-  if (hidden || !snapshot || snapshot.cards.length === 0) return null
+  if (hidden || !snapshot || visibleCards.length === 0) return null
 
-  const stackDepth = Math.min(snapshot.cards.length - 1, 3)
+  const stackDepth = Math.min(visibleCards.length - 1, 3)
   const stackInset = stackDepth * STACK_STEP_PX
 
   return (
@@ -237,17 +241,17 @@ export function BrowserPreviewSurface({ hidden = false }: { hidden?: boolean }) 
           ...(position ? { left: 0, transform: `translate3d(${position.x}px, ${position.y}px, 0)` } : {}),
         }}
         data-browser-preview-stack
-        data-card-count={snapshot.cards.length}
+        data-card-count={visibleCards.length}
         data-stack-depth={stackDepth}
       >
         <p className="sr-only" aria-live="polite">
-          {snapshot.cards.map((card) => `${previewLabel(card)}: ${accessibilityState(card)}`).join('. ')}
+          {visibleCards.map((card) => `${previewLabel(card)}: ${accessibilityState(card)}`).join('. ')}
         </p>
         <div
           className="relative aspect-video"
           style={{ marginLeft: stackInset, marginBottom: stackInset, width: `calc(100% - ${stackInset}px)` }}
         >
-          {snapshot.cards.map((card, index) => {
+          {visibleCards.map((card, index) => {
             const depth = Math.min(index, 3)
             const frame = frames[card.tabId]
             const label = previewLabel(card)
@@ -264,7 +268,7 @@ export function BrowserPreviewSurface({ hidden = false }: { hidden?: boolean }) 
                 )}
                 style={{
                   transform: `translate3d(${-depth * STACK_STEP_PX}px, ${depth * STACK_STEP_PX}px, 0)`,
-                  zIndex: snapshot.cards.length - index,
+                  zIndex: visibleCards.length - index,
                   opacity: Math.max(0.78, 1 - index * 0.06),
                 }}
                 data-browser-preview-card
@@ -359,9 +363,6 @@ function previewLabel(card: BrowserPreviewCardSnapshot): string {
 }
 
 function emptyMessage(card: BrowserPreviewCardSnapshot): string {
-  if (card.targetAffinity === 'external-chrome') return card.state === 'expired'
-    ? 'Snapshot expired'
-    : 'Waiting for agent snapshot'
   return card.state === 'unavailable' ? 'Preview unavailable' : 'Waiting for preview'
 }
 

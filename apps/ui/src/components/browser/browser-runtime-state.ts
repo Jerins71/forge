@@ -2,7 +2,7 @@ import type { BrowserSessionSnapshot, BrowserTabSnapshot } from '@forge/protocol
 import type { ManagerWsState } from '@/lib/ws-state'
 
 export function countOpenBrowserTabs(snapshot: BrowserSessionSnapshot | null): number {
-  return snapshot?.tabs.filter((tab) => tab.lifecycle !== 'closed').length ?? 0
+  return snapshot?.tabs.filter((tab) => tab.lifecycle !== 'closed' && tab.targetAffinity === 'managed-electron').length ?? 0
 }
 
 export function projectRuntimeBrowserTabState(state: ManagerWsState, runtimeTab: BrowserTabSnapshot): ManagerWsState {

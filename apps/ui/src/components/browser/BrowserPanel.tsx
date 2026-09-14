@@ -62,7 +62,7 @@ export function BrowserPanel({
   client = null, sessionAgentId, profileId, snapshot, host, hostRef, commandPort,
   mode = 'docked', popoutAvailable = Boolean(window.electronBridge?.browserWorkspace?.capability.popoutAvailable),
 }: BrowserPanelProps) {
-  const openTabs = (snapshot?.tabs ?? []).filter((tab) => tab.lifecycle !== 'closed')
+  const openTabs = (snapshot?.tabs ?? []).filter((tab) => tab.lifecycle !== 'closed' && tab.targetAffinity === 'managed-electron')
   const hasOpenTab = openTabs.length > 0
   const activeTab = openTabs.find((tab) => tab.tabId === snapshot?.activeTabId) ?? openTabs[0] ?? null
   const [address, setAddress] = useState(activeTab?.url ?? '')
@@ -129,7 +129,6 @@ export function BrowserPanel({
 
   const resize = (viewport: BrowserViewportSetting): void => { if (activeTab) void run(() => commands.resize(activeTab.tabId, viewport)) }
   const popped = mode === 'popped-out' || mode === 'opening'
-  const managedTarget = !activeTab || activeTab.targetAffinity === 'managed-electron'
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -148,7 +147,6 @@ export function BrowserPanel({
           <button type="button" aria-label="New browser tab" className="rounded p-2 hover:bg-muted focus-visible:ring-2" disabled={!host.connected} onClick={() => void run(() => commands.open())}><Plus className="size-4" /></button>
         </div>
 
-        {managedTarget ? (
         <>
         <div className="flex flex-wrap items-center gap-1.5 p-2">
           <IconButton label="Back" disabled={controlsUnavailable || !activeTab?.canGoBack} onClick={() => activeTab && void run(() => commands.history(activeTab.tabId, 'back'))}><ArrowLeft /></IconButton>
@@ -189,29 +187,10 @@ export function BrowserPanel({
           {activeTab ? <TabStatus tab={activeTab} /> : null}
         </div>
         </>
-        ) : (
-          <div className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
-            <span>This tab is open in Chrome.</span>
-            {activeTab ? <TabStatus tab={activeTab} /> : null}
-            <button type="button" className="rounded border px-3 py-1.5 text-foreground hover:bg-muted focus-visible:ring-2" onClick={() => activeTab && void run(() => commands.reveal(activeTab.tabId))}>Show in Chrome</button>
-            <button type="button" className="rounded border px-3 py-1.5 text-foreground hover:bg-muted focus-visible:ring-2" onClick={() => activeTab && void run(() => commands.takeControl(activeTab.tabId))}>Take Control</button>
-            <HelpTrigger contextKey="chat.browser" size="sm" className="size-8" />
-          </div>
-        )}
       </header>
 
       {unavailableMessage ? (
         <div className="m-auto max-w-lg p-8 text-center"><Globe2 className="mx-auto mb-3 size-10 text-muted-foreground" /><h2 className="font-medium">Browser host unavailable</h2><p className="mt-2 text-sm text-muted-foreground">{unavailableMessage}</p></div>
-      ) : activeTab && !managedTarget ? (
-        <div className="m-auto max-w-sm rounded-lg border bg-card p-6 text-center shadow-sm">
-          <Globe2 className="mx-auto mb-3 size-9 text-muted-foreground" />
-          <h2 className="font-medium">Browser tab open in Chrome</h2>
-          <p className="mt-2 text-sm text-muted-foreground">Forge can use this tab while it stays in your Chrome window.</p>
-          <div className="mt-4 flex justify-center gap-2">
-            <button type="button" className="rounded border px-3 py-1.5 hover:bg-muted focus-visible:ring-2" onClick={() => void run(() => commands.reveal(activeTab.tabId))}>Show in Chrome</button>
-            <button type="button" className="rounded border px-3 py-1.5 hover:bg-muted focus-visible:ring-2" onClick={() => void run(() => commands.takeControl(activeTab.tabId))}>Take Control</button>
-          </div>
-        </div>
       ) : activeTab ? (
         <div className="flex min-h-0 flex-1 overflow-hidden bg-muted/40 p-2">
           <div className="relative min-w-0 flex-1">

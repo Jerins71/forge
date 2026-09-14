@@ -47,12 +47,13 @@ function snapshot(tabs: BrowserTabSnapshot[]): BrowserSessionSnapshot {
 }
 
 describe('countOpenBrowserTabs', () => {
-  it('counts every live browser tab while excluding retained closed metadata', () => {
+  it('counts only live managed workspace tabs', () => {
     expect(countOpenBrowserTabs(snapshot([
       tab('ready', 'ready'),
       tab('loading', 'loading'),
       tab('restoring', 'restoring'),
       tab('closed', 'closed'),
+      { ...tab('external', 'ready'), targetAffinity: 'external-chrome' },
     ]))).toBe(3)
   })
 

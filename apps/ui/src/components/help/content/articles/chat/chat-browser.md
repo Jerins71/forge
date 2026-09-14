@@ -4,7 +4,7 @@ On Windows, Automatic Browser and External Chrome remain available as a beta fea
 
 Forge chooses the available local target automatically:
 
-- A Chrome-backed tab stays in Chrome. The Browser rail shows a compact card with **Show in Chrome**.
+- A Chrome-backed target stays entirely in Chrome. Its transient reference is not shown as a tab or card in the Browser workspace.
 - An embedded tab appears inside Forge and includes navigation, viewport, screenshot, recording, and dock/pop-out controls.
 
 When the Forge extension is enabled and authenticated, Forge can access eligible ordinary web tabs across that Chrome profile. `browser_status` provides a bounded **eligibleTabs** inventory across ready authenticated profiles; its bounded URL/title/profile/window/activity/focus/last-access details may transiently reach the manager/model for selection, but are not shown in Browser workspace UI or copied into canonical renderer state and are redacted from persistence. For a tabless `browser_open` (reuse enabled by default), Forge selects the active or most recently accessed eligible tab without requiring Chrome or the operating system to be focused. Pass an inventory `tabId` to select that exact tab. With `reuseExistingTab: false`, or when no eligible tab exists, Forge may create an inactive neutral `about:blank` tab for one authorized initial navigation. After an open selects a logical tab, non-open operations remain sticky; explicit Chrome-backed tabs do not migrate and unsupported operations fail on that tab.
@@ -17,11 +17,11 @@ There is no Chrome profile confirmation prompt or picker, host picker, tab attac
 
 When the agent starts using an exact embedded or Chrome-backed tab, Forge automatically shows a small read-only thumbnail over Chat. There is no Preview button and no separate Preview window. Up to four thumbnails overlap in a compact frameless stack that you can drag as one cluster. Opening the Browser workspace temporarily hides the cluster without dropping its subscription.
 
-A preview joins from main-process agent-control state, not from the Chrome inventory or a renderer button. It stays visible between nearby actions and clears at turn end, terminal **Take Control**, tab removal, session cleanup, or a selected workspace/host change.
+A managed preview joins from main-process agent-control state, not from the Chrome inventory or a renderer button. A Chrome preview appears only after a successful exact-target snapshot supplies real pixels; control state alone never shows an empty placeholder. It stays visible between nearby actions and clears at turn end, terminal **Take Control**, tab removal, session cleanup, or a selected workspace/host change.
 
 An embedded thumbnail normally updates from bounded native-viewport capture. Forge does not move, focus, unhide, reparent, resize, or keep the source awake to manufacture it, and capture waits rather than competing with active automation or recording.
 
-A Chrome thumbnail is not live and does not poll. It mirrors only the latest successful agent snapshot of that exact tab and discards the retained image after five minutes. Showing the thumbnail does not attach the debugger, extend control, or request another snapshot.
+A Chrome thumbnail is not live and does not poll. It mirrors only the latest successful agent snapshot of that exact tab and disappears when the retained image is discarded after five minutes. Showing the thumbnail does not attach the debugger, extend control, or request another snapshot.
 
 The floating stack is read-only and accepts no page clicks, typing, scrolling, refresh, recording, or Take Control. Screen lock and system suspend discard pixels and block new frames; unlock resumes automatic capture. Preview images stay in bounded local memory and are never saved to browser state, conversation history, artifacts, Remote Projects, or Collaboration.
 

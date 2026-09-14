@@ -64,22 +64,16 @@ If the successful JSON-RPC response would exceed the negotiated bounded response
 
 Physical viewport resize and recording start/stop are embedded-only. Chrome also has no managed download workflow, saved download artifacts, opening of downloaded files, standalone screenshot export controls, or interactive dock/pop-out page view. A Chrome snapshot can still return bounded transient page and PNG data to the active operation, and its latest successful image can appear automatically in a read-only floating preview.
 
-The Desktop activity rail has one **Browser** workspace:
-
-- an embedded tab renders in Forge with navigation, viewport, transient screenshot, recording, and dock/pop-out controls;
-- a Chrome-backed tab stays in Chrome and appears as a compact card with **Show in Chrome**; and
-- controls that the current target cannot support are hidden rather than presented as a second-host choice.
-
-**Show in Chrome** does not depend on a long-lived attachment. Forge first settles any active operation burst, reacquires the exact sticky Chrome tab with transient authority, reveals it, and releases that exact authority again. If the exact target cannot be reacquired, reveal fails rather than opening or migrating another tab.
+The Desktop activity rail has one **Browser** workspace for embedded Forge tabs, with navigation, viewport, transient screenshot, recording, and dock/pop-out controls. Chrome-backed targets stay entirely in Chrome: their transient references are not shown as Browser-workspace tabs or cards and do not suppress creation of an embedded tab.
 
 ### Automatic floating browser previews
 
 When the agent begins using an exact managed or Chrome-backed tab, Forge Desktop automatically places a small read-only thumbnail over the main Chat surface. There is no Preview button and no separate Preview window. Up to four active-turn thumbnails form one compact, frameless cascade; the whole cluster can be dragged and remains subscribed while the Browser workspace temporarily hides it.
 
-Admission follows the main-process control lifecycle rather than renderer UI state or Chrome inventory. A tab joins only after exact agent control begins, stays through short inter-operation or Chrome authority-idle gaps, and leaves on turn end, terminal Take Control, tab removal, session lifecycle, or selected workspace/host replacement. An eligible Chrome inventory row alone never creates a preview.
+Admission follows the main-process control lifecycle rather than renderer UI state or Chrome inventory. A managed tab joins after exact agent control begins. A Chrome-backed tab joins only when a successful exact-target snapshot has supplied real pixels—control state or an eligible inventory row alone never creates an empty preview. A preview stays through short inter-operation or Chrome authority-idle gaps and leaves on turn end, terminal Take Control, tab removal, session lifecycle, or selected workspace/host replacement.
 
 - A managed card uses a bounded native-viewport capture, normally no more than once per second after the renderer consumes the previous frame. Capture uses `stayHidden`, never focuses, unhides, reparents, resizes, or keeps the page awake, and waits rather than competing with an active automation or recording capture.
-- A Chrome card performs no capture request of its own. It starts with **Waiting for agent snapshot** and mirrors only a successful exact-target PNG from a normal agent `snapshot` operation. The retained image expires after five minutes; the preview never polls Chrome, acquires authority, or extends a lease.
+- A Chrome card performs no capture request of its own and is not shown until it can mirror a successful exact-target PNG from a normal agent `snapshot` operation. When the retained image expires after five minutes, the card disappears instead of becoming an empty placeholder. The preview never polls Chrome, acquires authority, or extends a lease.
 - The cluster accepts no page clicks, typing, scrolling, refresh, resize, recording, or Take Control action. Its transparent interaction surface exists only for bounded pointer or keyboard dragging.
 - Screen lock and system suspend immediately discard retained pixels and block new frames. Unlock resumes automatic capture. Selected workspace/host changes, tab removal, turn/session release, window close, and shutdown clear or invalidate the relevant in-memory state.
 

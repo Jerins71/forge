@@ -207,8 +207,11 @@ export class BrowserPreviewHost {
       return
     }
     const control = this.controls.get(observation.tabId)
-    if (!card && !member && control?.targetAffinity === 'external-chrome' && !control.confirmed) {
+    const eligibleMember = member?.targetAffinity === 'external-chrome' && member.lifecycle !== 'closed'
+    if (!card && control?.targetAffinity === 'external-chrome'
+      && (eligibleMember || (!member && !control.confirmed))) {
       this.storePendingExternalFrame(observation.tabId, screenshot.data, screenshot.width, screenshot.height)
+      this.reconcileCards()
     }
   }
 
@@ -266,6 +269,13 @@ export class BrowserPreviewHost {
           continue
         }
         control.confirmed = true
+        if (tab.targetAffinity === 'external-chrome') {
+          const existingFrame = this.cards.get(tabId)?.frame
+          const pendingFrame = this.pendingExternalFrames.get(tabId)
+          const hasFreshFrame = Boolean(existingFrame)
+            || Boolean(pendingFrame && this.now() - pendingFrame.receivedAt < BROWSER_PREVIEW_EXTERNAL_EXPIRE_MS)
+          if (!hasFreshFrame) continue
+        }
         eligible.push({ control, tab })
       }
     }
@@ -285,7 +295,7 @@ export class BrowserPreviewHost {
         nextCards.set(tab.tabId, {
           tab,
           frame: pending ? { ...pending, sequence: ++this.frameSequence, pulled: false } : null,
-          state: pending ? 'updating' : tab.targetAffinity === 'external-chrome' ? 'waiting' : 'delayed',
+          state: pending ? 'updating' : 'delayed',
         })
         changed = true
         continue
@@ -315,7 +325,7 @@ export class BrowserPreviewHost {
 
   private resumedState(card: PreviewCard): PreviewCard['state'] {
     if (this.hiddenContent) return 'paused'
-    if (card.tab.targetAffinity === 'external-chrome') return card.frame ? 'updating' : 'waiting'
+    if (card.tab.targetAffinity === 'external-chrome') return 'updating'
     return card.frame ? 'updating' : 'delayed'
   }
 
@@ -434,7 +444,11 @@ export class BrowserPreviewHost {
     this.captureContentEpoch += 1
     this.stopExpiryTimer()
     this.pendingExternalFrames.clear()
-    for (const card of this.cards.values()) {
+    for (const [tabId, card] of this.cards) {
+      if (card.tab.targetAffinity === 'external-chrome') {
+        this.cards.delete(tabId)
+        continue
+      }
       card.frame = null
       card.state = state
     }
@@ -483,19 +497,18 @@ export class BrowserPreviewHost {
   private expireExternalFrames(): void {
     if (this.disposed) return
     const now = this.now()
-    let changed = false
+    let cardExpired = false
     for (const card of this.cards.values()) {
       if (card.tab.targetAffinity !== 'external-chrome' || !card.frame
         || now - card.frame.receivedAt < BROWSER_PREVIEW_EXTERNAL_EXPIRE_MS) continue
       card.frame = null
-      card.state = 'expired'
-      changed = true
+      cardExpired = true
     }
     for (const [tabId, frame] of this.pendingExternalFrames) {
       if (now - frame.receivedAt >= BROWSER_PREVIEW_EXTERNAL_EXPIRE_MS) this.pendingExternalFrames.delete(tabId)
     }
-    if (changed) this.publishSnapshot()
-    this.scheduleExpiry()
+    if (cardExpired) this.reconcileCards()
+    else this.scheduleExpiry()
   }
 
   private stopExpiryTimer(): void {

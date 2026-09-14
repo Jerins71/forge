@@ -41,9 +41,11 @@ function render(state: BrowserSessionSnapshot, commands = port(), mode: 'docked'
 }
 
 describe('BrowserPanel automatic experience', () => {
-  it('renders one automatic tab strip', () => {
-    render(snapshot([managedTab, externalTab], managedTab.tabId))
-    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2)
+  it('renders only managed tabs in the Browser workspace', () => {
+    render(snapshot([managedTab, externalTab], externalTab.tabId))
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1)
+    expect(container.querySelector('[role="tab"]')?.textContent).toBe('Embedded tab')
+    expect(container.textContent).not.toContain('Chrome tab')
     expect(container.querySelector('[aria-label="Browser workspace"]')).not.toBeNull()
   })
 
@@ -86,31 +88,22 @@ describe('BrowserPanel automatic experience', () => {
     expect(container.querySelector('button[aria-label*="Managed Browser"]')).toBeNull()
   })
 
-  it('does not expose a manual Preview admission button for either target', () => {
-    render(snapshot([managedTab]))
+  it('does not expose External Chrome references or manual Preview controls', () => {
+    render(snapshot([managedTab, { ...externalTab, controller: 'agent-idle' }], externalTab.tabId))
     expect(container.querySelector('button[aria-label="Open read-only browser preview"]')).toBeNull()
-    render(snapshot([externalTab]))
     expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Preview')).toBe(false)
+    expect(container.textContent).not.toContain('Chrome')
+    expect(container.textContent).not.toContain('Agent attached · idle')
+    expect(container.textContent).not.toContain('Take Control')
   })
 
-  it('labels a retained Chrome debugger as agent-attached idle rather than human control', () => {
-    render(snapshot([{ ...externalTab, controller: 'agent-idle' }]))
-    expect(container.textContent).toContain('Agent attached · idle')
-    expect(container.textContent).not.toContain('Human controlling')
-  })
-
-  it('shows a compact Chrome card and hides unsupported controls', () => {
-    const commands = render(snapshot([externalTab]))
-    expect(container.textContent).toContain('Browser tab open in Chrome')
-    expect(container.querySelector('[data-browser-automation-viewport]')).toBeNull()
-    expect(container.querySelector('button[aria-label="Start recording"]')).toBeNull()
-    expect(container.querySelector('select#browser-viewport')).toBeNull()
-    const show = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Show in Chrome')!
-    act(() => show.click())
-    expect(commands.reveal).toHaveBeenCalledWith(externalTab.tabId)
-    const takeControl = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Take Control')!
-    act(() => takeControl.click())
-    expect(commands.takeControl).toHaveBeenCalledWith(externalTab.tabId)
+  it('treats an external-only canonical snapshot as an empty managed workspace', async () => {
+    const commands = render(snapshot([externalTab], externalTab.tabId))
+    await act(async () => { await Promise.resolve() })
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0)
+    expect(container.textContent).not.toContain('Chrome')
+    expect(commands.open).toHaveBeenCalledTimes(1)
+    expect(commands.open).toHaveBeenCalledWith(expect.stringMatching(/^session-1:profile-1:2:1$/))
   })
 
   it('dispatches an explicit new-tab command from the plus button', () => {

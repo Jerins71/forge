@@ -29,8 +29,8 @@ function snapshot(overrides: Partial<BrowserPreviewDeckSnapshot> = {}): BrowserP
     hiddenContent: false,
     cards: [{
       tabId: 'chrome.profile.7',
-      targetAffinity: 'external-chrome',
-      label: null,
+      targetAffinity: 'managed-electron',
+      label: 'Managed tab',
       lifecycle: 'ready',
       presented: false,
       state: 'waiting',
@@ -48,8 +48,8 @@ function card(tabId: string, index: number) {
   return {
     ...snapshot().cards[0]!,
     tabId,
-    targetAffinity: index === 0 ? 'managed-electron' as const : 'external-chrome' as const,
-    label: index === 0 ? 'Managed tab' : null,
+    targetAffinity: 'managed-electron' as const,
+    label: `Managed tab ${index + 1}`,
   }
 }
 
@@ -133,6 +133,15 @@ describe('BrowserPreviewSurface', () => {
     expect(container.querySelector('[data-browser-preview-layer]')).not.toBeNull()
     expect(container.querySelector('[data-browser-preview-stack]')).not.toBeNull()
     expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:preview-1')
+  })
+
+  it('never renders a frame-less External Chrome placeholder', async () => {
+    getSnapshot.mockResolvedValueOnce(snapshot({
+      cards: [{ ...snapshot().cards[0]!, targetAffinity: 'external-chrome', label: null }],
+    }))
+    await render()
+    expect(container.querySelector('[data-browser-preview-layer]')).toBeNull()
+    expect(container.textContent).not.toContain('Waiting for agent snapshot')
   })
 
   it('does not overwrite a newer live preview with a delayed bootstrap snapshot', async () => {
@@ -243,6 +252,37 @@ describe('BrowserPreviewSurface', () => {
     expect(pullFrame).toHaveBeenCalledOnce()
   })
 
+  it('drops an older Chrome image while a replacement frame fails to decode', async () => {
+    await render()
+    const first = snapshot({
+      cards: [{
+        ...snapshot().cards[0]!,
+        targetAffinity: 'external-chrome',
+        label: null,
+        state: 'updating',
+        frameSequence: 1,
+        hasFrame: true,
+        width: 1,
+        height: 1,
+        ageMsAtDelivery: 0,
+      }],
+    })
+    await publish(first)
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:preview-1')
+
+    globalThis.Image = class {
+      src = ''
+      naturalWidth = 1
+      naturalHeight = 1
+      decode = vi.fn(async () => { throw new Error('decode failed') })
+    } as never
+    await publish({ ...first, cards: [{ ...first.cards[0]!, frameSequence: 2 }] })
+
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:preview-1')
+    expect(container.querySelector('[data-browser-preview-layer]')).toBeNull()
+    expect(container.querySelector('img')).toBeNull()
+  })
+
   it('does not create or retain a frame blob when an in-flight pull resolves after unmount', async () => {
     type Frame = {
       previewGeneration: number
@@ -304,11 +344,12 @@ describe('BrowserPreviewSurface', () => {
 
     await publish(snapshot({
       previewGeneration: 2,
-      cards: [{ ...snapshot().cards[0]!, state: 'expired', frameSequence: 0, hasFrame: false }],
+      cards: [{ ...snapshot().cards[0]!, targetAffinity: 'external-chrome', label: null, state: 'expired', frameSequence: 0, hasFrame: false }],
     }))
+    expect(container.querySelector('[data-browser-preview-layer]')).toBeNull()
     expect(container.querySelector('img')).toBeNull()
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:preview-1')
-    expect(container.textContent).toContain('Snapshot expired')
+    expect(container.textContent).not.toContain('Snapshot expired')
   })
 
   it('discards decoded pixels whose current metadata changed while decode was pending', async () => {

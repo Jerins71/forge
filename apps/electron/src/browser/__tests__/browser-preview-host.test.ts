@@ -184,27 +184,26 @@ describe('BrowserPreviewHost', () => {
     fixture.now.value = BROWSER_PREVIEW_EXTERNAL_EXPIRE_MS
     await vi.advanceTimersByTimeAsync(BROWSER_PREVIEW_EXTERNAL_EXPIRE_MS)
     fixture.host.publishScope(scope([chrome('chrome-late')], { sessionRevision: 2 }))
-    expect(fixture.host.getSnapshot()).toMatchObject({
-      cards: [{ tabId: 'chrome-late', state: 'waiting', hasFrame: false }],
-    })
+    expect(fixture.host.getSnapshot()).toBeNull()
   })
 
-  it('mirrors only bounded exact Chrome snapshots and expires retained pixels', async () => {
+  it('admits only a bounded exact Chrome snapshot and removes the card when pixels expire', async () => {
     vi.useFakeTimers()
     const fixture = setup()
     fixture.host.publishScope(scope([chrome('chrome-1')]))
     fixture.host.observeAgentControl(control('chrome-1', 'external-chrome'))
+    expect(fixture.host.getSnapshot()).toBeNull()
 
     fixture.host.observeExternalSnapshot(observation('chrome-1', {
       session: { sessionAgentId: 'other-session', profileId: identity.profileId },
     }) as never)
-    expect(fixture.host.getSnapshot()?.cards[0]).toMatchObject({ state: 'waiting', hasFrame: false })
+    expect(fixture.host.getSnapshot()).toBeNull()
     fixture.host.observeExternalSnapshot(observation('chrome-1') as never)
     expect(fixture.host.getSnapshot()?.cards[0]).toMatchObject({ state: 'updating', hasFrame: true, frameSequence: 1 })
 
     fixture.now.value = BROWSER_PREVIEW_EXTERNAL_EXPIRE_MS
     await vi.advanceTimersByTimeAsync(BROWSER_PREVIEW_EXTERNAL_EXPIRE_MS)
-    expect(fixture.host.getSnapshot()?.cards[0]).toMatchObject({ state: 'expired', hasFrame: false, frameSequence: 0 })
+    expect(fixture.host.getSnapshot()).toBeNull()
   })
 
   it('blocks previews admitted while locked and resumes automatically after unlock', async () => {
@@ -220,7 +219,7 @@ describe('BrowserPreviewHost', () => {
     expect(fixture.manager.tryCapturePreviewFrame).not.toHaveBeenCalled()
     expect(fixture.host.getSnapshot()).toMatchObject({
       hiddenContent: true,
-      cards: [{ tabId: 'chrome-1', hasFrame: false }, { tabId: 'managed-1', hasFrame: false }],
+      cards: [{ tabId: 'managed-1', hasFrame: false }],
     })
 
     fixture.host.restoreSensitiveContent()
@@ -239,7 +238,7 @@ describe('BrowserPreviewHost', () => {
     fixture.host.clearSensitiveContent()
     fixture.host.restoreSensitiveContent()
     fixture.host.observeExternalSnapshot(observation('chrome-1', { contentEpoch: preClearEpoch }) as never)
-    expect(fixture.host.getSnapshot()?.cards[0]).toMatchObject({ hasFrame: false, state: 'waiting' })
+    expect(fixture.host.getSnapshot()).toBeNull()
 
     fixture.host.observeExternalSnapshot(observation('chrome-1', {
       contentEpoch: fixture.host.currentContentEpoch,
@@ -290,6 +289,7 @@ describe('BrowserPreviewHost', () => {
     fixture.host.publishScope(scope([managed('managed-1'), chrome('chrome-1')]))
     fixture.host.observeAgentControl(control('managed-1', 'managed-electron', 'idle'))
     fixture.host.observeAgentControl(control('chrome-1', 'external-chrome', 'idle'))
+    fixture.host.observeExternalSnapshot(observation('chrome-1') as never)
     expect(fixture.host.getSnapshot()?.cards).toHaveLength(2)
     fixture.windows[0]!.send.mockClear()
 
