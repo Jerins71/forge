@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useState, type RefObject } from 'react'
 import { ArrowLeft, ArrowRight, Camera, Circle, ExternalLink, Globe2, PanelTopClose, Plus, RefreshCw, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react'
 import {
   BROWSER_VIEWPORT_PRESETS,
@@ -48,30 +48,17 @@ interface BrowserPanelProps {
   hostRef?: RefObject<BrowserAutomationHostHandle | null>
 }
 
-/** One automatic blank-tab attempt per canonical empty snapshot identity. */
-function emptyBrowserOpenAttemptKey(
-  sessionAgentId: string,
-  profileId: string,
-  host: Pick<BrowserHostConnectionSnapshot, 'hostGeneration'>,
-  snapshot: Pick<BrowserSessionSnapshot, 'revision'>,
-): string {
-  return `${sessionAgentId}:${profileId}:${host.hostGeneration ?? 'null'}:${snapshot.revision}`
-}
-
 export function BrowserPanel({
   client = null, sessionAgentId, profileId, snapshot, host, hostRef, commandPort,
   mode = 'docked', popoutAvailable = Boolean(window.electronBridge?.browserWorkspace?.capability.popoutAvailable),
 }: BrowserPanelProps) {
   const openTabs = (snapshot?.tabs ?? []).filter((tab) => tab.lifecycle !== 'closed' && tab.targetAffinity === 'managed-electron')
-  const hasOpenTab = openTabs.length > 0
   const activeTab = openTabs.find((tab) => tab.tabId === snapshot?.activeTabId) ?? openTabs[0] ?? null
   const [address, setAddress] = useState(activeTab?.url ?? '')
   const [error, setError] = useState<string | null>(null)
   const [screenshot, setScreenshot] = useState<string | null>(null)
   const [customWidth, setCustomWidth] = useState(1280)
   const [customHeight, setCustomHeight] = useState(800)
-  const [autoOpeningTab, setAutoOpeningTab] = useState(false)
-  const attemptedEmptyOpenAuthoritiesRef = useRef(new Set<string>())
   useEffect(() => setAddress(activeTab?.url ?? ''), [activeTab?.tabId, activeTab?.url])
 
   const commands = commandPort ?? createLegacyLocalPort(client, sessionAgentId, profileId, hostRef)
@@ -85,48 +72,6 @@ export function BrowserPanel({
     setError(null)
     try { await action() } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)) }
   }
-  const openCommandRef = useRef(commands.open)
-  openCommandRef.current = commands.open
-  const runRef = useRef(run)
-  runRef.current = run
-
-  const managedBrowserSurface = window.electronBridge?.windowRole === 'main' || window.electronBridge?.windowRole === 'managed-browser-popout'
-  const emptyAuthorityIdentity = `${sessionAgentId}:${profileId}`
-  const emptyAuthorityKey = managedBrowserSurface && !controlsUnavailable && host.connected && snapshot?.hostingState === 'hosted' && !hasOpenTab
-    ? emptyBrowserOpenAttemptKey(sessionAgentId, profileId, host, snapshot)
-    : null
-
-  useEffect(() => {
-    if (hasOpenTab) {
-      // Only clear the authority currently represented by this canonical tab.
-      // Other authorities may still be in an empty phase while the panel is
-      // being switched between sessions.
-      attemptedEmptyOpenAuthoritiesRef.current.delete(emptyAuthorityIdentity)
-      setAutoOpeningTab(false)
-      return
-    }
-    if (!emptyAuthorityKey) {
-      if (controlsUnavailable || !host.connected) setAutoOpeningTab(false)
-      return
-    }
-    // Keep one attempt for the current empty phase even if delayed transport
-    // snapshots change metadata or revision before a tab arrives. A canonical
-    // open tab resets that authority's phase, allowing one attempt after its
-    // later closure. Other authorities remain independently deduplicated.
-    if (attemptedEmptyOpenAuthoritiesRef.current.has(emptyAuthorityIdentity)) return
-    attemptedEmptyOpenAuthoritiesRef.current.add(emptyAuthorityIdentity)
-    let cancelled = false
-    setAutoOpeningTab(true)
-    void (async () => {
-      try {
-        await runRef.current(() => openCommandRef.current(emptyAuthorityKey))
-      } finally {
-        if (!cancelled) setAutoOpeningTab(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [controlsUnavailable, emptyAuthorityIdentity, emptyAuthorityKey, hasOpenTab, host.connected])
-
   const resize = (viewport: BrowserViewportSetting): void => { if (activeTab) void run(() => commands.resize(activeTab.tabId, viewport)) }
   const popped = mode === 'popped-out' || mode === 'opening'
 
@@ -199,8 +144,6 @@ export function BrowserPanel({
           </div>
           {screenshot ? <ScreenshotPreview dataUrl={screenshot} onClose={() => setScreenshot(null)} /> : null}
         </div>
-      ) : autoOpeningTab ? (
-        <div className="m-auto text-center text-sm text-muted-foreground" aria-live="polite"><p>Opening a new tab…</p></div>
       ) : (
         <div className="m-auto text-center text-sm text-muted-foreground"><p>No browser tabs are open.</p><button type="button" className="mt-3 rounded border px-3 py-1.5 hover:bg-muted focus-visible:ring-2" onClick={() => void run(() => commands.open())}>Open a tab</button></div>
       )}

@@ -97,13 +97,12 @@ describe('BrowserPanel automatic experience', () => {
     expect(container.textContent).not.toContain('Take Control')
   })
 
-  it('treats an external-only canonical snapshot as an empty managed workspace', async () => {
+  it('treats an external-only canonical snapshot as an empty managed workspace', () => {
     const commands = render(snapshot([externalTab], externalTab.tabId))
-    await act(async () => { await Promise.resolve() })
     expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0)
     expect(container.textContent).not.toContain('Chrome')
-    expect(commands.open).toHaveBeenCalledTimes(1)
-    expect(commands.open).toHaveBeenCalledWith(expect.stringMatching(/^session-1:profile-1:2:1$/))
+    expect(container.textContent).toContain('No browser tabs are open.')
+    expect(commands.open).not.toHaveBeenCalled()
   })
 
   it('dispatches an explicit new-tab command from the plus button', () => {
@@ -119,10 +118,14 @@ describe('BrowserPanel automatic experience', () => {
     expect(container.querySelector('[role="tab"]')?.textContent).toBe('Embedded tab')
   })
 
-  it('automatically opens once from an empty hosted session with a deduplication key', async () => {
-    const commands = render(snapshot([]))
-    await act(async () => { await Promise.resolve() })
-    expect(commands.open).toHaveBeenCalledTimes(1)
-    expect(commands.open).toHaveBeenCalledWith(expect.stringMatching(/^session-1:profile-1:2:1$/))
+  it('lets the last managed tab close without automatically replacing it', () => {
+    const commands = render(snapshot([managedTab]))
+    act(() => (container.querySelector('button[aria-label="Close Embedded tab"]') as HTMLButtonElement).click())
+    expect(commands.close).toHaveBeenCalledWith('managed-1')
+
+    render(snapshot([]), commands)
+    expect(container.textContent).toContain('No browser tabs are open.')
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0)
+    expect(commands.open).not.toHaveBeenCalled()
   })
 })
