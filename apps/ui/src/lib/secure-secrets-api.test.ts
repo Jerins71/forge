@@ -26,6 +26,7 @@ import {
   replaceBitwardenPasswordManagerCollections,
   reconnectBitwardenProvider,
   secureSecretsErrorMessage,
+  syncBitwardenPasswordManager,
   testSecureSecretProvider,
   unlockBitwardenPasswordManager,
   unlockSecureMaterialEntry,
@@ -220,6 +221,18 @@ describe('secure secrets API', () => {
           removedSecrets: 0,
         })
       }
+      if (path.endsWith('/collections') && init?.method === 'POST') {
+        return jsonResponse({
+          settings: {
+            providerId: 'password-manager-1',
+            accountEmail: 'forge@example.test',
+            serverUrl: 'https://vault.example.test',
+            collections: [],
+          },
+          addedSecrets: 1,
+          removedSecrets: 0,
+        })
+      }
       return jsonResponse({
         providerId: 'password-manager-1',
         accountEmail: 'forge@example.test',
@@ -241,6 +254,7 @@ describe('secure secrets API', () => {
       'password-manager-1',
       ['11111111-1111-4111-8111-111111111111'],
     )
+    await syncBitwardenPasswordManager(client, 'password-manager-1')
     await lockBitwardenPasswordManager(client, 'password-manager-1')
 
     expect(encryptLocalValue).toHaveBeenCalledWith('synthetic-master-password')
@@ -255,6 +269,10 @@ describe('secure secrets API', () => {
     expect(JSON.parse(String(collectionRequest?.[1]?.body))).toEqual({
       collectionIds: ['11111111-1111-4111-8111-111111111111'],
     })
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/collections$/),
+      expect.objectContaining({ method: 'POST' }),
+    )
   })
 
   it('reports the real desktop vault status rather than bridge presence alone', async () => {

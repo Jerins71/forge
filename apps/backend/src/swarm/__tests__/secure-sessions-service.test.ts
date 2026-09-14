@@ -356,16 +356,30 @@ describe("SecureSessionsService", () => {
 
     items[0]!.name = "Ansible Vault Login";
     items[0]!.username = "rotated-vault-user";
-    const refreshed = await harness.service.replaceBitwardenPasswordManagerCollections(
+    items.push({
+      id: "55555555-5555-4555-8555-555555555555",
+      name: "Newly added deploy token",
+      username: "deploy-user",
+      collectionIds: [collections[0]!.id],
+      revisionDate: NOW,
+    });
+    const refreshed = await harness.service.syncBitwardenPasswordManager(
       provider.providerId,
-      { collectionIds: collections.map(({ id }) => id) },
     );
-    expect(refreshed).toMatchObject({ addedSecrets: 0, removedSecrets: 0 });
+    expect(refreshed).toMatchObject({ addedSecrets: 1, removedSecrets: 0 });
+    expect(harness.passwordManagerSyncs).toHaveLength(2);
     expect(harness.store.listSecrets(provider.providerId)).toContainEqual(
       expect.objectContaining({
         sourceLocator: items[0]!.id,
         displayName: "Ansible Vault Login",
         username: "rotated-vault-user",
+      }),
+    );
+    expect(harness.store.listSecrets(provider.providerId)).toContainEqual(
+      expect.objectContaining({
+        sourceLocator: items[2]!.id,
+        displayName: "Newly added deploy token",
+        username: "deploy-user",
       }),
     );
 

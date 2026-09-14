@@ -142,6 +142,11 @@ function fakeService(): SecureSecretTransportService {
       addedSecrets: 1,
       removedSecrets: 0,
     })),
+    syncBitwardenPasswordManager: vi.fn(async () => ({
+      settings: passwordManagerSettings,
+      addedSecrets: 1,
+      removedSecrets: 0,
+    })),
     testSecureSecretProvider: vi.fn(async () => providerTestResult),
     updateBitwardenSecureSecretProviderCredential: vi.fn(async () => provider),
     deleteSecureSecretProvider: vi.fn(async () => undefined),
@@ -205,6 +210,15 @@ describe("secure secret routes", () => {
     expect(service.replaceBitwardenPasswordManagerCollections).toHaveBeenCalledWith(
       "password-manager-1",
       { collectionIds: [passwordManagerSettings.collections[0]!.collectionId] },
+    );
+
+    const synced = await postJson(
+      `${server.baseUrl}/api/secure-secrets/providers/password-manager-1/collections`,
+      {},
+    );
+    expect(synced.status).toBe(200);
+    expect(service.syncBitwardenPasswordManager).toHaveBeenCalledWith(
+      "password-manager-1",
     );
 
     const locked = await postJson(

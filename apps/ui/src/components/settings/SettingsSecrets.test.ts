@@ -39,6 +39,7 @@ const secureSecretsApiMock = vi.hoisted(() => ({
   unlockBitwardenPasswordManager: vi.fn(),
   lockBitwardenPasswordManager: vi.fn(),
   replaceBitwardenPasswordManagerCollections: vi.fn(),
+  syncBitwardenPasswordManager: vi.fn(),
   exportSecureVaultTransfer: vi.fn(),
   importSecureVaultTransfer: vi.fn(),
   createSecureSshTrustedHost: vi.fn(),
@@ -96,6 +97,8 @@ vi.mock('@/lib/secure-secrets-api', async (importOriginal) => {
       secureSecretsApiMock.lockBitwardenPasswordManager(...args),
     replaceBitwardenPasswordManagerCollections: (...args: unknown[]) =>
       secureSecretsApiMock.replaceBitwardenPasswordManagerCollections(...args),
+    syncBitwardenPasswordManager: (...args: unknown[]) =>
+      secureSecretsApiMock.syncBitwardenPasswordManager(...args),
     exportSecureVaultTransfer: (...args: unknown[]) =>
       secureSecretsApiMock.exportSecureVaultTransfer(...args),
     importSecureVaultTransfer: (...args: unknown[]) =>
@@ -297,6 +300,12 @@ beforeEach(() => {
   secureSecretsApiMock.unlockBitwardenPasswordManager.mockReset()
   secureSecretsApiMock.lockBitwardenPasswordManager.mockReset()
   secureSecretsApiMock.replaceBitwardenPasswordManagerCollections.mockReset()
+  secureSecretsApiMock.syncBitwardenPasswordManager.mockReset()
+  secureSecretsApiMock.syncBitwardenPasswordManager.mockResolvedValue({
+    settings: BITWARDEN_PASSWORD_MANAGER_SETTINGS,
+    addedSecrets: 0,
+    removedSecrets: 0,
+  })
   secureSecretsApiMock.fetchSecureSecretsCatalog.mockResolvedValue({
     providers: [LOCAL_PROVIDER],
     secrets: [],
@@ -421,7 +430,7 @@ describe('SettingsSecrets', () => {
     const save = getByRole(container, 'button', { name: 'Save collection changes' })
     expect(save.hasAttribute('disabled')).toBe(true)
     expect(container.textContent).toContain(
-      'Collection selections are saved and the Forge catalog is synced.',
+      'Forge syncs item names from saved collections when you save changes or click Sync items now.',
     )
     fireEvent.click(development)
     await waitFor(() => {
@@ -449,7 +458,7 @@ describe('SettingsSecrets', () => {
     })
   })
 
-  it('keeps collection editing visible while settings reload and supports an explicit refresh', async () => {
+  it('keeps collection editing visible while settings load and syncs saved collection items', async () => {
     secureSecretsApiMock.fetchSecureSecretsCatalog.mockResolvedValue({
       providers: [LOCAL_PROVIDER, BITWARDEN_PASSWORD_MANAGER_PROVIDER],
       secrets: [],
@@ -472,15 +481,16 @@ describe('SettingsSecrets', () => {
     const refresh = await waitFor(() => getByRole(
       container,
       'button',
-      { name: 'Refresh collections' },
+      { name: 'Sync items now' },
     ))
     fireEvent.click(refresh)
 
     await waitFor(() => {
-      expect(secureSecretsApiMock.testSecureSecretProvider)
+      expect(secureSecretsApiMock.syncBitwardenPasswordManager)
         .toHaveBeenCalledWith(expect.anything(), BITWARDEN_PASSWORD_MANAGER_PROVIDER.providerId)
       expect(secureSecretsApiMock.fetchBitwardenPasswordManagerSettings)
-        .toHaveBeenCalledTimes(2)
+        .toHaveBeenCalledTimes(1)
+      expect(container.textContent).toContain('Bitwarden sync complete. 0 added, 0 removed.')
       expect(getByRole(container, 'checkbox', { name: 'Infrastructure' })).toBeTruthy()
     })
   })

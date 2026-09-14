@@ -1177,12 +1177,36 @@ export class SecureSessionsService {
     input: ReplaceBitwardenPasswordManagerCollectionsInput,
   ): Promise<UpdateBitwardenPasswordManagerCollectionsResult> {
     const requestedIds = normalizeProviderIds(input.collectionIds, 64);
+    return await this.reconcileBitwardenPasswordManagerCollections(
+      providerId,
+      requestedIds,
+    );
+  }
+
+  async syncBitwardenPasswordManager(
+    providerId: string,
+  ): Promise<UpdateBitwardenPasswordManagerCollectionsResult> {
+    return await this.reconcileBitwardenPasswordManagerCollections(providerId);
+  }
+
+  private async reconcileBitwardenPasswordManagerCollections(
+    providerId: string,
+    requestedCollectionIds?: readonly string[],
+  ): Promise<UpdateBitwardenPasswordManagerCollectionsResult> {
     return await this.withAuthorityMutation(async () => {
       const store = await this.store();
       const provider = store.getProvider(providerId);
       if (!provider || provider.kind !== "bitwarden_password_manager") {
         throw new SecureSessionsServiceError("SECURE_SECRET_NOT_FOUND");
       }
+      const requestedIds = requestedCollectionIds
+        ? [...requestedCollectionIds]
+        : normalizeProviderIds(
+          store.listBitwardenCollections(providerId).map((collection) => (
+            collection.collectionId
+          )),
+          64,
+        );
       try {
         const status = await this.options.bitwardenPasswordManagerSource.status(
           provider.cliExecutablePath,
