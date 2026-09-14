@@ -4,6 +4,8 @@ import type { SecureSessionsService } from "./secure-sessions-service.js";
 
 export interface SecureSessionCoordinatorPort extends SecureSessionLifecyclePort {
   initializeForBoot(): Promise<SecureOrphanRecoveryResult>;
+  hasPendingAccessResultSteer(agentId: string): boolean;
+  flushPendingAccessResultSteer(agentId: string): Promise<void>;
   isTeamSecureMode(managerAgentId: string): boolean;
   prepareWorkerForSecureTeam(workerAgentId: string): Promise<boolean>;
   advanceWorkerSecureAssignment(
@@ -28,6 +30,10 @@ export function createSecureSessionLifecyclePort(
 ): SecureSessionCoordinatorPort {
   return {
     initializeForBoot: () => service.initializeSecureSessions(),
+    hasPendingAccessResultSteer: (agentId) =>
+      service.hasPendingAccessResultSteer(agentId),
+    flushPendingAccessResultSteer: (agentId) =>
+      service.flushPendingAccessResultSteer(agentId),
     isTeamSecureMode: (managerAgentId) =>
       service.isTeamSecureMode(managerAgentId),
     prepareWorkerForSecureTeam: (workerAgentId) =>

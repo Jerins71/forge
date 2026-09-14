@@ -537,6 +537,9 @@ function createHarness() {
       recycles.push(agentId);
       return "recycled";
     },
+    hasUsableSecureRuntime: () => false,
+    sendAccessResultSteer: async () => undefined,
+    logDebug: () => undefined,
     now: () => NOW,
     createId: () => `worker-vertical-${++nextId}`,
   });

@@ -168,6 +168,9 @@ export interface SecureSecretTransportService {
     providerId: string,
     input: ReplaceBitwardenPasswordManagerCollectionsInput,
   ): Promise<UpdateBitwardenPasswordManagerCollectionsResult>;
+  syncBitwardenPasswordManager(
+    providerId: string,
+  ): Promise<UpdateBitwardenPasswordManagerCollectionsResult>;
   testSecureSecretProvider(providerId: string): Promise<SecureSecretProviderTestResult>;
   updateBitwardenSecureSecretProviderCredential(
     providerId: string,
@@ -393,6 +396,14 @@ export function createSecureSecretRoutes(options: {
                 providerId,
                 input,
               ),
+            );
+            return;
+          }
+          if (request.method === "POST") {
+            sendSecureJson(
+              response,
+              200,
+              await options.service.syncBitwardenPasswordManager(providerId),
             );
             return;
           }

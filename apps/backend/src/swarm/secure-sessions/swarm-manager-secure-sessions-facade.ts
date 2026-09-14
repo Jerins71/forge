@@ -192,6 +192,12 @@ export abstract class SwarmManagerSecureSessionsFacade extends SwarmManagerGoalF
     );
   }
 
+  syncBitwardenPasswordManager(
+    providerId: string,
+  ): Promise<UpdateBitwardenPasswordManagerCollectionsResult> {
+    return this.secureSessions.syncBitwardenPasswordManager(providerId);
+  }
+
   testSecureSecretProvider(providerId: string): Promise<SecureSecretProviderTestResult> {
     return this.secureSessions.testSecureSecretProvider(providerId);
   }

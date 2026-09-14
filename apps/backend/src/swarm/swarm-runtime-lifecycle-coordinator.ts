@@ -32,6 +32,7 @@ import {
 } from "./turn-ledger.js";
 import { isRuntimeRecoveryActiveForRuntime } from "./runtime/runtime-recovery-state.js";
 import { reconcileInterruptedManagerToolCalls } from "./interrupted-tool-reconciliation.js";
+import type { SecureSessionCoordinatorPort } from "./secure-sessions/secure-session-lifecycle-port.js";
 
 export const PENDING_MANUAL_MANAGER_STOP_NOTICE_TTL_MS = 15_000;
 
@@ -124,6 +125,10 @@ export interface SwarmRuntimeLifecycleCoordinatorOptions {
   plans: RuntimeLifecyclePlans;
   goals: RuntimeLifecycleGoals;
   choices: RuntimeLifecycleChoices;
+  secureSessions: Pick<
+    SecureSessionCoordinatorPort,
+    "hasPendingAccessResultSteer" | "flushPendingAccessResultSteer"
+  >;
   descriptorMutations: RuntimeLifecycleDescriptorMutations;
   directory: RuntimeLifecycleDirectory;
   events: RuntimeLifecycleEvents;
@@ -331,6 +336,26 @@ export class SwarmRuntimeLifecycleCoordinator {
   ): Promise<void> {
     await this.options.controller.handleRuntimeStatus(runtimeToken, agentId, status, pendingCount, contextUsage);
     const descriptor = this.options.descriptors.get(agentId);
+    if (
+      status === "idle"
+      && pendingCount === 0
+      && descriptor?.status === "idle"
+      && this.options.secureSessions.hasPendingAccessResultSteer(agentId)
+    ) {
+      // Runtime recycle cannot run inside the runtime's own status callback.
+      // Defer one tick, then the secure-session owner can replace an ordinary
+      // runtime before dispatching the access-result continuation.
+      const timer = setTimeout(() => {
+        void this.options.secureSessions.flushPendingAccessResultSteer(agentId)
+          .catch((error) => {
+            this.options.logDebug("secure_sessions:idle_access_result_steer:error", {
+              agentId,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          });
+      }, 0);
+      timer.unref?.();
+    }
     if (status === "idle" && pendingCount === 0 && descriptor?.status === "idle" && isSessionManager(descriptor)) {
       await this.options.plans.finalizeUsage(descriptor);
       if (!this.goalContinuationSuppressedAfterRunaway.has(agentId)) {

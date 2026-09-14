@@ -112,6 +112,10 @@ function createHarness(dataDir = "/tmp/data") {
   const choices = {
     hasPendingChoicesForSession: vi.fn(() => false),
   };
+  const secureSessions = {
+    hasPendingAccessResultSteer: vi.fn(() => false),
+    flushPendingAccessResultSteer: vi.fn(async () => undefined),
+  };
   const descriptorMutations = {
     patchDescriptor: vi.fn(async (agentId: string, patch: (value: AgentDescriptor) => AgentDescriptor) => {
       const current = descriptors.get(agentId);
@@ -142,6 +146,7 @@ function createHarness(dataDir = "/tmp/data") {
     plans,
     goals,
     choices,
+    secureSessions,
     descriptorMutations,
     directory,
     events,
@@ -159,6 +164,7 @@ function createHarness(dataDir = "/tmp/data") {
     codexScopes,
     plans,
     goals,
+    secureSessions,
     descriptorMutations,
     directory,
     events,
@@ -270,6 +276,26 @@ describe("SwarmRuntimeLifecycleCoordinator", () => {
     calls.length = 0;
     await coordinator.handleRuntimeStatus(5, "manager", "idle", 1);
     expect(calls).toEqual(["controller:status"]);
+  });
+
+  it("flushes a pending secure-access steer after leaving the runtime status callback", async () => {
+    vi.useFakeTimers();
+    const { coordinator, descriptors, secureSessions } = createHarness();
+    descriptors.set("manager", descriptor({
+      agentId: "manager",
+      role: "manager",
+      managerId: "manager",
+      profileId: "profile-a",
+      status: "idle",
+    }));
+    secureSessions.hasPendingAccessResultSteer.mockReturnValue(true);
+
+    await coordinator.handleRuntimeStatus(5, "manager", "idle", 0);
+    expect(secureSessions.flushPendingAccessResultSteer).not.toHaveBeenCalled();
+
+    await vi.runAllTimersAsync();
+    expect(secureSessions.flushPendingAccessResultSteer).toHaveBeenCalledOnce();
+    expect(secureSessions.flushPendingAccessResultSteer).toHaveBeenCalledWith("manager");
   });
 
   it("clears turn context before runtime error projection", async () => {

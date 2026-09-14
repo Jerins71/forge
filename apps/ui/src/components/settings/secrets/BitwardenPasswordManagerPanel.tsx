@@ -21,6 +21,7 @@ import {
   lockBitwardenPasswordManager,
   replaceBitwardenPasswordManagerCollections,
   secureSecretsErrorMessage,
+  syncBitwardenPasswordManager,
   testSecureSecretProvider,
   updateBitwardenPasswordManagerCli,
   unlockBitwardenPasswordManager,
@@ -133,17 +134,17 @@ export function BitwardenPasswordManagerPanel({
     }
   }
 
-  const refreshCollections = async () => {
+  const syncCollections = async () => {
     if (!providerId) return
-    setBusy('refresh-collections')
+    setBusy('sync-collections')
     try {
-      const result = await testSecureSecretProvider(apiClient, providerId)
-      if (result.code !== 'ok') {
-        await onChanged('Bitwarden Password Manager still needs attention.')
-        return
-      }
-      await loadSettings()
-      await onChanged('Bitwarden collections refreshed.')
+      const result = await syncBitwardenPasswordManager(apiClient, providerId)
+      setSettings(result.settings)
+      setSelectedIds(selectedCollectionIds(result.settings))
+      setCliPath(result.settings.cli.configuredExecutablePath ?? '')
+      await onChanged(
+        `Bitwarden sync complete. ${result.addedSecrets} added, ${result.removedSecrets} removed.`,
+      )
     } catch (error) {
       onError(error)
     } finally {
@@ -590,13 +591,13 @@ export function BitwardenPasswordManagerPanel({
               variant="outline"
               size="sm"
               className="gap-1.5"
-              disabled={busy !== null}
-              onClick={() => void refreshCollections()}
+              disabled={busy !== null || collectionsDirty}
+              onClick={() => void syncCollections()}
             >
-              {busy === 'refresh-collections'
+              {busy === 'sync-collections'
                 ? <Loader2 className="size-3.5 animate-spin" />
                 : <RefreshCw className="size-3.5" />}
-              Refresh collections
+              Sync items now
             </Button>
             <Button
               type="button"
@@ -616,7 +617,7 @@ export function BitwardenPasswordManagerPanel({
           >
             {collectionsDirty
               ? 'Collection changes are not saved yet.'
-              : 'Collection selections are saved and the Forge catalog is synced.'}
+              : 'Forge syncs item names from saved collections when you save changes or click Sync items now.'}
           </p>
         </div>
       ) : null}

@@ -631,6 +631,18 @@ export async function replaceBitwardenPasswordManagerCollections(
   )
 }
 
+export async function syncBitwardenPasswordManager(
+  apiClient: SettingsApiClient,
+  providerId: string,
+): Promise<UpdateBitwardenPasswordManagerCollectionsResult> {
+  assertBuilderTarget(apiClient)
+  return requestJson<UpdateBitwardenPasswordManagerCollectionsResult>(
+    apiClient,
+    `/api/secure-secrets/providers/${encodeURIComponent(providerId)}/collections`,
+    { method: 'POST' },
+  )
+}
+
 export async function importBitwardenSecret(
   apiClient: SettingsApiClient,
   input: ImportBitwardenSecretInput,

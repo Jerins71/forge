@@ -163,6 +163,13 @@ interface SecureSessionsServiceOptions {
   applyModeRuntimeRecycle: (
     sessionAgentId: string,
   ) => Promise<"recycled" | "deferred" | "none"> | "recycled" | "deferred" | "none";
+  hasUsableSecureRuntime: (agentId: string) => boolean;
+  sendAccessResultSteer: (
+    fromAgentId: string,
+    targetAgentId: string,
+    message: string,
+  ) => Promise<void>;
+  logDebug: (message: string, details?: unknown) => void;
   createValueGuard?: (values: readonly Uint8Array[]) => SecureValueGuard;
   now?: () => string;
   createId?: () => string;
@@ -231,6 +238,19 @@ interface SecurePrincipal {
   profileId: string;
 }
 
+interface PendingSecureAccessSteer {
+  requestId: string;
+  authoritySessionAgentId: string;
+  requestedByAgentId: string;
+  displayAlias: string;
+  outcome: "added" | "granted" | "denied";
+}
+
+interface SecureAccessMutationResult {
+  snapshot: PublicSecureSessionSnapshot;
+  steer: PendingSecureAccessSteer;
+}
+
 export class SecureSessionsService {
   private storePromise: Promise<SecureSessionStore> | null = null;
   private readonly activeSessions = new Map<string, ActiveSession>();
@@ -251,6 +271,14 @@ export class SecureSessionsService {
   private readonly sessionMutationTails = new Map<string, Promise<void>>();
   private readonly bashExecutionTails = new Map<string, Promise<void>>();
   private readonly lifecycleFences = new Map<string, SecureSessionLifecycleFence>();
+  private readonly pendingAccessSteersByAgentId = new Map<
+    string,
+    Map<string, PendingSecureAccessSteer>
+  >();
+  private readonly accessSteerFlushesByAgentId = new Map<
+    string,
+    Promise<"completed" | "deferred">
+  >();
   private authorityMutationTail: Promise<void> = Promise.resolve();
   private startupRecoveryPromise: Promise<SecureOrphanRecoveryResult> | null = null;
   private startupRecoveryResult: SecureOrphanRecoveryResult | null = null;
@@ -1177,12 +1205,36 @@ export class SecureSessionsService {
     input: ReplaceBitwardenPasswordManagerCollectionsInput,
   ): Promise<UpdateBitwardenPasswordManagerCollectionsResult> {
     const requestedIds = normalizeProviderIds(input.collectionIds, 64);
+    return await this.reconcileBitwardenPasswordManagerCollections(
+      providerId,
+      requestedIds,
+    );
+  }
+
+  async syncBitwardenPasswordManager(
+    providerId: string,
+  ): Promise<UpdateBitwardenPasswordManagerCollectionsResult> {
+    return await this.reconcileBitwardenPasswordManagerCollections(providerId);
+  }
+
+  private async reconcileBitwardenPasswordManagerCollections(
+    providerId: string,
+    requestedCollectionIds?: readonly string[],
+  ): Promise<UpdateBitwardenPasswordManagerCollectionsResult> {
     return await this.withAuthorityMutation(async () => {
       const store = await this.store();
       const provider = store.getProvider(providerId);
       if (!provider || provider.kind !== "bitwarden_password_manager") {
         throw new SecureSessionsServiceError("SECURE_SECRET_NOT_FOUND");
       }
+      const requestedIds = requestedCollectionIds
+        ? [...requestedCollectionIds]
+        : normalizeProviderIds(
+          store.listBitwardenCollections(providerId).map((collection) => (
+            collection.collectionId
+          )),
+          64,
+        );
       try {
         const status = await this.options.bitwardenPasswordManagerSource.status(
           provider.cliExecutablePath,
@@ -3134,7 +3186,7 @@ export class SecureSessionsService {
     const authoritySessionAgentId = this.resolveSecurePrincipal(
       sessionAgentId,
     ).descriptor.agentId;
-    return await this.withAuthorityMutation(async () =>
+    const result = await this.withAuthorityMutation(async () =>
       await this.withSessionMutation(authoritySessionAgentId, async () =>
         await this.resolveSecureAccessRequestUnlocked(
           authoritySessionAgentId,
@@ -3143,13 +3195,15 @@ export class SecureSessionsService {
         )
       )
     );
+    await this.queueSecureAccessSteer(result.steer);
+    return result.snapshot;
   }
 
   private async resolveSecureAccessRequestUnlocked(
     sessionAgentId: string,
     requestId: string,
     input: ResolveSecureSecretAccessRequest,
-  ): Promise<PublicSecureSessionSnapshot> {
+  ): Promise<SecureAccessMutationResult> {
     const principal = this.resolveSecurePrincipal(sessionAgentId);
     const descriptor = principal.descriptor;
     if (input.requestId !== requestId) {
@@ -3171,7 +3225,16 @@ export class SecureSessionsService {
       this.scheduleSessionExpiry(store, sessionAgentId);
       const result = this.toPublicSnapshot(store, resolved);
       this.options.emitSnapshot(toSnapshotEvent(result));
-      return result;
+      return {
+        snapshot: result,
+        steer: {
+          requestId,
+          authoritySessionAgentId: sessionAgentId,
+          requestedByAgentId: request.requestedByAgentId,
+          displayAlias: request.displayAlias,
+          outcome: "denied",
+        },
+      };
     }
     this.assertAccessAllowed(store, sessionAgentId, request.requestedByAgentId,
       request.secretId ? [request.secretId] : input.selectedSecretId ? [input.selectedSecretId] : []);
@@ -3211,7 +3274,16 @@ export class SecureSessionsService {
       this.scheduleSessionExpiry(store, sessionAgentId);
       const result = this.toPublicSnapshot(store, resolved);
       this.options.emitSnapshot(toSnapshotEvent(result));
-      return result;
+      return {
+        snapshot: result,
+        steer: {
+          requestId,
+          authoritySessionAgentId: sessionAgentId,
+          requestedByAgentId: request.requestedByAgentId,
+          displayAlias: request.displayAlias,
+          outcome: "granted",
+        },
+      };
     }
     assertSessionBindingCompatibility(store, snapshot, bindingIds);
     const material = await this.resolveSecretMaterial(store, secret.secretId);
@@ -3219,7 +3291,7 @@ export class SecureSessionsService {
     let leaseCreated = false;
     try {
       const requiresCleanEnvironment = this.activeSessions.has(sessionAgentId);
-      await this.ensureSecureEnvironment(store, descriptor);
+      await this.ensureSecureEnvironment(store, descriptor, { recycleRuntime: false });
       if (requiresCleanEnvironment) {
         await this.rebuildEnvironmentForNewLease(store, descriptor);
       }
@@ -3246,7 +3318,16 @@ export class SecureSessionsService {
       this.scheduleSessionExpiry(store, sessionAgentId);
       const result = this.toPublicSnapshot(store, lease.snapshot);
       this.options.emitSnapshot(toSnapshotEvent(result));
-      return result;
+      return {
+        snapshot: result,
+        steer: {
+          requestId,
+          authoritySessionAgentId: sessionAgentId,
+          requestedByAgentId: request.requestedByAgentId,
+          displayAlias: request.displayAlias,
+          outcome: "granted",
+        },
+      };
     } catch (error) {
       if (leaseCreated) {
         await this.failClosedSession(store, descriptor);
@@ -3265,7 +3346,7 @@ export class SecureSessionsService {
     const authoritySessionAgentId = this.resolveSecurePrincipal(
       sessionAgentId,
     ).descriptor.agentId;
-    return await this.withAuthorityMutation(async () =>
+    const result = await this.withAuthorityMutation(async () =>
       await this.withSessionMutation(authoritySessionAgentId, async () =>
         await this.fulfillSecureAccessRequestUnlocked(
           authoritySessionAgentId,
@@ -3274,13 +3355,15 @@ export class SecureSessionsService {
         )
       )
     );
+    await this.queueSecureAccessSteer(result.steer);
+    return result.snapshot;
   }
 
   private async fulfillSecureAccessRequestUnlocked(
     sessionAgentId: string,
     requestId: string,
     input: FulfillSecureAccessRequestInput,
-  ): Promise<PublicSecureSessionSnapshot> {
+  ): Promise<SecureAccessMutationResult> {
     const principal = this.resolveSecurePrincipal(sessionAgentId);
     const descriptor = principal.descriptor;
     const store = await this.store();
@@ -3406,7 +3489,7 @@ export class SecureSessionsService {
         encryptedMaterial,
       })).material;
       const requiresCleanEnvironment = this.activeSessions.has(sessionAgentId);
-      await this.ensureSecureEnvironment(store, descriptor);
+      await this.ensureSecureEnvironment(store, descriptor, { recycleRuntime: false });
       if (requiresCleanEnvironment) {
         await this.rebuildEnvironmentForNewLease(store, descriptor);
       }
@@ -3480,7 +3563,16 @@ export class SecureSessionsService {
       const result = this.toPublicSnapshot(store, lease.snapshot);
       this.options.emitSnapshot(toSnapshotEvent(result));
       if (newlyProtected) await this.recycleNewlyProtectedProjectRuntimes(new Set([profileId]));
-      return result;
+      return {
+        snapshot: result,
+        steer: {
+          requestId,
+          authoritySessionAgentId: sessionAgentId,
+          requestedByAgentId: request.requestedByAgentId,
+          displayAlias: request.displayAlias,
+          outcome: "added",
+        },
+      };
     } catch (error) {
       if (leaseCreated) {
         await this.failClosedSession(store, descriptor);
@@ -3491,6 +3583,89 @@ export class SecureSessionsService {
       material?.release();
       encryptedMaterial.fill(0);
     }
+  }
+
+  hasPendingAccessResultSteer(agentId: string): boolean {
+    return (this.pendingAccessSteersByAgentId.get(agentId)?.size ?? 0) > 0;
+  }
+
+  async flushPendingAccessResultSteer(agentId: string): Promise<void> {
+    const existing = this.accessSteerFlushesByAgentId.get(agentId);
+    if (existing) {
+      await existing;
+      return;
+    }
+    if (!this.hasPendingAccessResultSteer(agentId) || this.closing || this.closed) {
+      return;
+    }
+
+    const flush = this.flushPendingAccessResultSteerUnlocked(agentId).catch((error) => {
+      this.options.logDebug("secure_sessions:access_result_steer:error", {
+        agentId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return "deferred" as const;
+    });
+    this.accessSteerFlushesByAgentId.set(agentId, flush);
+    let disposition: "completed" | "deferred";
+    try {
+      disposition = await flush;
+    } finally {
+      if (this.accessSteerFlushesByAgentId.get(agentId) === flush) {
+        this.accessSteerFlushesByAgentId.delete(agentId);
+      }
+    }
+    if (disposition === "completed" && this.hasPendingAccessResultSteer(agentId)) {
+      await this.flushPendingAccessResultSteer(agentId);
+    }
+  }
+
+  private async queueSecureAccessSteer(steer: PendingSecureAccessSteer): Promise<void> {
+    const pending = this.pendingAccessSteersByAgentId.get(steer.requestedByAgentId)
+      ?? new Map<string, PendingSecureAccessSteer>();
+    if (!pending.has(steer.requestId)) {
+      pending.set(steer.requestId, steer);
+      this.pendingAccessSteersByAgentId.set(steer.requestedByAgentId, pending);
+    }
+    await this.flushPendingAccessResultSteer(steer.requestedByAgentId);
+  }
+
+  private async flushPendingAccessResultSteerUnlocked(
+    agentId: string,
+  ): Promise<"completed" | "deferred"> {
+    const pending = this.pendingAccessSteersByAgentId.get(agentId);
+    if (!pending || pending.size === 0) return "completed";
+
+    const descriptor = this.options.getDescriptor(agentId);
+    if (
+      !descriptor
+      || descriptor.archivedAt
+      || descriptor.status === "terminated"
+      || descriptor.status === "stopped"
+      || descriptor.status === "error"
+    ) {
+      this.pendingAccessSteersByAgentId.delete(agentId);
+      return "completed";
+    }
+
+    const entries = [...pending.values()];
+    const needsSecureRuntime = entries.some((entry) => entry.outcome !== "denied");
+    if (needsSecureRuntime && !this.options.hasUsableSecureRuntime(agentId)) {
+      const recycleDisposition = await this.options.applyModeRuntimeRecycle(agentId);
+      if (recycleDisposition === "deferred") return "deferred";
+    }
+    if (this.closing || this.closed) return "completed";
+
+    for (const entry of entries) {
+      await this.options.sendAccessResultSteer(
+        entry.authoritySessionAgentId,
+        entry.requestedByAgentId,
+        formatSecureAccessResultSteer(entry),
+      );
+      pending.delete(entry.requestId);
+    }
+    if (pending.size === 0) this.pendingAccessSteersByAgentId.delete(agentId);
+    return "completed";
   }
 
   async getSecureSessionAgentView(callerAgentId: string): Promise<SecureSessionAgentView> {
@@ -4008,6 +4183,9 @@ export class SecureSessionsService {
     this.closing = true;
     for (const timer of this.sessionExpiryTimers.values()) clearTimeout(timer);
     this.sessionExpiryTimers.clear();
+    this.pendingAccessSteersByAgentId.clear();
+    await Promise.allSettled([...this.accessSteerFlushesByAgentId.values()]);
+    this.accessSteerFlushesByAgentId.clear();
 
     // Every mutation admitted before `closing` became true owns a tail. Drain
     // those operations before taking the final active-task snapshot so a
@@ -5639,7 +5817,7 @@ export class SecureSessionsService {
     await Promise.allSettled([...this.options.listDescriptors()]
       .filter((agent) => agent.profileId && profileIds.has(agent.profileId)
         && (isBuilderManager(agent) || this.isEligibleSecureWorker(agent))
-        && !(isBuilderManager(agent) && this.activeSessions.has(agent.agentId)))
+        && !this.options.hasUsableSecureRuntime(agent.agentId))
       .map((agent) => this.options.applyModeRuntimeRecycle(agent.agentId)));
   }
 
@@ -5941,7 +6119,7 @@ export class SecureSessionsService {
   private async ensureSecureEnvironment(
     store: SecureSessionStore,
     descriptor: AgentDescriptor,
-    options: { emitSnapshot?: boolean } = {},
+    options: { emitSnapshot?: boolean; recycleRuntime?: boolean } = {},
   ): Promise<void> {
     const state = store.getSnapshot(descriptor.agentId).state;
     const active = this.activeSessions.get(descriptor.agentId);
@@ -6904,6 +7082,24 @@ function assertDoesNotShadowConfiguredDefault(
       throw new SecureSessionsServiceError("SECURE_REQUEST_INVALID");
     }
   }
+}
+
+function formatSecureAccessResultSteer(result: PendingSecureAccessSteer): string {
+  const alias = JSON.stringify(result.displayAlias);
+  if (result.outcome === "denied") {
+    return [
+      "SYSTEM: Secure access request declined.",
+      `Secret alias ${alias} was not granted.`,
+      "Continue the active task without using it. Follow any newer user instructions first, and explain if the task cannot proceed safely.",
+    ].join("\n");
+  }
+  return [
+    result.outcome === "added"
+      ? "SYSTEM: Secret added and secure access granted."
+      : "SYSTEM: Secure access granted.",
+    `Secret alias ${alias} is now available through secure_bash.`,
+    "Continue the active task without requesting this alias again. Follow any newer user instructions first.",
+  ].join("\n");
 }
 
 function expiresAt(
