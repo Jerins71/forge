@@ -81,6 +81,37 @@ describe("browser automation tools", () => {
     expect(invoke).toHaveBeenCalledWith("manager-1", "evaluate", expect.objectContaining({ awaitPromise: true, returnByValue: true }));
   });
 
+  it("routes explicit in-app opens without changing automatic open defaults", async () => {
+    const invoke = vi.fn(async (_agentId: string, operation: string) => ({ ok: true, operation, result: {} }));
+    const open = byName(buildBrowserAutomationTools(host(invoke), descriptor()), "browser_open");
+
+    expect(Value.Check(open.parameters, { target: "managed", url: "https://github.com" })).toBe(true);
+    expect(Value.Check(open.parameters, { target: "external-chrome" })).toBe(false);
+
+    await open.execute("managed-open", {
+      target: "managed", url: "https://github.com", show: false, reuseExistingTab: false,
+    }, undefined, undefined, undefined as never);
+    expect(invoke).toHaveBeenCalledWith(
+      "manager-1",
+      "open",
+      { url: "https://github.com", show: false, reuseExistingTab: false },
+      { requiredTargetAffinity: "managed-electron" },
+    );
+
+    for (const target of ["managed-electron", null, 42]) {
+      const invalid = await open.execute(`invalid-target-${String(target)}`, {
+        target, url: "https://example.com", show: false, reuseExistingTab: false,
+      }, undefined, undefined, undefined as never) as { isError?: boolean; details?: unknown };
+      expect(invalid).toMatchObject({ isError: true, details: { error: { code: "invalid-input" } } });
+    }
+
+    const conflict = await open.execute("managed-open-conflict", {
+      target: "managed", tabId: "existing", show: false, reuseExistingTab: false,
+    }, undefined, undefined, undefined as never) as { isError?: boolean; details?: unknown };
+    expect(conflict).toMatchObject({ isError: true, details: { error: { code: "invalid-input" } } });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps every schema branch strict", async () => {
     const invoke = vi.fn(async (_agentId: string, operation: string) => ({ ok: true, operation, result: {} }));
     const tools = buildBrowserAutomationTools(host(invoke), descriptor());
@@ -229,14 +260,18 @@ describe("browser automation tools", () => {
       getService: () => ({ invoke } as never),
     });
     await managerInvoke("manager-1", "status", {});
-    expect(invoke).toHaveBeenCalledWith("manager-1", "profile-1", "status", {});
+    expect(invoke).toHaveBeenCalledWith("manager-1", "profile-1", "status", {}, undefined);
+    await managerInvoke("manager-1", "open", { show: false, reuseExistingTab: false }, { requiredTargetAffinity: "managed-electron" });
+    expect(invoke).toHaveBeenCalledWith(
+      "manager-1", "profile-1", "open", { show: false, reuseExistingTab: false }, { requiredTargetAffinity: "managed-electron" },
+    );
 
     current = descriptor({ sessionSurface: "collab" });
     await expect(managerInvoke("manager-1", "status", {})).resolves.toMatchObject({
       ok: false,
       error: { code: "session-not-found" },
     });
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledTimes(2);
   });
 
   it("limits eligibility to normal local Builder managers", () => {

@@ -19,6 +19,7 @@ export function createBrowserAutomationManagerInvoker(options: BrowserAutomation
     callerAgentId: string,
     operation: Operation,
     input: BrowserAutomationInputByOperation[Operation],
+    routing?: { requiredTargetAffinity?: "managed-electron" },
   ): Promise<BrowserAutomationInvocationResult<Operation>> {
     const descriptor = options.getDescriptor(callerAgentId);
     if (!descriptor || descriptor.role !== "manager" || !descriptor.profileId) {
@@ -35,7 +36,7 @@ export function createBrowserAutomationManagerInvoker(options: BrowserAutomation
         error: { code: "session-not-found", message: "Browser automation is only available to local Builder manager sessions.", retryable: false },
       });
     }
-    return options.getService().invoke(callerAgentId, descriptor.profileId, operation, input);
+    return options.getService().invoke(callerAgentId, descriptor.profileId, operation, input, routing);
   };
 }
 

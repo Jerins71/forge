@@ -123,6 +123,7 @@ export interface SwarmToolHost extends HistoryRecallToolHost {
     callerAgentId: string,
     operation: Operation,
     input: BrowserAutomationInputByOperation[Operation],
+    routing?: { requiredTargetAffinity?: "managed-electron" },
   ): Promise<BrowserAutomationInvocationResult<Operation>>;
   updatePlan(
     callerAgentId: string,
