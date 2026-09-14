@@ -2678,6 +2678,14 @@ describe("SecureSessionsService", () => {
       harness.descriptors.get("manager-a")!,
     )).toBeDefined();
     expect(harness.recycles).toEqual(["manager-a"]);
+    expect(harness.accessResultSteers).toEqual([
+      expect.objectContaining({
+        fromAgentId: "manager-a",
+        targetAgentId: "manager-a",
+        message: expect.stringContaining('Secret alias "alpha" is now available through secure_bash.'),
+      }),
+    ]);
+    expect(harness.accessResultSteers[0]!.message).not.toContain(ALPHA);
 
     await harness.service.requestSecureSecretAccess("manager-b", "tool-2", {
       displayAlias: "private-beta",
@@ -2705,6 +2713,89 @@ describe("SecureSessionsService", () => {
     }));
     expect(fulfilled.leases).toHaveLength(1);
     expect(harness.recycles).toEqual(["manager-a", "manager-b"]);
+    expect(harness.accessResultSteers.at(-1)).toEqual(expect.objectContaining({
+      fromAgentId: "manager-b",
+      targetAgentId: "manager-b",
+      message: expect.stringContaining("Secret added and secure access granted."),
+    }));
+    await harness.close();
+  });
+
+  it("holds a grant steer until a streaming ordinary runtime can be recycled", async () => {
+    const harness = createHarness({
+      recycleDisposition: "deferred",
+      secureRuntimeReady: false,
+    });
+    await harness.service.createLocalSecureSecret({
+      displayAlias: "deferred-alpha",
+      encryptedMaterial: Buffer.from(ALPHA).toString("base64"),
+      bindings: [{ deliveryKind: "environment", targetName: "DEFERRED_ALPHA" }],
+    });
+    await harness.service.requestSecureSecretAccess("manager-a", "tool-deferred", {
+      displayAlias: "deferred-alpha",
+      exposures: [{ deliveryKind: "environment", targetName: "DEFERRED_ALPHA" }],
+      leaseKind: "task",
+      purposeSummary: "Continue after the secure runtime transition",
+    });
+    const pending = await harness.service.getSecureSessionSnapshot("manager-a");
+    const requestId = pending.pendingRequests[0]!.requestId;
+
+    const approved = await harness.service.resolveSecureAccessRequest(
+      "manager-a",
+      requestId,
+      {
+        baseRevision: pending.revision,
+        requestId,
+        decision: "approve",
+      },
+    );
+
+    expect(approved).toEqual(expect.objectContaining({
+      executionMode: "secure",
+      environmentStatus: "ready",
+    }));
+    expect(harness.service.hasPendingAccessResultSteer("manager-a")).toBe(true);
+    expect(harness.accessResultSteers).toEqual([]);
+
+    harness.setRecycleDisposition("recycled");
+    await harness.service.flushPendingAccessResultSteer("manager-a");
+    await harness.service.flushPendingAccessResultSteer("manager-a");
+
+    expect(harness.service.hasPendingAccessResultSteer("manager-a")).toBe(false);
+    expect(harness.accessResultSteers).toHaveLength(1);
+    expect(harness.accessResultSteers[0]).toEqual(expect.objectContaining({
+      fromAgentId: "manager-a",
+      targetAgentId: "manager-a",
+      message: expect.stringContaining('Secret alias "deferred-alpha" is now available through secure_bash.'),
+    }));
+    await harness.close();
+  });
+
+  it("steers an already secure runtime immediately without recycling it", async () => {
+    const harness = createHarness({ secureRuntimeReady: true });
+    await harness.service.createLocalSecureSecret({
+      displayAlias: "ready-alpha",
+      encryptedMaterial: Buffer.from(ALPHA).toString("base64"),
+      bindings: [{ deliveryKind: "environment", targetName: "READY_ALPHA" }],
+    });
+    await harness.service.requestSecureSecretAccess("manager-a", "tool-ready", {
+      displayAlias: "ready-alpha",
+      exposures: [{ deliveryKind: "environment", targetName: "READY_ALPHA" }],
+      leaseKind: "task",
+      purposeSummary: "Continue in the existing secure runtime",
+    });
+    const pending = await harness.service.getSecureSessionSnapshot("manager-a");
+    const requestId = pending.pendingRequests[0]!.requestId;
+
+    await harness.service.resolveSecureAccessRequest("manager-a", requestId, {
+      baseRevision: pending.revision,
+      requestId,
+      decision: "approve",
+    });
+
+    expect(harness.recycles).toEqual([]);
+    expect(harness.accessResultSteers).toHaveLength(1);
+    expect(harness.service.hasPendingAccessResultSteer("manager-a")).toBe(false);
     await harness.close();
   });
 
@@ -6221,6 +6312,14 @@ describe("automatic project secret access", () => {
       requestId, baseRevision: current.revision, decision: "deny",
     });
     expect((await h.service.getSecureSessionSnapshot("manager-a")).pendingRequests).toEqual([]);
+    expect(h.accessResultSteers).toEqual([
+      expect.objectContaining({
+        fromAgentId: "manager-a",
+        targetAgentId: "worker-a",
+        message: expect.stringContaining('Secret alias "automatic" was not granted.'),
+      }),
+    ]);
+    expect(h.accessResultSteers[0]!.message).not.toContain(ALPHA);
     await h.close();
   });
 
@@ -6357,6 +6456,7 @@ function createHarness(options: {
   recycleDispositionForAgent?: (
     agentId: string,
   ) => "recycled" | "deferred" | "none";
+  secureRuntimeReady?: boolean;
   rotatedLocalCiphertext?: string;
   passwordManagerStatus?: BitwardenPasswordManagerStatus;
   passwordManagerCollections?: readonly BitwardenPasswordManagerCollection[];
@@ -6544,7 +6644,13 @@ function createHarness(options: {
   const snapshots: SecureSessionSnapshotEvent[] = [];
   const catalogEvents: Array<{ type: string; revision: number }> = [];
   const recycles: string[] = [];
+  const accessResultSteers: Array<{
+    fromAgentId: string;
+    targetAgentId: string;
+    message: string;
+  }> = [];
   let recycleDisposition = options.recycleDisposition;
+  let secureRuntimeReady = options.secureRuntimeReady ?? false;
   let nextId = 0;
   let guardFailures = options.guardFailures ?? 0;
   let providerStatusStarted!: () => void;
@@ -6612,6 +6718,11 @@ function createHarness(options: {
         ?? recycleDisposition
         ?? "recycled";
     },
+    hasUsableSecureRuntime: () => secureRuntimeReady,
+    sendAccessResultSteer: async (fromAgentId, targetAgentId, message) => {
+      accessResultSteers.push({ fromAgentId, targetAgentId, message });
+    },
+    logDebug: () => undefined,
     createValueGuard: (values) => {
       if (guardFailures > 0) {
         guardFailures -= 1;
@@ -6647,6 +6758,10 @@ function createHarness(options: {
     snapshots,
     catalogEvents,
     recycles,
+    accessResultSteers,
+    setSecureRuntimeReady(value: boolean) {
+      secureRuntimeReady = value;
+    },
     setRecycleDisposition(value: "recycled" | "deferred" | "none") {
       recycleDisposition = value;
     },

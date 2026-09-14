@@ -538,6 +538,10 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       emitSnapshot: (event) => this.emit("secure_session_snapshot", event),
       emitCatalogChanged: (event) => this.emit("secure_secret_catalog_changed", event),
       applyModeRuntimeRecycle: (agentId) => this.projectExecutableTrustCoordinator.applyManagerRuntimeRecyclePolicy(agentId, "secure_session_mode_change"),
+      hasUsableSecureRuntime: (agentId) => this.runtimeController.hasUsableSecureRuntime(agentId),
+      sendAccessResultSteer: (fromAgentId, targetAgentId, message) =>
+        this.sendMessage(fromAgentId, targetAgentId, message, "steer", { origin: "internal" }).then(() => undefined),
+      logDebug: (message, details) => this.logDebug(message, details),
       now: this.now,
       getMaxProjectDefaults: () => this.secureSecretSettingsService.getMaxProjectDefaults(),
     });

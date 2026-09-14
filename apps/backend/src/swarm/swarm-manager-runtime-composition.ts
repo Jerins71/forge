@@ -367,6 +367,7 @@ export class SwarmManagerRuntimeComposition {
       plans: this.plans,
       goals: this.requireGoals(),
       choices: services.choices,
+      secureSessions: this.options.secureSessions,
       descriptorMutations: this.options.descriptors,
       directory: services.directory,
       events: {

@@ -545,6 +545,9 @@ async function createDockerHarness() {
     emitSnapshot: () => undefined,
     emitCatalogChanged: () => undefined,
     applyModeRuntimeRecycle: async () => "recycled",
+    hasUsableSecureRuntime: () => false,
+    sendAccessResultSteer: async () => undefined,
+    logDebug: () => undefined,
     now: () => NOW,
     createId: () => `team-docker-e2e-${++nextId}`,
   });
