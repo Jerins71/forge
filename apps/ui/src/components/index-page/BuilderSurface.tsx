@@ -271,6 +271,10 @@ export function BuilderSurface({
   const fileEditorCoordinatorRef = useRef<FileEditorCoordinator | null>(null)
   const archiveHydrationRequestedRef = useRef(false)
   const browserHostRef = useRef<BrowserAutomationHostHandle | null>(null)
+  const browserSelectionRef = useRef<{ sessionAgentId: string | null; profileId: string | null }>({
+    sessionAgentId: null,
+    profileId: null,
+  })
   const handledBrowserRevealRef = useRef<string | null>(null)
   const handledDeckPanelRef = useRef<string | null>(null)
   const handledStreamDeckNavigationRef = useRef<string | null>(null)
@@ -788,6 +792,7 @@ export function BuilderSurface({
   const browserProfileId = !isRemoteOriginActive
     ? activeManagerAgent?.profileId ?? activeManagerAgent?.agentId ?? null
     : null
+  browserSelectionRef.current = { sessionAgentId: browserSessionAgentId, profileId: browserProfileId }
   const browserSessionSnapshot = browserSessionAgentId
     ? localState.browserSessions[browserSessionAgentId] ?? null
     : null
@@ -814,6 +819,17 @@ export function BuilderSurface({
   // is visible to every effect on the next commit, matching the original
   // in-component ordering where the ref always held the live coordinator.
   fileEditorCoordinatorRef.current = panels.fileEditorCoordinator
+
+  const handleOpenManagedPreviewTab = useCallback(async (tabId: string): Promise<void> => {
+    const selection = browserSelectionRef.current
+    await browserCommandPort.activate(tabId)
+    const currentSelection = browserSelectionRef.current
+    if (currentSelection.sessionAgentId !== selection.sessionAgentId || currentSelection.profileId !== selection.profileId) return
+    panels.handleOpenBrowserFromReveal()
+    if (browserWorkspaceMode === 'popped-out' || browserWorkspaceMode === 'opening') {
+      await browserHostRef.current?.bringToFront()
+    }
+  }, [browserCommandPort, browserWorkspaceMode, panels])
 
   useEffect(() => {
     const request = localState.streamDeckNavigationRequest
@@ -2657,7 +2673,7 @@ export function BuilderSurface({
               />
             )}
             {activeView === 'chat' && !panels.isInlineDiffViewerOpen ? (
-              <BrowserPreviewSurface hidden={panels.isBrowserOpen} />
+              <BrowserPreviewSurface hidden={panels.isBrowserOpen} onOpenManagedTab={handleOpenManagedPreviewTab} />
             ) : null}
           </div>
 

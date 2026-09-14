@@ -32,16 +32,24 @@ interface DragState extends OverlayPosition {
   pointerId: number
   clientX: number
   clientY: number
+  moved: boolean
+}
+
+interface BrowserPreviewSurfaceProps {
+  hidden?: boolean
+  onOpenManagedTab?: (tabId: string) => void | Promise<void>
 }
 
 const STACK_STEP_PX = 14
 
-export function BrowserPreviewSurface({ hidden = false }: { hidden?: boolean }) {
+export function BrowserPreviewSurface({ hidden = false, onOpenManagedTab }: BrowserPreviewSurfaceProps) {
   const bridge = window.electronBridge?.browserPreview
   const surfaceRef = useRef<HTMLDivElement | null>(null)
   const overlayRef = useRef<HTMLElement | null>(null)
   const dragRef = useRef<DragState | null>(null)
+  const suppressClickRef = useRef(false)
   const [position, setPosition] = useState<OverlayPosition | null>(null)
+  const [frontTabId, setFrontTabId] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<BrowserPreviewDeckSnapshot | null>(null)
   const snapshotRef = useRef<BrowserPreviewDeckSnapshot | null>(null)
   const [frames, setFrames] = useState<Record<string, RenderedFrame>>({})
@@ -71,7 +79,10 @@ export function BrowserPreviewSurface({ hidden = false }: { hidden?: boolean }) 
     }
     snapshotRef.current = next
     setSnapshot(next)
-    if (!next || generationChanged) setPosition(null)
+    if (!next || generationChanged) {
+      setPosition(null)
+      setFrontTabId(null)
+    }
     const retained: Record<string, RenderedFrame> = {}
     for (const [tabId, frame] of Object.entries(framesRef.current)) {
       const card = cardsById.get(tabId)
@@ -159,7 +170,11 @@ export function BrowserPreviewSurface({ hidden = false }: { hidden?: boolean }) 
     }
   }, [applySnapshot, bridge, pump])
 
-  const visibleCards = snapshot?.cards.filter((card) => card.targetAffinity === 'managed-electron' || Boolean(frames[card.tabId])) ?? []
+  const eligibleCards = snapshot?.cards.filter((card) => card.targetAffinity === 'managed-electron' || Boolean(frames[card.tabId])) ?? []
+  const selectedFrontTabId = eligibleCards.some((card) => card.tabId === frontTabId) ? frontTabId : null
+  const visibleCards = selectedFrontTabId
+    ? [eligibleCards.find((card) => card.tabId === selectedFrontTabId)!, ...eligibleCards.filter((card) => card.tabId !== selectedFrontTabId)]
+    : eligibleCards
   const hasCustomPosition = position !== null
   const cardCount = visibleCards.length
   useEffect(() => {
@@ -187,26 +202,44 @@ export function BrowserPreviewSurface({ hidden = false }: { hidden?: boolean }) 
       pointerId: event.pointerId,
       clientX: event.clientX,
       clientY: event.clientY,
+      moved: false,
       ...start,
     }
     setPosition(start)
     event.currentTarget.setPointerCapture(event.pointerId)
-    event.preventDefault()
   }
 
   const moveDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
     const drag = dragRef.current
     if (!drag || drag.pointerId !== event.pointerId) return
+    const deltaX = event.clientX - drag.clientX
+    const deltaY = event.clientY - drag.clientY
+    if (!drag.moved && Math.hypot(deltaX, deltaY) >= 4) drag.moved = true
     setPosition(clampPosition({
-      x: drag.x + event.clientX - drag.clientX,
-      y: drag.y + event.clientY - drag.clientY,
+      x: drag.x + deltaX,
+      y: drag.y + deltaY,
     }, surfaceRef.current, overlayRef.current))
   }
 
   const endDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
-    if (dragRef.current?.pointerId !== event.pointerId) return
+    const drag = dragRef.current
+    if (drag?.pointerId !== event.pointerId) return
     dragRef.current = null
+    if (drag.moved) {
+      suppressClickRef.current = true
+      window.setTimeout(() => { suppressClickRef.current = false }, 0)
+    }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+
+  const selectCard = (tabId: string): void => {
+    if (suppressClickRef.current) return
+    setFrontTabId(tabId)
+  }
+
+  const openFrontCard = (card: BrowserPreviewCardSnapshot, index: number): void => {
+    if (suppressClickRef.current || index !== 0 || card.targetAffinity !== 'managed-electron' || !onOpenManagedTab) return
+    void Promise.resolve(onOpenManagedTab(card.tabId)).catch(() => undefined)
   }
 
   const nudge = (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
@@ -255,14 +288,18 @@ export function BrowserPreviewSurface({ hidden = false }: { hidden?: boolean }) 
             const depth = Math.min(index, 3)
             const frame = frames[card.tabId]
             const label = previewLabel(card)
+            const isFront = index === 0
+            const canOpen = isFront && card.targetAffinity === 'managed-electron' && Boolean(onOpenManagedTab)
+            const instruction = canOpen ? 'Double-click to open in Browser' : isFront ? 'Front preview' : 'Click to bring forward'
             return (
-              <article
+              <button
                 key={card.tabId}
-                role="img"
-                aria-label={`${label}: ${accessibilityState(card)}`}
+                type="button"
+                aria-label={`${label}: ${accessibilityState(card)}. ${instruction}`}
+                title={instruction}
                 className={cn(
-                  'absolute inset-0 overflow-hidden rounded-[10px] border border-white/10 bg-zinc-950 ring-1 ring-black/15',
-                  index === 0
+                  'absolute inset-0 touch-none cursor-grab overflow-hidden rounded-[10px] border border-white/10 bg-zinc-950 p-0 text-left ring-1 ring-black/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing',
+                  isFront
                     ? 'shadow-[0_16px_40px_rgba(0,0,0,0.34)]'
                     : 'shadow-[0_10px_26px_rgba(0,0,0,0.28)]',
                 )}
@@ -271,32 +308,29 @@ export function BrowserPreviewSurface({ hidden = false }: { hidden?: boolean }) 
                   zIndex: visibleCards.length - index,
                   opacity: Math.max(0.78, 1 - index * 0.06),
                 }}
+                onClick={() => selectCard(card.tabId)}
+                onDoubleClick={() => openFrontCard(card, index)}
+                onPointerDown={beginDrag}
+                onPointerMove={moveDrag}
+                onPointerUp={endDrag}
+                onPointerCancel={endDrag}
+                onKeyDown={nudge}
                 data-browser-preview-card
-                data-browser-preview-front={index === 0 ? 'true' : undefined}
+                data-browser-preview-front={isFront ? 'true' : undefined}
                 data-stack-index={index}
+                data-tab-id={card.tabId}
               >
                 {!snapshot.hiddenContent && frame
                   ? <img src={frame.url} alt="" aria-hidden="true" className="h-full w-full object-contain" draggable={false} />
                   : (
-                    <div className="flex h-full w-full items-center justify-center px-5 text-center text-[11px] text-zinc-300">
+                    <span className="flex h-full w-full items-center justify-center px-5 text-center text-[11px] text-zinc-300">
                       {snapshot.hiddenContent ? 'Preview hidden' : emptyMessage(card)}
-                    </div>
+                    </span>
                   )}
-              </article>
+              </button>
             )
           })}
         </div>
-        <button
-          type="button"
-          aria-label="Drag browser preview stack"
-          title="Drag browser preview stack"
-          className="absolute inset-0 z-50 touch-none cursor-grab rounded-[10px] bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
-          onPointerDown={beginDrag}
-          onPointerMove={moveDrag}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-          onKeyDown={nudge}
-        />
       </section>
     </div>
   )

@@ -99,9 +99,9 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-async function render(hidden = false): Promise<void> {
+async function render(hidden = false, onOpenManagedTab?: (tabId: string) => void | Promise<void>): Promise<void> {
   await act(async () => {
-    root?.render(createElement(BrowserPreviewSurface, { hidden }))
+    root?.render(createElement(BrowserPreviewSurface, { hidden, onOpenManagedTab }))
     await Promise.resolve()
     await Promise.resolve()
   })
@@ -193,11 +193,64 @@ describe('BrowserPreviewSurface', () => {
     ])
   })
 
+  it('brings a clicked card forward and opens that exact managed tab when the front card is double-clicked', async () => {
+    const onOpenManagedTab = vi.fn()
+    getSnapshot.mockResolvedValueOnce(snapshot({
+      cards: [card('managed-1', 0), card('managed-2', 1), card('managed-3', 2)],
+    }))
+    await render(false, onOpenManagedTab)
+
+    const thirdCard = container.querySelector('[data-tab-id="managed-3"]') as HTMLButtonElement
+    await act(async () => {
+      thirdCard.click()
+      await Promise.resolve()
+    })
+
+    const frontCard = container.querySelector('[data-browser-preview-front="true"]') as HTMLButtonElement
+    expect(frontCard.dataset.tabId).toBe('managed-3')
+    expect(onOpenManagedTab).not.toHaveBeenCalled()
+
+    await act(async () => {
+      frontCard.click()
+      frontCard.click()
+      frontCard.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }))
+      await Promise.resolve()
+    })
+    expect(onOpenManagedTab).toHaveBeenCalledOnce()
+    expect(onOpenManagedTab).toHaveBeenCalledWith('managed-3')
+  })
+
+  it('does not bring a back card forward when its drag ends with a click', async () => {
+    getSnapshot.mockResolvedValueOnce(snapshot({
+      cards: [card('managed-1', 0), card('managed-2', 1), card('managed-3', 2)],
+    }))
+    await render()
+    const draggedCard = container.querySelector('[data-tab-id="managed-3"]') as HTMLButtonElement & {
+      setPointerCapture(pointerId: number): void
+      releasePointerCapture(pointerId: number): void
+      hasPointerCapture(pointerId: number): boolean
+    }
+    draggedCard.setPointerCapture = vi.fn()
+    draggedCard.releasePointerCapture = vi.fn()
+    draggedCard.hasPointerCapture = vi.fn(() => true)
+
+    await act(async () => {
+      draggedCard.dispatchEvent(pointerEvent('pointerdown', { pointerId: 4, clientX: 50, clientY: 50, button: 0 }))
+      draggedCard.dispatchEvent(pointerEvent('pointermove', { pointerId: 4, clientX: 70, clientY: 70, button: 0 }))
+      draggedCard.dispatchEvent(pointerEvent('pointerup', { pointerId: 4, clientX: 70, clientY: 70, button: 0 }))
+      draggedCard.click()
+      await Promise.resolve()
+    })
+
+    const frontCard = container.querySelector('[data-browser-preview-front="true"]') as HTMLButtonElement
+    expect(frontCard.dataset.tabId).toBe('managed-1')
+  })
+
   it('drags the entire compact stack and constrains it to the Chat layer', async () => {
     await render()
     const surface = container.querySelector('[data-browser-preview-layer]') as HTMLDivElement
     const overlay = container.querySelector('section[aria-label="Browser preview stack"]') as HTMLElement
-    const handle = container.querySelector('button[aria-label="Drag browser preview stack"]') as HTMLButtonElement & {
+    const handle = container.querySelector('[data-browser-preview-card]') as HTMLButtonElement & {
       setPointerCapture(pointerId: number): void
       releasePointerCapture(pointerId: number): void
       hasPointerCapture(pointerId: number): boolean
