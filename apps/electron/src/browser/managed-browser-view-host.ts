@@ -131,9 +131,18 @@ export class ManagedBrowserViewHost {
         if (!canonical && (!owned.provisional || explicitlyUnhosted || committedExpired)) this.closeOwnedTab(tabId)
         else if (canonical) { owned.tab = canonical; owned.provisional = false; owned.committedAtSequence = null }
       }
+      let creationFailure: Error | undefined
       for (const tab of next.values()) {
-        if (!this.tabs.has(tab.tabId)) await this.createTab(tab, false)
+        if (this.tabs.has(tab.tabId)) continue
+        try {
+          await this.createTab(tab, false)
+        } catch (error) {
+          creationFailure ??= error instanceof Error
+            ? error
+            : new BrowserHostError('execution-failed', String(error), true)
+        }
       }
+      if (creationFailure) throw creationFailure
       return { applied: true, tabCount: this.tabs.size }
     })
   }
@@ -325,7 +334,19 @@ export class ManagedBrowserViewHost {
     if (this.options.onGuestBeforeInput) {
       view.webContents.on('before-input-event', this.options.onGuestBeforeInput)
     }
-    if (tab.url !== 'about:blank') void view.webContents.loadURL(tab.url).catch(() => undefined)
+    if (tab.url === 'about:blank') {
+      // A detached WebContentsView does not necessarily initialize its renderer
+      // until the first navigation. Complete the neutral load before exposing a
+      // provisional tab so automation can attach CDP without waiting forever.
+      try {
+        await view.webContents.loadURL(tab.url)
+      } catch (error) {
+        this.closeOwnedTab(tab.tabId)
+        throw error
+      }
+    } else {
+      void view.webContents.loadURL(tab.url).catch(() => undefined)
+    }
     return { ...tab, live: true }
   }
 

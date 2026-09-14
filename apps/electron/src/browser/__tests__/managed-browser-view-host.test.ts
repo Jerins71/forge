@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const fakes = vi.hoisted(() => {
   const createdViews: Array<{ webContents: unknown; bounds: { x: number; y: number; width: number; height: number }; visible: boolean; setBounds: ReturnType<typeof vi.fn>; setVisible: ReturnType<typeof vi.fn> }> = []
+  const loadUrlFailures: boolean[] = []
   let nextId = 100
   class FakeContents {
     id = ++nextId; debugger = {}; ipc = { on: vi.fn(), off: vi.fn() }
     navigationHistory = { canGoBack: () => false, canGoForward: () => false, goBack: vi.fn(), goForward: vi.fn() }
     listeners = new Map<string, (...args: unknown[]) => void>(); destroyed = false
     isDestroyed = () => this.destroyed; isLoading = () => false; getURL = () => 'about:blank'; getTitle = () => 'tab'; getZoomFactor = () => 1
-    loadURL = vi.fn(async () => undefined); insertCSS = vi.fn(async () => 'blank-theme'); reload = vi.fn(); reloadIgnoringCache = vi.fn(); setZoomFactor = vi.fn(); capturePage = vi.fn(); send = vi.fn(); focus = vi.fn()
+    loadURL = vi.fn(async () => { if (loadUrlFailures.shift()) throw new Error('neutral load failed') }); insertCSS = vi.fn(async () => 'blank-theme'); reload = vi.fn(); reloadIgnoringCache = vi.fn(); setZoomFactor = vi.fn(); capturePage = vi.fn(); send = vi.fn(); focus = vi.fn()
     close = vi.fn(() => { this.destroyed = true }); setWindowOpenHandler = vi.fn()
     on = vi.fn((event: string, listener: (...args: unknown[]) => void) => this.listeners.set(event, listener)); once = this.on
     off = vi.fn((event: string) => this.listeners.delete(event))
@@ -19,7 +20,7 @@ const fakes = vi.hoisted(() => {
     setBounds = vi.fn((bounds: typeof this.bounds) => { this.bounds = bounds }); setVisible = vi.fn((visible: boolean) => { this.visible = visible })
     setBackgroundColor = vi.fn()
   }
-  return { createdViews, FakeView }
+  return { createdViews, loadUrlFailures, FakeView }
 })
 const createdViews = fakes.createdViews
 type FakeView = InstanceType<typeof fakes.FakeView>
@@ -50,7 +51,7 @@ function makeHost(onGuestBeforeInput?: ConstructorParameters<typeof ManagedBrows
   return { host, manager }
 }
 
-beforeEach(() => { createdViews.length = 0 })
+beforeEach(() => { createdViews.length = 0; fakes.loadUrlFailures.length = 0 })
 describe('ManagedBrowserViewHost', () => {
   it('rejects external-only state and filters same-id external tabs from mixed state', async () => {
     const { host, manager } = makeHost()
@@ -86,6 +87,22 @@ describe('ManagedBrowserViewHost', () => {
     expect(host.tabCount).toBe(2)
   })
 
+  it('rolls back failed neutral initialization, continues hydration, and retries cleanly', async () => {
+    const { host, manager } = makeHost()
+    fakes.loadUrlFailures.push(true, false)
+    const input = { controllerInstanceId: 'c', hostGeneration: 1, updateSequence: 1, workspaceEpoch: 2, sessions: [session([tab('one'), tab('two')])] }
+
+    await expect(host.reconcile(input)).rejects.toThrow('neutral load failed')
+    expect(host.tabCount).toBe(1)
+    expect(manager.unregisterTabWebContents).toHaveBeenCalledOnce()
+    expect(manager.unregisterTabWebContents).toHaveBeenCalledWith('one', expect.any(Number))
+    expect((createdViews[0]!.webContents as InstanceType<typeof fakes.FakeView>['webContents']).close).toHaveBeenCalledOnce()
+
+    await expect(host.reconcile({ ...input, updateSequence: 2 })).resolves.toEqual({ applied: true, tabCount: 2 })
+    expect(host.tabCount).toBe(2)
+    expect(manager.registerTabWebContents).toHaveBeenCalledTimes(3)
+  })
+
   it('reconciles, presents, and reparents the identical view without stealing toolbar focus', async () => {
     const { host } = makeHost()
     await host.reconcile({ controllerInstanceId: 'c', hostGeneration: 1, updateSequence: 1, workspaceEpoch: 2, sessions: [session([tab('one'), tab('two')])] })
@@ -111,6 +128,8 @@ describe('ManagedBrowserViewHost', () => {
     const view = createdViews[0]!
     const contents = view.webContents as InstanceType<typeof fakes.FakeView>['webContents']
     expect(view.setBackgroundColor).toHaveBeenCalledWith('#18181b')
+    expect(contents.loadURL).toHaveBeenCalledOnce()
+    expect(contents.loadURL).toHaveBeenCalledWith('about:blank')
     expect(contents.insertCSS).toHaveBeenCalledOnce()
 
     contents.listeners.get('did-finish-load')?.()

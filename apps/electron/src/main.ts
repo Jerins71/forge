@@ -1606,13 +1606,14 @@ function isTrustedMainRenderer(event: unknown): boolean {
 
 function createAutomaticManagedTab(request: BrowserAutomationRequest): BrowserTabSnapshot {
   const now = new Date().toISOString()
-  const url = request.operation === 'open' && request.input.url ? normalizeAutomaticBrowserUrl(request.input.url) : 'about:blank'
   return {
     targetAffinity: 'managed-electron',
     tabId: `tab-${randomBytes(12).toString('hex')}`,
     sessionAgentId: request.sessionAgentId,
     profileId: request.profileId,
-    url,
+    // Provision one initialized neutral renderer. The managed open operation
+    // owns the requested URL navigation after the target is registered.
+    url: 'about:blank',
     title: 'New tab',
     lifecycle: 'restoring',
     loading: false,
@@ -1630,14 +1631,6 @@ function createAutomaticManagedTab(request: BrowserAutomationRequest): BrowserTa
     createdAt: now,
     updatedAt: now,
   }
-}
-
-function normalizeAutomaticBrowserUrl(value: string): string {
-  const trimmed = value.trim()
-  if (!trimmed || trimmed === 'about:blank') return 'about:blank'
-  if (/^https?:\/\//iu.test(trimmed)) return trimmed
-  if (/^(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/iu.test(trimmed)) return `http://${trimmed}`
-  return `https://${trimmed}`
 }
 
 function buildBackendBootstrap(
