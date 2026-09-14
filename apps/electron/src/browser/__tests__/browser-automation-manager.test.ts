@@ -170,7 +170,7 @@ async function setup(
   const manager = new BrowserAutomationManager({ approvedDataRoot: root, sendToRenderer: vi.fn(), ...options })
   const webview = new FakeWebContents(101)
   manager.registerTabWebContents({ tab: tabSnapshot(), visible: false, created }, webview)
-  manager.setTabPresentation({ tabId: 'tab-1', visible: true, viewportSetting: { mode: 'fill' }, renderedViewport: { width: 800, height: 600, deviceScaleFactor: 1 }, hostGeneration: 1, sessionRevision: 1, sequence: 1 })
+  manager.setTabPresentation({ tabId: 'tab-1', visible: true, renderedViewport: { width: 800, height: 600, deviceScaleFactor: 1 }, hostGeneration: 1, sessionRevision: 1, sequence: 1 })
   managers.push(manager)
   return { manager, webview, root }
 }
@@ -224,6 +224,31 @@ describe('BrowserAutomationManager', () => {
     expect(snapshot?.ok && snapshot.operation === 'snapshot' ? snapshot.result : null).toMatchObject({
       visibleText: 'Fixture text', viewport: { width: 800, height: 600 }, screenshot: { mimeType: 'image/png', width: 800, height: 600 },
     })
+  })
+
+  it('keeps resize as the viewport-policy authority during stale presentation reconciliation', async () => {
+    const { manager } = await setup()
+    await expect(manager.execute(request('resize', { mode: 'freeform', width: 1280, height: 800, timeoutMs: 2_000 })))
+      .resolves.toMatchObject({ ok: true, updatedTab: { viewportSetting: { mode: 'freeform', width: 1280, height: 800 } } })
+
+    const presentation = manager.setTabPresentation({
+      tabId: 'tab-1', visible: true,
+      renderedViewport: { width: 1024, height: 700, deviceScaleFactor: 2 },
+      hostGeneration: 1, sessionRevision: 2, sequence: 2,
+      // Exercise a late payload from the previous renderer contract. Layout
+      // reconciliation must never write viewport policy back into the runtime.
+      viewportSetting: { mode: 'fill' },
+    } as Parameters<typeof manager.setTabPresentation>[0] & { viewportSetting: { mode: 'fill' } })
+
+    expect(presentation).toMatchObject({
+      applied: true,
+      tab: {
+        viewportSetting: { mode: 'freeform', width: 1280, height: 800 },
+        renderedViewport: { width: 1024, height: 700, deviceScaleFactor: 2 },
+      },
+    })
+    await expect(manager.execute(request('snapshot', {})))
+      .resolves.toMatchObject({ ok: true, result: { viewportSetting: { mode: 'freeform', width: 1280, height: 800 } } })
   })
 
   it('uses non-gesture evaluation and enables CDP domains only when attaching the debugger', async () => {
@@ -592,7 +617,7 @@ describe('BrowserAutomationManager', () => {
 
   it('returns created only for an explicitly provisional tab and false after canonical reconnect', async () => {
     const { manager, webview } = await setup(true)
-    manager.setTabPresentation({ tabId: 'tab-1', visible: true, viewportSetting: { mode: 'fill' }, renderedViewport: { width: 800, height: 600, deviceScaleFactor: 1 }, hostGeneration: 1, sessionRevision: 1, sequence: 1 })
+    manager.setTabPresentation({ tabId: 'tab-1', visible: true, renderedViewport: { width: 800, height: 600, deviceScaleFactor: 1 }, hostGeneration: 1, sessionRevision: 1, sequence: 1 })
     const first = await manager.execute(request('open', { show: true, reuseExistingTab: true }))
     expect(first).toMatchObject({ ok: true, result: { created: true, panelRevealRequested: true } })
     const second = await manager.execute(request('open', { show: false, reuseExistingTab: true }))
@@ -600,7 +625,7 @@ describe('BrowserAutomationManager', () => {
     manager.unregisterTabWebContents('tab-1', webview.id)
     const reconnected = new FakeWebContents(104)
     manager.registerTabWebContents({ tab: tabSnapshot(), visible: false, created: false }, reconnected)
-    manager.setTabPresentation({ tabId: 'tab-1', visible: true, viewportSetting: { mode: 'fill' }, renderedViewport: { width: 800, height: 600, deviceScaleFactor: 1 }, hostGeneration: 1, sessionRevision: 2, sequence: 2 })
+    manager.setTabPresentation({ tabId: 'tab-1', visible: true, renderedViewport: { width: 800, height: 600, deviceScaleFactor: 1 }, hostGeneration: 1, sessionRevision: 2, sequence: 2 })
     const afterReconnect = await manager.execute(request('open', { show: false, reuseExistingTab: true }))
     expect(afterReconnect).toMatchObject({ ok: true, result: { created: false } })
     const status = await manager.execute(request('status', {}, 'tab-1'))

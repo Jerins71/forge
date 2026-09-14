@@ -313,7 +313,6 @@ export const BrowserAutomationHost = forwardRef<BrowserAutomationHostHandle, Bro
           void bridge.setTabPresentation({
             tabId: tab.tabId,
             visible,
-            viewportSetting: tab.viewportSetting,
             renderedViewport: visible ? { width: 1, height: 1, deviceScaleFactor: window.devicePixelRatio || 1 } : null,
             hostGeneration: state.browserHost.hostGeneration ?? 0,
             sessionRevision: session.revision,

@@ -374,16 +374,16 @@ export class ManagedElectronTargetAdapter implements BrowserTargetAdapter {
         : null
       const visible = Boolean(request.visible && viewport)
       const renderedViewport = visible ? viewport : null
+      // Presentation owns only physical attachment and bounds. Viewport policy is
+      // changed by resize and returned to canonical session state by that operation.
       changed = tab.visible !== visible
         || JSON.stringify(tab.snapshot.renderedViewport) !== JSON.stringify(renderedViewport)
-        || (request.viewportSetting !== undefined && JSON.stringify(tab.snapshot.viewportSetting) !== JSON.stringify(request.viewportSetting))
       tab.presentationGeneration = request.hostGeneration
       tab.presentationSequence = request.sequence
       tab.visible = visible
       if (changed) {
         tab.snapshot = {
           ...tab.snapshot,
-          ...(request.viewportSetting ? { viewportSetting: request.viewportSetting } : {}),
           renderedViewport,
           physicalVisible: visible,
           updatedAt: new Date(this.now()).toISOString(),

@@ -53,7 +53,6 @@ export type ManagedBrowserWorkspaceMode = 'docked' | 'opening' | 'popped-out' | 
 export interface BrowserPresentationRequest {
   tabId: string
   visible: boolean
-  viewportSetting?: BrowserViewportSetting
   renderedViewport: BrowserRenderedViewport | null
   hostGeneration: number
   sessionRevision: number

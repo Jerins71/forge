@@ -79,6 +79,16 @@ describe('BrowserAutomationHost', () => {
     expect(registered?.capabilities.features?.managedOpenRouting).toBe(true)
   })
 
+  it('publishes presentation without writing canonical viewport policy back to Electron', async () => {
+    const setTabPresentation = vi.mocked(window.electronBridge!.browserAutomation!.setTabPresentation)
+    render()
+    await act(async () => { await Promise.resolve() })
+    expect(setTabPresentation).toHaveBeenCalled()
+    for (const [presentation] of setTabPresentation.mock.calls) {
+      expect(presentation).not.toHaveProperty('viewportSetting')
+    }
+  })
+
   it('forwards allocation to main without renderer provisional interception', async () => {
     invoke.mockResolvedValue({ ...request, ok: true, result: { tab: null }, elapsedMs: 0 })
     render()

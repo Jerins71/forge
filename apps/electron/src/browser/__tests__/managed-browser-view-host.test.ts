@@ -110,12 +110,12 @@ describe('ManagedBrowserViewHost', () => {
     const metrics = { workspaceEpoch: 2, rect: { x: 10, y: 20, width: 600, height: 500 }, innerWidth: 1000, innerHeight: 800 }
     host.setPresentationTarget('docked', main as never, metrics)
     host.setPresentationTarget('popout', popout as never, metrics)
-    await host.present({ tabId: 'one', visible: true, viewportSetting: { mode: 'fill' }, renderedViewport: { width: 1, height: 1, deviceScaleFactor: 1 }, hostGeneration: 1, sessionRevision: 1, sequence: 1, workspaceEpoch: 2 })
+    await host.present({ tabId: 'one', visible: true, renderedViewport: { width: 1, height: 1, deviceScaleFactor: 1 }, hostGeneration: 1, sessionRevision: 1, sequence: 1, workspaceEpoch: 2 })
     const identity = createdViews[0]
     expect(main.children).toEqual(new Set([identity]))
     await host.transferOwner('popout', 2)
     await host.reconcile({ controllerInstanceId: 'c', hostGeneration: 1, updateSequence: 2, workspaceEpoch: 2, sessions: [session([{ ...tab('one'), title: 'metadata changed' }, tab('two')])] })
-    await host.present({ tabId: 'one', visible: true, viewportSetting: { mode: 'fill' }, renderedViewport: { width: 1, height: 1, deviceScaleFactor: 1 }, hostGeneration: 1, sessionRevision: 2, sequence: 2, workspaceEpoch: 2 })
+    await host.present({ tabId: 'one', visible: true, renderedViewport: { width: 1, height: 1, deviceScaleFactor: 1 }, hostGeneration: 1, sessionRevision: 2, sequence: 2, workspaceEpoch: 2 })
     expect(main.children.size).toBe(0)
     expect(popout.children).toEqual(new Set([identity]))
     expect(createdViews).toHaveLength(2)

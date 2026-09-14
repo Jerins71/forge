@@ -206,7 +206,7 @@ void app.whenReady().then(async () => {
     registerCount += 1
     manager.registerTabWebContents({ tab: { ...tab, url: guest.getURL(), lifecycle: 'ready', loading: false }, visible: false, created: false }, guest)
     const presentation = manager.setTabPresentation({
-      tabId: tab.tabId, visible: true, viewportSetting: { mode: 'fill' },
+      tabId: tab.tabId, visible: true,
       renderedViewport: { width: bounds.width, height: bounds.height, deviceScaleFactor: 1 },
       hostGeneration, sessionRevision: 1, sequence: 1, workspaceEpoch: 1,
     })

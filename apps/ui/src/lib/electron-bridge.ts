@@ -56,7 +56,7 @@ export type ElectronWindowRole = 'main' | 'managed-browser-popout'
 export type ManagedBrowserWorkspaceMode = 'docked' | 'opening' | 'popped-out' | 'docking' | 'unavailable'
 export interface BrowserViewportMetrics { workspaceEpoch: number; rect: { x: number; y: number; width: number; height: number }; innerWidth: number; innerHeight: number; deviceScaleFactor?: number }
 export interface BrowserPresentationRequest {
-  tabId: string; visible: boolean; viewportSetting?: BrowserViewportSetting; renderedViewport: BrowserRenderedViewport | null
+  tabId: string; visible: boolean; renderedViewport: BrowserRenderedViewport | null
   hostGeneration: number; sessionRevision: number; sequence: number; workspaceEpoch: number
 }
 export interface BrowserPresentationAcknowledgement { applied: boolean; tab: BrowserTabSnapshot; hostGeneration: number; sessionRevision: number; sequence: number }

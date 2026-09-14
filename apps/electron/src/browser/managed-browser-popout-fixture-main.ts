@@ -37,7 +37,7 @@ void app.whenReady().then(async () => {
     await host.reconcile({ controllerInstanceId: 'product-controller', hostGeneration: 5, updateSequence: 1, workspaceEpoch: 4, sessions: [session] })
     const metrics = { workspaceEpoch: 4, rect: { x: 0, y: 0, width: 800, height: 600 }, innerWidth: 900, innerHeight: 700 }
     host.setPresentationTarget('docked', main, metrics); host.setPresentationTarget('popout', popout, metrics)
-    await host.present({ tabId: tab.tabId, visible: true, viewportSetting: { mode: 'fill' }, renderedViewport: { width: 800, height: 600, deviceScaleFactor: 1 }, hostGeneration: 5, sessionRevision: 1, sequence: 1, workspaceEpoch: 4 })
+    await host.present({ tabId: tab.tabId, visible: true, renderedViewport: { width: 800, height: 600, deviceScaleFactor: 1 }, hostGeneration: 5, sessionRevision: 1, sequence: 1, workspaceEpoch: 4 })
     const waited = await manager.execute(request('waitFor', { text: 'Increment', timeoutMs: 5_000 }))
     if (!waited.ok) throw new Error(waited.error.message)
     const identity = host.getTabWebContentsId(tab.tabId)
