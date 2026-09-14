@@ -35,11 +35,13 @@ Once the Forge extension is enabled and authenticated in a Chrome profile, the A
 
 `browser_status` returns a bounded `eligibleTabs` inventory across all ready, authenticated Chrome profiles. Each entry has an opaque canonical `tabId` accepted by `browser_open`; inventory selection does not require OS focus. Ranking is deterministic: active tab first, then a tab in the focused window, then descending Chrome last-access time (exposed publicly as `lastAccessedAt`), descending profile connection time, ascending opaque extension-instance ID, ascending window ID, and ascending tab ID. The public inventory is capped at 32 entries. `eligibleTabsTruncated` is true when the aggregate exceeds that cap, any profile reports its own inventory truncated, or a ready profile's inventory request fails; candidates from failed profiles are omitted. There is no Chrome profile confirmation prompt or picker.
 
-The `reuseExistingTab` input controls whether a tabless open selects an existing eligible Chrome tab or may create a new one:
+Browser workspace creation is separate from agent Automatic Browser selection. **New browser tab** and empty-session workspace opens create embedded Forge tabs. Existing workspace cards may still represent an embedded tab or a Chrome-backed tab. If a connected Forge Desktop is too old to keep workspace creation embedded, opening a workspace tab is rejected and Forge asks you to update Desktop.
+
+The `reuseExistingTab` input still controls whether a tabless agent `browser_open` selects an existing eligible Chrome tab or may create a new one. Agent Automatic Browser behavior is unchanged:
 
 - The model-facing `browser_open` tool defaults `reuseExistingTab` to `true`. Without `tabId`, it selects the active or most recently accessed eligible tab from the profile-wide inventory, without requiring Chrome or the operating system to be focused.
 - Passing an inventory `tabId` explicitly selects that exact eligible Chrome tab. The tab ID comes from `browser_status`; it is not a profile picker or host preference.
-- Tabs created from the Browser workspace use `reuseExistingTab: false`. When creation is needed, or when no eligible tab exists, Forge may create an inactive neutral `about:blank` tab. A URL-bearing open performs one authorized initial navigation on that created tab.
+- Explicit `reuseExistingTab: false`, or no eligible tab, may create an inactive neutral Chrome `about:blank` tab. A URL-bearing open performs one authorized initial navigation on that created tab.
 - After an open selects a logical tab, subsequent non-open operations remain sticky to it. Explicit Chrome tabs do not migrate, and child tabs are not automatically enrolled.
 
 Chrome-internal pages, extension pages, and other platform-restricted pages remain excluded from eligibility. A normal web tab held by DevTools or another competing debugger may still appear in `eligibleTabs`, but acquisition or execution fails while that debugger controls the tab; inventory does not imply that Forge can take control.
