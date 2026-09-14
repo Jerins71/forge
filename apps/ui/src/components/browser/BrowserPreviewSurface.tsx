@@ -44,7 +44,13 @@ interface DragState extends OverlayPosition {
   clientY: number
 }
 
-export function BrowserPreviewSurface({ onOpenManagedBrowser }: { onOpenManagedBrowser?(): void }) {
+export function BrowserPreviewSurface({
+  onOpenManagedBrowser,
+  hidden = false,
+}: {
+  onOpenManagedBrowser?(): void
+  hidden?: boolean
+}) {
   const bridge = window.electronBridge?.browserPreview
   const surfaceRef = useRef<HTMLDivElement | null>(null)
   const overlayRef = useRef<HTMLElement | null>(null)
@@ -130,7 +136,9 @@ export function BrowserPreviewSurface({ onOpenManagedBrowser }: { onOpenManagedB
     const lifecycleId = ++lifecycle.current
     const pendingFrames = pending.current
     const decodingFrameUrls = decodingUrls.current
+    let receivedLiveSnapshot = false
     const removeSnapshot = bridge.onSnapshotChanged((next) => {
+      receivedLiveSnapshot = true
       applySnapshot(next)
       void pump()
     })
@@ -143,7 +151,7 @@ export function BrowserPreviewSurface({ onOpenManagedBrowser }: { onOpenManagedB
       void pump()
     })
     void bridge.getSnapshot().then((next) => {
-      if (lifecycle.current !== lifecycleId) return
+      if (lifecycle.current !== lifecycleId || receivedLiveSnapshot) return
       applySnapshot(next)
       void pump()
     }).catch((caught) => {
@@ -245,7 +253,7 @@ export function BrowserPreviewSurface({ onOpenManagedBrowser }: { onOpenManagedB
     setPosition(clampPosition({ x: start.x + movement.x, y: start.y + movement.y }, surfaceRef.current, overlayRef.current))
   }
 
-  if (!snapshot) return null
+  if (hidden || !snapshot) return null
 
   return (
     <div ref={surfaceRef} className="pointer-events-none absolute inset-0 z-40 overflow-hidden" data-browser-preview-layer>

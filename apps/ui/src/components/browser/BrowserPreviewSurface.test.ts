@@ -113,6 +113,62 @@ async function publish(next: BrowserPreviewDeckSnapshot | null): Promise<void> {
 }
 
 describe('BrowserPreviewSurface', () => {
+  it('stays subscribed while hidden and reveals a preview opened from the Browser workspace', async () => {
+    getSnapshot.mockResolvedValueOnce(null)
+    await act(async () => {
+      root?.render(createElement(BrowserPreviewSurface, { hidden: true }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(container.querySelector('[data-browser-preview-layer]')).toBeNull()
+
+    const withFrame = snapshot({
+      cards: [{ ...snapshot().cards[0]!, state: 'updating', frameSequence: 1, hasFrame: true, width: 1, height: 1, ageMsAtDelivery: 0 }],
+    })
+    await publish(withFrame)
+    expect(container.querySelector('[data-browser-preview-layer]')).toBeNull()
+    expect(pullFrame).toHaveBeenCalledOnce()
+
+    await act(async () => {
+      root?.render(createElement(BrowserPreviewSurface, { hidden: false }))
+      await Promise.resolve()
+    })
+    expect(container.querySelector('[data-browser-preview-layer]')).not.toBeNull()
+    expect(container.textContent).toContain('Browser previews')
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:preview-1')
+  })
+
+  it('does not overwrite a newer live preview with a delayed bootstrap snapshot', async () => {
+    let resolveBootstrap!: (value: BrowserPreviewDeckSnapshot | null) => void
+    getSnapshot.mockImplementationOnce(() => new Promise((resolve) => { resolveBootstrap = resolve }))
+    await render()
+
+    await publish(snapshot())
+    await act(async () => {
+      resolveBootstrap(null)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(container.querySelector('[data-browser-preview-layer]')).not.toBeNull()
+    expect(container.textContent).toContain('Browser previews')
+  })
+
+  it('does not restore a stale bootstrap deck after a newer live close event', async () => {
+    let resolveBootstrap!: (value: BrowserPreviewDeckSnapshot | null) => void
+    getSnapshot.mockImplementationOnce(() => new Promise((resolve) => { resolveBootstrap = resolve }))
+    await render()
+
+    await publish(null)
+    await act(async () => {
+      resolveBootstrap(snapshot())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(container.querySelector('[data-browser-preview-layer]')).toBeNull()
+  })
+
   it('mounts as a read-only overlay inside the main renderer and routes shell controls narrowly', async () => {
     await render()
     expect(container.querySelector('[data-browser-preview-layer]')).not.toBeNull()

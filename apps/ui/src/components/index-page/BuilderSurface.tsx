@@ -2658,8 +2658,11 @@ export function BuilderSurface({
                 }}
               />
             )}
-            {activeView === 'chat' && !panels.isInlineDiffViewerOpen && !panels.isBrowserOpen ? (
-              <BrowserPreviewSurface onOpenManagedBrowser={panels.handleOpenBrowserFromReveal} />
+            {activeView === 'chat' && !panels.isInlineDiffViewerOpen ? (
+              <BrowserPreviewSurface
+                hidden={panels.isBrowserOpen}
+                onOpenManagedBrowser={panels.handleOpenBrowserFromReveal}
+              />
             ) : null}
           </div>
 
