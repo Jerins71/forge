@@ -26,14 +26,8 @@ type BackendBootstrap = {
 }
 
 const bootstrap = readBootstrap()
-const roleScopedBridge = bootstrap.windowRole === 'browser-preview'
+const roleScopedBridge = bootstrap.windowRole === 'managed-browser-popout'
   ? {
-      windowRole: bootstrap.windowRole,
-      platform: bootstrap.platform,
-      browserPreview: createTrustedBrowserPreviewBridge(ipcRenderer, bootstrap.windowRole),
-    }
-  : bootstrap.windowRole === 'managed-browser-popout'
-    ? {
         windowRole: bootstrap.windowRole,
         platform: bootstrap.platform,
         browserWorkspace: createTrustedBrowserWorkspaceBridge(
@@ -42,8 +36,8 @@ const roleScopedBridge = bootstrap.windowRole === 'browser-preview'
           bootstrap.managedBrowserPopoutAvailable,
         ),
       }
-    : {
-        windowRole: bootstrap.windowRole,
+  : {
+      windowRole: bootstrap.windowRole,
         backendUrl: bootstrap.backendUrl,
         backendWsUrl: bootstrap.backendWsUrl,
         getVersion: (): string => bootstrap.version,
@@ -116,7 +110,7 @@ contextBridge.exposeInMainWorld('electronBridge', roleScopedBridge)
 function readBootstrap(): BackendBootstrap {
   const value = ipcRenderer.sendSync(BACKEND_READY_CHANNEL) as Partial<BackendBootstrap> | null
   if (!value) throw new Error('Electron bridge bootstrap was not available from the main process')
-  if (value.windowRole !== 'main' && value.windowRole !== 'managed-browser-popout' && value.windowRole !== 'browser-preview') throw new Error('Electron bridge bootstrap did not include a valid windowRole')
+  if (value.windowRole !== 'main' && value.windowRole !== 'managed-browser-popout') throw new Error('Electron bridge bootstrap did not include a valid windowRole')
   if (typeof value.platform !== 'string' || value.platform.length === 0) throw new Error('Electron bridge bootstrap did not include a valid platform')
   if (value.appRuntime !== 'development' && value.appRuntime !== 'installed') throw new Error('Electron bridge bootstrap did not include a valid appRuntime')
   if (typeof value.appStartedAt !== 'string' || !Number.isFinite(Date.parse(value.appStartedAt))) throw new Error('Electron bridge bootstrap did not include a valid appStartedAt')

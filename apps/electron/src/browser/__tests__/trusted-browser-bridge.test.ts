@@ -107,7 +107,7 @@ describe('trusted browser recording bridge', () => {
 })
 
 describe('trusted browser preview bridge', () => {
-  it('constructs mutually exclusive main and preview capabilities with typed envelopes', async () => {
+  it('gives the authoritative main renderer the embedded preview capabilities with typed envelopes', async () => {
     const listeners = new Map<string, (...args: unknown[]) => void>()
     const ipcRenderer = {
       on: vi.fn((channel: string, listener: (...args: unknown[]) => void) => listeners.set(channel, listener)),
@@ -120,17 +120,14 @@ describe('trusted browser preview bridge', () => {
     }
     const main = createTrustedBrowserPreviewBridge(ipcRenderer as never, 'main')
     expect(main.open).toBeTypeOf('function')
-    expect(main.getSnapshot).toBeUndefined()
+    expect(main.getSnapshot).toBeTypeOf('function')
     await main.open?.({ workspaceEpoch: 1, sessionAgentId: 'session', profileId: 'profile', tabId: 'tab' })
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(BROWSER_PREVIEW_IPC.open, {
       workspaceEpoch: 1, sessionAgentId: 'session', profileId: 'profile', tabId: 'tab',
     })
-
-    const preview = createTrustedBrowserPreviewBridge(ipcRenderer as never, 'browser-preview')
-    expect(preview.open).toBeUndefined()
-    await expect(preview.getSnapshot?.()).resolves.toBeNull()
+    await expect(main.getSnapshot?.()).resolves.toBeNull()
     const listener = vi.fn()
-    const dispose = preview.onFrameAvailable?.(listener)
+    const dispose = main.onFrameAvailable?.(listener)
     listeners.get(BROWSER_PREVIEW_IPC.frameAvailable)?.({}, { previewGeneration: 1, tabId: 'tab', sequence: 2 })
     expect(listener).toHaveBeenCalledWith({ previewGeneration: 1, tabId: 'tab', sequence: 2 })
     dispose?.()
@@ -142,7 +139,7 @@ describe('trusted browser preview bridge', () => {
   it('rejects malformed preview envelopes', async () => {
     const bridge = createTrustedBrowserPreviewBridge({
       on: vi.fn(), removeListener: vi.fn(), invoke: vi.fn(async () => ({ ok: true })),
-    } as never, 'browser-preview')
+    } as never, 'main')
     await expect(bridge.getSnapshot?.()).rejects.toMatchObject({ name: 'BrowserIpcError', code: 'malformed-response' })
   })
 })

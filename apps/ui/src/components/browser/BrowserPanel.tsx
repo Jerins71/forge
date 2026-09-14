@@ -43,6 +43,7 @@ interface BrowserPanelProps {
   commandPort?: BrowserWorkspaceCommandPort
   mode?: ManagedBrowserWorkspaceMode
   popoutAvailable?: boolean
+  onPreviewOpened?(): void
   /** @deprecated Local compatibility adapter; BrowserPanel itself never opens a transport. */
   client?: ManagerWsClient | null
   /** @deprecated Local compatibility adapter. */
@@ -61,7 +62,7 @@ function emptyBrowserOpenAttemptKey(
 
 export function BrowserPanel({
   client = null, sessionAgentId, profileId, snapshot, host, hostRef, commandPort,
-  mode = 'docked', popoutAvailable = Boolean(window.electronBridge?.browserWorkspace?.capability.popoutAvailable),
+  mode = 'docked', popoutAvailable = Boolean(window.electronBridge?.browserWorkspace?.capability.popoutAvailable), onPreviewOpened,
 }: BrowserPanelProps) {
   const openTabs = (snapshot?.tabs ?? []).filter((tab) => tab.lifecycle !== 'closed')
   const hasOpenTab = openTabs.length > 0
@@ -129,6 +130,12 @@ export function BrowserPanel({
   }, [controlsUnavailable, emptyAuthorityIdentity, emptyAuthorityKey, hasOpenTab, host.connected])
 
   const resize = (viewport: BrowserViewportSetting): void => { if (activeTab) void run(() => commands.resize(activeTab.tabId, viewport)) }
+  const preview = (tabId: string): void => {
+    void run(async () => {
+      await commands.preview?.(tabId)
+      onPreviewOpened?.()
+    })
+  }
   const popped = mode === 'popped-out' || mode === 'opening'
   const managedTarget = !activeTab || activeTab.targetAffinity === 'managed-electron'
 
@@ -165,7 +172,7 @@ export function BrowserPanel({
           <IconButton label="Zoom in" disabled={controlsUnavailable || !activeTab} onClick={() => activeTab && void run(() => commands.zoom(activeTab.tabId, activeTab.zoomFactor + .1))}><ZoomIn /></IconButton>
           <IconButton label="Screenshot" disabled={controlsUnavailable || !activeTab} onClick={() => activeTab && void run(async () => setScreenshot(await commands.capture(activeTab.tabId)))}><Camera /></IconButton>
           <IconButton label={activeTab?.recording ? 'Stop recording' : 'Start recording'} disabled={controlsUnavailable || !activeTab || !host.capabilities?.features?.recording} onClick={() => activeTab && void run(() => activeTab.recording ? commands.stopRecording(activeTab.tabId, activeTab.recording.recordingId) : commands.startRecording(activeTab.tabId))}><Circle className={cn(activeTab?.recording && 'fill-red-500 text-red-500')} /></IconButton>
-          {commands.preview ? <IconButton label="Open read-only browser preview" disabled={controlsUnavailable || !activeTab} onClick={() => activeTab && void run(() => commands.preview?.(activeTab.tabId))}><Eye /></IconButton> : null}
+          {commands.preview ? <IconButton label="Open read-only browser preview" disabled={controlsUnavailable || !activeTab} onClick={() => activeTab && preview(activeTab.tabId)}><Eye /></IconButton> : null}
           {popoutAvailable && (commands.popOut || commands.dock) ? (
             popped
               ? <IconButton label="Dock Automatic Browser in main window" onClick={() => void run(() => commands.dock?.())}><PanelTopClose /></IconButton>
@@ -195,7 +202,7 @@ export function BrowserPanel({
           <div className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
             <span>This tab is open in Chrome.</span>
             {activeTab ? <TabStatus tab={activeTab} /> : null}
-            {commands.preview ? <button type="button" className="rounded border px-3 py-1.5 text-foreground hover:bg-muted focus-visible:ring-2" onClick={() => activeTab && void run(() => commands.preview?.(activeTab.tabId))}>Preview</button> : null}
+            {commands.preview ? <button type="button" className="rounded border px-3 py-1.5 text-foreground hover:bg-muted focus-visible:ring-2" onClick={() => activeTab && preview(activeTab.tabId)}>Preview</button> : null}
             <button type="button" className="rounded border px-3 py-1.5 text-foreground hover:bg-muted focus-visible:ring-2" onClick={() => activeTab && void run(() => commands.reveal(activeTab.tabId))}>Show in Chrome</button>
             <button type="button" className="rounded border px-3 py-1.5 text-foreground hover:bg-muted focus-visible:ring-2" onClick={() => activeTab && void run(() => commands.takeControl(activeTab.tabId))}>Take Control</button>
             <HelpTrigger contextKey="chat.browser" size="sm" className="size-8" />

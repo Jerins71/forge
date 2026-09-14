@@ -12,6 +12,7 @@ import { WorkGraphWorkerHighlightProvider } from '@/components/chat/WorkGraphWor
 import { ArtifactsSidebar } from '@/components/chat/ArtifactsSidebar'
 import { shouldRevealBrowserPanel } from '@/components/index-page/activity-rail-workspace'
 import { BrowserAutomationHost, type BrowserAutomationHostHandle } from '@/components/browser/BrowserAutomationHost'
+import { BrowserPreviewSurface } from '@/components/browser/BrowserPreviewSurface'
 import { type BrowserWorkspaceCommandPort } from '@/components/browser/BrowserPanel'
 import { countOpenBrowserTabs, projectRuntimeBrowserTabState } from '@/components/browser/browser-runtime-state'
 import { BuilderBrowserPanel } from '@/components/index-page/BuilderBrowserPanel'
@@ -2296,7 +2297,7 @@ export function BuilderSurface({
             />
           ) : null}
 
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="relative flex min-w-0 flex-1 flex-col">
             {panels.isInlineDiffViewerOpen ? (
               <div className="diff-viewer flex min-h-0 flex-1 flex-col overflow-hidden bg-background" aria-label="Source Control workspace">
                 <DiffViewerContent
@@ -2396,6 +2397,7 @@ export function BuilderSurface({
                 commandPort={browserCommandPort}
                 mode={browserWorkspaceMode}
                 popoutAvailable={Boolean(window.electronBridge?.browserWorkspace?.capability.popoutAvailable)}
+                onPreviewOpened={panels.handleReturnToChatWorkspace}
               />
             ) : (
               <ChatWorkspace
@@ -2656,6 +2658,9 @@ export function BuilderSurface({
                 }}
               />
             )}
+            {activeView === 'chat' && !panels.isInlineDiffViewerOpen && !panels.isBrowserOpen ? (
+              <BrowserPreviewSurface onOpenManagedBrowser={panels.handleOpenBrowserFromReveal} />
+            ) : null}
           </div>
 
           {activeView === 'chat' && !panels.isInlineDiffViewerOpen ? (

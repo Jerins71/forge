@@ -50,7 +50,7 @@ export const BROWSER_WORKSPACE_IPC = {
   focus: 'forge:browser-workspace-focus', viewport: 'forge:browser-workspace-viewport',
 } as const
 
-export type ElectronWindowRole = 'main' | 'managed-browser-popout' | 'browser-preview'
+export type ElectronWindowRole = 'main' | 'managed-browser-popout'
 export type ManagedBrowserWorkspaceMode = 'docked' | 'opening' | 'popped-out' | 'docking' | 'unavailable'
 
 export interface BrowserPresentationRequest {
@@ -132,7 +132,7 @@ export interface BrowserPreviewBridge {
   getSnapshot?(): Promise<BrowserPreviewDeckSnapshot | null>
   pullFrame?(request: BrowserPreviewFramePullRequest): Promise<BrowserPreviewFramePayload | null>
   sendCommand?(command: BrowserPreviewShellCommand): Promise<void>
-  onSnapshotChanged?(listener: (snapshot: BrowserPreviewDeckSnapshot) => void): () => void
+  onSnapshotChanged?(listener: (snapshot: BrowserPreviewDeckSnapshot | null) => void): () => void
   onFrameAvailable?(listener: (available: BrowserPreviewFrameAvailable) => void): () => void
 }
 

@@ -11,7 +11,6 @@ import type { BrowserPreviewHost } from './browser-preview-host.js'
 export function installBrowserPreviewIpc(options: {
   ipcMain: IpcMain
   getMainWindow(): BrowserWindow | null
-  getPreviewWindow(): BrowserWindow | null
   host: BrowserPreviewHost
 }): () => void {
   const channels: string[] = []
@@ -38,15 +37,15 @@ export function installBrowserPreviewIpc(options: {
     return options.host.open(parseOpenRequest(value))
   })
   handle(BROWSER_PREVIEW_IPC.snapshot, (event) => {
-    requireWindow(event, options.getPreviewWindow(), 'Browser Preview state is restricted to the current preview renderer')
+    requireWindow(event, options.getMainWindow(), 'Browser Preview state is restricted to the authoritative Forge renderer')
     return options.host.getSnapshot()
   })
   handle(BROWSER_PREVIEW_IPC.pullFrame, (event, value) => {
-    requireWindow(event, options.getPreviewWindow(), 'Browser Preview frames are restricted to the current preview renderer')
+    requireWindow(event, options.getMainWindow(), 'Browser Preview frames are restricted to the authoritative Forge renderer')
     return options.host.pullFrame(parsePullRequest(value))
   })
   handle(BROWSER_PREVIEW_IPC.command, (event, value) => {
-    requireWindow(event, options.getPreviewWindow(), 'Browser Preview commands are restricted to the current preview renderer')
+    requireWindow(event, options.getMainWindow(), 'Browser Preview commands are restricted to the authoritative Forge renderer')
     return options.host.handleCommand(parseCommand(value))
   })
 
@@ -92,11 +91,6 @@ function parseCommand(value: unknown): BrowserPreviewShellCommand {
     exactKeys(record, ['hidden', 'previewGeneration', 'type'], 'Browser Preview command')
     if (typeof record.hidden !== 'boolean') throw new BrowserHostError('invalid-input', 'Browser Preview hidden-content value is invalid')
     return { type, previewGeneration, hidden: record.hidden }
-  }
-  if (type === 'set-pinned') {
-    exactKeys(record, ['pinned', 'previewGeneration', 'type'], 'Browser Preview command')
-    if (typeof record.pinned !== 'boolean') throw new BrowserHostError('invalid-input', 'Browser Preview pin value is invalid')
-    return { type, previewGeneration, pinned: record.pinned }
   }
   throw new BrowserHostError('invalid-input', 'Browser Preview command type is invalid')
 }

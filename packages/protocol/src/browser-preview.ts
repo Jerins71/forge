@@ -50,7 +50,6 @@ export interface BrowserPreviewDeckSnapshot {
   profileId: string
   paused: boolean
   hiddenContent: boolean
-  pinned: boolean
   cards: BrowserPreviewCardSnapshot[]
 }
 
@@ -90,6 +89,5 @@ export type BrowserPreviewShellCommand =
   | { type: 'remove'; previewGeneration: number; tabId: string }
   | { type: 'set-paused'; previewGeneration: number; paused: boolean }
   | { type: 'set-hidden-content'; previewGeneration: number; hidden: boolean }
-  | { type: 'set-pinned'; previewGeneration: number; pinned: boolean }
   | { type: 'promote'; previewGeneration: number; tabId: string }
   | { type: 'reveal'; previewGeneration: number; tabId: string }

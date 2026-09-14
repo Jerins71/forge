@@ -102,7 +102,6 @@ type BackendBootstrap = {
 let mainWindow: BrowserWindow | null = null
 let mainRendererRecovery: MainRendererRecoveryController | null = null
 let browserPopoutWindow: BrowserWindow | null = null
-let browserPreviewWindow: BrowserWindow | null = null
 let browserPreviewHost: BrowserPreviewHost | null = null
 let browserViewHost: ManagedBrowserViewHost | null = null
 let browserWorkspaceIpc: ReturnType<typeof installBrowserWorkspaceIpc> | null = null
@@ -677,9 +676,7 @@ if (!hasSingleInstanceLock) {
       ? 'main'
       : browserPopoutWindow && !browserPopoutWindow.isDestroyed() && senderId === browserPopoutWindow.webContents.id
         ? 'managed-browser-popout'
-        : browserPreviewWindow && !browserPreviewWindow.isDestroyed() && senderId === browserPreviewWindow.webContents.id
-          ? 'browser-preview'
-          : null
+        : null
     if (windowRole === null) {
       event.returnValue = null
       return
@@ -916,8 +913,7 @@ if (!hasSingleInstanceLock) {
     })
     browserPreviewHost = new BrowserPreviewHost({
       manager: browserManager,
-      getWindow: () => browserPreviewWindow,
-      createWindow: createBrowserPreviewWindow,
+      getWindow: () => mainWindow,
       promoteManaged: async (input) => {
         const workspace = browserWorkspaceIpc
         if (!workspace) throw new Error('Browser workspace is unavailable')
@@ -932,7 +928,6 @@ if (!hasSingleInstanceLock) {
     disposeBrowserPreviewIpc = installBrowserPreviewIpc({
       ipcMain,
       getMainWindow: () => mainWindow,
-      getPreviewWindow: () => browserPreviewWindow,
       host: browserPreviewHost,
     })
     disposeExternalChromeIpc = installExternalChromeIpc({
@@ -957,11 +952,21 @@ if (!hasSingleInstanceLock) {
       publishPreviewScope: (publication) => browserPreviewHost?.publishScope(publication),
     })
     const clearPreviewContent = (): void => browserPreviewHost?.clearSensitiveContent()
+    const previewVisibilityChanged = (): void => browserPreviewHost?.handleWindowVisibilityChanged()
+    const previewRendererWindow = mainWindow
     powerMonitor.on('lock-screen', clearPreviewContent)
     powerMonitor.on('suspend', clearPreviewContent)
+    previewRendererWindow?.on('show', previewVisibilityChanged)
+    previewRendererWindow?.on('hide', previewVisibilityChanged)
+    previewRendererWindow?.on('minimize', previewVisibilityChanged)
+    previewRendererWindow?.on('restore', previewVisibilityChanged)
     disposeBrowserPreviewListeners = () => {
       powerMonitor.off('lock-screen', clearPreviewContent)
       powerMonitor.off('suspend', clearPreviewContent)
+      previewRendererWindow?.off('show', previewVisibilityChanged)
+      previewRendererWindow?.off('hide', previewVisibilityChanged)
+      previewRendererWindow?.off('minimize', previewVisibilityChanged)
+      previewRendererWindow?.off('restore', previewVisibilityChanged)
     }
     installManagedBrowserFocusAggregation(mainWindow)
     initAutoUpdater({
@@ -1154,106 +1159,6 @@ function createMainWindow(): BrowserWindow {
   return window
 }
 
-async function createBrowserPreviewWindow(): Promise<BrowserWindow> {
-  if (browserPreviewWindow && !browserPreviewWindow.isDestroyed()) return browserPreviewWindow
-  const saved = loadWindowState({
-    key: 'browser-preview-window-state',
-    minWidth: 320,
-    minHeight: 240,
-    defaultState: { width: 460, height: 360, isMaximized: false, isFullScreen: false },
-  })
-  const window = new BrowserWindow({
-    title: 'Forge Browser Previews',
-    width: saved.width,
-    height: saved.height,
-    ...(saved.x !== undefined && saved.y !== undefined ? { x: saved.x, y: saved.y } : {}),
-    minWidth: 320,
-    minHeight: 240,
-    show: false,
-    alwaysOnTop: false,
-    fullscreenable: false,
-    ...(process.platform !== 'darwin' && { autoHideMenuBar: true }),
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-      webviewTag: false,
-      backgroundThrottling: true,
-      partition: 'forge-browser-preview-shell',
-      safeDialogs: true,
-    },
-  })
-  browserPreviewWindow = window
-  trackWindowState(window, { key: 'browser-preview-window-state', minWidth: 320, minHeight: 240 })
-  installBrowserPreviewContentSecurityPolicy(window)
-  window.webContents.session.setPermissionCheckHandler(() => false)
-  window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  window.webContents.on('will-attach-webview', (event) => event.preventDefault())
-  window.webContents.on('will-navigate', (event, url) => {
-    if (!isTrustedRendererUrl(url)) event.preventDefault()
-  })
-  const visibilityChanged = (): void => browserPreviewHost?.handleWindowVisibilityChanged()
-  window.on('show', visibilityChanged)
-  window.on('hide', visibilityChanged)
-  window.on('minimize', visibilityChanged)
-  window.on('restore', visibilityChanged)
-  window.on('closed', () => {
-    if (browserPreviewWindow === window) browserPreviewWindow = null
-    browserPreviewHost?.handleWindowClosed()
-  })
-  const closeFailedWindow = (): void => {
-    if (!window.isDestroyed()) window.close()
-  }
-  window.webContents.on('render-process-gone', closeFailedWindow)
-  window.webContents.on('did-fail-load', closeFailedWindow)
-  window.webContents.on('before-input-event', (event, input) => {
-    const closeShortcut = input.type === 'keyDown' && input.key.toLowerCase() === 'w'
-      && (process.platform === 'darwin' ? input.meta : input.control)
-    if (!closeShortcut && !(input.type === 'keyDown' && input.key === 'Escape')) return
-    event.preventDefault()
-    window.close()
-  })
-  await window.loadURL(resolveRendererUrl())
-  return window
-}
-
-function installBrowserPreviewContentSecurityPolicy(window: BrowserWindow): void {
-  const previewWebContentsId = window.webContents.id
-  const connectSource = app.isPackaged
-    ? "'none'"
-    : (() => {
-        const renderer = new URL(electronDevServerUrl)
-        const socketProtocol = renderer.protocol === 'https:' ? 'wss:' : 'ws:'
-        return `'self' ${socketProtocol}//${renderer.host}`
-      })()
-  const policy = [
-    "default-src 'none'",
-    "base-uri 'none'",
-    "object-src 'none'",
-    "frame-src 'none'",
-    "form-action 'none'",
-    "script-src 'self' 'unsafe-inline'",
-    "style-src 'self' 'unsafe-inline'",
-    "font-src 'self'",
-    "img-src blob:",
-    `connect-src ${connectSource}`,
-  ].join('; ')
-  window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-    if (details.webContentsId !== previewWebContentsId || details.resourceType !== 'mainFrame') {
-      callback({ responseHeaders: details.responseHeaders })
-      return
-    }
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [policy],
-      },
-    })
-  })
-}
-
 function disposeBrowserPreviewRuntime(): void {
   disposeBrowserPreviewListeners?.()
   disposeBrowserPreviewListeners = null
@@ -1261,9 +1166,6 @@ function disposeBrowserPreviewRuntime(): void {
   disposeBrowserPreviewIpc = null
   browserPreviewHost?.dispose()
   browserPreviewHost = null
-  const window = browserPreviewWindow
-  browserPreviewWindow = null
-  if (window && !window.isDestroyed()) window.close()
 }
 
 async function createBrowserPopoutWindow(): Promise<BrowserWindow> {

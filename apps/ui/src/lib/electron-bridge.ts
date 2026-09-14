@@ -54,7 +54,7 @@ export interface ExternalChromeBridge {
   revealExtensionFolder(): Promise<ExternalChromeControlResult>
 }
 
-export type ElectronWindowRole = 'main' | 'managed-browser-popout' | 'browser-preview'
+export type ElectronWindowRole = 'main' | 'managed-browser-popout'
 export type ManagedBrowserWorkspaceMode = 'docked' | 'opening' | 'popped-out' | 'docking' | 'unavailable'
 export interface BrowserViewportMetrics { workspaceEpoch: number; rect: { x: number; y: number; width: number; height: number }; innerWidth: number; innerHeight: number; deviceScaleFactor?: number }
 export interface BrowserPresentationRequest {
@@ -107,7 +107,7 @@ export interface BrowserPreviewBridge {
   getSnapshot?(): Promise<BrowserPreviewDeckSnapshot | null>
   pullFrame?(request: BrowserPreviewFramePullRequest): Promise<BrowserPreviewFramePayload | null>
   sendCommand?(command: BrowserPreviewShellCommand): Promise<void>
-  onSnapshotChanged?(listener: (snapshot: BrowserPreviewDeckSnapshot) => void): () => void
+  onSnapshotChanged?(listener: (snapshot: BrowserPreviewDeckSnapshot | null) => void): () => void
   onFrameAvailable?(listener: (available: BrowserPreviewFrameAvailable) => void): () => void
 }
 export interface BrowserWorkspaceBridge {

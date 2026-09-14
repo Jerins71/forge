@@ -9,7 +9,7 @@ import { BrowserPreviewHost } from '../browser-preview-host.js'
 
 class FakeWindow {
   destroyed = false
-  visible = false
+  visible = true
   minimized = false
   alwaysOnTop = false
   close = vi.fn(() => { this.destroyed = true; this.visible = false })
@@ -56,7 +56,7 @@ function observation(tabId: string, overrides: Record<string, unknown> = {}) {
 }
 
 function setup(now = { value: 0 }) {
-  const windows: FakeWindow[] = []
+  const windows: FakeWindow[] = [new FakeWindow()]
   const manager = {
     tryCapturePreviewFrame: vi.fn(async () => ({ status: 'captured' as const, data: 'eA==', width: 640, height: 360 })),
   }
@@ -64,14 +64,7 @@ function setup(now = { value: 0 }) {
   const revealChrome = vi.fn(async () => undefined)
   const host = new BrowserPreviewHost({
     manager: manager as never,
-    getWindow: () => windows.at(-1) ?? null as never,
-    createWindow: async () => {
-      const current = windows.at(-1)
-      if (current && !current.destroyed) return current as never
-      const window = new FakeWindow()
-      windows.push(window)
-      return window as never
-    },
+    getWindow: () => windows[0] as never,
     promoteManaged,
     revealChrome,
     now: () => now.value,
@@ -120,7 +113,10 @@ describe('BrowserPreviewHost', () => {
     await expect(fixture.host.open({ ...identity, tabId: `managed-${BROWSER_PREVIEW_MAX_CARDS + 1}` }))
       .rejects.toMatchObject({ code: 'invalid-input' })
     expect(fixture.windows).toHaveLength(1)
-    expect(fixture.windows[0]?.showInactive).toHaveBeenCalledTimes(BROWSER_PREVIEW_MAX_CARDS)
+    expect(fixture.windows[0]?.send).toHaveBeenCalledWith(
+      BROWSER_PREVIEW_IPC.snapshotChanged,
+      expect.objectContaining({ cards: expect.arrayContaining([expect.objectContaining({ tabId: 'managed-1' })]) }),
+    )
   })
 
   it('mirrors only bounded exact Chrome snapshots, ignores them while paused, and expires retained pixels', async () => {
@@ -202,24 +198,19 @@ describe('BrowserPreviewHost', () => {
     expect(fixture.host.getSnapshot()?.cards[0]).toMatchObject({ frameSequence: 1, hasFrame: true })
   })
 
-  it('captures the current presented card when presentation changes before a scheduled capture', async () => {
+  it('captures a managed card after its source leaves the Browser workspace', async () => {
     vi.useFakeTimers()
     const fixture = setup()
-    fixture.host.publishScope(scope([managed('managed-a'), managed('managed-b', false)]))
-    await fixture.host.open({ ...identity, tabId: 'managed-a' })
-    await fixture.host.open({ ...identity, tabId: 'managed-b' })
+    fixture.host.publishScope(scope([managed('managed-hidden', false)]))
+    const opened = await fixture.host.open({ ...identity, tabId: 'managed-hidden' })
+    expect(opened.cards[0]).toMatchObject({ presented: false, state: 'delayed' })
 
-    fixture.host.publishScope(scope([
-      managed('managed-a', false),
-      managed('managed-b'),
-    ], { sessionRevision: 5 }))
     await vi.advanceTimersByTimeAsync(0)
     await flush()
 
-    expect(fixture.manager.tryCapturePreviewFrame).toHaveBeenCalledTimes(1)
-    expect(fixture.manager.tryCapturePreviewFrame).toHaveBeenCalledWith('managed-b')
-    expect(fixture.host.getSnapshot()?.cards.find((card) => card.tabId === 'managed-b'))
-      .toMatchObject({ hasFrame: true, state: 'updating' })
+    expect(fixture.manager.tryCapturePreviewFrame).toHaveBeenCalledWith('managed-hidden')
+    expect(fixture.host.getSnapshot()?.cards[0])
+      .toMatchObject({ presented: false, hasFrame: true, state: 'updating' })
   })
 
   it('clears sensitive frames and prevents a late prior-generation capture from reappearing or overlapping', async () => {
@@ -261,6 +252,19 @@ describe('BrowserPreviewHost', () => {
       expect.objectContaining({ tabId: 'managed-1', label: 'Newest label' }),
     ])
     expect(fixture.windows[0]?.close).not.toHaveBeenCalled()
+  })
+
+  it('publishes a null snapshot instead of closing the main window when the final card is removed', async () => {
+    const fixture = setup()
+    fixture.host.publishScope(scope([chrome('chrome-1')]))
+    const opened = await fixture.host.open({ ...identity, tabId: 'chrome-1' })
+    fixture.windows[0]!.send.mockClear()
+
+    await fixture.host.handleCommand({ type: 'remove', previewGeneration: opened.previewGeneration, tabId: 'chrome-1' })
+
+    expect(fixture.host.getSnapshot()).toBeNull()
+    expect(fixture.windows[0]!.send).toHaveBeenCalledWith(BROWSER_PREVIEW_IPC.snapshotChanged, null)
+    expect(fixture.windows[0]!.close).not.toHaveBeenCalled()
   })
 
   it('routes shell actions through exact source-specific callbacks without mutating tab ownership', async () => {

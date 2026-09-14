@@ -35,8 +35,8 @@ function snapshot(tabs: BrowserTabSnapshot[], activeTabId = tabs[0]?.tabId ?? nu
 function port(): BrowserWorkspaceCommandPort {
   return { open: vi.fn(), activate: vi.fn(), close: vi.fn(), resize: vi.fn(), navigate: vi.fn(), history: vi.fn(), reload: vi.fn(), zoom: vi.fn(), capture: vi.fn(async () => ''), startRecording: vi.fn(), stopRecording: vi.fn(), reveal: vi.fn(), takeControl: vi.fn(), popOut: vi.fn(), dock: vi.fn() }
 }
-function render(state: BrowserSessionSnapshot, commands = port(), mode: 'docked' | 'popped-out' = 'docked') {
-  act(() => root.render(createElement(BrowserPanel, { sessionAgentId: 'session-1', profileId: 'profile-1', snapshot: state, host, commandPort: commands, mode, popoutAvailable: true })))
+function render(state: BrowserSessionSnapshot, commands = port(), mode: 'docked' | 'popped-out' = 'docked', onPreviewOpened?: () => void) {
+  act(() => root.render(createElement(BrowserPanel, { sessionAgentId: 'session-1', profileId: 'profile-1', snapshot: state, host, commandPort: commands, mode, popoutAvailable: true, onPreviewOpened })))
   return commands
 }
 
@@ -86,19 +86,30 @@ describe('BrowserPanel automatic experience', () => {
     expect(container.querySelector('button[aria-label*="Managed Browser"]')).toBeNull()
   })
 
-  it('opens read-only previews for both managed and Chrome tabs when Desktop exposes the command', () => {
+  it('opens read-only previews for both targets and returns to Chat only after open succeeds', async () => {
+    const onPreviewOpened = vi.fn()
     const managedCommands = port()
-    managedCommands.preview = vi.fn()
-    render(snapshot([managedTab]), managedCommands)
-    act(() => (container.querySelector('button[aria-label="Open read-only browser preview"]') as HTMLButtonElement).click())
+    managedCommands.preview = vi.fn(async () => undefined)
+    render(snapshot([managedTab]), managedCommands, 'docked', onPreviewOpened)
+    await act(async () => {
+      (container.querySelector('button[aria-label="Open read-only browser preview"]') as HTMLButtonElement).click()
+      await Promise.resolve()
+    })
     expect(managedCommands.preview).toHaveBeenCalledWith(managedTab.tabId)
+    expect(onPreviewOpened).toHaveBeenCalledOnce()
 
+    onPreviewOpened.mockClear()
     const chromeCommands = port()
-    chromeCommands.preview = vi.fn()
-    render(snapshot([externalTab]), chromeCommands)
+    chromeCommands.preview = vi.fn(async () => { throw new Error('preview failed') })
+    render(snapshot([externalTab]), chromeCommands, 'docked', onPreviewOpened)
     const preview = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Preview')!
-    act(() => preview.click())
+    await act(async () => {
+      preview.click()
+      await Promise.resolve()
+    })
     expect(chromeCommands.preview).toHaveBeenCalledWith(externalTab.tabId)
+    expect(onPreviewOpened).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('preview failed')
   })
 
   it('labels a retained Chrome debugger as agent-attached idle rather than human control', () => {

@@ -49,8 +49,8 @@ interface PreviewCard {
 
 export interface BrowserPreviewHostOptions {
   manager: BrowserAutomationManager
+  /** Authoritative main renderer that owns the embedded preview surface. */
   getWindow(): BrowserWindow | null
-  createWindow(): Promise<BrowserWindow>
   promoteManaged(input: { workspaceEpoch: number; sessionAgentId: string; profileId: string; tabId: string }): Promise<void>
   revealChrome(input: { sessionAgentId: string; profileId: string; tabId: string }): Promise<void>
   now?: () => number
@@ -64,7 +64,6 @@ const CAPTURE_INTERVAL_MS = 1_000
 export class BrowserPreviewHost {
   private readonly manager: BrowserAutomationManager
   private readonly getWindow: BrowserPreviewHostOptions['getWindow']
-  private readonly createWindow: BrowserPreviewHostOptions['createWindow']
   private readonly promoteManaged: BrowserPreviewHostOptions['promoteManaged']
   private readonly revealChrome: BrowserPreviewHostOptions['revealChrome']
   private readonly now: () => number
@@ -75,7 +74,6 @@ export class BrowserPreviewHost {
   private previewGeneration = 0
   private paused = false
   private hiddenContent = false
-  private pinned = false
   private captureTimer: ReturnType<typeof setTimeout> | null = null
   private expiryTimer: ReturnType<typeof setTimeout> | null = null
   private captureInFlight = false
@@ -87,7 +85,6 @@ export class BrowserPreviewHost {
   constructor(options: BrowserPreviewHostOptions) {
     this.manager = options.manager
     this.getWindow = options.getWindow
-    this.createWindow = options.createWindow
     this.promoteManaged = options.promoteManaged
     this.revealChrome = options.revealChrome
     this.now = options.now ?? (() => performance.now())
@@ -98,7 +95,7 @@ export class BrowserPreviewHost {
   publishScope(publication: PublishedPreviewScope | null): void {
     if (this.disposed) return
     if (!publication) {
-      this.invalidate(true)
+      this.invalidate()
       return
     }
     const previous = this.scope
@@ -109,7 +106,7 @@ export class BrowserPreviewHost {
       && previous.scope.hostGeneration === publication.scope.hostGeneration
     if (sameAuthority && publication.scope.sessionRevision < previous.scope.sessionRevision) return
     const identityChanged = previous !== null && !sameAuthority
-    if (identityChanged) this.invalidate(true)
+    if (identityChanged) this.invalidate()
     this.scope = publication
     const members = new Map(publication.scope.tabs.map((tab) => [tab.tabId, tab]))
     let changed = false
@@ -127,11 +124,8 @@ export class BrowserPreviewHost {
       }
     }
     this.scheduleExpiry()
-    if (this.cards.size === 0) this.closeWindow()
-    else {
-      if (changed) this.publishSnapshot()
-      this.scheduleCapture()
-    }
+    if (changed) this.publishSnapshot()
+    if (this.cards.size > 0) this.scheduleCapture()
   }
 
   async open(request: BrowserPreviewOpenRequest): Promise<BrowserPreviewDeckSnapshot> {
@@ -145,24 +139,13 @@ export class BrowserPreviewHost {
         this.previewGeneration += 1
         this.paused = false
         this.hiddenContent = false
-        this.pinned = false
       }
       this.cards.set(tab.tabId, {
         tab,
         frame: null,
-        state: tab.targetAffinity === 'external-chrome' ? 'waiting' : tab.presented ? 'delayed' : 'unavailable',
+        state: tab.targetAffinity === 'external-chrome' ? 'waiting' : 'delayed',
       })
     }
-    const openingGeneration = this.previewGeneration
-    const window = await this.createWindow()
-    if (window.isDestroyed()) throw new BrowserHostError('host-disconnected', 'Browser Preview window could not be opened')
-    this.requireScope(request)
-    if (this.previewGeneration !== openingGeneration || !this.cards.has(tab.tabId)) {
-      throw new BrowserHostError('stale-host-generation', 'Browser Preview changed while its window was opening', true)
-    }
-    if (window.isMinimized()) window.restore()
-    window.setAlwaysOnTop(this.pinned)
-    window.showInactive()
     this.publishSnapshot()
     this.scheduleCapture(0)
     return this.snapshot()
@@ -196,8 +179,8 @@ export class BrowserPreviewHost {
     if (command.type === 'remove') {
       this.cards.delete(command.tabId)
       this.scheduleExpiry()
-      if (this.cards.size === 0) this.closeWindow()
-      else this.publishSnapshot()
+      if (this.cards.size === 0) this.stopCaptureTimer()
+      this.publishSnapshot()
       return
     }
     if (command.type === 'set-paused') {
@@ -215,13 +198,6 @@ export class BrowserPreviewHost {
         this.publishSnapshot()
         this.scheduleCapture(0)
       }
-      return
-    }
-    if (command.type === 'set-pinned') {
-      this.pinned = command.pinned
-      const window = this.getWindow()
-      if (window && !window.isDestroyed()) window.setAlwaysOnTop(command.pinned)
-      this.publishSnapshot()
       return
     }
     const card = this.cards.get(command.tabId)
@@ -265,16 +241,6 @@ export class BrowserPreviewHost {
     } else this.stopCaptureTimer()
   }
 
-  handleWindowClosed(): void {
-    this.stopCaptureTimer()
-    this.stopExpiryTimer()
-    this.cards.clear()
-    this.previewGeneration += 1
-    this.paused = false
-    this.hiddenContent = false
-    this.pinned = false
-  }
-
   clearSensitiveContent(): void {
     if (this.cards.size === 0) return
     this.hiddenContent = true
@@ -284,7 +250,7 @@ export class BrowserPreviewHost {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
-    this.invalidate(true)
+    this.invalidate()
   }
 
   private requireScope(request: BrowserPreviewOpenRequest): PublishedPreviewScope {
@@ -310,7 +276,6 @@ export class BrowserPreviewHost {
   private resumedState(card: PreviewCard): PreviewCard['state'] {
     if (this.paused || this.hiddenContent) return 'paused'
     if (card.tab.targetAffinity === 'external-chrome') return card.frame ? 'updating' : 'waiting'
-    if (!card.tab.presented) return card.frame ? 'paused' : 'unavailable'
     return card.frame ? 'updating' : 'delayed'
   }
 
@@ -326,7 +291,7 @@ export class BrowserPreviewHost {
 
   private managedCaptureCandidates(): PreviewCard[] {
     return [...this.cards.values()].filter((card) => card.tab.targetAffinity === 'managed-electron'
-      && card.tab.presented && card.tab.lifecycle !== 'closed' && (!card.frame || card.frame.pulled))
+      && card.tab.lifecycle !== 'closed' && (!card.frame || card.frame.pulled))
   }
 
   private nextManagedCard(): PreviewCard | null {
@@ -339,7 +304,7 @@ export class BrowserPreviewHost {
 
   private async capture(tabId: string): Promise<void> {
     const card = this.cards.get(tabId)
-    if (!card || card.tab.targetAffinity !== 'managed-electron' || !card.tab.presented
+    if (!card || card.tab.targetAffinity !== 'managed-electron'
       || this.captureInFlight || this.paused || this.hiddenContent || !this.windowCanReceiveFrames()) return
     this.captureInFlight = true
     const contentEpoch = this.captureContentEpoch
@@ -391,7 +356,6 @@ export class BrowserPreviewHost {
       profileId: scope.profileId,
       paused: this.paused,
       hiddenContent: this.hiddenContent,
-      pinned: this.pinned,
       cards: [...this.cards.values()].map((card) => ({
         tabId: card.tab.tabId,
         targetAffinity: card.tab.targetAffinity,
@@ -409,8 +373,8 @@ export class BrowserPreviewHost {
   }
 
   private publishSnapshot(): void {
-    if (this.cards.size === 0 || !this.scope) return
-    sendToRendererWindow(this.getWindow(), BROWSER_PREVIEW_IPC.snapshotChanged, this.snapshot())
+    const snapshot = this.cards.size > 0 && this.scope ? this.snapshot() : null
+    sendToRendererWindow(this.getWindow(), BROWSER_PREVIEW_IPC.snapshotChanged, snapshot)
   }
 
   private clearFrames(state: PreviewCard['state']): void {
@@ -423,18 +387,13 @@ export class BrowserPreviewHost {
     this.publishSnapshot()
   }
 
-  private invalidate(close: boolean): void {
+  private invalidate(): void {
     this.stopCaptureTimer()
     this.stopExpiryTimer()
     this.scope = null
     this.cards.clear()
     this.previewGeneration += 1
-    if (close) this.closeWindow()
-  }
-
-  private closeWindow(): void {
-    const window = this.getWindow()
-    if (window && !window.isDestroyed()) window.close()
+    this.publishSnapshot()
   }
 
   private stopCaptureTimer(): void {
