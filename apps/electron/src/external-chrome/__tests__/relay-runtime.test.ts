@@ -862,7 +862,9 @@ describe('authenticated External Chrome Desktop relay runtime', () => {
     servers.push(server)
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(endpoint, resolve) })
     const client = await connectRelayClient(endpoint)
-    await sendRuntimeHello(client, 'instance_profile_a')
+    await sendRuntimeHello(client, 'instance_profile_a', 'm4-runtime.1', 'a'.repeat(64), 1, [{
+      leaseId: 'lease-before-desktop-restart', leaseEpoch: 31, state: 'acquired', tabIds: [40],
+    }])
     const requests: Array<{ method: string; params: Record<string, unknown> }> = []
     const loop = fakeExtensionLoop(client, requests)
 
@@ -880,6 +882,70 @@ describe('authenticated External Chrome Desktop relay runtime', () => {
     )).resolves.toBeUndefined()
 
     runtime.deactivate(); client.close(); await loop
+  })
+
+  it('settles a pre-restart checkpoint when the exact authenticated snapshot proves authority and receipt absence', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'forge-relay-restart-absence-'))
+    roots.push(root)
+    const checkpointFile = path.join(root, 'state', 'leases.json')
+    await mkdir(path.dirname(checkpointFile), { recursive: true })
+    await writeFile(checkpointFile, JSON.stringify({
+      schemaVersion: 2,
+      leases: [{
+        extensionInstanceId: 'instance_profile_a',
+        sessionAgentId: 'session-a',
+        profileId: 'profile-a',
+        leaseId: 'lease-absent-after-desktop-restart',
+        leaseEpoch: 32,
+        tabIds: [40],
+        expiresAt: 8_000_000_000_000_000,
+      }],
+      acquisitions: [],
+      releaseAcknowledgements: [],
+    }))
+    const runtime = new ExternalChromeRelayRuntime(checkpointFile)
+    runtime.configureExpectedRuntime({ payloadVersion: 'm4-runtime.1', sha256: 'a'.repeat(64), shellAbi: 1 })
+    runtime.activate({
+      epoch: 'epoch_1234567890abcdef', desktopInstanceId: 'desktop_1234567890abcdef',
+      keyId: 'key-test', secret: Buffer.alloc(32, 0x44),
+    })
+    const endpoint = path.join(root, 'relay.sock')
+    const server = createServer((socket) => runtime.accept(socket))
+    servers.push(server)
+    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(endpoint, resolve) })
+    const client = await connectRelayClient(endpoint)
+
+    await sendRuntimeHello(client, 'instance_profile_a')
+
+    await waitForCondition(async () => !(await runtime.hasActiveLeaseCheckpoints()))
+    expect(JSON.parse(await readFile(checkpointFile, 'utf8'))).toMatchObject({
+      leases: [], acquisitions: [], releaseAcknowledgements: [],
+    })
+    await expect(runtime.releaseAuthority(
+      { sessionAgentId: 'session-a', profileId: 'profile-a' },
+      { ownerEpoch: 32, tabId: 'ext.instance_profile_a.40' },
+      'redundant-host-retry',
+    )).resolves.toBeUndefined()
+    runtime.deactivate(); client.close()
+  })
+
+  it('keeps a live caller release idempotent after reconnect proves its held authority absent', async () => {
+    const { runtime, client, root } = await connectedRuntime()
+    const firstLoop = fakeExtensionLoop(client)
+    const session = { sessionAgentId: 'session-live-reconnect', profileId: 'profile-a' }
+    const acquired = await runtime.acquireTarget({
+      ...session, operation: 'snapshot', preferredTabId: null,
+      reuseExisting: true, createIfNeeded: true, ownerEpoch: 33,
+    })
+    if (!acquired.ok) throw new Error('fixture acquisition failed')
+    client.close(); await firstLoop
+
+    const reconnected = await connectRelayClient(path.join(root, 'relay.sock'))
+    await sendRuntimeHello(reconnected, 'instance_profile_a')
+    await waitForCondition(async () => !(await runtime.hasActiveLeaseCheckpoints()))
+
+    await expect(runtime.releaseAuthority(session, acquired.authority, 'idle')).resolves.toBeUndefined()
+    runtime.deactivate(); reconnected.close()
   })
 
   it('reconciles a Desktop-restart acquisition journal from the exact authenticated Extension report', async () => {
@@ -974,9 +1040,12 @@ describe('authenticated External Chrome Desktop relay runtime', () => {
     client.close(); await firstLoop
     await expect(runtime.releaseAuthority({ sessionAgentId: 'session-a', profileId: 'profile-a' }, acquired.authority, 'idle')).rejects.toThrow()
     expect(await runtime.leaseCheckpoints()).toHaveLength(1)
+    const retained = (await runtime.leaseCheckpoints())[0]!
 
     const reconnected = await connectRelayClient(path.join(root, 'relay.sock'))
-    await sendRuntimeHello(reconnected, 'instance_profile_a')
+    await sendRuntimeHello(reconnected, 'instance_profile_a', 'm4-runtime.1', 'a'.repeat(64), 1, [{
+      leaseId: retained.leaseId, leaseEpoch: retained.leaseEpoch, state: 'acquired', tabIds: retained.tabIds,
+    }])
     const requests: Array<{ method: string; params: Record<string, unknown> }> = []
     const retryLoop = fakeExtensionLoop(reconnected, requests)
     await runtime.releaseAuthority({ sessionAgentId: 'session-a', profileId: 'profile-a' }, acquired.authority, 'idle')
@@ -998,9 +1067,12 @@ describe('authenticated External Chrome Desktop relay runtime', () => {
 
     await expect(runtime.releaseSession(session, 'delete')).rejects.toThrow('disconnected')
     expect(await runtime.leaseCheckpoints()).toMatchObject([{ cleanupReason: 'delete', tabIds: [40] }])
+    const retained = (await runtime.leaseCheckpoints())[0]!
 
     const reconnected = await connectRelayClient(path.join(root, 'relay.sock'))
-    await sendRuntimeHello(reconnected, 'instance_profile_a')
+    await sendRuntimeHello(reconnected, 'instance_profile_a', 'm4-runtime.1', 'a'.repeat(64), 1, [{
+      leaseId: retained.leaseId, leaseEpoch: retained.leaseEpoch, state: 'acquired', tabIds: retained.tabIds,
+    }])
     const requests: Array<{ method: string; params: Record<string, unknown> }> = []
     const retryLoop = fakeExtensionLoop(reconnected, requests)
     await waitForCondition(async () => (await runtime.leaseCheckpoints()).length === 0)
@@ -1022,10 +1094,13 @@ describe('authenticated External Chrome Desktop relay runtime', () => {
     await expect(runtime.releaseAuthority({ sessionAgentId: 'session-a', profileId: 'profile-a' }, acquired.authority, 'idle'))
       .rejects.toThrow('exact checkpoint release was not acknowledged')
     expect(await runtime.leaseCheckpoints()).toHaveLength(1)
+    const retained = (await runtime.leaseCheckpoints())[0]!
     client.close(); await mismatchedLoop
 
     const reconnected = await connectRelayClient(path.join(root, 'relay.sock'))
-    await sendRuntimeHello(reconnected, 'instance_profile_a')
+    await sendRuntimeHello(reconnected, 'instance_profile_a', 'm4-runtime.1', 'a'.repeat(64), 1, [{
+      leaseId: retained.leaseId, leaseEpoch: retained.leaseEpoch, state: 'released', tabIds: retained.tabIds,
+    }])
     const exactLoop = fakeExtensionLoop(reconnected)
     await runtime.releaseAuthority({ sessionAgentId: 'session-a', profileId: 'profile-a' }, acquired.authority, 'idle')
     expect(await runtime.leaseCheckpoints()).toEqual([])

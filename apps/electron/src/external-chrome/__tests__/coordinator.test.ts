@@ -155,6 +155,7 @@ async function sendCoordinatorRuntimeHello(
   payloadVersion: string,
   payloadSha256: string,
   sendSnapshot = true,
+  reports: Array<{ leaseId: string; leaseEpoch: number; state: 'acquired' | 'released'; tabIds: number[] }> = [],
 ): Promise<void> {
   await client.send({
     jsonrpc: '2.0', id: 'hello', method: 'forge.runtime.hello', params: {
@@ -172,7 +173,7 @@ async function sendCoordinatorRuntimeHello(
   if (!sendSnapshot) return
   await client.send({
     jsonrpc: '2.0', method: 'browser.authoritySnapshot',
-    params: { protocolVersion: 1, snapshotId: `snapshot-${extensionInstanceId}`, reports: [] },
+    params: { protocolVersion: 1, snapshotId: `snapshot-${extensionInstanceId}`, reports },
   })
   await new Promise((resolve) => setTimeout(resolve, 10))
 }
@@ -464,7 +465,9 @@ describe('ExternalChromeHostCoordinator', () => {
 
     const reconnected = await connectToCoordinator(dataRoot)
     await sendCoordinatorRuntimeHello(
-      reconnected, 'instance_restart_exact', deployed.install.payloadVersion, deployed.install.payloadSha256,
+      reconnected, 'instance_restart_exact', deployed.install.payloadVersion, deployed.install.payloadSha256, true, [{
+        leaseId: durableLease!.leaseId, leaseEpoch: 17, state: 'acquired', tabIds: [40],
+      }],
     )
     await reconnected.send({ jsonrpc: '2.0', method: 'browser.leaseChanged', params: {
       protocolVersion: 1, leaseId: durableLease!.leaseId, leaseEpoch: 17, state: 'acquired', tabIds: [40],
@@ -736,7 +739,9 @@ describe('ExternalChromeHostCoordinator', () => {
 
     const reconnected = await connectToCoordinator(dataRoot)
     await sendCoordinatorRuntimeHello(
-      reconnected, 'instance_offline_mismatch', deployed.install.payloadVersion, deployed.install.payloadSha256,
+      reconnected, 'instance_offline_mismatch', deployed.install.payloadVersion, deployed.install.payloadSha256, true, [{
+        leaseId: 'lease-offline-mismatch', leaseEpoch: 9, state: 'acquired', tabIds: [40],
+      }],
     )
     const requests: Array<{ method: string; params: Record<string, unknown> }> = []
     const runtimeLoop = lifecycleExtensionLoop(reconnected, requests, 'instance_offline_mismatch')

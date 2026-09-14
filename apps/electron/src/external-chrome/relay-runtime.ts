@@ -1066,12 +1066,16 @@ export class ExternalChromeRelayRuntime implements ExternalChromeTransport {
     // Atomically replace live checkpoint evidence with a durable pending acknowledgement. The
     // Extension receipt cannot be forgotten until the following exact RPC succeeds.
     const acknowledgement = await this.checkpoints.settleRelease(checkpoint)
+    this.rememberSettledRelease(checkpoint)
+    await this.acknowledgeRelease(acknowledgement, connection, cleanupDeadlineAt)
+  }
+
+  private rememberSettledRelease(checkpoint: ExternalChromeLeaseCheckpoint): void {
     for (const tabId of checkpoint.tabIds) this.acquisitionCreated.delete(acquisitionKey(checkpoint, tabId))
     const key = settledReleaseKey(checkpoint)
     this.settledReleases.delete(key)
     this.settledReleases.set(key, [...checkpoint.tabIds].sort((left, right) => left - right))
     while (this.settledReleases.size > MAX_SETTLED_RELEASES) this.settledReleases.delete(this.settledReleases.keys().next().value!)
-    await this.acknowledgeRelease(acknowledgement, connection, cleanupDeadlineAt)
   }
 
   private async acknowledgeRelease(
@@ -1582,7 +1586,19 @@ export class ExternalChromeRelayRuntime implements ExternalChromeTransport {
 
     for (const checkpoint of (await this.checkpoints.all()).filter((record) => record.extensionInstanceId === extensionInstanceId)) {
       const report = reports.get(`${checkpoint.leaseId}\0${checkpoint.leaseEpoch}`)
-      if (report === undefined) continue
+      if (report === undefined) {
+        // A complete authenticated snapshot proves that neither live authority nor its durable
+        // release receipt remains. Advance the Desktop checkpoint through its durable settled
+        // state; the acknowledgement pass below can then consume that exact absence proof.
+        try {
+          await this.checkpoints.settleRelease(checkpoint)
+        } catch (error) {
+          const settled = this.settledReleases.get(settledReleaseKey(checkpoint))
+          if (canonical(settled ?? []) !== canonical(checkpoint.tabIds)) throw error
+        }
+        this.rememberSettledRelease(checkpoint)
+        continue
+      }
       if (canonical(report.tabIds) !== canonical(checkpoint.tabIds)) {
         throw new Error('authority snapshot changed exact checkpoint tab scope')
       }
