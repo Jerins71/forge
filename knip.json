@@ -99,6 +99,7 @@
         "src/browser/fixture-smoke-main.ts",
         "src/browser/popout-reparent-fixture-main.ts",
         "src/browser/managed-browser-popout-fixture-main.ts",
+        "src/browser/preview-capture-fixture-main.ts",
         "src/browser/guest-preload.ts",
         "scripts/**/*.mjs",
         "src/**/*.test.ts",

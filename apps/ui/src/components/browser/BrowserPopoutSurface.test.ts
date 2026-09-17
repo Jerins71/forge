@@ -62,7 +62,7 @@ describe('BrowserPopoutSurface', () => {
     expect(workspace.sendCommand).not.toHaveBeenCalled()
   })
 
-  it('auto-opens one blank tab through the shared BrowserPanel without registering a second host', async () => {
+  it('opens a tab on request through the shared BrowserPanel without registering a second host', async () => {
     const projection: ManagedBrowserWorkspaceProjection = {
       workspaceEpoch: 3,
       sessionAgentId: 'session-1',
@@ -78,12 +78,17 @@ describe('BrowserPopoutSurface', () => {
     window.electronBridge = { windowRole: 'managed-browser-popout', platform: 'darwin', browserWorkspace: workspace }
     await act(async () => { root = createRoot(container); root.render(createElement(BrowserPopoutSurface)); await Promise.resolve(); await Promise.resolve() })
     expect(container.querySelector('[aria-label="Browser workspace"]')).not.toBeNull()
+    expect(container.textContent).toContain('No browser tabs are open.')
+    expect(workspace.sendCommand).not.toHaveBeenCalled()
+    await act(async () => {
+      (container.querySelector('button[aria-label="New browser tab"]') as HTMLButtonElement).click()
+    })
     expect(workspace.sendCommand).toHaveBeenCalledTimes(1)
     expect(workspace.sendCommand).toHaveBeenCalledWith(expect.objectContaining({
       workspaceEpoch: 3,
       sessionAgentId: 'session-1',
       profileId: 'profile-1',
-      command: { type: 'open', autoOpenAttemptKey: 'session-1:profile-1:4:9' },
+      command: { type: 'open' },
     }))
     expect(window.electronBridge.browserAutomation).toBeUndefined()
     expect(window.electronBridge.backendWsUrl).toBeUndefined()
