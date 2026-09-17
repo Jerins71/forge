@@ -1977,7 +1977,7 @@ describe("RuntimeFactory", () => {
     const sendTool = tools.find((tool) => tool.name === "send_message_to_agent");
     await sendTool?.execute("tool-context", { targetAgentId: managerDescriptor.agentId, message: "Tests passed; continuing." });
 
-    expect(tools.map((tool) => tool.name)).toEqual(["send_message_to_agent", "knowledge"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["bash", "bash_process", "send_message_to_agent", "knowledge"]);
     expect(sendTool).toBeDefined();
     expect(sendMessage).toHaveBeenCalledWith(
       descriptor.agentId, managerDescriptor.agentId, JSON.stringify({

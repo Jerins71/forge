@@ -1,5 +1,6 @@
 import { createPiBrowserDiscovery, installPiProjectToolPolicy } from "./pi-tool-discovery.js";
 import { installOpenRouterRequestPolicy } from "./openrouter-request-policy.js";
+import { PiBashProcesses } from "./pi-bash-processes.js";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
   type AgentRuntimeExtensionSnapshot,
@@ -13,6 +14,7 @@ import {
   AuthStorage,
   DefaultResourceLoader,
   createAgentSession,
+  createBashToolDefinition,
   ModelRegistry,
   SettingsManager,
   type AgentSession,
@@ -416,9 +418,17 @@ export class PiRuntimeCreator {
           hostShellPath: settingsManager.getShellPath(),
         })
       : [];
-    const runtimeCustomTools = secureRuntimeBinding
-      ? [...secureCodingTools, ...runtimeSwarmTools, ...runtimeContextTools]
-      : [...runtimeSwarmTools, ...runtimeContextTools];
+    const bashProcesses = isCodexPluginWorkerDescriptor(descriptor) ? undefined : new PiBashProcesses();
+    const codingTools: ToolDefinition<any, any, any>[] = secureRuntimeBinding ? secureCodingTools : [createBashToolDefinition(descriptor.cwd, {
+      commandPrefix: settingsManager.getShellCommandPrefix(),
+      shellPath: settingsManager.getShellPath(),
+    })];
+    const processTools = bashProcesses
+      ? [...codingTools.map(tool => tool.name === "bash" || tool.name === "secure_bash" ? bashProcesses.wrap(tool) : tool), bashProcesses.tool]
+      : secureCodingTools;
+    // Protect every later process read as well as the original guarded command.
+    const guardedProcessTools = secureRuntimeBinding ? guardSecureRuntimeTools(processTools, secureRuntimeBinding) : processTools;
+    const runtimeCustomTools = [...guardedProcessTools, ...runtimeSwarmTools, ...runtimeContextTools];
     const toolOutputBudget = createModelVisibleToolResultBudget();
     toolOutputBudget.augmentToolDefinitions(runtimeCustomTools);
     const secureAllowedToolNames = isCodexPluginWorkerDescriptor(descriptor)
@@ -695,6 +705,7 @@ export class PiRuntimeCreator {
       compactionRuntimeSettingsProvider: this.deps.getCompactionRuntimeSettingsProvider(),
       compactionFailureScopeKey,
       generationTelemetry,
+      bashProcesses,
       callbacks: runtimeCallbacks,
       now: this.deps.now,
       dataDir: this.deps.config.paths.dataDir,

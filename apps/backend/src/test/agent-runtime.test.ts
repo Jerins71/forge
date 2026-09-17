@@ -1410,6 +1410,33 @@ describe('AgentRuntime', () => {
     expect(runtime.getStatus()).toBe('terminated')
   })
 
+  it('retains runtime ownership when yielded-command cleanup fails and allows a scoped retry', async () => {
+    const session = new FakeSession()
+    const stopAll = vi.fn().mockRejectedValueOnce(new Error('command still running')).mockResolvedValue(undefined)
+    const runtime = new AgentRuntime({
+      descriptor: makeDescriptor(), session: session as any,
+      callbacks: { onStatusChange: () => {} }, bashProcesses: { stopAll } as any,
+    })
+    await expect(runtime.shutdownForReplacement()).rejects.toThrow('command still running')
+    expect(session.disposeCalls).toBe(0)
+    expect(session.listener).toBeDefined()
+    await runtime.shutdownForReplacement()
+    expect(session.disposeCalls).toBe(1)
+    expect(stopAll).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops yielded commands even when the Pi model session has already become idle', async () => {
+    const session = new FakeSession()
+    const stopAll = vi.fn().mockResolvedValue(undefined)
+    const runtime = new AgentRuntime({
+      descriptor: makeDescriptor(), session: session as any,
+      callbacks: { onStatusChange: () => {} }, bashProcesses: { stopAll } as any,
+    })
+    await runtime.stopInFlight()
+    expect(stopAll).toHaveBeenCalledOnce()
+    expect(session.disposeCalls).toBe(0)
+  })
+
   it('emits reload session shutdown metadata when recycling or replacing the runtime', async () => {
     const recycleSession = new FakeSession()
     const recycleRuntime = new AgentRuntime({

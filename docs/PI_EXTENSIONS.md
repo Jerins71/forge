@@ -38,6 +38,36 @@ Pi extensions are TypeScript/JavaScript modules that hook into the agent lifecyc
 
 Forge runs Pi in headless/library mode (no terminal UI), so TUI-specific features like custom rendering, keyboard shortcuts, and interactive dialogs are not available. Extensions should check `ctx.hasUI` and adapt accordingly.
 
+## Commands that yield control
+
+Forge's ordinary Pi runtimes keep the `bash` tool and add `bash_process`. Bash returns
+after at most `yield_ms` (default 10,000; maximum 30,000) while the command continues.
+Its existing `timeout` remains a separate execution limit in **seconds**. Short commands
+still return their completed output directly. A running receipt includes `process_id`,
+elapsed time, and time since output; it is not a successful check.
+
+Use `bash_process({op:"wait",process_id:"…",yield_ms:30000})` to wait, `op:"stop"`
+to cancel that command, or `op:"list"` to recover owned handles. A `stopping` receipt
+requires a subsequent wait to confirm termination. There are no cross-agent handles or
+automatic command retries. Stop and runtime replacement cancel owned commands and wait
+for cleanup before releasing runtime ownership. Handles survive context rollover but
+not runtime replacement or backend restart; inspect current state before rerunning an
+old command. A runtime allows eight concurrent commands and retains up to 32 results.
+
+For builds/tests, `output_mode:"summary"` returns status and at most the last 50 lines /
+6,000 characters. `bash_process` defaults to summary; use `output_mode:"full"` to inspect
+its retained result, subject to the normal tool-output budget. Pi's full-output file
+retains overflow from its own output limit. Nonzero exits, timeouts, and guard failures
+remain errors. Summaries do not infer test success from log text.
+
+Secure Sessions uses the same process control for guarded host `bash` and `secure_bash`.
+Secret selection, injection, execution leases, streaming guards, and process cancellation
+remain on the existing execution path; later process reads are guarded again. The Codex
+plugin worker's restricted tool surface is unchanged. Extensions should not override
+`bash_process`; extensions replacing `bash` also replace its yielding behavior.
+Tool-result hooks receive the running receipt when Bash yields. Check
+`details.status` before treating a successful tool call as a completed command.
+
 ## Forge context lifecycle hooks
 
 Forge pins Pi to the version in `package.json` and applies the checked-in coding-agent patch under `patches/`. `pnpm pi-package:identity` verifies the installed package, lockfile, and patch digest together. Historical fixture manifests retain their original producing revision and byte hashes; their target-Pi validation identity is regenerated when the patch changes.

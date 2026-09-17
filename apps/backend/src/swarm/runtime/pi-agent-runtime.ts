@@ -83,6 +83,7 @@ import {
   hasNoReplySentinelLineManagerAssistantFinalMessage,
 } from "./manager-assistant-final-message.js";
 import { PiGenerationTelemetryAdapter } from "./generation-telemetry.js";
+import type { PiBashProcesses } from "./pi/pi-bash-processes.js";
 import {
   detectManagerOutputRunaway,
   type ManagerOutputRunawayDetection,
@@ -223,6 +224,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
   private readonly compactionRuntimeSettingsProvider: CompactionRuntimeSettingsProvider;
   private readonly compactionFailureScopeKey: string;
   private readonly generationTelemetry: PiGenerationTelemetryAdapter | undefined;
+  private readonly bashProcesses: PiBashProcesses | undefined;
   private readonly resolveContextMode: () => ContextMode;
   private readonly dataDir: string | undefined;
   private pendingDeliveries: PendingDelivery[] = [];
@@ -299,6 +301,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
     compactionRuntimeSettingsProvider?: CompactionRuntimeSettingsProvider;
     compactionFailureScopeKey?: string;
     generationTelemetry?: PiGenerationTelemetryAdapter;
+    bashProcesses?: PiBashProcesses;
     getContextMode?: () => ContextMode;
     dataDir?: string;
   }) {
@@ -311,6 +314,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
       options.compactionRuntimeSettingsProvider ?? createDefaultCompactionRuntimeSettingsProvider();
     this.compactionFailureScopeKey = options.compactionFailureScopeKey ?? options.descriptor.agentId;
     this.generationTelemetry = options.generationTelemetry;
+    this.bashProcesses = options.bashProcesses;
     this.resolveContextMode = options.getContextMode ?? (() => "summary");
     this.dataDir = options.dataDir;
     this.status = options.descriptor.status;
@@ -661,7 +665,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
     const deadlineAt = Date.now() + timeoutMs;
     const remainingMs = () => Math.max(0, deadlineAt - Date.now());
     try {
-      await withTimeout(this.session.abort(), remainingMs(), stage);
+      await withTimeout(Promise.all([this.session.abort(), this.bashProcesses?.stopAll()]), remainingMs(), stage);
     } catch (error) {
       this.logRuntimeError("interrupt", error, {
         stage: `${stage}_failed`,
@@ -831,6 +835,9 @@ export class AgentRuntime implements SwarmAgentRuntime {
   }
 
   private async disposeSessionResources(shutdown: PiSessionShutdownMetadata): Promise<void> {
+    // A yielded shell can outlive a model turn. Never release this runtime while
+    // one of its commands can still write; failed cleanup remains retryable.
+    await withTimeout(this.bashProcesses?.stopAll() ?? Promise.resolve(), DEFAULT_ABORT_TIMEOUT_MS, "dispose_bash_processes");
     await this.drainSessionEventQueue("dispose_drain_session_events");
 
     if (!this.sessionShutdownAncillaryCleanupAttempted) {

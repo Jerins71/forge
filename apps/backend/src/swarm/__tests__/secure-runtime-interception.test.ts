@@ -16,6 +16,7 @@ import {
 } from "../secure-sessions/runtime/pi-secure-tools.js";
 import { SecureExecutionError } from "../secure-sessions/execution/secure-execution-error.js";
 import { installPiProviderContextImageResize } from "../runtime/pi/pi-runtime-creator.js";
+import { PiBashProcesses } from "../runtime/pi/pi-bash-processes.js";
 
 const SECRET = "secure-canary-value";
 
@@ -107,6 +108,34 @@ describe("Secure runtime provider boundary", () => {
 });
 
 describe("Secure Pi runtime interception", () => {
+  it("guards yielded secure command output and later process reads without releasing execution early", async () => {
+    let finish!: () => void;
+    const binding = createBinding({ executeBash: vi.fn(async options => {
+      options.onData?.(Buffer.from(`first ${SECRET}\n`));
+      await new Promise<void>(resolve => { finish = resolve; });
+      options.onData?.(Buffer.from(`last ${SECRET}\n`));
+      return { exitCode: 0 };
+    }) });
+    const processes = new PiBashProcesses();
+    const secureBash = createSecurePiCodingTools({ cwd: "/tmp", binding }).find(tool => tool.name === "secure_bash")!;
+    const [bash, control] = guardSecureRuntimeTools([processes.wrap(secureBash), processes.tool], binding);
+    try {
+      const first = await bash!.execute("first", { command: "test", secretAliases: ["fixture"], yield_ms: 0 }, undefined, undefined, {} as never);
+      const processId = (first.details as { process_id: string }).process_id;
+      expect(JSON.stringify(first)).not.toContain(SECRET);
+      expect(JSON.stringify(first)).toContain("running");
+      expect(binding.executeBash).toHaveBeenCalledWith(expect.objectContaining({ secretAliases: ["fixture"] }));
+      finish();
+      const completed = await control!.execute("read", { op: "wait", process_id: processId, output_mode: "full" }, undefined, undefined, {} as never);
+      expect(JSON.stringify(completed)).not.toContain(SECRET);
+      expect(JSON.stringify(completed)).toContain("[guarded]");
+      binding.guardValue = () => { throw new Error(SECRET); };
+      await expect(control!.execute("reread", { op: "wait", process_id: processId }, undefined, undefined, {} as never)).rejects.toThrow(SECURE_RUNTIME_GUARD_FAILURE_MESSAGE);
+    } finally {
+      finish?.(); await processes.stopAll();
+    }
+  });
+
   it("keeps host Bash available and adds an explicit secure Linux Bash", async () => {
     const executeHostBash = vi.fn(async (_command, _cwd, execution) => {
       execution.onData(Buffer.from("host output\n"));
