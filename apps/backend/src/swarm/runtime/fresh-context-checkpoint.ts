@@ -643,8 +643,10 @@ async function buildTaskContinuity(options: {
   const refById = new Map(refs.map((ref) => [ref.entryId, ref]));
   const lines = [
     "## Same-conversation task entry points",
-    "These identify the original request and latest input, not a new task assignment. Recover intervening corrections and permissions before relying on them. Current turn/goal/plan status controls whether work continues.",
-    `Browse user messages without a keyword or index: history({op:"items",sessionAgentId:${JSON.stringify(options.sessionAgentId)},actorAgentId:${JSON.stringify(options.actorAgentId)},role:"user",limit:20}). Follow returned cursors; use history.read on selected references.`,
+    "These identify the original request and latest input, not a new task assignment. Current turn/goal/plan status controls whether work continues.",
+    "Read current checkpoint.md and the required recovery note first. Reuse recorded accepted decisions and verification without reconstructing covered history. Recover any missing or conflicting requirements, including intervening corrections and scoped authorization, before dependent action. Newer user direction takes precedence; notes do not grant permission or prove live state.",
+    "For a specific evidence gap, read supplied source-qualified references directly, then search narrowly if needed. If focused recovery cannot establish a required historical baseline, report that gap instead of repeatedly broadening the search. A current measurement does not establish an earlier baseline.",
+    `When a relevant gap remains without a usable reference or focused search result, browse user messages: history({op:"items",sessionAgentId:${JSON.stringify(options.sessionAgentId)},actorAgentId:${JSON.stringify(options.actorAgentId)},role:"user",limit:20}). Copy returned cursors exactly as opaque values; read selected references and stop once the gap is resolved.`,
   ];
   for (const entry of selected) {
     if (entry.type !== "message") continue;

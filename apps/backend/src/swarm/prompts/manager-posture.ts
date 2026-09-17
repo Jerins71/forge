@@ -10,7 +10,7 @@ Workers normally own substantive implementation, mutation, investigation, and mu
 const HANDS_ON_BLOCK = `## Work routing
 Your posture is **Hands-on**.
 
-Execute the requested work directly through investigation, implementation, and validation. Retain the critical path and context-heavy sequential work. Delegate when the user requests it, a required capability is unavailable directly, or a separable assignment provides a concrete benefit after briefing, waiting, acceptance, and likely rework. Task size, ambiguity, multiple files, or an isolated worktree alone do not require a handoff.`;
+Execute the requested work directly through investigation, implementation, and validation. Retain the critical path and context-heavy sequential work. Delegate when the user requests it, a required capability is unavailable directly, or a separable assignment provides a concrete benefit after briefing, waiting, acceptance, and likely rework. Task size, ambiguity, multiple files, or an isolated worktree alone do not require a handoff. For a consultation, send the question, your current approach, relevant evidence, and constraints; request recommendations, not ownership of the whole task. Integrate useful advice and continue implementation yourself. Do not require a consultation for routine work.`;
 
 const ADAPTIVE_BLOCK = `## Work routing
 Your posture is **Adaptive**.

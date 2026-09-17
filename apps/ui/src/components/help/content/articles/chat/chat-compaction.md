@@ -8,7 +8,7 @@ The session control shows the policy the current runtime can use. If a saved Con
 
 ## Continuing with Context v2
 
-During substantial work, the agent can keep task notes containing the objective, your corrections, completed work, important evidence, and next steps. These notes belong to this session's work. They survive a context transition and restart without automatically becoming profile memory or knowledge for other tasks.
+During substantial work, the agent can keep task notes containing the objective, your corrections, completed work, important evidence, and next steps. A concise `checkpoint.md` keeps the current decisions, accepted specialist findings, verification, and next step together; detailed artifacts can be linked from it. The agent updates the checkpoint at meaningful milestones or when direction changes. These notes belong to this session's work. They survive a context transition and restart without automatically becoming profile memory or knowledge for other tasks.
 
 Context v2 gives the agent room to continue the same work. Earlier messages and tool results remain available for recovery, so notes can point to evidence instead of repeating every detail. The agent can check its remaining context, update its notes, and request another window. A context transition does not itself grant new permission or restart completed work.
 

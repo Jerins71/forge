@@ -51,6 +51,10 @@ Forge supplies the manager a compact versioned `[delegationRoster]` context. The
 
 Configure rosters under **Settings → Delegation → Rosters**. The default Balanced roster is derived from existing tier bindings until roster settings are first saved.
 
+For a manager that does the work and occasionally seeks advice, open **Roster actions → Add hands-on support roster**. This creates an unsaved three-specialist roster: Plan consultant, Independent reviewer, and Researcher. It copies the selected roster's models and availability fallbacks for those tasks, with bounded consultation guidance and no escalation chain. Review the models, save, then select the roster and **Hands-on** work mode beside Send. Creating the roster does not change defaults or the manager model. The generic Build & execute task uses the Researcher's model when explicitly needed; its execution instructions still follow the requested task type.
+
+Worker results return automatically. Accepting a result means verifying and integrating it; sending thanks or an acceptance notice to a completed worker starts a new assignment. Send follow-ups only for concrete remaining work or necessary questions. For continuing work, the manager records accepted findings and decisions in its own `checkpoint.md`, with evidence and verification status.
+
 ## Multi-model Coordination Skill
 
 Forge ships `multi-model-coordination` for work that explicitly benefits from independent perspectives and evidence-based synthesis. It is not loaded as a mandatory workflow for ordinary work. The manager reads exactly one matching scenario reference when the user requests a panel, competing approaches, adversarial review, model/provider diversity, or when a consequential ambiguous choice clearly earns the extra coordination.

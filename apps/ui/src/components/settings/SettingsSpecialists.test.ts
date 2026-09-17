@@ -318,6 +318,52 @@ describe('SettingsSpecialists', () => {
       expect(container.textContent).toContain('Advanced & recovery')
     })
 
+    it('adds an unsaved support roster and preserves existing defaults when saved', async () => {
+      renderSpecialists([makeSpecialist()], PROFILES, 'presets')
+      await flush()
+      await flush()
+
+      const actions = container.querySelector('button[aria-label="Roster actions"]')
+      expect(actions).toBeTruthy()
+      flushSync(() => fireEvent.pointerDown(actions!, { button: 0, ctrlKey: false, pointerType: 'mouse' }))
+      await flush()
+      const addSupport = Array.from(document.body.querySelectorAll('[role="menuitem"]'))
+        .find((item) => item.textContent?.includes('Add hands-on support roster'))
+      expect(addSupport).toBeTruthy()
+      flushSync(() => fireEvent.click(addSupport!))
+      await flush()
+
+      expect(container.textContent).toContain('Plan consultant')
+      expect(container.textContent).toContain('Independent reviewer')
+      expect(container.textContent).toContain('Researcher')
+      expect(container.textContent).toContain('Unsaved changes')
+      expect(specialistsApiMock.saveDelegationRosterSettingsApi).not.toHaveBeenCalled()
+
+      const saveButton = Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('Save roster'))
+      expect(saveButton).toBeTruthy()
+      flushSync(() => fireEvent.click(saveButton!))
+      await flush()
+
+      expect(specialistsApiMock.saveDelegationRosterSettingsApi).toHaveBeenCalledWith(
+        'ws://127.0.0.1:47187',
+        expect.objectContaining({
+          defaultRosterId: 'balanced',
+          rosters: [
+            DELEGATION_ROSTERS.rosters[0],
+            expect.objectContaining({
+              rosterId: 'hands-on-support',
+              routes: [
+                expect.objectContaining({ routeId: 'plan-consultant', modelId: 'composer-2.5' }),
+                expect.objectContaining({ routeId: 'independent-reviewer', modelId: 'composer-2.5' }),
+                expect.objectContaining({ routeId: 'researcher', modelId: 'gpt-5.5' }),
+              ],
+            }),
+          ],
+        }),
+      )
+    })
+
     it('labels xhigh as Extra High when the selected model also supports Max', async () => {
       specialistsApiMock.fetchDelegationRosterSettings.mockResolvedValue({
         ...DELEGATION_ROSTERS,

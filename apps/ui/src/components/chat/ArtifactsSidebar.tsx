@@ -146,7 +146,7 @@ export function ArtifactsSidebar({
 
       <div
         className={cn(
-          'flex h-full shrink-0 flex-col bg-card/50',
+          'flex h-full shrink-0 flex-col bg-card/50 max-md:bg-card',
           desktopPlacement === 'left' ? 'md:border-r md:border-border/80' : 'md:border-l md:border-border/80',
           'transition-[width,opacity] duration-200 ease-out',
           desktopOnly && 'max-md:hidden',
@@ -168,7 +168,7 @@ export function ArtifactsSidebar({
             handleTabChange(value)
           }
         }}
-        className="h-full gap-0"
+        className="h-full min-h-0 gap-0"
       >
         <div className="flex h-[62px] shrink-0 items-center gap-2 px-3">
           {showTabs ? (
@@ -206,7 +206,7 @@ export function ArtifactsSidebar({
         <TabsContent value="artifacts" className="mt-0 min-h-0 flex-1">
           <ScrollArea
             className={cn(
-              'min-h-0 flex-1',
+              'h-full min-h-0',
               '[&>[data-slot=scroll-area-scrollbar]]:w-1.5',
               '[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-transparent',
               'hover:[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-border',

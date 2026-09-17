@@ -55,6 +55,7 @@ import {
 import { DelegationPolicyEditor } from './DelegationPolicyEditor'
 import {
   addPolicy,
+  addHandsOnSupportPreset,
   cloneDelegationSettings,
   clonePreset,
   duplicatePolicy,
@@ -255,6 +256,16 @@ export function DelegationPresetSettingsView({
     setJustSaved(false)
   }
 
+  const createHandsOnSupportPreset = () => {
+    const next = addHandsOnSupportPreset(settings, selectedPreset)
+    setSettings(next.settings)
+    setSelectedPresetId(next.preset.rosterId)
+    setSelectedPolicyId(selectedPolicyIdForTask(next.preset, 'plan'))
+    setPresetDetailsOpen(true)
+    setAdvancedOpen(false)
+    setJustSaved(false)
+  }
+
   const duplicateSelectedPreset = () => {
     const presetId = nextId(
       `${selectedPreset.rosterId}-copy`,
@@ -373,6 +384,11 @@ export function DelegationPresetSettingsView({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem disabled={settings.rosters.length >= 24} onClick={createHandsOnSupportPreset}>
+                <Plus className="size-4" />
+                Add hands-on support roster
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setPresetDetailsOpen((open) => !open)}>
                 Edit roster details
               </DropdownMenuItem>
@@ -400,8 +416,8 @@ export function DelegationPresetSettingsView({
       </div>
 
       {presetDetailsOpen && (
-        <div className="mt-3 grid gap-3 rounded-lg border border-border/60 bg-muted/15 p-3 md:grid-cols-[minmax(12rem,20rem)_minmax(0,1fr)]">
-          <div className="space-y-1.5">
+        <div className="mt-3 grid gap-3 rounded-lg border border-border/60 bg-muted/15 p-3 xl:grid-cols-[minmax(12rem,20rem)_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-1.5">
             <Label htmlFor={`preset-name-${selectedPreset.rosterId}`}>Roster name</Label>
             <Input
               id={`preset-name-${selectedPreset.rosterId}`}
@@ -412,7 +428,7 @@ export function DelegationPresetSettingsView({
               }))}
             />
           </div>
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <Label htmlFor={`preset-description-${selectedPreset.rosterId}`}>Description</Label>
             <Textarea
               id={`preset-description-${selectedPreset.rosterId}`}

@@ -512,6 +512,8 @@ describe('buildSwarmTools', () => {
     expect(tools.map((tool) => tool.name)).toEqual(['send_message_to_agent', 'knowledge'])
     expect(tools.find((tool) => tool.name === 'send_message_to_agent')?.description)
       .toContain('Workers may message only their own manager')
+    expect(tools.find((tool) => tool.name === 'send_message_to_agent')?.description)
+      .toContain('Messaging a completed worker starts another assignment')
   })
 
   it('list_agents verbose output includes external manager metadata', async () => {

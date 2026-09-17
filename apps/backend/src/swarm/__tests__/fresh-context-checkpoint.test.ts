@@ -304,11 +304,16 @@ describe("fresh context checkpoint helper", () => {
     expect(result!.summary).toContain('notes({op:"read",path:"runtime/continuity-0.md"})');
     expect(result!.summary).toContain("Protected pins");
     const notes = new TaskNotesStore({ dataDir }).forActor({ profileId: "p", sessionAgentId: "s", actorAgentId: "s" });
-    const note = await notes.read({ path: "runtime/continuity-0.md", maxChars: 20000 });
-    for (let i = 0; i < 10; i++) expect(note.text).toContain(`pin-${i}-end`);
-    expect(note.text).toContain("Build the original requested outcome");
-    expect(note.text).toContain("Yes, continue.");
-    expect(note.text).toContain('op:"items"');
+    let note = await notes.read({ path: "runtime/continuity-0.md", maxChars: 20000 });
+    let completeText = note.text;
+    while (note.nextOffset !== undefined) {
+      note = await notes.read({ path: note.path, offset: note.nextOffset, maxChars: 20000, expectedRevision: note.revision });
+      completeText += note.text;
+    }
+    for (let i = 0; i < 10; i++) expect(completeText).toContain(`pin-${i}-end`);
+    expect(completeText).toContain("Build the original requested outcome");
+    expect(completeText).toContain("Yes, continue.");
+    expect(completeText).toContain('op:"items"');
   });
 
   it("refuses oversized sections without a durable recovery reference instead of slicing them", () => {
@@ -384,25 +389,36 @@ describe("fresh context checkpoint helper", () => {
     expect(result!.summary.length).toBeLessThanOrEqual(8000);
   });
 
-  it("keeps actual user corrections distinct from internal deliveries and redacts argument previews", async () => {
+  it("guides focused recovery while preserving newer corrections and unconsumed tool evidence", async () => {
     const dataDir = await temporaryRoot();
     const branch = [
       messageEntry("first", { role: "user", content: '[sourceContext] {"channel":"web"}\nOriginal request' }),
-      messageEntry("correction", { role: "user", content: '[sourceContext] {"channel":"web"}\nUse the corrected requirement' }),
+      messageEntry("correction", { role: "user", content: '[sourceContext] {"channel":"web"}\nUse the corrected requirement. Local inspection only; no deployment.' }),
       messageEntry("worker", { role: "user", content: "SYSTEM: Worker finished some work" }),
       messageEntry("call", { role: "assistant", content: [{ type: "toolCall", id: "c", name: "test", arguments: { password: "FAKE-SECRET-PREVIEW", safe: "visible" } }] }),
       messageEntry("result", { role: "toolResult", toolCallId: "c", toolName: "test", content: "done" }),
     ];
     const sessionFile = join(dataDir, "session.jsonl");
     await writeFile(sessionFile, branch.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+    const notes = new TaskNotesStore({ dataDir }).forActor({ profileId: "p", sessionAgentId: "s", actorAgentId: "s" });
+    await notes.write({ path: "checkpoint.md", text: "Original request accepted. Earlier artifact verified; expected hash was not recorded." });
     const handler = createFreshContextHandler({ dataDir, sessionFile,
       descriptor: { agentId: "s", profileId: "p", managerId: "s", role: "manager" }, getContextMode: () => "fresh" });
     const result = await handler({ reason: "agent", willRetry: true, branchEntries: branch });
     expect(result!.summary).toContain("Use the corrected requirement");
     expect(result!.summary).not.toContain("Worker finished some work");
     expect(result!.summary).not.toContain("FAKE-SECRET-PREVIEW");
-    const note = await new TaskNotesStore({ dataDir }).forActor({ profileId: "p", sessionAgentId: "s", actorAgentId: "s" }).read({ path: "runtime/continuity-0.md" });
+    const note = await notes.read({ path: "runtime/continuity-0.md", maxChars: 20000 });
     expect(note.text).not.toContain("FAKE-SECRET-PREVIEW");
+    expect(note.text).toContain("Read current checkpoint.md and the required recovery note first");
+    expect(note.text).toContain("intervening corrections and scoped authorization");
+    expect(note.text).toContain("Local inspection only; no deployment.");
+    expect(note.text).toContain('"entryId":"correction"');
+    expect(note.text).toContain("read supplied source-qualified references directly");
+    expect(note.text).toContain("report that gap instead of repeatedly broadening the search");
+    expect(note.text).toContain("Copy returned cursors exactly as opaque values");
+    expect(note.text).toContain("Read their results before acting; do not re-run them");
+    expect(note.text).toContain('"entryId":"result"');
   });
 
   it("preserves context when protected pins are corrupt instead of treating them as empty", async () => {

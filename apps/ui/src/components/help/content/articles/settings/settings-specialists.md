@@ -30,6 +30,12 @@ OpenRouter provider routing is configured separately in **Settings > Models**. H
 
 Configure this under **Rosters**. Select a specialist to edit both what it does and how it runs. Its task-type badge shows its job; the **Default** badge shows whether Forge chooses it automatically for that task. Use **Make default** to replace the current default without editing a separate routing table. Use the compact work menu beside Send to select a session roster, return to the project default, or make the current choice the project default.
 
+### Hands-on support
+
+Use **Roster actions → Add hands-on support roster** for a small team of Plan consultant, Independent reviewer, and Researcher. The draft copies the selected roster's configured models and availability fallbacks. Review and save it, then select it with **Hands-on** from the work menu beside Send. Your manager keeps implementation and integration; specialists answer bounded questions or review a concrete risk. Creating the roster leaves existing defaults and your manager model unchanged.
+
+Consultation results return automatically. The manager integrates useful findings and continues; a follow-up to a completed worker is another assignment.
+
 ## Global, project, and Collaboration scopes
 
 Use the scope selector to edit shared definitions or narrower overrides:

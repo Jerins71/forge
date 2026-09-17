@@ -811,6 +811,8 @@ describe('SwarmManager', () => {
     expect(managerPrompt).toContain('Establish the intended outcome and what would demonstrate success')
     expect(managerPrompt).toContain('Match verification to the changed behavior and user-visible risk')
     expect(managerPrompt).toContain('A worker result requires a same-turn decision:')
+    expect(managerPrompt).toContain('A message to a completed worker starts another assignment')
+    expect(managerPrompt).toContain('Fold accepted worker findings into this checkpoint with complete source references and verification status')
     expect(managerPrompt).toContain('Your posture is **Delegation-first**.')
     expect(managerPrompt).toContain('Workers normally own substantive implementation')
     expect(managerPrompt).toContain('Do not ask again for an action already authorized')
