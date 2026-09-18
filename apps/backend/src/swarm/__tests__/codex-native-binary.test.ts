@@ -86,6 +86,7 @@ describe("Native Codex binary discovery", () => {
 
   it("does not execute or fall back from an unresolvable explicit wrapper", () => {
     expect(() => windows({ CODEX_BIN: "C:\\custom\\codex.cmd", PATH: prefix })).toThrow("could not locate its codex.exe");
+    expect(() => windows({ CODEX_BIN: "C:\\custom\\codex.cmd", PATH: prefix })).toThrow("npm.cmd install -g @openai/codex@latest");
     expect(mocks.version).not.toHaveBeenCalled();
   });
 
@@ -115,13 +116,57 @@ describe("Native Codex version diagnostics", () => {
   });
 
   it.each([
-    ["ENOENT", "executable was not found"], ["EACCES", "denied execution"],
+    ["ENOENT", "Codex CLI was not found"], ["EACCES", "denied execution"],
     ["EINVAL", "not a directly executable program"], ["OTHER", "failed its version check"],
   ])("reports %s without exposing subprocess diagnostics", async (code, expected) => {
     mocks.version.mockRejectedValue(Object.assign(new Error("private-subprocess-value"), { code, stderr: "private-stderr" }));
-    const error = await assertNativeCodexVersion("codex.exe", {}).catch(error => error as Error);
+    const error = await assertNativeCodexVersion("codex.exe", {}, "win32").catch(error => error as Error);
     expect(error.message).toContain(expected);
-    expect(error.message).toContain("codex.exe on Windows");
     expect(error.message).not.toContain("private-");
+    if (code !== "ENOENT") expect(error.message).not.toContain("install -g");
+  });
+
+  it.each([
+    ["win32", "PowerShell", "npm.cmd"], ["darwin", "Terminal", "npm"], ["linux", "Terminal", "npm"],
+  ] as const)("gives an actionable %s command for missing and outdated CLIs", async (platform, terminal, command) => {
+    mocks.version.mockRejectedValueOnce(Object.assign(new Error("missing"), { code: "ENOENT" }));
+    const missing = await assertNativeCodexVersion("codex", {}, platform).catch(error => error as Error);
+    expect(missing.message).toContain(`Install in ${terminal}`);
+    expect(missing.message).toContain(`\n${command} install -g @openai/codex@latest\n`);
+    expect(missing.message).toContain("restart Forge");
+    mocks.version.mockResolvedValueOnce({ stdout: "codex-cli 0.154.2" });
+    const outdated = await assertNativeCodexVersion("codex", {}, platform).catch(error => error as Error);
+    expect(outdated.message).toContain("Codex CLI 0.154.2 is too old");
+    expect(outdated.message).toContain("requires Codex CLI 0.155 or newer");
+    expect(outdated.message).toContain(`Update in ${terminal}`);
+    expect(outdated.message).toContain(`\n${command} install -g @openai/codex@latest\n`);
+    expect(outdated.message).toContain("CODEX_BIN");
+  });
+
+  it.each(["ChatGPT", "Codex"])("directs a bundled %s CLI update to its owning app", async name => {
+    mocks.version.mockResolvedValue({ stdout: "codex-cli 0.154.0" });
+    const error = await assertNativeCodexVersion(`/Applications/${name}.app/Contents/Resources/codex`, {}, "darwin").catch(error => error as Error);
+    expect(error.message).toContain(`bundled with ${name}.app`);
+    expect(error.message).toContain("Update that app");
+    expect(error.message).toContain("npm install -g @openai/codex@latest");
+    expect(error.message).toContain("override the bundled copy");
+  });
+
+  it.each(["Caskroom", "Cellar"])("uses Homebrew's update command for a %s installation on PATH", async directory => {
+    mocks.files.add("/opt/homebrew/bin/codex");
+    mocks.realpath.mockReturnValue(`/opt/homebrew/${directory}/codex/0.154.0/codex`);
+    mocks.version.mockResolvedValue({ stdout: "codex-cli 0.154.0" });
+    const error = await assertNativeCodexVersion("codex", { PATH: "/usr/bin:/opt/homebrew/bin" }, "darwin").catch(error => error as Error);
+    expect(error.message).toContain(directory === "Caskroom" ? "brew upgrade --cask codex" : "brew upgrade codex");
+    expect(error.message).not.toContain("npm install");
+  });
+
+  it("does not mistake malformed version output for an outdated CLI or echo raw output", async () => {
+    mocks.version.mockResolvedValue({ stdout: "unexpected private-value" });
+    const error = await assertNativeCodexVersion("codex.exe", {}, "win32").catch(error => error as Error);
+    expect(error.message).toContain("could not recognize");
+    expect(error.message).not.toContain("too old");
+    expect(error.message).not.toContain("private-value");
+    expect(error.message).toContain("npm.cmd install -g @openai/codex@latest");
   });
 });

@@ -20,6 +20,15 @@ and browser integration tools. No existing session changes runtime automatically
 - Select **Hands-on** or **Adaptive** for direct execution. The selected work mode
   still applies; Delegation-first continues to ask Forge workers to do project work.
 
+If the CLI is missing or too old, Forge's error includes the install/update command
+for the backend's operating system: `npm.cmd install -g @openai/codex@latest` in
+Windows PowerShell, or `npm install -g @openai/codex@latest` in a macOS/Linux terminal.
+These commands require Node.js/npm. Restart Forge after installation so it picks up
+PATH changes. For a selected macOS desktop-bundled CLI, update the desktop app or
+use `CODEX_BIN` to select a separately installed CLI; upgrading npm alone does not
+replace the bundled copy. Recognized Homebrew installations show the Homebrew
+update command. Permission and executable-format errors show their own recovery steps.
+
 Each manager owns an app-server process and a persistent native thread. Native data
 lives under `<FORGE_DATA_DIR>/shared/state/codex-native`, separate from the desktop
 app's Codex home. Forge sends the selected access token/account identity over stdio

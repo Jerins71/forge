@@ -126,7 +126,7 @@ export function ChatWorkspace({
       />
 
       {lastError ? (
-        <div className="border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <div role="alert" className="whitespace-pre-wrap break-words border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {lastError}
         </div>
       ) : null}
