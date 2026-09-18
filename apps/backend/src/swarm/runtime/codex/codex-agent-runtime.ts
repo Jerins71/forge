@@ -15,9 +15,10 @@ import { buildModelChangeRecoveryContext } from "../model-change-recovery-contex
 import { isConversationEntryEvent } from "../../conversation-validators.js";
 import { getCatalogContextWindow } from "@forge/protocol";
 import { assertNativeCodexVersion, resolveNativeCodexBinary } from "./codex-native-binary.js";
+import { readNativeToolContract } from "./codex-tool-contract.js";
 
 export const NATIVE_CODEX_STATE = "swarm_native_codex_state";
-interface ThreadState { version: 1; threadId: string; ownerAgentId: string; cwd: string; promptDigest?: string; toolsDigest?: string }
+interface ThreadState { version: 1; threadId: string; ownerAgentId: string; cwd: string; promptDigest?: string }
 interface ActiveTurn {
   id?: string;
   startedAt: number;
@@ -104,10 +105,6 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       // Forge can fork at an individual message, while native fork boundaries are
       // whole turns. Reconstruct forks from the already bounded canonical copy.
       const reuse = stored?.version === 1 && stored.ownerAgentId === options.descriptor.agentId && !options.creationOptions?.startupRecoveryContext;
-      const toolsDigest = createHash("sha256").update(JSON.stringify(runtime.bridge.definitions())).digest("hex");
-      if (reuse && stored.toolsDigest && stored.toolsDigest !== toolsDigest) {
-        throw new Error("This native Codex thread has an older Forge tool configuration. Fork this session or start a new session to use the changed tools.");
-      }
       const method = reuse ? "thread/resume" : "thread/start";
       const response = await runtime.client.request<any>(method, {
         ...common,
@@ -118,6 +115,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       if (response.model && response.model !== options.descriptor.model.modelId) {
         throw new Error(`Codex selected ${response.model} instead of the requested ${options.descriptor.model.modelId}.`);
       }
+      if (reuse) runtime.bridge.restoreContract(await readNativeToolContract(response.thread.path, options.codexHome, runtime.threadId));
       if (!reuse) {
         const recovery = options.creationOptions?.startupRecoveryContext?.blockText
           ?? buildModelChangeRecoveryContext({ descriptor: options.descriptor,
@@ -139,7 +137,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
         }] });
       }
       runtime.appendCustomEntry(NATIVE_CODEX_STATE, { version: 1, threadId: runtime.threadId,
-        ownerAgentId: options.descriptor.agentId, cwd: options.descriptor.cwd, promptDigest, toolsDigest } satisfies ThreadState);
+        ownerAgentId: options.descriptor.agentId, cwd: options.descriptor.cwd, promptDigest } satisfies ThreadState);
       return runtime;
     } catch (error) {
       runtime.closed = true;

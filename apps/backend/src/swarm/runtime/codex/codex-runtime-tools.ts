@@ -3,6 +3,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ChoiceQuestion } from "@forge/protocol";
 import type { RuntimeSessionEvent } from "../../runtime-contracts.js";
 import type { SwarmToolHost } from "../../swarm-tool-host.js";
+import { normalizeNativeToolContract, stableToolContract } from "./codex-tool-contract.js";
 
 type Tool = ToolDefinition<any, any, any>;
 
@@ -10,6 +11,7 @@ type Tool = ToolDefinition<any, any, any>;
 export class CodexRuntimeTools {
   private readonly tools: Map<string, Tool>;
   private readonly pending = new Set<Promise<unknown>>();
+  private legacyBudgetTools = new Set<string>();
 
   constructor(private readonly options: {
     tools: Tool[];
@@ -24,6 +26,15 @@ export class CodexRuntimeTools {
     return [{ type: "namespace", name: "forge", description: "Forge session coordination, task notes, history, and browser integration.",
       tools: [...this.tools.values()].map(tool => ({ type: "function", name: tool.name,
         description: tool.description, inputSchema: tool.parameters, deferLoading: false })) }];
+  }
+
+  restoreContract(definitions: unknown): void {
+    const persisted = normalizeNativeToolContract(definitions);
+    const current = normalizeNativeToolContract(this.definitions());
+    if (stableToolContract(persisted.value) !== stableToolContract(current.value)) {
+      throw new Error("This native Codex thread has an incompatible Forge tool configuration. Fork this session or start a new session to use the changed tools.");
+    }
+    this.legacyBudgetTools = persisted.legacyBudgetTools;
   }
 
   async drain(): Promise<void> { await Promise.allSettled([...this.pending]); }
@@ -82,11 +93,16 @@ export class CodexRuntimeTools {
   private async callTool(params: Record<string, any>, signal: AbortSignal): Promise<unknown> {
     const tool = params.namespace === "forge" ? this.tools.get(params.tool) : undefined;
     if (!tool) throw new Error("Unknown Forge tool for this runtime");
-    if (!Value.Check(tool.parameters, params.arguments)) throw new Error("Invalid Forge tool arguments");
+    let args = params.arguments;
+    if (this.legacyBudgetTools.has(tool.name) && args && typeof args === "object" && !Array.isArray(args)) {
+      args = { ...args };
+      delete args.max_output_tokens;
+    }
+    if (!Value.Check(tool.parameters, args)) throw new Error("Invalid Forge tool arguments");
     const toolCallId = String(params.callId);
     await this.options.emit({ type: "tool_execution_start", toolName: tool.name, toolCallId, args: params.arguments });
     try {
-      const result = await tool.execute(toolCallId, params.arguments, signal, undefined, {} as never);
+      const result = await tool.execute(toolCallId, args, signal, undefined, {} as never);
       if (signal.aborted) throw new Error("Codex turn was stopped");
       const isError = (result as { isError?: boolean }).isError === true;
       await this.options.emit({ type: "tool_execution_end", toolName: tool.name, toolCallId, result, isError });

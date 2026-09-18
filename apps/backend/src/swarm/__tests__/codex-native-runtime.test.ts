@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +16,9 @@ async function fixture(options: { root?: string; agentId?: string; rejectResume?
   const root = options.root ?? await mkdtemp(join(tmpdir(), "forge-native-codex-test-"));
   if (!options.root) roots.push(root);
   const agentId = options.agentId ?? "native-test";
+  const codexHome = join(root, "codex-home");
+  const nativePath = join(codexHome, `${agentId}.jsonl`);
+  await mkdir(codexHome, { recursive: true });
   const descriptor = { agentId, role: "manager", managerId: agentId, profileId: "test", cwd: root,
     status: "idle", sessionFile: join(root, `${agentId}.jsonl`), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     model: { provider: "codex-native", modelId: "gpt-6-astra", thinkingLevel: "high" },
@@ -31,7 +34,11 @@ async function fixture(options: { root?: string; agentId?: string; rejectResume?
     shutdown: vi.fn(async () => { disposed = true; }),
     request: vi.fn(async (method: string, params: any) => {
       if (method === "thread/resume" && options.rejectResume) throw new Error("Missing native thread");
-      if (["thread/start", "thread/resume", "thread/fork"].includes(method)) return { thread: { id: agentId === "child" ? "forked" : "native-thread" } };
+      const threadId = agentId === "child" ? "forked" : "native-thread";
+      if (method === "thread/start") await writeFile(nativePath, `${JSON.stringify({ type: "session_meta", payload: {
+        id: threadId, dynamic_tools: params.dynamicTools,
+      } })}\n`);
+      if (["thread/start", "thread/resume", "thread/fork"].includes(method)) return { thread: { id: threadId, path: nativePath } };
       if (method === "turn/start") return { turn: { id: "turn-1" } };
       if (method === "turn/steer") return { turnId: params.expectedTurnId };
       if (method === "turn/interrupt" && interruptCompletes) await handlers.onNotification?.("turn/completed", { threadId: "native-thread", turn: { id: "turn-1", status: "interrupted" } });
@@ -40,12 +47,12 @@ async function fixture(options: { root?: string; agentId?: string; rejectResume?
   };
   const runtime = await CodexAgentRuntime.create({ descriptor, callbacks: { onStatusChange: vi.fn(),
     onSessionEvent: async (_id, event) => { events.push(event); }, onRuntimeError: vi.fn(), onAgentEnd: vi.fn() },
-    systemPrompt: options.prompt ?? "Forge integration only", codexHome: join(root, "codex-home"), projectTrusted: false, auth,
+    systemPrompt: options.prompt ?? "Forge integration only", codexHome, projectTrusted: false, auth,
     host: { requestUserChoice }, tools: [{ name: "fixture_tool", label: "Fixture", description: "Fixture tool",
-      parameters: Type.Object({ value: Type.String() }), execute: async (_id, args) => ({ content: [{ type: "text", text: args.value }], details: {} }) }],
+      parameters: Type.Object({ value: Type.String() }, { additionalProperties: false }), execute: async (_id, args) => ({ content: [{ type: "text", text: args.value }], details: args }) }],
     createClient: h => { handlers = h; return client as never; },
   });
-  return { root, descriptor, runtime, client, auth, events, requestUserChoice,
+  return { root, nativePath, descriptor, runtime, client, auth, events, requestUserChoice,
     interruptCompletes: (value: boolean) => { interruptCompletes = value; },
     notify: (method: string, params: any) => handlers.onNotification?.(method, params),
     serverRequest: (method: string, params: any) => handlers.onRequest!(method, params),
@@ -53,6 +60,36 @@ async function fixture(options: { root?: string; agentId?: string; rejectResume?
 }
 
 describe("Native Codex manager", () => {
+  it("resumes legacy Pi-contaminated schemas without replacing history and strips only their budget metadata", async () => {
+    const f = await fixture();
+    await f.runtime.terminate();
+    const header = JSON.parse(await readFile(f.nativePath, "utf8"));
+    const tool = header.payload.dynamic_tools[0].tools[0];
+    delete tool.deferLoading;
+    tool.inputSchema.properties.max_output_tokens = { type: "integer", minimum: 256,
+      description: "Output token budget. Defaults to 10000 estimated tokens; larger requests may be capped by runtime policy." };
+    await writeFile(f.nativePath, `${JSON.stringify(header)}\n`);
+    const resumed = await fixture({ root: f.root });
+    expect(resumed.client.request.mock.calls.some(([method]) => method === "thread/start")).toBe(false);
+    await resumed.runtime.sendMessage("Continue");
+    const result = await resumed.serverRequest("item/tool/call", { threadId: "native-thread", turnId: "turn-1",
+      namespace: "forge", tool: "fixture_tool", callId: "legacy", arguments: { value: "accepted", max_output_tokens: 2000 } });
+    expect(result).toMatchObject({ success: true, contentItems: [{ text: "accepted" }] });
+    expect(resumed.events.find(event => event.type === "tool_execution_end")).toMatchObject({ result: { details: { value: "accepted" } } });
+    await expect(resumed.serverRequest("item/tool/call", { threadId: "native-thread", turnId: "turn-1",
+      namespace: "forge", tool: "fixture_tool", callId: "invalid", arguments: { value: "x", unexpected: true } })).rejects.toThrow("Invalid Forge tool arguments");
+    await resumed.runtime.terminate();
+  });
+
+  it("still rejects an incompatible persisted tool schema without starting a replacement thread", async () => {
+    const f = await fixture();
+    await f.runtime.terminate();
+    const header = JSON.parse(await readFile(f.nativePath, "utf8"));
+    header.payload.dynamic_tools[0].tools[0].inputSchema.properties.value.type = "number";
+    await writeFile(f.nativePath, `${JSON.stringify(header)}\n`);
+    await expect(fixture({ root: f.root })).rejects.toThrow("incompatible Forge tool configuration");
+  });
+
   it("uses full access without command approvals for new and resumed threads", async () => {
     const f = await fixture();
     expect(f.client.request).toHaveBeenCalledWith("thread/start", expect.objectContaining({

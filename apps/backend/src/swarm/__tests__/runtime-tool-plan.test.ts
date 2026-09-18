@@ -298,6 +298,20 @@ describe("runtime tool plan", () => {
       toolName: "user_extension_tool",
     }));
   });
+
+  it("isolates Pi schema instrumentation from existing and future native runtime plans", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "forge-runtime-tool-plan-"));
+    const options = { host: createHost(), descriptor: createManagerDescriptor(rootDir),
+      forgeExtensionHost: new ForgeExtensionHost({ dataDir: join(rootDir, "data") }) };
+    const before = planRuntimeTools(options);
+    const snapshot = JSON.stringify(before.swarmTools.map(tool => tool.parameters));
+    const pi = planRuntimeTools(options);
+    createModelVisibleToolResultBudget().augmentToolDefinitions(pi.swarmTools);
+    const after = planRuntimeTools(options);
+    expect(JSON.stringify(before.swarmTools.map(tool => tool.parameters))).toBe(snapshot);
+    expect(JSON.stringify(after.swarmTools.map(tool => tool.parameters))).toBe(snapshot);
+    expect(pi.swarmTools.find(tool => tool.name === "update_plan")?.parameters.properties).toHaveProperty("max_output_tokens");
+  });
 });
 
 describe("runtime Pi extension factory plan", () => {

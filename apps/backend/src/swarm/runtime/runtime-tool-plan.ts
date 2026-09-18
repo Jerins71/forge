@@ -1,4 +1,5 @@
 import { getCatalogProvider } from "@forge/protocol";
+import { Clone } from "@sinclair/typebox";
 import type { ExtensionFactory, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { CompactionRuntimeSettingsProvider } from "../compaction-runtime-settings-provider.js";
 import { createConfiguredForgePiCompactionAuthResolver } from "../compaction/forge-pi-compaction-auth.js";
@@ -31,7 +32,10 @@ export interface RuntimeToolPlan {
 }
 
 export function planRuntimeTools(options: PlanRuntimeToolsOptions): RuntimeToolPlan {
-  const baseSwarmTools = buildBaseRuntimeTools(options.host, options.descriptor);
+  // Runtime instrumentation (including Pi's output-budget parameter) must not
+  // mutate module-level schemas used by other sessions or providers.
+  const baseSwarmTools = buildBaseRuntimeTools(options.host, options.descriptor)
+    .map(tool => ({ ...tool, parameters: Clone(tool.parameters) }));
   const swarmTools = options.preparedForgeBindings
     ? wrapForgeToolsWithExtensionHooks({
         tools: baseSwarmTools,

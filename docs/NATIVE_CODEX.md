@@ -51,7 +51,11 @@ Forge's durable transcript into a new native thread. Forks include only the sele
 history boundary. This retains visible conversation context, not the native thread's
 complete internal context. Older Forge history remains available through history
 recall. Changing dynamic tool definitions requires a fork or new session; Forge
-does not silently resume a thread with an obsolete tool contract.
+does not silently resume a thread with an incompatible tool contract. Resume compares
+the persisted native tool schemas with the current implementation; a legacy optional
+Pi output-budget parameter is accepted without replacing the native thread or history.
+Each runtime receives independent schemas so Pi instrumentation cannot change another
+session's native tool definitions.
 
 ## First-release boundaries
 
