@@ -93,13 +93,12 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       const stored = runtime.getCustomEntries(NATIVE_CODEX_STATE).at(-1) as ThreadState | undefined;
       const config: Record<string, unknown> = {
         "shell_environment_policy.inherit": "core",
-        "sandbox_workspace_write.network_access": true,
         "cli_auth_credentials_store": "ephemeral",
         "features.multi_agent": false,
       };
       if (options.projectTrusted) config[`projects.${JSON.stringify(options.descriptor.cwd)}.trust_level`] = "trusted";
       const common = { model: options.descriptor.model.modelId, cwd: options.descriptor.cwd,
-        developerInstructions: options.systemPrompt, approvalPolicy: "on-request", sandbox: "workspace-write", config,
+        developerInstructions: options.systemPrompt, approvalPolicy: "never", sandbox: "danger-full-access", config,
         allowProviderModelFallback: false };
       // Model switches use Forge's explicit historical recovery block. Ordinary restarts resume.
       // Forge can fork at an individual message, while native fork boundaries are

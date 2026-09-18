@@ -61,10 +61,13 @@ does not silently resume a thread with an obsolete tool contract.
 - Secure Sessions and secret-delivery tools are unavailable for native managers.
   A model switch cannot bypass an active Secure Session. Use the existing Pi runtime
   for secret-backed work during this validation phase.
-- Native commands run with Codex workspace-write sandboxing and on-request
-  approval. Forge presents command, file-change, or permission requests through its
-  existing choice UI. File approval requires a complete bounded diff. Unknown
-  requests and secret-entry questions fail closed; MCP elicitation is declined.
+- Native managers run with full access (`danger-full-access`) and command approvals
+  disabled (`never`), including when resuming existing threads. Native commands can
+  access the host filesystem and network without per-command approval prompts.
+  Genuine clarification questions still use Forge's choice UI. If the server sends
+  an exceptional approval request, Forge presents it rather than auto-accepting it;
+  file approval requires a complete bounded diff. Unknown requests and secret-entry
+  questions fail closed; MCP elicitation is declined.
 - Forge tool hooks apply to bridged Forge tools. Pi extensions do not run inside
   Codex, and Forge hooks do not intercept native Codex coding tools. Native plugins
   or MCP servers are not imported from the user's desktop Codex configuration.

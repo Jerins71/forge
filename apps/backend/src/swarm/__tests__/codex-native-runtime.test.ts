@@ -53,6 +53,22 @@ async function fixture(options: { root?: string; agentId?: string; rejectResume?
 }
 
 describe("Native Codex manager", () => {
+  it("uses full access without command approvals for new and resumed threads", async () => {
+    const f = await fixture();
+    expect(f.client.request).toHaveBeenCalledWith("thread/start", expect.objectContaining({
+      approvalPolicy: "never", sandbox: "danger-full-access",
+    }));
+    await f.runtime.terminate();
+
+    const resumed = await fixture({ root: f.root });
+    expect(resumed.client.request).toHaveBeenCalledWith("thread/resume", expect.objectContaining({
+      threadId: "native-thread", approvalPolicy: "never", sandbox: "danger-full-access",
+    }));
+    await resumed.runtime.sendMessage("Continue with full access");
+    expect(resumed.requestUserChoice).not.toHaveBeenCalled();
+    await resumed.runtime.terminate();
+  });
+
   it("does not block cleanup when auth fails before a turn was submitted", async () => {
     const f = await fixture();
     f.auth.login.mockRejectedValueOnce(new Error("Account needs reconnecting"));
