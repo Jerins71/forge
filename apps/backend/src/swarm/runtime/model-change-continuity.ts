@@ -10,7 +10,7 @@ import { isEnoentError } from "../../utils/fs-errors.js";
 const MODEL_CHANGE_CONTINUITY_REQUEST_ENTRY_TYPE = "swarm_model_change_continuity_request";
 const MODEL_CHANGE_CONTINUITY_APPLIED_ENTRY_TYPE = "swarm_model_change_continuity_applied";
 
-export type ModelChangeContinuityRuntimeKind = "pi" | "cursor-sdk";
+export type ModelChangeContinuityRuntimeKind = "pi" | "cursor-sdk" | "codex";
 type PersistedModelChangeContinuityRuntimeKind = ModelChangeContinuityRuntimeKind | "claude" | "codex";
 
 export interface ModelChangeContinuityModel {
@@ -84,6 +84,7 @@ export function inferModelChangeContinuityRuntimeKind(
   if (provider === "cursor-sdk") {
     return "cursor-sdk";
   }
+  if (provider === "codex-native") return "codex";
 
   return "pi";
 }
@@ -356,7 +357,7 @@ function parseModelChangeContinuityApplied(data: unknown): ModelChangeContinuity
     attachedRuntime: {
       provider: value.attachedRuntime.provider,
       modelId: value.attachedRuntime.modelId,
-      runtimeKind: normalizeRuntimeKind(value.attachedRuntime.runtimeKind)
+      runtimeKind: normalizeRuntimeKind(value.attachedRuntime.runtimeKind, value.attachedRuntime.provider)
     }
   };
 }
@@ -366,7 +367,7 @@ function normalizeModelChangeContinuityModel(model: ModelChangeContinuityModel):
     provider: model.provider,
     modelId: model.modelId,
     thinkingLevel: normalizeThinkingLevel(model.thinkingLevel),
-    runtimeKind: normalizeRuntimeKind(model.runtimeKind)
+    runtimeKind: normalizeRuntimeKind(model.runtimeKind, model.provider)
   };
 }
 
@@ -388,7 +389,8 @@ function isPersistedRuntimeKind(value: unknown): value is PersistedModelChangeCo
   return value === "pi" || value === "claude" || value === "cursor-sdk" || value === "codex";
 }
 
-function normalizeRuntimeKind(value: PersistedModelChangeContinuityRuntimeKind): ModelChangeContinuityRuntimeKind {
+function normalizeRuntimeKind(value: PersistedModelChangeContinuityRuntimeKind, provider: string): ModelChangeContinuityRuntimeKind {
+  if (provider === "codex-native") return "codex";
   return value === "cursor-sdk" ? "cursor-sdk" : "pi";
 }
 
@@ -403,4 +405,3 @@ function normalizeThinkingLevel(level: string | undefined): string | undefined {
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
-

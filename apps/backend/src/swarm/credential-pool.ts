@@ -84,6 +84,7 @@ export class CredentialPoolService {
   private loaded = false;
   private readonly poolFilePath: string;
   private readonly deps: CredentialPoolServiceDeps;
+  private readonly pendingRefreshes = new Map<string, Promise<AuthCredential>>();
 
   constructor(deps: CredentialPoolServiceDeps) {
     this.deps = deps;
@@ -254,12 +255,13 @@ export class CredentialPoolService {
    */
   async buildRuntimeAuthData(
     provider: string,
-    credentialId: string
+    credentialId: string,
+    options?: { forceRefresh?: boolean },
   ): Promise<Record<string, AuthCredential>> {
     this.assertSupportedProvider(provider);
     await this.ensureLoaded();
 
-    const selectedCredential = await this.ensureCredentialAvailable(provider, credentialId);
+    const selectedCredential = await this.ensureCredentialAvailable(provider, credentialId, options?.forceRefresh);
     const result: Record<string, AuthCredential> = {};
 
     // Read all keys from auth.json via the file-backed storage
@@ -510,9 +512,11 @@ export class CredentialPoolService {
     return entry;
   }
 
-  private async ensureCredentialAvailable(provider: string, credentialId: string): Promise<AuthCredential> {
+  private async ensureCredentialAvailable(provider: string, credentialId: string, forceRefresh = false): Promise<AuthCredential> {
     const entry = this.findCredential(provider, credentialId);
     const key = authStorageKey(provider, entry.id, entry.isPrimary);
+    const pending = this.pendingRefreshes.get(key);
+    if (pending) return pending;
     const authStorage = AuthStorage.create(this.deps.authFile);
     const credential = authStorage.get(key);
 
@@ -525,7 +529,7 @@ export class CredentialPoolService {
       return credential;
     }
 
-    if (!oauthCredentialNeedsRefresh(credential, POOLED_OAUTH_REFRESH_SKEW_MS)) {
+    if (!forceRefresh && !oauthCredentialNeedsRefresh(credential, POOLED_OAUTH_REFRESH_SKEW_MS)) {
       return credential;
     }
 
@@ -536,6 +540,17 @@ export class CredentialPoolService {
       throw new PooledCredentialAuthError(provider, credentialId, `Credential is missing refreshable OAuth fields: ${key}`);
     }
 
+    const refreshing = this.refreshCredential(provider, credentialId, key, entry, authStorage, refreshableCredential, oauthProvider);
+    this.pendingRefreshes.set(key, refreshing);
+    try { return await refreshing; }
+    finally { this.pendingRefreshes.delete(key); }
+  }
+
+  private async refreshCredential(
+    provider: string, credentialId: string, key: string, entry: PersistedCredentialEntry,
+    authStorage: AuthStorage, refreshableCredential: OAuthCredentials,
+    oauthProvider: NonNullable<ReturnType<typeof getPooledOAuthProvider>>,
+  ): Promise<AuthCredential> {
     try {
       const refreshedCredential = {
         type: "oauth",

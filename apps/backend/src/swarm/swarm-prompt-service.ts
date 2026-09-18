@@ -189,7 +189,7 @@ export class SwarmPromptService {
     const sessionSystemPrompt = normalizeOptionalAgentId(descriptor.sessionSystemPrompt)?.trim();
     const archetypeEntry = projectAgentComposition || sessionSystemPrompt
       ? undefined
-      : await this.options.promptRegistry.resolveEntry("archetype", archetypeId, resolvedProfileId);
+      : await this.resolveManagerArchetypeEntry(archetypeId, resolvedProfileId, descriptor);
     if (!projectAgentComposition && !sessionSystemPrompt && !archetypeEntry) {
       throw new Error(`Prompt not found: archetype/${archetypeId}`);
     }
@@ -271,7 +271,8 @@ export class SwarmPromptService {
         ? Promise.resolve(projectAgentComposition.content)
         : normalizedSessionSystemPrompt
           ? Promise.resolve(normalizedSessionSystemPrompt)
-          : this.options.promptRegistry.resolve("archetype", managerArchetypeId, profileId),
+          : this.resolveManagerArchetypeEntry(managerArchetypeId, profileId, descriptor)
+            .then(entry => entry?.content ?? this.options.promptRegistry.resolve("archetype", managerArchetypeId, profileId)),
       this.resolveSpecialistRosterForDescriptor(descriptor, specialistRegistry),
       specialistRegistry.resolveTierConfigs(),
     ]);
@@ -819,7 +820,7 @@ export class SwarmPromptService {
       throw new Error(`Agent ${descriptor.agentId} is not a project agent`);
     }
 
-    const base = await this.resolveProjectAgentBasePrompt();
+    const base = await this.resolveProjectAgentBasePrompt(descriptor);
     const sources: ProjectAgentPromptSource[] = [base.source];
     let rolePrompt: string | undefined;
 
@@ -870,7 +871,20 @@ export class SwarmPromptService {
     };
   }
 
-  private async resolveProjectAgentBasePrompt(): Promise<{ content: string; source: ProjectAgentPromptSource }> {
+  private async resolveManagerArchetypeEntry(archetypeId: string, profileId: string, descriptor: AgentDescriptor) {
+    const entry = await this.options.promptRegistry.resolveEntry("archetype", archetypeId, profileId);
+    if (descriptor.model.provider === "codex-native" && archetypeId === MANAGER_ARCHETYPE_ID && entry?.sourceLayer === "builtin") {
+      return this.options.promptRegistry.resolveEntry("archetype", "codex-manager", profileId);
+    }
+    return entry;
+  }
+
+  private async resolveProjectAgentBasePrompt(descriptor: AgentDescriptor): Promise<{ content: string; source: ProjectAgentPromptSource }> {
+    if (descriptor.model.provider === "codex-native") {
+      const content = await this.options.promptRegistry.resolveAtLayer("archetype", "codex-manager", "builtin");
+      if (!content?.trim()) throw new Error("Native Codex integration prompt is missing");
+      return { content, source: { kind: "project_agent_base" } };
+    }
     try {
       const content = await this.options.promptRegistry.resolveAtLayer(
         "operational",

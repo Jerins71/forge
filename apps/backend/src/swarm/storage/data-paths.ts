@@ -37,6 +37,10 @@ export function getSharedStateDir(dataDir: string): string {
   return join(getSharedDir(dataDir), "state");
 }
 
+export function getNativeCodexHome(dataDir: string): string {
+  return join(getSharedStateDir(dataDir), "codex-native");
+}
+
 // ── Integration paths ─────────────────────────────────────────────────────────
 
 export function getIntegrationsDir(dataDir: string): string {

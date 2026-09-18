@@ -428,6 +428,7 @@ export async function getManagedModelProviderCredentialAvailability(
     availability.set(provider, summary.configured);
   }
 
+  availability.set("codex-native", availability.get("openai-codex") ?? false);
   return availability;
 }
 

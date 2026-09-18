@@ -23,6 +23,10 @@ Do **not** add model metadata in frontend fallback constants, ad-hoc backend map
 
 ## Runtime flow
 
+The **Codex native** family uses a separate `codex-native` provider and shares the
+OpenAI/Codex model metadata and Forge authentication. It is manager-only and has no
+Pi model projection. See [Native Codex managers](NATIVE_CODEX.md) for setup and limits.
+
 Forge owns model metadata end-to-end:
 
 1. The checked-in catalog defines the baseline model metadata.

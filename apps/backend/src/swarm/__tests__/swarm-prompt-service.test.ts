@@ -214,6 +214,25 @@ function createPromptServiceForDescriptor(
 }
 
 describe("SwarmPromptService", () => {
+  it("selects a compact native integration prompt while preserving authored manager replacements", async () => {
+    const { config } = await makeConfig();
+    const descriptor = createManagerDescriptor(config, repoRoot, { managerPosture: "hands_on",
+      model: { provider: "codex-native", modelId: "gpt-6-astra", thinkingLevel: "high" } });
+    const registry = createPromptRegistry(config);
+    const service = createPromptServiceForDescriptor(config, descriptor, { promptRegistry: registry });
+    const prompt = await service.buildResolvedManagerPrompt(descriptor);
+    expect(prompt).toContain("Forge's native Codex manager");
+    expect(prompt).toContain("do not poll worker activity");
+    expect(prompt).not.toMatch(/\$\{(?:MODEL_SPECIFIC_INSTRUCTIONS|MANAGER_POSTURE|SPECIALIST_ROSTER)\}/);
+    const preview = await service.previewManagerSystemPromptForAgent(descriptor.agentId);
+    expect(preview.sections.find(s => s.label === "System Prompt")?.source).toBe(join(BUILTIN_ARCHETYPES, "codex-manager.md"));
+    expect((await readFile(join(BUILTIN_ARCHETYPES, "codex-manager.md"), "utf8")).length).toBeLessThan(5_000);
+    await registry.save("archetype", "manager", "Authored native policy.", descriptor.profileId);
+    const authored = await service.buildResolvedManagerPrompt(descriptor);
+    expect(authored).toContain("Authored native policy.");
+    expect(authored).not.toContain("Forge's native Codex manager");
+  });
+
   it("keeps always-loaded manager policy compact and free of tool manuals", async () => {
     const managerSource = await readFile(join(BUILTIN_ARCHETYPES, "manager.md"), "utf8");
     const projectAgentSource = await readFile(

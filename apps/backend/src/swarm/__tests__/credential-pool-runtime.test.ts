@@ -40,6 +40,24 @@ function writeAuthFile(data: Record<string, unknown>): Promise<void> {
 // ── Pool service runtime helpers ──
 
 describe("CredentialPoolService runtime helpers", () => {
+  it("can refresh a rejected OAuth token before its recorded expiry", async () => {
+    await writeAuthFile({ "openai-codex": makeOAuthCredential() });
+    const pool = new CredentialPoolService(deps);
+    const selected = await pool.select("openai-codex");
+    const refresh = vi.spyOn(openaiCodexOAuthProvider, "refreshToken").mockResolvedValue({
+      access: "replacement", refresh: "rotated-refresh", expires: Date.now() + 3600000,
+    });
+    try {
+      const [data, concurrent] = await Promise.all([
+        pool.buildRuntimeAuthData("openai-codex", selected!.credentialId, { forceRefresh: true }),
+        pool.buildRuntimeAuthData("openai-codex", selected!.credentialId, { forceRefresh: true }),
+      ]);
+      expect(data["openai-codex"]).toMatchObject({ access: "replacement" });
+      expect(concurrent["openai-codex"]).toEqual(data["openai-codex"]);
+      expect(AuthStorage.create(authFile).get("openai-codex")).toMatchObject({ refresh: "rotated-refresh" });
+      expect(refresh).toHaveBeenCalledOnce();
+    } finally { refresh.mockRestore(); }
+  });
   describe("getPoolSize", () => {
     it("returns 0 when no pool exists and no auth.json", async () => {
       const pool = new CredentialPoolService(deps);

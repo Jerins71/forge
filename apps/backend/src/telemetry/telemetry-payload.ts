@@ -218,7 +218,8 @@ export async function extractAuthMethodsConfigured(config: SwarmConfig): Promise
   try {
     const availability = await getManagedModelProviderCredentialAvailability(config)
     return Array.from(availability.entries())
-      .filter(([, isConfigured]) => isConfigured)
+      // Native Codex shares the OpenAI Codex credential; it is not a separate auth method.
+      .filter(([provider, isConfigured]) => isConfigured && provider !== 'codex-native')
       .map(([provider]) => provider)
       .sort()
   } catch {

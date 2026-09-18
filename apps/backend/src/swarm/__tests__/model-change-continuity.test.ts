@@ -39,6 +39,7 @@ describe("model-change-continuity", () => {
     expect(inferModelChangeContinuityRuntimeKind({ provider: "cursor-sdk" })).toBe("cursor-sdk");
     expect(inferModelChangeContinuityRuntimeKind({ provider: "openai-codex-app-server" })).toBe("pi");
     expect(inferModelChangeContinuityRuntimeKind({ provider: "openai-codex" })).toBe("pi");
+    expect(inferModelChangeContinuityRuntimeKind({ provider: "codex-native" })).toBe("codex");
   });
 
   it("formats notices with catalog display names and reasoning levels", () => {

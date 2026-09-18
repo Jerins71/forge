@@ -546,6 +546,12 @@ describe("SwarmSettingsService.updateManagerModel", () => {
     await expect(
       service.updateSessionModel(session.agentId, "override", "cursor-composer", "high"),
     ).rejects.toThrow("Secure Sessions are not supported by this runtime provider.");
+    const authDir = join(root, "data", "shared", "config", "auth");
+    await mkdir(authDir, { recursive: true });
+    await writeFile(join(authDir, "auth.json"), JSON.stringify({ "openai-codex": { type: "api_key", key: "fixture-key" } }));
+    await expect(service.updateSessionExactModel(session.agentId, {
+      provider: "codex-native", modelId: "gpt-6-astra",
+    }, "high")).rejects.toThrow("Secure Sessions are not supported by this runtime provider.");
 
     expect(hasActiveSecureSession).toHaveBeenCalledWith(session.agentId);
     expect(stopSecureSessionForLifecycle).not.toHaveBeenCalled();

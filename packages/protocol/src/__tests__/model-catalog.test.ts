@@ -256,7 +256,18 @@ const EXPECTED_MODELS = {
   },
 } as const
 
+const NATIVE_MODEL_IDS = ['gpt-5.5', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']
+
 describe('model-catalog', () => {
+  it('keeps native Codex managers separate from Pi and worker presets', () => {
+    expect(getCatalogProvider('codex-native')).toMatchObject({ piProjectionMode: 'none' })
+    expect(getCatalogFamily('codex-native')).toMatchObject({ visibleInSpawnPreset: false, visibleInSpecialists: false })
+    for (const id of NATIVE_MODEL_IDS) {
+      expect(getCatalogModel(id, 'codex-native')).toMatchObject({ modelId: id, provider: 'codex-native', familyId: 'codex-native' })
+      expect(getCatalogModel(id, 'openai-codex')?.provider).toBe('openai-codex')
+    }
+  })
+
   it('contains the expected curated providers, families, and model set', () => {
     expect(Object.keys(FORGE_MODEL_CATALOG.providers)).toEqual([
       'openai-codex',
@@ -264,10 +275,11 @@ describe('model-catalog', () => {
       'xai',
       'openrouter',
       'cursor-sdk',
+      'codex-native',
     ])
-    expect(Object.keys(FORGE_MODEL_CATALOG.families)).toEqual(Object.keys(EXPECTED_FAMILIES))
-    expect(Object.keys(FORGE_MODEL_CATALOG.models)).toEqual(Object.keys(EXPECTED_MODELS))
-    expect(Object.keys(FORGE_MODEL_CATALOG.models)).toHaveLength(17)
+    expect(Object.keys(FORGE_MODEL_CATALOG.families)).toEqual([...Object.keys(EXPECTED_FAMILIES), 'codex-native'])
+    expect(Object.keys(FORGE_MODEL_CATALOG.models)).toEqual([...Object.keys(EXPECTED_MODELS), ...NATIVE_MODEL_IDS.map(id => `codex-native/${id}`)])
+    expect(Object.keys(FORGE_MODEL_CATALOG.models)).toHaveLength(22)
     expect(FORGE_MODEL_CATALOG.models).not.toHaveProperty('gpt-5.3-codex')
     expect(FORGE_MODEL_CATALOG.models).not.toHaveProperty('gpt-5.3-codex-spark')
     expect(FORGE_MODEL_CATALOG.models).not.toHaveProperty('claude-sonnet-4-5-20250929')
@@ -721,6 +733,7 @@ describe('model-catalog', () => {
       'pi-grok',
       'cursor-composer',
       'cursor-grok-45',
+      'codex-native',
     ])
 
     expect(getChangeManagerFamilies().map((family) => family.familyId)).toEqual([
@@ -733,6 +746,7 @@ describe('model-catalog', () => {
       'pi-grok',
       'cursor-composer',
       'cursor-grok-45',
+      'codex-native',
     ])
 
     expect(getSpawnPresetFamilies().map((family) => family.familyId)).toEqual([

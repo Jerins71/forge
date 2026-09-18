@@ -25,6 +25,7 @@ import { assertForgeRuntimeEligibleDescriptor } from "../external-thread-compati
 import { assertSwarmModelIdNotRetired } from "../model-presets.js";
 import { PiRuntimeCreator } from "./pi/pi-runtime-creator.js";
 import { CursorSdkRuntimeCreator } from "./cursor-sdk/cursor-sdk-runtime-creator.js";
+import { CodexRuntimeCreator } from "./codex/codex-runtime-creator.js";
 import {
   SECURE_RUNTIME_BINDING_UNAVAILABLE_MESSAGE,
   SECURE_RUNTIME_PROVIDER_UNSUPPORTED_MESSAGE,
@@ -121,6 +122,18 @@ export class RuntimeFactory {
     const creationOptions = secureRuntimeBinding
       ? { ...options, secureRuntimeBinding }
       : options;
+
+    if (descriptor.model.provider === "codex-native") {
+      if (secureRuntimeBinding) throw new Error(SECURE_RUNTIME_PROVIDER_UNSUPPORTED_MESSAGE);
+      return new CodexRuntimeCreator(this.deps).create({ descriptor, systemPrompt, runtimeToken, creationOptions,
+        callbacks: {
+          onStatusChange: (...args) => this.deps.callbacks.onStatusChange(runtimeToken, ...args),
+          onSessionEvent: (...args) => this.deps.callbacks.onSessionEvent(runtimeToken, ...args),
+          onAgentEnd: (...args) => this.deps.callbacks.onAgentEnd(runtimeToken, ...args),
+          onRuntimeError: (...args) => this.deps.callbacks.onRuntimeError(runtimeToken, ...args),
+        },
+      });
+    }
 
     if (isCursorSdkModelDescriptor(descriptor.model)) {
       if (secureRuntimeBinding) {

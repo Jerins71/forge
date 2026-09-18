@@ -27,6 +27,20 @@ afterEach(() => {
 })
 
 describe('StdioJsonRpcClient', () => {
+  it('confirms owned process exit even when the subprocess ignores graceful termination', async () => {
+    const client = createClient({ script: String.raw`
+process.on('SIGTERM', () => {});
+setInterval(() => {}, 1000);
+require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+  const message = JSON.parse(line);
+  process.stdout.write(JSON.stringify({ id: message.id, result: { pid: process.pid } }) + '\n');
+});
+` })
+    const { pid } = await client.request<{ pid: number }>('ready')
+    await client.shutdown(1000)
+    expect(() => process.kill(pid, 0)).toThrow()
+    await client.shutdown(1000)
+  })
   it('resolves request/response happy-path results', async () => {
     const client = createClient({
       script: String.raw`

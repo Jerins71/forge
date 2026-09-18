@@ -62,6 +62,8 @@ export class StdioJsonRpcClient {
   private nextRequestId = 0;
   private readonly pendingById = new Map<string, PendingRequest>();
   private readonly stderrContextLines: string[] = [];
+  private resolveExit!: () => void;
+  private readonly exited = new Promise<void>(resolve => { this.resolveExit = resolve; });
 
   constructor(options: StdioJsonRpcClientOptions) {
     this.options = options;
@@ -93,6 +95,7 @@ export class StdioJsonRpcClient {
     this.child.on("error", (error) => {
       this.handleProcessExit(error instanceof Error ? error : new Error(String(error)));
     });
+    this.child.once("close", () => this.resolveExit());
 
     this.child.on("exit", (code, signal) => {
       if (this.disposed) {
@@ -175,6 +178,25 @@ export class StdioJsonRpcClient {
     this.rejectAllPending(new Error("JSON-RPC client disposed"));
   }
 
+  /** Disposal requests exit; replacement ownership requires observing it. Retryable after timeout. */
+  async shutdown(timeoutMs = 3_000): Promise<void> {
+    this.dispose();
+    let timer: NodeJS.Timeout | undefined;
+    let killTimer: NodeJS.Timeout | undefined;
+    try {
+      // Escalate only this owned process, then still require observed exit.
+      killTimer = setTimeout(() => {
+        if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGKILL");
+      }, Math.max(1, Math.floor(timeoutMs / 2)));
+      await Promise.race([this.exited, new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("JSON-RPC subprocess exit is not yet confirmed")), timeoutMs);
+      })]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+    }
+  }
+
   private ensureReady(): void {
     if (this.disposed) {
       throw new Error("JSON-RPC client is disposed");
@@ -186,6 +208,8 @@ export class StdioJsonRpcClient {
   }
 
   private writeMessage(message: unknown): void {
+    // A server-request handler may settle after shutdown closed stdin.
+    if (this.disposed) return;
     const payload = `${JSON.stringify(message)}\n`;
     this.child.stdin.write(payload, "utf8");
   }

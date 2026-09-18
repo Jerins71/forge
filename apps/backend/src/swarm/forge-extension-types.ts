@@ -5,7 +5,7 @@ import type {
 } from "@forge/protocol";
 
 export type ForgeScope = "global" | "profile" | "project-local";
-export type ForgeRuntimeType = "pi" | "cursor-sdk";
+export type ForgeRuntimeType = import("@forge/protocol").ForgeRuntimeType;
 
 export interface ForgeApi {
   readonly dataDir: string;

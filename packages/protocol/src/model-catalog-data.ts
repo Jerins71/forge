@@ -8,7 +8,7 @@ import type { ForgeModelCatalog } from './model-catalog-types.js'
  *
  * Schema: providers → families → models (model-centric first, families are a manager UX projection).
  */
-export const FORGE_MODEL_CATALOG = {
+const BASE_MODEL_CATALOG = {
   providers: {
     'openai-codex': {
       providerId: 'openai-codex',
@@ -525,6 +525,39 @@ export const FORGE_MODEL_CATALOG = {
     },
   },
 } as const satisfies ForgeModelCatalog
+
+/** Native Codex shares model metadata and Forge auth, but owns its agent loop. */
+export const FORGE_MODEL_CATALOG: ForgeModelCatalog = {
+  ...BASE_MODEL_CATALOG,
+  providers: {
+    ...BASE_MODEL_CATALOG.providers,
+    'codex-native': {
+      providerId: 'codex-native', displayName: 'Codex native',
+      availabilityMode: 'managed-auth', piProjectionMode: 'none',
+      projectionScope: 'catalog-only', requestBehaviorId: null,
+    },
+  },
+  families: {
+    ...BASE_MODEL_CATALOG.families,
+    'codex-native': {
+      familyId: 'codex-native', displayName: 'Codex native', provider: 'codex-native',
+      defaultModelId: 'gpt-6-astra', defaultReasoningLevel: 'high',
+      visibleInCreateManager: true, visibleInChangeManager: true,
+      visibleInSpawnPreset: false, visibleInSpecialists: false,
+    },
+  },
+  models: {
+    ...BASE_MODEL_CATALOG.models,
+    ...Object.fromEntries(Object.values(BASE_MODEL_CATALOG.models)
+      .filter(model => model.provider === 'openai-codex')
+      .map(model => [`codex-native/${model.modelId}`, {
+        ...model, catalogId: `codex-native/${model.modelId}`, provider: 'codex-native',
+        familyId: 'codex-native', displayName: `${model.displayName} (Codex native)`,
+        isFamilyDefault: model.modelId === 'gpt-6-astra', webSearchCapability: 'native' as const,
+        piUpstreamId: null, intentionalDivergenceNotes: 'Native Codex app-server runtime; no Pi model projection.',
+      }])),
+  },
+}
 
 const catalogFamilies = FORGE_MODEL_CATALOG.families as Record<string, { familyId: string }>
 

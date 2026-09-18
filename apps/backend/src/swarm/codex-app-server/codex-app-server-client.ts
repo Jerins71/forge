@@ -121,4 +121,10 @@ class CodexAppServerClientAdapter implements CodexAppServerClientPort {
   isDisposed(): boolean {
     return this.disposed;
   }
+
+  async shutdown(timeoutMs?: number): Promise<void> {
+    this.disposed = true;
+    this.connected = false;
+    await this.rpc.shutdown(timeoutMs);
+  }
 }

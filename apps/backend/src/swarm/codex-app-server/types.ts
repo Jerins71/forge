@@ -98,6 +98,7 @@ export interface CodexAppServerClientPort {
   request<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T>;
   notify(method: string, params?: unknown): void;
   dispose(): void;
+  shutdown?(timeoutMs?: number): Promise<void>;
   isDisposed(): boolean;
 }
 
