@@ -11,9 +11,12 @@ and browser integration tools. No existing session changes runtime automatically
 - Configure an OpenAI/Codex account in Forge's Authentication settings. Native
   managers honor Forge's credential pool selection and Forge Auth broker mode.
 - On macOS, Forge first looks for the executable in ChatGPT.app or Codex.app under
-  `/Applications` and `~/Applications`, then searches PATH. Other platforms use PATH.
-  Set `CODEX_BIN` to an executable to override detection. On Windows, an explicit
-  native `codex.exe` path is recommended; Windows execution is not yet validated.
+  `/Applications` and `~/Applications`, then searches PATH. On Windows, Forge finds
+  `codex.exe` on PATH or resolves the native binary behind a standard npm Codex
+  installation (including `%APPDATA%\\npm`). It launches that executable directly;
+  Windows `.cmd` and PowerShell wrappers are not executable through the native
+  version-check/RPC path. Set `CODEX_BIN` to the full native `codex.exe` path for a
+  custom installation. Windows execution still requires live validation.
 - Select **Hands-on** or **Adaptive** for direct execution. The selected work mode
   still applies; Delegation-first continues to ask Forge workers to do project work.
 
