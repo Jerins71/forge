@@ -265,6 +265,9 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       await this.emit({ type: "agent_start" });
       await this.emit({ type: "turn_start" });
       await this.options.auth.login(this.client);
+      // Activate Forge's queued input/output target before native output can
+      // arrive. turn_start alone does not consume an inbound user message.
+      await this.emit({ type: "message_start", message: { role: "user", content: message.text } });
       const text = [this.pinned ? `<forge_pinned_context>\n${this.pinned}\n</forge_pinned_context>` : undefined, message.text].filter(Boolean).join("\n\n");
       submitted = true;
       const response = await this.client.request<any>("turn/start", { threadId: this.threadId,
@@ -319,7 +322,15 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       });
       return;
     }
-    if (params.item?.type === "userMessage" && params.item.clientId) active.pendingSteers.delete(params.item.clientId);
+    if (params.item?.type === "userMessage" && params.item.clientId) {
+      const consumed = active.pendingSteers.get(params.item.clientId);
+      if (consumed) {
+        active.pendingSteers.delete(params.item.clientId);
+        // An accepted steer is not consumed until Codex emits its user item.
+        // Activate it once, preserving suppression of output from older input.
+        await this.emit({ type: "message_start", message: { role: "user", content: consumed.text } });
+      }
+    }
     if (method === "thread/tokenUsage/updated") {
       const tokens = params.tokenUsage?.last?.totalTokens;
       const window = params.tokenUsage?.modelContextWindow;

@@ -79,8 +79,12 @@ describe("Native Codex manager", () => {
     const projector = makeProjector(true);
     const tracker = new ManagerAssistantOutputTracker({ now: () => new Date().toISOString(),
       emitConversationMessage: event => projector.emitConversationMessage(event), markSessionActivity: () => {} });
-    tracker.activateTurn(agentId, { kind: "session_transcript", channel: "web" });
-    consume = event => tracker.handleRuntimeEvent(agentId, event);
+    consume = event => {
+      if (event.type === "message_start" && event.message.role === "user") {
+        tracker.activateTurn(agentId, { kind: "session_transcript", channel: "web" });
+      }
+      tracker.handleRuntimeEvent(agentId, event);
+    };
     await f.runtime.sendMessage("Inspect and validate the fixture");
     const base = { threadId: "native-thread", turnId: "turn-1" };
     for (const [id, text] of [["inspect", "I found the scheduling boundary."], ["validate", "The focused checks pass; I'm checking the final diff."]]) {
@@ -175,8 +179,14 @@ describe("Native Codex manager", () => {
     const f = await fixture();
     await f.runtime.sendMessage("Start work");
     await f.runtime.sendMessage("Consumed constraint");
+    const consumedInputs = () => f.events.filter(event => event.type === "message_start" && event.message.role === "user")
+      .map(event => event.type === "message_start" ? event.message.content : undefined);
+    expect(consumedInputs()).toEqual(["Start work"]);
     const steer = f.client.request.mock.calls.find(([method]) => method === "turn/steer")![1];
-    await f.notify("item/completed", { threadId: "native-thread", turnId: "turn-1", item: { type: "userMessage", id: "input", clientId: steer.clientUserMessageId } });
+    const input = { threadId: "native-thread", turnId: "turn-1", item: { type: "userMessage", id: "input", clientId: steer.clientUserMessageId } };
+    await f.notify("item/started", input);
+    await f.notify("item/completed", input);
+    expect(consumedInputs()).toEqual(["Start work", "Consumed constraint"]);
     await f.runtime.stopInFlight();
     expect(f.client.request.mock.calls.some(([method]) => method === "thread/inject_items")).toBe(false);
     await f.runtime.terminate();
