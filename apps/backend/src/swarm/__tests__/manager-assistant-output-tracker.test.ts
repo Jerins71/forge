@@ -321,6 +321,38 @@ describe("ManagerAssistantOutputTracker", () => {
     expect(emitted).toEqual([]);
   });
 
+  it("retains separate non-final messages until same-turn work starts, including later updates", () => {
+    const { tracker, emitted } = createTracker();
+    tracker.activateTurn("manager-1", WEB_TARGET);
+
+    for (const [id, text] of [["first", "I'll inspect the scheduler."], ["second", "The lock is per agent; I'm checking session isolation."]]) {
+      const before = emitted.length;
+      tracker.handleRuntimeEvent("manager-1", assistantMessageUpdate(text, { stopReason: "toolUse" }));
+      tracker.handleRuntimeEvent("manager-1", assistantMessageEnd(text, { stopReason: "toolUse" }));
+      expect(emitted).toHaveLength(before);
+      tracker.handleRuntimeEvent("manager-1", { type: "tool_execution_start", toolName: "codex_command", toolCallId: id, args: {} });
+      tracker.handleRuntimeEvent("manager-1", { type: "tool_execution_end", toolName: "codex_command", toolCallId: id, isError: false });
+      expect(emitted).toHaveLength(before + 1);
+      expect(emitted.at(-1)).toMatchObject({ text, source: "assistant_progress" });
+    }
+    tracker.handleRuntimeEvent("manager-1", assistantMessageEnd("Done."));
+    tracker.handleRuntimeEvent("manager-1", { type: "agent_end" });
+    expect(emitted).toHaveLength(2);
+  });
+
+  it("does not leak a separate non-final candidate into a later turn or expose NO_REPLY", () => {
+    const { tracker, emitted } = createTracker();
+    tracker.activateTurn("manager-1", WEB_TARGET);
+    tracker.handleRuntimeEvent("manager-1", assistantMessageEnd("Unfinished progress", { stopReason: "toolUse" }));
+    tracker.handleRuntimeEvent("manager-1", { type: "agent_end" });
+    tracker.activateTurn("manager-1", WEB_TARGET);
+    tracker.handleRuntimeEvent("manager-1", { type: "tool_execution_start", toolName: "codex_command", toolCallId: "new", args: {} });
+    tracker.handleRuntimeEvent("manager-1", { type: "tool_execution_end", toolName: "codex_command", toolCallId: "new", isError: false });
+    tracker.handleRuntimeEvent("manager-1", assistantMessageEnd("NO_REPLY\nInternal context", { stopReason: "toolUse" }));
+    tracker.handleRuntimeEvent("manager-1", { type: "tool_execution_start", toolName: "codex_command", toolCallId: "next", args: {} });
+    expect(emitted).toEqual([]);
+  });
+
   it("does not treat dangling clean message_end text as progress when same-turn work starts", () => {
     const { tracker, emitted } = createTracker();
     tracker.activateTurn("manager-1", WEB_TARGET);

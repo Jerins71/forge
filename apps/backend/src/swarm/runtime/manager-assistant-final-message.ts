@@ -117,7 +117,7 @@ export function getToolLikeMessageBlocks(message: unknown): Array<Record<string,
   });
 }
 
-function isToolUseStopReason(message: unknown): boolean {
+export function isToolUseStopReason(message: unknown): boolean {
   return normalizeStopReason(extractMessageStopReason(message)) === "tooluse";
 }
 

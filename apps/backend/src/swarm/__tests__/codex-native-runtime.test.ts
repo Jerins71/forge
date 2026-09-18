@@ -5,14 +5,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Type } from "@sinclair/typebox";
 import { CodexAgentRuntime, NATIVE_CODEX_STATE } from "../runtime/codex/codex-agent-runtime.js";
 import { nativeCodexEnvironment } from "../runtime/codex/codex-runtime-auth.js";
+import { ManagerAssistantOutputTracker } from "../runtime/manager-assistant-output-tracker.js";
+import { extractCleanManagerAssistantFinalMessage } from "../runtime/manager-assistant-final-message.js";
+import { ConversationProjector } from "../conversation-projector.js";
 import type { CodexAppServerClientHandlers } from "../codex-app-server/types.js";
-import type { AgentDescriptor } from "../types.js";
+import type { AgentDescriptor, ConversationMessageEvent } from "../types.js";
 import type { RuntimeSessionEvent } from "../runtime-contracts.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 
-async function fixture(options: { root?: string; agentId?: string; rejectResume?: boolean; prompt?: string } = {}) {
+async function fixture(options: { root?: string; agentId?: string; rejectResume?: boolean; prompt?: string;
+  onEvent?: (event: RuntimeSessionEvent) => void } = {}) {
   const root = options.root ?? await mkdtemp(join(tmpdir(), "forge-native-codex-test-"));
   if (!options.root) roots.push(root);
   const agentId = options.agentId ?? "native-test";
@@ -46,7 +50,7 @@ async function fixture(options: { root?: string; agentId?: string; rejectResume?
     }),
   };
   const runtime = await CodexAgentRuntime.create({ descriptor, callbacks: { onStatusChange: vi.fn(),
-    onSessionEvent: async (_id, event) => { events.push(event); }, onRuntimeError: vi.fn(), onAgentEnd: vi.fn() },
+    onSessionEvent: async (_id, event) => { events.push(event); options.onEvent?.(event); }, onRuntimeError: vi.fn(), onAgentEnd: vi.fn() },
     systemPrompt: options.prompt ?? "Forge integration only", codexHome, projectTrusted: false, auth,
     host: { requestUserChoice }, tools: [{ name: "fixture_tool", label: "Fixture", description: "Fixture tool",
       parameters: Type.Object({ value: Type.String() }, { additionalProperties: false }), execute: async (_id, args) => ({ content: [{ type: "text", text: args.value }], details: args }) }],
@@ -60,6 +64,47 @@ async function fixture(options: { root?: string; agentId?: string; rejectResume?
 }
 
 describe("Native Codex manager", () => {
+  it("publishes separate native commentary live and replays it once after restart", async () => {
+    let consume: (event: RuntimeSessionEvent) => void = () => {};
+    const f = await fixture({ onEvent: event => consume(event) });
+    const agentId = f.descriptor.agentId;
+    const live: ConversationMessageEvent[] = [];
+    const makeProjector = (running: boolean) => new ConversationProjector({
+      descriptors: new Map([[agentId, f.descriptor]]),
+      runtimes: running ? new Map([[agentId, f.runtime]]) : new Map(),
+      conversationEntriesByAgentId: new Map(), now: () => new Date().toISOString(),
+      emitServerEvent: (_name, event) => { if (event.type === "conversation_message") live.push(event); },
+      logDebug: () => {},
+    });
+    const projector = makeProjector(true);
+    const tracker = new ManagerAssistantOutputTracker({ now: () => new Date().toISOString(),
+      emitConversationMessage: event => projector.emitConversationMessage(event), markSessionActivity: () => {} });
+    tracker.activateTurn(agentId, { kind: "session_transcript", channel: "web" });
+    consume = event => tracker.handleRuntimeEvent(agentId, event);
+    await f.runtime.sendMessage("Inspect and validate the fixture");
+    const base = { threadId: "native-thread", turnId: "turn-1" };
+    for (const [id, text] of [["inspect", "I found the scheduling boundary."], ["validate", "The focused checks pass; I'm checking the final diff."]]) {
+      await f.notify("item/started", { ...base, item: { type: "agentMessage", id, phase: "commentary", text: "" } });
+      await f.notify("item/agentMessage/delta", { ...base, itemId: id, delta: text });
+      const message = { ...base, item: { type: "agentMessage", id, phase: "commentary", text } };
+      await f.notify("item/completed", message);
+      await f.notify("item/completed", message);
+      await f.notify("item/started", { ...base, item: { type: "commandExecution", id: `${id}-cmd`, command: "true", status: "inProgress" } });
+      expect(live.at(-1)).toMatchObject({ text, source: "assistant_progress" });
+      await f.notify("item/completed", { ...base, item: { type: "commandExecution", id: `${id}-cmd`, status: "completed", exitCode: 0 } });
+    }
+    await f.notify("item/completed", { ...base, item: { type: "agentMessage", id: "final", phase: "final_answer", text: "Verified." } });
+    await f.notify("turn/completed", { threadId: "native-thread", turn: { id: "turn-1", status: "completed" } });
+    expect(live).toHaveLength(2);
+    expect(f.events.map(extractCleanManagerAssistantFinalMessage).filter(Boolean)).toEqual([{ text: "Verified." }]);
+    await projector.flushPendingHistoryCacheWrites();
+    await f.runtime.terminate();
+
+    const reloaded = makeProjector(false);
+    expect(reloaded.getConversationHistory(agentId).filter(event => event.type === "conversation_message" && event.source === "assistant_progress")).toEqual(live);
+    await reloaded.flushPendingHistoryCacheWrites();
+  });
+
   it("resumes legacy Pi-contaminated schemas without replacing history and strips only their budget metadata", async () => {
     const f = await fixture();
     await f.runtime.terminate();

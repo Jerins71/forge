@@ -10,6 +10,7 @@ import type { MessageRouteDecision } from "../message-router.js";
 import {
   getToolLikeMessageBlocks,
   hasNoReplySentinelLine,
+  isToolUseStopReason,
   messageHasIneligibleStopOrError,
 } from "./manager-assistant-final-message.js";
 
@@ -209,7 +210,10 @@ export class ManagerAssistantOutputTracker {
     }
 
     if (!onlyPresentChoicesToolBlocks) {
-      if (options?.provisional) {
+      // Native Codex sends completed commentary separately from the following
+      // tool item. Preserve that non-final text until same-turn work starts,
+      // just as we do for providers that embed tool calls in the message.
+      if (options?.provisional || isToolUseStopReason(event.message)) {
         activeTurn.candidate = {
           text,
           kind: "progress",
