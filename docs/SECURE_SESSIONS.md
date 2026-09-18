@@ -2,9 +2,9 @@
 
 Secure Sessions let a local Builder task use an approved secret without putting the
 secret value in chat, a model prompt, tool arguments, WebSocket messages, or the
-conversation transcript. The agent continues to call the ordinary Pi Bash and file
+conversation transcript. The agent continues to call the ordinary runtime coding
 tools for normal host work. For projects with secret grants, Forge automatically adds a separate
-`secure_bash` tool backed by the Linux secure execution plane. Forge resolves project
+`secure_bash` tool backed by the configured secure executor. Forge resolves project
 grants inside its local secure service when preparing protected execution. Each
 command receives only the display aliases it selects; normal `bash` never receives
 the protected values.
@@ -12,6 +12,74 @@ the protected values.
 This feature is designed for the practical middle ground between two unsafe extremes:
 giving the model a password and building a special-purpose tool for every command that
 might need one.
+
+## Native Codex and nono
+
+Native Codex Builder managers support the existing vault, Bitwarden sources, project
+grants, task/timed/one-use access, SSH host trust, and `forge.secure_bash`. Ordinary
+Codex tools keep full access and their normal execution path. Forge resolves only the
+aliases selected by each secure command, injects values locally, and filters stdout
+and stderr before the dynamic-tool result reaches Codex or conversation storage.
+Grant changes do not restart native Codex. Threads created before these tools were
+added continue normally with their original contract; start a new session or fork to
+use the secure tools. Browser login delivery is outside this native integration.
+
+This prevents common accidental disclosure by cooperative agents. Native Codex's own
+shell and file tools are not intercepted before model calls. Do not write credentials
+into the workspace and then read them with those tools. This is not hostile-agent
+containment or a guarantee against every transformation of a secret.
+
+Select the native executor before starting Forge:
+
+```bash
+FORGE_SECURE_EXECUTION_BACKEND=nono
+FORGE_NONO_PATH=/absolute/path/to/nono
+```
+
+Install nono separately from its official release; macOS arm64 acceptance was tested
+with **v0.78.0**. `FORGE_NONO_PATH` defaults to `nono` on PATH. Forge uses `nono wrap`,
+not nono's Codex profile, hooks, tool shim, or credential proxy. Nono availability is
+checked by running a sandboxed harmless command. Missing or unsupported execution
+fails closed; it never silently runs the credentialed command without nono. Docker
+remains the default when the executor setting is omitted. Nono supports macOS and
+Linux; native Windows requires the existing Docker path. Linux requires a usable
+Landlock kernel. This change was exercised on macOS; Linux requires platform acceptance.
+
+Nono runs local programs with workspace access, a private empty home, a clean
+environment, and network access. Commands do not load host shell profiles or inherit
+host credentials. Environment, stdin, askpass, file and SSH-agent delivery are
+supported. File bindings under `/run/forge-secure/bindings` are mapped to private,
+per-command files outside the workspace; these are temporary disk files on macOS,
+not a RAM filesystem. They and the execution-local agent are removed on completion,
+abort, timeout, revocation, and backend-process exit. No long-lived container is used.
+A small credential-free lifetime process observes the backend pipe so cleanup also
+runs after a backend crash. Commands may read/write the selected workspace, so avoid
+saving credentials or unfiltered diagnostic dumps there.
+
+For password SSH, grant an `askpass` binding named `SSH_ASKPASS`; `ssh <trusted-alias>`
+then works without a PTY. Existing environment-only grants also work:
+
+```bash
+FORGE_ASKPASS_ENV=LOGIN SSH_ASKPASS="$FORGE_ASKPASS_HELPER" \
+SSH_ASKPASS_REQUIRE=force DISPLAY=forge-secure ssh server 'hostname'
+```
+
+`LOGIN` is the granted variable name, never the password text. A selected `ssh_agent`
+binding supplies `SSH_AUTH_SOCK`; keys are loaded through stdin, never key files.
+Trusted aliases apply to `ssh`, `scp`, `sftp`, and Git over SSH.
+
+To log in with one password and use a second password remotely, select both aliases,
+use askpass for login, and pipe the second environment variable to the remote
+program. For sudo followed by another stdin password consumer:
+
+```bash
+printf '%s\n%s\n' "$LOGIN" "$REMOTE_PASSWORD" | \
+  ssh server 'sudo -S -p "" /usr/local/bin/password-consuming-command'
+```
+
+Use the tool's timeout (seconds, default 120) for longer operations. Each invocation
+is a new process; combine related remote operations in one command. Interactive
+terminal sessions and remote shell state do not carry across tool calls.
 
 ## Enable a project
 
@@ -31,22 +99,22 @@ Other projects keep their own settings and sessions.
 ## Shared project secret access
 
 The protected environment belongs to one local Builder manager session. That manager session
-is the only authorization principal: it owns one reusable Linux container, one lease
+is the only authorization principal: it owns one execution environment, one lease
 set, one request queue, and one output-protection state. Eligible local Forge Pi
 workers inherit that authority while executing work for the manager; they never
 create a second secret grant or sandbox. Explicit task and agent blocks override
 that inheritance. The runner starts on first protected use:
 
 - the manager and all eligible workers can run `secure_bash` in the same
-  manager-owned container;
+  manager-owned execution environment;
 - ordinary `bash` remains on the host with its usual PATH, authentication, shell
   settings, and developer tools; on Windows this is normally Git Bash;
 - idle, newly created, reassigned, and completed workers do not create or retain
-  additional containers;
-- the workspace is mounted directly into the container (at the same path on
-  macOS/Linux and at `/workspace` on Windows);
+  additional execution environments;
+- the workspace is accessible to secure commands; Docker mounts it at the same path
+  on macOS/Linux and at `/workspace` on Windows, while nono uses its native path;
 - approved values can be delivered to a command as an environment variable, stdin,
-  a protected RAM-backed file, an askpass helper, or an execution-local SSH agent;
+  a protected file (RAM-backed with Docker), an askpass helper, or an execution-local SSH agent;
 - each secure command names the exact granted aliases it needs, so unrelated grants
   are not delivered and no additional approval prompt is required;
 - a task or timed grant can be reused across many commands from the manager or any
@@ -54,7 +122,7 @@ that inheritance. The runner starts on first protected use:
 - output from both `bash` and `secure_bash` is filtered before the Pi tool
   accumulator, Forge events, persistence, extensions, UI, or the next provider
   request;
-- host-side file-tool results pass through the same active exact-value guard before
+- Pi host-side file-tool results pass through the same active exact-value guard before
   they can be returned to the runtime;
 - stopping or revoking Team Secure Mode destroys the shared process tree and revokes
   the session's grants. A worker lifecycle event never revokes session authority.
@@ -63,8 +131,8 @@ The agent sees only catalog aliases, delivery destinations, lease status, and fi
 error codes. It cannot ask the Secure Sessions tools to return a stored value or a
 provider locator.
 
-Team Secure Mode is currently available for a supported local Pi-backed Builder
-manager and eligible local Forge Pi workers in the same project. Unsupported worker
+Team Secure Mode is available for supported local Pi-backed and native Codex Builder
+managers, and eligible local Forge Pi workers in the same project. Unsupported worker
 runtimes fail closed before secure work is dispatched; Forge does not silently run
 that assignment without the secure boundary. Cursor SDK, Remote Projects,
 Collaboration channels, Codex plugin/external-thread workers, and ordinary integrated
@@ -83,7 +151,7 @@ binding or ineligible target is rejected before Bash or the message is delivered
 
 ## Set up the execution environment
 
-Secure Sessions currently use Docker as a replaceable first execution backend. Build
+With the default Docker executor, build
 the pinned runner image from the repository root:
 
 ```bash
@@ -466,8 +534,9 @@ Secure Sessions make the following concrete promises for supported paths:
   tools, history, and catalog metadata;
 - Docker CLI arguments, image configuration, and container inspect metadata do not
   contain the value;
-- values enter the guest executor in a private binary frame on stdin, after the
-  container has already started;
+- with Docker, values enter the guest executor in a private binary frame on stdin,
+  after the container has already started; nono uses the per-command delivery
+  described above;
 - normal host `bash` never receives approved values or consumes one-use grants, and
   its streamed output is still checked before Pi can accumulate or persist it;
 - output is matched as raw bytes across arbitrary chunk boundaries, including common
@@ -475,14 +544,16 @@ Secure Sessions make the following concrete promises for supported paths:
 - low-entropy values are buffered until command completion; harmless output is
   released, while an exact match is replaced by a fixed redaction marker without
   revealing its position;
-- a final structured guard protects runtime events and provider context;
+- Pi's final structured guard also protects runtime events and provider context;
+  native Codex receives guarded results from Forge's secure tools, while its own
+  shell and file tools retain their ordinary behavior;
 - successful output redaction completes the command normally and marks only that
   manager session as quarantined; the team can continue, a one-use lease is consumed
   when applicable, and task or timed leases remain available for later commands;
 - the manager can stop Team Secure Mode to kill every tracked process and revoke the
   shared authority;
-- stopping or failing a secure operation destroys the task container when safe
-  filtering or process control cannot be guaranteed.
+- stopping or failing a secure operation tears down its execution environment when
+  safe filtering or process control cannot be guaranteed.
 
 This is a **model-hidden execution** boundary, not a claim that arbitrary code cannot
 use a value it legitimately receives. A process that receives a raw database password
@@ -505,13 +576,13 @@ turn an already trusted local agent into an untrusted sandbox. Use it to keep va
 out of prompts, tool arguments, ordinary output, and accidental logs—not as a boundary
 against a malicious agent that controls the same developer account.
 
-This first backend is a conventional Docker container, not a microVM. It protects
+The default Docker backend is a conventional container, not a microVM. It protects
 host process and filesystem boundaries better than direct execution, but shares the
 Docker host's kernel. The provider interface is intentionally replaceable so a
 microVM backend can be added without changing vault, lease, approval, or redaction
 contracts.
 
-The workspace mount is writable by design. The manager and its workers can see and
+The Docker workspace mount is writable by design. The manager and its workers can see and
 modify the same selected workspace and run concurrently in the same container, so
 their file and process changes can race. Secure Sessions protect unrelated host paths
 and make hard process revocation reliable, but they do not protect team members from
@@ -598,7 +669,7 @@ credential-set rebuild destroys it. Per-command RAM files and askpass helpers ar
 removed when the direct command exits, so background jobs that need long-lived access
 should use an inherited environment binding or be launched by a foreground supervisor.
 
-Normal `bash` uses the host shell and environment; on Windows this is normally Git
+With the Docker executor, normal `bash` uses the host shell and environment; on Windows this is normally Git
 Bash, so host paths and authenticated Windows tools continue to behave as they do
 outside Team Secure Mode. `secure_bash` is always Linux. On Windows, Forge uses
 Docker Desktop's Linux-container engine and translates command working directories
@@ -617,7 +688,7 @@ still passes through the secure guard.
 
 | Status | Meaning |
 | --- | --- |
-| Environment unavailable | Docker is unavailable, unsupported, or the runner image failed its contract check |
+| Environment unavailable | The configured executor is unavailable or unsupported, or the Docker runner image failed its contract check |
 | Source locked or unavailable | Desktop safe storage, Bitwarden authentication, or the `bws` host command is unavailable |
 | Automatic grant unavailable | This session's automatic grant was skipped; unlock or repair its source, then retry the protected command |
 | Automatic grant binding conflict | This automatic grant was skipped because its saved delivery collides with another active or automatic delivery |

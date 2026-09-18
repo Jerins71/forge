@@ -4,7 +4,6 @@
  * unknown persisted legacy descriptors that remain unavailable after retirement.
  */
 const UNSUPPORTED_SECURE_RUNTIME_PROVIDERS = new Set([
-  "codex-native",
   "claude-sdk",
   "cursor-sdk",
   "cursor-acp",

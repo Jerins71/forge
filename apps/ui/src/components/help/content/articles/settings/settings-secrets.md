@@ -2,7 +2,7 @@
 
 **Settings → Secrets** manages private sources and reusable delivery bindings for
 local Builder tasks. Saving alone does not give a secret to an agent or
-task. Each manager session owns one secure container, one grant set, and one request
+task. Each manager session owns one secure execution environment, one grant set, and one request
 queue. Eligible local Forge Pi workers use that same session authority.
 
 ## Choose where an alias is available
@@ -158,7 +158,7 @@ browser clearly labels the trusted-network HTTP path when it is active. A locked
 Secure Sessions keep raw values out of model prompts, model-originated tool arguments,
 Forge public events, history, and normal command output. Forge keeps Pi's `bash` tool
 on the host and adds a separate `secure_bash` tool backed by the manager-session-owned
-Linux container. Only `secure_bash` receives approved values or Forge-managed SSH
+secure executor. Only `secure_bash` receives approved values or Forge-managed SSH
 trust. Output from both tools is filtered before Pi can accumulate or persist it. If
 protected output is found, Forge redacts it and marks the shared session. The team can
 continue with task or timed grants still active, or you can pause secret access.
@@ -176,8 +176,16 @@ concurrent file and process changes can race. Use separate Git worktrees for hig
 or concurrently writing agents. The first release also has no
 destination-constrained network proxy.
 
-Secure Sessions currently require a Pi-backed local Builder runtime and the pinned
-Forge Docker runner image. Supported local Forge Pi workers can participate with
+Secure Sessions support Pi-backed local Builder sessions and native Codex managers.
+The default executor uses the pinned Forge Docker runner image. An installed nono
+executor can be selected with `FORGE_SECURE_EXECUTION_BACKEND=nono` on macOS/Linux;
+`FORGE_NONO_PATH` optionally selects its executable. Nono runs local programs with
+per-command credentials and filtered output. Native Codex's ordinary coding tools
+keep full access; they do not receive Forge credentials and are not intercepted
+before model calls. Keep credential use inside `forge.secure_bash` and never write
+values into workspace files. Existing native threads without the secure tools need
+a new session or fork for this capability; ordinary continuation still works.
+Browser login delivery is not included in the native path. Supported local Forge Pi workers can participate with
 the manager session's authority. Cursor SDK, Remote Projects, Collaboration, Codex
 plugin/external-thread workers, and the integrated terminal are not secure-session
 execution paths. Secure Bash is non-interactive pipe execution

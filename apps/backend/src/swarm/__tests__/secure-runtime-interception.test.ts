@@ -170,7 +170,7 @@ describe("Secure Pi runtime interception", () => {
     expect(hostBash.label).toBe("Host Bash · Windows");
     expect(hostBash.description).toContain("Git Bash");
     expect(hostBash.description).toContain("GitHub CLI");
-    expect(secureBash.label).toBe("Secure Bash · Linux container");
+    expect(secureBash.label).toBe("Secure Bash");
     expect(secureBash.description).toContain("approved Secure Sessions value");
     expect(secureBash.description).toContain("exact project-granted or task-granted secret aliases");
     expect(secureBash.description).toContain("SSH_AUTH_SOCK automatically");

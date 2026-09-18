@@ -1,3 +1,5 @@
+import { Type } from "@sinclair/typebox";
+import { CodexRuntimeTools } from "../runtime/codex/codex-runtime-tools.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -43,4 +45,18 @@ describe("native Codex tool contract", () => {
     await writeFile(file, "x".repeat(2 * 1024 * 1024 + 1));
     await expect(readNativeToolContract(file, home, "thread")).rejects.toThrow("missing or too large");
   });
+});
+
+
+it("resumes pre-secrets native threads without exposing tools absent from their saved contract", async () => {
+  const tool = (name: string) => ({ name, label: name, description: name,
+    parameters: Type.Object({}), execute: async () => ({ content: [], details: {} }) });
+  const options = { agentId: "test", host: { requestUserChoice: async () => [] }, emit: async () => {} };
+  const old = new CodexRuntimeTools({ ...options, tools: [tool("existing")] });
+  const current = new CodexRuntimeTools({ ...options, tools: [tool("existing"), tool("secure_bash"), tool("secure_session_status")] });
+  expect(() => current.restoreContract(old.definitions())).not.toThrow();
+  expect(current.definitions()).toEqual(old.definitions());
+  await expect(current.request("item/tool/call", { namespace: "forge", tool: "secure_bash", arguments: {}, callId: "call" }, new AbortController().signal)).rejects.toThrow("Unknown Forge tool");
+  const changed = new CodexRuntimeTools({ ...options, tools: [{ ...tool("existing"), description: "Incompatible change" }, tool("secure_bash")] });
+  expect(() => changed.restoreContract(old.definitions())).toThrow("incompatible");
 });

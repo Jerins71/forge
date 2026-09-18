@@ -18,7 +18,7 @@ import { assertNativeCodexVersion, resolveNativeCodexBinary } from "./codex-nati
 import { readNativeToolContract } from "./codex-tool-contract.js";
 
 export const NATIVE_CODEX_STATE = "swarm_native_codex_state";
-interface ThreadState { version: 1; threadId: string; ownerAgentId: string; cwd: string; promptDigest?: string }
+interface ThreadState { version: 1; threadId: string; ownerAgentId: string; cwd: string; promptDigest?: string; hasStartedTurn?: boolean }
 interface ActiveTurn {
   id?: string;
   startedAt: number;
@@ -52,6 +52,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
   private readonly bridge: CodexRuntimeTools;
   private readonly queued: RuntimeUserMessage[] = [];
   private threadId = "";
+  private hasStartedTurn = false;
   private active?: ActiveTurn;
   private status: AgentStatus = "idle";
   private usage?: AgentContextUsage;
@@ -102,9 +103,11 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
         developerInstructions: options.systemPrompt, approvalPolicy: "never", sandbox: "danger-full-access", config,
         allowProviderModelFallback: false };
       // Model switches use Forge's explicit historical recovery block. Ordinary restarts resume.
+      // Codex does not persist an unused thread. Recreate that empty allocation
+      // after settings recycle; never discard a thread that has accepted a turn.
       // Forge can fork at an individual message, while native fork boundaries are
       // whole turns. Reconstruct forks from the already bounded canonical copy.
-      const reuse = stored?.version === 1 && stored.ownerAgentId === options.descriptor.agentId && !options.creationOptions?.startupRecoveryContext;
+      const reuse = stored?.version === 1 && stored.ownerAgentId === options.descriptor.agentId && !options.creationOptions?.startupRecoveryContext && stored.hasStartedTurn !== false;
       const method = reuse ? "thread/resume" : "thread/start";
       const response = await runtime.client.request<any>(method, {
         ...common,
@@ -116,6 +119,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
         throw new Error(`Codex selected ${response.model} instead of the requested ${options.descriptor.model.modelId}.`);
       }
       if (reuse) runtime.bridge.restoreContract(await readNativeToolContract(response.thread.path, options.codexHome, runtime.threadId));
+      runtime.hasStartedTurn = Boolean(reuse);
       if (!reuse) {
         const recovery = options.creationOptions?.startupRecoveryContext?.blockText
           ?? buildModelChangeRecoveryContext({ descriptor: options.descriptor,
@@ -137,7 +141,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
         }] });
       }
       runtime.appendCustomEntry(NATIVE_CODEX_STATE, { version: 1, threadId: runtime.threadId,
-        ownerAgentId: options.descriptor.agentId, cwd: options.descriptor.cwd, promptDigest } satisfies ThreadState);
+        ownerAgentId: options.descriptor.agentId, cwd: options.descriptor.cwd, promptDigest, hasStartedTurn: runtime.hasStartedTurn } satisfies ThreadState);
       return runtime;
     } catch (error) {
       runtime.closed = true;
@@ -275,6 +279,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
         effort: this.descriptor.model.thinkingLevel, clientUserMessageId: deliveryId });
       if (typeof response?.turn?.id !== "string") throw new Error("Codex did not acknowledge a turn identity");
       active.id = response.turn.id;
+      this.markThreadStarted();
       this.recordUser(message);
       if (!this.recoveryConsumed) {
         await this.options.creationOptions?.onStartupRecoveryConsumed?.();
@@ -286,6 +291,13 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       throw error;
     }
     finally { this.dispatching = false; }
+  }
+
+  private markThreadStarted(): void {
+    if (this.hasStartedTurn) return;
+    this.hasStartedTurn = true;
+    const state = this.getCustomEntries(NATIVE_CODEX_STATE).at(-1) as ThreadState;
+    this.appendCustomEntry(NATIVE_CODEX_STATE, { ...state, hasStartedTurn: true } satisfies ThreadState);
   }
 
   private beginTurn(): ActiveTurn {
@@ -314,7 +326,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     if (!active) return;
     const turnId = params.turnId ?? params.turn?.id;
     if (active.id && turnId && turnId !== active.id) return;
-    if (method === "turn/started") { active.id = params.turn?.id; return; }
+    if (method === "turn/started") { active.id = params.turn?.id; this.markThreadStarted(); return; }
     if (method === "error" && params.willRetry === true) {
       await this.options.callbacks.onRuntimeError?.(this.descriptor.agentId, {
         phase: "prompt_start", message: `Codex is retrying: ${String(params.error?.message ?? "Provider request failed")}`,

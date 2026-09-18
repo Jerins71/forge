@@ -70,6 +70,34 @@ function testBitwardenCliSummary() {
 }
 
 describe("SecureSessionsService", () => {
+  it("keeps native bindings live through grant changes without recycling the app-server runtime", async () => {
+    const harness = createHarness();
+    const descriptor = harness.descriptors.get("manager-a")!;
+    descriptor.model.provider = "codex-native";
+    const binding = (await harness.service.prepareSecureRuntimeBinding(descriptor))!;
+    expect(binding.guardValue("ordinary output")).toBe("ordinary output");
+    const secret = await harness.service.createLocalSecureSecret({ displayAlias: "native-password",
+      encryptedMaterial: Buffer.from(ALPHA).toString("base64"),
+      bindings: [{ deliveryKind: "environment", targetName: "NATIVE_PASSWORD" }],
+      scope: { kind: "profile", profileId: "profile-a" } });
+    await harness.service.setSecureSecretProjectDefault(secret.secretId, { profileId: "profile-a", enabled: true });
+    const run = () => binding.executeBash({ command: "use-password", cwd: descriptor.cwd,
+      secretAliases: ["native-password"], onData: () => {} });
+    await run();
+    expect(harness.execution.environmentDeliveryNames.at(-1)).toEqual(["NATIVE_PASSWORD"]);
+    expect(binding.guardValue(ALPHA)).not.toContain(ALPHA);
+    const beforeStop = await harness.service.getSecureSessionSnapshot("manager-a");
+    await harness.service.stopSecureSession("manager-a", { baseRevision: beforeStop.revision, stopProcesses: true });
+    await expect(run()).rejects.toBeDefined();
+    await harness.service.startSecureSession("manager-a");
+    expect(binding.guardValue("after stop")).toBe("after stop");
+    await run(); // Project grant reactivates in the same native runtime.
+    expect(harness.recycles).toEqual([]);
+    binding.invalidate!();
+    await expect(run()).rejects.toMatchObject({ code: "SECURE_OPERATION_FAILED" });
+    await harness.close();
+  });
+
   it("exports and transactionally re-seals machine-bound vault material", async () => {
     const harness = createHarness();
     const local = await harness.service.createLocalSecureSecret({

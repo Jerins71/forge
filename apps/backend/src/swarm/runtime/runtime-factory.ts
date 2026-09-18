@@ -124,7 +124,6 @@ export class RuntimeFactory {
       : options;
 
     if (descriptor.model.provider === "codex-native") {
-      if (secureRuntimeBinding) throw new Error(SECURE_RUNTIME_PROVIDER_UNSUPPORTED_MESSAGE);
       return new CodexRuntimeCreator(this.deps).create({ descriptor, systemPrompt, runtimeToken, creationOptions,
         callbacks: {
           onStatusChange: (...args) => this.deps.callbacks.onStatusChange(runtimeToken, ...args),

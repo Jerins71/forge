@@ -16,6 +16,6 @@ describe("supportsSecureRuntimeProvider", () => {
   it("continues to reject other unsupported SDK/ACP providers", () => {
     expect(supportsSecureRuntimeProvider("cursor-sdk")).toBe(false);
     expect(supportsSecureRuntimeProvider("cursor-acp")).toBe(false);
-    expect(supportsSecureRuntimeProvider("codex-native")).toBe(false);
+    expect(supportsSecureRuntimeProvider("codex-native")).toBe(true);
   });
 });

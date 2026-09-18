@@ -71,7 +71,13 @@ sandbox and grant set. Use the shield to unlock a source, grant additional acces
 pause, block, revoke, or restore access; **Apply now** remains only on a genuinely
 manual, non-automatic path. This policy does not configure a host
 environment variable or grant standard Bash, prompts, terminals, or unsupported
-worker runtimes access. The Docker execution backend requires the pinned
+worker runtimes access. Native Codex managers use the same approved grants through
+`forge.secure_bash`; ordinary native commands do not receive those values. Set
+`FORGE_SECURE_EXECUTION_BACKEND=nono` and optionally `FORGE_NONO_PATH=/absolute/path/to/nono`
+to use an installed nono executable on macOS/Linux. The default remains `docker`.
+See the [native executor guide](SECURE_SESSIONS.md#native-codex-and-nono) for SSH,
+file-delivery behavior, and the accidental-disclosure boundary.
+The Docker execution backend requires the pinned
 `forge-secure-runner:node22-v6` image, which can be built with the command in the
 [Secure Sessions guide](SECURE_SESSIONS.md#set-up-the-execution-environment). Its
 effective Docker endpoint must be a local `unix://` socket on macOS/Linux or Docker

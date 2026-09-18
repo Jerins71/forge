@@ -24,6 +24,8 @@ import {
 import { FileBackedPromptRegistry, type PromptRegistry } from "./prompt-registry.js";
 import { SecretsEnvService } from "./secrets-env-service.js";
 import { SessionDescriptorFactory } from "./session-descriptor-factory.js";
+import { NonoSecureExecutionBackend } from "./secure-sessions/execution/nono-secure-execution-backend.js";
+import type { SecureExecutionBackend } from "./secure-sessions/execution/secure-execution-backend.js";
 import { DockerSecureExecutionBackend } from "./secure-sessions/execution/docker-secure-execution-backend.js";
 import { BitwardenBwsSecretSource, BwsCommandClient } from "./secure-sessions/sources/bitwarden-bws-source.js";
 import { BitwardenCliManager } from "./secure-sessions/sources/bitwarden-cli-manager.js";
@@ -50,7 +52,7 @@ export interface SecureSessionsFoundation {
   bitwardenSource: BitwardenBwsSecretSource;
   bitwardenPasswordManagerSource: BitwardenPasswordManagerSecretSource;
   probeBitwarden: () => Promise<boolean>;
-  execution: DockerSecureExecutionBackend;
+  execution: SecureExecutionBackend;
 }
 
 /**
@@ -214,9 +216,9 @@ export function createSwarmManagerFoundation(
       new BitwardenCliManager({ dataDir: config.paths.dataDir }),
     ),
     probeBitwarden: () => bitwardenClient.probe(),
-    execution: new DockerSecureExecutionBackend({
-      scope: config.paths.dataDir,
-    }),
+    execution: process.env.FORGE_SECURE_EXECUTION_BACKEND === "nono"
+      ? new NonoSecureExecutionBackend({ scope: config.paths.dataDir })
+      : new DockerSecureExecutionBackend({ scope: config.paths.dataDir }),
   };
   const observabilityCoordinator = new SwarmObservabilityCoordinator({
     service: overrides.observability,

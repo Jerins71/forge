@@ -77,7 +77,7 @@ export function createSecurePiCodingTools(options: {
     ...(baseSecureBash as AnyToolDefinition),
     parameters: Type.Object({
       command: Type.String({
-        description: "Bash command to execute inside Forge's Linux secure container",
+        description: "Bash command to execute in Forge's configured secure executor",
       }),
       timeout: Type.Optional(Type.Number({
         description: "Timeout in seconds; omitted commands use Forge's default timeout",
@@ -109,9 +109,9 @@ export function createSecurePiCodingTools(options: {
     },
   };
   secureBash.name = "secure_bash";
-  secureBash.label = "Secure Bash · Linux container";
+  secureBash.label = "Secure Bash";
   secureBash.description =
-    "Execute Bash inside Forge's Linux secure container. Set secretAliases to the exact project-granted or task-granted secret aliases this command needs, or [] when it needs only Secure Sessions SSH trust or isolation. Only those approved Secure Sessions values are delivered; no new approval is created. SSH-agent selections set SSH_AUTH_SOCK automatically for ordinary ssh, scp, and Git commands. The workspace and working directory are mapped automatically; prefer relative paths. Host programs, credential managers, and authenticated host CLIs are intentionally unavailable—use normal bash for those.";
+    "Execute Bash in Forge's configured secure executor. Set secretAliases to the exact project-granted or task-granted secret aliases this command needs, or [] when it needs only Secure Sessions SSH trust or isolation. Only those approved Secure Sessions values are delivered; no new approval is created. SSH-agent selections set SSH_AUTH_SOCK automatically for ordinary ssh, scp, and Git commands. The workspace and working directory are mapped automatically; prefer relative paths. Nono uses local programs in an isolated environment; Docker uses Linux container programs. Use normal bash for host credential managers and authenticated host CLIs.";
   secureBash.promptSnippet =
     "Use secure_bash only for commands that need approved secrets, SSH-agent keys, or Secure Sessions SSH trust; pass the exact needed granted aliases in secretAliases, or [] for trust-only commands";
 

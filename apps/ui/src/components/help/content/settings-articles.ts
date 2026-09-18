@@ -367,6 +367,8 @@ export const settingsArticles: HelpArticle[] = [
     summary: 'Grant local or Bitwarden secrets to projects for automatic agent access, pause or block access, and privately fulfill requests.',
     content: settingsSecretsContent,
     keywords: [
+      'nono',
+      'native Codex',
       'secure session',
       'secret',
       'vault',

@@ -608,7 +608,7 @@ export function buildSecureSessionTools(
   host: SwarmToolHost,
   descriptor: AgentDescriptor,
 ): ToolDefinition[] {
-  if (!isBuilderSurface(host, descriptor) || host.isSecureSessionsEnabledForAgent?.(descriptor.agentId) === false) {
+  if (!isBuilderSurface(host, descriptor) || (descriptor.model.provider !== "codex-native" && host.isSecureSessionsEnabledForAgent?.(descriptor.agentId) === false)) {
     return [];
   }
 

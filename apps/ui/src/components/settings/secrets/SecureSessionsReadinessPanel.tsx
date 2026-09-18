@@ -21,7 +21,7 @@ import { serializeSafeSecureSessionsDiagnostics } from './secure-readiness-diagn
 
 const EXECUTION_LABELS: Record<SecureSessionReadinessCode, string> = {
   available: 'Ready',
-  backend_unavailable: 'Docker unavailable',
+  backend_unavailable: 'Secure executor unavailable',
   image_unavailable: 'Secure image unavailable',
   unsupported_platform: 'Unsupported platform',
 }
@@ -49,7 +49,7 @@ function readinessActions(
 ): string[] {
   const actions: string[] = []
   if (readiness?.code === 'backend_unavailable') {
-    actions.push('Start or repair Docker Desktop, then check again.')
+    actions.push('Check the configured secure executor: nono must be installed, or Docker Desktop must be running.')
   } else if (readiness?.code === 'image_unavailable') {
     actions.push('Install the Forge secure runner in this local Docker engine.')
   } else if (readiness?.code === 'unsupported_platform') {

@@ -31,9 +31,19 @@ export class CodexRuntimeTools {
   restoreContract(definitions: unknown): void {
     const persisted = normalizeNativeToolContract(definitions);
     const current = normalizeNativeToolContract(this.definitions());
+    // App-server binds dynamic tools at thread creation. Preserve older threads
+    // without pretending newly added Secure Sessions tools are available there.
+    const optionalAdditions = new Set(["secure_bash", "secure_session_status", "request_secret_access", "request_ssh_host_trust"]);
+    const persistedNamespaces = persisted.value as Array<{ tools: Array<{ name: string }> }>;
+    const persistedNames = new Set(persistedNamespaces.flatMap(namespace => namespace.tools.map(tool => tool.name)));
+    const unavailable = [...optionalAdditions].filter(name => !persistedNames.has(name));
+    for (const namespace of current.value as Array<{ tools: Array<{ name: string }> }>) {
+      namespace.tools = namespace.tools.filter(tool => !unavailable.includes(tool.name));
+    }
     if (stableToolContract(persisted.value) !== stableToolContract(current.value)) {
       throw new Error("This native Codex thread has an incompatible Forge tool configuration. Fork this session or start a new session to use the changed tools.");
     }
+    for (const name of unavailable) this.tools.delete(name);
     this.legacyBudgetTools = persisted.legacyBudgetTools;
   }
 

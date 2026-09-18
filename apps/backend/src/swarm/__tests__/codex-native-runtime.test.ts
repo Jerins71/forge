@@ -111,6 +111,7 @@ describe("Native Codex manager", () => {
 
   it("resumes legacy Pi-contaminated schemas without replacing history and strips only their budget metadata", async () => {
     const f = await fixture();
+    await f.runtime.sendMessage("Create a persisted native turn");
     await f.runtime.terminate();
     const header = JSON.parse(await readFile(f.nativePath, "utf8"));
     const tool = header.payload.dynamic_tools[0].tools[0];
@@ -132,6 +133,7 @@ describe("Native Codex manager", () => {
 
   it("still rejects an incompatible persisted tool schema without starting a replacement thread", async () => {
     const f = await fixture();
+    await f.runtime.sendMessage("Create a persisted native turn");
     await f.runtime.terminate();
     const header = JSON.parse(await readFile(f.nativePath, "utf8"));
     header.payload.dynamic_tools[0].tools[0].inputSchema.properties.value.type = "number";
@@ -144,6 +146,7 @@ describe("Native Codex manager", () => {
     expect(f.client.request).toHaveBeenCalledWith("thread/start", expect.objectContaining({
       approvalPolicy: "never", sandbox: "danger-full-access",
     }));
+    await f.runtime.sendMessage("Create a persisted native turn");
     await f.runtime.terminate();
 
     const resumed = await fixture({ root: f.root });
@@ -225,6 +228,7 @@ describe("Native Codex manager", () => {
   });
   it("updates changed developer instructions on resume without replacing native history", async () => {
     const f = await fixture({ prompt: "Delegation first" });
+    await f.runtime.sendMessage("Create a persisted native turn");
     await f.runtime.terminate();
     const resumed = await fixture({ root: f.root, prompt: "Hands-on: execute directly" });
     const injected = resumed.client.request.mock.calls.find(([method]) => method === "thread/inject_items")![1];
@@ -266,6 +270,7 @@ describe("Native Codex manager", () => {
   it("persists identity immediately, resumes it, and reconstructs bounded copied sessions independently", async () => {
     const f = await fixture();
     f.runtime.appendCustomEntry("swarm_conversation_entry", { type: "conversation_message", agentId: "native-test", role: "user", text: "Selected fork boundary", source: "user_input", timestamp: new Date().toISOString() });
+    await f.runtime.sendMessage("Create a persisted native turn");
     await f.runtime.terminate();
     const resumed = await fixture({ root: f.root });
     expect(resumed.client.request).toHaveBeenCalledWith("thread/resume", expect.objectContaining({ threadId: "native-thread" }));
@@ -328,4 +333,18 @@ describe("Native Codex manager", () => {
       FORGE_SECRET: "private", CODEX_HOME: "/desktop", AWS_SECRET_ACCESS_KEY: "private" }))
       .toEqual({ PATH: "/bin", HOME: "/home/user", CODEX_HOME: "/isolated" });
   });
+});
+
+
+it("recreates only an unused native allocation after a settings recycle", async () => {
+  const f = await fixture();
+  expect(f.runtime.getCustomEntries(NATIVE_CODEX_STATE).at(-1)).toMatchObject({ hasStartedTurn: false });
+  await f.runtime.terminate();
+  const fresh = await fixture({ root: f.root, rejectResume: true, prompt: "New work mode" });
+  expect(fresh.client.request.mock.calls.some(([method]) => method === "thread/resume")).toBe(false);
+  expect(fresh.client.request.mock.calls.some(([method]) => method === "thread/start")).toBe(true);
+  await fresh.runtime.sendMessage("First actual message");
+  expect(fresh.runtime.getCustomEntries(NATIVE_CODEX_STATE).at(-1)).toMatchObject({ hasStartedTurn: true });
+  await fresh.runtime.terminate();
+  await expect(fixture({ root: f.root, rejectResume: true })).rejects.toThrow("Missing native thread");
 });

@@ -2255,7 +2255,7 @@ export class SecureSessionsService {
         // Busy agents retain their current turn, but every new secure call checks the project policy.
         const recycles = await Promise.allSettled([...this.options.listDescriptors()]
           .filter(agent => agent.profileId === profileId)
-          .map(agent => this.options.applyModeRuntimeRecycle(agent.agentId)));
+          .map(agent => this.recycleModeRuntime(agent.agentId)));
         failed ||= recycles.some(result => result.status === "rejected");
       }
       if (failed) throw new SecureSessionsServiceError("SECURE_OPERATION_FAILED");
@@ -2346,14 +2346,55 @@ export class SecureSessionsService {
       const snapshot = this.toPublicSnapshot(store, store.getSnapshot(managerId));
       if (mutation.changed) {
         await Promise.allSettled([principal.descriptor, ...this.listEligibleSecureWorkers(principal.descriptor)]
-          .map((agent) => this.options.applyModeRuntimeRecycle(agent.agentId)));
+          .map((agent) => this.recycleModeRuntime(agent.agentId)));
       }
       return snapshot;
     }));
   }
 
-  /** Runtime creation installs protection without provisioning Docker or resolving values. */
+  private recycleModeRuntime(agentId: string) {
+    // Native tools resolve current authority per command; changing a grant must not
+    // interrupt its app-server turn or change the persisted dynamic-tool contract.
+    if (this.options.getDescriptor(agentId)?.model.provider === "codex-native") return "none" as const;
+    return this.options.applyModeRuntimeRecycle(agentId);
+  }
+
+  private nativeRuntimeBinding(descriptor: AgentDescriptor): SecureRuntimeBinding {
+    let invalidated = false;
+    const check = () => {
+      const current = this.options.getDescriptor(descriptor.agentId);
+      if (invalidated || !current || current.cwd !== descriptor.cwd || current.model.provider !== "codex-native") {
+        throw new SecureSessionsServiceError("SECURE_OPERATION_FAILED");
+      }
+    };
+    return {
+      invalidate: () => { invalidated = true; },
+      executeBash: async request => {
+        check();
+        const binding = await this.preparePinnedSecureRuntimeBinding(descriptor);
+        if (!binding) throw new SecureSessionsServiceError("SECURE_REQUEST_INVALID");
+        return binding.executeBash(request);
+      },
+      guardValue: value => {
+        check();
+        return this.getSecureRuntimeBinding(descriptor)?.guardValue(value) ?? value;
+      },
+      createOutputGuard: () => {
+        check();
+        const binding = this.getSecureRuntimeBinding(descriptor);
+        if (!binding) throw new SecureSessionsServiceError("SECURE_OPERATION_FAILED");
+        return binding.createOutputGuard();
+      },
+    };
+  }
+
   async prepareSecureRuntimeBinding(descriptor: AgentDescriptor): Promise<SecureRuntimeBinding | undefined> {
+    if (descriptor.model.provider === "codex-native") return this.nativeRuntimeBinding(descriptor);
+    return this.preparePinnedSecureRuntimeBinding(descriptor);
+  }
+
+  /** Runtime creation installs protection without provisioning Docker or resolving values. */
+  private async preparePinnedSecureRuntimeBinding(descriptor: AgentDescriptor): Promise<SecureRuntimeBinding | undefined> {
     let principal: SecurePrincipal;
     try { principal = this.resolveSecurePrincipal(descriptor.agentId); } catch { return undefined; }
     if (!this.isSecureSessionsEnabledForAgent(descriptor.agentId)) return undefined;
@@ -2485,7 +2526,7 @@ export class SecureSessionsService {
               // mid-command. Its deferred recycle is a normal transition: the
               // current turn remains ordinary, and lifecycle acquisition must
               // apply the pending boundary before its next secure assignment.
-              await this.options.applyModeRuntimeRecycle(worker.agentId);
+              await this.recycleModeRuntime(worker.agentId);
             }
           }
           return snapshot;
@@ -2507,9 +2548,9 @@ export class SecureSessionsService {
               ).catch(() => undefined);
             }
             await Promise.allSettled([
-              this.options.applyModeRuntimeRecycle(manager.agentId),
+              this.recycleModeRuntime(manager.agentId),
               ...workers.map((worker) =>
-                this.options.applyModeRuntimeRecycle(worker.agentId)
+                this.recycleModeRuntime(worker.agentId)
               ),
             ]);
           }
@@ -2655,7 +2696,7 @@ export class SecureSessionsService {
       const snapshot = this.toPublicSnapshot(store, storedSnapshot);
       if (runtime.changed || preparedProjectDefaults.length > 0 || !bindingWasActive) {
         if (options.recycleRuntime !== false) {
-          const recycle = await this.options.applyModeRuntimeRecycle(sessionAgentId);
+          const recycle = await this.recycleModeRuntime(sessionAgentId);
           if (recycle === "deferred") {
             activationDeferred = true;
             throw new SecureSessionsServiceError("SECURE_OPERATION_FAILED");
@@ -2747,9 +2788,9 @@ export class SecureSessionsService {
             { recycleRuntime: false },
           );
           await Promise.allSettled([
-            this.options.applyModeRuntimeRecycle(manager.agentId),
+            this.recycleModeRuntime(manager.agentId),
             ...workers.map((worker) =>
-              this.options.applyModeRuntimeRecycle(worker.agentId)
+              this.recycleModeRuntime(worker.agentId)
             ),
           ]);
           if (stopped.environmentStatus === "degraded") {
@@ -2823,7 +2864,7 @@ export class SecureSessionsService {
     if (revoke.changed || runtime.changed) {
       this.options.emitSnapshot(toSnapshotEvent(snapshot));
       if (options.recycleRuntime !== false) {
-        await this.options.applyModeRuntimeRecycle(sessionAgentId);
+        await this.recycleModeRuntime(sessionAgentId);
       }
     }
     return snapshot;
@@ -3651,7 +3692,7 @@ export class SecureSessionsService {
     const entries = [...pending.values()];
     const needsSecureRuntime = entries.some((entry) => entry.outcome !== "denied");
     if (needsSecureRuntime && !this.options.hasUsableSecureRuntime(agentId)) {
-      const recycleDisposition = await this.options.applyModeRuntimeRecycle(agentId);
+      const recycleDisposition = await this.recycleModeRuntime(agentId);
       if (recycleDisposition === "deferred") return "deferred";
     }
     if (this.closing || this.closed) return "completed";
@@ -5282,7 +5323,7 @@ export class SecureSessionsService {
         ? [manager, ...this.listEligibleSecureWorkers(manager)]
         : [];
       await Promise.allSettled(agents.map((agent) =>
-        this.options.applyModeRuntimeRecycle(agent.agentId)));
+        this.recycleModeRuntime(agent.agentId)));
     }
   }
 
@@ -5790,6 +5831,7 @@ export class SecureSessionsService {
   private isEligibleSecureWorker(descriptor: AgentDescriptor): boolean {
     if (
       descriptor.role !== "worker"
+      || descriptor.model.provider === "codex-native"
       || descriptor.archivedAt
       || descriptor.sessionSurface === "collab"
       || descriptor.collab
@@ -5818,7 +5860,7 @@ export class SecureSessionsService {
       .filter((agent) => agent.profileId && profileIds.has(agent.profileId)
         && (isBuilderManager(agent) || this.isEligibleSecureWorker(agent))
         && !this.options.hasUsableSecureRuntime(agent.agentId))
-      .map((agent) => this.options.applyModeRuntimeRecycle(agent.agentId)));
+      .map((agent) => this.recycleModeRuntime(agent.agentId)));
   }
 
   private listEligibleSecureWorkers(
