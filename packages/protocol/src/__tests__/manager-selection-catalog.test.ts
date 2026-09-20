@@ -21,7 +21,7 @@ describe('manager selection catalog contract', () => {
     expect(MANAGER_POSTURES).toEqual(WORK_MODE_DEFINITIONS.map((definition) => definition.id))
     expect(MANAGER_POSTURES).toEqual(['delegation_first', 'adaptive', 'hands_on'])
     expect(WORK_MODE_DEFINITIONS.filter((definition) => definition.productDefault)).toHaveLength(1)
-    expect(DEFAULT_MANAGER_POSTURE).toBe('delegation_first')
+    expect(DEFAULT_MANAGER_POSTURE).toBe('hands_on')
     expect(WORK_MODE_DEFINITIONS.find((definition) => definition.id === 'adaptive')).toMatchObject({
       label: 'Adaptive',
       selectable: true,

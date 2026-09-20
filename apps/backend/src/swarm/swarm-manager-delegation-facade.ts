@@ -34,6 +34,10 @@ export abstract class SwarmManagerDelegationFacade extends SwarmManagerSecureSes
     return this.configuration.saveDelegationRosterSettings(input);
   }
 
+  applyRecommendedManagerDefaults() {
+    return this.configuration.applyRecommendedManagerDefaults();
+  }
+
   updateSessionDelegation(
     sessionAgentId: string,
     updates: Parameters<SwarmConfigurationCoordinator["updateSessionDelegation"]>[1],

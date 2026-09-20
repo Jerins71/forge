@@ -133,6 +133,16 @@ export function makeManagerSelectionCatalog(
         defaultReasoningId: 'high',
       }),
       model({
+        provider: 'codex-native',
+        providerLabel: 'Codex native (Preferred)',
+        modelId: 'gpt-5.6-sol',
+        label: 'GPT-5.6 Sol (Codex native)',
+        familyId: 'codex-native',
+        familyLabel: 'Codex native',
+        reasoningIds: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+        defaultReasoningId: 'high',
+      }),
+      model({
         provider: 'anthropic',
         providerLabel: 'Anthropic',
         modelId: 'claude-opus-5',
@@ -206,11 +216,11 @@ export function makeManagerSelectionCatalog(
     workModes: DEFAULT_WORK_MODES,
     defaults: {
       createManagerModel: {
-        provider: 'openai-codex',
-        modelId: 'gpt-5.5',
-        reasoningId: 'xhigh',
+        provider: 'codex-native',
+        modelId: 'gpt-5.6-sol',
+        reasoningId: 'high',
       },
-      workModeId: 'delegation_first',
+      workModeId: 'hands_on',
     },
     ...overrides,
   }

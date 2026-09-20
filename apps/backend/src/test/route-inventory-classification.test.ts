@@ -166,6 +166,7 @@ const ROUTE_INVENTORY: RouteInventoryEntry[] = [
   { sample: "/api/settings/notifications", expect: { GET: "admin", PUT: "admin" } },
   { sample: "/api/settings/models", expect: { GET: "member" }, killSwitched: true },
   { sample: "/api/settings/manager-selection-catalog", expect: { GET: "member" }, killSwitched: true },
+  { sample: "/api/settings/recommended-manager-defaults", expect: { POST: "admin" } },
   { sample: "/api/settings/delegation-rosters", expect: { GET: "member", PUT: "admin" }, killSwitched: true },
   { sample: "/api/settings/specialists", expect: { GET: "admin", PUT: "admin", DELETE: "admin" } },
   { sample: "/api/settings/specialists/tiers", expect: { GET: "admin", PUT: "admin" } },

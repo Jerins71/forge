@@ -17,7 +17,7 @@ import {
   type MainRendererRecoveryController,
 } from './main-renderer-recovery.js'
 import { loadWindowState, trackWindowState } from './window-state.js'
-import { showWhatsNewIfUpdated } from './whats-new.js'
+import { consumePostUpdateInfo } from './whats-new.js'
 import { createBackendForkOptions } from './backend-fork-options.js'
 import { resolveDevBetterSqlite3Binding } from './dev-native-binding.js'
 import { PackagedRemoteUiServer, resolvePackagedRemoteUiHost, startOptionalPackagedRemoteUi } from './packaged-remote-ui-server.js'
@@ -62,6 +62,8 @@ const electronDevServerUrl = electronStartupOverrides.devServerUrl
 const DEFAULT_BACKEND_PORT = 47287
 const BACKEND_READY_CHANNEL = 'forge:get-backend-bootstrap'
 const TERMINAL_SHORTCUT_CHANNEL = 'bridge:terminal-shortcut'
+const POST_UPDATE_INFO_CHANNEL = 'forge:get-post-update-info'
+const OPEN_RELEASE_NOTES_CHANNEL = 'forge:open-release-notes'
 // Secure Session teardown includes confirmed Docker removal. Give the backend
 // enough time to complete its bounded cleanup contract before escalating to a
 // process-tree kill.
@@ -805,6 +807,16 @@ if (!hasSingleInstanceLock) {
     focusMainWindow()
   })
 
+  ipcMain.handle(POST_UPDATE_INFO_CHANNEL, (event) => {
+    if (!isTrustedMainRenderer(event)) return null
+    return consumePostUpdateInfo()
+  })
+
+  ipcMain.handle(OPEN_RELEASE_NOTES_CHANNEL, async (event) => {
+    if (!isTrustedMainRenderer(event)) return
+    await shell.openExternal(`https://github.com/a-mart/forge/releases/tag/v${app.getVersion()}`)
+  })
+
   app.whenReady().then(async () => {
     lifecycleLog.record('electron_started', {
       isPackaged: app.isPackaged,
@@ -1003,10 +1015,6 @@ if (!hasSingleInstanceLock) {
       lifecycleLog.record('electron_initial_renderer_load_superseded')
     }
 
-    // Show "What's New" dialog if the app was just updated (non-blocking)
-    showWhatsNewIfUpdated(mainWindow).catch((error) => {
-      console.warn('Failed to show What\'s New dialog', error)
-    })
   }).catch((error) => {
     lifecycleLog.record('electron_initialization_failed')
     void stopPackagedRemoteUiServer().catch((stopError) => {

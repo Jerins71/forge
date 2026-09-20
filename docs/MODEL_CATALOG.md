@@ -82,7 +82,7 @@ The Builder web `@Codex` surface has two paths. A plain leading `@Codex` or `[@C
 
 ## OpenAI GPT-6 Astra catalog
 
-`openai-codex/gpt-6-astra` is the checked-in model for the visible `pi-6` family. It is selectable for managers, compaction, specialists, and worker spawns, but does not replace Forge's `pi-5.5` global default or any checked-in roster and is not added to the automatic Codex capacity fallback chain. Forge exposes low, medium, high, xhigh, and max reasoning with high as its catalog default; unsupported none and ultra selections clamp to low and max respectively.
+`openai-codex/gpt-6-astra` is the checked-in model for the visible `pi-6` family. It is selectable for managers, compaction, specialists, and worker spawns and is used by the Default roster's Plan consultant, but it does not replace the `codex-native/gpt-5.6-sol` High manager default or enter the automatic Codex capacity fallback chain. Forge exposes low, medium, high, xhigh, and max reasoning with high as its catalog default; unsupported none and ultra selections clamp to low and max respectively.
 
 Astra has a 1.05M-token context window (922k maximum input plus 128k maximum output), text-and-image input, text output, tool calling, and structured output. Base Pi cost metadata is $10/MTok input, $1/MTok cached input, $12.50/MTok cache writes, and $50/MTok output. Requests above 272k total input use the request-wide $20/$2/$25/$75 tier. Temperature is disabled for the synthetic projection.
 

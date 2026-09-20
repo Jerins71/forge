@@ -1,5 +1,9 @@
 import type { ManagerReasoningLevel } from './agents.js'
-import { WORK_MODE_ID_MAX_LENGTH, type WorkModeId } from './delegation.js'
+import {
+  DEFAULT_DELEGATION_ROSTER_ID,
+  WORK_MODE_ID_MAX_LENGTH,
+  type WorkModeId,
+} from './delegation.js'
 import type { ManagerModelSurface } from './model-catalog-helpers.js'
 
 /** Version of the standalone manager-selection discovery resource. */
@@ -83,4 +87,20 @@ export interface ManagerSelectionCatalogResponse {
   models: ManagerModelOption[]
   workModes: WorkModeOption[]
   defaults: ManagerSelectionCatalogDefaults
+}
+
+export const RECOMMENDED_MANAGER_DEFAULTS = {
+  model: {
+    provider: 'codex-native',
+    modelId: 'gpt-5.6-sol',
+    reasoningId: 'high',
+  },
+  workModeId: 'hands_on',
+  rosterId: DEFAULT_DELEGATION_ROSTER_ID,
+} as const
+
+export interface ApplyRecommendedManagerDefaultsResponse {
+  profileIds: string[]
+  rosterId: string
+  rosterRevision: number
 }

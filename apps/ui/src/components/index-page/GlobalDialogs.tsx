@@ -4,6 +4,7 @@ import { CreateManagerDialog } from '@/components/chat/CreateManagerDialog'
 import { DeleteManagerDialog } from '@/components/chat/DeleteManagerDialog'
 import { ForkSessionDialog } from '@/components/chat/ForkSessionDialog'
 import { DiffViewerDialog } from '@/components/diff-viewer/DiffViewerDialog'
+import { PostUpdateDialog } from './PostUpdateDialog'
 
 interface GlobalDialogsProps {
   artifactPanelProps: ComponentPropsWithoutRef<typeof ArtifactPanel>
@@ -11,6 +12,7 @@ interface GlobalDialogsProps {
   deleteManagerDialogProps: ComponentPropsWithoutRef<typeof DeleteManagerDialog>
   forkSessionDialogProps?: ComponentPropsWithoutRef<typeof ForkSessionDialog> | null
   diffViewerDialogProps: ComponentPropsWithoutRef<typeof DiffViewerDialog>
+  postUpdateSource: ComponentPropsWithoutRef<typeof PostUpdateDialog>['source']
 }
 
 export function GlobalDialogs({
@@ -19,6 +21,7 @@ export function GlobalDialogs({
   deleteManagerDialogProps,
   forkSessionDialogProps,
   diffViewerDialogProps,
+  postUpdateSource,
 }: GlobalDialogsProps) {
   return (
     <>
@@ -27,6 +30,7 @@ export function GlobalDialogs({
       <DeleteManagerDialog {...deleteManagerDialogProps} />
       {forkSessionDialogProps ? <ForkSessionDialog {...forkSessionDialogProps} /> : null}
       <DiffViewerDialog {...diffViewerDialogProps} />
+      <PostUpdateDialog source={postUpdateSource} />
     </>
   )
 }

@@ -243,59 +243,6 @@ export function removePolicy(
   }
 }
 
-/** Build an opt-in consultation roster from the user's current task models. */
-export function addHandsOnSupportPreset(
-  settings: DelegationRosterSettings,
-  source: DelegationRoster,
-): { settings: DelegationRosterSettings; preset: DelegationRoster } {
-  const consultationRoute = (
-    mode: DelegationBehaviorMode,
-    routeId: string,
-    label: string,
-    useWhen: string,
-    avoidWhen: string,
-  ): DelegationRoute => {
-    const sourceRoute = source.routes.find(
-      (route) => route.routeId === selectedPolicyIdForTask(source, mode),
-    )
-    if (!sourceRoute) throw new Error(`No specialist is configured for ${TASK_TYPE_LABELS[mode]}.`)
-    const { capabilityEscalationRouteId: _escalation, ...route } = clonePolicy(sourceRoute)
-    return { ...route, routeId, label, behaviorMode: mode, useWhen, avoidWhen }
-  }
-  const preset: DelegationRoster = {
-    rosterId: nextId('hands-on-support', new Set(settings.rosters.map((roster) => roster.rosterId))),
-    revision: 1,
-    name: 'Hands-on support',
-    description: 'The manager owns implementation and integration. Consult specialists for a bounded planning question, independent review, or source-backed research.',
-    defaultRouteId: 'researcher',
-    modeRoutes: {
-      general: 'researcher',
-      plan: 'plan-consultant',
-      'correctness-review': 'independent-reviewer',
-      'design-review': 'independent-reviewer',
-      research: 'researcher',
-    },
-    routes: [
-      consultationRoute(
-        'plan', 'plan-consultant', 'Plan consultant',
-        'Consult on a specific consequential decision or critique a proposed plan. Supply existing findings and the unresolved question; retain implementation and integration with the manager.',
-        'Avoid routine task decomposition, implementation ownership, and repeated planning once there is a credible path.',
-      ),
-      consultationRoute(
-        'correctness-review', 'independent-reviewer', 'Independent reviewer',
-        'Request one focused review of a major feature or concrete acceptance risk. Return actionable findings and evidence for the manager to resolve.',
-        'Avoid automatic review of every small edit, courtesy follow-ups, and repeated review without new changes or unresolved findings.',
-      ),
-      consultationRoute(
-        'research', 'researcher', 'Researcher',
-        'Answer a bounded question with source-backed findings that let the manager continue. Use for independent research when briefing and acceptance cost less than doing it directly.',
-        'Avoid duplicating known findings, unbounded exploration, or handing off the manager\'s implementation work.',
-      ),
-    ],
-  }
-  return { settings: { ...settings, rosters: [...settings.rosters, preset] }, preset }
-}
-
 export function nextId(base: string, existing: Set<string>): string {
   const normalized = base
     .toLowerCase()

@@ -23,7 +23,7 @@ export const WORK_MODE_DEFINITIONS = [
     label: 'Delegate first',
     description: 'Workers execute substantive project work; the manager answers, performs bounded read-only orientation, and checks results.',
     selectable: true,
-    productDefault: true,
+    productDefault: false,
   },
   {
     id: 'adaptive',
@@ -37,7 +37,7 @@ export const WORK_MODE_DEFINITIONS = [
     label: 'Hands-on',
     description: 'Executes investigation, implementation, and validation directly; delegates for explicit requests, unavailable capabilities, or concrete benefits from separable work.',
     selectable: true,
-    productDefault: false,
+    productDefault: true,
   },
 ] as const satisfies readonly WorkModeDefinition[]
 
@@ -135,4 +135,56 @@ export interface DelegationRosterSettings {
   version: 1
   defaultRosterId: string
   rosters: DelegationRoster[]
+}
+
+export const DEFAULT_DELEGATION_ROSTER_ID = 'default'
+
+/** Forge's shipped roster for the Hands-on manager experience. */
+export function createDefaultDelegationRoster(): DelegationRoster {
+  return {
+    rosterId: DEFAULT_DELEGATION_ROSTER_ID,
+    revision: 1,
+    name: 'Default',
+    description: 'The manager owns implementation and integration. Specialists provide bounded planning advice, independent review, and source-backed research.',
+    defaultRouteId: 'researcher',
+    modeRoutes: {
+      general: 'researcher',
+      plan: 'plan-consultant',
+      'correctness-review': 'independent-reviewer',
+      'design-review': 'independent-reviewer',
+      research: 'researcher',
+    },
+    routes: [
+      {
+        routeId: 'plan-consultant',
+        label: 'Plan consultant',
+        behaviorMode: 'plan',
+        useWhen: 'Consult on a specific consequential decision or critique a proposed plan. Supply existing findings and the unresolved question; retain implementation and integration with the manager.',
+        avoidWhen: 'Avoid routine task decomposition, implementation ownership, and repeated planning once there is a credible path.',
+        provider: 'openai-codex',
+        modelId: 'gpt-6-astra',
+        reasoningLevel: 'xhigh',
+      },
+      {
+        routeId: 'independent-reviewer',
+        label: 'Independent reviewer',
+        behaviorMode: 'correctness-review',
+        useWhen: 'Request one focused review of a major feature or concrete acceptance risk. Return actionable findings and evidence for the manager to resolve.',
+        avoidWhen: 'Avoid automatic review of every small edit, courtesy follow-ups, and repeated review without new changes or unresolved findings.',
+        provider: 'anthropic',
+        modelId: 'claude-fable-5-1',
+        reasoningLevel: 'low',
+      },
+      {
+        routeId: 'researcher',
+        label: 'Researcher',
+        behaviorMode: 'research',
+        useWhen: 'Answer a bounded question with source-backed findings that let the manager continue. Use for independent research when briefing and acceptance cost less than doing it directly.',
+        avoidWhen: "Avoid duplicating known findings, unbounded exploration, or handing off the manager's implementation work.",
+        provider: 'xai',
+        modelId: 'grok-4.6',
+        reasoningLevel: 'high',
+      },
+    ],
+  }
 }

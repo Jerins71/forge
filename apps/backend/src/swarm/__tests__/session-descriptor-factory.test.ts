@@ -51,7 +51,7 @@ describe("SessionDescriptorFactory", () => {
         thinkingLevel: "xhigh",
       },
       modelOrigin: "profile_default",
-      managerPosture: "delegation_first",
+      managerPosture: "hands_on",
       managerPostureOrigin: "product_default",
       sessionFile: getSessionFilePath(harness.dataDir, "forge", "forge--s2"),
       archetypeId: "planner",

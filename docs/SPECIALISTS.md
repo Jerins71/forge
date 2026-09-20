@@ -12,11 +12,11 @@ Work-graph nodes use the same optional named-specialist override. Forge pins the
 
 ## Work Mode
 
-**Delegate first** is the product default. The manager delegates project mutations, sustained investigation, multi-step analysis, and substantial implementation while retaining small read-only orientation and acceptance checks.
+**Delegate first** delegates project mutations, sustained investigation, multi-step analysis, and substantial implementation while retaining small read-only orientation and acceptance checks.
 
 **Adaptive** starts with direct execution. It delegates when the expected improvement in completion time, total cost, or necessary independent assurance outweighs briefing, context transfer, waiting, acceptance, and likely rework. Quick workers suit self-contained low-risk work that is cheap to explain and verify; available parallelism or a cheaper model alone does not justify a handoff.
 
-**Hands-on** keeps investigation, implementation, and validation with the manager, including the critical path. Complexity, ambiguity, multiple files or steps, and worktree isolation alone do not trigger delegation. Workers are used for explicit user requests, required capabilities unavailable directly, or clearly separable assignments with a concrete benefit over continuing directly.
+**Hands-on** is the product default. It keeps investigation, implementation, and validation with the manager, including the critical path. Complexity, ambiguity, multiple files or steps, and worktree isolation alone do not trigger delegation. Workers are used for explicit user requests, required capabilities unavailable directly, or clearly separable assignments with a concrete benefit over continuing directly.
 
 Work mode decides whether to delegate; the roster selects the worker after that decision. Skills do not impose a separate work mode. Once ownership is working, preserve it; do not hand off merely because orientation ended or a backend restart occurred. Workers receive explicit assignment context, not an automatic copy of the manager conversation.
 
@@ -49,9 +49,7 @@ The selection order is global default → project default → session override. 
 
 Forge supplies the manager a compact versioned `[delegationRoster]` context. The roster is intentionally outside the stable system-prompt prefix so switching rosters does not rewrite the cached prompt. Work mode is different: it is part of the system prompt because it changes the manager's operating policy.
 
-Configure rosters under **Settings → Delegation → Rosters**. The default Balanced roster is derived from existing tier bindings until roster settings are first saved.
-
-For a manager that does the work and occasionally seeks advice, open **Roster actions → Add hands-on support roster**. This creates an unsaved three-specialist roster: Plan consultant, Independent reviewer, and Researcher. It copies the selected roster's models and availability fallbacks for those tasks, with bounded consultation guidance and no escalation chain. Review the models, save, then select the roster and **Hands-on** work mode beside Send. Creating the roster does not change defaults or the manager model. The generic Build & execute task uses the Researcher's model when explicitly needed; its execution instructions still follow the requested task type.
+Configure rosters under **Settings → Delegation → Rosters**. New installations use the **Default** roster: Plan consultant (`openai-codex/gpt-6-astra`, xhigh), Independent reviewer (`anthropic/claude-fable-5-1`, low), and Researcher (`xai/grok-4.6`, high). It is paired with Hands-on mode so the manager owns implementation and integration while specialists handle bounded consultation, independent review, or research. Existing installations can opt into this complete set from the one-time post-update dialog.
 
 Worker results return automatically. Accepting a result means verifying and integrating it; sending thanks or an acceptance notice to a completed worker starts a new assignment. Send follow-ups only for concrete remaining work or necessary questions. For continuing work, the manager records accepted findings and decisions in its own `checkpoint.md`, with evidence and verification status.
 
@@ -111,7 +109,7 @@ builtin: true                        # Internal — marks Forge-shipped speciali
 | `deep` | `openai-codex/gpt-5.5` | high | `openai-codex/gpt-5.5` medium |
 | `max` | `openai-codex/gpt-5.5` | xhigh | `openai-codex/gpt-5.5` medium |
 
-Tier settings remain global at `~/.forge/shared/specialists/tier-configs.json` for persisted workers and compatibility. When `~/.forge/shared/config/delegation-rosters.json` does not exist, Forge derives the Balanced roster from the stored tier bindings. Saving rosters writes that compatibility file; normal manager delegation then uses specialists rather than tier names.
+Tier settings remain global at `~/.forge/shared/specialists/tier-configs.json` for persisted workers and compatibility. When `~/.forge/shared/config/delegation-rosters.json` does not exist, Forge selects the Default roster and retains the tier-derived Balanced roster as an alternative. Saving rosters writes that compatibility file; normal manager delegation then uses specialists rather than tier names.
 
 ## Shipped Task Instructions and Dedicated Capabilities
 

@@ -12,7 +12,7 @@ import {
   mapLegacyClaudeSdkModel,
 } from "./legacy-claude-sdk-model.js";
 
-export const DEFAULT_SWARM_MODEL_PRESET: SwarmModelPreset = "pi-5.5";
+export const DEFAULT_SWARM_MODEL_PRESET: SwarmModelPreset = "codex-native";
 
 const REMOVED_PRESET_REPLACEMENTS: Record<string, SwarmModelPreset> = {
   "codex-app": "pi-5.5",

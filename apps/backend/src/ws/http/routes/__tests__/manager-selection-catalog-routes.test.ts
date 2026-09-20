@@ -6,6 +6,7 @@ import type { SwarmManager } from "../../../../swarm/swarm-manager.js";
 import {
   createManagerSelectionCatalogRoutes,
   MANAGER_SELECTION_CATALOG_ENDPOINT_PATH,
+  RECOMMENDED_MANAGER_DEFAULTS_ENDPOINT_PATH,
 } from "../manager-selection-catalog-routes.js";
 import type { HttpRoute } from "../../shared/http-route.js";
 
@@ -118,12 +119,38 @@ describe("manager selection catalog HTTP route", () => {
     expect(body).not.toContain("secret");
     expect(body).not.toContain("pi-models");
   });
+
+  it("applies recommended defaults through the bounded settings action", async () => {
+    const applyRecommendedManagerDefaults = vi.fn(async () => ({
+      profileIds: ["project-a"],
+      rosterId: "default",
+      rosterRevision: 2,
+    }));
+    const server = await startRouteServer(async () => CATALOG, applyRecommendedManagerDefaults);
+    closeCallbacks.push(server.close);
+
+    const response = await fetch(`${server.baseUrl}${RECOMMENDED_MANAGER_DEFAULTS_ENDPOINT_PATH}`, {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      profileIds: ["project-a"],
+      rosterId: "default",
+      rosterRevision: 2,
+    });
+    expect(applyRecommendedManagerDefaults).toHaveBeenCalledTimes(1);
+  });
 });
 
 async function startRouteServer(
   getManagerSelectionCatalog: () => Promise<ManagerSelectionCatalogResponse>,
+  applyRecommendedManagerDefaults = vi.fn(),
 ): Promise<{ baseUrl: string; close: () => Promise<void> }> {
-  const swarmManager = { getManagerSelectionCatalog } as unknown as SwarmManager;
+  const swarmManager = {
+    getManagerSelectionCatalog,
+    applyRecommendedManagerDefaults,
+  } as unknown as SwarmManager;
   const routes = createManagerSelectionCatalogRoutes({ swarmManager });
   const server = createServer((request, response) => {
     void handleRoute(routes, request, response);

@@ -325,6 +325,10 @@ export class SwarmConfigurationCoordinator {
     return this.settings.saveDelegationRosterSettings(input);
   }
 
+  applyRecommendedManagerDefaults() {
+    return this.settings.applyRecommendedManagerDefaults();
+  }
+
   updateSessionDelegation(
     sessionAgentId: string,
     updates: Parameters<SwarmSettingsService["updateSessionDelegation"]>[1],

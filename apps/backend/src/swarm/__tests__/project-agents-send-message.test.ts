@@ -249,7 +249,7 @@ describe("SwarmManager project-agent sendMessage routing", () => {
     expect(targetRuntimeInput.message).toBe(
       'SYSTEM: Cross-profile ping\n[assistantOutputTarget] {"kind":"explicit_tool_required","reason":"agent_message"}',
     );
-    expect(targetRuntimeInput.roster).toMatchObject({ id: "balanced", revision: 1 });
+    expect(targetRuntimeInput.roster).toMatchObject({ id: "default", revision: 1 });
 
     const targetHistory = manager.getConversationHistory(target.agentId);
     expect(
@@ -288,7 +288,7 @@ describe("SwarmManager project-agent sendMessage routing", () => {
     expect(targetRuntimeInput.message).toBe(
       `[projectAgentContext] {"fromAgentId":"manager","fromDisplayName":"manager","external":true,"fromProfileId":"manager","fromProjectName":"manager"}\n[assistantOutputTarget] {"kind":"peer_agent"}\n\nShared cross-profile ping`,
     );
-    expect(targetRuntimeInput.roster).toMatchObject({ id: "balanced", revision: 1 });
+    expect(targetRuntimeInput.roster).toMatchObject({ id: "default", revision: 1 });
 
     const targetHistory = manager.getConversationHistory(target.agentId);
     expect(
@@ -340,7 +340,7 @@ describe("SwarmManager project-agent sendMessage routing", () => {
     }
     const targetRuntimeInput = splitDelegationRosterRuntimeContext(targetRuntimeText);
     expect(targetRuntimeInput.message).toBe(`[projectAgentContext] {"fromAgentId":"manager","fromDisplayName":"manager","external":true,"fromProfileId":"manager","fromProjectName":"manager"}\n[assistantOutputTarget] {"kind":"peer_agent"}\n\nShared cross-profile ping`);
-    expect(targetRuntimeInput.roster).toMatchObject({ id: "balanced", revision: 1 });
+    expect(targetRuntimeInput.roster).toMatchObject({ id: "default", revision: 1 });
 
     await manager.handleRuntimeSessionEvent(target.agentId, {
       type: "message_start",
@@ -378,7 +378,7 @@ describe("SwarmManager project-agent sendMessage routing", () => {
     expect(senderRuntimeInput.message).toBe(
       `[projectAgentContext] {"fromAgentId":"beta","fromDisplayName":"beta","external":true,"fromProfileId":"beta","fromProjectName":"beta"}\n[assistantOutputTarget] {"kind":"peer_agent"}\n\nReply back`,
     );
-    expect(senderRuntimeInput.roster).toMatchObject({ id: "balanced", revision: 1 });
+    expect(senderRuntimeInput.roster).toMatchObject({ id: "default", revision: 1 });
 
     const senderHistory = manager.getConversationHistory(sender.agentId);
     expect(
@@ -486,7 +486,7 @@ describe("SwarmManager project-agent sendMessage routing", () => {
     expect(targetRuntimeInput.message).toBe(
       `[projectAgentContext] {"fromAgentId":"manager","fromDisplayName":"manager","external":false,"fromProfileId":"manager","fromProjectName":"manager"}\n[assistantOutputTarget] {"kind":"peer_agent"}\n\nNeed a release summary`,
     );
-    expect(targetRuntimeInput.roster).toMatchObject({ id: "balanced", revision: 1 });
+    expect(targetRuntimeInput.roster).toMatchObject({ id: "default", revision: 1 });
 
     const cacheFile = getConversationHistoryCacheFilePath(target.sessionFile);
     await waitForFileText(cacheFile, {

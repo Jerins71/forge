@@ -104,9 +104,9 @@ In eligible Builder manager sessions, a compact pill beside **Send** shows the e
 
 The Send-adjacent work-mode control chooses how the manager owns subsequent turns:
 
-- **Delegate first** (default) — workers own substantive execution; the manager answers, orients with bounded read-only checks, and accepts results.
+- **Delegate first** — workers own substantive execution; the manager answers, orients with bounded read-only checks, and accepts results.
 - **Adaptive** — starts directly and hands off only when the total path, including briefing, waiting, acceptance, and likely rework, improves.
-- **Hands-on** — keeps investigation, implementation, and validation, including the critical path; explicit delegation remains available.
+- **Hands-on** (default) — keeps investigation, implementation, and validation, including the critical path; explicit delegation remains available.
 
 See [Worker Delegation](SPECIALISTS.md) for the maintained work-mode guidance.
 

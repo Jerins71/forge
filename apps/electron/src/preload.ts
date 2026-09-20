@@ -12,6 +12,8 @@ import { OPEN_PDF_IN_DEFAULT_APP_CHANNEL, type OpenPdfIpcRequest, type OpenPdfIp
 
 const BACKEND_READY_CHANNEL = 'forge:get-backend-bootstrap'
 const TERMINAL_SHORTCUT_CHANNEL = 'bridge:terminal-shortcut'
+const POST_UPDATE_INFO_CHANNEL = 'forge:get-post-update-info'
+const OPEN_RELEASE_NOTES_CHANNEL = 'forge:open-release-notes'
 
 type BackendBootstrap = {
   backendUrl: string
@@ -41,6 +43,8 @@ const roleScopedBridge = bootstrap.windowRole === 'managed-browser-popout'
         backendUrl: bootstrap.backendUrl,
         backendWsUrl: bootstrap.backendWsUrl,
         getVersion: (): string => bootstrap.version,
+        getPostUpdateInfo: () => ipcRenderer.invoke(POST_UPDATE_INFO_CHANNEL),
+        openReleaseNotes: () => ipcRenderer.invoke(OPEN_RELEASE_NOTES_CHANNEL),
         appRuntime: bootstrap.appRuntime,
         appStartedAt: bootstrap.appStartedAt,
         platform: bootstrap.platform,

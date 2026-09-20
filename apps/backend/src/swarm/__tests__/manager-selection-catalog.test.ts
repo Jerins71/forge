@@ -22,6 +22,7 @@ import { validateAgentDescriptor } from "../swarm-manager-utils.js";
 
 const ALL_AVAILABLE = new Map<string, boolean>([
   ["openai-codex", true],
+  ["codex-native", true],
   ["anthropic", true],
   ["xai", true],
   ["openrouter", true],
@@ -82,7 +83,7 @@ describe.sequential("manager selection catalog projection", () => {
     await rm(dataDir, { recursive: true, force: true });
   });
 
-  it("projects exact Fable 5.1, Astra, Adaptive, bounded defaults, and no runtime-only metadata", () => {
+  it("projects exact Fable 5.1, Astra, preferred native Codex, bounded defaults, and no runtime-only metadata", () => {
     const first = buildManagerSelectionCatalog(ALL_AVAILABLE);
     const second = buildManagerSelectionCatalog(ALL_AVAILABLE);
 
@@ -121,11 +122,17 @@ describe.sequential("manager selection catalog projection", () => {
     );
     expect(first.defaults).toEqual({
       createManagerModel: {
-        provider: "openai-codex",
-        modelId: "gpt-5.5",
-        reasoningId: "xhigh",
+        provider: "codex-native",
+        modelId: "gpt-5.6-sol",
+        reasoningId: "high",
       },
-      workModeId: "delegation_first",
+      workModeId: "hands_on",
+    });
+    expect(first.models.find((model) =>
+      model.provider === "codex-native" && model.modelId === "gpt-5.6-sol"
+    )).toMatchObject({
+      providerLabel: "Codex native (Preferred)",
+      defaultReasoningId: "high",
     });
     const defaultSelection = first.defaults.createManagerModel;
     const defaultModel = first.models.find((model) =>
@@ -187,7 +194,7 @@ describe.sequential("manager selection catalog projection", () => {
     expect(unavailable.revision).toBe(buildManagerSelectionCatalog(withoutAnthropic).revision);
 
     const withoutDefaultProvider = new Map(ALL_AVAILABLE);
-    withoutDefaultProvider.set("openai-codex", false);
+    withoutDefaultProvider.set("codex-native", false);
     expect(buildManagerSelectionCatalog(withoutDefaultProvider).defaults).not.toHaveProperty("createManagerModel");
   });
 

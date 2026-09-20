@@ -1712,7 +1712,7 @@ describe('SwarmManager', () => {
     expect(runtimeInput.message).toBe(
       'SYSTEM: closeout reminder\n[assistantOutputTarget] {"kind":"explicit_tool_required","reason":"agent_message"}',
     )
-    expect(runtimeInput.roster).toMatchObject({ id: 'balanced', revision: 1 })
+    expect(runtimeInput.roster).toMatchObject({ id: 'default', revision: 1 })
 
     const sessionHistory = manager.getConversationHistory(sessionAgent.agentId)
     expect(
@@ -1756,7 +1756,7 @@ describe('SwarmManager', () => {
     expect(runtimeInput.message).toBe(
       'SYSTEM: Completed the read-only health check across all three hosts.\n[assistantOutputTarget] {"kind":"explicit_tool_required","reason":"agent_message"}',
     )
-    expect(runtimeInput.roster).toMatchObject({ id: 'balanced', revision: 1 })
+    expect(runtimeInput.roster).toMatchObject({ id: 'default', revision: 1 })
 
     await emitCleanAssistantFinal(
       manager,

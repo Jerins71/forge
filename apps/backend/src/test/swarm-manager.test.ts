@@ -322,7 +322,7 @@ describe('SwarmManager', () => {
     expect(runtimeInput.message).toBe(
       '[sourceContext] {"channel":"web"}\n[assistantOutputTarget] {"kind":"session_transcript"}\n\ninterrupt current plan',
     )
-    expect(runtimeInput.roster).toMatchObject({ id: 'balanced', revision: 1 })
+    expect(runtimeInput.roster).toMatchObject({ id: 'default', revision: 1 })
   })
 
   it('streams worker active-tool snapshots even when the manager is idle', async () => {
@@ -1837,7 +1837,7 @@ describe('SwarmManager', () => {
     expect(runtimeInput.message).toBe(
       '[sourceContext] {"channel":"telegram","channelId":"123456","userId":"456789","threadTs":"173.456","channelType":"group","teamId":"T789"}\n[assistantOutputTarget] {"mode":"internal_only"}\n\nreply in telegram thread',
     )
-    expect(runtimeInput.roster).toMatchObject({ id: 'balanced', revision: 1 })
+    expect(runtimeInput.roster).toMatchObject({ id: 'default', revision: 1 })
   })
 
   it('defaults speak_to_user routing to web when target is omitted, even after telegram input', async () => {

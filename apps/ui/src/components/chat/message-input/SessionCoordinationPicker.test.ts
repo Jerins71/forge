@@ -208,7 +208,7 @@ describe('SessionCoordinationPicker', () => {
 
   it('uses the catalog default for inheritance when the project has no override', async () => {
     const config = makeConfig({
-      managerPosture: 'hands_on',
+      managerPosture: 'delegation_first',
       managerPostureOrigin: 'session_override',
       projectDefaultManagerPosture: undefined,
     })
@@ -217,7 +217,7 @@ describe('SessionCoordinationPicker', () => {
 
     flushSync(() => {
       fireEvent.click(getByRole(document.body, 'radio', {
-        name: /Delegate first.*Project default/,
+        name: /Hands-on.*Project default/,
       }))
     })
     await flushAsyncWork()

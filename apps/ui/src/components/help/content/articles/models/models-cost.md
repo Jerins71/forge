@@ -21,8 +21,8 @@ These work well for everyday development tasks.
 Reserve these for work where quality matters most.
 
 - **GPT-6 Astra** — The most capable Codex choice. Best for the hardest backend work, large multi-file refactors, and demanding research tasks.
-- **GPT-5.5** — The unchanged Forge and specialist default full coding model. Strong for complex backend work and multi-file refactors without the top-tier cost.
-- **GPT-5.5 at medium reasoning** — The default specialist-work balance of quality and cost. Best for frontend work, nuanced code review, and tasks that need careful judgment.
+- **GPT-5.6 Sol at high reasoning** — Forge's recommended Codex-native manager default. Strong for everyday implementation and orchestration without paying the latency cost of the highest reasoning levels.
+- **GPT-5.5 at medium reasoning** — A capable specialist-work balance of quality and cost. Best for frontend work, nuanced code review, and tasks that need careful judgment.
 - **Grok 4.6 at high reasoning** — The native xAI default configured for more thorough manager or specialist work.
 - **Cursor Grok 4.5** — Cursor SDK Grok 4.5 for high-quality Cursor runtime sessions; the fast variant trades higher price for lower latency.
 

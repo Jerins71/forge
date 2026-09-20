@@ -111,10 +111,15 @@ describe("model-presets", () => {
     }
   });
 
-  it("exposes GPT-6 Astra as a selectable preset without changing the global default", () => {
+  it("exposes GPT-6 Astra while keeping native Codex Sol as the global default", () => {
     const preset = getModelPresetInfoList().find((entry) => entry.presetId === "pi-6");
 
-    expect(DEFAULT_SWARM_MODEL_PRESET).toBe("pi-5.5");
+    expect(DEFAULT_SWARM_MODEL_PRESET).toBe("codex-native");
+    expect(resolveModelDescriptorFromPreset(DEFAULT_SWARM_MODEL_PRESET)).toEqual({
+      provider: "codex-native",
+      modelId: "gpt-5.6-sol",
+      thinkingLevel: "high",
+    });
     expect(preset).toMatchObject({
       provider: "openai-codex",
       modelId: "gpt-6-astra",

@@ -27,13 +27,13 @@ async function makeDataDir(): Promise<string> {
 }
 
 describe("delegation roster settings", () => {
-  it("migrates the existing tier bindings into one balanced roster without writing eagerly", async () => {
+  it("ships the consultation roster as Default while retaining Balanced as an alternative", async () => {
     const dataDir = await makeDataDir();
 
     const settings = await resolveDelegationRosterSettings(dataDir);
 
-    expect(settings.defaultRosterId).toBe("balanced");
-    expect(settings.rosters).toHaveLength(1);
+    expect(settings.defaultRosterId).toBe("default");
+    expect(settings.rosters).toHaveLength(2);
     expect(settings.rosters[0]).toMatchObject({
       rosterId: "balanced",
       defaultRouteId: "fast-builder",
@@ -75,6 +75,28 @@ describe("delegation roster settings", () => {
     expect(settings.rosters[0]?.description).toBe(
       "A balanced development team with a normal builder, focused alternatives, and evidence-based escalation.",
     );
+    expect(settings.rosters[1]).toMatchObject({
+      rosterId: "default",
+      name: "Default",
+      defaultRouteId: "researcher",
+      modeRoutes: {
+        general: "researcher",
+        plan: "plan-consultant",
+        "correctness-review": "independent-reviewer",
+        "design-review": "independent-reviewer",
+        research: "researcher",
+      },
+    });
+    expect(settings.rosters[1]?.routes.map((route) => [
+      route.routeId,
+      route.provider,
+      route.modelId,
+      route.reasoningLevel,
+    ])).toEqual([
+      ["plan-consultant", "openai-codex", "gpt-6-astra", "xhigh"],
+      ["independent-reviewer", "anthropic", "claude-fable-5-1", "low"],
+      ["researcher", "xai", "grok-4.6", "high"],
+    ]);
     await expect(readFile(getDelegationRostersPath(dataDir), "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
@@ -87,6 +109,7 @@ describe("delegation roster settings", () => {
 
     const legacy = normalizeDelegationRosterSettings({
       ...settings,
+      defaultRosterId: roster.rosterId,
       rosters: [{
         ...roster,
         description: "General-purpose routes migrated from the existing Forge worker model bindings.",
@@ -94,6 +117,7 @@ describe("delegation roster settings", () => {
     });
     const custom = normalizeDelegationRosterSettings({
       ...settings,
+      defaultRosterId: roster.rosterId,
       rosters: [{ ...roster, description: "My own route terminology." }],
     });
 
@@ -109,6 +133,7 @@ describe("delegation roster settings", () => {
     const roster = settings.rosters[0]!;
     const persisted = {
       ...settings,
+      defaultRosterId: roster.rosterId,
       rosters: [{
         ...roster,
         routes: roster.routes.map((route) => {
@@ -184,6 +209,7 @@ describe("delegation roster settings", () => {
 
     const migrated = normalizeDelegationRosterSettings({
       ...settings,
+      defaultRosterId: roster.rosterId,
       rosters: [{
         ...roster,
         routes: roster.routes.map((route) => (
@@ -268,6 +294,7 @@ describe("delegation roster settings", () => {
 
     const consolidated = normalizeDelegationRosterSettings({
       ...settings,
+      defaultRosterId: roster.rosterId,
       rosters: [{
         ...roster,
         modeRoutes: { ...roster.modeRoutes, "design-review": "design-reviewer" },
@@ -282,6 +309,7 @@ describe("delegation roster settings", () => {
 
     const customized = normalizeDelegationRosterSettings({
       ...settings,
+      defaultRosterId: roster.rosterId,
       rosters: [{
         ...roster,
         modeRoutes: { ...roster.modeRoutes, "design-review": "design-reviewer" },

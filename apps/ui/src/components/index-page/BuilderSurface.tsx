@@ -2750,6 +2750,7 @@ export function BuilderSurface({
       </div>
 
       <GlobalDialogs
+        postUpdateSource={localWsUrl}
         artifactPanelProps={{
           artifact: panels.activeArtifact,
           wsUrl,

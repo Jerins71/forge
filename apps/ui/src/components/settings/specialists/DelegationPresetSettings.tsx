@@ -55,7 +55,6 @@ import {
 import { DelegationPolicyEditor } from './DelegationPolicyEditor'
 import {
   addPolicy,
-  addHandsOnSupportPreset,
   cloneDelegationSettings,
   clonePreset,
   duplicatePolicy,
@@ -256,16 +255,6 @@ export function DelegationPresetSettingsView({
     setJustSaved(false)
   }
 
-  const createHandsOnSupportPreset = () => {
-    const next = addHandsOnSupportPreset(settings, selectedPreset)
-    setSettings(next.settings)
-    setSelectedPresetId(next.preset.rosterId)
-    setSelectedPolicyId(selectedPolicyIdForTask(next.preset, 'plan'))
-    setPresetDetailsOpen(true)
-    setAdvancedOpen(false)
-    setJustSaved(false)
-  }
-
   const duplicateSelectedPreset = () => {
     const presetId = nextId(
       `${selectedPreset.rosterId}-copy`,
@@ -384,11 +373,6 @@ export function DelegationPresetSettingsView({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem disabled={settings.rosters.length >= 24} onClick={createHandsOnSupportPreset}>
-                <Plus className="size-4" />
-                Add hands-on support roster
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setPresetDetailsOpen((open) => !open)}>
                 Edit roster details
               </DropdownMenuItem>

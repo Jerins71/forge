@@ -239,6 +239,18 @@ describe('SessionModelPicker compact menu', () => {
     expect(getAllByRole(document.body, 'menuitemradio', { name: 'Grok 4.5' }).length).toBeGreaterThan(0)
   })
 
+  it('labels Codex native as the preferred provider in the model picker', async () => {
+    const onUpdate = vi.fn(async () => {})
+    renderPicker(onUpdate)
+    await openPicker()
+    await openSubmenu(/Model/)
+
+    expect(document.body.textContent).toContain('Codex native (Preferred)')
+    expect(getByRole(document.body, 'menuitemradio', {
+      name: 'GPT-5.6 Sol (Codex native)',
+    })).toBeTruthy()
+  })
+
   it('applies a reasoning override immediately', async () => {
     const onUpdate = vi.fn(async () => {})
     renderPicker(onUpdate)

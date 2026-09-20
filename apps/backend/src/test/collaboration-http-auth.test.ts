@@ -266,6 +266,7 @@ describe("collaboration HTTP auth middleware", () => {
     expect(classifyCollaborationHttpRequest("/api/settings/remote-build", "PUT", REMOTE_BUILD_ON)).toBe("admin");
     expect(classifyCollaborationHttpRequest("/api/settings/model-overrides", "PUT", REMOTE_BUILD_ON)).toBe("admin");
     expect(classifyCollaborationHttpRequest("/api/settings/manager-selection-catalog", "POST", REMOTE_BUILD_ON)).toBe("admin");
+    expect(classifyCollaborationHttpRequest("/api/settings/recommended-manager-defaults", "POST", REMOTE_BUILD_ON)).toBe("admin");
     expect(classifyCollaborationHttpRequest("/api/settings/delegation-rosters", "PUT", REMOTE_BUILD_ON)).toBe("admin");
     expect(classifyCollaborationHttpRequest("/api/settings/extensions", "GET", REMOTE_BUILD_ON)).toBe("admin");
     expect(classifyCollaborationHttpRequest("/api/settings/cli-access/keys", "GET", REMOTE_BUILD_ON)).toBe("admin");

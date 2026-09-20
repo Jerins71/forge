@@ -183,6 +183,54 @@ function createOpenAICodexOAuthSecretsEnvService(): any {
 }
 
 describe("SwarmSettingsService delegation settings", () => {
+  it("applies the shipped manager defaults without replacing explicit session model overrides", async () => {
+    const root = await createTempRoot();
+    const session = Object.assign(
+      createSession(root, "manager", resolveModelDescriptorFromPreset("pi-opus"), "session_override"),
+      {
+        managerPosture: "delegation_first" as const,
+        managerPostureOrigin: "product_default" as const,
+        delegationRosterId: "balanced",
+        delegationRosterOrigin: "global_default" as const,
+      },
+    );
+    const authDir = join(root, "data", "shared", "config", "auth");
+    await mkdir(authDir, { recursive: true });
+    await writeFile(join(authDir, "auth.json"), JSON.stringify({
+      "openai-codex": { type: "api_key", key: "fixture-key" },
+    }));
+    const profile = createProfile();
+    const service = createService({
+      rootDir: root,
+      sessions: [session],
+      profiles: new Map([[profile.profileId, profile]]),
+    });
+
+    const result = await service.applyRecommendedManagerDefaults();
+
+    expect(result).toMatchObject({
+      profileIds: ["manager"],
+      rosterId: "default",
+    });
+    expect(session.model).toEqual(resolveModelDescriptorFromPreset("pi-opus"));
+    expect(session.modelOrigin).toBe("session_override");
+    expect(session).toMatchObject({
+      managerPosture: "hands_on",
+      managerPostureOrigin: "project_default",
+      delegationRosterId: "default",
+      delegationRosterOrigin: "project_default",
+    });
+    expect(profile).toMatchObject({
+      defaultModel: {
+        provider: "codex-native",
+        modelId: "gpt-5.6-sol",
+        thinkingLevel: "high",
+      },
+      defaultManagerPosture: "hands_on",
+      defaultDelegationRosterId: "default",
+    });
+  });
+
   it("changes session posture with one runtime recycle while roster-only changes stay runtime-stable", async () => {
     const root = await createTempRoot();
     const session = Object.assign(createSession(root, "manager"), {
@@ -273,7 +321,7 @@ describe("SwarmSettingsService delegation settings", () => {
     });
 
     expect(session).toMatchObject({
-      managerPosture: "delegation_first",
+      managerPosture: "hands_on",
       managerPostureOrigin: "product_default",
     });
     expect(applyManagerRuntimeRecyclePolicy).not.toHaveBeenCalled();
@@ -299,7 +347,7 @@ describe("SwarmSettingsService delegation settings", () => {
     });
 
     expect(session).toMatchObject({
-      managerPosture: "delegation_first",
+      managerPosture: "hands_on",
       managerPostureOrigin: "product_default",
       delegationRosterId: "balanced",
       delegationRosterOrigin: "session_override",

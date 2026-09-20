@@ -532,7 +532,7 @@ export const FORGE_MODEL_CATALOG: ForgeModelCatalog = {
   providers: {
     ...BASE_MODEL_CATALOG.providers,
     'codex-native': {
-      providerId: 'codex-native', displayName: 'Codex native',
+      providerId: 'codex-native', displayName: 'Codex native (Preferred)',
       availabilityMode: 'managed-auth', piProjectionMode: 'none',
       projectionScope: 'catalog-only', requestBehaviorId: null,
     },
@@ -541,7 +541,7 @@ export const FORGE_MODEL_CATALOG: ForgeModelCatalog = {
     ...BASE_MODEL_CATALOG.families,
     'codex-native': {
       familyId: 'codex-native', displayName: 'Codex native', provider: 'codex-native',
-      defaultModelId: 'gpt-6-astra', defaultReasoningLevel: 'high',
+      defaultModelId: 'gpt-5.6-sol', defaultReasoningLevel: 'high',
       visibleInCreateManager: true, visibleInChangeManager: true,
       visibleInSpawnPreset: false, visibleInSpecialists: false,
     },
@@ -553,7 +553,9 @@ export const FORGE_MODEL_CATALOG: ForgeModelCatalog = {
       .map(model => [`codex-native/${model.modelId}`, {
         ...model, catalogId: `codex-native/${model.modelId}`, provider: 'codex-native',
         familyId: 'codex-native', displayName: `${model.displayName} (Codex native)`,
-        isFamilyDefault: model.modelId === 'gpt-6-astra', webSearchCapability: 'native' as const,
+        isFamilyDefault: model.modelId === 'gpt-5.6-sol',
+        defaultReasoningLevel: model.modelId === 'gpt-5.6-sol' ? 'high' as const : model.defaultReasoningLevel,
+        webSearchCapability: 'native' as const,
         piUpstreamId: null, intentionalDivergenceNotes: 'Native Codex app-server runtime; no Pi model projection.',
       }])),
   },

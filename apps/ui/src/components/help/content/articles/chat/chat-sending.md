@@ -29,7 +29,7 @@ A notice is added only when the effective model or reasoning changes. Choosing t
 
 ## Changing work mode
 
-The Send-adjacent work-mode control chooses how the manager owns subsequent turns. **Delegate first** (default) assigns substantive execution to workers. **Adaptive** starts directly and hands off only when the total path improves. **Hands-on** keeps the critical path with the manager; explicit delegation remains available. The manager stays the accountable owner in every mode.
+The Send-adjacent work-mode control chooses how the manager owns subsequent turns. **Delegate first** assigns substantive execution to workers. **Adaptive** starts directly and hands off only when the total path improves. **Hands-on** is the default and keeps the critical path with the manager; explicit delegation remains available. The manager stays the accountable owner in every mode.
 
 ## Replying to a message
 

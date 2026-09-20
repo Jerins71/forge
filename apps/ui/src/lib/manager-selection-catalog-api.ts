@@ -1,10 +1,14 @@
-import type { ManagerSelectionCatalogResponse } from '@forge/protocol'
+import type {
+  ApplyRecommendedManagerDefaultsResponse,
+  ManagerSelectionCatalogResponse,
+} from '@forge/protocol'
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import { createBuilderSettingsApiClient } from '@/components/settings/settings-api-client'
 import { fetchModelOverrides } from '@/components/settings/models-api'
 import { decodeManagerSelectionCatalog } from '@/lib/manager-selection-catalog'
 
 export const MANAGER_SELECTION_CATALOG_PATH = '/api/settings/manager-selection-catalog'
+export const RECOMMENDED_MANAGER_DEFAULTS_PATH = '/api/settings/recommended-manager-defaults'
 const LOCAL_FIRST_CATALOG_ERROR = 'Failed to load models.'
 
 export class ManagerSelectionCatalogRequestError extends Error {
@@ -61,4 +65,14 @@ export async function fetchManagerSelectionCatalog(
   }
 
   throw new ManagerSelectionCatalogRequestError(LOCAL_FIRST_CATALOG_ERROR, response.status)
+}
+
+export async function applyRecommendedManagerDefaults(
+  clientOrWsUrl: SettingsApiClient | string | undefined,
+): Promise<ApplyRecommendedManagerDefaultsResponse> {
+  const client = resolveClient(clientOrWsUrl)
+  return client.fetchJson<ApplyRecommendedManagerDefaultsResponse>(
+    RECOMMENDED_MANAGER_DEFAULTS_PATH,
+    { method: 'POST' },
+  )
 }

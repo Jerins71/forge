@@ -2677,7 +2677,7 @@ describe('SwarmWebSocketServer', () => {
     expect(runtimeInput.message).toBe(
       '[sourceContext] {"channel":"cli","messageId":"send-1"}\n[assistantOutputTarget] {"kind":"explicit_tool_required","reason":"unsupported_direct_cli_source"}\n\nhello from cli',
     )
-    expect(runtimeInput.roster).toMatchObject({ id: 'balanced', revision: 1 })
+    expect(runtimeInput.roster).toMatchObject({ id: 'default', revision: 1 })
 
     client.send(JSON.stringify({
       type: 'cli_run',
@@ -2710,7 +2710,7 @@ describe('SwarmWebSocketServer', () => {
     expect(runRuntimeInput.message).toBe(
       '[sourceContext] {"channel":"cli","messageId":"run-correlation-1"}\n[assistantOutputTarget] {"kind":"explicit_tool_required","reason":"unsupported_direct_cli_source"}\n\nhello from cli run',
     )
-    expect(runRuntimeInput.roster).toMatchObject({ id: 'balanced', revision: 1 })
+    expect(runRuntimeInput.roster).toMatchObject({ id: 'default', revision: 1 })
 
     client.send(JSON.stringify({
       type: 'cli_send_message',
@@ -2731,7 +2731,7 @@ describe('SwarmWebSocketServer', () => {
     expect(projectAgentRuntimeInput.message).toBe(
       '[sourceContext] {"channel":"cli","messageId":"send-project-agent"}\n[assistantOutputTarget] {"kind":"explicit_tool_required","reason":"unsupported_direct_cli_source"}\n\nhello docs agent',
     )
-    expect(projectAgentRuntimeInput.roster).toMatchObject({ id: 'balanced', revision: 1 })
+    expect(projectAgentRuntimeInput.roster).toMatchObject({ id: 'default', revision: 1 })
 
     client.send(JSON.stringify({
       type: 'cli_run',
@@ -2758,7 +2758,7 @@ describe('SwarmWebSocketServer', () => {
     expect(projectAgentRunRuntimeInput.message).toBe(
       '[sourceContext] {"channel":"cli","messageId":"run-docs-correlation"}\n[assistantOutputTarget] {"kind":"explicit_tool_required","reason":"unsupported_direct_cli_source"}\n\nrun docs agent',
     )
-    expect(projectAgentRunRuntimeInput.roster).toMatchObject({ id: 'balanced', revision: 1 })
+    expect(projectAgentRunRuntimeInput.roster).toMatchObject({ id: 'default', revision: 1 })
 
     client.close()
     await once(client, 'close')

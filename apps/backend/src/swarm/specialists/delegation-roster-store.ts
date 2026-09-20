@@ -1,6 +1,8 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  createDefaultDelegationRoster,
+  DEFAULT_DELEGATION_ROSTER_ID,
   DELEGATION_BEHAVIOR_MODES,
   type DelegationBehaviorMode,
   type DelegationRoster,
@@ -22,7 +24,7 @@ const ROSTER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const MAX_ROSTERS = 24;
 const MAX_ROUTES = 24;
-const DEFAULT_ROSTER_ID = "balanced";
+const LEGACY_BALANCED_ROSTER_ID = "balanced";
 const LEGACY_BALANCED_DESCRIPTIONS = new Set([
   "General-purpose routes migrated from the existing Forge worker model bindings.",
   "General-purpose worker profiles derived from the existing Forge model bindings.",
@@ -157,7 +159,7 @@ export async function resolveDelegationRosterSettings(
     return normalizeDelegationRosterSettings(parsed);
   } catch (error) {
     if (!isEnoentError(error)) throw error;
-    return buildMigratedDelegationRosterSettings(await resolveTierConfigs(dataDir));
+    return buildDefaultDelegationRosterSettings(await resolveTierConfigs(dataDir));
   }
 }
 
@@ -430,7 +432,7 @@ function normalizePersistedRouteModel(model: {
 function migrateBuiltinRosterSpecialists(roster: DelegationRoster): DelegationRoster {
   const modeRoutes = { ...roster.modeRoutes };
   const routeById = new Map(roster.routes.map((route) => [route.routeId, route]));
-  const hasBuiltinShape = roster.rosterId === DEFAULT_ROSTER_ID
+  const hasBuiltinShape = roster.rosterId === LEGACY_BALANCED_ROSTER_ID
     && ["quick-scout", "fast-builder", "research-analyst", "independent-critic", "deep-reasoner"]
       .every((routeId) => routeById.has(routeId));
 
@@ -588,11 +590,11 @@ function normalizeModeRoutes(
   return result;
 }
 
-function buildMigratedDelegationRosterSettings(
+function buildDefaultDelegationRosterSettings(
   tiers: readonly TierConfig[],
 ): DelegationRosterSettings {
   const byTier = new Map(tiers.map((tier) => [tier.tier, tier]));
-  const routes = [
+  const balancedRoutes = [
     routeFromTier(byTier.get("light"), "quick-scout"),
     routeFromTier(byTier.get("fast"), "fast-builder"),
     routeFromTier(byTier.get("standard"), "planner", "plan"),
@@ -600,7 +602,7 @@ function buildMigratedDelegationRosterSettings(
     routeFromTier(byTier.get("deep"), "independent-critic"),
     routeFromTier(byTier.get("max"), "deep-reasoner"),
   ];
-  for (const route of routes) {
+  for (const route of balancedRoutes) {
     if (route.routeId !== "deep-reasoner") {
       route.capabilityEscalationRouteId = route.routeId === "quick-scout"
         ? "fast-builder"
@@ -609,9 +611,9 @@ function buildMigratedDelegationRosterSettings(
   }
   return {
     version: 1,
-    defaultRosterId: DEFAULT_ROSTER_ID,
+    defaultRosterId: DEFAULT_DELEGATION_ROSTER_ID,
     rosters: [{
-      rosterId: DEFAULT_ROSTER_ID,
+      rosterId: "balanced",
       revision: 1,
       name: "Balanced",
       description: BALANCED_DESCRIPTION,
@@ -623,8 +625,8 @@ function buildMigratedDelegationRosterSettings(
         "design-review": "independent-critic",
         research: "research-analyst",
       },
-      routes,
-    }],
+      routes: balancedRoutes,
+    }, createDefaultDelegationRoster()],
   };
 }
 

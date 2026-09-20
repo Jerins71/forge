@@ -7,9 +7,14 @@ import {
   type RedeemOpenAIBrokerInviteRequest,
   type UpdateOpenAIBrokerSettingsRequest,
   DEFAULT_MANAGER_POSTURE,
+  createDefaultDelegationRoster,
+  isSystemProfile,
+  RECOMMENDED_MANAGER_DEFAULTS,
+  type ApplyRecommendedManagerDefaultsResponse,
   getCatalogModelKey,
   type ContextMode,
   type CredentialPoolState,
+  type DelegationRoster,
   type DelegationRosterSettings,
   type ManagerExactModelSelection,
   type ManagerPosture,
@@ -253,6 +258,58 @@ export class SwarmSettingsService {
     );
     await this.applyGlobalDelegationRosterDefault(saved.defaultRosterId);
     return saved;
+  }
+
+  async applyRecommendedManagerDefaults(): Promise<ApplyRecommendedManagerDefaultsResponse> {
+    await this.resolveExactManagerModel(
+      {
+        provider: RECOMMENDED_MANAGER_DEFAULTS.model.provider,
+        modelId: RECOMMENDED_MANAGER_DEFAULTS.model.modelId,
+      },
+      "change",
+      RECOMMENDED_MANAGER_DEFAULTS.model.reasoningId,
+    );
+    const currentSettings = await resolveDelegationRosterSettings(this.options.config.paths.dataDir);
+    const recommendedRoster = createDefaultDelegationRoster();
+    const savedSettings = await this.saveDelegationRosterSettings({
+      ...currentSettings,
+      defaultRosterId: recommendedRoster.rosterId,
+      rosters: [
+        ...currentSettings.rosters.filter((roster) =>
+          roster.rosterId !== recommendedRoster.rosterId
+          && !isLegacyHandsOnSupportRoster(roster)
+        ),
+        recommendedRoster,
+      ],
+    });
+    const savedRoster = savedSettings.rosters.find(
+      (roster) => roster.rosterId === recommendedRoster.rosterId,
+    );
+    if (!savedRoster) throw new Error("Recommended roster was not saved.");
+
+    const profileIds = [...this.options.profiles.values()]
+      .filter((profile) => !isSystemProfile(profile))
+      .map((profile) => profile.profileId);
+    for (const profileId of profileIds) {
+      await this.updateProfileDefaultExactModel(
+        profileId,
+        {
+          provider: RECOMMENDED_MANAGER_DEFAULTS.model.provider,
+          modelId: RECOMMENDED_MANAGER_DEFAULTS.model.modelId,
+        },
+        RECOMMENDED_MANAGER_DEFAULTS.model.reasoningId,
+      );
+      await this.updateProjectDelegationDefaults(profileId, {
+        managerPosture: RECOMMENDED_MANAGER_DEFAULTS.workModeId,
+        delegationRosterId: RECOMMENDED_MANAGER_DEFAULTS.rosterId,
+      });
+    }
+
+    return {
+      profileIds,
+      rosterId: savedRoster.rosterId,
+      rosterRevision: savedRoster.revision,
+    };
   }
 
   async updateProjectDelegationDefaults(
@@ -1697,6 +1754,15 @@ function brokerRuntimeBoundaryFingerprint(response: OpenAIBrokerSettingsResponse
 
 function errorToMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isLegacyHandsOnSupportRoster(roster: DelegationRoster): boolean {
+  if (roster.name !== "Hands-on support") return false;
+  const routeIds = new Set(roster.routes.map((route) => route.routeId));
+  return routeIds.size === 3
+    && routeIds.has("plan-consultant")
+    && routeIds.has("independent-reviewer")
+    && routeIds.has("researcher");
 }
 
 function cloneModelDescriptor(model: AgentDescriptor["model"]): AgentDescriptor["model"] {

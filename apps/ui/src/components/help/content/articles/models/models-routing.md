@@ -8,7 +8,7 @@ For a local Builder project, use **Project Settings → Default model → Change
 
 ## Work mode
 
-Delegate first is the default work mode: workers execute substantive project work while the manager stays read-only. Adaptive starts directly and weighs the full time, cost, and assurance benefit of a handoff. Hands-on keeps the critical path with the manager through investigation, implementation, and validation. It delegates for explicit requests, unavailable capabilities, or concrete benefits from separable work—not merely because work is complex or spans multiple files.
+Delegate first has workers execute substantive project work while the manager stays read-only. Adaptive starts directly and weighs the full time, cost, and assurance benefit of a handoff. Hands-on is the default work mode and keeps the critical path with the manager through investigation, implementation, and validation. It delegates for explicit requests, unavailable capabilities, or concrete benefits from separable work—not merely because work is complex or spans multiple files.
 
 Set a project default or use the work-mode control beside Send for a session override. Work mode is part of the manager system prompt. Changing it mid-session replaces the runtime before the next turn and may cause one prompt-cache miss.
 
@@ -48,4 +48,4 @@ When the primary model is OpenRouter, hard routing/privacy filters on that exact
 
 ## Compatibility
 
-Existing worker descriptors and stored tier/lens configuration remain supported. Until rosters are first saved, Forge derives the Balanced roster from the stored tier bindings. The persisted fields remain `roster`, `route`, and `mode` for compatibility, while the UI presents rosters and complete specialists.
+Existing worker descriptors and stored tier/lens configuration remain supported. New installations start with the Default roster for bounded planning, review, and research support. The persisted fields remain `roster`, `route`, and `mode` for compatibility, while the UI presents rosters and complete specialists.

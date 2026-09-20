@@ -24,6 +24,11 @@ export type UpdateStatus =
   | { type: 'downloading'; percent?: number }
   | { type: 'downloaded'; version?: string }
   | { type: 'error'; message?: string }
+export interface PostUpdateInfo {
+  previousVersion: string
+  currentVersion: string
+  offerRecommendedDefaults: boolean
+}
 export interface CliInstallResult { success: boolean; installedPath: string; binDir: string; pathIncluded: boolean; pathInstructions: string | null; error?: string }
 export interface StreamDeckPluginStatus { supported: boolean; isPackaged: boolean; bundled: boolean; streamDeckInstalled: boolean; pluginVersion: string }
 export type SecureVaultBridgeResult =
@@ -131,6 +136,8 @@ export interface ElectronBridge {
   appStartedAt?: string
   markRendererReady?(): void
   getVersion?(): string
+  getPostUpdateInfo?(): Promise<PostUpdateInfo | null>
+  openReleaseNotes?(): Promise<void>
   platform: string
   browserAutomation?: BrowserAutomationBridge
   browserPreview?: BrowserPreviewBridge
