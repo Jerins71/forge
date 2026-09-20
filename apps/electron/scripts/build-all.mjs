@@ -10,6 +10,7 @@ import { prepareElectronBetterSqlite3Binding } from './prepare-dev-native.mjs'
 import { verifyElectronRuntime } from './verify-electron-runtime.mjs'
 import { stageExternalChromeResources } from './stage-external-chrome.mjs'
 import { assertReleaseEnvironment } from '../../native-messaging-host/scripts/release-signing.mjs'
+import { isStreamDeckSetupEnabled } from '../../../scripts/stream-deck-setup.mjs'
 
 gracefulFs.gracefulify(fs)
 
@@ -162,6 +163,7 @@ async function main() {
   await rm(stageDir, { recursive: true, force: true })
   await mkdir(stageDir, { recursive: true })
   await cleanUiBuildOutput()
+  const streamDeckSetupEnabled = isStreamDeckSetupEnabled()
 
   await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/protocol', 'build'])
   await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/backend', 'build'])
@@ -170,9 +172,11 @@ async function main() {
   await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/chrome-extension', 'build'])
   await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/external-chrome-native-host', 'build'])
   await run(externalChromeRelease.seaNode, [path.join(repoRoot, 'apps', 'native-messaging-host', 'scripts', 'package-current.mjs')])
-  await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/stream-deck', 'run', 'build'])
-  await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/stream-deck', 'run', 'validate'])
-  await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/stream-deck', 'run', 'pack'])
+  if (streamDeckSetupEnabled) {
+    await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/stream-deck', 'run', 'build'])
+    await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/stream-deck', 'run', 'validate'])
+    await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/stream-deck', 'run', 'pack'])
+  }
   await run(pnpmCommand, ['--dir', electronDir, 'build'])
 
   await stageBundledBackend()
@@ -182,7 +186,8 @@ async function main() {
   await stageExternalChromeResources({ outputRoot: externalChromeStageDir, requireExecutable: true })
   await run(process.execPath, [path.join(electronDir, 'scripts', 'external-chrome-package-content-smoke.mjs'), externalChromeStageDir])
   await stageCliArtifact()
-  await stageStreamDeckArtifact()
+  await mkdir(streamDeckStageDir, { recursive: true })
+  if (streamDeckSetupEnabled) await stageStreamDeckArtifact()
 
   await assertExists(backendStageBundlePath, 'staged backend bundle entry')
   await assertExists(path.join(uiStageDir, 'index.html'), 'staged renderer entry')
@@ -200,7 +205,9 @@ async function main() {
     'staged secure runner askpass helper',
   )
   await assertExists(cliStagedEntry, 'staged CLI entry')
-  await assertExists(path.join(streamDeckStageDir, path.basename(streamDeckArtifactPath)), 'staged Stream Deck plugin installer')
+  if (streamDeckSetupEnabled) {
+    await assertExists(path.join(streamDeckStageDir, path.basename(streamDeckArtifactPath)), 'staged Stream Deck plugin installer')
+  }
   await assertExists(path.join(stagedPlaywrightCoreDir, 'lib', 'coreBundle.js'), 'staged Playwright injected runtime')
   await assertExists(path.join(browserRuntimeDir, 'THIRD_PARTY_NOTICES.md'), 'staged browser third-party notice')
   await assertExists(path.join(externalChromeStageDir, 'package-manifest.json'), 'staged External Chrome package manifest')

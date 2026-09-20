@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import { createConnection } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isStreamDeckSetupEnabled } from './stream-deck-setup.mjs'
 import { createRequire } from 'node:module'
 import {
   DEFAULT_FORCE_ARM_DELAY_MS,
@@ -121,14 +122,20 @@ export function createElectronDevelopmentSetupCommands({
     cwd: electronDir,
   })
 
+  const streamDeckCommands = isStreamDeckSetupEnabled(environment)
+    ? [
+        pnpmCommand('Stream Deck build', ['run', 'streamdeck:build']),
+        pnpmCommand('Stream Deck package', ['run', 'streamdeck:pack']),
+      ]
+    : []
+
   return [
     pnpmCommand('Workspace dependency sync', [
       'install',
       '--frozen-lockfile',
       '--prefer-offline',
     ]),
-    pnpmCommand('Stream Deck build', ['run', 'streamdeck:build']),
-    pnpmCommand('Stream Deck package', ['run', 'streamdeck:pack']),
+    ...streamDeckCommands,
     pnpmCommand('Protocol build', ['--filter', '@forge/protocol', 'build']),
     nodeScript('Electron runtime verification', ['apps', 'electron', 'scripts', 'verify-electron-runtime.mjs']),
     nodeScript('Electron native preparation', ['apps', 'electron', 'scripts', 'prepare-dev-native.mjs']),

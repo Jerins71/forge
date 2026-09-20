@@ -30,7 +30,7 @@ The optional Chrome adapter has no Electron view or recording authority. Its coo
 - **Forge resources** — `.stage/forge-resources/`, containing built-in skills, archetypes, operational prompts, specialists, static assets, and related runtime resources
 - **Brave Search skill dependencies** — the unbundled Brave scripts keep their manifest-declared runtime dependency closure in their own staged `node_modules/`. This preserves package-relative assets and does not rely on the separate backend dependency tree or an end-user install.
 - **CLI runtime** — `.stage/cli/cli.js`, copied from `packages/cli/dist/cli.js` and packaged as `resources/cli/cli.js` for the desktop CLI shim
-- **Stream Deck plugin installer** — `.stage/stream-deck/com.forge.command-center.streamDeckPlugin`, built, validated, and packaged from `apps/stream-deck/` for the optional local Command Center installation flow
+- **Stream Deck plugin installer** — when `FORGE_STREAM_DECK_SETUP_ENABLED=true`, `.stage/stream-deck/com.forge.command-center.streamDeckPlugin` is built, validated, and packaged from `apps/stream-deck/` for the optional local Command Center installation flow
 - **Cursor SDK runtime assets** — required and staged for native manager and specialist support via `@cursor/sdk`, together with `sqlite3` and the required platform-native SDK assets; packaging and its packaged-runtime preflight fail if any of these assets are missing
 - **SQLite runtime** — `better-sqlite3` remains external to the backend bundle so its Electron-specific native binding can be staged and exercised with Electron-as-Node before packaging
 - **Embedded browser runtime** — main/trusted-preload/guest-preload bundles in `app.asar`, plus `.stage/browser-runtime/playwright-core/` and an exact staged copy of root `THIRD_PARTY_NOTICES.md` under packaged `resources/browser-runtime/`
@@ -204,12 +204,12 @@ The packaging pipeline:
 
 1. Clears `apps/electron/release/` so stale installers, blockmaps, and unpacked directories do not leak into the next validation/upload pass
 2. Clears `apps/ui/.output/` so the packaged renderer always starts from a fresh UI build output
-3. Builds `@forge/protocol`, `@forge/backend`, `@forge/ui`, `@forge/stream-deck`, and the Electron main process; it validates and packages the Stream Deck plugin installer before staging
+3. Builds `@forge/protocol`, `@forge/backend`, `@forge/ui`, and the Electron main process. Stream Deck build, validation, and packaging run only when `FORGE_STREAM_DECK_SETUP_ENABLED=true`
 4. Stages backend runtime assets into `apps/electron/.stage/backend/`
 5. Stages renderer assets into `apps/electron/.stage/ui/`, then validates that every asset referenced by the staged `index.html` actually exists in the staged `assets/` directory before packaging continues
 6. Builds `@forge/cli` and stages the bundled CLI entrypoint into `apps/electron/.stage/cli/cli.js`
 7. Stages Forge runtime resources into `apps/electron/.stage/forge-resources/`
-8. Stages the optional Stream Deck plugin installer into `apps/electron/.stage/stream-deck/`
+8. Stages the optional Stream Deck plugin installer into `apps/electron/.stage/stream-deck/` only when `FORGE_STREAM_DECK_SETUP_ENABLED=true`; the directory remains empty by default
 9. Stages pinned `playwright-core` and the byte-identical root `THIRD_PARTY_NOTICES.md` into `.stage/browser-runtime/`, validating the injected-runtime markers before packaging
 10. Builds the optional Chrome adapter shell/payload and current platform/architecture native relay with official Node 26.5.0; macOS release mode signs and signer-verifies the relay before calculating its hash, while Windows release mode emits explicit unsigned metadata protected by the exact manifest hash; explicit validation mode remains non-publishable
 11. Runs a packaged-runtime preflight that resolves and loads the staged native/runtime externals from `.stage/backend/node_modules/`, exercising `better-sqlite3`, `sqlite3`, `node-pty`, `sharp`, and `koffi` with Electron-as-Node and ensuring they do not silently fall back to repo-level `node_modules`

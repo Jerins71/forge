@@ -6,7 +6,7 @@ Repository helper scripts invoked by root `pnpm` commands. Prefer those commands
 
 | Script | Normal command | Description |
 | --- | --- | --- |
-| `dev-electron.mjs` | `pnpm dev:electron` | Starts the Electron development launcher, UI, local backend, and required Stream Deck/browser preparation. |
+| `dev-electron.mjs` | `pnpm dev:electron` | Starts the Electron development launcher, UI, local backend, and required browser preparation. Stream Deck preparation is opt-in with `FORGE_STREAM_DECK_SETUP_ENABLED=true`. |
 | `prod-daemon.mjs` | `pnpm prod:daemon` | Starts Forge as a background daemon. |
 | `prod-daemon-restart.mjs` | `pnpm prod:restart` | Restarts a running daemon. |
 | `prod-daemon-ipc.mjs` | internal | IPC helper for daemon lifecycle. |

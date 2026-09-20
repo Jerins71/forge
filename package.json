@@ -27,7 +27,7 @@
     "dev:ui": "pnpm run dev:preflight && pnpm --filter @forge/ui dev",
     "dev:electron": "node scripts/dev-electron.mjs",
     "dev:electron:remote": "node scripts/dev-electron.mjs --remote",
-    "build": "pnpm --filter @forge/protocol build && pnpm --filter @forge/cli build && pnpm --filter @forge/skill-share-worker build && pnpm --filter @forge/backend build && pnpm --filter @forge/ui build && pnpm --filter @forge/stream-deck build",
+    "build": "pnpm --filter @forge/protocol build && pnpm --filter @forge/cli build && pnpm --filter @forge/skill-share-worker build && pnpm --filter @forge/backend build && pnpm --filter @forge/ui build",
     "build:electron": "pnpm --filter @forge/electron run build:all",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",

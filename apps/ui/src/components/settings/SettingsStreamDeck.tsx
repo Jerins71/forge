@@ -99,8 +99,8 @@ export function SettingsStreamDeck({ apiClient }: { apiClient: SettingsApiClient
   // Older preload bridges do not expose isPackaged; they only occur in source runs.
   const isDevelopmentBuild = plugin !== null && plugin.isPackaged !== true
   const installerDescription = isDevelopmentBuild
-    ? 'This development build prepares a real Stream Deck installer before Forge starts, so you can test the same direct-install flow as a release.'
-    : 'Forge Desktop bundles the signed direct-distribution package. Stream Deck will ask you to confirm installation and add the layouts for supported devices.'
+    ? 'Stream Deck setup is disabled by default. Restart with FORGE_STREAM_DECK_SETUP_ENABLED=true to prepare the direct-install package for this development build.'
+    : 'Forge Desktop includes the direct-install package only in builds created with Stream Deck setup explicitly enabled.'
 
   return (
     <div className="space-y-7">
@@ -153,8 +153,8 @@ export function SettingsStreamDeck({ apiClient }: { apiClient: SettingsApiClient
             detail={plugin?.bundled
               ? `v${plugin.pluginVersion} ready`
               : isDevelopmentBuild
-                ? 'Restart pnpm dev:electron to prepare it'
-                : 'Available in packaged Forge'}
+                ? 'Restart with Stream Deck setup enabled'
+                : 'Not included in this build'}
           />
           <StatusTile label="Stream Deck" ok={plugin?.streamDeckInstalled ?? false} detail={plugin?.streamDeckInstalled ? 'App detected' : 'Install Elgato Stream Deck first'} />
           <StatusTile label="Paired devices" ok={activeDevices.length > 0} detail={`${activeDevices.length} active`} />

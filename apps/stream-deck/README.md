@@ -6,7 +6,7 @@ workers, context, repository activity, navigation, and guarded agent actions.
 
 ## Connect it
 
-Released Forge Desktop builds stage the direct-distribution installer; it is installed only when you choose the local Desktop flow.
+Stream Deck setup is disabled by default. To prepare the direct-distribution installer during Electron development or packaging, set `FORGE_STREAM_DECK_SETUP_ENABLED=true`. The plugin is installed only when you choose the local Desktop flow.
 
 1. Open **Forge Settings → Stream Deck** and choose **Install / Update**.
 2. Confirm the native plugin installation in Stream Deck. Forge's device-specific layout is
@@ -36,6 +36,7 @@ state require a 650 ms hold. Delete and clear operations are intentionally not e
 ## Development
 
 ```bash
+FORGE_STREAM_DECK_SETUP_ENABLED=true pnpm dev:electron
 pnpm streamdeck:build
 pnpm streamdeck:validate
 pnpm --filter @forge/stream-deck test
