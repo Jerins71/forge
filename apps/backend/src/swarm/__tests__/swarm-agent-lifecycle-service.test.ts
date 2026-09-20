@@ -3479,7 +3479,7 @@ describe("SwarmAgentLifecycleService", () => {
     const dataDir = await mkdtemp(join(tmpdir(), "forge-route-capacity-fallback-"));
     try {
       const settings = await resolveDelegationRosterSettings(dataDir);
-      const roster = settings.rosters[0]!;
+      const roster = settings.rosters.find((candidate) => candidate.rosterId === "balanced")!;
       const route = roster.routes.find((candidate) => candidate.routeId === "fast-builder")!;
       const primary = {
         provider: "openai-codex",
@@ -3493,17 +3493,19 @@ describe("SwarmAgentLifecycleService", () => {
       };
       await saveDelegationRosterSettings(dataDir, {
         ...settings,
-        rosters: [{
-          ...roster,
-          defaultRouteId: route.routeId,
-          modeRoutes: {},
-          routes: [{
-            ...route,
-            ...primary,
-            availabilityFallback: configuredFallback,
-            capabilityEscalationRouteId: undefined,
-          }],
-        }],
+        rosters: settings.rosters.map((candidate) => candidate.rosterId === roster.rosterId
+          ? {
+            ...roster,
+            defaultRouteId: route.routeId,
+            modeRoutes: {},
+            routes: [{
+              ...route,
+              ...primary,
+              availabilityFallback: configuredFallback,
+              capabilityEscalationRouteId: undefined,
+            }],
+          }
+          : candidate),
       });
       const persisted = await resolveDelegationRosterSettings(dataDir);
       const persistedRoute = persisted.rosters[0]!.routes.find((candidate) => candidate.routeId === route.routeId)!;
@@ -3568,7 +3570,7 @@ describe("SwarmAgentLifecycleService", () => {
     const dataDir = await mkdtemp(join(tmpdir(), "forge-route-capacity-fallback-"));
     try {
       const settings = await resolveDelegationRosterSettings(dataDir);
-      const roster = settings.rosters[0]!;
+      const roster = settings.rosters.find((candidate) => candidate.rosterId === "balanced")!;
       const route = roster.routes.find((candidate) => candidate.routeId === "fast-builder")!;
       const primary = {
         provider: "openrouter",
@@ -3582,17 +3584,19 @@ describe("SwarmAgentLifecycleService", () => {
       };
       await saveDelegationRosterSettings(dataDir, {
         ...settings,
-        rosters: [{
-          ...roster,
-          defaultRouteId: route.routeId,
-          modeRoutes: {},
-          routes: [{
-            ...route,
-            ...primary,
-            availabilityFallback: configuredFallback,
-            capabilityEscalationRouteId: undefined,
-          }],
-        }],
+        rosters: settings.rosters.map((candidate) => candidate.rosterId === roster.rosterId
+          ? {
+            ...roster,
+            defaultRouteId: route.routeId,
+            modeRoutes: {},
+            routes: [{
+              ...route,
+              ...primary,
+              availabilityFallback: configuredFallback,
+              capabilityEscalationRouteId: undefined,
+            }],
+          }
+          : candidate),
       });
       const persisted = await resolveDelegationRosterSettings(dataDir);
       const persistedRoute = persisted.rosters[0]!.routes.find((candidate) => candidate.routeId === route.routeId)!;

@@ -376,7 +376,7 @@ describe("SwarmManager project-agent regressions", () => {
         fromProjectName: "manager"
       })}\n[assistantOutputTarget] {"kind":"peer_agent"}\n\nops-follow-up`
     ]);
-    expect(docsInputs?.every((input) => input.roster.id === "balanced")).toBe(true);
+    expect(docsInputs?.every((input) => input.roster.id === "default")).toBe(true);
     const qaInputs = qaRuntime?.sendCalls.map((call) => (
       splitDelegationRosterRuntimeContext(String(call.message))
     ));
@@ -403,7 +403,7 @@ describe("SwarmManager project-agent regressions", () => {
         fromProjectName: "manager"
       })}\n[assistantOutputTarget] {"kind":"peer_agent"}\n\nnote-6`
     ]);
-    expect(qaInputs?.every((input) => input.roster.id === "balanced")).toBe(true);
+    expect(qaInputs?.every((input) => input.roster.id === "default")).toBe(true);
   });
 
   it("treats an empty prompt.md as an intentionally blank override instead of falling back to descriptor cache", async () => {

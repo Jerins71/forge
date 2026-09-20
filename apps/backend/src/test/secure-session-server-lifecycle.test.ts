@@ -5,6 +5,7 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startServer, type StartedServer } from "../server.js";
 import { DockerSecureExecutionBackend } from "../swarm/secure-sessions/execution/docker-secure-execution-backend.js";
+import { NonoSecureExecutionBackend } from "../swarm/secure-sessions/execution/nono-secure-execution-backend.js";
 import { SecureSessionsService } from "../swarm/secure-sessions/secure-sessions-service.js";
 import { SwarmManager } from "../swarm/swarm-manager.js";
 import { createTempConfig, type TempConfigHandle } from "../test-support/temp-config.js";
@@ -43,14 +44,17 @@ describe("Secure Sessions server lifecycle", () => {
       finishRecovery = resolve;
     });
 
+    const recoverOrphans = async (liveTasks: unknown) => {
+      order.push("recover");
+      expect(liveTasks).toEqual([]);
+      const result = await recoveryGate;
+      order.push("recover-finished");
+      return result;
+    };
     vi.spyOn(DockerSecureExecutionBackend.prototype, "recoverOrphans")
-      .mockImplementation(async (liveTasks) => {
-        order.push("recover");
-        expect(liveTasks).toEqual([]);
-        const result = await recoveryGate;
-        order.push("recover-finished");
-        return result;
-      });
+      .mockImplementation(recoverOrphans);
+    vi.spyOn(NonoSecureExecutionBackend.prototype, "recoverOrphans")
+      .mockImplementation(recoverOrphans);
     const originalClose = SecureSessionsService.prototype.closeSecureSessions;
     const closeSpy = vi.spyOn(SecureSessionsService.prototype, "closeSecureSessions")
       .mockImplementation(async function closeSecureSessionsForTest() {

@@ -9,7 +9,7 @@ import { execFile } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
@@ -54,10 +54,12 @@ describe("pi-upgrade isolated instance ownership integration", () => {
     const fakeBin = join(home, "Library/pnpm");
     const backendPort = await freePort();
     const uiPort = await freePort();
+    const nodeDir = dirname(process.execPath);
     const env = {
       ...process.env,
       HOME: home,
       TMPDIR: tempDir,
+      PATH: `${nodeDir}:${fakeBin}:${process.env.PATH ?? ""}`,
       FORGE_PORT: String(backendPort),
       FORGE_UI_PORT: String(uiPort),
       FORGE_DATA_DIR: dataDir,
@@ -68,8 +70,18 @@ describe("pi-upgrade isolated instance ownership integration", () => {
     await mkdir(fakeBin, { recursive: true });
     await writeFile(join(dataDir, "shared/config/auth/auth.json"), "{}\n", { mode: 0o600 });
     await writeFile(join(scriptRoot, ".env"), `FORGE_DATA_DIR=${dataDir}\nFORGE_PORT=${backendPort}\nFORGE_UI_PORT=${uiPort}\nVITE_FORGE_WS_URL=ws://127.0.0.1:${backendPort}\n`);
-    await cp(startScript, join(scriptRoot, "scripts/pi-upgrade/start-isolated-instance.sh"));
-    await cp(stopScript, join(scriptRoot, "scripts/pi-upgrade/stop-isolated-instance.sh"));
+    const pinCopiedScriptNode = async (src, dest) => {
+      const original = await readFile(src, "utf8");
+      // Host Homebrew node can be dyld-broken; pin the copied fixture to the
+      // same Node as this test runner without changing the production script.
+      const pinned = original.replaceAll(
+        "export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:${HOME}/Library/pnpm:${PATH:-}\"",
+        `export PATH=\"${nodeDir}:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:\${HOME}/Library/pnpm:\${PATH:-}\"`,
+      );
+      await writeFile(dest, pinned, { mode: 0o755 });
+    };
+    await pinCopiedScriptNode(startScript, join(scriptRoot, "scripts/pi-upgrade/start-isolated-instance.sh"));
+    await pinCopiedScriptNode(stopScript, join(scriptRoot, "scripts/pi-upgrade/stop-isolated-instance.sh"));
     await cp(join(repoRoot, "scripts/pi-upgrade/assert-isolation.mjs"), join(scriptRoot, "scripts/pi-upgrade/assert-isolation.mjs"));
 
     const listener = join(root, "listener.mjs");
