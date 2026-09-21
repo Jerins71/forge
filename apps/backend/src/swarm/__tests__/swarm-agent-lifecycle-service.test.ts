@@ -451,10 +451,10 @@ describe("SwarmAgentLifecycleService", () => {
     await expect(svc.getOrCreateRuntimeForDescriptor(manager)).resolves.toBe(runtime);
 
     expect(order.slice(0, 8)).toEqual([
+      "allocate",
       "session-parent",
       "prompt",
       "prepare",
-      "allocate",
       "create:42:true",
       "pinned",
       "append",
@@ -467,6 +467,23 @@ describe("SwarmAgentLifecycleService", () => {
     expect(position("attach")).toBeLessThan(position("status"));
     expect(position("attach")).toBeLessThan(position("prompt-meta"));
     expect(position("attach")).toBeLessThan(position("stats"));
+  });
+
+  it("clears the reserved creation token when session preparation fails", async () => {
+    const manager = createAgentDescriptor({ agentId: "m-prepare-fail", role: "manager", managerId: "m-prepare-fail", status: "idle" });
+    const clearRuntimeToken = vi.fn();
+    const createRuntimeForDescriptor = vi.fn();
+    const svc = new SwarmAgentLifecycleService(baseLifecycleOptions({
+      descriptors: new Map([[manager.agentId, manager]]),
+      allocateRuntimeToken: vi.fn(() => 42),
+      clearRuntimeToken,
+      ensureSessionFileParentDirectory: vi.fn(async () => { throw new Error("Preparation failed"); }),
+      createRuntimeForDescriptor,
+    }));
+
+    await expect(svc.getOrCreateRuntimeForDescriptor(manager)).rejects.toThrow("Preparation failed");
+    expect(clearRuntimeToken).toHaveBeenCalledWith(manager.agentId, 42);
+    expect(createRuntimeForDescriptor).not.toHaveBeenCalled();
   });
 
   it("blocks runtime creation before touching the session while shutdown is quarantined", async () => {
