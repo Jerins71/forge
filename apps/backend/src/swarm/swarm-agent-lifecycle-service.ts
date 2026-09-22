@@ -1890,7 +1890,13 @@ export class SwarmAgentLifecycleService {
         }
         return await this.createAndAttachRuntimeForDescriptor(descriptor, runtimeToken, requirements);
       } catch (error) {
-        this.options.clearRuntimeToken(descriptor.agentId, runtimeToken);
+        const attachedRuntime = this.options.runtimes.get(descriptor.agentId);
+        const ownsAttachedRuntime =
+          attachedRuntime !== undefined
+          && this.options.getRuntimeToken(descriptor.agentId) === runtimeToken;
+        if (!ownsAttachedRuntime) {
+          this.options.clearRuntimeToken(descriptor.agentId, runtimeToken);
+        }
         throw error;
       }
     })();

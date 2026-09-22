@@ -486,6 +486,45 @@ describe("SwarmAgentLifecycleService", () => {
     expect(createRuntimeForDescriptor).not.toHaveBeenCalled();
   });
 
+  it("preserves the token when post-attach metadata persistence fails", async () => {
+    const manager = createAgentDescriptor({
+      agentId: "m-post-attach-fail",
+      role: "manager",
+      managerId: "m-post-attach-fail",
+      status: "idle",
+    });
+    const runtime = makeRuntimeStub({ descriptor: manager });
+    const runtimes = new Map<string, SwarmAgentRuntime>();
+    let currentToken: number | undefined;
+    const clearRuntimeToken = vi.fn((_agentId: string, expectedToken?: number) => {
+      if (expectedToken === undefined || expectedToken === currentToken) {
+        currentToken = undefined;
+      }
+    });
+    const svc = new SwarmAgentLifecycleService(baseLifecycleOptions({
+      descriptors: new Map([[manager.agentId, manager]]),
+      runtimes,
+      allocateRuntimeToken: vi.fn(() => {
+        currentToken = 42;
+        return 42;
+      }),
+      getRuntimeToken: vi.fn(() => currentToken),
+      clearRuntimeToken,
+      createRuntimeForDescriptor: vi.fn(async () => runtime),
+      attachRuntime: vi.fn((agentId, attachedRuntime) => {
+        runtimes.set(agentId, attachedRuntime);
+      }),
+      captureSessionRuntimePromptMeta: vi.fn(async () => {
+        throw new Error("Metadata write failed");
+      }),
+    }));
+
+    await expect(svc.getOrCreateRuntimeForDescriptor(manager)).rejects.toThrow("Metadata write failed");
+    expect(runtimes.get(manager.agentId)).toBe(runtime);
+    expect(currentToken).toBe(42);
+    expect(clearRuntimeToken).not.toHaveBeenCalled();
+  });
+
   it("blocks runtime creation before touching the session while shutdown is quarantined", async () => {
     const manager = createAgentDescriptor({
       agentId: "m-quarantined",
