@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { BellOff, CheckCheck, ChevronDown, ChevronUp, CircleAlert, Globe, Inbox, Pin } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { LOCAL_ORIGIN_ID } from '@/lib/origin-store'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import type { SessionRow } from '@/lib/agent-hierarchy'
 import { SessionContextMenu, type SessionContextMenuActions } from './SessionContextMenu'
 import { SidebarRoomAvatar } from './shared'
@@ -62,9 +62,10 @@ export function RoomsInbox({
   // The element itself is always supplied by production composition, so its
   // presence cannot determine whether the Inbox has visible content.
   const hasInlineProjects = hasInlineProjectContent
-  // Existing mute preferences are local Builder preferences; do not let a
-  // coincident remote agent ID borrow a local visual marker.
-  const isMuted = (session: RoomsInboxSessionViewModel) => session.identity.originId === LOCAL_ORIGIN_ID
+  // Existing mute preferences belong to primary sessions; do not let a
+  // coincident agent ID on another environment borrow the marker.
+  const primaryOriginId = useOptionalEnvironmentContext()?.primaryEnvironmentId
+  const isMuted = (session: RoomsInboxSessionViewModel) => session.identity.originId === primaryOriginId
     && mutedSessionIds?.has(session.identity.sessionAgentId) === true
   const isEmpty = sections.needsYou.length === 0
     && sections.active.length === 0
@@ -317,6 +318,7 @@ function InboxSessionRow({
   } | null
 }) {
   const presentation = presentRoomsInboxReason(session.reason)
+  const primaryOriginId = useOptionalEnvironmentContext()?.primaryEnvironmentId
   const isSelected = selected?.originId === session.identity.originId
     && selected.sessionAgentId === session.identity.sessionAgentId
   const relativeTime = session.reason === 'recently_updated'
@@ -356,7 +358,7 @@ function InboxSessionRow({
           {session.pinnedAt ? <Pin className="sidebar-room-inbox-marker" aria-label="Pinned" /> : null}
           {muted ? <BellOff className="sidebar-room-inbox-marker" aria-label="Muted" /> : null}
           <InboxStatusPill session={session} />
-          {session.identity.originId !== LOCAL_ORIGIN_ID ? <Globe className="sidebar-room-remote-marker" aria-label="Remote project" /> : null}
+          {session.identity.originId !== primaryOriginId ? <Globe className="sidebar-room-remote-marker" aria-label="Remote project" /> : null}
           {relativeTime ? <span className="sidebar-room-inbox-relative-time">{relativeTime}</span> : null}
         </span>
       </button>

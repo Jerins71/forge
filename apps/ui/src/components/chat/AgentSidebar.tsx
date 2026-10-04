@@ -25,7 +25,7 @@ import {
   getDirectlyArchivedSessionRows,
 } from '@/lib/agent-hierarchy'
 import type { ProfileTreeRow } from '@/lib/agent-hierarchy'
-import { LOCAL_ORIGIN_ID } from '@/lib/origin-store'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import { useProviderUsage } from '@/hooks/use-provider-usage'
 import { toggleMute, getMutedAgents, setMutedAgents, MUTE_CHANGE_EVENT } from '@/lib/notification-service'
 import { cn } from '@/lib/utils'
@@ -160,6 +160,8 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     setRoomsMode,
   } = useSidebarPrefs()
   const roomsV2 = sidebarLayout === 'rooms-v2'
+  // The project tree shows the primary environment; other environments render as logical groups.
+  const primaryOriginId = useOptionalEnvironmentContext()?.primaryEnvironmentId ?? ''
   const showProjectsBody = !roomsV2 || roomsMode === 'projects'
   const inboxFallbackOrigins = useMemo<RoomsInboxOriginInput[]>(() => {
     const toOriginInput = (
@@ -208,17 +210,17 @@ export const AgentSidebar = React.memo(function AgentSidebar({
         })),
     })
 
-    return [toOriginInput(LOCAL_ORIGIN_ID, connected, treeRows, statuses, unreadCounts)]
-  }, [connected, statuses, treeRows, unreadCounts])
+    return [toOriginInput(primaryOriginId, connected, treeRows, statuses, unreadCounts)]
+  }, [connected, primaryOriginId, statuses, treeRows, unreadCounts])
   const projectViewOptions = useMemo<SidebarProjectViewOption[]>(() => (
     treeRows.map((row) => ({
         key: builderSidebarOrderKey({
-          originId: LOCAL_ORIGIN_ID,
+          originId: primaryOriginId,
           profileId: row.profile.profileId,
         }),
         label: row.profile.displayName,
       }))
-  ), [treeRows])
+  ), [primaryOriginId, treeRows])
   const {
     views: projectViews,
     activeView,
@@ -230,10 +232,10 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   const viewFilteredTreeRows = useMemo(() => {
     if (!activeProjectKeys) return treeRows
     return treeRows.filter((row) => activeProjectKeys.has(builderSidebarOrderKey({
-      originId: LOCAL_ORIGIN_ID,
+      originId: primaryOriginId,
       profileId: row.profile.profileId,
     })))
-  }, [activeProjectKeys, treeRows])
+  }, [activeProjectKeys, primaryOriginId, treeRows])
   const {
     activeDragId,
     setActiveDragId,
@@ -356,7 +358,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   const mixedProjectRows = useMemo<MixedProjectRow[]>(() => {
     const visibleRows: MixedProjectRow[] = [
       ...displayedRegularRows.map((treeRow) => ({
-        ref: { originId: LOCAL_ORIGIN_ID, profileId: treeRow.profile.profileId },
+        ref: { originId: primaryOriginId, profileId: treeRow.profile.profileId },
         treeRow,
       })),
     ]
@@ -369,7 +371,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       const row = rowByKey.get(builderSidebarOrderKey(ref))
       return row ? [row] : []
     })
-  }, [builderSidebarOrder, displayedRegularRows])
+  }, [builderSidebarOrder, displayedRegularRows, primaryOriginId])
 
   const viewNavigationRows = useMemo(() => {
     if (!activeView) return []
@@ -894,7 +896,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
             mode={roomsMode}
             onModeChange={setRoomsMode}
             selected={selectedAgentId ? {
-              originId: LOCAL_ORIGIN_ID,
+              originId: primaryOriginId,
               sessionAgentId: selectedAgentId,
             } : null}
             searchQuery={deferredSearchQuery}
@@ -1180,8 +1182,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       {/* Change model dialog */}
       {changeModelTarget && onUpdateManagerModel ? (
         <ChangeModelDialog
-          wsUrl={wsUrl}
-          originId={LOCAL_ORIGIN_ID}
+          originId={primaryOriginId}
           modelConfigChangeKey={modelConfigChangeKey}
           connectionEpoch={connectionEpoch}
           profileId={changeModelTarget.profileId}
@@ -1196,8 +1197,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       {/* Session model dialog */}
       {sessionModelTarget && onUpdateSessionModel ? (
         <SessionModelDialog
-          wsUrl={wsUrl}
-          originId={LOCAL_ORIGIN_ID}
+          originId={primaryOriginId}
           modelConfigChangeKey={modelConfigChangeKey}
           connectionEpoch={connectionEpoch}
           sessionAgentId={sessionModelTarget.sessionAgentId}

@@ -29,13 +29,12 @@ import {
   projectSelectableManagerModelRows,
 } from '@/lib/manager-selection-catalog'
 import { useManagerSelectionCatalog } from '@/lib/use-manager-selection-catalog'
-import { LOCAL_ORIGIN_ID } from '@/lib/origin-store'
+import { useEnvironmentSettingsClient } from '@/hooks/use-environment-settings-client'
 import { formatManagerReasoningLevel } from '@/lib/reasoning-level-labels'
 
 export function SessionModelDialog({
   apiClient,
-  wsUrl,
-  originId = LOCAL_ORIGIN_ID,
+  originId,
   modelConfigChangeKey,
   connectionEpoch,
   sessionAgentId,
@@ -48,11 +47,10 @@ export function SessionModelDialog({
   onClose,
   returnFocusRef,
 }: {
-  /** Target-aware origin client. New call sites should prefer this over wsUrl. */
-  apiClient?: SettingsApiClient
-  /** Legacy local-sidebar compatibility path. */
-  wsUrl?: string
-  originId?: string
+  /** Defaults to the authenticated client of the `originId` environment. */
+  apiClient?: SettingsApiClient | null
+  /** Environment UUID whose model catalog is shown. */
+  originId: string
   modelConfigChangeKey?: number
   connectionEpoch?: number
   sessionAgentId: string
@@ -76,6 +74,7 @@ export function SessionModelDialog({
     currentModel?.modelId !== profileDefaultModel.modelId ||
     currentModel?.thinkingLevel !== profileDefaultModel.thinkingLevel
   ))
+  const environmentSettingsClient = useEnvironmentSettingsClient(originId)
   const {
     catalog,
     loading: availabilityLoading,
@@ -83,7 +82,7 @@ export function SessionModelDialog({
     refetch: loadAvailability,
   } = useManagerSelectionCatalog({
     originId,
-    client: apiClient ?? wsUrl,
+    client: apiClient ?? environmentSettingsClient,
     modelConfigChangeKey,
     connectionEpoch,
     forceOnEnabled: true,

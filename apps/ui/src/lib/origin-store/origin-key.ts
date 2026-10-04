@@ -5,11 +5,8 @@
  * keys carry the pair.
  */
 
-/** Opaque origin identifier.  `"local"` is reserved for the on-device backend. */
+/** Opaque origin identifier: the environment UUID. */
 export type OriginId = string
-
-/** The reserved origin id for the local Builder backend. */
-export const LOCAL_ORIGIN_ID: OriginId = 'local'
 
 /**
  * Separator between origin and id in a flat composite key string.  Chosen to

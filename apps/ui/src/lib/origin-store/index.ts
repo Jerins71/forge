@@ -2,13 +2,11 @@
  * Origin-keyed selector store.
  *
  * Public surface for the store registry, its per-slice `useSyncExternalStore`
- * hooks, composite `(originId, id)` identity, and the origin meta slice. Only
- * the reserved `"local"` origin exists today; Forge V2 environments replace
- * origins with paired environments that reuse this per-selector store.
+ * hooks, composite `(originId, id)` identity, and the origin meta slice. Each
+ * origin is a paired environment keyed by its UUID.
  */
 
 export {
-  LOCAL_ORIGIN_ID,
   compositeKey,
   type OriginId,
 } from './origin-key'
