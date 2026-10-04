@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,18 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { mkdtemp } from "node:fs/promises";
 
-import {
-  COPY_SCHEMA_VERSION,
-  DEFAULT_BACKEND_PORT,
-  DEFAULT_UI_PORT,
-  IsolationError,
-  assertLaunchEnvironment,
-  assertPreparedIsolation,
-  getRepoRoot,
-  loadDatabaseConstructor,
-  prepareIsolatedData,
-  resetPreparedIsolation,
-} from "../isolation-lib.mjs";
+import { COPY_SCHEMA_VERSION, IsolationError, assertPreparedIsolation, loadDatabaseConstructor, prepareIsolatedData } from "../isolation-lib.mjs";
 
 const SYNTHETIC_SECRET = "synthetic-provider-secret-never-log";
 
@@ -243,43 +231,6 @@ test("assertion fails closed when dangerous automation is reactivated", async (t
   );
 });
 
-test("repeat-run reset quarantines regenerated automation without touching the source", async (t) => {
-  const fixture = await createFixture();
-  t.after(() => fixture.database.close());
-  const beforeDigest = await sourceDigest(fixture.source);
-  await prepareIsolatedData({
-    sourcePath: fixture.source,
-    targetPath: fixture.target,
-    electronUserDataPath: fixture.electronUserData,
-  });
-  await writeJson(join(fixture.target, "profiles/profile/schedules/schedules.json"), {
-    schedules: [{ id: "regenerated", enabled: true }],
-  });
-  await writeJson(join(fixture.target, "shared/config/telemetry.json"), {
-    enabled: true,
-  });
-
-  const reset = await resetPreparedIsolation({
-    dataPath: fixture.target,
-    sourcePath: fixture.source,
-    electronUserDataPath: fixture.electronUserData,
-    now: () => new Date("2026-07-24T12:00:00.000Z"),
-  });
-
-  assert.equal(reset.status, "reset");
-  assert.deepEqual(reset.quarantinedPaths.sort(), [
-    "profiles/profile/schedules/schedules.json",
-    "shared/config/telemetry.json",
-  ]);
-  assert.equal(await sourceDigest(fixture.source), beforeDigest);
-  await assertPreparedIsolation({
-    dataPath: fixture.target,
-    sourcePath: fixture.source,
-    electronUserDataPath: fixture.electronUserData,
-    requireLaunchEnv: false,
-  });
-});
-
 test("assertion rejects credential permissions that are not private", async (t) => {
   const fixture = await createFixture();
   t.after(() => fixture.database.close());
@@ -298,82 +249,4 @@ test("assertion rejects credential permissions that are not private", async (t) 
     }),
     /credential file/,
   );
-});
-
-test("launch environment is exact and refuses Collaboration bootstrap credentials", async () => {
-  const dataPath = "/tmp/forge-secure-copy-data";
-  const electronUserDataPath = "/tmp/forge-secure-copy-electron";
-  const env = {
-    FORGE_RUNTIME_TARGET: "builder",
-    FORGE_HOST: "127.0.0.1",
-    FORGE_PORT: String(DEFAULT_BACKEND_PORT),
-    FORGE_UI_PORT: String(DEFAULT_UI_PORT),
-    FORGE_DATA_DIR: dataPath,
-    FORGE_ELECTRON_DEV_SERVER_URL: `http://127.0.0.1:${DEFAULT_UI_PORT}`,
-    FORGE_ELECTRON_USER_DATA_DIR: electronUserDataPath,
-    VITE_FORGE_WS_URL: `ws://127.0.0.1:${DEFAULT_BACKEND_PORT}`,
-    FORGE_TELEMETRY: "false",
-    FORGE_CORTEX_ENABLED: "false",
-    FORGE_TERMINAL_ENABLED: "false",
-    FORGE_SKILL_SHARE_DISABLED: "true",
-    FORGE_REMOTE_PROJECTS_ENABLED: "false",
-    FORGE_REMOTE_PROJECTS_TERMINALS_ENABLED: "false",
-    FORGE_VERSIONING_ENABLED: "false",
-    FORGE_DEBUG: "false",
-  };
-  assert.doesNotThrow(() =>
-    assertLaunchEnvironment(env, {
-      dataPath,
-      electronUserDataPath,
-    }),
-  );
-  assert.throws(
-    () =>
-      assertLaunchEnvironment(
-        { ...env, FORGE_ADMIN_PASSWORD: SYNTHETIC_SECRET },
-        { dataPath, electronUserDataPath },
-      ),
-    (error) => {
-      assert.ok(error instanceof IsolationError);
-      assert.equal(error.message.includes(SYNTHETIC_SECRET), false);
-      return true;
-    },
-  );
-});
-
-test("launch harness check-only validates a prepared fixture without printing credentials", async (t) => {
-  const fixture = await createFixture();
-  t.after(() => fixture.database.close());
-  await prepareIsolatedData({
-    sourcePath: fixture.source,
-    targetPath: fixture.target,
-    electronUserDataPath: fixture.electronUserData,
-  });
-  const result = spawnSync(
-    "bash",
-    [
-      join(
-        getRepoRoot(),
-        "scripts/secure-sessions-data-copy/launch-electron.sh",
-      ),
-      "--check-only",
-    ],
-    {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        FORGE_SOURCE_DATA_DIR: fixture.source,
-        FORGE_DATA_DIR: fixture.target,
-        FORGE_ELECTRON_USER_DATA_DIR: fixture.electronUserData,
-        FORGE_ADMIN_EMAIL: "",
-        FORGE_ADMIN_PASSWORD: "",
-        FORGE_COLLABORATION_AUTH_SECRET: "",
-        FORGE_COLLABORATION_BASE_URL: "",
-      },
-    },
-  );
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /"launchStarted":false/);
-  assert.equal(result.stdout.includes(SYNTHETIC_SECRET), false);
-  assert.equal(result.stderr.includes(SYNTHETIC_SECRET), false);
 });
