@@ -127,17 +127,6 @@ export function assertBuilderSession(
   throw new Error(`Cannot ${action} for collaboration-backed session ${descriptor.agentId}.`);
 }
 
-export function assertCollabSession(
-  descriptor: Pick<AgentDescriptor, "agentId" | "sessionSurface"> | null | undefined,
-  action = "perform this collaboration operation"
-): void {
-  if (descriptor?.sessionSurface === "collab") {
-    return;
-  }
-
-  throw new Error(`Cannot ${action} for Builder session ${descriptor?.agentId ?? "unknown"}.`);
-}
-
 export function cloneDescriptor(descriptor: AgentDescriptor): AgentDescriptor {
   return cloneDescriptorForPublic(descriptor);
 }

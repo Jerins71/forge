@@ -3,7 +3,6 @@ import { join } from "node:path";
 import type { Dirent } from "node:fs";
 import { isEnoentError, isNotDirLikeMissingError } from "../../../utils/fs-errors.js";
 import { writeFileAtomic } from "../../../utils/atomic-files.js";
-import type { RuntimeTarget } from "../../../runtime-target.js";
 import {
   type EffortTier,
   type ResolvedSpecialistDefinition,
@@ -22,7 +21,6 @@ import { sanitizePathSegment } from "../../data-paths.js";
 import {
   getBuiltinSpecialistsDir,
   getProfileSpecialistsDir,
-  getSessionSpecialistsDir,
   getSharedSpecialistsDir,
 } from "./specialist-paths.js";
 import {
@@ -50,7 +48,8 @@ const REMOVED_BUILTIN_SPECIALIST_FILES = new Set([
 ]);
 export const SPECIALIST_TARGET_SPACE_FRONTMATTER_KEY = "TargetSpace";
 const LEGACY_SPECIALIST_TARGET_SPACE_FRONTMATTER_KEY = "targetSpace";
-const DEFAULT_SPECIALIST_TARGET_SPACE: SpecialistTargetSpace[] = ["builder"];
+const BUILDER_TARGET_SPACE: SpecialistTargetSpace = "builder";
+const DEFAULT_SPECIALIST_TARGET_SPACE: SpecialistTargetSpace[] = [BUILDER_TARGET_SPACE];
 
 export const EFFORT_TIER_ORDER = ["light", "fast", "standard", "deep", "max"] as const satisfies readonly EffortTier[];
 
@@ -151,7 +150,6 @@ export const LEGACY_SPECIALIST_REWRITE_TABLE: Record<string, LegacySpecialistRew
 type InternalResolvedSpecialistDefinition = ResolvedSpecialistDefinition & { forgePrecedence?: "override" };
 
 const rosterCache = new Map<string, ResolvedSpecialistDefinition[]>();
-const sharedRosterHandleCache = new Map<string, string[]>();
 
 export interface SpecialistFrontmatter {
   displayName: string;
@@ -213,10 +211,9 @@ export async function parseSpecialistFile(filePath: string): Promise<ParsedSpeci
 export async function resolveRoster(
   profileId: string,
   dataDir: string,
-  targetSpace: SpecialistTargetSpace = "builder",
 ): Promise<ResolvedSpecialistDefinition[]> {
   const normalizedProfileId = sanitizePathSegment(profileId);
-  const cacheKey = getRosterCacheKey({ dataDir, profileId: normalizedProfileId, targetSpace });
+  const cacheKey = getRosterCacheKey({ dataDir, profileId: normalizedProfileId });
   const cached = rosterCache.get(cacheKey);
   if (cached) {
     return cloneRosterEntries(cached);
@@ -226,8 +223,8 @@ export async function resolveRoster(
   const profileDir = getProfileSpecialistsDir(dataDir, normalizedProfileId);
 
   const [sharedByHandle, profileByHandle] = await Promise.all([
-    resolveDirectorySpecialists(sharedDir, "shared", targetSpace),
-    resolveDirectorySpecialists(profileDir, "profile", targetSpace),
+    resolveDirectorySpecialists(sharedDir, "shared"),
+    resolveDirectorySpecialists(profileDir, "profile"),
   ]);
 
   const allHandles = [...new Set([...sharedByHandle.keys(), ...profileByHandle.keys()])].sort();
@@ -254,19 +251,18 @@ export async function resolveWorkspaceRoster(
   profileId: string,
   dataDir: string,
   workspaceSpecialistsDir: string | undefined,
-  targetSpace: SpecialistTargetSpace = "builder",
 ): Promise<ResolvedSpecialistDefinition[]> {
-  if (!workspaceSpecialistsDir || targetSpace === "collaboration") {
-    return resolveRoster(profileId, dataDir, targetSpace);
+  if (!workspaceSpecialistsDir) {
+    return resolveRoster(profileId, dataDir);
   }
 
   const normalizedProfileId = sanitizePathSegment(profileId);
   const sharedDir = getSharedSpecialistsDir(dataDir);
   const profileDir = getProfileSpecialistsDir(dataDir, normalizedProfileId);
   const [sharedByHandle, workspaceByHandle, profileByHandle] = await Promise.all([
-    resolveDirectorySpecialists(sharedDir, "shared", targetSpace),
-    resolveDirectorySpecialists(workspaceSpecialistsDir, "workspace", targetSpace),
-    resolveDirectorySpecialists(profileDir, "profile", targetSpace),
+    resolveDirectorySpecialists(sharedDir, "shared"),
+    resolveDirectorySpecialists(workspaceSpecialistsDir, "workspace"),
+    resolveDirectorySpecialists(profileDir, "profile"),
   ]);
 
   const allHandles = [...new Set([...sharedByHandle.keys(), ...workspaceByHandle.keys(), ...profileByHandle.keys()])].sort();
@@ -300,66 +296,14 @@ export async function resolveWorkspaceRoster(
   return cloneRosterEntries(resolved);
 }
 
-export interface CollaborationChannelRosterOptions {
-  sessionAgentId: string;
-  selectedGlobalHandles: readonly string[];
-}
-
-export async function resolveCollaborationChannelRoster(
-  dataDir: string,
-  options: CollaborationChannelRosterOptions,
-): Promise<ResolvedSpecialistDefinition[]> {
-  const normalizedSessionAgentId = sanitizePathSegment(options.sessionAgentId);
-  const selectedGlobalHandles = normalizeSelectedHandles(options.selectedGlobalHandles);
-  const cacheKey = getRosterCacheKey({
-    dataDir,
-    profileId: "_collaboration",
-    targetSpace: "collaboration",
-    sessionAgentId: normalizedSessionAgentId,
-    selectedGlobalHandles,
-  });
-  const cached = rosterCache.get(cacheKey);
-  if (cached) {
-    return cloneRosterEntries(cached);
-  }
-
-  const sharedDir = getSharedSpecialistsDir(dataDir);
-  const channelDir = getSessionSpecialistsDir(dataDir, "_collaboration", normalizedSessionAgentId);
-  const [sharedByHandle, channelByHandle] = await Promise.all([
-    resolveDirectorySpecialists(sharedDir, "shared", "collaboration"),
-    resolveDirectorySpecialists(channelDir, "channel"),
-  ]);
-
-  const selectedShared = new Map<string, ResolvedSpecialistDefinition>();
-  for (const handle of selectedGlobalHandles) {
-    const entry = sharedByHandle.get(handle);
-    if (entry) {
-      selectedShared.set(handle, entry);
-    }
-  }
-
-  const allHandles = [...new Set([...selectedShared.keys(), ...channelByHandle.keys()])].sort();
-  const resolved: ResolvedSpecialistDefinition[] = [];
-  for (const handle of allHandles) {
-    const channelEntry = channelByHandle.get(handle);
-    if (channelEntry) {
-      resolved.push({ ...channelEntry, shadowsGlobal: sharedByHandle.has(handle) });
-      continue;
-    }
-    const sharedEntry = selectedShared.get(handle);
-    if (sharedEntry) {
-      resolved.push(sharedEntry);
-    }
-  }
-
-  rosterCache.set(cacheKey, cloneRosterEntries(resolved));
-  return cloneRosterEntries(resolved);
-}
-
+/**
+ * Only Builder-visible specialists are resolved. Files whose TargetSpace omits
+ * builder (for example, specialists authored for the removed Collaboration
+ * server) still parse but stay hidden.
+ */
 async function resolveDirectorySpecialists(
   directoryPath: string,
-  scope: "shared" | "profile" | "channel" | "workspace",
-  targetSpace?: SpecialistTargetSpace,
+  scope: "shared" | "profile" | "workspace",
 ): Promise<Map<string, InternalResolvedSpecialistDefinition>> {
   const files = await listMarkdownFiles(directoryPath);
   const handles = files
@@ -373,7 +317,7 @@ async function resolveDirectorySpecialists(
     handles.map(async ({ file, handle }) => {
       const filePath = join(directoryPath, file.name);
       const parsed = await parseSpecialistFile(filePath);
-      if (!parsed || (targetSpace && !parsed.frontmatter.targetSpace.includes(targetSpace))) {
+      if (!parsed || !parsed.frontmatter.targetSpace.includes(BUILDER_TARGET_SPACE)) {
         return null;
       }
       if (REMOVED_BUILTIN_SPECIALIST_FILES.has(file.name) && parsed.frontmatter.builtin) {
@@ -384,20 +328,16 @@ async function resolveDirectorySpecialists(
         handle,
         definition: toResolvedSpecialistDefinition({
           specialistId: handle,
-          frontmatter: scope === "channel"
-            ? { ...parsed.frontmatter, targetSpace: ["collaboration"] }
-            : parsed.frontmatter,
+          frontmatter: parsed.frontmatter,
           body: parsed.body,
           sourceKind:
             scope === "profile"
               ? "profile"
-              : scope === "channel"
-                ? "channel"
-                : scope === "workspace"
-                  ? "workspace"
-                  : parsed.frontmatter.builtin
-                    ? "builtin"
-                    : "global",
+              : scope === "workspace"
+                ? "workspace"
+                : parsed.frontmatter.builtin
+                  ? "builtin"
+                  : "global",
           sourcePath: filePath,
           shadowsGlobal: false,
         }),
@@ -421,33 +361,8 @@ function cloneRosterEntries(roster: ResolvedSpecialistDefinition[]): ResolvedSpe
   return roster.map(({ forgePrecedence: _forgePrecedence, ...entry }: InternalResolvedSpecialistDefinition) => ({ ...entry }));
 }
 
-function getSharedRosterHandleCacheKey(dataDir: string, targetSpace: SpecialistTargetSpace): string {
-  return `${dataDir}${CACHE_KEY_SEPARATOR}${targetSpace}`;
-}
-
-async function refreshSharedRosterHandleCache(dataDir: string): Promise<void> {
-  await Promise.all([
-    resolveSharedRoster(dataDir, "builder"),
-    resolveSharedRoster(dataDir, "collaboration"),
-  ]);
-}
-
-function getRosterCacheKey(options: {
-  dataDir: string;
-  profileId: string;
-  targetSpace: SpecialistTargetSpace;
-  sessionAgentId?: string;
-  selectedGlobalHandles?: readonly string[];
-  workspaceSpecialistsDir?: string;
-}): string {
-  return [
-    options.dataDir,
-    options.profileId,
-    options.targetSpace,
-    options.sessionAgentId ?? "",
-    options.workspaceSpecialistsDir ?? "",
-    ...(options.selectedGlobalHandles ?? []),
-  ].join(CACHE_KEY_SEPARATOR);
+function getRosterCacheKey(options: { dataDir: string; profileId: string }): string {
+  return [options.dataDir, options.profileId].join(CACHE_KEY_SEPARATOR);
 }
 
 export function generateRosterBlock(
@@ -525,23 +440,12 @@ function compactRosterText(text: string, maxLength = 96): string {
   return `${clipped}...`;
 }
 
-export interface SeedBuiltinsOptions {
-  /**
-   * Deprecated compatibility option. Builtin specialist seeding is intentionally
-   * target-space agnostic: shared storage is the union used by Builder and the
-   * collaboration server, and each file's TargetSpace frontmatter controls
-   * runtime visibility.
-   */
-  runtimeTarget?: RuntimeTarget;
-}
-
-export async function seedBuiltins(dataDir: string, options: SeedBuiltinsOptions = {}): Promise<void> {
+export async function seedBuiltins(dataDir: string): Promise<void> {
   const builtinDir = getBuiltinSpecialistsDir();
   const sharedDir = getSharedSpecialistsDir(dataDir);
 
   await mkdir(sharedDir, { recursive: true });
 
-  void options.runtimeTarget;
   const builtinFiles = await listMarkdownFiles(builtinDir);
 
   for (const removedFile of REMOVED_BUILTIN_SPECIALIST_FILES) {
@@ -594,7 +498,6 @@ export async function seedBuiltins(dataDir: string, options: SeedBuiltinsOptions
   }
 
   invalidateSpecialistCache();
-  await refreshSharedRosterHandleCache(dataDir);
 }
 
 export function normalizeEffortTier(value: string | undefined): EffortTier | undefined {
@@ -685,62 +588,6 @@ export async function saveProfileSpecialist(
   invalidateSpecialistCache(normalizedProfileId);
 }
 
-export async function saveChannelSpecialist(
-  dataDir: string,
-  sessionAgentId: string,
-  handle: string,
-  data: SaveSpecialistRequest,
-): Promise<void> {
-  const normalizedSessionAgentId = sanitizePathSegment(sessionAgentId);
-  const specialistId = normalizeSpecialistHandle(handle);
-
-  if (!specialistId) {
-    throw new Error(`Invalid specialist handle: ${handle}`);
-  }
-
-  const frontmatter = validateSaveRequest({ ...data, targetSpace: ["collaboration"] });
-  const channelDir = getSessionSpecialistsDir(dataDir, "_collaboration", normalizedSessionAgentId);
-  const filePath = join(channelDir, `${sanitizePathSegment(specialistId)}.md`);
-
-  const shared = await parseSpecialistFile(
-    join(getSharedSpecialistsDir(dataDir), `${sanitizePathSegment(specialistId)}.md`),
-  );
-  if (shared?.frontmatter.builtin) {
-    frontmatter.builtin = true;
-  }
-
-  await mkdir(channelDir, { recursive: true });
-  await writeSpecialistFile(filePath, serializeSpecialistFile(frontmatter, data.promptBody));
-
-  invalidateSpecialistCache(undefined, normalizedSessionAgentId);
-}
-
-export async function deleteChannelSpecialist(dataDir: string, sessionAgentId: string, handle: string): Promise<void> {
-  const normalizedSessionAgentId = sanitizePathSegment(sessionAgentId);
-  const specialistId = normalizeSpecialistHandle(handle);
-
-  if (!specialistId) {
-    throw new Error(`Invalid specialist handle: ${handle}`);
-  }
-
-  const filePath = join(
-    getSessionSpecialistsDir(dataDir, "_collaboration", normalizedSessionAgentId),
-    `${sanitizePathSegment(specialistId)}.md`,
-  );
-
-  try {
-    await unlink(filePath);
-  } catch (error) {
-    if (isEnoentError(error)) {
-      throw new Error(`Unknown specialist: ${specialistId}`);
-    }
-
-    throw error;
-  }
-
-  invalidateSpecialistCache(undefined, normalizedSessionAgentId);
-}
-
 export async function deleteProfileSpecialist(dataDir: string, profileId: string, handle: string): Promise<void> {
   const normalizedProfileId = sanitizePathSegment(profileId);
   const specialistId = normalizeSpecialistHandle(handle);
@@ -767,25 +614,9 @@ export async function deleteProfileSpecialist(dataDir: string, profileId: string
   invalidateSpecialistCache(normalizedProfileId);
 }
 
-export async function resolveSharedRoster(
-  dataDir: string,
-  targetSpace?: SpecialistTargetSpace,
-): Promise<ResolvedSpecialistDefinition[]> {
-  const sharedDir = getSharedSpecialistsDir(dataDir);
-  const byHandle = await resolveDirectorySpecialists(sharedDir, "shared", targetSpace);
-  const sorted = [...byHandle.values()].sort((a, b) => a.specialistId.localeCompare(b.specialistId));
-  if (targetSpace) {
-    sharedRosterHandleCache.set(getSharedRosterHandleCacheKey(dataDir, targetSpace), sorted.map((entry) => entry.specialistId));
-  }
-  return sorted;
-}
-
-export function getCachedSharedSpecialistHandles(
-  dataDir: string,
-  targetSpace: SpecialistTargetSpace,
-): string[] | undefined {
-  const handles = sharedRosterHandleCache.get(getSharedRosterHandleCacheKey(dataDir, targetSpace));
-  return handles ? [...handles] : undefined;
+export async function resolveSharedRoster(dataDir: string): Promise<ResolvedSpecialistDefinition[]> {
+  const byHandle = await resolveDirectorySpecialists(getSharedSpecialistsDir(dataDir), "shared");
+  return [...byHandle.values()].sort((a, b) => a.specialistId.localeCompare(b.specialistId));
 }
 
 export async function saveSharedSpecialist(
@@ -813,7 +644,6 @@ export async function saveSharedSpecialist(
   await writeSpecialistFile(filePath, serializeSpecialistFile(frontmatter, data.promptBody));
 
   invalidateSpecialistCache();
-  await refreshSharedRosterHandleCache(dataDir);
 }
 
 export async function deleteSharedSpecialist(dataDir: string, handle: string): Promise<void> {
@@ -837,7 +667,6 @@ export async function deleteSharedSpecialist(dataDir: string, handle: string): P
 
   await unlink(filePath);
   invalidateSpecialistCache();
-  await refreshSharedRosterHandleCache(dataDir);
 }
 
 export async function getWorkerTemplate(): Promise<string> {
@@ -857,23 +686,17 @@ export async function getWorkerTemplate(): Promise<string> {
   }
 }
 
-export function invalidateSpecialistCache(profileId?: string, sessionAgentId?: string): void {
-  if (!profileId && !sessionAgentId) {
+export function invalidateSpecialistCache(profileId?: string): void {
+  if (!profileId) {
     rosterCache.clear();
     return;
   }
 
-  const normalizedProfileId = profileId ? sanitizePathSegment(profileId) : undefined;
-  const normalizedSessionAgentId = sessionAgentId ? sanitizePathSegment(sessionAgentId) : undefined;
+  const normalizedProfileId = sanitizePathSegment(profileId);
   for (const key of rosterCache.keys()) {
-    const parts = key.split(CACHE_KEY_SEPARATOR);
-    if (normalizedProfileId && parts[1] !== normalizedProfileId) {
-      continue;
+    if (key.split(CACHE_KEY_SEPARATOR)[1] === normalizedProfileId) {
+      rosterCache.delete(key);
     }
-    if (normalizedSessionAgentId && parts[3] !== normalizedSessionAgentId) {
-      continue;
-    }
-    rosterCache.delete(key);
   }
 }
 
@@ -1163,20 +986,6 @@ function isLegacyModelFieldModelId(modelId: string, provider: string | undefined
   const inferredProvider = provider ?? inferProviderFromModelId(modelId) ?? undefined;
   const normalized = inferredProvider ? normalizePersistedSwarmModelDescriptor({ provider: inferredProvider, modelId }) : undefined;
   return modelCatalogService.isKnownModelId(normalized?.modelId ?? modelId, normalized?.provider ?? inferredProvider);
-}
-
-function normalizeSelectedHandles(handles: readonly string[]): string[] {
-  const normalized: string[] = [];
-  const seen = new Set<string>();
-  for (const rawHandle of handles) {
-    const handle = normalizeSpecialistHandle(rawHandle);
-    if (!handle || seen.has(handle)) {
-      continue;
-    }
-    seen.add(handle);
-    normalized.push(handle);
-  }
-  return normalized;
 }
 
 function parseEffortTier(value: string | undefined): EffortTier | undefined {

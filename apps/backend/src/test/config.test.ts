@@ -126,8 +126,6 @@ describe('createConfig', () => {
       expect(config.paths.sharedConfigDir).toBe(resolve(dataDir, 'shared', 'config'))
       expect(config.paths.sharedCacheDir).toBe(resolve(dataDir, 'shared', 'cache'))
       expect(config.paths.sharedStateDir).toBe(resolve(dataDir, 'shared', 'state'))
-      expect(config.paths.collaborationAuthDbPath).toBe(resolve(dataDir, 'shared', 'config', 'collaboration', 'auth.db'))
-      expect(config.paths.collaborationAuthSecretPath).toBe(resolve(dataDir, 'shared', 'config', 'collaboration', 'auth-secret.key'))
     })
   })
 
@@ -361,12 +359,6 @@ describe('createConfig', () => {
     })
   })
 
-  it('keeps collaboration loaders disabled in builder runtime', async () => {
-    await withEnv({ FORGE_RUNTIME_TARGET: 'builder' }, () => {
-      expect(createConfig().collaborationModules).toBeUndefined()
-    })
-  })
-
   it('keeps builder unrestricted defaults when FORGE_CWD_ALLOWLIST_ROOTS is unset', async () => {
     await withEnv({ FORGE_RUNTIME_TARGET: 'builder' }, () => {
       const config = createConfig()
@@ -399,7 +391,6 @@ describe('createConfig', () => {
       () => {
         const config = createConfig()
         expect(config.runtimeTarget).toBe('builder')
-        expect(config.remoteProjectsEnv).toBeUndefined()
       },
     )
   })

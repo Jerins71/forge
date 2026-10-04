@@ -349,20 +349,8 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
     return this.services.sessions.stopSession(agentId);
   }
 
-  stopCollaborationSession(
-    agentId: string,
-  ): ReturnType<SessionLifecycleCoordinator["stopCollaborationSession"]> {
-    return this.services.sessions.stopCollaborationSession(agentId);
-  }
-
   resumeSession(agentId: string): ReturnType<SessionLifecycleCoordinator["resumeSession"]> {
     return this.services.sessions.resumeSession(agentId);
-  }
-
-  deleteCollaborationSession(
-    agentId: string,
-  ): ReturnType<SessionLifecycleCoordinator["deleteCollaborationSession"]> {
-    return this.services.sessions.deleteCollaborationSession(agentId);
   }
 
   deleteSession(agentId: string): ReturnType<SessionLifecycleCoordinator["deleteSession"]> {
@@ -559,18 +547,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
     return this.services.events.getProfilesSnapshotVersion();
   }
 
-  hasCollaborationStorageProfile(): boolean {
-    return this.services.collaboration.hasProfile();
-  }
-
-  hasCollaborationStorageRootSession(): boolean {
-    return this.services.collaboration.hasRootSession();
-  }
-
-  ensureCollaborationStorageProfile(): Promise<void> {
-    return this.services.collaboration.ensure();
-  }
-
   listCortexConsolidationRuns(): Promise<CortexConsolidationRunRecord[]> {
     return this.services.knowledge.listCortexConsolidationRuns();
   }
@@ -677,18 +653,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
   ): Promise<void> {
     return this.services.configuration.updateManagerModel(
       managerId,
-      modelPreset,
-      reasoningLevel,
-    );
-  }
-
-  updateCollaborationSessionModel(
-    sessionAgentId: string,
-    modelPreset: SwarmModelPreset,
-    reasoningLevel?: SwarmReasoningLevel,
-  ): Promise<void> {
-    return this.services.configuration.updateCollaborationSessionModel(
-      sessionAgentId,
       modelPreset,
       reasoningLevel,
     );
@@ -951,10 +915,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
     sessionAgentId?: string,
   ): Promise<SkillInventoryEntry[]> {
     return this.services.configuration.listSkillMetadata(profileId, sessionAgentId);
-  }
-
-  getCollaborationGlobalSkillHandles(): Iterable<string> {
-    return this.services.configuration.getCollaborationGlobalSkillHandles();
   }
 
   listSkillFiles(

@@ -200,14 +200,6 @@ async function handleSpecialistRequest(
   const dataDir = swarmManager.getConfig().paths.dataDir;
   const profileId = requestUrl.searchParams.get("profileId")?.trim() || undefined;
   const sessionAgentId = requestUrl.searchParams.get("sessionAgentId")?.trim() || undefined;
-  let targetSpace: SpecialistTargetSpace;
-  try {
-    targetSpace = parseTargetSpaceQuery(requestUrl);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    sendJson(response, 400, { error: message });
-    return;
-  }
   const relativePath = requestUrl.pathname.slice(SPECIALISTS_ENDPOINT_PATH.length);
 
   // Tombstone the removed toggle route so older clients cannot accidentally create
@@ -248,7 +240,7 @@ async function handleSpecialistRequest(
     // GET /api/settings/specialists — returns shared/global specialists only
     if (request.method === "GET" && relativePath === "") {
       try {
-        const specialists = await resolveSharedRoster(dataDir, targetSpace);
+        const specialists = await resolveSharedRoster(dataDir);
         const sanitized = specialists.map(({ sourcePath: _, ...rest }) => rest);
         sendJson(response, 200, { specialists: sanitized });
       } catch (error) {
@@ -276,7 +268,7 @@ async function handleSpecialistRequest(
     if (request.method === "PUT") {
       try {
         const body = await readJsonBody(request);
-        const data = parseSaveSpecialistBody(body, targetSpace);
+        const data = parseSaveSpecialistBody(body);
         await saveSharedSpecialist(dataDir, handle, data);
         await notifyGlobalSpecialistMutation({ swarmManager, broadcastEvent, dataDir });
         sendJson(response, 200, { ok: true });
@@ -310,8 +302,8 @@ async function handleSpecialistRequest(
   // GET /api/settings/specialists/roster-prompt?profileId=X
   if (request.method === "GET" && relativePath === ROSTER_PROMPT_SUFFIX) {
     try {
-      const workspaceSpecialistsDir = await resolveWorkspaceSpecialistsDir(swarmManager, profileId, sessionAgentId, targetSpace);
-      const roster = await resolveProfileRoster(profileId, dataDir, workspaceSpecialistsDir, targetSpace);
+      const workspaceSpecialistsDir = await resolveWorkspaceSpecialistsDir(swarmManager, profileId, sessionAgentId);
+      const roster = await resolveProfileRoster(profileId, dataDir, workspaceSpecialistsDir);
       const markdown = generateRosterBlock(roster);
       sendJson(response, 200, { markdown });
     } catch (error) {
@@ -324,8 +316,8 @@ async function handleSpecialistRequest(
   // GET /api/settings/specialists?profileId=X
   if (request.method === "GET" && relativePath === "") {
     try {
-      const workspaceSpecialistsDir = await resolveWorkspaceSpecialistsDir(swarmManager, profileId, sessionAgentId, targetSpace);
-      const specialists = await resolveProfileRoster(profileId, dataDir, workspaceSpecialistsDir, targetSpace);
+      const workspaceSpecialistsDir = await resolveWorkspaceSpecialistsDir(swarmManager, profileId, sessionAgentId);
+      const specialists = await resolveProfileRoster(profileId, dataDir, workspaceSpecialistsDir);
       // Strip sourcePath — it's a server filesystem detail the UI doesn't need.
       const sanitized = specialists.map(({ sourcePath: _, ...rest }) => rest);
       sendJson(response, 200, { specialists: sanitized });
@@ -355,7 +347,7 @@ async function handleSpecialistRequest(
     try {
       requireNonSystemProfile(profileId, profiles);
       const body = await readJsonBody(request);
-      const data = parseSaveSpecialistBody(body, targetSpace);
+      const data = parseSaveSpecialistBody(body);
       await saveProfileSpecialist(dataDir, profileId, handle, data);
       await notifySpecialistRosterMutation({
         swarmManager,
@@ -398,20 +390,18 @@ function resolveProfileRoster(
   profileId: string,
   dataDir: string,
   workspaceSpecialistsDir: string | undefined,
-  targetSpace: SpecialistTargetSpace,
 ) {
   return workspaceSpecialistsDir
-    ? resolveWorkspaceRoster(profileId, dataDir, workspaceSpecialistsDir, targetSpace)
-    : resolveRoster(profileId, dataDir, targetSpace);
+    ? resolveWorkspaceRoster(profileId, dataDir, workspaceSpecialistsDir)
+    : resolveRoster(profileId, dataDir);
 }
 
 async function resolveWorkspaceSpecialistsDir(
   swarmManager: SwarmManager,
   profileId: string,
   sessionAgentId: string | undefined,
-  targetSpace: SpecialistTargetSpace,
 ): Promise<string | undefined> {
-  if (!sessionAgentId || targetSpace === "collaboration") {
+  if (!sessionAgentId) {
     return undefined;
   }
   const session = swarmManager.listAgents().find((agent) => agent.agentId === sessionAgentId);
@@ -436,11 +426,8 @@ async function notifySpecialistRosterMutation(options: {
   profileId: string;
 }): Promise<void> {
   const { swarmManager, broadcastEvent, dataDir, profileId } = options;
-  const [builderRoster, collaborationRoster] = await Promise.all([
-    resolveRoster(profileId, dataDir, "builder"),
-    resolveRoster(profileId, dataDir, "collaboration"),
-  ]);
-  const specialistIds = [...new Set([...builderRoster, ...collaborationRoster].map((entry) => entry.specialistId))];
+  const roster = await resolveRoster(profileId, dataDir);
+  const specialistIds = roster.map((entry) => entry.specialistId);
 
   broadcastEvent({
     type: "specialist_roster_changed",
@@ -462,10 +449,6 @@ async function notifyGlobalSpecialistMutation(options: {
   const profiles = swarmManager.listProfiles();
 
   for (const profile of profiles) {
-    if (profile.profileId === "_collaboration") {
-      continue;
-    }
-
     await notifySpecialistRosterMutation({
       swarmManager,
       broadcastEvent,
@@ -473,45 +456,9 @@ async function notifyGlobalSpecialistMutation(options: {
       profileId: profile.profileId,
     });
   }
-
-  const collaborationSessions = swarmManager.listAgents().filter(
-    (agent) => agent.role === "manager" && agent.profileId === "_collaboration" && agent.sessionSurface === "collab",
-  );
-  if (collaborationSessions.length === 0) {
-    return;
-  }
-
-  const collaborationRoster = await resolveRoster("_collaboration", dataDir, "collaboration");
-  const specialistIds = [...new Set(collaborationRoster.map((entry) => entry.specialistId))];
-  broadcastEvent({
-    type: "specialist_roster_changed",
-    profileId: "_collaboration",
-    specialistIds,
-    updatedAt: new Date().toISOString(),
-  });
-
-  for (const session of collaborationSessions) {
-    await swarmManager.notifySpecialistRosterChanged("_collaboration", {
-      sessionAgentId: session.agentId,
-    });
-  }
 }
 
-function parseTargetSpaceQuery(requestUrl: URL): SpecialistTargetSpace {
-  const raw = requestUrl.searchParams.get("targetSpace")?.trim();
-  if (raw === undefined || raw.length === 0) {
-    return "builder";
-  }
-  if (raw === "builder" || raw === "collaboration") {
-    return raw;
-  }
-  throw new Error("targetSpace query must be builder or collaboration");
-}
-
-function parseSaveSpecialistBody(
-  value: unknown,
-  fallbackTargetSpace: SpecialistTargetSpace,
-): SaveSpecialistRequest {
+function parseSaveSpecialistBody(value: unknown): SaveSpecialistRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Request body must be a JSON object");
   }
@@ -531,7 +478,7 @@ function parseSaveSpecialistBody(
     fallbackReasoningLevel: readOptionalStringField(obj, "fallbackReasoningLevel"),
     pinned: readOptionalBooleanField(obj, "pinned"),
     webSearch: readOptionalBooleanField(obj, "webSearch"),
-    targetSpace: readOptionalTargetSpaceField(obj, "targetSpace") ?? [fallbackTargetSpace],
+    targetSpace: readOptionalTargetSpaceField(obj, "targetSpace") ?? ["builder"],
     defaultTier: readOptionalEffortTierField(obj, "defaultTier"),
     promptBody: readRequiredStringField(obj, "promptBody"),
   };

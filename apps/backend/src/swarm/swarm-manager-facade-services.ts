@@ -4,7 +4,6 @@ import type { AgentDirectory } from "./agent-directory.js";
 import type { SessionAttentionCoordinator } from "./session/session-attention-coordinator.js";
 import type { AssistantOutputRouter } from "./assistant-output-router.js";
 import type { CodexPluginDelegationCoordinator } from "./codex-app-server/codex-plugin-delegation-coordinator.js";
-import type { CollaborationStorageProvisioner } from "./collaboration-storage-provisioner.js";
 import type { ConversationProjector } from "./session/conversation-projector.js";
 import type { ForgeExtensionHost } from "./forge-extension-host.js";
 import type { SessionGoalCoordinator } from "./goals/session-goal-coordinator.js";
@@ -123,7 +122,6 @@ export interface SwarmManagerFacadeServices extends SwarmManagerSessionFacadeSer
     >;
     sidebarPerf: SidebarPerfRecorder;
   };
-  collaboration: CollaborationStorageProvisioner;
   trust: ProjectExecutableTrustCoordinator;
   observability: SwarmObservabilityCoordinator;
   persistence: Pick<SwarmSessionMetaService, "flushPendingTurnSeqPersists">;

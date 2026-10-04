@@ -273,8 +273,6 @@ export interface SwarmPaths {
   sharedAuthDir: string;
   sharedAuthFile: string;
   sharedSecretsFile: string;
-  collaborationAuthDbPath?: string;
-  collaborationAuthSecretPath?: string;
   remoteUpdateAwarenessDbPath?: string;
 
   // Legacy compatibility fields (flat layout)
@@ -298,15 +296,8 @@ export interface SqliteDatabaseConstructor {
   new (path: string, options?: Database.Options): Database.Database;
 }
 
-export type CollaborationDatabaseConstructor = SqliteDatabaseConstructor;
-
 export interface RemoteUpdateAwarenessModuleLoaders {
   loadDatabaseModule: () => Promise<SqliteDatabaseConstructor>;
-}
-
-export interface CollaborationModuleLoaders {
-  loadAuthModule: () => Promise<typeof import("better-auth")>;
-  loadDatabaseModule: () => Promise<CollaborationDatabaseConstructor>;
 }
 
 export interface SwarmConfig {
@@ -316,24 +307,8 @@ export interface SwarmConfig {
   isDesktop: boolean;
   runtimeTarget: RuntimeTarget;
   cortexEnabled: boolean;
-  adminEmail?: string;
-  adminPassword?: string;
-  collaborationAuthSecret?: string;
-  collaborationAuthCookieName?: string;
-  collaborationBaseUrl?: string;
-  collaborationTrustedOrigins?: string[];
-  collaborationModules?: CollaborationModuleLoaders;
   /** Feature-owned SQLite loader available in every runtime target. */
   remoteUpdateAwarenessModules?: RemoteUpdateAwarenessModuleLoaders;
-  /**
-   * Collaboration-server startup overlay for Remote Projects policy.
-   * Absent on Builder. Parsed once from FORGE_REMOTE_PROJECTS_* env vars.
-   */
-  remoteProjectsEnv?: {
-    enabled?: boolean;
-    terminalsEnabled?: boolean;
-    instanceName?: string;
-  };
   allowNonManagerSubscriptions: boolean;
   managerId?: string;
   managerDisplayName: string;

@@ -123,28 +123,14 @@ describe("prompt routes", () => {
         hasProfileOverride: true,
       }),
     );
-    expect(payload.prompts).toContainEqual(
-      expect.objectContaining({
-        category: "archetype",
-        promptId: "collaboration-channel",
-        displayName: "Collaboration Channel System Prompt",
-      }),
+    expect(payload.prompts).not.toContainEqual(
+      expect.objectContaining({ category: "archetype", promptId: "collaboration-channel" }),
     );
   });
 
   it("gets resolved prompt entries and supports layer-specific reads", async () => {
     const promptRegistry = createPromptRegistryStub({
-      resolveEntry: vi.fn(async (_category, promptId) => {
-        if (promptId === "collaboration-channel") {
-          return {
-            category: "archetype",
-            promptId: "collaboration-channel",
-            content: "collaboration-content",
-            sourceLayer: "builtin",
-            sourcePath: "/repo/collaboration-channel.md",
-          };
-        }
-
+      resolveEntry: vi.fn(async () => {
         return {
           category: "archetype",
           promptId: "manager",
@@ -167,18 +153,6 @@ describe("prompt routes", () => {
         content: "manager-content",
         sourceLayer: "repo",
         sourcePath: "/repo/manager.md",
-      }),
-    );
-
-    const collabResponse = await fetch(`${server.baseUrl}/api/prompts/archetype/collaboration-channel`);
-    expect(collabResponse.status).toBe(200);
-    await expect(collabResponse.json()).resolves.toEqual(
-      expect.objectContaining({
-        category: "archetype",
-        promptId: "collaboration-channel",
-        content: "collaboration-content",
-        sourceLayer: "builtin",
-        sourcePath: "/repo/collaboration-channel.md",
       }),
     );
 

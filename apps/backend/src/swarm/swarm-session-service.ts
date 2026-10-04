@@ -2,7 +2,7 @@ import { isEnoentError } from "../utils/fs-errors.js";
 import { TaskNotesStore } from './task-notes-store.js';
 import { writeFile } from "node:fs/promises";
 import { DEFAULT_MANAGER_POSTURE } from "@forge/protocol";
-import { assertBuilderSession, assertCollabSession, cloneDescriptor } from "./swarm-manager-utils.js";
+import { assertBuilderSession, cloneDescriptor } from "./swarm-manager-utils.js";
 import { SessionProvisioner, type ProvisionedSessionDescriptor } from "./session-provisioner.js";
 import type { SwarmAgentRuntime } from "./runtime-contracts.js";
 import type { AgentDescriptor, AgentModelDescriptor, ManagerProfile, SessionLifecycleEvent } from "./types.js";
@@ -235,12 +235,6 @@ export class SwarmSessionService {
   async deleteSession(agentId: string): Promise<{ terminatedWorkerIds: string[] }> {
     const descriptor = this.options.getRequiredSessionDescriptor(agentId);
     assertBuilderSession(descriptor, "delete Builder sessions");
-    return this.deleteSessionDescriptor(descriptor);
-  }
-
-  async deleteCollaborationSession(agentId: string): Promise<{ terminatedWorkerIds: string[] }> {
-    const descriptor = this.options.getRequiredSessionDescriptor(agentId);
-    assertCollabSession(descriptor, "delete collaboration sessions");
     return this.deleteSessionDescriptor(descriptor);
   }
 

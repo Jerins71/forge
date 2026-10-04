@@ -1,4 +1,4 @@
-import type { GenerationMeasurementRecordV1, GenerationThroughputEvent, SessionActiveToolsSnapshotEvent, SessionGoalSnapshotEvent, SpecialistTargetSpace } from "@forge/protocol";
+import type { GenerationMeasurementRecordV1, GenerationThroughputEvent, SessionActiveToolsSnapshotEvent, SessionGoalSnapshotEvent } from "@forge/protocol";
 import type { VersioningMutationSink } from "../versioning/versioning-types.js";
 import { ensureCanonicalAuthFilePath } from "./storage/auth-storage-paths.js";
 import { BootReconciler } from "./agents/descriptor-store/boot-reconciler.js";
@@ -167,14 +167,8 @@ export interface RuntimeCompositionResolution {
     profileId: string,
     fallback: string,
   ): Promise<string>;
-  resolveSpecialistRosterForProfile(
-    profileId: string,
-    targetSpace?: SpecialistTargetSpace,
-  ): Promise<ResolvedSpecialistDefinitionLike[]>;
-  resolveSpecialistRosterForManager(
-    manager: AgentDescriptor,
-    targetSpace?: SpecialistTargetSpace,
-  ): Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveSpecialistRosterForProfile(profileId: string): Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveSpecialistRosterForManager(manager: AgentDescriptor): Promise<ResolvedSpecialistDefinitionLike[]>;
   resolveSpawnModelWithCapacityFallback(model: AgentModelDescriptor): AgentModelDescriptor;
   resolveSpawnWorkerArchetypeId(
     input: SpawnAgentInput,

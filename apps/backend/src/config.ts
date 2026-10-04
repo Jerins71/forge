@@ -4,8 +4,6 @@ import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { normalizeAllowlistRoots, parseCwdAllowlistRootsEnv } from "./swarm/cwd-policy.js";
 import {
   getAgentsStoreFilePath,
-  getCollaborationAuthDbPath,
-  getCollaborationAuthSecretPath,
   getLegacyAuthFilePath,
   getLegacySecretsFilePath,
   getProfilesDir,
@@ -22,7 +20,6 @@ import {
 } from "./swarm/data-paths.js";
 import type { SwarmConfig } from "./swarm/types.js";
 import { isCollaborationServerRuntimeTarget, resolveRuntimeTargetFromEnv } from "./runtime-target.js";
-import { parseRemoteProjectsEnv } from "./collaboration/remote-projects-env.js";
 import { loadConfiguredSqliteDatabaseConstructor } from "./sqlite-database-loader.js";
 
 export function readTelemetryEnvOverride(): boolean | undefined {
@@ -48,8 +45,6 @@ export function createConfig(): SwarmConfig {
   const sharedAuthDir = getSharedAuthDir(dataDir);
   const sharedAuthFile = getSharedAuthFilePath(dataDir);
   const sharedSecretsFile = getSharedSecretsFilePath(dataDir);
-  const collaborationAuthDbPath = getCollaborationAuthDbPath(dataDir);
-  const collaborationAuthSecretPath = getCollaborationAuthSecretPath(dataDir);
   const remoteUpdateAwarenessDbPath = getRemoteUpdateAwarenessDbPath(dataDir);
   // Legacy flat-layout paths retained for backward compatibility.
   const authFile = getLegacyAuthFilePath(dataDir);
@@ -65,37 +60,6 @@ export function createConfig(): SwarmConfig {
   const isDesktop = parseBooleanEnv(process.env.FORGE_DESKTOP);
   const runtimeTarget = resolveRuntimeTargetFromEnv();
   const cwdAllowlistRoots = resolveCwdAllowlistRoots(runtimeTarget, rootDir);
-  const adminEmail = parseOptionalStringEnv(
-    process.env.FORGE_ADMIN_EMAIL ?? process.env.MIDDLEMAN_ADMIN_EMAIL,
-  );
-  const adminPassword = parseOptionalStringEnv(
-    process.env.FORGE_ADMIN_PASSWORD ?? process.env.MIDDLEMAN_ADMIN_PASSWORD,
-  );
-  const collaborationAuthSecret = parseOptionalStringEnv(
-    process.env.FORGE_COLLABORATION_AUTH_SECRET ?? process.env.MIDDLEMAN_COLLABORATION_AUTH_SECRET,
-  );
-  const collaborationAuthCookieName = parseOptionalStringEnv(
-    process.env.FORGE_COLLABORATION_AUTH_COOKIE_NAME ??
-      process.env.MIDDLEMAN_COLLABORATION_AUTH_COOKIE_NAME,
-  );
-  const collaborationBaseUrl = parseOptionalStringEnv(
-    process.env.FORGE_COLLABORATION_BASE_URL ?? process.env.MIDDLEMAN_COLLABORATION_BASE_URL,
-  );
-  const collaborationTrustedOrigins = parseOptionalStringListEnv(
-    process.env.FORGE_COLLABORATION_TRUSTED_ORIGINS ??
-      process.env.MIDDLEMAN_COLLABORATION_TRUSTED_ORIGINS,
-  );
-  const collaborationModules = isCollaborationServerRuntimeTarget(runtimeTarget)
-    ? {
-        loadAuthModule: () => import("better-auth"),
-        loadDatabaseModule: loadConfiguredSqliteDatabaseConstructor,
-      }
-    : undefined;
-  // Collaboration-server only: Builder ignores these variables entirely.
-  // Invalid values fail startup (thrown from parseRemoteProjectsEnv).
-  const remoteProjectsEnv = isCollaborationServerRuntimeTarget(runtimeTarget)
-    ? parseRemoteProjectsEnv(process.env)
-    : undefined;
 
   return {
     host: process.env.FORGE_HOST ?? process.env.MIDDLEMAN_HOST ?? "127.0.0.1",
@@ -108,17 +72,9 @@ export function createConfig(): SwarmConfig {
         process.env.FORGE_CORTEX_ENABLED ?? process.env.MIDDLEMAN_CORTEX_ENABLED,
         "FORGE_CORTEX_ENABLED"
       ) !== false,
-    adminEmail,
-    adminPassword,
-    collaborationAuthSecret,
-    collaborationAuthCookieName,
-    collaborationBaseUrl,
-    collaborationTrustedOrigins,
-    collaborationModules,
     remoteUpdateAwarenessModules: {
       loadDatabaseModule: loadConfiguredSqliteDatabaseConstructor,
     },
-    remoteProjectsEnv,
     allowNonManagerSubscriptions: true,
     managerId,
     managerDisplayName: "Manager",
@@ -144,8 +100,6 @@ export function createConfig(): SwarmConfig {
       sharedAuthDir,
       sharedAuthFile,
       sharedSecretsFile,
-      collaborationAuthDbPath,
-      collaborationAuthSecretPath,
       remoteUpdateAwarenessDbPath,
       authFile,
       secretsFile,
@@ -272,20 +226,6 @@ function isSwarmRepoRoot(path: string): boolean {
 function parseBooleanEnv(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
-}
-
-function parseOptionalStringEnv(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function parseOptionalStringListEnv(value: string | undefined): string[] | undefined {
-  const entries = value
-    ?.split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
-  return entries?.length ? entries : undefined;
 }
 
 function parseOptionalBooleanEnv(

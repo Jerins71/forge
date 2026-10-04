@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  deleteChannelSpecialist,
   deleteProfileSpecialist,
   deleteSharedSpecialist,
   DEFAULT_TIER_CONFIGS,
@@ -13,12 +12,10 @@ import {
   normalizeSpecialistHandle,
   parseSpecialistFile,
   resolveLegacySpecialistRewrite,
-  resolveCollaborationChannelRoster,
   resolveRoster,
   resolveSharedRoster,
   resolveTierConfigs,
   resolveWorkspaceRoster,
-  saveChannelSpecialist,
   saveProfileSpecialist,
   saveSharedSpecialist,
   seedBuiltins,
@@ -938,7 +935,7 @@ describe("specialist-registry", () => {
     });
   });
 
-  it("resolves roster entries by targetSpace and keeps target spaces cache-isolated", async () => {
+  it("resolves only Builder-visible specialists while still parsing collaboration-only files", async () => {
     const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
     const dataDir = join(root, "data");
     const sharedDir = join(dataDir, "shared", "specialists");
@@ -993,13 +990,12 @@ describe("specialist-registry", () => {
       "utf8",
     );
 
-    expect((await resolveRoster("profile-a", dataDir, "builder")).map((entry) => entry.specialistId)).toEqual([
+    expect((await resolveRoster("profile-a", dataDir)).map((entry) => entry.specialistId)).toEqual([
       "builder-only",
       "dual",
     ]);
-    expect((await resolveRoster("profile-a", dataDir, "collaboration")).map((entry) => entry.specialistId)).toEqual([
-      "collab-only",
-      "dual",
+    expect((await parseSpecialistFile(join(sharedDir, "collab-only.md")))?.frontmatter.targetSpace).toEqual([
+      "collaboration",
     ]);
   });
 
@@ -1196,20 +1192,14 @@ describe("specialist-registry", () => {
     expect(rosterBlock).not.toContain("`cursor-builder`");
   });
 
-  it("seeds the union of builder and collaboration builtins for collaboration-server runtime", async () => {
+  it("seeds Builder builtins without the removed collaboration builtins", async () => {
     const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
     const dataDir = join(root, "data");
 
-    await seedBuiltins(dataDir, { runtimeTarget: "collaboration-server" });
+    await seedBuiltins(dataDir);
 
-    const allRoster = await resolveSharedRoster(dataDir);
-    const allHandles = allRoster.map((entry) => entry.specialistId).sort();
-    const builderHandles = (await resolveSharedRoster(dataDir, "builder")).map((entry) => entry.specialistId).sort();
-    const collaborationHandles = (await resolveSharedRoster(dataDir, "collaboration"))
-      .map((entry) => entry.specialistId)
-      .sort();
-
-    expect(allHandles).toEqual([
+    const handles = (await resolveSharedRoster(dataDir)).map((entry) => entry.specialistId).sort();
+    expect(handles).toEqual([
       "architect",
       "code-reviewer",
       "code-reviewer-2",
@@ -1217,17 +1207,7 @@ describe("specialist-registry", () => {
       "planner",
       "researcher",
     ].sort());
-    expect(builderHandles).toContain("architect");
-    expect(builderHandles).toContain("codex-plugin");
-    expect(builderHandles).not.toContain("collab-planner");
-    expect(collaborationHandles).toEqual([
-      "architect",
-      "code-reviewer",
-      "code-reviewer-2",
-      "planner",
-      "researcher",
-    ].sort());
-    expect(allHandles).not.toContain("collab-builder");
+    expect(handles).not.toContain("collab-planner");
   });
 
   it("skips overwriting pinned builtin files during seeding", async () => {
@@ -1487,7 +1467,7 @@ describe("specialist-registry", () => {
     expect(roster.some((entry) => entry.specialistId === "custom-worker")).toBe(false);
   });
 
-  it("preserves behavior-mode identity for profile and channel overrides", async () => {
+  it("preserves behavior-mode identity for profile overrides", async () => {
     const root = await mkdtemp(join(tmpdir(), "specialist-registry-mode-override-"));
     const dataDir = join(root, "data");
     process.env.FORGE_DATA_DIR = dataDir;
@@ -1505,277 +1485,15 @@ describe("specialist-registry", () => {
       promptBody: "Profile planning instructions.",
     });
 
-    const profileRoster = await resolveRoster("profile-a", dataDir, "builder");
+    const profileRoster = await resolveRoster("profile-a", dataDir);
     const profilePlan = profileRoster.find((entry) => entry.specialistId === "planner");
     expect(profilePlan).toMatchObject({ sourceKind: "profile", builtin: true, available: false });
     const profileBlock = generateRosterBlock(profileRoster);
     expect(profileBlock).toContain("`plan`: task breakdown, sequencing, and risk analysis");
     expect(profileBlock).not.toContain("`planner`: Plan for this profile");
-
-    await saveChannelSpecialist(dataDir, "channel-a", "planner", {
-      displayName: "Channel Plan",
-      color: "#7c3aed",
-      enabled: true,
-      whenToUse: "Plan for this channel.",
-      defaultTier: "deep",
-      promptBody: "Channel planning instructions.",
-    });
-    const channelRoster = await resolveCollaborationChannelRoster(dataDir, {
-      sessionAgentId: "channel-a",
-      selectedGlobalHandles: ["planner"],
-    });
-    const channelPlan = channelRoster.find((entry) => entry.specialistId === "planner");
-    expect(channelPlan).toMatchObject({ sourceKind: "channel", builtin: true });
-    const channelBlock = generateRosterBlock(channelRoster);
-    expect(channelBlock).toContain("`plan`: task breakdown, sequencing, and risk analysis");
-    expect(channelBlock).not.toContain("`planner`: Plan for this channel");
   });
 
-  it("saves shared specialists and exposes them through the shared roster", async () => {
-    const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const dataDir = join(root, "data");
-
-    await saveSharedSpecialist(dataDir, "global-worker", {
-      displayName: "Global Worker",
-      color: "#123abc",
-      enabled: true,
-      whenToUse: "Shared tasks",
-      modelId: "gpt-5.5",
-      reasoningLevel: "medium",
-      promptBody: "Shared prompt body",
-    });
-
-    const roster = await resolveSharedRoster(dataDir);
-    expect(roster).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          specialistId: "global-worker",
-          sourceKind: "global",
-          modelId: "gpt-5.5",
-          reasoningLevel: "medium",
-        }),
-      ]),
-    );
-  });
-
-  it("includes webSearch in resolved roster entries", async () => {
-    const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const dataDir = join(root, "data");
-
-    await saveSharedSpecialist(dataDir, "research-worker", {
-      displayName: "Research Worker",
-      color: "#123abc",
-      enabled: true,
-      whenToUse: "Shared research tasks",
-      modelId: "grok-4",
-      webSearch: true,
-      promptBody: "Shared research prompt body",
-    });
-
-    const roster = await resolveSharedRoster(dataDir);
-    expect(roster).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          specialistId: "research-worker",
-          webSearch: true,
-        }),
-      ]),
-    );
-  });
-
-  it("coerces webSearch to false in resolved roster entries for non-Grok specialist files", async () => {
-    const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const dataDir = join(root, "data");
-    const sharedDir = join(dataDir, "shared", "specialists");
-
-    await mkdir(sharedDir, { recursive: true });
-    await writeFile(
-      join(sharedDir, "non-grok.md"),
-      [
-        "---",
-        "displayName: Non Grok Specialist",
-        "color: '#123abc'",
-        "enabled: true",
-        "whenToUse: Standard tasks",
-        "modelId: gpt-5.5",
-        "webSearch: true",
-        "---",
-        "",
-        "Standard prompt body",
-      ].join("\n"),
-      "utf8",
-    );
-
-    const roster = await resolveSharedRoster(dataDir);
-    expect(roster).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          specialistId: "non-grok",
-          webSearch: false,
-        }),
-      ]),
-    );
-  });
-
-  it("rejects deleting missing profile specialists", async () => {
-    const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const dataDir = join(root, "data");
-
-    await expect(deleteProfileSpecialist(dataDir, "profile-a", "missing-worker")).rejects.toThrow(
-      "Unknown specialist: missing-worker",
-    );
-  });
-
-  it("marks specialist unavailable when fallback model is unknown", async () => {
-    const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const dataDir = join(root, "data");
-    const sharedDir = join(dataDir, "shared", "specialists");
-    process.env.FORGE_DATA_DIR = dataDir;
-
-    await mkdir(sharedDir, { recursive: true });
-
-    await writeFile(
-      join(sharedDir, "worker.md"),
-      [
-        "---",
-        "displayName: Worker",
-        "color: '#2563eb'",
-        "enabled: true",
-        "whenToUse: General tasks",
-        "modelId: gpt-5.5",
-        "fallbackModelId: nonexistent-model",
-        "fallbackReasoningLevel: high",
-        "---",
-        "",
-        "Worker body.",
-      ].join("\n"),
-      "utf8",
-    );
-
-    const roster = await resolveRoster("profile-a", dataDir);
-
-    expect(roster).toHaveLength(1);
-    expect(roster[0]).toMatchObject({
-      specialistId: "worker",
-      available: false,
-      availabilityCode: "invalid_model",
-      availabilityMessage: "Unknown fallbackModelId: nonexistent-model",
-    });
-  });
-
-  it.each([
-    ["openai-codex", "gpt-5.3-codex-spark", "openai-codex", "gpt-5.5"],
-    ["openai-codex", "gpt-5.6-sol", "openai-codex", "gpt-6-sol"],
-    ["openai-codex", "gpt-5.6-luna", "openai-codex", "gpt-6-luna"],
-    ["openai-codex", "gpt-5.6-terra", "openai-codex", "gpt-6-sol"],
-    ["codex-native", "gpt-5.6-terra", "codex-native", "gpt-6-sol"],
-    ["anthropic", "claude-sonnet-4-5-20250929", "anthropic", "claude-sonnet-5"],
-    ["claude-sdk", "claude-haiku-4-5-20251001", "anthropic", "claude-sonnet-5"],
-  ])("migrates persisted retired exact model %s/%s on specialist load", async (
-    provider,
-    modelId,
-    nextProvider,
-    nextModelId,
-  ) => {
-    const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const dataDir = join(root, "data");
-    const sharedDir = join(dataDir, "shared", "specialists");
-    process.env.FORGE_DATA_DIR = dataDir;
-    await mkdir(sharedDir, { recursive: true });
-    const filePath = join(sharedDir, "retired-worker.md");
-    const markdown = [
-      "---",
-      "displayName: Retired Worker",
-      "color: '#2563eb'",
-      "enabled: true",
-      "whenToUse: Legacy tasks",
-      `provider: ${provider}`,
-      `modelId: ${modelId}`,
-      "---",
-      "",
-      "Worker body.",
-    ].join("\n");
-    await writeFile(filePath, markdown, "utf8");
-
-    const roster = await resolveRoster("profile-a", dataDir);
-
-    expect(roster[0]).toMatchObject({
-      available: true,
-      availabilityCode: "ok",
-      provider: nextProvider,
-      modelId: nextModelId,
-    });
-    expect(await readFile(filePath, "utf8")).toBe(markdown);
-  });
-
-  it("keeps legacy tier model bindings out of current route guidance", () => {
-    const markdown = generateRosterBlock([], [{
-      ...DEFAULT_TIER_CONFIGS.fast,
-      modelId: "gpt-5.5",
-      provider: "openai-codex",
-      reasoningLevel: "high",
-      fallbackModelId: "gpt-5.5",
-      fallbackProvider: "openai-codex",
-      fallbackReasoningLevel: "medium",
-    }]);
-
-    expect(markdown).toContain("active roster of specialists");
-    expect(markdown).toContain("[delegationRoster]");
-    expect(markdown).toContain("`requiresSecureRuntime=true`");
-    expect(markdown).not.toContain("codex/gpt-5.5");
-  });
-
-  it("adds a web search tag to roster entries when enabled", () => {
-    const markdown = generateRosterBlock([
-      {
-        specialistId: "research",
-        displayName: "Research Specialist",
-        color: "#2563eb",
-        enabled: true,
-        whenToUse: "Web research",
-        modelId: "grok-4",
-        provider: "xai",
-        reasoningLevel: "medium",
-        builtin: false,
-        pinned: false,
-        webSearch: true,
-        targetSpace: ["builder"],
-        promptBody: "Prompt",
-        sourceKind: "global",
-        available: true,
-        availabilityCode: "ok",
-        shadowsGlobal: false,
-      },
-    ]);
-
-    expect(markdown).toContain("[web search]");
-  });
-
-  it("returns null for legacy migration with unknown preset name", async () => {
-    const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const filePath = join(root, "unknown-preset.md");
-
-    await writeFile(
-      filePath,
-      [
-        "---",
-        "displayName: Unknown Preset",
-        "color: '#2563eb'",
-        "enabled: true",
-        "whenToUse: Unknown tasks",
-        "model: pi-nonexistent",
-        "reasoningLevel: high",
-        "---",
-        "",
-        "Unknown preset body.",
-      ].join("\n"),
-      "utf8",
-    );
-
-    expect(await parseSpecialistFile(filePath)).toBeNull();
-  });
-
-  it("keeps profile shadowing scoped by targetSpace", async () => {
+  it("does not let a collaboration-only profile file shadow a Builder specialist", async () => {
     const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
     const dataDir = join(root, "data");
     const sharedDir = join(dataDir, "shared", "specialists");
@@ -1816,8 +1534,7 @@ describe("specialist-registry", () => {
       "utf8",
     );
 
-    const builderRoster = await resolveRoster("profile-a", dataDir, "builder");
-    const collaborationRoster = await resolveRoster("profile-a", dataDir, "collaboration");
+    const builderRoster = await resolveRoster("profile-a", dataDir);
 
     expect(builderRoster).toHaveLength(1);
     expect(builderRoster[0]).toMatchObject({
@@ -1827,146 +1544,6 @@ describe("specialist-registry", () => {
       shadowsGlobal: false,
       targetSpace: ["builder"],
     });
-    expect(collaborationRoster).toHaveLength(1);
-    expect(collaborationRoster[0]).toMatchObject({
-      specialistId: "worker",
-      sourceKind: "profile",
-      displayName: "Profile Collaboration Worker",
-      shadowsGlobal: false,
-      targetSpace: ["collaboration"],
-    });
-  });
-
-  it("resolves channel collaboration roster from selected globals plus channel-local shadowing", async () => {
-    const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const dataDir = join(root, "data");
-
-    await saveSharedSpecialist(dataDir, "global-collab", {
-      displayName: "Global Collab",
-      color: "#2563eb",
-      enabled: true,
-      whenToUse: "Use globally in collaboration.",
-      modelId: "gpt-5.5",
-      provider: "openai",
-      targetSpace: ["collaboration"],
-      promptBody: "Global collab prompt.",
-    });
-    await saveSharedSpecialist(dataDir, "unselected-collab", {
-      displayName: "Unselected Collab",
-      color: "#2563eb",
-      enabled: true,
-      whenToUse: "Not selected.",
-      modelId: "gpt-5.5",
-      provider: "openai",
-      targetSpace: ["collaboration"],
-      promptBody: "Unselected prompt.",
-    });
-    await saveChannelSpecialist(dataDir, "channel-a", "global-collab", {
-      displayName: "Local Override",
-      color: "#16a34a",
-      enabled: true,
-      whenToUse: "Use local override.",
-      modelId: "gpt-5.5",
-      provider: "openai",
-      promptBody: "Channel-local prompt.",
-    });
-    await saveChannelSpecialist(dataDir, "channel-a", "local-only", {
-      displayName: "Local Only",
-      color: "#16a34a",
-      enabled: true,
-      whenToUse: "Use locally.",
-      modelId: "gpt-5.5",
-      provider: "openai",
-      targetSpace: ["builder"],
-      promptBody: "Local-only prompt.",
-    });
-
-    const roster = await resolveCollaborationChannelRoster(dataDir, {
-      sessionAgentId: "channel-a",
-      selectedGlobalHandles: ["global-collab", "missing-collab"],
-    });
-    const byId = new Map(roster.map((entry) => [entry.specialistId, entry]));
-
-    expect(roster.map((entry) => entry.specialistId)).toEqual(["global-collab", "local-only"]);
-    expect(byId.get("global-collab")).toMatchObject({
-      sourceKind: "channel",
-      promptBody: "Channel-local prompt.",
-      shadowsGlobal: true,
-      targetSpace: ["collaboration"],
-    });
-    expect(byId.get("local-only")).toMatchObject({ sourceKind: "channel", targetSpace: ["collaboration"] });
-    expect(byId.has("unselected-collab")).toBe(false);
-  });
-
-  it("normalizes and deduplicates selected global handles for collaboration channel rosters", async () => {
-    const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const dataDir = join(root, "data");
-
-    await saveSharedSpecialist(dataDir, "Global Collab", {
-      displayName: "Global Collab",
-      color: "#2563eb",
-      enabled: true,
-      whenToUse: "Use globally in collaboration.",
-      modelId: "gpt-5.5",
-      targetSpace: ["collaboration"],
-      promptBody: "Global collab prompt.",
-    });
-    await saveSharedSpecialist(dataDir, "Builder Only", {
-      displayName: "Builder Only",
-      color: "#2563eb",
-      enabled: true,
-      whenToUse: "Use in builder only.",
-      modelId: "gpt-5.5",
-      targetSpace: ["builder"],
-      promptBody: "Builder-only prompt.",
-    });
-
-    const roster = await resolveCollaborationChannelRoster(dataDir, {
-      sessionAgentId: "channel-a",
-      selectedGlobalHandles: [" Global Collab ", "global-collab", "builder-only", "!!!"],
-    });
-
-    expect(roster.map((entry) => entry.specialistId)).toEqual(["global-collab"]);
-    expect(roster[0]).toMatchObject({ sourceKind: "global", targetSpace: ["collaboration"] });
-  });
-
-  it("invalidates channel roster cache for channel-local mutations only", async () => {
-    const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const dataDir = join(root, "data");
-
-    await saveChannelSpecialist(dataDir, "channel-a", "local", {
-      displayName: "Local A",
-      color: "#2563eb",
-      enabled: true,
-      whenToUse: "Use locally.",
-      modelId: "gpt-5.5",
-      provider: "openai",
-      promptBody: "Local prompt A.",
-    });
-    await saveChannelSpecialist(dataDir, "channel-b", "local", {
-      displayName: "Local B",
-      color: "#2563eb",
-      enabled: true,
-      whenToUse: "Use locally.",
-      modelId: "gpt-5.5",
-      provider: "openai",
-      promptBody: "Local prompt B.",
-    });
-
-    expect((await resolveCollaborationChannelRoster(dataDir, {
-      sessionAgentId: "channel-a",
-      selectedGlobalHandles: [],
-    })).map((entry) => entry.specialistId)).toEqual(["local"]);
-    await deleteChannelSpecialist(dataDir, "channel-a", "local");
-
-    expect(await resolveCollaborationChannelRoster(dataDir, {
-      sessionAgentId: "channel-a",
-      selectedGlobalHandles: [],
-    })).toEqual([]);
-    expect((await resolveCollaborationChannelRoster(dataDir, {
-      sessionAgentId: "channel-b",
-      selectedGlobalHandles: [],
-    })).map((entry) => entry.specialistId)).toEqual(["local"]);
   });
 
   it("rejects deleting builtins and missing shared specialists", async () => {

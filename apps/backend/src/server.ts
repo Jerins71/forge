@@ -1,8 +1,4 @@
 import { createConfig } from "./config.js";
-import { bootstrapCollaborationAdmin } from "./collaboration/auth/admin-bootstrap.js";
-import { clearCollaborationBetterAuthService, getOrCreateCollaborationBetterAuthService } from "./collaboration/auth/better-auth-service.js";
-import { closeCollaborationAuthDb, getOrCreateCollaborationAuthDb } from "./collaboration/auth/collaboration-db.js";
-import { runCollaborationAuthMigrations } from "./collaboration/auth/migration-runner.js";
 import { StatsService } from "./stats/stats-service.js";
 import { collectFeatureAdoption } from "./telemetry/feature-counters.js";
 import {
@@ -17,7 +13,7 @@ import type { ObservabilityFacade } from "./observability/observability-types.js
 import { CronSchedulerService } from "./scheduler/cron-scheduler-service.js";
 import { getScheduleFilePath } from "./scheduler/schedule-storage.js";
 import { acquireRuntimeLock } from "./runtime-lock.js";
-import { isBuilderRuntimeTarget, isCollaborationServerRuntimeTarget } from "./runtime-target.js";
+import { isBuilderRuntimeTarget } from "./runtime-target.js";
 import { FeedbackService } from "./swarm/feedback-service.js";
 import { SwarmManager } from "./swarm/swarm-manager.js";
 import { BrowserAutomationService } from "./swarm/browser-automation/index.js";
@@ -108,14 +104,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
   });
 
   try {
-    await seedBuiltins(config.paths.dataDir, { runtimeTarget: config.runtimeTarget });
-    await runCollaborationAuthMigrations(config);
-
-    if (isCollaborationServerRuntimeTarget(config.runtimeTarget)) {
-      const authService = await getOrCreateCollaborationBetterAuthService(config);
-      const collaborationDatabase = await getOrCreateCollaborationAuthDb(config);
-      await bootstrapCollaborationAdmin(config, collaborationDatabase, authService);
-    }
+    await seedBuiltins(config.paths.dataDir);
 
     await observabilityService.initialize();
 
@@ -131,8 +120,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       observabilityService.shutdown({ timeoutMs: 3000 }),
       versioningService.stop(),
     ]);
-    clearCollaborationBetterAuthService(config);
-    closeCollaborationAuthDb(config);
     releaseRuntimeLock();
     throw error;
   }
@@ -422,8 +409,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
         observabilityService.shutdown({ timeoutMs: 3000 }),
         versioningService.stop(),
       ]);
-      clearCollaborationBetterAuthService(config);
-      closeCollaborationAuthDb(config);
       releaseRuntimeLock();
     }
     throw error;
@@ -501,8 +486,6 @@ class BackendServer implements StartedServer {
         this.terminalService?.shutdown(),
         this.observabilityService.shutdown({ timeoutMs: 3000 }),
         this.versioningService.stop(),
-        Promise.resolve().then(() => clearCollaborationBetterAuthService(this.config)),
-        Promise.resolve().then(() => closeCollaborationAuthDb(this.config)),
       ]);
 
       try {

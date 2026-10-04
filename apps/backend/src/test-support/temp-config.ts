@@ -19,13 +19,6 @@ export interface TempConfigOptions {
   isDesktop?: boolean
   runtimeTarget?: RuntimeTarget
   cortexEnabled?: boolean
-  adminEmail?: string
-  adminPassword?: string
-  collaborationAuthSecret?: string
-  collaborationAuthCookieName?: string
-  collaborationBaseUrl?: string
-  collaborationTrustedOrigins?: string[]
-  remoteProjectsEnv?: SwarmConfig['remoteProjectsEnv']
   allowNonManagerSubscriptions?: boolean
   managerId?: string
   managerDisplayName?: string
@@ -88,9 +81,6 @@ export async function createTempConfig(options: TempConfigOptions = {}): Promise
   const sharedAuthDir = join(sharedConfigDir, 'auth')
   const sharedAuthFile = join(sharedAuthDir, 'auth.json')
   const sharedSecretsFile = join(sharedConfigDir, 'secrets.json')
-  const collaborationConfigDir = join(sharedConfigDir, 'collaboration')
-  const collaborationAuthDbPath = join(collaborationConfigDir, 'auth.db')
-  const collaborationAuthSecretPath = join(collaborationConfigDir, 'auth-secret.key')
   const authDir = join(dataDir, 'auth')
   const authFile = join(authDir, 'auth.json')
   const secretsFile = join(dataDir, 'secrets.json')
@@ -146,20 +136,6 @@ export async function createTempConfig(options: TempConfigOptions = {}): Promise
     isDesktop: options.isDesktop ?? false,
     runtimeTarget: options.runtimeTarget ?? 'builder',
     cortexEnabled: options.cortexEnabled ?? true,
-    adminEmail: options.adminEmail,
-    adminPassword: options.adminPassword,
-    collaborationAuthSecret: options.collaborationAuthSecret,
-    collaborationAuthCookieName: options.collaborationAuthCookieName,
-    collaborationBaseUrl: options.collaborationBaseUrl,
-    collaborationTrustedOrigins: options.collaborationTrustedOrigins,
-    collaborationModules:
-      (options.runtimeTarget ?? 'builder') === 'collaboration-server'
-        ? {
-            loadAuthModule: () => import('better-auth'),
-            loadDatabaseModule: async () => (await import('better-sqlite3')).default,
-          }
-        : undefined,
-    remoteProjectsEnv: options.remoteProjectsEnv,
     allowNonManagerSubscriptions: options.allowNonManagerSubscriptions ?? false,
     managerId,
     managerDisplayName: options.managerDisplayName ?? 'Manager',
@@ -181,8 +157,6 @@ export async function createTempConfig(options: TempConfigOptions = {}): Promise
       sharedAuthDir,
       sharedAuthFile,
       sharedSecretsFile,
-      collaborationAuthDbPath,
-      collaborationAuthSecretPath,
       authFile,
       secretsFile,
       agentDir,

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import type { SpecialistTargetSpace } from "@forge/protocol";
 import { isNonRunningAgentStatus } from "../agent-state-machine.js";
 import { sanitizePathSegment } from "../swarm-manager-utils.js";
 import type { CodexTurnActivation } from "../turn-context-coordinator.js";
@@ -624,10 +623,8 @@ export class CodexPluginDelegationCoordinator {
 
   applySpecialistAvailability<T extends CodexPluginSpecialistDefinition>(
     roster: T[],
-    targetSpace: SpecialistTargetSpace,
     managerAgentId: string,
   ): Array<T | CodexPluginSpecialistDefinition> {
-    if (targetSpace !== "builder") return roster;
     const withoutCodex = roster.filter((entry) => entry.specialistId !== CODEX_PLUGIN_SPECIALIST_ID);
     if (
       !this.activeDelegationByManagerId.has(managerAgentId) &&

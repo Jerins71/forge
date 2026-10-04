@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { isSystemProfile, type ManagerProfile, type ProjectAgentExternalDirectoryEntry, type ProjectAgentShareGrantInfo, type ProjectAgentSharingSnapshot } from "@forge/protocol";
-import { COLLABORATION_PROFILE_ID } from "../collaboration/constants.js";
 import { readJsonFileIfExists, writeJsonFileAtomic } from "../utils/atomic-files.js";
 import { slugifySessionName } from "./swarm-manager-utils.js";
 import { getProjectAgentSharingStorePath } from "./storage/data-paths.js";
@@ -151,7 +150,7 @@ function isEligibleShareTargetProfile(
   if (isSystemProfile(profile)) {
     return false;
   }
-  if (profile.profileId === CORTEX_PROFILE_ID || profile.profileId === COLLABORATION_PROFILE_ID) {
+  if (profile.profileId === CORTEX_PROFILE_ID) {
     return false;
   }
   if (profile.archivedAt) {
@@ -501,7 +500,7 @@ export class ProjectAgentSharingService {
     if (!profile || isSystemProfile(profile)) {
       throw new Error("Project agent sharing is not available for system profiles");
     }
-    if (profileId === CORTEX_PROFILE_ID || profileId === COLLABORATION_PROFILE_ID) {
+    if (profileId === CORTEX_PROFILE_ID) {
       throw new Error("Project agent sharing is not available for this profile");
     }
     if (descriptor.sessionSurface === "collab") {

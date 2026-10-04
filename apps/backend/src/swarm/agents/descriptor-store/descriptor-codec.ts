@@ -15,10 +15,56 @@ interface DecodeStoreOptions {
   warn?: (message: string) => void;
 }
 
+/**
+ * Raw agents.json records owned by removed features. They are never loaded into
+ * the Builder, but are written back verbatim so an upgrade never deletes them.
+ */
+export interface RetiredStoreRecords {
+  agents: unknown[];
+  profiles: unknown[];
+}
+
 export interface DecodeStoreResult {
   store: AgentsStoreFile;
+  retired: RetiredStoreRecords;
   normalizedPathCount: number;
   skippedDescriptorCount: number;
+}
+
+/** Storage profile of the removed Collaboration server. */
+const RETIRED_COLLABORATION_PROFILE_ID = "_collaboration";
+
+function isRetiredCollaborationAgentRecord(candidate: unknown, retiredManagerIds: ReadonlySet<string>): boolean {
+  if (!isRecord(candidate)) {
+    return false;
+  }
+
+  return (
+    candidate.profileId === RETIRED_COLLABORATION_PROFILE_ID
+    || candidate.agentId === RETIRED_COLLABORATION_PROFILE_ID
+    || candidate.sessionSurface === "collab"
+    || (candidate.collab !== undefined && candidate.collab !== null)
+    || (typeof candidate.managerId === "string" && retiredManagerIds.has(candidate.managerId))
+  );
+}
+
+function partitionRetiredAgentRecords(candidates: unknown[]): { active: unknown[]; retired: unknown[] } {
+  const retiredManagerIds = new Set<string>();
+  for (const candidate of candidates) {
+    if (isRecord(candidate) && candidate.role === "manager" && isRetiredCollaborationAgentRecord(candidate, retiredManagerIds)) {
+      const agentId = extractDescriptorAgentId(candidate);
+      if (agentId) {
+        retiredManagerIds.add(agentId);
+      }
+    }
+  }
+
+  const active: unknown[] = [];
+  const retired: unknown[] = [];
+  for (const candidate of candidates) {
+    (isRetiredCollaborationAgentRecord(candidate, retiredManagerIds) ? retired : active).push(candidate);
+  }
+  return { active, retired };
 }
 
 export function decodeAgentsStoreFile(raw: string, options: DecodeStoreOptions): DecodeStoreResult {
@@ -26,6 +72,7 @@ export function decodeAgentsStoreFile(raw: string, options: DecodeStoreOptions):
   if (!isRecord(parsed) || !Array.isArray(parsed.agents)) {
     return {
       store: { agents: [], profiles: [] },
+      retired: { agents: [], profiles: [] },
       normalizedPathCount: 0,
       skippedDescriptorCount: 0
     };
@@ -36,7 +83,19 @@ export function decodeAgentsStoreFile(raw: string, options: DecodeStoreOptions):
   let skippedDescriptorCount = 0;
   const warn = options.warn ?? console.warn;
 
-  for (const [index, candidate] of parsed.agents.entries()) {
+  const agentRecords = partitionRetiredAgentRecords(parsed.agents);
+  const profileCandidates = Array.isArray(parsed.profiles) ? parsed.profiles : [];
+  const retiredProfiles = profileCandidates.filter(
+    (candidate) => isRecord(candidate) && candidate.profileId === RETIRED_COLLABORATION_PROFILE_ID,
+  );
+  if (agentRecords.retired.length > 0 || retiredProfiles.length > 0) {
+    options.logDebug?.("Retained retired Collaboration records without loading them", {
+      agents: agentRecords.retired.length,
+      profiles: retiredProfiles.length,
+    });
+  }
+
+  for (const [index, candidate] of agentRecords.active.entries()) {
     const validated = validateAgentDescriptor(candidate);
     if (typeof validated === "string") {
       skippedDescriptorCount += 1;
@@ -64,8 +123,13 @@ export function decodeAgentsStoreFile(raw: string, options: DecodeStoreOptions):
   return {
     store: {
       agents: validAgents,
-      profiles: decodePersistedProfiles(parsed.profiles, options.storeFilePath, warn)
+      profiles: decodePersistedProfiles(
+        profileCandidates.filter((candidate) => !retiredProfiles.includes(candidate)),
+        options.storeFilePath,
+        warn,
+      )
     },
+    retired: { agents: agentRecords.retired, profiles: retiredProfiles },
     normalizedPathCount,
     skippedDescriptorCount
   };
@@ -123,9 +187,9 @@ function decodePersistedProfiles(
   return profiles;
 }
 
-export function encodeAgentsStoreFile(store: AgentsStoreFile): string {
+export function encodeAgentsStoreFile(store: AgentsStoreFile, retired?: RetiredStoreRecords): string {
   return `${JSON.stringify({
-    agents: store.agents.map(cloneDescriptorForPersistence),
-    profiles: (store.profiles ?? []).map(cloneProfile)
+    agents: [...store.agents.map(cloneDescriptorForPersistence), ...(retired?.agents ?? [])],
+    profiles: [...(store.profiles ?? []).map(cloneProfile), ...(retired?.profiles ?? [])]
   }, null, 2)}\n`;
 }

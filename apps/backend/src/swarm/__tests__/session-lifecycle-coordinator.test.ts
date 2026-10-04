@@ -643,7 +643,6 @@ function createHarness(): Harness {
       createSessionWithOverrides: vi.fn(async () => makeCreatedSession("created")),
       createSessionFromBaseDescriptor: vi.fn(async () => makeCreatedSession("created")),
       deleteSession: vi.fn(async () => ({ terminatedWorkerIds: [] })),
-      deleteCollaborationSession: vi.fn(async () => ({ terminatedWorkerIds: [] })),
       clearSessionConversation: vi.fn(async () => undefined),
       renameSession: vi.fn(async () => undefined),
       forkSession: vi.fn(async () => makeCreatedSession("forked")),

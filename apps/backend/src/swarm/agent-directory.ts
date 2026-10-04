@@ -10,7 +10,6 @@ import { cloneDescriptorForPersistence, cloneProfile } from "./agents/descriptor
 import { normalizeArchetypeId } from "./prompts/prompt-registry.js";
 import {
   assertBuilderSession,
-  assertCollabSession,
   cloneDescriptor,
   normalizeAgentId,
   normalizeOptionalAgentId,
@@ -273,12 +272,6 @@ export class AgentDirectory {
   getRequiredBuilderSessionDescriptor(agentId: string, action: string): ManagerSessionDescriptor {
     const descriptor = this.getRequiredSessionDescriptor(agentId);
     assertBuilderSession(descriptor, action);
-    return descriptor;
-  }
-
-  getRequiredCollaborationSessionDescriptor(agentId: string, action: string): ManagerSessionDescriptor {
-    const descriptor = this.getRequiredSessionDescriptor(agentId);
-    assertCollabSession(descriptor, action);
     return descriptor;
   }
 

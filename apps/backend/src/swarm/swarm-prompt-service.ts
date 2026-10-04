@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-import { isRepoProjectAgentSource, type PromptPreviewResponse, type PromptPreviewSection, type SpecialistTargetSpace, type TierConfig } from "@forge/protocol";
+import { isRepoProjectAgentSource, type PromptPreviewResponse, type PromptPreviewSection, type TierConfig } from "@forge/protocol";
 import { assembleRuntimePrompt, discoverAgentsMd } from "./runtime-prompt-assembler.js";
 import { isSessionAgentDescriptor } from "./agent-directory.js";
 import {
@@ -123,7 +123,7 @@ interface ResolvedSpecialistDefinitionLike {
 }
 
 interface SpecialistRegistryModuleLike {
-  resolveRoster(profileId: string, targetSpace?: SpecialistTargetSpace): Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveRoster(profileId: string): Promise<ResolvedSpecialistDefinitionLike[]>;
   generateRosterBlock(roster: ResolvedSpecialistDefinitionLike[], tierConfigs?: readonly TierConfig[]): string;
   resolveTierConfigs(): Promise<TierConfig[]>;
 }
@@ -149,10 +149,7 @@ export interface SwarmPromptServiceOptions {
   getSessionsForProfile: (profileId: string) => AgentDescriptor[];
   getExternalProjectAgentDirectoryEntries?: (profileId: string) => Promise<ProjectAgentDirectoryEntry[]> | ProjectAgentDirectoryEntry[];
   loadSpecialistRegistryModule: () => Promise<SpecialistRegistryModuleLike>;
-  resolveSpecialistRosterForManager?: (
-    manager: AgentDescriptor,
-    targetSpace?: SpecialistTargetSpace,
-  ) => Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveSpecialistRosterForManager?: (manager: AgentDescriptor) => Promise<ResolvedSpecialistDefinitionLike[]>;
   resolveSkillRosterForDescriptor?: (descriptor: AgentDescriptor) => Promise<SkillMetadata[] | null | undefined>;
   getKnowledgeV2Enabled?: () => boolean;
   logDebug: (message: string, details?: unknown) => void;
@@ -566,28 +563,18 @@ export class SwarmPromptService {
     descriptor: AgentDescriptor,
     specialistRegistry: SpecialistRegistryModuleLike,
   ): Promise<ResolvedSpecialistDefinitionLike[]> {
-    const targetSpace = this.resolveSpecialistTargetSpace(descriptor);
     if (descriptor.role === "manager") {
       return this.options.resolveSpecialistRosterForManager
-        ? this.options.resolveSpecialistRosterForManager(descriptor, targetSpace)
-        : specialistRegistry.resolveRoster(descriptor.profileId ?? descriptor.agentId, targetSpace);
+        ? this.options.resolveSpecialistRosterForManager(descriptor)
+        : specialistRegistry.resolveRoster(descriptor.profileId ?? descriptor.agentId);
     }
 
     const managerDescriptor = this.options.descriptors.get(descriptor.managerId);
     if (managerDescriptor && this.options.resolveSpecialistRosterForManager) {
-      return this.options.resolveSpecialistRosterForManager(managerDescriptor, targetSpace);
+      return this.options.resolveSpecialistRosterForManager(managerDescriptor);
     }
 
-    return specialistRegistry.resolveRoster(descriptor.profileId ?? descriptor.agentId, targetSpace);
-  }
-
-  private resolveSpecialistTargetSpace(descriptor: AgentDescriptor): SpecialistTargetSpace {
-    if (descriptor.role === "manager") {
-      return isCollabSession(descriptor) ? "collaboration" : "builder";
-    }
-
-    const managerDescriptor = this.options.descriptors.get(descriptor.managerId);
-    return managerDescriptor && isCollabSession(managerDescriptor) ? "collaboration" : "builder";
+    return specialistRegistry.resolveRoster(descriptor.profileId ?? descriptor.agentId);
   }
 
   private async resolveSkillMetadataForDescriptor(descriptor: AgentDescriptor): Promise<SkillMetadata[]> {

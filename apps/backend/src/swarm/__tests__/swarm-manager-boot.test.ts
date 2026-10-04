@@ -948,6 +948,114 @@ describe('SwarmManager', () => {
     ])
   })
 
+  it('retains removed Collaboration records verbatim without loading them across save and restart', async () => {
+    const config = await makeTempConfig()
+    config.cortexEnabled = false
+    const sessionsDir = getLegacySessionsDirPath(config.paths.dataDir)
+    const collabRoot = {
+      agentId: '_collaboration',
+      displayName: 'Collaboration',
+      role: 'manager',
+      managerId: '_collaboration',
+      profileId: '_collaboration',
+      status: 'idle',
+      createdAt: '2026-03-27T00:00:00.000Z',
+      updatedAt: '2026-03-27T00:00:00.000Z',
+      cwd: config.defaultCwd,
+      model: config.defaultModel,
+      sessionFile: join(sessionsDir, '_collaboration.jsonl'),
+      futureCollabField: { kept: true },
+    }
+    const collabChannel = {
+      ...collabRoot,
+      agentId: 'channel-session',
+      managerId: 'channel-session',
+      archetypeId: 'collaboration-channel',
+      sessionSurface: 'collab',
+      collab: { workspaceId: 'workspace-1', channelId: 'channel-1' },
+      sessionFile: join(sessionsDir, 'channel-session.jsonl'),
+    }
+    // No collab markers of its own: retained because its manager is retired.
+    const collabWorker = {
+      agentId: 'channel-worker',
+      displayName: 'Channel Worker',
+      role: 'worker',
+      managerId: 'channel-session',
+      status: 'idle',
+      createdAt: '2026-03-27T00:01:00.000Z',
+      updatedAt: '2026-03-27T00:01:00.000Z',
+      cwd: config.defaultCwd,
+      model: config.defaultModel,
+      sessionFile: join(sessionsDir, 'channel-worker.jsonl'),
+    }
+    const collabProfile = {
+      profileId: '_collaboration',
+      displayName: 'Collaboration',
+      defaultSessionAgentId: '_collaboration',
+      profileType: 'system',
+      createdAt: '2026-03-27T00:00:00.000Z',
+      updatedAt: '2026-03-27T00:00:00.000Z',
+    }
+    const builderManager = {
+      agentId: 'manager',
+      displayName: 'Manager',
+      role: 'manager',
+      managerId: 'manager',
+      profileId: 'manager',
+      archetypeId: 'manager',
+      status: 'idle',
+      createdAt: '2026-03-27T00:03:00.000Z',
+      updatedAt: '2026-03-27T00:03:00.000Z',
+      cwd: config.defaultCwd,
+      model: config.defaultModel,
+      sessionFile: join(sessionsDir, 'manager.jsonl'),
+    }
+    await writeFile(
+      config.paths.agentsStoreFile,
+      `${JSON.stringify({
+        agents: [collabRoot, builderManager, collabWorker, collabChannel],
+        profiles: [
+          collabProfile,
+          {
+            profileId: 'manager',
+            displayName: 'Manager',
+            defaultSessionAgentId: 'manager',
+            createdAt: '2026-03-27T00:03:00.000Z',
+            updatedAt: '2026-03-27T00:03:00.000Z',
+          },
+        ],
+      }, null, 2)}\n`,
+      'utf8',
+    )
+
+    const readStore = async () => JSON.parse(await readFile(config.paths.agentsStoreFile, 'utf8')) as {
+      agents: Array<Record<string, unknown>>
+      profiles: Array<Record<string, unknown>>
+    }
+    const expectHiddenAndRetained = async (manager: TestSwarmManager) => {
+      expect(manager.listAgents().map((descriptor) => descriptor.agentId)).toEqual(['manager'])
+      expect(manager.listProfiles().map((profile) => profile.profileId)).toEqual(['manager'])
+      const persisted = await readStore()
+      for (const record of [collabRoot, collabWorker, collabChannel]) {
+        expect(persisted.agents).toContainEqual(record)
+      }
+      expect(persisted.profiles).toContainEqual(collabProfile)
+    }
+
+    const first = new TestSwarmManager(config)
+    await first.boot()
+    await expectHiddenAndRetained(first)
+
+    // A Builder mutation rewrites agents.json from the live maps.
+    await first.renameSession('manager', 'Renamed Manager')
+    expect((await readStore()).agents).toContainEqual(expect.objectContaining({ agentId: 'manager', sessionLabel: 'Renamed Manager' }))
+    await expectHiddenAndRetained(first)
+
+    const restarted = new TestSwarmManager(config)
+    await restarted.boot()
+    await expectHiddenAndRetained(restarted)
+  })
+
   it('does not materialize manager SYSTEM.md into the data dir on boot', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)

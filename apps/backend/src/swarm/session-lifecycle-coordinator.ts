@@ -35,7 +35,6 @@ import type {
 import type { SwarmAgentLifecycleService } from "./swarm-agent-lifecycle-service.js";
 import {
   assertBuilderSession,
-  assertCollabSession,
   cloneDescriptor,
   normalizeOptionalAgentId,
   normalizeOptionalModelId,
@@ -111,7 +110,6 @@ export interface SessionLifecycleCoordinatorOptions {
     | "createSessionWithOverrides"
     | "createSessionFromBaseDescriptor"
     | "deleteSession"
-    | "deleteCollaborationSession"
     | "clearSessionConversation"
     | "renameSession"
     | "forkSession"
@@ -432,13 +430,6 @@ export class SessionLifecycleCoordinator {
     return this.stopValidatedSession(agentId);
   }
 
-  async stopCollaborationSession(
-    agentId: string,
-  ): Promise<{ terminatedWorkerIds: string[] }> {
-    this.getRequiredCollaborationSessionDescriptor(agentId, "stop collaboration sessions");
-    return this.stopValidatedSession(agentId);
-  }
-
   async resumeSession(agentId: string): Promise<void> {
     const descriptor = this.getRequiredBuilderSessionDescriptor(
       agentId,
@@ -496,25 +487,6 @@ export class SessionLifecycleCoordinator {
         return result;
       },
     );
-  }
-
-  async deleteCollaborationSession(
-    agentId: string,
-  ): Promise<{ terminatedWorkerIds: string[] }> {
-    this.cleanupCodex(agentId);
-    const requiredDescriptor = this.getRequiredCollaborationSessionDescriptor(
-      agentId,
-      "delete collaboration sessions",
-    );
-    const descriptor = cloneDescriptor(requiredDescriptor);
-    this.options.browser.cancelSession(agentId);
-    await this.releaseBeforeDelete(requiredDescriptor.profileId, agentId);
-    const result = await this.options.sessions.deleteCollaborationSession(agentId);
-    await this.options.reportAttentionSessionRetired?.(agentId);
-    await this.options.browser.deleteSession(requiredDescriptor.profileId, agentId);
-    this.options.activeTools.clearSession(agentId);
-    await this.emitExtensionLifecycle("deleted", descriptor);
-    return result;
   }
 
   async clearSessionConversation(agentId: string): Promise<void> {
@@ -862,15 +834,6 @@ export class SessionLifecycleCoordinator {
   ): AgentDescriptor & { role: "manager"; profileId: string } {
     const descriptor = this.getRequiredSessionDescriptor(agentId);
     assertBuilderSession(descriptor, action);
-    return descriptor;
-  }
-
-  private getRequiredCollaborationSessionDescriptor(
-    agentId: string,
-    action: string,
-  ): AgentDescriptor & { role: "manager"; profileId: string } {
-    const descriptor = this.getRequiredSessionDescriptor(agentId);
-    assertCollabSession(descriptor, action);
     return descriptor;
   }
 

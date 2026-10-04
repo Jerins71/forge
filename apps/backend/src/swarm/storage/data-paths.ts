@@ -448,24 +448,12 @@ export function getLegacyCliAccessFilePath(dataDir: string): string {
   return join(getSharedConfigDir(dataDir), "cli-access.json");
 }
 
-export function getSharedCollaborationConfigDir(dataDir: string): string {
-  return join(getSharedConfigDir(dataDir), "collaboration");
-}
-
-export function getCollaborationAuthDbPath(dataDir: string): string {
-  return join(getSharedCollaborationConfigDir(dataDir), "auth.db");
-}
-
 export function getRemoteUpdateAwarenessDbPath(dataDir: string): string {
   return join(getSharedStateDir(dataDir), "remote-update-awareness.db");
 }
 
 export function getSecureSessionsDbPath(dataDir: string): string {
   return join(getSharedStateDir(dataDir), "secure-sessions.db");
-}
-
-export function getCollaborationAuthSecretPath(dataDir: string): string {
-  return join(getSharedCollaborationConfigDir(dataDir), "auth-secret.key");
 }
 
 export function getSharedSecretsFilePath(dataDir: string): string {
@@ -522,10 +510,6 @@ export function getSharedMobileNotificationPreferencesPath(dataDir: string): str
 
 export function getNotificationSettingsPath(dataDir: string): string {
   return join(getSharedConfigDir(dataDir), "notification-settings.json");
-}
-
-export function getRemoteBuildSettingsPath(dataDir: string): string {
-  return join(getSharedConfigDir(dataDir), "remote-build-settings.json");
 }
 
 export function getTerminalSettingsPath(dataDir: string): string {
