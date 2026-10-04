@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Clock3, Loader2 } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
+import type { EnvironmentClient } from '@forge/client-runtime'
 import { cn } from '@/lib/utils'
 
 // ── Types ──
@@ -55,21 +55,12 @@ function normalizeSchedule(value: unknown): ScheduleRecord | null {
   }
 }
 
-function resolveManagerSchedulesEndpoint(wsUrl: string, managerId: string): string {
-  const normalizedManagerId = managerId.trim()
-  if (!normalizedManagerId) throw new Error('managerId is required.')
-  return resolveApiEndpoint(wsUrl, `/api/managers/${encodeURIComponent(normalizedManagerId)}/schedules`)
-}
-
 async function fetchSchedules(
-  wsUrl: string,
+  environmentClient: EnvironmentClient,
   managerId: string,
   signal: AbortSignal,
 ): Promise<ScheduleRecord[]> {
-  const response = await fetch(resolveManagerSchedulesEndpoint(wsUrl, managerId), { signal, credentials: 'include' })
-  if (!response.ok) throw new Error(`Unable to load schedules (${response.status})`)
-
-  const payload = (await response.json()) as { schedules?: unknown }
+  const payload = await environmentClient.features.sessions.schedules(managerId.trim(), signal)
   if (!payload || !Array.isArray(payload.schedules)) return []
 
   return payload.schedules
@@ -184,12 +175,12 @@ function describeCronExpression(cron: string): string {
 // ── Component ──
 
 interface SchedulesPanelProps {
-  wsUrl: string
+  environmentClient: EnvironmentClient | null
   managerId: string
   isActive: boolean
 }
 
-export function SchedulesPanel({ wsUrl, managerId, isActive }: SchedulesPanelProps) {
+export function SchedulesPanel({ environmentClient, managerId, isActive }: SchedulesPanelProps) {
   const [schedules, setSchedules] = useState<ScheduleRecord[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -206,7 +197,7 @@ export function SchedulesPanel({ wsUrl, managerId, isActive }: SchedulesPanelPro
   useEffect(() => {
     if (!isActive) return
 
-    if (!managerId.trim()) {
+    if (!managerId.trim() || !environmentClient) {
       setSchedules([])
       setSelectedScheduleId(null)
       setError('Select a manager to load schedules.')
@@ -218,7 +209,7 @@ export function SchedulesPanel({ wsUrl, managerId, isActive }: SchedulesPanelPro
     setIsLoading(true)
     setError(null)
 
-    void fetchSchedules(wsUrl, managerId, abortController.signal)
+    void fetchSchedules(environmentClient, managerId, abortController.signal)
       .then((nextSchedules) => {
         if (abortController.signal.aborted) return
         setSchedules(nextSchedules)
@@ -242,7 +233,7 @@ export function SchedulesPanel({ wsUrl, managerId, isActive }: SchedulesPanelPro
     return () => {
       abortController.abort()
     }
-  }, [isActive, managerId, wsUrl])
+  }, [environmentClient, isActive, managerId])
 
   if (isLoading) {
     return (

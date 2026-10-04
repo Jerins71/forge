@@ -1,3 +1,4 @@
+import type { EnvironmentClient } from '@forge/client-runtime'
 import { createElement, useEffect, useState } from 'react'
 import { Code2, Database, FileCode2, FileText, Image, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -16,7 +17,7 @@ import { useResizablePanel } from '@/components/diff-viewer/useResizablePanel'
 export type ArtifactsSidebarTab = 'artifacts' | 'schedules'
 
 interface ArtifactsSidebarProps {
-  wsUrl: string
+  environmentClient: EnvironmentClient | null
   managerId: string
   artifacts: ArtifactReference[]
   isOpen: boolean
@@ -100,7 +101,7 @@ function useIsDesktopViewport(): boolean {
 }
 
 export function ArtifactsSidebar({
-  wsUrl,
+  environmentClient,
   managerId,
   artifacts,
   isOpen,
@@ -212,9 +213,9 @@ export function ArtifactsSidebar({
               'hover:[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-border',
             )}
           >
-            {isOpen && activeTab === 'artifacts' && managerId
+            {isOpen && activeTab === 'artifacts' && managerId && environmentClient
               && (!desktopOnly || isDesktopViewport) && (!mobileOnly || !isDesktopViewport) && <ContextArtifactsSection
-              key={`${wsUrl}:${managerId}`} wsUrl={wsUrl} managerId={managerId}
+              key={`${environmentClient.environmentId}:${managerId}`} environmentClient={environmentClient} managerId={managerId}
             />}
             <h3 className="px-3 pt-3 text-xs font-semibold">Conversation artifacts</h3>
             {artifacts.length === 0 ? (
@@ -243,7 +244,7 @@ export function ArtifactsSidebar({
 
         <TabsContent value="schedules" className="mt-0 min-h-0 flex-1">
           <SchedulesPanel
-            wsUrl={wsUrl}
+            environmentClient={environmentClient}
             managerId={managerId}
             isActive={isOpen && activeTab === 'schedules'}
           />

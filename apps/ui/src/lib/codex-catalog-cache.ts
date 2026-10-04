@@ -3,6 +3,7 @@ import {
   type CodexCatalogFetchResult,
   type CodexCatalogSnapshot,
 } from './codex-catalog-api'
+import { qualifiedKey, type EnvironmentClient } from '@forge/client-runtime'
 
 const CACHE_TTL_MS = 30_000
 
@@ -28,13 +29,18 @@ function hasCachedSnapshot(entry: CacheEntry | undefined): entry is CacheEntry {
 }
 
 
-export function getCachedCodexCatalog(managerAgentId: string): CodexCatalogSnapshot | null {
-  const entry = cacheByManager.get(managerAgentId)
+/** Manager IDs are only unique within one environment. */
+function cacheKey(client: EnvironmentClient, managerAgentId: string): string {
+  return qualifiedKey(client.environmentId, managerAgentId)
+}
+
+export function getCachedCodexCatalog(client: EnvironmentClient, managerAgentId: string): CodexCatalogSnapshot | null {
+  const entry = cacheByManager.get(cacheKey(client, managerAgentId))
   return hasCachedSnapshot(entry) ? entry.snapshot : null
 }
 
-export function isCodexCatalogCacheFresh(managerAgentId: string, nowMs = Date.now()): boolean {
-  const entry = cacheByManager.get(managerAgentId)
+function isCodexCatalogCacheFresh(key: string, nowMs = Date.now()): boolean {
+  const entry = cacheByManager.get(key)
   if (!hasCachedSnapshot(entry)) {
     return false
   }
@@ -42,9 +48,9 @@ export function isCodexCatalogCacheFresh(managerAgentId: string, nowMs = Date.no
   return nowMs - entry.fetchedAtMs <= CACHE_TTL_MS
 }
 
-function storeSnapshot(managerAgentId: string, snapshot: CodexCatalogSnapshot): void {
-  const existing = cacheByManager.get(managerAgentId)
-  cacheByManager.set(managerAgentId, {
+function storeSnapshot(key: string, snapshot: CodexCatalogSnapshot): void {
+  const existing = cacheByManager.get(key)
+  cacheByManager.set(key, {
     snapshot,
     fetchedAtMs: Date.now(),
     inflight: existing?.inflight,
@@ -53,45 +59,46 @@ function storeSnapshot(managerAgentId: string, snapshot: CodexCatalogSnapshot): 
 
 /** Non-blocking warm-up for composer sessions; errors keep any stale cache. */
 export function ensureCodexCatalogWarm(
-  wsUrl: string | undefined,
+  client: EnvironmentClient,
   managerAgentId: string,
 ): void {
-  if (!managerAgentId || isCodexCatalogCacheFresh(managerAgentId)) {
+  if (!managerAgentId || isCodexCatalogCacheFresh(cacheKey(client, managerAgentId))) {
     return
   }
 
-  void fetchCodexCatalogWithCache(wsUrl, managerAgentId).catch(() => {
+  void fetchCodexCatalogWithCache(client, managerAgentId).catch(() => {
     // Warm-up is best-effort; picker handles explicit fetch errors.
   })
 }
 
 export async function fetchCodexCatalogWithCache(
-  wsUrl: string | undefined,
+  client: EnvironmentClient,
   managerAgentId: string,
   options?: { forceRefresh?: boolean },
 ): Promise<CodexCatalogFetchResult> {
-  const existing = cacheByManager.get(managerAgentId)
+  const key = cacheKey(client, managerAgentId)
+  const existing = cacheByManager.get(key)
   const forceRefresh = options?.forceRefresh === true
 
   if (!forceRefresh && existing?.inflight) {
     return existing.inflight
   }
 
-  if (!forceRefresh && hasCachedSnapshot(existing) && isCodexCatalogCacheFresh(managerAgentId)) {
+  if (!forceRefresh && hasCachedSnapshot(existing) && isCodexCatalogCacheFresh(key)) {
     return { status: 'ok', snapshot: existing.snapshot }
   }
 
   const inflight: Promise<CodexCatalogFetchResult> = fetchCodexCatalog(
-    wsUrl,
+    client,
     managerAgentId,
   ).then((result): CodexCatalogFetchResult => {
-    const entry = cacheByManager.get(managerAgentId)
+    const entry = cacheByManager.get(key)
     if (entry?.inflight === inflight) {
       entry.inflight = undefined
     }
 
     if (result.status === 'ok') {
-      storeSnapshot(managerAgentId, result.snapshot)
+      storeSnapshot(key, result.snapshot)
       return result
     }
 
@@ -107,7 +114,7 @@ export async function fetchCodexCatalogWithCache(
     return inflight
   }
 
-  cacheByManager.set(managerAgentId, {
+  cacheByManager.set(key, {
     snapshot: emptySnapshot(),
     fetchedAtMs: 0,
     inflight,

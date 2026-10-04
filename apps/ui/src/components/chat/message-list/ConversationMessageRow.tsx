@@ -1,4 +1,5 @@
 import { isClaudeSignInRequired } from '@forge/protocol'
+import type { EnvironmentClient } from '@forge/client-runtime'
 import { memo, useState, useCallback } from 'react'
 import { isUserVisibleAssistantConversationMessage } from '@forge/protocol'
 import { Copy, Check, GitFork, Pin, Reply, Layers, CircleCheck } from 'lucide-react'
@@ -108,7 +109,7 @@ function PinButton({ pinned, onClick }: { pinned: boolean; onClick: () => void }
 
 interface ConversationMessageRowProps {
   message: ConversationMessageEntry
-  wsUrl?: string
+  environmentClient?: EnvironmentClient | null
   activeAgentDisplayName?: string
   transcriptAgentId?: string | null
   feedbackTargetId?: string
@@ -147,7 +148,7 @@ interface ConversationMessageRowProps {
 
 export const ConversationMessageRow = memo(function ConversationMessageRow({
   message,
-  wsUrl,
+  environmentClient,
   activeAgentDisplayName,
   transcriptAgentId,
   feedbackTargetId,
@@ -224,7 +225,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
                 {normalizedText}
               </p>
             ) : null}
-            <MessageAttachments attachments={attachments} isUser={false} wsUrl={wsUrl} />
+            <MessageAttachments attachments={attachments} isUser={false} environmentClient={environmentClient} />
           </div>
           {timestampLabel ? (
             <div className="mt-1 text-[11px] text-indigo-700/80 dark:text-indigo-300/80">
@@ -297,7 +298,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
               {timestampLabel && <time dateTime={message.timestamp}>{timestampLabel}</time>}
             </div>
             <p className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-relaxed">{normalizedText}</p>
-            <MessageAttachments attachments={attachments} isUser={false} wsUrl={wsUrl} />
+            <MessageAttachments attachments={attachments} isUser={false} environmentClient={environmentClient} />
           </div>
         </div>
       )
@@ -314,7 +315,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
               {normalizedText}
             </p>
           ) : null}
-          <MessageAttachments attachments={attachments} isUser={false} wsUrl={wsUrl} />
+          <MessageAttachments attachments={attachments} isUser={false} environmentClient={environmentClient} />
         </div>
         {timestampLabel || sourceContext ? (
           <div className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-700/80 dark:text-amber-300/80">
@@ -386,7 +387,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
                 className="mb-1"
               />
             ) : null}
-            <MessageAttachments attachments={attachments} isUser wsUrl={wsUrl} />
+            <MessageAttachments attachments={attachments} isUser environmentClient={environmentClient} />
             {hasText ? (
               <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
                 {normalizedText}
@@ -500,7 +501,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
           enableMermaid
         />
       ) : null}
-      <MessageAttachments attachments={attachments} isUser={false} wsUrl={wsUrl} />
+      <MessageAttachments attachments={attachments} isUser={false} environmentClient={environmentClient} />
       {timestampLabel || sourceContext || showFeedback || onForkFromMessage || canPinAssistant || onReplyToMessage ? (
         <div className="flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/70">
           <SourceBadge sourceContext={sourceContext} />

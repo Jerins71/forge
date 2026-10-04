@@ -1,3 +1,4 @@
+import type { EnvironmentClient } from '@forge/client-runtime'
 import type {
   AgentModelDescriptor,
   AgentModelOrigin,
@@ -95,7 +96,10 @@ export interface MessageInputProps {
   placeholderOverride?: string
   agentLabel?: string
   allowWhileLoading?: boolean
+  /** Primary-bound voice transcription endpoint. */
   wsUrl?: string
+  /** The session's environment for mentions/catalog reads. */
+  environmentClient?: EnvironmentClient | null
   agentId?: string
   /** Override draft storage key. Defaults to `agentId`. Builder uses agentId; collab uses channel-based keys. */
   draftKey?: string

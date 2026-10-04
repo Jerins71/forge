@@ -3,7 +3,7 @@ import { FileText, RefreshCw } from 'lucide-react'
 import { isSessionContextArtifacts, type ContextArtifactFile, type SessionContextArtifacts } from '@forge/protocol'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
+import type { EnvironmentClient } from '@forge/client-runtime'
 import { MarkdownMessage } from '../MarkdownMessage'
 
 const descriptions = {
@@ -17,7 +17,7 @@ function timestamp(value: string) {
   return Number.isNaN(date.getTime()) ? 'Unknown update time' : date.toLocaleString()
 }
 
-function useContextArtifacts(wsUrl: string, managerId: string) {
+function useContextArtifacts(environmentClient: EnvironmentClient, managerId: string) {
   const [data, setData] = useState<SessionContextArtifacts | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
@@ -31,13 +31,12 @@ function useContextArtifacts(wsUrl: string, managerId: string) {
         return
       }
       try {
-        const response = await fetch(resolveApiEndpoint(wsUrl,
-          `/api/agents/${encodeURIComponent(managerId)}/context-artifacts`), {
-          signal: controller.signal, credentials: 'include', cache: 'no-store',
-        })
-        if (!response.ok) throw new Error(response.status === 404
-          ? 'Context files are unavailable for this session or server.' : 'Unable to refresh context files. Try again.')
-        const payload: unknown = await response.json()
+        const payload: unknown = await environmentClient.features.sessions
+          .contextArtifacts(managerId, controller.signal)
+          .catch((cause: unknown) => {
+            throw new Error((cause as { status?: number }).status === 404
+              ? 'Context files are unavailable for this session or server.' : 'Unable to refresh context files. Try again.')
+          })
         if (!isSessionContextArtifacts(payload) || payload.contextMode.sessionAgentId !== managerId) {
           throw new Error('Invalid context files response.')
         }
@@ -54,13 +53,13 @@ function useContextArtifacts(wsUrl: string, managerId: string) {
     setLoading(true)
     void load()
     return () => { controller.abort(); clearTimeout(timer) }
-  }, [wsUrl, managerId, refresh])
+  }, [environmentClient, managerId, refresh])
   return { data, error, loading, refresh: () => setRefresh(value => value + 1) }
 }
 
 /** Mounted only for the visible Artifacts tab, keyed by server and manager by its caller. */
-export function ContextArtifactsSection({ wsUrl, managerId }: { wsUrl: string; managerId: string }) {
-  const { data, error, loading, refresh } = useContextArtifacts(wsUrl, managerId)
+export function ContextArtifactsSection({ environmentClient, managerId }: { environmentClient: EnvironmentClient; managerId: string }) {
+  const { data, error, loading, refresh } = useContextArtifacts(environmentClient, managerId)
   const opener = useRef<HTMLButtonElement | null>(null)
   const refreshButton = useRef<HTMLButtonElement | null>(null)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)

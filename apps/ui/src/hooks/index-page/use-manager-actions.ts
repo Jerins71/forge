@@ -7,8 +7,7 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from 'react'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
-import { seedProjectResources } from '@/components/file-browser/use-file-browser-queries'
+import type { EnvironmentClient } from '@forge/client-runtime'
 import { fetchRepositorySettings } from '@/components/settings/repository-settings-api'
 import type { CreateProjectSourceMode } from '@/components/chat/CreateManagerDialog'
 import { deriveRepositoryFolderFromUrl } from '@/lib/repository-project-helpers'
@@ -24,7 +23,10 @@ import type { AppRouteState } from './use-route-state'
 import { DEFAULT_MANAGER_AGENT_ID } from './use-route-state'
 
 interface UseManagerActionsOptions {
+  /** Primary-bound repository settings endpoint. */
   wsUrl: string
+  /** The environment whose sessions these actions address (compaction, resource seeding). */
+  environmentClient: EnvironmentClient | null
   clientRef: MutableRefObject<ManagerWsClient | null>
   agents: AgentDescriptor[]
   activeAgent: AgentDescriptor | null
@@ -37,6 +39,7 @@ interface UseManagerActionsOptions {
 
 export function useManagerActions({
   wsUrl,
+  environmentClient,
   clientRef,
   agents,
   activeAgent,
@@ -208,14 +211,15 @@ export function useManagerActions({
   }, [])
 
   const handleCompactManager = useCallback(async (customInstructions?: string) => {
-    if (!isActiveManager || !activeAgentId) {
+    if (!isActiveManager || !activeAgentId || !environmentClient) {
       return
     }
 
     setCompactingAgentId(activeAgentId)
 
     try {
-      await requestManagerCompaction(wsUrl, activeAgentId, customInstructions)
+      const trimmed = customInstructions?.trim()
+      await environmentClient.features.sessions.compact(activeAgentId, trimmed ? { customInstructions: trimmed } : {})
       setState((previous) => ({
         ...previous,
         lastError: null,
@@ -228,17 +232,17 @@ export function useManagerActions({
     } finally {
       setCompactingAgentId(null)
     }
-  }, [activeAgentId, isActiveManager, setState, wsUrl])
+  }, [activeAgentId, environmentClient, isActiveManager, setState])
 
   const handleSmartCompactManager = useCallback(async () => {
-    if (!isActiveManager || !activeAgentId) {
+    if (!isActiveManager || !activeAgentId || !environmentClient) {
       return
     }
 
     setSmartCompactingAgentId(activeAgentId)
 
     try {
-      await requestManagerSmartCompaction(wsUrl, activeAgentId)
+      await environmentClient.features.sessions.smartCompact(activeAgentId)
       setState((previous) => ({
         ...previous,
         lastError: null,
@@ -251,7 +255,7 @@ export function useManagerActions({
     } finally {
       setSmartCompactingAgentId(null)
     }
-  }, [activeAgentId, isActiveManager, setState, wsUrl])
+  }, [activeAgentId, environmentClient, isActiveManager, setState])
 
   const handleStopAllAgents = useCallback(async () => {
     const client = clientRef.current
@@ -468,7 +472,7 @@ export function useManagerActions({
 
         if (scaffoldForgeResources) {
           const profileId = manager.profileId ?? manager.agentId
-          seedProjectResources(wsUrl, { profileId, sessionAgentId: manager.agentId }).catch((err) => {
+          environmentClient?.features.files.seedResources({ profileId, sessionAgentId: manager.agentId }).catch((err: unknown) => {
             console.warn('Failed to seed .forge project resources:', err)
           })
         }
@@ -536,7 +540,7 @@ export function useManagerActions({
       // Seed .forge project resources if the user opted in (non-blocking)
       if (scaffoldForgeResources) {
         const profileId = manager.profileId ?? manager.agentId
-        seedProjectResources(wsUrl, { profileId, sessionAgentId: manager.agentId }).catch((err) => {
+        environmentClient?.features.files.seedResources({ profileId, sessionAgentId: manager.agentId }).catch((err: unknown) => {
           console.warn('Failed to seed .forge project resources:', err)
         })
       }
@@ -560,6 +564,7 @@ export function useManagerActions({
   }, [
     clientRef,
     createProjectSourceMode,
+    environmentClient,
     navigateToRoute,
     newManagerCwd,
     newManagerModelSelection,
@@ -571,7 +576,6 @@ export function useManagerActions({
     repositoryUrl,
     resetCloneFields,
     scaffoldForgeResources,
-    wsUrl,
   ])
 
   const handleRequestDeleteManager = useCallback((managerId: string) => {
@@ -682,79 +686,6 @@ export function useManagerActions({
     isStoppingAllAgents,
     handleStopAllAgents,
   }
-}
-
-async function requestManagerCompaction(
-  wsUrl: string,
-  agentId: string,
-  customInstructions?: string,
-): Promise<void> {
-  const endpoint = resolveApiEndpoint(
-    wsUrl,
-    `/api/agents/${encodeURIComponent(agentId)}/compact`,
-  )
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(
-      customInstructions && customInstructions.trim().length > 0
-        ? { customInstructions: customInstructions.trim() }
-        : {},
-    ),
-  })
-
-  if (response.ok) {
-    return
-  }
-
-  let errorMessage: string | undefined
-  try {
-    const payload = (await response.json()) as { error?: unknown }
-    if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
-      errorMessage = payload.error.trim()
-    }
-  } catch {
-    // Ignore JSON parsing errors and fall back to status-based error text.
-  }
-
-  throw new Error(errorMessage ?? `Compaction request failed with status ${response.status}`)
-}
-
-async function requestManagerSmartCompaction(
-  wsUrl: string,
-  agentId: string,
-): Promise<void> {
-  const endpoint = resolveApiEndpoint(
-    wsUrl,
-    `/api/agents/${encodeURIComponent(agentId)}/smart-compact`,
-  )
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({}),
-  })
-
-  if (response.ok) {
-    return
-  }
-
-  let errorMessage: string | undefined
-  try {
-    const payload = (await response.json()) as { error?: unknown }
-    if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
-      errorMessage = payload.error.trim()
-    }
-  } catch {
-    // Ignore JSON parsing errors and fall back to status-based error text.
-  }
-
-  throw new Error(errorMessage ?? `Smart compaction request failed with status ${response.status}`)
 }
 
 function toErrorMessage(error: unknown): string {
