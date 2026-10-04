@@ -361,6 +361,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.4)
+      '@forge/client-runtime':
+        specifier: workspace:*
+        version: link:../../packages/client-runtime
       '@forge/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -543,6 +546,31 @@ importers:
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.13)(jiti@2.7.0)(jsdom@27.4.0(@noble/hashes@2.2.0))(lightningcss@1.30.2)(msw@2.12.10(@types/node@24.10.13)(typescript@5.9.3))(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)
+
+  packages/client-runtime:
+    dependencies:
+      '@forge/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@sinclair/typebox':
+        specifier: ^0.34.41
+        version: 0.34.48
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.11
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.11)(jiti@2.7.0)(jsdom@27.4.0(@noble/hashes@2.2.0))(lightningcss@1.30.2)(msw@2.12.10(@types/node@22.19.11)(typescript@5.9.3))(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
 
   packages/protocol:
     dependencies:
