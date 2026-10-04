@@ -4,7 +4,6 @@ import type {
   UpdateSecureSecretSettingsResponse,
 } from "@forge/protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isBuilderRuntimeTarget, type RuntimeTarget } from "../../../runtime-target.js";
 import {
   SecureSecretSettingsConflictError,
   SecureSecretSettingsService,
@@ -18,9 +17,8 @@ const SECURE_SECRET_SETTINGS_METHODS = "GET, PUT, OPTIONS";
 
 export function createSecureSecretSettingsRoutes(options: {
   settingsService: SecureSecretSettingsService;
-  runtimeTarget: RuntimeTarget;
 }): HttpRoute[] {
-  const { settingsService, runtimeTarget } = options;
+  const { settingsService } = options;
 
   return [
     {
@@ -31,7 +29,6 @@ export function createSecureSecretSettingsRoutes(options: {
           request,
           response,
           settingsService,
-          runtimeTarget,
         );
       },
     },
@@ -42,7 +39,6 @@ async function handleSecureSecretSettingsRequest(
   request: IncomingMessage,
   response: ServerResponse,
   settingsService: SecureSecretSettingsService,
-  runtimeTarget: RuntimeTarget,
 ): Promise<void> {
   if (request.method === "OPTIONS") {
     applyCorsHeaders(request, response, SECURE_SECRET_SETTINGS_METHODS);
@@ -52,13 +48,6 @@ async function handleSecureSecretSettingsRequest(
   }
 
   applyCorsHeaders(request, response, SECURE_SECRET_SETTINGS_METHODS);
-
-  if (!isBuilderRuntimeTarget(runtimeTarget)) {
-    sendJson(response, 404, {
-      error: "Secure secret settings are only available in Builder runtime.",
-    });
-    return;
-  }
 
   if (request.method === "GET") {
     const payload: GetSecureSecretSettingsResponse = settingsService.getSettingsView();

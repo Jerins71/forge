@@ -36,7 +36,6 @@ function config(): SwarmConfig {
     port: 47187,
     debug: false,
     isDesktop: false,
-    runtimeTarget: "builder",
     cortexEnabled: false,
     allowNonManagerSubscriptions: false,
     managerDisplayName: "Manager",

@@ -28,7 +28,7 @@ describe("remote update awareness archive lifecycle", () => {
     let profiles = [profile()];
     const events: unknown[] = [];
     const manager = {
-      getConfig: () => ({ runtimeTarget: "builder", paths: {} }),
+      getConfig: () => ({ paths: {} }),
       listProfiles: () => profiles,
       getAgent: (agentId: string) => agentId === descriptor.agentId ? descriptor : undefined,
     } as unknown as SwarmManager;
@@ -67,7 +67,7 @@ describe("remote update awareness archive lifecycle", () => {
   it("keeps the global master authoritative over an explicit project-on override", async () => {
     const { database, store } = await createTestStore();
     const manager = {
-      getConfig: () => ({ runtimeTarget: "builder", paths: {} }),
+      getConfig: () => ({ paths: {} }),
       listProfiles: () => [profile()],
       getAgent: () => descriptor,
     } as unknown as SwarmManager;

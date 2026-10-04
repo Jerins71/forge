@@ -43,8 +43,8 @@ export interface CwdPolicy {
   rootDir: string;
   allowlistRoots: string[];
   /**
-   * When true (collaboration-server / remote-build selection surfaces), paths
-   * must resolve inside allowlistRoots. Local Builder keeps this false.
+   * When true, paths must resolve inside allowlistRoots. No current caller
+   * enforces it: the local Builder keeps CWD selection unrestricted.
    */
   enforceAllowlist: boolean;
 }

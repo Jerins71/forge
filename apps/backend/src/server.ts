@@ -7,13 +7,11 @@ import {
   extractProvidersUsed
 } from "./telemetry/telemetry-payload.js";
 import { TelemetryService } from "./telemetry/telemetry-service.js";
-import { createNoopObservabilityFacade } from "./observability/noop-observability.js";
 import { ObservabilityService } from "./observability/observability-service.js";
 import type { ObservabilityFacade } from "./observability/observability-types.js";
 import { CronSchedulerService } from "./scheduler/cron-scheduler-service.js";
 import { getScheduleFilePath } from "./scheduler/schedule-storage.js";
 import { acquireRuntimeLock } from "./runtime-lock.js";
-import { isBuilderRuntimeTarget } from "./runtime-target.js";
 import { FeedbackService } from "./swarm/feedback-service.js";
 import { SwarmManager } from "./swarm/swarm-manager.js";
 import { BrowserAutomationService } from "./swarm/browser-automation/index.js";
@@ -65,12 +63,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
   const logger = createLogger(options.logger);
 
   const runtimeLock = acquireRuntimeLock(config.paths.dataDir);
-  const observabilityService: ObservabilityFacade = isBuilderRuntimeTarget(config.runtimeTarget)
-    ? new ObservabilityService({
-        dataDir: config.paths.dataDir,
-        runtimeTarget: config.runtimeTarget,
-      })
-    : createNoopObservabilityFacade(config.runtimeTarget);
+  const observabilityService: ObservabilityFacade = new ObservabilityService({ dataDir: config.paths.dataDir });
 
   // Signal-driven shutdown is owned by index.ts so the lock remains held until
   // graceful shutdown completes. This hook is only a final best-effort fallback

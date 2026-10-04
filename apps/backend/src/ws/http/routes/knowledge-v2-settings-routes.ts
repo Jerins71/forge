@@ -4,7 +4,6 @@ import type {
   UpdateKnowledgeV2SettingsResponse,
 } from "@forge/protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isBuilderRuntimeTarget, type RuntimeTarget } from "../../../runtime-target.js";
 import {
   KnowledgeV2MigrationRequiredError,
   KnowledgeV2SettingsService,
@@ -22,7 +21,6 @@ const KNOWLEDGE_V2_CLEANUP_METHODS = "POST, OPTIONS";
 export function createKnowledgeV2SettingsRoutes(options: {
   settingsService: KnowledgeV2SettingsService;
   dataDir: string;
-  runtimeTarget: RuntimeTarget;
 }): HttpRoute[] {
   return [
     {
@@ -33,7 +31,6 @@ export function createKnowledgeV2SettingsRoutes(options: {
           request,
           response,
           options.settingsService,
-          options.runtimeTarget,
         );
       },
     },
@@ -51,7 +48,6 @@ async function handleKnowledgeV2SettingsRequest(
   request: IncomingMessage,
   response: ServerResponse,
   settingsService: KnowledgeV2SettingsService,
-  runtimeTarget: RuntimeTarget,
 ): Promise<void> {
   if (request.method === "OPTIONS") {
     applyCorsHeaders(request, response, KNOWLEDGE_V2_SETTINGS_METHODS);
@@ -61,11 +57,6 @@ async function handleKnowledgeV2SettingsRequest(
   }
 
   applyCorsHeaders(request, response, KNOWLEDGE_V2_SETTINGS_METHODS);
-
-  if (!isBuilderRuntimeTarget(runtimeTarget)) {
-    sendJson(response, 404, { error: "Knowledge v2 settings are only available in Builder runtime." });
-    return;
-  }
 
   if (request.method === "GET") {
     const payload: GetKnowledgeV2SettingsResponse = {
@@ -115,7 +106,6 @@ async function handleKnowledgeV2CleanupRequest(
   options: {
     settingsService: KnowledgeV2SettingsService;
     dataDir: string;
-    runtimeTarget: RuntimeTarget;
   },
 ): Promise<void> {
   if (request.method === "OPTIONS") {
@@ -126,11 +116,6 @@ async function handleKnowledgeV2CleanupRequest(
   }
 
   applyCorsHeaders(request, response, KNOWLEDGE_V2_CLEANUP_METHODS);
-
-  if (!isBuilderRuntimeTarget(options.runtimeTarget)) {
-    sendJson(response, 404, { error: "Knowledge v2 settings are only available in Builder runtime." });
-    return;
-  }
 
   if (request.method !== "POST") {
     response.setHeader("Allow", KNOWLEDGE_V2_CLEANUP_METHODS);

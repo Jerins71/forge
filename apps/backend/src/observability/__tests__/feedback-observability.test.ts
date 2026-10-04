@@ -165,7 +165,6 @@ function createFakeObservability(): ObservabilityFacade & { recordFeedback: Retu
     updateSettings: vi.fn(async () => settings),
     getStatus: vi.fn(() => ({
       enabled: false,
-      runtimeTarget: 'builder',
       contentMode: 'rich',
       exporter: {
         configured: false,

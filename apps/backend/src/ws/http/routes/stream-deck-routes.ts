@@ -11,7 +11,6 @@ import {
   type StreamDeckSessionSummary,
   type StreamDeckSnapshot,
 } from "@forge/protocol";
-import { isBuilderRuntimeTarget, type RuntimeTarget } from "../../../runtime-target.js";
 import type { StatsService } from "../../../stats/stats-service.js";
 import type { CliAccessService } from "../../../swarm/cli-access-service.js";
 import type { StreamDeckAccessService } from "../../../swarm/stream-deck-access-service.js";
@@ -63,17 +62,12 @@ interface StreamDeckRouteSwarmManager {
 export function createStreamDeckRoutes(options: {
   cliAccessService: CliAccessService;
   streamDeckAccessService: StreamDeckAccessService;
-  runtimeTarget: RuntimeTarget;
   swarmManager: StreamDeckRouteSwarmManager;
   unreadTracker: Pick<UnreadTracker, "getSnapshot" | "markRead">;
   statsService: Pick<StatsService, "getSnapshot">;
   onUnreadChanged?: (sessionAgentId: string, count: number) => void;
   broadcastEvent: (event: ServerEvent) => void;
 }): HttpRoute[] {
-  if (!isBuilderRuntimeTarget(options.runtimeTarget)) {
-    return [];
-  }
-
   return [
     {
       methods: STREAM_DECK_HTTP_METHODS,

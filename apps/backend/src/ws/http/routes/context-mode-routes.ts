@@ -3,7 +3,6 @@ import type {
   SessionContextModeSnapshot,
 } from "@forge/protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isBuilderRuntimeTarget, type RuntimeTarget } from "../../../runtime-target.js";
 import {
   ContextModeValidationError,
   parseSessionContextModeWrite,
@@ -20,7 +19,6 @@ const CONTEXT_MODE_METHODS = "GET, PUT, OPTIONS";
 
 export function createContextModeRoutes(options: {
   swarmManager: SwarmManager;
-  runtimeTarget: RuntimeTarget;
 }): HttpRoute[] {
   return [
     {
@@ -32,10 +30,6 @@ export function createContextModeRoutes(options: {
         if (request.method === "OPTIONS") {
           response.statusCode = 204;
           response.end();
-          return;
-        }
-        if (!isBuilderRuntimeTarget(options.runtimeTarget)) {
-          sendJson(response, 404, { error: "Context artifacts are only available in Builder runtime." });
           return;
         }
         if (request.method !== "GET") {
@@ -74,7 +68,7 @@ export function createContextModeRoutes(options: {
 }
 
 async function handleProfileContextModeRequest(
-  options: { swarmManager: SwarmManager; runtimeTarget: RuntimeTarget },
+  options: { swarmManager: SwarmManager },
   request: IncomingMessage,
   response: ServerResponse,
   requestUrl: URL,
@@ -87,11 +81,6 @@ async function handleProfileContextModeRequest(
   }
 
   applyCorsHeaders(request, response, CONTEXT_MODE_METHODS);
-
-  if (!isBuilderRuntimeTarget(options.runtimeTarget)) {
-    sendJson(response, 404, { error: "Context mode settings are only available in Builder runtime." });
-    return;
-  }
 
   const profileId = decodePathSegment(requestUrl.pathname.match(PROFILE_CONTEXT_MODE_PATTERN)?.[1]);
   if (!profileId) {
@@ -127,7 +116,7 @@ async function handleProfileContextModeRequest(
 }
 
 async function handleAgentContextModeRequest(
-  options: { swarmManager: SwarmManager; runtimeTarget: RuntimeTarget },
+  options: { swarmManager: SwarmManager },
   request: IncomingMessage,
   response: ServerResponse,
   requestUrl: URL,
@@ -140,11 +129,6 @@ async function handleAgentContextModeRequest(
   }
 
   applyCorsHeaders(request, response, CONTEXT_MODE_METHODS);
-
-  if (!isBuilderRuntimeTarget(options.runtimeTarget)) {
-    sendJson(response, 404, { error: "Context mode settings are only available in Builder runtime." });
-    return;
-  }
 
   const agentId = decodePathSegment(requestUrl.pathname.match(AGENT_CONTEXT_MODE_PATTERN)?.[1]);
   if (!agentId) {

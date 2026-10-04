@@ -37,7 +37,7 @@ afterEach(async () => {
 describe("Secure Sessions server lifecycle", () => {
   it("recovers orphaned execution without delaying readiness and closes secure sessions on stop", async () => {
     const order: string[] = [];
-    const tempConfig = await createTempConfig({ runtimeTarget: "builder" });
+    const tempConfig = await createTempConfig();
     tempConfigs.push(tempConfig);
     let finishRecovery: ((value: { destroyedSandboxIds: string[] }) => void) | undefined;
     const recoveryGate = new Promise<{ destroyedSandboxIds: string[] }>((resolve) => {
@@ -91,7 +91,7 @@ describe("Secure Sessions server lifecycle", () => {
 
   it("holds the runtime lock through graceful shutdown and restores process listeners", async () => {
     const baselineListeners = lifecycleListenerCounts();
-    const tempConfig = await createTempConfig({ runtimeTarget: "builder" });
+    const tempConfig = await createTempConfig();
     tempConfigs.push(tempConfig);
     const lockFile = join(tempConfig.config.paths.dataDir, "runtime.lock");
 
@@ -143,7 +143,7 @@ describe("Secure Sessions server lifecycle", () => {
   });
 
   it("stops WebSocket ingress before draining persistence and releases the runtime lock", async () => {
-    const tempConfig = await createTempConfig({ runtimeTarget: "builder" });
+    const tempConfig = await createTempConfig();
     tempConfigs.push(tempConfig);
     const lockFile = join(tempConfig.config.paths.dataDir, "runtime.lock");
 
@@ -214,7 +214,7 @@ describe("Secure Sessions server lifecycle", () => {
 
   it("releases the runtime lock and exit hook after startup fails", async () => {
     const baselineListeners = lifecycleListenerCounts();
-    const tempConfig = await createTempConfig({ runtimeTarget: "builder" });
+    const tempConfig = await createTempConfig();
     tempConfigs.push(tempConfig);
     const lockFile = join(tempConfig.config.paths.dataDir, "runtime.lock");
     vi.spyOn(EmbeddedGitVersioningService.prototype, "start")
@@ -235,7 +235,7 @@ describe("Secure Sessions server lifecycle", () => {
 
   it("finishes mandatory cleanup when the WebSocket stop reports a failure", async () => {
     const baselineListeners = lifecycleListenerCounts();
-    const tempConfig = await createTempConfig({ runtimeTarget: "builder" });
+    const tempConfig = await createTempConfig();
     tempConfigs.push(tempConfig);
     const lockFile = join(tempConfig.config.paths.dataDir, "runtime.lock");
     const originalStop = SwarmWebSocketServer.prototype.stop;

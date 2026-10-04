@@ -2,16 +2,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { mkdtemp } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import type { PhoenixObservabilitySettings, PhoenixObservabilitySettingsPatch, PhoenixObservabilityStatus } from '@forge/protocol'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { PhoenixObservabilitySettings, PhoenixObservabilityStatus } from '@forge/protocol'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   P0HttpRouteFakeSwarmManager as FakeSwarmManager,
   createP0HttpRouteManagerDescriptor as createManagerDescriptor,
   makeP0HttpRouteTempConfig as makeTempConfig,
 } from '../../../../test-support/ws-integration-harness.js'
 import { ObservabilityService } from '../../../../observability/observability-service.js'
-import type { ObservabilityFacade } from '../../../../observability/observability-types.js'
-import { createDefaultPhoenixObservabilitySettings } from '../../../../observability/observability-settings.js'
 import { sendJson } from '../../../http-utils.js'
 import { SwarmWebSocketServer } from '../../../server.js'
 import { createPhoenixObservabilityRoutes } from '../phoenix-observability-routes.js'
@@ -26,9 +24,9 @@ afterEach(async () => {
 describe('createPhoenixObservabilityRoutes', () => {
   it('serves settings and status for Builder runtime', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'forge-phoenix-routes-'))
-    const service = new ObservabilityService({ dataDir, runtimeTarget: 'builder' })
+    const service = new ObservabilityService({ dataDir })
     await service.initialize()
-    const server = await createRouteServer(createPhoenixObservabilityRoutes({ observabilityService: service, runtimeTarget: 'builder' }))
+    const server = await createRouteServer(createPhoenixObservabilityRoutes({ observabilityService: service }))
 
     const response = await fetch(`${server.baseUrl}/api/phoenix-observability/settings`)
     const body = await response.json() as { settings: PhoenixObservabilitySettings; status: PhoenixObservabilityStatus }
@@ -40,9 +38,9 @@ describe('createPhoenixObservabilityRoutes', () => {
 
   it('rejects non-loopback endpoints on save', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'forge-phoenix-routes-'))
-    const service = new ObservabilityService({ dataDir, runtimeTarget: 'builder' })
+    const service = new ObservabilityService({ dataDir })
     await service.initialize()
-    const server = await createRouteServer(createPhoenixObservabilityRoutes({ observabilityService: service, runtimeTarget: 'builder' }))
+    const server = await createRouteServer(createPhoenixObservabilityRoutes({ observabilityService: service }))
 
     const response = await fetch(`${server.baseUrl}/api/phoenix-observability/settings`, {
       method: 'PUT',
@@ -52,15 +50,6 @@ describe('createPhoenixObservabilityRoutes', () => {
 
     expect(response.status).toBe(400)
     await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining('http:// loopback') })
-  })
-
-  it('defensively hides routes for collaboration runtime', async () => {
-    const service = new FakeObservabilityService('collaboration-server')
-    const server = await createRouteServer(createPhoenixObservabilityRoutes({ observabilityService: service, runtimeTarget: 'collaboration-server' }))
-
-    const response = await fetch(`${server.baseUrl}/api/phoenix-observability/status`)
-
-    expect(response.status).toBe(404)
   })
 
   it('SwarmWebSocketServer fallback uses an explicit no-op facade instead of owning a real service', async () => {
@@ -92,61 +81,6 @@ describe('createPhoenixObservabilityRoutes', () => {
     }
   })
 })
-
-class FakeObservabilityService implements ObservabilityFacade {
-  readonly settings = createDefaultPhoenixObservabilitySettings()
-  readonly testConnection = vi.fn(async () => ({ ok: true, status: this.getStatus() }))
-
-  constructor(private readonly runtimeTarget: PhoenixObservabilityStatus['runtimeTarget']) {}
-
-  async initialize(): Promise<void> {}
-  async getSettings(): Promise<PhoenixObservabilitySettings> { return this.settings }
-  async updateSettings(patch: PhoenixObservabilitySettingsPatch): Promise<PhoenixObservabilitySettings> {
-    Object.assign(this.settings, patch)
-    return this.settings
-  }
-  getStatus(): PhoenixObservabilityStatus {
-    return {
-      enabled: this.settings.enabled,
-      runtimeTarget: this.runtimeTarget,
-      contentMode: this.settings.contentMode,
-      exporter: {
-        configured: false,
-        active: false,
-        endpoint: this.settings.endpoint,
-        projectName: this.settings.projectName ?? 'default',
-        lastSuccessfulExportAt: null,
-        lastErrorAt: null,
-        lastErrorMessage: null,
-      },
-      counters: {
-        spansStarted: 0,
-        spansEnded: 0,
-        accepted: 0,
-        droppedQueueFull: 0,
-        exportSucceeded: 0,
-        exportFailed: 0,
-        contentTruncations: 0,
-        redactionMatches: 0,
-        correlationMisses: 0,
-        correlationEvictions: 0,
-      },
-    }
-  }
-  recordPromptResolved(): void {}
-  recordRuntimeCreated(): void {}
-  beginRuntimeInput(): undefined { return undefined }
-  completeRuntimeInput(): void {}
-  cancelRuntimeInput(): void {}
-  recordRuntimeInput(): undefined { return undefined }
-  recordRuntimeSessionEvent(): void {}
-  recordRuntimeError(): void {}
-  recordToolSideEffect(): void {}
-  recordUserVisibleMessage(): void {}
-  recordAgentDelivery(): void {}
-  recordFeedback(): void {}
-  async shutdown(): Promise<void> {}
-}
 
 async function createRouteServer(routes: HttpRoute[]): Promise<{ baseUrl: string; close: () => Promise<void> }> {
   const httpServer = createServer((request, response) => {

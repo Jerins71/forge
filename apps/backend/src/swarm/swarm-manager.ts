@@ -654,8 +654,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         getPiModelsJsonPath: () => this.configurationCoordinator.getPiModelsJsonPathOrThrow(),
         getMemoryRuntimeResources: (descriptor) => this.getMemoryRuntimeResources(descriptor),
         getSwarmContextFiles: (cwd) => this.getSwarmContextFiles(cwd),
-        resolveAndValidateCwd: (cwd, cwdOptions) =>
-          this.configurationCoordinator.resolveAndValidateCwd(cwd, cwdOptions),
+        resolveAndValidateCwd: (cwd) => this.configurationCoordinator.resolveAndValidateCwd(cwd),
         ensureSessionFileParentDirectory: (sessionFile) =>
           this.persistenceService.ensureSessionFileParentDirectory(sessionFile),
         ensureDirectories: () => this.persistenceService.ensureDirectories(),

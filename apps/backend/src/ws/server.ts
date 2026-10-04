@@ -43,7 +43,6 @@ import { isPidAlive } from "../swarm/platform.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
 import type { BrowserAutomationService } from "../swarm/browser-automation/index.js";
 import { UnreadTracker } from "../swarm/session/unread-tracker.js";
-import { isBuilderRuntimeTarget } from "../runtime-target.js";
 import { createNoopObservabilityFacade } from "../observability/noop-observability.js";
 import type { ObservabilityFacade } from "../observability/observability-types.js";
 import { FeedbackService } from "../swarm/feedback-service.js";
@@ -305,7 +304,6 @@ export class SwarmWebSocketServer {
     if (event.type !== "generation_throughput") return;
     // Pi throughput is a Builder-local capability in v1. Do not forward it
     // through CLI subscriptions.
-    if (!isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) return;
     this.wsHandler.broadcastGenerationThroughput(event.measurement.sessionId, event);
   };
 
@@ -482,16 +480,14 @@ export class SwarmWebSocketServer {
     this.host = options.host;
     this.port = options.port;
     this.secureControlToken = options.secureControlToken ?? "";
-    const isBuilder = isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget);
     const cortexEnabled = this.swarmManager.getConfig().cortexEnabled;
     this.cortexAutoReviewSettingsService = new CortexAutoReviewSettingsService({
       dataDir: this.swarmManager.getConfig().paths.dataDir,
       cortexEnabled,
     });
-    this.builderSidebarOrderService = isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)
-      ? options.builderSidebarOrderService ??
-        new BuilderSidebarOrderService({ dataDir: this.swarmManager.getConfig().paths.dataDir })
-      : null;
+    this.builderSidebarOrderService =
+      options.builderSidebarOrderService ??
+      new BuilderSidebarOrderService({ dataDir: this.swarmManager.getConfig().paths.dataDir });
     this.knowledgeV2SettingsService =
       options.knowledgeV2SettingsService ??
       this.swarmManager.getKnowledgeV2SettingsService?.() ??
@@ -500,7 +496,7 @@ export class SwarmWebSocketServer {
       options.compactionSettingsService ?? this.swarmManager.getCompactionSettingsService();
     this.secureSecretSettingsService =
       options.secureSecretSettingsService
-      ?? (isBuilder ? this.swarmManager.getSecureSecretSettingsService() : null);
+      ?? this.swarmManager.getSecureSecretSettingsService();
     this.cliAccessService = options.cliAccessService ?? new CliAccessService({
       dataDir: this.swarmManager.getConfig().paths.dataDir,
       envApiKey: readCliApiKeyEnv(),
@@ -530,7 +526,7 @@ export class SwarmWebSocketServer {
         : null;
     this.observabilityService =
       options.observabilityService ??
-      createNoopObservabilityFacade(this.swarmManager.getConfig().runtimeTarget);
+      createNoopObservabilityFacade();
     this.feedbackService =
       options.feedbackService ??
       new FeedbackService(this.swarmManager.getConfig().paths.dataDir, { observability: this.observabilityService });
@@ -553,7 +549,7 @@ export class SwarmWebSocketServer {
     let wsHandlerRef: WsHandler | null = null;
 
     const remoteUpdateConfig = this.swarmManager.getConfig();
-    this.remoteUpdateAwarenessService = isBuilder && (
+    this.remoteUpdateAwarenessService = (
       options.remoteUpdateAwarenessService ||
       (remoteUpdateConfig.paths.remoteUpdateAwarenessDbPath && remoteUpdateConfig.remoteUpdateAwarenessModules)
     )
@@ -608,9 +604,7 @@ export class SwarmWebSocketServer {
     this.cliWsHandler = new CliWsHandler(this.swarmManager);
     wsHandlerRef = this.wsHandler;
 
-    this.repositorySettingsService = isBuilder
-      ? new RepositorySettingsService({ dataDir: this.swarmManager.getConfig().paths.dataDir })
-      : null;
+    this.repositorySettingsService = new RepositorySettingsService({ dataDir: this.swarmManager.getConfig().paths.dataDir });
     this.repositoryProjectCreationService = this.repositorySettingsService
       ? new RepositoryProjectCreationService({
           swarmManager: this.swarmManager,
@@ -626,8 +620,8 @@ export class SwarmWebSocketServer {
         void this.telemetryService?.sendOnStatsRefresh(allStats);
       },
     });
-    this.claudeAuthService = isBuilder ? new ClaudeAuthService(this.swarmManager.getConfig(), () => this.swarmManager.notifyClaudeNativeAuthChanged()) : null;
-    this.nativeRuntimeUpdateService = isBuilder ? new NativeRuntimeUpdateService({ dataDir: this.swarmManager.getConfig().paths.dataDir }) : null;
+    this.claudeAuthService = new ClaudeAuthService(this.swarmManager.getConfig(), () => this.swarmManager.notifyClaudeNativeAuthChanged());
+    this.nativeRuntimeUpdateService = new NativeRuntimeUpdateService({ dataDir: this.swarmManager.getConfig().paths.dataDir });
     this.settingsRoutes = createSettingsRoutes({
       swarmManager: this.swarmManager,
       notificationSettingsService: this.notificationSettingsService,
@@ -642,50 +636,37 @@ export class SwarmWebSocketServer {
       & SecureBrowserVaultService;
 
     this.httpRoutes = [
-      ...(isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)
-        ? createCliRoutes({
-            cliAccessService: this.cliAccessService,
-            runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
-            swarmManager: this.swarmManager,
-          })
-        : []),
-      ...(isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)
-          ? createStreamDeckRoutes({
-            cliAccessService: this.cliAccessService,
-            streamDeckAccessService: this.streamDeckAccessService,
-            runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
-            swarmManager: this.swarmManager,
-            unreadTracker: this.unreadTracker,
-            statsService: this.statsService,
-            broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
-            onUnreadChanged: (sessionAgentId, count) =>
-              this.wsHandler.broadcastUnreadCountUpdate(sessionAgentId, count),
-          })
-        : []),
+      ...createCliRoutes({
+        cliAccessService: this.cliAccessService,
+        swarmManager: this.swarmManager,
+      }),
+      ...createStreamDeckRoutes({
+        cliAccessService: this.cliAccessService,
+        streamDeckAccessService: this.streamDeckAccessService,
+        swarmManager: this.swarmManager,
+        unreadTracker: this.unreadTracker,
+        statsService: this.statsService,
+        broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
+        onUnreadChanged: (sessionAgentId, count) =>
+          this.wsHandler.broadcastUnreadCountUpdate(sessionAgentId, count),
+      }),
       ...createStreamDeckPairingRoutes({
         streamDeckAccessService: this.streamDeckAccessService,
-        runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
       }),
       ...createCliAccessSettingsRoutes({
         cliAccessService: this.cliAccessService,
-        runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
       }),
-      ...(isBuilder
-        ? [
-            ...createSecureBrowserControlRoutes({
-              accessService: this.secureBrowserAccessService,
-              vaultService: secureTransportService,
-              secureControlAvailable: this.secureControlToken.length >= 32,
-            }),
-            ...createProjectSecureSessionsRoutes({ service: this.swarmManager }),
-            ...createSecureSecretRoutes({ service: secureTransportService }),
-            ...createSecureSessionRoutes({ service: secureTransportService }),
-          ]
-        : []),
+      ...createSecureBrowserControlRoutes({
+        accessService: this.secureBrowserAccessService,
+        vaultService: secureTransportService,
+        secureControlAvailable: this.secureControlToken.length >= 32,
+      }),
+      ...createProjectSecureSessionsRoutes({ service: this.swarmManager }),
+      ...createSecureSecretRoutes({ service: secureTransportService }),
+      ...createSecureSessionRoutes({ service: secureTransportService }),
       ...(this.builderSidebarOrderService
         ? createBuilderSidebarOrderRoutes({
             service: this.builderSidebarOrderService,
-            runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
             broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
           })
         : []),
@@ -705,12 +686,7 @@ export class SwarmWebSocketServer {
         ? createRemoteUpdateAwarenessRoutes({ service: this.remoteUpdateAwarenessService })
         : []),
       ...createFeedbackRoutes({ swarmManager: this.swarmManager, feedbackService: this.feedbackService }),
-      ...(isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)
-        ? createPhoenixObservabilityRoutes({
-            observabilityService: this.observabilityService,
-            runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
-          })
-        : []),
+      ...createPhoenixObservabilityRoutes({ observabilityService: this.observabilityService }),
       ...createCortexRoutes({ swarmManager: this.swarmManager, cortexEnabled }),
       ...createCortexAutoReviewRoutes({
         settingsService: this.cortexAutoReviewSettingsService,
@@ -720,25 +696,21 @@ export class SwarmWebSocketServer {
         ? createKnowledgeV2SettingsRoutes({
             settingsService: this.knowledgeV2SettingsService,
             dataDir: this.swarmManager.getConfig().paths.dataDir,
-            runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
           })
         : []),
       ...(this.compactionSettingsService
         ? createCompactionSettingsRoutes({
             settingsService: this.compactionSettingsService,
-            runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
           })
         : []),
       ...(this.secureSecretSettingsService
         ? createSecureSecretSettingsRoutes({
             settingsService: this.secureSecretSettingsService,
-            runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
           })
         : []),
       ...(this.repositorySettingsService
         ? createRepositorySettingsRoutes({
             settingsService: this.repositorySettingsService,
-            runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
           })
         : []),
       ...createDebugRoutes({ swarmManager: this.swarmManager }),
@@ -754,10 +726,7 @@ export class SwarmWebSocketServer {
       ...createMobileRoutes({ mobilePushService: this.mobilePushService }),
       ...createManagerSelectionCatalogRoutes({ swarmManager: this.swarmManager }),
       ...createAgentHttpRoutes({ swarmManager: this.swarmManager }),
-      ...(isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget) ? createContextModeRoutes({
-        swarmManager: this.swarmManager,
-        runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
-      }) : []),
+      ...createContextModeRoutes({ swarmManager: this.swarmManager }),
       ...createSessionAuditRoutes({ swarmManager: this.swarmManager }),
       ...createCodexCatalogRoutes({ swarmManager: this.swarmManager }),
       ...(this.terminalService ? createTerminalRoutes({ terminalService: this.terminalService, settingsService: this.terminalSettingsService }) : []),
@@ -798,7 +767,6 @@ export class SwarmWebSocketServer {
       ...createStaticUiRoutes({
         rootDir: this.swarmManager.getConfig().paths.rootDir,
         resourcesDir: this.swarmManager.getConfig().paths.resourcesDir,
-        runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
         nodeEnv: process.env.NODE_ENV,
       }),
     ];
@@ -1078,12 +1046,6 @@ export class SwarmWebSocketServer {
   }
 
   private async handleCliUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
-    const config = this.swarmManager.getConfig();
-    if (!isBuilderRuntimeTarget(config.runtimeTarget)) {
-      rejectWebSocketUpgrade(socket, 404, "Not Found");
-      return;
-    }
-
     const cliWss = this.cliWss;
     if (!cliWss) {
       ignoreSocketErrors(socket);
@@ -1113,10 +1075,7 @@ export class SwarmWebSocketServer {
         const validation = validateSecureBuilderControlOrigin(request, { backendHost: this.host, backendPort: this.getPort() });
         if (!validation.ok) { sendJson(response, 403, { error: validation.errorMessage }); return; }
       }
-      if (
-        isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)
-        && isSecureBuilderControlPath(requestUrl.pathname)
-      ) {
+      if (isSecureBuilderControlPath(requestUrl.pathname)) {
         const originValidation = validateSecureBuilderControlOrigin(
           request,
           {

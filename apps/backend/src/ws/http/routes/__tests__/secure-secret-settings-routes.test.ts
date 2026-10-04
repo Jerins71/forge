@@ -24,7 +24,7 @@ describe("createSecureSecretSettingsRoutes", () => {
     const service = new SecureSecretSettingsService({ dataDir });
     await service.load();
     const server = await createRouteServer(
-      createSecureSecretSettingsRoutes({ settingsService: service, runtimeTarget: "builder" }),
+      createSecureSecretSettingsRoutes({ settingsService: service }),
     );
 
     const response = await fetch(`${server.baseUrl}/api/settings/secure-secrets`);
@@ -45,7 +45,7 @@ describe("createSecureSecretSettingsRoutes", () => {
     const service = new SecureSecretSettingsService({ dataDir });
     await service.load();
     const server = await createRouteServer(
-      createSecureSecretSettingsRoutes({ settingsService: service, runtimeTarget: "builder" }),
+      createSecureSecretSettingsRoutes({ settingsService: service }),
     );
 
     const response = await fetch(`${server.baseUrl}/api/settings/secure-secrets`, {
@@ -66,7 +66,7 @@ describe("createSecureSecretSettingsRoutes", () => {
     const service = new SecureSecretSettingsService({ dataDir });
     await service.load();
     const server = await createRouteServer(
-      createSecureSecretSettingsRoutes({ settingsService: service, runtimeTarget: "builder" }),
+      createSecureSecretSettingsRoutes({ settingsService: service }),
     );
 
     const decimal = await fetch(`${server.baseUrl}/api/settings/secure-secrets`, {
@@ -96,7 +96,7 @@ describe("createSecureSecretSettingsRoutes", () => {
     });
     await service.load();
     const server = await createRouteServer(
-      createSecureSecretSettingsRoutes({ settingsService: service, runtimeTarget: "builder" }),
+      createSecureSecretSettingsRoutes({ settingsService: service }),
     );
 
     const response = await fetch(`${server.baseUrl}/api/settings/secure-secrets`, {
@@ -111,23 +111,6 @@ describe("createSecureSecretSettingsRoutes", () => {
     expect(service.getMaxProjectDefaults()).toBe(50);
   });
 
-  it("returns 404 for collaboration runtime", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "forge-secure-secret-settings-collab-"));
-    const service = new SecureSecretSettingsService({ dataDir });
-    await service.load();
-    const server = await createRouteServer(
-      createSecureSecretSettingsRoutes({
-        settingsService: service,
-        runtimeTarget: "collaboration-server",
-      }),
-    );
-
-    const response = await fetch(`${server.baseUrl}/api/settings/secure-secrets`);
-    const body = (await response.json()) as { error: string };
-
-    expect(response.status).toBe(404);
-    expect(body.error).toContain("Builder runtime");
-  });
 });
 
 async function createRouteServer(routes: HttpRoute[]): Promise<{ baseUrl: string; close: () => Promise<void> }> {

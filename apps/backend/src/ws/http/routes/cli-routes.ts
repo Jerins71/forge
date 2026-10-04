@@ -18,7 +18,6 @@ import {
   type CliStatusResponse,
   type ConversationEntryEvent,
 } from "@forge/protocol";
-import { isBuilderRuntimeTarget, type RuntimeTarget } from "../../../runtime-target.js";
 import { buildCliCapabilities, CLI_SERVER_VERSION } from "../../cli-capabilities.js";
 import {
   buildCliSessionTranscriptResponse,
@@ -64,13 +63,8 @@ interface CliRouteSwarmManager {
 
 export function createCliRoutes(options: {
   cliAccessService: CliAccessService;
-  runtimeTarget: RuntimeTarget;
   swarmManager: CliRouteSwarmManager;
 }): HttpRoute[] {
-  if (!isBuilderRuntimeTarget(options.runtimeTarget)) {
-    return [];
-  }
-
   return [
     {
       methods: CLI_HTTP_METHODS,
@@ -85,7 +79,6 @@ export function createCliRoutes(options: {
 async function handleCliHttpRequest(
   options: {
     cliAccessService: CliAccessService;
-    runtimeTarget: RuntimeTarget;
     swarmManager: CliRouteSwarmManager;
   },
   request: IncomingMessage,
@@ -112,7 +105,7 @@ async function handleCliHttpRequest(
     return;
   }
 
-  const capabilities = buildCliCapabilities(options.runtimeTarget);
+  const capabilities = buildCliCapabilities();
   const segments = getCliPathSegments(requestUrl.pathname);
   if (!segments) {
     sendCliError(response, 400, "bad_path", "Malformed CLI path");
@@ -126,7 +119,7 @@ async function handleCliHttpRequest(
       status: "ok",
       serverTime: new Date().toISOString(),
       serverVersion: CLI_SERVER_VERSION,
-      runtimeTarget: options.runtimeTarget,
+      runtimeTarget: "builder",
       capabilities,
       summary: {
         profileCount: profiles.length,

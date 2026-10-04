@@ -1116,7 +1116,7 @@ describe('WsSubscriptions snapshot delivery tracking', () => {
     const snapshot = { type: 'generation_throughput_snapshot', sessionAgentId: 'manager', measurements: [] }
     const manager = {
       ...base,
-      getConfig: () => ({ managerId: 'manager', runtimeTarget: 'builder' }),
+      getConfig: () => ({ managerId: 'manager' }),
       listWorkersForSession: () => [],
       getGenerationThroughputSnapshot: vi.fn().mockReturnValueOnce(deferred.promise).mockResolvedValue(snapshot),
     }

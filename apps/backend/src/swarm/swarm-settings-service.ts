@@ -40,7 +40,6 @@ import {
   type DirectoryListingResult,
   type DirectoryValidationResult
 } from "./cwd-policy.js";
-import { isCollaborationServerRuntimeTarget } from "../runtime-target.js";
 import { pickDirectory as pickNativeDirectory } from "./directory-picker.js";
 import { ProjectResourceSettingsStore } from "./project-resource-settings.js";
 import { ProjectWorkspaceResolver } from "./project-workspace-resolver.js";
@@ -1653,7 +1652,7 @@ export class SwarmSettingsService {
     return {
       rootDir: this.options.config.paths.rootDir,
       allowlistRoots: normalizeAllowlistRoots(this.options.config.cwdAllowlistRoots),
-      enforceAllowlist: isCollaborationServerRuntimeTarget(this.options.config.runtimeTarget),
+      enforceAllowlist: false,
     };
   }
 }

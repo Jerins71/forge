@@ -3,7 +3,6 @@ import type {
   StreamDeckPairingClaimRequest,
   StreamDeckPairingRequestInput,
 } from "@forge/protocol";
-import { isBuilderRuntimeTarget, type RuntimeTarget } from "../../../runtime-target.js";
 import type { StreamDeckAccessService } from "../../../swarm/stream-deck-access-service.js";
 import { readJsonBody, sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
@@ -16,9 +15,7 @@ const MAX_BODY_BYTES = 8 * 1024;
 
 export function createStreamDeckPairingRoutes(options: {
   streamDeckAccessService: StreamDeckAccessService;
-  runtimeTarget: RuntimeTarget;
 }): HttpRoute[] {
-  if (!isBuilderRuntimeTarget(options.runtimeTarget)) return [];
   return [{
     methods: METHODS,
     matches: (pathname) =>

@@ -26,7 +26,7 @@ function fixture() {
     increment: vi.fn((_profileId: string, id: string) => (counts[id] = (counts[id] ?? 0) + 1)),
   }
   const manager = {
-    getConfig: () => ({ runtimeTarget: 'builder', managerId: 'a', debug: false, paths: { dataDir: '/fixture' } }),
+    getConfig: () => ({ managerId: 'a', debug: false, paths: { dataDir: '/fixture' } }),
     getAgent: (id: string) => agents.find((a) => a.agentId === id), listAgents: () => agents,
     listBootstrapAgents: () => agents.filter((a) => a.role === 'manager'), listProfiles: () => profiles,
     getSessionAttentionSnapshot: () => ({ revision, attentions: ['a', 'hidden', 'collab'].map((id) => ({ sessionAgentId: id, profileId: 'p', attentionId: `attention-${id}`, reason: 'work_settled' as const, raisedAt: at })) }),

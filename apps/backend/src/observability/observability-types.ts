@@ -205,5 +205,4 @@ export interface ObservabilityAgentDeliveryInput {
   metadata?: Record<string, unknown>;
 }
 
-export type ObservabilityRuntimeTarget = PhoenixObservabilityStatus["runtimeTarget"];
 export type ObservabilityRuntimeType = import("@forge/protocol").ForgeRuntimeType;

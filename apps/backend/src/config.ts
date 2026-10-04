@@ -19,7 +19,6 @@ import {
   getUploadsDir
 } from "./swarm/data-paths.js";
 import type { SwarmConfig } from "./swarm/types.js";
-import { isCollaborationServerRuntimeTarget, resolveRuntimeTargetFromEnv } from "./runtime-target.js";
 import { loadConfiguredSqliteDatabaseConstructor } from "./sqlite-database-loader.js";
 
 export function readTelemetryEnvOverride(): boolean | undefined {
@@ -58,15 +57,14 @@ export function createConfig(): SwarmConfig {
   const defaultCwd = rootDir;
 
   const isDesktop = parseBooleanEnv(process.env.FORGE_DESKTOP);
-  const runtimeTarget = resolveRuntimeTargetFromEnv();
-  const cwdAllowlistRoots = resolveCwdAllowlistRoots(runtimeTarget, rootDir);
+  assertNoRemovedCollaborationServerEnv();
+  const cwdAllowlistRoots = resolveCwdAllowlistRoots(rootDir);
 
   return {
     host: process.env.FORGE_HOST ?? process.env.MIDDLEMAN_HOST ?? "127.0.0.1",
     port: Number.parseInt(process.env.FORGE_PORT ?? process.env.MIDDLEMAN_PORT ?? "47187", 10),
     debug: (process.env.FORGE_DEBUG ?? process.env.MIDDLEMAN_DEBUG ?? "false") === "true",
     isDesktop,
-    runtimeTarget,
     cortexEnabled:
       parseOptionalBooleanEnv(
         process.env.FORGE_CORTEX_ENABLED ?? process.env.MIDDLEMAN_CORTEX_ENABLED,
@@ -111,27 +109,42 @@ export function createConfig(): SwarmConfig {
 }
 
 /**
- * Collaboration-server / remote-build CWD selection uses an explicit allowlist.
- * Local Builder keeps unrestricted selection and retains the historical default
- * roots for file-access helpers only.
+ * The collaboration server was removed in Forge V2. The local Builder has no
+ * authentication, so a host still configured as a collaboration server (or for
+ * Remote Projects) must abort startup instead of silently exposing the Builder.
+ */
+export function assertNoRemovedCollaborationServerEnv(env: NodeJS.ProcessEnv = process.env): void {
+  const runtimeTarget = (env.FORGE_RUNTIME_TARGET ?? env.MIDDLEMAN_RUNTIME_TARGET)?.trim();
+  const removedSettings: string[] = [];
+  if (runtimeTarget && runtimeTarget !== "builder") {
+    removedSettings.push(`FORGE_RUNTIME_TARGET=${JSON.stringify(runtimeTarget)}`);
+  }
+  if (!runtimeTarget && parseBooleanEnv(env.FORGE_COLLABORATION_ENABLED ?? env.MIDDLEMAN_COLLABORATION_ENABLED)) {
+    removedSettings.push("FORGE_COLLABORATION_ENABLED");
+  }
+  if (parseBooleanEnv(env.FORGE_REMOTE_PROJECTS_ENABLED)) {
+    removedSettings.push("FORGE_REMOTE_PROJECTS_ENABLED");
+  }
+
+  if (removedSettings.length > 0) {
+    throw new Error(
+      `Unsupported configuration: ${removedSettings.join(", ")}. ` +
+        "The Forge collaboration server and Remote Projects were removed in Forge V2; only the local Builder is supported. " +
+        "Unset these variables to start the Builder.",
+    );
+  }
+}
+
+/**
+ * Roots used by Builder file-access helpers. CWD selection is unrestricted.
  *
  * `FORGE_CWD_ALLOWLIST_ROOTS` delimiters: `;` and newlines always; `:` also on
- * non-Windows. Do not assume the image `/app` checkout is a user workspace —
- * Docker should set this to a mounted path such as `/workspaces`.
+ * non-Windows.
  */
-function resolveCwdAllowlistRoots(
-  runtimeTarget: ReturnType<typeof resolveRuntimeTargetFromEnv>,
-  rootDir: string,
-): string[] {
+function resolveCwdAllowlistRoots(rootDir: string): string[] {
   const configuredRoots = parseCwdAllowlistRootsEnv(
     process.env.FORGE_CWD_ALLOWLIST_ROOTS ?? process.env.MIDDLEMAN_CWD_ALLOWLIST_ROOTS,
   );
-
-  if (isCollaborationServerRuntimeTarget(runtimeTarget)) {
-    // Fail closed when unset/empty: remote selection/create/change must not
-    // silently fall back to the container image root.
-    return normalizeAllowlistRoots(configuredRoots);
-  }
 
   if (configuredRoots.length > 0) {
     return normalizeAllowlistRoots(configuredRoots);

@@ -4,7 +4,6 @@ import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createConfig, readTelemetryEnvOverride } from '../config.js'
-import { resolveRuntimeTargetFromEnv } from '../runtime-target.js'
 import { withPlatform } from './test-helpers.js'
 
 const MANAGED_ENV_KEYS = [
@@ -121,7 +120,6 @@ describe('createConfig', () => {
       expect(config.host).toBe('127.0.0.1')
       expect(config.port).toBe(47187)
       expect(config.debug).toBe(false)
-      expect(config.runtimeTarget).toBe('builder')
       expect(config.paths.dataDir).toBe(dataDir)
       expect(config.paths.sharedConfigDir).toBe(resolve(dataDir, 'shared', 'config'))
       expect(config.paths.sharedCacheDir).toBe(resolve(dataDir, 'shared', 'cache'))
@@ -334,29 +332,34 @@ describe('createConfig', () => {
     }
   })
 
-  it('fails closed when the removed collaboration-server target is requested', async () => {
+  it('fails closed on removed collaboration-server and Remote Projects configuration', async () => {
     for (const env of [
       { FORGE_RUNTIME_TARGET: 'collaboration-server' },
       { MIDDLEMAN_RUNTIME_TARGET: 'collaboration-server' },
       { FORGE_RUNTIME_TARGET: 'ship-it' },
       { FORGE_COLLABORATION_ENABLED: 'true' },
+      { FORGE_REMOTE_PROJECTS_ENABLED: 'true' },
+      { FORGE_RUNTIME_TARGET: 'builder', FORGE_REMOTE_PROJECTS_ENABLED: '1' },
     ] as const) {
       await withEnv(env, () => {
-        expect(() => resolveRuntimeTargetFromEnv()).toThrow(/collaboration server was removed in Forge V2/)
-        expect(() => createConfig()).toThrow(/collaboration server was removed in Forge V2/)
+        expect(() => createConfig()).toThrow(/removed in Forge V2/)
       })
     }
-
-    await withEnv({ FORGE_RUNTIME_TARGET: 'builder', FORGE_COLLABORATION_ENABLED: 'true' }, () => {
-      expect(createConfig().runtimeTarget).toBe('builder')
-    })
   })
 
-  it('defaults runtime target to builder when no runtime env is set', async () => {
-    await withEnv({}, () => {
-      expect(resolveRuntimeTargetFromEnv()).toBe('builder')
-      expect(createConfig().runtimeTarget).toBe('builder')
-    })
+  it('starts the Builder when runtime env is unset, builder, or carries inert legacy values', async () => {
+    for (const env of [
+      {},
+      { FORGE_RUNTIME_TARGET: 'builder' },
+      { FORGE_RUNTIME_TARGET: '  ' },
+      { FORGE_RUNTIME_TARGET: 'builder', FORGE_COLLABORATION_ENABLED: 'true' },
+      { FORGE_COLLABORATION_ENABLED: 'false' },
+      { FORGE_REMOTE_PROJECTS_ENABLED: 'false', FORGE_REMOTE_PROJECTS_TERMINALS_ENABLED: 'yep' },
+    ] as const) {
+      await withEnv(env, () => {
+        expect(() => createConfig()).not.toThrow()
+      })
+    }
   })
 
   it('keeps builder unrestricted defaults when FORGE_CWD_ALLOWLIST_ROOTS is unset', async () => {
@@ -378,20 +381,4 @@ describe('createConfig', () => {
     })
   })
 
-  it('ignores Remote Projects env overrides on Builder runtime', async () => {
-    // Invalid/overlong values must not fail Builder startup — these vars are
-    // collaboration-server only and Builder must ignore them entirely.
-    await withEnv(
-      {
-        FORGE_RUNTIME_TARGET: 'builder',
-        FORGE_REMOTE_PROJECTS_ENABLED: 'definitely-not-a-boolean',
-        FORGE_REMOTE_PROJECTS_TERMINALS_ENABLED: 'yep',
-        FORGE_REMOTE_PROJECTS_INSTANCE_NAME: `  ${'x'.repeat(121)}  `,
-      },
-      () => {
-        const config = createConfig()
-        expect(config.runtimeTarget).toBe('builder')
-      },
-    )
-  })
 })

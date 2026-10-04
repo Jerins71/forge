@@ -220,7 +220,7 @@ describe('WsHandler session attention dismissal', () => {
     }))
     const handler = new WsHandler({
       swarmManager: {
-        getConfig: () => ({ runtimeTarget: 'builder', debug: false, paths: { dataDir: '/tmp' } }),
+        getConfig: () => ({ debug: false, paths: { dataDir: '/tmp' } }),
         dismissSessionAttention,
       } as any,
       mobilePushService: {} as any,
@@ -248,7 +248,7 @@ describe('WsHandler session attention dismissal', () => {
     const dismissSessionAttention = vi.fn()
     const handler = new WsHandler({
       swarmManager: {
-        getConfig: () => ({ runtimeTarget: 'builder', debug: false, paths: { dataDir: '/tmp' } }),
+        getConfig: () => ({ debug: false, paths: { dataDir: '/tmp' } }),
         dismissSessionAttention,
       } as any,
       mobilePushService: {} as any,
@@ -276,7 +276,7 @@ describe('WsHandler session attention dismissal', () => {
     const dismissSessionAttention = vi.fn()
     const handler = new WsHandler({
       swarmManager: {
-        getConfig: () => ({ runtimeTarget: 'builder', debug: false, paths: { dataDir: '/tmp' } }),
+        getConfig: () => ({ debug: false, paths: { dataDir: '/tmp' } }),
         dismissSessionAttention,
       } as any,
       mobilePushService: {} as any,
@@ -305,7 +305,7 @@ describe('WsHandler session attention dismissal', () => {
   it('returns a correlated error when durable dismissal fails', async () => {
     const handler = new WsHandler({
       swarmManager: {
-        getConfig: () => ({ runtimeTarget: 'builder', debug: false, paths: { dataDir: '/tmp' } }),
+        getConfig: () => ({ debug: false, paths: { dataDir: '/tmp' } }),
         dismissSessionAttention: vi.fn(async () => { throw new Error('disk unavailable') }),
       } as any,
       mobilePushService: {} as any,

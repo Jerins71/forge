@@ -1,13 +1,11 @@
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
-import { isBuilderRuntimeTarget } from "../../../runtime-target.js";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
 
 export function createHistoryIndexRoutes(options: {
-  swarmManager: Pick<SwarmManager, "getConfig" | "getHistoryIndexStatus" | "setHistoryIndexPaused">;
+  swarmManager: Pick<SwarmManager, "getHistoryIndexStatus" | "setHistoryIndexPaused">;
 }): HttpRoute[] {
   const manager = options.swarmManager;
-  if (!isBuilderRuntimeTarget(manager.getConfig().runtimeTarget)) return [];
   const methods = "GET, PATCH, OPTIONS";
   return [{
     methods,

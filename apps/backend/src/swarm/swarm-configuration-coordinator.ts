@@ -40,7 +40,6 @@ import {
   type SpecialistRegistryModule,
 } from "./prompt-resource-coordinator.js";
 import { normalizeArchetypeId, type PromptRegistry } from "./prompts/prompt-registry.js";
-import { isCollaborationServerRuntimeTarget } from "../runtime-target.js";
 import type { RuntimeErrorEvent } from "./runtime-contracts.js";
 import {
   getManagedModelProviderCredentialAvailability,
@@ -652,11 +651,8 @@ export class SwarmConfigurationCoordinator {
     return this.prompts.getSwarmContextFiles(cwd);
   }
 
-  resolveAndValidateCwd(
-    cwd: string,
-    options?: { enforceAllowlist?: boolean },
-  ): Promise<string> {
-    return validateDirectoryPath(cwd, this.getCwdPolicy(options));
+  resolveAndValidateCwd(cwd: string): Promise<string> {
+    return validateDirectoryPath(cwd, this.getCwdPolicy());
   }
 
   getPiModelsJsonPathOrThrow(): string {
@@ -691,16 +687,11 @@ export class SwarmConfigurationCoordinator {
     }
   }
 
-  private getCwdPolicy(options?: { enforceAllowlist?: boolean }): {
-    rootDir: string;
-    allowlistRoots: string[];
-    enforceAllowlist: boolean;
-  } {
-    const collabServer = isCollaborationServerRuntimeTarget(this.options.config.runtimeTarget);
+  private getCwdPolicy(): { rootDir: string; allowlistRoots: string[]; enforceAllowlist: boolean } {
     return {
       rootDir: this.options.config.paths.rootDir,
       allowlistRoots: normalizeAllowlistRoots(this.options.config.cwdAllowlistRoots),
-      enforceAllowlist: options?.enforceAllowlist ?? collabServer,
+      enforceAllowlist: false,
     };
   }
 

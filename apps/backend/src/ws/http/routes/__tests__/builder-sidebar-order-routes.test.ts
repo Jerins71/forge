@@ -4,7 +4,7 @@ import type {
   BuilderSidebarOrderUpdatedEvent,
 } from "@forge/protocol";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { access, mkdtemp } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,7 +12,6 @@ import {
   BuilderSidebarOrderService,
   MAX_BUILDER_SIDEBAR_ORDER_REQUEST_BYTES,
 } from "../../../../swarm/builder-sidebar-order-service.js";
-import { getBuilderSidebarOrderPath } from "../../../../swarm/storage/data-paths.js";
 import { sendJson } from "../../../http-utils.js";
 import type { HttpRoute } from "../../shared/http-route.js";
 import { createBuilderSidebarOrderRoutes } from "../builder-sidebar-order-routes.js";
@@ -34,7 +33,6 @@ describe("createBuilderSidebarOrderRoutes", () => {
     const events: BuilderSidebarOrderUpdatedEvent[] = [];
     const server = await createRouteServer(createBuilderSidebarOrderRoutes({
       service,
-      runtimeTarget: "builder",
       broadcastEvent: (event) => events.push(event),
     }));
 
@@ -70,7 +68,6 @@ describe("createBuilderSidebarOrderRoutes", () => {
     const broadcastEvent = vi.fn();
     const server = await createRouteServer(createBuilderSidebarOrderRoutes({
       service,
-      runtimeTarget: "builder",
       broadcastEvent,
     }));
 
@@ -94,7 +91,7 @@ describe("createBuilderSidebarOrderRoutes", () => {
     const dataDir = await mkdtemp(join(tmpdir(), "forge-sidebar-order-invalid-"));
     const service = new BuilderSidebarOrderService({ dataDir });
     await service.load();
-    const server = await createRouteServer(createBuilderSidebarOrderRoutes({ service, runtimeTarget: "builder" }));
+    const server = await createRouteServer(createBuilderSidebarOrderRoutes({ service }));
 
     const duplicate = await fetch(`${server.baseUrl}/api/settings/builder-sidebar-order`, {
       method: "PUT",
@@ -126,29 +123,6 @@ describe("createBuilderSidebarOrderRoutes", () => {
     expect(await oversized.json()).toEqual({ error: expect.stringContaining("too large") });
   });
 
-  it("fails closed without exposing or persisting the setting in collaboration runtime", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "forge-sidebar-order-collab-"));
-    const service = new BuilderSidebarOrderService({ dataDir });
-    await service.load();
-    const server = await createRouteServer(createBuilderSidebarOrderRoutes({
-      service,
-      runtimeTarget: "collaboration-server",
-    }));
-
-    for (const method of ["GET", "PUT", "OPTIONS"]) {
-      const response = await fetch(`${server.baseUrl}/api/settings/builder-sidebar-order`, {
-        method,
-        ...(method === "PUT"
-          ? {
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ baseRevision: 0, order: [] }),
-            }
-          : {}),
-      });
-      expect(response.status, method).toBe(404);
-    }
-    await expect(access(getBuilderSidebarOrderPath(dataDir))).rejects.toMatchObject({ code: "ENOENT" });
-  });
 });
 
 async function createRouteServer(routes: HttpRoute[]): Promise<{

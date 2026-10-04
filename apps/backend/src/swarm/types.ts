@@ -27,7 +27,6 @@ import {
 } from "@forge/protocol";
 import type { AgentStatus } from "./agent-state-machine.js";
 import type Database from "better-sqlite3";
-import type { RuntimeTarget } from "../runtime-target.js";
 
 export type AgentRole = "manager" | "worker";
 
@@ -305,7 +304,6 @@ export interface SwarmConfig {
   port: number;
   debug: boolean;
   isDesktop: boolean;
-  runtimeTarget: RuntimeTarget;
   cortexEnabled: boolean;
   /** Feature-owned SQLite loader available in every runtime target. */
   remoteUpdateAwarenessModules?: RemoteUpdateAwarenessModuleLoaders;

@@ -10,7 +10,7 @@ import { createDefaultPhoenixObservabilitySettings } from '../observability-sett
 describe('ObservabilityService', () => {
   it('is disabled and no-op by default', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'forge-observability-service-'))
-    const service = new ObservabilityService({ dataDir, runtimeTarget: 'builder' })
+    const service = new ObservabilityService({ dataDir })
 
     await service.initialize()
     service.recordFeedback({
@@ -30,29 +30,6 @@ describe('ObservabilityService', () => {
     expect(service.getStatus()).toMatchObject({ enabled: false, exporter: { configured: false } })
   })
 
-  it('does not construct or configure an exporter outside Builder even when persisted settings are enabled', async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), 'forge-observability-service-'))
-    const settingsPath = getPhoenixObservabilitySettingsPath(dataDir)
-    await mkdir(dirname(settingsPath), { recursive: true })
-    await writeFile(settingsPath, JSON.stringify({ ...createDefaultPhoenixObservabilitySettings(), enabled: true }), 'utf8')
-    let exporterConstructed = false
-    const service = new ObservabilityService({
-      dataDir,
-      runtimeTarget: 'collaboration-server',
-      exporterFactory: () => {
-        exporterConstructed = true
-        throw new Error('must not construct')
-      },
-    })
-
-    await service.initialize()
-    const testResult = await service.testConnection()
-
-    expect(exporterConstructed).toBe(false)
-    expect(testResult.ok).toBe(false)
-    expect(service.getStatus()).toMatchObject({ enabled: false, runtimeTarget: 'collaboration-server', exporter: { configured: false } })
-  })
-
   it('sanitizes invalid persisted endpoints on startup and does not configure exporter', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'forge-observability-service-'))
     const settingsPath = getPhoenixObservabilitySettingsPath(dataDir)
@@ -65,7 +42,6 @@ describe('ObservabilityService', () => {
     let exporterConstructed = false
     const service = new ObservabilityService({
       dataDir,
-      runtimeTarget: 'builder',
       exporterFactory: () => {
         exporterConstructed = true
         throw new Error('must not construct')
@@ -84,10 +60,10 @@ describe('ObservabilityService', () => {
   })
 
   it('provides an explicit no-op facade for non-owner tests and standalone construction', async () => {
-    const facade = createNoopObservabilityFacade('collaboration-server')
+    const facade = createNoopObservabilityFacade()
 
     await expect(facade.initialize()).resolves.toBeUndefined()
-    expect(facade.getStatus()).toMatchObject({ enabled: false, runtimeTarget: 'collaboration-server', exporter: { configured: false } })
+    expect(facade.getStatus()).toMatchObject({ enabled: false, runtimeTarget: 'builder', exporter: { configured: false } })
     await expect(facade.updateSettings({ enabled: true })).rejects.toThrow('not available')
     await expect(facade.testConnection()).resolves.toMatchObject({ ok: false })
     expect(() => facade.recordFeedback({
@@ -109,7 +85,6 @@ describe('ObservabilityService', () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'forge-observability-service-'))
     const service = new ObservabilityService({
       dataDir,
-      runtimeTarget: 'builder',
       exporterFactory: () => {
         throw new Error('exporter failed')
       },
@@ -129,7 +104,6 @@ describe('ObservabilityService', () => {
     await writeFile(settingsPath, JSON.stringify({ ...createDefaultPhoenixObservabilitySettings(), enabled: true }), 'utf8')
     const service = new ObservabilityService({
       dataDir,
-      runtimeTarget: 'builder',
       exporterFactory: () => {
         throw new Error('exporter failed')
       },

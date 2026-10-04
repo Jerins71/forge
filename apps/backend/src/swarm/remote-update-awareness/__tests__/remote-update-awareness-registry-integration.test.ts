@@ -39,7 +39,7 @@ function managerFor(
   getDescriptors: () => AgentDescriptor[]
 ): SwarmManager {
   return {
-    getConfig: () => ({ runtimeTarget: "builder", paths: {} }),
+    getConfig: () => ({ paths: {} }),
     listProfiles: getProfiles,
     getAgent: (agentId: string) => getDescriptors().find((entry) => entry.agentId === agentId),
   } as unknown as SwarmManager;

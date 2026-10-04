@@ -327,7 +327,6 @@ function config(overrides: Partial<SwarmConfig> = {}): SwarmConfig {
     port: 4711,
     debug: false,
     isDesktop: false,
-    runtimeTarget: "builder",
     cortexEnabled: false,
     allowNonManagerSubscriptions: false,
     managerDisplayName: "Manager",

@@ -3,7 +3,6 @@ import type {
   CliAccessKeyListResponse,
 } from "@forge/protocol";
 import type { CliAccessService } from "../../../swarm/cli-access-service.js";
-import { isBuilderRuntimeTarget, type RuntimeTarget } from "../../../runtime-target.js";
 import { sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
 
@@ -18,12 +17,7 @@ const ELECTRON_DEV_RENDERER_ORIGINS = new Set([
 
 export function createCliAccessSettingsRoutes(options: {
   cliAccessService: CliAccessService;
-  runtimeTarget: RuntimeTarget;
 }): HttpRoute[] {
-  if (!isBuilderRuntimeTarget(options.runtimeTarget)) {
-    return [];
-  }
-
   return [
     {
       methods: `${LIST_METHODS}, ${ITEM_METHODS}`,

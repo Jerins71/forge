@@ -193,7 +193,7 @@ describe('sendSubscriptionBootstrap', () => {
         listBootstrapAgents: () => [manager],
         getAgent: () => manager,
         listProfiles: () => [],
-        getConfig: () => ({ runtimeTarget: 'builder' }),
+        getConfig: () => ({}),
         getManagerToolActivitySnapshot: vi.fn(() => ({
           type: 'manager_tool_activity',
           sessionAgentId: manager.agentId,

@@ -134,7 +134,7 @@ export class CliHeadlessSubscriptions {
       type: "headless_ready",
       requestId: command.requestId,
       serverTime: new Date().toISOString(),
-      capabilities: buildCliCapabilities(this.swarmManager.getConfig().runtimeTarget),
+      capabilities: buildCliCapabilities(),
       subscribed,
       targetAgent: toPublicCliAgentDescriptor(targetAgent),
       ...(profile ? { profile: cloneProfile(profile) } : {}),

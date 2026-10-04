@@ -140,7 +140,7 @@ export interface RuntimeCompositionRuntimeResources {
     skillMetadata: SkillMetadata[];
   }>;
   getSwarmContextFiles(cwd: string): Promise<Array<{ path: string; content: string }>>;
-  resolveAndValidateCwd(cwd: string, options?: { enforceAllowlist?: boolean }): Promise<string>;
+  resolveAndValidateCwd(cwd: string): Promise<string>;
   ensureSessionFileParentDirectory(sessionFile: string): Promise<void>;
   ensureDirectories(): Promise<void>;
   loadStore(): Promise<AgentsStoreFile>;
@@ -929,7 +929,7 @@ export class SwarmManagerRuntimeComposition {
         loadCompactionSettings: () => services.knowledge.loadCompactionSettingsForRuntime(),
         loadSecureSecretSettings: runtimeResources.loadSecureSecretSettings,
         reloadSkillMetadata: runtimeResources.reloadSkillMetadata,
-        resolveDefaultCwd: (cwd) => runtimeResources.resolveAndValidateCwd(cwd, { enforceAllowlist: false }),
+        resolveDefaultCwd: (cwd) => runtimeResources.resolveAndValidateCwd(cwd),
         refreshDefaultMemoryTemplate: () => services.knowledge.refreshMemoryTemplateForBoot(),
       },
       domains: {

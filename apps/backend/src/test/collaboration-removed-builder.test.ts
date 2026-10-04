@@ -14,7 +14,7 @@ const tempConfigHandles: TempConfigHandle[] = []
 let activeServer: StartedServer | null = null
 
 async function startBuilderServer(): Promise<{ server: StartedServer; config: TempConfigHandle['config'] }> {
-  const tempConfigHandle = await createTempConfig({ runtimeTarget: 'builder' })
+  const tempConfigHandle = await createTempConfig()
   tempConfigHandles.push(tempConfigHandle)
 
   const server = await startServer({
@@ -38,12 +38,10 @@ afterEach(async () => {
   }
 })
 
-describe('builder runtime target seam', () => {
+describe('Builder after Collaboration removal', () => {
   it('leaves collaboration status, auth, and collab routes unmounted', async () => {
-    const { server, config } = await startBuilderServer()
+    const { server } = await startBuilderServer()
     const baseUrl = `http://${server.host}:${server.port}`
-
-    expect(config.runtimeTarget).toBe('builder')
 
     const statusResponse = await fetch(`${baseUrl}/api/collaboration/status`)
     expect(statusResponse.status).toBe(404)
@@ -67,7 +65,7 @@ describe('builder runtime target seam', () => {
     })
   })
 
-  it('does not set up documented collaboration auth artifacts in builder mode', async () => {
+  it('does not create Collaboration auth artifacts', async () => {
     const { config } = await startBuilderServer()
 
     const collaborationConfigDir = join(config.paths.sharedConfigDir, 'collaboration')

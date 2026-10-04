@@ -4,7 +4,6 @@ import type {
   UpdateRepositorySettingsRequest,
   UpdateRepositorySettingsResponse,
 } from '@forge/protocol'
-import { isBuilderRuntimeTarget, type RuntimeTarget } from '../../../runtime-target.js'
 import {
   RepositorySettingsService,
   RepositorySettingsValidationError,
@@ -17,16 +16,15 @@ const REPOSITORY_SETTINGS_METHODS = 'GET, PUT, OPTIONS'
 
 export function createRepositorySettingsRoutes(options: {
   settingsService: RepositorySettingsService
-  runtimeTarget: RuntimeTarget
 }): HttpRoute[] {
-  const { settingsService, runtimeTarget } = options
+  const { settingsService } = options
 
   return [
     {
       methods: REPOSITORY_SETTINGS_METHODS,
       matches: (pathname) => pathname === REPOSITORY_SETTINGS_ENDPOINT,
       handle: async (request, response) => {
-        await handleRepositorySettingsRequest(request, response, settingsService, runtimeTarget)
+        await handleRepositorySettingsRequest(request, response, settingsService)
       },
     },
   ]
@@ -36,7 +34,6 @@ async function handleRepositorySettingsRequest(
   request: IncomingMessage,
   response: ServerResponse,
   settingsService: RepositorySettingsService,
-  runtimeTarget: RuntimeTarget,
 ): Promise<void> {
   if (request.method === 'OPTIONS') {
     applyCorsHeaders(request, response, REPOSITORY_SETTINGS_METHODS)
@@ -46,11 +43,6 @@ async function handleRepositorySettingsRequest(
   }
 
   applyCorsHeaders(request, response, REPOSITORY_SETTINGS_METHODS)
-
-  if (!isBuilderRuntimeTarget(runtimeTarget)) {
-    sendJson(response, 404, { error: 'Repository settings are only available in Builder runtime.' })
-    return
-  }
 
   if (request.method === 'GET') {
     const settings = await settingsService.getSettingsAsync()

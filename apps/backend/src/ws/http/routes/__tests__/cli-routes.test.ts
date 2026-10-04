@@ -58,7 +58,6 @@ describe("CLI routes and bearer auth", () => {
       capabilities: {
         protocolVersion: CLI_PROTOCOL_VERSION,
         available: true,
-        runtimeTarget: "builder",
         features: {
           bearerAuth: true,
           headlessWs: true,
@@ -152,7 +151,6 @@ describe("CLI routes and bearer auth", () => {
       status: 200,
       json: {
         status: "ok",
-        runtimeTarget: "builder",
         capabilities: {
           available: true,
           features: {
@@ -402,39 +400,6 @@ describe("CLI routes and bearer auth", () => {
     });
   });
 
-  it("does not register CLI HTTP routes for collaboration runtime", async () => {
-    const configHandle = await createTempConfig({
-      prefix: "cli-collab-route-",
-      port: await getAvailablePort(),
-      runtimeTarget: "collaboration-server",
-    });
-    activeServers.push({ baseUrl: "cleanup-only", close: configHandle.cleanup });
-    const service = new CliAccessService({
-      dataDir: configHandle.config.paths.dataDir,
-      now: () => "2026-05-11T00:00:00.000Z",
-    });
-    const generated = await service.generateKey({ name: "Collab route test" });
-    const manager = new FakeSwarmManager(configHandle.config, [
-      createManagerDescriptor(configHandle.config.paths.rootDir, "manager"),
-    ]);
-    const server = new SwarmWebSocketServer({
-      swarmManager: manager as unknown as never,
-      host: configHandle.config.host,
-      port: configHandle.config.port,
-      allowNonManagerSubscriptions: false,
-      cliAccessService: service,
-    });
-    activeSwarmServers.push(server);
-    await server.start();
-
-    const response = await fetch(`http://${configHandle.config.host}:${configHandle.config.port}/api/cli/status`, {
-      headers: { authorization: `Bearer ${generated.plaintextKey}` },
-    });
-
-    expect(response.status).toBe(404);
-    await expect(service.listKeys()).resolves.toEqual([generated.key]);
-  });
-
   it("authenticates /api/cli/ws before accepting the isolated headless socket", async () => {
     const configHandle = await createTempConfig({ prefix: "cli-ws-route-", port: await getAvailablePort() });
     activeServers.push({ baseUrl: "cleanup-only", close: configHandle.cleanup });
@@ -484,41 +449,6 @@ describe("CLI routes and bearer auth", () => {
     ]);
   });
 
-  it("returns 404 for /api/cli/ws on collaboration runtime before bearer auth is evaluated", async () => {
-    const configHandle = await createTempConfig({
-      prefix: "cli-ws-collab-",
-      port: await getAvailablePort(),
-      runtimeTarget: "collaboration-server",
-    });
-    activeServers.push({ baseUrl: "cleanup-only", close: configHandle.cleanup });
-    const service = new CliAccessService({
-      dataDir: configHandle.config.paths.dataDir,
-      now: () => "2026-05-11T00:00:00.000Z",
-    });
-    const generated = await service.generateKey({ name: "Collab WS test" });
-    const manager = new FakeSwarmManager(configHandle.config, [
-      createManagerDescriptor(configHandle.config.paths.rootDir, "manager"),
-    ]);
-    const server = new SwarmWebSocketServer({
-      swarmManager: manager as unknown as never,
-      host: configHandle.config.host,
-      port: configHandle.config.port,
-      allowNonManagerSubscriptions: false,
-      cliAccessService: service,
-    });
-    activeSwarmServers.push(server);
-    await server.start();
-
-    await expect(
-      connectWebSocket(`ws://${configHandle.config.host}:${configHandle.config.port}/api/cli/ws`, {
-        authorization: `Bearer ${generated.plaintextKey}`,
-      })
-    ).resolves.toMatchObject({
-      opened: false,
-      errorMessage: expect.stringContaining("Unexpected server response: 404") as string,
-    });
-    await expect(service.listKeys()).resolves.toEqual([generated.key]);
-  });
 });
 
 function createCliRouteState(): {
@@ -814,7 +744,7 @@ async function createCliRouteTestServer(
   cliAccessService: CliAccessService,
   swarmManager: ReturnType<typeof createCliRouteState>,
 ): Promise<TestServer> {
-  const routes = createCliRoutes({ cliAccessService, runtimeTarget: "builder", swarmManager });
+  const routes = createCliRoutes({ cliAccessService, swarmManager });
   const server = createServer((request, response) => {
     void handleRouteRequest(routes, request, response);
   });

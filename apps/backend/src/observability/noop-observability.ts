@@ -14,16 +14,15 @@ import type {
   ObservabilityRuntimeInputInput,
   ObservabilityRuntimeErrorInput,
   ObservabilityRuntimeSessionEventInput,
-  ObservabilityRuntimeTarget,
   ObservabilityToolSideEffectInput,
   ObservabilityUserVisibleMessageInput,
   ObservabilityAgentDeliveryInput,
 } from "./observability-types.js";
 import { createDefaultPhoenixObservabilitySettings } from "./observability-settings.js";
 
-export function createNoopObservabilityFacade(runtimeTarget: ObservabilityRuntimeTarget = "builder"): ObservabilityFacade {
+export function createNoopObservabilityFacade(): ObservabilityFacade {
   const settings = createDefaultPhoenixObservabilitySettings();
-  const status = createNoopStatus(runtimeTarget, settings);
+  const status = createNoopStatus(settings);
 
   return {
     async initialize(): Promise<void> {},
@@ -59,13 +58,10 @@ export function createNoopObservabilityFacade(runtimeTarget: ObservabilityRuntim
   };
 }
 
-function createNoopStatus(
-  runtimeTarget: ObservabilityRuntimeTarget,
-  settings: PhoenixObservabilitySettings,
-): PhoenixObservabilityStatus {
+function createNoopStatus(settings: PhoenixObservabilitySettings): PhoenixObservabilityStatus {
   return {
     enabled: false,
-    runtimeTarget,
+    runtimeTarget: "builder",
     contentMode: settings.contentMode,
     exporter: {
       configured: false,

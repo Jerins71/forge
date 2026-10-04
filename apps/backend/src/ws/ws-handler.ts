@@ -7,7 +7,6 @@ import type {
   TerminalDescriptor,
 } from "@forge/protocol";
 import type { MobilePushService } from "../mobile/mobile-push-service.js";
-import { isBuilderRuntimeTarget } from "../runtime-target.js";
 import type { SidebarPerfRecorder } from "../stats/sidebar-perf-types.js";
 import { FeedbackService } from "../swarm/feedback-service.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
@@ -229,10 +228,6 @@ export class WsHandler {
     }
 
     if (command.type === "subscribe_inventory") {
-      if (!isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-        this.send(socket, { type: "error", code: "INVENTORY_NOT_SUPPORTED", message: "Inventory subscriptions require a local Builder server.", requestId: command.requestId });
-        return;
-      }
       try {
         await this.subscriptionManager.handleSubscribeInventory(socket, command.requestId);
       } catch {

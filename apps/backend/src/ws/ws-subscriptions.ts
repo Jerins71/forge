@@ -8,7 +8,6 @@ import {
   type ServerEvent,
   type TerminalDescriptor,
 } from "@forge/protocol";
-import { isBuilderRuntimeTarget } from "../runtime-target.js";
 import type { SidebarPerfRecorder } from "../stats/sidebar-perf-types.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
 import { isEligibleLocalBuilderManager, type BrowserAutomationService } from "../swarm/browser-automation/index.js";
@@ -385,16 +384,12 @@ export class WsSubscriptions {
 
   /**
    * Count-only throughput stays on the local Builder socket. In particular it
-   * intentionally does not use the Collaboration subscription manager or CLI.
+   * intentionally does not use the CLI transport.
    */
   broadcastGenerationThroughput(
     sessionAgentId: string,
     event: Extract<ServerEvent, { type: "generation_throughput" }>,
   ): void {
-    if (!isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-      return;
-    }
-
     const wss = this.getServer();
     if (!wss) return;
     for (const client of wss.clients) {
@@ -410,15 +405,11 @@ export class WsSubscriptions {
   /**
    * Ephemeral manager-turn tool progress is local Builder-only. It is scoped to
    * the manager's exact session subscription and never travels through the
-   * Collaboration or CLI transport paths.
+   * CLI transport path.
    */
   broadcastManagerToolActivity(
     event: Extract<ServerEvent, { type: "manager_tool_activity" }>,
   ): void {
-    if (!isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-      return;
-    }
-
     this.broadcastToExactSubscription(event.sessionAgentId, event);
   }
 
