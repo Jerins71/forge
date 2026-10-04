@@ -10,6 +10,8 @@ import { controlEnvironment, isWithin, readManifest, repositoryRoot, sanitizedEn
 import { getAgentsStoreFilePath } from '../../../apps/backend/src/swarm/storage/data-paths.js';
 import * as dataPaths from '../../../apps/backend/src/swarm/storage/data-paths.js';
 import { AgentDescriptorStore } from '../../../apps/backend/src/swarm/agents/agent-descriptor-store.js';
+import { createFixturePlatform } from './ui-platform.js';
+import { fixturePlatformScript } from './ui-platform.js';
 import { WebSocket } from './ws.js';
 import type { SqliteDatabaseConstructor } from '../../../apps/backend/src/swarm/types.js';
 
@@ -38,7 +40,7 @@ export async function openUiFleet(manifestPath: string, options: { integration?:
   const integration: UiFleetIntegration = options.integration ?? {
     bootstrap: environment => controlEnvironment<BootstrapSession>(manifest, environment.name, 'bootstrap'),
     seed: seedUiEnvironment,
-    platformScript: async () => { throw new Error('V2 UI platform bootstrap integration is pending stream D'); },
+    platformScript: async () => fixturePlatformScript,
   };
   const sessions = new Map<string, BootstrapSession>();
   const publicEnvironments: UiEnvironment[] = [];
@@ -54,7 +56,8 @@ export async function openUiFleet(manifestPath: string, options: { integration?:
   const [a, b, c] = publicEnvironments as [UiEnvironment, UiEnvironment, UiEnvironment];
   const script = await integration.platformScript(a, sessions.get(a.environmentId)!);
   for (const session of sessions.values()) assert(!script.includes(session.bearer), 'platform code cannot embed a bearer');
-  const ui = await serveBuiltUi(options.uiRoot ?? join(repositoryRoot, 'apps/ui/.output/public'), script);
+  const platform = options.integration ? undefined : createFixturePlatform(environments, a, sessions.get(a.environmentId)!, () => `http://127.0.0.1:${manifest.uiPort}`);
+  const ui = await serveBuiltUi(options.uiRoot ?? join(repositoryRoot, 'apps/ui/.output/public'), script, { port: manifest.uiPort, platform });
   let disposed = false;
   const owned = (environment: UiEnvironment) => {
     if (disposed) throw new Error('UI fleet is disposed');
@@ -84,7 +87,7 @@ export async function openUiFleet(manifestPath: string, options: { integration?:
 }
 /** Serve the existing production build, with optional memory-only fixture code.
  * A Playwright worker owns this server and closes only its own listener. */
-export async function serveBuiltUi(rootPath: string, bootstrapScript = '') {
+export async function serveBuiltUi(rootPath: string, bootstrapScript = '', options: { port?: number; platform?: (operation: string, input: unknown) => Promise<unknown> } = {}) {
   const root = await realpath(rootPath).catch(() => { throw new Error('Built UI unavailable; run pnpm --filter @forge/ui build'); });
   let shell: string | undefined;
   for (const candidate of ['index.html', '_shell.html']) {
@@ -94,7 +97,18 @@ export async function serveBuiltUi(rootPath: string, bootstrapScript = '') {
   if (!shell) throw new Error('Built UI shell unavailable; run pnpm --filter @forge/ui build');
   const server = createServer((req, res) => {
     void (async () => {
-      if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return; }
+      if (req.method === 'POST' && req.url === '/__forge_e2e_platform' && options.platform) {
+        const ownOrigin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+        if (req.headers.origin !== ownOrigin || req.headers['content-type'] !== 'application/json') { res.writeHead(403).end(); return; }
+        let bytes = 0; const chunks: Buffer[] = [];
+        for await (const chunk of req) { bytes += chunk.length; if (bytes > 36 * 1024 * 1024) throw new Error('Fixture platform payload limit'); chunks.push(chunk); }
+        const { operation, input } = JSON.parse(Buffer.concat(chunks).toString()) as { operation: string; input: unknown };
+        let result: unknown;
+        try { result = { ok: true, value: await options.platform(operation, input) }; }
+        catch { result = { ok: false, error: { code: 'UNAVAILABLE', message: 'Fixture platform operation failed', retryable: false } }; }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(result)); return;
+      }
+      if (req.method !== 'GET'  && req.method !== 'HEAD') { res.writeHead(405).end(); return; }
       const path = decodeURIComponent(new URL(req.url ?? '/', 'http://fixture.invalid').pathname);
       if (path.startsWith('/api/')) { res.writeHead(404).end(); return; }
       if (path === '/__forge_e2e_platform.js') {
@@ -111,18 +125,18 @@ export async function serveBuiltUi(rootPath: string, bootstrapScript = '') {
       res.end(req.method === 'HEAD' ? undefined : content);
     })().catch(() => { if (!res.headersSent) res.writeHead(404); res.end(); });
   });
-  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  server.listen(options.port ?? 0, '127.0.0.1'); await once(server, 'listening');
   const address = server.address(); assert(address && typeof address === 'object');
   return { url: `http://127.0.0.1:${address.port}`, stop: async () => { server.closeAllConnections(); await new Promise<void>(resolveStop => server.close(() => resolveStop())); } };
 }
-async function ticket(baseUrl: string, session: BootstrapSession, audience: 'rpc' | 'legacy') {
+export async function ticket(baseUrl: string, session: BootstrapSession, audience: 'rpc' | 'legacy') {
   const response = await fetch(`${baseUrl}/api/v2/access/ws-ticket`, { method: 'POST',
     headers: { Authorization: `Bearer ${session.bearer}`, 'Content-Type': 'application/json', 'x-forge-environment-protocol': '1' },
     body: JSON.stringify({ audience, protocolVersion: 1 }), signal: AbortSignal.timeout(5000) });
   if (!response.ok) throw new Error('Fixture authenticated ticket unavailable');
   return (await response.json() as { ticket: string }).ticket;
 }
-async function authenticatedRpc<T>(baseUrl: string, session: BootstrapSession, method: string, input: unknown): Promise<T> {
+export async function authenticatedRpc<T>(baseUrl: string, session: BootstrapSession, method: string, input: unknown): Promise<T> {
   const ws = new WebSocket(`${baseUrl.replace('http:', 'ws:').replace('https:', 'wss:')}/api/v2/rpc`, ['forge.v2', `ticket.${await ticket(baseUrl, session, 'rpc')}`]);
   const requestId = 'fixture-grant';
   try {
@@ -140,7 +154,7 @@ async function authenticatedRpc<T>(baseUrl: string, session: BootstrapSession, m
     });
   } finally { ws.terminate(); }
 }
-async function seedUiEnvironment(environment: EnvironmentFixture, session: BootstrapSession): Promise<UiEnvironment> {
+export async function seedUiEnvironment(environment: EnvironmentFixture, session: BootstrapSession): Promise<UiEnvironment> {
   // Current serializer/API creates synthetic project descriptors. This path uses
   // the authenticated legacy adapter once A/C land, never an unauthenticated seam.
   const ws = new WebSocket(environment.baseUrl.replace('http:', 'ws:'), ['forge.v2', `ticket.${await ticket(environment.baseUrl, session, 'legacy')}`]);

@@ -1,3 +1,5 @@
+import type { EnvironmentDescriptor, DeviceSession } from '@forge/protocol/environment-v2';
+import { bootstrapFixtureChild } from './fixtures/pairing.js';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -19,16 +21,16 @@ const backendRequire = createRequire(join(repositoryRoot, 'apps/backend/package.
 export interface EnvironmentFixture {
   name: string; instanceId: string; checkout: string; dataDir: string;
   installationStateDir: string; pid: number; port: number; baseUrl: string;
-  bootstrap: 'pending';
+  bootstrap: 'pending' | 'private-parent'; environment?: EnvironmentDescriptor;
 }
 export interface FleetManifest {
   formatVersion: 1; runId: string; root: string; repositoryRoot: string;
-  artifactRoot: string; controlSocket: string; createdAt: string; status: 'running' | 'stopped' | 'failed';
+  artifactRoot: string; uiPort?: number; controlSocket: string; createdAt: string; status: 'running' | 'stopped' | 'failed';
   provider: 'fixture'; teardown?: { ownedChildrenExited: number; rootRemoved: boolean }; environments: EnvironmentFixture[];
 }
 // Fill this port once A's named private IPC and normal exchange land. Sessions
 // stay in memory; neither grants nor bearer/ticket values enter the manifest.
-export interface BootstrapSession { environmentId: string; bearer: string; label?: string; }
+export interface BootstrapSession { environmentId: string; bearer: string; label?: string; deviceSession?: DeviceSession; environment?: EnvironmentDescriptor; }
 export interface PairingHooks {
   bootstrap(child: ChildProcess, environment: EnvironmentFixture): Promise<BootstrapSession>;
   pair(environment: EnvironmentFixture, mode: 'link' | 'code'): Promise<BootstrapSession>;
@@ -94,11 +96,15 @@ export async function launchFleet(options: { environments?: number; out?: string
   const root = await realpath(await mkdtemp(join(tmpdir(), 'forge-v2-e2e-')));
   const out = resolve(options.out ?? join(repositoryRoot, '.internal/forge-v2-remote/e2e-manifest.json'));
   const artifactRoot = resolve(options.artifactRoot ?? join(repositoryRoot, '.internal/forge-v2-remote/e2e', runId));
-  const manifest: FleetManifest = { formatVersion: 1, runId, root, repositoryRoot, artifactRoot,
+  const portReservation = createServer();
+  await new Promise<void>(resolvePort => portReservation.listen(0, '127.0.0.1', resolvePort));
+  const uiPort = (portReservation.address() as { port: number }).port;
+  await new Promise<void>(resolvePort => portReservation.close(() => resolvePort()));
+  const manifest: FleetManifest = { formatVersion: 1, runId, root, repositoryRoot, artifactRoot, uiPort,
     controlSocket: join(root, 'fleet-control.sock'), createdAt: new Date().toISOString(), status: 'running', provider: 'fixture', environments: [] };
   const children: ChildProcess[] = [];
   const paused = new Set<string>();
-  const pairing = options.pairingHooks ?? pendingPairingHooks;
+  const pairing = options.pairingHooks ?? { bootstrap: bootstrapFixtureChild, pair: pendingPairingHooks.pair };
   let controlServer: ReturnType<typeof createServer> | undefined;
   let lifecycle: Promise<unknown> = Promise.resolve();
   const startFunctions = new Map<string, () => Promise<EnvironmentFixture>>();
@@ -161,7 +167,7 @@ export async function launchFleet(options: { environments?: number; out?: string
       await command(['add', '.'], checkout, env);
       await command(['-c', 'user.name=Forge Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', `Mark ${name}`], checkout, env);
       const childEnv = { ...env, FORGE_DATA_DIR: dataDir, FORGE_HOST: '127.0.0.1', FORGE_PORT: '0',
-        FORGE_E2E_CHECKOUT: checkout, CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs') };
+        FORGE_E2E_CHECKOUT: checkout, FORGE_E2E_INSTALLATION_STATE: installationStateDir, FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: '1', FORGE_ALLOWED_CLIENT_ORIGINS: `app://forge,http://127.0.0.1:${uiPort}`, CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs') };
       const entry = join(repositoryRoot, 'scripts/environment-e2e/fixtures/backend-process.ts');
       const args = entry.endsWith('.ts') ? ['--import', backendRequire.resolve('tsx'), entry] : [entry];
       const startEnvironment = async (): Promise<EnvironmentFixture> => {
@@ -180,7 +186,7 @@ export async function launchFleet(options: { environments?: number; out?: string
         const ready = await waitForReady(child, dataDir);
         if (existing && existing.port !== ready.port) throw new Error('Restart changed the owned environment port');
         const environment: EnvironmentFixture = { name, instanceId: name, checkout, dataDir, installationStateDir,
-          pid: child.pid!, port: ready.port, baseUrl: `http://127.0.0.1:${ready.port}`, bootstrap: 'pending' };
+          pid: child.pid!, port: ready.port, baseUrl: `http://127.0.0.1:${ready.port}`, bootstrap: ready.environment ? 'private-parent' : 'pending', environment: ready.environment };
         if (existing) Object.assign(existing, environment);
         else manifest.environments.push(environment);
         paused.delete(name);
@@ -234,20 +240,20 @@ export async function controlEnvironment<T>(manifest: FleetManifest, name: strin
     req.on('error', reject); req.on('timeout', () => req.destroy(new Error('Private fleet control timeout'))); req.end();
   });
 }
-function waitForReady(child: ChildProcess, dataDir: string): Promise<{ port: number }> {
+function waitForReady(child: ChildProcess, dataDir: string): Promise<{ port: number; environment?: EnvironmentDescriptor }> {
   return new Promise((resolveReady, reject) => {
     const timer = setTimeout(() => finish(new Error('Backend ready IPC timed out')), 30_000);
     const exit = () => finish(new Error('Backend exited before ready IPC'));
     const message = (value: unknown) => {
       if (!value || typeof value !== 'object') return;
-      const ready = value as { type?: string; port?: number; dataDir?: string };
+      const ready = value as { type?: string; port?: number; dataDir?: string; environment?: EnvironmentDescriptor };
       if (ready.type !== 'ready') return;
       if (!Number.isInteger(ready.port) || ready.port! < 1 || ready.dataDir !== dataDir) { finish(new Error('Backend ready IPC failed isolation check')); return; }
-      finish(undefined, ready.port);
+      finish(undefined, ready.port, ready.environment);
     };
-    const finish = (error?: Error, port?: number) => {
+    const finish = (error?: Error, port?: number, environment?: EnvironmentDescriptor) => {
       clearTimeout(timer); child.off('message', message); child.off('exit', exit); child.off('error', finish);
-      if (error) reject(error); else resolveReady({ port: port! });
+      if (error) reject(error); else resolveReady({ port: port!, environment });
     };
     child.on('message', message); child.once('exit', exit); child.once('error', finish);
   });

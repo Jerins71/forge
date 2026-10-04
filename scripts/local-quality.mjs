@@ -214,6 +214,7 @@ function testWorkspace(file) {
     ['apps/skill-share-worker/', 'apps/skill-share-worker'],
     ['packages/protocol/', 'packages/protocol'],
     ['packages/cli/', 'packages/cli'],
+    ['packages/client-runtime/', 'packages/client-runtime'],
     ['scripts/', 'apps/backend'],
   ];
   return workspacePrefixes.find(([prefix]) => file.startsWith(prefix))?.[1] ?? null;
@@ -232,6 +233,9 @@ export function classify(file) {
   else if (file.startsWith('packages/protocol/')) {
     areas.add('protocol');
     broadReasons.push('protocol changes can affect all workspaces');
+  } else if (file.startsWith('packages/client-runtime/')) {
+    areas.add('client-runtime');
+    areas.add('ui');
   } else if (file.startsWith('packages/cli/')) areas.add('cli');
 
   if (/(?:^|\/)package\.json$/u.test(file) || /^(pnpm-lock\.yaml|pnpm-workspace\.yaml)$/u.test(file)) {
@@ -265,6 +269,7 @@ function addWorkspaceChecks(checks, areas, mode) {
       if (areas.has('skill-share-worker')) lintPaths.push('apps/skill-share-worker');
       if (areas.has('protocol')) lintPaths.push('packages/protocol');
       if (areas.has('cli')) lintPaths.push('packages/cli');
+      if (areas.has('client-runtime')) lintPaths.push('packages/client-runtime');
       if (lintPaths.length > 0) add({ id: 'lint:changed-workspaces', label: `ESLint (${lintPaths.join(', ')})`, command: [pnpm, ['exec', 'eslint', '--max-warnings', '0', ...lintPaths]] });
     }
   }
@@ -273,6 +278,7 @@ function addWorkspaceChecks(checks, areas, mode) {
     if (wantsAll || areas.has('ui')) add({ id: 'typecheck:ui', label: 'UI typecheck', command: [pnpm, ['--filter', '@forge/ui', 'typecheck']] });
     if (wantsAll || areas.has('protocol')) add({ id: 'typecheck:protocol', label: 'Protocol typecheck', command: [pnpm, ['--filter', '@forge/protocol', 'typecheck']] });
     if (wantsAll || areas.has('cli')) add({ id: 'typecheck:cli', label: 'CLI typecheck', command: [pnpm, ['--filter', '@forge/cli', 'typecheck']] });
+    if (wantsAll || areas.has('client-runtime')) add({ id: 'typecheck:client-runtime', label: 'Client runtime typecheck', command: [pnpm, ['--filter', '@forge/client-runtime', 'typecheck']] });
     if (wantsAll || areas.has('electron')) add({ id: 'typecheck:electron', label: 'Electron typecheck', command: [pnpm, ['--filter', '@forge/electron', 'typecheck']] });
     if (wantsAll || areas.has('chrome-extension')) add({ id: 'typecheck:chrome-extension', label: 'Chrome extension typecheck', command: [pnpm, ['--filter', '@forge/chrome-extension', 'typecheck']] });
     if (wantsAll || areas.has('native-messaging-host')) add({ id: 'typecheck:native-messaging-host', label: 'Native messaging host typecheck', command: [pnpm, ['--filter', '@forge/external-chrome-native-host', 'typecheck']] });
@@ -284,6 +290,7 @@ function addWorkspaceChecks(checks, areas, mode) {
     if (wantsAll || areas.has('ui')) add({ id: 'test:ui', label: 'UI tests', command: [pnpm, ['--filter', '@forge/ui', 'test']] });
     if (wantsAll || areas.has('protocol')) add({ id: 'test:protocol', label: 'Protocol tests', command: [pnpm, ['--filter', '@forge/protocol', 'test']] });
     if (wantsAll || areas.has('cli')) add({ id: 'test:cli', label: 'CLI tests', command: [pnpm, ['--filter', '@forge/cli', 'test']] });
+    if (wantsAll || areas.has('client-runtime')) add({ id: 'test:client-runtime', label: 'Client runtime test', command: [pnpm, ['--filter', '@forge/client-runtime', 'test']] });
     if (wantsAll || areas.has('electron')) add({ id: 'test:electron', label: 'Electron tests', command: [pnpm, ['--filter', '@forge/electron', 'test']] });
     if (wantsAll || areas.has('chrome-extension')) add({ id: 'test:chrome-extension', label: 'Chrome extension tests', command: [pnpm, ['--filter', '@forge/chrome-extension', 'test']] });
     if (wantsAll || areas.has('native-messaging-host')) add({ id: 'test:native-messaging-host', label: 'Native messaging host tests', command: [pnpm, ['--filter', '@forge/external-chrome-native-host', 'test']] });

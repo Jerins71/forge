@@ -1,3 +1,4 @@
+import { installEnvironmentParentBootstrap } from '../../../apps/backend/src/environment/parent-bootstrap.js';
 import { readFile, mkdir, writeFile, symlink, realpath } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createConfig } from '../../../apps/backend/src/config.js';
@@ -21,6 +22,8 @@ process.on('disconnect', () => void shutdown());
 const checkout = resolve(process.env.FORGE_E2E_CHECKOUT!);
 const fixture = JSON.parse(await readFile(resolve(checkout, '.fixture-environment.json'), 'utf8'));
 if (fixture.formatVersion !== 1 || !process.env.FORGE_DATA_DIR || !/^\d+$/.test(process.env.FORGE_PORT ?? '')) throw new Error('Missing isolated fixture settings');
+const authorizedPhysicalParent = process.env.FORGE_ENVIRONMENT_BOOTSTRAP_PARENT === '1' && Boolean(process.send);
+delete process.env.FORGE_ENVIRONMENT_BOOTSTRAP_PARENT;
 const config = createConfig();
 config.paths.rootDir = checkout;
 config.paths.resourcesDir = checkout;
@@ -45,7 +48,8 @@ await saveSharedSpecialist(config.paths.dataDir, 'fixture-worker', {
   provider: 'codex-native', modelId: 'gpt-6-sol', reasoningLevel: 'high',
   promptBody: 'Return the synthetic fixture worker result.',
 });
-lifecycle.server = await startServer({ config, onReady: ({ port }) => {
-  if (process.connected) process.send?.({ type: 'ready', port, dataDir: config.paths.dataDir }, () => {});
+lifecycle.server = await startServer({ config, environmentIdentity: { installationStateDir: process.env.FORGE_E2E_INSTALLATION_STATE, label: fixture.instanceId }, onReady: ({ port, environment }) => {
+  if (process.connected) process.send?.({ type: 'ready', port, dataDir: config.paths.dataDir, environment }, () => {});
 } });
+installEnvironmentParentBootstrap({ authorizedPhysicalParent, createGrant: () => lifecycle.server!.createBootstrapGrant() });
 if (lifecycle.shutdownRequested || !process.connected) await shutdown();

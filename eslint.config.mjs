@@ -85,6 +85,7 @@ export default tseslint.config(
       'apps/skill-share-worker/**/*.{ts,tsx}',
       'packages/protocol/**/*.{ts,tsx}',
       'packages/cli/**/*.{ts,tsx}',
+      'packages/client-runtime/**/*.{ts,tsx}',
     ],
     languageOptions: {
       parser: tseslint.parser,
@@ -99,6 +100,7 @@ export default tseslint.config(
           path.join(repoRoot, 'apps/skill-share-worker/tsconfig.eslint.json'),
           path.join(repoRoot, 'packages/protocol/tsconfig.eslint.json'),
           path.join(repoRoot, 'packages/cli/tsconfig.eslint.json'),
+          path.join(repoRoot, 'packages/client-runtime/tsconfig.test.json'),
         ],
         tsconfigRootDir: repoRoot,
       },
