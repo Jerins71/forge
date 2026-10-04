@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { createEnvironmentCredentialsBridge, createEnvironmentPersistenceBridge } from './environment-credentials-ipc.js'
 import type { SleepBlockerSettingsPatch, SleepBlockerStatus } from './sleep-blocker.js'
 import { createTrustedBrowserBridge, createTrustedBrowserPreviewBridge, createTrustedBrowserWorkspaceBridge } from './browser/trusted-browser-bridge.js'
 import type { ElectronWindowRole } from './browser/browser-bridge-contract.js'
@@ -40,6 +41,8 @@ const roleScopedBridge = bootstrap.windowRole === 'managed-browser-popout'
       }
   : {
       windowRole: bootstrap.windowRole,
+        environmentCredentials: createEnvironmentCredentialsBridge(ipcRenderer),
+        environmentPersistence: createEnvironmentPersistenceBridge(ipcRenderer),
         backendUrl: bootstrap.backendUrl,
         backendWsUrl: bootstrap.backendWsUrl,
         getVersion: (): string => bootstrap.version,

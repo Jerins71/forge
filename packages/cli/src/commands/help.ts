@@ -13,6 +13,9 @@ Global options:
   -v, --version       Show version
 
 Commands:
+  serve [--backend-entry <absolute-file>] [--host <address>] [--port <n>] [--data-dir <absolute-directory>] [--pair --pair-output <absolute-file>]
+  pair <url-or-host> [--credential-file <absolute-file>]
+  environment rekey|adopt|restore --data-dir <absolute-directory>
   status
   doctor
   config get|set|unset|list
@@ -38,6 +41,12 @@ Commands:
 
 export function commandHelp(command: string | undefined): string {
   switch (command) {
+    case 'serve':
+      return 'Usage: forge serve [--backend-entry <absolute-file>] [--host <address>] [--port <0..65535>] [--data-dir <absolute-directory>] [--public-url <https-origin>] [--tls-cert <absolute-file> --tls-key <absolute-file>] [--tailscale-serve] [--pair [--pair-output <absolute-file>]]\n\nRuns the ordinary installed Forge backend in the foreground. The standalone CLI does not include backend assets. Remote binding requires a public HTTPS URL and TLS plan. Noninteractive pairing requires a new protected output file.'
+    case 'pair':
+      return 'Usage: forge pair <url-or-host> [--credential-file <absolute-file>] [--environment-id <uuid>] [--scopes <comma-separated>]\n\nEnter a pairing link or code privately at the terminal. Stores the session in OS credential storage where available; an explicit owner-only fallback file is supported.'
+    case 'environment':
+      return 'Usage: forge environment rekey|adopt|restore --data-dir <absolute-directory> [--backend-entry <absolute-file>] [--from-data-dir <previous-directory>]\n\nLocal recovery runs under the ordinary backend runtime lock. Re-key assigns a new identity and revokes sessions; adopt retires the old data-path binding; restore rotates the stream epoch and revokes stale tokens.'
     case 'status':
       return 'Usage: forge status [--json]\n\nShows Forge CLI API status and capability summary.'
     case 'doctor':

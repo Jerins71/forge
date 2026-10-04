@@ -2,6 +2,9 @@ import { resolveCliConfig } from '../config.js'
 import { ForgeClient, type ForgeClientLike } from '../forge-client.js'
 import { CliError, type CliIo, renderError, writeHuman } from '../output.js'
 import { CLI_VERSION, EXIT_CODES } from '../version.js'
+import { handleServeCommand } from './serve.js'
+import { handlePairCommand } from './pair.js'
+import { handleEnvironmentCommand } from './environment.js'
 import { handleConfigCommand } from './config.js'
 import { commandHelp, mainHelp } from './help.js'
 import {
@@ -62,6 +65,9 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
 
   try {
     switch (args.positionals[0]) {
+      case 'serve': return await handleServeCommand(context)
+      case 'pair': return await handlePairCommand(context)
+      case 'environment': return await handleEnvironmentCommand(context)
       case 'status':
         return await handleStatusCommand(context)
       case 'doctor':
