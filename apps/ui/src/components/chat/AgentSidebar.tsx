@@ -43,6 +43,7 @@ import { SidebarSearch } from './agent-sidebar/SidebarSearch'
 import { ProjectViewSwitcher, type SidebarProjectViewOption } from './agent-sidebar/ProjectViewSwitcher'
 import { SidebarFooter } from './agent-sidebar/SidebarFooter'
 import { ProfileGroup } from './agent-sidebar/ProfileGroup'
+import { OtherEnvironmentProjects } from './agent-sidebar/LogicalProjectGroup'
 import { RoomsInboxLive } from './agent-sidebar/RoomsInboxLive'
 import { RoomsProjectsTree, type RoomsProjectTreeRow } from './agent-sidebar/RoomsProjectsTree'
 import type { RoomsInboxOriginInput } from './agent-sidebar/rooms-inbox-selectors'
@@ -130,6 +131,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   onDeleteProjectAgentReference,
   onRequestProjectAgentRecommendations,
   onCreateAgentCreator,
+  environmentNavigation,
 }: AgentSidebarProps) {
   const builtTreeRows = useMemo(() => buildProfileTreeRows(agents, profiles), [agents, profiles])
   const treeRows = providedTreeRows ?? builtTreeRows
@@ -737,6 +739,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       inactiveRepoProjectAgents={getEntriesForProfile(treeRow.profile.profileId)}
       selectedInactiveRepoEntryKey={selectedInactiveRepoEntryKey}
       onSelectInactiveRepoProjectAgent={wsUrl ? handleSelectInactiveRepoProjectAgent : undefined}
+      environmentNavigation={environmentNavigation}
     />
   ), [
     statuses, unreadCounts, selectedAgentId, isSettingsActive, isSearchActive,
@@ -758,6 +761,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     handleToggleMute, handleMuteAllSessions, getCreatorAttribution,
     hideCliSessions, handleToggleHideCliSessions,
     getEntriesForProfile, selectedInactiveRepoEntryKey, wsUrl, handleSelectInactiveRepoProjectAgent,
+    environmentNavigation,
     roomsV2,
   ])
 
@@ -1043,6 +1047,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
             </ul>
           )
         })()}
+        {environmentNavigation && !isSearchActive ? <OtherEnvironmentProjects navigation={environmentNavigation} /> : null}
           </>
         ) : null}
 

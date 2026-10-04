@@ -61,3 +61,19 @@ export const EnvironmentStatusChip = memo(function EnvironmentStatusChip({
     </span>
   )
 })
+
+/** Readable machine badge for a session row; the label is the environment's display name. */
+export function EnvironmentBadge({ label, className }: { label: string; className?: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex max-w-24 shrink-0 items-center rounded border border-sidebar-border px-1 text-[10px] leading-4 text-muted-foreground',
+        className,
+      )}
+      data-environment-badge={label}
+      title={`Runs on ${label}`}
+    >
+      <span className="truncate">{label}</span>
+    </span>
+  )
+}

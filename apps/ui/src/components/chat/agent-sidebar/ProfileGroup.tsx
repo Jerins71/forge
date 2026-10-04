@@ -29,6 +29,7 @@ import { MAX_VISIBLE_SESSIONS } from './constants'
 import { buildSessionContextMenuActions, getProjectRoomSummary } from './utils'
 import { getInactiveRepoProjectAgentEntryKey, matchesRepoProjectAgentSearch } from '@/components/settings/repo-project-agent-ui-utils'
 import type { ProfileGroupProps } from './types'
+import { OtherEnvironmentSessions } from './LogicalProjectGroup'
 
 export const ProfileGroup = React.memo(function ProfileGroup({
   treeRow,
@@ -86,6 +87,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
   inactiveRepoProjectAgents = [],
   selectedInactiveRepoEntryKey,
   onSelectInactiveRepoProjectAgent,
+  environmentNavigation,
 }: ProfileGroupProps) {
   const { profile, sessions } = treeRow
   const hasAnySessions = sessions.length > 0 || inactiveRepoProjectAgents.length > 0
@@ -476,6 +478,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                   getCreatorAttribution={getCreatorAttribution}
                   hideCliSessions={menuActions.hideCliSessions}
                   onToggleHideCliSessions={menuActions.onToggleHideCliSessions}
+                  environmentLabel={environmentNavigation?.primaryBadgeLabel}
                 />
               )
             }
@@ -535,6 +538,9 @@ export const ProfileGroup = React.memo(function ProfileGroup({
             )
           })()}
         </div>
+      ) : null}
+      {!isCollapsed && environmentNavigation ? (
+        <OtherEnvironmentSessions projectId={profile.profileId} navigation={environmentNavigation} />
       ) : null}
     </div>
   )

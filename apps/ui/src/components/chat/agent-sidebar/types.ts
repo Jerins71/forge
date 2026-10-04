@@ -17,6 +17,7 @@ import type {
 import type { DirectoryValidationResult } from '@/lib/ws-client'
 import type { DraggableAttributes, DraggableSyntheticListeners } from '@dnd-kit/core'
 import type { ProfileTreeRow, SessionRow } from '@/lib/agent-hierarchy'
+import type { EnvironmentSessionNavigation } from './LogicalProjectGroup'
 
 export type AgentLiveStatus = {
   status: AgentStatus
@@ -84,6 +85,8 @@ export interface AgentSidebarProps {
   onDeleteProjectAgentReference?: (agentId: string, fileName: string) => Promise<{ agentId: string; fileName: string }>
   onRequestProjectAgentRecommendations?: (agentId: string) => Promise<{ whenToUse: string; systemPrompt: string }>
   onCreateAgentCreator?: (profileId: string) => void
+  /** Present only when the environment runtime is mounted; adds other environments' projects and sessions. */
+  environmentNavigation?: EnvironmentSessionNavigation
 }
 
 export interface WorkerRowProps {
@@ -158,6 +161,8 @@ export interface SessionRowItemProps {
   getCreatorAttribution?: (creatorAgentId: string) => string | null
   hideCliSessions?: boolean
   onToggleHideCliSessions?: () => void
+  /** Machine badge shown when more than one environment is paired. */
+  environmentLabel?: string | null
 }
 
 export interface ProfileGroupProps {
@@ -218,6 +223,7 @@ export interface ProfileGroupProps {
   inactiveRepoProjectAgents?: import('@/hooks/use-inactive-repo-project-agents').RepoProjectAgentSidebarEntry[]
   selectedInactiveRepoEntryKey?: string | null
   onSelectInactiveRepoProjectAgent?: (entry: import('@/hooks/use-inactive-repo-project-agents').RepoProjectAgentSidebarEntry) => void
+  environmentNavigation?: EnvironmentSessionNavigation
 }
 
 export interface ProjectAgentSettingsSheetProps {
