@@ -12,6 +12,7 @@ it('persists identity across restart, blocks a copied root, rekeys without rewri
   root = await mkdtemp(join(tmpdir(), 'forge-identity-'));
   const dataDir = join(root, 'data');
   const installationStateDir = join(root, 'host');
+  await expect(loadEnvironmentIdentity({dataDir,installationStateDir,label:'x'.repeat(81)})).rejects.toThrow(/descriptor/);
   const first = await loadEnvironmentIdentity({ dataDir, installationStateDir });
   expect((await loadEnvironmentIdentity({ dataDir, installationStateDir })).file).toEqual(first.file);
   await writeFile(join(dataDir, 'user.md'), 'retain me');
