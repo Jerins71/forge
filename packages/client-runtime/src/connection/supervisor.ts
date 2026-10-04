@@ -79,7 +79,9 @@ export class EnvironmentSupervisor {
     readonly http: AuthenticatedHttp,
     readonly ports: RuntimePorts,
     readonly onConnected: () => Promise<void> | void,
-    readonly onBlocked: () => Promise<void> | void,
+    readonly onBlocked: (
+      error: EnvironmentRuntimeError,
+    ) => Promise<void> | void,
   ) {
     if (ports.connectivity)
       this.detach.push(
@@ -243,7 +245,7 @@ export class EnvironmentSupervisor {
     if (e.code === 'UNAUTHENTICATED' || e.code === 'FORBIDDEN') {
       phase = 'auth-blocked'
       blockedCause ??= 'needs-pairing'
-      void Promise.resolve(this.onBlocked()).catch(() =>
+      void Promise.resolve(this.onBlocked(e)).catch(() =>
         this.patch({
           reason: 'Device access blocked; local cache cleanup failed',
         }),
@@ -251,10 +253,11 @@ export class EnvironmentSupervisor {
     } else if (e.code === 'IDENTITY_MISMATCH') {
       phase = 'identity-blocked'
       blockedCause = 'identity-mismatch'
-      void Promise.resolve(this.onBlocked()).catch(() => {})
+      void Promise.resolve(this.onBlocked(e)).catch(() => {})
     } else if (e.code === 'PROTOCOL_MISMATCH') {
       phase = 'version-blocked'
       blockedCause = 'protocol-mismatch'
+      void Promise.resolve(this.onBlocked(e)).catch(() => {})
     } else if (e.blockedCause === 'https-required') {
       phase = 'version-blocked'
     } else if (this.ports.connectivity && !this.ports.connectivity.online())

@@ -308,6 +308,20 @@ describe('environment runtime acceptance', () => {
     } = await fleet()
     await registry.start()
     await online(registry, s.seed.entry.environmentId)
+    s.descriptor = { ...s.seed.descriptor, protocolVersion: 2 as 1 }
+    s.disconnect()
+    await until(
+      () =>
+        registry.get(s.seed.entry.environmentId).connection.getSnapshot()
+          .phase === 'version-blocked',
+    )
+    expect(
+      registry.get(s.seed.entry.environmentId).shell.getSnapshot().sessions
+        .size,
+    ).toBe(0)
+    s.descriptor = s.seed.descriptor
+    registry.retryNow(s.seed.entry.environmentId)
+    await online(registry, s.seed.entry.environmentId)
     s.descriptor = {
       ...s.seed.descriptor,
       environmentId: '99999999-9999-4999-8999-999999999999',
@@ -318,11 +332,11 @@ describe('environment runtime acceptance', () => {
         registry.get(s.seed.entry.environmentId).connection.getSnapshot()
           .phase === 'identity-blocked',
     )
-    expect(s.connections).toBe(1)
+    expect(s.connections).toBe(2)
     const before = s.inputs.length
     registry.retryNow(s.seed.entry.environmentId)
     await new Promise((r) => setTimeout(r, 40))
-    expect(s.connections).toBe(1)
+    expect(s.connections).toBe(2)
     expect(s.inputs.length).toBe(before)
   })
   it('advances optional unknown events, resyncs malformed known events, and rejects foreign targets', async () => {

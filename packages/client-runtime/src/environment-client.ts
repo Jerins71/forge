@@ -59,7 +59,10 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
       this.http,
       ports,
       () => this.prepareCache(),
-      () => this.purge(),
+      (error) =>
+        error.code === 'PROTOCOL_MISMATCH'
+          ? this.clearProtectedCache()
+          : this.purge(),
     )
     this.connection = this.supervisor.connection
     this.shell = new ShellStore(
@@ -182,8 +185,11 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
     const descriptor = this.descriptor()!,
       device = this.http.deviceSession!
     const state = this.shell.getSnapshot()
-    if (state.cursor && state.cursor.streamEpoch !== descriptor.streamEpoch)
+    if (state.cursor && state.cursor.streamEpoch !== descriptor.streamEpoch) {
       this.shell.reset()
+      this.details.purge()
+      this.readCache.clear()
+    }
     const cached = await this.ports.persistence.loadShell(this.environmentId)
     if (
       cached &&
@@ -530,6 +536,17 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
         .catch(() => {})
         .then(() => this.ports.persistence.saveShell(record))
     await this.cacheWrite
+  }
+  private async clearProtectedCache(): Promise<void> {
+    if (this.cacheTimer) {
+      clearTimeout(this.cacheTimer)
+      this.cacheTimer = null
+    }
+    this.shell.reset()
+    this.details.purge()
+    this.readCache.clear()
+    await this.cacheWrite.catch(() => {})
+    await this.ports.persistence.deleteShell(this.environmentId)
   }
   async purge(): Promise<void> {
     if (this.cacheTimer) {
