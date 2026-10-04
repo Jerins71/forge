@@ -21,7 +21,8 @@ import type { FileEditSessionController } from './use-file-edit-sessions'
 import { formatFileSize, isImageFile, isPdfFile } from './file-browser-utils'
 import { ImagePreview } from './ImagePreview'
 import { PdfPreview } from './PdfPreview'
-import { buildPdfRawUrl } from './pdf-preview-utils'
+import { useFilePreviewUrl } from './use-file-preview-url'
+import type { EnvironmentPanels } from '@/lib/environment-panel-context'
 import { MarkdownPreview } from './MarkdownPreview'
 import type { FileContentResult } from './use-file-browser-queries'
 import type { FileContentScrollSnapshot } from './use-file-browser-workspace-state'
@@ -64,24 +65,24 @@ function joinWorkspaceAbsolutePath(cwd: string, filePath: string): string {
 }
 
 function FileBrowserPdfPreview({
-  wsUrl,
+  panel,
   filePath,
   cwd,
   agentId,
   worktreeId = null,
 }: {
-  wsUrl: string
+  panel: EnvironmentPanels | null
   filePath: string
   cwd: string
   agentId: string
   worktreeId?: string | null
 }) {
-  const sourceUrl = useMemo(
-    () => buildPdfRawUrl(wsUrl, filePath, agentId, worktreeId),
-    [wsUrl, filePath, agentId, worktreeId],
-  )
+  const { url: sourceUrl, error } = useFilePreviewUrl(panel, { agentId, path: filePath, worktreeId, kind: 'raw' })
   const fileName = filePath.split('/').pop() ?? 'Document.pdf'
   const nativeFilePath = joinWorkspaceAbsolutePath(cwd, filePath)
+  if (!sourceUrl) {
+    return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{error ?? 'Loading preview…'}</div>
+  }
   return (
     <PdfPreview
       sourceUrl={sourceUrl}
@@ -119,7 +120,7 @@ function versionRestoreKey(version: FileContentResult['version'] | null | undefi
 /* ------------------------------------------------------------------ */
 
 interface FileContentViewerProps {
-  wsUrl: string
+  panel: EnvironmentPanels | null
   agentId: string
   cwd: string
   filePath: string | null
@@ -147,7 +148,7 @@ interface FileViewerInfo {
 }
 
 export function FileContentViewer({
-  wsUrl,
+  panel,
   agentId,
   cwd,
   filePath,
@@ -264,7 +265,7 @@ export function FileContentViewer({
         />
         <ImagePreview
           key={`${agentId}:${worktreeId ?? 'session'}:${filePath}`}
-          wsUrl={wsUrl}
+          panel={panel}
           filePath={filePath}
           agentId={agentId}
           worktreeId={worktreeId}
@@ -287,7 +288,7 @@ export function FileContentViewer({
         <div className="flex min-h-0 flex-1 flex-col">
           <FileBrowserPdfPreview
             key={`${agentId}:${worktreeId ?? 'session'}:${filePath}`}
-            wsUrl={wsUrl}
+            panel={panel}
             filePath={filePath}
             cwd={cwd}
             agentId={agentId}

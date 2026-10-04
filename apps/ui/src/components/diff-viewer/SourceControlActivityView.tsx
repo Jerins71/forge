@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { EnvironmentPanels } from '@/lib/environment-panel-context'
 import { FileX2, History } from 'lucide-react'
 import { CommitList } from './CommitList'
 import { DiffPane } from './DiffPane'
@@ -19,7 +20,7 @@ import type { HistoryStatusInfo } from './HistoryView'
 const PAGE_SIZE = 50
 
 interface SourceControlActivityViewProps {
-  wsUrl: string
+  panel: EnvironmentPanels | null
   agentId: string | null
   repoTarget: GitRepoTarget
   worktreeId?: string | null
@@ -33,7 +34,7 @@ interface SourceControlActivityViewProps {
 }
 
 export function SourceControlActivityView({
-  wsUrl,
+  panel,
   agentId,
   repoTarget,
   worktreeId = null,
@@ -58,8 +59,8 @@ export function SourceControlActivityView({
   const prevContextKeyRef = useRef(`${agentId ?? ''}:${repoTarget}:${worktreeId ?? ''}`)
   const prevRefreshTokenRef = useRef(refreshToken)
   const files = useMemo(() => status?.files ?? [], [status?.files])
-  const workingDiffQuery = useGitDiff(wsUrl, agentId, repoTarget, selectedWorkingFile, worktreeId)
-  const logQuery = useGitLog(wsUrl, agentId, repoTarget, PAGE_SIZE, currentOffset, worktreeId)
+  const workingDiffQuery = useGitDiff(panel, agentId, repoTarget, selectedWorkingFile, worktreeId)
+  const logQuery = useGitLog(panel, agentId, repoTarget, PAGE_SIZE, currentOffset, worktreeId)
 
   useEffect(() => {
     const contextKey = `${agentId ?? ''}:${repoTarget}:${worktreeId ?? ''}`
@@ -118,7 +119,7 @@ export function SourceControlActivityView({
     }
   }, [allCommits, selectedSha])
 
-  const commitDetailQuery = useGitCommitDetail(wsUrl, agentId, repoTarget, selectedSha, worktreeId)
+  const commitDetailQuery = useGitCommitDetail(panel, agentId, repoTarget, selectedSha, worktreeId)
   const commitFiles = useMemo(() => commitDetailQuery.data?.files ?? [], [commitDetailQuery.data?.files])
 
   useEffect(() => {
@@ -139,7 +140,7 @@ export function SourceControlActivityView({
     }
   }, [commitFiles, selectedCommitFile, selectedSha])
 
-  const commitDiffQuery = useGitCommitDiff(wsUrl, agentId, repoTarget, selectedSha, selectedCommitFile, worktreeId)
+  const commitDiffQuery = useGitCommitDiff(panel, agentId, repoTarget, selectedSha, selectedCommitFile, worktreeId)
 
   useEffect(() => {
     if (refreshToken === prevRefreshTokenRef.current) {

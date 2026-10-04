@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import type { EnvironmentPanels } from '@/lib/environment-panel-context'
 import { FileCode2, FileImage, FileText, FileType, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -18,7 +19,7 @@ const IMAGE_FILE_PATTERN = /\.(png|jpg|jpeg|gif|webp|svg)$/i
 const MARKDOWN_FILE_PATTERN = /\.(md|markdown|mdx)$/i
 
 interface FileBrowserPanelProps {
-  wsUrl: string
+  panel: EnvironmentPanels | null
   agentId: string | null
   filePath: string | null
   onClose: () => void
@@ -44,7 +45,7 @@ interface FileBrowserPanelProps {
 }
 
 export function FileBrowserPanel({
-  wsUrl,
+  panel,
   agentId,
   filePath,
   onClose,
@@ -71,7 +72,7 @@ export function FileBrowserPanel({
   const gatedAgentId = filePath ? agentId : null
 
   // Fetch root listing for cwd (re-uses cache from sidebar)
-  const rootList = useDirectoryListing(wsUrl, gatedAgentId, '', worktreeId)
+  const rootList = useDirectoryListing(panel, gatedAgentId, '', worktreeId)
   const cwd = rootList.data?.cwd ?? ''
 
   // Only fetch file content for non-image, non-PDF files
@@ -80,7 +81,7 @@ export function FileBrowserPanel({
     [filePath],
   )
   const fileContent = useFileContent(
-    wsUrl,
+    panel,
     gatedAgentId,
     shouldFetchContent ? filePath : null,
     worktreeId,
@@ -187,7 +188,7 @@ export function FileBrowserPanel({
         <div className="flex min-h-0 flex-1 flex-col">
           {gatedAgentId && filePath ? (
             <FileContentViewer
-              wsUrl={wsUrl}
+              panel={panel}
               agentId={gatedAgentId}
               cwd={cwd}
               filePath={filePath}

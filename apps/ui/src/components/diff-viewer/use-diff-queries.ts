@@ -22,7 +22,8 @@ import type {
   GitWorktreeListResult,
 } from '@forge/protocol'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
+import type { GitReadOptions } from '@forge/client-runtime'
+import type { EnvironmentPanels } from '@/lib/environment-panel-context'
 
 export type GitPullRequestsQueryResult = ReturnType<typeof useGitPullRequests>
 
@@ -38,96 +39,36 @@ export type {
   GitWorktreeListResult,
 } from '@forge/protocol'
 
-/* ------------------------------------------------------------------ */
-/*  Generic fetch wrapper                                             */
-/* ------------------------------------------------------------------ */
-
-async function fetchGitApi<T>(wsUrl: string, path: string, params: Record<string, string>): Promise<T> {
-  const searchParams = new URLSearchParams(params)
-  const url = resolveApiEndpoint(wsUrl, `${path}?${searchParams.toString()}`)
-  const response = await fetch(url, { credentials: 'include' })
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }))
-    throw new Error(body.error ?? `HTTP ${response.status}`)
-  }
-
-  return response.json() as Promise<T>
-}
-
-async function postGitApi<T>(wsUrl: string, path: string, body: object): Promise<T> {
-  const url = resolveApiEndpoint(wsUrl, path)
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(body),
-  })
-
-  const payload = await response.json().catch(() => ({ error: response.statusText })) as T & {
-    error?: string
-    success?: boolean
-    errors?: string[]
-  }
-
-  if (!response.ok && typeof payload.error === 'string') {
-    throw new Error(payload.error)
-  }
-
-  return payload as T
-}
-
-function buildGitRequestParams(
-  agentId: string,
-  repoTarget: GitRepoTarget,
-  extraParams: Record<string, string | number | null | undefined> = {},
-  worktreeId?: string | null,
-): Record<string, string> {
-  const params: Record<string, string> = {
-    agentId,
-    repoTarget,
-  }
-
-  if (worktreeId) {
-    params.worktreeId = worktreeId
-  }
-
-  for (const [key, value] of Object.entries(extraParams)) {
-    if (value == null) continue
-    params[key] = String(value)
-  }
-
-  return params
-}
-
+/** Keys carry the environment: equal session IDs on two hosts never share cache entries. */
 function buildGitQueryKey(
   scope: string,
+  environmentId: string | null | undefined,
   agentId: string | null,
   repoTarget: GitRepoTarget,
   worktreeId?: string | null,
   ...parts: Array<string | number | null>
 ): string {
-  return JSON.stringify([scope, agentId ?? '', repoTarget, worktreeId ?? '', ...parts.map((part) => part ?? '')])
+  return JSON.stringify([scope, environmentId ?? '', agentId ?? '', repoTarget, worktreeId ?? '', ...parts.map((part) => part ?? '')])
 }
 
 function parseGitQueryKey(
   queryKey: string,
-): { scope: string; agentId: string; repoTarget: GitRepoTarget } | null {
+): { scope: string; environmentId: string; agentId: string; repoTarget: GitRepoTarget } | null {
   try {
     const parsed = JSON.parse(queryKey)
-    if (!Array.isArray(parsed) || parsed.length < 3) {
+    if (!Array.isArray(parsed) || parsed.length < 4) {
       return null
     }
 
-    const [scope, agentId, repoTarget] = parsed
-    if (typeof scope !== 'string' || typeof agentId !== 'string') {
+    const [scope, environmentId, agentId, repoTarget] = parsed
+    if (typeof scope !== 'string' || typeof environmentId !== 'string' || typeof agentId !== 'string') {
       return null
     }
     if (repoTarget !== 'workspace') {
       return null
     }
 
-    return { scope, agentId, repoTarget }
+    return { scope, environmentId, agentId, repoTarget }
   } catch {
     return null
   }
@@ -251,120 +192,105 @@ function useSimpleQuery<T>(
 /*  Public hooks                                                      */
 /* ------------------------------------------------------------------ */
 
+function readOptions(
+  repoTarget: GitRepoTarget,
+  worktreeId?: string | null,
+  extra: Omit<GitReadOptions, 'repoTarget' | 'worktreeId'> = {},
+): GitReadOptions {
+  return { repoTarget, ...(worktreeId ? { worktreeId } : {}), ...extra }
+}
+
 export function useGitStatus(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   repoTarget: GitRepoTarget,
   worktreeId?: string | null,
 ) {
-  const queryKey = buildGitQueryKey('git:status', agentId, repoTarget, worktreeId)
+  const queryKey = buildGitQueryKey('git:status', panel?.session.environmentId, agentId, repoTarget, worktreeId)
   const fetchFn = useCallback(
-    () =>
-      fetchGitApi<GitStatusResult>(
-        wsUrl,
-        '/api/git/status',
-        buildGitRequestParams(agentId!, repoTarget, {}, worktreeId),
-      ),
-    [wsUrl, agentId, repoTarget, worktreeId],
+    () => panel!.features.git.status(agentId!, panel!.signal, readOptions(repoTarget, worktreeId)),
+    [panel, agentId, repoTarget, worktreeId],
   )
 
   return useSimpleQuery<GitStatusResult>(queryKey, fetchFn, {
-    enabled: !!agentId,
+    enabled: !!panel && !!agentId,
     staleTime: 10_000,
     refetchOnWindowFocus: true,
   })
 }
 
 export function useGitBranches(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   repoTarget: GitRepoTarget,
   worktreeId?: string | null,
   options: { enabled?: boolean } = {},
 ) {
   const enabled = options.enabled ?? !!agentId
-  const queryKey = buildGitQueryKey('git:branches', agentId, repoTarget, worktreeId)
+  const queryKey = buildGitQueryKey('git:branches', panel?.session.environmentId, agentId, repoTarget, worktreeId)
   const fetchFn = useCallback(
-    () =>
-      fetchGitApi<GitBranchListResult>(
-        wsUrl,
-        '/api/git/branches',
-        buildGitRequestParams(agentId!, repoTarget, {}, worktreeId),
-      ),
-    [wsUrl, agentId, repoTarget, worktreeId],
+    () => panel!.features.git.branches(agentId!, panel!.signal, readOptions(repoTarget, worktreeId)),
+    [panel, agentId, repoTarget, worktreeId],
   )
 
   return useSimpleQuery<GitBranchListResult>(queryKey, fetchFn, {
-    enabled: enabled && !!agentId,
+    enabled: enabled && !!panel && !!agentId,
     staleTime: 10_000,
     refetchOnWindowFocus: true,
   })
 }
 
 export function useGitWorktrees(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   repoTarget: GitRepoTarget,
   options: { enabled?: boolean } = {},
 ) {
   const enabled = options.enabled ?? !!agentId
-  const queryKey = buildGitQueryKey('git:worktrees', agentId, repoTarget, null)
+  const queryKey = buildGitQueryKey('git:worktrees', panel?.session.environmentId, agentId, repoTarget, null)
   const fetchFn = useCallback(
-    () =>
-      fetchGitApi<GitWorktreeListResult>(
-        wsUrl,
-        '/api/git/worktrees',
-        buildGitRequestParams(agentId!, repoTarget),
-      ),
-    [wsUrl, agentId, repoTarget],
+    () => panel!.features.git.worktrees(agentId!, panel!.signal, readOptions(repoTarget)),
+    [panel, agentId, repoTarget],
   )
 
   return useSimpleQuery<GitWorktreeListResult>(queryKey, fetchFn, {
-    enabled: enabled && !!agentId,
+    enabled: enabled && !!panel && !!agentId,
     staleTime: 10_000,
     refetchOnWindowFocus: true,
   })
 }
 
 export function useGitPullRequests(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   repoTarget: GitRepoTarget,
   worktreeId?: string | null,
   options: { enabled?: boolean; closedLimit?: number } = {},
 ) {
   const enabled = options.enabled ?? !!agentId
+  const closedLimit = options.closedLimit ?? 10
   const queryKey = buildGitQueryKey(
     'git:pull-requests',
+    panel?.session.environmentId,
     agentId,
     repoTarget,
     worktreeId,
-    options.closedLimit ?? 10,
+    closedLimit,
   )
   const fetchFn = useCallback(
-    () =>
-      fetchGitApi<GitPullRequestListResult>(
-        wsUrl,
-        '/api/git/pull-requests',
-        buildGitRequestParams(
-          agentId!,
-          repoTarget,
-          { closedLimit: options.closedLimit ?? 10 },
-          worktreeId,
-        ),
-      ),
-    [wsUrl, agentId, repoTarget, worktreeId, options.closedLimit],
+    () => panel!.features.git.pullRequests(agentId!, panel!.signal, readOptions(repoTarget, worktreeId, { closedLimit })),
+    [panel, agentId, repoTarget, worktreeId, closedLimit],
   )
 
   return useSimpleQuery<GitPullRequestListResult>(queryKey, fetchFn, {
-    enabled: enabled && !!agentId,
+    enabled: enabled && !!panel && !!agentId,
     staleTime: 30_000,
     refetchOnWindowFocus: true,
   })
 }
 
 export function useGitPullRequestDetail(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   repoTarget: GitRepoTarget,
   number: number | null,
@@ -372,140 +298,99 @@ export function useGitPullRequestDetail(
   options: { enabled?: boolean } = {},
 ) {
   const enabled = (options.enabled ?? !!agentId) && number != null
-  const queryKey = buildGitQueryKey('git:pull-request-detail', agentId, repoTarget, worktreeId, number)
+  const queryKey = buildGitQueryKey('git:pull-request-detail', panel?.session.environmentId, agentId, repoTarget, worktreeId, number)
   const fetchFn = useCallback(
-    () =>
-      fetchGitApi<GitPullRequestDetail>(
-        wsUrl,
-        `/api/git/pull-requests/${number}`,
-        buildGitRequestParams(agentId!, repoTarget, {}, worktreeId),
-      ),
-    [wsUrl, agentId, repoTarget, number, worktreeId],
+    () => panel!.features.git.pullRequest(agentId!, number!, panel!.signal, readOptions(repoTarget, worktreeId)),
+    [panel, agentId, repoTarget, number, worktreeId],
   )
 
   return useSimpleQuery<GitPullRequestDetail>(queryKey, fetchFn, {
-    enabled: enabled && !!agentId && number != null,
+    enabled: enabled && !!panel && !!agentId && number != null,
     staleTime: 15_000,
     refetchOnWindowFocus: true,
   })
 }
 
 export function useGitDiff(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   repoTarget: GitRepoTarget,
   file: string | null,
   worktreeId?: string | null,
 ) {
-  const queryKey = buildGitQueryKey('git:diff', agentId, repoTarget, worktreeId, file)
+  const queryKey = buildGitQueryKey('git:diff', panel?.session.environmentId, agentId, repoTarget, worktreeId, file)
   const fetchFn = useCallback(
-    () =>
-      fetchGitApi<GitDiffResult>(
-        wsUrl,
-        '/api/git/diff',
-        buildGitRequestParams(agentId!, repoTarget, { file: file! }, worktreeId),
-      ),
-    [wsUrl, agentId, repoTarget, file, worktreeId],
+    () => panel!.features.git.diff(agentId!, file!, panel!.signal, readOptions(repoTarget, worktreeId)),
+    [panel, agentId, repoTarget, file, worktreeId],
   )
 
   return useSimpleQuery<GitDiffResult>(queryKey, fetchFn, {
-    enabled: !!agentId && !!file,
+    enabled: !!panel && !!agentId && !!file,
     staleTime: 10_000,
   })
 }
 
 export function useGitLog(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   repoTarget: GitRepoTarget,
   limit: number,
   offset: number,
   worktreeId?: string | null,
 ) {
-  const queryKey = buildGitQueryKey('git:log', agentId, repoTarget, worktreeId, limit, offset)
+  const queryKey = buildGitQueryKey('git:log', panel?.session.environmentId, agentId, repoTarget, worktreeId, limit, offset)
   const fetchFn = useCallback(
-    () =>
-      fetchGitApi<GitLogResult>(
-        wsUrl,
-        '/api/git/log',
-        buildGitRequestParams(
-          agentId!,
-          repoTarget,
-          {
-            limit,
-            offset,
-          },
-          worktreeId,
-        ),
-      ),
-    [wsUrl, agentId, repoTarget, limit, offset, worktreeId],
+    () => panel!.features.git.log(agentId!, panel!.signal, readOptions(repoTarget, worktreeId, { limit, offset })),
+    [panel, agentId, repoTarget, limit, offset, worktreeId],
   )
 
   return useSimpleQuery<GitLogResult>(queryKey, fetchFn, {
-    enabled: !!agentId,
+    enabled: !!panel && !!agentId,
     staleTime: 60_000,
   })
 }
 
 export function useGitCommitDetail(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   repoTarget: GitRepoTarget,
   sha: string | null,
   worktreeId?: string | null,
 ) {
-  const queryKey = buildGitQueryKey('git:commit', agentId, repoTarget, worktreeId, sha)
+  const queryKey = buildGitQueryKey('git:commit', panel?.session.environmentId, agentId, repoTarget, worktreeId, sha)
   const fetchFn = useCallback(
-    () =>
-      fetchGitApi<GitCommitDetail>(
-        wsUrl,
-        '/api/git/commit',
-        buildGitRequestParams(agentId!, repoTarget, { sha: sha! }, worktreeId),
-      ),
-    [wsUrl, agentId, repoTarget, sha, worktreeId],
+    () => panel!.features.git.commit(agentId!, sha!, panel!.signal, readOptions(repoTarget, worktreeId)),
+    [panel, agentId, repoTarget, sha, worktreeId],
   )
 
   return useSimpleQuery<GitCommitDetail>(queryKey, fetchFn, {
-    enabled: !!agentId && !!sha,
+    enabled: !!panel && !!agentId && !!sha,
     staleTime: Number.MAX_SAFE_INTEGER, // committed data never changes
   })
 }
 
 export function useGitCommitDiff(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   repoTarget: GitRepoTarget,
   sha: string | null,
   file: string | null,
   worktreeId?: string | null,
 ) {
-  const queryKey = buildGitQueryKey('git:commit-diff', agentId, repoTarget, worktreeId, sha, file)
+  const queryKey = buildGitQueryKey('git:commit-diff', panel?.session.environmentId, agentId, repoTarget, worktreeId, sha, file)
   const fetchFn = useCallback(
-    () =>
-      fetchGitApi<GitDiffResult>(
-        wsUrl,
-        '/api/git/commit-diff',
-        buildGitRequestParams(
-          agentId!,
-          repoTarget,
-          {
-            sha: sha!,
-            file: file!,
-          },
-          worktreeId,
-        ),
-      ),
-    [wsUrl, agentId, repoTarget, sha, file, worktreeId],
+    () => panel!.features.git.commitDiff(agentId!, sha!, file!, panel!.signal, readOptions(repoTarget, worktreeId)),
+    [panel, agentId, repoTarget, sha, file, worktreeId],
   )
 
   return useSimpleQuery<GitDiffResult>(queryKey, fetchFn, {
-    enabled: !!agentId && !!sha && !!file,
+    enabled: !!panel && !!agentId && !!sha && !!file,
     staleTime: Number.MAX_SAFE_INTEGER,
   })
 }
 
 export async function fetchMutationPreflight(
-  wsUrl: string,
+  panel: EnvironmentPanels,
   params: {
     agentId: string
     repoTarget: GitRepoTarget
@@ -516,61 +401,60 @@ export async function fetchMutationPreflight(
     remote?: string
   },
 ): Promise<GitMutationPreflight> {
-  const searchParams = buildGitRequestParams(params.agentId, params.repoTarget, {
-    action: params.action,
-    targetBranch: params.targetBranch,
-    startPoint: params.startPoint,
-    remote: params.remote,
-  }, params.worktreeId)
-
-  return fetchGitApi<GitMutationPreflight>(wsUrl, '/api/git/mutation-preflight', searchParams)
+  const { agentId, action, repoTarget, worktreeId, ...extra } = params
+  return panel.features.git.preflight(
+    agentId,
+    action,
+    { ...readOptions(repoTarget, worktreeId), ...extra },
+    panel.signal,
+  )
 }
 
 export async function fetchGitOrigin(
-  wsUrl: string,
+  panel: EnvironmentPanels,
   request: GitFetchRequest,
 ): Promise<GitFetchResult> {
-  return postGitApi<GitFetchResult>(wsUrl, '/api/git/fetch', request)
+  return panel.features.git.fetch(request, panel.signal)
 }
 
 export async function switchGitBranch(
-  wsUrl: string,
+  panel: EnvironmentPanels,
   request: GitSwitchBranchRequest,
 ): Promise<GitMutationResult> {
-  return postGitApi<GitMutationResult>(wsUrl, '/api/git/switch-branch', request)
+  return panel.features.git.switchBranch(request, panel.signal)
 }
 
 export async function createGitBranch(
-  wsUrl: string,
+  panel: EnvironmentPanels,
   request: GitCreateBranchRequest,
 ): Promise<GitMutationResult> {
-  return postGitApi<GitMutationResult>(wsUrl, '/api/git/create-branch', request)
+  return panel.features.git.createBranch(request, panel.signal)
 }
 
 export async function pullGitFfOnly(
-  wsUrl: string,
+  panel: EnvironmentPanels,
   request: GitPullFfOnlyRequest,
 ): Promise<GitPullResult> {
-  return postGitApi<GitPullResult>(wsUrl, '/api/git/pull-ff-only', request)
+  return panel.features.git.pull(request, panel.signal)
 }
 
 export async function pushGitUpstream(
-  wsUrl: string,
+  panel: EnvironmentPanels,
   request: GitPushRequest,
 ): Promise<GitPushResult> {
-  return postGitApi<GitPushResult>(wsUrl, '/api/git/push', request)
+  return panel.features.git.push(request, panel.signal)
 }
 
 export async function mergeGitPullRequest(
-  wsUrl: string,
+  panel: EnvironmentPanels,
   number: number,
   request: GitPullRequestMergeRequest,
 ): Promise<GitPullRequestMergeResult> {
-  return postGitApi<GitPullRequestMergeResult>(wsUrl, `/api/git/pull-requests/${number}/merge`, request)
+  return panel.features.git.mergePullRequest(number, request, panel.signal)
 }
 
 /** Invalidate mutable git caches. Commit caches remain immutable. */
-export function invalidateGitCaches(options?: { agentId?: string | null; repoTarget?: GitRepoTarget }) {
+export function invalidateGitCaches(options?: { environmentId?: string | null; agentId?: string | null; repoTarget?: GitRepoTarget }) {
   for (const key of queryCache.keys()) {
     const parsed = parseGitQueryKey(key)
     if (!parsed) {
@@ -587,6 +471,10 @@ export function invalidateGitCaches(options?: { agentId?: string | null; repoTar
       parsed.scope !== 'git:diff' &&
       parsed.scope !== 'git:log'
     ) {
+      continue
+    }
+
+    if (options?.environmentId != null && parsed.environmentId !== options.environmentId) {
       continue
     }
 

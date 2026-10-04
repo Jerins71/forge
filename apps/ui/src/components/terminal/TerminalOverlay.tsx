@@ -1,7 +1,7 @@
 import { AlertCircle, Loader2, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { TerminalDescriptor } from '@forge/protocol'
-import type { TerminalWsState } from '@/lib/terminal-ws-client'
+import type { TerminalWsState } from '@/lib/environment-terminal-client'
 import { cn } from '@/lib/utils'
 
 interface TerminalOverlayProps {

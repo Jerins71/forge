@@ -9,7 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogDescription, DialogHeader, DialogOverlay, DialogPortal, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { fetchSessionAuditEntryDetail, fetchSessionAuditPage } from '@/lib/session-audit-api'
+import type { EnvironmentClient } from '@forge/client-runtime'
 import { shouldUsePlainJsonDetailView } from '@/lib/session-audit-json-detail'
 import { highlightCode } from '@/lib/syntax-highlight'
 import { cn } from '@/lib/utils'
@@ -31,7 +31,8 @@ interface SessionAuditDrawerProps {
   onOpenChange: (open: boolean) => void
   sessionAgentId: string | null
   sessionLabel: string
-  wsUrl?: string
+  /** The session's own environment; audit rows never load from another host. */
+  environmentClient: EnvironmentClient | null
 }
 
 export function SessionAuditDrawer({
@@ -39,7 +40,7 @@ export function SessionAuditDrawer({
   onOpenChange,
   sessionAgentId,
   sessionLabel,
-  wsUrl,
+  environmentClient,
 }: SessionAuditDrawerProps) {
   const [category, setCategory] = useState<string>(ALL_CATEGORIES)
   const [typeFilter, setTypeFilter] = useState('')
@@ -63,7 +64,7 @@ export function SessionAuditDrawer({
   const selectedWorkerId = selectedSource.startsWith(WORKER_SOURCE_PREFIX) ? selectedSource.slice(WORKER_SOURCE_PREFIX.length) : undefined
   const selectedScope = selectedWorkerId ? 'worker' : 'session'
   const selectedSourceKind = selectedWorkerId ? 'canonical_worker_jsonl' : 'canonical_session_jsonl'
-  const sourceSessionKey = `${open ? 'open' : 'closed'}:${sessionAgentId ?? ''}:${wsUrl ?? ''}`
+  const sourceSessionKey = JSON.stringify([open ? 'open' : 'closed', environmentClient?.environmentId ?? '', sessionAgentId ?? ''])
   const requestKey = `${sourceSessionKey}:${selectedSource}:${category}:${normalizedTypeFilter}`
   const activeRequestKeyRef = useRef(requestKey)
   const requestGenerationRef = useRef(0)
@@ -113,7 +114,7 @@ export function SessionAuditDrawer({
   useEffect(() => {
     setSelectedSource(MANAGER_SOURCE_VALUE)
     setSelectedEntryId(null)
-  }, [sessionAgentId, wsUrl])
+  }, [sessionAgentId, environmentClient])
 
   useEffect(() => {
     setSelectedEntryId(null)
@@ -138,7 +139,8 @@ export function SessionAuditDrawer({
       setLoadingMore(false)
       setError(null)
       try {
-        const page = await fetchSessionAuditPage(wsUrl, sessionAgentId!, {
+        if (!environmentClient) throw new Error('Environment unavailable')
+        const page = await environmentClient.features.audit.page(sessionAgentId!, {
           scope: selectedScope,
           workerId: selectedWorkerId,
           sourceKind: selectedSourceKind,
@@ -146,8 +148,7 @@ export function SessionAuditDrawer({
           limit: PAGE_LIMIT,
           categories: selectedCategory ? [selectedCategory] : undefined,
           types: normalizedTypeFilter ? [normalizedTypeFilter] : undefined,
-          signal: controller.signal,
-        })
+        }, controller.signal)
         if (controller.signal.aborted || activeRequestKeyRef.current !== currentRequestKey || requestGenerationRef.current !== generation) return
         setManifestState({ sessionKey: sourceSessionKey, manifest: page.manifest })
         setPageState({
@@ -171,7 +172,7 @@ export function SessionAuditDrawer({
     return () => {
       controller.abort()
     }
-  }, [open, requestKey, resetAuditState, sessionAgentId, selectedCategory, normalizedTypeFilter, selectedScope, selectedSourceKind, selectedWorkerId, sourceSessionKey, wsUrl])
+  }, [open, requestKey, resetAuditState, sessionAgentId, selectedCategory, normalizedTypeFilter, selectedScope, selectedSourceKind, selectedWorkerId, sourceSessionKey, environmentClient])
 
   const updateSplitPercent = useCallback((nextPercent: number) => {
     const boundedPercent = clampSplitPercent(nextPercent)
@@ -227,7 +228,7 @@ export function SessionAuditDrawer({
   }, [splitPercent, updateSplitPercent])
 
   async function loadMore() {
-    if (!sessionAgentId || !visibleNextCursor || loadingMore) return
+    if (!environmentClient || !sessionAgentId || !visibleNextCursor || loadingMore) return
     const currentRequestKey = activeRequestKeyRef.current
     const generation = requestGenerationRef.current
     const cursor = visibleNextCursor
@@ -237,7 +238,7 @@ export function SessionAuditDrawer({
     setLoadingMore(true)
     setError(null)
     try {
-      const page = await fetchSessionAuditPage(wsUrl, sessionAgentId, {
+      const page = await environmentClient.features.audit.page(sessionAgentId, {
         scope: selectedScope,
         workerId: selectedWorkerId,
         sourceKind: selectedSourceKind,
@@ -246,8 +247,7 @@ export function SessionAuditDrawer({
         limit: PAGE_LIMIT,
         categories: selectedCategory ? [selectedCategory] : undefined,
         types: normalizedTypeFilter ? [normalizedTypeFilter] : undefined,
-        signal: controller.signal,
-      })
+      }, controller.signal)
       if (controller.signal.aborted || activeRequestKeyRef.current !== currentRequestKey || requestGenerationRef.current !== generation) return
       setManifestState({ sessionKey: sourceSessionKey, manifest: page.manifest })
       setPageState((current) => {
@@ -446,7 +446,7 @@ export function SessionAuditDrawer({
             <div className="flex min-h-[50vh] min-w-0 flex-1 flex-col overflow-hidden border-t border-border/70 lg:min-h-0 lg:border-t-0 lg:border-l-0">
               <SessionAuditDetailPanel
                 sessionAgentId={sessionAgentId}
-                wsUrl={wsUrl}
+                environmentClient={environmentClient}
                 entry={selectedEntry}
                 scope={selectedScope}
                 workerId={selectedWorkerId}
@@ -606,14 +606,14 @@ function SessionAuditRow({
 
 function SessionAuditDetailPanel({
   sessionAgentId,
-  wsUrl,
+  environmentClient,
   entry,
   scope,
   workerId,
   sourceKind,
 }: {
   sessionAgentId: string | null
-  wsUrl?: string
+  environmentClient: EnvironmentClient | null
   entry: SessionAuditEntry | null
   scope: 'session' | 'worker'
   workerId?: string
@@ -626,7 +626,7 @@ function SessionAuditDetailPanel({
   const [copied, setCopied] = useState(false)
   const [wordWrap, setWordWrap] = useState(true)
   const copyResetTimeoutRef = useRef<number | null>(null)
-  const requestKey = entry ? `${entry.id}:${scope}:${workerId ?? ''}:${sourceKind}` : ''
+  const requestKey = entry ? `${environmentClient?.environmentId ?? ''}:${entry.id}:${scope}:${workerId ?? ''}:${sourceKind}` : ''
   const activeRequestKeyRef = useRef(requestKey)
 
   if (activeRequestKeyRef.current !== requestKey) {
@@ -644,10 +644,11 @@ function SessionAuditDetailPanel({
       copyResetTimeoutRef.current = null
     }
 
-    if (!entry || !sessionAgentId) {
+    if (!entry || !sessionAgentId || !environmentClient) {
       setLoading(false)
       return
     }
+    const client = environmentClient
 
     const controller = new AbortController()
     const currentRequestKey = requestKey
@@ -656,14 +657,13 @@ function SessionAuditDetailPanel({
       setLoading(true)
       setError(null)
       try {
-        const response = await fetchSessionAuditEntryDetail(wsUrl, sessionAgentId!, {
+        const response = await client.features.audit.detail(sessionAgentId!, {
           scope,
           workerId,
           sourceKind,
           byteOffset: entry!.byteOffset,
           nextByteOffset: entry!.nextByteOffset,
-          signal: controller.signal,
-        })
+        }, controller.signal)
         if (controller.signal.aborted || activeRequestKeyRef.current !== currentRequestKey) return
         setDetail(response)
       } catch (loadError) {
@@ -685,7 +685,7 @@ function SessionAuditDetailPanel({
         copyResetTimeoutRef.current = null
       }
     }
-  }, [entry, requestKey, scope, sessionAgentId, sourceKind, workerId, wsUrl])
+  }, [entry, environmentClient, requestKey, scope, sessionAgentId, sourceKind, workerId])
 
   const displayText = entry && (viewMode === 'formatted' && detail?.formattedJson
     ? detail.formattedJson

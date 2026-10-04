@@ -1,5 +1,5 @@
 import type { RemoteUpdateAwarenessProjectSnapshot } from '@forge/protocol'
-import { dismissRemoteUpdateAwarenessProjectUpdate } from '@/components/settings/remote-update-awareness-api'
+import { dismissRemoteUpdateAwarenessProjectUpdate, type RemoteUpdateAwarenessClient } from '@/components/settings/remote-update-awareness-api'
 import {
   createRemoteUpdateAwarenessMutationTarget,
   type RemoteUpdateAwarenessMutationTarget,
@@ -24,7 +24,7 @@ export function isVisibleDismissibleRemoteUpdateBanner(
 }
 
 export async function dismissVisibleRemoteUpdateBanner(
-  wsUrl: string,
+  client: RemoteUpdateAwarenessClient,
   snapshot: RemoteUpdateAwarenessProjectSnapshot | null | undefined,
   requestId = 0,
 ): Promise<{
@@ -41,7 +41,7 @@ export async function dismissVisibleRemoteUpdateBanner(
   }
 
   const response = await dismissRemoteUpdateAwarenessProjectUpdate(
-    wsUrl,
+    client,
     expectedTarget.projectId,
     expectedTarget.generation,
   )

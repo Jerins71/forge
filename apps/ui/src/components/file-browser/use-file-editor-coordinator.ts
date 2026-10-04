@@ -1,7 +1,9 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { doesDeleteAffectFile } from './file-browser-utils'
 
+/** Session IDs are only unique within one environment, so every editor key carries both. */
 export interface FileEditorSessionKey {
+  environmentId: string
   agentId: string
   worktreeId: string | null
   filePath: string
@@ -21,14 +23,14 @@ export interface FileEditorGuardApi {
 }
 
 export type FileEditorTransitionAction =
-  | { type: 'delete-entry'; path: string; entryType: 'file' | 'directory'; agentId: string; worktreeId: string | null }
-  | { type: 'rename-entry'; path: string; entryType: 'file' | 'directory'; agentId: string; worktreeId: string | null }
+  | { type: 'delete-entry'; path: string; entryType: 'file' | 'directory'; environmentId: string; agentId: string; worktreeId: string | null }
+  | { type: 'rename-entry'; path: string; entryType: 'file' | 'directory'; environmentId: string; agentId: string; worktreeId: string | null }
   | { type: 'select-file'; nextPath: string }
   | { type: 'close-viewer' }
   | { type: 'close-tab'; key: FileEditorSessionKey }
   | { type: 'close-file-browser' }
   | { type: 'open-source-control-inline' }
-  | { type: 'source-control-mutation'; mutation: 'switch-branch' | 'create-branch' | 'pull-ff-only' | 'push'; agentId: string; worktreeId: string | null }
+  | { type: 'source-control-mutation'; mutation: 'switch-branch' | 'create-branch' | 'pull-ff-only' | 'push'; environmentId: string; agentId: string; worktreeId: string | null }
   | { type: 'select-agent'; nextAgentId: string }
   | { type: 'navigate-route'; nextView: 'chat' | 'settings' | 'stats' | 'archive' }
   | { type: 'open-workspace-panel'; panel: 'artifacts' | 'source-control' | 'chat' }
@@ -56,8 +58,14 @@ export interface FileDirtyConfirmDialogState {
   onCancel: () => void
 }
 
-function serializeFileEditorKey(key: FileEditorSessionKey): string {
-  return `${key.agentId}\u0000${key.worktreeId ?? ''}\u0000${key.filePath}`
+export function fileEditorKeyId(key: FileEditorSessionKey): string {
+  return JSON.stringify([key.environmentId, key.agentId, key.worktreeId ?? '', key.filePath])
+}
+
+type FileScope = Pick<FileEditorSessionKey, 'environmentId' | 'agentId' | 'worktreeId'>
+
+export function sameFileScope(a: FileScope, b: FileScope): boolean {
+  return a.environmentId === b.environmentId && a.agentId === b.agentId && (a.worktreeId ?? null) === (b.worktreeId ?? null)
 }
 
 function fileNameFromPath(filePath: string): string {
@@ -68,20 +76,20 @@ function snapshotsMatchSourceControlMutation(
   snapshot: FileEditorDirtySnapshot,
   action: Extract<FileEditorTransitionAction, { type: 'source-control-mutation' }>,
 ): boolean {
-  return snapshot.key.agentId === action.agentId && snapshot.key.worktreeId === action.worktreeId
+  return sameFileScope(snapshot.key, action)
 }
 
 function doesEntryMutationAffectSnapshot(
   snapshot: FileEditorDirtySnapshot,
   action: Extract<FileEditorTransitionAction, { type: 'delete-entry' | 'rename-entry' }>,
 ): boolean {
-  if (snapshot.key.agentId !== action.agentId || (snapshot.key.worktreeId ?? null) !== (action.worktreeId ?? null)) return false
+  if (!sameFileScope(snapshot.key, action)) return false
 
   return doesDeleteAffectFile(action.path, action.entryType, snapshot.key.filePath)
 }
 
 function keysEqual(a: FileEditorSessionKey, b: FileEditorSessionKey): boolean {
-  return a.agentId === b.agentId && a.worktreeId === b.worktreeId && a.filePath === b.filePath
+  return sameFileScope(a, b) && a.filePath === b.filePath
 }
 
 function actionPreservesDirtyDrafts(action: FileEditorTransitionAction): boolean {
@@ -108,7 +116,7 @@ export function useFileEditorCoordinator(
   const [isSavingPendingTransition, setIsSavingPendingTransition] = useState(false)
 
   const registerWritableEditor = useCallback((key: FileEditorSessionKey, api: FileEditorGuardApi) => {
-    const serializedKey = serializeFileEditorKey(key)
+    const serializedKey = fileEditorKeyId(key)
     const token = Symbol(serializedKey)
     const existing = guardsRef.current.get(serializedKey)
 
@@ -132,8 +140,8 @@ export function useFileEditorCoordinator(
     const snapshots: FileEditorDirtySnapshot[] = []
     const addSnapshot = (snapshot: FileEditorDirtySnapshot | null | undefined) => {
       if (!snapshot?.isDirty) return
-      const serialized = serializeFileEditorKey(snapshot.key)
-      if (snapshots.some((existing) => serializeFileEditorKey(existing.key) === serialized)) return
+      const serialized = fileEditorKeyId(snapshot.key)
+      if (snapshots.some((existing) => fileEditorKeyId(existing.key) === serialized)) return
       snapshots.push({
         ...snapshot,
         fileName: snapshot.fileName || fileNameFromPath(snapshot.key.filePath),
@@ -156,11 +164,11 @@ export function useFileEditorCoordinator(
 
   const findGuardForSnapshot = useCallback((snapshot: FileEditorDirtySnapshot): FileEditorGuardApi | null => {
     const activeSnapshot = activeGuard?.getSnapshot() ?? null
-    if (activeSnapshot && serializeFileEditorKey(activeSnapshot.key) === serializeFileEditorKey(snapshot.key)) {
+    if (activeSnapshot && fileEditorKeyId(activeSnapshot.key) === fileEditorKeyId(snapshot.key)) {
       return activeGuard ?? null
     }
 
-    return guardsRef.current.get(serializeFileEditorKey(snapshot.key))?.api ?? options.getGuardForKey?.(snapshot.key) ?? null
+    return guardsRef.current.get(fileEditorKeyId(snapshot.key))?.api ?? options.getGuardForKey?.(snapshot.key) ?? null
   }, [activeGuard, options])
 
   const requestFileEditorTransition = useCallback((

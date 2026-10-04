@@ -4,7 +4,7 @@ import {
   type TerminalAttachment,
 } from '@forge/client-runtime'
 import type { SessionRef } from '@forge/protocol/environment-v2'
-import type { TerminalWsState } from './terminal-ws-client'
+export type TerminalWsState = 'connecting' | 'connected' | 'disconnected' | 'failed'
 /** Terminal bytes share the environment application socket. A reconnect obtains a new VT snapshot. */
 export class EnvironmentTerminalClient {
   private attachment: TerminalAttachment | null = null

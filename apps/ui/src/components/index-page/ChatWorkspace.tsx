@@ -1,4 +1,5 @@
-import { useEffect, useState, type ComponentPropsWithoutRef, type RefObject } from 'react'
+import { useEffect, useState, type ComponentPropsWithoutRef, type ReactNode, type RefObject } from 'react'
+import type { EnvironmentClient } from '@forge/client-runtime'
 import { OnboardingCallout } from '@/components/chat/OnboardingCallout'
 import { ChatHeader } from '@/components/chat/ChatHeader'
 import { ChatSearchBar } from '@/components/chat/ChatSearchBar'
@@ -28,6 +29,10 @@ import type {
 
 interface ChatWorkspaceProps {
   headerProps: ComponentPropsWithoutRef<typeof ChatHeader>
+  /** The session's own environment for audit and Git monitoring; never another host. */
+  environmentClient: EnvironmentClient | null
+  /** Locked machine/workspace strip for a session on another environment. */
+  environmentStrip?: ReactNode
   managerToolActivity?: ManagerToolActivityEvent | null
   pendingInputCount?: number
   /** Already filtered to the active local project by the Builder shell. */
@@ -60,6 +65,8 @@ interface ChatWorkspaceProps {
 
 export function ChatWorkspace({
   headerProps,
+  environmentClient,
+  environmentStrip,
   managerToolActivity,
   pendingInputCount,
   remoteUpdateSnapshot = null,
@@ -110,18 +117,21 @@ export function ChatWorkspace({
         showSessionAudit={showSessionAudit}
         onOpenSessionAudit={showSessionAudit ? () => setSessionAuditOpen(true) : undefined}
       />
-      <RemoteUpdateAwarenessBanner
-        wsUrl={headerProps.wsUrl ?? ''}
-        snapshot={chatRemoteUpdateSnapshot}
-        onInspect={onOpenRemoteUpdateIncoming ?? (() => undefined)}
-        onSnapshotChange={onRemoteUpdateSnapshotChange ?? (() => undefined)}
-      />
+      {environmentStrip}
+      {environmentClient ? (
+        <RemoteUpdateAwarenessBanner
+          client={environmentClient.features.settings}
+          snapshot={chatRemoteUpdateSnapshot}
+          onInspect={onOpenRemoteUpdateIncoming ?? (() => undefined)}
+          onSnapshotChange={onRemoteUpdateSnapshotChange ?? (() => undefined)}
+        />
+      ) : null}
       <SessionAuditDrawer
         open={sessionAuditOpen}
         onOpenChange={setSessionAuditOpen}
         sessionAgentId={showSessionAudit ? headerProps.activeAgentId : null}
         sessionLabel={headerProps.activeAgentLabel}
-        wsUrl={headerProps.wsUrl}
+        environmentClient={environmentClient}
       />
 
       <GoalBar snapshot={goalSnapshot} onAction={onGoalAction} />

@@ -35,3 +35,4 @@ export function createEnvironmentPanelContext(
     },
   }
 }
+export type EnvironmentPanels = ReturnType<typeof createEnvironmentPanelContext>

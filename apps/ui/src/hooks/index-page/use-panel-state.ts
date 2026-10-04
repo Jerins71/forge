@@ -36,6 +36,7 @@ export interface FileBrowserWorktreeSelection {
 }
 
 interface UsePanelStateOptions {
+  activeEnvironmentId: string | null
   activeAgentId: string | null
   /** Distinguishes agent/session contexts that may reuse the same agent id across origins or projects. */
   activeContextKey?: string
@@ -43,6 +44,7 @@ interface UsePanelStateOptions {
 }
 
 export function usePanelState({
+  activeEnvironmentId,
   activeAgentId,
   activeContextKey = activeAgentId ?? 'none',
   enableKeyboardShortcuts = true,
@@ -65,6 +67,7 @@ export function usePanelState({
   const [fileBrowserWorktreeContext, setFileBrowserWorktreeContext] =
     useState<FileBrowserWorktreeSelection | null>(null)
   const fileBrowserWorkspace = useFileBrowserWorkspaceState({
+    activeEnvironmentId,
     activeAgentId,
     worktreeContext: fileBrowserWorktreeContext,
   })
@@ -77,7 +80,7 @@ export function usePanelState({
     setIsFileBrowserOpen(false)
     setIsBrowserOpen(false)
     setIsMobileSidebarOpen(false)
-  }, [activeAgentId])
+  }, [activeAgentId, activeEnvironmentId])
 
   useEffect(() => {
     setDiffViewerTarget((current) => (current && current.contextKey !== activeContextKey ? null : current))

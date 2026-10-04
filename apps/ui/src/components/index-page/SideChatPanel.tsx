@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { qualifiedKey } from '@forge/client-runtime'
+import type { SessionRef } from '@forge/protocol/environment-v2'
 import { Loader2, MessageSquareDashed, PanelRightClose, Trash2 } from 'lucide-react'
 import type { ConversationAttachment } from '@forge/protocol'
 import { MessageInput, type MessageInputHandle } from '@/components/chat/MessageInput'
@@ -31,8 +33,10 @@ const MAX_SIDE_CHAT_WIDTH = 1200
 const MAIN_CHAT_MIN_REM = 28
 
 export interface SideChatPanelProps {
+  /** Primary-bound voice transcription endpoint. */
   wsUrl: string
-  originId: string
+  /** The side chat lives on its source session's environment. */
+  environmentId: string
   /** Null while the fork is being created. */
   sideChatAgentId: string | null
   sourceLabel: string
@@ -46,7 +50,7 @@ export interface SideChatPanelProps {
 
 export function SideChatPanel({
   wsUrl,
-  originId,
+  environmentId,
   sideChatAgentId,
   sourceLabel,
   isExpanded,
@@ -57,11 +61,11 @@ export function SideChatPanel({
   onDiscard,
 }: SideChatPanelProps) {
   // Collapsed panels do not hold a connection; expanding reconnects and rehydrates.
-  const { clientRef, state } = useSideChatConnection({
-    wsUrl,
-    originId,
-    agentId: isExpanded ? sideChatAgentId : null,
-  })
+  const session = useMemo<SessionRef | null>(
+    () => (isExpanded && sideChatAgentId ? { environmentId, sessionId: sideChatAgentId } : null),
+    [environmentId, isExpanded, sideChatAgentId],
+  )
+  const { clientRef, state, environmentClient } = useSideChatConnection(session)
   const asideRef = useRef<HTMLElement | null>(null)
   const [isConfirmingDiscard, setIsConfirmingDiscard] = useState(false)
   const getAvailableWidth = useCallback(() => {
@@ -235,7 +239,7 @@ export function SideChatPanel({
             messages={visibleMessages}
             agents={scopedState?.agents}
             isLoading={isLoading}
-            wsUrl={wsUrl}
+            environmentClient={environmentClient}
             activeAgentId={sideChatAgentId}
             pendingChoiceIds={scopedState?.pendingChoiceIds ?? EMPTY_PENDING_CHOICE_IDS}
             onChoiceSubmit={(agentId, choiceId, answers) => clientRef.current?.sendChoiceResponse(agentId, choiceId, answers)}
@@ -264,7 +268,9 @@ export function SideChatPanel({
         allowWhileLoading
         agentLabel="side chat"
         wsUrl={wsUrl}
+        environmentClient={environmentClient}
         agentId={sideChatAgentId ?? undefined}
+        draftKey={sideChatAgentId ? qualifiedKey(environmentId, sideChatAgentId) : undefined}
       />
     </aside>
   )

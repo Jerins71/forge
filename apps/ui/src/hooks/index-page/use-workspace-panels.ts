@@ -27,8 +27,6 @@ import {
   type MutableRefObject,
 } from 'react'
 import type { EnvironmentClient } from '@forge/client-runtime'
-import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
-import type { SessionRef } from '@forge/protocol/environment-v2'
 import { createEnvironmentPanelContext } from '@/lib/environment-panel-context'
 import { Clock3, FolderOpen, GitBranch, Globe2, MessageSquare, Package, SquareTerminal } from 'lucide-react'
 import type { AgentDescriptor, GitWorktreeSummary } from '@forge/protocol'
@@ -43,8 +41,7 @@ import {
 import { requestGuardedArtifactsPanelToggle } from '@/components/index-page/builder-file-editor-guard-actions'
 import { FILE_BROWSER_INLINE_EDITING_ENABLED } from '@/components/file-browser/file-editor-feature-gates'
 import { useFileEditSessions } from '@/components/file-browser/use-file-edit-sessions'
-import { fileBrowserTabId } from '@/components/file-browser/use-file-browser-workspace-state'
-import { useFileEditorCoordinator, type FileEditorSessionKey } from '@/components/file-browser/use-file-editor-coordinator'
+import { fileEditorKeyId, useFileEditorCoordinator, type FileEditorSessionKey } from '@/components/file-browser/use-file-editor-coordinator'
 import {
   applySuccessfulFileCreateToCaches,
   applySuccessfulFileDeleteToCaches,
@@ -64,12 +61,12 @@ type TerminalPanel = ReturnType<typeof useTerminalPanel>
 interface BuilderNavigationState {
   view: 'chat'
   agentId: string
+  environmentId?: string
 }
 
 export interface UseWorkspacePanelsOptions {
-  wsUrl: string
-  sessionRef?: SessionRef | null
-  environmentClient?: EnvironmentClient
+  /** The addressed environment; every panel request goes through it and never falls back to another host. */
+  environmentClient: EnvironmentClient | null
   activeAgentId: string | null
   activeAgent: AgentDescriptor | null
   activeManagerAgent: AgentDescriptor | null
@@ -77,15 +74,12 @@ export interface UseWorkspacePanelsOptions {
   terminalPanel: TerminalPanel
   terminalCount: number
   browserTabCount: number
-  activeContextKey?: string
   clientRef: MutableRefObject<ManagerWsClient | null>
   messageInputRef: MutableRefObject<MessageInputHandle | null>
   navigateToRoute: (nextRouteState: BuilderNavigationState, replace?: boolean) => void
 }
 
 export function useWorkspacePanels({
-  wsUrl,
-  sessionRef,
   environmentClient,
   activeAgentId,
   activeAgent,
@@ -94,32 +88,23 @@ export function useWorkspacePanels({
   terminalPanel,
   terminalCount,
   browserTabCount,
-  activeContextKey,
   clientRef,
   messageInputRef,
   navigateToRoute,
 }: UseWorkspacePanelsOptions) {
-  const registry = useOptionalEnvironmentContext()?.registry
-  const environment =
-    environmentClient ??
-    (sessionRef ? registry?.get(sessionRef.environmentId) : undefined)
-  const panelEnvironmentId =
-    sessionRef?.environmentId ?? environment?.environmentId
-  const panelSessionId = sessionRef?.sessionId ?? activeAgentId
+  const environmentId = environmentClient?.environmentId ?? null
   const environmentPanels = useMemo(
     () =>
-      environment && panelEnvironmentId && panelSessionId
-        ? createEnvironmentPanelContext(environment, {
-            environmentId: panelEnvironmentId,
-            sessionId: panelSessionId,
+      environmentClient && activeAgentId
+        ? createEnvironmentPanelContext(environmentClient, {
+            environmentId: environmentClient.environmentId,
+            sessionId: activeAgentId,
           })
         : null,
-    [environment, panelEnvironmentId, panelSessionId],
+    [environmentClient, activeAgentId],
   )
 
   useEffect(() => () => environmentPanels?.dispose(), [environmentPanels])
-  const qualifiedContextKey =
-    environmentPanels?.queryKey('panels') ?? activeContextKey
   const [diffViewerPresentation, setDiffViewerPresentation] = useState<'modal' | 'inline'>('modal')
 
   const {
@@ -168,31 +153,29 @@ export function useWorkspacePanels({
     browseWorktreeFiles: handleBrowseWorktreeFiles,
     clearFileBrowserWorktreeContext: handleClearFileBrowserWorktreeContext,
   } = usePanelState({
+    activeEnvironmentId: environmentId,
     activeAgentId,
-    activeContextKey: qualifiedContextKey,
+    activeContextKey: environmentPanels?.queryKey('panels') ?? 'none',
     enableKeyboardShortcuts: false,
   })
 
   const [fileBrowserRefreshNonce, setFileBrowserRefreshNonce] = useState(0)
   const [sourceControlRefreshNonce, setSourceControlRefreshNonce] = useState(0)
   const activeFileEditorKey = useMemo<FileEditorSessionKey | null>(() => {
-    if (!activeAgentId || !selectedFileBrowserFile) return null
+    if (!environmentId || !activeAgentId || !selectedFileBrowserFile) return null
     return {
+      environmentId,
       agentId: activeAgentId,
       worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
       filePath: selectedFileBrowserFile,
     }
-  }, [activeAgentId, fileBrowserWorktreeContext?.worktreeId, selectedFileBrowserFile])
+  }, [environmentId, activeAgentId, fileBrowserWorktreeContext?.worktreeId, selectedFileBrowserFile])
   const fileEditSessions = useFileEditSessions({
-    wsUrl,
+    panel: environmentPanels,
     activeKey: activeFileEditorKey,
     editingEnabled: FILE_BROWSER_INLINE_EDITING_ENABLED,
     onDirtyChange: (key) => {
-      const tab = fileBrowserTabs.find((candidate) =>
-        candidate.key.agentId === key.agentId &&
-        candidate.key.worktreeId === key.worktreeId &&
-        candidate.key.filePath === key.filePath,
-      )
+      const tab = fileBrowserTabs.find((candidate) => fileEditorKeyId(candidate.key) === fileEditorKeyId(key))
       if (tab) stickifyFileBrowserTab(tab.id)
     },
     onSavedContent: () => {
@@ -219,7 +202,7 @@ export function useWorkspacePanels({
   useEffect(() => {
     const retainedTabKeys = new Set(allFileBrowserTabs.map((tab) => tab.id))
     for (const key of fileEditSessions.getSessionKeys()) {
-      if (!retainedTabKeys.has(fileBrowserTabId(key))) {
+      if (!retainedTabKeys.has(fileEditorKeyId(key))) {
         fileEditSessions.removeSession(key)
       }
     }
@@ -237,13 +220,14 @@ export function useWorkspacePanels({
 
   const isInlineDiffViewerOpen = isDiffViewerOpen && diffViewerPresentation === 'inline'
 
-  const handleSelectAgent = useCallback((agentId: string) => {
+  /** Selects a session on `targetEnvironmentId` (default: the addressed environment). */
+  const handleSelectAgent = useCallback((agentId: string, targetEnvironmentId = environmentId ?? undefined) => {
     fileEditorCoordinator.requestFileEditorTransition({ type: 'select-agent', nextAgentId: agentId }, () => {
       getSidebarPerfRegistry().startSessionSwitch(agentId)
-      navigateToRoute({ view: 'chat', agentId })
-      clientRef.current?.subscribeToAgent(agentId)
+      navigateToRoute({ view: 'chat', agentId, ...(targetEnvironmentId ? { environmentId: targetEnvironmentId } : {}) })
+      if (targetEnvironmentId === environmentId) clientRef.current?.subscribeToAgent(agentId)
     })
-  }, [clientRef, fileEditorCoordinator, navigateToRoute])
+  }, [clientRef, environmentId, fileEditorCoordinator, navigateToRoute])
 
   const handleGuardedFileBrowserSelectFile = useCallback((path: string) => {
     handleFileBrowserSelectFile(path)
@@ -254,8 +238,8 @@ export function useWorkspacePanels({
   }, [handleOpenStickyFileBrowserFile])
 
   const handleFileBrowserCreateFile = useCallback(async (directoryPath: string, name: string): Promise<string | null> => {
-    if (!activeAgentId) return null
-    const result = await createFilePath(wsUrl, {
+    if (!environmentPanels || !activeAgentId) return null
+    const result = await createFilePath(environmentPanels, {
       agentId: activeAgentId,
       worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
       directoryPath,
@@ -263,6 +247,7 @@ export function useWorkspacePanels({
       type: 'file',
     })
     applySuccessfulFileCreateToCaches({
+      environmentId: environmentPanels.session.environmentId,
       agentId: activeAgentId,
       worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
     })
@@ -270,32 +255,31 @@ export function useWorkspacePanels({
     setSourceControlRefreshNonce((previous) => previous + 1)
     handleOpenStickyFileBrowserFile(result.path)
     return result.path
-  }, [activeAgentId, fileBrowserWorktreeContext?.worktreeId, handleOpenStickyFileBrowserFile, wsUrl])
+  }, [activeAgentId, environmentPanels, fileBrowserWorktreeContext?.worktreeId, handleOpenStickyFileBrowserFile])
 
   const handleFileBrowserRenameEntry = useCallback((path: string, entryType: 'file' | 'directory', newName: string): Promise<boolean> => {
-    if (!activeAgentId) return Promise.resolve(false)
+    if (!environmentPanels || !activeAgentId) return Promise.resolve(false)
+    const scope = {
+      environmentId: environmentPanels.session.environmentId,
+      agentId: activeAgentId,
+      worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
+    }
 
     const runRename = async (): Promise<boolean> => {
-      const result = await renameFilePath(wsUrl, {
+      const result = await renameFilePath(environmentPanels, {
         agentId: activeAgentId,
         worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
         path,
         newName,
       })
       applySuccessfulFileRenameToCaches({
-        agentId: activeAgentId,
-        worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
+        ...scope,
         path,
         newPath: result.newPath,
         entryType,
       })
       renameFileBrowserTabsAffectedByRename(path, result.newPath, entryType)
-      fileEditSessions.removeSessionsAffectedByDelete({
-        agentId: activeAgentId,
-        worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
-        path,
-        entryType,
-      })
+      fileEditSessions.removeSessionsAffectedByDelete({ ...scope, path, entryType })
       setFileBrowserRefreshNonce((previous) => previous + 1)
       setSourceControlRefreshNonce((previous) => previous + 1)
       return true
@@ -307,8 +291,7 @@ export function useWorkspacePanels({
           type: 'rename-entry',
           path,
           entryType,
-          agentId: activeAgentId,
-          worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
+          ...scope,
         },
         () => {
           void runRename().then(resolve, reject)
@@ -318,35 +301,34 @@ export function useWorkspacePanels({
     })
   }, [
     activeAgentId,
+    environmentPanels,
     fileBrowserWorktreeContext?.worktreeId,
     fileEditorCoordinator,
     fileEditSessions,
     renameFileBrowserTabsAffectedByRename,
-    wsUrl,
   ])
 
   const handleFileBrowserDeleteEntry = useCallback((path: string, entryType: 'file' | 'directory'): Promise<boolean> => {
-    if (!activeAgentId) return Promise.resolve(false)
+    if (!environmentPanels || !activeAgentId) return Promise.resolve(false)
+    const scope = {
+      environmentId: environmentPanels.session.environmentId,
+      agentId: activeAgentId,
+      worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
+    }
 
     const runDelete = async (): Promise<boolean> => {
-      await deleteFilePath(wsUrl, {
+      await deleteFilePath(environmentPanels, {
         agentId: activeAgentId,
         path,
-        worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
+        worktreeId: scope.worktreeId,
       })
       applySuccessfulFileDeleteToCaches({
-        agentId: activeAgentId,
-        worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
+        ...scope,
         path,
         entryType,
       })
       removeFileBrowserTabsAffectedByDelete(path, entryType)
-      fileEditSessions.removeSessionsAffectedByDelete({
-        agentId: activeAgentId,
-        worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
-        path,
-        entryType,
-      })
+      fileEditSessions.removeSessionsAffectedByDelete({ ...scope, path, entryType })
       setFileBrowserRefreshNonce((previous) => previous + 1)
       setSourceControlRefreshNonce((previous) => previous + 1)
       return true
@@ -358,8 +340,7 @@ export function useWorkspacePanels({
           type: 'delete-entry',
           path,
           entryType,
-          agentId: activeAgentId,
-          worktreeId: fileBrowserWorktreeContext?.worktreeId ?? null,
+          ...scope,
         },
         () => {
           void runDelete().then(resolve, reject)
@@ -369,11 +350,11 @@ export function useWorkspacePanels({
     })
   }, [
     activeAgentId,
+    environmentPanels,
     fileBrowserWorktreeContext?.worktreeId,
     fileEditorCoordinator,
     fileEditSessions,
     removeFileBrowserTabsAffectedByDelete,
-    wsUrl,
   ])
 
   const handleRequestCloseFileBrowserTab = useCallback((tabId: string) => {
@@ -554,13 +535,15 @@ export function useWorkspacePanels({
     target: { agentId: string; worktreeId: string | null },
     run: () => void,
   ) => {
+    if (!environmentId) return
     fileEditorCoordinator.requestFileEditorTransition({
       type: 'source-control-mutation',
       mutation,
+      environmentId,
       agentId: target.agentId,
       worktreeId: target.worktreeId,
     }, run)
-  }, [fileEditorCoordinator])
+  }, [environmentId, fileEditorCoordinator])
 
   const handleSourceControlMutationComplete = useCallback(() => {
     setFileBrowserRefreshNonce((previous) => previous + 1)
