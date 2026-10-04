@@ -23,8 +23,8 @@ export const fixturePlatformScript = `(() => {
   };
 })();`;
 
-export function createFixturePlatform(environments: EnvironmentFixture[], primary: { environmentId: string }, first: BootstrapSession, clientOrigin: () => string) {
-  const sessions = new Map([[first.environmentId, first]]);
+export function createFixturePlatform(environments: EnvironmentFixture[], primary: { environmentId: string }, first: BootstrapSession, clientOrigin: () => string, paired: BootstrapSession[] = []) {
+  const sessions = new Map([first, ...paired].map(session => [session.environmentId, session]));
   const records = new Map<string, string>();
   const target = (id: string) => {
     const session = sessions.get(id);

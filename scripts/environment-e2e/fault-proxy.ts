@@ -4,11 +4,12 @@ import type { Duplex } from 'node:stream';
 import type { WebSocket as Socket, RawData } from 'ws';
 import { WebSocket, WebSocketServer } from './fixtures/ws.js';
 
-export type ResponseFault = { transport: 'http'; path: string } | { transport: 'ws'; rpcId: string | number };
+export type ResponseFault = { transport: 'http'; path: string } | { transport: 'ws'; rpcId: string | number; closeAfterDrop?: boolean } | { transport: 'ws'; method: 'session.launch' | 'session.send' | 'session.choose'; closeAfterDrop?: boolean };
 export interface WireMetrics {
   http: { requestBytes: number; responseBytes: number };
   ws: { requestBytes: number; responseBytes: number; requestFrames: number; responseFrames: number };
   droppedResponses: number;
+  commandAttempts: Array<{ method: string; commandId: string }>;
 }
 
 /** Application payload counts only. No headers, protocols, addresses or bodies are retained. */
@@ -21,6 +22,7 @@ export async function startFaultProxy(options: { upstream: string; port?: number
     http: { requestBytes: 0, responseBytes: 0 },
     ws: { requestBytes: 0, responseBytes: 0, requestFrames: 0, responseFrames: 0 },
     droppedResponses: 0,
+    commandAttempts: [],
   };
   let nextId = 0;
   let fault: ResponseFault | undefined;
@@ -83,8 +85,9 @@ export async function startFaultProxy(options: { upstream: string; port?: number
       if (!binary && fault?.transport === 'ws') {
         try {
           const frame = JSON.parse(data.toString()) as { id?: unknown; requestId?: unknown; type?: unknown; result?: unknown; error?: unknown };
-          if ((frame.requestId ?? frame.id) === fault.rpcId && (frame.type === 'result' || 'result' in frame || 'error' in frame)) {
-            fault = undefined; counts.droppedResponses++; return;
+          if ('rpcId' in fault && (frame.requestId ?? frame.id) === fault.rpcId && (frame.type === 'result' || 'result' in frame || 'error' in frame)) {
+            const closeAfterDrop = fault.closeAfterDrop;
+            fault = undefined; counts.droppedResponses++; if (closeAfterDrop) close(); return;
           }
         } catch { /* Non-JSON frames are forwarded unchanged. */ }
       }
@@ -106,6 +109,13 @@ export async function startFaultProxy(options: { upstream: string; port?: number
         socket.on('message', (data, binary) => {
           const size = byteLength(data);
           counts.ws.requestBytes += size; counts.ws.requestFrames++;
+          if (!binary) {
+            try {
+              const frame = JSON.parse(data.toString());
+              if (['session.launch', 'session.send', 'session.choose', 'session.stop'].includes(frame.method) && typeof frame.input?.commandId === 'string') counts.commandAttempts.push({ method: frame.method, commandId: frame.input.commandId });
+              if (fault?.transport === 'ws' && 'method' in fault && frame.method === fault.method) fault = { transport: 'ws', rpcId: frame.requestId, closeAfterDrop: fault.closeAfterDrop };
+            } catch { /* binary/non-JSON pass unchanged */ }
+          }
           if (remote.readyState !== WebSocket.OPEN || remote.bufferedAmount + size > 2_097_152) { close(); return; }
           remote.send(data, { binary });
         });

@@ -143,7 +143,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                     {...dragHandleListeners}
                     aria-label={`${isCollapsed ? 'Expand' : 'Collapse'}${dragHandleListeners ? ' or drag' : ''} project ${profile.displayName}`}
                     aria-expanded={!isCollapsed}
-                    onClick={() => onToggleProfileCollapsed()}
+                    onClick={() => onToggleProfileCollapsed(profile.profileId)}
                     className={cn(
                       'flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-left transition-colors',
                       roomsV2 ? 'py-1.5 pl-2 pr-1' : 'py-1.5 pl-2.5 pr-1.5',
@@ -507,7 +507,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                     {hasMore ? (
                       <button
                         type="button"
-                        onClick={() => onShowMoreSessions()}
+                        onClick={() => onShowMoreSessions(profile.profileId)}
                         className={cn(
                           'flex items-center gap-1 rounded-md py-1 text-left text-[11px] text-muted-foreground/70 transition-colors',
                           'hover:text-muted-foreground',
@@ -521,7 +521,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                     {isExpanded ? (
                       <button
                         type="button"
-                        onClick={() => onShowLessSessions()}
+                        onClick={() => onShowLessSessions(profile.profileId)}
                         className={cn(
                           'flex items-center gap-1 rounded-md py-1 text-left text-[11px] text-muted-foreground/70 transition-colors',
                           'hover:text-muted-foreground',

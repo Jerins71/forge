@@ -177,10 +177,10 @@ export interface ProfileGroupProps {
   collapsedSessionIds: Set<string>
   visibleSessionLimit: number
   expandedWorkerListSessionIds: Set<string>
-  onToggleProfileCollapsed: () => void
+  onToggleProfileCollapsed: (profileId: string) => void
   onToggleSessionCollapsed: (sessionId: string) => void
-  onShowMoreSessions: () => void
-  onShowLessSessions: () => void
+  onShowMoreSessions: (profileId: string) => void
+  onShowLessSessions: (profileId: string) => void
   onToggleWorkerListExpanded: (sessionId: string) => void
   onSelect: (agentId: string) => void
   onDeleteAgent: (agentId: string) => void

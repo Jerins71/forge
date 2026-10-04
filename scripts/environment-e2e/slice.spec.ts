@@ -258,7 +258,7 @@ test('9.2.9 revocation closes C RPC and denies subsequent tickets/API while A/B 
 
 test('9.2.7 controlled crash at all seven effect boundaries', async () => {
   test.setTimeout(180000);
-  const observations = [];
+  const observations: Record<string, unknown>[] = [];
   evidence.crashes = observations;
   for (const boundary of crashBoundaries) {
     const commandId = randomUUID(); const sessionId = `v2-${commandId}`;

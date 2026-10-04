@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils'
 import { EnvironmentBadge, EnvironmentStatusChip } from './EnvironmentStatusChip'
 import { useEnvironmentLabel } from './hooks/useEnvironmentStatus'
 import { otherEnvironmentGroupKeys } from './hooks/useOtherEnvironmentProjects'
+import { recordEnvironmentRow } from '@/lib/origin-store/environment-e2e-fixture'
 
 const MEMBER_SESSION_LIMIT = 5
 const EMPTY_IDS: readonly string[] = []
@@ -244,6 +245,7 @@ export const EnvironmentSessionRow = memo(function EnvironmentSessionRow({
   selected: boolean
   onSelect: (session: SessionRef) => void
 }) {
+  recordEnvironmentRow(environmentId, sessionId)
   const sessionKeys = useMemo(() => [`session:${sessionId}`], [sessionId])
   const selectSession = useCallback((shell: ShellState) => shell.sessions.get(sessionId), [sessionId])
   const session = useEnvironmentSelector(environmentId, 'shell', selectSession, sessionKeys)

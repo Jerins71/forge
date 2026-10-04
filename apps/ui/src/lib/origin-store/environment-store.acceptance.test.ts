@@ -55,6 +55,33 @@ async function fleet(count = 8) {
   return { servers, registry }
 }
 describe('environment UI store acceptance', () => {
+  it('preserves unchanged shell records and shares selector reads across React subscribers', async () => {
+    const { servers: [server], registry } = await fleet(1)
+    const environment = registry.get(server.seed.entry.environmentId)
+    const origin = new OriginStore({ environmentClient: environment })
+    cleanups.push(() => origin.destroy())
+    const initial = origin.getSnapshot()
+    let evaluations = 0
+    const selector = (state: typeof initial) => { evaluations++; return state.agents }
+    const detach = origin.subscribeSlice('acceptance', selector, () => {})
+    cleanups.push(detach)
+    origin.readSlice(selector)
+    origin.readSlice(selector)
+    expect(evaluations).toBe(1)
+    server.emit({ kind: 'event', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 2, event: { type: 'session.upsert', session: { ...server.seed.shell!.sessions[0], title: 'Changed title' } } })
+    await until(() => origin.getSnapshot().agents[0]?.displayName === 'Changed title')
+    const changed = origin.getSnapshot()
+    expect(changed.profiles[0]).toBe(initial.profiles[0])
+    expect(changed.unreadCounts).toBe(initial.unreadCounts)
+    const readsBefore = evaluations
+    origin.readSlice(selector)
+    origin.readSlice(selector)
+    expect(evaluations).toBe(readsBefore)
+    const previousAgent = changed.agents[0]
+    server.emit({ kind: 'event', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 3, event: { type: 'session.upsert', session: { ...server.seed.shell!.sessions[0], title: 'Changed title' } } })
+    await until(() => environment.shell.getSnapshot().cursor?.afterSequence === 3)
+    expect(origin.getSnapshot().agents[0]).toBe(previousAgent)
+  })
   it('uses bounded Desktop binary requests for file, attachment and chat artifact previews', async () => {
     const bytes = new Uint8Array([0, 127, 128, 255])
     const requests: Array<{ path: string; maxBytes: number }> = []

@@ -173,10 +173,19 @@ function isSessionRunning(agent: AgentDescriptor): boolean {
 
 export { isSessionRunning }
 
+/** Keep unchanged project/session rows stable across catalog updates in one mounted sidebar. */
+export function createProfileTreeSelector() {
+  let previousRows: ProfileTreeRow[] = []
+  return (agents: AgentDescriptor[], profiles: ManagerProfile[]) => {
+    previousRows = buildProfileTreeRows(agents, profiles, { previousRows })
+    return previousRows
+  }
+}
+
 export function buildProfileTreeRows(
   agents: AgentDescriptor[],
   profiles: ManagerProfile[],
-  options: { includeArchived?: boolean } = {},
+  options: { includeArchived?: boolean; previousRows?: ProfileTreeRow[] } = {},
 ): ProfileTreeRow[] {
   const visibleAgents = filterBuilderVisibleAgents(agents)
   const profileArchivedById = new Map(profiles.map((profile) => [profile.profileId, Boolean(profile.archivedAt)]))
@@ -242,13 +251,17 @@ export function buildProfileTreeRows(
       return bTime.localeCompare(aTime) || a.agentId.localeCompare(b.agentId)
     })
 
-    const sessionRows: SessionRow[] = sortedSessions.map((session) => ({
-      sessionAgent: session,
-      workers: (workersByManager.get(session.agentId) ?? []).sort(byCreatedAtDescThenId),
-      isDefault: session.agentId === profile.defaultSessionAgentId,
-    }))
+    const previousRow = options.previousRows?.find(row => row.profile.profileId === profile.profileId)
+    const previousSessions = new Map(previousRow?.sessions.map(row => [row.sessionAgent.agentId, row]))
+    const sessionRows: SessionRow[] = sortedSessions.map((session) => {
+      const workers = (workersByManager.get(session.agentId) ?? []).sort(byCreatedAtDescThenId)
+      const isDefault = session.agentId === profile.defaultSessionAgentId
+      const previous = previousSessions.get(session.agentId)
+      return previous?.sessionAgent === session && previous.isDefault === isDefault && previous.workers.length === workers.length && workers.every((worker, index) => worker === previous.workers[index])
+        ? previous : { sessionAgent: session, workers, isDefault }
+    })
 
-    treeRows.push({ profile, sessions: sessionRows })
+    treeRows.push(previousRow?.profile === profile && previousRow.sessions.length === sessionRows.length && sessionRows.every((session, index) => session === previousRow.sessions[index]) ? previousRow : { profile, sessions: sessionRows })
   }
 
   // Sort profiles by sortOrder first, then createdAt, then profileId for determinism

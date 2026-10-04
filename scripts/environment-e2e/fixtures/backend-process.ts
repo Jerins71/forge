@@ -30,11 +30,11 @@ const hardening = await installHardeningHooks(config.paths.dataDir, checkout);
 process.on('message', message => {
   const request = message as { type?: string; requestId?: string; input?: { operation: string; commandId: string; boundary: Parameters<typeof hardening.arm>[0]['boundary'] } };
   if (request?.type !== 'forge:fixture:request') return;
-  try {
-    if (request.input?.operation !== 'arm-crash') throw new Error('Unknown private fixture operation');
-    const value = hardening.arm(request.input);
+  void (async () => {
+    if (!request.input) throw new Error('Missing private fixture operation');
+    const value = request.input.operation === 'arm-crash' ? hardening.arm(request.input) : await hardening.operate(request.input);
     process.send?.({ type: 'forge:fixture:result', requestId: request.requestId, value });
-  } catch { process.send?.({ type: 'forge:fixture:result', requestId: request.requestId, error: 'Private fixture request rejected' }); }
+  })().catch(() => { process.send?.({ type: 'forge:fixture:result', requestId: request.requestId, error: 'Private fixture request rejected' }); });
 });
 config.paths.rootDir = checkout;
 config.paths.resourcesDir = checkout;

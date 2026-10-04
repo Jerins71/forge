@@ -1,10 +1,19 @@
 import { readFileSync, writeFileSync, existsSync, openSync, fsyncSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
+import { basename } from 'node:path';
+import { ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import type { Database } from 'better-sqlite3';
 import { loadConfiguredSqliteDatabaseConstructor } from '../../../apps/backend/src/sqlite-database-loader.js';
 import { getEnvironmentDbPath, getSessionMetaPath } from '../../../apps/backend/src/swarm/storage/data-paths.js';
 import { AgentDescriptorStore } from '../../../apps/backend/src/swarm/agents/agent-descriptor-store.js';
 import { SwarmManager } from '../../../apps/backend/src/swarm/swarm-manager.js';
+import { ConversationTimeline } from '../../../apps/backend/src/swarm/session/conversation-timeline.js';
+import { RpcSendQueue } from '../../../apps/backend/src/ws/rpc/rpc-send-queue.js';
+import { StreamQueue } from '../../../apps/backend/src/environment/streams/stream-budget.js';
+import { WebSocket } from './ws.js';
+import type NativeSocket from 'ws';
+import type { AgentDescriptor } from '../../../apps/backend/src/swarm/types.js';
 
 export const crashBoundaries = ['pre-commit', 'post-commit', 'post-Git', 'post-meta', 'post-JSONL', 'post-dispatch-marker', 'post-provider-accept'] as const;
 export type CrashBoundary = typeof crashBoundaries[number];
@@ -15,6 +24,66 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
   const databasePath = getEnvironmentDbPath(dataDir);
   const markerPath = join(checkout, '.fixture-crash.json');
   let armed: { commandId: string; boundary: CrashBoundary } | null = null;
+  let manager: SwarmManager | undefined;
+  let tick = 0;
+  const timeline = new ConversationTimeline({ now: () => new Date().toISOString() });
+  const overlay = new Map<string, AgentDescriptor>();
+  const streams = new Set<NodeJS.Timeout>();
+  const counters = { catalogSerializations: 0, transcriptHydrations: 0, gitScans: 0, hostResourceProbes: 0, applicationRxBytes: 0, applicationTxBytes: 0, streamQueueFramesMax: 0, streamQueueBytesMax: 0, sendQueueFramesMax: 0, sendQueueBytesMax: 0, injections: 0 };
+  const sockets = new Set<WeakRef<NativeSocket>>();
+  const knownSockets = new WeakSet<NativeSocket>();
+  const subscriptions = new WeakMap<NativeSocket, Map<string, { method: string; sessionId?: string }>>();
+  const requests = new WeakMap<NativeSocket, Map<string, { method: string; sessionId?: string }>>();
+  const socketEmit = WebSocket.prototype.emit;
+  WebSocket.prototype.emit = function (event, ...args) {
+    if (event === 'message' && (this as unknown as { _isServer: boolean })._isServer) {
+      const raw = String(args[0]); counters.applicationRxBytes += Buffer.byteLength(raw);
+      try {
+        const frame = JSON.parse(raw);
+        if (frame.type === 'request') {
+          let map = requests.get(this); if (!map) { map = new Map(); requests.set(this, map); }
+          map.set(frame.requestId, { method: frame.method, sessionId: frame.input?.sessionId });
+        } else if (frame.type === 'unsubscribe') subscriptions.get(this)?.delete(frame.subscriptionId);
+      } catch { /* malformed frames are measured and rejected by the real parser */ }
+    }
+    return socketEmit.call(this, event, ...args);
+  };
+  const enqueue = RpcSendQueue.prototype.enqueue;
+  RpcSendQueue.prototype.enqueue = function (frame, priority) {
+    const state = this as unknown as { socket: NativeSocket; frames: unknown[]; bytes: number; inFlightBytes: number; sending: boolean };
+    if (!knownSockets.has(state.socket)) { knownSockets.add(state.socket); sockets.add(new WeakRef(state.socket)); subscriptions.set(state.socket, new Map()); }
+    const result = enqueue.call(this, frame, priority);
+    if (result) counters.applicationTxBytes += Buffer.byteLength(JSON.stringify(frame));
+    if (frame.type === 'result') {
+      const request = requests.get(state.socket)?.get(frame.requestId);
+      if (request && frame.output && typeof frame.output === 'object' && 'subscriptionId' in frame.output) subscriptions.get(state.socket)?.set(String(frame.output.subscriptionId), request);
+      requests.get(state.socket)?.delete(frame.requestId);
+    } else if (frame.type === 'error') requests.get(state.socket)?.delete(frame.requestId);
+    else if (frame.type === 'stream.error') subscriptions.get(state.socket)?.delete(frame.subscriptionId);
+    counters.sendQueueFramesMax = Math.max(counters.sendQueueFramesMax, state.frames.length + Number(state.sending));
+    counters.sendQueueBytesMax = Math.max(counters.sendQueueBytesMax, state.bytes + Math.max(state.inFlightBytes, state.socket.bufferedAmount));
+    return result;
+  };
+  const push = StreamQueue.prototype.push;
+  StreamQueue.prototype.push = function (item) {
+    push.call(this, item);
+    const state = this as unknown as { items: unknown[]; bytes: number };
+    counters.streamQueueFramesMax = Math.max(counters.streamQueueFramesMax, state.items.length); counters.streamQueueBytesMax = Math.max(counters.streamQueueBytesMax, state.bytes);
+  };
+  const processPrototype = ChildProcess.prototype as any;
+  const spawn = processPrototype.spawn;
+  processPrototype.spawn = function (options: { file: string }) {
+    const executable = basename(options.file);
+    if (executable === 'git' || executable === 'git.exe') counters.gitScans++;
+    if (['ps', 'df', 'sysctl', 'systeminfo.exe', 'wmic.exe'].includes(executable)) counters.hostResourceProbes++;
+    return spawn.call(this, options);
+  };
+  const listAgents = SwarmManager.prototype.listAgentsForInternalUse;
+  SwarmManager.prototype.listAgentsForInternalUse = function () { manager = this; return listAgents.call(this); };
+  const getAgent = SwarmManager.prototype.getAgentForInternalUse;
+  SwarmManager.prototype.getAgentForInternalUse = function (id) { manager = this; return overlay.get(id) ?? getAgent.call(this, id); };
+  const history = SwarmManager.prototype.getConversationHistoryPage;
+  SwarmManager.prototype.getConversationHistoryPage = function (...args) { counters.transcriptHydrations++; return history.apply(this, args); };
   const hit = (boundary: CrashBoundary, commandId: string) => {
     if (!armed || armed.commandId !== commandId || armed.boundary !== boundary) return;
     writeFileSync(markerPath, JSON.stringify({ ...armed, pid: process.pid, reachedAt: new Date().toISOString() }) + '\n', { mode: 0o600 });
@@ -40,6 +109,10 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
   const originalPrepare = prototype.prepare;
   prototype.prepare = function (this: Database, sql: string) {
     const statement = originalPrepare.call(this, sql);
+    if (this.name === databasePath && /SELECT summary_json FROM control_(?:sessions|projects) ORDER BY/.test(sql)) {
+      const all = statement.all.bind(statement) as (...args: any[]) => unknown[];
+      statement.all = (...args: any[]) => { counters.catalogSerializations++; return all(...args); };
+    }
     if (this.name === databasePath && sql === "UPDATE workspace_reservations SET state='ready' WHERE command_id=?") {
       const run = statement.run.bind(statement) as (...args: any[]) => ReturnType<typeof statement.run>;
       statement.run = (...args: any[]) => { hit('post-Git', args[0]); return run(...args); };
@@ -71,6 +144,35 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
     arm(input: { commandId: string; boundary: CrashBoundary }) {
       if (!/^[0-9a-f-]{36}$/.test(input.commandId) || !crashBoundaries.includes(input.boundary)) throw new Error('Invalid controlled crash request');
       armed = input; return { armed: true, pid: process.pid };
+    },
+    async operate(input: { operation: string; sessionId?: string; count?: number; hz?: number; durationMs?: number; textBytes?: number; status?: AgentDescriptor['status']; gc?: boolean }) {
+      if (input.operation === 'metrics') {
+        if (input.gc) (globalThis as unknown as { gc?: () => void }).gc?.();
+        const active = [...sockets].map(ref => ref.deref()).filter((socket): socket is NativeSocket => !!socket && socket.readyState === WebSocket.OPEN);
+        return { ...counters, pid: process.pid, memory: process.memoryUsage(), sockets: active.length, subscriptions: active.flatMap(socket => [...(subscriptions.get(socket)?.values() ?? [])]), tcpRxBytes: active.reduce((n, socket) => n + ((socket as any)._socket?.bytesRead ?? 0), 0), tcpTxBytes: active.reduce((n, socket) => n + ((socket as any)._socket?.bytesWritten ?? 0), 0), gcAvailable: typeof (globalThis as any).gc === 'function' };
+      }
+      if (input.operation === 'stream-stop') { for (const timer of streams) clearInterval(timer); streams.clear(); return { stopped: true }; }
+      if (!manager || !input.sessionId) throw new Error('Fixture session missing');
+      const descriptor = manager.getAgentForInternalUse(input.sessionId); if (!descriptor) throw new Error('Unknown fixture session');
+      const inject = () => {
+        const timestamp = new Date(Date.now() + tick++).toISOString();
+        const next = { ...descriptor, status: input.status ?? 'streaming' as const, updatedAt: timestamp };
+        overlay.set(descriptor.agentId, next);
+        if (input.operation !== 'shell-burst') {
+          const event = { type: 'conversation_message' as const, agentId: descriptor.agentId, role: 'assistant' as const, source: 'speak_to_user' as const, text: `Synthetic provider update ${tick} ` + 'x'.repeat(input.textBytes ?? 64), timestamp, terminal: true, id: randomUUID() };
+          timeline.appendConversationEntry(descriptor, event); manager!.emit('conversation_message', event);
+        }
+        manager!.emit('agent_status', { agentId: descriptor.agentId, status: next.status, timestamp }); counters.injections++;
+      };
+      if (input.operation === 'stream-start') {
+        if (!input.hz || input.hz < 1 || input.hz > 100 || !input.durationMs || input.durationMs > 120000) throw new Error('Invalid fixture stream limits');
+        const timer = setInterval(inject, 1000 / input.hz); streams.add(timer);
+        setTimeout(() => { clearInterval(timer); streams.delete(timer); }, input.durationMs);
+        return { started: true };
+      }
+      if (!['burst', 'shell-burst'].includes(input.operation) || !input.count || input.count > 10000 || (input.textBytes ?? 0) > 60000) throw new Error('Invalid fixture burst');
+      for (let index = 0; index < input.count; index++) { inject(); if (input.operation === 'burst' && index % 20 === 19) await new Promise<void>(resolve => setImmediate(resolve)); }
+      return { injected: input.count };
     },
   };
 }

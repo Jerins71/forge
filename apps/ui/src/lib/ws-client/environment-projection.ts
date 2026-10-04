@@ -15,7 +15,7 @@ export function projectSession(
   shell: ShellState,
   previous?: AgentDescriptor,
 ): AgentDescriptor {
-  return {
+  const next: AgentDescriptor = {
     ...previous,
     agentId: session.sessionId,
     managerId: session.sessionId,
@@ -44,13 +44,16 @@ export function projectSession(
       ? { archivedAt: session.updatedAt }
       : { archivedAt: undefined }),
   }
+  return previous && Object.keys(next).every(key => next[key as keyof AgentDescriptor] === previous[key as keyof AgentDescriptor]) ? previous : next
 }
-export function projectShell(shell: ShellState, previous: AgentDescriptor[]) {
+export function projectShell(shell: ShellState, previous: AgentDescriptor[], previousProfiles: ManagerProfile[] = [], previousUnread: Record<string, number> = {}) {
   const byId = new Map(previous.map((a) => [a.agentId, a]))
   const agents = [...shell.sessions.values()].map((s) =>
     projectSession(s, shell, byId.get(s.sessionId)),
   )
-  const profiles: ManagerProfile[] = [...shell.projects.values()].map((p) => ({
+  const profilesById = new Map(previousProfiles.map(profile => [profile.profileId, profile]))
+  const profiles: ManagerProfile[] = [...shell.projects.values()].map((p) => {
+    const next: ManagerProfile = {
     profileId: p.projectId,
     displayName: p.title,
     defaultSessionAgentId:
@@ -59,10 +62,13 @@ export function projectShell(shell: ShellState, previous: AgentDescriptor[]) {
     createdAt: p.updatedAt,
     updatedAt: p.updatedAt,
     ...(p.archived ? { archivedAt: p.updatedAt } : {}),
-  }))
+    }
+    const previousProfile = profilesById.get(p.projectId)
+    return previousProfile && Object.keys(next).every(key => next[key as keyof ManagerProfile] === previousProfile[key as keyof ManagerProfile]) ? previousProfile : next
+  })
   const unreadCounts: Record<string, number> = {}
   for (const s of shell.sessions.values()) unreadCounts[s.sessionId] = s.unread
-  return { agents, profiles, unreadCounts }
+  return { agents, profiles, unreadCounts: Object.keys(previousUnread).length === agents.length && Object.keys(unreadCounts).every(key => unreadCounts[key] === previousUnread[key]) ? previousUnread : unreadCounts }
 }
 export function projectItems(
   items: NonNullable<DetailState['projection']>['items'],

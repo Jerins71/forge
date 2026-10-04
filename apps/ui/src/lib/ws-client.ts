@@ -358,7 +358,7 @@ export class ManagerWsClient {
       )
       const updateShell = () =>
         this.updateState(
-          projectShell(client.shell.getSnapshot(), this.state.agents),
+          projectShell(client.shell.getSnapshot(), this.state.agents, this.state.profiles, this.state.unreadCounts),
         )
       updateShell()
       this.environmentDetach.push(

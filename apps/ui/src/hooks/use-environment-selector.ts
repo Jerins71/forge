@@ -9,6 +9,7 @@ import type {
   ShellState,
 } from '@forge/client-runtime'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
+import { recordEnvironmentSelector } from '@/lib/origin-store/environment-e2e-fixture'
 export function useSelectorStore<S, T>(
   store: SelectorStore<S>,
   selector: (state: S) => T,
@@ -51,9 +52,13 @@ export function useEnvironmentSelector<T>(
   dependencies?: readonly string[],
 ): T {
   const client = useEnvironmentRegistry().get(environmentId)
+  const measuredSelector = useCallback((state: ShellState | ConnectionState) => {
+    recordEnvironmentSelector(environmentId)
+    return (selector as (state: ShellState | ConnectionState) => T)(state)
+  }, [environmentId, selector])
   return useSelectorStore(
     client[domain] as SelectorStore<ShellState | ConnectionState>,
-    selector as (s: ShellState | ConnectionState) => T,
+    measuredSelector,
     dependencies,
   )
 }

@@ -10,6 +10,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test as base, type BrowserContext, type Page, type Request } from '@playwright/test'
+import { readManifest } from './launch.js'
+import { startFaultProxy } from './fault-proxy.js'
 
 interface UiEnvironment { environmentId: string; label: string; baseUrl: string; projectTitle: string; sessionId: string }
 interface UiFleet {
@@ -34,6 +36,7 @@ const secrets: string[] = []
 const leaks: string[] = []
 let sharedContext: BrowserContext
 let sharedPage: Page
+let proxy: Awaited<ReturnType<typeof startFaultProxy>>
 // These serial scenarios exercise a single device's persisted environment catalog.
 // Credentials stay in the Node platform bridge; the browser retains only public catalog state.
 const test = base.extend({
@@ -45,6 +48,18 @@ test.use({ screenshot: 'off' })
 
 test.beforeAll(async ({ browser }) => {
   sharedContext = await browser.newContext()
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  const bUrl = manifest.environments[1]!.baseUrl
+  proxy = await startFaultProxy({ upstream: bUrl })
+  await sharedContext.addInitScript(({ upstream, forwarded }) => {
+    const Native = window.WebSocket
+    window.WebSocket = class extends Native {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        const target = String(url).startsWith(upstream.replace(/^http/, 'ws')) ? String(url).replace(upstream.replace(/^http/, 'ws'), forwarded.replace(/^http/, 'ws')) : url
+        super(target, protocols)
+      }
+    }
+  }, { upstream: bUrl, forwarded: proxy.url })
   sharedPage = await sharedContext.newPage()
   // The exchange body is the only carrier for pairing secrets.
   sharedPage.on('request', (request: Request) => {
@@ -64,6 +79,7 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   await sharedContext?.close()
+  await proxy?.stop()
   if (!fleet) return
   const dir = join(fleet.artifactRoot, 'ui')
   await mkdir(dir, { recursive: true })
@@ -197,6 +213,12 @@ test('9.2.3 Run on B with a new worktree and an attachment uploaded to B; enviro
   await page.locator('input[type=file]').setInputFiles({ name: 'note.txt', mimeType: 'text/plain', buffer: Buffer.from('routed to B') })
   await shot(page, 'run-on-workspace')
   await page.getByRole('combobox', { name: 'Message agent...' }).fill('Write the fixture marker')
+  proxy.dropNextResponse({ transport: 'ws', method: 'session.launch', closeAfterDrop: true })
+  await page.keyboard.press('Enter')
+  await expect.poll(() => proxy.metrics().droppedResponses).toBe(1)
+  await expect(page.getByText('The environment is offline. The draft is kept; try again when it reconnects.')).toBeVisible()
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())).find((value: any) => value.environmentId === b.environmentId)?.fresh).toBe(true)
+  await page.getByRole('combobox', { name: 'Message agent...' }).focus()
   await page.keyboard.press('Enter')
 
   await expect(page).toHaveURL(new RegExp(`env=${b.environmentId}`))
@@ -207,6 +229,10 @@ test('9.2.3 Run on B with a new worktree and an attachment uploaded to B; enviro
   await expect.poll(() => fleet!.launchEvidence(b, sessionId)).toMatchObject({ commands: 1, worktrees: 1, dispatches: 1, markerChanged: true })
   const evidence = await fleet!.launchEvidence(b, sessionId)
   assertions.launch = { environmentId: b.environmentId, sessionId, ...evidence }
+  const attempts = proxy.metrics().commandAttempts.filter(attempt => attempt.method === 'session.launch')
+  expect(attempts).toHaveLength(2)
+  expect(new Set(attempts.map(attempt => attempt.commandId)).size).toBe(1)
+  assertions.browserLostAck = { droppedResults: proxy.metrics().droppedResponses, attempts, sameCommandId: true, ...evidence }
 })
 
 test('offline environment shows age, disables Run on, and never falls back to another machine', async ({ page }) => {
@@ -215,7 +241,7 @@ test('offline environment shows age, disables Run on, and never falls back to an
   try {
     await openEnvironmentsSettings(page)
     await expect(environmentRow(page, b)).toHaveAttribute('data-environment-status', 'offline')
-    await expect(environmentRow(page, b)).toContainText(/Offline · \d+[smhd] ago/)
+    await expect(environmentRow(page, b)).toContainText(/cached \d+[smhd] ago/)
     // Cached shell stays visible while offline.
     await expect(environmentRow(page, b)).toContainText(/\d+ sessions/)
     await shot(page, 'offline-environment')

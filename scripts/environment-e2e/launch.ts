@@ -179,7 +179,7 @@ export async function launchFleet(options: { environments?: number; out?: string
       const childEnv = { ...env, FORGE_DATA_DIR: dataDir, FORGE_HOST: '127.0.0.1', FORGE_PORT: '0',
         FORGE_E2E_CHECKOUT: checkout, FORGE_E2E_INSTALLATION_STATE: installationStateDir, FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: '1', FORGE_ALLOWED_CLIENT_ORIGINS: `app://forge,http://127.0.0.1:${uiPort}`, CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs') };
       const entry = join(repositoryRoot, 'scripts/environment-e2e/fixtures/backend-process.ts');
-      const args = entry.endsWith('.ts') ? ['--import', backendRequire.resolve('tsx'), entry] : [entry];
+      const args = entry.endsWith('.ts') ? ['--expose-gc', '--import', backendRequire.resolve('tsx'), entry] : ['--expose-gc', entry];
       const startEnvironment = async (): Promise<EnvironmentFixture> => {
         const existing = manifest.environments.find(environment => environment.name === name);
         const active = children[index];
@@ -249,7 +249,7 @@ export async function controlEnvironment<T>(manifest: FleetManifest, name: strin
   if (marker.runId !== manifest.runId || marker.root !== await realpath(manifest.root)) throw new Error('Unmarked fleet control root');
   return new Promise<T>((resolveControl, reject) => {
     const body = input === undefined ? '' : JSON.stringify(input);
-    const req = controlRequest({ socketPath: manifest.controlSocket, path: `/environment/${name}/${action}`, method: 'POST', timeout: 30_000, headers: { 'Content-Length': Buffer.byteLength(body) } }, res => {
+    const req = controlRequest({ socketPath: manifest.controlSocket, path: `/environment/${name}/${action}`, method: 'POST', timeout: action === 'fixture' ? 120_000 : 30_000, headers: { 'Content-Length': Buffer.byteLength(body) } }, res => {
       let body = '';
       res.on('data', (chunk: Buffer) => { body += chunk.toString(); if (body.length > 65536) req.destroy(new Error('Oversized private control response')); });
       res.on('end', () => { if (res.statusCode !== 200) reject(new Error('V2 private bootstrap/lifecycle integration is pending or unavailable')); else { try { resolveControl(JSON.parse(body) as T); } catch { reject(new Error('Invalid private control response')); } } });
@@ -260,7 +260,7 @@ export async function controlEnvironment<T>(manifest: FleetManifest, name: strin
 async function fixtureChildRequest(child: ChildProcess, input: unknown): Promise<unknown> {
   return new Promise((resolveRequest, reject) => {
     const requestId = randomUUID();
-    const timer = setTimeout(() => { child.off('message', receive); reject(new Error('Private fixture IPC timed out')); }, 15_000);
+    const timer = setTimeout(() => { child.off('message', receive); reject(new Error('Private fixture IPC timed out')); }, 115_000);
     const receive = (message: any) => {
       if (message?.type !== 'forge:fixture:result' || message.requestId !== requestId) return;
       clearTimeout(timer); child.off('message', receive);

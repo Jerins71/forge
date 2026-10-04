@@ -24,6 +24,7 @@ export class OriginStore {
   readonly wsUrl: string
   private readonly client: ManagerWsClient
   private readonly state: KeyedSelectorStore<ManagerWsState>
+  private readonly selections = new WeakMap<OriginSelector<unknown>, { snapshot: ManagerWsState; value: unknown }>()
   private readonly meta = new KeyedSelectorStore<OriginMetaState>(
     createInitialOriginMetaState(),
   )
@@ -94,10 +95,15 @@ export class OriginStore {
     listener: () => void,
     equal: (a: T, b: T) => boolean = Object.is,
   ) {
-    return this.state.subscribe(selector, listener, equal)
+    return this.state.subscribe(() => this.readSlice(selector), listener, equal)
   }
   readSlice<T>(selector: OriginSelector<T>): T {
-    return selector(this.getSnapshot())
+    const snapshot = this.getSnapshot()
+    const previous = this.selections.get(selector)
+    if (previous?.snapshot === snapshot) return previous.value as T
+    const value = selector(snapshot)
+    this.selections.set(selector, { snapshot, value })
+    return value
   }
   subscribeMeta(listener: () => void) {
     return this.meta.subscribe((s) => s, listener)

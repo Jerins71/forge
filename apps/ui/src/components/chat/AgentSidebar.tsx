@@ -20,12 +20,13 @@ import {
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable'
 import {
-  buildProfileTreeRows,
+  createProfileTreeSelector,
   getArchivedProfileRows,
   getDirectlyArchivedSessionRows,
 } from '@/lib/agent-hierarchy'
 import type { ProfileTreeRow } from '@/lib/agent-hierarchy'
 import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
+import { profileSidebar } from '@/lib/origin-store/environment-e2e-fixture'
 import { useProviderUsage } from '@/hooks/use-provider-usage'
 import { toggleMute, getMutedAgents, setMutedAgents, MUTE_CHANGE_EVENT } from '@/lib/notification-service'
 import { cn } from '@/lib/utils'
@@ -134,7 +135,8 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   onCreateAgentCreator,
   environmentNavigation,
 }: AgentSidebarProps) {
-  const builtTreeRows = useMemo(() => buildProfileTreeRows(agents, profiles), [agents, profiles])
+  const selectTreeRows = useMemo(createProfileTreeSelector, [])
+  const builtTreeRows = useMemo(() => selectTreeRows(agents, profiles), [agents, profiles, selectTreeRows])
   const treeRows = providedTreeRows ?? builtTreeRows
   const hasArchivedItems = useMemo(() => (
     getArchivedProfileRows(agents, profiles).length > 0
@@ -696,10 +698,10 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       collapsedSessionIds={expandedSessionIds}
       visibleSessionLimit={getVisibleSessionLimit(treeRow.profile.profileId)}
       expandedWorkerListSessionIds={expandedWorkerListSessionIds}
-      onToggleProfileCollapsed={() => toggleProfileCollapsed(treeRow.profile.profileId)}
+      onToggleProfileCollapsed={toggleProfileCollapsed}
       onToggleSessionCollapsed={toggleSessionCollapsed}
-      onShowMoreSessions={() => showMoreSessions(treeRow.profile.profileId)}
-      onShowLessSessions={() => showLessSessions(treeRow.profile.profileId)}
+      onShowMoreSessions={showMoreSessions}
+      onShowLessSessions={showLessSessions}
       onToggleWorkerListExpanded={toggleWorkerListExpanded}
       onSelect={handleSelectAgent}
       onDeleteAgent={onDeleteAgent}
@@ -1103,7 +1105,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     </aside>
   )
 
-  return (
+  return profileSidebar(
     <>
       {/* Desktop: render inline */}
       <div className="hidden md:flex md:shrink-0">
