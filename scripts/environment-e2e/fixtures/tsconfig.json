@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext",
+    "strict": true, "noEmit": true, "noUnusedLocals": true, "noUnusedParameters": true,
+    "skipLibCheck": true, "esModuleInterop": true, "resolveJsonModule": true,
+    "types": ["node"], "typeRoots": ["../../../apps/backend/node_modules/@types"],
+    "baseUrl": "../../..", "paths": {"ws": ["apps/backend/node_modules/@types/ws"]}
+  },
+  "include": ["../**/*.ts"]
+}

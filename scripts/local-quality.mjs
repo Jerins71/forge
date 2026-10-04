@@ -199,7 +199,8 @@ function isCodeFile(file) {
 }
 
 function isTestFile(file) {
-  return /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(file);
+  // The environment harness uses Playwright; run it explicitly through its config.
+  return !(file.startsWith('scripts/environment-e2e/') && file.endsWith('.spec.ts')) && /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(file);
 }
 
 function testWorkspace(file) {

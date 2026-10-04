@@ -109,9 +109,8 @@ export default tseslint.config(
     rules: typescriptBaselineRules,
   },
   {
-    // Secure Sessions E2E helpers live at the repository root and are imported
-    // by backend tests, but they are not part of a build tsconfig.
-    files: ['scripts/secure-sessions-e2e/**/*.ts'],
+    // Root E2E helpers are not part of a workspace build tsconfig.
+    files: ['scripts/secure-sessions-e2e/**/*.ts', 'scripts/environment-e2e/**/*.ts'],
     languageOptions: {
       parser: tseslint.parser,
     },

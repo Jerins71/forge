@@ -54,7 +54,8 @@
     "help:validate": "node scripts/validate-help-content.mjs --strict",
     "help:validate:migration": "node scripts/validate-help-content.mjs --strict --fidelity",
     "help:baseline": "node scripts/snapshot-help-content-baseline.mjs",
-    "postinstall": "node scripts/fix-node-pty-spawn-helper-permissions.mjs"
+    "postinstall": "node scripts/fix-node-pty-spawn-helper-permissions.mjs",
+    "e2e:env": "node --import ./apps/backend/node_modules/tsx/dist/loader.mjs scripts/environment-e2e/launch.ts"
   },
   "pnpm": {
     "overrides": {
@@ -91,6 +92,7 @@
     }
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "concurrently": "^9.2.1",
     "cross-env": "^7.0.3",
     "eslint": "^10.2.0",
