@@ -15,6 +15,10 @@
     "./cli": {
       "types": "./src/cli.ts",
       "default": "./dist/cli.js"
+    },
+    "./environment-v2": {
+      "types": "./src/environment-v2.ts",
+      "default": "./dist/environment-v2.js"
     }
   },
   "types": "./src/index.ts",
@@ -22,6 +26,9 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.41"
   },
   "devDependencies": {
     "typescript": "^5.9.2",
