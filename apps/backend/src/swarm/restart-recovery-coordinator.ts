@@ -38,6 +38,9 @@ export interface RestartRecoveryCoordinatorOptions {
 
 /** Owns boot-time turn-ledger reconciliation and one-shot restart recovery. */
 export class RestartRecoveryCoordinator {
+  private controlledRecoveryPolicy: (sessionId: string) => boolean = () => false;
+
+  setControlledRecoveryPolicy(policy: (sessionId: string) => boolean): void { this.controlledRecoveryPolicy = policy; }
   private snapshot: RestartRecoverySnapshot | null = null;
   private resumeInProgress = false;
 
@@ -186,7 +189,7 @@ export class RestartRecoveryCoordinator {
     try {
       for (const workerId of snapshot.interruptedWorkers) {
       const worker = this.options.descriptors.get(workerId);
-      if (!worker || worker.role !== "worker") continue;
+      if (!worker || worker.role !== "worker" || this.options.descriptors.get(worker.managerId)?.controlCommandId || this.controlledRecoveryPolicy(worker.managerId)) continue;
       await this.options
         .sendMessage(
           worker.managerId,
@@ -199,6 +202,7 @@ export class RestartRecoveryCoordinator {
       }
 
       for (const managerId of snapshot.interruptedManagers) {
+      if (this.options.descriptors.get(managerId)?.controlCommandId || this.controlledRecoveryPolicy(managerId)) continue;
       await this.options
         .sendMessage(
           managerId,
@@ -212,6 +216,7 @@ export class RestartRecoveryCoordinator {
 
       const pendingMessages = await this.resolvePendingReportMessages(snapshot);
       for (const report of snapshot.undeliveredReports) {
+        if (this.controlledRecoveryPolicy(report.toAgentId)) continue;
         const message = pendingMessages.get(report.deliveryId);
         if (!message) continue;
         const source = this.options.descriptors.get(report.fromAgentId);

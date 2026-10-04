@@ -16,6 +16,9 @@ export interface SessionCreationOptions {
   label?: string;
   name?: string;
   sessionAgentId?: string;
+  controlCommandId?: string;
+  /** Only the ensure owner can reconcile a verified matching initial manifest. */
+  reconcileOwnedDirectory?: boolean;
   sessionPurpose?: AgentDescriptor["sessionPurpose"];
   cli?: AgentDescriptor["cli"];
   managerPosture?: ManagerPosture;
@@ -114,6 +117,7 @@ export class SessionDescriptorFactory {
 
     const sessionDescriptor: PreparedManagerSessionDescriptor = {
       agentId: identity.sessionAgentId,
+      ...(options?.controlCommandId ? { controlCommandId: options.controlCommandId } : {}),
       displayName: identity.displayName,
       role: "manager",
       managerId: identity.sessionAgentId,
@@ -203,7 +207,8 @@ export class SessionDescriptorFactory {
     }
 
     if (normalizedSessionAgentId && normalizedSessionAgentId.length > 0) {
-      if (this.isSessionAgentIdReserved(profileId, normalizedSessionAgentId)) {
+      if (this.isSessionAgentIdReserved(profileId, normalizedSessionAgentId) &&
+          !(options?.reconcileOwnedDirectory && options.controlCommandId && !this.descriptors.has(normalizedSessionAgentId))) {
         throw new Error(`Session agent id already exists: ${normalizedSessionAgentId}`);
       }
 

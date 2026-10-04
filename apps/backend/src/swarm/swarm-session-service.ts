@@ -1,5 +1,8 @@
 import { isEnoentError } from "../utils/fs-errors.js";
 import { TaskNotesStore } from './task-notes-store.js';
+import { existsSync } from "node:fs";
+import { readSessionMeta } from "./session/session-manifest.js";
+import { getSessionDir } from "./data-paths.js";
 import { writeFile } from "node:fs/promises";
 import { DEFAULT_MANAGER_POSTURE } from "@forge/protocol";
 import { cloneDescriptor } from "./swarm-manager-utils.js";
@@ -19,6 +22,8 @@ interface SessionCreationOptions {
   label?: string;
   name?: string;
   sessionAgentId?: string;
+  controlCommandId?: string;
+  reconcileOwnedDirectory?: boolean;
   sessionPurpose?: AgentDescriptor["sessionPurpose"];
   cli?: AgentDescriptor["cli"];
   managerPosture?: AgentDescriptor["managerPosture"];
@@ -41,6 +46,7 @@ export interface SwarmSessionServiceOptions {
   dataDir?: string;
   withRuntimeShutdownBarrier: <T>(agentId: string, operation: () => Promise<T>) => Promise<T>;
   profiles: Map<string, ManagerProfile>;
+  getDescriptor?: (agentId: string) => AgentDescriptor | undefined;
   runtimes: Map<string, SwarmAgentRuntime>;
   provisioner: SessionProvisioner;
   prepareSessionCreation: (
@@ -98,7 +104,44 @@ export interface SwarmSessionServiceOptions {
 }
 
 export class SwarmSessionService {
+  private readonly controlledEnsures = new Map<string, Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }>>();
   constructor(private readonly options: SwarmSessionServiceOptions) {}
+
+  ensureControlledSession(input: { commandId: string; sessionId: string; projectId: string; title: string; cwd: string; model?: AgentModelDescriptor }): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
+    const active = this.controlledEnsures.get(input.sessionId);
+    if (active) return active.then(result => { this.assertControlledOwnership(result.sessionAgent, input); return result; });
+    const pending = this.ensureControlledSessionOnce(input).finally(() => this.controlledEnsures.delete(input.sessionId));
+    this.controlledEnsures.set(input.sessionId, pending); return pending;
+  }
+
+  private assertControlledOwnership(descriptor: AgentDescriptor, input: { commandId: string; projectId: string; cwd: string; model?: AgentModelDescriptor }): void {
+    if (descriptor.role !== "manager" || descriptor.controlCommandId !== input.commandId || descriptor.profileId !== input.projectId || descriptor.cwd !== input.cwd || (input.model && JSON.stringify(descriptor.model) !== JSON.stringify(input.model))) {
+      throw Object.assign(new Error("Controlled session ownership does not match."), { code: "CONFLICT", retryable: false });
+    }
+  }
+
+  private async ensureControlledSessionOnce(input: { commandId: string; sessionId: string; projectId: string; title: string; cwd: string; model?: AgentModelDescriptor }): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
+    if (input.sessionId !== `v2-${input.commandId}`) throw new Error("Controlled session ID is not reserved for this command.");
+    const existing = this.options.getDescriptor?.(input.sessionId);
+    if (existing) {
+      this.assertControlledOwnership(existing, input);
+      const profile = this.options.profiles.get(input.projectId); if (!profile) throw new Error("Controlled project is missing.");
+      // Existing admission checks reject unsafe/pending cleanup; getOrCreate never installs a competing writer.
+      await this.options.provisioner.provisionSession({ descriptor: existing as ProvisionedSessionDescriptor, retainOnError: true,
+        initializeRuntime: async () => { if (existing.status !== "stopped") await this.options.getOrCreateRuntimeForDescriptor(existing); } });
+      await this.options.saveStore(); return { profile: { ...profile }, sessionAgent: cloneDescriptor(existing) };
+    }
+    const dataDir = this.options.dataDir; if (!dataDir) throw new Error("Controlled session data directory is missing.");
+    let reconcileOwnedDirectory = false;
+    if (existsSync(getSessionDir(dataDir, input.projectId, input.sessionId))) {
+      const meta = await readSessionMeta(dataDir, input.projectId, input.sessionId);
+      if (!meta || meta.controlCommandId !== input.commandId || meta.profileId !== input.projectId || meta.cwd !== input.cwd) {
+        throw Object.assign(new Error("Reserved session directory has conflicting ownership; it was retained."), { code: "CONFLICT", retryable: false });
+      }
+      reconcileOwnedDirectory = true;
+    }
+    return this.createSessionWithOverrides(input.projectId, { sessionAgentId: input.sessionId, label: input.title, controlCommandId: input.commandId, reconcileOwnedDirectory }, { cwd: input.cwd, model: input.model });
+  }
 
   async createSession(
     profileId: string,
@@ -139,6 +182,8 @@ export class SwarmSessionService {
 
     await this.options.provisioner.provisionSession({
       descriptor: sessionDescriptor,
+      retainOnError: Boolean(sessionDescriptor.controlCommandId),
+      beforeRuntime: sessionDescriptor.controlCommandId ? this.options.saveStore : undefined,
       initializeRuntime: async () => {
         const runtime = await this.options.getOrCreateRuntimeForDescriptor(sessionDescriptor);
         sessionDescriptor.contextUsage = runtime.getContextUsage();

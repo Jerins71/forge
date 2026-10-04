@@ -54,6 +54,16 @@ export class SwarmEventCoordinator {
   private pendingAgentsSnapshotEmit = false;
   private agentsSnapshotVersion = 0;
   private profilesSnapshotVersion = 0;
+  private readonly catalogObservers = new Set<(dirty: { agentIds?: readonly string[]; profiles?: boolean }) => void>();
+  private readonly dirtyAgentIds = new Set<string>();
+
+  observeCatalogDirty(listener: (dirty: { agentIds?: readonly string[]; profiles?: boolean }) => void): () => void {
+    this.catalogObservers.add(listener); return () => this.catalogObservers.delete(listener);
+  }
+
+  private reportCatalogDirty(dirty: { agentIds?: readonly string[]; profiles?: boolean }): void {
+    for (const listener of this.catalogObservers) listener(dirty);
+  }
 
   constructor(private readonly options: SwarmEventCoordinatorOptions) {}
 
@@ -74,6 +84,12 @@ export class SwarmEventCoordinator {
     this.options.conversationProjector.emitConversationMessage(event, options);
     this.options.observability.recordUserVisibleMessage(event);
 
+  }
+
+  async appendControlledConversationMessage(event: ConversationMessageEvent, control: import("./session/conversation-projector.js").ControlledAppendContext): Promise<ConversationMessageEvent> {
+    const persisted = await this.options.conversationProjector.appendControlledConversationMessage(event, control);
+    this.options.observability.recordUserVisibleMessage(persisted);
+    return persisted;
   }
 
   emitAgentMessage(event: AgentMessageEvent): void {
@@ -125,6 +141,7 @@ export class SwarmEventCoordinator {
 
     descriptor.updatedAt = normalizedTimestamp;
     this.options.host.upsertDescriptor(descriptor);
+    this.dirtyAgentIds.add(descriptor.agentId);
     this.emitAgentsSnapshot();
   }
 
@@ -140,6 +157,7 @@ export class SwarmEventCoordinator {
 
     descriptor.lastUserMessageAt = timestamp;
     this.options.host.upsertDescriptor(descriptor);
+    this.dirtyAgentIds.add(descriptor.agentId);
     this.emitAgentsSnapshot();
   }
 
@@ -214,6 +232,7 @@ export class SwarmEventCoordinator {
         : {}),
     };
 
+    this.dirtyAgentIds.add(agentId);
     this.options.host.emit("agent_status", payload);
     for (const snapshot of this.options.sessionActiveTools.recordAgentStatus(payload, descriptor)) {
       this.emitSessionActiveToolsSnapshot(snapshot);
@@ -240,6 +259,8 @@ export class SwarmEventCoordinator {
       this.pendingAgentsSnapshotEmit = false;
       this.options.history?.refreshRegistryCatalog();
       this.agentsSnapshotVersion += 1;
+      this.reportCatalogDirty(this.dirtyAgentIds.size ? { agentIds: [...this.dirtyAgentIds] } : {});
+      this.dirtyAgentIds.clear();
       this.options.host.emit("agents_snapshot", {
         type: "agents_snapshot",
         agents: this.options.host.listManagerAgents(),
@@ -250,6 +271,7 @@ export class SwarmEventCoordinator {
   emitProfilesSnapshot(): void {
     this.options.history?.refreshRegistryCatalog();
     this.profilesSnapshotVersion += 1;
+    this.reportCatalogDirty({ profiles: true });
     this.options.host.emit("profiles_snapshot", {
       type: "profiles_snapshot",
       profiles: this.options.host.listProfiles(),

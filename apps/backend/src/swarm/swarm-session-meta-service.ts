@@ -3,12 +3,12 @@ import { join } from "node:path";
 import type {
   SessionMemoryMergeAttemptStatus,
   SessionMemoryMergeFailureStage,
-  SessionMemoryMergeStrategy,
-  SessionMeta
+  SessionMemoryMergeStrategy
 } from "@forge/protocol";
 import { updateJsonFileAtomic } from "../utils/atomic-files.js";
 import { getProfileMemoryPath, getSessionMetaPath } from "./data-paths.js";
 import {
+  type SessionMeta,
   backfillCompactionCounts,
   computePromptFingerprint,
   incrementSessionCompactionCount,
@@ -129,6 +129,7 @@ export class SwarmSessionMetaService {
     const next: SessionMeta = {
       ...base,
       sessionId: descriptor.agentId,
+      controlCommandId: descriptor.controlCommandId ?? base.controlCommandId,
       profileId,
       label: normalizeOptionalAgentId(descriptor.sessionLabel) ?? base.label,
       cli: descriptor.cli ?? base.cli,

@@ -115,7 +115,7 @@ import type {
   SwarmReasoningLevel,
 } from "./types.js";
 import { normalizeOptionalAgentId } from "./swarm-manager-utils.js";
-import { SwarmManagerSessionAttentionFacade } from "./swarm-manager-session-attention-facade.js";
+import { SwarmManagerControlFacade } from "./swarm-manager-control-facade.js";
 
 export interface CreateManagerInput {
   secureSessionsEnabled?: boolean;
@@ -189,7 +189,7 @@ import type {
  * coordinators above, while this class keeps the manager's compatibility
  * surface explicit without forcing every delegate into the composition root.
  */
-export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFacade {
+export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
   protected abstract getFacadeServices(): SwarmManagerFacadeServices;
   flushPendingPersistence(): Promise<void> { return this.services.persistence.flushPendingTurnSeqPersists(); }
   getSessionPlanSnapshot(
@@ -260,6 +260,8 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
     return this.services.sessions.createSession(profileId, options);
   }
 
+
+
   createSessionWithOverrides(
     profileId: string,
     options: SessionCreationOptions = {},
@@ -301,6 +303,10 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
   restoreProfile(profileId: string): ReturnType<SessionLifecycleCoordinator["restoreProfile"]> {
     return this.services.sessions.restoreProfile(profileId);
   }
+
+
+
+
 
   stopSession(agentId: string): ReturnType<SessionLifecycleCoordinator["stopSession"]> {
     return this.services.sessions.stopSession(agentId);
@@ -470,6 +476,12 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
   ): Promise<AppendConversationUserMessageResult> {
     return this.services.userMessages.appendConversationUserMessage(text, options);
   }
+
+
+
+
+
+
 
   handleUserMessage(text: string, options?: HandleUserMessageOptions): Promise<void> {
     return this.services.userMessages.handleUserMessage(text, options);

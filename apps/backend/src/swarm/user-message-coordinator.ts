@@ -11,11 +11,12 @@ import type {
   CodexPluginDelegationTurnContext,
   CodexPluginRetryAuthorizationContext,
 } from "./codex-app-server/codex-plugin-delegation-coordinator.js";
-import type { CodexUserMessageRoute } from "./codex-app-server/codex-mention-router.js";
+import { classifyCodexUserMessage, type CodexUserMessageRoute } from "./codex-app-server/codex-mention-router.js";
 import type { CodexMcpToolGateEvaluation } from "./codex-app-server/codex-mcp-tool-gate.js";
 import type { ConversationAttachmentService } from "./conversation-attachment-service.js";
 import { resolveConversationReplyTarget } from "./conversation-reply.js";
 import { isExternalThreadDescriptor } from "./external-thread-compatibility.js";
+import type { ControlledAppendContext } from "./session/conversation-projector.js";
 import type { MemoryCoordinator } from "./memory-coordinator.js";
 import type { SessionGoalCoordinator } from "./goals/session-goal-coordinator.js";
 import type { ProjectAgentCoordinator } from "./project-agent-coordinator.js";
@@ -42,6 +43,12 @@ import type {
   SendMessageReceipt,
 } from "./types.js";
 import { linkSessionReferences, type SessionReferenceDependencies } from "./session-references.js";
+
+export interface ControlledInputContext extends ControlledAppendContext {
+  beforeDispatch(): Promise<"dispatch" | "do-not-dispatch">;
+  onCanonicalAppend(entryId: string): Promise<void>;
+  onDispatchAccepted(): Promise<void>;
+}
 
 type ManagerDescriptor = AgentDescriptor & { role: "manager"; profileId: string };
 type CodexClassification = CodexUserMessageRoute;
@@ -80,6 +87,8 @@ export interface HandleUserMessageOptions {
   sourceContext?: MessageSourceContext;
   replyTo?: ConversationReplyTargetInput;
   clientRequestId?: string;
+  /** Internal control effect context; external parsers never populate this. */
+  controlledInput?: ControlledInputContext;
   /** Manager sessions the user referenced in this message; linked as peers of the target. */
   sessionReferenceAgentIds?: string[];
 }
@@ -91,6 +100,8 @@ export interface PreparedInboundConversationPayload {
   source: "user_input" | "project_agent_input";
   sourceContext?: MessageSourceContext;
   clientRequestId?: string;
+  /** Internal control effect context; external parsers never populate this. */
+  controlledInput?: ControlledInputContext;
   projectAgentContext?: ConversationMessageEvent["projectAgentContext"];
   attachments?: ConversationAttachment[];
   replyTo?: ConversationReplyTarget;
@@ -106,7 +117,7 @@ export interface InboundConversationAppenderOptions {
   attachments: Pick<ConversationAttachmentService, "prepareConversation">;
   events: Pick<
     SwarmEventCoordinator,
-    "emitConversationMessage" | "markSessionActivity" | "markSessionUserMessageActivity"
+    "emitConversationMessage" | "appendControlledConversationMessage" | "markSessionActivity" | "markSessionUserMessageActivity"
   >;
   now(): string;
 }
@@ -128,7 +139,7 @@ export class InboundConversationAppender {
         payload.source === "user_input" ? payload.attachments : undefined,
       );
     const timestamp = payload.timestamp ?? this.options.now();
-    const event: ConversationMessageEvent = {
+    let event: ConversationMessageEvent = {
       type: "conversation_message",
       agentId: target.agentId,
       role: "user",
@@ -143,7 +154,12 @@ export class InboundConversationAppender {
       replyTo: payload.source === "user_input" ? payload.replyTo : undefined,
     };
 
-    this.options.events.emitConversationMessage(event);
+    if (payload.controlledInput) {
+      event = await this.options.events.appendControlledConversationMessage(event, payload.controlledInput);
+      await payload.controlledInput.onCanonicalAppend(event.timelineEntryId ?? event.id!);
+    } else {
+      this.options.events.emitConversationMessage(event);
+    }
     this.options.events.markSessionActivity(target.agentId, timestamp);
     if (payload.source === "user_input") {
       this.options.events.markSessionUserMessageActivity(target.agentId, timestamp);
@@ -241,6 +257,7 @@ interface RuntimeDispatchInput {
   codexPluginRetryAuthorizationContext?: CodexPluginRetryAuthorizationContext;
   replyTo?: ConversationReplyTarget;
   sessionReferenceGuidance?: string;
+  controlledInput?: ControlledInputContext;
 }
 
 /**
@@ -250,7 +267,18 @@ interface RuntimeDispatchInput {
  * their ordering and rollback boundary.
  */
 export class UserMessageCoordinator {
+  private readonly controlledInputLocks = new Map<string, Promise<void>>();
   constructor(private readonly options: UserMessageCoordinatorOptions) {}
+
+  async applyControlledInput(text: string, options: HandleUserMessageOptions & { targetAgentId: string; controlledInput: ControlledInputContext }): Promise<{ delivery: "dispatched" | "unknown" }> {
+    const prior = this.controlledInputLocks.get(options.targetAgentId) ?? Promise.resolve();
+    let accepted = false;
+    const control = options.controlledInput;
+    const operation = prior.catch(() => {}).then(() => this.handleUserMessage(text, { ...options, controlledInput: { ...control, onDispatchAccepted: async () => { await control.onDispatchAccepted(); accepted = true; } } }));
+    this.controlledInputLocks.set(options.targetAgentId, operation);
+    try { await operation; return { delivery: accepted ? "dispatched" : "unknown" }; }
+    finally { if (this.controlledInputLocks.get(options.targetAgentId) === operation) this.controlledInputLocks.delete(options.targetAgentId); }
+  }
 
   async appendConversationUserMessage(
     text: string,
@@ -327,7 +355,10 @@ export class UserMessageCoordinator {
         )
       : undefined;
 
-    if (await this.options.codex.direct.maybeRouteUserMessage({
+    if (options?.controlledInput && (isExternalThreadDescriptor(target) || parseCompactSlashCommand(trimmed) || classifyCodexUserMessage(trimmed).kind === "sidecar")) {
+      throw Object.assign(new Error("This input route cannot acknowledge durable control delivery."), { code: "UNAVAILABLE", retryable: false });
+    }
+    if (!options?.controlledInput && await this.options.codex.direct.maybeRouteUserMessage({
       target,
       text: trimmed,
       attachments,
@@ -380,6 +411,7 @@ export class UserMessageCoordinator {
         sourceContext,
         resolvedReplyTo,
         options?.clientRequestId,
+        options?.controlledInput,
       );
 
       if (target.role === "manager") {
@@ -408,6 +440,7 @@ export class UserMessageCoordinator {
         codexPluginRetryAuthorizationContext: preparedCodexTurn.retryAuthorizationContext,
         replyTo: resolvedReplyTo,
         sessionReferenceGuidance,
+        controlledInput: options?.controlledInput,
       });
     });
   }
@@ -441,6 +474,7 @@ export class UserMessageCoordinator {
     sourceContext: MessageSourceContext,
     replyTo?: ConversationReplyTarget,
     clientRequestId?: string,
+    controlledInput?: ControlledInputContext,
   ): Promise<AppendConversationUserMessageResult> {
     const receivedAt = this.options.now();
     const managerContextId = target.role === "manager" ? target.agentId : target.managerId;
@@ -458,6 +492,7 @@ export class UserMessageCoordinator {
       source: "user_input",
       sourceContext,
       clientRequestId,
+      controlledInput,
       attachments,
       replyTo,
     });
@@ -496,6 +531,7 @@ export class UserMessageCoordinator {
         )
       : input.text;
     let receipt: SendMessageReceipt;
+    if (input.controlledInput && await input.controlledInput.beforeDispatch() !== "dispatch") return;
     try {
       receipt = await this.options.agentMessages.sendMessage(
         managerContextId,
@@ -509,6 +545,7 @@ export class UserMessageCoordinator {
       throw error;
     }
 
+    await input.controlledInput?.onDispatchAccepted();
     this.options.logDebug("manager:user_message_dispatch_complete", {
       managerContextId,
       targetAgentId: target.agentId,
@@ -615,7 +652,13 @@ export class UserMessageCoordinator {
     });
 
     try {
+      if (input.controlledInput && await input.controlledInput.beforeDispatch() !== "dispatch") {
+        rollback();
+        this.options.observability.cancelRuntimeInput(observabilityInput, "controlled_input_fenced");
+        return;
+      }
       const receipt = await runtime.sendMessage(runtimeMessage, "steer");
+      await input.controlledInput?.onDispatchAccepted();
       this.options.observability.completeRuntimeInput(observabilityInput, receipt, metadata);
       this.options.codex.plugin.recordDispatchAccepted(managerContextId, {
         gate: codexMcpToolGate,

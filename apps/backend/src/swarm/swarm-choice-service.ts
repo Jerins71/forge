@@ -1,9 +1,14 @@
+import { TypeCompiler } from "@sinclair/typebox/compiler";
+import { ChoiceSummarySchema } from "@forge/protocol/environment-v2";
 import { randomUUID } from "node:crypto";
 import type { ChoiceRequestEvent } from "@forge/protocol";
 import type { AgentDescriptor, ChoiceAnswer, ChoiceQuestion, ChoiceRequestStatus } from "./types.js";
 
+const choiceValidator = TypeCompiler.Compile(ChoiceSummarySchema);
+
 interface PendingChoiceRequest {
   choiceId: string;
+  runtimeGeneration: string;
   agentId: string;
   sessionAgentId: string;
   questions: ChoiceQuestion[];
@@ -43,6 +48,10 @@ export class SwarmChoiceService {
   }
 
   requestUserChoiceWithId(agentId: string, questions: ChoiceQuestion[]): { choiceId: string; promise: Promise<ChoiceAnswer[]> } {
+    const boundedChoice = { choiceId: "pending", agentId, status: "pending", questions };
+    if (!choiceValidator.Check(boundedChoice) || Buffer.byteLength(JSON.stringify(boundedChoice)) > 60 * 1024) {
+      throw Object.assign(new Error("Choice metadata exceeds the bounded detail limit."), { code: "PAYLOAD_TOO_LARGE", retryable: false });
+    }
     const descriptor = this.options.getDescriptor(agentId);
     if (!descriptor) {
       throw new Error(`Agent not found: ${agentId}`);
@@ -58,6 +67,7 @@ export class SwarmChoiceService {
     const promise = new Promise<ChoiceAnswer[]>((resolve, reject) => {
       const pending: PendingChoiceRequest = {
         choiceId,
+        runtimeGeneration: randomUUID(),
         agentId,
         sessionAgentId,
         questions,
@@ -189,8 +199,8 @@ export class SwarmChoiceService {
       timestamp?: string;
     },
   ): ChoiceRequestEvent {
-    return {
-      type: "choice_request",
+    return Object.assign({
+      type: "choice_request" as const,
       agentId: pending.agentId,
       sessionAgentId: pending.sessionAgentId,
       choiceId: pending.choiceId,
@@ -198,6 +208,6 @@ export class SwarmChoiceService {
       status,
       ...(overrides?.answers ? { answers: overrides.answers } : {}),
       timestamp: overrides?.timestamp ?? pending.createdAt,
-    };
+    }, { runtimeGeneration: pending.runtimeGeneration });
   }
 }

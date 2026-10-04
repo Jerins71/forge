@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { type CliSessionMetadata, type SessionMeta, type SessionWorkerMeta } from "@forge/protocol";
+import { type CliSessionMetadata, type SessionMeta as ProtocolSessionMeta, type SessionWorkerMeta } from "@forge/protocol";
 import { writeJsonFileAtomic } from "../../utils/atomic-files.js";
 import {
   getProfilesDir,
@@ -13,6 +13,10 @@ import {
 } from "../data-paths.js";
 import type { AgentDescriptor } from "../types.js";
 import { isEnoentError } from "../../utils/fs-errors.js";
+
+export interface SessionMeta extends ProtocolSessionMeta {
+  controlCommandId?: string;
+}
 
 interface RebuildSessionMetaOptions {
   dataDir: string;
@@ -244,6 +248,7 @@ export async function rebuildSessionMeta(options: RebuildSessionMetaOptions): Pr
           ]);
 
           const meta: SessionMeta = {
+            controlCommandId: sessionDescriptor.controlCommandId ?? existingMeta?.controlCommandId,
             sessionId: sessionDescriptor.agentId,
             profileId,
             label: normalizeOptionalString(sessionDescriptor.sessionLabel) ?? null,
@@ -731,6 +736,7 @@ function coerceSessionMeta(value: unknown): SessionMeta | undefined {
   return {
     sessionId,
     profileId,
+    controlCommandId: normalizeOptionalString(value.controlCommandId),
     label: normalizeOptionalString(value.label) ?? null,
     cli: coerceCliSessionMetadata(value.cli),
     model: {
