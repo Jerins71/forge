@@ -46,6 +46,25 @@ export function createEventSink(database: Database, clock: () => number, random:
   let pending: StoredEvent[] = []
   let publishing = false
   let closed = false
+  const totals = database.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(payload_bytes), 0) AS bytes FROM events').get() as { count: number; bytes: number }
+  let journalCount = totals.count
+  let journalBytes = totals.bytes
+  let nextPruneAt = 0
+  const pruneJournal = (): { count: number; bytes: number } => {
+    const cutoff = clock() - 7 * 86_400_000
+    const expired = database.prepare('SELECT COALESCE(MAX(sequence), 0) AS sequence FROM events WHERE created_at < ?').get(cutoff) as { sequence: number }
+    const countBoundary = database.prepare('SELECT sequence FROM events ORDER BY sequence DESC LIMIT 1 OFFSET 99999').get() as { sequence: number } | undefined
+    const byteBoundary = database.prepare(`SELECT MIN(sequence) AS sequence FROM (
+      SELECT sequence, SUM(payload_bytes) OVER (ORDER BY sequence DESC) AS bytes FROM events
+    ) WHERE bytes <= 268435456`).get() as { sequence: number | null }
+    const prefix = Math.max(expired.sequence, countBoundary ? countBoundary.sequence - 1 : 0,
+      byteBoundary.sequence ? byteBoundary.sequence - 1 : 0)
+    if (prefix > 0) {
+      database.prepare('DELETE FROM events WHERE sequence <= ?').run(prefix)
+      database.prepare('UPDATE environment_meta SET retained_after_sequence = MAX(retained_after_sequence, ?) WHERE singleton = 1').run(prefix)
+    }
+    return database.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(payload_bytes), 0) AS bytes FROM events').get() as { count: number; bytes: number }
+  }
   const meta = () => database.prepare('SELECT high_water_sequence, stream_epoch FROM environment_meta WHERE singleton = 1').get() as {
     high_water_sequence: number; stream_epoch: string
   }
@@ -76,7 +95,7 @@ export function createEventSink(database: Database, clock: () => number, random:
     database.prepare('UPDATE events SET event_type = ?, payload_json = ?, payload_bytes = ? WHERE sequence = ?')
       .run(event.type, payload, payloadBytes, sequence)
     database.prepare('UPDATE environment_meta SET high_water_sequence = ? WHERE singleton = 1').run(sequence)
-    project(database, input.sessionId, event, sequence)
+    project(database, input.sessionId, event, sequence, input.sourceKey)
     pending.push({ sequence, eventId, streamEpoch: meta().stream_epoch, commandId: input.commandId ?? null,
       topic: input.topic, sessionId: input.sessionId, eventType: event.type, event,
       payloadBytes, sourceKey: input.sourceKey ?? null, createdAt })
@@ -92,11 +111,16 @@ export function createEventSink(database: Database, clock: () => number, random:
       const tx = { database }
       pending = []
       let result: ReturnType<typeof write>
+      let pruned: { count: number; bytes: number } | undefined
       try {
         result = database.transaction(() => {
           active = tx
           const value = write(tx)
           if (value && typeof value === 'object' && 'then' in value) throw new Error('Control transactions must be synchronous')
+          const bytes = pending.reduce((sum, event) => sum + event.payloadBytes, 0)
+          if (pending.length && (journalCount + pending.length > 100_000 || journalBytes + bytes > 268435456 || clock() >= nextPruneAt)) {
+            pruned = pruneJournal()
+          }
           return value
         }).immediate()
       } catch (error) {
@@ -104,6 +128,14 @@ export function createEventSink(database: Database, clock: () => number, random:
         throw error
       } finally {
         active = undefined
+      }
+      if (pruned) {
+        journalCount = pruned.count
+        journalBytes = pruned.bytes
+        nextPruneAt = clock() + 60_000
+      } else {
+        journalCount += pending.length
+        journalBytes += pending.reduce((sum, event) => sum + event.payloadBytes, 0)
       }
       committed.push(...pending)
       pending = []
@@ -147,27 +179,18 @@ export function createEventSink(database: Database, clock: () => number, random:
       return { ...captured, unsubscribe }
     },
     prune() {
-      sink.transaction(() => {
-        const cutoff = clock() - 7 * 86_400_000
-        const expired = database.prepare('SELECT COALESCE(MAX(sequence), 0) AS sequence FROM events WHERE created_at < ?').get(cutoff) as { sequence: number }
-        const countBoundary = database.prepare('SELECT sequence FROM events ORDER BY sequence DESC LIMIT 1 OFFSET 99999').get() as { sequence: number } | undefined
-        const byteBoundary = database.prepare(`SELECT MIN(sequence) AS sequence FROM (
-          SELECT sequence, SUM(payload_bytes) OVER (ORDER BY sequence DESC) AS bytes FROM events
-        ) WHERE bytes <= 268435456`).get() as { sequence: number | null }
-        const prefix = Math.max(expired.sequence, countBoundary ? countBoundary.sequence - 1 : 0,
-          byteBoundary.sequence ? byteBoundary.sequence - 1 : 0)
-        if (prefix > 0) {
-          database.prepare('DELETE FROM events WHERE sequence <= ?').run(prefix)
-          database.prepare('UPDATE environment_meta SET retained_after_sequence = MAX(retained_after_sequence, ?) WHERE singleton = 1').run(prefix)
-        }
-      })
+      let totals!: { count: number; bytes: number }
+      sink.transaction(() => { totals = pruneJournal() })
+      journalCount = totals.count
+      journalBytes = totals.bytes
+      nextPruneAt = clock() + 60_000
     },
     close() { closed = true; listeners.clear() },
   }
   return sink
 }
 
-function project(database: Database, sessionId: string | null, event: ControlEvent, sequence: number): void {
+function project(database: Database, sessionId: string | null, event: ControlEvent, sequence: number, sourceKey?: string | null): void {
   switch (event.type) {
     case 'project.upsert':
       database.prepare(`INSERT INTO control_projects VALUES (?, ?, ?)
@@ -195,7 +218,7 @@ function project(database: Database, sessionId: string | null, event: ControlEve
       if (!sessionId) throw new Error('Detail item requires session identity')
       database.prepare(`INSERT INTO detail_items VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_id, item_id) DO UPDATE SET item_json = excluded.item_json, updated_sequence = excluded.updated_sequence`)
-        .run(sessionId, event.item.itemId, event.item.userTurnId, `${sessionId}:${event.item.itemId}`, JSON.stringify(event.item), sequence)
+        .run(sessionId, event.item.itemId, event.item.userTurnId, sourceKey ?? `${sessionId}:${event.item.itemId}`, JSON.stringify(event.item), sequence)
       database.prepare(`DELETE FROM detail_items WHERE session_id = ? AND item_id NOT IN
         (SELECT item_id FROM detail_items WHERE session_id = ? ORDER BY updated_sequence DESC LIMIT 200)`).run(sessionId, sessionId)
       database.prepare(`DELETE FROM detail_items WHERE session_id = ? AND user_turn_id NOT IN
