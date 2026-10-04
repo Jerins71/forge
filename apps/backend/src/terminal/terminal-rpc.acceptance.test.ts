@@ -49,7 +49,7 @@ describe("terminal over environment RPC", () => {
     const t = await terminalFixture();
     const transport = createTerminalRpcTransport({ terminalService: t.service });
     const host = await t.service.create({ sessionAgentId: "session", name: "host" });
-    const text = "😀".repeat(20_000);
+    const text = "😀".repeat(750_000); // More than the socket queue: replay must be streamed in chunks.
     await writeFile(getTerminalSnapshotPath(t.dataDir, "project", "session", host.terminal.terminalId), text);
     const f = await socketFixture({ terminalTransport: transport });
     cleanups.push(async () => { await f.close(); await t.service.shutdown(); await rm(t.dataDir, { recursive: true, force: true }); });
@@ -65,6 +65,7 @@ describe("terminal over environment RPC", () => {
     while (!final) {
       const frame = await c.next() as Extract<RpcServerFrame, { type: "stream" }>;
       const item = frame.item as Extract<RpcStreamItem<"terminal.attach">, { kind: "snapshot" }>;
+      expect(Buffer.byteLength(item.data)).toBeLessThanOrEqual(32_768);
       expect(item.kind).toBe("snapshot"); expect(item.part).toBe(part++); expect(item.offset).toBe(Buffer.byteLength(replay));
       replay += item.data; final = item.final;
     }
@@ -81,6 +82,16 @@ describe("terminal over environment RPC", () => {
     c.send({ type: "request", requestId: "detached", method: "terminal.input", input: { subscriptionId, inputId: randomUUID(), data: "x" } });
     expect(await c.next()).toMatchObject({ type: "error", error: { code: "NOT_FOUND" } });
     expect(t.pty.handles[0].killed).toBe(false);
+    c.send({ type: "request", requestId: "reattach", method: "terminal.attach", input: { terminalId: host.terminal.terminalId, sessionId: "session", ticket: transport.issueTicket(principal, host.terminal.terminalId, "session").ticket } });
+    expect(await c.next()).toMatchObject({ type: "result" });
+    let restored = "";
+    final = false;
+    while (!final) {
+      const frame = await c.next() as Extract<RpcServerFrame, { type: "stream" }>;
+      const item = frame.item as Extract<RpcStreamItem<"terminal.attach">, { kind: "snapshot" }>;
+      restored += item.data; final = item.final;
+    }
+    expect(restored).toBe(text + "hello😀");
   });
 
   it("persists creator ownership across restart and revocation kills only device-created PTYs", async () => {
@@ -120,5 +131,8 @@ describe("terminal over environment RPC", () => {
     const ticket = transport.issueTicket(principal, host.terminal.terminalId, "session").ticket;
     c.send({ type: "request", requestId: "attach", method: "terminal.attach", input: { terminalId: host.terminal.terminalId, sessionId: "session", ticket } });
     await c.next(); expect(await c.next()).toMatchObject({ type: "stream.error", error: { code: "UNAUTHENTICATED" } });
+    const owner = await f.connect();
+    owner.send({ type: "request", requestId: "replayed", method: "terminal.attach", input: { terminalId: host.terminal.terminalId, sessionId: "session", ticket } });
+    await owner.next(); expect(await owner.next()).toMatchObject({ type: "stream.error", error: { code: "UNAUTHENTICATED" } });
   });
 });

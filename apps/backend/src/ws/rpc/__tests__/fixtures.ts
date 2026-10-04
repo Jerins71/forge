@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { WebSocket } from "ws";
@@ -9,7 +9,7 @@ import type { RpcDependencies } from "../rpc-handlers.js";
 import { StreamFault } from "../../../environment/streams/stream-budget.js";
 import { loadConfiguredSqliteDatabaseConstructor } from "../../../sqlite-database-loader.js";
 import { migrateControlDatabase } from "../../../environment/control/migrations.js";
-import { createEventSink } from "../../../environment/control/event-sink.js";
+import { createControlCore } from "../../../environment/control/database.js";
 import { createShellStream } from "../../../environment/streams/shell-stream.js";
 import { createDetailStream } from "../../../environment/streams/detail-stream.js";
 
@@ -38,11 +38,19 @@ export async function streamFixture() {
   const Constructor = await loadConfiguredSqliteDatabaseConstructor();
   const database = new Constructor(":memory:");
   migrateControlDatabase(database, descriptor);
-  const sink = createEventSink(database, () => Date.parse("2026-10-04T00:00:00.000Z"), randomUUID);
+  const core = await createControlCore({ database, clock: () => Date.parse("2026-10-04T00:00:00.000Z"), random: randomUUID, isDeviceRevoked: () => false,
+    swarm: { ensureSession: async () => ({ materialized: true }), stopSession: async () => ({ stopped: true }), applyChoice: async () => "answered",
+      applyInput: async input => { await input.onCanonicalAppend(input.inputId); if (await input.beforeDispatch() === "dispatch") await input.onDispatchAccepted(); return { delivery: "dispatched" }; } },
+    workspace: { prepareLaunch: async input => ({ project: { projectId: "project", title: "Project", cwd: "/test", repository: null, isGit: false, defaultBranch: null, updatedAt: "2026-10-04T00:00:00.000Z", sortKey: "project", archived: false },
+      revision: "1", cwd: "/test", reservation: { reservationId: input.commandId, repositoryRoot: "/test", repositoryCommonDir: "/test", kind: "current_checkout", path: "/test", pathKey: "/test", branch: null, baseCommit: null, owned: false } }),
+      isLaunchCurrent: () => true, ensure: async () => ({ cwd: "/test", branch: null }), reconcile: async () => "ready" },
+    artifacts: { validateInput: () => [], pinInput: () => {} },
+  });
+  const sink = core.eventSink;
   const deps = { database, getDescriptor: () => descriptor, subscribeCommitted: sink.subscribe,
     withReadBarrier: <T>(fn: () => T) => sink.readBarrier(fn).value };
-  return { database, sink, shellStream: createShellStream(deps), detailStream: createDetailStream(deps),
-    close: () => { sink.close(); database.close(); } };
+  return { database, sink, core, deps, shellStream: createShellStream(deps), detailStream: createDetailStream(deps),
+    close: async () => { await core.close(); database.close(); } };
 }
 
 export async function socketFixture(overrides: Partial<RpcDependencies> = {}) {
@@ -73,13 +81,13 @@ export async function socketFixture(overrides: Partial<RpcDependencies> = {}) {
     },
   };
   const streams = await streamFixture();
-  const deps: RpcDependencies = { access, control, shellStream: streams.shellStream, detailStream: streams.detailStream, legacyAdapter: emptyLegacy, terminalTransport: emptyTerminal, ...overrides };
+  const deps: RpcDependencies = { access, control: streams.core.controlService, shellStream: streams.shellStream, detailStream: streams.detailStream, legacyAdapter: emptyLegacy, terminalTransport: emptyTerminal, ...overrides };
   const rpc = createEnvironmentRpcServer(deps);
   const sockets = new Set<WebSocket>();
   const server = createServer(async (request, response) => {
     try {
       await access.authenticateHttp(request, "session:read", false);
-      const ticket = randomUUID();
+      const ticket = randomBytes(32).toString("base64url");
       tickets.set(ticket, principal);
       response.end(JSON.stringify({ ticket }));
     } catch { response.writeHead(401); response.end(); }
@@ -95,10 +103,10 @@ export async function socketFixture(overrides: Partial<RpcDependencies> = {}) {
   await once(server, "listening");
   const address = server.address() as { port: number };
   const base = `http://127.0.0.1:${address.port}`;
-  const issueTicket = (p = principal) => { const ticket = randomUUID(); tickets.set(ticket, p); return ticket; };
+  const issueTicket = (p = principal) => { const ticket = randomBytes(32).toString("base64url"); tickets.set(ticket, p); return ticket; };
   async function connect(p = principal) {
     const ticket = issueTicket(p);
-    const socket = new WebSocket(`${base.replace("http", "ws")}/api/v2/rpc?protocolVersion=1&ticket=${ticket}`, "forge.v2");
+    const socket = new WebSocket(`${base.replace("http", "ws")}/api/v2/rpc`, ["forge.v2", `ticket.${ticket}`]);
     sockets.add(socket);
     const inbox: RpcServerFrame[] = [];
     socket.on("message", data => inbox.push(JSON.parse(data.toString())));
@@ -118,5 +126,5 @@ export async function socketFixture(overrides: Partial<RpcDependencies> = {}) {
     };
   }
   return { access, rpc, streams, base, connect, issueTicket,
-    close: async () => { for (const socket of sockets) socket.terminate(); await rpc.stop(); await new Promise<void>(resolve => server.close(() => resolve())); streams.close(); } };
+    close: async () => { for (const socket of sockets) socket.terminate(); await rpc.stop(); await new Promise<void>(resolve => server.close(() => resolve())); await streams.close(); } };
 }

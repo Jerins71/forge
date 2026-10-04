@@ -23,7 +23,7 @@ export interface StreamDependencies {
   subscribeCommitted(listener: (event: CommittedStreamEvent) => void): () => void;
   getDescriptor(): EnvironmentDescriptor;
   withReadBarrier?<T>(fn: () => T): T;
-  ensureDetailInitialized?(sessionId: string): Promise<void>;
+  ensureDetailInitialized?(sessionId: string): Promise<{ historyCursor: string | null }>;
   readHistory?(principal: Principal, input: RpcInput<"session.history">): Promise<RpcOutput<"session.history">>;
   readContent?(principal: Principal, input: RpcInput<"session.content">): Promise<RpcOutput<"session.content">>;
 }

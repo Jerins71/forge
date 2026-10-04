@@ -130,6 +130,36 @@ export class WsHandler {
           handleDeletedAgentSubscriptions: (ids: Set<string>) => this.handleDeletedAgentSubscriptions(ids),
           unreadTracker: this.unreadTracker ?? undefined,
         };
+        if (command.type === "resume_restart_recovery" || command.type === "dismiss_restart_recovery") {
+          const snapshot = command.type === "resume_restart_recovery" ? await this.swarmManager.resumeRestartRecovery() : await this.swarmManager.dismissRestartRecovery();
+          send({ type: "restart_recovery_snapshot", snapshot, requestId: command.requestId });
+          return;
+        }
+        if (command.type === "pin_message") {
+          const result = await this.swarmManager.pinMessage(sessionId, command.messageId, command.pinned);
+          send({ type: "message_pinned", agentId: sessionId, messageId: command.messageId, pinned: result.pinned, timestamp: result.timestamp });
+          return;
+        }
+        if (command.type === "clear_all_pins") { await this.swarmManager.clearAllPins(sessionId); return; }
+        if (command.type === "dismiss_session_attention") {
+          const result = await this.swarmManager.dismissSessionAttention(command.attentionIds);
+          send({ type: "session_attention_update", revision: result.revision, changes: result.changes, requestId: command.requestId });
+          return;
+        }
+        if (command.type === "mark_unread" || command.type === "mark_all_read") {
+          if (!this.unreadTracker) return;
+          const agents = command.type === "mark_unread" ? [this.swarmManager.getAgent(sessionId)] : this.swarmManager.listAgents();
+          for (const agent of agents) {
+            if (!agent || agent.role !== "manager") continue;
+            const profileId = this.subscriptionManager.resolveProfileIdForAgent(agent.agentId) ?? agent.agentId;
+            if (command.type === "mark_all_read" && command.profileId !== profileId) continue;
+            if (command.type === "mark_unread") this.unreadTracker.markUnread(profileId, agent.agentId);
+            else this.unreadTracker.markRead(profileId, agent.agentId);
+            this.broadcastUnreadCountUpdate(agent.agentId, this.unreadTracker.getCount(profileId, agent.agentId));
+          }
+          return;
+        }
+        if (command.type === "ping") { send({ type: "ready", subscribedAgentId: sessionId, serverTime: new Date().toISOString() }); return; }
         if (isBrowserClientCommand(command)) {
           await handleBrowserCommand({ ...context, command, connectionId: `rpc:${sessionId}`,
             browserAutomationService: this.browserAutomationService,
@@ -155,6 +185,7 @@ export class WsHandler {
         if (signal.aborted) return [];
         const activity = this.swarmManager.getManagerToolActivitySnapshot(sessionId);
         if (activity) events.push(activity);
+        events.push(await this.swarmManager.getGenerationThroughputSnapshot(sessionId));
         for (const snapshot of await this.swarmManager.listSecureSessionTeamSnapshots(sessionId)) events.push({ type: "secure_session_snapshot", ...snapshot });
         for (const elicitation of this.swarmManager.getPendingCodexElicitationsForManager(sessionId)) events.push({
           type: "codex_elicitation_request", elicitationId: elicitation.elicitationId, agentId: elicitation.managerAgentId,
@@ -190,7 +221,9 @@ export class WsHandler {
     server.on("connection", (socket) => {
       const principal = this.principals.get(socket);
       if (!principal || !this.environmentControl) { socket.close(1008, "Device authentication required"); return; }
-      const unregister = this.environmentControl.access.registerResource(principal, () => socket.close(1008, "Device access ended"));
+      const unregister = this.environmentControl.access.registerResource(principal, (force?: boolean) => {
+        if (force) socket.terminate(); else socket.close(1008, "Device access ended");
+      });
       this.browserConnectionIds.set(socket, randomUUID());
       socket.on("message", (raw) => {
         void this.handleSocketMessage(socket, raw);

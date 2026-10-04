@@ -15,7 +15,7 @@ export function createDetailStream(deps: StreamDependencies) {
   }
 
   async function* detail(_principal: Principal, input: RpcInput<"session.subscribe">, signal: AbortSignal): AsyncGenerator<DetailStreamItem> {
-    await deps.ensureDetailInitialized?.(input.sessionId);
+    const initialized = await deps.ensureDetailInitialized?.(input.sessionId);
     if (signal.aborted) return;
     const queue = new StreamQueue<DetailStreamItem>();
     let unsubscribe: (() => void) | undefined;
@@ -47,7 +47,7 @@ export function createDetailStream(deps: StreamDependencies) {
           if (choices.length > 20) throw new StreamFault("PAYLOAD_TOO_LARGE", "Too many pending choices.");
           const snapshot: DetailSnapshot = {
             session: requireSession(input.sessionId), items: recentItems(deps.database, input.sessionId).map(item => projectDetailItem(item)),
-            workers: workers.workers, choices, historyCursor: null, workersCursor: workers.nextPage,
+            workers: workers.workers, choices, historyCursor: initialized?.historyCursor ?? null, workersCursor: workers.nextPage,
           };
           // Metadata is mandatory; content previews can shrink to content references.
           if (encodedBytes({ ...snapshot, items: snapshot.items.map(item => ({ ...item, text: "" })) }) > SNAPSHOT_BYTES - 1024) {

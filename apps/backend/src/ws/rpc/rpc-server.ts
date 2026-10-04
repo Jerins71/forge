@@ -4,7 +4,7 @@ import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import {
   ENVIRONMENT_RPC_PATH, ENVIRONMENT_WS_PROTOCOL, ENVIRONMENT_PROTOCOL_VERSION, ENVIRONMENT_PROTOCOL_HEADER,
-  V2_LIMITS, rpcRegistry, type RpcInput, type StreamMethod, type RpcStreamItem, type RpcClientFrame,
+  V2_LIMITS, rpcRegistry, type Method, type RpcInput, type StreamMethod, type RpcStreamItem, type RpcClientFrame,
 } from "@forge/protocol/environment-v2";
 import type { Principal } from "../../environment/control/control-types.js";
 import { StreamFault, encodedBytes, EVENT_BYTES, SNAPSHOT_BYTES } from "../../environment/streams/stream-budget.js";
@@ -25,10 +25,13 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
     if (!canHandleUpgrade(pathname ?? url.pathname)) return false;
     try {
       if (stopped) throw new StreamFault("UNAVAILABLE", "RPC server is stopping.");
-      const protocol = request.headers[ENVIRONMENT_PROTOCOL_HEADER] ?? url.searchParams.get("protocolVersion");
+      if (url.search) throw new StreamFault("UNAUTHENTICATED", "Socket credentials must use subprotocols.");
+      const protocol = request.headers[ENVIRONMENT_PROTOCOL_HEADER] ?? ENVIRONMENT_PROTOCOL_VERSION;
       const protocols = String(request.headers["sec-websocket-protocol"] ?? "").split(",").map(p => p.trim());
       if (String(protocol) !== String(ENVIRONMENT_PROTOCOL_VERSION) || !protocols.includes(ENVIRONMENT_WS_PROTOCOL)) throw new StreamFault("PROTOCOL_MISMATCH", "Environment protocol mismatch.");
-      const authenticated = await deps.access.consumeWsTicket({ ticket: url.searchParams.get("ticket") ?? "", audience: "rpc",
+      const ticket = protocols.find(protocol => /^ticket\.[A-Za-z0-9_-]{43}$/.test(protocol));
+      if (protocols.length !== 2 || !ticket) throw new StreamFault("UNAUTHENTICATED", "Socket ticket required.");
+      const authenticated = await deps.access.consumeWsTicket({ ticket: ticket.slice(7), audience: "rpc",
         origin: typeof request.headers.origin === "string" ? request.headers.origin : null, protocolVersion: ENVIRONMENT_PROTOCOL_VERSION });
       if (stopped || socket.destroyed) return true;
       deps.access.authorize(authenticated, []);
@@ -45,7 +48,7 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
   }
 
   function connect(socket: WebSocket, principal: Principal) {
-    const pending = new Map<string, AbortController>();
+    const pending = new Map<string, { controller: AbortController; method: Method }>();
     const subscriptions = new Map<string, { method: StreamMethod; controller: AbortController }>();
     let live = true;
     let pong = true;
@@ -65,7 +68,7 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
       if (!live) return;
       live = false;
       clearInterval(heartbeat);
-      for (const controller of pending.values()) controller.abort();
+      for (const { controller } of pending.values()) controller.abort();
       pending.clear();
       for (const id of subscriptions.keys()) stopSubscription(id);
       queue.stop();
@@ -80,7 +83,8 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
     }, V2_LIMITS.heartbeatMs);
     heartbeat.unref();
     connections.set(socket, { principal, close: () => { socket.close(1008, "Device access ended"); cleanup(); } });
-    unregister = deps.access.registerResource(principal, () => {
+    unregister = deps.access.registerResource(principal, (force?: boolean) => {
+      if (force) socket.terminate();
       connections.get(socket)?.close();
       void deps.terminalTransport.closeDevice(principal.deviceSessionId);
     });
@@ -103,7 +107,13 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
 
     async function receive(frame: RpcClientFrame) {
       if (frame.type === "ping") { queue.enqueue({ type: "pong", nonce: frame.nonce }); return; }
-      if (frame.type === "cancel") { pending.get(frame.requestId)?.abort(); return; }
+      if (frame.type === "cancel") {
+        const call = pending.get(frame.requestId);
+        call?.controller.abort();
+        // Durable operations keep their bounded execution slot until acceptance settles.
+        if (call && !rpcRegistry[call.method].receipt) pending.delete(frame.requestId);
+        return;
+      }
       if (frame.type === "unsubscribe") { stopSubscription(frame.subscriptionId); return; }
       const { requestId, method, input } = frame;
       let controller: AbortController | undefined;
@@ -113,7 +123,7 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
         deps.access.authorize(principal, [rpcRegistry[method].scope]);
         if (!compiledRegistry[method].input.Check(input)) throw new StreamFault("INVALID_INPUT", "Invalid method input.");
         controller = new AbortController();
-        pending.set(requestId, controller);
+        pending.set(requestId, { controller, method });
         if (rpcRegistry[method].stream) {
           const streamMethod = method as StreamMethod;
           const count = [...subscriptions.values()].filter(s => s.method === streamMethod).length;
@@ -144,7 +154,7 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
         }
       } catch (error) {
         if (!controller?.signal.aborted && live) queue.enqueue({ type: "error", requestId, error: rpcError(error) });
-      } finally { if (!controller || pending.get(requestId) === controller) pending.delete(requestId); }
+      } finally { if (controller && pending.get(requestId)?.controller === controller) pending.delete(requestId); }
     }
 
     async function pump(id: string, method: StreamMethod, stream: AsyncIterable<unknown>, controller: AbortController) {

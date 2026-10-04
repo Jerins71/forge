@@ -37,8 +37,10 @@ export function createTerminalRpcTransport({ terminalService }: { terminalServic
     tickets.delete(input.ticket);
     if (!ticket || ticket.expiresAt <= Date.now() || ticket.deviceSessionId !== principal.deviceSessionId || ticket.terminalId !== input.terminalId || ticket.sessionId !== input.sessionId) throw new StreamFault("UNAUTHENTICATED", "Invalid terminal ticket.");
     if (signal.aborted) return;
-    const queue = new StreamQueue<Frame>();
+    let failure: Error | undefined;
+    const queue = new StreamQueue<Frame>(error => { failure = error instanceof Error ? error : new StreamFault("RESYNC_REQUIRED", "Terminal replay failed."); });
     let detach = () => {};
+    let snapshotReplay = "";
     let offset = 0;
     const decoder = new StringDecoder("utf8");
     const abort = () => { detach(); attachments.delete(subscriptionId); queue.end(); };
@@ -48,14 +50,9 @@ export function createTerminalRpcTransport({ terminalService }: { terminalServic
       detach = await terminalService.attachRpcClient({
         terminalId: input.terminalId, sessionAgentId: input.sessionId,
         onSnapshot: replay => {
-          const text = replay.toString("utf8");
-          const parts = splitUtf8(text, 32_768);
-          const snapshotId = randomUUID();
-          for (let part = 0; part < parts.length; part++) {
-            const data = parts[part];
-            queue.push({ kind: "snapshot", snapshotId, part, final: part === parts.length - 1, offset, data });
-            offset += Buffer.byteLength(data);
-          }
+          // Capture immutable VT replay while the existing owner installs the live attachment.
+          snapshotReplay = replay.toString("utf8");
+          offset = Buffer.byteLength(snapshotReplay);
         },
         onData: chunk => {
           for (const data of splitUtf8(decoder.write(chunk), 8192)) {
@@ -71,7 +68,24 @@ export function createTerminalRpcTransport({ terminalService }: { terminalServic
           } else if (message.type === "error") queue.fail(new StreamFault("UNAVAILABLE", "Terminal unavailable."));
         },
       });
-      if (signal.aborted) abort();
+      if (signal.aborted) return;
+      const snapshotId = randomUUID();
+      const parts = splitUtf8(snapshotReplay, 32_768);
+      let current = parts.next();
+      let part = 0;
+      let snapshotOffset = 0;
+      while (!current.done) {
+        if (signal.aborted) return;
+        if (failure) throw failure;
+        const next = parts.next();
+        const data = current.value;
+        yield { kind: "snapshot", snapshotId, part: part++, final: next.done === true, offset: snapshotOffset, data };
+        snapshotOffset += Buffer.byteLength(data);
+        current = next;
+        // Give the socket scheduler a turn between replay parts; slow sockets still hit its cap.
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      snapshotReplay = "";
       yield* queue;
     } finally { signal.removeEventListener("abort", abort); abort(); }
   }
@@ -111,16 +125,14 @@ export function createTerminalRpcTransport({ terminalService }: { terminalServic
   return { attach, input, resize, closeDevice, issueTicket };
 }
 
-function splitUtf8(text: string, maxBytes: number): string[] {
-  const parts: string[] = [];
+function* splitUtf8(text: string, maxBytes: number): Generator<string> {
   let part = "";
   let bytes = 0;
   for (const character of text) {
     const size = Buffer.byteLength(character);
-    if (bytes + size > maxBytes) { parts.push(part); part = ""; bytes = 0; }
+    if (bytes + size > maxBytes) { yield part; part = ""; bytes = 0; }
     part += character;
     bytes += size;
   }
-  parts.push(part);
-  return parts;
+  yield part;
 }

@@ -88,7 +88,9 @@ export class TerminalWsProxy {
     void access.authenticateHttp(request, "terminal:operate", false).then(principal => {
       if (socket.destroyed) return;
       this.wss.handleUpgrade(request, socket, head, client => {
-        const unregister = access.registerResource(principal, () => client.close(1008, "Device access ended"));
+        const unregister = access.registerResource(principal, (force?: boolean) => {
+          if (force) client.terminate(); else client.close(1008, "Device access ended");
+        });
         client.once("close", unregister);
         void this.handleConnection(client, terminalId, requesterAgentId);
       });

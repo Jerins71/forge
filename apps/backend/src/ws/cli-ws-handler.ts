@@ -1,4 +1,4 @@
-import { isChoiceAnswer, isSystemProfile, validateChoiceAnswers } from "@forge/protocol";
+import { isChoiceAnswer, isSystemProfile } from "@forge/protocol";
 import type {
   ChoiceQuestion,
   CliChoiceCancelCommand,
@@ -189,27 +189,21 @@ export class CliWsHandler {
   }
 
   private async handleChoiceResponse(socket: WebSocket, command: CliChoiceResponseCommand): Promise<void> {
-    const pending = this.requireCliPendingChoice(command.choiceId, command.sessionAgentId);
-    const validationError = validateChoiceAnswers(pending.questions, command.answers);
-    if (validationError) {
-      throw new CliCommandError(
-        "choice_invalid_response",
-        `Invalid choice response: ${validationError}`,
-        400,
-        [{ field: "answers", message: validationError }],
-      );
-    }
-
     const { control, principal } = this.requireControl(socket);
+    const commandId = legacyCommandId(principal, "session.choose", command.requestId);
+    let sessionAgentId = command.sessionAgentId;
+    if (!sessionAgentId) {
+      try { sessionAgentId = (await control.getReceipt(principal, commandId)).sessionId ?? undefined; }
+      catch (error) {
+        if (!error || typeof error !== "object" || !("code" in error) || error.code !== "NOT_FOUND") throw error;
+      }
+    }
+    sessionAgentId ??= this.requireCliPendingChoice(command.choiceId).sessionAgentId;
+    // The control owner checks the original request before pending-choice state on retry.
     await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.choose", {
-      commandId: legacyCommandId(principal, "session.choose", command.requestId), sessionId: pending.sessionAgentId,
-      choiceId: command.choiceId, answers: command.answers,
+      commandId, sessionId: sessionAgentId, choiceId: command.choiceId, answers: command.answers,
     }));
-    this.sendRequestSuccess(socket, command, {
-      choiceId: command.choiceId,
-      sessionAgentId: pending.sessionAgentId,
-      status: "answered",
-    });
+    this.sendRequestSuccess(socket, command, { choiceId: command.choiceId, sessionAgentId, status: "answered" });
   }
 
   private handleChoiceCancel(socket: WebSocket, command: CliChoiceCancelCommand): void {

@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { createServer } from "node:http";
+import { createHealthRoutes } from "../http/routes/health-routes.js";
+import type { EnvironmentHttpRoute } from "./http-route-access.js";
 import { WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 import { createLegacyBuilderAdapter } from "./legacy-builder-adapter.js";
@@ -10,21 +13,66 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanups.splice(0)) await close(); });
 
 describe("environment RPC real socket boundary", () => {
+  it("routes launch/reconnect retry through the real durable control owner and publishes committed projections", async () => {
+    const f = await socketFixture(); cleanups.push(f.close);
+    const first = await f.connect();
+    first.send({ type: "request", requestId: "shell", method: "shell.subscribe", input: {} });
+    await first.next(); await first.next(); await first.next();
+    const input = { commandId: randomUUID(), projectId: "project", title: "Controlled", workspaceStrategy: { kind: "current_checkout" as const }, initialMessage: { text: "hello", artifactIds: [] } };
+    first.send({ type: "request", requestId: "launch", method: "session.launch", input });
+    const accepted = await first.next(frame => frame.type === "result" && frame.requestId === "launch");
+    expect(accepted).toMatchObject({ output: { commandId: input.commandId, state: "accepted" } });
+    expect(await first.next(frame => frame.type === "stream")).toMatchObject({ item: { kind: "event", event: { type: "project.upsert" } } });
+    first.socket.terminate();
+    const retry = await f.connect();
+    retry.send({ type: "request", requestId: "retry", method: "session.launch", input });
+    expect(await retry.next()).toMatchObject({ type: "result", output: { commandId: input.commandId, state: "accepted" } });
+    expect(f.streams.database.prepare("SELECT COUNT(*) count FROM commands").get()).toEqual({ count: 1 });
+    await f.streams.core.effectWorker.drain();
+    retry.send({ type: "request", requestId: "receipt", method: "command.get", input: { commandId: input.commandId } });
+    expect(await retry.next()).toMatchObject({ type: "result", output: { state: "succeeded", delivery: "dispatched" } });
+    expect(f.streams.database.prepare("SELECT COUNT(*) count FROM control_inputs").get()).toEqual({ count: 1 });
+  });
+
   it("requires authenticated tickets and exact paths/protocol; HTTP ticket is authenticated", async () => {
     const f = await socketFixture(); cleanups.push(f.close);
     expect((await fetch(`${f.base}/ticket`)).status).toBe(401);
     expect((await fetch(`${f.base}/ticket`, { headers: { authorization: "Bearer test" } })).status).toBe(200);
-    for (const path of ["/", "/ws", "/unexpected", "/api/v2/rpc?protocolVersion=1", `/api/v2/rpc?protocolVersion=2&ticket=${f.issueTicket()}`]) {
+    for (const path of ["/", "/ws", "/unexpected", "/api/v2/rpc", `/api/v2/rpc?ticket=${f.issueTicket()}`]) {
       const socket = new WebSocket(`${f.base.replace("http", "ws")}${path}`, "forge.v2");
       const status = await new Promise<number>(resolve => { socket.on("unexpected-response", (_request, response) => { response.resume(); socket.terminate(); resolve(response.statusCode!); }); socket.on("error", () => {}); });
-      expect(status).toBe(path.startsWith("/api/v2/rpc") ? path.includes("Version=2") ? 426 : 401 : 404);
+      expect(status).toBe(path.startsWith("/api/v2/rpc") ? 401 : 404);
     }
+    const mismatch = new WebSocket(`${f.base.replace("http", "ws")}/api/v2/rpc`, ["forge.v2", `ticket.${f.issueTicket()}`], { headers: { "x-forge-environment-protocol": "2" } });
+    const mismatchStatus = await new Promise<number>(resolve => { mismatch.on("unexpected-response", (_request, response) => { response.resume(); mismatch.terminate(); resolve(response.statusCode!); }); mismatch.on("error", () => {}); });
+    expect(mismatchStatus).toBe(426);
     const ticket = f.issueTicket();
-    const socket = new WebSocket(`${f.base.replace("http", "ws")}/api/v2/rpc?protocolVersion=1&ticket=${ticket}`, "forge.v2");
+    const socket = new WebSocket(`${f.base.replace("http", "ws")}/api/v2/rpc`, ["forge.v2", `ticket.${ticket}`]);
     await once(socket, "open"); socket.terminate();
-    const replay = new WebSocket(`${f.base.replace("http", "ws")}/api/v2/rpc?protocolVersion=1&ticket=${ticket}`, "forge.v2");
+    const replay = new WebSocket(`${f.base.replace("http", "ws")}/api/v2/rpc`, ["forge.v2", `ticket.${ticket}`]);
     const status = await new Promise<number>(resolve => { replay.on("unexpected-response", (_request, response) => { response.resume(); replay.terminate(); resolve(response.statusCode!); }); replay.on("error", () => {}); });
     expect(status).toBe(401);
+  });
+
+  it("serves minimal health before pairing and keeps activity behind route authentication", async () => {
+    const routes = createHealthRoutes({ resolveControlPidFile: () => "unused", allowReboot: false,
+      swarmManager: { listAgents: () => [{ role: "manager", agentId: "session", status: "streaming", activeWorkerCount: 0 }] } as never,
+    }) as EnvironmentHttpRoute[];
+    const server = createServer(async (request, response) => {
+      const url = new URL(request.url!, "http://forge.invalid");
+      const route = routes.find(route => route.methods === request.method && route.matches(url.pathname));
+      if (!route || (!("public" in route.access) && request.headers.authorization !== "Bearer test")) {
+        response.writeHead(401); response.end(); return;
+      }
+      await route.handle(request, response, url);
+    });
+    server.listen(0, "127.0.0.1"); await once(server, "listening");
+    cleanups.push(() => new Promise<void>(resolve => server.close(() => resolve())));
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    expect(await (await fetch(`${base}/api/health`)).json()).toEqual({ ok: true });
+    expect(await (await fetch(`${base}/api/health`, { method: "HEAD" })).text()).toBe("");
+    expect((await fetch(`${base}/api/activity`)).status).toBe(401);
+    expect(await (await fetch(`${base}/api/activity`, { headers: { authorization: "Bearer test" } })).json()).toMatchObject({ swarm: { activeSessions: 1 } });
   });
 
   it("checks scope before input, validates output, and preserves accepted commands on cancel", async () => {
