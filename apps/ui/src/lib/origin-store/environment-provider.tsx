@@ -6,6 +6,7 @@ const EnvironmentContext = createContext<EnvironmentContextValue | null>(null)
 export function EnvironmentProvider({ registry, primaryEnvironmentId, children }: EnvironmentContextValue & {children:ReactNode}) {
   return <EnvironmentContext.Provider value={{registry,primaryEnvironmentId}}>{children}</EnvironmentContext.Provider>
 }
+export function useOptionalEnvironmentContext(): EnvironmentContextValue | null { return useContext(EnvironmentContext) }
 export function useEnvironmentContext(): EnvironmentContextValue {
   const context=useContext(EnvironmentContext)
   if(!context) throw new Error('EnvironmentProvider is required')
