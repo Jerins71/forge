@@ -82,7 +82,7 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
       socket.ping();
     }, V2_LIMITS.heartbeatMs);
     heartbeat.unref();
-    connections.set(socket, { principal, close: () => { socket.close(1008, "Device access ended"); cleanup(); } });
+    connections.set(socket, { principal, close: () => { socket.close(4401, "Device access ended"); cleanup(); } });
     unregister = deps.access.registerResource(principal, (force?: boolean) => {
       if (force) socket.terminate();
       connections.get(socket)?.close();
