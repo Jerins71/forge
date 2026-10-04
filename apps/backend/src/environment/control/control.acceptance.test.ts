@@ -395,4 +395,45 @@ describe('durable control acceptance on real SQLite', () => {
     expect(await f.core.controlService.getReceipt(principal, STOP)).toMatchObject({ state: 'succeeded' })
   })
 
+  it('rejects unavailable initial-input routes before durable launch acceptance', async () => {
+    const f = await fixture()
+    const error = { code: 'UNAVAILABLE' as const, message: 'Input route has no dispatch marker', retryable: false }
+    f.options.inputRoute = { async preflight(input) {
+      expect(f.core.database.inTransaction).toBe(false)
+      expect(input).toEqual({ projectId: launch.projectId, message: launch.initialMessage })
+      return { ok: false, error }
+    } }
+    await expect(f.core.controlService.execute(principal, 'session.launch', launch)).rejects.toMatchObject(error)
+    for (const table of ['commands', 'control_sessions', 'workspace_reservations', 'control_inputs', 'effects', 'events']) expect(count(f.core, table)).toBe(0)
+    expect(f.core.eventSink.highWater).toBe(0)
+    expect(f.counts()).toMatchObject({ preflightCount: 0, materialized: 0, dispatchCount: 0 })
+  })
+
+  it('checks new sends outside acceptance and keeps deduplicated receipts when routing changes', async () => {
+    const f = await fixture()
+    const sessionId = 'v2-' + COMMAND
+    await f.core.controlService.execute(principal, 'session.launch', launch)
+    let available = true
+    let calls = 0
+    const error = { code: 'UNAVAILABLE' as const, message: 'Input route unavailable', retryable: true, retryAfterMs: 250 }
+    f.options.inputRoute = { async preflight(input) {
+      calls++
+      expect(f.core.database.inTransaction).toBe(false)
+      expect(input).toEqual({ sessionId, message: { text: 'next', artifactIds: [] } })
+      return available ? { ok: true } : { ok: false, error }
+    } }
+    const input = { commandId: SEND, sessionId, message: { text: 'next', artifactIds: [] } }
+    const receipt = await f.core.controlService.execute(principal, 'session.send', input)
+    available = false
+    expect(await f.core.controlService.execute(principal, 'session.send', input)).toEqual(receipt)
+    expect(calls).toBe(1)
+    const eventCount = count(f.core, 'events')
+    await expect(f.core.controlService.execute(principal, 'session.send', { ...input, commandId: STOP })).rejects.toMatchObject(error)
+    expect(count(f.core, 'commands')).toBe(2)
+    expect(count(f.core, 'control_inputs')).toBe(2)
+    expect(count(f.core, 'effects')).toBe(4)
+    expect(count(f.core, 'events')).toBe(eventCount)
+    expect(calls).toBe(2)
+  })
+
 })
