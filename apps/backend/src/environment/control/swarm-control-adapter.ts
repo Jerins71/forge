@@ -37,7 +37,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, w
         targetAgentId: input.sessionId, attachments,
         controlledInput: {
           inputId: input.inputId, commandId: input.commandId,
-          contentHash: createHash("sha256").update(JSON.stringify(input.message)).digest("hex"),
+          contentHash: createHash("sha256").update(JSON.stringify({ text: input.message.text, artifactIds: [...input.message.artifactIds].sort() })).digest("hex"),
           sourceOffset: locator?.byte_offset,
           onLocator(proof) {
             database.prepare(`INSERT INTO mirror_sources (source_key,file_generation,byte_offset,last_entry_id,updated_at) VALUES (?,?,?,?,?)
@@ -70,7 +70,7 @@ export function createControlledInputRoutePreflight({ swarmManager }: {
       const descriptor = sessionId ? swarmManager.getAgentForInternalUse(sessionId) : undefined;
       const unsupported = parseCompactSlashCommand(input.message.text) || classifyCodexUserMessage(input.message.text).kind === "sidecar" || descriptor?.externalThread;
       const buffering = Boolean(input.sessionId && !swarmManager.isControlledInputPersistenceReady(input.sessionId));
-      if (unsupported || buffering) return { ok: false, error: { code: "UNAVAILABLE", message: buffering ? "This new session has no persisted conversation yet. Send a legacy turn first or start a controlled session." : "This input route cannot acknowledge durable control delivery.", retryable: false } };
+      if (unsupported || buffering) return { ok: false, error: { code: "UNAVAILABLE", message: buffering ? "This new session has no persisted conversation yet. Start a new session or wait for its first response before sending." : "This input route cannot acknowledge durable control delivery.", retryable: false } };
       return { ok: true };
     },
   };

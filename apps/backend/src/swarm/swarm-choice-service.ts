@@ -1,10 +1,6 @@
-import { TypeCompiler } from "@sinclair/typebox/compiler";
-import { ChoiceSummarySchema } from "@forge/protocol/environment-v2";
 import { randomUUID } from "node:crypto";
 import type { ChoiceRequestEvent } from "@forge/protocol";
 import type { AgentDescriptor, ChoiceAnswer, ChoiceQuestion, ChoiceRequestStatus } from "./types.js";
-
-const choiceValidator = TypeCompiler.Compile(ChoiceSummarySchema);
 
 interface PendingChoiceRequest {
   choiceId: string;
@@ -48,10 +44,6 @@ export class SwarmChoiceService {
   }
 
   requestUserChoiceWithId(agentId: string, questions: ChoiceQuestion[]): { choiceId: string; promise: Promise<ChoiceAnswer[]> } {
-    const boundedChoice = { choiceId: "pending", agentId, status: "pending", questions };
-    if (!choiceValidator.Check(boundedChoice) || Buffer.byteLength(JSON.stringify(boundedChoice)) > 60 * 1024) {
-      throw Object.assign(new Error("Choice metadata exceeds the bounded detail limit."), { code: "PAYLOAD_TOO_LARGE", retryable: false });
-    }
     const descriptor = this.options.getDescriptor(agentId);
     if (!descriptor) {
       throw new Error(`Agent not found: ${agentId}`);
@@ -199,7 +191,7 @@ export class SwarmChoiceService {
       timestamp?: string;
     },
   ): ChoiceRequestEvent {
-    return Object.assign({
+    return Object.defineProperty({
       type: "choice_request" as const,
       agentId: pending.agentId,
       sessionAgentId: pending.sessionAgentId,
@@ -208,6 +200,6 @@ export class SwarmChoiceService {
       status,
       ...(overrides?.answers ? { answers: overrides.answers } : {}),
       timestamp: overrides?.timestamp ?? pending.createdAt,
-    }, { runtimeGeneration: pending.runtimeGeneration });
+    }, "runtimeGeneration", { value: pending.runtimeGeneration, enumerable: false });
   }
 }

@@ -260,8 +260,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
     return this.services.sessions.createSession(profileId, options);
   }
 
-
-
   createSessionWithOverrides(
     profileId: string,
     options: SessionCreationOptions = {},
@@ -303,10 +301,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
   restoreProfile(profileId: string): ReturnType<SessionLifecycleCoordinator["restoreProfile"]> {
     return this.services.sessions.restoreProfile(profileId);
   }
-
-
-
-
 
   stopSession(agentId: string): ReturnType<SessionLifecycleCoordinator["stopSession"]> {
     return this.services.sessions.stopSession(agentId);
@@ -476,12 +470,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
   ): Promise<AppendConversationUserMessageResult> {
     return this.services.userMessages.appendConversationUserMessage(text, options);
   }
-
-
-
-
-
-
 
   handleUserMessage(text: string, options?: HandleUserMessageOptions): Promise<void> {
     return this.services.userMessages.handleUserMessage(text, options);
@@ -1198,7 +1186,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
     this.services.runtime.turns.afterRuntimeEventProjection(agentId, runtimeToken, event);
   }
 
-
   getActiveTurnId(agentId: string, runtimeToken?: number): string | undefined {
     return this.services.runtime.turns.getActiveTurnId(agentId, runtimeToken);
   }
@@ -1235,7 +1222,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
       sessions: this.listAgents().filter((descriptor) => descriptor.role === "manager"),
     });
   }
-
 
   setTerminalArchiveHooks(hooks?: TerminalArchiveHooks): void {
     this.services.host.setTerminalArchiveHooks(hooks);

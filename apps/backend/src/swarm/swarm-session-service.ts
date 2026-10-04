@@ -109,13 +109,13 @@ export class SwarmSessionService {
 
   ensureControlledSession(input: { commandId: string; sessionId: string; projectId: string; title: string; cwd: string; model?: AgentModelDescriptor }): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
     const active = this.controlledEnsures.get(input.sessionId);
-    if (active) return active.then(result => { this.assertControlledOwnership(result.sessionAgent, input); return result; });
+    if (active) return active.then(result => { this.assertControlledOwnership(this.options.getDescriptor?.(input.sessionId) ?? result.sessionAgent, input); return result; });
     const pending = this.ensureControlledSessionOnce(input).finally(() => this.controlledEnsures.delete(input.sessionId));
     this.controlledEnsures.set(input.sessionId, pending); return pending;
   }
 
   private assertControlledOwnership(descriptor: AgentDescriptor, input: { commandId: string; projectId: string; cwd: string; model?: AgentModelDescriptor }): void {
-    if (descriptor.role !== "manager" || descriptor.controlCommandId !== input.commandId || descriptor.profileId !== input.projectId || descriptor.cwd !== input.cwd || (input.model && JSON.stringify(descriptor.model) !== JSON.stringify(input.model))) {
+    if (descriptor.role !== "manager" || descriptor.controlCommandId !== input.commandId || descriptor.profileId !== input.projectId || descriptor.cwd !== input.cwd || (input.model && (descriptor.model.provider !== input.model.provider || descriptor.model.modelId !== input.model.modelId || descriptor.model.thinkingLevel !== input.model.thinkingLevel))) {
       throw Object.assign(new Error("Controlled session ownership does not match."), { code: "CONFLICT", retryable: false });
     }
   }
@@ -125,6 +125,12 @@ export class SwarmSessionService {
     const existing = this.options.getDescriptor?.(input.sessionId);
     if (existing) {
       this.assertControlledOwnership(existing, input);
+      if (this.options.dataDir) {
+        const meta = await readSessionMeta(this.options.dataDir, input.projectId, input.sessionId);
+        if (meta && (meta.controlCommandId !== input.commandId || meta.profileId !== input.projectId || meta.cwd !== input.cwd)) {
+          throw Object.assign(new Error("Controlled session manifest conflicts with its descriptor."), { code: "CONFLICT", retryable: false });
+        }
+      }
       const profile = this.options.profiles.get(input.projectId); if (!profile) throw new Error("Controlled project is missing.");
       // Existing admission checks reject unsafe/pending cleanup; getOrCreate never installs a competing writer.
       await this.options.provisioner.provisionSession({ descriptor: existing as ProvisionedSessionDescriptor, retainOnError: true,

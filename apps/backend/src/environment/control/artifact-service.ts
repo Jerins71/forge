@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants, type ReadStream } from "node:fs";
-import { mkdir, open, readFile, readdir, rm, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { constants, lstatSync, type ReadStream } from "node:fs";
+import { mkdir, open, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { writeFileAtomic } from "../../utils/atomic-files.js";
 import type { Database } from "better-sqlite3";
 import type { ArtifactRef } from "@forge/protocol/environment-v2";
-import type { ConversationAttachment } from "../../swarm/types.js";
-import { getEnvironmentArtifactDir } from "../../swarm/storage/data-paths.js";
+import type { SwarmManager } from "../../swarm/swarm-manager.js";
+import type { ConversationAttachment, ConversationEntryEvent } from "../../swarm/types.js";
+import { getEnvironmentArtifactDir, getUploadsDir } from "../../swarm/storage/data-paths.js";
 import { trustPersistedConversationAttachment } from "../../swarm/conversation-attachment-service.js";
 import type { Principal } from "./control-types.js";
 import type { ArtifactPort, InputArtifact } from "./effect-types.js";
@@ -22,15 +23,17 @@ function ref(row: ArtifactRow): ArtifactRef { return { artifactId: row.artifact_
 export interface ArtifactService extends ArtifactPort {
   upload(input: { principal: Principal; projectId: string; uploadId: string; fileName: string; mimeType: string; sizeBytes?: number; body: AsyncIterable<Uint8Array>; signal?: AbortSignal }): Promise<ArtifactRef>;
   attachmentsForInput(inputId: string): Promise<ConversationAttachment[]>;
+  prepareHistoricalArtifacts(sessionId: string, entries: readonly ConversationEntryEvent[]): Promise<void>;
+  refsForEntry(sessionId: string, entry: ConversationEntryEvent): ArtifactRef[];
   openDownload(input: { principal: Principal; artifactId: string; range?: string; signal?: AbortSignal }): Promise<{ ref: ArtifactRef; stream: ReadStream; start: number; end: number; sizeBytes: number; partial: boolean }>;
   sweep(now?: number): Promise<void>;
 }
-export function createArtifactService({ database, dataDir }: { database: Database; dataDir: string }): ArtifactService {
+export function createArtifactService({ database, dataDir, swarmManager }: { database: Database; dataDir: string; swarmManager?: Pick<SwarmManager, "getAgentForInternalUse"> }): ArtifactService {
   const directory = getEnvironmentArtifactDir(dataDir);
   function assertActive(principal: Principal, scope: "session:read" | "session:operate") {
     if (!principal.scopes.has(scope)) throw error("FORBIDDEN", "Artifact access requires the matching session scope.");
     const device = database.prepare("SELECT revoked_at, expires_at FROM device_sessions WHERE device_session_id=?").get(principal.deviceSessionId) as { revoked_at: number | null; expires_at: number } | undefined;
-    if (device && (device.revoked_at !== null || device.expires_at <= Date.now())) throw error("UNAUTHENTICATED", "Device access is no longer active.");
+    if (!device || device.revoked_at !== null || device.expires_at <= Date.now()) throw error("UNAUTHENTICATED", "Device access is no longer active.");
   }
   function storagePath(row: ArtifactRow): string {
     if (basename(row.storage_name) !== row.storage_name || !/^[a-f0-9-]{36}$/.test(row.storage_name)) throw error("INTERNAL", "Artifact storage identity is invalid.");
@@ -38,13 +41,19 @@ export function createArtifactService({ database, dataDir }: { database: Databas
   }
   function authorized(row: ArtifactRow, principal: Principal, sessionId?: string): boolean {
     if (row.device_session_id === principal.deviceSessionId) return true;
+    if (row.device_session_id.startsWith("history:")) {
+      const historicalSession = row.device_session_id.slice("history:".length);
+      const descriptor = swarmManager?.getAgentForInternalUse(historicalSession);
+      if (descriptor && (descriptor.profileId ?? descriptor.agentId) === row.project_id && (!sessionId || sessionId === historicalSession)) return true;
+    }
     const query = `SELECT 1 FROM input_artifacts a JOIN control_inputs i ON i.input_id=a.input_id WHERE a.artifact_id=?${sessionId ? " AND i.session_id=?" : ""} LIMIT 1`;
     return Boolean(database.prepare(query).get(...(sessionId ? [row.artifact_id, sessionId] : [row.artifact_id])));
   }
   const service: ArtifactService = {
     async upload(input) {
       assertActive(input.principal, "session:operate");
-      if (!input.uploadId || input.uploadId.length > 128 || !input.projectId || input.projectId.length > 128 || !input.fileName || input.fileName.length > 256 || /[\x00-\x1f]/.test(input.fileName) || !/^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/.test(input.mimeType)) throw error("INVALID_INPUT", "Artifact metadata is invalid.");
+      if (!database.prepare("SELECT 1 FROM control_projects WHERE project_id=?").get(input.projectId)) throw error("NOT_FOUND", "Upload project is unavailable.");
+      if (!input.uploadId || input.uploadId.length > 128 || !input.projectId || input.projectId.length > 128 || !input.fileName || input.fileName.length > 256 || /[\x00-\x1f]/.test(input.fileName) || input.mimeType.length > 256 || !/^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/.test(input.mimeType)) throw error("INVALID_INPUT", "Artifact metadata is invalid.");
       if (input.sizeBytes !== undefined && (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 0 || input.sizeBytes > MAX_FILE)) throw error("PAYLOAD_TOO_LARGE", "Artifact exceeds 25 MiB.");
       await mkdir(directory, { recursive: true });
       const artifactId = randomUUID(); const storageName = randomUUID();
@@ -87,11 +96,56 @@ export function createArtifactService({ database, dataDir }: { database: Databas
       return input.artifactIds.map(id => {
         const row = database.prepare("SELECT * FROM artifacts WHERE artifact_id=?").get(id) as ArtifactRow | undefined;
         if (!row || row.project_id !== input.projectId || !authorized(row, input.principal, input.sessionId)) throw error("NOT_FOUND", "Artifact is unavailable to this command.");
+        try {
+          const file = lstatSync(storagePath(row));
+          if (!file.isFile() || file.size !== row.size_bytes) throw error("NOT_FOUND", "Artifact file is unavailable.");
+        } catch { throw error("NOT_FOUND", "Artifact file is unavailable."); }
         total += row.size_bytes; if (total > MAX_COMMAND) throw error("PAYLOAD_TOO_LARGE", "Command attachments exceed 50 MiB.");
         return { artifactId: row.artifact_id };
       });
     },
     pinInput(inputId, rows: readonly InputArtifact[]) { const insert = database.prepare("INSERT OR IGNORE INTO input_artifacts (input_id,artifact_id) VALUES (?,?)"); for (const row of rows) insert.run(inputId, row.artifactId); },
+    refsForEntry(sessionId, entry) {
+      if (entry.type !== "conversation_message") return [];
+      if (entry.controlCommandId) {
+        return (database.prepare("SELECT a.* FROM artifacts a JOIN input_artifacts p ON p.artifact_id=a.artifact_id JOIN control_inputs i ON i.input_id=p.input_id WHERE i.command_id=? ORDER BY a.artifact_id").all(entry.controlCommandId) as ArtifactRow[]).map(ref);
+      }
+      return (entry.attachments ?? []).flatMap(attachment => {
+        const fileRef = "fileRef" in attachment ? attachment.fileRef : undefined; if (!fileRef) return [];
+        const row = database.prepare("SELECT * FROM artifacts WHERE device_session_id=? AND upload_id=?").get(`history:${sessionId}`, fileRef) as ArtifactRow | undefined;
+        return row ? [ref(row)] : [];
+      });
+    },
+    async prepareHistoricalArtifacts(sessionId, entries) {
+      const descriptor = swarmManager?.getAgentForInternalUse(sessionId);
+      if (!descriptor || descriptor.role !== "manager") return;
+      const uploads = await realpath(getUploadsDir(dataDir)).catch((caught: NodeJS.ErrnoException) => { if (caught.code === "ENOENT") return null; throw caught; });
+      if (!uploads) return;
+      for (const entry of entries) {
+        if (entry.type !== "conversation_message" || entry.controlCommandId) continue;
+        for (const attachment of entry.attachments ?? []) {
+          const fileRef = "fileRef" in attachment ? attachment.fileRef : undefined;
+          if (!fileRef || fileRef !== basename(fileRef) || !/^[A-Za-z0-9._-]+$/.test(fileRef)) continue;
+          if (database.prepare("SELECT 1 FROM artifacts WHERE device_session_id=? AND upload_id=?").get(`history:${sessionId}`, fileRef)) continue;
+          const original = await realpath(join(uploads, fileRef)); const within = relative(uploads, original);
+          if (isAbsolute(within) || within === ".." || within.startsWith(`..${sep}`)) throw error("FORBIDDEN", "Historical attachment is outside its owned upload directory.");
+          const info = await stat(original); if (info.size > MAX_FILE) throw error("PAYLOAD_TOO_LARGE", "Historical attachment exceeds 25 MiB.");
+          const bytes = await readFile(original); if (bytes.length > MAX_FILE) throw error("PAYLOAD_TOO_LARGE", "Historical attachment exceeds 25 MiB.");
+          const sha256 = createHash("sha256").update(bytes).digest("hex");
+          const identity = createHash("sha256").update(`${sessionId}\n${fileRef}\n${sha256}`).digest("hex");
+          const artifactId = `${identity.slice(0, 8)}-${identity.slice(8, 12)}-4${identity.slice(13, 16)}-8${identity.slice(17, 20)}-${identity.slice(20, 32)}`;
+          const storageName = randomUUID(); const path = join(directory, storageName); let committed = false;
+          try {
+            await writeFileAtomic(path, bytes, { durable: true, mode: 0o600 });
+            const row: ArtifactRow = { artifact_id: artifactId, upload_id: fileRef, device_session_id: `history:${sessionId}`, project_id: descriptor.profileId ?? descriptor.agentId,
+              file_name: (attachment.fileName ?? fileRef).slice(0, 256), mime_type: attachment.mimeType.slice(0, 256), size_bytes: bytes.length, sha256, storage_name: storageName, created_at: Date.now() };
+            const inserted = database.prepare(`INSERT OR IGNORE INTO artifacts (artifact_id,upload_id,device_session_id,project_id,file_name,mime_type,size_bytes,sha256,storage_name,created_at)
+              VALUES (@artifact_id,@upload_id,@device_session_id,@project_id,@file_name,@mime_type,@size_bytes,@sha256,@storage_name,@created_at)`).run(row);
+            committed = inserted.changes > 0;
+          } finally { if (!committed) await rm(path, { force: true }); }
+        }
+      }
+    },
     async attachmentsForInput(inputId) {
       const rows = database.prepare("SELECT a.* FROM artifacts a JOIN input_artifacts i ON i.artifact_id=a.artifact_id WHERE i.input_id=? ORDER BY a.artifact_id").all(inputId) as ArtifactRow[];
       return Promise.all(rows.map(async row => {
