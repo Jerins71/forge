@@ -14,6 +14,7 @@ export const fixturePlatformScript = `(() => {
       session: environmentId => call('session',{environmentId}),
       wsTicket: (environmentId,audience,protocolVersion) => call('wsTicket',{environmentId,audience,protocolVersion}),
       request: input => call('request',input),
+      requestBinary: async input => {const result=await call('requestBinary',{...input,body:input.body?Array.from(input.body):undefined}); if(result.ok)result.value.bytes=new Uint8Array(result.value.bytes); return result;},
       uploadArtifact: input => call('uploadArtifact',{...input,bytes:Array.from(input.bytes)}),
       artifact: async input => {const result=await call('artifact',input); if(result.ok)result.value.bytes=new Uint8Array(result.value.bytes); return result;},
       remove: environmentId => call('remove',{environmentId})
@@ -66,10 +67,15 @@ export function createFixturePlatform(environments: EnvironmentFixture[], primar
     let response: Response;
     if (operation === 'session') response = await fetch(`${environment.baseUrl}/api/v2/access/session`, { headers });
     else if (operation === 'wsTicket') response = await fetch(`${environment.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ audience: input.audience, protocolVersion: input.protocolVersion }) });
-    else if (operation === 'request') {
+    else if (operation === 'request' || operation === 'requestBinary') {
       if (typeof input.path !== 'string' || !input.path.startsWith('/api/') || input.path.startsWith('/api/v2/access') || input.path.includes('://')) throw new Error('Invalid feature path');
       const supplied = { ...input.headers }; delete supplied.authorization; delete supplied.Authorization;
-      response = await fetch(`${environment.baseUrl}${input.path}`, { method: input.method, headers: { ...supplied, ...headers }, body: input.body, redirect: 'error' });
+      response = await fetch(`${environment.baseUrl}${input.path}`, { method: input.method, headers: { ...supplied, ...headers }, body: operation === 'requestBinary' && input.body ? new Uint8Array(input.body) : input.body, redirect: 'error' });
+      if (operation === 'requestBinary') {
+        if (!Number.isSafeInteger(input.maxBytes) || input.maxBytes < 1 || input.maxBytes > 26214400) throw new Error('Invalid binary byte limit');
+        const bytes = new Uint8Array(await response.arrayBuffer()); if (bytes.length > input.maxBytes) throw new Error('Binary response too large');
+        return { status: response.status, headers: Object.fromEntries(response.headers), bytes: [...bytes] };
+      }
       return { status: response.status, headers: Object.fromEntries(response.headers), body: await response.text() };
     } else if (operation === 'uploadArtifact') {
       const bytes = new Uint8Array(input.bytes);

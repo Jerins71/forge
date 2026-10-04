@@ -72,6 +72,12 @@ export interface PlatformTransport {
     path: string,
     init?: RequestInit,
   ): Promise<Response>
+  requestBinary(
+    entry: EnvironmentCatalogEntry,
+    path: string,
+    maxBytes: number,
+    init?: RequestInit,
+  ): Promise<Response>
   pair(input: PairingInput): Promise<PairingExchangeResult>
   uploadArtifact?(
     entry: EnvironmentCatalogEntry,

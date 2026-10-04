@@ -36,17 +36,13 @@ export function normalizeBaseUrl(value: string): string {
 }
 export class AuthenticatedHttp {
   onUnauthorized?: (error: EnvironmentRuntimeError) => void
-  /** The Desktop platform request carries UTF-8 text bodies only; binary bytes would be corrupted. */
-  readonly textOnly: boolean
   descriptor: EnvironmentDescriptor | null = null
   credential: Credential | null = null
   deviceSession: DeviceSession | null = null
   constructor(
     readonly entry: EnvironmentCatalogEntry,
     readonly ports: RuntimePorts,
-  ) {
-    this.textOnly = !!ports.platform
-  }
+  ) {}
   async publicDescriptor(signal?: AbortSignal): Promise<EnvironmentDescriptor> {
     if (
       this.ports.clientOrigin?.startsWith('https:') &&
@@ -88,6 +84,12 @@ export class AuthenticatedHttp {
     return value
   }
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
+    return this.request(path, init)
+  }
+  async fetchBinary(path: string, maxBytes: number, init: RequestInit = {}): Promise<Response> {
+    return this.request(path, init, maxBytes)
+  }
+  private async request(path: string, init: RequestInit, maxBytes?: number): Promise<Response> {
     if (
       !path.startsWith('/api/') ||
       path.startsWith('//') ||
@@ -114,7 +116,9 @@ export class AuthenticatedHttp {
     let response: Response
     try {
       response = this.ports.platform
-        ? await this.ports.platform.request(this.entry, path, options)
+        ? maxBytes === undefined
+          ? await this.ports.platform.request(this.entry, path, options)
+          : await this.ports.platform.requestBinary(this.entry, path, maxBytes, options)
         : await this.ports.fetch(`${this.entry.baseUrl}${path}`, options)
     } catch (error) {
       if (

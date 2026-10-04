@@ -8,6 +8,7 @@ import {
   createEnvironmentRegistry,
   createMemoryCredentialStore,
   createMemoryPersistence,
+  createFeatureClients,
   type EnvironmentRegistry,
 } from '@forge/client-runtime'
 import {
@@ -54,6 +55,32 @@ async function fleet(count = 8) {
   return { servers, registry }
 }
 describe('environment UI store acceptance', () => {
+  it('uses bounded Desktop binary requests for file, attachment and chat artifact previews', async () => {
+    const bytes = new Uint8Array([0, 127, 128, 255])
+    const requests: Array<{ path: string; maxBytes: number }> = []
+    const bridge = {
+      request: async () => { throw new Error('Binary preview used text IPC') },
+      requestBinary: async (input: { path: string; maxBytes: number }) => {
+        requests.push(input)
+        return { ok: true as const, value: { status: 200, headers: { 'content-type': 'image/png' }, bytes } }
+      },
+    } as unknown as EnvironmentCredentialsBridge
+    const entry = { environmentId: 'a6a8cae8-1291-4bc5-ab1f-a574c4e6fbd9', baseUrl: 'http://127.0.0.1:12345', primary: true, enabled: true, labelOverride: null, credentialRef: null }
+    const transport = createDesktopEnvironmentTransport(bridge)
+    const blobs: Blob[] = []
+    const features = createFeatureClients({
+      entry,
+      fetch: (path, init) => transport.request(entry, path, init),
+      fetchBinary: (path, maxBytes, init) => transport.requestBinary!(entry, path, maxBytes, init),
+      json: async () => { throw new Error('Unused JSON request') },
+    }, {} as never, blob => { blobs.push(blob); return { url: 'blob:fixture', release: () => {} } })
+    await features.files.previewUrl({ agentId: 'session', path: 'image.png', kind: 'raw' })
+    await features.sessions.attachmentUrl('image.png')
+    await features.chatArtifacts.fileUrl({ agentId: 'session', path: 'image.png' })
+    expect(requests).toHaveLength(3)
+    expect(requests.every(input => input.maxBytes === 26214400)).toBe(true)
+    for (const blob of blobs) expect(new Uint8Array(await blob.arrayBuffer())).toEqual(bytes)
+  })
   it('isolates actual React row renders across eight WS environments and serializes repeatable evidence', async () => {
     const { servers, registry } = await fleet()
     const host = document.createElement('div')
@@ -224,6 +251,7 @@ describe('environment UI store acceptance', () => {
           body: await r.text(),
         })
       },
+      requestBinary: unsupported,
       uploadArtifact: unsupported,
       artifact: unsupported,
       remove: async () => ok({ removed: true }),

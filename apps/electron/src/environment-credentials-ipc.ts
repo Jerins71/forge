@@ -13,6 +13,7 @@ export type EnvironmentCredentialResult<T> = { ok: true; value: T } | { ok: fals
 export interface DesktopEnvironmentTarget { environmentId: string; baseUrl: string; label: string; primary: boolean; deviceSessionId:string; deviceName:string; scopes:Scope[]; pairedAt:string; expiresAt:string }
 export interface EnvironmentPairInput { baseUrl: string; environmentId: string; credential: PairingExchange['credential']; deviceName: string; requestedScopes: Scope[] }
 export interface EnvironmentHttpInput { environmentId: string; path: string; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; headers?: Record<string, string>; body?: string }
+export interface EnvironmentBinaryHttpInput extends Omit<EnvironmentHttpInput, 'body'> { body?: Uint8Array; maxBytes: number }
 export interface EnvironmentArtifactInput { environmentId: string; artifactId: string; range?: string }
 export interface EnvironmentUploadInput { environmentId: string; projectId: string; uploadId: string; fileName: string; mimeType: string; bytes: Uint8Array }
 export interface EnvironmentCredentialsBridge {
@@ -22,6 +23,7 @@ export interface EnvironmentCredentialsBridge {
   session(environmentId: string): Promise<EnvironmentCredentialResult<{ deviceSession: DeviceSession }>>;
   wsTicket(environmentId: string, audience: 'rpc' | 'legacy', protocolVersion: number): Promise<EnvironmentCredentialResult<{ ticket: string; expiresAt: string }>>;
   request(input: EnvironmentHttpInput): Promise<EnvironmentCredentialResult<{ status: number; headers: Record<string, string>; body: string }>>;
+  requestBinary(input: EnvironmentBinaryHttpInput): Promise<EnvironmentCredentialResult<{ status: number; headers: Record<string, string>; bytes: Uint8Array }>>;
   uploadArtifact(input: EnvironmentUploadInput): Promise<EnvironmentCredentialResult<ArtifactRef>>;
   artifact(input: EnvironmentArtifactInput): Promise<EnvironmentCredentialResult<{ bytes: Uint8Array; mimeType: string; fileName: string }>>;
   remove(environmentId: string): Promise<EnvironmentCredentialResult<{ removed: boolean }>>;
@@ -126,6 +128,14 @@ export function createEnvironmentCredentialService(options: { storePath: string;
   async function envelope<T>(fn: () => Promise<T>): Promise<EnvironmentCredentialResult<T>> {
     try { return { ok: true, value: await fn() }; } catch (error) { return { ok: false, error: error instanceof CredentialFailure ? { code: error.code, message: error.message, retryable: error.retryable } : { code: 'INTERNAL', message: 'Environment credential operation failed', retryable: false } }; }
   }
+  async function checkedRequest(input: Omit<EnvironmentHttpInput, 'body'>) {
+    if (!input || typeof input.path !== 'string' || !input.path.startsWith('/api/') || input.path.includes('\\') || input.path.includes('#') || /[\x00-\x1f]/.test(input.path) || !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(input.method)) fail('INVALID_INPUT', 'Invalid environment HTTP request');
+    const t = await target(input.environmentId); const url = new URL(input.path, t.baseUrl);
+    if (url.origin !== t.baseUrl || !url.pathname.startsWith('/api/') || url.pathname.startsWith('/api/v2/access/')) fail('FORBIDDEN', 'Use the dedicated access methods');
+    const headers = new Headers(); for (const [name, value] of Object.entries(input.headers ?? {})) { if (!['content-type', 'x-forge-environment-protocol'].includes(name.toLowerCase())) fail('FORBIDDEN', 'Request header is not permitted'); headers.set(name, value); }
+    await pinned(t);
+    return { t, path: url.pathname + url.search, headers };
+  }
   async function pairInternal(input: EnvironmentPairInput, primary = false) {
     if (!input || typeof input.baseUrl !== 'string') return fail('INVALID_INPUT','Invalid pairing input');
     const baseUrl = targetUrl(input.baseUrl); await load();
@@ -207,13 +217,16 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     session: id => envelope(async () => { const t = await target(id); await pinned(t); const result = await checkedJson(await http(t, '/api/v2/access/session')) as { deviceSession: DeviceSession }; return { deviceSession: result.deviceSession }; }),
     wsTicket: (id, audience, protocolVersion) => envelope(async () => { if (!['rpc', 'legacy'].includes(audience) || protocolVersion !== 1) fail('INVALID_INPUT', 'Invalid socket ticket input'); const t = await target(id); await pinned(t); return await checkedJson(await http(t, '/api/v2/access/ws-ticket', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audience, protocolVersion }) })) as { ticket: string; expiresAt: string }; }),
     request: input => envelope(async () => {
-      if (typeof input.path !== 'string' || !input.path.startsWith('/api/') || input.path.startsWith('//') || input.path.includes('\\') || input.path.includes('#') || /[\x00-\x1f]/.test(input.path) || !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(input.method) || input.body && Buffer.byteLength(input.body) > 1_048_576) fail('INVALID_INPUT', 'Invalid environment HTTP request');
-      const t = await target(input.environmentId); const url = new URL(input.path, t.baseUrl);
-      if (url.origin !== t.baseUrl || url.pathname.startsWith('/api/v2/access/')) fail('FORBIDDEN', 'Use the dedicated access methods');
-      await pinned(t);
-      const headers = new Headers(); for (const [name, value] of Object.entries(input.headers ?? {})) { if (!['content-type', 'x-forge-environment-protocol'].includes(name.toLowerCase())) fail('FORBIDDEN', 'Request header is not permitted'); headers.set(name, value); }
-      const response = await http(t, url.pathname + url.search, { method: input.method, headers, body: input.body });
+      if (!input || input.body !== undefined && (typeof input.body !== 'string' || Buffer.byteLength(input.body) > 1_048_576)) fail('INVALID_INPUT', 'Invalid environment HTTP request');
+      const { t, path, headers } = await checkedRequest(input);
+      const response = await http(t, path, { method: input.method, headers, body: input.body });
       return { status: response.status, headers: safeHeaders(response), body: new TextDecoder().decode(await boundedBytes(response)) };
+    }),
+    requestBinary: input => envelope(async () => {
+      if (!input || !Number.isSafeInteger(input.maxBytes) || input.maxBytes < 1 || input.maxBytes > MAX_ARTIFACT_BYTES || input.body !== undefined && (!(input.body instanceof Uint8Array) || input.body.byteLength > MAX_ARTIFACT_BYTES)) fail('INVALID_INPUT', 'Invalid environment binary request');
+      const { t, path, headers } = await checkedRequest(input);
+      const response = await http(t, path, { method: input.method, headers, ...(input.body ? { body: Buffer.from(input.body) } : {}) });
+      return { status: response.status, headers: safeHeaders(response), bytes: await boundedBytes(response, input.maxBytes) };
     }),
     uploadArtifact: input => envelope(async () => {
       if (!(input.bytes instanceof Uint8Array) || input.bytes.byteLength > MAX_ARTIFACT_BYTES || !UUID.test(input.uploadId) || !input.projectId || input.projectId.length > 128 || !input.fileName || input.fileName.length > 256 || /[\r\n]/.test(input.mimeType) || input.mimeType.length > 256) fail('INVALID_INPUT', 'Invalid artifact upload');
@@ -253,6 +266,7 @@ export function installEnvironmentCredentialsIpc(options: { ipcMain: { handle(ch
       case 'session': return options.service.session(r.environmentId ?? '');
       case 'wsTicket': return options.service.wsTicket(r.environmentId ?? '', r.audience!, r.protocolVersion!);
       case 'request': return options.service.request(r.input as EnvironmentHttpInput);
+      case 'requestBinary': return options.service.requestBinary(r.input as EnvironmentBinaryHttpInput);
       case 'uploadArtifact': return options.service.uploadArtifact(r.input as EnvironmentUploadInput);
       case 'artifact': return options.service.artifact(r.input as EnvironmentArtifactInput);
       case 'remove': return options.service.remove(r.environmentId ?? '');
@@ -272,7 +286,7 @@ export function installEnvironmentCredentialsIpc(options: { ipcMain: { handle(ch
 /** Narrow preload facade: no method accepts a bearer token, host-admin bootstrap, or filesystem path. */
 export function createEnvironmentCredentialsBridge(ipc: { invoke(channel: string, input: unknown): Promise<unknown> }): EnvironmentCredentialsBridge {
   const invoke = <T>(request: unknown) => ipc.invoke(ENVIRONMENT_CREDENTIALS_CHANNEL, request) as Promise<EnvironmentCredentialResult<T>>;
-  return { primary: () => invoke({ operation: 'primary' }), list: () => invoke({ operation: 'list' }), pair: input => invoke({ operation: 'pair', input }), session: environmentId => invoke({ operation: 'session', environmentId }), wsTicket: (environmentId, audience, protocolVersion) => invoke({ operation: 'wsTicket', environmentId, audience, protocolVersion }), request: input => invoke({ operation: 'request', input }), uploadArtifact: input => invoke({ operation: 'uploadArtifact', input }), artifact: input => invoke({ operation: 'artifact', input }), remove: environmentId => invoke({ operation: 'remove', environmentId }) };
+  return { primary: () => invoke({ operation: 'primary' }), list: () => invoke({ operation: 'list' }), pair: input => invoke({ operation: 'pair', input }), session: environmentId => invoke({ operation: 'session', environmentId }), wsTicket: (environmentId, audience, protocolVersion) => invoke({ operation: 'wsTicket', environmentId, audience, protocolVersion }), request: input => invoke({ operation: 'request', input }), requestBinary: input => invoke({ operation: 'requestBinary', input }), uploadArtifact: input => invoke({ operation: 'uploadArtifact', input }), artifact: input => invoke({ operation: 'artifact', input }), remove: environmentId => invoke({ operation: 'remove', environmentId }) };
 }
 
 export function createEnvironmentPersistenceBridge(ipc: {invoke(channel:string,input:unknown):Promise<unknown>}): EnvironmentPersistenceBridge {

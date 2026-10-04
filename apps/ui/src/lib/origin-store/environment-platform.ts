@@ -70,6 +70,18 @@ export function createDesktopEnvironmentTransport(
         },
       )
     },
+    requestBinary: async (e, path, maxBytes, init = {}) => {
+      if (init.signal?.aborted) throw new Error('Request aborted')
+      const headers = Object.fromEntries(new Headers(init.headers))
+      delete headers.authorization
+      delete headers['x-forge-csrf']
+      const method = (init.method ?? 'GET').toUpperCase()
+      if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) throw new Error('Unsupported HTTP method')
+      const body = init.body == null ? undefined : new Uint8Array(await new Response(init.body).arrayBuffer())
+      const result = await unwrap(bridge.requestBinary({ environmentId: e.environmentId, path, method: method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', headers, body, maxBytes }))
+      if (init.signal?.aborted) throw new Error('Request aborted')
+      return new Response([204, 205, 304].includes(result.status) ? null : result.bytes as BodyInit, { status: result.status, headers: result.headers })
+    },
     uploadArtifact: async (e, input) => {
       if (input.signal?.aborted) throw new Error('Upload aborted')
       const bytes =

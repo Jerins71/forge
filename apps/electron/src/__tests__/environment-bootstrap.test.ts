@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createEnvironmentCredentialService } from '../environment-credentials-ipc.js';
+import { createEnvironmentCredentialService, createEnvironmentCredentialsBridge, installEnvironmentCredentialsIpc, ENVIRONMENT_CREDENTIALS_CHANNEL } from '../environment-credentials-ipc.js';
 import { requestEnvironmentBootstrap, ensurePrimaryEnvironmentSession } from '../environment-bootstrap-ipc.js';
 import { createBackendForkOptions, resolveBackendExposurePolicy } from '../backend-fork-options.js';
 const power = vi.hoisted(()=>({started:false,start:vi.fn(()=>{power.started=true;return 1;}),stop:vi.fn(()=>{power.started=false;})}));
@@ -26,6 +26,15 @@ it('safeStorage ciphertext stays on disk; parent IPC pairs via ordinary HTTP and
     else if (req.url === '/api/v2/access/exchange') {
       exchanges++; for await (const chunk of req) expect(chunk).toBeDefined();
       res.end(JSON.stringify({ environment: { environmentId: id, label: 'primary' }, deviceSession: { deviceSessionId: id, deviceName:'test', scopes:['session:read'],createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+30*24*60*60*1000).toISOString() }, bearerToken: token }));
+    } else if (req.url === '/api/files/raw?binary=1') {
+      expect(req.headers.authorization).toBe(`Bearer ${token}`);
+      expect(req.headers.origin).toBe('app://forge');
+      res.setHeader('Content-Type', 'image/png'); res.end(Buffer.from([0, 127, 128, 255]));
+    } else if (req.url === '/api/files/raw?chunked=1') {
+      res.setHeader('Content-Type', 'application/octet-stream'); res.write(Buffer.from([0, 127])); res.end(Buffer.from([128, 255]));
+    } else if (req.url === '/api/files/raw?upload=1') {
+      const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      expect([...Buffer.concat(chunks)]).toEqual([0, 128, 255]); res.end(Buffer.from([255, 128, 0]));
     } else if (req.url?.startsWith('/api/v2/artifacts?')) {
       expect(req.headers.authorization).toBe(`Bearer ${token}`);
       expect(req.headers['content-length']).toBe('3'); expect(req.headers['x-forge-file-name']).toBe('test%20data.bin');
@@ -53,6 +62,19 @@ it('safeStorage ciphertext stays on disk; parent IPC pairs via ordinary HTTP and
   expect(JSON.stringify(paired)).not.toContain(token);
   expect(await readFile(storePath, 'utf8')).not.toContain(token);
   await ensurePrimaryEnvironmentSession({ child, baseUrl, credentials }); expect(exchanges).toBe(1);
+  const handlers = new Map<string, (event: unknown, input: unknown) => unknown>();
+  cleanup.push(installEnvironmentCredentialsIpc({ ipcMain: { handle: (channel, listener) => { handlers.set(channel, listener); }, removeHandler: channel => { handlers.delete(channel); } }, service: credentials, isTrustedSender: event => event === 'trusted' }));
+  const bridge = createEnvironmentCredentialsBridge({ invoke: async (channel, input) => handlers.get(channel)!('trusted', input) });
+  const binary = { environmentId: id, method: 'GET' as const, path: '/api/files/raw?binary=1', maxBytes: 4 };
+  expect(await bridge.requestBinary(binary)).toEqual({ ok: true, value: { status: 200, headers: { 'content-type': 'image/png' }, bytes: new Uint8Array([0,127,128,255]) } });
+  expect(await bridge.requestBinary({ ...binary, path: '/api/files/raw?chunked=1', maxBytes: 3 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+  expect(await bridge.requestBinary({ ...binary, maxBytes: 3 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+  expect(await bridge.requestBinary({ ...binary, path: '/api/files/raw?upload=1', method: 'POST', body: new Uint8Array([0,128,255]) })).toMatchObject({ ok: true, value: { bytes: new Uint8Array([255,128,0]) } });
+  for (const maxBytes of [0, -1, 1.5, 26214401, NaN]) expect(await bridge.requestBinary({ ...binary, maxBytes })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+  for (const path of ['/api/../outside', '/api/v2/access/session', '//evil.test/api/', '/api/files/raw#fragment', '/api/%2e%2e/outside']) expect(await bridge.requestBinary({ ...binary, path })).toMatchObject({ ok: false });
+  for (const name of ['Authorization', 'Origin', 'Cookie', 'Host', 'x-forge-csrf']) expect(await bridge.requestBinary({ ...binary, headers: { [name]: 'forbidden' } })).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+  expect(await bridge.requestBinary({ ...binary, body: new Uint8Array(26214401) })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+  expect(await handlers.get(ENVIRONMENT_CREDENTIALS_CHANNEL)!('untrusted', { operation: 'requestBinary', input: binary })).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
   expect(await credentials.uploadArtifact({environmentId:id,projectId:'project',uploadId:id,fileName:'test data.bin',mimeType:'application/octet-stream',bytes:new Uint8Array([0,127,255])})).toMatchObject({ok:true,value:{artifactId:id}});
   expect(await credentials.artifact({environmentId:id,artifactId:id})).toMatchObject({ok:true,value:{bytes:new Uint8Array([0,127,255]),fileName:'test data.bin'}});
   const preview=await credentials.artifactProtocolResponse(`forge-artifact://artifact/${id}/${id}`,'bytes=0-1');

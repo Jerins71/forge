@@ -239,6 +239,14 @@ export interface EnvironmentCredentialsBridge {
       body: string
     }>
   >
+  requestBinary(input: {
+    environmentId: string
+    path: string
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+    headers?: Record<string, string>
+    body?: Uint8Array
+    maxBytes: number
+  }): Promise<EnvironmentCredentialResult<{ status: number; headers: Record<string, string>; bytes: Uint8Array }>>
   uploadArtifact(input: {
     environmentId: string
     projectId: string
