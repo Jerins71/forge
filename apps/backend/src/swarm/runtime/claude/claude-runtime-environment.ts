@@ -1,29 +1,27 @@
 import { execFile } from "node:child_process";
-import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, win32 } from "node:path";
+import { isAbsolute, win32 } from "node:path";
 import { access, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { ensureCanonicalAuthFilePath } from "../../storage/auth-storage-paths.js";
 import type { SwarmConfig } from "../../types.js";
 import { CLAUDE_SIGN_IN_REQUIRED } from "@forge/protocol";
+import { bundledClaudeRuntime, selectClaudeRuntime } from "../runtime-updates/claude-managed-runtime.js";
 
 const execute = promisify(execFile);
 
-/** Resolve the matched native package, including the staged Electron dependency tree. */
-export async function resolveClaudeExecutable(env = process.env, platform = process.platform, arch = process.arch): Promise<string> {
+/**
+ * CLAUDE_BIN wins; otherwise the newest compatible runtime Forge downloaded into
+ * `dataDir`, falling back to the matched native package bundled with Forge.
+ */
+export async function resolveClaudeExecutable(env = process.env, platform = process.platform, arch = process.arch, dataDir?: string): Promise<string> {
   const override = env.CLAUDE_BIN?.trim();
   if (override && (!(platform === "win32" ? win32.isAbsolute(override) : isAbsolute(override)) || /\.(cmd|bat|ps1)$/i.test(override))) {
     throw new Error("CLAUDE_BIN must be an absolute path to the native Claude executable (claude.exe on Windows), not a shell wrapper. Remove CLAUDE_BIN to use Forge's bundled runtime.");
   }
   let executable = override;
   try {
-    if (!executable) {
-      const sdkRequire = createRequire(createRequire(import.meta.url).resolve("@anthropic-ai/claude-agent-sdk"));
-      const suffix = platform === "linux" && !(process.report.getReport() as { header?: { glibcVersionRuntime?: string } }).header?.glibcVersionRuntime ? "-musl" : "";
-      const manifest = sdkRequire.resolve(`@anthropic-ai/claude-agent-sdk-${platform}-${arch}${suffix}/package.json`);
-      executable = join(dirname(manifest), platform === "win32" ? "claude.exe" : "claude");
-    }
+    executable ||= (await selectClaudeRuntime(dataDir, await bundledClaudeRuntime(platform, arch), platform)).executable;
     await access(executable);
     return executable;
   } catch {

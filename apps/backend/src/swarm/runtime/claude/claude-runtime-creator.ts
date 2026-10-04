@@ -70,7 +70,7 @@ export class ClaudeRuntimeCreator {
       skills ? `<forge_skills>\nRead a relevant skill's file before using it.\n${skills}\n</forge_skills>` : "",
     ].filter(Boolean).join("\n\n");
     const env = await claudeRuntimeEnvironment(this.deps.config);
-    const executable = await resolveClaudeExecutable();
+    const executable = await resolveClaudeExecutable(process.env, process.platform, process.arch, this.deps.config.paths.dataDir);
     await assertClaudeSetup(executable, env, descriptor.cwd);
     const runtime = await ClaudeAgentRuntime.create({ descriptor, callbacks: options.callbacks,
       systemPrompt, env, executable, projectTrusted: trust.trusted, tools, host: this.deps.host,

@@ -50,8 +50,21 @@ Advanced environment settings:
 | `ANTHROPIC_API_KEY` | unset | In `api_key` mode, takes precedence over an Anthropic API-key credential in Forge Authentication settings. OAuth credentials are not used. |
 | `ANTHROPIC_BASE_URL` | Anthropic default | Optional HTTP(S) endpoint in `api_key` mode only. |
 | `CLAUDE_CONFIG_DIR` | Claude default | Optional native Claude configuration/history directory. Log in with the same value; Forge does not copy credentials into it. |
-| `CLAUDE_BIN` | bundled executable | Optional absolute path to a native executable, requiring Claude Code 2.1.280 or newer. On Windows use `claude.exe`, not a `.cmd`, `.bat`, or `.ps1` wrapper. Remove the override to return to the bundled runtime. |
+| `CLAUDE_BIN` | bundled executable | Optional absolute path to a native executable, requiring Claude Code 2.1.280 or newer. On Windows use `claude.exe`, not a `.cmd`, `.bat`, or `.ps1` wrapper. Remove the override to return to the bundled runtime. Settings updates an external executable through its own installer (`claude update`, npm, or Homebrew). |
 | `CLAUDE_CODE_GIT_BASH_PATH` | Claude detection | Optional Git for Windows Bash path. Native Claude shell tools on Windows require Git for Windows. |
+
+### Runtime updates
+
+Forge ships Claude Code inside the app, so the bundled copy changes only with a Forge
+release. **Settings → About → Agent runtimes** compares it with the latest release and
+offers **Update** when a newer Claude Code has the same major and minor version as the
+bundled Agent SDK. Forge downloads the official
+`@anthropic-ai/claude-agent-sdk-<platform>-<arch>` package from npm, verifies npm's
+sha512 integrity hash and the binary's reported version, and installs it under
+`<data-dir>/runtimes/claude/<version>/`. New sessions use the newest compatible copy;
+running sessions keep their binary until they restart, and older downloads are removed
+when no longer selected. A release with a newer minor version waits for a Forge update.
+`CLAUDE_BIN` always takes precedence over both copies.
 
 API billing is never selected automatically when a subscription login is absent or
 fails. Changing environment settings requires restarting the Forge backend. This

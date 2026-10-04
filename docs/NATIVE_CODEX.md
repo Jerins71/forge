@@ -29,6 +29,16 @@ use `CODEX_BIN` to select a separately installed CLI; upgrading npm alone does n
 replace the bundled copy. Recognized Homebrew installations show the Homebrew
 update command. Permission and executable-format errors show their own recovery steps.
 
+**Settings → About → Agent runtimes** shows the Codex version Forge launches and the
+latest release. When the installation's owner is proven from its real path, **Update**
+runs that owner: `codex update` for the standalone installer, `npm install -g` against
+the npm prefix that holds Codex, `pnpm`/`bun` global installs, or `brew upgrade` when
+the keg sits under that Homebrew prefix. Desktop-app copies, mise-pinned versions, and
+project `node_modules` installs show a manual step instead. Forge refuses an update
+whose installation changed since the command was shown, and checks the version again
+afterwards. Running sessions keep their version until they restart; on Windows, stop
+Codex sessions first because a running `codex.exe` cannot be replaced.
+
 Each manager owns an app-server process and a persistent native thread. Native data
 lives under `<FORGE_DATA_DIR>/shared/state/codex-native`, separate from the desktop
 app's Codex home. Forge sends the selected access token/account identity over stdio

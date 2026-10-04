@@ -67,6 +67,7 @@ import { useProjectViews, useSidebarPrefs, useSidebarTreeState } from './agent-s
 import { useInactiveRepoProjectAgents, type RepoProjectAgentSidebarEntry } from '@/hooks/use-inactive-repo-project-agents'
 import { getInactiveRepoProjectAgentEntryKey, matchesRepoProjectAgentSearch } from '@/components/settings/repo-project-agent-ui-utils'
 import type { AgentSidebarProps } from './agent-sidebar/types'
+import { useNativeRuntimeAttention } from '@/components/settings/native-runtimes-api'
 import {
   builderSidebarOrderKey,
   reconcileBuilderSidebarOrder,
@@ -365,6 +366,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       .join('|')
   ), [agents])
 
+  const runtimeUpdateAttention = useNativeRuntimeAttention(wsUrl)
   const { getEntriesForProfile } = useInactiveRepoProjectAgents({
     connected,
     wsUrl,
@@ -1389,6 +1391,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
         onRefetchProviderUsage={refetchProviderUsage}
         onOpenSettings={handleOpenSettings}
         onOpenStats={handleOpenStats}
+        settingsAttention={runtimeUpdateAttention}
       />
     </aside>
   )

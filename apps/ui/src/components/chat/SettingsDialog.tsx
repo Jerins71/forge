@@ -21,6 +21,7 @@ import { SettingsSlashCommands } from '@/components/settings/SettingsSlashComman
 import { SettingsExtensions } from '@/components/settings/SettingsExtensions'
 import { SettingsExternalChrome } from '@/components/settings/SettingsExternalChrome'
 import { SettingsAbout } from '@/components/settings/SettingsAbout'
+import { useNativeRuntimeAttention } from '@/components/settings/native-runtimes-api'
 import { SettingsCliAccess } from '@/components/settings/SettingsCliAccess'
 import { SettingsStreamDeck } from '@/components/settings/SettingsStreamDeck'
 import { SettingsObservability } from '@/components/settings/SettingsObservability'
@@ -126,6 +127,7 @@ export function SettingsPanel({
   )
 
   const availableTabs = target.availableTabs
+  const runtimeUpdateAttention = useNativeRuntimeAttention(target.kind === 'builder' ? wsUrl : undefined)
   const selectedProject = useMemo(
     () => profiles.find((profile) => profile.profileId === contextProfileId),
     [contextProfileId, profiles],
@@ -181,6 +183,7 @@ export function SettingsPanel({
       availableTabs={layoutAvailableTabs}
       targetLabel={targetLabel}
       title={isProjectSettings ? 'Project Settings' : 'Settings'}
+      attentionTabs={runtimeUpdateAttention ? ['about'] : undefined}
     >
       {activeTab === 'general' && (
         <SettingsGeneral
@@ -272,7 +275,7 @@ export function SettingsPanel({
           initialApiBaseUrl={target.kind === 'collab' ? target.apiBaseUrl : initialCollabApiBaseUrl}
         />
       )}
-      {activeTab === 'about' && <SettingsAbout wsUrl={wsUrl} apiClient={apiClient} />}
+      {activeTab === 'about' && <SettingsAbout wsUrl={wsUrl} apiClient={apiClient} showNativeRuntimes={target.kind === 'builder'} />}
     </SettingsLayout>
   )
 }

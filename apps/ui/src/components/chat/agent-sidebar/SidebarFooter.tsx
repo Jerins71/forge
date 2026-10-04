@@ -48,6 +48,8 @@ interface SidebarFooterProps {
   onRefetchProviderUsage: () => void
   onOpenSettings: () => void
   onOpenStats?: () => void
+  /** A native runtime update is waiting in Settings → About. */
+  settingsAttention?: boolean
 }
 
 export function SidebarFooter({
@@ -63,6 +65,7 @@ export function SidebarFooter({
   onRefetchProviderUsage,
   onOpenSettings,
   onOpenStats,
+  settingsAttention = false,
 }: SidebarFooterProps) {
   const usageSplit = roomsV2 ? '52%' : '38%'
   const controlClass = roomsV2
@@ -117,6 +120,7 @@ export function SidebarFooter({
                   onClick={onOpenSettings}
                   className={cn(
                     controlClass,
+                    'relative',
                     isSettingsActive
                       ? 'bg-sidebar-accent text-sidebar-accent-foreground'
                       : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
@@ -126,9 +130,10 @@ export function SidebarFooter({
                   data-tour="settings"
                 >
                   <Settings aria-hidden="true" className="size-4" />
+                  {settingsAttention ? <span className="absolute right-1 top-1 size-1.5 rounded-full bg-amber-500 ring-2 ring-sidebar" aria-label="Runtime update available" /> : null}
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={6}>Settings</TooltipContent>
+              <TooltipContent side="top" sideOffset={6}>{settingsAttention ? 'Settings · runtime update available' : 'Settings'}</TooltipContent>
             </Tooltip>
             <HelpButton roomsV2={roomsV2} />
           </div>

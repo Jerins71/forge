@@ -27,7 +27,7 @@ it.skipIf(process.platform === "win32")("serves a code-return link through HTTP 
   vi.stubEnv("HOME", root); vi.stubEnv("USERPROFILE", root);
   vi.stubEnv("CLAUDE_CONFIG_DIR", config); vi.stubEnv("CLAUDE_BIN", executable);
   vi.stubEnv("FORGE_CLAUDE_AUTH_MODE", "cli");
-  const service = new ClaudeAuthService({} as SwarmConfig);
+  const service = new ClaudeAuthService({ paths: { dataDir: "/nonexistent-forge-data" } } as SwarmConfig);
   const [route] = createClaudeAuthRoutes(service);
   const server = createServer((request, response) => {
     void route!.handle(request, response, new URL(request.url!, "http://localhost"));

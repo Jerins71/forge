@@ -7,13 +7,16 @@ import { SettingsSection } from './settings-row'
 import { fetchServerVersion } from './settings-api'
 import { createBuilderSettingsApiClient, type SettingsApiClient } from './settings-api-client'
 import { isElectron, type UpdateStatus } from '@/lib/electron-bridge'
+import { NativeRuntimes } from './NativeRuntimes'
 
 interface SettingsAboutProps {
   wsUrl: string
   apiClient?: SettingsApiClient
+  /** Runtime updates run installers on this computer, so only the local Builder shows them. */
+  showNativeRuntimes?: boolean
 }
 
-export function SettingsAbout({ wsUrl, apiClient }: SettingsAboutProps) {
+export function SettingsAbout({ wsUrl, apiClient, showNativeRuntimes = false }: SettingsAboutProps) {
   const bridge = window.electronBridge
   const inElectron = isElectron()
   // Resolve a target-aware client at the boundary (settings-api takes a client).
@@ -178,6 +181,7 @@ export function SettingsAbout({ wsUrl, apiClient }: SettingsAboutProps) {
           )}
         </div>
       </SettingsSection>
+      {showNativeRuntimes ? <NativeRuntimes apiClient={clientOrWsUrl} /> : null}
     </div>
   )
 }

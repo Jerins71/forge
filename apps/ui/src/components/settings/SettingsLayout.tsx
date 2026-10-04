@@ -56,9 +56,11 @@ interface SettingsLayoutProps {
    * Used by the Skills tab whose explorer panels each scroll independently.
    */
   fillHeight?: boolean
+  /** Tabs that show an amber attention dot. */
+  attentionTabs?: SettingsTab[]
 }
 
-export function SettingsLayout({ activeTab, onTabChange, onBack, children, contentWidthClassName, availableTabs, targetLabel, title = 'Settings', fillHeight }: SettingsLayoutProps) {
+export function SettingsLayout({ activeTab, onTabChange, onBack, children, contentWidthClassName, availableTabs, targetLabel, title = 'Settings', fillHeight, attentionTabs }: SettingsLayoutProps) {
   const visibleItems = availableTabs
     ? NAV_ITEMS.filter((item) => availableTabs.includes(item.id))
     : NAV_ITEMS
@@ -108,6 +110,7 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
             >
               <span className="flex shrink-0">{item.icon}</span>
               <span className="whitespace-nowrap">{item.label}</span>
+              {attentionTabs?.includes(item.id) ? <AttentionDot /> : null}
             </button>
           )
         })}
@@ -134,6 +137,7 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
                 >
                   <span className="flex shrink-0">{item.icon}</span>
                   <span className="truncate">{item.label}</span>
+                  {attentionTabs?.includes(item.id) ? <AttentionDot /> : null}
                 </button>
               )
             })}
@@ -166,4 +170,8 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
       </div>
     </div>
   )
+}
+
+function AttentionDot() {
+  return <span className="ml-auto size-1.5 shrink-0 rounded-full bg-amber-500" aria-label="Update available" />
 }

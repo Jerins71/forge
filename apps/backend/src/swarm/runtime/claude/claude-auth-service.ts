@@ -26,7 +26,7 @@ export class ClaudeAuthService {
     if (this.flow) return { ...this.state };
     try {
       const env = await claudeRuntimeEnvironment(this.config);
-      const connected = await isClaudeSignedIn(await resolveClaudeExecutable(), env);
+      const connected = await isClaudeSignedIn(await resolveClaudeExecutable(process.env, process.platform, process.arch, this.config.paths.dataDir), env);
       // A flow may have started while this check was in flight.
       if (!this.flow) this.state = {
         connected, mode: env.ANTHROPIC_API_KEY ? "api_key" : "subscription",
@@ -49,7 +49,7 @@ export class ClaudeAuthService {
     try {
       const env = await claudeRuntimeEnvironment(this.config);
       if (env.ANTHROPIC_API_KEY) throw new Error("Forge is configured for API-key billing. Switch FORGE_CLAUDE_AUTH_MODE to cli before connecting a subscription.");
-      const executable = await resolveClaudeExecutable();
+      const executable = await resolveClaudeExecutable(process.env, process.platform, process.arch, this.config.paths.dataDir);
       if (flow.stopped) { this.release(flow); return { ...this.state }; }
       // auth login has no --no-browser flag. BROWSER overrides its system opener
       // without fallback. A path beneath the executable file cannot be launched

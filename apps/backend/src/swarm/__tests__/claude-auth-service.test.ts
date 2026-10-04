@@ -24,7 +24,7 @@ beforeEach(() => {
   child = new Child(); mocks.spawn.mockReset().mockReturnValue(child);
   mocks.signedIn.mockReset().mockResolvedValue(false);
   mocks.env.mockReset().mockResolvedValue({ HOME: "/same-home", CLAUDE_CONFIG_DIR: "/same-config" });
-  service = new ClaudeAuthService({} as SwarmConfig);
+  service = new ClaudeAuthService({ paths: { dataDir: "/nonexistent-forge-data" } } as SwarmConfig);
 });
 afterEach(async () => { await service.shutdown(); vi.useRealTimers(); });
 
@@ -85,7 +85,7 @@ describe("native Claude sign-in", () => {
     mocks.signedIn.mockResolvedValue(true);
     let release!: () => void;
     const refresh = vi.fn(() => new Promise<void>(resolve => { release = resolve; }));
-    service = new ClaudeAuthService({} as SwarmConfig, refresh);
+    service = new ClaudeAuthService({ paths: { dataDir: "/nonexistent-forge-data" } } as SwarmConfig, refresh);
     expect((await service.status()).connected).toBe(true);
     const flow = await service.start();
     child.stdout.write("https://claude.ai/oauth/authorize?state=fixture\n");
@@ -101,7 +101,7 @@ describe("native Claude sign-in", () => {
   it("keeps a failed replacement visible while the previous login is still connected", async () => {
     mocks.signedIn.mockResolvedValue(true);
     const refresh = vi.fn();
-    service = new ClaudeAuthService({} as SwarmConfig, refresh);
+    service = new ClaudeAuthService({ paths: { dataDir: "/nonexistent-forge-data" } } as SwarmConfig, refresh);
     await service.start(); child.stderr.write("PRIVATE_FAILURE"); child.close(1);
     await vi.waitFor(async () => expect((await service.status()).phase).toBe("error"));
     expect((await service.status()).connected).toBe(true);
@@ -112,14 +112,14 @@ describe("native Claude sign-in", () => {
   it("does not refresh runtimes when replacement is canceled", async () => {
     mocks.signedIn.mockResolvedValue(true);
     const refresh = vi.fn();
-    service = new ClaudeAuthService({} as SwarmConfig, refresh);
+    service = new ClaudeAuthService({ paths: { dataDir: "/nonexistent-forge-data" } } as SwarmConfig, refresh);
     const flow = await service.start(); await service.cancel(flow.flowId!);
     expect((await service.status()).connected).toBe(true);
     expect(refresh).not.toHaveBeenCalled();
   });
   it("reports a verified login whose old runtime could not be refreshed without exposing cleanup errors", async () => {
     mocks.signedIn.mockResolvedValue(true);
-    service = new ClaudeAuthService({} as SwarmConfig, async () => { throw new Error("PRIVATE_CLEANUP"); });
+    service = new ClaudeAuthService({ paths: { dataDir: "/nonexistent-forge-data" } } as SwarmConfig, async () => { throw new Error("PRIVATE_CLEANUP"); });
     await service.start(); child.close(0);
     await vi.waitFor(async () => expect((await service.status()).phase).toBe("error"));
     expect((await service.status()).connected).toBe(true);

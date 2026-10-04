@@ -1,5 +1,7 @@
 import { ClaudeAuthService } from "../swarm/runtime/claude/claude-auth-service.js";
 import { createClaudeAuthRoutes } from "./http/routes/claude-auth-routes.js";
+import { createNativeRuntimeRoutes, NATIVE_RUNTIMES_PATH } from "./http/routes/native-runtime-routes.js";
+import { NativeRuntimeUpdateService } from "../swarm/runtime/runtime-updates/native-runtime-update-service.js";
 import { createProjectSecureSessionsRoutes } from "./http/routes/project-secure-sessions-routes.js";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
@@ -211,6 +213,7 @@ export class SwarmWebSocketServer {
   private readonly mobilePushService: MobilePushService;
   private readonly settingsRoutes: SettingsRouteBundle;
   private readonly claudeAuthService: ClaudeAuthService | null;
+  private readonly nativeRuntimeUpdateService: NativeRuntimeUpdateService | null;
   private readonly statsService: StatsService;
   private readonly tokenAnalyticsService: TokenAnalyticsService;
   private readonly generationThroughputService: GenerationThroughputService;
@@ -735,6 +738,7 @@ export class SwarmWebSocketServer {
       },
     });
     this.claudeAuthService = isBuilder ? new ClaudeAuthService(this.swarmManager.getConfig(), () => this.swarmManager.notifyClaudeNativeAuthChanged()) : null;
+    this.nativeRuntimeUpdateService = isBuilder ? new NativeRuntimeUpdateService({ dataDir: this.swarmManager.getConfig().paths.dataDir }) : null;
     this.settingsRoutes = createSettingsRoutes({
       swarmManager: this.swarmManager,
       notificationSettingsService: this.notificationSettingsService,
@@ -896,6 +900,7 @@ export class SwarmWebSocketServer {
       ...createCodexCatalogRoutes({ swarmManager: this.swarmManager }),
       ...(this.terminalService ? createTerminalRoutes({ terminalService: this.terminalService, settingsService: this.terminalSettingsService }) : []),
       ...(this.claudeAuthService ? createClaudeAuthRoutes(this.claudeAuthService) : []),
+      ...(this.nativeRuntimeUpdateService ? createNativeRuntimeRoutes(this.nativeRuntimeUpdateService) : []),
       ...this.settingsRoutes.routes,
       ...createSpecialistRoutes({
         swarmManager: this.swarmManager,
@@ -1291,7 +1296,9 @@ export class SwarmWebSocketServer {
     let route: HttpRoute | undefined;
 
     try {
-      if (this.claudeAuthService && requestUrl.pathname === "/api/settings/claude-native") {
+      // Both start local processes the server chooses; only the Builder's own UI may ask.
+      if ((this.claudeAuthService && requestUrl.pathname === "/api/settings/claude-native")
+        || (this.nativeRuntimeUpdateService && requestUrl.pathname === NATIVE_RUNTIMES_PATH)) {
         const validation = validateSecureBuilderControlOrigin(request, { backendHost: this.host, backendPort: this.getPort() });
         if (!validation.ok) { sendJson(response, 403, { error: validation.errorMessage }); return; }
       }
