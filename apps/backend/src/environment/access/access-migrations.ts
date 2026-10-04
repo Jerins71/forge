@@ -18,6 +18,12 @@ export function applyAccessMigrations(db: Database.Database): void {
       scopes_json TEXT NOT NULL, created_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL, revoked_at INTEGER
     );
+    CREATE TABLE IF NOT EXISTS integration_device_sessions (
+      integration TEXT NOT NULL CHECK(integration IN ('cli','stream-deck')),
+      credential_id TEXT NOT NULL,
+      device_session_id TEXT NOT NULL UNIQUE REFERENCES device_sessions(device_session_id),
+      PRIMARY KEY(integration,credential_id)
+    );
     CREATE INDEX IF NOT EXISTS access_grants_expiry ON pairing_grants(expires_at);
     CREATE INDEX IF NOT EXISTS access_sessions_expiry ON device_sessions(expires_at);
   `))();

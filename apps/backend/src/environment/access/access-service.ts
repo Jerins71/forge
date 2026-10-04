@@ -2,7 +2,7 @@ import { createHash, createHmac, createPublicKey, randomBytes, timingSafeEqual, 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type Database from 'better-sqlite3';
 import { TypeCompiler } from '@sinclair/typebox/compiler';
-import { PairingExchangeSchema, CreatePairingGrantSchema, WsTicketRequestSchema, ENVIRONMENT_PROTOCOL_VERSION, type PairingExchange, type PairingExchangeResult, type RpcInput, type RpcOutput, type Scope, type RpcError } from '@forge/protocol/environment-v2';
+import { PairingExchangeSchema, CreatePairingGrantSchema, ScopesSchema, WsTicketRequestSchema, ENVIRONMENT_PROTOCOL_VERSION, type PairingExchange, type PairingExchangeResult, type RpcInput, type RpcOutput, type Scope, type RpcError } from '@forge/protocol/environment-v2';
 import type { EnvironmentAccessPort, Principal } from '../control/control-types.js';
 import type { EnvironmentIdentity } from '../identity.js';
 import type { ExposurePolicy } from '../exposure-policy.js';
@@ -12,6 +12,7 @@ import { createEnvironmentAccessRoutes } from '../../ws/http/routes/environment-
 
 const fullScopes: Scope[] = ['session:read', 'session:operate', 'workspace:read', 'workspace:write', 'terminal:operate', 'settings:admin', 'access:admin'];
 const exchangeValidator = TypeCompiler.Compile(PairingExchangeSchema);
+const scopesValidator = TypeCompiler.Compile(ScopesSchema);
 const grantValidator = TypeCompiler.Compile(CreatePairingGrantSchema);
 const ticketValidator = TypeCompiler.Compile(WsTicketRequestSchema);
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -138,7 +139,6 @@ export function createEnvironmentAccess({ database, identity, exposure, clock = 
   function redeem(input: PairingExchange, origin: string | null): { result: PairingExchangeResult; token: string } {
     if (!exchangeValidator.Check(input)) throw new AccessError('INVALID_INPUT', 'Invalid pairing exchange');
     if (!exposure.allowsOrigin(origin) || input.delivery === 'cookie' && origin === null) throw new AccessError('FORBIDDEN', 'Origin is not allowed');
-    rate('exchange:environment', 100);
     rate(`exchange:grant:${input.credential.kind === 'link' ? input.credential.grantId : secretHash('code', input.credential.code.replaceAll('-', '').toUpperCase())}`, 20);
     if (input.environmentId !== identity.environmentId) throw invalid();
     let validProof = false;
@@ -163,7 +163,7 @@ export function createEnvironmentAccess({ database, identity, exposure, clock = 
     scheduleExpiry(device);
     return { token, result: { environment: identity.descriptor(), deviceSession: deviceView(device, id), ...(input.delivery === 'bearer' ? { bearerToken: token } : { csrfToken: csrf(token) }) } };
   }
-  async function exchange(input: PairingExchange, origin: string | null) { return redeem(input, origin).result; }
+  async function exchange(input: PairingExchange, origin: string | null) { rate('exchange:environment', 100); return redeem(input, origin).result; }
   async function exchangeHttp(input: PairingExchange, request: IncomingMessage, response: ServerResponse) {
     const { token, result } = redeem(input, request.headers.origin ?? null);
     if (input.delivery === 'cookie') response.setHeader('Set-Cookie', `${cookieName}=${token}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict${exposure.secure ? '; Secure' : ''}`);
@@ -188,8 +188,7 @@ export function createEnvironmentAccess({ database, identity, exposure, clock = 
   }
   function registerResource(p: Principal, close: (force?: boolean) => void) { const row = current(p.deviceSessionId); scheduleExpiry(row); return liveResources.register(p.deviceSessionId, close); }
   async function listDevices(p: Principal) { authorize(p, ['access:admin']); return (database.prepare('SELECT * FROM device_sessions WHERE expires_at > ? ORDER BY created_at, device_session_id').all(clock()) as DeviceRow[]).map(row => deviceView(row, p.deviceSessionId)); }
-  async function revokeDevice(p: Principal, input: RpcInput<'access.devices.revoke'>) {
-    authorize(p, ['access:admin']);
+  function revoke(input: RpcInput<'access.devices.revoke'>) {
     const row = store.device(input.deviceSessionId); if (!row) throw new AccessError('NOT_FOUND', 'Device session not found');
     const revokedAt = row.revoked_at ?? clock();
     database.transaction(() => { database.prepare('UPDATE device_sessions SET revoked_at = ? WHERE device_session_id = ?').run(revokedAt, input.deviceSessionId); database.prepare('UPDATE pairing_grants SET revoked_at = ? WHERE created_by = ? AND used_at IS NULL').run(revokedAt, input.deviceSessionId); })();
@@ -199,10 +198,41 @@ export function createEnvironmentAccess({ database, identity, exposure, clock = 
     liveResources.close(input.deviceSessionId);
     return { deviceSessionId: input.deviceSessionId, revokedAt: new Date(revokedAt).toISOString() };
   }
+  async function revokeDevice(p: Principal, input: RpcInput<'access.devices.revoke'>) { authorize(p,['access:admin']); return revoke(input); }
+  /** Named integration authenticator MUST run first. These are host-composition hooks, never RPC methods. */
+  function ensureIntegrationPrincipal(input: {integration:'cli'|'stream-deck';credentialId:string;label:string;scopes:Scope[]}):Principal {
+    if(disposed)throw invalid();
+    if(!input || !['cli','stream-deck'].includes(input.integration) || typeof input.credentialId!=='string' || input.credentialId.length<1 || input.credentialId.length>256 || typeof input.label!=='string' || input.label.length>80 || !scopesValidator.Check(input.scopes))throw new AccessError('INVALID_INPUT','Invalid integration principal');
+    const row = database.transaction(()=>{
+      const mapping=database.prepare('SELECT device_session_id FROM integration_device_sessions WHERE integration=? AND credential_id=?').get(input.integration,input.credentialId) as {device_session_id:string}|undefined;
+      if(mapping){
+        const existing=store.device(mapping.device_session_id);
+        // Preserve tombstones/expiry. A still-valid legacy key cannot resurrect a revoked host grant.
+        if(!existing || existing.revoked_at!==null || existing.expires_at<=clock())throw invalid();
+        const previous=JSON.parse(existing.scopes_json) as Scope[];const allowed=previous.filter(scope=>input.scopes.includes(scope));
+        if(!allowed.length)throw new AccessError('FORBIDDEN','Integration has no permitted device scopes');
+        if(allowed.length!==previous.length){database.prepare('UPDATE device_sessions SET scopes_json=? WHERE device_session_id=?').run(JSON.stringify(allowed),existing.device_session_id);existing.scopes_json=JSON.stringify(allowed);devices.delete(existing.device_session_id);}
+        if(clock()-existing.last_seen_at>=300_000){database.prepare('UPDATE device_sessions SET last_seen_at=? WHERE device_session_id=?').run(clock(),existing.device_session_id);existing.last_seen_at=clock();}
+        return existing;
+      }
+      if((database.prepare('SELECT count(*) AS n FROM device_sessions WHERE expires_at>?').get(clock()) as {n:number}).n>=256)throw new AccessError('RATE_LIMITED','Device session limit reached');
+      const id=uuid(),now=clock();const label=input.integration==='stream-deck'?`Stream Deck${input.label?' · '+input.label:''}`.slice(0,80):input.label||'Forge CLI';
+      // No bearer is delivered for an integration. Its existing narrower credential remains mandatory.
+      database.prepare('INSERT INTO device_sessions(device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id,secretHash('session',opaque()),secretHash('integration',input.integration+'\n'+input.credentialId),label,'cli',JSON.stringify(input.scopes),now,now,now+SESSION_MS);
+      database.prepare('INSERT INTO integration_device_sessions(integration,credential_id,device_session_id) VALUES(?,?,?)').run(input.integration,input.credentialId,id);
+      return store.device(id)!;
+    })();
+    devices.set(row.device_session_id,row);scheduleExpiry(row);return principal(row);
+  }
+  function revokeIntegrationPrincipal(input: {integration:'cli'|'stream-deck';credentialId:string}):void {
+    const mapping=database.prepare('SELECT device_session_id FROM integration_device_sessions WHERE integration=? AND credential_id=?').get(input.integration,input.credentialId) as {device_session_id:string}|undefined;
+    if(mapping)revoke({deviceSessionId:mapping.device_session_id});
+  }
   function dispose() { disposed = true; devices.clear(); tickets.clear(); limits.clear(); for (const timer of expiryTimers.values()) clearTimeout(timer); expiryTimers.clear(); liveResources.dispose(); }
   const authenticateCurrentHttp = (request: IncomingMessage, requireCsrf: boolean) => authenticateHttp(request, undefined, requireCsrf);
-  const checkExchangeRate = (request: IncomingMessage) => rate(`exchange:ip:${exposure.sourceIp(request)}`, 5);
-  const access = { checkExchangeRate, authenticateHttp, authenticateCurrentHttp, authorize, exchange, createGrant, listDevices, revokeDevice, consumeWsTicket, registerResource, issueWsTicket, createBootstrapGrant, createChallenge, exchangeHttp, session, dispose } satisfies EnvironmentAccessPort & Record<string, unknown>;
+  // HTTP routes call before reading a body, so malformed attempts count toward both limits.
+  const checkExchangeRate = (request: IncomingMessage) => { rate('exchange:environment', 100); rate(`exchange:ip:${exposure.sourceIp(request)}`, 5); };
+  const access = { ensureIntegrationPrincipal, revokeIntegrationPrincipal, checkExchangeRate, authenticateHttp, authenticateCurrentHttp, authorize, exchange, createGrant, listDevices, revokeDevice, consumeWsTicket, registerResource, issueWsTicket, createBootstrapGrant, createChallenge, exchangeHttp, session, dispose } satisfies EnvironmentAccessPort & Record<string, unknown>;
   return { ...access, routes: [...createEnvironmentRoutes({ identity }), ...createEnvironmentAccessRoutes({ access, exposure })] };
 }
 export type EnvironmentAccess = ReturnType<typeof createEnvironmentAccess>;

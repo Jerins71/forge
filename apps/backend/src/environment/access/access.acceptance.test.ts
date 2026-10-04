@@ -7,11 +7,11 @@ import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { loadConfiguredSqliteDatabaseConstructor } from '../../sqlite-database-loader.js';
-import { createEnvironmentAccess, canonicalPairingFields, pairingProofMessage } from './access-service.js';
+import { createEnvironmentAccess, AccessError, canonicalPairingFields, pairingProofMessage } from './access-service.js';
 import { applyAccessMigrations } from './access-migrations.js';
 import { loadEnvironmentIdentity } from '../identity.js';
 import { createExposurePolicy } from '../exposure-policy.js';
-import { createEnvironmentHttpPolicy, createRouteInventory } from './http-policy.js';
+import { createEnvironmentHttpPolicy, createRouteInventory, type EnvironmentHttpRoute } from './http-policy.js';
 import type { PairingExchange, Scope } from '@forge/protocol/environment-v2';
 import type { Principal } from '../control/control-types.js';
 
@@ -24,19 +24,22 @@ async function harness() {
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   const identity = await loadEnvironmentIdentity({ dataDir: join(dir, 'data'), installationStateDir: join(dir, 'installation') });
   const Database = await loadConfiguredSqliteDatabaseConstructor();
-  const db = new Database(join(dir, 'access.sqlite'));
+  let db = new Database(join(dir, 'access.sqlite'));
   applyAccessMigrations(db);
   cleanup.push(() => db.close());
   let now = Date.now();
   const exposure = createExposurePolicy({ host: '127.0.0.1', port: 0, allowedClientOrigins: ['https://client.test'] });
   let access = createEnvironmentAccess({ database: db, identity, exposure, clock: () => now });
   cleanup.push(() => access.dispose());
+  const extraRoutes: EnvironmentHttpRoute[] = [];
+  const integrationAuthenticators: Record<string,(req:import('node:http').IncomingMessage)=>Promise<void>> = {};
   const server = createServer(async (req, res) => {
     const url = new URL(req.url!, 'http://127.0.0.1');
-    const inventory = createRouteInventory(access.routes);
-    const policy = createEnvironmentHttpPolicy({ access, exposure, inventory });
+    const routes = [...access.routes, ...extraRoutes];
+    const inventory = createRouteInventory(routes);
+    const policy = createEnvironmentHttpPolicy({ access, exposure, inventory, integrationAuthenticators });
     if ((await policy(req, res, url)).handled) return;
-    const route = access.routes.find(r => r.matches(url.pathname));
+    const route = routes.find(r => r.matches(url.pathname));
     if (route) await route.handle(req, res, url);
     else { res.statusCode = 404; res.end(); }
   });
@@ -45,7 +48,7 @@ async function harness() {
   cleanup.push(() => { server.closeAllConnections(); return new Promise<void>(r => server.close(() => r())); });
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   exposure.setLoopbackPort((server.address() as { port: number }).port);
-  return { dir, db, identity, exposure, server, base, get access() { return access; }, advance(ms: number) { now += ms; }, restart() { access.dispose(); access = createEnvironmentAccess({ database: db, identity, exposure, clock: () => now }); } };
+  return { dir, get db() { return db; }, identity, exposure, server, base, extraRoutes, integrationAuthenticators, get access() { return access; }, advance(ms: number) { now += ms; }, restart() { access.dispose(); db.close(); db = new Database(join(dir, 'access.sqlite')); applyAccessMigrations(db); access = createEnvironmentAccess({ database: db, identity, exposure, clock: () => now }); } };
 }
 
 async function transcript(h: Awaited<ReturnType<typeof harness>>, grant: Awaited<ReturnType<typeof h.access.createBootstrapGrant>>, scopes: Scope[] = all, delivery: 'cookie' | 'bearer' = 'bearer') {
@@ -139,4 +142,58 @@ it('tickets use real sockets, replay fails, revocation commits then closes resou
   expect(h.db.prepare('SELECT revoked_at FROM device_sessions WHERE device_session_id = ?').get(principal.deviceSessionId)).toMatchObject({ revoked_at: expect.any(Number) });
   expect((await fetch(`${h.base}/api/v2/access/session`, { headers: { Authorization: `Bearer ${first.payload.bearerToken}` } })).status).toBe(401);
   expect((await fetch(`${h.base}/api/v2/access/session`, { headers: { Authorization: `Bearer ${second.payload.bearerToken}` } })).status).toBe(200);
+});
+
+it('rejects broader redemption scopes, limits malformed exchanges, and actively expires registered resources', async () => {
+  const h = await harness(); const admin = await paired(h);
+  const principal: Principal = {deviceSessionId:admin.payload.deviceSession.deviceSessionId,scopes:new Set(all)};
+  const grant = await h.access.createGrant(principal,{kind:'link',label:'read only',scopes:['session:read'],expiresInSeconds:60,reachableBaseUrl:h.base});
+  expect((await exchange(h,await transcript(h,grant,all))).status).toBe(403);
+  const narrowed = await exchange(h,await transcript(h,grant,['session:read'])); expect(narrowed.status).toBe(200);
+  const device = await narrowed.json();
+  const untouched = await h.access.createGrant(principal,{kind:'code',label:'pending',scopes:['session:read'],expiresInSeconds:300,reachableBaseUrl:h.base});
+  const other = await paired(h);
+  await h.access.revokeDevice({deviceSessionId:other.payload.deviceSession.deviceSessionId,scopes:new Set(all)}, {deviceSessionId:principal.deviceSessionId});
+  expect(h.db.prepare('SELECT revoked_at FROM pairing_grants WHERE grant_id=?').get(untouched.grantId)).toMatchObject({revoked_at:expect.any(Number)});
+  let closed = false; h.access.registerResource({deviceSessionId:device.deviceSession.deviceSessionId,scopes:new Set(['session:read'])}, () => {closed=true;});
+  h.advance(30*24*60*60*1000+1);
+  expect((await fetch(`${h.base}/api/v2/access/session`,{headers:{Authorization:`Bearer ${device.bearerToken}`}})).status).toBe(401);
+  expect(closed).toBe(true);
+  h.restart();
+  for (let i=0;i<5;i++) expect((await fetch(`${h.base}/api/v2/access/exchange`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status).toBe(400);
+  expect((await fetch(`${h.base}/api/v2/access/exchange`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status).toBe(429);
+});
+
+it('revocation aborts a real streaming HTTP asset response without disconnecting another device', async () => {
+  const h = await harness(); const device = await paired(h); const admin = await paired(h);
+  let closed!: () => void; const assetClosed = new Promise<void>(resolve => {closed=resolve;});
+  h.extraRoutes.push({methods:'GET',matches:path=>path==='/acceptance/asset',access:{scopes:['session:read']},handle:async(request,response)=>{
+    const p = await h.access.authenticateHttp(request,'session:read',false);
+    const unregister = h.access.registerResource(p,()=>response.destroy());
+    response.once('close',()=>{unregister();closed();});
+    response.writeHead(200,{'Content-Type':'application/octet-stream'}); response.write(Buffer.alloc(128,7));
+    await assetClosed;
+  }});
+  const asset = await fetch(`${h.base}/acceptance/asset`,{headers:{Authorization:`Bearer ${device.payload.bearerToken}`}});
+  expect(asset.status).toBe(200);
+  await h.access.revokeDevice({deviceSessionId:admin.payload.deviceSession.deviceSessionId,scopes:new Set(all)},{deviceSessionId:device.payload.deviceSession.deviceSessionId});
+  await assetClosed; await expect(asset.arrayBuffer()).rejects.toThrow();
+  expect((await fetch(`${h.base}/api/v2/access/session`,{headers:{Authorization:`Bearer ${admin.payload.bearerToken}`}})).status).toBe(200);
+});
+
+it('integration credentials map to durable listed devices and neither revocation path can silently recreate authority', async () => {
+  const h=await harness();const admin=await paired(h);let authenticated=0;
+  h.integrationAuthenticators.cli=async req=>{if(req.headers.authorization!=='Bearer acceptance-cli-key')throw new AccessError('UNAUTHENTICATED','Integration credential required');authenticated++;};
+  h.extraRoutes.push({methods:'POST',matches:path=>path==='/acceptance/cli',access:{integration:'cli'},handle:async(_request,response)=>{
+    try{const p=h.access.ensureIntegrationPrincipal({integration:'cli',credentialId:'fixture-key-id',label:'Acceptance CLI',scopes:['session:read','session:operate']});h.access.authorize(p,['session:operate']);response.end(JSON.stringify({deviceSessionId:p.deviceSessionId}));}catch(error){response.statusCode=(error as AccessError).code==='UNAUTHENTICATED'?401:403;response.end();}
+  }});
+  const send=()=>fetch(`${h.base}/acceptance/cli`,{method:'POST',headers:{Authorization:'Bearer acceptance-cli-key'}});
+  expect((await fetch(`${h.base}/acceptance/cli`,{method:'POST'})).status).toBe(401);expect(authenticated).toBe(0);
+  const first=await(await send()).json();h.restart();const second=await(await send()).json();expect(second).toEqual(first);
+  const host={deviceSessionId:admin.payload.deviceSession.deviceSessionId,scopes:new Set(all)};
+  expect(await h.access.listDevices(host)).toContainEqual(expect.objectContaining({deviceSessionId:first.deviceSessionId,kind:'cli',deviceName:'Acceptance CLI'}));
+  await h.access.revokeDevice(host,{deviceSessionId:first.deviceSessionId});expect((await send()).status).toBe(401);h.restart();expect((await send()).status).toBe(401);
+  const deck=h.access.ensureIntegrationPrincipal({integration:'stream-deck',credentialId:'fixture-deck-id',label:'Device name',scopes:['session:read','session:operate']});let closed=false;h.access.registerResource(deck,()=>{closed=true;});
+  h.access.revokeIntegrationPrincipal({integration:'stream-deck',credentialId:'fixture-deck-id'});expect(closed).toBe(true);
+  expect(()=>h.access.ensureIntegrationPrincipal({integration:'stream-deck',credentialId:'fixture-deck-id',label:'Device name',scopes:['session:read']})).toThrow();
 });

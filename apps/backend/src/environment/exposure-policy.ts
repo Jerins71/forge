@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'node:http';
 import { isIP } from 'node:net';
-import { readFile, writeFile, unlink } from 'node:fs/promises';
+import { readFile, open, unlink } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -62,10 +62,10 @@ export function createExposurePolicy(options: ExposureOptions = {}): ExposurePol
 }
 
 /** Own only a previously absent HTTPS handler, and compare it before explicit disable. */
-export async function enableTailscaleServe(options: { backendPort: number; publicBaseUrl: string; ownershipFile: string; run?: (args: string[]) => Promise<string>; probe?: (url: string) => Promise<void> }): Promise<void> {
+export async function enableTailscaleServe(options: { backendPort: number; publicBaseUrl: string; ownershipFile: string; environmentId?: string; run?: (args: string[]) => Promise<string>; probe?: (url: string) => Promise<void> }): Promise<void> {
   const run = options.run ?? (async args => (await promisify(execFile)('tailscale', args, { windowsHide: true })).stdout);
   const url = normalizedBase(options.publicBaseUrl);
-  if (url.protocol !== 'https:') throw new Error('Tailscale requires HTTPS');
+  if (url.protocol !== 'https:' || url.port && url.port !== '443') throw new Error('Tailscale requires the standard HTTPS port');
   const target = `http://127.0.0.1:${options.backendPort}`;
   const status = JSON.parse(await run(['serve', 'status', '--json'])) as { Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }> };
   const key = `${url.hostname}:443`;
@@ -73,10 +73,17 @@ export async function enableTailscaleServe(options: { backendPort: number; publi
   if (existing && existing.Proxy !== target) throw new Error('Tailscale already has a different handler at this origin');
   if (!existing) {
     // Reserve durable ownership before touching an external serving rule.
-    await writeFile(options.ownershipFile, JSON.stringify({ key, target }), { flag: 'wx', mode: 0o600 });
+    try {
+      const file = await open(options.ownershipFile, 'wx', 0o600);
+      try { await file.writeFile(JSON.stringify({key,target})); await file.sync(); } finally { await file.close(); }
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      const owned = JSON.parse(await readFile(options.ownershipFile,'utf8')) as {key:string;target:string};
+      if (owned.key !== key || owned.target !== target) throw new Error('A different Forge-owned Tailscale rule requires explicit disable first');
+    }
     await run(['serve', '--bg', '--https=443', '--set-path=/', target]);
   }
-  await (options.probe ?? (async base => { const result = await fetch(`${base}/api/v2/environment`, { signal: AbortSignal.timeout(5000) }); if (!result.ok) throw new Error('Tailscale environment probe failed'); }))(url.origin);
+  await (options.probe ?? (async base => { const result = await fetch(`${base}/api/v2/environment`, { signal: AbortSignal.timeout(5000) }); if (!result.ok) throw new Error('Tailscale environment probe failed'); const descriptor = await result.json() as {environmentId?:string;protocolVersion?:number}; if (!descriptor.environmentId || descriptor.protocolVersion !== 1 || options.environmentId && descriptor.environmentId !== options.environmentId) throw new Error('Tailscale environment identity probe failed'); }))(url.origin);
 }
 export async function disableOwnedTailscaleServe(options: { ownershipFile: string; run?: (args: string[]) => Promise<string> }): Promise<void> {
   let owned: { key: string; target: string };

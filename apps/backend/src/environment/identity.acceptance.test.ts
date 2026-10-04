@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, it } from 'vitest';
 import { loadEnvironmentIdentity, recoverEnvironmentIdentity } from './identity.js';
-import { createExposurePolicy } from './exposure-policy.js';
+import { createExposurePolicy, enableTailscaleServe, disableOwnedTailscaleServe } from './exposure-policy.js';
 import { applyAccessMigrations } from './access/access-migrations.js';
 import { loadConfiguredSqliteDatabaseConstructor } from '../sqlite-database-loader.js';
 let root: string;
@@ -41,4 +41,20 @@ it('requires an explicit remote HTTPS plan and trusts forwarded metadata only fr
   const policy = createExposurePolicy({ host: '0.0.0.0', port: 47187, publicBaseUrl: 'https://dev1.test', trustedProxy: { peer: '127.0.0.1', host: 'dev1.test', proto: 'https' } });
   expect(policy.publicBaseUrl).toBe('https://dev1.test');
   expect(() => policy.validateForwarding({ headers: { 'x-forwarded-host': 'evil.test', 'x-forwarded-proto': 'https' }, socket: { remoteAddress: '127.0.0.1' } } as never)).toThrow();
+});
+
+it('tracks only an absent Tailscale root rule and disables that exact owned path while preserving other routes', async () => {
+  root = await mkdtemp(join(tmpdir(),'forge-tailscale-'));
+  const ownershipFile = join(root,'owned.json'); const calls: string[][] = [];
+  const status = {Web:{'dev1.test:443':{Handlers:{'/other':{Proxy:'http://127.0.0.1:9999'}} as Record<string,{Proxy:string}>}}};
+  const run = async(args:string[])=>{calls.push(args); if(args.includes('status'))return JSON.stringify(status); if(args.includes('off'))delete status.Web['dev1.test:443'].Handlers['/']; else status.Web['dev1.test:443'].Handlers['/']={Proxy:'http://127.0.0.1:47187'}; return '';};
+  await enableTailscaleServe({backendPort:47187,publicBaseUrl:'https://dev1.test',ownershipFile,run,probe:async()=>{}});
+  expect(await readFile(ownershipFile,'utf8')).toContain('127.0.0.1:47187');
+  await disableOwnedTailscaleServe({ownershipFile,run});
+  expect(status.Web['dev1.test:443'].Handlers['/other']).toEqual({Proxy:'http://127.0.0.1:9999'});
+  expect(calls.at(-1)).toEqual(['serve','--https=443','--set-path=/','off']);
+  status.Web['dev1.test:443'].Handlers['/']={Proxy:'http://127.0.0.1:47187'};
+  await enableTailscaleServe({backendPort:47187,publicBaseUrl:'https://dev1.test',ownershipFile,run,probe:async()=>{}});
+  await expect(readFile(ownershipFile,'utf8')).rejects.toMatchObject({code:'ENOENT'});
+  const before = calls.length; await disableOwnedTailscaleServe({ownershipFile,run}); expect(calls).toHaveLength(before);
 });
