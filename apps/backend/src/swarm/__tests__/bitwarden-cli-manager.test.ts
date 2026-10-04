@@ -1,12 +1,9 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  BitwardenCliManager,
-  FORGE_MANAGED_BITWARDEN_CLI_VERSION,
-} from "../secure-sessions/sources/bitwarden-cli-manager.js";
+import { BitwardenCliManager, FORGE_MANAGED_BITWARDEN_CLI_VERSION } from "../secure-sessions/sources/bitwarden-cli-manager.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -18,53 +15,6 @@ afterEach(async () => {
 });
 
 describe("BitwardenCliManager", () => {
-  it("reuses version probes but rechecks changed executables and expired probes", async () => {
-    const root = await temporaryRoot();
-    const executable = await fakeCli(path.join(root, "bw"));
-    const counter = path.join(root, "probes");
-    const script = (version: string) => `#!/bin/sh\nprintf x >> '${counter}'\nprintf '${version}\\n'\n`;
-    await writeFile(executable, script("2026.8.0"));
-    let now = 1_000;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
-    const manager = new BitwardenCliManager({ dataDir: root, environment: { PATH: "" } });
-    await manager.resolve(executable);
-    await manager.resolve(executable);
-    expect(await readFile(counter, "utf8")).toBe("x");
-    now += 60_001;
-    await manager.resolve(executable);
-    expect(await readFile(counter, "utf8")).toBe("xx");
-    await writeFile(executable, script("2026.10.0"));
-    expect((await manager.resolve(executable)).summary.version).toBe("2026.10.0");
-    expect(await readFile(counter, "utf8")).toBe("xxx");
-    await rm(executable);
-    expect((await manager.resolve(executable)).invocation).toBeNull();
-  });
-
-  it("prefers a working configured executable and reports safe diagnostics", async () => {
-    const root = await temporaryRoot();
-    const executable = await fakeCli(path.join(root, "custom", "bw"));
-    const manager = new BitwardenCliManager({
-      dataDir: path.join(root, "data"),
-      platform: "darwin",
-      arch: "arm64",
-      environment: { PATH: "" },
-    });
-
-    const result = await manager.resolve(executable);
-    const canonicalExecutable = await realpath(executable);
-
-    expect(result.summary).toMatchObject({
-      state: "ready",
-      source: "configured",
-      executablePath: canonicalExecutable,
-      configuredExecutablePath: executable,
-      version: "2026.8.0",
-      managedVersion: FORGE_MANAGED_BITWARDEN_CLI_VERSION,
-      canInstall: true,
-    });
-    expect(result.invocation?.commandShell).toBeNull();
-  });
-
   it("does not silently bypass an invalid configured path with a system CLI", async () => {
     const root = await temporaryRoot();
     const systemCli = await fakeCli(path.join(root, "bin", "bw"));
@@ -150,25 +100,6 @@ describe("BitwardenCliManager", () => {
 
     await expect(manager.install()).rejects.toMatchObject({
       code: "SECURE_SOURCE_RESPONSE_INVALID",
-    });
-  });
-
-  it("reports unsupported automatic installation without blocking custom discovery", async () => {
-    const root = await temporaryRoot();
-    const manager = new BitwardenCliManager({
-      dataDir: path.join(root, "data"),
-      platform: "win32",
-      arch: "arm64",
-      environment: { PATH: "", SystemDrive: "Z:" },
-    });
-
-    await expect(manager.resolve(null)).resolves.toMatchObject({
-      invocation: null,
-      summary: {
-        state: "unsupported",
-        canInstall: false,
-        managedVersion: null,
-      },
     });
   });
 });

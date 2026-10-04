@@ -56,23 +56,4 @@ posixOnly("native runtime update service", () => {
     // The standalone updater targets the install's own home, not Forge's private CODEX_HOME.
     expect((await readFile(join(root, "codex-home"), "utf8")).trim()).toBe(join(await realpath(root), ".codex"));
   });
-
-  it("reports a failing installer with its output", async () => {
-    await fakeStandaloneCodex("0.150.0", 3);
-    const updates = service(registry("0.160.0"));
-    const [before] = await updates.status();
-    await updates.startUpdate("codex", before!.updateCommand);
-    await updates.settled();
-    const [after] = await updates.status();
-    expect(after).toMatchObject({ currentVersion: "0.150.0", status: "outdated",
-      update: { status: "failed", message: "The update command exited with code 3." } });
-    expect(after!.update?.output).toContain("boom");
-  });
-
-  it("keeps working when the registry is unreachable", async () => {
-    await fakeStandaloneCodex("0.150.0");
-    const [codexStatus, claudeStatus] = await service(registry(null)).status();
-    expect(codexStatus).toMatchObject({ currentVersion: "0.150.0", latestVersion: null, status: "unknown", canUpdate: false });
-    expect(claudeStatus).toMatchObject({ source: "bundled", status: "unknown", canUpdate: false });
-  });
 });

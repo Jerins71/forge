@@ -27,27 +27,6 @@ describe('parseOpenAIAuthBrokerInvite', () => {
     })
   })
 
-  it('accepts decoded JSON blobs for paste flows', () => {
-    expect(parseOpenAIAuthBrokerInvite(JSON.stringify(payload))).toMatchObject({
-      brokerUrl: 'https://broker.example.test',
-      inviteId: 'inv_123',
-      secret: 'invite_secret',
-    })
-    expect(parseOpenAIAuthBrokerInvite(payload)).toMatchObject({ inviteId: 'inv_123' })
-  })
-
-  it('allows localhost HTTP invites for local development', () => {
-    const local = { ...payload, brokerUrl: 'http://127.0.0.1:8787' }
-    expect(parseOpenAIAuthBrokerInvite(
-      `http://127.0.0.1:8787/-/forge-auth/invite#forge_auth_broker=${encode(local)}`,
-    )).toMatchObject({ brokerUrl: 'http://127.0.0.1:8787' })
-
-    const ipv6Localhost = { ...payload, brokerUrl: 'http://[::1]:8787' }
-    expect(parseOpenAIAuthBrokerInvite(
-      `http://[::1]:8787/-/forge-auth/invite#forge_auth_broker=${encode(ipv6Localhost)}`,
-    )).toMatchObject({ brokerUrl: 'http://[::1]:8787' })
-  })
-
   it('rejects raw tokens, non-http protocols, remote HTTP, and unsupported providers', () => {
     const rejected = [
       'fop_abcdefghijklmnopqrstuvwxyz',

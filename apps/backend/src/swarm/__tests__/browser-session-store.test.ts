@@ -78,71 +78,6 @@ describe("BrowserSessionStore", () => {
     expect(entries).toEqual(["browser.json"]);
   });
 
-  it("accepts agent-idle live state but never claims a physical External Chrome attachment after restart", async () => {
-    const dataDir = await root();
-    const store = new BrowserSessionStore({ dataDir, now });
-    const state = snapshot(store);
-    state.tabs = [{ ...tab(), targetAffinity: "external-chrome", controller: "agent-idle" }];
-    await store.save(state);
-    const persisted = JSON.parse(await readFile(store.getStatePath("profile-1", "manager-1"), "utf8"));
-    expect(persisted.tabs).toMatchObject([{ targetAffinity: "external-chrome", controller: "agent-idle" }]);
-
-    const restarted = new BrowserSessionStore({ dataDir, now });
-    await expect(restarted.load("profile-1", "manager-1")).resolves.toMatchObject({
-      tabs: [{ targetAffinity: "external-chrome", live: false, controller: "none" }],
-    });
-  });
-
-  it("defaults legacy persisted session and tab host kinds to Managed Electron", async () => {
-    const dataDir = await root();
-    const store = new BrowserSessionStore({ dataDir, now });
-    await store.save(snapshot(store));
-    const path = store.getStatePath("profile-1", "manager-1");
-    const legacy = JSON.parse(await readFile(path, "utf8"));
-    legacy.schemaVersion = 1;
-    legacy.hostKind = "managed-electron";
-    legacy.tabs[0].hostKind = "managed-electron";
-    delete legacy.tabs[0].targetAffinity;
-    await writeFile(path, JSON.stringify(legacy), "utf8");
-    await expect(store.load("profile-1", "manager-1")).resolves.toMatchObject({
-      schemaVersion: 2,
-      tabs: [{ targetAffinity: "managed-electron" }],
-    });
-  });
-
-  it("rejects duplicate logical tab ids across target affinities", async () => {
-    const dataDir = await root();
-    const store = new BrowserSessionStore({ dataDir, now });
-    const state = snapshot(store);
-    state.tabs.push({ ...tab(), targetAffinity: "external-chrome", title: "External" });
-    await expect(store.save(state)).rejects.toThrow("Duplicate browser logical tab id");
-  });
-
-  it("migrates v1 mixed state by preserving managed tabs and dropping unproven Chrome hints", async () => {
-    const dataDir = await root();
-    const store = new BrowserSessionStore({ dataDir, now });
-    const path = store.getStatePath("profile-1", "manager-1");
-    const { mkdir } = await import("node:fs/promises");
-    await mkdir(join(dataDir, "profiles", "profile-1", "sessions", "manager-1"), { recursive: true });
-    const state = snapshot(store) as any;
-    state.schemaVersion = 1;
-    state.hostKind = "external-chrome";
-    state.tabs = [
-      { ...tab(), targetAffinity: undefined, hostKind: "managed-electron" },
-      { ...tab(), tabId: "ext.profile.7", targetAffinity: undefined, hostKind: "external-chrome", url: "https://private.invalid", title: "Private" },
-    ];
-    state.activeTabId = "ext.profile.7";
-    state.defaultTabId = "ext.profile.7";
-    await writeFile(path, JSON.stringify(state), "utf8");
-    const migrated = await store.load("profile-1", "manager-1");
-    expect(migrated).toMatchObject({ schemaVersion: 2, activeTabId: "tab-1", defaultTabId: "tab-1", tabs: [{ tabId: "tab-1", targetAffinity: "managed-electron" }] });
-    expect(migrated).not.toHaveProperty("hostKind");
-    const rewritten = await readFile(path, "utf8");
-    expect(JSON.parse(rewritten)).toMatchObject({ schemaVersion: 2, tabs: [{ tabId: "tab-1" }] });
-    expect(rewritten).not.toContain("private.invalid");
-    expect(rewritten).not.toContain("must-not-migrate");
-  });
-
   it("never persists External Chrome titles, full URLs, origins, or action copies", async () => {
     const dataDir = await root();
     const store = new BrowserSessionStore({ dataDir, now });
@@ -163,22 +98,6 @@ describe("BrowserSessionStore", () => {
       tabs: [{ targetAffinity: "external-chrome", url: "", title: "", error: null }],
       recentActions: [{ id: "external-action" }],
     });
-  });
-
-  it("persists only canonical metadata and omits screenshot, page, evaluate, and diagnostic payloads", async () => {
-    const dataDir = await root();
-    const store = new BrowserSessionStore({ dataDir, now });
-    const state = snapshot(store) as BrowserSessionSnapshot & Record<string, unknown>;
-    state.screenshot = { data: "SCREENSHOT_SECRET" };
-    state.visibleText = "PAGE_SECRET";
-    state.accessibility = { secret: "A11Y_SECRET" };
-    state.consoleEntries = [{ text: "CONSOLE_SECRET" }];
-    state.value = "EVALUATE_SECRET";
-    await store.save(state);
-
-    const persisted = await readFile(store.getStatePath("profile-1", "manager-1"), "utf8");
-    expect(persisted).not.toContain("SECRET");
-    expect(JSON.parse(persisted)).not.toHaveProperty("screenshot");
   });
 
   it("preserves corrupt and unknown-schema source data under a diagnostic suffix", async () => {

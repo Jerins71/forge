@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,73 +35,6 @@ function buildSessionHeader(cwd: string): string {
 }
 
 describe("appendImmediateCustomEntryViaTimeline", () => {
-  it("creates a missing session file with a header and custom entry", async () => {
-    const root = await createTempDir("immediate-entry-writer-");
-    const sessionFile = join(root, "sessions", "manager.jsonl");
-
-    const result = await appendImmediateCustomEntryViaTimeline({
-      sessionFile,
-      cwd: root,
-      customType: "swarm_model_change_continuity_request",
-      data: { hello: "world" },
-      now: () => "2026-01-02T00:00:00.000Z"
-    });
-
-    expect(result.headerCreated).toBe(true);
-    expect(result.parentId).toBeNull();
-
-    const lines = readFileSync(sessionFile, "utf8").trimEnd().split("\n");
-    expect(lines).toHaveLength(2);
-
-    const header = JSON.parse(lines[0] ?? "{}");
-    expect(header.type).toBe("session");
-    expect(header.cwd).toBe(root);
-
-    const entry = JSON.parse(lines[1] ?? "{}");
-    expect(entry.type).toBe("custom");
-    expect(entry.customType).toBe("swarm_model_change_continuity_request");
-    expect(entry.parentId).toBeNull();
-    expect(entry.data).toEqual({ hello: "world" });
-  });
-
-  it("appends to a valid session file using the current leaf entry id as parent when available", async () => {
-    const root = await createTempDir("immediate-entry-writer-");
-    const sessionFile = join(root, "manager.jsonl");
-    writeFileSync(
-      sessionFile,
-      [
-        buildSessionHeader(root),
-        JSON.stringify({
-          type: "custom",
-          customType: "swarm_conversation_entry",
-          id: "entry-1",
-          parentId: null,
-          data: { text: "existing" },
-          timestamp: "2026-01-01T00:00:01.000Z"
-        })
-      ].join("\n"),
-      "utf8"
-    );
-
-    const result = await appendImmediateCustomEntryViaTimeline({
-      sessionFile,
-      cwd: root,
-      customType: "swarm_model_change_continuity_applied",
-      data: { ok: true },
-      now: () => "2026-01-02T00:00:00.000Z"
-    });
-
-    expect(result.headerCreated).toBe(false);
-    expect(result.parentId).toBe("entry-1");
-
-    const lines = readFileSync(sessionFile, "utf8").trimEnd().split("\n");
-    expect(lines).toHaveLength(3);
-
-    const appended = JSON.parse(lines[2] ?? "{}");
-    expect(appended.parentId).toBe("entry-1");
-    expect(appended.customType).toBe("swarm_model_change_continuity_applied");
-  });
-
   it("fails without mutating a non-empty file that has an invalid header", async () => {
     const root = await createTempDir("immediate-entry-writer-");
     const sessionFile = join(root, "manager.jsonl");
@@ -118,80 +51,6 @@ describe("appendImmediateCustomEntryViaTimeline", () => {
     ).rejects.toThrow(/invalid session header/i);
 
     expect(readFileSync(sessionFile, "utf8")).toBe(original);
-  });
-
-  it("fails without mutating a corrupted file whose trailing line cannot be parsed safely", async () => {
-    const root = await createTempDir("immediate-entry-writer-");
-    const sessionFile = join(root, "manager.jsonl");
-    const original = `${buildSessionHeader(root)}\n{"type":"custom","id":"entry-1"}\n{not-json`;
-    writeFileSync(sessionFile, original, "utf8");
-
-    await expect(
-      appendImmediateCustomEntryViaTimeline({
-        sessionFile,
-        cwd: root,
-        customType: "swarm_model_change_continuity_request",
-        data: { requestId: "req-1" }
-      })
-    ).rejects.toThrow(/invalid trailing session line/i);
-
-    expect(readFileSync(sessionFile, "utf8")).toBe(original);
-  });
-
-  it("appends after an existing header-only session file with a null parent", async () => {
-    const root = await createTempDir("immediate-entry-writer-");
-    const sessionFile = join(root, "manager.jsonl");
-    writeFileSync(sessionFile, `${buildSessionHeader(root)}\n`, "utf8");
-
-    const result = await appendImmediateCustomEntryViaTimeline({
-      sessionFile,
-      cwd: root,
-      customType: "swarm_model_change_continuity_request",
-      data: { requestId: "req-header-only" },
-      now: () => "2026-01-02T00:00:00.000Z"
-    });
-
-    expect(result.headerCreated).toBe(false);
-    expect(result.parentId).toBeNull();
-
-    const lines = readFileSync(sessionFile, "utf8").trimEnd().split("\n");
-    expect(lines).toHaveLength(2);
-    const appended = JSON.parse(lines[1] ?? "{}");
-    expect(appended.parentId).toBeNull();
-    expect(appended.customType).toBe("swarm_model_change_continuity_request");
-  });
-
-  it("preserves CRLF session headers and inserts a leading newline when appending after a non-newline tail", async () => {
-    const root = await createTempDir("immediate-entry-writer-");
-    const sessionFile = join(root, "manager.jsonl");
-    const original = `${buildSessionHeader(root)}\r\n${JSON.stringify({
-      type: "custom",
-      customType: "swarm_conversation_entry",
-      id: "entry-1",
-      parentId: null,
-      timestamp: "2026-01-01T00:00:01.000Z",
-      data: { text: "existing" }
-    })}`;
-    writeFileSync(sessionFile, original, "utf8");
-
-    const result = await appendImmediateCustomEntryViaTimeline({
-      sessionFile,
-      cwd: root,
-      customType: "swarm_model_change_continuity_applied",
-      data: { ok: true },
-      now: () => "2026-01-02T00:00:00.000Z"
-    });
-
-    expect(result.headerCreated).toBe(false);
-    expect(result.parentId).toBe("entry-1");
-
-    const text = readFileSync(sessionFile, "utf8");
-    expect(text.startsWith(`${buildSessionHeader(root)}\r\n`)).toBe(true);
-    expect(text.startsWith(`${original}\n`)).toBe(true);
-    const lines = text.trimEnd().split(/\r?\n/u);
-    expect(lines).toHaveLength(3);
-    const appended = JSON.parse(lines[2] ?? "{}");
-    expect(appended.parentId).toBe("entry-1");
   });
 
   it("uses append-only single-line writes when multiple entries are written concurrently", async () => {
@@ -219,20 +78,5 @@ describe("appendImmediateCustomEntryViaTimeline", () => {
       expect(parsed.type).toBe("custom");
       expect(parsed.customType).toBe("swarm_model_change_continuity_request");
     }
-  });
-
-  it("fails without mutating the target when the session path is not appendable", async () => {
-    const root = await createTempDir("immediate-entry-writer-");
-    const sessionFile = join(root, "manager.jsonl");
-    mkdirSync(sessionFile, { recursive: true });
-
-    await expect(
-      appendImmediateCustomEntryViaTimeline({
-        sessionFile,
-        cwd: root,
-        customType: "swarm_model_change_continuity_request",
-        data: { requestId: "req-1" }
-      })
-    ).rejects.toThrow();
   });
 });

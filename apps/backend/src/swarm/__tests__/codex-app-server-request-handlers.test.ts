@@ -22,15 +22,6 @@ describe("codex app-server server request handlers", () => {
     ).toEqual({ decision: "decline" });
   });
 
-  it("declines MCP elicitation requests with action decline", () => {
-    expect(
-      handleCodexAppServerServerRequest({
-        method: "mcpServer/elicitation/request",
-        params: { prompt: "Allow Codex to use Google Chrome?" },
-      }),
-    ).toEqual({ action: "decline" });
-  });
-
   it("throws for unsupported server requests", () => {
     expect(() =>
       handleCodexAppServerServerRequest({

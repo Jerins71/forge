@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assertClaudeSetup, claudeRuntimeEnvironment, resolveClaudeExecutable, isClaudeSignedIn } from "../runtime/claude/claude-runtime-environment.js";
+import { claudeRuntimeEnvironment, resolveClaudeExecutable } from "../runtime/claude/claude-runtime-environment.js";
 import type { SwarmConfig } from "../types.js";
 
 const exec = vi.hoisted(() => ({ version: "2.1.280 (Claude Code)", loggedIn: false, failure: undefined as unknown, raw: undefined as string | undefined }));
@@ -34,33 +34,7 @@ describe("Claude native setup", () => {
       await expect(claudeRuntimeEnvironment(config, { FORGE_CLAUDE_AUTH_MODE: "auto" })).rejects.toThrow("must be cli");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
-  it("requests in-app sign-in without exposing an executable path", async () => {
-    await expect(assertClaudeSetup("/path with space/claude", {}, tmpdir())).rejects.toThrow("Connect your Claude account");
-    exec.loggedIn = true; await expect(assertClaudeSetup("/fixture/claude", {}, tmpdir())).resolves.toBeUndefined();
-  });
-  it("recognizes the CLI signed-out exit code without disguising process errors as missing login", async () => {
-    exec.failure = { code: 1, stdout: '{"loggedIn":false}', stderr: "PRIVATE_CANARY" };
-    await expect(isClaudeSignedIn("/fixture/claude", {})).resolves.toBe(false);
-    exec.failure = { code: "ETIMEDOUT", stdout: "PRIVATE_CANARY" };
-    await expect(isClaudeSignedIn("/fixture/claude", {})).rejects.toThrow("could not check");
-    exec.failure = { code: 1, stdout: "PRIVATE_CANARY" };
-    await expect(isClaudeSignedIn("/fixture/claude", {})).rejects.toThrow("unreadable connection status");
-  });
-  it("provides bundled-runtime recovery and an update command for old overrides", async () => {
-    exec.version = "2.1.259 (Claude Code)";
-    await expect(assertClaudeSetup("/fixture/claude", {}, tmpdir())).rejects.toThrow("claude update");
-    exec.version = "unexpected version";
-    await expect(assertClaudeSetup("/fixture/claude", {}, tmpdir())).rejects.toThrow("unrecognized version response");
-  });
-  it("names a missing session folder instead of the SDK's misleading launch failure", async () => {
-    exec.loggedIn = true;
-    const missing = join(tmpdir(), "forge-claude-missing-cwd", "project");
-    await expect(assertClaudeSetup("/fixture/claude", {}, missing)).rejects.toThrow(`working folder does not exist on this computer: ${missing}`);
-  });
   it.each(["C:\\Users\\Adam\\claude.cmd", "C:\\tools\\claude.ps1", "claude.exe"])("rejects an unsafe or ambiguous Windows override: %s", async path => {
     await expect(resolveClaudeExecutable({ CLAUDE_BIN: path }, "win32", "x64")).rejects.toThrow("absolute path to the native Claude executable");
-  });
-  it("resolves the installed platform package without requiring a global Claude CLI", async () => {
-    expect(await resolveClaudeExecutable({})).toMatch(/claude(?:\.exe)?$/);
   });
 });

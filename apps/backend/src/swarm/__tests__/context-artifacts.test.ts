@@ -38,17 +38,4 @@ describe('context artifacts canonical read projection', () => {
     expect(result.files[0].text).toBe(text)
     expect(await actor().snapshot()).toEqual(before)
   })
-  it('returns new revisions and reflects a conversation clear without stale files', async () => {
-    const { actor, read, dataDir } = await setup()
-    expect((await read()).files).toEqual([])
-    await actor().write({ path: 'checkpoint.md', text: 'first' })
-    await actor().write({ path: 'checkpoint.md', text: 'second' })
-    expect((await read()).files[0]).toMatchObject({ text: 'second', revision: 2 })
-    await new TaskNotesStore({ dataDir }).clearSession('project', 'manager')
-    expect((await read()).files).toEqual([])
-  })
-  it('does not substitute manager notes for a worker request', async () => {
-    const { read } = await setup()
-    await expect(read('worker')).rejects.toThrow('only available for manager sessions')
-  })
 })

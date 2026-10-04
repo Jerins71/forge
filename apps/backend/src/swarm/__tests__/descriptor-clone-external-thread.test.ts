@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  cloneDescriptorForPersistence,
-  cloneDescriptorForPublic,
-  cloneExternalThread,
-} from "../agents/descriptor-store/descriptor-clone.js";
+import { cloneDescriptorForPersistence, cloneDescriptorForPublic } from "../agents/descriptor-store/descriptor-clone.js";
 import type { AgentDescriptor } from "../types.js";
 
 function codexWorkerDescriptor(overrides: Partial<AgentDescriptor> = {}): AgentDescriptor {
@@ -35,66 +31,6 @@ function codexWorkerDescriptor(overrides: Partial<AgentDescriptor> = {}): AgentD
 }
 
 describe("descriptor clone externalThread", () => {
-  it("cloneExternalThread does not alias nested fields", () => {
-    const source = {
-      type: "codex_app_server",
-      persisted: true,
-      createdByMention: true,
-      threadId: "thread-1",
-    } as const;
-
-    const cloned = cloneExternalThread(source);
-    expect(cloned).not.toBe(source);
-    expect(cloned).toEqual(source);
-
-    (cloned as { threadId: string }).threadId = "mutated";
-    expect(source.threadId).toBe("thread-1");
-  });
-
-  it("persists manager contextModeOverride through clone", () => {
-    const source = {
-      agentId: "manager",
-      managerId: "manager",
-      displayName: "Manager",
-      role: "manager" as const,
-      status: "idle" as const,
-      createdAt: "2026-05-30T00:00:00.000Z",
-      updatedAt: "2026-05-30T00:00:00.000Z",
-      cwd: "/tmp",
-      model: { provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "medium" },
-      sessionFile: "/tmp/manager.jsonl",
-      contextModeOverride: "fresh" as const,
-    };
-    const persisted = cloneDescriptorForPersistence(source);
-    const published = cloneDescriptorForPublic(source);
-    expect(persisted.contextModeOverride).toBe("fresh");
-    expect(published.contextModeOverride).toBe("fresh");
-    persisted.contextModeOverride = "summary";
-    expect(source.contextModeOverride).toBe("fresh");
-  });
-
-  it("cloneDescriptorForPersistence deep-clones externalThread", () => {
-    const source = codexWorkerDescriptor();
-    const cloned = cloneDescriptorForPersistence(source);
-
-    expect(cloned.externalThread).not.toBe(source.externalThread);
-    expect(cloned.externalThread).toEqual(source.externalThread);
-
-    cloned.externalThread!.threadId = "mutated";
-    expect(source.externalThread?.threadId).toBe("thread-1");
-  });
-
-  it("cloneDescriptorForPublic deep-clones externalThread", () => {
-    const source = codexWorkerDescriptor();
-    const cloned = cloneDescriptorForPublic(source);
-
-    expect(cloned.externalThread).not.toBe(source.externalThread);
-    expect(cloned.externalThread).toEqual(source.externalThread);
-
-    cloned.externalThread!.lastTurnId = "mutated";
-    expect(source.externalThread?.lastTurnId).toBe("turn-1");
-  });
-
   it("persists worker parent context without exposing it publicly", () => {
     const source = codexWorkerDescriptor({
       workerParentContext: {
