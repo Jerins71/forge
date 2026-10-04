@@ -1,4 +1,5 @@
 import { mkdir, readFile, readdir, rename, rm, stat } from "node:fs/promises";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { dirname, join } from "node:path";
 import type { TerminalMeta } from "@forge/protocol";
 import type * as HeadlessModule from "@xterm/headless";
@@ -17,6 +18,9 @@ import { toErrorMessage } from "./terminal-service-helpers.js";
 
 const { Terminal } = headlessPkg as typeof HeadlessModule;
 const { SerializeAddon } = serializePkg as typeof SerializeModule;
+
+/** Device ownership is terminal persistence metadata, separate from manager ownership. */
+export type StoredTerminalMeta = TerminalMeta & { creatorDeviceSessionId?: string };
 
 type HeadlessTerminal = InstanceType<typeof Terminal>;
 type HeadlessSerializeAddon = InstanceType<typeof SerializeAddon>;
@@ -47,6 +51,11 @@ export class TerminalPersistence {
   private readonly scrollbackLines: number;
   readonly journalMaxBytes: number;
   private readonly mirrors = new Map<string, TerminalMirrorRuntime>();
+  private readonly creatingDevice = new AsyncLocalStorage<string>();
+
+  withCreatingDevice<T>(deviceSessionId: string, fn: () => Promise<T>): Promise<T> {
+    return this.creatingDevice.run(deviceSessionId, fn);
+  }
 
   constructor(options: TerminalPersistenceOptions) {
     this.dataDir = options.dataDir;
@@ -166,6 +175,10 @@ export class TerminalPersistence {
   }
 
   async saveMeta(meta: TerminalMeta): Promise<void> {
+    const owner = this.creatingDevice.getStore();
+    if (owner && !(meta as StoredTerminalMeta).creatorDeviceSessionId) {
+      (meta as StoredTerminalMeta).creatorDeviceSessionId = owner;
+    }
     const path = getTerminalMetaPath(this.dataDir, meta.profileId, meta.sessionAgentId, meta.terminalId);
     await writeFileAtomic(path, `${JSON.stringify(meta, null, 2)}\n`);
   }

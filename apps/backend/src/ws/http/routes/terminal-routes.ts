@@ -23,6 +23,8 @@ import {
   sendJson,
 } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
+import { requireHttpPrincipal } from "../../rpc/http-principal.js";
+import type { createTerminalRpcTransport } from "../../../terminal/terminal-rpc-transport.js";
 
 const TERMINALS_COLLECTION_PATH = "/api/terminals";
 const TERMINAL_ITEM_PATH_PATTERN = /^\/api\/terminals\/([^/]+)$/;
@@ -41,6 +43,7 @@ export function createTerminalRoutes(options: {
   terminalService: TerminalService;
   settingsService: TerminalSettingsService;
   discoverShells?: (currentDefaultShell?: string) => Promise<AvailableTerminalShell[]>;
+  terminalTransport?: Pick<ReturnType<typeof createTerminalRpcTransport>, "issueTicket">;
 }): HttpRoute[] {
   const { terminalService, settingsService } = options;
   const discoverShells = options.discoverShells ?? discoverAvailableShells;
@@ -135,7 +138,7 @@ export function createTerminalRoutes(options: {
 
           const body = await readJsonBody(request);
           const payload = parseTerminalCreateRequest(body);
-          const created = await terminalService.create(payload);
+          const created = await terminalService.create(payload, requireHttpPrincipal(request).deviceSessionId);
           sendJson(response, 201, { ...created });
         } catch (error) {
           sendTerminalRouteError(request, response, TERMINALS_COLLECTION_METHODS, access.allowedOrigin, error);
@@ -236,11 +239,10 @@ export function createTerminalRoutes(options: {
         try {
           const body = await readJsonBody(request);
           const payload = parseTerminalIssueTicketRequest(body);
-          const ticket = await terminalService.issueWsTicket({
-            terminalId,
-            sessionAgentId: payload.sessionAgentId,
-            requesterAgentId: payload.requesterAgentId,
-          });
+          const principal = requireHttpPrincipal(request);
+          const ticket = options.terminalTransport
+            ? options.terminalTransport.issueTicket(principal, terminalId, payload.sessionAgentId)
+            : await terminalService.issueWsTicket({ terminalId, sessionAgentId: payload.sessionAgentId, requesterAgentId: payload.requesterAgentId });
           sendJson(response, 200, { ...ticket });
         } catch (error) {
           sendTerminalRouteError(request, response, TERMINAL_TICKET_METHODS, access.allowedOrigin, error);
@@ -269,6 +271,9 @@ function beginTerminalRequest(
     response.end();
     return null;
   }
+
+  try { requireHttpPrincipal(request); }
+  catch { sendTerminalJsonError(response, 401, "Device authentication required", "UNAUTHENTICATED"); return null; }
 
   return { allowedOrigin: validation.allowedOrigin };
 }

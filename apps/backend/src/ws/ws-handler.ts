@@ -27,6 +27,9 @@ import { WsSubscriptions } from "./ws-subscriptions.js";
 import type { RepositoryProjectCreationService } from "../swarm/repository-project-creation-service.js";
 import type { PresentedChatArtifactTicketStore } from "../swarm/session/presented-chat-artifact.js";
 import type { HtmlArtifactPreviewStore } from "../swarm/session/html-artifact-preview.js";
+import type { ControlService, EnvironmentAccessPort, Principal } from "../environment/control/control-types.js";
+import { awaitLegacyReceipt, executeMigratedLegacyCommand, legacyCommandScopes, legacySessionEventAllowlist, type LegacyHandlerPorts } from "./rpc/legacy-builder-adapter.js";
+import { StreamFault } from "../environment/streams/stream-budget.js";
 
 const CONVERSATION_PAGE_RATE_WINDOW_MS = 5_000;
 const MAX_CONVERSATION_PAGE_REQUESTS_PER_WINDOW = 8;
@@ -41,6 +44,9 @@ export class WsHandler {
   private readonly apiProxy: WsApiProxy;
   private repositoryProjectCreationService: RepositoryProjectCreationService | null = null;
   private readonly conversationPageRequestTimes = new WeakMap<WebSocket, number[]>();
+  private environmentControl: { access: EnvironmentAccessPort; control: ControlService } | null = null;
+  private readonly principals = new WeakMap<WebSocket, Principal>();
+  private readonly featureListeners = new Map<string, Set<(event: ServerEvent) => void>>();
 
   private wss: WebSocketServer | null = null;
 
@@ -100,6 +106,80 @@ export class WsHandler {
     this.repositoryProjectCreationService = service;
   }
 
+  setEnvironmentControl(deps: { access: EnvironmentAccessPort; control: ControlService }): void {
+    this.environmentControl = deps;
+  }
+
+  /** Called by the exact upgrade router after consuming an audience:'legacy' ticket. */
+  bindPrincipal(socket: WebSocket, principal: Principal): void {
+    if (!this.environmentControl) throw new StreamFault("UNAVAILABLE", "Legacy access is not composed.");
+    this.environmentControl.access.authorize(principal, []);
+    this.principals.set(socket, principal);
+  }
+
+  legacyPorts(): LegacyHandlerPorts {
+    return {
+      executeCommand: async ({ sessionId, command, signal, send }) => {
+        if (signal.aborted) return;
+        if (!this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session.");
+        // Handler identity is a token, never a socket. Handlers touch it only through send.
+        const socket = Symbol("legacy-command");
+        const context = { command, socket, subscribedAgentId: sessionId, swarmManager: this.swarmManager,
+          resolveManagerContextAgentId: (agentId: string) => this.resolveManagerContextAgentId(agentId),
+          send: (_connection: symbol, event: ServerEvent) => { if (!signal.aborted) send(event); },
+          handleDeletedAgentSubscriptions: (ids: Set<string>) => this.handleDeletedAgentSubscriptions(ids),
+          unreadTracker: this.unreadTracker ?? undefined,
+        };
+        if (isBrowserClientCommand(command)) {
+          await handleBrowserCommand({ ...context, command, connectionId: `rpc:${sessionId}`,
+            browserAutomationService: this.browserAutomationService,
+            resolveProfileIdForAgent: agentId => this.subscriptionManager.resolveProfileIdForAgent(agentId),
+            isEligibleLocalBuilderManager: agentId => {
+              const descriptor = this.swarmManager.getAgent(agentId);
+              return !!descriptor && isEligibleLocalBuilderManager(descriptor);
+            },
+            broadcastToSession: (id, event) => this.broadcastToSession(id, event),
+            hydrateHostSessions: () => this.hydrateBrowserHostSessions(),
+          });
+          return;
+        }
+        if (await handleManagerCommand({ ...context, broadcastToSubscribed: event => { send(event); this.broadcastToSubscribed(event); } })) return;
+        if (await handleSessionCommand({ ...context, supportsGoalControlRequestId: true, broadcastUnreadCountUpdate: (id, count) => this.broadcastUnreadCountUpdate(id, count) })) return;
+        if (await handleAgentCommand(context)) return;
+        if (await handleConversationCommand({ ...context, allowNonManagerSubscriptions: this.allowNonManagerSubscriptions, logDebug: () => {}, resolveConfiguredManagerId: () => this.resolveConfiguredManagerId() })) return;
+        throw new StreamFault("UNAVAILABLE", `Legacy command ${command.type} has no port adapter.`);
+      },
+      featureState: async (sessionId, signal) => {
+        if (!this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session.");
+        const events: ServerEvent[] = [await this.swarmManager.getSessionPlanSnapshot(sessionId), await this.swarmManager.getSessionGoalSnapshot(sessionId)];
+        if (signal.aborted) return [];
+        const activity = this.swarmManager.getManagerToolActivitySnapshot(sessionId);
+        if (activity) events.push(activity);
+        for (const snapshot of await this.swarmManager.listSecureSessionTeamSnapshots(sessionId)) events.push({ type: "secure_session_snapshot", ...snapshot });
+        for (const elicitation of this.swarmManager.getPendingCodexElicitationsForManager(sessionId)) events.push({
+          type: "codex_elicitation_request", elicitationId: elicitation.elicitationId, agentId: elicitation.managerAgentId,
+          sidecarAgentId: elicitation.sidecarAgentId, mode: elicitation.mode, title: elicitation.title,
+          message: elicitation.message, fields: elicitation.fields, urlOrigin: elicitation.urlOrigin, persistScopes: elicitation.persistScopes,
+        });
+        const profileId = this.subscriptionManager.resolveProfileIdForAgent(sessionId);
+        const browser = profileId ? await this.browserAutomationService.getSessionSnapshot(profileId, sessionId) : null;
+        if (browser) events.push({ type: "browser_session_snapshot", snapshot: browser });
+        return events;
+      },
+      subscribeFeatures: (sessionId, listener) => {
+        let listeners = this.featureListeners.get(sessionId);
+        if (!listeners) this.featureListeners.set(sessionId, listeners = new Set());
+        listeners.add(listener);
+        return () => { listeners.delete(listener); if (!listeners.size) this.featureListeners.delete(sessionId); };
+      },
+    };
+  }
+
+  private publishFeatures(sessionId: string, event: ServerEvent): void {
+    if (!legacySessionEventAllowlist.includes(event.type as typeof legacySessionEventAllowlist[number])) return;
+    for (const listener of this.featureListeners.get(sessionId) ?? []) listener(event);
+  }
+
   sendToSocket(socket: WebSocket, event: ServerEvent): void {
     this.send(socket, event);
   }
@@ -108,12 +188,16 @@ export class WsHandler {
     this.wss = server;
 
     server.on("connection", (socket) => {
+      const principal = this.principals.get(socket);
+      if (!principal || !this.environmentControl) { socket.close(1008, "Device authentication required"); return; }
+      const unregister = this.environmentControl.access.registerResource(principal, () => socket.close(1008, "Device access ended"));
       this.browserConnectionIds.set(socket, randomUUID());
       socket.on("message", (raw) => {
         void this.handleSocketMessage(socket, raw);
       });
 
       socket.on("close", () => {
+        unregister();
         this.unregisterBrowserHost(socket);
         this.subscriptionManager.remove(socket);
       });
@@ -131,6 +215,9 @@ export class WsHandler {
   }
 
   broadcastToSubscribed(event: ServerEvent): void {
+    if (event.type === "secure_secret_catalog_changed") for (const sessionId of this.featureListeners.keys()) this.publishFeatures(sessionId, event);
+    else if ("sessionAgentId" in event && typeof event.sessionAgentId === "string") this.publishFeatures(event.sessionAgentId, event);
+    else if (event.type === "codex_elicitation_request" || event.type === "codex_elicitation_dismissed") this.publishFeatures(event.agentId, event);
     this.subscriptionManager.broadcastToSubscribed(event);
   }
 
@@ -139,10 +226,12 @@ export class WsHandler {
   }
 
   broadcastToSession(sessionAgentId: string, event: ServerEvent): void {
+    this.publishFeatures(sessionAgentId, event);
     this.subscriptionManager.broadcastToSession(sessionAgentId, event);
   }
 
   broadcastToManagerSession(sessionAgentId: string, event: ServerEvent): void {
+    this.publishFeatures(sessionAgentId, event);
     this.subscriptionManager.broadcastToManagerSession(sessionAgentId, event);
   }
 
@@ -150,22 +239,26 @@ export class WsHandler {
     sessionAgentId: string,
     event: Extract<ServerEvent, { type: "generation_throughput" }>,
   ): void {
+    this.publishFeatures(sessionAgentId, event);
     this.subscriptionManager.broadcastGenerationThroughput(sessionAgentId, event);
   }
 
   broadcastManagerToolActivity(
     event: Extract<ServerEvent, { type: "manager_tool_activity" }>,
   ): void {
+    this.publishFeatures(event.sessionAgentId, event);
     this.subscriptionManager.broadcastManagerToolActivity(event);
   }
 
   broadcastSecureSessionSnapshot(
     event: Extract<ServerEvent, { type: "secure_session_snapshot" }>,
   ): void {
+    this.publishFeatures(event.sessionAgentId, event);
     this.subscriptionManager.broadcastSecureSessionSnapshot(event);
   }
 
   broadcastToExactSubscription(agentId: string, event: ServerEvent): void {
+    this.publishFeatures(agentId, event);
     this.subscriptionManager.broadcastToExactSubscription(agentId, event);
   }
 
@@ -197,6 +290,32 @@ export class WsHandler {
     }
 
     const command = parsed.command;
+    const principal = this.principals.get(socket);
+    if (!principal || !this.environmentControl) { socket.close(1008, "Device authentication required"); return; }
+    try {
+      const migrated = command.type === "create_session" || command.type === "user_message" || command.type === "choice_response" || command.type === "stop_session";
+      const scope = migrated ? "session:operate" : command.type === "subscribe" || command.type === "subscribe_inventory" || command.type === "get_conversation_page" || command.type === "get_session_workers" ? "session:read" : legacyCommandScopes[command.type];
+      if (scope === "unsupported") throw new StreamFault("FORBIDDEN", "Legacy command is unavailable on this transport.");
+      this.environmentControl.access.authorize(principal, [scope]);
+      if (migrated) {
+        const receipt = await awaitLegacyReceipt(this.environmentControl.control, principal,
+          await executeMigratedLegacyCommand(this.environmentControl.control, principal, command,
+            this.subscriptionManager.getSubscribedAgentId(socket) ?? ""));
+        if (command.type === "create_session") {
+          const sessionAgent = this.swarmManager.getAgent(receipt.sessionId!);
+          const profile = this.swarmManager.listProfiles().find(profile => profile.profileId === command.profileId);
+          if (!sessionAgent || !profile) throw new StreamFault("UNAVAILABLE", "Controlled session descriptor is unavailable.");
+          this.send(socket, { type: "session_created", sessionAgent, profile, requestId: command.requestId });
+        } else if (command.type === "stop_session") {
+          this.send(socket, { type: "session_stopped", agentId: command.agentId,
+            profileId: this.subscriptionManager.resolveProfileIdForAgent(command.agentId) ?? command.agentId, terminatedWorkerIds: [], requestId: command.requestId });
+        }
+        return;
+      }
+    } catch (error) {
+      this.send(socket, { type: "error", code: "ENVIRONMENT_COMMAND_REJECTED", message: error instanceof StreamFault ? error.message : "Request rejected.", requestId: extractRequestId(command) });
+      return;
+    }
     // A command admitted while viewing a conversation may finish after demotion.
     // Recheck at actual send (including after backpressure), without weakening the
     // explicit origin-safe response paths or retaining a second request registry.

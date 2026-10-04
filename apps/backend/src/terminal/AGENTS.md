@@ -3,8 +3,9 @@
 ## Ownership and boundaries
 
 This directory owns per-session terminal lifecycle, PTY execution, persistence, settings, access
-policy, and terminal WebSocket transport. Terminal WebSockets carry raw I/O separately from the main
-application WebSocket and must remain behind short-lived authenticated tickets.
+policy, and terminal transports. V2 terminal I/O is multiplexed on the environment RPC socket behind
+short-lived device/session-bound tickets. Legacy terminal WebSockets retain their ticket and device
+authorization guards during the cutover.
 
 Keep `terminal-service.ts` as the service facade. Place lifecycle, runtime, persistence, access, shell
 discovery, and transport details in their focused modules rather than widening the facade.

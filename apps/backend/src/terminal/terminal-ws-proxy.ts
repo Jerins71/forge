@@ -9,6 +9,7 @@ import type { TerminalRuntimeConfig } from "./terminal-config.js";
 import { validateTerminalWsOrigin } from "./terminal-access-policy.js";
 import { TerminalServiceError, type TerminalService } from "./terminal-service.js";
 import { toErrorMessage } from "./terminal-service-helpers.js";
+import type { EnvironmentAccessPort } from "../environment/control/control-types.js";
 
 const TERMINAL_WS_PATH_PATTERN = /^\/terminal\/ws\/([^/]+)$/;
 
@@ -16,13 +17,16 @@ export class TerminalWsProxy {
   private readonly terminalService: TerminalService;
   private readonly runtimeConfig: TerminalRuntimeConfig;
   private readonly wss: WebSocketServer;
+  private readonly environmentAccess: EnvironmentAccessPort | undefined;
 
   constructor(options: {
     terminalService: TerminalService;
     runtimeConfig: TerminalRuntimeConfig;
+    environmentAccess?: EnvironmentAccessPort;
   }) {
     this.terminalService = options.terminalService;
     this.runtimeConfig = options.runtimeConfig;
+    this.environmentAccess = options.environmentAccess;
     this.wss = new WebSocketServer({ noServer: true });
   }
 
@@ -78,9 +82,17 @@ export class TerminalWsProxy {
       return true;
     }
 
-    this.wss.handleUpgrade(request, socket, head, (client) => {
-      void this.handleConnection(client, terminalId, requesterAgentId);
-    });
+    if (!this.environmentAccess) { writeUpgradeError(socket, 401, "Device authentication required"); return true; }
+    const access = this.environmentAccess;
+    // Device cookie/bearer authorization supplements the legacy terminal capability.
+    void access.authenticateHttp(request, "terminal:operate", false).then(principal => {
+      if (socket.destroyed) return;
+      this.wss.handleUpgrade(request, socket, head, client => {
+        const unregister = access.registerResource(principal, () => client.close(1008, "Device access ended"));
+        client.once("close", unregister);
+        void this.handleConnection(client, terminalId, requesterAgentId);
+      });
+    }).catch(() => writeUpgradeError(socket, 401, "Device authentication required"));
     return true;
   }
 
