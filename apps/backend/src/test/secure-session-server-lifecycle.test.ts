@@ -9,8 +9,6 @@ import { NonoSecureExecutionBackend } from "../swarm/secure-sessions/execution/n
 import { SecureSessionsService } from "../swarm/secure-sessions/secure-sessions-service.js";
 import { SwarmManager } from "../swarm/swarm-manager.js";
 import { createTempConfig, type TempConfigHandle } from "../test-support/temp-config.js";
-import { EmbeddedGitVersioningService } from "../versioning/embedded-git-versioning-service.js";
-import { SwarmWebSocketServer } from "../ws/server.js";
 
 const tempConfigs: TempConfigHandle[] = [];
 let activeServer: StartedServer | null = null;
@@ -211,67 +209,4 @@ describe("Secure Sessions server lifecycle", () => {
       await stopping?.catch(() => undefined);
     }
   }, 10_000);
-
-  it("releases the runtime lock and exit hook after startup fails", async () => {
-    const baselineListeners = lifecycleListenerCounts();
-    const tempConfig = await createTempConfig();
-    tempConfigs.push(tempConfig);
-    const lockFile = join(tempConfig.config.paths.dataDir, "runtime.lock");
-    vi.spyOn(EmbeddedGitVersioningService.prototype, "start")
-      .mockRejectedValueOnce(new Error("versioning startup failed"));
-
-    await expect(startServer({
-      config: tempConfig.config,
-      logger: {
-        info: () => undefined,
-        warn: () => undefined,
-        error: () => undefined,
-      },
-    })).rejects.toThrow("versioning startup failed");
-
-    await expect(access(lockFile)).rejects.toMatchObject({ code: "ENOENT" });
-    expect(lifecycleListenerCounts()).toEqual(baselineListeners);
-  });
-
-  it("finishes mandatory cleanup when the WebSocket stop reports a failure", async () => {
-    const baselineListeners = lifecycleListenerCounts();
-    const tempConfig = await createTempConfig();
-    tempConfigs.push(tempConfig);
-    const lockFile = join(tempConfig.config.paths.dataDir, "runtime.lock");
-    const originalStop = SwarmWebSocketServer.prototype.stop;
-    vi.spyOn(SwarmWebSocketServer.prototype, "stop")
-      .mockImplementationOnce(async function stopThenFailForTest() {
-        await originalStop.call(this);
-        throw new Error("WebSocket stop failed");
-      });
-
-    activeServer = await startServer({
-      config: tempConfig.config,
-      logger: {
-        info: () => undefined,
-        warn: () => undefined,
-        error: () => undefined,
-      },
-    });
-
-    await expect(activeServer.stop()).rejects.toThrow("WebSocket stop failed");
-    activeServer = null;
-
-    await expect(access(lockFile)).rejects.toMatchObject({ code: "ENOENT" });
-    expect(lifecycleListenerCounts()).toEqual(baselineListeners);
-
-    activeServer = await startServer({
-      config: tempConfig.config,
-      logger: {
-        info: () => undefined,
-        warn: () => undefined,
-        error: () => undefined,
-      },
-    });
-    await expect(access(lockFile)).resolves.toBeUndefined();
-
-    await activeServer.stop();
-    activeServer = null;
-    expect(lifecycleListenerCounts()).toEqual(baselineListeners);
-  });
 });

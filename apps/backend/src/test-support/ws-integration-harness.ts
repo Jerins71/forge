@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { AuthStorage, SessionManager, type AuthCredential } from '@earendil-works/pi-coding-agent'
 import type { SidebarPerfRecorder } from '../stats/sidebar-perf-types.js'
 import { ensureCanonicalAuthFilePath } from '../swarm/storage/auth-storage-paths.js'
@@ -169,11 +168,6 @@ export function createP0HttpRoutePerfStub(overrides?: Partial<SidebarPerfRecorde
   }
 }
 
-export interface P0HttpRouteSseEvent {
-  event: string
-  data: unknown
-}
-
 export class P0HttpRouteFakeSwarmManager extends EventEmitter {
   private readonly config: SwarmConfig
   private readonly agents: AgentDescriptor[]
@@ -338,126 +332,9 @@ export function createP0HttpRouteManagerDescriptor(rootDir: string, managerId = 
   }
 }
 
-export async function makeP0HttpRouteTempConfig(options?: { port?: number; managerId?: string }): Promise<SwarmConfig> {
-  const config = await buildTempConfig({
-    prefix: 'swarm-ws-p0-test-',
-    port: options?.port,
-    managerId: options?.managerId ?? 'manager',
-    omitSharedAuthFile: true,
-  })
-  if (options != null && 'managerId' in options && options.managerId === undefined) {
-    return { ...config, managerId: undefined }
-  }
-  return config
-}
-
 export async function parseP0HttpRouteJsonResponse(response: Response): Promise<{ status: number; json: Record<string, unknown> }> {
   return {
     status: response.status,
     json: (await response.json()) as Record<string, unknown>,
   }
-}
-
-export async function postP0HttpRouteTranscribe(url: string, options?: { size?: number; type?: string }): Promise<Response> {
-  const byteLength = options?.size ?? 32
-  const bytes = new Uint8Array(byteLength)
-  bytes.fill(7)
-
-  const form = new FormData()
-  const file = new File([bytes], 'audio.wav', { type: options?.type ?? 'audio/wav' })
-  form.set('file', file)
-
-  return fetch(url, {
-    method: 'POST',
-    body: form,
-  })
-}
-
-function parseP0HttpRouteSseChunk(chunk: string): P0HttpRouteSseEvent | undefined {
-  const lines = chunk
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-
-  let event = 'message'
-  let dataText = ''
-
-  for (const line of lines) {
-    if (line.startsWith('event:')) {
-      event = line.slice('event:'.length).trim()
-      continue
-    }
-
-    if (line.startsWith('data:')) {
-      dataText += line.slice('data:'.length).trim()
-    }
-  }
-
-  if (!dataText) {
-    return undefined
-  }
-
-  return {
-    event,
-    data: JSON.parse(dataText) as unknown,
-  }
-}
-
-export async function readP0HttpRouteSseEvents(
-  response: Response,
-  onEvent?: (event: P0HttpRouteSseEvent) => Promise<void> | void,
-): Promise<P0HttpRouteSseEvent[]> {
-  if (!response.body) {
-    throw new Error('Expected SSE response body')
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  const events: P0HttpRouteSseEvent[] = []
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) {
-      break
-    }
-
-    buffer += decoder.decode(value, { stream: true })
-
-    let boundaryIndex = buffer.indexOf('\n\n')
-    while (boundaryIndex >= 0) {
-      const chunk = buffer.slice(0, boundaryIndex)
-      buffer = buffer.slice(boundaryIndex + 2)
-
-      const parsed = parseP0HttpRouteSseChunk(chunk)
-      if (parsed) {
-        events.push(parsed)
-        if (onEvent) {
-          await onEvent(parsed)
-        }
-      }
-
-      boundaryIndex = buffer.indexOf('\n\n')
-    }
-  }
-
-  return events
-}
-
-export async function writeP0HttpRouteAuthKey(authFile: string, apiKey: string): Promise<void> {
-  await mkdir(dirname(authFile), { recursive: true })
-  await writeFile(
-    authFile,
-    JSON.stringify(
-      {
-        'openai-codex': {
-          type: 'api_key',
-          key: apiKey,
-        },
-      },
-      null,
-      2,
-    ),
-    'utf8',
-  )
 }

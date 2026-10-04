@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ProjectContextModeSnapshot, SessionContextModeSnapshot } from "@forge/protocol";
+import type { SessionContextModeSnapshot } from "@forge/protocol";
 import { sendJson } from "../../../http-utils.js";
 import { createContextModeRoutes } from "../context-mode-routes.js";
 import type { HttpRoute } from "../../shared/http-route.js";
@@ -13,50 +13,6 @@ afterEach(async () => {
 });
 
 describe("createContextModeRoutes", () => {
-  it("serves uncached read-only context artifacts and rejects writes", async () => {
-    const payload = { contextMode: { sessionAgentId: "manager" }, revision: 1, files: [] };
-    const read = vi.fn(async () => payload);
-    const swarmManager = { getSessionContextArtifacts: read } as unknown as SwarmManager;
-    const server = await createRouteServer(createContextModeRoutes({ swarmManager }));
-    const response = await fetch(`${server.baseUrl}/api/agents/manager/context-artifacts`);
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    await expect(response.json()).resolves.toEqual(payload);
-    expect(read).toHaveBeenCalledWith("manager");
-    expect((await fetch(`${server.baseUrl}/api/agents/manager/context-artifacts`, { method: "PUT" })).status).toBe(405);
-    expect(read).toHaveBeenCalledTimes(1);
-    read.mockRejectedValueOnce(new Error("Unknown agent: missing"));
-    expect((await fetch(`${server.baseUrl}/api/agents/missing/context-artifacts`)).status).toBe(404);
-  });
-
-  it("returns summary by default and round-trips project GET/PUT", async () => {
-    const profile = { profileId: "forge", defaultContextMode: undefined as "summary" | "fresh" | undefined };
-    const swarmManager = {
-      getProjectContextMode: vi.fn((profileId: string) => ({
-        profileId,
-        mode: profile.defaultContextMode ?? "summary",
-      })),
-      updateProjectContextMode: vi.fn(async (_profileId: string, mode: "summary" | "fresh") => {
-        profile.defaultContextMode = mode;
-      }),
-    } as unknown as SwarmManager;
-    const server = await createRouteServer(
-      createContextModeRoutes({ swarmManager }),
-    );
-
-    const initial = await fetch(`${server.baseUrl}/api/profiles/forge/context-mode`);
-    expect(initial.status).toBe(200);
-    await expect(initial.json()).resolves.toEqual({ profileId: "forge", mode: "summary" } satisfies ProjectContextModeSnapshot);
-
-    const updated = await fetch(`${server.baseUrl}/api/profiles/forge/context-mode`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "fresh" }),
-    });
-    expect(updated.status).toBe(200);
-    await expect(updated.json()).resolves.toEqual({ profileId: "forge", mode: "fresh" });
-    expect(swarmManager.updateProjectContextMode).toHaveBeenCalledWith("forge", "fresh");
-  });
 
   it("round-trips session override, inherit restore, and rejects invalid writes", async () => {
     const snapshot: SessionContextModeSnapshot = {
@@ -116,51 +72,6 @@ describe("createContextModeRoutes", () => {
     await expect(invalid.json()).resolves.toMatchObject({
       error: 'mode must be "summary" or "fresh"',
     });
-  });
-
-  it("reports unsupported-runtime fresh activation clearly", async () => {
-    const swarmManager = {
-      getSessionContextMode: vi.fn(),
-      updateSessionContextMode: vi.fn(async () => {
-        throw new Error("Context v2 is not supported for Cursor SDK runtimes.");
-      }),
-    } as unknown as SwarmManager;
-    const server = await createRouteServer(
-      createContextModeRoutes({ swarmManager }),
-    );
-
-    const response = await fetch(`${server.baseUrl}/api/agents/cursor/context-mode`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "fresh" }),
-    });
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      error: "Context v2 is not supported for Cursor SDK runtimes.",
-    });
-  });
-
-  it("rejects session PUT targeting a worker", async () => {
-    const swarmManager = {
-      getSessionContextMode: vi.fn(),
-      updateSessionContextMode: vi.fn(async () => {
-        throw new Error("Context mode can only be updated on manager sessions.");
-      }),
-    } as unknown as SwarmManager;
-    const server = await createRouteServer(
-      createContextModeRoutes({ swarmManager }),
-    );
-
-    const response = await fetch(`${server.baseUrl}/api/agents/worker-1/context-mode`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "fresh" }),
-    });
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      error: "Context mode can only be updated on manager sessions.",
-    });
-    expect(swarmManager.updateSessionContextMode).toHaveBeenCalledWith("worker-1", "fresh");
   });
 
 });

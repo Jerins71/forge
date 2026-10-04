@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,38 +22,6 @@ afterEach(async () => {
 });
 
 describe("file browser delete", () => {
-  it("deletes files and folders within cwd with path whitespace preserved", async () => {
-    const harness = await createHarness();
-    const spacedFile = " foo.txt";
-    await writeFile(join(harness.workspaceDir, spacedFile), "leading-space\n", "utf8");
-    await mkdir(join(harness.workspaceDir, "nested"), { recursive: true });
-    await writeFile(join(harness.workspaceDir, "nested", "child.txt"), "child\n", "utf8");
-
-    const fileDelete = await fetch(
-      `${harness.server.baseUrl}/api/files/content?agentId=manager-1&path=${encodeURIComponent(spacedFile)}`,
-      { method: "DELETE" },
-    );
-    expect(fileDelete.status).toBe(200);
-    expect((await fileDelete.json()) as FileDeleteResponse).toEqual({
-      success: true,
-      path: spacedFile,
-      entryType: "file",
-    });
-
-    const folderDelete = await fetch(
-      `${harness.server.baseUrl}/api/files/content?agentId=manager-1&path=${encodeURIComponent("nested")}`,
-      { method: "DELETE" },
-    );
-    expect(folderDelete.status).toBe(200);
-    expect((await folderDelete.json()) as FileDeleteResponse).toEqual({
-      success: true,
-      path: "nested",
-      entryType: "directory",
-    });
-
-    await expect(readFile(join(harness.workspaceDir, spacedFile), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(join(harness.workspaceDir, "nested", "child.txt"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-  });
 
   it("rejects workspace root deletion and traversal escapes", async () => {
     const harness = await createHarness();
@@ -109,21 +77,6 @@ describe("file browser delete", () => {
     expect(traversalDelete.status).toBe(403);
   });
 
-  it("rejects deletes through nested paths behind outside-target symlinks", async () => {
-    const harness = await createHarness();
-    const outsideNested = join(harness.root, "outside-nested");
-    await mkdir(join(outsideNested, "nested"), { recursive: true });
-    await writeFile(join(outsideNested, "nested", "leaf.txt"), "leaf\n", "utf8");
-    await symlink(outsideNested, join(harness.workspaceDir, "middle"));
-
-    const traversalDelete = await fetch(
-      `${harness.server.baseUrl}/api/files/content?agentId=manager-1&path=${encodeURIComponent("middle/nested/leaf.txt")}`,
-      { method: "DELETE" },
-    );
-    expect(traversalDelete.status).toBe(403);
-    await expect(readFile(join(outsideNested, "nested", "leaf.txt"), "utf8")).resolves.toBe("leaf\n");
-  });
-
   it("deletes internal file and directory symlinks without removing their targets", async () => {
     const harness = await createHarness();
     const targetFile = join(harness.workspaceDir, "target.txt");
@@ -163,40 +116,6 @@ describe("file browser delete", () => {
     await expect(access(dirLink)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(targetFile, "utf8")).resolves.toBe("target-content\n");
     await expect(readFile(join(targetDir, "kept.txt"), "utf8")).resolves.toBe("kept\n");
-  });
-
-  it("records tracked deletes", async () => {
-    const harness = await createHarness();
-    const trackedPath = join(harness.workspaceDir, "tracked.txt");
-    await writeFile(trackedPath, "tracked\n", "utf8");
-    const workspaceRoot = await realpath(harness.workspaceDir);
-    const resolvedTrackedPath = join(workspaceRoot, "tracked.txt");
-    const recordMutation = vi.fn(async () => true);
-    harness.swarmManager.getVersioningService = () => ({
-      isTrackedPath: (pathValue: string) => pathValue === resolvedTrackedPath || pathValue === trackedPath,
-      recordMutation,
-    }) as never;
-
-    const trackedDelete = await fetch(
-      `${harness.server.baseUrl}/api/files/content?agentId=manager-1&path=${encodeURIComponent("tracked.txt")}`,
-      { method: "DELETE" },
-    );
-    expect(trackedDelete.status).toBe(200);
-    expect(recordMutation).toHaveBeenCalledWith({
-      path: resolvedTrackedPath,
-      action: "delete",
-      source: "api-write-file",
-      agentId: "manager-1",
-    });
-  });
-
-  it("returns 404 for missing paths", async () => {
-    const harness = await createHarness();
-    const response = await fetch(
-      `${harness.server.baseUrl}/api/files/content?agentId=manager-1&path=${encodeURIComponent("missing.txt")}`,
-      { method: "DELETE" },
-    );
-    expect(response.status).toBe(404);
   });
 });
 

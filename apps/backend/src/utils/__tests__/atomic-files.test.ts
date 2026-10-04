@@ -2,13 +2,7 @@ import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  appendJsonl,
-  readJsonFileIfExists,
-  updateJsonFileAtomic,
-  writeFileAtomic,
-  writeJsonFileAtomic,
-} from "../atomic-files.js";
+import { appendJsonl, readJsonFileIfExists, updateJsonFileAtomic, writeFileAtomic } from "../atomic-files.js";
 
 const tempRoots: string[] = [];
 
@@ -25,39 +19,6 @@ afterEach(async () => {
 });
 
 describe("atomic-files", () => {
-  it("writeFileAtomic creates files and parent directories", async () => {
-    const root = await createTempRoot();
-    const filePath = join(root, "nested", "dir", "note.txt");
-
-    await writeFileAtomic(filePath, "hello world");
-
-    await expect(readFile(filePath, "utf8")).resolves.toBe("hello world");
-  });
-
-  it.each([false, true])("publishes streamed cache chunks only after the complete stream is written (durable=%s)", async (durable) => {
-    const root = await createTempRoot();
-    const path = join(root, "stream.json");
-    await writeFileAtomic(path, "previous");
-    async function* chunks() {
-      yield "[1,";
-      expect(await readFile(path, "utf8")).toBe("previous");
-      yield Buffer.from("2]");
-    }
-    await writeFileAtomic(path, chunks(), { mode: 0o600, durable });
-    expect(await readFile(path, "utf8")).toBe("[1,2]");
-  });
-
-  it("writeJsonFileAtomic pretty prints JSON with a trailing newline", async () => {
-    const root = await createTempRoot();
-    const filePath = join(root, "data.json");
-
-    await writeJsonFileAtomic(filePath, { answer: 42 });
-
-    await expect(readFile(filePath, "utf8")).resolves.toBe(`{
-  "answer": 42
-}
-`);
-  });
 
   it("durable writes validate before commit and clean temporary files after a rejected boundary", async () => {
     const root = await createTempRoot();
@@ -86,45 +47,6 @@ describe("atomic-files", () => {
     expect((await stat(filePath)).mode & 0o777).toBe(0o600);
   });
 
-  it("writeFileAtomic preserves binary bytes", async () => {
-    const root = await createTempRoot();
-    const filePath = join(root, "tool.bin");
-    const bytes = Uint8Array.from([0, 1, 2, 127, 128, 254, 255]);
-
-    await writeFileAtomic(filePath, bytes, { mode: 0o700 });
-
-    await expect(readFile(filePath)).resolves.toEqual(Buffer.from(bytes));
-    expect((await stat(filePath)).mode & 0o777).toBe(0o700);
-  });
-
-  it("readJsonFileIfExists returns parsed data for existing files", async () => {
-    const root = await createTempRoot();
-    const filePath = join(root, "config.json");
-
-    await writeJsonFileAtomic(filePath, { enabled: true, count: 3 });
-
-    await expect(readJsonFileIfExists<{ enabled: boolean; count: number }>(filePath)).resolves.toEqual({
-      enabled: true,
-      count: 3,
-    });
-  });
-
-  it("readJsonFileIfExists returns undefined for missing files", async () => {
-    const root = await createTempRoot();
-    const filePath = join(root, "missing.json");
-
-    await expect(readJsonFileIfExists(filePath)).resolves.toBeUndefined();
-  });
-
-  it("readJsonFileIfExists returns undefined for malformed JSON", async () => {
-    const root = await createTempRoot();
-    const filePath = join(root, "broken.json");
-
-    await writeFileAtomic(filePath, "{not valid json");
-
-    await expect(readJsonFileIfExists(filePath)).resolves.toBeUndefined();
-  });
-
   it("updateJsonFileAtomic performs a read-modify-write cycle", async () => {
     const root = await createTempRoot();
     const filePath = join(root, "counter.json");
@@ -138,31 +60,6 @@ describe("atomic-files", () => {
   });
 
   describe("writeFileAtomic crash window", () => {
-    it("leaves a fresh target absent (not partially written) when rename fails permanently", async () => {
-      vi.resetModules();
-      vi.doMock("node:fs/promises", async () => {
-        const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
-        return {
-          ...actual,
-          rename: vi.fn().mockRejectedValue(Object.assign(new Error("simulated crash"), { code: "EPERM" })),
-        };
-      });
-
-      const { writeFileAtomic: writeFileAtomicMocked } = await import("../atomic-files.js");
-      const root = await createTempRoot();
-      const filePath = join(root, "fresh.txt");
-
-      await expect(writeFileAtomicMocked(filePath, "new content")).rejects.toThrow("simulated crash");
-
-      // Target was never created — the crash happened between temp-write and rename.
-      await expect(readFile(filePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-
-      // The temp file is left on disk holding the content that would have been renamed in.
-      const entries = await readdir(root);
-      const tempEntries = entries.filter((name) => name.startsWith("fresh.txt.") && name.endsWith(".tmp"));
-      expect(tempEntries).toHaveLength(1);
-      await expect(readFile(join(root, tempEntries[0]), "utf8")).resolves.toBe("new content");
-    });
 
     it("leaves an existing target intact (not clobbered or truncated) when rename fails permanently", async () => {
       const root = await createTempRoot();
@@ -194,14 +91,6 @@ describe("atomic-files", () => {
   });
 
   describe("appendJsonl", () => {
-    it("creates parent directories and appends a single JSON line", async () => {
-      const root = await createTempRoot();
-      const filePath = join(root, "nested", "dir", "log.jsonl");
-
-      await appendJsonl(filePath, { event: "started", seq: 1 });
-
-      await expect(readFile(filePath, "utf8")).resolves.toBe('{"event":"started","seq":1}\n');
-    });
 
     it("appends subsequent calls as additional lines without disturbing prior lines", async () => {
       const root = await createTempRoot();

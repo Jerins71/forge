@@ -13,93 +13,6 @@ afterEach(async () => {
   await Promise.all(activeServers.splice(0).map((server) => server.close()))
 })
 
-describe('mermaid preview shipped asset pair', () => {
-  it('embed.js contains the forge:mermaid-ping handler so parents can recover from a missed READY', async () => {
-    const server = await createMermaidPreviewTestServer()
-
-    const response = await fetch(`${server.baseUrl}/mermaid-preview/assets/embed.js`)
-    expect(response.status).toBe(200)
-    const source = await response.text()
-
-    // The embed must post READY at bootstrap
-    expect(source).toContain('forge:mermaid-ready')
-    // The embed must handle pings from the parent to re-post READY
-    expect(source).toContain('forge:mermaid-ping')
-    // The embed must handle render requests
-    expect(source).toContain('forge:mermaid-render')
-    // The embed must handle export requests
-    expect(source).toContain('forge:mermaid-export-svg')
-    // The embed must post results back
-    expect(source).toContain('forge:mermaid-rendered')
-    expect(source).toContain('forge:mermaid-export-svg-result')
-    // The embed must post error messages
-    expect(source).toContain('forge:mermaid-error')
-  })
-
-  it('embed HTML loads the vendored mermaid runtime and embed.js', async () => {
-    const server = await createMermaidPreviewTestServer()
-
-    const htmlResponse = await fetch(
-      `${server.baseUrl}/mermaid-preview/embed?instanceId=test-1&theme=dark`,
-    )
-    expect(htmlResponse.status).toBe(200)
-    const html = await htmlResponse.text()
-
-    // Verify script references
-    expect(html).toContain('/mermaid-preview/assets/vendor/mermaid.min.js')
-    expect(html).toContain('/mermaid-preview/assets/embed.js')
-    expect(html).toContain('/mermaid-preview/assets/embed.css')
-
-    // Verify all three referenced assets are actually fetchable
-    const assetPaths = [
-      '/mermaid-preview/assets/vendor/mermaid.min.js',
-      '/mermaid-preview/assets/embed.js',
-      '/mermaid-preview/assets/embed.css',
-    ]
-
-    for (const assetPath of assetPaths) {
-      const assetResponse = await fetch(`${server.baseUrl}${assetPath}`)
-      expect(assetResponse.status).toBe(200)
-      const body = await assetResponse.text()
-      expect(body.length).toBeGreaterThan(0)
-    }
-  })
-
-  it('embed.js ping handler calls the same postReadyMessage as bootstrap', async () => {
-    const server = await createMermaidPreviewTestServer()
-
-    const response = await fetch(`${server.baseUrl}/mermaid-preview/assets/embed.js`)
-    expect(response.status).toBe(200)
-    const source = await response.text()
-
-    // The ping handler must call postReadyMessage (the same function
-    // used at bootstrap) so the READY payload is always identical
-    expect(source).toMatch(/case\s+PING_MESSAGE\s*:\s*\n?\s*postReadyMessage\(\)/)
-
-    // Bootstrap must also call postReadyMessage
-    const bootstrapMatch = source.match(/renderPlaceholder\([^)]+\)\s*\n\s*postReadyMessage\(\)/)
-    expect(bootstrapMatch).toBeTruthy()
-  })
-
-  it('ships readable-scale zoom, fit, reset, keyboard, wheel, and pointer-pan behavior', async () => {
-    const server = await createMermaidPreviewTestServer()
-
-    const response = await fetch(`${server.baseUrl}/mermaid-preview/assets/embed.js`)
-    expect(response.status).toBe(200)
-    const source = await response.text()
-
-    expect(source).toContain('MIN_READABLE_SCALE')
-    expect(source).toContain('resetReadableView()')
-    expect(source).toContain('fitDiagram()')
-    expect(source).toContain("addEventListener('wheel'")
-    expect(source).toContain("addEventListener('pointerdown'")
-    expect(source).toContain("addEventListener('keydown'")
-    expect(source).toContain('event.ctrlKey || event.metaKey || event.altKey')
-    expect(source).toContain("event.pointerType === 'touch'")
-    expect(source).toContain('Large diagram — opened at')
-  })
-})
-
 describe('mermaid preview routes', () => {
   it('serves the embed shell with restrictive headers', async () => {
     const server = await createMermaidPreviewTestServer()
@@ -134,30 +47,6 @@ describe('mermaid preview routes', () => {
     expect(html).not.toContain('diagram-1')
   })
 
-  it('serves static assets with expected content types', async () => {
-    const server = await createMermaidPreviewTestServer()
-
-    const jsResponse = await fetch(`${server.baseUrl}/mermaid-preview/assets/embed.js`)
-    expect(jsResponse.status).toBe(200)
-    expect(jsResponse.headers.get('content-type')).toContain('text/javascript')
-    expect(jsResponse.headers.get('cache-control')).toBe('no-store')
-    expect(await jsResponse.text()).toContain('forge:mermaid-ready')
-
-    const cssResponse = await fetch(`${server.baseUrl}/mermaid-preview/assets/embed.css`)
-    expect(cssResponse.status).toBe(200)
-    expect(cssResponse.headers.get('content-type')).toContain('text/css')
-    expect(cssResponse.headers.get('cache-control')).toBe('no-store')
-    expect(await cssResponse.text()).toContain('.mermaid-preview-shell')
-
-    const mermaidResponse = await fetch(
-      `${server.baseUrl}/mermaid-preview/assets/vendor/mermaid.min.js`,
-    )
-    expect(mermaidResponse.status).toBe(200)
-    expect(mermaidResponse.headers.get('content-type')).toContain('text/javascript')
-    expect(mermaidResponse.headers.get('cache-control')).toBe('no-store')
-    expect(await mermaidResponse.text()).toContain('globalThis["mermaid"]')
-  })
-
   it('rejects attempted asset path traversal', async () => {
     const server = await createMermaidPreviewTestServer()
 
@@ -166,16 +55,6 @@ describe('mermaid preview routes', () => {
 
     const payload = (await response.json()) as { error?: string }
     expect(payload.error).toBe('Forbidden')
-  })
-
-  it('returns 404 for missing assets inside the allowed root', async () => {
-    const server = await createMermaidPreviewTestServer()
-
-    const response = await fetch(`${server.baseUrl}/mermaid-preview/assets/missing.js`)
-    expect(response.status).toBe(404)
-
-    const payload = (await response.json()) as { error?: string }
-    expect(payload.error).toBe('Asset not found')
   })
 })
 

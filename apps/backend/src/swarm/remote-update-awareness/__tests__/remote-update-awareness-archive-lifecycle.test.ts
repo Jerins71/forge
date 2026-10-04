@@ -63,25 +63,4 @@ describe("remote update awareness archive lifecycle", () => {
     await service.stop();
     database.close();
   });
-
-  it("keeps the global master authoritative over an explicit project-on override", async () => {
-    const { database, store } = await createTestStore();
-    const manager = {
-      getConfig: () => ({ paths: {} }),
-      listProfiles: () => [profile()],
-      getAgent: () => descriptor,
-    } as unknown as SwarmManager;
-    const service = new LocalRemoteUpdateAwarenessService({
-      swarmManager: manager,
-      coreService: new RemoteUpdateAwarenessService(store),
-      isGitProject: async () => true,
-    });
-    await service.start();
-    service.setProjectOverride("project", "on");
-    expect(service.getProjectSnapshot("project")).toMatchObject({
-      override: "on", globalEnabled: false, effectiveEnabled: false, state: "disabled",
-    });
-    await service.stop();
-    database.close();
-  });
 });

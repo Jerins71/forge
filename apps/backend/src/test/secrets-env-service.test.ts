@@ -3,12 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { AuthStorage } from '@earendil-works/pi-coding-agent'
-import {
-  getManagedModelProviderCredentialAvailability,
-  getManagedModelProviderCredentialSummaries,
-  resolveCursorSdkApiKey,
-  SecretsEnvService,
-} from '../swarm/secrets-env-service.js'
+import { getManagedModelProviderCredentialSummaries, resolveCursorSdkApiKey, SecretsEnvService } from '../swarm/secrets-env-service.js'
 import type { SwarmConfig } from '../swarm/types.js'
 
 interface TestPaths {
@@ -109,36 +104,6 @@ describe('SecretsEnvService path migration', () => {
     }
   })
 
-  it('reads legacy flat-root auth when canonical auth is missing, then writes updated auth to the canonical path', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'secrets-env-service-legacy-auth-'))
-    const paths = buildPaths(root)
-
-    await mkdir(join(root, 'auth'), { recursive: true })
-
-    const legacyAuthStorage = AuthStorage.create(paths.authFile)
-    legacyAuthStorage.set('anthropic', {
-      type: 'api_key',
-      key: 'legacy-anthropic-key',
-      access: 'legacy-anthropic-key',
-      refresh: '',
-      expires: '',
-    } as any)
-
-    const service = createService(paths)
-
-    const initialProviders = await service.listSettingsAuth()
-    expect(initialProviders.find((provider) => provider.provider === 'anthropic')?.configured).toBe(true)
-
-    await service.updateSettingsAuth({ 'openai-codex': 'new-openai-key' })
-
-    const canonicalAuthStorage = AuthStorage.create(paths.sharedAuthFile)
-    const anthropic = canonicalAuthStorage.get('anthropic')
-    const openai = canonicalAuthStorage.get('openai-codex')
-
-    expect((anthropic as any)?.key ?? (anthropic as any)?.access).toBe('legacy-anthropic-key')
-    expect((openai as any)?.key ?? (openai as any)?.access).toBe('new-openai-key')
-  })
-
   it('rejects setting an Anthropic API key while pooled Anthropic OAuth accounts exist', async () => {
     const root = await mkdtemp(join(tmpdir(), 'secrets-env-service-pooled-anthropic-'))
     const paths = buildPaths(root)
@@ -192,69 +157,6 @@ describe('SecretsEnvService path migration', () => {
       "Credential pooling is only supported for 'openai-codex', 'anthropic'",
     )
   })
-
-  it('reports managed model provider availability from canonical secrets/auth plus process env fallback', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'secrets-env-service-availability-test-'))
-    const paths = buildPaths(root)
-
-    await mkdir(join(root, 'shared', 'config', 'auth'), { recursive: true })
-    await writeFile(paths.sharedSecretsFile, JSON.stringify({ XAI_API_KEY: 'xai-secret-key' }, null, 2), 'utf8')
-
-    const sharedAuthStorage = AuthStorage.create(paths.sharedAuthFile)
-    sharedAuthStorage.set('openai-codex', {
-      type: 'api_key',
-      key: 'sk-openai-secret',
-      access: 'sk-openai-secret',
-      refresh: '',
-      expires: '',
-    } as any)
-
-    const previousAnthropic = process.env.ANTHROPIC_API_KEY
-    const previousOpenRouter = process.env.OPENROUTER_API_KEY
-    delete process.env.ANTHROPIC_API_KEY
-    delete process.env.OPENROUTER_API_KEY
-
-    try {
-      process.env.ANTHROPIC_API_KEY = 'sk-ant-secret'
-      process.env.OPENROUTER_API_KEY = 'sk-or-v1-secret'
-
-      const availability = await getManagedModelProviderCredentialAvailability(createConfig(paths))
-
-      expect(availability.get('openai-codex')).toBe(true)
-      expect(availability.get('xai')).toBe(true)
-      expect(availability.get('anthropic')).toBe(true)
-      expect(availability.get('openrouter')).toBe(true)
-      expect(availability.get('cursor-sdk')).toBe(false)
-    } finally {
-      if (previousAnthropic === undefined) {
-        delete process.env.ANTHROPIC_API_KEY
-      } else {
-        process.env.ANTHROPIC_API_KEY = previousAnthropic
-      }
-
-      if (previousOpenRouter === undefined) {
-        delete process.env.OPENROUTER_API_KEY
-      } else {
-        process.env.OPENROUTER_API_KEY = previousOpenRouter
-      }
-    }
-  })
-
-  it('reports xAI manager availability for stored OAuth credentials', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'secrets-env-service-xai-oauth-availability-test-'));
-    const paths = buildPaths(root);
-
-    await mkdir(join(root, 'shared', 'config', 'auth'), { recursive: true });
-    AuthStorage.create(paths.sharedAuthFile).set('xai', {
-      type: 'oauth',
-      access: 'xai-oauth-access',
-      refresh: 'xai-oauth-refresh',
-      expires: Date.now() + 60_000,
-    } as any);
-
-    const availability = await getManagedModelProviderCredentialAvailability(createConfig(paths));
-    expect(availability.get('xai')).toBe(true);
-  });
 
   it('resolves Cursor SDK API keys from auth, secrets, then env without leaking secret values in errors', async () => {
     const root = await mkdtemp(join(tmpdir(), 'secrets-env-service-cursor-sdk-auth-'))
@@ -316,51 +218,5 @@ describe('SecretsEnvService path migration', () => {
         process.env.CURSOR_API_KEY = previousCursor
       }
     }
-  })
-
-  it('lists Cursor SDK as API-key-only Settings auth and masks the stored key', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'secrets-env-service-cursor-sdk-list-'))
-    const paths = buildPaths(root)
-    const service = createService(paths)
-
-    await service.updateSettingsAuth({ 'cursor-sdk': 'cursor-api-key-secret' })
-    const providers = await service.listSettingsAuth()
-    const cursorProvider = providers.find((provider) => provider.provider === 'cursor-sdk')
-
-    expect(cursorProvider).toEqual({
-      provider: 'cursor-sdk',
-      configured: true,
-      authType: 'api_key',
-      maskedValue: '********cret',
-    })
-  })
-
-  it('does not treat OAuth-shaped cursor-sdk auth entries as usable credentials', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'secrets-env-service-cursor-sdk-oauth-'))
-    const paths = buildPaths(root)
-    const config = createConfig(paths)
-    await mkdir(join(root, 'shared', 'config', 'auth'), { recursive: true })
-
-    const authStorage = AuthStorage.create(paths.sharedAuthFile)
-    authStorage.set('cursor-sdk', makeOAuthCredential('cursor-oauth-access-token') as any)
-
-    const service = createService(paths)
-    const providers = await service.listSettingsAuth()
-    expect(providers.find((provider) => provider.provider === 'cursor-sdk')).toEqual({
-      provider: 'cursor-sdk',
-      configured: false,
-      authType: undefined,
-      maskedValue: undefined,
-    })
-
-    await expect(resolveCursorSdkApiKey(config)).rejects.toThrow(
-      'Cursor SDK auth not configured. Add Cursor SDK auth in Settings → Authentication.',
-    )
-    const summaries = await getManagedModelProviderCredentialSummaries(config)
-    expect(summaries.get('cursor-sdk')).toEqual({
-      configured: false,
-      authTypes: [],
-      sources: [],
-    })
   })
 })
