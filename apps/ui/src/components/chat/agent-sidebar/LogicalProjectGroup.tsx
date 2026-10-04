@@ -13,11 +13,11 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useEnvironmentCatalog, useEnvironmentSelector, useLogicalProjects, useSelectorStore } from '@/hooks/use-environment-selector'
+import { useEnvironmentSelector, useLogicalProjects, useSelectorStore } from '@/hooks/use-environment-selector'
 import { useEnvironmentRegistry, usePrimaryEnvironmentId } from '@/lib/origin-store/environment-provider'
-import { environmentLabel } from '@/components/settings/environments/environment-runtime'
 import { cn } from '@/lib/utils'
 import { EnvironmentBadge, EnvironmentStatusChip } from './EnvironmentStatusChip'
+import { useEnvironmentLabel } from './hooks/useEnvironmentStatus'
 
 const MEMBER_SESSION_LIMIT = 5
 const EMPTY_IDS: readonly string[] = []
@@ -30,16 +30,6 @@ export interface EnvironmentSessionNavigation {
   /** This machine's label for badges on its own session rows; null with a single environment. */
   primaryBadgeLabel: string | null
 }
-
-export function useEnvironmentLabel(environmentId: string): string {
-  const registry = useEnvironmentRegistry()
-  const catalog = useEnvironmentCatalog()
-  // Subscribing to connection changes keeps a refreshed descriptor label current.
-  useEnvironmentSelector(environmentId, 'connection', selectPhase)
-  return environmentLabel(catalog.get(environmentId), registry.get(environmentId).descriptor())
-}
-
-const selectPhase = (state: { phase: string }) => state.phase
 
 /**
  * One logical project across environments. `standalone` renders its own header; `members` renders

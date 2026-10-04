@@ -24,9 +24,18 @@ export function describeEnvironmentStatus(connection: ConnectionState, now: numb
     case 'disabled':
       return { kind: 'disabled', label: 'Disabled', detail: 'Environment is disabled', blocksLaunch: true }
     case 'auth-blocked':
-      return /revok/i.test(connection.reason ?? '')
-        ? { kind: 'revoked', label: 'Revoked', detail: 'This device was revoked; pair again', blocksLaunch: true }
-        : { kind: 'needs-pairing', label: 'Needs pairing', detail: 'Pair this environment again', blocksLaunch: true }
+      if (connection.blockedCause === 'revoked') {
+        return { kind: 'revoked', label: 'Revoked', detail: 'This device was revoked; pair again', blocksLaunch: true }
+      }
+      if (connection.blockedCause === 'https-required') {
+        return { kind: 'needs-pairing', label: 'HTTPS required', detail: 'This page uses HTTPS, so the environment must too', blocksLaunch: true }
+      }
+      return {
+        kind: 'needs-pairing',
+        label: 'Needs pairing',
+        detail: connection.blockedCause === 'expired' ? 'Access expired; pair again' : 'Pair this environment again',
+        blocksLaunch: true,
+      }
     case 'version-blocked':
       return { kind: 'update-required', label: 'Update required', detail: connection.reason ?? 'Forge versions are incompatible', blocksLaunch: true }
     case 'identity-blocked':

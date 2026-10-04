@@ -28,8 +28,9 @@ describe('describeEnvironmentStatus', () => {
   })
 
   it('distinguishes revoked from needs pairing', () => {
-    expect(describeEnvironmentStatus(state({ phase: 'auth-blocked', reason: 'device revoked' }), NOW).kind).toBe('revoked')
-    expect(describeEnvironmentStatus(state({ phase: 'auth-blocked', reason: 'session expired' }), NOW).kind).toBe('needs-pairing')
+    expect(describeEnvironmentStatus(state({ phase: 'auth-blocked', blockedCause: 'revoked' }), NOW).kind).toBe('revoked')
+    expect(describeEnvironmentStatus(state({ phase: 'auth-blocked', blockedCause: 'expired' }), NOW).kind).toBe('needs-pairing')
+    expect(describeEnvironmentStatus(state({ phase: 'auth-blocked', blockedCause: 'https-required' }), NOW)).toMatchObject({ kind: 'needs-pairing', label: 'HTTPS required' })
   })
 
   it('reports update required and identity mismatch as blocking', () => {

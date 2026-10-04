@@ -1,11 +1,13 @@
 /** @vitest-environment jsdom */
 
-import { type Root } from 'react-dom/client'
+import { createRoot, type Root } from 'react-dom/client'
+import { createElement, useEffect } from 'react'
 import { flushSync } from 'react-dom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   parseRouteStateFromLocation,
   toRouteSearch,
+  useRouteState,
   type AppRouteState,
   type ActiveView,
 } from './use-route-state'
@@ -91,4 +93,34 @@ describe('useRouteState — settingsTab deep-link', () => {
     })
   })
 
+})
+
+describe('useRouteState — environment-qualified sessions', () => {
+  // Failure case: a remote session ID must never become a local route, including through the sticky
+  // agent kept while visiting Settings.
+  const ENV = '00000000-0000-4000-8000-000000000002'
+
+  it('round-trips the owning environment and launch group', () => {
+    const state = parseRouteStateFromLocation('/', { agent: 'session-1', env: ENV })
+    expect(state).toEqual({ view: 'chat', agentId: 'session-1', deckPanel: undefined, environmentId: ENV })
+    expect(toRouteSearch(state)).toEqual({ agent: 'session-1', env: ENV })
+    expect(parseRouteStateFromLocation('/', { launch: 'group-1' })).toMatchObject({ view: 'chat', launch: 'group-1' })
+  })
+
+  it('does not carry a remote session as the sticky local agent', () => {
+    const navigations: unknown[] = []
+    function Probe() {
+      const value = useRouteState({
+        pathname: '/',
+        search: { agent: 'session-1', env: ENV },
+        navigate: (options) => { navigations.push(options.search) },
+      })
+      useEffect(() => { captured.current = value })
+      return null
+    }
+    root = createRoot(container)
+    flushSync(() => root!.render(createElement(Probe)))
+    captured.current!.navigateToRoute({ view: 'settings' })
+    expect(navigations).toEqual([{ view: 'settings' }])
+  })
 })

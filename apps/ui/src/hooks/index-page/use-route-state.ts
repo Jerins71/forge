@@ -8,7 +8,15 @@ export type ActiveView = 'chat' | 'settings' | 'stats' | 'archive'
 export type StatsTab = 'overview' | 'tokens' | 'throughput'
 export type DeckPanel = 'git' | 'browser' | 'terminal'
 export type AppRouteState =
-  | { view: 'chat'; agentId: string; deckPanel?: DeckPanel }
+  | {
+      view: 'chat'
+      agentId: string
+      deckPanel?: DeckPanel
+      /** Environment that owns `agentId`; omitted for this machine's sessions. Never resolved locally. */
+      environmentId?: string
+      /** Logical project key whose launch composer is open; `agentId` is ignored while set. */
+      launch?: string
+    }
   | { view: 'settings'; settingsTab?: string; settingsProfileId?: string; skillImportUrl?: string }
   | { view: 'stats'; statsTab?: StatsTab }
   | { view: 'archive' }
@@ -16,6 +24,8 @@ export type AppRouteState =
 type AppRouteSearch = {
   view?: string
   agent?: string
+  env?: string
+  launch?: string
   deckPanel?: string
   statsTab?: string
   settingsTab?: string
@@ -92,11 +102,15 @@ export function parseRouteStateFromLocation(pathname: string, search: unknown): 
     return { view: 'archive' }
   }
 
-  if (view === 'chat' || agentId !== undefined) {
+  const environmentId = typeof routeSearch.env === 'string' && routeSearch.env.trim() ? routeSearch.env.trim() : undefined
+  const launch = typeof routeSearch.launch === 'string' && routeSearch.launch ? routeSearch.launch : undefined
+  if (view === 'chat' || agentId !== undefined || environmentId !== undefined || launch !== undefined) {
     return {
       view: 'chat',
       agentId: normalizeAgentId(agentId),
       deckPanel,
+      ...(environmentId ? { environmentId } : {}),
+      ...(launch ? { launch } : {}),
     }
   }
 
@@ -129,6 +143,8 @@ function normalizeRouteState(routeState: AppRouteState): AppRouteState {
     view: 'chat',
     agentId: normalizeAgentId(routeState.agentId),
     deckPanel: routeState.deckPanel,
+    ...(routeState.environmentId ? { environmentId: routeState.environmentId } : {}),
+    ...(routeState.launch ? { launch: routeState.launch } : {}),
   }
 }
 
@@ -171,6 +187,8 @@ export function toRouteSearch(
   if (routeState.deckPanel) {
     search.deckPanel = routeState.deckPanel
   }
+  if (routeState.environmentId) search.env = routeState.environmentId
+  if (routeState.launch) search.launch = routeState.launch
 
   return search
 }
@@ -192,6 +210,7 @@ function routeStatesEqual(left: AppRouteState, right: AppRouteState): boolean {
 
   if (left.view === 'chat' && right.view === 'chat') {
     return left.agentId === right.agentId && left.deckPanel === right.deckPanel
+      && left.environmentId === right.environmentId && left.launch === right.launch
   }
 
   return false
@@ -223,7 +242,9 @@ export function useRouteState({
   )
 
   const activeView: ActiveView = routeState.view
-  const stickyAgent = routeState.view === 'chat' ? routeState.agentId : undefined
+  // A session on another environment is never kept as the sticky local agent; returning to chat
+  // must not open the same session ID on this machine.
+  const stickyAgent = routeState.view === 'chat' && !routeState.environmentId ? routeState.agentId : undefined
 
   const navigateToRoute = useCallback(
     (nextRouteState: AppRouteState, replace = false) => {
@@ -235,7 +256,7 @@ export function useRouteState({
       // Keep the current agent as a fallback when navigating to non-chat views
       // so it survives the round-trip.
       const currentSearch = (typeof search === 'object' && search !== null ? search : {}) as AppRouteSearch
-      const effectiveStickyAgent = normalizedRouteState.view === 'chat'
+      const effectiveStickyAgent = normalizedRouteState.view === 'chat' || currentSearch.env
         ? undefined
         : stickyAgent ?? currentSearch.agent
 

@@ -14,7 +14,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { EnvironmentStatusDot, useEnvironmentStatus } from '@/components/chat/agent-sidebar/EnvironmentStatusChip'
+import { EnvironmentStatusDot } from '@/components/chat/agent-sidebar/EnvironmentStatusChip'
+import { useEnvironmentStatus } from '@/components/chat/agent-sidebar/hooks/useEnvironmentStatus'
 import type { EnvironmentCatalogEntry } from '@forge/client-runtime'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 import { useEnvironmentSelector } from '@/hooks/use-environment-selector'

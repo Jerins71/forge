@@ -1,8 +1,7 @@
-import { memo, useEffect, useState } from 'react'
+import { memo } from 'react'
 import { cn } from '@/lib/utils'
-import { useEnvironmentSelector } from '@/hooks/use-environment-selector'
-import { selectConnection } from '@/components/settings/environments/environment-runtime'
-import { describeEnvironmentStatus, type EnvironmentStatus, type EnvironmentStatusKind } from '@/components/settings/environments/environment-status'
+import type { EnvironmentStatus, EnvironmentStatusKind } from '@/components/settings/environments/environment-status'
+import { useEnvironmentStatus } from './hooks/useEnvironmentStatus'
 
 const TONE: Record<EnvironmentStatusKind, string> = {
   online: 'bg-emerald-500',
@@ -13,20 +12,6 @@ const TONE: Record<EnvironmentStatusKind, string> = {
   'update-required': 'bg-amber-500',
   'identity-changed': 'bg-destructive',
   disabled: 'bg-muted-foreground/30',
-}
-
-/** Re-renders on this environment's connection changes only; offline age ticks locally. */
-export function useEnvironmentStatus(environmentId: string): EnvironmentStatus {
-  const connection = useEnvironmentSelector(environmentId, 'connection', selectConnection)
-  const ticking = connection.phase === 'offline' || connection.phase === 'backoff'
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!ticking) return
-    setNow(Date.now())
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000)
-    return () => window.clearInterval(timer)
-  }, [ticking])
-  return describeEnvironmentStatus(connection, now)
 }
 
 export function EnvironmentStatusDot({ status, className }: { status: EnvironmentStatus; className?: string }) {
