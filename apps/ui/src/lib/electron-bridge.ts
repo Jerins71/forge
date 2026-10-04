@@ -128,6 +128,8 @@ export interface BrowserWorkspaceBridge {
 }
 
 export interface ElectronBridge {
+  environmentPersistence?: EnvironmentPersistenceBridge
+  environmentCredentials?: EnvironmentCredentialsBridge
   windowRole: ElectronWindowRole
   backendUrl?: string
   backendWsUrl?: string
@@ -163,6 +165,128 @@ export interface ElectronBridge {
 }
 declare global { interface Window { electronBridge?: ElectronBridge } }
 export function isElectron(): boolean {
-  return typeof window !== 'undefined' && window.electronBridge?.windowRole === 'main'
+  return ( typeof window !== 'undefined' && window.electronBridge?.windowRole === 'main'
     && typeof window.electronBridge.backendWsUrl === 'string' && window.electronBridge.backendWsUrl.length > 0
+  )
+}
+
+export type EnvironmentCredentialResult<T> =
+  | { ok: true; value: T }
+  | {
+      ok: false
+      error: {
+        code:
+          | 'INVALID_INPUT'
+          | 'UNAUTHENTICATED'
+          | 'FORBIDDEN'
+          | 'IDENTITY_MISMATCH'
+          | 'UNAVAILABLE'
+          | 'INTERNAL'
+        message: string
+        retryable: boolean
+      }
+    }
+export interface DesktopEnvironmentTarget {
+  deviceSessionId:string
+  deviceName:string
+  scopes:import('@forge/protocol/environment-v2').Scope[]
+  pairedAt:string
+  expiresAt:string
+  environmentId: string
+  baseUrl: string
+  label: string
+  primary: boolean
+}
+export interface EnvironmentCredentialsBridge {
+  primary(): Promise<
+    EnvironmentCredentialResult<DesktopEnvironmentTarget | null>
+  >
+  list(): Promise<EnvironmentCredentialResult<DesktopEnvironmentTarget[]>>
+  pair(input: {
+    baseUrl: string
+    environmentId: string
+    credential: import('@forge/protocol/environment-v2').PairingExchange['credential']
+    deviceName: string
+    requestedScopes: import('@forge/protocol/environment-v2').Scope[]
+  }): Promise<
+    EnvironmentCredentialResult<{
+      environment: import('@forge/protocol/environment-v2').EnvironmentDescriptor
+      deviceSession: import('@forge/protocol/environment-v2').DeviceSession
+    }>
+  >
+  session(
+    environmentId: string,
+  ): Promise<
+    EnvironmentCredentialResult<{
+      deviceSession: import('@forge/protocol/environment-v2').DeviceSession
+    }>
+  >
+  wsTicket(
+    environmentId: string,
+    audience: 'rpc' | 'legacy',
+    protocolVersion: number,
+  ): Promise<EnvironmentCredentialResult<{ ticket: string; expiresAt: string }>>
+  request(input: {
+    environmentId: string
+    path: string
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+    headers?: Record<string, string>
+    body?: string
+  }): Promise<
+    EnvironmentCredentialResult<{
+      status: number
+      headers: Record<string, string>
+      body: string
+    }>
+  >
+  uploadArtifact(input: {
+    environmentId: string
+    projectId: string
+    uploadId: string
+    fileName: string
+    mimeType: string
+    bytes: Uint8Array
+  }): Promise<
+    EnvironmentCredentialResult<
+      import('@forge/protocol/environment-v2').ArtifactRef
+    >
+  >
+  artifact(input: {
+    environmentId: string
+    artifactId: string
+    range?: string
+  }): Promise<
+    EnvironmentCredentialResult<{
+      bytes: Uint8Array
+      mimeType: string
+      fileName: string
+    }>
+  >
+  remove(
+    environmentId: string,
+  ): Promise<EnvironmentCredentialResult<{ removed: boolean }>>
+}
+export interface EnvironmentPersistenceBridge {
+  load(input: {
+    environmentId: string
+    deviceSessionId?: string
+    key: 'shell' | 'pending'
+  }): Promise<EnvironmentCredentialResult<string | null>>
+  save(input: {
+    environmentId: string
+    deviceSessionId?: string
+    key: 'shell' | 'pending'
+    value: string
+  }): Promise<EnvironmentCredentialResult<void>>
+  clear(input: {
+    environmentId: string
+  }): Promise<EnvironmentCredentialResult<void>>
+}
+declare global {
+  interface Window {
+    __forgeE2EPlatform?: {
+      environmentCredentials: EnvironmentCredentialsBridge
+      environmentPersistence: EnvironmentPersistenceBridge
+    }
+  }
 }

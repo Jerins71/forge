@@ -4,9 +4,9 @@ This directory contains shared client-side infrastructure. Treat the websocket c
 
 ## ws-client
 
-`ManagerWsClient` is the stable facade. All state flows through it, so do not bypass it with parallel client state or direct socket ownership from feature components.
+`@forge/client-runtime` owns environment catalog, the single socket/supervisor per enabled environment, shell/detail stores, authentication and command recovery. React consumers use environment-qualified selector hooks and mounted detail leases. `ManagerWsClient` is a temporary socketless facade/reducer on the V2 path; inject `EnvironmentClient`, never call its legacy `start()` for an environment. Feature components never own sockets or construct backend URLs.
 
-Keep the `ManagerWsState` shape stable. Any change to the state contract needs a full consumer audit across the UI.
+Keep the compatibility `ManagerWsState` shape stable. Primary identity comes from bootstrap as a paired UUID; unknown environments never route to the primary. Any change to the state contract needs a full consumer audit across the UI.
 
 Decomposition lives in:
 - `ws-client/` for request builders, runtime constants, reducers, utilities, and helpers

@@ -57,6 +57,7 @@ type FileEditorCoordinator = ReturnType<typeof useFileEditorCoordinator>
 
 interface BuilderNavigationState {
   view: 'chat'
+  environmentId?: string
   agentId: string
 }
 
@@ -215,7 +216,7 @@ export function useSessionActions({
       void (async () => {
         try {
           const result = await client.createSession(profileId, name)
-          navigateToRoute({ view: 'chat', agentId: result.sessionAgent.agentId })
+          navigateToRoute({ view: 'chat', environmentId:clientRef.current?.getEnvironmentClient()?.environmentId, agentId: result.sessionAgent.agentId })
           client.subscribeToAgent(result.sessionAgent.agentId, { reason: 'create' })
         } catch (error) {
           setState((prev) => ({
@@ -238,7 +239,7 @@ export function useSessionActions({
             sessionPurpose: 'agent_creator',
             label: 'Agent Creator',
           })
-          navigateToRoute({ view: 'chat', agentId: result.sessionAgent.agentId })
+          navigateToRoute({ view: 'chat', environmentId:clientRef.current?.getEnvironmentClient()?.environmentId, agentId: result.sessionAgent.agentId })
           client.subscribeToAgent(result.sessionAgent.agentId, { reason: 'create' })
         } catch (error) {
           setState((prev) => ({
@@ -321,7 +322,7 @@ export function useSessionActions({
             state.profiles,
           )
           if (agentId === activeAgentId && fallbackAgentId) {
-            navigateToRoute({ view: 'chat', agentId: fallbackAgentId })
+            navigateToRoute({ view: 'chat', environmentId:clientRef.current?.getEnvironmentClient()?.environmentId, agentId: fallbackAgentId })
           }
         } catch (error) {
           setState((prev) => ({
@@ -355,7 +356,7 @@ export function useSessionActions({
             state.profiles.filter((profile) => profile.profileId !== profileId),
           )
           if (archivesActiveProfile && fallbackAgentId) {
-            navigateToRoute({ view: 'chat', agentId: fallbackAgentId })
+            navigateToRoute({ view: 'chat', environmentId:clientRef.current?.getEnvironmentClient()?.environmentId, agentId: fallbackAgentId })
           }
         } catch (error) {
           setState((prev) => ({
@@ -382,7 +383,7 @@ export function useSessionActions({
       void (async () => {
         try {
           const result = await client.restoreSession(agentId)
-          if (open) navigateToRoute({ view: 'chat', agentId: result.openAgentId ?? result.agentId })
+          if (open) navigateToRoute({ view: 'chat', environmentId:clientRef.current?.getEnvironmentClient()?.environmentId, agentId: result.openAgentId ?? result.agentId })
         } catch (error) {
           setState((prev) => ({
             ...prev,
@@ -408,7 +409,7 @@ export function useSessionActions({
       void (async () => {
         try {
           const result = await client.restoreProfile(profileId)
-          if (open && result.openAgentId) navigateToRoute({ view: 'chat', agentId: result.openAgentId })
+          if (open && result.openAgentId) navigateToRoute({ view: 'chat', environmentId:clientRef.current?.getEnvironmentClient()?.environmentId, agentId: result.openAgentId })
         } catch (error) {
           setState((prev) => ({
             ...prev,
@@ -482,7 +483,7 @@ export function useSessionActions({
       void (async () => {
         try {
           const result = await client.forkSession(sourceAgentId, name)
-          navigateToRoute({ view: 'chat', agentId: result.newSessionAgent.agentId })
+          navigateToRoute({ view: 'chat', environmentId:clientRef.current?.getEnvironmentClient()?.environmentId, agentId: result.newSessionAgent.agentId })
           client.subscribeToAgent(result.newSessionAgent.agentId, { reason: 'fork' })
         } catch (error) {
           setState((prev) => ({
@@ -515,7 +516,7 @@ export function useSessionActions({
       void (async () => {
         try {
           const result = await client.forkSession(activeAgentId, name, messageId)
-          navigateToRoute({ view: 'chat', agentId: result.newSessionAgent.agentId })
+          navigateToRoute({ view: 'chat', environmentId:clientRef.current?.getEnvironmentClient()?.environmentId, agentId: result.newSessionAgent.agentId })
           client.subscribeToAgent(result.newSessionAgent.agentId, { reason: 'fork' })
         } catch (error) {
           setState((prev) => ({
@@ -711,7 +712,7 @@ export function useSessionActions({
         const remainingAgents = state.agents.filter((entry) => entry.agentId !== agentId)
         const fallbackAgentId = chooseFallbackAgentId(remainingAgents, undefined, state.profiles)
         if (fallbackAgentId) {
-          navigateToRoute({ view: 'chat', agentId: fallbackAgentId })
+          navigateToRoute({ view: 'chat', environmentId:clientRef.current?.getEnvironmentClient()?.environmentId, agentId: fallbackAgentId })
           clientRef.current?.subscribeToAgent(fallbackAgentId)
         }
       }

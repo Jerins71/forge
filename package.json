@@ -17,17 +17,18 @@
     "apps/stream-deck",
     "apps/skill-share-worker",
     "packages/protocol",
-    "packages/cli"
+    "packages/cli",
+    "packages/client-runtime"
   ],
   "scripts": {
-    "dev:preflight": "pnpm --filter @forge/protocol build",
+    "dev:preflight": "pnpm --filter @forge/protocol build && pnpm --filter @forge/client-runtime build",
     "dev": "pnpm run dev:preflight && concurrently --kill-others-on-fail --names backend,ui \"pnpm --filter @forge/backend dev\" \"pnpm --filter @forge/ui dev\"",
     "dev:remote": "node scripts/dev-remote.mjs",
     "dev:backend": "pnpm run dev:preflight && pnpm --filter @forge/backend dev",
     "dev:ui": "pnpm run dev:preflight && pnpm --filter @forge/ui dev",
     "dev:electron": "node scripts/dev-electron.mjs",
     "dev:electron:remote": "node scripts/dev-electron.mjs --remote",
-    "build": "pnpm --filter @forge/protocol build && pnpm --filter @forge/cli build && pnpm --filter @forge/skill-share-worker build && pnpm --filter @forge/backend build && pnpm --filter @forge/ui build",
+    "build": "pnpm --filter @forge/protocol build && pnpm --filter @forge/client-runtime build && pnpm --filter @forge/cli build && pnpm --filter @forge/skill-share-worker build && pnpm --filter @forge/backend build && pnpm --filter @forge/ui build",
     "build:electron": "pnpm --filter @forge/electron run build:all",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",

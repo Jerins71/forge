@@ -1,44 +1,40 @@
 import { useEffect, useRef, useState } from 'react'
 import { ManagerWsClient } from '@/lib/ws-client'
 import type { ManagerWsState } from '@/lib/ws-state'
-
-/**
- * Panel-scoped Builder connection for a side chat. The origin client tracks a
- * single subscribed conversation (the main chat), so the side chat gets its own
- * short-lived client on the same origin, subscribed to the side chat session.
- */
+import type { SessionRef } from '@forge/protocol/environment-v2'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
+/** Side chat has its own explicit SessionRef; its facade shares the runtime socket. */
 export function useSideChatConnection({
-  wsUrl,
   originId,
   agentId,
+  session,
 }: {
-  wsUrl: string
+  wsUrl?: string
   originId: string
   agentId: string | null
+  session?: SessionRef | null
 }) {
+  const registry = useOptionalEnvironmentContext()?.registry
+  const environmentId = session?.environmentId ?? originId,
+    sessionId = session?.sessionId ?? agentId
   const clientRef = useRef<ManagerWsClient | null>(null)
   const [state, setState] = useState<ManagerWsState | null>(null)
-
   useEffect(() => {
-    if (!agentId) {
+    if (!sessionId || !registry || !registry.catalog.getSnapshot().has(environmentId)) {
       setState(null)
       return
     }
-
-    const client = new ManagerWsClient(wsUrl, agentId, { originId })
+    const environment = registry.get(environmentId)
+    const client = new ManagerWsClient('', sessionId, {
+      environmentClient: environment,
+    })
     clientRef.current = client
-    const unsubscribe = client.subscribe(setState)
-    client.start()
-
+    const detach = client.subscribe(setState)
     return () => {
-      unsubscribe()
-      if (clientRef.current === client) {
-        clientRef.current = null
-      }
+      detach()
       client.destroy()
-      setState(null)
+      if (clientRef.current === client) clientRef.current = null
     }
-  }, [agentId, originId, wsUrl])
-
+  }, [registry, environmentId, sessionId])
   return { clientRef, state }
 }

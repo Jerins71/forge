@@ -10,6 +10,7 @@ import { GuidedTour } from '@/components/help/GuidedTour'
 import { ShortcutOverlay } from '@/components/help/ShortcutOverlay'
 import { useHelpHotkeys } from '@/components/help/help-hooks'
 import { initializeHelpContent } from '@/components/help/help-registry'
+import { ApplicationEnvironmentProvider } from '@/lib/origin-store/application-environment-provider'
 import { isElectron } from '@/lib/electron-bridge'
 import { preloadBuiltInSounds } from '@/lib/notification-service'
 import { installSidebarPerfDebugHooks } from '@/lib/perf/sidebar-perf-debug'
@@ -86,7 +87,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <TooltipProvider>
           <HelpProvider>
             <HelpHotkeysRegistrar />
-            {children}
+            <ApplicationEnvironmentProvider>{children}</ApplicationEnvironmentProvider>
             <HelpDrawer />
             <GuidedTour />
             <ShortcutOverlay />

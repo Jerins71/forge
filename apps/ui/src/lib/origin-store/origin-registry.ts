@@ -1,130 +1,84 @@
-/**
- * Origin store registry.
- *
- * A map of `originId → OriginStore`.  Store create/destroy is an EXPLICIT
- * registry operation driven by connection lifecycle — never constructed inside
- * a React effect (this replaces the `use-ws-connection.ts` construct-in-effect
- * pattern).  Today only the reserved `"local"` origin is created.
- *
- * The module exposes a single shared registry (`originRegistry`).  A registry
- * is intentionally tiny state — do not add per-origin domain logic here; that
- * lives in {@link OriginStore}.
- */
-
+import type { EnvironmentRegistry } from '@forge/client-runtime'
 import { OriginStore, type OriginStoreOptions } from './origin-store'
 import type { OriginId } from './origin-key'
-import { ConversationSnapshotCache } from '../ws-client/conversation-snapshot-cache'
-import { SESSION_SWITCH_SNAPSHOT_CACHE_ENABLED } from '../ws-client/conversation-snapshot-cache-gate'
-
-type Unsubscribe = () => void
-
+/** Thin UI adapter map. EnvironmentRegistry owns catalog, identity and connections. */
 export class OriginRegistry {
+  private registry: EnvironmentRegistry | null = null
   private readonly stores = new Map<OriginId, OriginStore>()
-  private readonly conversationSnapshotCache = SESSION_SWITCH_SNAPSHOT_CACHE_ENABLED
-    ? new ConversationSnapshotCache()
-    : undefined
-  /** Listeners notified when an origin is added or removed. */
   private readonly listeners = new Set<() => void>()
-
-  /**
-   * Create (or return the existing) store for an origin.  Idempotent per
-   * `originId`: if a store already exists with the SAME `wsUrl`, it is reused;
-   * a create with a different `wsUrl` recreates the store (URL change is a new
-   * backend).  Notifies registry listeners on add.
-   */
-  createOrigin(options: OriginStoreOptions): OriginStore {
-    const existing = this.stores.get(options.originId)
-    if (existing) {
-      if (existing.wsUrl === options.wsUrl) {
-        return existing
-      }
-      // URL changed → tear down and recreate.
-      this.conversationSnapshotCache?.evictOrigin(options.originId)
-      existing.destroy()
-      this.stores.delete(options.originId)
+  private detach: (() => void) | null = null
+  attach(registry: EnvironmentRegistry): () => void {
+    if (this.registry === registry) return () => {}
+    this.destroyAll()
+    this.registry = registry
+    const reconcile = () => {
+      const catalog = registry.catalog.getSnapshot()
+      for (const [id, store] of this.stores)
+        if (
+          !catalog.has(id) ||
+          store.options.environmentClient !== registry.get(id)
+        ) {
+          store.destroy()
+          this.stores.delete(id)
+        }
+      for (const id of catalog.keys())
+        if (!this.stores.has(id))
+          this.stores.set(
+            id,
+            new OriginStore({ environmentClient: registry.get(id) }),
+          )
+      for (const listener of this.listeners) listener()
     }
-
-    const store = new OriginStore({
-      ...options,
-      conversationSnapshotCache: options.conversationSnapshotCache ?? this.conversationSnapshotCache,
-    })
-    this.stores.set(options.originId, store)
-    this.notifyRegistry()
-    return store
+    reconcile()
+    this.detach = registry.catalog.subscribe((s) => s, reconcile)
+    return () => {
+      if (this.registry === registry) {
+        this.destroyAll()
+        this.registry = null
+      }
+    }
   }
-
-  /** Get the store for an origin, or `undefined` if not created. */
-  getOrigin(originId: OriginId): OriginStore | undefined {
-    return this.stores.get(originId)
+  createOrigin(options: OriginStoreOptions) {
+    const id = options.environmentClient.environmentId
+    let s = this.stores.get(id)
+    if (!s) {
+      s = new OriginStore(options)
+      this.stores.set(id, s)
+      queueMicrotask(() => {
+        for (const l of this.listeners) l()
+      })
+    }
+    return s
   }
-
-  /** Whether an origin currently has a live store. */
-  hasOrigin(originId: OriginId): boolean {
-    return this.stores.has(originId)
+  getOrigin(id: OriginId) {
+    return this.stores.get(id)
   }
-
-  /**
-   * Destroy and remove an origin's store.  Notifies registry listeners on
-   * removal.  Destroying one origin leaves every other origin's store and its
-   * subscriptions intact (requirement 10c).
-   */
-  destroyOrigin(originId: OriginId): void {
-    const store = this.stores.get(originId)
-    if (!store) return
-    this.conversationSnapshotCache?.evictOrigin(originId)
-    store.destroy()
-    this.stores.delete(originId)
-    this.notifyRegistry()
+  hasOrigin(id: OriginId) {
+    return this.stores.has(id)
   }
-
-  /** All currently-live origin ids, in insertion order. */
-  getOriginIds(): OriginId[] {
+  destroyOrigin(id: OriginId) {
+    this.stores.get(id)?.destroy()
+    this.stores.delete(id)
+    for (const l of this.listeners) l()
+  }
+  getOriginIds() {
     return [...this.stores.keys()]
   }
-
-  /** All currently-live stores, in insertion order. */
-  getStores(): OriginStore[] {
+  getStores() {
     return [...this.stores.values()]
   }
-
-  /** Subscribe to origin add/remove events (for `useAllOrigins`). */
-  subscribeRegistry(listener: () => void): Unsubscribe {
+  subscribeRegistry(listener: () => void) {
     this.listeners.add(listener)
     return () => {
       this.listeners.delete(listener)
     }
   }
-
-  /** Destroy every store (test cleanup / full teardown). */
-  destroyAll(): void {
-    for (const [originId, store] of this.stores) {
-      this.conversationSnapshotCache?.evictOrigin(originId)
-      store.destroy()
-    }
+  destroyAll() {
+    this.detach?.()
+    this.detach = null
+    for (const s of this.stores.values()) s.destroy()
     this.stores.clear()
-    this.notifyRegistry()
-  }
-
-  /**
-   * Notify registry subscribers of an add/remove.
-   *
-   * Deferred to a microtask on purpose. `createOrigin` is called lazily during
-   * render (the local origin is created inside `useWsConnection`'s render body).
-   * Notifying `subscribeRegistry` listeners (e.g. `useAllOrigins` in the sidebar)
-   * synchronously there triggers React's "Cannot update a component while
-   * rendering a different component" — which, under the dev build, wedges into a
-   * setState-during-render loop that hangs the app. A microtask defers the
-   * notification to just after the current render completes; `useSyncExternalStore`
-   * re-reads the snapshot on the scheduled re-render, so no update is lost.
-   * Tests that assert notification must flush microtasks first.
-   */
-  private notifyRegistry(): void {
-    const listeners = [...this.listeners]
-    queueMicrotask(() => {
-      for (const listener of listeners) listener()
-    })
+    for (const l of this.listeners) l()
   }
 }
-
-/** The shared, module-level registry. */
 export const originRegistry = new OriginRegistry()

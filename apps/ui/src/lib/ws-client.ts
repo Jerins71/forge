@@ -1,3 +1,11 @@
+import type { EnvironmentClient, DetailState } from '@forge/client-runtime'
+import {
+  projectShell,
+  projectDetailMessages,
+  projectItems,
+  projectWorker,
+} from './ws-client/environment-projection'
+import { sendEnvironmentCommand } from './ws-client/environment-command-transport'
 import { BROWSER_HOST_REGISTER_PROTOCOL_INCOMPATIBLE_ERROR } from '@forge/protocol'
 import type { CodexElicitationDecision, CodexElicitationPersistScope, SessionGoalControlAction, SessionProjectAgentInput, WorkModeId } from '@forge/protocol'
 import type { ConversationSnapshotCache } from './ws-client/conversation-snapshot-cache'
@@ -205,13 +213,20 @@ export type {
 } from './ws-client/types'
 
 export interface ManagerWsClientOptions {
+  environmentClient?: EnvironmentClient
+  socketless?: boolean
   originId?: string
   conversationSnapshotCache?: ConversationSnapshotCache
   conversationBootstrapWatchdogMs?: number
 }
 
 export class ManagerWsClient {
-  private readonly transport: WebSocketTransport
+  private readonly transport: WebSocketTransport | null
+  private readonly environmentClient?: EnvironmentClient
+  private readonly environmentDetach: Array<() => void> = []
+  private detailLease: ReturnType<EnvironmentClient['acquireDetail']> | null =
+    null
+  private detailDetach: (() => void) | null = null
   private desiredAgentId: string | null
   private conversationView: BuilderTimelineChannelView = 'web'
   private readonly originId: string
@@ -228,7 +243,14 @@ export class ManagerWsClient {
 
   /** Convenience accessor — delegates to transport so existing guards work unchanged. */
   private get socket(): WebSocket | null {
-    return this.transport.getSocket()
+    if (this.environmentClient)
+      return {
+        readyState: this.environmentClient.connection.getSnapshot()
+          .transportHealthy
+          ? 1
+          : 3,
+      } as WebSocket
+    return this.transport?.getSocket() ?? null
   }
 
   private hasExplicitAgentSelection = false
@@ -265,10 +287,14 @@ export class ManagerWsClient {
     (event: Extract<import('@forge/protocol').ServerEvent, { type: 'repository_project_creation_progress' }>) => void
   >()
 
-  constructor(url: string, initialAgentId?: string | null, options: ManagerWsClientOptions = {}) {
+  constructor(url: string, initialAgentId?: string | null, options: ManagerWsClientOptions = {},
+  ) {
     const normalizedInitialAgentId = normalizeAgentId(initialAgentId)
     this.desiredAgentId = normalizedInitialAgentId
-    this.originId = options.originId ?? 'local'
+    this.environmentClient = options.environmentClient
+    this.originId =
+      options.environmentClient?.environmentId ?? options.originId ??
+      'unregistered'
     this.conversationSnapshotCache = options.conversationSnapshotCache
     this.conversationBootstrapWatchdogMs = options.conversationBootstrapWatchdogMs ?? CONVERSATION_BOOTSTRAP_WATCHDOG_MS
     this.state = createInitialManagerWsState(normalizedInitialAgentId)
@@ -300,7 +326,10 @@ export class ManagerWsClient {
       },
     })
 
-    this.transport = new WebSocketTransport({
+    this.transport =
+      options.environmentClient || options.socketless
+        ? null
+        : new WebSocketTransport({
       url,
       reconnectDelayMs: RECONNECT_MS,
       onOpen: () => this.handleTransportOpen(),
@@ -308,6 +337,30 @@ export class ManagerWsClient {
       onMessage: (data) => this.handleServerEvent(data),
       onError: () => this.handleTransportError(),
     })
+    if (this.environmentClient) {
+      const client = this.environmentClient
+      const updateShell = () =>
+        this.updateState(
+          projectShell(client.shell.getSnapshot(), this.state.agents),
+        )
+      updateShell()
+      this.environmentDetach.push(
+        client.shell.subscribe((s) => s.sessions, updateShell, Object.is, [
+          'sessions',
+          'projects',
+        ]),
+      )
+      const updateConnection = () => {
+        const c = client.connection.getSnapshot()
+        this.updateState({ connected: c.transportHealthy, lastError: c.reason })
+      }
+      updateConnection()
+      this.environmentDetach.push(
+        client.connection.subscribe((s) => s, updateConnection),
+      )
+      if (normalizedInitialAgentId)
+        this.subscribeToAgent(normalizedInitialAgentId)
+    }
   }
 
   /**
@@ -318,6 +371,14 @@ export class ManagerWsClient {
    */
   setSessionInvalidatedObserver(observer: (() => void) | null): void {
     this.sessionInvalidatedObserver = observer
+  }
+
+  applyCompatibilitySnapshot(patch: Partial<ManagerWsState>): void {
+    this.updateState(patch)
+  }
+
+  getEnvironmentClient(): EnvironmentClient | undefined {
+    return this.environmentClient
   }
 
   getState(): ManagerWsState {
@@ -517,7 +578,7 @@ export class ManagerWsClient {
         offset += chunk!.byteLength
       }
       const parsed = JSON.parse(new TextDecoder().decode(joined)) as unknown
-      return Array.isArray(parsed) ? parsed as BrowserSessionSnapshot[] : null
+      return Array.isArray(parsed) ? ( parsed as BrowserSessionSnapshot[]) : null
     } catch {
       return null
     }
@@ -637,10 +698,15 @@ export class ManagerWsClient {
   start(): void {
     if (typeof window === 'undefined') return
 
-    this.transport.connect(INITIAL_CONNECT_DELAY_MS)
+    this.transport?.connect(INITIAL_CONNECT_DELAY_MS)
   }
 
   destroy(): void {
+    this.detailDetach?.()
+    this.detailLease?.release()
+    this.detailDetach = null
+    this.detailLease = null
+    for (const detach of this.environmentDetach) detach()
     this.requestDispatcher.rejectAllPendingRequests('Client destroyed before request completed.')
     this.sessionWorkerCache.destroy()
     this.bootstrapBuffer.clear()
@@ -652,12 +718,17 @@ export class ManagerWsClient {
     this.clearGenerationTerminalCleanupTimers()
     this.stopBrowserHandshake()
 
-    this.transport.disconnect()
+    this.transport?.disconnect()
   }
 
-  subscribeToAgent(agentId: string, options?: { explicit?: boolean; reason?: ConversationSubscriptionReason }): void {
+  subscribeToAgent(agentId: string, options?: { explicit?: boolean; reason?: ConversationSubscriptionReason },
+  ): void {
     const trimmed = agentId.trim()
     if (!trimmed) return
+    if (this.environmentClient) {
+      this.mountEnvironmentDetail(trimmed)
+      return
+    }
 
     const isExplicitSelection = options?.explicit ?? true
     this.hasExplicitAgentSelection = isExplicitSelection
@@ -687,6 +758,10 @@ export class ManagerWsClient {
   }
 
   retryConversationBootstrap(): boolean {
+    if (this.environmentClient && this.state.targetAgentId) {
+      this.mountEnvironmentDetail(this.state.targetAgentId)
+    return true
+    }
     const agentId = this.state.conversationBootstrap.agentId ?? this.state.targetAgentId
     if (!agentId) return false
     this.beginConversationSubscription({
@@ -698,6 +773,10 @@ export class ManagerWsClient {
   }
 
   setConversationView(view: BuilderTimelineChannelView): boolean {
+    if (this.environmentClient) {
+      this.conversationView = view
+      return false
+    }
     if (this.conversationView === view) return false
     this.conversationView = view
     const agentId = this.state.targetAgentId
@@ -710,12 +789,55 @@ export class ManagerWsClient {
     text: string,
     options?: {
       agentId?: string
+      artifactIds?: string[]
       delivery?: DeliveryMode
       attachments?: ConversationAttachment[]
       replyTo?: ConversationReplyTargetInput
       sessionReferenceAgentIds?: string[]
     },
   ): void {
+    if (this.environmentClient) {
+      const client = this.environmentClient,
+        sessionId = options?.agentId ?? this.state.targetAgentId
+      if (!sessionId) {
+      this.updateState({
+        lastError: 'No session selected' })
+      return
+      }
+      const commandId = crypto.randomUUID()
+      void (async () => {
+        const artifactIds = [...(options?.artifactIds ?? [])]
+        const projectId = client.shell
+          .getSnapshot()
+          .sessions.get(sessionId)?.projectId
+        if (options?.attachments?.length && !projectId)
+          throw new Error('Session project is unavailable')
+        for (const a of options?.attachments ?? []) {
+          const bytes =
+            a.type === 'text'
+              ? new TextEncoder().encode(a.text ?? '')
+              : Uint8Array.from(atob(a.data ?? ''), (c) => c.charCodeAt(0))
+          const artifact = await client.uploadArtifact({
+            projectId: projectId!,
+            uploadId: crypto.randomUUID(),
+            fileName: a.fileName ?? 'attachment',
+            mimeType: a.mimeType,
+            body: bytes,
+          })
+          artifactIds.push(artifact.artifactId)
+        }
+        await client.request('session.send', {
+          commandId,
+          sessionId,
+          message: { text, artifactIds },
+        })
+      })().catch((error) =>
+      this.updateState({
+        lastError: error instanceof Error ? error.message : String(error),
+        }),
+      )
+      return
+    }
     const trimmed = text.trim()
     const attachments = normalizeConversationAttachments(options?.attachments)
     if (!trimmed && attachments.length === 0) return
@@ -1282,7 +1404,11 @@ export class ManagerWsClient {
     )
   }
 
-  getSessionWorkers(sessionAgentId: string): Promise<SessionWorkersResult> {
+  async getSessionWorkers(sessionAgentId: string): Promise<SessionWorkersResult> {
+    if(this.environmentClient){
+      const output=await this.environmentClient.request('session.workers',{sessionId:sessionAgentId})
+      return {sessionAgentId,workers:output.workers.map(w=>projectWorker(w,sessionAgentId,this.environmentClient!.shell.getSnapshot()))}
+    }
     return this.sessionWorkerCache.getSessionWorkers(sessionAgentId)
   }
 
@@ -1298,6 +1424,13 @@ export class ManagerWsClient {
     this.updateState({ conversationPageLoading: true, lastError: null })
     let pageRequestId: string | null = null
     try {
+      if(this.environmentClient){
+        const page=await this.environmentClient.request('session.history',{sessionId:agentId,before:cursor,turns:Math.min(20,Math.max(1,limit??20))})
+        const messages=projectItems(page.items,agentId)
+        const result:ConversationPageResult={agentId,messages,page:{hasOlder:!!page.nextCursor,...(page.nextCursor?{nextCursor:page.nextCursor}:{}),completeness:'complete',source:'canonical'}}
+        if(this.state.targetAgentId===agentId)this.updateState({messages:[...messages,...this.state.messages],conversationPage:result.page,conversationPageLoading:false,conversationHistoryMutation:{revision:(this.state.conversationHistoryMutation?.revision??0)+1,kind:'prepend'}})
+        return result
+      }
       return await this.requestDispatcher.enqueueRequest(
         'get_conversation_page',
         (requestId) => {
@@ -1329,6 +1462,10 @@ export class ManagerWsClient {
   }
 
   refreshConversationHistory(): boolean {
+    if (this.environmentClient && this.state.targetAgentId) {
+      this.mountEnvironmentDetail(this.state.targetAgentId)
+      return true
+    }
     const agentId = this.state.targetAgentId
     if (!agentId) return false
     this.beginConversationSubscription({
@@ -1601,7 +1738,7 @@ export class ManagerWsClient {
     // invalid — reconnecting would 401 forever. Stop the transport and let
     // the origin manager surface the sign-in state.
     if (event?.code === SESSION_INVALIDATED_CLOSE_CODE) {
-      this.transport.disconnect()
+      this.transport?.disconnect()
       this.updateState({
         lastError: 'Your session has been invalidated. Please sign in again.',
       })
@@ -2231,7 +2368,76 @@ export class ManagerWsClient {
   }
 
   private send(command: ClientCommand): boolean {
-    return this.transport.send(command)
+    if (this.environmentClient) {
+      if (!this.environmentClient.connection.getSnapshot().transportHealthy)
+        return false
+      void sendEnvironmentCommand(
+        this.environmentClient,
+        command,
+        this.state.targetAgentId ?? this.desiredAgentId ?? undefined,
+      )
+        .then((events) => {
+          for (const event of events) this.handleServerEvent(event)
+        })
+        .catch((error) => {
+          this.updateState({
+            lastError: error instanceof Error ? error.message : String(error),
+          })
+          this.requestDispatcher.rejectAllPendingRequests(
+            error instanceof Error ? error.message : String(error),
+          )
+        })
+      return true
+    }
+    return this.transport?.send(command) ?? false
+  }
+
+  private mountEnvironmentDetail(sessionId: string): void {
+    if (!this.environmentClient) return
+    this.detailDetach?.()
+    this.detailLease?.release()
+    this.desiredAgentId = sessionId
+    this.detailLease = this.environmentClient.acquireDetail(sessionId)
+    const store = this.detailLease.store
+    let projection: DetailState['projection'] = null
+    let transient: DetailState['transient'] = new Map()
+    const apply = () => {
+      const detail = store.getSnapshot()
+      if (detail.projection !== projection) {
+        projection = detail.projection
+        this.updateState({
+          messages: [...projectDetailMessages(detail),...(projection?.choices??[]).filter(c=>c.status==='pending').map(c=>({type:'choice_request' as const,agentId:c.agentId,choiceId:c.choiceId,status:'pending' as const,questions:c.questions,timestamp:projection!.session.updatedAt}))],
+          pendingChoiceIds:new Set((projection?.choices??[]).filter(c=>c.status==='pending').map(c=>c.choiceId)),
+          agents:[...this.state.agents.filter(a=>a.role!=='worker'||a.managerId!==sessionId),...(projection?.workers??[]).map(w=>projectWorker(w,sessionId,this.environmentClient!.shell.getSnapshot()))],
+          conversationPage:projection?{hasOlder:!!projection.historyCursor,...(projection.historyCursor?{nextCursor:projection.historyCursor}:{}),completeness:'complete',source:'canonical'}:null,
+          conversationPageLoading:false,
+          activityMessages: [],
+          conversationPresentation: null,
+          conversationHistoryMutation: {
+            revision:
+              (this.state.conversationHistoryMutation?.revision ?? 0) + 1,
+            kind: 'replace',
+          },
+        })
+      }
+      for (const [key, event] of detail.transient)
+        if (transient.get(key) !== event) this.handleServerEvent(event)
+      transient = detail.transient
+      this.updateState({
+        targetAgentId: sessionId,
+        subscribedAgentId: sessionId,
+        conversationBootstrap: {
+          ...this.state.conversationBootstrap,
+          agentId: sessionId,
+          phase: detail.freshness === 'live' ? 'ready' : 'pending',
+        },
+        planSnapshotLoadingSessionId: null,
+        goalSnapshotLoadingSessionId: null,
+        secureSessionSnapshotLoadingSessionId: null,
+      })
+    }
+    apply()
+    this.detailDetach = store.subscribe((s) => s, apply)
   }
 
   private updateState(patch: Partial<ManagerWsState>): void {
@@ -2240,5 +2446,4 @@ export class ManagerWsClient {
       listener(this.state)
     }
   }
-
 }
