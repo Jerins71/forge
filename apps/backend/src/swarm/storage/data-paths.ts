@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { homedir } from "node:os";
 
 export interface MemoryPathDescriptor {
   agentId: string;
@@ -626,4 +627,32 @@ export function getLegacySecretsFilePath(dataDir: string): string {
 
 export function getHistoryIndexSettingsPath(dataDir: string): string {
   return join(getSharedConfigDir(dataDir), "history-index.json");
+}
+
+// Environment identity/control state has one path owner, shared by all V2 services.
+export function getEnvironmentIdentityPath(dataDir: string): string {
+  return join(getSharedStateDir(dataDir), "environment", "identity.json");
+}
+
+export function getEnvironmentDbPath(dataDir: string): string {
+  return join(getSharedStateDir(dataDir), "environment", "control.sqlite");
+}
+
+export function getEnvironmentArtifactDir(dataDir: string): string {
+  return join(getSharedStateDir(dataDir), "environment", "artifacts");
+}
+
+export function getEnvironmentWorktreesDir(dataDir: string): string {
+  return join(getSharedStateDir(dataDir), "environment", "worktrees");
+}
+
+/** Installation binding is outside every environment root, in OS application state. */
+export function getHostInstallationStateDir(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  userHome: string = homedir(),
+): string {
+  if (platform === "win32") return join(env.LOCALAPPDATA || join(userHome, "AppData", "Local"), "Forge", "installation");
+  if (platform === "darwin") return join(userHome, "Library", "Application Support", "Forge", "installation");
+  return join(env.XDG_STATE_HOME || join(userHome, ".local", "state"), "forge", "installation");
 }
