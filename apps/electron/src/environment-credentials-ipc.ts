@@ -109,7 +109,7 @@ export function createEnvironmentCredentialService(options: { storePath: string;
   }
   async function target(id: string): Promise<StoredTarget> { if (!UUID.test(id)) return fail('INVALID_INPUT', 'Invalid environment identity'); const t = (await load()).find(t => t.environmentId === id); if (!t) return fail('UNAUTHENTICATED', 'Environment needs pairing'); return t; }
   async function http(t: StoredTarget, path: string, init: RequestInit = {}) {
-    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', 'app://forge');
+    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', 'app://forge'); headers.set('x-forge-environment-protocol', '1');
     try { const response = await fetcher(t.baseUrl + path, { ...init, headers, redirect: 'error', signal: init.signal ?? AbortSignal.timeout(30_000) }); if (response.status === 401) await clearRuntime(t.environmentId); return response; } catch { return fail('UNAVAILABLE', 'Environment request could not connect'); }
   }
   async function checkedJson(response: Response): Promise<unknown> {
@@ -229,9 +229,9 @@ export function createEnvironmentCredentialService(options: { storePath: string;
       return { status: response.status, headers: safeHeaders(response), bytes: await boundedBytes(response, input.maxBytes) };
     }),
     uploadArtifact: input => envelope(async () => {
-      if (!(input.bytes instanceof Uint8Array) || input.bytes.byteLength > MAX_ARTIFACT_BYTES || !UUID.test(input.uploadId) || !input.projectId || input.projectId.length > 128 || !input.fileName || input.fileName.length > 256 || /[\r\n]/.test(input.mimeType) || input.mimeType.length > 256) fail('INVALID_INPUT', 'Invalid artifact upload');
+      if (!(input.bytes instanceof Uint8Array) || input.bytes.byteLength > MAX_ARTIFACT_BYTES || typeof input.uploadId !== 'string' || !input.uploadId || input.uploadId.length > 128 || !input.projectId || input.projectId.length > 128 || !input.fileName || input.fileName.length > 256 || /[\r\n]/.test(input.mimeType) || input.mimeType.length > 256) fail('INVALID_INPUT', 'Invalid artifact upload');
       const t = await target(input.environmentId); await pinned(t);
-      const response = await http(t, `/api/v2/artifacts?projectId=${encodeURIComponent(input.projectId)}&uploadId=${input.uploadId}`, { method: 'POST', headers: { 'Content-Type': input.mimeType, 'Content-Length': String(input.bytes.byteLength), 'X-Forge-File-Name': encodeURIComponent(input.fileName) }, body: Buffer.from(input.bytes) });
+      const response = await http(t, `/api/v2/artifacts?projectId=${encodeURIComponent(input.projectId)}&uploadId=${encodeURIComponent(input.uploadId)}`, { method: 'POST', headers: { 'Content-Type': input.mimeType, 'Content-Length': String(input.bytes.byteLength), 'X-Forge-File-Name': encodeURIComponent(input.fileName) }, body: Buffer.from(input.bytes) });
       return await checkedJson(response) as ArtifactRef;
     }),
     artifact: input => envelope(async () => { const response = await artifactResponse(input); return { bytes: await boundedBytes(response), mimeType: response.headers.get('content-type') ?? 'application/octet-stream', fileName: response.headers.get('content-disposition')?.match(/filename="([^"]*)"/)?.[1] ?? 'artifact' }; }),

@@ -37,12 +37,14 @@ it('safeStorage ciphertext stays on disk; parent IPC pairs via ordinary HTTP and
       expect([...Buffer.concat(chunks)]).toEqual([0, 128, 255]); res.end(Buffer.from([255, 128, 0]));
     } else if (req.url?.startsWith('/api/v2/artifacts?')) {
       expect(req.headers.authorization).toBe(`Bearer ${token}`);
+      expect(req.headers['x-forge-environment-protocol']).toBe('1');
       expect(req.headers['content-length']).toBe('3'); expect(req.headers['x-forge-file-name']).toBe('test%20data.bin');
       const parts: Buffer[] = []; for await (const chunk of req) parts.push(Buffer.from(chunk));
       expect([...Buffer.concat(parts)]).toEqual([0,127,255]);
       res.end(JSON.stringify({artifactId:id,fileName:'test data.bin',mimeType:'application/octet-stream',sizeBytes:3}));
     } else if (req.url === `/api/v2/artifacts/${id}`) {
       expect(req.headers.authorization).toBe(`Bearer ${token}`);
+      expect(req.headers['x-forge-environment-protocol']).toBe('1');
       res.setHeader('Content-Type','application/octet-stream');res.setHeader('Content-Disposition','inline; filename="test data.bin"');
       if(req.headers.range) { expect(req.headers.range).toBe('bytes=0-1');res.statusCode=206;res.setHeader('Content-Range','bytes 0-1/3');res.end(Buffer.from([0,127])); }
       else res.end(Buffer.from([0,127,255]));
@@ -76,6 +78,7 @@ it('safeStorage ciphertext stays on disk; parent IPC pairs via ordinary HTTP and
   expect(await bridge.requestBinary({ ...binary, body: new Uint8Array(26214401) })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
   expect(await handlers.get(ENVIRONMENT_CREDENTIALS_CHANNEL)!('untrusted', { operation: 'requestBinary', input: binary })).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
   expect(await credentials.uploadArtifact({environmentId:id,projectId:'project',uploadId:id,fileName:'test data.bin',mimeType:'application/octet-stream',bytes:new Uint8Array([0,127,255])})).toMatchObject({ok:true,value:{artifactId:id}});
+  expect(await credentials.uploadArtifact({environmentId:id,projectId:'project',uploadId:id+':0',fileName:'test data.bin',mimeType:'application/octet-stream',bytes:new Uint8Array([0,127,255])})).toMatchObject({ok:true,value:{artifactId:id}});
   expect(await credentials.artifact({environmentId:id,artifactId:id})).toMatchObject({ok:true,value:{bytes:new Uint8Array([0,127,255]),fileName:'test data.bin'}});
   const preview=await credentials.artifactProtocolResponse(`forge-artifact://artifact/${id}/${id}`,'bytes=0-1');
   expect(preview.status).toBe(206);expect([...new Uint8Array(await preview.arrayBuffer())]).toEqual([0,127]);
