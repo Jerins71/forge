@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import {
   anthropicOAuthProvider,
   openaiCodexOAuthProvider,
@@ -101,7 +102,7 @@ export function createSettingsRoutes(options: {
     await Promise.all(Array.from(usageProviders, (provider) => statsService.invalidateProviderUsage(provider)));
   };
 
-  const routes: HttpRoute[] = [
+  const routes: HttpRoute[] = withEnvironmentRouteAccess([
     {
       methods: "GET, PUT, DELETE, OPTIONS",
       matches: (pathname) => pathname === SETTINGS_ENV_ENDPOINT_PATH || pathname.startsWith(`${SETTINGS_ENV_ENDPOINT_PATH}/`),
@@ -131,7 +132,7 @@ export function createSettingsRoutes(options: {
         await handleSettingsNotificationsHttpRequest(notificationSettingsService, request, response);
       }
     }
-  ];
+  ], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 
   return {
     routes,

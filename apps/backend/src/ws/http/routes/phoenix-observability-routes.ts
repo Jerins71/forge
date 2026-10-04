@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type {
   PhoenixObservabilitySettingsPatch,
 } from "@forge/protocol";
@@ -15,7 +16,7 @@ export function createPhoenixObservabilityRoutes(options: {
 }): HttpRoute[] {
   const { observabilityService } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: OBSERVABILITY_METHODS,
       matches: (pathname) => pathname === SETTINGS_PATH || pathname === STATUS_PATH || pathname === TEST_PATH,
@@ -64,7 +65,7 @@ export function createPhoenixObservabilityRoutes(options: {
         }
       },
     },
-  ];
+  ], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }
 
 async function handleSettingsRequest(

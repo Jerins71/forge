@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { parseOpenRouterRoutingConfig, resolveOpenRouterRouting, type OpenRouterModelsFile, type OpenRouterRoutingSettingsResponse, type ServerEvent } from "@forge/protocol";
 import { getOpenRouterRoutingRevision, mutateOpenRouterModelsFile, readOpenRouterModels } from "../../../swarm/catalog/openrouter-models.js";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
@@ -16,7 +17,7 @@ function snapshot(file: OpenRouterModelsFile, modelId?: string): OpenRouterRouti
 }
 export function createOpenRouterRoutingRoutes(options: { swarmManager: SwarmManager; broadcastEvent: (event: ServerEvent) => void }): HttpRoute[] {
   const discovery = new OpenRouterEndpointDiscovery();
-  return [{
+  return withEnvironmentRouteAccess([{
     methods: "GET, PUT, OPTIONS",
     matches: (path) => path === ROUTING || path.startsWith(MODELS) || path.startsWith(ENDPOINTS),
     handle: async (request, response, url) => {
@@ -55,5 +56,5 @@ export function createOpenRouterRoutingRoutes(options: { swarmManager: SwarmMana
         sendJson(response, 200, { ...snapshot(result.nextFile, modelId) });
       } catch (error) { sendJson(response, error instanceof RoutingHttpError ? error.status : 500, { error: error instanceof Error ? error.message : String(error) }); }
     },
-  }];
+  }], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }

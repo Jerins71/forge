@@ -1,4 +1,4 @@
-import { isChoiceAnswer, isSystemProfile, validateChoiceAnswers } from "@forge/protocol";
+import { isChoiceAnswer, isSystemProfile } from "@forge/protocol";
 import type {
   ChoiceQuestion,
   CliChoiceCancelCommand,
@@ -23,9 +23,22 @@ import { sendWsEvent } from "./ws-send.js";
 import { CliHeadlessSubscriptions } from "./cli-headless-subscriptions.js";
 import { getCliChoiceOwner } from "./cli-choice-owners.js";
 import { toPublicCliAgentDescriptor } from "./cli-public-descriptors.js";
+import type { ControlService, Principal } from "../environment/control/control-types.js";
+import { awaitLegacyReceipt, legacyCommandId } from "./rpc/legacy-builder-adapter.js";
+import { StreamFault } from "../environment/streams/stream-budget.js";
 
 export class CliWsHandler {
   private readonly subscriptions: CliHeadlessSubscriptions;
+  private environmentControl: { control: ControlService; principalForSocket(socket: WebSocket): Principal } | null = null;
+
+  setEnvironmentControl(deps: { control: ControlService; principalForSocket(socket: WebSocket): Principal }): void {
+    this.environmentControl = deps;
+  }
+
+  private requireControl(socket: WebSocket) {
+    if (!this.environmentControl) throw new StreamFault("UNAVAILABLE", "CLI control is not composed.");
+    return { control: this.environmentControl.control, principal: this.environmentControl.principalForSocket(socket) };
+  }
 
   constructor(private readonly swarmManager: SwarmManager) {
     this.subscriptions = new CliHeadlessSubscriptions(
@@ -93,7 +106,7 @@ export class CliWsHandler {
       }
 
       if (command.type === "cli_choice_response") {
-        this.handleChoiceResponse(socket, command);
+        await this.handleChoiceResponse(socket, command);
         return;
       }
 
@@ -127,11 +140,13 @@ export class CliWsHandler {
   private async handleCreateSession(socket: WebSocket, command: CliCreateSessionCommand): Promise<void> {
     this.requireCliWritableProfile(command.profileId);
 
-    const created = await this.swarmManager.createSession(command.profileId, {
-      label: command.label,
-      name: command.name,
-      cli: command.cli,
-    });
+    const { control, principal } = this.requireControl(socket);
+    const receipt = await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.launch", {
+      commandId: legacyCommandId(principal, "session.launch", command.requestId), projectId: command.profileId,
+      title: command.label ?? command.name ?? "CLI session", workspaceStrategy: { kind: "current_checkout" },
+    }));
+    const sessionAgent = this.requireCliSession(receipt.sessionId!);
+    const created = { sessionAgent, profile: this.swarmManager.listProfiles().find(profile => profile.profileId === command.profileId)! };
 
     this.sendRequestSuccess(socket, command, {
       session: toPublicCliAgentDescriptor(created.sessionAgent),
@@ -145,7 +160,7 @@ export class CliWsHandler {
       ? this.requireCliProjectAgentSession(command.target.profileId, command.target.handle)
       : this.requireCliSession(command.target.agentId);
     const sourceContext = buildCliSourceContext(command);
-    await this.dispatchCliMessage(target.agentId, command.text, command.attachments, command.delivery, sourceContext);
+    await this.dispatchCliMessage(socket, command.requestId, target.agentId, command.text, command.attachments, command.delivery, sourceContext);
     this.sendRequestSuccess(socket, command, {
       sessionAgentId: target.agentId,
       profileId: target.profileId,
@@ -157,13 +172,13 @@ export class CliWsHandler {
 
   private async handleRun(socket: WebSocket, command: CliRunCommand): Promise<void> {
     const target = command.target.kind === "new_session"
-      ? await this.createCliRunSession(command)
+      ? await this.createCliRunSession(socket, command)
       : command.target.kind === "project_agent"
         ? this.requireCliProjectAgentSession(command.target.profileId, command.target.handle)
         : this.requireCliSession(command.target.agentId);
 
     const sourceContext = buildCliSourceContext(command);
-    await this.dispatchCliMessage(target.agentId, command.text, command.attachments, command.delivery, sourceContext);
+    await this.dispatchCliMessage(socket, command.requestId, target.agentId, command.text, command.attachments, command.delivery, sourceContext);
     this.sendRequestSuccess(socket, command, {
       sessionAgentId: target.agentId,
       profileId: target.profileId,
@@ -173,24 +188,22 @@ export class CliWsHandler {
     });
   }
 
-  private handleChoiceResponse(socket: WebSocket, command: CliChoiceResponseCommand): void {
-    const pending = this.requireCliPendingChoice(command.choiceId, command.sessionAgentId);
-    const validationError = validateChoiceAnswers(pending.questions, command.answers);
-    if (validationError) {
-      throw new CliCommandError(
-        "choice_invalid_response",
-        `Invalid choice response: ${validationError}`,
-        400,
-        [{ field: "answers", message: validationError }],
-      );
+  private async handleChoiceResponse(socket: WebSocket, command: CliChoiceResponseCommand): Promise<void> {
+    const { control, principal } = this.requireControl(socket);
+    const commandId = legacyCommandId(principal, "session.choose", command.requestId);
+    let sessionAgentId = command.sessionAgentId;
+    if (!sessionAgentId) {
+      try { sessionAgentId = (await control.getReceipt(principal, commandId)).sessionId ?? undefined; }
+      catch (error) {
+        if (!error || typeof error !== "object" || !("code" in error) || error.code !== "NOT_FOUND") throw error;
+      }
     }
-
-    this.swarmManager.resolveChoiceRequest(command.choiceId, command.answers);
-    this.sendRequestSuccess(socket, command, {
-      choiceId: command.choiceId,
-      sessionAgentId: pending.sessionAgentId,
-      status: "answered",
-    });
+    sessionAgentId ??= this.requireCliPendingChoice(command.choiceId).sessionAgentId;
+    // The control owner checks the original request before pending-choice state on retry.
+    await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.choose", {
+      commandId, sessionId: sessionAgentId, choiceId: command.choiceId, answers: command.answers,
+    }));
+    this.sendRequestSuccess(socket, command, { choiceId: command.choiceId, sessionAgentId, status: "answered" });
   }
 
   private handleChoiceCancel(socket: WebSocket, command: CliChoiceCancelCommand): void {
@@ -207,8 +220,11 @@ export class CliWsHandler {
     switch (command.type) {
       case "stop_session": {
         this.requireCliSession(command.agentId);
-        const result = await this.swarmManager.stopSession(command.agentId);
-        this.sendRequestSuccess(socket, command, { agentId: command.agentId, ...result });
+        const { control, principal } = this.requireControl(socket);
+        await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.stop", {
+          commandId: legacyCommandId(principal, "session.stop", command.requestId), sessionId: command.agentId,
+        }));
+        this.sendRequestSuccess(socket, command, { agentId: command.agentId, terminatedWorkerIds: [] });
         return;
       }
 
@@ -310,33 +326,36 @@ export class CliWsHandler {
     }
   }
 
-  private async createCliRunSession(command: CliRunCommand): Promise<AgentDescriptor & { role: "manager" }> {
+  private async createCliRunSession(socket: WebSocket, command: CliRunCommand): Promise<AgentDescriptor & { role: "manager" }> {
     if (command.target.kind !== "new_session") {
       throw new CliCommandError("bad_request", "CLI run target must be a new session.", 400);
     }
 
     this.requireCliWritableProfile(command.target.profileId);
-    const created = await this.swarmManager.createSession(command.target.profileId, {
-      label: command.target.label,
-      name: command.target.name,
-      cli: command.cli,
-    });
-    return created.sessionAgent as AgentDescriptor & { role: "manager" };
+    const { control, principal } = this.requireControl(socket);
+    const receipt = await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.launch", {
+      commandId: legacyCommandId(principal, "session.launch", command.requestId), projectId: command.target.profileId,
+      title: command.target.label ?? command.target.name ?? "CLI session", workspaceStrategy: { kind: "current_checkout" },
+    }));
+    return this.requireCliSession(receipt.sessionId!);
   }
 
   private async dispatchCliMessage(
+    socket: WebSocket,
+    requestId: string,
     targetAgentId: string,
     text: string,
     attachments: ConversationAttachment[] | undefined,
     delivery: RequestedDeliveryMode | undefined,
     sourceContext: MessageSourceContext,
   ): Promise<void> {
-    await this.swarmManager.handleUserMessage(text, {
-      targetAgentId,
-      delivery,
-      attachments,
-      sourceContext,
-    });
+    void sourceContext;
+    if (attachments?.length || delivery && delivery !== "auto") throw new StreamFault("UNAVAILABLE", "Use the V2 artifact/message path for this CLI input.");
+    const { control, principal } = this.requireControl(socket);
+    await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.send", {
+      commandId: legacyCommandId(principal, "session.send", requestId), sessionId: targetAgentId,
+      message: { text, artifactIds: [] },
+    }));
   }
 
   private requireCliWritableProfile(profileId: string): void {

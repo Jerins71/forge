@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   isSystemProfile,
@@ -65,7 +66,7 @@ export function createCliRoutes(options: {
   cliAccessService: CliAccessService;
   swarmManager: CliRouteSwarmManager;
 }): HttpRoute[] {
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: CLI_HTTP_METHODS,
       matches: (pathname) => pathname === CLI_HTTP_ROUTE_PREFIX || pathname.startsWith(`${CLI_HTTP_ROUTE_PREFIX}/`),
@@ -73,7 +74,7 @@ export function createCliRoutes(options: {
         await handleCliHttpRequest(options, request, response, requestUrl);
       },
     },
-  ];
+  ], { GET: { integration: 'cli' }, HEAD: { integration: 'cli' }, POST: { integration: 'cli' }, PUT: { integration: 'cli' }, PATCH: { integration: 'cli' }, DELETE: { integration: 'cli' } });
 }
 
 async function handleCliHttpRequest(

@@ -30,6 +30,7 @@ import {
   type TerminalStateChangedEvent,
 } from "./terminal-service-types.js";
 import type { ResolvedTerminalSession } from "./terminal-session-resolver.js";
+import type { StoredTerminalMeta } from "./terminal-persistence.js";
 
 export { TerminalServiceError } from "./terminal-service-types.js";
 
@@ -136,8 +137,10 @@ export class TerminalService extends EventEmitter {
     await this.lifecycleOperations.shutdown();
   }
 
-  async create(request: TerminalCreateRequest): Promise<TerminalCreateResponse> {
-    return this.lifecycleOperations.create(request);
+  async create(request: TerminalCreateRequest, creatorDeviceSessionId?: string): Promise<TerminalCreateResponse> {
+    return creatorDeviceSessionId
+      ? this.persistence.withCreatingDevice(creatorDeviceSessionId, () => this.lifecycleOperations.create(request))
+      : this.lifecycleOperations.create(request);
   }
 
   async createTerminal(request: TerminalCreateRequest): Promise<TerminalDescriptor> {
@@ -247,6 +250,40 @@ export class TerminalService extends EventEmitter {
     onControl: (message: TerminalWsServerControlMessage) => void;
   }): Promise<() => void> {
     return this.clientOperations.attachClient(input);
+  }
+
+  /** Snapshot and attachment are installed under the existing PTY runtime lock. */
+  async attachRpcClient(input: {
+    terminalId: string;
+    sessionAgentId: string;
+    onSnapshot: (replay: Buffer) => void;
+    onData: (chunk: Buffer) => void;
+    onControl: (message: TerminalWsServerControlMessage) => void;
+  }): Promise<() => void> {
+    const runtime = this.requireRuntime(input.terminalId, input.sessionAgentId);
+    const client = { onData: input.onData, onControl: input.onControl };
+    await this.withRuntimeLock(runtime, async () => {
+      this.assertNotClosing(runtime);
+      const restore = await this.persistence.readReplayData(runtime.meta);
+      runtime.attachedClients.add(client);
+      try {
+        input.onSnapshot(restore.replay);
+        if (runtime.meta.state === "exited" || runtime.meta.state === "restore_failed") {
+          input.onControl({ channel: "control", type: "exit", exitCode: runtime.meta.exitCode, exitSignal: runtime.meta.exitSignal });
+        }
+      } catch (error) { runtime.attachedClients.delete(client); throw error; }
+    });
+    return () => { runtime.attachedClients.delete(client); };
+  }
+
+  async revokeDevice(deviceSessionId: string): Promise<void> {
+    for (const runtime of this.terminals.values()) {
+      if ((runtime.meta as StoredTerminalMeta).creatorDeviceSessionId === deviceSessionId && !runtime.closed) {
+        if (runtime.pty) await this.ptyRuntime.killPty(runtime.pty);
+        // Use the existing exit owner: retain snapshot/journal/meta for inspection and restart.
+        await this.runtimeOperations.handlePtyExit(runtime.meta.terminalId, null, null);
+      }
+    }
   }
 
   async handleClientControl(input: {

@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
 import {
   getOpenAICodexWebSocketConstructorDiagnostics,
@@ -33,7 +34,7 @@ interface CodexTransportDebugResponse {
 export function createDebugRoutes(options: { swarmManager: SwarmManager }): HttpRoute[] {
   const { swarmManager } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: "GET, OPTIONS",
       matches: (pathname) => pathname === CODEX_TRANSPORT_ENDPOINT_PATH,
@@ -110,7 +111,7 @@ export function createDebugRoutes(options: { swarmManager: SwarmManager }): Http
         sendJson(response, 200, payload as unknown as Record<string, unknown>);
       },
     },
-  ];
+  ], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }
 
 function isCodexTransportDebugEnabled(): boolean {

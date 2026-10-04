@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type {
   CliAccessKeyListResponse,
@@ -18,7 +19,7 @@ const ELECTRON_DEV_RENDERER_ORIGINS = new Set([
 export function createCliAccessSettingsRoutes(options: {
   cliAccessService: CliAccessService;
 }): HttpRoute[] {
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: `${LIST_METHODS}, ${ITEM_METHODS}`,
       matches: (pathname) =>
@@ -28,7 +29,7 @@ export function createCliAccessSettingsRoutes(options: {
         await handleKeysRequest(options.cliAccessService, request, response, requestUrl);
       },
     },
-  ];
+  ], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }
 
 /* ------------------------------------------------------------------ */

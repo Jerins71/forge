@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { lstat, mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative, resolve } from "node:path";
 import type {
@@ -40,7 +41,7 @@ export function createProjectResourceRoutes(options: { swarmManager: SwarmManage
   const settingsStore = new ProjectResourceSettingsStore(dataDir);
   const resolver = new ProjectWorkspaceResolver({ dataDir, settingsStore });
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: PROJECT_RESOURCES_METHODS,
       matches: (pathname) =>
@@ -148,7 +149,7 @@ export function createProjectResourceRoutes(options: { swarmManager: SwarmManage
         }
       }
     }
-  ];
+  ], { GET: { scopes: ['workspace:read'] }, HEAD: { scopes: ['workspace:read'] }, POST: { scopes: ['workspace:write'] }, PUT: { scopes: ['workspace:write'] }, PATCH: { scopes: ['workspace:write'] }, DELETE: { scopes: ['workspace:write'] } });
 }
 
 async function buildSnapshot(options: {

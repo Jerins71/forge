@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ModelCacheVisualizationSettingsChangedEvent, ServerEvent } from '@forge/protocol'
 import {
@@ -18,7 +19,7 @@ export function createModelCacheVisualizationRoutes(options: {
 }): HttpRoute[] {
   const { swarmManager, broadcastEvent } = options
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: ENABLED_METHODS,
       matches: (pathname) => pathname === MODEL_CACHE_VISUALIZATION_ENABLED_ENDPOINT_PATH,
@@ -32,7 +33,7 @@ export function createModelCacheVisualizationRoutes(options: {
         )
       },
     },
-  ]
+  ], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } })
 }
 
 async function handleModelCacheVisualizationEnabledRequest(

@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
@@ -7,7 +8,7 @@ export function createHistoryIndexRoutes(options: {
 }): HttpRoute[] {
   const manager = options.swarmManager;
   const methods = "GET, PATCH, OPTIONS";
-  return [{
+  return withEnvironmentRouteAccess([{
     methods,
     matches: (pathname) => pathname === "/api/history/index",
     handle: async (request, response) => {
@@ -34,5 +35,5 @@ export function createHistoryIndexRoutes(options: {
         sendJson(response, 500, { error: "History index settings could not be loaded or saved." });
       }
     },
-  }];
+  }], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }

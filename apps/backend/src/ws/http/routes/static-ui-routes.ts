@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { existsSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -29,7 +30,7 @@ export function createStaticUiRoutes(options: {
     return []
   }
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: STATIC_UI_METHODS,
       matches: (pathname) => !pathname.startsWith('/api/'),
@@ -37,7 +38,7 @@ export function createStaticUiRoutes(options: {
         await handleStaticUiRequest(request, response, requestUrl, staticRoot, shellPath)
       },
     },
-  ]
+  ], { GET: { public: 'static-ui' }, HEAD: { public: 'static-ui' } })
 }
 
 function resolveStaticUiRoot(rootDir: string, resourcesDir?: string): string | null {

@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type {
   GetSecureSecretSettingsResponse,
   UpdateSecureSecretSettingsRequest,
@@ -20,7 +21,7 @@ export function createSecureSecretSettingsRoutes(options: {
 }): HttpRoute[] {
   const { settingsService } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: SECURE_SECRET_SETTINGS_METHODS,
       matches: (pathname) => pathname === SECURE_SECRET_SETTINGS_ENDPOINT,
@@ -32,7 +33,7 @@ export function createSecureSecretSettingsRoutes(options: {
         );
       },
     },
-  ];
+  ], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }
 
 async function handleSecureSecretSettingsRequest(

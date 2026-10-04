@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { rm, writeFile } from "node:fs/promises";
 import {
   getRestartFilePathForPidFile,
@@ -13,6 +14,7 @@ import {
 import type { HttpRoute } from "../shared/http-route.js";
 
 const HEALTH_ENDPOINT_PATH = "/api/health";
+const ACTIVITY_ENDPOINT_PATH = "/api/activity";
 const REBOOT_ENDPOINT_PATH = "/api/reboot";
 
 export function createHealthRoutes(options: {
@@ -22,9 +24,10 @@ export function createHealthRoutes(options: {
 }): HttpRoute[] {
   const { resolveControlPidFile, allowReboot = true, swarmManager } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: "GET, HEAD, OPTIONS",
+      access: { public: "health" },
       matches: (pathname) => pathname === HEALTH_ENDPOINT_PATH,
       handle: async (request, response) => {
         applyCorsHeaders(request, response, "GET, HEAD, OPTIONS");
@@ -41,15 +44,17 @@ export function createHealthRoutes(options: {
           return;
         }
 
-        const body = {
-          ok: true,
-          version: "1.0.0",
-          timestamp: Date.now(),
-          swarm: swarmManager ? summarizeSwarmActivity(swarmManager) : undefined
-        };
-
-        // Node's http server auto-strips the body for HEAD responses
-        sendJson(response, 200, body);
+        // Node's http server auto-strips the body for HEAD responses.
+        sendJson(response, 200, { ok: true });
+      }
+    },
+    {
+      methods: "GET, HEAD, OPTIONS",
+      access: { scopes: ["session:read"] },
+      matches: (pathname) => pathname === ACTIVITY_ENDPOINT_PATH,
+      handle: async (request, response) => {
+        applyCorsHeaders(request, response, "GET, HEAD, OPTIONS");
+        sendJson(response, 200, { ok: true, swarm: swarmManager ? summarizeSwarmActivity(swarmManager) : undefined });
       }
     },
     {
@@ -89,7 +94,7 @@ export function createHealthRoutes(options: {
         rebootTimer.unref();
       }
     }
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }
 
 function summarizeSwarmActivity(swarmManager: SwarmManager): {

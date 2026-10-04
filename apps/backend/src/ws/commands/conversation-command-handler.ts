@@ -6,18 +6,18 @@ import {
 import type { WebSocket } from "ws";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
 
-export interface ConversationCommandRouteContext {
+export interface ConversationCommandRouteContext<Connection = WebSocket> {
   command: ClientCommand;
-  socket: WebSocket;
+  socket: Connection;
   subscribedAgentId: string;
   swarmManager: SwarmManager;
   allowNonManagerSubscriptions: boolean;
-  send: (socket: WebSocket, event: ServerEvent) => void;
+  send: (socket: Connection, event: ServerEvent) => void;
   logDebug: (message: string, details?: unknown) => void;
   resolveConfiguredManagerId: () => string | undefined;
 }
 
-export async function handleConversationCommand(context: ConversationCommandRouteContext): Promise<boolean> {
+export async function handleConversationCommand<Connection>(context: ConversationCommandRouteContext<Connection>): Promise<boolean> {
   const {
     command,
     socket,

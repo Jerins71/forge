@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { FEEDBACK_REASON_CODES, type FeedbackEvent, type FeedbackSubmitValue } from "@forge/protocol";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
 import { FeedbackService, type FeedbackListOptions } from "../../../swarm/feedback-service.js";
@@ -11,7 +12,7 @@ export function createFeedbackRoutes(options: { swarmManager: SwarmManager; feed
   const { swarmManager } = options;
   const feedbackService = options.feedbackService ?? new FeedbackService(swarmManager.getConfig().paths.dataDir);
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: "POST, GET, OPTIONS",
       matches: (pathname) => SESSION_FEEDBACK_ENDPOINT_PATTERN.test(pathname),
@@ -118,7 +119,7 @@ export function createFeedbackRoutes(options: { swarmManager: SwarmManager; feed
         }
       }
     }
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:operate'] }, PUT: { scopes: ['session:operate'] }, PATCH: { scopes: ['session:operate'] }, DELETE: { scopes: ['session:operate'] } });
 }
 
 function resolveSessionRoute(pathname: string, pattern: RegExp): { profileId: string; sessionId: string } | null {

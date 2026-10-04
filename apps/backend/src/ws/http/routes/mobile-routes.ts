@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { MobilePushService } from "../../../mobile/mobile-push-service.js";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
@@ -13,7 +14,7 @@ const PREFS_METHODS = "GET, PUT, OPTIONS";
 export function createMobileRoutes(options: { mobilePushService: MobilePushService }): HttpRoute[] {
   const { mobilePushService } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: POST_METHODS,
       matches: (pathname) => pathname === PUSH_REGISTER_PATH,
@@ -128,5 +129,5 @@ export function createMobileRoutes(options: { mobilePushService: MobilePushServi
         });
       }
     }
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:operate'] }, PUT: { scopes: ['session:operate'] }, PATCH: { scopes: ['session:operate'] }, DELETE: { scopes: ['session:operate'] } });
 }

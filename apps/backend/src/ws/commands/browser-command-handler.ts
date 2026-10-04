@@ -14,23 +14,23 @@ import type {
 import type { BrowserAutomationService } from "../../swarm/browser-automation/index.js";
 import type { WebSocket } from "ws";
 
-export interface BrowserCommandHandlerOptions {
+export interface BrowserCommandHandlerOptions<Connection = WebSocket> {
   command: BrowserClientCommand;
-  socket: WebSocket;
+  socket: Connection;
   connectionId: string;
   subscribedAgentId?: string;
   browserAutomationService: BrowserAutomationService;
   resolveManagerContextAgentId: (agentId: string) => string | undefined;
   resolveProfileIdForAgent: (agentId: string) => string | undefined;
   isEligibleLocalBuilderManager: (agentId: string) => boolean;
-  send: (socket: WebSocket, event: ServerEvent) => void;
-  sendCritical?: (socket: WebSocket, event: ServerEvent) => Promise<number | null>;
+  send: (socket: Connection, event: ServerEvent) => void;
+  sendCritical?: (socket: Connection, event: ServerEvent) => Promise<number | null>;
   broadcastToSession: (sessionAgentId: string, event: ServerEvent) => void;
   hydrateHostSessions: () => Promise<BrowserSessionSnapshot[]>;
   logDebug?: (message: string, details?: unknown) => void;
 }
 
-export async function handleBrowserCommand(options: BrowserCommandHandlerOptions): Promise<boolean> {
+export async function handleBrowserCommand<Connection>(options: BrowserCommandHandlerOptions<Connection>): Promise<boolean> {
   const { command, browserAutomationService: service, socket, connectionId } = options;
   switch (command.type) {
     case "browser_host_register": {
@@ -141,8 +141,8 @@ export async function handleBrowserCommand(options: BrowserCommandHandlerOptions
   }
 }
 
-async function handlePanelRevealAcknowledgement(
-  options: BrowserCommandHandlerOptions,
+async function handlePanelRevealAcknowledgement<Connection>(
+  options: BrowserCommandHandlerOptions<Connection>,
   command: Extract<BrowserClientCommand, { type: "browser_panel_reveal_acknowledge" }>,
 ): Promise<void> {
   const { browserAutomationService: service, connectionId } = options;
@@ -178,8 +178,8 @@ async function handlePanelRevealAcknowledgement(
   }
 }
 
-async function handleRecordingCommand(
-  options: BrowserCommandHandlerOptions,
+async function handleRecordingCommand<Connection>(
+  options: BrowserCommandHandlerOptions<Connection>,
   command: Extract<BrowserClientCommand, { type: "browser_recording_start" | "browser_recording_stop" }>,
 ): Promise<void> {
   const { browserAutomationService: service, connectionId } = options;
@@ -238,8 +238,8 @@ async function handleRecordingCommand(
   }
 }
 
-async function handleTabCommand(
-  options: BrowserCommandHandlerOptions,
+async function handleTabCommand<Connection>(
+  options: BrowserCommandHandlerOptions<Connection>,
   command: Extract<BrowserClientCommand, { type: "browser_tab_open" | "browser_tab_activate" | "browser_tab_close" | "browser_tab_resize" }>,
 ): Promise<void> {
   const { browserAutomationService: service, connectionId } = options;
@@ -320,8 +320,8 @@ async function handleTabCommand(
   }
 }
 
-function sendSuccess(
-  options: BrowserCommandHandlerOptions,
+function sendSuccess<Connection>(
+  options: BrowserCommandHandlerOptions<Connection>,
   command: Extract<BrowserClientCommand, { type: "browser_tab_open" | "browser_tab_activate" | "browser_tab_close" | "browser_tab_resize" }>,
   snapshot: BrowserSessionSnapshot,
 ): void {
@@ -333,8 +333,8 @@ function sendSuccess(
   } satisfies BrowserServerEvent);
 }
 
-function sendFailure(
-  options: BrowserCommandHandlerOptions,
+function sendFailure<Connection>(
+  options: BrowserCommandHandlerOptions<Connection>,
   command: Extract<BrowserClientCommand, { requestId: string }>,
   suffix: string,
   message: string,
@@ -361,7 +361,7 @@ function cloneSnapshot(snapshot: BrowserSessionSnapshot): BrowserSessionSnapshot
 
 const MAX_BROWSER_HYDRATION_CHUNK_BYTES = 256 * 1024;
 
-async function sendCritical(options: BrowserCommandHandlerOptions, event: ServerEvent): Promise<number | null> {
+async function sendCritical<Connection>(options: BrowserCommandHandlerOptions<Connection>, event: ServerEvent): Promise<number | null> {
   if (options.sendCritical) return options.sendCritical(options.socket, event);
   options.send(options.socket, event);
   return Buffer.byteLength(JSON.stringify(event), "utf8");

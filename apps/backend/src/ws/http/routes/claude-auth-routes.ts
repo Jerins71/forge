@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { ClaudeAuthService } from "../../../swarm/runtime/claude/claude-auth-service.js";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
@@ -5,7 +6,7 @@ import type { HttpRoute } from "../shared/http-route.js";
 export function createClaudeAuthRoutes(service: Pick<ClaudeAuthService, "status" | "start" | "cancel" | "submitCode">): HttpRoute[] {
   const path = "/api/settings/claude-native";
   const methods = "GET, POST, DELETE, OPTIONS";
-  return [{ methods, matches: pathname => pathname === path, handle: async (request, response) => {
+  return withEnvironmentRouteAccess([{ methods, matches: pathname => pathname === path, handle: async (request, response) => {
     applyCorsHeaders(request, response, methods);
     response.setHeader("Cache-Control", "no-store");
     if (request.method === "OPTIONS") { response.writeHead(204).end(); return; }
@@ -26,5 +27,5 @@ export function createClaudeAuthRoutes(service: Pick<ClaudeAuthService, "status"
     } catch (error) {
       sendJson(response, 400, { error: error instanceof Error ? error.message : "Claude sign-in request failed" });
     }
-  } }];
+  } }], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }

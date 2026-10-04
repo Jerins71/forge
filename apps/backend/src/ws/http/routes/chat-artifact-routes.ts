@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
 import {
   ChatArtifactError,
@@ -19,7 +20,7 @@ export function createChatArtifactRoutes(options: {
   artifactSecurityPlatform?: NodeJS.Platform;
 }): HttpRoute[] {
   const ticketStore = options.ticketStore ?? new PresentedChatArtifactTicketStore();
-  return [{
+  return withEnvironmentRouteAccess([{
     methods: METHODS,
     matches: pathname => pathname === READ_PATH || pathname.startsWith(TICKET_PATH_PREFIX),
     handle: async (request, response, requestUrl) => {
@@ -74,5 +75,5 @@ export function createChatArtifactRoutes(options: {
         sendJson(response, 500, { error: "Unable to read chat artifact.", code: "transcript_read_failed" });
       }
     },
-  }];
+  }], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:read'] }, PUT: { scopes: ['session:read'] }, PATCH: { scopes: ['session:read'] }, DELETE: { scopes: ['session:read'] } });
 }

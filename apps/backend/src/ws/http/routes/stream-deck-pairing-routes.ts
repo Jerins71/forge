@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type {
   StreamDeckPairingClaimRequest,
@@ -16,7 +17,7 @@ const MAX_BODY_BYTES = 8 * 1024;
 export function createStreamDeckPairingRoutes(options: {
   streamDeckAccessService: StreamDeckAccessService;
 }): HttpRoute[] {
-  return [{
+  return withEnvironmentRouteAccess([{
     methods: METHODS,
     matches: (pathname) =>
       pathname === PAIRING_PREFIX ||
@@ -25,7 +26,7 @@ export function createStreamDeckPairingRoutes(options: {
       pathname.startsWith(`${SETTINGS_PREFIX}/`),
     handle: (request, response, requestUrl) =>
       handleRequest(options.streamDeckAccessService, request, response, requestUrl),
-  }];
+  }], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }
 
 async function handleRequest(

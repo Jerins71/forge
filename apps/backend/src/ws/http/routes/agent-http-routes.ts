@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentSystemPromptResponse } from "@forge/protocol";
 import {
@@ -16,7 +17,7 @@ const AGENT_CLEAR_ENDPOINT_PATTERN = /^\/api\/agents\/([^/]+)\/clear$/;
 const AGENT_SYSTEM_PROMPT_PATTERN = /^\/api\/agents\/([^/]+)\/system-prompt$/;
 
 export function createAgentHttpRoutes(options: { swarmManager: SwarmManager }): HttpRoute[] {
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: "POST, OPTIONS",
       matches: (pathname) => AGENT_COMPACT_ENDPOINT_PATTERN.test(pathname),
@@ -45,7 +46,7 @@ export function createAgentHttpRoutes(options: { swarmManager: SwarmManager }): 
         await handleAgentSystemPromptHttpRequest(options.swarmManager, request, response, requestUrl);
       }
     }
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:operate'] }, PUT: { scopes: ['session:operate'] }, PATCH: { scopes: ['session:operate'] }, DELETE: { scopes: ['session:operate'] } });
 }
 
 async function handleCompactAgentHttpRequest(

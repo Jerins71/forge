@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 // Compatibility re-exports — these types were extracted to prompt-contracts.ts
 export type { PromptEntry, PromptRegistryForRoutes, PromptPreviewProvider, PromptPreviewResponse, PromptPreviewSection } from "../../../swarm/prompt-contracts.js";
@@ -53,7 +54,7 @@ export function createPromptRoutes(options: {
 }): HttpRoute[] {
   const { promptRegistry, broadcastEvent, promptPreviewProvider } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     // ── Preview full manager runtime context ──────────────────
     {
       methods: "GET, OPTIONS",
@@ -261,7 +262,7 @@ export function createPromptRoutes(options: {
         sendJson(response, 405, { error: "Method Not Allowed" });
       },
     },
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['workspace:write'] }, PUT: { scopes: ['workspace:write'] }, PATCH: { scopes: ['workspace:write'] }, DELETE: { scopes: ['workspace:write'] } });
 }
 
 // ---------------------------------------------------------------------------

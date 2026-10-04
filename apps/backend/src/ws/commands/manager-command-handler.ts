@@ -15,20 +15,23 @@ import {
   type RepositoryProjectCreationService,
 } from "../../swarm/repository-project-creation-service.js";
 
-export interface ManagerCommandRouteContext {
+export interface ManagerCommandRouteContext<Connection = WebSocket> {
   command: ClientCommand;
-  socket: WebSocket;
+  socket: Connection;
   subscribedAgentId: string;
   swarmManager: SwarmManager;
   resolveManagerContextAgentId: (subscribedAgentId: string) => string | undefined;
-  send: (socket: WebSocket, event: ServerEvent) => void;
+  send: (socket: Connection, event: ServerEvent) => void;
   broadcastToSubscribed: (event: ServerEvent) => void;
   handleDeletedAgentSubscriptions: (deletedAgentIds: Set<string>) => void;
   unreadTracker?: UnreadTracker;
-  repositoryProjectCreationService?: RepositoryProjectCreationService;
+  repositoryProjectCreationService?: {
+    create(input: Omit<Parameters<RepositoryProjectCreationService["create"]>[0], "socket"> & { socket: Connection }): ReturnType<RepositoryProjectCreationService["create"]>;
+    cancel(requestId: string, socket?: Connection): ReturnType<RepositoryProjectCreationService["cancel"]>;
+  };
 }
 
-export async function handleManagerCommand(context: ManagerCommandRouteContext): Promise<boolean> {
+export async function handleManagerCommand<Connection>(context: ManagerCommandRouteContext<Connection>): Promise<boolean> {
   const {
     command,
     socket,

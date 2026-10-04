@@ -17,20 +17,20 @@ import {
 } from "../../swarm/system-profile-guards.js";
 import type { UnreadTracker } from "../../swarm/session/unread-tracker.js";
 
-export interface SessionCommandRouteContext {
+export interface SessionCommandRouteContext<Connection = WebSocket> {
   command: ClientCommand;
-  socket: WebSocket;
+  socket: Connection;
   subscribedAgentId: string;
   swarmManager: SwarmManager;
   resolveManagerContextAgentId: (subscribedAgentId: string) => string | undefined;
-  send: (socket: WebSocket, event: ServerEvent) => void;
+  send: (socket: Connection, event: ServerEvent) => void;
   handleDeletedAgentSubscriptions: (deletedAgentIds: Set<string>) => void;
   unreadTracker?: UnreadTracker;
   broadcastUnreadCountUpdate?: (sessionAgentId: string, count: number) => void;
   supportsGoalControlRequestId?: boolean;
 }
 
-export async function handleSessionCommand(context: SessionCommandRouteContext): Promise<boolean> {
+export async function handleSessionCommand<Connection>(context: SessionCommandRouteContext<Connection>): Promise<boolean> {
   const {
     command,
     socket,

@@ -3,16 +3,16 @@ import type { WebSocket } from "ws";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
 import { projectConversationPageMetadataForWire } from "../conversation-page-wire.js";
 
-export interface AgentCommandRouteContext {
+export interface AgentCommandRouteContext<Connection = WebSocket> {
   command: ClientCommand;
-  socket: WebSocket;
+  socket: Connection;
   subscribedAgentId: string;
   swarmManager: SwarmManager;
   resolveManagerContextAgentId: (subscribedAgentId: string) => string | undefined;
-  send: (socket: WebSocket, event: ServerEvent) => void;
+  send: (socket: Connection, event: ServerEvent) => void;
 }
 
-export async function handleAgentCommand(context: AgentCommandRouteContext): Promise<boolean> {
+export async function handleAgentCommand<Connection>(context: AgentCommandRouteContext<Connection>): Promise<boolean> {
   const { command, socket, subscribedAgentId, swarmManager, resolveManagerContextAgentId, send } = context;
 
   if (command.type === "kill_agent") {

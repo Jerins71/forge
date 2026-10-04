@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { NativeRuntimeStatusResponse } from "@forge/protocol";
 import {
   NativeRuntimeUpdateError,
@@ -11,7 +12,7 @@ export const NATIVE_RUNTIMES_PATH = "/api/settings/native-runtimes";
 /** Composed only by the local Builder: updates run installers on this computer. */
 export function createNativeRuntimeRoutes(service: Pick<NativeRuntimeUpdateService, "status" | "startUpdate">): HttpRoute[] {
   const methods = "GET, POST, OPTIONS";
-  return [{ methods, matches: pathname => pathname === NATIVE_RUNTIMES_PATH, handle: async (request, response) => {
+  return withEnvironmentRouteAccess([{ methods, matches: pathname => pathname === NATIVE_RUNTIMES_PATH, handle: async (request, response) => {
     applyCorsHeaders(request, response, methods);
     response.setHeader("Cache-Control", "no-store");
     if (request.method === "OPTIONS") { response.writeHead(204).end(); return; }
@@ -33,5 +34,5 @@ export function createNativeRuntimeRoutes(service: Pick<NativeRuntimeUpdateServi
       if (!(error instanceof NativeRuntimeUpdateError)) throw error;
       sendJson(response, 409, { error: error.message });
     }
-  } }];
+  } }], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }

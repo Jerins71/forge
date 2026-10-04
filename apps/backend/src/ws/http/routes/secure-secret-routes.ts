@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   SECURE_SECRET_RETENTIONS,
@@ -226,7 +227,7 @@ export function createSecureSecretRoutes(options: {
 }): HttpRoute[] {
   const methods = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
 
-  return [{
+  return withEnvironmentRouteAccess([{
     methods,
     matches: (pathname) =>
       pathname === SECURE_SECRETS_PATH
@@ -658,7 +659,7 @@ export function createSecureSecretRoutes(options: {
         handleSecureRouteError(response, error);
       }
     },
-  }];
+  }], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }
 
 export function applySecureHeaders(

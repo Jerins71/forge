@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { TelemetryService } from '../../../telemetry/telemetry-service.js'
 import { applyCorsHeaders, sendJson } from '../../http-utils.js'
@@ -10,7 +11,7 @@ export function createTelemetryRoutes(options: {
 }): HttpRoute[] {
   const { telemetryService } = options
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: 'POST, OPTIONS',
       matches: (pathname) => pathname === TELEMETRY_SEND_NOW_ENDPOINT,
@@ -18,7 +19,7 @@ export function createTelemetryRoutes(options: {
         await handleSendNowRequest(request, response, telemetryService)
       },
     },
-  ]
+  ], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } })
 }
 
 async function handleSendNowRequest(

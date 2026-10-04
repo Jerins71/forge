@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -35,7 +36,7 @@ function resolveMermaidPreviewStaticRoot(): string {
 }
 
 export function createMermaidPreviewRoutes(): HttpRoute[] {
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: "GET, OPTIONS",
       matches: (pathname) =>
@@ -53,7 +54,7 @@ export function createMermaidPreviewRoutes(): HttpRoute[] {
         await handleAssetRequest(request, response, requestUrl);
       },
     },
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:read'] }, PUT: { scopes: ['session:read'] }, PATCH: { scopes: ['session:read'] }, DELETE: { scopes: ['session:read'] } });
 }
 
 async function handleEmbedDocumentRequest(

@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   STREAM_DECK_ACTION_TYPES,
@@ -24,6 +25,9 @@ import {
 import { CLI_SERVER_VERSION } from "../../cli-capabilities.js";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
+import type { ControlService, Principal } from "../../../environment/control/control-types.js";
+import { awaitLegacyReceipt, legacyCommandId } from "../../rpc/legacy-builder-adapter.js";
+import { StreamFault } from "../../../environment/streams/stream-budget.js";
 
 export const STREAM_DECK_ROUTE_PREFIX = "/api/stream-deck";
 const STREAM_DECK_HTTP_METHODS = "GET,POST,OPTIONS";
@@ -67,8 +71,9 @@ export function createStreamDeckRoutes(options: {
   statsService: Pick<StatsService, "getSnapshot">;
   onUnreadChanged?: (sessionAgentId: string, count: number) => void;
   broadcastEvent: (event: ServerEvent) => void;
+  environmentControl?: { control: ControlService; principalForRequest(request: IncomingMessage): Principal };
 }): HttpRoute[] {
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: STREAM_DECK_HTTP_METHODS,
       matches: (pathname) =>
@@ -78,7 +83,7 @@ export function createStreamDeckRoutes(options: {
         await handleStreamDeckRequest(options, request, response, requestUrl);
       },
     },
-  ];
+  ], { GET: { integration: 'stream-deck' }, POST: { integration: 'stream-deck' } });
 }
 
 async function handleStreamDeckRequest(
@@ -261,7 +266,7 @@ async function handleStreamDeckAction(
 
   const action = parsed.action;
   try {
-    const result = await executeStreamDeckAction(options, action);
+    const result = await executeStreamDeckAction(options, action, options.environmentControl?.principalForRequest(request));
     sendActionResponse(response, 200, result);
   } catch (error) {
     sendActionResponse(response, 409, actionError(action.requestId, "action_failed", error));
@@ -271,6 +276,7 @@ async function handleStreamDeckAction(
 export async function executeStreamDeckAction(
   options: Parameters<typeof createStreamDeckRoutes>[0],
   action: StreamDeckActionRequest,
+  principal?: Principal,
 ): Promise<StreamDeckActionResponse> {
   if (action.type === "navigate") {
     if (action.sessionAgentId) {
@@ -297,31 +303,31 @@ export async function executeStreamDeckAction(
     if (!profile || profile.archivedAt) {
       throw new Error("Profile not found");
     }
-    const created = await options.swarmManager.createSession(action.profileId, {
-      ...(action.label ? { label: action.label } : {}),
-    });
+    if (!options.environmentControl || !principal) throw new StreamFault("UNAVAILABLE", "Stream Deck control is not composed.");
+    const control = options.environmentControl.control;
+    const receipt = await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.launch", {
+      commandId: legacyCommandId(principal, "session.launch", action.requestId), projectId: action.profileId,
+      title: action.label ?? "Stream Deck session", workspaceStrategy: { kind: "current_checkout" },
+    }));
     return {
       ok: true,
       requestId: action.requestId,
       type: action.type,
-      sessionAgentId: created.sessionAgent.agentId,
-      message: `Created ${created.sessionAgent.sessionLabel ?? created.sessionAgent.displayName}`,
+      sessionAgentId: receipt.sessionId!,
+      message: "Session created",
     };
   }
 
   const session = requireSession(options.swarmManager, action.sessionAgentId);
 
   if (action.type === "send_prompt") {
-    await options.swarmManager.handleUserMessage(action.text, {
-      targetAgentId: session.agentId,
-      delivery: action.delivery ?? "auto",
-      sourceContext: {
-        channel: "cli",
-        channelId: "stream-deck",
-        messageId: action.requestId,
-      },
-      clientRequestId: action.requestId,
-    });
+    if (action.delivery && action.delivery !== "auto") throw new StreamFault("UNAVAILABLE", "Controlled Stream Deck delivery mode is unsupported.");
+    if (!options.environmentControl || !principal) throw new StreamFault("UNAVAILABLE", "Stream Deck control is not composed.");
+    const control = options.environmentControl.control;
+    await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.send", {
+      commandId: legacyCommandId(principal, "session.send", action.requestId), sessionId: session.agentId,
+      message: { text: action.text, artifactIds: [] },
+    }));
     return success(action, session.agentId, "Prompt delivered");
   }
 
@@ -330,18 +336,26 @@ export async function executeStreamDeckAction(
       await options.swarmManager.resumeSession(session.agentId);
       return success(action, session.agentId, "Session resumed");
     }
-    await options.swarmManager.stopSession(session.agentId);
+    await controlledStop();
     return success(action, session.agentId, "Session stopped");
   }
 
   if (action.type === "stop_session") {
-    await options.swarmManager.stopSession(session.agentId);
+    await controlledStop();
     return success(action, session.agentId, "Session stopped");
   }
 
   if (action.type === "resume_session") {
     await options.swarmManager.resumeSession(session.agentId);
     return success(action, session.agentId, "Session resumed");
+  }
+
+  async function controlledStop() {
+    if (!options.environmentControl || !principal) throw new StreamFault("UNAVAILABLE", "Stream Deck control is not composed.");
+    const control = options.environmentControl.control;
+    await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.stop", {
+      commandId: legacyCommandId(principal, "session.stop", action.requestId), sessionId: session.agentId,
+    }));
   }
 
   if (action.type === "smart_compact") {

@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
 import { applyCorsHeaders, sendJson } from "../../http-utils.js";
@@ -13,7 +14,7 @@ const ALLOWED_HEADERS = "content-type, if-none-match";
 export function createManagerSelectionCatalogRoutes(options: {
   swarmManager: SwarmManager;
 }): HttpRoute[] {
-  return [{
+  return withEnvironmentRouteAccess([{
     methods: ROUTE_METHODS,
     matches: (pathname) =>
       pathname === MANAGER_SELECTION_CATALOG_ENDPOINT_PATH
@@ -26,7 +27,7 @@ export function createManagerSelectionCatalogRoutes(options: {
       }
       await handleManagerSelectionCatalogRequest(options.swarmManager, request, response);
     },
-  }];
+  }], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:read'] }, PUT: { scopes: ['session:read'] }, PATCH: { scopes: ['session:read'] }, DELETE: { scopes: ['session:read'] } });
 }
 
 async function handleRecommendedManagerDefaultsRequest(

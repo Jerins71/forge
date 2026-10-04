@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { OnboardingState, OnboardingTechnicalLevel } from "@forge/protocol";
 import { ONBOARDING_TECHNICAL_LEVEL_VALUES } from "@forge/protocol";
 import { getOnboardingSnapshot, saveOnboardingPreferences, skipOnboarding } from "../../../swarm/onboarding-state.js";
@@ -15,7 +16,7 @@ const ONBOARDING_ADDITIONAL_PREFERENCES_MAX_LENGTH = 2000;
 export function createOnboardingRoutes(options: { swarmManager: SwarmManager }): HttpRoute[] {
   const { swarmManager } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: ONBOARDING_STATE_METHODS,
       matches: (pathname) => pathname === ONBOARDING_STATE_ENDPOINT_PATH,
@@ -56,7 +57,7 @@ export function createOnboardingRoutes(options: { swarmManager: SwarmManager }):
         }
       },
     },
-  ];
+  ], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }
 
 function buildOnboardingStateResponse(snapshot: OnboardingState) {

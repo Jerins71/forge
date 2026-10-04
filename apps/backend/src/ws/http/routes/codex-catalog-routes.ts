@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { applyCorsHeaders, sendJson } from "../../http-utils.js";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
@@ -6,7 +7,7 @@ import type { HttpRoute } from "../shared/http-route.js";
 const CODEX_CATALOG_PATTERN = /^\/api\/codex-app-server\/catalog$/;
 
 export function createCodexCatalogRoutes(options: { swarmManager: SwarmManager }): HttpRoute[] {
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: "GET, OPTIONS",
       matches: (pathname) => CODEX_CATALOG_PATTERN.test(pathname),
@@ -14,7 +15,7 @@ export function createCodexCatalogRoutes(options: { swarmManager: SwarmManager }
         await handleCodexCatalogRequest(options.swarmManager, request, response, requestUrl);
       },
     },
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:read'] }, PUT: { scopes: ['session:read'] }, PATCH: { scopes: ['session:read'] }, DELETE: { scopes: ['session:read'] } });
 }
 
 async function handleCodexCatalogRequest(
