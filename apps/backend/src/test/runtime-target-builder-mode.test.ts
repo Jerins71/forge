@@ -39,24 +39,14 @@ afterEach(async () => {
 })
 
 describe('builder runtime target seam', () => {
-  it('serves only the disabled collaboration status stub while leaving auth and collab routes unmounted', async () => {
+  it('leaves collaboration status, auth, and collab routes unmounted', async () => {
     const { server, config } = await startBuilderServer()
     const baseUrl = `http://${server.host}:${server.port}`
 
     expect(config.runtimeTarget).toBe('builder')
 
     const statusResponse = await fetch(`${baseUrl}/api/collaboration/status`)
-    expect(statusResponse.status).toBe(200)
-    await expect(statusResponse.json()).resolves.toEqual({
-      enabled: false,
-      adminExists: false,
-      ready: false,
-      bootstrapState: 'disabled',
-      workspaceExists: false,
-      workspaceDefaultsInitialized: false,
-      storageProfileExists: false,
-      storageRootSessionExists: false,
-    })
+    expect(statusResponse.status).toBe(404)
 
     const authResponse = await fetch(`${baseUrl}/api/auth/session`)
     expect(authResponse.status).toBe(404)

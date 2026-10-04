@@ -336,26 +336,28 @@ describe('createConfig', () => {
     }
   })
 
-  it('defaults runtime target to builder when no runtime env is set', async () => {
-    await withEnv({}, () => {
-      expect(resolveRuntimeTargetFromEnv()).toBe('builder')
+  it('fails closed when the removed collaboration-server target is requested', async () => {
+    for (const env of [
+      { FORGE_RUNTIME_TARGET: 'collaboration-server' },
+      { MIDDLEMAN_RUNTIME_TARGET: 'collaboration-server' },
+      { FORGE_RUNTIME_TARGET: 'ship-it' },
+      { FORGE_COLLABORATION_ENABLED: 'true' },
+    ] as const) {
+      await withEnv(env, () => {
+        expect(() => resolveRuntimeTargetFromEnv()).toThrow(/collaboration server was removed in Forge V2/)
+        expect(() => createConfig()).toThrow(/collaboration server was removed in Forge V2/)
+      })
+    }
+
+    await withEnv({ FORGE_RUNTIME_TARGET: 'builder', FORGE_COLLABORATION_ENABLED: 'true' }, () => {
       expect(createConfig().runtimeTarget).toBe('builder')
     })
   })
 
-  it('parses FORGE_RUNTIME_TARGET when set', async () => {
-    await withEnv({ FORGE_RUNTIME_TARGET: 'collaboration-server' }, () => {
-      expect(resolveRuntimeTargetFromEnv()).toBe('collaboration-server')
-      const config = createConfig()
-      expect(config.runtimeTarget).toBe('collaboration-server')
-      expect(config.collaborationModules).toBeDefined()
-    })
-  })
-
-  it('supports legacy MIDDLEMAN_RUNTIME_TARGET when FORGE_RUNTIME_TARGET is absent', async () => {
-    await withEnv({ MIDDLEMAN_RUNTIME_TARGET: 'collaboration-server' }, () => {
-      expect(resolveRuntimeTargetFromEnv()).toBe('collaboration-server')
-      expect(createConfig().runtimeTarget).toBe('collaboration-server')
+  it('defaults runtime target to builder when no runtime env is set', async () => {
+    await withEnv({}, () => {
+      expect(resolveRuntimeTargetFromEnv()).toBe('builder')
+      expect(createConfig().runtimeTarget).toBe('builder')
     })
   })
 
@@ -365,84 +367,10 @@ describe('createConfig', () => {
     })
   })
 
-  it('parses FORGE_CWD_ALLOWLIST_ROOTS for collaboration-server and fails closed when unset', async () => {
-    await withEnv(
-      {
-        FORGE_RUNTIME_TARGET: 'collaboration-server',
-        FORGE_CWD_ALLOWLIST_ROOTS: '/workspaces;/data',
-      },
-      () => {
-        const config = createConfig()
-        expect(config.cwdAllowlistRoots).toEqual(
-          expect.arrayContaining([
-            expect.stringMatching(/workspaces$/),
-            expect.stringMatching(/data$/),
-          ]),
-        )
-      },
-    )
-
-    await withEnv({ FORGE_RUNTIME_TARGET: 'collaboration-server', FORGE_CWD_ALLOWLIST_ROOTS: '' }, () => {
-      expect(createConfig().cwdAllowlistRoots).toEqual([])
-    })
-  })
-
   it('keeps builder unrestricted defaults when FORGE_CWD_ALLOWLIST_ROOTS is unset', async () => {
     await withEnv({ FORGE_RUNTIME_TARGET: 'builder' }, () => {
       const config = createConfig()
       expect(config.cwdAllowlistRoots.length).toBeGreaterThan(0)
-    })
-  })
-
-  it('parses collaboration auth env values for collaboration-server runtime', async () => {
-    await withEnv(
-      {
-        FORGE_RUNTIME_TARGET: 'collaboration-server',
-        FORGE_ADMIN_EMAIL: ' admin@example.com ',
-        FORGE_ADMIN_PASSWORD: ' super-secret ',
-        FORGE_COLLABORATION_AUTH_SECRET: ' auth-secret ',
-        FORGE_COLLABORATION_AUTH_COOKIE_NAME: ' forge_collab_test_session ',
-        FORGE_COLLABORATION_BASE_URL: ' https://forge.example.com/collab ',
-        FORGE_COLLABORATION_TRUSTED_ORIGINS: ' http://127.0.0.1:47188 , https://app.example.com ',
-      },
-      () => {
-        const config = createConfig()
-        expect(config.adminEmail).toBe('admin@example.com')
-        expect(config.adminPassword).toBe('super-secret')
-        expect(config.collaborationAuthSecret).toBe('auth-secret')
-        expect(config.collaborationAuthCookieName).toBe('forge_collab_test_session')
-        expect(config.collaborationBaseUrl).toBe('https://forge.example.com/collab')
-        expect(config.collaborationTrustedOrigins).toEqual([
-          'http://127.0.0.1:47188',
-          'https://app.example.com',
-        ])
-      },
-    )
-  })
-
-  it('maps legacy collaboration enabled env to collaboration-server only when runtime target is unset', async () => {
-    await withEnv({ FORGE_COLLABORATION_ENABLED: 'true' }, () => {
-      expect(resolveRuntimeTargetFromEnv()).toBe('collaboration-server')
-      expect(createConfig().runtimeTarget).toBe('collaboration-server')
-    })
-
-    await withEnv(
-      {
-        FORGE_RUNTIME_TARGET: 'builder',
-        FORGE_COLLABORATION_ENABLED: 'true',
-        MIDDLEMAN_COLLABORATION_ENABLED: 'true',
-      },
-      () => {
-        expect(resolveRuntimeTargetFromEnv()).toBe('builder')
-        expect(createConfig().runtimeTarget).toBe('builder')
-      }
-    )
-  })
-
-  it('aborts instead of falling back to builder for an explicitly invalid FORGE_RUNTIME_TARGET', async () => {
-    await withEnv({ FORGE_RUNTIME_TARGET: 'ship-it' }, () => {
-      expect(() => resolveRuntimeTargetFromEnv()).toThrow(/Invalid FORGE_RUNTIME_TARGET value/)
-      expect(() => createConfig()).toThrow(/Invalid FORGE_RUNTIME_TARGET value/)
     })
   })
 
@@ -456,24 +384,6 @@ describe('createConfig', () => {
       const config = createConfig()
       expect(config.isDesktop).toBe(false)
     })
-  })
-
-  it('parses Remote Projects env overrides only for collaboration-server', async () => {
-    await withEnv(
-      {
-        FORGE_RUNTIME_TARGET: 'collaboration-server',
-        FORGE_REMOTE_PROJECTS_ENABLED: 'true',
-        FORGE_REMOTE_PROJECTS_TERMINALS_ENABLED: '0',
-        FORGE_REMOTE_PROJECTS_INSTANCE_NAME: ' Compose Instance ',
-      },
-      () => {
-        expect(createConfig().remoteProjectsEnv).toEqual({
-          enabled: true,
-          terminalsEnabled: false,
-          instanceName: 'Compose Instance',
-        })
-      },
-    )
   })
 
   it('ignores Remote Projects env overrides on Builder runtime', async () => {
@@ -490,32 +400,6 @@ describe('createConfig', () => {
         const config = createConfig()
         expect(config.runtimeTarget).toBe('builder')
         expect(config.remoteProjectsEnv).toBeUndefined()
-      },
-    )
-  })
-
-  it('treats blank Remote Projects env overrides as absent on collaboration-server', async () => {
-    await withEnv(
-      {
-        FORGE_RUNTIME_TARGET: 'collaboration-server',
-        FORGE_REMOTE_PROJECTS_ENABLED: '  ',
-        FORGE_REMOTE_PROJECTS_TERMINALS_ENABLED: '',
-        FORGE_REMOTE_PROJECTS_INSTANCE_NAME: '\t',
-      },
-      () => {
-        expect(createConfig().remoteProjectsEnv).toEqual({})
-      },
-    )
-  })
-
-  it('fails collaboration startup on invalid Remote Projects boolean env', async () => {
-    await withEnv(
-      {
-        FORGE_RUNTIME_TARGET: 'collaboration-server',
-        FORGE_REMOTE_PROJECTS_ENABLED: 'definitely',
-      },
-      () => {
-        expect(() => createConfig()).toThrow(/FORGE_REMOTE_PROJECTS_ENABLED/)
       },
     )
   })

@@ -17,26 +17,25 @@ export function isCollaborationServerRuntimeTarget(target: RuntimeTarget): boole
 export function resolveRuntimeTargetFromEnv(env: NodeJS.ProcessEnv = process.env): RuntimeTarget {
   const explicitValue = env.FORGE_RUNTIME_TARGET ?? env.MIDDLEMAN_RUNTIME_TARGET;
   const normalizedExplicitValue = explicitValue?.trim();
-
-  if (normalizedExplicitValue) {
-    if (isRuntimeTarget(normalizedExplicitValue)) {
-      return normalizedExplicitValue;
-    }
-
-    // Fail closed: an explicitly-set-but-invalid target must abort startup, never
-    // silently fall back to builder. A typo like `collab-server` on a collaboration
-    // deployment would otherwise boot the unauthenticated builder surface.
-    throw new Error(
-      `Invalid FORGE_RUNTIME_TARGET value: ${JSON.stringify(explicitValue)}. ` +
-        `Valid values are ${RUNTIME_TARGETS.join(", ")}. Unset the variable to default to builder.`,
-    );
-  }
-
   const legacyCollaborationEnabled = parseOptionalBooleanEnv(
     env.FORGE_COLLABORATION_ENABLED ?? env.MIDDLEMAN_COLLABORATION_ENABLED,
   );
 
-  return legacyCollaborationEnabled === true ? "collaboration-server" : "builder";
+  // Fail closed: the collaboration server (and its authentication) was removed.
+  // Never silently boot the unauthenticated Builder surface on a host that was
+  // configured as a collaboration server, and never accept an unknown target.
+  if (
+    (normalizedExplicitValue && normalizedExplicitValue !== "builder")
+    || (!normalizedExplicitValue && legacyCollaborationEnabled === true)
+  ) {
+    throw new Error(
+      `Unsupported runtime target configuration (FORGE_RUNTIME_TARGET=${JSON.stringify(explicitValue ?? "")}). ` +
+        "The Forge collaboration server was removed in Forge V2; only the local Builder is supported. " +
+        "Unset FORGE_RUNTIME_TARGET and FORGE_COLLABORATION_ENABLED to start the Builder.",
+    );
+  }
+
+  return "builder";
 }
 
 function parseOptionalBooleanEnv(value: string | undefined): boolean | undefined {

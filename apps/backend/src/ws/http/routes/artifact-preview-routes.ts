@@ -1,7 +1,6 @@
 import { createReadStream } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { HTML_ARTIFACT_PREVIEW_ENDPOINT, HTML_ARTIFACT_PREVIEW_PATH_PREFIX } from "@forge/protocol";
-import { getCollaborationRequestAuthContext } from "../../../collaboration/auth/collaboration-auth-middleware.js";
 import {
   HtmlArtifactPreviewError,
   HtmlArtifactPreviewStore,
@@ -39,12 +38,10 @@ export function createArtifactPreviewRoutes(options: {
         }
         let payload: unknown;
         try { payload = await readJsonBody(request, MAX_ISSUE_BODY_BYTES); } catch { sendJson(response, 400, invalidHtmlArtifactPreviewRequest().body); return; }
-        const authBinding = getCollaborationRequestAuthContext(request)?.userId;
         const result = await issueHtmlArtifactPreview({
           source: options.swarmManager,
           store,
           payload,
-          ...(authBinding ? { authBinding } : {}),
           includeCwdAllowlistRootsForAgent: false,
         });
         sendJson(response, result.status, result.body);
@@ -64,8 +61,7 @@ export function createArtifactPreviewRoutes(options: {
           return;
         }
         try {
-          const authBinding = getCollaborationRequestAuthContext(request)?.userId;
-          const asset = await store.resolveAsset(token, relativePath, authBinding);
+          const asset = await store.resolveAsset(token, relativePath);
           sendAsset(request, response, asset, `${requestOrigin(request)}${HTML_ARTIFACT_PREVIEW_PATH_PREFIX}${token}/`);
         } catch (error) {
           const code = error instanceof HtmlArtifactPreviewError ? error.code : "not_found";

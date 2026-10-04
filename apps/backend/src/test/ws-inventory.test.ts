@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import type { AgentDescriptor, ManagerProfile, ServerEvent } from '@forge/protocol'
 import { WsHandler } from '../ws/ws-handler.js'
-import { setCollaborationSocketAuthContext } from '../collaboration/auth/collaboration-auth-middleware.js'
 import { SwarmWebSocketServer } from '../ws/server.js'
 import { WsSubscriptions } from '../ws/ws-subscriptions.js'
 import * as parser from '../ws/ws-command-parser.js'
@@ -235,17 +234,6 @@ describe('passive Builder inventory contract', () => {
     expect(f.owner.isInventorySubscription(f.a)).toBe(false)
     hold.resolve(); await pending
     expect(delivered).toEqual([])
-    expect(f.unread.markRead).not.toHaveBeenCalled()
-  })
-
-  it('rejects inventory on Collaboration runtime without installing a viewed or passive target', async () => {
-    const f = fixture()
-    f.manager.getConfig = () => ({ runtimeTarget: 'collaboration-server', managerId: 'a', debug: false, paths: { dataDir: '/fixture' } })
-    setCollaborationSocketAuthContext(f.a, { userId: 'fixture-admin', name: 'Admin', email: 'admin@example.test', role: 'admin', disabled: false, passwordChangeRequired: false })
-    await f.command(f.a, { type: 'subscribe_inventory', requestId: 'not-builder' })
-    await flush()
-    expect(events(f.a).at(-1)).toMatchObject({ type: 'error', code: 'INVENTORY_NOT_SUPPORTED', requestId: 'not-builder' })
-    expect(f.owner.subscriptions.size).toBe(0)
     expect(f.unread.markRead).not.toHaveBeenCalled()
   })
 

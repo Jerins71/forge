@@ -11,7 +11,6 @@ import {
   isTerminalAssistantConversationMessage,
   type BrowserHostConnectionSnapshot,
   type BrowserSessionSnapshot,
-  type CollaborationStatus,
   type ServerEvent,
   type TerminalClosedEvent,
   type TerminalCreatedEvent,
@@ -19,26 +18,7 @@ import {
 } from "@forge/protocol";
 import { WebSocketServer } from "ws";
 
-import { BUILDER_PROTOCOL_VERSION } from "@forge/protocol";
 import { MobilePushService } from "../mobile/mobile-push-service.js";
-import { getForgeAppVersion } from "../utils/app-version.js";
-import {
-  authenticateRequest,
-  classifyCollaborationHttpRequest,
-  evaluateCollaborationAdminAccess,
-  evaluateCollaborationMemberAccess,
-  evaluateCollaborationPasswordChangeAccess,
-  resolveCollaborationAuthContextForUserId,
-  setCollaborationRequestAuthContext,
-  setCollaborationRequestCorsContext,
-  setCollaborationSocketAuthContext,
-  validateCollaborationHttpOrigin,
-  type CollaborationAuthContext,
-} from "../collaboration/auth/collaboration-auth-middleware.js";
-import { getOrCreateCollaborationBetterAuthService } from "../collaboration/auth/better-auth-service.js";
-import type { CollaborationReadinessRequestService } from "../collaboration/readiness-service.js";
-import { RemoteBuildSettingsService } from "../collaboration/remote-build-settings-service.js";
-import type { CollaborationSettingsService } from "../collaboration/settings-service.js";
 
 import {
   getControlPidFilePath,
@@ -62,7 +42,6 @@ import {
 import { isPidAlive } from "../swarm/platform.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
 import type { BrowserAutomationService } from "../swarm/browser-automation/index.js";
-import { isCollabSession } from "../swarm/swarm-manager-utils.js";
 import { UnreadTracker } from "../swarm/session/unread-tracker.js";
 import { isBuilderRuntimeTarget } from "../runtime-target.js";
 import { createNoopObservabilityFacade } from "../observability/noop-observability.js";
@@ -78,7 +57,6 @@ import {
 
 import {
   authenticateCliWebSocketRequest,
-  isCliHttpPath,
   isCliWebSocketPath,
 } from "./cli-auth.js";
 import { applyCorsHeaders, resolveRequestUrl, sendJson } from "./http-utils.js";
@@ -91,7 +69,6 @@ import { createCliAccessSettingsRoutes } from "./http/routes/cli-access-settings
 import { createCliRoutes } from "./http/routes/cli-routes.js";
 import { createStreamDeckRoutes } from "./http/routes/stream-deck-routes.js";
 import { createStreamDeckPairingRoutes } from "./http/routes/stream-deck-pairing-routes.js";
-import { createCollaborationRoutes } from "./http/routes/collaboration-routes.js";
 import { createCortexAutoReviewRoutes } from "./http/routes/cortex-auto-review-routes.js";
 import { createCompactionSettingsRoutes } from "./http/routes/compaction-settings-routes.js";
 import { createContextModeRoutes } from "./http/routes/context-mode-routes.js";
@@ -114,7 +91,6 @@ import { createManagerSelectionCatalogRoutes } from "./http/routes/manager-selec
 import { createModelConfigRoutes } from "./http/routes/model-config-routes.js";
 import { createOpenRouterRoutes } from "./http/routes/openrouter-routes.js";
 import { createProjectResourceRoutes } from "./http/routes/project-resource-routes.js";
-import { createRemoteBuildSettingsRoutes } from "./http/routes/remote-build-settings-routes.js";
 import { createPhoenixObservabilityRoutes } from "./http/routes/phoenix-observability-routes.js";
 import { createPromptRoutes } from "./http/routes/prompt-routes.js";
 import { createSchedulerRoutes } from "./http/routes/scheduler-routes.js";
@@ -198,7 +174,6 @@ export class SwarmWebSocketServer {
   private readonly terminalWsProxy: TerminalWsProxy | null;
   private readonly unreadTracker: UnreadTracker;
   private readonly notificationSettingsService: NotificationSettingsService;
-  private readonly remoteBuildSettingsService: RemoteBuildSettingsService;
   private readonly remoteUpdateAwarenessService: LocalRemoteUpdateAwarenessService | null;
 
   private httpServer: HttpServer | null = null;
@@ -220,8 +195,6 @@ export class SwarmWebSocketServer {
   private readonly telemetryService: TelemetryService | null;
   private readonly observabilityService: ObservabilityFacade;
   private readonly feedbackService: FeedbackService;
-  private readonly collaborationSettingsService: CollaborationSettingsService | null;
-  private readonly collaborationReadinessService: CollaborationReadinessRequestService | null;
   private readonly httpRoutes: HttpRoute[];
   private readonly controlPidFile: string;
   private readonly shouldManageControlPid: boolean;
@@ -237,7 +210,6 @@ export class SwarmWebSocketServer {
     if (event.type !== "conversation_message" || isRetiredMessageSource(event.sourceContext)) return;
     this.wsHandler.broadcastToSubscribed(event);
     this.cliWsHandler.broadcast(event);
-    this.wsHandler.broadcastCollaborationConversationMessage(event);
 
     const triggersUnread =
       isTerminalAssistantConversationMessage(event) ||
@@ -270,14 +242,12 @@ export class SwarmWebSocketServer {
     if (event.type !== "agent_message") return;
     this.wsHandler.broadcastToSubscribed(event);
     this.cliWsHandler.broadcast(event);
-    this.wsHandler.broadcastCollaborationAgentMessage(event);
   };
 
   private readonly onAgentToolCall = (event: ServerEvent): void => {
     if (event.type !== "agent_tool_call") return;
     this.wsHandler.broadcastToSubscribed(event);
     this.cliWsHandler.broadcast(event);
-    this.wsHandler.broadcastCollaborationAgentToolCall(event);
   };
 
   private readonly onChoiceRequest = (event: ServerEvent): void => {
@@ -285,11 +255,6 @@ export class SwarmWebSocketServer {
 
     this.wsHandler.broadcastToSubscribed(event);
     this.cliWsHandler.broadcast(event);
-
-    const collabSessionAgentId = this.resolveCollaborationChoiceSessionAgentId(event);
-    if (collabSessionAgentId) {
-      this.wsHandler.broadcastCollaborationChoiceRequest(event, collabSessionAgentId);
-    }
 
     if (event.status === "pending") {
       const sessionAgentId = resolveSessionAgentIdForUnread(this.swarmManager, event.agentId);
@@ -322,35 +287,24 @@ export class SwarmWebSocketServer {
     if (event.type !== "message_pinned") return;
     this.wsHandler.broadcastToSubscribed(event);
     this.cliWsHandler.broadcast(event);
-
-    const descriptor = this.swarmManager.getAgent(event.agentId);
-    if (descriptor?.role === "manager" && isCollabSession(descriptor) && descriptor.collab?.channelId) {
-      this.wsHandler.getCollaborationSubscriptionManager().broadcastMessagePinned(
-        descriptor.collab.channelId,
-        event.messageId,
-        event.pinned,
-      );
-    }
   };
 
   private readonly onAgentStatus = (event: ServerEvent): void => {
     if (event.type !== "agent_status") return;
     this.wsHandler.broadcastToSubscribed(event);
     this.cliWsHandler.broadcast(event);
-    this.wsHandler.broadcastCollaborationAgentStatus(event);
   };
 
   private readonly onSessionWorkersSnapshot = (event: ServerEvent): void => {
     if (event.type !== "session_workers_snapshot") return;
     this.wsHandler.broadcastToSubscribed(event);
     this.cliWsHandler.broadcast(event);
-    this.wsHandler.broadcastCollaborationSessionWorkersSnapshot(event);
   };
 
   private readonly onGenerationThroughput = (event: ServerEvent): void => {
     if (event.type !== "generation_throughput") return;
     // Pi throughput is a Builder-local capability in v1. Do not forward it
-    // through CLI or Collaboration subscriptions.
+    // through CLI subscriptions.
     if (!isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) return;
     this.wsHandler.broadcastGenerationThroughput(event.measurement.sessionId, event);
   };
@@ -376,7 +330,7 @@ export class SwarmWebSocketServer {
   private readonly onSessionAttentionSnapshot = (event: ServerEvent): void => {
     if (event.type !== "session_attention_snapshot") return;
     // Builder-global origin state: every Builder subscription converges, while
-    // Collaboration-only and CLI sockets remain outside this fanout. The event
+    // CLI sockets remain outside this fanout. The event
     // carries complete state, so any dropped delivery heals on the next one.
     this.wsHandler.broadcastToSubscribed(event);
   };
@@ -483,41 +437,6 @@ export class SwarmWebSocketServer {
     return { profileId: descriptor.profileId ?? descriptor.agentId };
   }
 
-  private resolveCollaborationChoiceSessionAgentId(event: Extract<ServerEvent, { type: "choice_request" }>): string | undefined {
-    const explicitSessionAgentId = event.sessionAgentId?.trim();
-    if (explicitSessionAgentId) {
-      const sessionDescriptor = this.swarmManager.getAgent(explicitSessionAgentId);
-      if (
-        !sessionDescriptor ||
-        sessionDescriptor.role !== "manager" ||
-        !isCollabSession(sessionDescriptor)
-      ) {
-        console.warn(
-          `[collab] Dropping choice_request fanout: invalid sessionAgentId ${explicitSessionAgentId}`,
-        );
-        return undefined;
-      }
-
-      const requesterDescriptor = this.swarmManager.getAgent(event.agentId);
-      if (requesterDescriptor) {
-        const requesterSessionAgentId =
-          requesterDescriptor.role === "manager"
-            ? requesterDescriptor.agentId
-            : requesterDescriptor.managerId;
-        if (requesterSessionAgentId !== explicitSessionAgentId) {
-          console.warn(
-            `[collab] Dropping choice_request fanout: sessionAgentId ${explicitSessionAgentId} mismatches requester ${event.agentId}`,
-          );
-          return undefined;
-        }
-      }
-
-      return explicitSessionAgentId;
-    }
-
-    return this.resolveChoiceSessionAgentId(event.agentId);
-  }
-
   broadcastBrowserSessionChanged(
     snapshot: BrowserSessionSnapshot,
     reason: "host-report" | "automation" | "human-command" | "lifecycle" | "recovery",
@@ -533,21 +452,6 @@ export class SwarmWebSocketServer {
     this.wsHandler.broadcastToSubscribed({ type: "browser_host_connected", host });
   }
 
-  private resolveChoiceSessionAgentId(agentId: string): string | undefined {
-    const descriptor = this.swarmManager.getAgent(agentId);
-    if (!descriptor) {
-      return undefined;
-    }
-
-    const sessionAgentId = descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId;
-    const sessionDescriptor = this.swarmManager.getAgent(sessionAgentId);
-    if (!sessionDescriptor || sessionDescriptor.role !== "manager" || !isCollabSession(sessionDescriptor)) {
-      return undefined;
-    }
-
-    return sessionAgentId;
-  }
-
   constructor(options: {
     swarmManager: SwarmManager;
     host: string;
@@ -560,13 +464,10 @@ export class SwarmWebSocketServer {
     unreadTracker?: UnreadTracker;
     statsService?: StatsService;
     telemetryService?: TelemetryService | null;
-    collaborationSettingsService?: CollaborationSettingsService;
-    collaborationReadinessService?: CollaborationReadinessRequestService;
     cliAccessService?: CliAccessService;
     streamDeckAccessService?: StreamDeckAccessService;
     secureBrowserAccessService?: SecureBrowserAccessService;
     notificationSettingsService?: NotificationSettingsService;
-    remoteBuildSettingsService?: RemoteBuildSettingsService;
     builderSidebarOrderService?: BuilderSidebarOrderService;
     knowledgeV2SettingsService?: KnowledgeV2SettingsService;
     compactionSettingsService?: CompactionSettingsService;
@@ -615,12 +516,6 @@ export class SwarmWebSocketServer {
     this.notificationSettingsService =
       options.notificationSettingsService ??
       new NotificationSettingsService({ dataDir: this.swarmManager.getConfig().paths.dataDir });
-    this.remoteBuildSettingsService =
-      options.remoteBuildSettingsService ??
-      new RemoteBuildSettingsService({
-        dataDir: this.swarmManager.getConfig().paths.dataDir,
-        envOverrides: this.swarmManager.getConfig().remoteProjectsEnv,
-      });
     this.terminalService = options.terminalService ?? null;
     this.terminalRuntimeConfig = options.terminalRuntimeConfig ?? null;
     this.terminalSettingsService =
@@ -650,7 +545,6 @@ export class SwarmWebSocketServer {
             .filter(
               (descriptor) =>
                 descriptor.role === "manager" &&
-                !isCollabSession(descriptor) &&
                 (descriptor.profileId ?? descriptor.agentId) === profileId,
             )
             .map((descriptor) => descriptor.agentId) ?? [],
@@ -694,10 +588,7 @@ export class SwarmWebSocketServer {
         : undefined,
       unreadTracker: this.unreadTracker,
       perf: this.swarmManager.getSidebarPerfRecorder(),
-      collaborationReadinessService: options.collaborationReadinessService ?? undefined,
       feedbackService: this.feedbackService,
-      isRemoteBuildEnabled: () => this.remoteBuildSettingsService.isRemoteBuildEnabled(),
-      areRemoteTerminalsEnabled: () => this.remoteBuildSettingsService.areTerminalsEnabled(),
       browserAutomationService: options.browserAutomationService,
       artifactTicketStore,
       htmlPreviewStore,
@@ -730,8 +621,6 @@ export class SwarmWebSocketServer {
     this.wsHandler.setRepositoryProjectCreationService(this.repositoryProjectCreationService);
 
     this.telemetryService = options.telemetryService ?? null;
-    this.collaborationSettingsService = options.collaborationSettingsService ?? null;
-    this.collaborationReadinessService = options.collaborationReadinessService ?? null;
     this.statsService = options.statsService ?? new StatsService(this.swarmManager, {
       onRefreshAllCompleted: (allStats) => {
         void this.telemetryService?.sendOnStatsRefresh(allStats);
@@ -753,9 +642,6 @@ export class SwarmWebSocketServer {
       & SecureBrowserVaultService;
 
     this.httpRoutes = [
-      ...(isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)
-        ? [createDisabledCollaborationStatusRoute()]
-        : []),
       ...(isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)
         ? createCliRoutes({
             cliAccessService: this.cliAccessService,
@@ -801,26 +687,6 @@ export class SwarmWebSocketServer {
             service: this.builderSidebarOrderService,
             runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
             broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
-          })
-        : []),
-      ...(this.collaborationSettingsService
-        ? createCollaborationRoutes({
-            config: this.swarmManager.getConfig(),
-            settingsService: this.collaborationSettingsService,
-            readinessService: this.collaborationReadinessService ?? undefined,
-            swarmManager: this.swarmManager,
-            broadcasts: this.wsHandler.getCollaborationSubscriptionManager(),
-            buildStatusHandshake: () => ({
-              instanceName: this.remoteBuildSettingsService.getInstanceDisplayName(),
-              forgeVersion: getForgeAppVersion(),
-              protocolVersion: BUILDER_PROTOCOL_VERSION,
-              capabilities: {
-                collab: true,
-                remoteBuild: this.remoteBuildSettingsService.isRemoteBuildEnabled(),
-                createDirectory: true,
-                sessionAttention: true,
-              },
-            }),
           })
         : []),
       ...createHistoryIndexRoutes({ swarmManager: this.swarmManager }),
@@ -875,10 +741,6 @@ export class SwarmWebSocketServer {
             runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
           })
         : []),
-      ...createRemoteBuildSettingsRoutes({
-        settingsService: this.remoteBuildSettingsService,
-        runtimeTarget: this.swarmManager.getConfig().runtimeTarget,
-      }),
       ...createDebugRoutes({ swarmManager: this.swarmManager }),
       ...createTranscriptionRoutes({ swarmManager: this.swarmManager }),
       ...createStatsRoutes({
@@ -973,7 +835,6 @@ export class SwarmWebSocketServer {
       await this.repositorySettingsService.load();
     }
     await this.notificationSettingsService.load();
-    await this.remoteBuildSettingsService.load();
     await this.unreadTracker.load();
     await this.swarmManager.loadModelCacheVisualizationSettings?.();
     await this.remoteUpdateAwarenessService?.start();
@@ -1198,55 +1059,10 @@ export class SwarmWebSocketServer {
       }
     }
 
-    const config = this.swarmManager.getConfig();
-    let authContext: CollaborationAuthContext | null = null;
-
-    if (isBuilderRuntimeTarget(config.runtimeTarget)) {
-      const originValidation = validateTerminalWsOrigin(request);
-      if (!originValidation.ok) {
-        rejectWebSocketUpgrade(socket, 403, originValidation.errorMessage);
-        return;
-      }
-    } else {
-      const originValidation = validateCollaborationHttpOrigin(request, config);
-      if (!originValidation.ok) {
-        rejectWebSocketUpgrade(socket, 403, originValidation.errorMessage);
-        return;
-      }
-
-      try {
-        const authService = await getOrCreateCollaborationBetterAuthService(config);
-        const session = await authService.getSessionFromCookieHeader(request.headers.cookie);
-        if (!session) {
-          rejectWebSocketUpgrade(socket, 401, "Authentication required");
-          return;
-        }
-
-        const resolvedAuthContext = await resolveCollaborationAuthContextForUserId(config, session.user.id);
-        if (!resolvedAuthContext) {
-          rejectWebSocketUpgrade(socket, 401, "Authentication required");
-          return;
-        }
-
-        authContext = {
-          ...resolvedAuthContext,
-          ...(session.session?.id ? { sessionId: session.session.id } : {}),
-        };
-
-        if (authContext.disabled) {
-          rejectWebSocketUpgrade(socket, 403, "User account is disabled");
-          return;
-        }
-
-        if (authContext.passwordChangeRequired) {
-          rejectWebSocketUpgrade(socket, 403, "Password change required");
-          return;
-        }
-      } catch (error) {
-        console.error("[collaboration] Failed to authenticate WebSocket upgrade", error);
-        rejectWebSocketUpgrade(socket, 500, "Internal Server Error");
-        return;
-      }
+    const originValidation = validateTerminalWsOrigin(request);
+    if (!originValidation.ok) {
+      rejectWebSocketUpgrade(socket, 403, originValidation.errorMessage);
+      return;
     }
 
     const wss = this.wss;
@@ -1257,11 +1073,6 @@ export class SwarmWebSocketServer {
     }
 
     wss.handleUpgrade(request, socket, head, (client) => {
-      if (authContext) {
-        setCollaborationSocketAuthContext(client, authContext);
-        this.wsHandler.getCollaborationSubscriptionManager().registerSocket(client, authContext);
-      }
-
       wss.emit("connection", client, request);
     });
   }
@@ -1374,72 +1185,6 @@ export class SwarmWebSocketServer {
           return;
         }
       }
-      if (!isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-        if (isCliHttpPath(requestUrl.pathname)) {
-          applyCorsHeaders(request, response, "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
-          response.statusCode = 404;
-          response.end("Not Found");
-          return;
-        }
-
-        const originValidation = validateCollaborationHttpOrigin(request, this.swarmManager.getConfig());
-        if (!originValidation.ok) {
-          setCollaborationRequestCorsContext(request, { allowedOrigin: null });
-          applyCorsHeaders(request, response, "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
-          sendJson(response, 403, { error: originValidation.errorMessage });
-          return;
-        }
-
-        setCollaborationRequestCorsContext(request, { allowedOrigin: originValidation.allowedOrigin });
-
-        if (requestUrl.pathname === "/api/auth" || requestUrl.pathname.startsWith("/api/auth/")) {
-          applyCorsHeaders(request, response, "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
-          if (request.method === "OPTIONS") {
-            response.statusCode = 204;
-            response.end();
-            return;
-          }
-
-          const authService = await getOrCreateCollaborationBetterAuthService(this.swarmManager.getConfig());
-          await authService.handleAuthRequest(request, response);
-          return;
-        }
-
-        const authContext = await authenticateRequest(request, this.swarmManager.getConfig());
-        setCollaborationRequestAuthContext(request, authContext);
-
-        const passwordChangeAccess = evaluateCollaborationPasswordChangeAccess(
-          authContext,
-          requestUrl.pathname,
-          request.method,
-        );
-        if (!passwordChangeAccess.ok) {
-          applyCorsHeaders(request, response, "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
-          sendJson(response, passwordChangeAccess.statusCode, { error: passwordChangeAccess.error });
-          return;
-        }
-
-        const accessClass = classifyCollaborationHttpRequest(requestUrl.pathname, request.method, {
-          remoteBuildEnabled: this.remoteBuildSettingsService.isRemoteBuildEnabled(),
-          terminalsEnabled: this.remoteBuildSettingsService.areTerminalsEnabled(),
-        });
-        if (accessClass === "member") {
-          const access = evaluateCollaborationMemberAccess(authContext);
-          if (!access.ok) {
-            applyCorsHeaders(request, response, "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
-            sendJson(response, access.statusCode, { error: access.error });
-            return;
-          }
-        } else if (accessClass === "admin") {
-          const access = evaluateCollaborationAdminAccess(authContext);
-          if (!access.ok) {
-            applyCorsHeaders(request, response, "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
-            sendJson(response, access.statusCode, { error: access.error });
-            return;
-          }
-        }
-      }
-
       route = this.httpRoutes.find((candidate) => candidate.matches(requestUrl.pathname));
 
       if (!route) {
@@ -1468,43 +1213,6 @@ export class SwarmWebSocketServer {
       sendJson(response, statusCode, { error: message });
     }
   }
-}
-
-function createDisabledCollaborationStatusRoute(): HttpRoute {
-  return {
-    methods: "GET, OPTIONS",
-    matches: (pathname: string) => pathname === "/api/collaboration/status",
-    handle: async (request: IncomingMessage, response: ServerResponse) => {
-      applyCorsHeaders(request, response, "GET, OPTIONS");
-
-      if (request.method === "OPTIONS") {
-        response.statusCode = 204;
-        response.end();
-        return;
-      }
-
-      if (request.method !== "GET") {
-        response.setHeader("Allow", "GET, OPTIONS");
-        sendJson(response, 405, { error: "Method Not Allowed" });
-        return;
-      }
-
-      sendJson(response, 200, buildDisabledCollaborationStatus() as unknown as Record<string, unknown>);
-    }
-  };
-}
-
-function buildDisabledCollaborationStatus(): CollaborationStatus {
-  return {
-    enabled: false,
-    adminExists: false,
-    ready: false,
-    bootstrapState: "disabled",
-    workspaceExists: false,
-    workspaceDefaultsInitialized: false,
-    storageProfileExists: false,
-    storageRootSessionExists: false,
-  };
 }
 
 function ignoreSocketErrors(socket: Duplex): void {

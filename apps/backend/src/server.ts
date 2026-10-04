@@ -3,8 +3,6 @@ import { bootstrapCollaborationAdmin } from "./collaboration/auth/admin-bootstra
 import { clearCollaborationBetterAuthService, getOrCreateCollaborationBetterAuthService } from "./collaboration/auth/better-auth-service.js";
 import { closeCollaborationAuthDb, getOrCreateCollaborationAuthDb } from "./collaboration/auth/collaboration-db.js";
 import { runCollaborationAuthMigrations } from "./collaboration/auth/migration-runner.js";
-import { CollaborationSettingsService } from "./collaboration/settings-service.js";
-import { createCollaborationReadinessService, type CollaborationReadinessRequestService } from "./collaboration/readiness-service.js";
 import { StatsService } from "./stats/stats-service.js";
 import { collectFeatureAdoption } from "./telemetry/feature-counters.js";
 import {
@@ -201,22 +199,9 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
   let handleTerminalSessionLifecycle: (event: SessionLifecycleEvent) => void = () => undefined;
   let handleTerminalAgentsSnapshot: () => void = () => undefined;
   let server: BackendServer | null = null;
-  let collaborationReadinessService: CollaborationReadinessRequestService | undefined;
-  let collaborationSettingsService: CollaborationSettingsService | undefined;
 
   try {
     await swarmManager.boot();
-
-    if (isCollaborationServerRuntimeTarget(config.runtimeTarget)) {
-      const collaborationDatabase = await getOrCreateCollaborationAuthDb(config);
-      collaborationReadinessService = await createCollaborationReadinessService(
-        config,
-        collaborationDatabase,
-        swarmManager,
-      );
-      collaborationSettingsService = new CollaborationSettingsService(config, collaborationReadinessService);
-      await collaborationReadinessService.ensureCollaborationReady();
-    }
 
     let telemetryService: TelemetryService | null = null;
     const statsService = new StatsService(swarmManager, {
@@ -393,8 +378,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       telemetryService,
       observabilityService,
       feedbackService,
-      collaborationSettingsService,
-      collaborationReadinessService,
       browserAutomationService,
       secureControlToken: options.secureControlToken,
     });
