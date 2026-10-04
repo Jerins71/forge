@@ -12,8 +12,9 @@ import type { SettingsApiClient } from '@/components/settings/settings-api-clien
 import { originRegistry, useOriginSnapshot } from '@/lib/origin-store'
 /** Legacy facade projection; acquisition never starts a socket or owns primary registration. */
 const unavailableClient = new ManagerWsClient('', null, { socketless: true })
-export function useEnvironmentConnection(environmentId: string | null) {
-  const state = useOriginSnapshot(environmentId ?? 'unregistered')
+
+/** The environment's facade handles without subscribing to its state; read state through a slice. */
+export function useEnvironmentHandles(environmentId: string | null) {
   const store = environmentId
     ? originRegistry.getOrigin(environmentId)
     : undefined
@@ -37,7 +38,13 @@ export function useEnvironmentConnection(environmentId: string | null) {
     [store],
   )
   return useMemo(
-    () => ({ client, clientRef, httpClientRef, state, setState }),
-    [client, state, setState],
+    () => ({ client, clientRef, httpClientRef, setState }),
+    [client, setState],
   )
+}
+
+export function useEnvironmentConnection(environmentId: string | null) {
+  const state = useOriginSnapshot(environmentId ?? 'unregistered')
+  const handles = useEnvironmentHandles(environmentId)
+  return useMemo(() => ({ ...handles, state }), [handles, state])
 }
