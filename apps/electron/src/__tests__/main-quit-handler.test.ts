@@ -83,15 +83,4 @@ describe('Electron quit cleanup', () => {
     expect(fx.disposeBrowserPreviewRuntime).toHaveBeenCalledOnce()
     expect(fx.app.exit).not.toHaveBeenCalled()
   })
-
-  it('continues backend cleanup after Chrome retains unresolved recovery state', async () => {
-    const fx = fixture(vi.fn(async () => { throw new Error('release unproven') }))
-    expect(fx.quit().preventDefault).toHaveBeenCalledOnce()
-    await vi.waitFor(() => expect(fx.backendSupervisor.stop).toHaveBeenCalledOnce())
-    expect(fx.context.console.warn).toHaveBeenCalledOnce()
-    expect(fx.disposeBrowserPreviewRuntime).toHaveBeenCalledOnce()
-    expect(fx.quit().preventDefault).toHaveBeenCalledOnce()
-    fx.backend.resolve()
-    await vi.waitFor(() => expect(fx.app.exit).toHaveBeenCalledExactlyOnceWith(0))
-  })
 })

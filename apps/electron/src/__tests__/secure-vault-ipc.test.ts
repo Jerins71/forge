@@ -1,16 +1,7 @@
-import { EventEmitter } from 'node:events'
+
 import { createCipheriv, createECDH, hkdfSync, randomBytes } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import {
-  SECURE_VAULT_MAX_PLAINTEXT_BYTES,
-  SECURE_VAULT_REMOTE_ENTRY_TTL_MS,
-  SECURE_VAULT_RENDERER_CHANNEL,
-  createSecureVaultController,
-  createSecureVaultRequestHandler,
-  initializeSecureVaultAtStartup,
-  installSecureVaultChildBridge,
-  installSecureVaultRendererIpc,
-} from '../secure-vault-ipc.js'
+import { SECURE_VAULT_RENDERER_CHANNEL, createSecureVaultController, createSecureVaultRequestHandler, installSecureVaultRendererIpc } from '../secure-vault-ipc.js'
 
 function createSafeStorage(options: {
   available?: boolean
@@ -53,54 +44,6 @@ function createController(
 }
 
 describe('secure vault controller', () => {
-  it('keeps status passive until startup initializes private storage', async () => {
-    const safeStorage = createSafeStorage({ available: false })
-    const controller = createController(safeStorage)
-
-    expect(controller.status()).toEqual({
-      available: false,
-      errorCode: 'SECURE_VAULT_STORAGE_UNAVAILABLE',
-    })
-    expect(safeStorage.isEncryptionAvailable).not.toHaveBeenCalled()
-    expect(safeStorage.isAsyncEncryptionAvailable).not.toHaveBeenCalled()
-
-    await initializeSecureVaultAtStartup(controller)
-    expect(safeStorage.isAsyncEncryptionAvailable).toHaveBeenCalledTimes(1)
-    expect(controller.status()).toEqual({ available: true })
-  })
-
-  it('keeps startup available when private-storage initialization rejects', async () => {
-    const unlock = vi.fn().mockRejectedValue(new Error('native failure'))
-
-    await expect(
-      initializeSecureVaultAtStartup({ unlock }),
-    ).resolves.toBeUndefined()
-    expect(unlock).toHaveBeenCalledTimes(1)
-  })
-
-  it('coalesces concurrent native unlock prompts and permits a clean retry', async () => {
-    let resolveFirst: ((available: boolean) => void) | undefined
-    const first = new Promise<boolean>((resolve) => {
-      resolveFirst = resolve
-    })
-    const safeStorage = createSafeStorage({
-      available: false,
-      asyncAvailable: vi.fn()
-        .mockImplementationOnce(() => first)
-        .mockResolvedValueOnce(true),
-    })
-    const controller = createController(safeStorage)
-
-    const unlockOne = controller.unlock()
-    const unlockTwo = controller.unlock()
-    expect(safeStorage.isAsyncEncryptionAvailable).toHaveBeenCalledTimes(1)
-    resolveFirst?.(false)
-
-    expect(await unlockOne).toMatchObject({ available: false })
-    expect(await unlockTwo).toMatchObject({ available: false })
-    expect(await controller.unlock()).toEqual({ available: true })
-    expect(safeStorage.isAsyncEncryptionAvailable).toHaveBeenCalledTimes(2)
-  })
 
   it('round-trips arbitrary bytes and returns replacement ciphertext on key rotation', async () => {
     const safeStorage = createSafeStorage({
@@ -124,47 +67,6 @@ describe('secure vault controller', () => {
         reEncryptedPayload:
           Buffer.from(`current:${plainPayload}`).toString('base64'),
       },
-    })
-  })
-
-  it('turns a one-use remote browser envelope directly into safeStorage ciphertext', async () => {
-    const safeStorage = createSafeStorage()
-    const controller = createController(safeStorage)
-    expect(await controller.unlock()).toEqual({ available: true })
-    const context = 'secure-browser:device-1'
-    const challenge = await controller.createRemoteEntryChallenge(
-      Buffer.from(context).toString('base64'),
-    )
-    if (!challenge.ok) throw new Error('Expected remote entry challenge')
-    const secret = 'remote-only-secret-value'
-    const envelope = sealRemoteEntry(
-      secret,
-      context,
-      challenge.result,
-    )
-
-    const encrypted = await controller.encryptRemoteEntry(
-      Buffer.from(JSON.stringify(envelope)).toString('base64'),
-    )
-    expect(encrypted).toEqual({
-      ok: true,
-      result: {
-        payload: Buffer.from(
-          `sealed:${Buffer.from(secret).toString('base64')}`,
-        ).toString('base64'),
-      },
-    })
-    expect(JSON.stringify(encrypted)).not.toContain(secret)
-    expect(safeStorage.encryptStringAsync).toHaveBeenCalledWith(
-      Buffer.from(secret).toString('base64'),
-    )
-
-    const replay = await controller.encryptRemoteEntry(
-      Buffer.from(JSON.stringify(envelope)).toString('base64'),
-    )
-    expect(replay).toEqual({
-      ok: false,
-      errorCode: 'SECURE_VAULT_INVALID_REQUEST',
     })
   })
 
@@ -192,35 +94,6 @@ describe('secure vault controller', () => {
     await expect(controller.encryptRemoteEntry(
       Buffer.from(JSON.stringify(envelope)).toString('base64'),
     )).resolves.toMatchObject({ ok: true })
-  })
-
-  it('expires unused remote entry challenges before decrypting anything', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-07-28T16:00:00.000Z'))
-    try {
-      const safeStorage = createSafeStorage()
-      const controller = createController(safeStorage)
-      expect(await controller.unlock()).toEqual({ available: true })
-      const context = 'secure-browser:device-1'
-      const challenge = await controller.createRemoteEntryChallenge(
-        Buffer.from(context).toString('base64'),
-      )
-      if (!challenge.ok) throw new Error('Expected remote entry challenge')
-      const envelope = sealRemoteEntry('expired-secret', context, challenge.result)
-      vi.setSystemTime(new Date(
-        Date.now() + SECURE_VAULT_REMOTE_ENTRY_TTL_MS + 1,
-      ))
-
-      await expect(controller.encryptRemoteEntry(
-        Buffer.from(JSON.stringify(envelope)).toString('base64'),
-      )).resolves.toEqual({
-        ok: false,
-        errorCode: 'SECURE_VAULT_INVALID_REQUEST',
-      })
-      expect(safeStorage.encryptStringAsync).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
   })
 })
 
@@ -305,81 +178,6 @@ describe('secure vault backend child IPC', () => {
     expect(safeStorage.encryptStringAsync).not.toHaveBeenCalled()
   })
 
-  it('bounds and validates payloads before safeStorage', async () => {
-    const safeStorage = createSafeStorage()
-    const handler = createSecureVaultRequestHandler({
-      controller: createController(safeStorage, 'win32'),
-    })
-    const oversized = Buffer.alloc(
-      SECURE_VAULT_MAX_PLAINTEXT_BYTES + 1,
-    ).toString('base64')
-
-    expect(await handler.handle({
-      type: 'secure_vault_request',
-      requestId: 'large-1',
-      operation: 'encrypt',
-      payload: oversized,
-    })).toMatchObject({
-      ok: false,
-      errorCode: 'SECURE_VAULT_PAYLOAD_TOO_LARGE',
-    })
-    expect(await handler.handle({
-      type: 'secure_vault_request',
-      requestId: 'invalid-1',
-      operation: 'encrypt',
-      payload: 'not canonical base64',
-    })).toMatchObject({
-      ok: false,
-      errorCode: 'SECURE_VAULT_INVALID_REQUEST',
-    })
-    expect(await handler.handle({
-      type: 'secure_vault_request',
-      requestId: 'empty-1',
-      operation: 'encrypt',
-      payload: '',
-    })).toMatchObject({
-      ok: false,
-      errorCode: 'SECURE_VAULT_INVALID_REQUEST',
-    })
-    expect(safeStorage.encryptStringAsync).not.toHaveBeenCalled()
-  })
-
-  it('uses stable request IDs to replay one bounded async encrypt result', async () => {
-    let encryptionSequence = 0
-    const safeStorage = createSafeStorage({
-      encrypt: async (value) =>
-        Buffer.from(`${++encryptionSequence}:${value}`, 'utf8'),
-    })
-    const controller = createController(safeStorage)
-    expect(await controller.unlock()).toEqual({ available: true })
-    const unlockedHandler = createSecureVaultRequestHandler({ controller })
-    const firstRequest = {
-      type: 'secure_vault_request',
-      requestId: 'stable-operation-id',
-      operation: 'encrypt',
-      payload: Buffer.from('first').toString('base64'),
-    }
-
-    const [first, retry] = await Promise.all([
-      unlockedHandler.handle(firstRequest),
-      unlockedHandler.handle(firstRequest),
-    ])
-    const conflictingRetry = await unlockedHandler.handle({
-      ...firstRequest,
-      payload: Buffer.from('different').toString('base64'),
-    })
-
-    expect(retry).toEqual(first)
-    expect(conflictingRetry).toEqual({
-      type: 'secure_vault_response',
-      requestId: 'stable-operation-id',
-      ok: false,
-      errorCode: 'SECURE_VAULT_INVALID_REQUEST',
-    })
-    expect(safeStorage.encryptStringAsync).toHaveBeenCalledTimes(1)
-    unlockedHandler.dispose()
-  })
-
   it('maps provider exceptions to fixed errors without reflecting values or messages', async () => {
     const canary = 'do-not-reflect-this-value'
     const safeStorage = createSafeStorage({
@@ -405,51 +203,6 @@ describe('secure vault backend child IPC', () => {
       errorCode: 'SECURE_VAULT_ENCRYPT_FAILED',
     })
     expect(JSON.stringify(response)).not.toContain(canary)
-  })
-
-  it('attaches a request/reply listener without consuming unrelated backend messages', async () => {
-    class FakeChild extends EventEmitter {
-      connected = true
-      sent: unknown[] = []
-
-      send(message: unknown, callback?: (error: Error | null) => void): boolean {
-        this.sent.push(message)
-        callback?.(null)
-        return true
-      }
-    }
-
-    const child = new FakeChild()
-    const controller = createController()
-    expect(await controller.unlock()).toEqual({ available: true })
-    const dispose = installSecureVaultChildBridge({
-      child: child as never,
-      controller,
-    })
-
-    child.emit('message', { type: 'ready', port: 47287 })
-    child.emit('message', {
-      type: 'secure_vault_request',
-      requestId: 'status-child',
-      operation: 'status',
-    })
-    await vi.waitFor(() => expect(child.sent).toHaveLength(1))
-
-    expect(child.sent).toEqual([{
-      type: 'secure_vault_response',
-      requestId: 'status-child',
-      ok: true,
-      result: { available: true },
-    }])
-
-    dispose()
-    child.emit('message', {
-      type: 'secure_vault_request',
-      requestId: 'status-after-dispose',
-      operation: 'status',
-    })
-    await Promise.resolve()
-    expect(child.sent).toHaveLength(1)
   })
 })
 

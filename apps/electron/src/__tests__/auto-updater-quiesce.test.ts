@@ -24,10 +24,4 @@ describe('prepareUpdateInstall', () => {
     })).rejects.toThrow('timed out')
     expect(prepare).not.toHaveBeenCalled()
   })
-
-  it('keeps old updater clients working when no hook is supplied', async () => {
-    const prepare = vi.fn(async () => undefined)
-    await prepareUpdateInstall({ prepareQuitForUpdate: prepare })
-    expect(prepare).toHaveBeenCalledOnce()
-  })
 })

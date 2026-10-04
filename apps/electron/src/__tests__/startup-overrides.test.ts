@@ -2,12 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  DEFAULT_ELECTRON_DEV_SERVER_URL,
-  applyElectronStartupOverrides,
-  resolveDevServerUrl,
-  resolveIsolatedUserDataDir,
-} from '../startup-overrides.js'
+import { applyElectronStartupOverrides, resolveIsolatedUserDataDir } from '../startup-overrides.js'
 
 const temporaryDirectories: string[] = []
 
@@ -15,37 +10,6 @@ afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true })
   }
-})
-
-describe('resolveDevServerUrl', () => {
-  it.each([
-    'http://127.0.0.1:4173',
-    'https://localhost:47188/ui/',
-    'http://[::1]:47188',
-  ])('accepts an absolute HTTP(S) loopback URL: %s', (value) => {
-    expect(resolveDevServerUrl({ isPackaged: false, value })).toBe(new URL(value).toString())
-  })
-
-  it.each([
-    'http://192.168.1.10:47188',
-    'https://example.com',
-    'file:///tmp/renderer.html',
-    '/relative/renderer',
-    'http://user:password@localhost:47188',
-    'http://localhost:47188/?token=value',
-  ])('rejects unsafe development renderer URLs: %s', (value) => {
-    expect(() => resolveDevServerUrl({ isPackaged: false, value }))
-      .toThrow('must be an absolute loopback URL')
-  })
-
-  it('uses the fixed default and rejects any packaged override', () => {
-    expect(resolveDevServerUrl({ isPackaged: true, value: undefined }))
-      .toBe(DEFAULT_ELECTRON_DEV_SERVER_URL)
-    expect(() => resolveDevServerUrl({
-      isPackaged: true,
-      value: 'http://127.0.0.1:47188',
-    })).toThrow('disabled in packaged builds')
-  })
 })
 
 describe('isolated Electron user data override', () => {

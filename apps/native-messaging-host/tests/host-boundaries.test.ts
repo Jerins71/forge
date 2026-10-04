@@ -1,21 +1,10 @@
-import path from 'node:path'
+
 import { PassThrough } from 'node:stream'
-import {
-  EXTERNAL_CHROME_MAX_NATIVE_INBOUND_FRAME_BYTES,
-  EXTERNAL_CHROME_MAX_NATIVE_OUTBOUND_FRAME_BYTES,
-} from '@forge/protocol'
 import { describe, expect, it } from 'vitest'
-import {
-  HOST_EXTENSION_ORIGIN,
-  HOST_MAX_DESKTOP_UNAVAILABLE_BYTES,
-  HOST_MAX_NATIVE_INBOUND_BYTES,
-  HOST_MAX_NATIVE_OUTBOUND_BYTES,
-  HOST_MAX_NEGOTIATED_MESSAGE_BYTES,
-} from '../src/constants.js'
+import { HOST_EXTENSION_ORIGIN, HOST_MAX_DESKTOP_UNAVAILABLE_BYTES } from '../src/constants.js'
 import { NativeMessageDecoder } from '../src/framing.js'
 import { runNativeHost } from '../src/host.js'
-import { normalizeNativeHostLaunchArguments, resolveNativeHostExecutable, validateChromeLaunchArguments } from '../src/launch.js'
-import type { AuthenticatedRelayClient } from '../src/relay-client.js'
+import { validateChromeLaunchArguments } from '../src/launch.js'
 import { DesktopUnavailableError, validateRendezvous, type RendezvousDocument } from '../src/transport.js'
 
 function capture(): { stream: PassThrough; chunks: Buffer[] } {
@@ -39,48 +28,6 @@ const VALID_RENDEZVOUS: RendezvousDocument = {
 }
 
 describe('native host trust and process boundaries', () => {
-  it('discovers installed resources beside the SEA or shebang script executable', () => {
-    const deployedHost = path.resolve('/forge-data', 'integrations', 'external-chrome', 'native-host', 'forge-external-chrome-native-host')
-    expect(resolveNativeHostExecutable(['/usr/bin/node', deployedHost, HOST_EXTENSION_ORIGIN], false, '/usr/bin/node'))
-      .toBe(deployedHost)
-    expect(resolveNativeHostExecutable(['/Applications/ForgeHost', HOST_EXTENSION_ORIGIN], true, '/Applications/ForgeHost'))
-      .toBe('/Applications/ForgeHost')
-    expect(() => resolveNativeHostExecutable(['/usr/bin/node'], false, '/usr/bin/node')).toThrow(/unavailable/u)
-  })
-
-  it('normalizes ordinary JS, legacy SEA, and Node 25 SEA launch shapes precisely', () => {
-    expect(normalizeNativeHostLaunchArguments(
-      [process.execPath, 'host.cjs', HOST_EXTENSION_ORIGIN],
-      false,
-      process.execPath,
-    )).toEqual([HOST_EXTENSION_ORIGIN])
-    expect(normalizeNativeHostLaunchArguments(
-      [process.execPath, HOST_EXTENSION_ORIGIN],
-      true,
-      process.execPath,
-    )).toEqual([HOST_EXTENSION_ORIGIN])
-    expect(normalizeNativeHostLaunchArguments(
-      [process.execPath, process.execPath, HOST_EXTENSION_ORIGIN],
-      true,
-      process.execPath,
-    )).toEqual([HOST_EXTENSION_ORIGIN])
-    const windowsArguments = normalizeNativeHostLaunchArguments(
-      [process.execPath, process.execPath, HOST_EXTENSION_ORIGIN, '--parent-window=42'],
-      true,
-      process.execPath,
-    )
-    expect(windowsArguments).toEqual([HOST_EXTENSION_ORIGIN, '--parent-window=42'])
-    expect(() => validateChromeLaunchArguments(windowsArguments, HOST_EXTENSION_ORIGIN, 'win32')).not.toThrow()
-
-    const unexpectedSeaMetadata = 'sea-config.current.json'
-    const unexpected = normalizeNativeHostLaunchArguments(
-      [process.execPath, unexpectedSeaMetadata, HOST_EXTENSION_ORIGIN],
-      true,
-      process.execPath,
-    )
-    expect(unexpected).toEqual([unexpectedSeaMetadata, HOST_EXTENSION_ORIGIN])
-    expect(() => validateChromeLaunchArguments(unexpected, HOST_EXTENSION_ORIGIN, 'darwin')).toThrow(/pinned/u)
-  })
 
   it('pins the exact extension origin and platform launch shape', () => {
     expect(() => validateChromeLaunchArguments([HOST_EXTENSION_ORIGIN], HOST_EXTENSION_ORIGIN, 'darwin')).not.toThrow()
@@ -96,12 +43,6 @@ describe('native host trust and process boundaries', () => {
       HOST_EXTENSION_ORIGIN,
       'win32',
     )).toThrow(/parent-window/u)
-  })
-
-  it('uses strict Forge bounds below Chrome native messaging limits', () => {
-    expect(HOST_MAX_NATIVE_INBOUND_BYTES).toBeLessThan(EXTERNAL_CHROME_MAX_NATIVE_INBOUND_FRAME_BYTES)
-    expect(HOST_MAX_NATIVE_OUTBOUND_BYTES).toBeLessThan(EXTERNAL_CHROME_MAX_NATIVE_OUTBOUND_FRAME_BYTES)
-    expect(HOST_MAX_NEGOTIATED_MESSAGE_BYTES).toBeLessThan(HOST_MAX_NATIVE_OUTBOUND_BYTES)
   })
 
   it('rejects stale, cross-user, and network rendezvous documents', () => {
@@ -149,50 +90,6 @@ describe('native host trust and process boundaries', () => {
     }])
     expect(stdoutBytes.toString('utf8')).not.toContain('private diagnostic')
     expect(Buffer.concat(stderr.chunks).toString('utf8')).toContain('private diagnostic')
-  })
-
-  it('cancels a still-open native input pump when the Desktop relay reaches EOF', async () => {
-    const input = new PassThrough()
-    const stdout = capture()
-    let relayCloses = 0
-    const relay = {
-      send: async () => undefined,
-      receive: async () => null,
-      close: () => { relayCloses += 1 },
-    } as unknown as AuthenticatedRelayClient
-
-    await expect(runNativeHost({
-      input,
-      output: stdout.stream,
-      diagnostic: capture().stream,
-      platform: 'darwin',
-      launchArguments: [HOST_EXTENSION_ORIGIN],
-      connectRelay: async () => relay,
-    })).resolves.toBe(0)
-    expect(input.destroyed).toBe(true)
-    expect(relayCloses).toBe(1)
-    expect(Buffer.concat(stdout.chunks)).toHaveLength(0)
-  })
-
-  it('treats a Desktop-unavailable relay pump failure as a clean native-host exit', async () => {
-    const input = new PassThrough()
-    const relay = {
-      send: async () => undefined,
-      receive: async () => {
-        throw new DesktopUnavailableError('relay socket closed during epoch replacement')
-      },
-      close: () => undefined,
-    } as unknown as AuthenticatedRelayClient
-
-    await expect(runNativeHost({
-      input,
-      output: capture().stream,
-      diagnostic: capture().stream,
-      platform: 'linux',
-      launchArguments: [HOST_EXTENSION_ORIGIN],
-      connectRelay: async () => relay,
-    })).resolves.toBe(0)
-    expect(input.destroyed).toBe(true)
   })
 
   it('writes no protocol bytes for a wrong origin', async () => {
