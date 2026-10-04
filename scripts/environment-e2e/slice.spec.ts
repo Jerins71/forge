@@ -15,6 +15,7 @@ import { loadConfiguredSqliteDatabaseConstructor } from '../../apps/backend/src/
 import { WebSocket } from './fixtures/ws.js';
 import { proxySelfTest } from './fixtures/proxy-self-test.js';
 import { startFaultProxy } from './fault-proxy.js';
+import { crashBoundaries } from './fixtures/hardening-hooks.js';
 
 let manifest: FleetManifest;
 const sessions: BootstrapSession[] = [];
@@ -255,8 +256,60 @@ test('9.2.9 revocation closes C RPC and denies subsequent tickets/API while A/B 
   evidence.revoke = { closeCode: code, elapsedMs: Date.now() - started, futureAccessDenied: true, isolationAB: true, activeDownloadAborted: !download.complete, deviceCreatedPtyEnded: true, hostOwnedAndUnsentEffects: 'not-yet' };
 });
 
+test('9.2.7 controlled crash at all seven effect boundaries', async () => {
+  test.setTimeout(180000);
+  const observations = [];
+  evidence.crashes = observations;
+  for (const boundary of crashBoundaries) {
+    const commandId = randomUUID(); const sessionId = `v2-${commandId}`;
+    const input = { commandId, projectId: projects[1]!.sessionId, title: `Crash ${boundary}`, workspaceStrategy: { kind: 'new_worktree', baseRef: 'main', branch: `crash/${commandId}` }, initialMessage: { text: `crash matrix ${boundary}`, artifactIds: [] } };
+    const armed = await controlEnvironment<{ armed: boolean; pid: number }>(manifest, b().name, 'fixture', { operation: 'arm-crash', commandId, boundary });
+    expect(armed.armed).toBe(true);
+    const rpc = await openFixtureRpc(b().baseUrl, sessions[1]!);
+    let acknowledged = false;
+    try { await rpc.call('session.launch', input); acknowledged = true; } catch { /* The two acceptance boundaries deliberately prevent the result. */ }
+    const marker = await until(async () => {
+      try { return JSON.parse(await readFile(join(b().checkout, '.fixture-crash.json'), 'utf8')); } catch { return null; }
+    }, result => result?.commandId === commandId && result.boundary === boundary);
+    expect(marker.pid).toBe(armed.pid);
+    await until(() => { try { process.kill(armed.pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } }, Boolean);
+    rpc.close();
+    const before = await readDb(db => ({
+      commands: (db.prepare('SELECT count(*) n FROM commands WHERE command_id=?').get(commandId) as { n: number }).n,
+      receipt: db.prepare('SELECT receipt_json FROM command_receipts WHERE command_id=?').get(commandId),
+      input: db.prepare('SELECT append_state,delivery_state FROM control_inputs WHERE command_id=?').get(commandId),
+      locators: (db.prepare('SELECT count(*) n FROM mirror_sources WHERE source_key=?').get(`input:input-${commandId}`) as { n: number }).n,
+      reservation: db.prepare('SELECT state FROM workspace_reservations WHERE command_id=?').get(commandId),
+    }));
+    expect(before.commands).toBe(boundary === 'pre-commit' ? 0 : 1);
+    if (boundary === 'pre-commit' || boundary === 'post-commit') expect(acknowledged).toBe(false);
+    if (boundary === 'post-Git') expect(before.reservation).toEqual({ state: 'reserved' });
+    if (boundary === 'post-JSONL') { expect(before.locators).toBe(0); expect(before.input).toEqual({ append_state: 'pending', delivery_state: 'pending' }); }
+    if (boundary === 'post-dispatch-marker' || boundary === 'post-provider-accept') expect(before.input).toEqual({ append_state: 'recorded', delivery_state: 'dispatching' });
+    await controlEnvironment(manifest, b().name, 'start');
+    const descriptor = await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'environment.get', {});
+    expect(descriptor.environmentId).toBe(sessions[1]!.environmentId);
+    expect(descriptor.streamEpoch).toBe(sessions[1]!.environment!.streamEpoch);
+    const retry = await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', input);
+    expect(retry.commandId).toBe(commandId); expect(retry.sessionId).toBe(sessionId);
+    const receipt = await settled(commandId);
+    const ambiguous = boundary === 'post-dispatch-marker' || boundary === 'post-provider-accept';
+    expect(receipt).toMatchObject({ state: ambiguous ? 'interrupted' : 'succeeded', delivery: ambiguous ? 'unknown' : 'dispatched', inputId: `input-${commandId}` });
+    if (before.receipt) expect(receipt.acceptedSequence).toBe(JSON.parse((before.receipt as { receipt_json: string }).receipt_json).acceptedSequence);
+    const counts = await readLaunchEvidence(b(), sessionId);
+    expect(counts.commands).toBe(1); expect(counts.worktrees).toBe(1); expect(counts.dispatches).toBeLessThanOrEqual(1);
+    expect(counts.dispatches).toBe(boundary === 'post-dispatch-marker' ? 0 : 1);
+    const canonical = await readFile(getSessionFilePath(b().dataDir, projects[1]!.sessionId, sessionId), 'utf8');
+    const canonicalInputs = canonical.split('\n').filter(line => line.includes(`"controlCommandId":"${commandId}"`) && line.includes('"role":"user"')).length;
+    expect(canonicalInputs).toBe(1);
+    const meta = JSON.parse(await readFile(getSessionMetaPath(b().dataDir, projects[1]!.sessionId, sessionId), 'utf8')); expect(meta.controlCommandId).toBe(commandId);
+    const gitWorktrees = (await exec('git', ['worktree', 'list', '--porcelain'], { cwd: b().checkout })).stdout.split(`branch refs/heads/crash/${commandId}`).length - 1; expect(gitWorktrees).toBe(1);
+    observations.push({ boundary, marker, acknowledged, before, after: { ...counts, receipt, canonicalInputs, gitWorktrees, identityStable: true, metaOwned: true } });
+  }
+  evidence.crashes = observations;
+});
+
 for (const name of [
   '9.2.5 mounted UI files/diff/audit/model/terminal target routing and A/C streams',
-  '9.2.7 controlled crash at all seven effect boundaries',
   '9.2.10 copied-root, snapshot-barrier race and slow-consumer overflow in real fleet',
 ]) test.fixme(name, async () => {});

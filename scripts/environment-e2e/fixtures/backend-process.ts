@@ -5,6 +5,7 @@ import { createConfig } from '../../../apps/backend/src/config.js';
 import { saveSharedSpecialist } from '../../../apps/backend/src/swarm/agents/specialists/specialist-registry.js';
 import { startServer, type StartedServer } from '../../../apps/backend/src/server.js';
 import { getNativeCodexHome, getSharedAuthFilePath } from '../../../apps/backend/src/swarm/storage/data-paths.js';
+import { installHardeningHooks } from './hardening-hooks.js';
 
 // Separate process per backend. Avoid index.ts's dotenv loading and Desktop-only
 // ready gate; use the ordinary composition and its existing ready callback.
@@ -25,6 +26,16 @@ if (fixture.formatVersion !== 1 || !process.env.FORGE_DATA_DIR || !/^\d+$/.test(
 const authorizedPhysicalParent = process.env.FORGE_ENVIRONMENT_BOOTSTRAP_PARENT === '1' && Boolean(process.send);
 delete process.env.FORGE_ENVIRONMENT_BOOTSTRAP_PARENT;
 const config = createConfig();
+const hardening = await installHardeningHooks(config.paths.dataDir, checkout);
+process.on('message', message => {
+  const request = message as { type?: string; requestId?: string; input?: { operation: string; commandId: string; boundary: Parameters<typeof hardening.arm>[0]['boundary'] } };
+  if (request?.type !== 'forge:fixture:request') return;
+  try {
+    if (request.input?.operation !== 'arm-crash') throw new Error('Unknown private fixture operation');
+    const value = hardening.arm(request.input);
+    process.send?.({ type: 'forge:fixture:result', requestId: request.requestId, value });
+  } catch { process.send?.({ type: 'forge:fixture:result', requestId: request.requestId, error: 'Private fixture request rejected' }); }
+});
 config.paths.rootDir = checkout;
 config.paths.resourcesDir = checkout;
 config.paths.repoMemorySkillFile = resolve(checkout, '.swarm/skills/memory/SKILL.md');

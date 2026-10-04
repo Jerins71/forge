@@ -209,11 +209,17 @@ export async function launchFleet(options: { environments?: number; out?: string
     await saveManifest(out, manifest);
     // Private test-process lifecycle channel. It is never a backend endpoint.
     controlServer = createServer((req, res) => {
-      const match = /^\/environment\/(env-[a-z])\/(stop|start|bootstrap)$/.exec(req.url ?? '');
-      if (req.method !== 'POST' || !match || req.headers['content-length'] && req.headers['content-length'] !== '0') { res.writeHead(404).end(); return; }
+      const match = /^\/environment\/(env-[a-z])\/(stop|start|bootstrap|fixture)$/.exec(req.url ?? '');
+      if (req.method !== 'POST' || !match || Number(req.headers['content-length'] ?? 0) > 65536 || match[2] !== 'fixture' && Number(req.headers['content-length'] ?? 0) !== 0) { res.writeHead(404).end(); return; }
       const environment = manifest.environments.find(value => value.name === match[1]);
       if (!environment || stopping) { res.writeHead(409).end(); return; }
       const work = lifecycle.then(async () => {
+        if (match[2] === 'fixture') {
+          let body = ''; for await (const chunk of req) { body += chunk.toString(); if (body.length > 65536) throw new Error('Private fixture request too large'); }
+          const input = JSON.parse(body);
+          if (input.operation === 'arm-crash') paused.add(environment.name);
+          return fixtureChildRequest(children[manifest.environments.indexOf(environment)]!, input);
+        }
         if (match[2] === 'bootstrap') return pairing.bootstrap(children[manifest.environments.indexOf(environment)]!, environment);
         if (match[2] === 'stop') { paused.add(environment.name); await stopChild(children[manifest.environments.indexOf(environment)]!); }
         else await startFunctions.get(environment.name)!();
@@ -237,17 +243,30 @@ export async function launchFleet(options: { environments?: number; out?: string
     throw new Error(`Harness launch failed; artifacts preserved in ${artifactRoot}`, { cause: error });
   }
 }
-export async function controlEnvironment<T>(manifest: FleetManifest, name: string, action: 'stop' | 'start' | 'bootstrap'): Promise<T> {
+export async function controlEnvironment<T>(manifest: FleetManifest, name: string, action: 'stop' | 'start' | 'bootstrap' | 'fixture', input?: unknown): Promise<T> {
   if (!isWithin(manifest.root, manifest.controlSocket)) throw new Error('Control socket outside marked root');
   const marker = JSON.parse(await readFile(join(manifest.root, markerName), 'utf8'));
   if (marker.runId !== manifest.runId || marker.root !== await realpath(manifest.root)) throw new Error('Unmarked fleet control root');
   return new Promise<T>((resolveControl, reject) => {
-    const req = controlRequest({ socketPath: manifest.controlSocket, path: `/environment/${name}/${action}`, method: 'POST', timeout: 30_000 }, res => {
+    const body = input === undefined ? '' : JSON.stringify(input);
+    const req = controlRequest({ socketPath: manifest.controlSocket, path: `/environment/${name}/${action}`, method: 'POST', timeout: 30_000, headers: { 'Content-Length': Buffer.byteLength(body) } }, res => {
       let body = '';
       res.on('data', (chunk: Buffer) => { body += chunk.toString(); if (body.length > 65536) req.destroy(new Error('Oversized private control response')); });
       res.on('end', () => { if (res.statusCode !== 200) reject(new Error('V2 private bootstrap/lifecycle integration is pending or unavailable')); else { try { resolveControl(JSON.parse(body) as T); } catch { reject(new Error('Invalid private control response')); } } });
     });
-    req.on('error', reject); req.on('timeout', () => req.destroy(new Error('Private fleet control timeout'))); req.end();
+    req.on('error', reject); req.on('timeout', () => req.destroy(new Error('Private fleet control timeout'))); req.end(body);
+  });
+}
+async function fixtureChildRequest(child: ChildProcess, input: unknown): Promise<unknown> {
+  return new Promise((resolveRequest, reject) => {
+    const requestId = randomUUID();
+    const timer = setTimeout(() => { child.off('message', receive); reject(new Error('Private fixture IPC timed out')); }, 15_000);
+    const receive = (message: any) => {
+      if (message?.type !== 'forge:fixture:result' || message.requestId !== requestId) return;
+      clearTimeout(timer); child.off('message', receive);
+      if (message.error) reject(new Error('Private fixture operation rejected')); else resolveRequest(message.value);
+    };
+    child.on('message', receive); child.send({ type: 'forge:fixture:request', requestId, input });
   });
 }
 function waitForReady(child: ChildProcess, dataDir: string): Promise<{ port: number; environment?: EnvironmentDescriptor }> {
