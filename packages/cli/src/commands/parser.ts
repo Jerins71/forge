@@ -9,6 +9,18 @@ type ValueOptionKey = {
 }[keyof ParsedArgs['options']]
 
 const VALUE_FLAG_OPTIONS = {
+  '--backend-entry': 'backendEntry',
+  '--host': 'host',
+  '--port': 'port',
+  '--data-dir': 'dataDir',
+  '--from-data-dir': 'fromDataDir',
+  '--public-url': 'publicUrl',
+  '--tls-cert': 'tlsCert',
+  '--tls-key': 'tlsKey',
+  '--pair-output': 'pairOutput',
+  '--credential-file': 'credentialFile',
+  '--environment-id': 'environmentId',
+  '--scopes': 'scopes',
   '--url': 'url',
   '--api-key': 'apiKey',
   '--profile': 'profile',
@@ -39,6 +51,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       break
     }
 
+    if (token === '--pair') { options.pair = true; continue }
+    if (token === '--tailscale-serve') { options.tailscaleServe = true; continue }
     if (token === '--json') {
       options.json = true
       continue

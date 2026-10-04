@@ -4,6 +4,20 @@ import type { CliIo, OutputOptions } from '../output.js'
 export interface ParsedArgs {
   positionals: string[]
   options: OutputOptions & {
+    backendEntry?: string
+    host?: string
+    port?: string
+    dataDir?: string
+    fromDataDir?: string
+    publicUrl?: string
+    tlsCert?: string
+    tlsKey?: string
+    pair?: boolean
+    pairOutput?: string
+    tailscaleServe?: boolean
+    credentialFile?: string
+    environmentId?: string
+    scopes?: string
     url?: string
     apiKey?: string
     profile?: string
