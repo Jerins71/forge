@@ -36,7 +36,6 @@ import {
   toErrorMessage,
 } from './settings-api'
 import type { SettingsApiClient } from './settings-api-client'
-import type { SettingsBackendTarget } from './settings-target'
 import { CredentialPoolPanel } from './CredentialPoolPanel'
 import { OpenAICredentialPool } from './OpenAICredentialPool'
 
@@ -385,11 +384,10 @@ function AuthProviderRow({
 
 interface SettingsAuthProps {
   wsUrl: string
-  target: SettingsBackendTarget
   apiClient: SettingsApiClient
 }
 
-export function SettingsAuth({ wsUrl: _wsUrl, target, apiClient }: SettingsAuthProps) {
+export function SettingsAuth({ wsUrl: _wsUrl, apiClient }: SettingsAuthProps) {
   useHelpContext('settings.auth')
 
   const [authProviders, setAuthProviders] = useState<SettingsAuthProvider[]>([])
@@ -719,11 +717,7 @@ export function SettingsAuth({ wsUrl: _wsUrl, target, apiClient }: SettingsAuthP
     <div className="flex flex-col gap-8">
       <SettingsSection
         label="Authentication"
-        description={
-          target.kind === 'collab'
-            ? 'Stored on the connected Collab backend. These credentials are not copied from your local Builder.'
-            : 'Stored on this Builder backend.'
-        }
+        description="Stored on this Builder backend."
       >
         {authError ? (
           <div className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
@@ -745,7 +739,7 @@ export function SettingsAuth({ wsUrl: _wsUrl, target, apiClient }: SettingsAuthP
           </div>
         ) : (
           <div className="space-y-3">
-            {target.kind === 'builder' ? <ClaudeNativeAuth apiClient={apiClient} /> : null}
+            <ClaudeNativeAuth apiClient={apiClient} />
             {SETTINGS_AUTH_PROVIDER_ORDER.map((provider) => {
               // OpenAI and Anthropic use the credential pool panel
               if (provider === 'openai-codex') {
@@ -753,7 +747,6 @@ export function SettingsAuth({ wsUrl: _wsUrl, target, apiClient }: SettingsAuthP
                   <OpenAICredentialPool
                     key={provider}
                     apiClient={apiClient}
-                    target={target}
                     authType={authProviderById.get(provider)?.authType}
                     onError={handlePoolError}
                     onSuccess={handlePoolSuccess}
@@ -770,7 +763,6 @@ export function SettingsAuth({ wsUrl: _wsUrl, target, apiClient }: SettingsAuthP
                     providerLabel="Anthropic"
                     authType={authProviderById.get(provider)?.authType}
                     apiClient={apiClient}
-                    target={target}
                     onError={handlePoolError}
                     onSuccess={handlePoolSuccess}
                     onAuthReload={handlePoolAuthReload}

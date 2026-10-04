@@ -17,7 +17,6 @@ export function resolveStreamDeckNavigationRoute(
   return {
     view: 'chat',
     agentId,
-    surface: 'builder',
     ...(request.surface === 'git' || request.surface === 'browser' || request.surface === 'terminal'
       ? { deckPanel: request.surface }
       : {}),

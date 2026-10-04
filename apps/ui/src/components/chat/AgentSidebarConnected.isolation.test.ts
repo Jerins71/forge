@@ -39,19 +39,6 @@ beforeEach(() => {
   })
   sidebarRenderSpy.mockReset()
   originRegistry.destroyAll()
-  window.localStorage.setItem('forge:collab:connections:v1', JSON.stringify({
-    version: 1,
-    connections: [{
-      id: 'remote-a',
-      kind: 'remote',
-      label: 'Remote A',
-      serverUrl: 'https://remote.test',
-      apiBaseUrl: 'https://remote.test/',
-      wsUrl: 'wss://remote.test',
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    }],
-  }))
   container = document.createElement('div')
   document.body.appendChild(container)
 })
@@ -123,8 +110,8 @@ function emitProductionAgentStatus(
   store.ingest({ type: 'event', event })
 }
 
-describe('AgentSidebarConnected origin isolation', () => {
-  it('ignores production worker-status descriptor churn and isolates local A from remote B', async () => {
+describe('AgentSidebarConnected structural isolation', () => {
+  it('ignores production worker-status descriptor churn for structural discovery and ordering', async () => {
     const discoverySyncSpy = vi.spyOn(BuilderSidebarOrderStore.prototype, 'ensureDiscovered')
     const local = originRegistry.createOrigin({
       originId: LOCAL_ORIGIN_ID,
@@ -144,33 +131,12 @@ describe('AgentSidebarConnected origin isolation', () => {
         hasReceivedProfilesSnapshot: true,
       },
     })
-    const remote = originRegistry.createOrigin({
-      originId: 'remote-a',
-      wsUrl: 'ws://remote.test',
-      offline: true,
-    })
-    remote.ingest({
-      type: 'snapshot',
-      state: {
-        connected: true,
-        agents: [
-          manager('remote-session', 'remote-project'),
-          worker('remote-worker', 'remote-session', 'remote-project'),
-        ],
-        profiles: [profile('remote-project', 'remote-session')],
-        hasReceivedAgentsSnapshot: true,
-        hasReceivedProfilesSnapshot: true,
-      },
-    })
 
     const api: BuilderSidebarOrderApi = {
       get: vi.fn(async () => ({
         version: 1 as const,
         revision: 1,
-        order: [
-          { originId: 'local', profileId: 'local-project' },
-          { originId: 'remote-a', profileId: 'remote-project' },
-        ],
+        order: [{ originId: 'local', profileId: 'local-project' }],
         updatedAt: '2026-07-09T12:00:00.000Z',
       })),
       put: vi.fn(),
@@ -191,32 +157,10 @@ describe('AgentSidebarConnected origin isolation', () => {
     await vi.waitFor(() => expect(api.get).toHaveBeenCalledOnce())
     await vi.waitFor(() => expect(discoverySyncSpy).toHaveBeenCalled())
     await new Promise((resolve) => setTimeout(resolve, 0))
-    const initialProps = sidebarRenderSpy.mock.calls.at(-1)?.[0] as AgentSidebarProps
-    const initialRemoteOrigins = initialProps.remoteOrigins ?? []
-    const initialRemoteTreeRows = initialRemoteOrigins[0]?.treeRows
     sidebarRenderSpy.mockClear()
     discoverySyncSpy.mockClear()
 
-    const remoteAgentsBefore = remote.getSnapshot().agents
-    flushSync(() => {
-      emitProductionAgentStatus(remote, {
-        type: 'agent_status',
-        agentId: 'remote-worker',
-        managerId: 'remote-session',
-        status: 'streaming',
-        pendingCount: 1,
-      })
-    })
-    await Promise.resolve()
-
-    expect(remote.getSnapshot().agents).not.toBe(remoteAgentsBefore)
-    expect(remote.getSnapshot().agents.find((agent) => agent.agentId === 'remote-worker')?.status).toBe('streaming')
-    expect(sidebarRenderSpy).not.toHaveBeenCalled()
-    expect(discoverySyncSpy).not.toHaveBeenCalled()
-    expect(api.put).not.toHaveBeenCalled()
-
-    // Local volatile state legitimately updates local props, but the remote
-    // structural container/tree identities remain unchanged for memoized rows.
+    const localAgentsBefore = local.getSnapshot().agents
     flushSync(() => {
       emitProductionAgentStatus(local, {
         type: 'agent_status',
@@ -226,24 +170,27 @@ describe('AgentSidebarConnected origin isolation', () => {
         pendingCount: 1,
       })
     })
-    const localTickProps = sidebarRenderSpy.mock.calls.at(-1)?.[0] as AgentSidebarProps
-    expect(localTickProps.remoteOrigins).toBe(initialRemoteOrigins)
-    expect(localTickProps.remoteOrigins?.[0]?.treeRows).toBe(initialRemoteTreeRows)
+    await Promise.resolve()
+
+    // Volatile status legitimately updates sidebar props, but never re-runs
+    // structural discovery or writes the ordering preference.
+    expect(local.getSnapshot().agents).not.toBe(localAgentsBefore)
+    expect(local.getSnapshot().agents.find((agent) => agent.agentId === 'local-worker')?.status).toBe('streaming')
     expect(discoverySyncSpy).not.toHaveBeenCalled()
     expect(api.put).not.toHaveBeenCalled()
 
     sidebarRenderSpy.mockClear()
     flushSync(() => {
-      remote.ingest({
+      local.ingest({
         type: 'snapshot',
-        state: { profiles: [{ ...profile('remote-project', 'remote-session'), displayName: 'Changed' }] },
+        state: { profiles: [{ ...profile('local-project', 'local-session'), displayName: 'Changed' }] },
       })
     })
     expect(sidebarRenderSpy).toHaveBeenCalled()
     expect(api.put).not.toHaveBeenCalled()
   })
 
-  it('routes a unified DnD callback only to the local preference API, never either reorderProfiles command', async () => {
+  it('routes a DnD callback only to the local preference API, never the reorderProfiles command', async () => {
     const local = originRegistry.createOrigin({
       originId: LOCAL_ORIGIN_ID,
       wsUrl: 'ws://local.test',
@@ -253,35 +200,25 @@ describe('AgentSidebarConnected origin isolation', () => {
       type: 'snapshot',
       state: {
         connected: true,
-        agents: [manager('local-session', 'local-project')],
-        profiles: [profile('local-project', 'local-session')],
-        hasReceivedAgentsSnapshot: true,
-        hasReceivedProfilesSnapshot: true,
-      },
-    })
-    const remote = originRegistry.createOrigin({
-      originId: 'remote-a',
-      wsUrl: 'ws://remote.test',
-      offline: true,
-    })
-    remote.ingest({
-      type: 'snapshot',
-      state: {
-        connected: true,
-        agents: [manager('remote-session', 'remote-project')],
-        profiles: [profile('remote-project', 'remote-session')],
+        agents: [
+          manager('local-session', 'local-project'),
+          manager('other-session', 'other-project'),
+        ],
+        profiles: [
+          profile('local-project', 'local-session'),
+          profile('other-project', 'other-session'),
+        ],
         hasReceivedAgentsSnapshot: true,
         hasReceivedProfilesSnapshot: true,
       },
     })
     const localLegacyReorder = vi.spyOn(local.getClient(), 'reorderProfiles')
-    const remoteLegacyReorder = vi.spyOn(remote.getClient(), 'reorderProfiles')
     let current = {
       version: 1 as const,
       revision: 1,
       order: [
         { originId: 'local', profileId: 'local-project' },
-        { originId: 'remote-a', profileId: 'remote-project' },
+        { originId: 'local', profileId: 'other-project' },
       ],
       updatedAt: '2026-07-09T12:00:00.000Z',
     }
@@ -317,7 +254,7 @@ describe('AgentSidebarConnected origin isolation', () => {
     const props = sidebarRenderSpy.mock.calls.at(-1)![0] as AgentSidebarProps
 
     props.onMoveBuilderProject?.(
-      { originId: 'remote-a', profileId: 'remote-project' },
+      { originId: 'local', profileId: 'other-project' },
       { originId: 'local', profileId: 'local-project' },
     )
     await vi.waitFor(() => expect(api.put).toHaveBeenCalledOnce())
@@ -325,11 +262,10 @@ describe('AgentSidebarConnected origin isolation', () => {
     expect(api.put).toHaveBeenCalledWith({
       baseRevision: 1,
       order: [
-        { originId: 'remote-a', profileId: 'remote-project' },
+        { originId: 'local', profileId: 'other-project' },
         { originId: 'local', profileId: 'local-project' },
       ],
     })
     expect(localLegacyReorder).not.toHaveBeenCalled()
-    expect(remoteLegacyReorder).not.toHaveBeenCalled()
   })
 })

@@ -29,7 +29,7 @@ const { invalidateManagerSelectionCatalog } = await import('@/lib/use-manager-se
 let container: HTMLDivElement
 let root: Root | null = null
 
-const dialogApiClient = { target: { kind: 'collab' } } as unknown as SettingsApiClient
+const dialogApiClient = { target: {} } as unknown as SettingsApiClient
 
 beforeEach(() => {
   invalidateManagerSelectionCatalog()

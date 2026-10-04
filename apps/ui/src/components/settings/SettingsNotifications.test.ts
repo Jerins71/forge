@@ -137,7 +137,7 @@ async function flush(): Promise<void> {
 
 function makeMockApiClient(): SettingsApiClient {
   return {
-    target: { kind: 'builder', label: 'test', description: 'test', wsUrl: 'ws://localhost', apiBaseUrl: 'http://localhost:47187', fetchCredentials: 'same-origin', requiresAdmin: false, availableTabs: [] },
+    target: { label: 'test', description: 'test', wsUrl: 'ws://localhost', apiBaseUrl: 'http://localhost:47187', fetchCredentials: 'same-origin', availableTabs: [] },
     endpoint: vi.fn((path: string) => path) as unknown as SettingsApiClient['endpoint'],
     fetch: vi.fn() as unknown as SettingsApiClient['fetch'],
     fetchJson: vi.fn() as unknown as SettingsApiClient['fetchJson'],

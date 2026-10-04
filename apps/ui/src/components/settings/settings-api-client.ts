@@ -3,13 +3,10 @@
  *
  * All settings HTTP requests go through this client so that the correct
  * backend base URL and credentials policy are applied consistently.
- * Builder settings use local same-origin requests; Collab settings use
- * credentialed cross-origin requests to the remote Collab backend.
  */
 
 import type { SettingsBackendTarget } from './settings-target'
-import { createBuilderSettingsTarget, createCollabSettingsTarget } from './settings-target'
-import { getCollaborationConnectionOptions } from '@/lib/collaboration-connections'
+import { createBuilderSettingsTarget } from './settings-target'
 
 /* ------------------------------------------------------------------ */
 /*  Interface                                                          */
@@ -101,20 +98,6 @@ export function createSettingsApiClient(target: SettingsBackendTarget): Settings
  * target-aware plumbing yet. Settings paths should use target-aware clients.
  */
 export function createBuilderSettingsApiClient(wsUrl: string): SettingsApiClient {
-  // Wave R: legacy string call sites receive the ACTIVE origin's wsUrl. When
-  // that URL belongs to a registered remote collaboration connection, route
-  // through the credentialed collab target so the session cookie rides along;
-  // local (and unknown) URLs keep builder same-origin semantics.
-  try {
-    const remote = getCollaborationConnectionOptions().find(
-      (target) => target.isRemote && target.wsUrl === wsUrl,
-    )
-    if (remote) {
-      return new SettingsApiClientImpl(createCollabSettingsTarget(wsUrl, remote.apiBaseUrl))
-    }
-  } catch {
-    // Registry unavailable (SSR/tests) — fall through to builder semantics.
-  }
   return new SettingsApiClientImpl(createBuilderSettingsTarget(wsUrl))
 }
 

@@ -19,13 +19,11 @@ function makeClient(
 ): SettingsApiClient {
   return {
     target: {
-      kind: 'builder',
       label: 'Builder',
       description: 'Builder',
       wsUrl: 'ws://127.0.0.1:47187',
       apiBaseUrl: 'http://127.0.0.1:47187/',
       fetchCredentials: 'same-origin',
-      requiresAdmin: false,
       availableTabs: [],
     },
     endpoint: (path) => path,

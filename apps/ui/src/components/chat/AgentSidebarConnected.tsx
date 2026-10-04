@@ -1,9 +1,8 @@
 /**
  * Origin-slice-connected wrapper for {@link AgentSidebar}.
  *
- * Structural discovery subscribes only to connection/agent/profile snapshots.
- * Hot remote status, unread, and meta values are subscribed inside memoized
- * remote rows; ordering is always loaded/written through the local API.
+ * Structural discovery subscribes only to connection/agent/profile snapshots;
+ * ordering is always loaded/written through the local API.
  */
 
 import {
@@ -26,10 +25,8 @@ import { CortexRailItem } from './agent-sidebar/CortexRailItem'
 import { ActivityRail, type ActivityRailItem } from '@/components/index-page/ActivityRail'
 import type {
   AgentSidebarProps,
-  RemoteSidebarOrigin,
   StatusMap,
 } from './agent-sidebar/types'
-import { getRemoteVisibleProfileRows } from './agent-sidebar/RemoteOriginSections.utils'
 import {
   buildProfileTreeRows,
   isCortexProfile,
@@ -62,7 +59,6 @@ type StoreProvidedProps =
   | 'unreadCounts'
   | 'terminalScopeId'
   | 'terminalCount'
-  | 'remoteOrigins'
   | 'builderSidebarOrder'
   | 'onMoveBuilderProject'
 
@@ -242,33 +238,11 @@ export const AgentSidebarConnected = memo(function AgentSidebarConnected({
     () => localTreeRows.find((row) => isCortexProfile(row)) ?? null,
     [localTreeRows],
   )
-  const remoteOrigins = useMemo<RemoteSidebarOrigin[]>(() => {
-    const modelByOrigin = new Map(originTreeModels.map((entry) => [entry.originId, entry]))
-    return originStructures
-      .filter((entry) => entry.originId !== LOCAL_ORIGIN_ID)
-      .map((entry) => ({
-        originId: entry.originId,
-        connected: entry.value.connected,
-        treeRows: getRemoteVisibleProfileRows(
-          modelByOrigin.get(entry.originId)?.treeRows ?? EMPTY_TREE_ROWS,
-        ),
-      }))
-  }, [originStructures, originTreeModels])
-
-  const discoveredOrder = useMemo<BuilderSidebarOrderRef[]>(() => {
-    const localRefs = structuralLocalTreeRows
+  const discoveredOrder = useMemo<BuilderSidebarOrderRef[]>(() => (
+    structuralLocalTreeRows
       .filter(isOrderableLocalRow)
       .map((row) => ({ originId: LOCAL_ORIGIN_ID, profileId: row.profile.profileId }))
-    const remoteRefs = remoteOrigins.flatMap((origin) => (
-      origin.connected
-        ? origin.treeRows.map((row) => ({
-            originId: origin.originId,
-            profileId: row.profile.profileId,
-          }))
-        : []
-    ))
-    return [...localRefs, ...remoteRefs]
-  }, [remoteOrigins, structuralLocalTreeRows])
+  ), [structuralLocalTreeRows])
 
   const structuralOrderKey = useMemo(
     () => JSON.stringify(discoveredOrder.map(builderSidebarOrderKey)),
@@ -383,7 +357,6 @@ export const AgentSidebarConnected = memo(function AgentSidebarConnected({
         unreadCounts={unreadCounts}
         terminalScopeId={terminalScopeId}
         terminalCount={terminalCount}
-        remoteOrigins={remoteOrigins}
         builderSidebarOrder={effectiveOrder}
         onMoveBuilderProject={dndAvailable ? handleMoveBuilderProject : undefined}
       />

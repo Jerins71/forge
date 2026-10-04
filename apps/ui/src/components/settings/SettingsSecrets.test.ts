@@ -324,18 +324,14 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-function makeClient(kind: 'builder' | 'collab' = 'builder'): SettingsApiClient {
+function makeClient(): SettingsApiClient {
   return {
     target: {
-      kind,
-      label: kind,
-      description: kind,
-      wsUrl: kind === 'builder' ? 'ws://127.0.0.1:47187' : 'wss://remote.example.test',
-      apiBaseUrl: kind === 'builder'
-        ? 'http://127.0.0.1:47187/'
-        : 'https://remote.example.test/',
-      fetchCredentials: kind === 'builder' ? 'same-origin' : 'include',
-      requiresAdmin: kind === 'collab',
+      label: 'builder',
+      description: 'builder',
+      wsUrl: 'ws://127.0.0.1:47187',
+      apiBaseUrl: 'http://127.0.0.1:47187/',
+      fetchCredentials: 'same-origin',
       availableTabs: [],
     },
     endpoint: (path) => path,
@@ -368,14 +364,6 @@ function pastePrivateValue(control: HTMLTextAreaElement, value: string): void {
 }
 
 describe('SettingsSecrets', () => {
-  it('never loads secure settings for a remote origin', () => {
-    render(makeClient('collab'))
-
-    expect(container.textContent).toContain('Local Builder only')
-    expect(container.textContent).toContain('disabled for remote origins')
-    expect(secureSecretsApiMock.fetchSecureSecretsCatalog).not.toHaveBeenCalled()
-  })
-
   it('opens saved secrets by default when Secure Sessions are ready', async () => {
     secureSecretsApiMock.fetchSecureSessionReadiness.mockResolvedValue({
       available: true,

@@ -15,7 +15,7 @@ import { makeManagerSelectionCatalog } from '@/lib/manager-selection-catalog.fix
 import { invalidateManagerSelectionCatalog } from '@/lib/use-manager-selection-catalog'
 
 const fetchCodexCatalogMock = vi.mocked(fetchCodexCatalog)
-const pickerApiClient = { target: { kind: 'collab' } } as unknown as SettingsApiClient
+const pickerApiClient = { target: {} } as unknown as SettingsApiClient
 
 /* ------------------------------------------------------------------ */
 /*  Mocks                                                             */
@@ -1121,21 +1121,21 @@ describe('MessageInput', () => {
 
   describe('draftKey prop', () => {
     it('uses draftKey instead of agentId for draft storage', async () => {
-      renderMessageInput({ agentId: 'agent-1', draftKey: 'collab:channel:ch1' })
+      renderMessageInput({ agentId: 'agent-1', draftKey: 'custom:draft:ch1' })
       await flush()
 
       typeInTextarea('channel draft')
       await flush()
 
       const drafts = JSON.parse(localStorageMock.getItem(DRAFTS_KEY) ?? '{}')
-      expect(drafts['collab:channel:ch1']).toBe('channel draft')
+      expect(drafts['custom:draft:ch1']).toBe('channel draft')
       expect(drafts['agent-1']).toBeUndefined()
     })
 
     it('restores draft from draftKey on mount', async () => {
-      localStorageMock.setItem(DRAFTS_KEY, JSON.stringify({ 'collab:channel:ch1': 'saved channel draft' }))
+      localStorageMock.setItem(DRAFTS_KEY, JSON.stringify({ 'custom:draft:ch1': 'saved channel draft' }))
 
-      renderMessageInput({ agentId: 'agent-1', draftKey: 'collab:channel:ch1' })
+      renderMessageInput({ agentId: 'agent-1', draftKey: 'custom:draft:ch1' })
       await flush()
 
       expect(getTextarea().value).toBe('saved channel draft')

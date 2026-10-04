@@ -52,7 +52,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-const pickerApiClient = { target: { kind: 'builder' } } as unknown as SettingsApiClient
+const pickerApiClient = { target: {} } as unknown as SettingsApiClient
 const pickerHttpClientRef = { current: pickerApiClient }
 
 function makeConfig(

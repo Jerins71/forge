@@ -25,16 +25,6 @@ import {
   storeSidebarModelIconsPref,
   storeSidebarProviderUsagePref,
 } from '@/lib/sidebar-prefs'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { SettingsSection, SettingsWithCTA } from './settings-row'
 import { isElectron, type SleepBlockerStatus } from '@/lib/electron-bridge'
 import {
@@ -83,20 +73,12 @@ import { fetchModelPresets } from '@/lib/model-preset'
 import { fetchCompactionSettings, updateCompactionSettings } from '@/components/settings/compaction-settings-api'
 import { PROVIDER_LABELS } from '@/components/settings/specialists/types'
 import { formatReasoningLevel } from '@/lib/reasoning-level-labels'
-import type { SettingsBackendTarget } from './settings-target'
 import { createBuilderSettingsApiClient, type SettingsApiClient } from './settings-api-client'
 
 interface SettingsGeneralProps {
   wsUrl: string
-  /** When provided, the component uses target-aware API routing. */
-  target?: SettingsBackendTarget
   /** When provided, used for all backend requests instead of raw wsUrl. */
   apiClient?: SettingsApiClient
-  /**
-   * Explicit runtime capability for Clone repository settings.
-   * Direct collaboration-server Builder must pass false even when target.kind is builder.
-   */
-  repositoryCloneAvailable: boolean
 }
 
 interface CompactionModelOption {
@@ -198,14 +180,10 @@ function buildCompactionAvailabilityWarning(view: GetCompactionSettingsResponse 
 
 export function SettingsGeneral({
   wsUrl,
-  target,
   apiClient,
-  repositoryCloneAvailable,
 }: SettingsGeneralProps) {
   useHelpContext('settings.general')
 
-  const isCollab = target?.kind === 'collab'
-  const isBuilder = !isCollab
 
   // Use apiClient for onboarding when available, fall back to wsUrl
   const onboardingSource = apiClient ?? wsUrl
@@ -317,7 +295,6 @@ export function SettingsGeneral({
 
   // Fetch terminal shell settings on mount — Builder-only
   useEffect(() => {
-    if (isCollab) return // Terminal settings are not available in Collab target
     setTerminalLoadFailed(false)
     void fetchAvailableShells(wsUrl)
       .then((data) => {
@@ -329,7 +306,7 @@ export function SettingsGeneral({
         setTerminalLoadFailed(true)
         setTerminalError(err instanceof Error ? err.message : 'Could not load terminal settings')
       })
-  }, [wsUrl, isCollab])
+  }, [wsUrl])
 
   const handleTerminalShellChange = useCallback(
     (value: string) => {
@@ -364,8 +341,6 @@ export function SettingsGeneral({
   )
 
   const loadCompactionSettings = useCallback(async () => {
-    if (!isBuilder) return
-
     setCompactionLoadFailed(false)
     setCompactionError(null)
     const [view, presets] = await Promise.all([
@@ -376,15 +351,14 @@ export function SettingsGeneral({
     setCompactionDraft(view.settings)
     setCompactionModelPresets(presets)
     setCompactionLoadFailed(false)
-  }, [compactionSource, presetsApiClient, isBuilder])
+  }, [compactionSource, presetsApiClient])
 
   useEffect(() => {
-    if (!isBuilder) return
     void loadCompactionSettings().catch((err) => {
       setCompactionLoadFailed(true)
       setCompactionError(err instanceof Error ? err.message : 'Could not load compaction settings')
     })
-  }, [isBuilder, loadCompactionSettings])
+  }, [loadCompactionSettings])
 
   const compactionModelOptions = useMemo(() => {
     const options = buildCompactionModelOptions(compactionModelPresets)
@@ -591,7 +565,6 @@ export function SettingsGeneral({
   const modelCacheVisualizationSource = apiClient ?? wsUrl
 
   useEffect(() => {
-    if (!isBuilder) return
     let cancelled = false
     setModelCacheVisualizationLoading(true)
     setModelCacheVisualizationError(null)
@@ -612,12 +585,11 @@ export function SettingsGeneral({
     return () => {
       cancelled = true
     }
-  }, [isBuilder, modelCacheVisualizationSource])
+  }, [modelCacheVisualizationSource])
 
   const repositorySettingsSource = apiClient ?? wsUrl
 
   useEffect(() => {
-    if (!repositoryCloneAvailable) return
     let cancelled = false
     setRepositoryLoading(true)
     setRepositoryError(null)
@@ -639,7 +611,7 @@ export function SettingsGeneral({
     return () => {
       cancelled = true
     }
-  }, [repositoryCloneAvailable, repositorySettingsSource])
+  }, [repositorySettingsSource])
 
   const handleSaveRepositoryHome = useCallback(() => {
     if (repositoryUpdating) return
@@ -756,11 +728,8 @@ export function SettingsGeneral({
     }
   }, [savePreferences])
 
-  // Reboot confirmation state — collab targets require explicit confirmation
-  const [showRebootConfirm, setShowRebootConfirm] = useState(false)
-
   // Reboot handler — uses apiClient for target-aware routing
-  const executeReboot = useCallback(() => {
+  const handleReboot = useCallback(() => {
     if (apiClient) {
       void apiClient.fetch('/api/reboot', { method: 'POST' }).catch(() => {})
     } else {
@@ -769,109 +738,97 @@ export function SettingsGeneral({
     }
   }, [apiClient, wsUrl])
 
-  const handleReboot = useCallback(() => {
-    if (isCollab) {
-      setShowRebootConfirm(true)
-    } else {
-      executeReboot()
-    }
-  }, [isCollab, executeReboot])
-
   return (
     <div className="flex flex-col gap-8">
       {/* Editor — local-only (Builder) */}
-      {isBuilder && (
-        <SettingsSection
-          label="Editor"
-          description="Customize local editor integration"
+      <SettingsSection
+        label="Editor"
+        description="Customize local editor integration"
+      >
+        <SettingsWithCTA
+          label="Preferred Editor"
+          description="Choose which editor to open artifact files in"
         >
-          <SettingsWithCTA
-            label="Preferred Editor"
-            description="Choose which editor to open artifact files in"
+          <Select
+            value={editorPreference}
+            onValueChange={(value) => {
+              if (value === 'vscode-insiders' || value === 'vscode' || value === 'cursor') {
+                handleEditorPreferenceChange(value)
+              }
+            }}
           >
-            <Select
-              value={editorPreference}
-              onValueChange={(value) => {
-                if (value === 'vscode-insiders' || value === 'vscode' || value === 'cursor') {
-                  handleEditorPreferenceChange(value)
-                }
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-48">
-                <SelectValue placeholder="Select editor" />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.entries(EDITOR_LABELS) as [EditorPreference, string][]).map(([value, label]) => (
-                  <SelectItem key={value} value={value}>
-                    <span className="inline-flex items-center gap-2">
-                      <Code className="size-3.5" />
-                      {label}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </SettingsWithCTA>
-        </SettingsSection>
-      )}
+            <SelectTrigger className="w-full sm:w-48">
+              <SelectValue placeholder="Select editor" />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.entries(EDITOR_LABELS) as [EditorPreference, string][]).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  <span className="inline-flex items-center gap-2">
+                    <Code className="size-3.5" />
+                    {label}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsWithCTA>
+      </SettingsSection>
 
-      {repositoryCloneAvailable && (
-        <SettingsSection
-          label="Repositories"
-          description="Default base path for Clone repository when creating a project. Configured home wins over last-used clone base; otherwise Forge uses your home directory."
-        >
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Label htmlFor="repository-configured-home" className="text-sm font-medium">
-                Configured repository home
-              </Label>
-              <Input
-                id="repository-configured-home"
-                value={repositoryConfiguredHome}
-                onChange={(event) => {
-                  setRepositoryConfiguredHome(event.target.value)
-                  setRepositorySuccess(false)
-                }}
-                placeholder={repositoryEffectiveBasePath || 'Absolute directory path'}
-                disabled={repositoryLoading || repositoryUpdating}
-              />
-              <p className="text-xs text-muted-foreground">
-                Effective default: <span className="font-mono text-foreground">{repositoryEffectiveBasePath || '…'}</span>
-                {repositorySource ? ` (${repositorySource.replace('_', ' ')})` : null}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleSaveRepositoryHome}
-                disabled={repositoryLoading || repositoryUpdating}
-              >
-                {repositoryUpdating ? 'Saving…' : 'Save'}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleResetRepositoryHome}
-                disabled={repositoryLoading || repositoryUpdating || !repositoryConfiguredHome}
-              >
-                <RotateCcw className="mr-1.5 size-3.5" />
-                Clear configured home
-              </Button>
-              {repositorySuccess ? (
-                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                  <Check className="size-3.5" />
-                  Saved
-                </span>
-              ) : null}
-            </div>
-            {repositoryError ? (
-              <p className="text-xs text-destructive">{repositoryError}</p>
+      <SettingsSection
+        label="Repositories"
+        description="Default base path for Clone repository when creating a project. Configured home wins over last-used clone base; otherwise Forge uses your home directory."
+      >
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="repository-configured-home" className="text-sm font-medium">
+              Configured repository home
+            </Label>
+            <Input
+              id="repository-configured-home"
+              value={repositoryConfiguredHome}
+              onChange={(event) => {
+                setRepositoryConfiguredHome(event.target.value)
+                setRepositorySuccess(false)
+              }}
+              placeholder={repositoryEffectiveBasePath || 'Absolute directory path'}
+              disabled={repositoryLoading || repositoryUpdating}
+            />
+            <p className="text-xs text-muted-foreground">
+              Effective default: <span className="font-mono text-foreground">{repositoryEffectiveBasePath || '…'}</span>
+              {repositorySource ? ` (${repositorySource.replace('_', ' ')})` : null}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleSaveRepositoryHome}
+              disabled={repositoryLoading || repositoryUpdating}
+            >
+              {repositoryUpdating ? 'Saving…' : 'Save'}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleResetRepositoryHome}
+              disabled={repositoryLoading || repositoryUpdating || !repositoryConfiguredHome}
+            >
+              <RotateCcw className="mr-1.5 size-3.5" />
+              Clear configured home
+            </Button>
+            {repositorySuccess ? (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Check className="size-3.5" />
+                Saved
+              </span>
             ) : null}
           </div>
-        </SettingsSection>
-      )}
+          {repositoryError ? (
+            <p className="text-xs text-destructive">{repositoryError}</p>
+          ) : null}
+        </div>
+      </SettingsSection>
 
       <SettingsSection
         label="Conversation Response Throughput"
@@ -879,7 +836,7 @@ export function SettingsGeneral({
       >
         <SettingsWithCTA
           label="Show response throughput in conversations"
-          description="Show final Pi response throughput in manager headers, worker pills, and worker Quick Look. This browser preference applies immediately to Builder and Collaboration conversations."
+          description="Show final Pi response throughput in manager headers, worker pills, and worker Quick Look. This browser preference applies immediately."
         >
           <Switch
             id="conversation-throughput-display-toggle"
@@ -889,194 +846,190 @@ export function SettingsGeneral({
         </SettingsWithCTA>
       </SettingsSection>
 
-      {isBuilder && (
-        <SettingsSection
-          label="Prompt Cache Visualization"
-          description="Show a compact prompt-cache indicator in manager chat headers for OpenAI/Codex Pi sessions when provider-reported cached input token counts are available."
-        >
-          <div className="flex items-center gap-3">
-            <Switch
-              id="model-cache-visualization-enabled-toggle"
-              checked={modelCacheVisualizationEnabled}
-              disabled={modelCacheVisualizationLoading || modelCacheVisualizationUpdating}
-              onCheckedChange={handleModelCacheVisualizationToggle}
-              aria-label="Enable prompt cache visualization"
-            />
-            <Label htmlFor="model-cache-visualization-enabled-toggle" className="text-sm font-medium">
-              Enable prompt cache visualization
-            </Label>
-            {modelCacheVisualizationUpdating ? (
-              <span className="text-xs text-muted-foreground">Saving…</span>
-            ) : null}
-          </div>
-          {!modelCacheVisualizationEnabled && !modelCacheVisualizationLoading ? (
-            <p className="mt-2 text-xs italic text-muted-foreground/70">
-              Prompt cache visualization is off by default. While disabled, Forge does not collect new cache
-              observations and hides the header indicator. Observations from earlier enabled periods may appear
-              after you turn this on and load session history; Forge does not report guaranteed miss or drop causes.
-            </p>
+      <SettingsSection
+        label="Prompt Cache Visualization"
+        description="Show a compact prompt-cache indicator in manager chat headers for OpenAI/Codex Pi sessions when provider-reported cached input token counts are available."
+      >
+        <div className="flex items-center gap-3">
+          <Switch
+            id="model-cache-visualization-enabled-toggle"
+            checked={modelCacheVisualizationEnabled}
+            disabled={modelCacheVisualizationLoading || modelCacheVisualizationUpdating}
+            onCheckedChange={handleModelCacheVisualizationToggle}
+            aria-label="Enable prompt cache visualization"
+          />
+          <Label htmlFor="model-cache-visualization-enabled-toggle" className="text-sm font-medium">
+            Enable prompt cache visualization
+          </Label>
+          {modelCacheVisualizationUpdating ? (
+            <span className="text-xs text-muted-foreground">Saving…</span>
           ) : null}
-          {modelCacheVisualizationError ? (
-            <p className="mt-2 text-xs text-destructive">{modelCacheVisualizationError}</p>
-          ) : null}
-        </SettingsSection>
-      )}
+        </div>
+        {!modelCacheVisualizationEnabled && !modelCacheVisualizationLoading ? (
+          <p className="mt-2 text-xs italic text-muted-foreground/70">
+            Prompt cache visualization is off by default. While disabled, Forge does not collect new cache
+            observations and hides the header indicator. Observations from earlier enabled periods may appear
+            after you turn this on and load session history; Forge does not report guaranteed miss or drop causes.
+          </p>
+        ) : null}
+        {modelCacheVisualizationError ? (
+          <p className="mt-2 text-xs text-destructive">{modelCacheVisualizationError}</p>
+        ) : null}
+      </SettingsSection>
 
       {/* Sleep Prevention — Electron-only, Builder-only */}
-      {isBuilder && (
-        <SettingsSection
-          label="Compaction"
-          description="Choose the model, reasoning level, and timeout Forge uses for automatic and smart Pi compaction."
-        >
-          {!compactionView || !compactionDraft ? (
-            <div className="text-sm text-muted-foreground">
-              {compactionError ?? 'Loading compaction settings…'}
-              {compactionLoadFailed ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void loadCompactionSettings().catch((err) => {
-                      setCompactionLoadFailed(true)
-                      setCompactionError(err instanceof Error ? err.message : 'Could not load compaction settings')
-                    })
-                  }}
-                  className="ml-2 text-primary underline hover:no-underline"
-                >
-                  Retry
-                </button>
-              ) : null}
-            </div>
-          ) : (
-            <>
-              <SettingsWithCTA
-                label="Compaction model"
-                description="Model used for Forge-owned automatic compaction and Smart compact summaries."
+      <SettingsSection
+        label="Compaction"
+        description="Choose the model, reasoning level, and timeout Forge uses for automatic and smart Pi compaction."
+      >
+        {!compactionView || !compactionDraft ? (
+          <div className="text-sm text-muted-foreground">
+            {compactionError ?? 'Loading compaction settings…'}
+            {compactionLoadFailed ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void loadCompactionSettings().catch((err) => {
+                    setCompactionLoadFailed(true)
+                    setCompactionError(err instanceof Error ? err.message : 'Could not load compaction settings')
+                  })
+                }}
+                className="ml-2 text-primary underline hover:no-underline"
               >
-                <div className="flex flex-col items-end gap-1.5">
-                  <div className="flex items-center gap-2">
-                    {compactionSuccess ? (
-                      <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-                        <Check className="size-3" />
-                        Saved
-                      </span>
-                    ) : null}
-                    <Select
-                      value={getCompactionModelKey(compactionDraft.model)}
-                      onValueChange={handleCompactionModelChange}
-                      disabled={compactionUpdating}
-                    >
-                      <SelectTrigger className="w-full sm:w-72" aria-label="Compaction model">
-                        <SelectValue placeholder="Select model" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {compactionModelGroups.map((group) => (
-                          <SelectGroup key={group.provider}>
-                            <SelectLabel className="text-xs text-muted-foreground">{group.providerLabel}</SelectLabel>
-                            {group.options.map((option) => (
-                              <SelectItem key={option.key} value={option.key}>
-                                {option.label}{option.isCurrentUnavailable ? ' (current setting)' : ''}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {selectedCompactionModel?.isCurrentUnavailable ? (
-                    <span className="text-[10px] text-muted-foreground">
-                      Current setting is preserved here so you can switch away from it.
+                Retry
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <>
+            <SettingsWithCTA
+              label="Compaction model"
+              description="Model used for Forge-owned automatic compaction and Smart compact summaries."
+            >
+              <div className="flex flex-col items-end gap-1.5">
+                <div className="flex items-center gap-2">
+                  {compactionSuccess ? (
+                    <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                      <Check className="size-3" />
+                      Saved
                     </span>
                   ) : null}
-                </div>
-              </SettingsWithCTA>
-
-              <SettingsWithCTA
-                label="Compaction reasoning"
-                description="Reasoning level used when Forge asks the compaction model to summarize older context."
-              >
-                <Select
-                  value={compactionDraft.reasoningLevel}
-                  onValueChange={handleCompactionReasoningChange}
-                  disabled={compactionUpdating}
-                >
-                  <SelectTrigger className="w-full sm:w-48" aria-label="Compaction reasoning level">
-                    <SelectValue placeholder="Select reasoning level" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableCompactionReasoningLevels.map((level) => (
-                      <SelectItem key={level} value={level}>
-                        {formatReasoningLevel(level, availableCompactionReasoningLevels)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </SettingsWithCTA>
-
-              <SettingsWithCTA
-                label="Compaction timeout"
-                description="How long Forge waits before automatic compaction is treated as timed out."
-              >
-                <Select
-                  value={String(Math.max(1, Math.round(compactionDraft.timeoutMs / 60_000)))}
-                  onValueChange={handleCompactionTimeoutChange}
-                  disabled={compactionUpdating}
-                >
-                  <SelectTrigger className="w-full sm:w-48" aria-label="Compaction timeout">
-                    <SelectValue placeholder="Select timeout" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {compactionTimeoutMinuteOptions.map((minutes) => (
-                      <SelectItem key={minutes} value={String(minutes)}>
-                        {formatCompactionTimeoutLabel(minutes)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </SettingsWithCTA>
-
-              {compactionWarning ? (
-                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
-                  {compactionWarning}
-                </div>
-              ) : null}
-
-              {compactionError && !compactionLoadFailed ? (
-                <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                  {compactionError}
-                </div>
-              ) : null}
-
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3">
-                <p className="text-xs text-muted-foreground">
-                  Defaults: {compactionView.defaults.model.modelId} · {formatReasoningLevel(compactionView.defaults.reasoningLevel, defaultCompactionReasoningLevels)} · {formatCompactionTimeoutLabel(Math.round(compactionView.defaults.timeoutMs / 60_000))}
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCompactionReset}
-                    disabled={!hasCompactionChanges || compactionUpdating}
+                  <Select
+                    value={getCompactionModelKey(compactionDraft.model)}
+                    onValueChange={handleCompactionModelChange}
+                    disabled={compactionUpdating}
                   >
-                    <RotateCcw className="size-4" />
-                    Reset
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={handleCompactionSave}
-                    disabled={!hasCompactionChanges || compactionUpdating}
-                  >
-                    Save
-                  </Button>
+                    <SelectTrigger className="w-full sm:w-72" aria-label="Compaction model">
+                      <SelectValue placeholder="Select model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {compactionModelGroups.map((group) => (
+                        <SelectGroup key={group.provider}>
+                          <SelectLabel className="text-xs text-muted-foreground">{group.providerLabel}</SelectLabel>
+                          {group.options.map((option) => (
+                            <SelectItem key={option.key} value={option.key}>
+                              {option.label}{option.isCurrentUnavailable ? ' (current setting)' : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+                {selectedCompactionModel?.isCurrentUnavailable ? (
+                  <span className="text-[10px] text-muted-foreground">
+                    Current setting is preserved here so you can switch away from it.
+                  </span>
+                ) : null}
               </div>
-            </>
-          )}
-        </SettingsSection>
-      )}
+            </SettingsWithCTA>
 
-      {isBuilder && inElectron && (
+            <SettingsWithCTA
+              label="Compaction reasoning"
+              description="Reasoning level used when Forge asks the compaction model to summarize older context."
+            >
+              <Select
+                value={compactionDraft.reasoningLevel}
+                onValueChange={handleCompactionReasoningChange}
+                disabled={compactionUpdating}
+              >
+                <SelectTrigger className="w-full sm:w-48" aria-label="Compaction reasoning level">
+                  <SelectValue placeholder="Select reasoning level" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableCompactionReasoningLevels.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      {formatReasoningLevel(level, availableCompactionReasoningLevels)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SettingsWithCTA>
+
+            <SettingsWithCTA
+              label="Compaction timeout"
+              description="How long Forge waits before automatic compaction is treated as timed out."
+            >
+              <Select
+                value={String(Math.max(1, Math.round(compactionDraft.timeoutMs / 60_000)))}
+                onValueChange={handleCompactionTimeoutChange}
+                disabled={compactionUpdating}
+              >
+                <SelectTrigger className="w-full sm:w-48" aria-label="Compaction timeout">
+                  <SelectValue placeholder="Select timeout" />
+                </SelectTrigger>
+                <SelectContent>
+                  {compactionTimeoutMinuteOptions.map((minutes) => (
+                    <SelectItem key={minutes} value={String(minutes)}>
+                      {formatCompactionTimeoutLabel(minutes)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SettingsWithCTA>
+
+            {compactionWarning ? (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+                {compactionWarning}
+              </div>
+            ) : null}
+
+            {compactionError && !compactionLoadFailed ? (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                {compactionError}
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3">
+              <p className="text-xs text-muted-foreground">
+                Defaults: {compactionView.defaults.model.modelId} · {formatReasoningLevel(compactionView.defaults.reasoningLevel, defaultCompactionReasoningLevels)} · {formatCompactionTimeoutLabel(Math.round(compactionView.defaults.timeoutMs / 60_000))}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCompactionReset}
+                  disabled={!hasCompactionChanges || compactionUpdating}
+                >
+                  <RotateCcw className="size-4" />
+                  Reset
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleCompactionSave}
+                  disabled={!hasCompactionChanges || compactionUpdating}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
+      </SettingsSection>
+
+      {inElectron && (
         <SettingsSection
           label="Sleep Prevention"
           description="Keep the system awake while agents are active"
@@ -1235,174 +1188,170 @@ export function SettingsGeneral({
       </SettingsSection>
 
       {/* Sidebar — local-only (Builder) */}
-      {isBuilder && (
-        <SettingsSection
-          label="Sidebar"
-          description="Customize sidebar appearance"
+      <SettingsSection
+        label="Sidebar"
+        description="Customize sidebar appearance"
+      >
+        <SettingsWithCTA
+          label="Show model icons"
+          description="Display model provider icons next to manager profiles in the sidebar"
         >
-          <SettingsWithCTA
-            label="Show model icons"
-            description="Display model provider icons next to manager profiles in the sidebar"
-          >
-            <Switch
-              checked={sidebarModelIcons}
-              onCheckedChange={(checked) => {
-                setSidebarModelIcons(checked)
-                storeSidebarModelIconsPref(checked)
-              }}
-            />
-          </SettingsWithCTA>
+          <Switch
+            checked={sidebarModelIcons}
+            onCheckedChange={(checked) => {
+              setSidebarModelIcons(checked)
+              storeSidebarModelIconsPref(checked)
+            }}
+          />
+        </SettingsWithCTA>
 
-          <SettingsWithCTA
-            label="Show provider usage"
-            description="Display provider usage limits above the sidebar footer"
-          >
-            <Switch
-              checked={sidebarProviderUsage}
-              onCheckedChange={(checked) => {
-                setSidebarProviderUsage(checked)
-                storeSidebarProviderUsagePref(checked)
-              }}
-            />
-          </SettingsWithCTA>
-
-          <SettingsWithCTA
-            label="Use new project view"
-            description="Try the new project view. Classic remains available as a rollback option."
-          >
-            <Switch
-              id="sidebar-rooms-v2-toggle"
-              checked={sidebarLayout === 'rooms-v2'}
-              onCheckedChange={(checked) => {
-                const next = checked ? 'rooms-v2' : 'classic'
-                setSidebarLayout(next)
-                storeSidebarLayoutPref(next)
-              }}
-            />
-          </SettingsWithCTA>
-        </SettingsSection>
-      )}
-
-      {/* Terminal — Builder-only; hidden entirely for Collab target */}
-      {isBuilder && (
-        <SettingsSection
-          label="Terminal"
-          description="Configure the integrated terminal"
+        <SettingsWithCTA
+          label="Show provider usage"
+          description="Display provider usage limits above the sidebar footer"
         >
-          <SettingsWithCTA
-            label="Default Shell"
-            description={
-              terminalSettings?.source === 'env' ? (
-                <>
-                  <span>Shell used when opening new terminals.</span>
-                  <br />
-                  <span className="text-amber-600 dark:text-amber-400">
-                    Currently set via <code className="text-[10px]">FORGE_TERMINAL_DEFAULT_SHELL</code> environment variable.
-                  </span>
-                </>
-              ) : (
-                'Shell used when opening new terminals'
-              )
-            }
-          >
-            <div className="flex flex-col items-end gap-1.5">
-              <div className="flex items-center gap-2">
-                {terminalSuccess && (
-                  <span className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                    <Check className="size-3" />
-                    Saved
-                  </span>
-                )}
-                <Select
-                  value={terminalSettings?.persistedDefaultShell ?? '__system_default__'}
-                  onValueChange={handleTerminalShellChange}
-                  disabled={
-                    !terminalShells ||
-                    terminalSettings?.source === 'env' ||
-                    terminalUpdating
-                  }
-                >
-                  <SelectTrigger className="w-full sm:w-64">
-                    <SelectValue placeholder="Loading shells…">
-                      {terminalSettings?.persistedDefaultShell
-                        ? (() => {
-                            const shell = terminalShells?.shells.find(
-                              (s) => s.path === terminalSettings.persistedDefaultShell,
-                            )
-                            return shell ? (
-                              <span className="inline-flex items-center gap-2">
-                                <Terminal className="size-3.5" />
-                                {shell.name}
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-2">
-                                <Terminal className="size-3.5" />
-                                {terminalSettings.persistedDefaultShell}
-                              </span>
-                            )
-                          })()
-                        : (
-                          <span className="inline-flex items-center gap-2">
-                            <Terminal className="size-3.5" />
-                            System Default
-                          </span>
-                        )}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__system_default__">
-                      <span className="inline-flex items-center gap-2">
-                        <Terminal className="size-3.5" />
-                        System Default
-                      </span>
-                    </SelectItem>
-                    {terminalShells?.shells
-                      .filter((s) => s.available)
-                      .map((shell) => (
-                        <SelectItem key={shell.path} value={shell.path}>
-                          <span className="inline-flex items-center gap-2">
-                            <Terminal className="size-3.5" />
-                            {shell.name}
-                            <span className="text-muted-foreground text-[10px]">— {shell.path}</span>
-                          </span>
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {terminalError ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-destructive">{terminalError}</span>
-                  {terminalLoadFailed ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTerminalError(null)
-                        setTerminalLoadFailed(false)
-                        void fetchAvailableShells(wsUrl)
-                          .then((data) => {
-                            setTerminalShells(data)
-                            setTerminalSettings(data.settings)
-                            setTerminalLoadFailed(false)
-                          })
-                          .catch((err) => {
-                            setTerminalLoadFailed(true)
-                            setTerminalError(
-                              err instanceof Error ? err.message : 'Could not load terminal settings',
-                            )
-                          })
-                      }}
-                      className="text-[10px] text-primary underline hover:no-underline"
-                    >
-                      Retry
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
+          <Switch
+            checked={sidebarProviderUsage}
+            onCheckedChange={(checked) => {
+              setSidebarProviderUsage(checked)
+              storeSidebarProviderUsagePref(checked)
+            }}
+          />
+        </SettingsWithCTA>
+
+        <SettingsWithCTA
+          label="Use new project view"
+          description="Try the new project view. Classic remains available as a rollback option."
+        >
+          <Switch
+            id="sidebar-rooms-v2-toggle"
+            checked={sidebarLayout === 'rooms-v2'}
+            onCheckedChange={(checked) => {
+              const next = checked ? 'rooms-v2' : 'classic'
+              setSidebarLayout(next)
+              storeSidebarLayoutPref(next)
+            }}
+          />
+        </SettingsWithCTA>
+      </SettingsSection>
+
+      {/* Terminal */}
+      <SettingsSection
+        label="Terminal"
+        description="Configure the integrated terminal"
+      >
+        <SettingsWithCTA
+          label="Default Shell"
+          description={
+            terminalSettings?.source === 'env' ? (
+              <>
+                <span>Shell used when opening new terminals.</span>
+                <br />
+                <span className="text-amber-600 dark:text-amber-400">
+                  Currently set via <code className="text-[10px]">FORGE_TERMINAL_DEFAULT_SHELL</code> environment variable.
+                </span>
+              </>
+            ) : (
+              'Shell used when opening new terminals'
+            )
+          }
+        >
+          <div className="flex flex-col items-end gap-1.5">
+            <div className="flex items-center gap-2">
+              {terminalSuccess && (
+                <span className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                  <Check className="size-3" />
+                  Saved
+                </span>
+              )}
+              <Select
+                value={terminalSettings?.persistedDefaultShell ?? '__system_default__'}
+                onValueChange={handleTerminalShellChange}
+                disabled={
+                  !terminalShells ||
+                  terminalSettings?.source === 'env' ||
+                  terminalUpdating
+                }
+              >
+                <SelectTrigger className="w-full sm:w-64">
+                  <SelectValue placeholder="Loading shells…">
+                    {terminalSettings?.persistedDefaultShell
+                      ? (() => {
+                          const shell = terminalShells?.shells.find(
+                            (s) => s.path === terminalSettings.persistedDefaultShell,
+                          )
+                          return shell ? (
+                            <span className="inline-flex items-center gap-2">
+                              <Terminal className="size-3.5" />
+                              {shell.name}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-2">
+                              <Terminal className="size-3.5" />
+                              {terminalSettings.persistedDefaultShell}
+                            </span>
+                          )
+                        })()
+                      : (
+                        <span className="inline-flex items-center gap-2">
+                          <Terminal className="size-3.5" />
+                          System Default
+                        </span>
+                      )}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__system_default__">
+                    <span className="inline-flex items-center gap-2">
+                      <Terminal className="size-3.5" />
+                      System Default
+                    </span>
+                  </SelectItem>
+                  {terminalShells?.shells
+                    .filter((s) => s.available)
+                    .map((shell) => (
+                      <SelectItem key={shell.path} value={shell.path}>
+                        <span className="inline-flex items-center gap-2">
+                          <Terminal className="size-3.5" />
+                          {shell.name}
+                          <span className="text-muted-foreground text-[10px]">— {shell.path}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
             </div>
-          </SettingsWithCTA>
-        </SettingsSection>
-      )}
+            {terminalError ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-destructive">{terminalError}</span>
+                {terminalLoadFailed ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTerminalError(null)
+                      setTerminalLoadFailed(false)
+                      void fetchAvailableShells(wsUrl)
+                        .then((data) => {
+                          setTerminalShells(data)
+                          setTerminalSettings(data.settings)
+                          setTerminalLoadFailed(false)
+                        })
+                        .catch((err) => {
+                          setTerminalLoadFailed(true)
+                          setTerminalError(
+                            err instanceof Error ? err.message : 'Could not load terminal settings',
+                          )
+                        })
+                    }}
+                    className="text-[10px] text-primary underline hover:no-underline"
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </SettingsWithCTA>
+      </SettingsSection>
 
       <SettingsSection
         label="System"
@@ -1422,22 +1371,6 @@ export function SettingsGeneral({
           </Button>
         </SettingsWithCTA>
       </SettingsSection>
-
-      {/* Confirmation dialog for collab-targeted reboot */}
-      <AlertDialog open={showRebootConfirm} onOpenChange={setShowRebootConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Reboot remote backend?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will restart the connected Collab backend and all its agents. Any active sessions on the remote server will be interrupted.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={executeReboot}>Reboot</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }

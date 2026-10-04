@@ -22,7 +22,7 @@ const {
   useManagerSelectionCatalog,
 } = await import('./use-manager-selection-catalog')
 
-const apiClient = { target: { kind: 'builder' } } as unknown as SettingsApiClient
+const apiClient = { target: {} } as unknown as SettingsApiClient
 let container: HTMLDivElement
 let root: Root | null = null
 

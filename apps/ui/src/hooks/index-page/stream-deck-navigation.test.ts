@@ -4,10 +4,10 @@ import { resolveStreamDeckNavigationRoute } from './stream-deck-navigation'
 
 describe('resolveStreamDeckNavigationRoute', () => {
   it.each([
-    ['git', { view: 'chat', agentId: 'forge', surface: 'builder', deckPanel: 'git' }],
-    ['browser', { view: 'chat', agentId: 'forge', surface: 'builder', deckPanel: 'browser' }],
-    ['terminal', { view: 'chat', agentId: 'forge', surface: 'builder', deckPanel: 'terminal' }],
-    ['chat', { view: 'chat', agentId: 'forge', surface: 'builder' }],
+    ['git', { view: 'chat', agentId: 'forge', deckPanel: 'git' }],
+    ['browser', { view: 'chat', agentId: 'forge', deckPanel: 'browser' }],
+    ['terminal', { view: 'chat', agentId: 'forge', deckPanel: 'terminal' }],
+    ['chat', { view: 'chat', agentId: 'forge' }],
     ['stats', { view: 'stats', statsTab: 'overview' }],
     ['tokens', { view: 'stats', statsTab: 'tokens' }],
   ] satisfies Array<[StreamDeckSurface, object]>)('routes %s into its real Forge surface', (surface, expected) => {

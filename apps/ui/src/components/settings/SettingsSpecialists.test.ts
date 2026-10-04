@@ -11,7 +11,6 @@ import type {
   ManagerProfile,
   ResolvedSpecialistDefinition,
 } from '@forge/protocol'
-import type { SettingsApiClient } from './settings-api-client'
 
 /* ------------------------------------------------------------------ */
 /*  Mocks                                                             */
@@ -21,7 +20,6 @@ const specialistsApiMock = vi.hoisted(() => ({
   fetchSpecialists: vi.fn(),
   fetchSharedSpecialists: vi.fn(),
   fetchRosterPrompt: vi.fn(),
-  fetchChannelRosterPrompt: vi.fn(),
   fetchWorkerTemplate: vi.fn(),
   fetchDelegationRosterSettings: vi.fn(),
   saveDelegationRosterSettingsApi: vi.fn(),
@@ -29,23 +27,12 @@ const specialistsApiMock = vi.hoisted(() => ({
   saveSharedSpecialist: vi.fn(),
   deleteSpecialist: vi.fn(),
   deleteSharedSpecialist: vi.fn(),
-  fetchChannelSpecialists: vi.fn(),
-  saveChannelSpecialist: vi.fn(),
-  deleteChannelSpecialistApi: vi.fn(),
-  updateChannelSpecialistSelection: vi.fn(),
-  updateCategoryDefaultSpecialists: vi.fn(),
-  fetchCollabCategories: vi.fn(),
-  fetchCollabChannels: vi.fn(),
-  updateChannelSkillSelection: vi.fn(),
-  updateCategoryDefaultSkillSelection: vi.fn(),
-  fetchCollabSkillInventory: vi.fn(),
 }))
 
 vi.mock('./specialists-api', () => ({
   fetchSpecialists: (...args: unknown[]) => specialistsApiMock.fetchSpecialists(...args),
   fetchSharedSpecialists: (...args: unknown[]) => specialistsApiMock.fetchSharedSpecialists(...args),
   fetchRosterPrompt: (...args: unknown[]) => specialistsApiMock.fetchRosterPrompt(...args),
-  fetchChannelRosterPrompt: (...args: unknown[]) => specialistsApiMock.fetchChannelRosterPrompt(...args),
   fetchWorkerTemplate: (...args: unknown[]) => specialistsApiMock.fetchWorkerTemplate(...args),
   fetchDelegationRosterSettings: (...args: unknown[]) =>
     specialistsApiMock.fetchDelegationRosterSettings(...args),
@@ -55,16 +42,6 @@ vi.mock('./specialists-api', () => ({
   saveSharedSpecialist: (...args: unknown[]) => specialistsApiMock.saveSharedSpecialist(...args),
   deleteSpecialist: (...args: unknown[]) => specialistsApiMock.deleteSpecialist(...args),
   deleteSharedSpecialist: (...args: unknown[]) => specialistsApiMock.deleteSharedSpecialist(...args),
-  fetchChannelSpecialists: (...args: unknown[]) => specialistsApiMock.fetchChannelSpecialists(...args),
-  saveChannelSpecialist: (...args: unknown[]) => specialistsApiMock.saveChannelSpecialist(...args),
-  deleteChannelSpecialistApi: (...args: unknown[]) => specialistsApiMock.deleteChannelSpecialistApi(...args),
-  updateChannelSpecialistSelection: (...args: unknown[]) => specialistsApiMock.updateChannelSpecialistSelection(...args),
-  updateCategoryDefaultSpecialists: (...args: unknown[]) => specialistsApiMock.updateCategoryDefaultSpecialists(...args),
-  fetchCollabCategories: (...args: unknown[]) => specialistsApiMock.fetchCollabCategories(...args),
-  fetchCollabChannels: (...args: unknown[]) => specialistsApiMock.fetchCollabChannels(...args),
-  updateChannelSkillSelection: (...args: unknown[]) => specialistsApiMock.updateChannelSkillSelection(...args),
-  updateCategoryDefaultSkillSelection: (...args: unknown[]) => specialistsApiMock.updateCategoryDefaultSkillSelection(...args),
-  fetchCollabSkillInventory: (...args: unknown[]) => specialistsApiMock.fetchCollabSkillInventory(...args),
 }))
 
 vi.mock('@/lib/model-preset', () => ({
@@ -733,263 +710,5 @@ describe('SettingsSpecialists', () => {
 
       expect(container.textContent).toContain('Hide disabled')
     })
-  })
-
-  /* ---- TargetSpace badges ---- */
-
-  describe('targetSpace badges', () => {
-    it('shows Collab badge for collaboration-only specialist', async () => {
-      const spec = makeSpecialist({ targetSpace: ['collaboration'] })
-      renderSpecialists([spec])
-      await flush()
-      await flush()
-
-      expect(container.textContent).toContain('Collab')
-    })
-
-    it('shows Both badge for dual-target specialist', async () => {
-      const spec = makeSpecialist({ targetSpace: ['builder', 'collaboration'] })
-      renderSpecialists([spec])
-      await flush()
-      await flush()
-
-      expect(container.textContent).toContain('Both')
-    })
-
-    it('does not show badge for builder-only specialist', async () => {
-      const spec = makeSpecialist({ targetSpace: ['builder'] })
-      renderSpecialists([spec])
-      await flush()
-      await flush()
-
-      expect(container.textContent).not.toContain('Collab')
-      expect(container.textContent).not.toContain('Both')
-    })
-  })
-})
-
-/* ================================================================== */
-/*  Collab mode tests                                                  */
-/* ================================================================== */
-
-describe('SettingsSpecialists (collab mode)', () => {
-  function makeCollabApiClient(): SettingsApiClient {
-    return {
-      target: {
-        kind: 'collab',
-        label: 'Collab Server',
-        description: 'Remote collaboration server',
-        wsUrl: 'ws://collab.test:47187',
-        apiBaseUrl: 'http://collab.test:47187',
-        fetchCredentials: 'include',
-        requiresAdmin: true,
-        availableTabs: ['specialists'],
-      },
-      endpoint: (path: string) => `http://collab.test:47187${path}`,
-      fetch: vi.fn(),
-      fetchJson: vi.fn(),
-      readApiError: vi.fn(),
-    }
-  }
-
-  it('renders collab settings banner when apiClient targets collab', async () => {
-    const apiClient = makeCollabApiClient()
-    specialistsApiMock.fetchSharedSpecialists.mockResolvedValue([])
-    specialistsApiMock.fetchCollabCategories.mockResolvedValue([])
-    specialistsApiMock.fetchCollabChannels.mockResolvedValue([])
-
-    root = createRoot(container)
-    flushSync(() => {
-      root?.render(
-        createElement(SettingsSpecialists, {
-          wsUrl: 'ws://collab.test:47187',
-          apiClient,
-          profiles: [],
-          specialistChangeKey: 0,
-          modelConfigChangeKey: 0,
-        }),
-      )
-    })
-    await flush()
-    await flush()
-
-    const banner = document.body.querySelector('[data-testid="collab-settings-banner"]')
-    expect(banner).toBeTruthy()
-    expect(banner?.textContent).toContain('Editing remote collaboration server settings')
-    expect(banner?.textContent).toContain('http://collab.test:47187')
-  })
-
-  it('shows Global Collaboration label in scope selector for collab mode', async () => {
-    const apiClient = makeCollabApiClient()
-    specialistsApiMock.fetchSharedSpecialists.mockResolvedValue([])
-    specialistsApiMock.fetchCollabCategories.mockResolvedValue([])
-    specialistsApiMock.fetchCollabChannels.mockResolvedValue([])
-
-    root = createRoot(container)
-    flushSync(() => {
-      root?.render(
-        createElement(SettingsSpecialists, {
-          wsUrl: 'ws://collab.test:47187',
-          apiClient,
-          profiles: [],
-          specialistChangeKey: 0,
-          modelConfigChangeKey: 0,
-        }),
-      )
-    })
-    await flush()
-    await flush()
-
-    expect(container.textContent).toContain('Collaboration Task Instructions & Custom Specialists')
-  })
-
-  it('fetches specialists with collaboration targetSpace in collab mode', async () => {
-    const apiClient = makeCollabApiClient()
-    const collabSpec = makeSpecialist({
-      specialistId: 'collab-planner',
-      displayName: 'Collab Planner',
-      targetSpace: ['collaboration'],
-    })
-    specialistsApiMock.fetchSharedSpecialists.mockResolvedValue([collabSpec])
-    specialistsApiMock.fetchCollabCategories.mockResolvedValue([])
-    specialistsApiMock.fetchCollabChannels.mockResolvedValue([])
-
-    root = createRoot(container)
-    flushSync(() => {
-      root?.render(
-        createElement(SettingsSpecialists, {
-          wsUrl: 'ws://collab.test:47187',
-          apiClient,
-          profiles: [],
-          specialistChangeKey: 0,
-          modelConfigChangeKey: 0,
-        }),
-      )
-    })
-    await flush()
-    await flush()
-
-    // fetchSharedSpecialists is called with the collab apiClient which has
-    // target.kind === 'collab', so inferTargetSpace returns 'collaboration'
-    expect(specialistsApiMock.fetchSharedSpecialists).toHaveBeenCalled()
-    const callArgs = specialistsApiMock.fetchSharedSpecialists.mock.calls[0]
-    const client = callArgs[0] as SettingsApiClient
-    expect(client.target.kind).toBe('collab')
-  })
-
-  it('shows Channel badge on channel-sourced specialist card', async () => {
-    const spec = makeSpecialist({
-      sourceKind: 'channel' as ResolvedSpecialistDefinition['sourceKind'],
-      targetSpace: ['collaboration'],
-      builtin: false,
-    })
-    renderSpecialists([spec])
-    await flush()
-    await flush()
-
-    expect(container.textContent).toContain('Channel')
-  })
-
-  it('does not render ChannelSkillSelection or CategorySkillDefaultsView in channel scope', async () => {
-    const apiClient = makeCollabApiClient()
-    specialistsApiMock.fetchSharedSpecialists.mockResolvedValue([])
-    specialistsApiMock.fetchChannelSpecialists.mockResolvedValue({
-      specialists: [],
-      selectedGlobalSpecialistHandles: [],
-      missingSelectedSpecialistHandles: [],
-    })
-    specialistsApiMock.fetchCollabCategories.mockResolvedValue([{
-      categoryId: 'cat-1',
-      workspaceId: 'ws-1',
-      name: 'Engineering',
-      defaultSelectedSpecialistHandles: [],
-      position: 0,
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T00:00:00Z',
-    }])
-    specialistsApiMock.fetchCollabChannels.mockResolvedValue([{
-      channelId: 'ch-1',
-      workspaceId: 'ws-1',
-      categoryId: 'cat-1',
-      name: 'backend',
-      archived: false,
-      position: 0,
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T00:00:00Z',
-    }])
-
-    root = createRoot(container)
-    flushSync(() => {
-      root?.render(
-        createElement(SettingsSpecialists, {
-          wsUrl: 'ws://collab.test:47187',
-          apiClient,
-          profiles: [],
-          specialistChangeKey: 0,
-          modelConfigChangeKey: 0,
-          initialChannelId: 'ch-1',
-        }),
-      )
-    })
-    await flush()
-    await flush()
-
-    // Specialists page should NOT render skill selection controls (relocated to Skills page)
-    expect(container.textContent).not.toContain('Skill Selection')
-    expect(container.textContent).not.toContain('Default Skill Selection')
-    // But should still show specialist-related UI
-    expect(container.textContent).toContain('Specialist')
-  })
-
-  it('does not render skill defaults in category scope', async () => {
-    const apiClient = makeCollabApiClient()
-    specialistsApiMock.fetchSharedSpecialists.mockResolvedValue([])
-    specialistsApiMock.fetchCollabCategories.mockResolvedValue([{
-      categoryId: 'cat-1',
-      workspaceId: 'ws-1',
-      name: 'Engineering',
-      defaultSelectedSpecialistHandles: [],
-      position: 0,
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T00:00:00Z',
-    }])
-    specialistsApiMock.fetchCollabChannels.mockResolvedValue([])
-
-    root = createRoot(container)
-    flushSync(() => {
-      root?.render(
-        createElement(SettingsSpecialists, {
-          wsUrl: 'ws://collab.test:47187',
-          apiClient,
-          profiles: [],
-          specialistChangeKey: 0,
-          modelConfigChangeKey: 0,
-        }),
-      )
-    })
-    await flush()
-    await flush()
-
-    // Switch to category scope
-    const trigger = container.querySelector('[role="combobox"]')
-    flushSync(() => {
-      trigger!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }))
-    })
-    await flush()
-
-    const options = document.body.querySelectorAll('[role="option"]')
-    const categoryOption = Array.from(options).find(
-      (el) => el.textContent?.includes('Category: Engineering'),
-    )
-    if (categoryOption) {
-      flushSync(() => {
-        categoryOption.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }))
-      })
-      await flush()
-      await flush()
-    }
-
-    // No skill defaults section on Specialists page
-    expect(container.textContent).not.toContain('Default Skill Selection')
   })
 })

@@ -53,7 +53,6 @@ import {
 import type { SettingsAuthOAuthFlowState, SettingsAuthProviderId } from './settings-types'
 import type { SettingsAuthProviderAuthType } from '@forge/protocol'
 import type { SettingsApiClient } from './settings-api-client'
-import type { SettingsBackendTarget } from './settings-target'
 
 /* ------------------------------------------------------------------ */
 /*  Health badge                                                      */
@@ -412,8 +411,6 @@ export interface CredentialPoolPanelProps {
   authType?: SettingsAuthProviderAuthType
   /** Settings API client for target-aware backend calls. */
   apiClient: SettingsApiClient
-  /** Settings backend target (builder or collab). */
-  target: SettingsBackendTarget
   onError: (message: string) => void
   onSuccess: (message: string) => void
   onAuthReload: () => void
@@ -426,7 +423,6 @@ export function CredentialPoolPanel({
   description,
   authType,
   apiClient,
-  target,
   onError,
   onSuccess,
   onAuthReload,
@@ -856,12 +852,6 @@ export function CredentialPoolPanel({
 
             {oauthFlow.progressMessage && (
               <p className="text-[11px] text-muted-foreground">{oauthFlow.progressMessage}</p>
-            )}
-
-            {target.kind === 'collab' && (oauthFlow.status === 'waiting_for_code' || oauthFlow.status === 'waiting_for_select' || oauthFlow.status === 'waiting_for_auth') && (
-              <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                This authorizes the Collab backend. If the browser ends on a localhost callback URL, paste that full URL/code below.
-              </p>
             )}
 
             {oauthFlow.status === 'waiting_for_select' && oauthFlow.selectOptions && (

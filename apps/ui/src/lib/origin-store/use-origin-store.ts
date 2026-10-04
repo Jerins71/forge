@@ -1,20 +1,15 @@
 /**
- * React hooks over the origin store (WP-U1, requirements 2 & 3).
+ * React hooks over the origin store.
  *
  * `useOriginSlice(originId, selector, equalityFn?)` subscribes a component to a
  * single slice of one origin's state via `useSyncExternalStore`.  Notifications
  * are per (origin, selector): the store only wakes this subscriber when the
  * selected value changes, and an event on origin A never wakes origin B (they
- * are separate store instances).  This is the fix for the whole-snapshot
- * re-render; the `use-collab-connections.ts` `forceRender` fan-out is the
- * explicit anti-goal.
+ * are separate store instances).  This avoids whole-snapshot re-renders.
  *
  * The selector+equality memoization is a hand-rolled
  * `useSyncExternalStoreWithSelector` (React 19 ships only the base
  * `useSyncExternalStore`; we avoid adding the shim dependency for a few lines).
- *
- * @see apps/ui/src/lib/connection-health-store.ts (precedent)
- * @see .internal/forge-review-2026-07/97-remote/U1-REQUIREMENTS.md (req. 2, 3)
  */
 
 import { useCallback, useDebugValue, useRef, useSyncExternalStore } from 'react'

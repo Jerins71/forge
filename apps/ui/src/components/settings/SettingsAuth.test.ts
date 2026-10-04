@@ -21,19 +21,6 @@ function sseResponse(): Response {
   return new Response(body, { headers: { 'content-type': 'text/event-stream' } })
 }
 
-function builderTarget() {
-  return {
-    kind: 'builder' as const,
-    label: 'Builder backend',
-    description: 'Builder',
-    wsUrl: 'ws://127.0.0.1:47187',
-    apiBaseUrl: 'http://127.0.0.1:47187/',
-    fetchCredentials: 'same-origin' as const,
-    requiresAdmin: false,
-    availableTabs: [],
-  }
-}
-
 function authConfiguredResponse(): Response {
   return new Response(JSON.stringify({
     providers: [
@@ -77,7 +64,6 @@ describe('SettingsAuth xAI OAuth', () => {
     root.render(createElement(SettingsAuth, {
       wsUrl: 'ws://127.0.0.1:47187',
       apiClient,
-      target: builderTarget(),
     }))
 
     await waitFor(() => expect(container.textContent).toContain('Stored API key'))
@@ -117,7 +103,6 @@ describe('SettingsAuth xAI OAuth', () => {
     root.render(createElement(SettingsAuth, {
       wsUrl: 'ws://127.0.0.1:47187',
       apiClient,
-      target: builderTarget(),
     }))
 
     await waitFor(() => expect(container.textContent).toContain('Stored API key'))
@@ -163,7 +148,6 @@ describe('SettingsAuth xAI OAuth', () => {
     root.render(createElement(SettingsAuth, {
       wsUrl: 'ws://127.0.0.1:47187',
       apiClient,
-      target: builderTarget(),
     }))
 
     await waitFor(() => expect(container.textContent).toContain('Stored API key'))

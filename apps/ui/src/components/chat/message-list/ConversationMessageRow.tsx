@@ -9,11 +9,10 @@ import { cn } from '@/lib/utils'
 import { MessageAttachments } from './MessageAttachments'
 import { MessageFeedback } from './MessageFeedback'
 import { SourceBadge, formatTimestamp } from './message-row-utils'
-import { getAuthorColor, getAuthorInitials } from './collab-author-utils'
 import { ExternalThreadContextCard } from './ExternalThreadContextCard'
 import { ProjectAgentMessageRow } from './ProjectAgentMessageRow'
 import { ReplyPreview } from './ReplyPreview'
-import type { ConversationMessageEntry, MessageListSurface } from './types'
+import type { ConversationMessageEntry } from './types'
 
 // These canonical notices predate structured notice kinds. Match complete text
 // so both live events and saved transcripts improve without downgrading failures.
@@ -110,8 +109,6 @@ function PinButton({ pinned, onClick }: { pinned: boolean; onClick: () => void }
 interface ConversationMessageRowProps {
   message: ConversationMessageEntry
   wsUrl?: string
-  surface?: MessageListSurface
-  currentCollabUserId?: string
   activeAgentDisplayName?: string
   transcriptAgentId?: string | null
   feedbackTargetId?: string
@@ -151,8 +148,6 @@ interface ConversationMessageRowProps {
 export const ConversationMessageRow = memo(function ConversationMessageRow({
   message,
   wsUrl,
-  surface = 'builder',
-  currentCollabUserId,
   activeAgentDisplayName,
   transcriptAgentId,
   feedbackTargetId,
@@ -186,26 +181,6 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
 
   const timestampLabel = formatTimestamp(message.timestamp)
   const sourceContext = message.sourceContext
-
-  // Attributed message from ANOTHER user: left-aligned with avatar/name.
-  // Applies on the collab surface and on builder transcripts whose origin
-  // has a signed-in identity (Wave R remote origins, SPEC §5.5). The local
-  // origin passes no currentCollabUserId and its messages carry no author,
-  // so local transcripts never render chips.
-  if (
-    (surface === 'collab' || currentCollabUserId !== undefined) &&
-    message.role === 'user' &&
-    message.collaborationAuthor &&
-    message.collaborationAuthor.userId !== currentCollabUserId
-  ) {
-    return (
-      <CollabRemoteUserRow
-        message={message}
-        timestampLabel={timestampLabel}
-        wsUrl={wsUrl}
-      />
-    )
-  }
 
   if (externalThreadContext) {
     const sidecarAgentId = externalThreadContext.sidecarAgentId?.trim() ?? ''
@@ -566,63 +541,3 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
     </div>
   )
 })
-
-// ---------------------------------------------------------------------------
-// Collab remote user row — left-aligned with avatar and author name
-// ---------------------------------------------------------------------------
-
-function CollabRemoteUserRow({
-  message,
-  timestampLabel,
-  wsUrl,
-}: {
-  message: ConversationMessageEntry
-  timestampLabel: string
-  wsUrl?: string
-}) {
-  const author = message.collaborationAuthor
-  const authorName = author?.displayName?.trim() || 'User'
-  const authorId = author?.userId ?? authorName
-  const avatarColor = getAuthorColor(authorId)
-  const initials = getAuthorInitials(authorName)
-  const normalizedText = message.text.trim()
-  const hasText = normalizedText.length > 0 && normalizedText !== '.'
-  const attachments = message.attachments ?? []
-
-  return (
-    <div className="flex items-start gap-3">
-      <div className="flex w-10 shrink-0 justify-center pt-0.5">
-        <div
-          className="flex size-9 items-center justify-center rounded-full text-xs font-semibold text-white shadow-sm"
-          style={{ backgroundColor: avatarColor }}
-          aria-hidden="true"
-        >
-          {initials}
-        </div>
-      </div>
-
-      <div className="min-w-0 max-w-2xl flex-1 lg:max-w-3xl">
-        <div className="mb-1 px-1 text-sm font-medium text-foreground">
-          {authorName}
-        </div>
-
-        <div className="rounded-2xl rounded-tl-md border border-border/60 bg-card/80 px-4 py-2.5 text-sm text-foreground shadow-sm">
-          {attachments.length > 0 ? (
-            <div className={cn(hasText && 'mb-2')}>
-              <MessageAttachments attachments={attachments} isUser={false} wsUrl={wsUrl} />
-            </div>
-          ) : null}
-          {hasText ? (
-            <p className="whitespace-pre-wrap break-words leading-relaxed">
-              {normalizedText}
-            </p>
-          ) : null}
-        </div>
-
-        {timestampLabel ? (
-          <div className="mt-1 px-1 text-[11px] text-muted-foreground">{timestampLabel}</div>
-        ) : null}
-      </div>
-    </div>
-  )
-}

@@ -45,13 +45,11 @@ function createMockClient(response: Response): SettingsApiClient {
     fetchJson: vi.fn(),
     readApiError: vi.fn(async () => 'API error'),
     target: {
-      kind: 'builder',
       label: 'Builder backend',
       description: 'Local Forge Builder backend on this machine.',
       wsUrl: 'ws://127.0.0.1:47187',
       apiBaseUrl: 'http://127.0.0.1:47187/',
       fetchCredentials: 'same-origin',
-      requiresAdmin: false,
       availableTabs: [],
     },
   }

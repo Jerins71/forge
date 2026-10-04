@@ -21,7 +21,6 @@
  * no reload side effects. A reconnect re-hydrates WS state in place (the client
  * re-subscribes on transport open) rather than reloading the page.
  *
- * @see .internal/forge-review-2026-07/97-remote/U1-REQUIREMENTS.md
  * @see apps/ui/src/lib/connection-health-store.ts (useSyncExternalStore precedent)
  */
 
@@ -37,14 +36,10 @@ import {
 import { reduceAgentStatus } from '@/lib/ws-client/snapshot-reducers'
 import { createBuilderSettingsApiClient, type SettingsApiClient } from '@/components/settings/settings-api-client'
 import {
-  createSettingsApiClient,
-} from '@/components/settings/settings-api-client'
-import { createCollabSettingsTarget } from '@/components/settings/settings-target'
-import {
   createInitialOriginMetaState,
   type OriginMetaState,
 } from './origin-meta'
-import { LOCAL_ORIGIN_ID, type OriginId } from './origin-key'
+import type { OriginId } from './origin-key'
 
 /** A pure selector over an origin's domain state. */
 export type OriginSelector<T> = (state: ManagerWsState) => T
@@ -67,8 +62,7 @@ export interface OriginStoreOptions {
   /** WebSocket URL for this origin's backend. */
   wsUrl: string
   /**
-   * Optional explicit HTTP client factory (Wave R remote origins pass a
-   * credentialed collab client).  When omitted, a same-origin Builder client
+   * Optional explicit HTTP client.  When omitted, a same-origin Builder client
    * derived from `wsUrl` is used.
    */
   httpClient?: SettingsApiClient
@@ -128,10 +122,7 @@ export class OriginStore {
   }
 
   /**
-   * Open the live WebSocket for this origin. Idempotent. Wave R remote
-   * origins are created with `offline: true` so the section (meta) renders
-   * while the handshake/auth probe runs; the origin manager calls this once
-   * the origin is authenticated and version-compatible.
+   * Open the live WebSocket for this origin. Idempotent.
    */
   startTransport(): void {
     if (this.transportStarted) return
@@ -173,9 +164,8 @@ export class OriginStore {
   }
 
   /**
-   * Per-origin target-aware HTTP client (requirement 9).  Local origin →
-   * same-origin Builder client; remote → credentialed collab client.  Feature
-   * APIs take this client, never a raw `wsUrl`.
+   * Per-origin HTTP client.  Feature APIs take this client, never a raw
+   * `wsUrl`.
    */
   getHttpClient(): SettingsApiClient {
     return this.httpClient
@@ -238,7 +228,7 @@ export class OriginStore {
 
   /**
    * Hydrate the store from a `snapshot` or a single domain `event` with no
-   * socket.  Used by tests and by non-WebSocket transports (Wave R).  This
+   * socket.  Used by tests and by non-WebSocket transports.  This
    * routes conversation and agent-status events through the SAME pure reducers
    * the live client uses, so id-keyed bootstrap-merge
    * behavior stays in one place (see Coordination-with-WP-P1 in the store dir
@@ -275,7 +265,7 @@ export class OriginStore {
     })
   }
 
-  /** Write the origin meta slice (connection manager / Wave R auth). */
+  /** Write the origin meta slice. */
   patchMeta(patch: Partial<OriginMetaState>): void {
     const next = { ...this.meta, ...patch }
     this.meta = next
@@ -326,13 +316,6 @@ export class OriginStore {
   }
 }
 
-/**
- * Default per-origin HTTP client: same-origin Builder client for the local
- * origin, credentialed collab client for anything else (Wave R).
- */
 function defaultHttpClientFor(options: OriginStoreOptions): SettingsApiClient {
-  if (options.originId === LOCAL_ORIGIN_ID) {
-    return createBuilderSettingsApiClient(options.wsUrl)
-  }
-  return createSettingsApiClient(createCollabSettingsTarget(options.wsUrl))
+  return createBuilderSettingsApiClient(options.wsUrl)
 }

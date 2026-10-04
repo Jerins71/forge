@@ -1,19 +1,13 @@
 import { useCallback, useRef, useState } from 'react'
 import type { SettingsApiClient } from '../../settings-api-client'
 import type { SettingsSessionContext } from '../../session-context'
-import { fetchRosterPrompt, fetchChannelRosterPrompt } from '../../specialists-api'
+import { fetchRosterPrompt } from '../../specialists-api'
 
-/**
- * Manages the roster prompt dialog state and fetching.
- *
- * When `channelId` is provided, the channel-specific roster prompt endpoint
- * is used instead of the profile roster prompt.
- */
+/** Manages the roster prompt dialog state and fetching. */
 export function useRosterPrompt(
   clientOrWsUrl: SettingsApiClient | string,
   selectedScope: string,
   isGlobal: boolean,
-  channelId?: string,
   previewSession?: SettingsSessionContext | null,
 ) {
   const rosterRequestIdRef = useRef(0)
@@ -23,7 +17,7 @@ export function useRosterPrompt(
   const [rosterError, setRosterError] = useState<string | null>(null)
 
   const handleViewRoster = useCallback(async () => {
-    if (isGlobal && !channelId) return
+    if (isGlobal) return
 
     const requestId = ++rosterRequestIdRef.current
     setRosterOpen(true)
@@ -32,9 +26,7 @@ export function useRosterPrompt(
 
     try {
       const sessionAgentId = previewSession?.profileId === selectedScope ? previewSession.agentId : undefined
-      const markdown = channelId
-        ? await fetchChannelRosterPrompt(clientOrWsUrl, channelId)
-        : await fetchRosterPrompt(clientOrWsUrl, selectedScope, sessionAgentId)
+      const markdown = await fetchRosterPrompt(clientOrWsUrl, selectedScope, sessionAgentId)
       if (requestId === rosterRequestIdRef.current) {
         setRosterMarkdown(markdown)
       }
@@ -48,7 +40,7 @@ export function useRosterPrompt(
         setRosterLoading(false)
       }
     }
-  }, [clientOrWsUrl, selectedScope, isGlobal, channelId, previewSession])
+  }, [clientOrWsUrl, selectedScope, isGlobal, previewSession])
 
   /** Reset roster state (used on scope change). */
   const resetRoster = useCallback(() => {

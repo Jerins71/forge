@@ -42,22 +42,6 @@ interface SettingsSecretsProps {
 }
 
 export function SettingsSecrets({ apiClient, profiles, currentProfileId }: SettingsSecretsProps) {
-  if (apiClient.target.kind !== 'builder') {
-    return (
-      <div className="rounded-md border border-border bg-card/40 p-4">
-        <div className="flex items-start gap-2">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
-          <div className="space-y-1">
-            <h2 className="text-sm font-semibold">Local Builder only</h2>
-            <p className="text-sm text-muted-foreground">
-              Secret sources and bindings are disabled for remote origins.
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <BuilderSecretsSettings
       apiClient={apiClient}

@@ -14,12 +14,8 @@ vi.mock('@/lib/api-endpoint', () => ({
   },
 }))
 
-vi.mock('@/lib/collaboration-endpoints', () => ({
-  resolveCollaborationApiBaseUrl: () => 'https://collab.example.com/',
-}))
-
 const { createSettingsApiClient, createBuilderSettingsApiClient } = await import('./settings-api-client')
-const { createBuilderSettingsTarget, createCollabSettingsTarget } = await import('./settings-target')
+const { createBuilderSettingsTarget } = await import('./settings-target')
 
 describe('SettingsApiClient', () => {
   let fetchSpy: MockInstance
@@ -41,12 +37,6 @@ describe('SettingsApiClient', () => {
       expect(client.endpoint('/api/settings/auth')).toBe('http://127.0.0.1:47187/api/settings/auth')
     })
 
-    it('resolves paths against the collab target base URL', () => {
-      const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
-
-      expect(client.endpoint('/api/settings/auth')).toBe('https://collab.example.com/api/settings/auth')
-    })
-
     it('handles query parameters in paths', () => {
       const client = createSettingsApiClient(createBuilderSettingsTarget('ws://127.0.0.1:47187'))
 
@@ -63,17 +53,6 @@ describe('SettingsApiClient', () => {
       expect(fetchSpy).toHaveBeenCalledWith(
         'http://127.0.0.1:47187/api/settings/auth',
         expect.objectContaining({ credentials: 'same-origin' }),
-      )
-    })
-
-    it('uses include credentials for collab target', async () => {
-      const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
-
-      await client.fetch('/api/settings/auth')
-
-      expect(fetchSpy).toHaveBeenCalledWith(
-        'https://collab.example.com/api/settings/auth',
-        expect.objectContaining({ credentials: 'include' }),
       )
     })
 
@@ -98,7 +77,7 @@ describe('SettingsApiClient', () => {
         }),
       )
 
-      const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+      const client = createSettingsApiClient(createBuilderSettingsTarget('ws://127.0.0.1:47187'))
 
       await expect(client.fetchJson('/api/settings/auth')).rejects.toThrow('Unauthorized')
     })
@@ -131,7 +110,7 @@ describe('SettingsApiClient', () => {
     it('creates a builder client from a raw wsUrl', async () => {
       const client = createBuilderSettingsApiClient('ws://127.0.0.1:47187')
 
-      expect(client.target.kind).toBe('builder')
+      expect(client.target).toEqual(createBuilderSettingsTarget('ws://127.0.0.1:47187'))
       expect(client.endpoint('/api/settings/auth')).toBe('http://127.0.0.1:47187/api/settings/auth')
 
       await client.fetch('/api/settings/auth')

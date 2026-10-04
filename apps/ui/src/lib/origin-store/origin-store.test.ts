@@ -165,11 +165,10 @@ describe('origin meta slice', () => {
     expect(store.getSnapshot()).not.toHaveProperty('connectionStatus')
   })
 
-  it('accepts explicit meta patches (Wave R auth path)', () => {
+  it('accepts explicit meta patches', () => {
     const store = makeStore(LOCAL_ORIGIN_ID)
-    store.patchMeta({ authState: 'pending', protocolVersion: 2 })
-    expect(store.getMetaSnapshot().authState).toBe('pending')
-    expect(store.getMetaSnapshot().protocolVersion).toBe(2)
+    store.patchMeta({ lastError: 'socket closed' })
+    expect(store.getMetaSnapshot()).toEqual({ connectionStatus: 'idle', lastError: 'socket closed' })
   })
 })
 
@@ -220,29 +219,22 @@ describe('command facade and HTTP client', () => {
   it('local origin exposes a same-origin Builder HTTP client', () => {
     const store = makeStore(LOCAL_ORIGIN_ID)
     const http = store.getHttpClient()
-    expect(http.target.kind).toBe('builder')
     expect(http.target.fetchCredentials).toBe('same-origin')
-  })
-
-  it('a non-local origin defaults to a credentialed collab HTTP client', () => {
-    const store = makeStore('remote-a')
-    const http = store.getHttpClient()
-    expect(http.target.kind).toBe('collab')
-    expect(http.target.fetchCredentials).toBe('include')
+    expect(http.endpoint('/api/x')).toBe('http://127.0.0.1/api/x')
   })
 
   it('honors an explicitly injected HTTP client', () => {
-    const fake = { target: { kind: 'collab', fetchCredentials: 'include' } } as unknown as SettingsApiClient
+    const fake = { target: { fetchCredentials: 'include' } } as unknown as SettingsApiClient
     const store = makeStore('remote-b', { httpClient: fake })
     expect(store.getHttpClient()).toBe(fake)
   })
 })
 
 // ---------------------------------------------------------------------------
-// Requirement 10 — acceptance test protecting Wave R (SECOND origin)
+// Requirement 10 — registry isolation across multiple origin ids
 // ---------------------------------------------------------------------------
 
-describe('requirement 10 — second-origin acceptance', () => {
+describe('requirement 10 — multi-origin registry isolation', () => {
   it('keeps colliding session attention and revisions isolated by origin', () => {
     const local = makeStore(LOCAL_ORIGIN_ID)
     const remote = makeStore('remote-a')

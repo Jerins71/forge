@@ -26,13 +26,11 @@ import {
 function makeClient(fetchImpl: SettingsApiClient['fetch']): SettingsApiClient {
   return {
     target: {
-      kind: 'builder',
       label: 'Builder',
       description: 'Local',
       wsUrl: 'ws://localhost:47188/ws',
       apiBaseUrl: 'http://localhost:47188',
       fetchCredentials: 'same-origin',
-      requiresAdmin: false,
       availableTabs: [],
     },
     endpoint: (path) => path,

@@ -689,11 +689,10 @@ describe('parseWindowRouteSearch', () => {
   })
 
   it('parses settingsTab from URL search params', () => {
-    const result = parseWindowRouteSearch('?view=settings&surface=builder&settingsTab=collaboration')
+    const result = parseWindowRouteSearch('?view=settings&settingsTab=secrets')
     expect(result).toMatchObject({
       view: 'settings',
-      surface: 'builder',
-      settingsTab: 'collaboration',
+      settingsTab: 'secrets',
     })
   })
 
@@ -710,55 +709,21 @@ describe('parseWindowRouteSearch', () => {
   })
 
   it('returns undefined settingsTab when not present', () => {
-    const result = parseWindowRouteSearch('?view=settings&surface=builder')
+    const result = parseWindowRouteSearch('?view=settings')
     expect(result.settingsTab).toBeUndefined()
   })
 
-  it('parses all known params including settingsTab, statsTab, collab, collabApiBaseUrl, and skillImportUrl', () => {
+  it('parses all known params including deckPanel, statsTab, settingsTab, and skillImportUrl', () => {
     const result = parseWindowRouteSearch(
-      '?view=settings&agent=mgr&surface=builder&channel=ch1&collab=conn_abc&statsTab=st&settingsTab=auth&collabApiBaseUrl=https%3A%2F%2Fb.example.com%2F&skillImportUrl=https%3A%2F%2Fforgeskills.radops.ai%2Fs%2Ftoken',
+      '?view=settings&agent=mgr&deckPanel=git&statsTab=st&settingsTab=auth&skillImportUrl=https%3A%2F%2Fforgeskills.radops.ai%2Fs%2Ftoken',
     )
     expect(result).toEqual({
       view: 'settings',
       agent: 'mgr',
-      surface: 'builder',
-      channel: 'ch1',
-      collab: 'conn_abc',
+      deckPanel: 'git',
       statsTab: 'st',
       settingsTab: 'auth',
-      collabApiBaseUrl: 'https://b.example.com/',
       skillImportUrl: 'https://forgeskills.radops.ai/s/token',
     })
-  })
-
-  it('parses collab param from URL search', () => {
-    const result = parseWindowRouteSearch('?surface=collab&channel=general&collab=conn_xyz')
-    expect(result).toMatchObject({
-      surface: 'collab',
-      channel: 'general',
-      collab: 'conn_xyz',
-    })
-  })
-
-  it('returns undefined collab when not present', () => {
-    const result = parseWindowRouteSearch('?surface=collab&channel=general')
-    expect(result.collab).toBeUndefined()
-  })
-
-  it('parses collabApiBaseUrl from URL search params', () => {
-    const result = parseWindowRouteSearch(
-      '?view=settings&surface=builder&settingsTab=collaboration&collabApiBaseUrl=https%3A%2F%2Fb.example.com%2F',
-    )
-    expect(result).toMatchObject({
-      view: 'settings',
-      surface: 'builder',
-      settingsTab: 'collaboration',
-      collabApiBaseUrl: 'https://b.example.com/',
-    })
-  })
-
-  it('returns undefined collabApiBaseUrl when not present', () => {
-    const result = parseWindowRouteSearch('?view=settings&surface=builder&settingsTab=collaboration')
-    expect(result.collabApiBaseUrl).toBeUndefined()
   })
 })

@@ -13,10 +13,7 @@ vi.mock('@/components/help/HelpTrigger', () => ({
 const { SettingsLayout } = await import('./SettingsLayout')
 import type { SettingsTab } from './settings-target'
 
-const COLLAB_TABS = await import('./settings-target').then(mod => {
-  const target = mod.createCollabSettingsTarget('wss://collab.example.com')
-  return target.availableTabs
-})
+const SUBSET_TABS: SettingsTab[] = ['general', 'appearance', 'auth', 'models', 'about']
 
 let container: HTMLDivElement
 let root: Root | null = null
@@ -54,12 +51,11 @@ function renderLayout(props: {
 
 describe('SettingsLayout', () => {
   it('filters tabs to only availableTabs when provided', () => {
-    renderLayout({ availableTabs: COLLAB_TABS })
+    renderLayout({ availableTabs: SUBSET_TABS })
 
-    // Collab tabs include renderer-local Appearance but exclude repository resources and notifications.
     const desktopNav = container.querySelector('nav.hidden')
     const buttons = desktopNav?.querySelectorAll('button') ?? []
-    expect(buttons.length).toBe(11)
+    expect(buttons.length).toBe(SUBSET_TABS.length)
 
     // Notifications should not be present
     const labels = Array.from(buttons).map(btn => btn.textContent?.trim())

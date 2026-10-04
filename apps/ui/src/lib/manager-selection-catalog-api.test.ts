@@ -21,7 +21,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function makeClient(fetchImpl: SettingsApiClient['fetch']): SettingsApiClient {
   return {
-    target: { kind: 'builder' } as SettingsApiClient['target'],
+    target: {} as SettingsApiClient['target'],
     endpoint: (path) => path,
     fetch: fetchImpl,
     fetchJson: vi.fn(),

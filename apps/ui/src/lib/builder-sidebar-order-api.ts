@@ -43,15 +43,8 @@ export function createLocalBuilderSidebarOrderApi(localWsUrl: string): BuilderSi
   ))
 }
 
-/**
- * Create an API bound to the local Builder target. Passing a collaboration
- * target is rejected before fetch so unified ordering can never leak remotely.
- */
+/** Create an API bound to the local Builder target. */
 export function createBuilderSidebarOrderApi(client: SettingsApiClient): BuilderSidebarOrderApi {
-  if (client.target.kind !== 'builder') {
-    throw new Error('Builder sidebar order API requires the local Builder target.')
-  }
-
   return {
     async get() {
       const response = await client.fetch(BUILDER_SIDEBAR_ORDER_API_PATH, { cache: 'no-store' })

@@ -1,13 +1,10 @@
 /**
- * Origin-aware selector store (WP-U1).
+ * Origin-keyed selector store.
  *
- * Public surface for the origin-keyed store registry, its per-slice
- * `useSyncExternalStore` hooks, composite `(originId, id)` identity, and the
- * origin meta slice.  Ships with only the reserved `"local"` origin live; the
- * shape is already multi-origin so remote projects (Wave R) plug in without
- * rework.
- *
- * @see .internal/forge-review-2026-07/97-remote/U1-REQUIREMENTS.md
+ * Public surface for the store registry, its per-slice `useSyncExternalStore`
+ * hooks, composite `(originId, id)` identity, and the origin meta slice. Only
+ * the reserved `"local"` origin exists today; Forge V2 environments replace
+ * origins with paired environments that reuse this per-selector store.
  */
 
 export {
@@ -20,14 +17,7 @@ export {
   createInitialOriginMetaState,
   type OriginMetaState,
   type OriginConnectionStatus,
-  type OriginAuthState,
-  type OriginCurrentUser,
 } from './origin-meta'
-
-export {
-  ForgeOriginManager,
-  forgeOriginManager,
-} from './forge-origin-manager'
 
 export {
   OriginStore,

@@ -1,18 +1,12 @@
 /**
- * Contextual settings backend target abstraction.
- *
- * Settings can target the local Builder backend or a remote Collab backend.
- * The target is determined by route context only — no manual toggle in v1.
+ * Settings backend target: the backend whose settings a Settings view edits.
  */
 
 import { resolveApiEndpoint } from '@/lib/api-endpoint'
-import { resolveCollaborationApiBaseUrl } from '@/lib/collaboration-endpoints'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
-
-export type SettingsBackendKind = 'builder' | 'collab'
 
 export type SettingsTab =
   | 'project-settings'
@@ -34,17 +28,14 @@ export type SettingsTab =
   | 'cli-access'
   | 'stream-deck'
   | 'observability'
-  | 'collaboration'
   | 'about'
 
 export interface SettingsBackendTarget {
-  kind: SettingsBackendKind
   label: string
   description: string
   wsUrl: string
   apiBaseUrl: string
   fetchCredentials: RequestCredentials
-  requiresAdmin: boolean
   availableTabs: SettingsTab[]
 }
 
@@ -71,21 +62,6 @@ const BUILDER_TABS: SettingsTab[] = [
   'cli-access',
   'stream-deck',
   'observability',
-  'collaboration',
-  'about',
-]
-
-const COLLAB_TABS: SettingsTab[] = [
-  'general',
-  'appearance',
-  'auth',
-  'models',
-  'skills',
-  'prompts',
-  'specialists',
-  'slash-commands',
-  'extensions',
-  'collaboration',
   'about',
 ]
 
@@ -95,30 +71,11 @@ const COLLAB_TABS: SettingsTab[] = [
 
 export function createBuilderSettingsTarget(localWsUrl: string): SettingsBackendTarget {
   return {
-    kind: 'builder',
     label: 'Builder backend',
     description: 'Local Forge Builder backend on this machine.',
     wsUrl: localWsUrl,
     apiBaseUrl: resolveApiEndpoint(localWsUrl, '/'),
     fetchCredentials: 'same-origin',
-    requiresAdmin: false,
     availableTabs: BUILDER_TABS,
-  }
-}
-
-export function createCollabSettingsTarget(
-  collabWsUrl: string,
-  /** Explicit API base URL.  When omitted, resolves via the default connection. */
-  explicitApiBaseUrl?: string,
-): SettingsBackendTarget {
-  return {
-    kind: 'collab',
-    label: 'Collab backend',
-    description: 'Connected remote collaboration backend.',
-    wsUrl: collabWsUrl,
-    apiBaseUrl: explicitApiBaseUrl ?? resolveCollaborationApiBaseUrl(),
-    fetchCredentials: 'include',
-    requiresAdmin: true,
-    availableTabs: COLLAB_TABS,
   }
 }

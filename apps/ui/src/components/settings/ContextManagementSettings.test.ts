@@ -21,7 +21,7 @@ vi.mock('./context-mode-api', () => ({
 
 let container: HTMLDivElement
 let root: Root | null = null
-const apiClient = { target: { kind: 'builder' } } as unknown as SettingsApiClient
+const apiClient = { target: {} } as unknown as SettingsApiClient
 
 function snapshot(mode: 'summary' | 'fresh' = 'summary'): ProjectContextModeSnapshot {
   return { profileId: 'forge', mode }
@@ -152,8 +152,8 @@ describe('ContextManagementSettings', () => {
     apiMock.updateProjectContextMode.mockImplementationOnce(() => new Promise((resolve) => {
       resolveProjectA = resolve
     }))
-    const clientA = { target: { kind: 'builder', id: 'a' } } as unknown as SettingsApiClient
-    const clientB = { target: { kind: 'builder', id: 'b' } } as unknown as SettingsApiClient
+    const clientA = { target: { id: 'a' } } as unknown as SettingsApiClient
+    const clientB = { target: { id: 'b' } } as unknown as SettingsApiClient
     apiMock.fetchProjectContextMode.mockImplementation(async (_client: SettingsApiClient, profileId: string) => (
       snapshot(profileId === 'project-b' ? 'summary' : 'summary')
     ))
@@ -202,8 +202,8 @@ describe('ContextManagementSettings', () => {
     apiMock.updateProjectContextMode.mockImplementationOnce(() => new Promise((_, reject) => {
       rejectProjectA = reject
     }))
-    const clientA = { target: { kind: 'builder', id: 'a' } } as unknown as SettingsApiClient
-    const clientB = { target: { kind: 'builder', id: 'b' } } as unknown as SettingsApiClient
+    const clientA = { target: { id: 'a' } } as unknown as SettingsApiClient
+    const clientB = { target: { id: 'b' } } as unknown as SettingsApiClient
 
     renderSettings('summary', 1, { apiClient: clientA, profileId: 'project-a' })
     await flushAsyncWork()

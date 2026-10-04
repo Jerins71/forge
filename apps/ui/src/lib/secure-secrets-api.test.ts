@@ -73,19 +73,14 @@ const SSH_HOST_SUMMARY = {
   updatedAt: '2026-07-23T12:00:00.000Z',
 }
 
-function makeClient(
-  fetchImpl: SettingsApiClient['fetch'],
-  kind: 'builder' | 'collab' = 'builder',
-): SettingsApiClient {
+function makeClient(fetchImpl: SettingsApiClient['fetch']): SettingsApiClient {
   return {
     target: {
-      kind,
-      label: kind,
-      description: kind,
+      label: 'builder',
+      description: 'builder',
       wsUrl: 'ws://127.0.0.1:47187',
       apiBaseUrl: 'http://127.0.0.1:47187/',
       fetchCredentials: 'same-origin',
-      requiresAdmin: false,
       availableTabs: [],
     },
     endpoint: (path) => path,
@@ -568,16 +563,6 @@ describe('secure secrets API', () => {
     )
   })
 
-  it('rejects remote targets before making a request', async () => {
-    const fetchMock = vi.fn()
-    const client = makeClient(fetchMock, 'collab')
-
-    await expect(fetchSecureSecretsCatalog(client)).rejects.toMatchObject({
-      code: 'SECURE_BUILDER_ONLY',
-    })
-    expect(fetchMock).not.toHaveBeenCalled()
-  })
-
   it('sends only encrypted local material to the backend', async () => {
     const rawSecret = 'raw-secret-never-in-http'
     const encryptLocalValue = vi.fn(async (value: string) => {
@@ -906,5 +891,4 @@ it('uses the secure control transport and validates project settings responses',
   await expect(fetchProjectSecureSessionsSettings(client, 'project-a')).resolves.toEqual({ profileId: 'project-a', enabled: false })
   fetchImpl.mockResolvedValue(jsonResponse({ profileId: 'other-project', enabled: true }))
   await expect(fetchProjectSecureSessionsSettings(client, 'project-a')).rejects.toThrow()
-  await expect(updateProjectSecureSessionsSettings(makeClient(fetchImpl, 'collab'), 'project-a', true)).rejects.toMatchObject({ code: 'SECURE_BUILDER_ONLY' })
 })

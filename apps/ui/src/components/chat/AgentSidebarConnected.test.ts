@@ -87,26 +87,10 @@ function profile(profileId: string): ManagerProfile {
   }
 }
 
-function registerRemoteConnections(originIds: string[]): void {
-  window.localStorage.setItem('forge:collab:connections:v1', JSON.stringify({
-    version: 1,
-    connections: originIds.map((id) => ({
-      id,
-      kind: 'remote',
-      label: id,
-      serverUrl: `https://${id}.test`,
-      apiBaseUrl: `https://${id}.test/`,
-      wsUrl: `wss://${id}.test`,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    })),
-  }))
-}
-
 function renderConnectedSidebar(overrides: {
   onDeleteManager?: (managerId: string) => void
   builderSidebarOrderApi?: BuilderSidebarOrderApi
-  withRemoteCollision?: boolean
+  withSecondProject?: boolean
   /** Opt into Classic only when the contract is the Classic/unified project list. */
   classicLayout?: boolean
 } = {}) {
@@ -121,8 +105,14 @@ function renderConnectedSidebar(overrides: {
   store.ingest({
     type: 'snapshot',
     state: {
-      agents: [manager('profile-a--main', 'profile-a')],
-      profiles: [profile('profile-a')],
+      agents: [
+        manager('profile-a--main', 'profile-a'),
+        ...(overrides.withSecondProject ? [manager('profile-b--main', 'profile-b')] : []),
+      ],
+      profiles: [
+        profile('profile-a'),
+        ...(overrides.withSecondProject ? [{ ...profile('profile-b'), displayName: 'Second profile-b' }] : []),
+      ],
       statuses: {},
       unreadCounts: {},
       connected: true,
@@ -130,41 +120,6 @@ function renderConnectedSidebar(overrides: {
       hasReceivedProfilesSnapshot: true,
     },
   })
-
-  if (overrides.withRemoteCollision) {
-    registerRemoteConnections(['remote-a', 'remote-offline'])
-  }
-  const remoteStore = overrides.withRemoteCollision
-    ? originRegistry.createOrigin({
-        originId: 'remote-a',
-        wsUrl: 'ws://remote.test',
-        offline: true,
-      })
-    : null
-  remoteStore?.ingest({
-    type: 'snapshot',
-    state: {
-      agents: [manager('remote-session', 'profile-a')],
-      profiles: [{ ...profile('profile-a'), displayName: 'Remote profile-a', defaultSessionAgentId: 'remote-session' }],
-      statuses: {},
-      unreadCounts: {},
-      connected: true,
-      hasReceivedAgentsSnapshot: true,
-      hasReceivedProfilesSnapshot: true,
-    },
-  })
-  remoteStore?.patchMeta({
-    connectionStatus: 'connected',
-    authState: 'authenticated',
-    instanceName: 'Remote A',
-  })
-  if (overrides.withRemoteCollision) {
-    originRegistry.createOrigin({
-      originId: 'remote-offline',
-      wsUrl: 'ws://remote-offline.test',
-      offline: true,
-    })
-  }
 
   root = createRoot(container)
   flushSync(() => {
@@ -178,8 +133,7 @@ function renderConnectedSidebar(overrides: {
           createElement(AgentSidebarConnected, {
             wsUrl: 'ws://local.test',
             builderSidebarOrderApi: overrides.builderSidebarOrderApi,
-            selectedAgentId: 'remote-session',
-            activeOriginId: 'remote-a',
+            selectedAgentId: null,
             isSettingsActive: false,
             onAddManager: vi.fn(),
             onSelectAgent: vi.fn(),
@@ -195,11 +149,11 @@ function renderConnectedSidebar(overrides: {
       ),
     )
   })
-  return { localStore: store, remoteStore }
+  return { localStore: store }
 }
 
 describe('AgentSidebarConnected', () => {
-  it('routes the local profile Delete Manager context-menu action while a remote origin is active', () => {
+  it('routes the profile Delete Manager context-menu action', () => {
     const onDeleteManager = vi.fn()
     renderConnectedSidebar({ onDeleteManager })
 
@@ -229,8 +183,8 @@ describe('AgentSidebarConnected', () => {
       version: 1,
       revision: 2,
       order: [
-        { originId: 'remote-a', profileId: 'profile-a' },
-        { originId: 'remote-offline', profileId: 'hidden-anchor' },
+        { originId: 'local', profileId: 'profile-b' },
+        { originId: 'local', profileId: 'hidden-anchor' },
       ],
       updatedAt: '2026-07-09T12:00:00.000Z',
     }
@@ -249,16 +203,16 @@ describe('AgentSidebarConnected', () => {
 
     renderConnectedSidebar({
       builderSidebarOrderApi: api,
-      withRemoteCollision: true,
+      withSecondProject: true,
     })
 
     await vi.waitFor(() => expect(api.put).toHaveBeenCalledOnce())
     expect(api.put).toHaveBeenCalledWith({
       baseRevision: 2,
       order: [
-        { originId: 'remote-a', profileId: 'profile-a' },
-        { originId: 'remote-offline', profileId: 'hidden-anchor' },
         { originId: 'local', profileId: 'profile-a' },
+        { originId: 'local', profileId: 'profile-b' },
+        { originId: 'local', profileId: 'hidden-anchor' },
       ],
     })
 
@@ -266,17 +220,17 @@ describe('AgentSidebarConnected', () => {
     expect(sidebar?.getAttribute('data-sidebar-layout')).toBe('rooms-v2')
     expect(container.querySelector('[data-testid="rooms-inbox"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="rooms-mode-switch"]')).not.toBeNull()
-    expect(container.textContent).toContain('Remote profile-a')
+    expect(container.textContent).toContain('Second profile-b')
     expect(container.textContent).toContain('profile-a--main')
   })
 
-  it('reconciles raw-id collisions through the local preference without calling either origin reorder API', async () => {
+  it('reconciles through the local preference without calling the reorderProfiles API', async () => {
     let current: BuilderSidebarOrderState = {
       version: 1,
       revision: 2,
       order: [
-        { originId: 'remote-a', profileId: 'profile-a' },
-        { originId: 'remote-offline', profileId: 'hidden-anchor' },
+        { originId: 'local', profileId: 'profile-b' },
+        { originId: 'local', profileId: 'hidden-anchor' },
       ],
       updatedAt: '2026-07-09T12:00:00.000Z',
     }
@@ -292,32 +246,32 @@ describe('AgentSidebarConnected', () => {
         return current
       }),
     }
-    const { localStore, remoteStore } = renderConnectedSidebar({
+    const { localStore } = renderConnectedSidebar({
       builderSidebarOrderApi: api,
-      withRemoteCollision: true,
+      withSecondProject: true,
       classicLayout: true,
     })
     const localLegacyReorder = vi.spyOn(localStore.getClient(), 'reorderProfiles')
-    const remoteLegacyReorder = vi.spyOn(remoteStore!.getClient(), 'reorderProfiles')
 
     await vi.waitFor(() => expect(api.put).toHaveBeenCalledOnce())
 
     expect(api.put).toHaveBeenCalledWith({
       baseRevision: 2,
       order: [
-        { originId: 'remote-a', profileId: 'profile-a' },
-        { originId: 'remote-offline', profileId: 'hidden-anchor' },
         { originId: 'local', profileId: 'profile-a' },
+        { originId: 'local', profileId: 'profile-b' },
+        { originId: 'local', profileId: 'hidden-anchor' },
       ],
     })
-    const listText = container.querySelector('aside [data-testid="unified-project-list"]')?.textContent ?? ''
-    expect(listText.startsWith('Remote profile-a')).toBe(true)
-    expect(listText).toContain('profile-a--main')
+    await vi.waitFor(() => {
+      const listText = container.querySelector('aside [data-testid="unified-project-list"]')?.textContent ?? ''
+      expect(listText.startsWith('profile-a')).toBe(true)
+      expect(listText).toContain('Second profile-b')
+    })
     expect(localLegacyReorder).not.toHaveBeenCalled()
-    expect(remoteLegacyReorder).not.toHaveBeenCalled()
   })
 
-  it('keeps local session context menu actions when a remote origin is active', () => {
+  it('keeps session context menu actions', () => {
     renderConnectedSidebar()
 
     const sessionButton = Array.from(container.querySelectorAll('button')).find(
@@ -341,7 +295,7 @@ describe('AgentSidebarConnected', () => {
       revision: 1,
       order: [
         { originId: 'local', profileId: 'profile-a' },
-        { originId: 'remote-a', profileId: 'profile-a' },
+        { originId: 'local', profileId: 'profile-b' },
       ],
       updatedAt: '2026-07-09T12:00:00.000Z',
     }
@@ -351,7 +305,7 @@ describe('AgentSidebarConnected', () => {
     }
     const { localStore } = renderConnectedSidebar({
       builderSidebarOrderApi: api,
-      withRemoteCollision: true,
+      withSecondProject: true,
       classicLayout: true,
     })
     await vi.waitFor(() => expect(api.get).toHaveBeenCalledOnce())
@@ -364,7 +318,7 @@ describe('AgentSidebarConnected', () => {
       ...current,
       revision: 2,
       order: [
-        { originId: 'remote-a', profileId: 'profile-a' },
+        { originId: 'local', profileId: 'profile-b' },
         { originId: 'local', profileId: 'profile-a' },
       ],
       updatedAt: '2026-07-09T12:01:00.000Z',
@@ -388,7 +342,7 @@ describe('AgentSidebarConnected', () => {
     await vi.waitFor(() => expect(api.get).toHaveBeenCalledTimes(2))
     await vi.waitFor(() => {
       const text = container.querySelector('aside [data-testid="unified-project-list"]')?.textContent ?? ''
-      expect(text.startsWith('Remote profile-a')).toBe(true)
+      expect(text.startsWith('Second profile-b')).toBe(true)
     })
     expect(api.put).not.toHaveBeenCalled()
   })
@@ -396,7 +350,7 @@ describe('AgentSidebarConnected', () => {
   it('accepts a new R1 invalidation after reconnect resets old R5 authority to R0', async () => {
     const naturalOrder = [
       { originId: 'local', profileId: 'profile-a' },
-      { originId: 'remote-a', profileId: 'profile-a' },
+      { originId: 'local', profileId: 'profile-b' },
     ]
     let current: BuilderSidebarOrderState = {
       version: 1,
@@ -410,7 +364,7 @@ describe('AgentSidebarConnected', () => {
     }
     const { localStore } = renderConnectedSidebar({
       builderSidebarOrderApi: api,
-      withRemoteCollision: true,
+      withSecondProject: true,
       classicLayout: true,
     })
     await vi.waitFor(() => expect(api.get).toHaveBeenCalledOnce())
@@ -444,7 +398,7 @@ describe('AgentSidebarConnected', () => {
     await vi.waitFor(() => expect(api.get).toHaveBeenCalledTimes(3))
     await vi.waitFor(() => {
       const text = container.querySelector('aside [data-testid="unified-project-list"]')?.textContent ?? ''
-      expect(text.startsWith('Remote profile-a')).toBe(true)
+      expect(text.startsWith('Second profile-b')).toBe(true)
     })
     expect(api.put).not.toHaveBeenCalled()
   })
@@ -455,7 +409,7 @@ describe('AgentSidebarConnected', () => {
       revision: 1,
       order: [
         { originId: 'local', profileId: 'profile-a' },
-        { originId: 'remote-a', profileId: 'profile-a' },
+        { originId: 'local', profileId: 'profile-b' },
       ],
       updatedAt: '2026-07-09T12:00:00.000Z',
     }
@@ -465,7 +419,7 @@ describe('AgentSidebarConnected', () => {
     }
     const { localStore } = renderConnectedSidebar({
       builderSidebarOrderApi: api,
-      withRemoteCollision: true,
+      withSecondProject: true,
       classicLayout: true,
     })
     await vi.waitFor(() => expect(api.get).toHaveBeenCalledOnce())
@@ -474,7 +428,7 @@ describe('AgentSidebarConnected', () => {
       ...current,
       revision: 2,
       order: [
-        { originId: 'remote-a', profileId: 'profile-a' },
+        { originId: 'local', profileId: 'profile-b' },
         { originId: 'local', profileId: 'profile-a' },
       ],
       updatedAt: '2026-07-09T12:02:00.000Z',
@@ -489,52 +443,8 @@ describe('AgentSidebarConnected', () => {
     await vi.waitFor(() => expect(api.get).toHaveBeenCalledTimes(2))
     await vi.waitFor(() => {
       const text = container.querySelector('aside [data-testid="unified-project-list"]')?.textContent ?? ''
-      expect(text.startsWith('Remote profile-a')).toBe(true)
+      expect(text.startsWith('Second profile-b')).toBe(true)
     })
-  })
-
-  it('never treats this browser registry omission as instance-global removal authority', async () => {
-    let current: BuilderSidebarOrderState = {
-      version: 1,
-      revision: 5,
-      order: [
-        { originId: 'local', profileId: 'profile-a' },
-        { originId: 'remote-a', profileId: 'profile-a' },
-      ],
-      updatedAt: '2026-07-09T12:00:00.000Z',
-    }
-    const api: BuilderSidebarOrderApi = {
-      get: vi.fn(async () => current),
-      put: vi.fn(async (request) => {
-        current = {
-          version: 1,
-          revision: current.revision + 1,
-          order: request.order,
-          updatedAt: '2026-07-09T12:01:00.000Z',
-        }
-        return current
-      }),
-    }
-    renderConnectedSidebar({ builderSidebarOrderApi: api, withRemoteCollision: true })
-    await vi.waitFor(() => expect(api.get).toHaveBeenCalledOnce())
-
-    registerRemoteConnections([])
-    flushSync(() => window.dispatchEvent(new Event('forge-collab-connections-change')))
-
-    await new Promise((resolve) => setTimeout(resolve, 25))
-    expect(api.put).not.toHaveBeenCalled()
-    expect(current.order).toEqual([
-      { originId: 'local', profileId: 'profile-a' },
-      { originId: 'remote-a', profileId: 'profile-a' },
-    ])
-    // The stale store is still a live rendering concern, but localStorage
-    // membership can neither hide it nor mutate shared durable order.
-    expect(container.textContent).toContain('Remote profile-a')
-
-    registerRemoteConnections(['remote-a'])
-    flushSync(() => window.dispatchEvent(new Event('forge-collab-connections-change')))
-    await new Promise((resolve) => setTimeout(resolve, 25))
-    expect(api.put).not.toHaveBeenCalled()
   })
 
   it('becomes quiescent after a persistent automatic reconciliation PUT failure', async () => {
@@ -600,7 +510,7 @@ describe('AgentSidebarConnected', () => {
       })),
       put: vi.fn(async () => { throw new BuilderSidebarOrderApiUnavailableError() }),
     }
-    renderConnectedSidebar({ builderSidebarOrderApi: api, withRemoteCollision: true })
+    renderConnectedSidebar({ builderSidebarOrderApi: api, withSecondProject: true })
 
     await vi.waitFor(() => expect(api.put).toHaveBeenCalledOnce())
     await vi.waitFor(() => {

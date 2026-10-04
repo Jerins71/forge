@@ -16,7 +16,6 @@ import type {
   ManagerReasoningLevel,
   SessionModelUpdateMode,
 } from '@forge/protocol'
-import type { RemoteSidebarOrigin } from './agent-sidebar/types'
 import { originRegistry } from '@/lib/origin-store'
 
 function manager(
@@ -147,13 +146,8 @@ function renderSidebar({
   unreadCounts = {},
   onCreateSession,
   wsUrl,
-  remoteOrigins,
   builderSidebarOrder,
   onMoveBuilderProject,
-  activeOriginId,
-  onSelectRemoteAgent,
-  onRemoteOriginSignIn,
-  collaborationModeSwitch,
   isMobileOpen,
   onMobileClose,
 }: {
@@ -176,13 +170,8 @@ function renderSidebar({
   unreadCounts?: Record<string, number>
   onCreateSession?: (profileId: string, name?: string) => void
   wsUrl?: string
-  remoteOrigins?: RemoteSidebarOrigin[]
   builderSidebarOrder?: BuilderSidebarOrderRef[]
   onMoveBuilderProject?: (active: BuilderSidebarOrderRef, over: BuilderSidebarOrderRef) => void
-  activeOriginId?: string
-  onSelectRemoteAgent?: (originId: string, agentId: string) => void
-  onRemoteOriginSignIn?: (originId: string) => void
-  collaborationModeSwitch?: { activeSurface: 'builder' | 'collab'; onSelectSurface: (surface: 'builder' | 'collab') => void }
   isMobileOpen?: boolean
   onMobileClose?: () => void
 }) {
@@ -205,7 +194,6 @@ function renderSidebar({
           profiles: resolvedProfiles,
           statuses,
           unreadCounts,
-          collaborationModeSwitch,
           selectedAgentId,
           onAddManager: vi.fn(),
           onSelectAgent,
@@ -223,12 +211,8 @@ function renderSidebar({
           isSettingsActive,
           isMobileOpen,
           onMobileClose,
-          remoteOrigins,
           builderSidebarOrder,
           onMoveBuilderProject,
-          activeOriginId,
-          onSelectRemoteAgent,
-          onRemoteOriginSignIn,
         }),
       ),
     )
@@ -270,7 +254,6 @@ describe('AgentSidebar', () => {
     localStorageMock.setItem('forge-sidebar-rooms-mode', 'projects')
     renderSidebar({
       agents: [sessionManager('rooms-command', 'rooms-command')],
-      collaborationModeSwitch: { activeSurface: 'builder', onSelectSurface: vi.fn() },
     })
 
     const sidebar = getDesktopSidebar()
@@ -280,8 +263,6 @@ describe('AgentSidebar', () => {
     expect(commandRow?.querySelector('[aria-label="Project view: All projects"]')).not.toBeNull()
     expect(sidebar.querySelectorAll('[aria-label="Project view: All projects"]')).toHaveLength(1)
     expect(sidebar.querySelector('[data-testid="rooms-sidebar-header"] button[aria-label="Add project"]')?.className).toContain('size-7')
-    expect(getByRole(sidebar, 'button', { name: /builder/i })).toBeTruthy()
-    expect(getByRole(sidebar, 'button', { name: /collab/i })).toBeTruthy()
   })
 
   it('persists the Rooms Inbox or Projects mode independently from Project Views', async () => {
@@ -334,18 +315,6 @@ describe('AgentSidebar', () => {
       displayName: 'Inbox Project',
       defaultSessionAgentId: 'inbox-project',
     }
-    const remoteSession = {
-      ...sessionManager('remote-inbox-session', 'remote-inbox-project'),
-      sessionLabel: 'Remote Inbox Session',
-      updatedAt: new Date().toISOString(),
-    }
-    const remoteProfile = {
-      ...profileFor(remoteSession),
-      profileId: 'remote-inbox-project',
-      displayName: 'Remote Inbox Project',
-      defaultSessionAgentId: 'remote-inbox-session',
-    }
-
     const store = originRegistry.createOrigin({
       originId: 'local',
       wsUrl: 'ws://local.test',
@@ -379,14 +348,6 @@ describe('AgentSidebar', () => {
       onRenameSession,
       onForkSession,
       onUpdateSessionModel,
-      remoteOrigins: [{
-        originId: 'remote-inbox-origin',
-        connected: true,
-        treeRows: [{
-          profile: remoteProfile,
-          sessions: [{ sessionAgent: remoteSession, workers: [], isDefault: true }],
-        }],
-      }],
     })
 
     const sidebar = getDesktopSidebar()
@@ -421,96 +382,6 @@ describe('AgentSidebar', () => {
     expect(onForkSession).toHaveBeenCalledWith('inbox-extra', undefined)
     expect(onRenameSession).not.toHaveBeenCalled()
     expect(onUpdateSessionModel).not.toHaveBeenCalled()
-
-    const remoteRow = sidebar.querySelector('[data-inbox-row="remote-inbox-origin::remote-inbox-session"]') as HTMLElement
-    expect(remoteRow).not.toBeNull()
-    expect(remoteRow.closest('[data-slot="context-menu-trigger"]')).toBeNull()
-  })
-
-  it('keeps Inbox selected when an origin-scoped remote Inbox row is selected', () => {
-    localStorageMock.setItem('forge-sidebar-layout', 'rooms-v2')
-    const onSelectRemoteAgent = vi.fn()
-    const localSession = sessionManager('local-inbox', 'local-inbox')
-    const remoteSession = {
-      ...sessionManager('remote-inbox', 'remote-inbox'),
-      sessionLabel: 'Remote answer',
-      updatedAt: new Date().toISOString(),
-    }
-    const remoteProfile = {
-      ...profileFor(remoteSession),
-      profileId: 'remote-inbox',
-      displayName: 'Remote Project',
-      defaultSessionAgentId: 'remote-inbox',
-    }
-    renderSidebar({
-      agents: [localSession],
-      remoteOrigins: [{
-        originId: 'remote-inbox-origin',
-        connected: true,
-        treeRows: [{
-          profile: remoteProfile,
-          sessions: [{ sessionAgent: remoteSession, workers: [], isDefault: true }],
-        }],
-      }],
-      onSelectRemoteAgent,
-    })
-
-    const sidebar = getDesktopSidebar()
-    click(sidebar.querySelector('[data-inbox-row="remote-inbox-origin::remote-inbox"]') as HTMLElement)
-    expect(onSelectRemoteAgent).toHaveBeenCalledWith('remote-inbox-origin', 'remote-inbox')
-    expect(getByRole(sidebar, 'button', { name: /Inbox/ }).getAttribute('aria-pressed')).toBe('true')
-  })
-
-  it('renders local and remote project room cards in Rooms Projects mode', () => {
-    localStorageMock.setItem('forge-sidebar-layout', 'rooms-v2')
-    localStorageMock.setItem('forge-sidebar-rooms-mode', 'projects')
-    const localSession = {
-      ...sessionManager('local-session', 'local-project'),
-      activeWorkerCount: 1,
-    }
-    const remoteSession = {
-      ...sessionManager('remote-session', 'remote-project'),
-      activeWorkerCount: 1,
-    }
-    const localProfile = {
-      ...profileFor(localSession),
-      profileId: 'local-project',
-      displayName: 'Local Project',
-      defaultSessionAgentId: 'local-session',
-    }
-    const remoteProfile = {
-      ...profileFor(remoteSession),
-      profileId: 'remote-project',
-      displayName: 'Remote Project',
-      defaultSessionAgentId: 'remote-session',
-    }
-
-    renderSidebar({
-      agents: [localSession],
-      profiles: [localProfile],
-      builderSidebarOrder: [
-        { originId: 'local', profileId: 'local-project' },
-        { originId: 'remote-rooms', profileId: 'remote-project' },
-      ],
-      onMoveBuilderProject: vi.fn(),
-      remoteOrigins: [{
-        originId: 'remote-rooms',
-        connected: true,
-        instanceName: 'Remote Rooms',
-        treeRows: [{
-          profile: remoteProfile,
-          sessions: [{ sessionAgent: remoteSession, workers: [], isDefault: true }],
-        }],
-      }],
-      onSelectRemoteAgent: vi.fn(),
-    })
-
-    const sidebar = getDesktopSidebar()
-    expect(sidebar.getAttribute('data-sidebar-layout')).toBe('rooms-v2')
-    expect(sidebar.querySelector('[data-room-card="local"]')).not.toBeNull()
-    expect(sidebar.querySelector('[data-room-card="remote"]')).not.toBeNull()
-    expect(sidebar.querySelectorAll('[aria-roledescription="sortable"]')).toHaveLength(2)
-    expect(sidebar.querySelector('[aria-label$="sessions actively working"]')).toBeNull()
   })
 
   it('renders the real Rooms project tree inline in Inbox without changing modes on project actions', () => {
@@ -626,7 +497,7 @@ describe('AgentSidebar', () => {
     })
   })
 
-  it('renders the clear/New Project state when the supplied shared tree has no rows or remote status card', () => {
+  it('renders the clear/New Project state when the supplied shared tree has no rows', () => {
     localStorageMock.setItem('forge-sidebar-layout', 'rooms-v2')
     renderSidebar({ agents: [], profiles: [] })
 
@@ -635,32 +506,6 @@ describe('AgentSidebar', () => {
     expect(sidebar.querySelector('[data-inbox-section="projects"]')).toBeNull()
     expect(queryByText(sidebar, 'No active agents.')).toBeNull()
     expect(getByRole(sidebar, 'button', { name: 'New Project' })).toBeTruthy()
-  })
-
-  it('renders an empty remote origin sign-in card inline in Inbox', () => {
-    localStorageMock.setItem('forge-sidebar-layout', 'rooms-v2')
-    const onRemoteOriginSignIn = vi.fn()
-    const remote = originRegistry.createOrigin({
-      originId: 'remote-empty',
-      wsUrl: 'ws://remote-empty.test',
-      offline: true,
-    })
-    remote.patchMeta({
-      connectionStatus: 'disconnected',
-      authState: 'unauthorized',
-      instanceName: 'Remote Empty',
-    })
-    renderSidebar({
-      agents: [],
-      profiles: [],
-      remoteOrigins: [{ originId: 'remote-empty', connected: false, treeRows: [] }],
-      onRemoteOriginSignIn,
-    })
-
-    const projects = getDesktopSidebar().querySelector('[data-inbox-section="projects"]') as HTMLElement
-    expect(projects.querySelector('[data-testid="remote-origin-section-remote-empty"]')).not.toBeNull()
-    click(getByRole(projects, 'button', { name: 'Sign in' }))
-    expect(onRemoteOriginSignIn).toHaveBeenCalledWith('remote-empty')
   })
 
   it('mounts enabled sortable controls for Inbox projects on both responsive trees', () => {
@@ -1620,92 +1465,18 @@ describe('AgentSidebar', () => {
     vi.stubGlobal('localStorage', localStorageMock)
   })
 
-  it('intermixes local and remote projects by composite identity while keeping local Cortex fixed above them', () => {
-    localStorageMock.setItem('forge-sidebar-layout', 'classic')
-    const localSession = {
-      ...sessionManager('shared-session', 'same-profile'),
-      sessionLabel: 'Local Session',
-    }
-    const cortexSession = {
-      ...sessionManager('cortex', 'cortex'),
-      archetypeId: 'cortex',
-      displayName: 'Cortex',
-    }
-    const remoteSession = {
-      ...sessionManager('shared-session', 'same-profile'),
-      displayName: 'Remote Session',
-      sessionLabel: 'Remote Session',
-    }
-    const localProfile: ManagerProfile = {
-      ...profileFor(localSession),
-      profileId: 'same-profile',
-      displayName: 'Local Project',
-      defaultSessionAgentId: localSession.agentId,
-    }
-    const cortexProfile: ManagerProfile = {
-      ...profileFor(cortexSession),
-      profileId: 'cortex',
-      displayName: 'Cortex',
-      defaultSessionAgentId: cortexSession.agentId,
-      profileType: 'system',
-    }
-    const remoteProfile: ManagerProfile = {
-      ...profileFor(remoteSession),
-      profileId: 'same-profile',
-      displayName: 'Remote Project',
-      defaultSessionAgentId: remoteSession.agentId,
-    }
-
-    renderSidebar({
-      agents: [localSession, cortexSession],
-      profiles: [localProfile, cortexProfile],
-      activeOriginId: 'remote-a',
-      selectedAgentId: 'shared-session',
-      onSelectRemoteAgent: vi.fn(),
-      remoteOrigins: [{
-        originId: 'remote-a',
-        connected: true,
-        instanceName: 'Remote A',
-        treeRows: [{
-          profile: remoteProfile,
-          sessions: [{ sessionAgent: remoteSession, workers: [], isDefault: true }],
-        }],
-      }],
-      builderSidebarOrder: [
-        { originId: 'remote-a', profileId: 'same-profile' },
-        { originId: 'local', profileId: 'same-profile' },
-      ],
-      onMoveBuilderProject: vi.fn(),
-    })
-
-    const sidebar = getDesktopSidebar()
-    const unifiedList = sidebar.querySelector('[data-testid="unified-project-list"]')
-    expect(unifiedList).not.toBeNull()
-    const text = unifiedList?.textContent ?? ''
-    expect(text.indexOf('Remote Project')).toBeLessThan(text.indexOf('Local Project'))
-    expect(sidebar.querySelector('[data-testid="remote-profile-row-remote-a::same-profile"]')).not.toBeNull()
-    expect(unifiedList?.textContent).not.toContain('Cortex')
-    expect((sidebar.textContent ?? '').indexOf('Cortex')).toBeLessThan(
-      (sidebar.textContent ?? '').indexOf('Remote Project'),
-    )
-    const localSessionContainer = getByText(sidebar, 'Local Session').closest('div.relative')
-    const remoteSessionButton = getByText(sidebar, 'Remote Session').closest('button')
-    expect(localSessionContainer?.className).not.toContain('ring-1')
-    expect(remoteSessionButton?.className).toContain('ring-1')
-  })
-
-  it('applies plain, s:, and w: search consistently across local and remote rows and hides status cards while searching', async () => {
+  it('applies plain, s:, and w: search consistently across projects', async () => {
     localStorageMock.setItem('forge-sidebar-layout', 'classic')
     const localSession = {
       ...sessionManager('local-session', 'local-project'),
       sessionLabel: 'Needle Local Session',
     }
-    const remoteSession = {
-      ...sessionManager('remote-session', 'remote-project'),
-      sessionLabel: 'Needle Remote Session',
+    const otherSession = {
+      ...sessionManager('other-session', 'other-project'),
+      sessionLabel: 'Needle Other Session',
     }
-    const remoteWorker = {
-      ...worker('remote-worker', 'remote-session'),
+    const otherWorker = {
+      ...worker('other-worker', 'other-session'),
       displayName: 'Worker Needle Specialist',
     }
     const localProfile: ManagerProfile = {
@@ -1714,64 +1485,41 @@ describe('AgentSidebar', () => {
       displayName: 'Local Project',
       defaultSessionAgentId: localSession.agentId,
     }
-    const remoteProfile: ManagerProfile = {
-      ...profileFor(remoteSession),
-      profileId: 'remote-project',
-      displayName: 'Remote Project',
-      defaultSessionAgentId: remoteSession.agentId,
+    const otherProfile: ManagerProfile = {
+      ...profileFor(otherSession),
+      profileId: 'other-project',
+      displayName: 'Other Project',
+      defaultSessionAgentId: otherSession.agentId,
     }
 
     renderSidebar({
-      agents: [localSession],
-      profiles: [localProfile],
-      remoteOrigins: [
-        {
-          originId: 'remote-a',
-          connected: true,
-          instanceName: 'Remote A',
-          treeRows: [{
-            profile: remoteProfile,
-            sessions: [{
-              sessionAgent: remoteSession,
-              workers: [remoteWorker],
-              isDefault: true,
-            }],
-          }],
-        },
-        {
-          originId: 'remote-empty',
-          connected: false,
-          instanceName: 'Remote Empty',
-          treeRows: [],
-        },
-      ],
+      agents: [localSession, otherSession, otherWorker],
+      profiles: [localProfile, otherProfile],
     })
 
     const sidebar = getDesktopSidebar()
-    expect(sidebar.querySelector('[data-testid="remote-origin-section-remote-empty"]')).not.toBeNull()
     const searchInput = sidebar.querySelector('input[placeholder^="Search"]') as HTMLInputElement
 
     fireEvent.change(searchInput, { target: { value: 'Needle' } })
     await waitFor(() => {
       expect(sidebar.textContent).toContain('2 matches')
       expect(queryByText(sidebar, 'Local Project')).toBeTruthy()
-      expect(queryByText(sidebar, 'Remote Project')).toBeTruthy()
-      expect(sidebar.querySelector('[data-testid="remote-origin-sections"]')).toBeNull()
+      expect(queryByText(sidebar, 'Other Project')).toBeTruthy()
     })
 
-    fireEvent.change(searchInput, { target: { value: 's:Remote' } })
+    fireEvent.change(searchInput, { target: { value: 's:Other' } })
     await waitFor(() => {
       expect(sidebar.textContent).toContain('1 match')
       expect(queryByText(sidebar, 'Local Project')).toBeNull()
-      expect(queryByText(sidebar, 'Remote Project')).toBeTruthy()
+      expect(queryByText(sidebar, 'Other Project')).toBeTruthy()
     })
 
     fireEvent.change(searchInput, { target: { value: 'w:Worker Needle' } })
     await waitFor(() => {
       expect(sidebar.textContent).toContain('1 match')
       expect(queryByText(sidebar, 'Local Project')).toBeNull()
-      expect(queryByText(sidebar, 'Remote Project')).toBeTruthy()
-      expect(queryByText(sidebar, 'Needle Remote Session')).toBeTruthy()
+      expect(queryByText(sidebar, 'Other Project')).toBeTruthy()
+      expect(queryByText(sidebar, 'Needle Other Session')).toBeTruthy()
     })
 
     fireEvent.change(searchInput, { target: { value: 'definitely absent' } })
@@ -1779,58 +1527,8 @@ describe('AgentSidebar', () => {
       expect(sidebar.textContent).toContain('0 matches')
       expect(queryByText(sidebar, 'No matches found.')).toBeTruthy()
       expect(queryByText(sidebar, 'Local Project')).toBeNull()
-      expect(queryByText(sidebar, 'Remote Project')).toBeNull()
-      expect(sidebar.querySelector('[data-testid="remote-origin-sections"]')).toBeNull()
+      expect(queryByText(sidebar, 'Other Project')).toBeNull()
     })
-  })
-
-  it('renders delimiter-adversarial local/remote sortable tuples as distinct accessible rows', () => {
-    localStorageMock.setItem('forge-sidebar-layout', 'classic')
-    const localSession = sessionManager('local-session', 'nested::profile')
-    const remoteSession = sessionManager('remote-session', 'profile')
-    const localProfile: ManagerProfile = {
-      ...profileFor(localSession),
-      profileId: 'nested::profile',
-      displayName: 'Delimiter Local',
-      defaultSessionAgentId: localSession.agentId,
-    }
-    const remoteProfile: ManagerProfile = {
-      ...profileFor(remoteSession),
-      profileId: 'profile',
-      displayName: 'Delimiter Remote',
-      defaultSessionAgentId: remoteSession.agentId,
-    }
-
-    renderSidebar({
-      agents: [localSession],
-      profiles: [localProfile],
-      remoteOrigins: [{
-        originId: 'local::nested',
-        connected: true,
-        instanceName: 'Delimiter Instance',
-        treeRows: [{
-          profile: remoteProfile,
-          sessions: [{ sessionAgent: remoteSession, workers: [], isDefault: true }],
-        }],
-      }],
-      builderSidebarOrder: [
-        { originId: 'local::nested', profileId: 'profile' },
-        { originId: 'local', profileId: 'nested::profile' },
-      ],
-      onMoveBuilderProject: vi.fn(),
-    })
-
-    const sidebar = getDesktopSidebar()
-    const list = sidebar.querySelector('[data-testid="unified-project-list"]')
-    expect(list?.textContent).toContain('Delimiter Local')
-    expect(list?.textContent).toContain('Delimiter Remote')
-    const activators = list?.querySelectorAll('button[aria-roledescription="sortable"]') ?? []
-    expect(activators).toHaveLength(2)
-    expect(Array.from(activators).map((element) => element.getAttribute('aria-label'))).toEqual([
-      'Collapse or drag remote project Delimiter Remote on Delimiter Instance',
-      'Collapse or drag project Delimiter Local',
-    ])
-    expect(Array.from(list?.children ?? []).every((element) => !element.hasAttribute('aria-roledescription'))).toBe(true)
   })
 
   it('keeps profiles visible when sidebar search matches inactive repository project agents', async () => {

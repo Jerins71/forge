@@ -334,7 +334,7 @@ async function flush(): Promise<void> {
 function renderGeneral(): void {
   root = createRoot(container)
   flushSync(() => {
-    root?.render(createElement(SettingsGeneral, { wsUrl: 'ws://127.0.0.1:47187', repositoryCloneAvailable: false }))
+    root?.render(createElement(SettingsGeneral, { wsUrl: 'ws://127.0.0.1:47187' }))
   })
 }
 
@@ -588,8 +588,8 @@ describe('SettingsGeneral', () => {
         .mockResolvedValueOnce({ available: true, response: knowledgeV2SettingsView(false, false) })
 
       root = createRoot(container)
-      flushSync(() => root?.render(createElement(SettingsGeneral, { wsUrl: 'ws://first', repositoryCloneAvailable: false })))
-      flushSync(() => root?.render(createElement(SettingsGeneral, { wsUrl: 'ws://second', repositoryCloneAvailable: false })))
+      flushSync(() => root?.render(createElement(SettingsGeneral, { wsUrl: 'ws://first' })))
+      flushSync(() => root?.render(createElement(SettingsGeneral, { wsUrl: 'ws://second' })))
       await flush()
       resolveFirst({ available: true, response: knowledgeV2SettingsView(false, true) })
       await flush()
@@ -730,261 +730,51 @@ describe('SettingsGeneral', () => {
 })
 
 /* ================================================================== */
-/*  Collab target — Builder-only sections hidden                      */
+/*  Explicit apiClient routing and preferences                        */
 /* ================================================================== */
 
-describe('SettingsGeneral — collab target', () => {
-  function renderCollab(): void {
-    root = createRoot(container)
-    flushSync(() => {
-      root?.render(
-        createElement(SettingsGeneral, {
-          wsUrl: 'wss://collab.example.com',
-          repositoryCloneAvailable: false,
-          target: {
-            kind: 'collab',
-            label: 'Collab backend',
-            description: 'Remote collab.',
-            wsUrl: 'wss://collab.example.com',
-            apiBaseUrl: 'https://collab.example.com/',
-            fetchCredentials: 'include',
-            requiresAdmin: true,
-            availableTabs: ['general', 'auth', 'models', 'about'],
-          },
-        }),
-      )
-    })
-  }
-
-  it('hides the Terminal section in collab mode', async () => {
-    renderCollab()
-    await flush()
-    await flush()
-
-    expect(container.textContent).not.toContain('Default Shell')
-    expect(container.textContent).not.toContain('Terminal')
-  })
-
-  it('does NOT call fetchAvailableShells in collab mode', async () => {
-    renderCollab()
-    await flush()
-    await flush()
-
-    expect(terminalApiMock.fetchAvailableShells).not.toHaveBeenCalled()
-  })
-
-  it('hides the Appearance section in collab mode', async () => {
-    renderCollab()
-    await flush()
-
-    expect(container.textContent).not.toContain('Appearance')
-    expect(container.textContent).not.toContain('Theme')
-  })
-
-  it('hides the Sidebar section in collab mode', async () => {
-    renderCollab()
-    await flush()
-
-    expect(container.textContent).not.toContain('Sidebar')
-    expect(container.textContent).not.toContain('Show model icons')
-  })
-
-  it('hides prompt cache visualization and does not load builder-only setting in collab mode', async () => {
-    renderCollab()
-    await flush()
-    await flush()
-
-    expect(container.textContent).not.toContain('Prompt Cache Visualization')
-    expect(container.textContent).not.toContain('Enable prompt cache visualization')
-    expect(modelCacheVisualizationApiMock.fetchModelCacheVisualizationEnabled).not.toHaveBeenCalled()
-    expect(modelCacheVisualizationApiMock.setModelCacheVisualizationEnabledApi).not.toHaveBeenCalled()
-  })
-
-  it('hides compaction settings and does not load builder-only compaction APIs in collab mode', async () => {
-    renderCollab()
-    await flush()
-    await flush()
-
-    expect(container.textContent).not.toContain('Compaction model')
-    expect(container.textContent).not.toContain('Compaction timeout')
-    expect(compactionApiMock.fetchCompactionSettings).not.toHaveBeenCalled()
-    expect(modelPresetMock.fetchModelPresets).not.toHaveBeenCalled()
-  })
-
-  it('hides Repositories and does not hit repository settings routes in collab mode', async () => {
-    renderCollab()
-    await flush()
-    await flush()
-
-    expect(container.textContent).not.toContain('Repositories')
-    expect(container.textContent).not.toContain('Configured repository home')
-    expect(repositoryApiMock.fetchRepositorySettings).not.toHaveBeenCalled()
-  })
-
-  it('still renders Cortex settings in collab mode', async () => {
-    renderCollab()
-    await flush()
-    await flush()
-
-    expect(container.textContent).toContain('Automatic Consolidation')
-    expect(container.textContent).toContain('Every 24 hours')
-    expect(container.textContent).not.toContain('Automatic Reviews')
-  })
-
-  it('passes apiClient to onboarding hook when provided', async () => {
-    const mockClient = {
-      target: {
-        kind: 'collab' as const,
-        label: 'Collab',
-        description: 'Remote',
-        wsUrl: 'wss://collab.example.com',
-        apiBaseUrl: 'https://collab.example.com/',
-        fetchCredentials: 'include' as const,
-        requiresAdmin: true,
-        availableTabs: ['general' as const],
-      },
-      endpoint: (path: string) => `https://collab.example.com${path}`,
-      fetch: vi.fn(),
-      fetchJson: vi.fn(),
-      readApiError: vi.fn(),
-    }
-    root = createRoot(container)
-    flushSync(() => {
-      root?.render(
-        createElement(SettingsGeneral, {
-          wsUrl: 'wss://collab.example.com',
-          repositoryCloneAvailable: false,
-          target: mockClient.target,
-          apiClient: mockClient,
-        }),
-      )
-    })
-    await flush()
-
-    // useOnboardingState should have been called with the apiClient, not wsUrl
-    expect(onboardingMock.useOnboardingState).toHaveBeenCalledWith(mockClient)
-  })
-
-  /* ---- Collab reboot confirmation ---- */
-
-  function makeCollabClient() {
+describe('SettingsGeneral — apiClient routing', () => {
+  function makeClient() {
     return {
       target: {
-        kind: 'collab' as const,
-        label: 'Collab',
-        description: 'Remote',
-        wsUrl: 'wss://collab.example.com',
-        apiBaseUrl: 'https://collab.example.com/',
-        fetchCredentials: 'include' as const,
-        requiresAdmin: true,
+        label: 'Builder',
+        description: 'Local',
+        wsUrl: 'ws://127.0.0.1:47187',
+        apiBaseUrl: 'http://127.0.0.1:47187/',
+        fetchCredentials: 'same-origin' as const,
         availableTabs: ['general' as const, 'auth' as const, 'models' as const, 'about' as const],
       },
-      endpoint: (path: string) => `https://collab.example.com${path}`,
+      endpoint: (path: string) => `http://127.0.0.1:47187${path}`,
       fetch: vi.fn().mockResolvedValue({ ok: true }),
       fetchJson: vi.fn(),
       readApiError: vi.fn(),
     }
   }
 
-  function renderCollabWithClient(client: ReturnType<typeof makeCollabClient>): void {
+  function renderWithClient(client: ReturnType<typeof makeClient>): void {
     root = createRoot(container)
     flushSync(() => {
       root?.render(
         createElement(SettingsGeneral, {
-          wsUrl: 'wss://collab.example.com',
-          repositoryCloneAvailable: false,
-          target: client.target,
+          wsUrl: 'ws://127.0.0.1:47187',
           apiClient: client,
         }),
       )
     })
   }
 
-  it('shows confirmation dialog before collab reboot (does not fire immediately)', async () => {
-    const client = makeCollabClient()
-    renderCollabWithClient(client)
+  it('passes apiClient to onboarding hook when provided', async () => {
+    const mockClient = makeClient()
+    renderWithClient(mockClient)
     await flush()
 
-    // Click the Reboot button
-    const rebootBtn = Array.from(container.querySelectorAll('button')).find(
-      (btn) => btn.textContent?.includes('Reboot'),
-    )
-    expect(rebootBtn).toBeTruthy()
-
-    flushSync(() => {
-      fireEvent.click(rebootBtn!)
-    })
-    await flush()
-
-    // Confirmation dialog should appear in the document (portal)
-    expect(document.body.textContent).toContain('Reboot remote backend?')
-
-    // No fetch yet — waiting for confirmation
-    expect(client.fetch).not.toHaveBeenCalled()
+    // useOnboardingState should have been called with the apiClient, not wsUrl
+    expect(onboardingMock.useOnboardingState).toHaveBeenCalledWith(mockClient)
   })
 
-  it('executes reboot after confirming the collab confirmation dialog', async () => {
-    const client = makeCollabClient()
-    renderCollabWithClient(client)
-    await flush()
-
-    // Open confirmation dialog
-    const rebootBtn = Array.from(container.querySelectorAll('button')).find(
-      (btn) => btn.textContent?.includes('Reboot'),
-    )
-    flushSync(() => {
-      fireEvent.click(rebootBtn!)
-    })
-    await flush()
-
-    // Find and click the confirm action in the dialog (second "Reboot" button)
-    const allButtons = Array.from(document.body.querySelectorAll('button'))
-    const confirmBtn = allButtons.find(
-      (btn) => btn.textContent === 'Reboot' && btn !== rebootBtn,
-    )
-    expect(confirmBtn).toBeTruthy()
-
-    flushSync(() => {
-      fireEvent.click(confirmBtn!)
-    })
-    await flush()
-
-    expect(client.fetch).toHaveBeenCalledWith('/api/reboot', { method: 'POST' })
-  })
-
-  it('does not reboot when collab confirmation is cancelled', async () => {
-    const client = makeCollabClient()
-    renderCollabWithClient(client)
-    await flush()
-
-    // Open confirmation dialog
-    const rebootBtn = Array.from(container.querySelectorAll('button')).find(
-      (btn) => btn.textContent?.includes('Reboot'),
-    )
-    flushSync(() => {
-      fireEvent.click(rebootBtn!)
-    })
-    await flush()
-
-    // Find and click the Cancel button
-    const cancelBtn = Array.from(document.body.querySelectorAll('button')).find(
-      (btn) => btn.textContent === 'Cancel',
-    )
-    expect(cancelBtn).toBeTruthy()
-
-    flushSync(() => {
-      fireEvent.click(cancelBtn!)
-    })
-    await flush()
-
-    expect(client.fetch).not.toHaveBeenCalled()
-  })
-
-  it('Builder reboot fires immediately without confirmation', async () => {
-    const fetchSpy = vi.fn().mockResolvedValue({ ok: true })
-    vi.stubGlobal('fetch', fetchSpy)
-
-    renderGeneral()
+  it('reboots immediately through the supplied apiClient', async () => {
+    const client = makeClient()
+    renderWithClient(client)
     await flush()
 
     const rebootBtn = Array.from(container.querySelectorAll('button')).find(
@@ -995,14 +785,7 @@ describe('SettingsGeneral — collab target', () => {
     })
     await flush()
 
-    // Builder fires immediately — no confirmation dialog
-    expect(document.body.textContent).not.toContain('Reboot remote backend?')
-    expect(fetchSpy).toHaveBeenCalledWith(
-      'http://127.0.0.1:47187/api/reboot',
-      expect.objectContaining({ method: 'POST' }),
-    )
-
-    vi.unstubAllGlobals()
+    expect(client.fetch).toHaveBeenCalledWith('/api/reboot', expect.objectContaining({ method: 'POST' }))
   })
 
   it('renders conversation throughput off by default and persists an immediate change', async () => {
@@ -1041,30 +824,19 @@ describe('SettingsGeneral — collab target', () => {
   })
 })
 
-describe('SettingsGeneral — builder target repositories', () => {
+describe('SettingsGeneral — repositories', () => {
   function renderBuilder(): void {
     root = createRoot(container)
     flushSync(() => {
       root?.render(
         createElement(SettingsGeneral, {
           wsUrl: 'ws://127.0.0.1:47187',
-          repositoryCloneAvailable: true,
-          target: {
-            kind: 'builder',
-            label: 'Local Builder',
-            description: 'Local backend.',
-            wsUrl: 'ws://127.0.0.1:47187',
-            apiBaseUrl: 'http://127.0.0.1:47187/',
-            fetchCredentials: 'same-origin',
-            requiresAdmin: false,
-            availableTabs: ['general', 'auth', 'models', 'about'],
-          },
         }),
       )
     })
   }
 
-  it('loads and renders Repositories for an explicit builder target', async () => {
+  it('loads and renders Repositories', async () => {
     renderBuilder()
     await flush()
     await flush()
@@ -1074,31 +846,4 @@ describe('SettingsGeneral — builder target repositories', () => {
     expect(repositoryApiMock.fetchRepositorySettings).toHaveBeenCalled()
   })
 
-  it('hides Repositories when repositoryCloneAvailable is false on a builder target (direct collab)', async () => {
-    root = createRoot(container)
-    flushSync(() => {
-      root?.render(
-        createElement(SettingsGeneral, {
-          wsUrl: 'ws://127.0.0.1:47187',
-          repositoryCloneAvailable: false,
-          target: {
-            kind: 'builder',
-            label: 'Hosted collab builder',
-            description: 'Direct collaboration server builder shell.',
-            wsUrl: 'ws://127.0.0.1:47187',
-            apiBaseUrl: 'http://127.0.0.1:47187/',
-            fetchCredentials: 'same-origin',
-            requiresAdmin: false,
-            availableTabs: ['general', 'auth', 'models', 'about'],
-          },
-        }),
-      )
-    })
-    await flush()
-    await flush()
-
-    expect(container.textContent).not.toContain('Repositories')
-    expect(container.textContent).not.toContain('Configured repository home')
-    expect(repositoryApiMock.fetchRepositorySettings).not.toHaveBeenCalled()
-  })
 })

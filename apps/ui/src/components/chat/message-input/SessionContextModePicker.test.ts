@@ -22,7 +22,7 @@ vi.mock('@/components/settings/context-mode-api', () => ({
 
 let container: HTMLDivElement
 let root: Root | null = null
-const apiClient = { target: { kind: 'builder' } } as unknown as SettingsApiClient
+const apiClient = { target: {} } as unknown as SettingsApiClient
 
 function makeSnapshot(overrides: Partial<SessionContextModeSnapshot> = {}): SessionContextModeSnapshot {
   return {
@@ -245,8 +245,8 @@ describe('SessionContextModePicker', () => {
     apiMock.updateSessionContextMode.mockImplementationOnce(() => new Promise((resolve) => {
       resolveSessionA = resolve
     }))
-    const clientA = { target: { kind: 'builder', id: 'a' } } as unknown as SettingsApiClient
-    const clientB = { target: { kind: 'builder', id: 'b' } } as unknown as SettingsApiClient
+    const clientA = { target: { id: 'a' } } as unknown as SettingsApiClient
+    const clientB = { target: { id: 'b' } } as unknown as SettingsApiClient
     apiMock.fetchSessionContextMode.mockImplementation(async (_client, agentId: string) => (
       makeSnapshot({
         sessionAgentId: agentId,
@@ -314,8 +314,8 @@ describe('SessionContextModePicker', () => {
     apiMock.updateSessionContextMode.mockImplementationOnce(() => new Promise((_, reject) => {
       rejectSessionA = reject
     }))
-    const clientA = { target: { kind: 'builder', id: 'a' } } as unknown as SettingsApiClient
-    const clientB = { target: { kind: 'builder', id: 'b' } } as unknown as SettingsApiClient
+    const clientA = { target: { id: 'a' } } as unknown as SettingsApiClient
+    const clientB = { target: { id: 'b' } } as unknown as SettingsApiClient
     apiMock.fetchSessionContextMode.mockImplementation(async (_client, agentId: string) => (
       makeSnapshot({ sessionAgentId: agentId, effectiveMode: 'summary' })
     ))

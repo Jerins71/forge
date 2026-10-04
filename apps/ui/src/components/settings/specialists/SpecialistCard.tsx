@@ -112,21 +112,6 @@ export function SpecialistCard({
                   Pinned
                 </span>
               )}
-              {specialist.sourceKind === 'channel' && (
-                <span className="inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
-                  Channel
-                </span>
-              )}
-              {specialist.targetSpace.includes('collaboration') && !specialist.targetSpace.includes('builder') && (
-                <span className="inline-flex items-center rounded-full border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-400">
-                  Collab
-                </span>
-              )}
-              {specialist.targetSpace.includes('builder') && specialist.targetSpace.includes('collaboration') && (
-                <span className="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
-                  Both
-                </span>
-              )}
               {specialist.specialistId === 'codex-plugin' && (
                 <span className="inline-flex items-center rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-400">
                   Contextual / automatic
@@ -475,30 +460,6 @@ export function SpecialistCard({
           </Button>
         )}
         {mode === 'profileOverride' && !specialist.shadowsGlobal && onDelete && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onDelete}
-            disabled={isSaving}
-            className="gap-1 text-destructive hover:text-destructive"
-          >
-            <Trash2 className="size-3" />
-            Delete
-          </Button>
-        )}
-        {mode === 'channelLocal' && specialist.shadowsGlobal && onRevert && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onRevert}
-            disabled={isSaving}
-            className="gap-1 text-muted-foreground"
-          >
-            <RotateCcw className="size-3" />
-            Revert to global
-          </Button>
-        )}
-        {mode === 'channelLocal' && !specialist.shadowsGlobal && onDelete && (
           <Button
             size="sm"
             variant="outline"

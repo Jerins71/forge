@@ -22,16 +22,12 @@ vi.mock('@/lib/api-endpoint', () => ({
   },
 }))
 
-vi.mock('@/lib/collaboration-endpoints', () => ({
-  resolveCollaborationApiBaseUrl: () => 'https://collab.example.com/',
-}))
-
 const {
   createSettingsApiClient,
   createBuilderSettingsApiClient,
 } = await import('./settings-api-client')
 const {
-  createCollabSettingsTarget,
+  createBuilderSettingsTarget,
 } = await import('./settings-target')
 
 /* ------------------------------------------------------------------ */
@@ -73,45 +69,45 @@ describe('settings-api env variables via client', () => {
     )
   })
 
-  it('fetches env variables through collab client with credentials include', async () => {
+  it('fetches env variables through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ variables: [] }))
     const { fetchSettingsEnvVariables } = await import('./settings-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await fetchSettingsEnvVariables(client)
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/env',
-      expect.objectContaining({ credentials: 'include' }),
+      'https://forge.example.com/api/settings/env',
+      expect.objectContaining({ credentials: 'same-origin' }),
     )
   })
 
-  it('updates env variables through collab client', async () => {
+  it('updates env variables through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
     const { updateSettingsEnvVariables } = await import('./settings-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await updateSettingsEnvVariables(client, { BRAVE_API_KEY: 'test' })
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/env',
+      'https://forge.example.com/api/settings/env',
       expect.objectContaining({
         method: 'PUT',
-        credentials: 'include',
+        credentials: 'same-origin',
       }),
     )
   })
 
-  it('deletes env variable through collab client', async () => {
+  it('deletes env variable through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
     const { deleteSettingsEnvVariable } = await import('./settings-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await deleteSettingsEnvVariable(client, 'BRAVE_API_KEY')
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/env/BRAVE_API_KEY',
-      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+      'https://forge.example.com/api/settings/env/BRAVE_API_KEY',
+      expect.objectContaining({ method: 'DELETE', credentials: 'same-origin' }),
     )
   })
 })
@@ -121,17 +117,17 @@ describe('settings-api env variables via client', () => {
 /* ================================================================== */
 
 describe('settings-api server version via client', () => {
-  it('fetches server version through collab client', async () => {
+  it('fetches server version through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ system: { serverVersion: '1.0.0' } }))
     const { fetchServerVersion } = await import('./settings-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     const version = await fetchServerVersion(client)
 
     expect(version).toBe('1.0.0')
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/stats?range=7d',
-      expect.objectContaining({ credentials: 'include' }),
+      'https://forge.example.com/api/stats?range=7d',
+      expect.objectContaining({ credentials: 'same-origin' }),
     )
   })
 })
@@ -141,17 +137,17 @@ describe('settings-api server version via client', () => {
 /* ================================================================== */
 
 describe('models-api via client', () => {
-  it('fetches model overrides through collab client with no-store cache', async () => {
+  it('fetches model overrides through a non-default client with no-store cache', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ version: 1, overrides: {}, providerAvailability: {} }))
     const { fetchModelOverrides } = await import('./models-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     const payload = await fetchModelOverrides(client)
 
     expect(payload.openRouterModels).toEqual([])
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/model-overrides',
-      expect.objectContaining({ cache: 'no-store', credentials: 'include' }),
+      'https://forge.example.com/api/settings/model-overrides',
+      expect.objectContaining({ cache: 'no-store', credentials: 'same-origin' }),
     )
   })
 
@@ -167,7 +163,7 @@ describe('models-api via client', () => {
       }],
     }))
     const { fetchModelOverrides } = await import('./models-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await expect(fetchModelOverrides(client)).resolves.toMatchObject({
       overrides: { 'openrouter:z-ai/glm-5.1': { managerEnabled: true } },
@@ -179,29 +175,29 @@ describe('models-api via client', () => {
     })
   })
 
-  it('updates model override item through collab client', async () => {
+  it('updates model override item through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
     const { updateModelOverride } = await import('./models-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await updateModelOverride(client, 'gpt-5', { enabled: false })
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/model-overrides/gpt-5',
-      expect.objectContaining({ method: 'PUT', credentials: 'include' }),
+      'https://forge.example.com/api/settings/model-overrides/gpt-5',
+      expect.objectContaining({ method: 'PUT', credentials: 'same-origin' }),
     )
   })
 
-  it('deletes model override item through collab client', async () => {
+  it('deletes model override item through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
     const { deleteModelOverride } = await import('./models-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await deleteModelOverride(client, 'gpt-5')
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/model-overrides/gpt-5',
-      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+      'https://forge.example.com/api/settings/model-overrides/gpt-5',
+      expect.objectContaining({ method: 'DELETE', credentials: 'same-origin' }),
     )
   })
 
@@ -223,42 +219,42 @@ describe('models-api via client', () => {
 /* ================================================================== */
 
 describe('openrouter-api via client', () => {
-  it('fetches available OpenRouter models through collab client', async () => {
+  it('fetches available OpenRouter models through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ models: [] }))
     const { fetchAvailableOpenRouterModels } = await import('./openrouter-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await fetchAvailableOpenRouterModels(client)
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/openrouter/available-models',
-      expect.objectContaining({ cache: 'no-store', credentials: 'include' }),
+      'https://forge.example.com/api/settings/openrouter/available-models',
+      expect.objectContaining({ cache: 'no-store', credentials: 'same-origin' }),
     )
   })
 
-  it('adds OpenRouter model through collab client', async () => {
+  it('adds OpenRouter model through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
     const { addOpenRouterModel } = await import('./openrouter-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await addOpenRouterModel(client, { modelId: 'test/model', name: 'Test Model' } as never)
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      expect.stringContaining('https://collab.example.com/api/settings/openrouter/models/'),
-      expect.objectContaining({ method: 'PUT', credentials: 'include' }),
+      expect.stringContaining('https://forge.example.com/api/settings/openrouter/models/'),
+      expect.objectContaining({ method: 'PUT', credentials: 'same-origin' }),
     )
   })
 
-  it('removes OpenRouter model through collab client', async () => {
+  it('removes OpenRouter model through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
     const { removeOpenRouterModel } = await import('./openrouter-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await removeOpenRouterModel(client, 'test/model')
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      expect.stringContaining('https://collab.example.com/api/settings/openrouter/models/'),
-      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+      expect.stringContaining('https://forge.example.com/api/settings/openrouter/models/'),
+      expect.objectContaining({ method: 'DELETE', credentials: 'same-origin' }),
     )
   })
 })
@@ -268,42 +264,42 @@ describe('openrouter-api via client', () => {
 /* ================================================================== */
 
 describe('slash-commands-api via client', () => {
-  it('fetches slash commands through collab client', async () => {
+  it('fetches slash commands through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ commands: [] }))
     const { fetchSlashCommands } = await import('./slash-commands-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await fetchSlashCommands(client)
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/slash-commands',
-      expect.objectContaining({ credentials: 'include' }),
+      'https://forge.example.com/api/slash-commands',
+      expect.objectContaining({ credentials: 'same-origin' }),
     )
   })
 
-  it('creates slash command through collab client', async () => {
+  it('creates slash command through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ command: { id: '1', name: 'test', prompt: 'hi', createdAt: '', updatedAt: '' } }))
     const { createSlashCommand } = await import('./slash-commands-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await createSlashCommand(client, { name: 'test', prompt: 'hi' })
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/slash-commands',
-      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+      'https://forge.example.com/api/slash-commands',
+      expect.objectContaining({ method: 'POST', credentials: 'same-origin' }),
     )
   })
 
-  it('deletes slash command through collab client', async () => {
+  it('deletes slash command through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
     const { deleteSlashCommand } = await import('./slash-commands-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await deleteSlashCommand(client, 'cmd-1')
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/slash-commands/cmd-1',
-      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+      'https://forge.example.com/api/slash-commands/cmd-1',
+      expect.objectContaining({ method: 'DELETE', credentials: 'same-origin' }),
     )
   })
 })
@@ -313,16 +309,16 @@ describe('slash-commands-api via client', () => {
 /* ================================================================== */
 
 describe('cortex-auto-review-api via client', () => {
-  it('fetches cortex settings through collab client', async () => {
+  it('fetches cortex settings through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ settings: { enabled: true, intervalMinutes: 120 } }))
     const { fetchCortexAutoReviewSettings } = await import('./cortex-auto-review-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await fetchCortexAutoReviewSettings(client)
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/cortex-auto-review',
-      expect.objectContaining({ credentials: 'include' }),
+      'https://forge.example.com/api/settings/cortex-auto-review',
+      expect.objectContaining({ credentials: 'same-origin' }),
     )
   })
 })
@@ -332,41 +328,41 @@ describe('cortex-auto-review-api via client', () => {
 /* ================================================================== */
 
 describe('specialists-api via client', () => {
-  it('fetches specialists through collab client with no-store cache', async () => {
+  it('fetches specialists through a non-default client with no-store cache', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ specialists: [] }))
     const { fetchSpecialists } = await import('./specialists-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await fetchSpecialists(client, 'profile-1')
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/specialists?profileId=profile-1&targetSpace=collaboration',
-      expect.objectContaining({ cache: 'no-store', credentials: 'include' }),
+      'https://forge.example.com/api/settings/specialists?profileId=profile-1&targetSpace=builder',
+      expect.objectContaining({ cache: 'no-store', credentials: 'same-origin' }),
     )
   })
 
-  it('saves shared specialists through collab client with collaboration targetSpace query and preserved payload', async () => {
+  it('saves shared specialists through a non-default client with builder targetSpace query and preserved payload', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
     const { saveSharedSpecialist } = await import('./specialists-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await saveSharedSpecialist(client, 'handoff', {
       displayName: 'Handoff',
       color: '#2563eb',
       enabled: true,
-      whenToUse: 'Collaboration handoffs',
+      whenToUse: 'Handoffs',
       modelId: 'gpt-5.5',
       provider: 'openai-codex',
-      targetSpace: ['collaboration'],
+      targetSpace: ['builder'],
       promptBody: 'Prompt',
     })
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/specialists/handoff?targetSpace=collaboration',
+      'https://forge.example.com/api/settings/specialists/handoff?targetSpace=builder',
       expect.objectContaining({
         method: 'PUT',
-        credentials: 'include',
-        body: expect.stringContaining('"targetSpace":["collaboration"]'),
+        credentials: 'same-origin',
+        body: expect.stringContaining('"targetSpace":["builder"]'),
       }),
     )
   })
@@ -377,16 +373,16 @@ describe('specialists-api via client', () => {
 /* ================================================================== */
 
 describe('prompt-api via client', () => {
-  it('fetches prompt list through collab client', async () => {
+  it('fetches prompt list through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ prompts: [] }))
     const { fetchPromptList } = await import('./prompts/prompt-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await fetchPromptList(client, 'profile-1')
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/prompts?profileId=profile-1',
-      expect.objectContaining({ credentials: 'include' }),
+      'https://forge.example.com/api/prompts?profileId=profile-1',
+      expect.objectContaining({ credentials: 'same-origin' }),
     )
   })
 })
@@ -396,16 +392,16 @@ describe('prompt-api via client', () => {
 /* ================================================================== */
 
 describe('extensions-api via client', () => {
-  it('fetches extensions through collab client', async () => {
+  it('fetches extensions through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ forgeExtensions: [], piExtensions: [] }))
     const { fetchSettingsExtensions } = await import('./settings-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await fetchSettingsExtensions(client)
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/extensions',
-      expect.objectContaining({ credentials: 'include' }),
+      'https://forge.example.com/api/settings/extensions',
+      expect.objectContaining({ credentials: 'same-origin' }),
     )
   })
 })
@@ -415,29 +411,29 @@ describe('extensions-api via client', () => {
 /* ================================================================== */
 
 describe('onboarding-api via client', () => {
-  it('fetches onboarding state through collab client with credentials include', async () => {
+  it('fetches onboarding state through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({
       state: { status: 'completed', completedAt: '2024-01-01', preferences: { preferredName: 'Test', technicalLevel: 'developer' } },
     }))
     const { fetchOnboardingStateViaClient } = await import('../../lib/onboarding-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     const result = await fetchOnboardingStateViaClient(client)
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/onboarding/state',
-      expect.objectContaining({ credentials: 'include' }),
+      'https://forge.example.com/api/onboarding/state',
+      expect.objectContaining({ credentials: 'same-origin' }),
     )
     expect(result.status).toBe('completed')
     expect(result.preferences?.preferredName).toBe('Test')
   })
 
-  it('saves onboarding preferences through collab client with credentials include', async () => {
+  it('saves onboarding preferences through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({
       state: { status: 'completed', completedAt: '2024-01-01', preferences: { preferredName: 'Adam', technicalLevel: 'developer' } },
     }))
     const { saveOnboardingPreferencesViaClient } = await import('../../lib/onboarding-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     const result = await saveOnboardingPreferencesViaClient(client, {
       preferredName: 'Adam',
@@ -445,30 +441,30 @@ describe('onboarding-api via client', () => {
     })
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/onboarding/preferences',
+      'https://forge.example.com/api/onboarding/preferences',
       expect.objectContaining({
         method: 'POST',
-        credentials: 'include',
+        credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
       }),
     )
     expect(result.status).toBe('completed')
   })
 
-  it('skips onboarding through collab client with credentials include', async () => {
+  it('skips onboarding through a non-default client', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({
       state: { status: 'skipped', skippedAt: '2024-01-01', preferences: null },
     }))
     const { skipOnboardingViaClient } = await import('../../lib/onboarding-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     const result = await skipOnboardingViaClient(client)
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/onboarding/preferences',
+      'https://forge.example.com/api/onboarding/preferences',
       expect.objectContaining({
         method: 'POST',
-        credentials: 'include',
+        credentials: 'same-origin',
       }),
     )
     expect(result.status).toBe('skipped')
@@ -513,7 +509,7 @@ describe('onboarding-api via client', () => {
   it('throws on missing state in onboarding response', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({}))
     const { fetchOnboardingStateViaClient } = await import('../../lib/onboarding-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await expect(fetchOnboardingStateViaClient(client)).rejects.toThrow('missing state')
   })
@@ -521,7 +517,7 @@ describe('onboarding-api via client', () => {
   it('throws on non-ok response from onboarding save', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ error: 'Forbidden' }, 403))
     const { saveOnboardingPreferencesViaClient } = await import('../../lib/onboarding-api')
-    const client = createSettingsApiClient(createCollabSettingsTarget('wss://collab.example.com'))
+    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
 
     await expect(
       saveOnboardingPreferencesViaClient(client, { preferredName: 'Test', technicalLevel: 'developer' }),

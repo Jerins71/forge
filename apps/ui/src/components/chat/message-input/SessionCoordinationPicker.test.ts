@@ -67,7 +67,7 @@ function makeConfig(
   return {
     originId: 'local',
     httpClientRef: {
-      current: { target: { kind: 'builder' } } as unknown as SettingsApiClient,
+      current: { target: {} } as unknown as SettingsApiClient,
     },
     sessionAgentId: 'manager-1',
     profileId: 'project-1',

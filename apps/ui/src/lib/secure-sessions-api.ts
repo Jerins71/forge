@@ -29,7 +29,6 @@ import type {
 } from '@forge/protocol'
 
 export type SecureSessionUiErrorCode =
-  | 'SECURE_BUILDER_ONLY'
   | 'SECURE_PRIVATE_API_UNAVAILABLE'
   | 'SECURE_PROJECT_DEFAULT_LIMIT_REACHED'
   | 'SECURE_REQUEST_INVALID'
@@ -43,7 +42,6 @@ export type SecureSessionUiErrorCode =
   | 'SECURE_OPERATION_FAILED'
 
 const ERROR_MESSAGES: Record<SecureSessionUiErrorCode, string> = {
-  SECURE_BUILDER_ONLY: 'Secure Sessions are available only in the local Builder.',
   SECURE_PRIVATE_API_UNAVAILABLE: 'Private secret entry requires the Forge desktop app.',
   SECURE_PROJECT_DEFAULT_LIMIT_REACHED:
     'This project already has the maximum number of secure grants.',
@@ -132,7 +130,6 @@ export function isSecureControlAvailable(remoteAuthorized = false): boolean {
 export async function fetchSecureSessionCatalog(
   apiClient: SettingsApiClient,
 ): Promise<SecureSecretsCatalog> {
-  assertBuilderTarget(apiClient)
   return fetchSecureSecretsCatalog(apiClient)
 }
 
@@ -381,7 +378,6 @@ export async function fulfillSecureAccessRequestPrivately(
   baseRevision: number,
   input: SecurePrivateFulfillmentInput,
 ): Promise<SecureSessionSnapshot> {
-  assertBuilderTarget(apiClient)
   let privateValue = ''
   let encryptedMaterial: string | undefined
   try {
@@ -656,18 +652,11 @@ async function encryptPrivateValue(
   }
 }
 
-function assertBuilderTarget(apiClient: SettingsApiClient): void {
-  if (apiClient.target.kind !== 'builder') {
-    throw new SecureSessionUiError('SECURE_BUILDER_ONLY')
-  }
-}
-
 async function requestSnapshot(
   apiClient: SettingsApiClient,
   path: string,
   init?: RequestInit,
 ): Promise<SecureSessionSnapshot> {
-  assertBuilderTarget(apiClient)
   return performSnapshotRequest(apiClient, path, withSecureControl(init))
 }
 
@@ -676,7 +665,6 @@ async function requestWebSafeSnapshot(
   path: string,
   init?: RequestInit,
 ): Promise<SecureSessionSnapshot> {
-  assertBuilderTarget(apiClient)
   return performSnapshotRequest(apiClient, path, init)
 }
 

@@ -9,7 +9,7 @@ import {
   updateSessionContextMode,
 } from './context-mode-api'
 import { createBuilderSettingsApiClient, createSettingsApiClient } from './settings-api-client'
-import { createCollabSettingsTarget } from './settings-target'
+import { createBuilderSettingsTarget } from './settings-target'
 
 vi.mock('@/lib/api-endpoint', () => ({
   resolveApiEndpoint: (wsUrl: string, path: string) => {
@@ -23,12 +23,8 @@ vi.mock('@/lib/api-endpoint', () => ({
   },
 }))
 
-vi.mock('@/lib/collaboration-endpoints', () => ({
-  resolveCollaborationApiBaseUrl: () => 'https://collab.example.com/',
-}))
-
 const BUILDER_WS = 'ws://127.0.0.1:47187'
-const COLLAB_WS = 'wss://collab.example.com'
+const OTHER_WS = 'wss://forge.example.com'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -173,12 +169,12 @@ describe('context-mode-api', () => {
   })
 
   it('routes through the supplied client rather than inventing a new socket', async () => {
-    const client = createSettingsApiClient(createCollabSettingsTarget(COLLAB_WS))
+    const client = createSettingsApiClient(createBuilderSettingsTarget(OTHER_WS))
     fetchSpy.mockResolvedValueOnce(jsonResponse({ profileId: 'forge', mode: 'summary' }))
     await fetchProjectContextMode(client, 'forge')
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/profiles/forge/context-mode',
-      expect.objectContaining({ credentials: 'include' }),
+      'https://forge.example.com/api/profiles/forge/context-mode',
+      expect.objectContaining({ credentials: 'same-origin' }),
     )
     for (const call of fetchSpy.mock.calls) {
       expect(call[0]).not.toContain('127.0.0.1')

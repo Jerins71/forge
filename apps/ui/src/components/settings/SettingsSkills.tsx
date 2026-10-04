@@ -13,7 +13,6 @@ interface SettingsSkillsProps {
   profiles: ManagerProfile[]
   managers?: AgentDescriptor[]
   previewSession?: SettingsSessionContext | null
-  changeKey?: number
   initialImportUrl?: string
   onInitialImportUrlConsumed?: () => void
 }
@@ -24,7 +23,6 @@ export function SettingsSkills({
   profiles,
   managers,
   previewSession,
-  changeKey,
   initialImportUrl,
   onInitialImportUrlConsumed,
 }: SettingsSkillsProps) {
@@ -35,7 +33,6 @@ export function SettingsSkills({
       profiles={profiles}
       managers={managers}
       previewSession={previewSession}
-      changeKey={changeKey}
       initialImportUrl={initialImportUrl}
       onInitialImportUrlConsumed={onInitialImportUrlConsumed}
     />

@@ -6,7 +6,7 @@ import { flushSync } from 'react-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveOpenRouterRouting, type OpenRouterEndpointsResponse, type OpenRouterRoutingConfig } from '@forge/protocol'
 import { createSettingsApiClient, type SettingsApiClient } from './settings-api-client'
-import { createCollabSettingsTarget } from './settings-target'
+import { createBuilderSettingsTarget } from './settings-target'
 import { fetchOpenRouterEndpoints, fetchOpenRouterRouting, saveOpenRouterRouting } from './openrouter-routing-api'
 import { OpenRouterRoutingDialog } from './OpenRouterRoutingDialog'
 import { SettingsOpenRouter } from './SettingsOpenRouter'
@@ -34,7 +34,7 @@ beforeEach(() => {
   defaults = {}; routing = {}; revision = 1; offline = false; conflict = false
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   client = {
-    target: createCollabSettingsTarget('wss://remote.example/ws', 'https://remote.example'),
+    target: createBuilderSettingsTarget('wss://remote.example/ws'),
     endpoint: (path) => `https://remote.example${path}`,
     fetchJson: vi.fn(async (path: string) => {
       if (path.includes('/endpoints/')) { if (offline) throw new Error('offline'); return endpoints }
@@ -271,10 +271,10 @@ describe('Settings OpenRouter refresh and scope', () => {
   })
 })
 
-it('routes API requests and encoded exact IDs through the remote SettingsApiClient with credentials', async () => {
+it('routes API requests and encoded exact IDs through the supplied SettingsApiClient', async () => {
   const fetch = vi.fn(async () => new Response(JSON.stringify({ revision: '1', defaults: {}, effective: {}, endpoints: [] })))
   vi.stubGlobal('fetch', fetch)
-  const remote = createSettingsApiClient(createCollabSettingsTarget('wss://remote.example/ws', 'https://remote.example'))
+  const remote = createSettingsApiClient(createBuilderSettingsTarget('wss://remote.example/ws'))
   await fetchOpenRouterRouting(remote, modelId)
   await saveOpenRouterRouting(remote, modelId, '1', { only: null })
   await fetchOpenRouterEndpoints(remote, modelId, true)
@@ -283,5 +283,5 @@ it('routes API requests and encoded exact IDs through the remote SettingsApiClie
     'https://remote.example/api/settings/openrouter/routing/models/publisher%2Fmodel',
     'https://remote.example/api/settings/openrouter/endpoints/publisher%2Fmodel?refresh=true',
   ])
-  for (const call of fetch.mock.calls) expect((call as unknown[])[1]).toMatchObject({ credentials: 'include' })
+  for (const call of fetch.mock.calls) expect((call as unknown[])[1]).toMatchObject({ credentials: 'same-origin' })
 })

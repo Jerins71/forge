@@ -1,13 +1,8 @@
 /**
- * Composite `(originId, id)` identity for the origin-aware store (WP-U1).
+ * Composite `(originId, id)` identity for the origin-aware store.
  *
- * No consumer outside a store may treat `agentId` / `profileId` / `sessionId`
- * as globally unique — remote projects (Wave R) will surface colliding ids
- * across origins.  Store keys, React list keys, and navigation state all carry
- * the pair.  Today only the reserved `"local"` origin is live, so the pair is
- * a superset of today's single-origin behavior.
- *
- * @see .internal/forge-review-2026-07/97-remote/U1-REQUIREMENTS.md (req. 4)
+ * Agent, profile, and session ids are only unique within one backend, so store
+ * keys carry the pair.
  */
 
 /** Opaque origin identifier.  `"local"` is reserved for the on-device backend. */

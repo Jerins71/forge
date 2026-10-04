@@ -463,7 +463,7 @@ export function useManagerActions({
         const result = await operation.promise
         const manager = result.manager
 
-        navigateToRoute({ view: 'chat', agentId: manager.agentId, surface: 'builder' })
+        navigateToRoute({ view: 'chat', agentId: manager.agentId })
         client.subscribeToAgent(manager.agentId, { reason: 'create' })
 
         if (scaffoldForgeResources) {
@@ -530,7 +530,7 @@ export function useManagerActions({
         secureSessionsEnabled: newManagerSecureSessionsEnabled,
       })
 
-      navigateToRoute({ view: 'chat', agentId: manager.agentId, surface: 'builder' })
+      navigateToRoute({ view: 'chat', agentId: manager.agentId })
       client.subscribeToAgent(manager.agentId, { reason: 'create' })
 
       // Seed .forge project resources if the user opted in (non-blocking)
@@ -605,13 +605,11 @@ export function useManagerActions({
           navigateToRoute({
             view: 'chat',
             agentId: nextTargetAgentId,
-            surface: 'builder',
           })
         } else {
           navigateToRoute({
             view: 'chat',
             agentId: DEFAULT_MANAGER_AGENT_ID,
-            surface: 'builder',
           })
         }
       }

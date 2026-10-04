@@ -25,7 +25,6 @@ import { useNativeRuntimeAttention } from '@/components/settings/native-runtimes
 import { SettingsCliAccess } from '@/components/settings/SettingsCliAccess'
 import { SettingsStreamDeck } from '@/components/settings/SettingsStreamDeck'
 import { SettingsObservability } from '@/components/settings/SettingsObservability'
-import { SettingsCollaboration } from '@/components/settings/SettingsCollaboration'
 import type { AgentDescriptor, ManagerProfile } from '@forge/protocol'
 
 function getSettingsContentWidthClassName(activeTab: SettingsTab): string | undefined {
@@ -56,25 +55,11 @@ interface SettingsPanelProps {
   /** Optional target for target-aware Settings shell. When omitted, Builder target is created from wsUrl. */
   target?: SettingsBackendTarget
   /**
-   * Explicit runtime capability for Clone repository settings.
-   * When omitted, derived after target resolution (builder enables, collab disables).
-   * Explicit false disables even on Builder/direct-server shells.
-   */
-  repositoryCloneAvailable?: boolean
-  /**
    * Optional initial tab to select when the panel mounts.
-   * Used for deep-link navigation (e.g. sign-in recovery → Collaboration tab).
    * Must be a valid {@link SettingsTab} string; ignored if not in the target's
    * `availableTabs`.
    */
   initialTab?: string
-  /**
-   * Optional collab backend API base URL to preselect in the Collaboration
-   * settings tab.  Used when the user clicks "Sign in again" from an auth
-   * error on a specific collab backend to navigate directly to the right
-   * backend's sign-in form.
-   */
-  initialCollabApiBaseUrl?: string
   /** Optional Forge skill-share URL to open in the Skills import dialog. */
   initialSkillImportUrl?: string
   /** Called after the Skills tab consumes the import URL so the bearer URL can be removed from route state. */
@@ -94,9 +79,7 @@ export function SettingsPanel({
   contextProfileId,
   projectSettingsActions,
   target: externalTarget,
-  repositoryCloneAvailable,
   initialTab,
-  initialCollabApiBaseUrl,
   initialSkillImportUrl,
   onSkillImportUrlConsumed,
 }: SettingsPanelProps) {
@@ -109,16 +92,11 @@ export function SettingsPanel({
     return 'general'
   })
 
-  // Resolve target: external (from collab) or auto-create Builder target from wsUrl
+  // Resolve target: external or auto-create Builder target from wsUrl
   const target = useMemo<SettingsBackendTarget>(
     () => externalTarget ?? createBuilderSettingsTarget(wsUrl),
     [externalTarget, wsUrl],
   )
-
-  // Derive only after target resolution: collab always disables; explicit false
-  // disables Builder/direct-server; omitted on builder enables.
-  const resolvedRepositoryCloneAvailable =
-    target.kind === 'collab' ? false : repositoryCloneAvailable !== false
 
   // Create API client from resolved target
   const apiClient = useMemo<SettingsApiClient>(
@@ -127,7 +105,7 @@ export function SettingsPanel({
   )
 
   const availableTabs = target.availableTabs
-  const runtimeUpdateAttention = useNativeRuntimeAttention(target.kind === 'builder' ? wsUrl : undefined)
+  const runtimeUpdateAttention = useNativeRuntimeAttention(wsUrl)
   const selectedProject = useMemo(
     () => profiles.find((profile) => profile.profileId === contextProfileId),
     [contextProfileId, profiles],
@@ -143,10 +121,9 @@ export function SettingsPanel({
       ),
     )
   }, [contextProfileId, managers, selectedProject?.defaultSessionAgentId])
-  // Project settings are available only on the local Builder surface. A route
-  // carries the profile ID so the selected project stays stable even if the
-  // sticky conversation selection belongs to another project.
-  const projectSettingsRouteAvailable = target.kind === 'builder' && Boolean(contextProfileId)
+  // A route carries the profile ID so the selected project stays stable even if
+  // the sticky conversation selection belongs to another project.
+  const projectSettingsRouteAvailable = Boolean(contextProfileId)
   const isProjectSettings = activeTab === 'project-settings' && projectSettingsRouteAvailable
   const layoutAvailableTabs = isProjectSettings ? ['project-settings'] as SettingsTab[] : availableTabs
   const targetLabel = isProjectSettings
@@ -158,8 +135,7 @@ export function SettingsPanel({
       ? projectSettingsRouteAvailable
       : availableTabs.includes(tab), [availableTabs, projectSettingsRouteAvailable])
 
-  // Sync activeTab when initialTab prop changes while panel is already mounted
-  // (e.g. deep-link navigation to Collaboration tab after sign-in recovery).
+  // Sync activeTab when initialTab prop changes while panel is already mounted.
   useEffect(() => {
     if (initialTab && isAvailableTab(initialTab as SettingsTab)) {
       setActiveTab(initialTab as SettingsTab)
@@ -188,18 +164,16 @@ export function SettingsPanel({
       {activeTab === 'general' && (
         <SettingsGeneral
           wsUrl={wsUrl}
-          target={target}
           apiClient={apiClient}
-          repositoryCloneAvailable={resolvedRepositoryCloneAvailable}
         />
       )}
-      {activeTab === 'git-monitoring' && target.kind === 'builder' && (
+      {activeTab === 'git-monitoring' && (
         <SettingsGitMonitoring wsUrl={wsUrl} profiles={profiles} />
       )}
       {activeTab === 'appearance' && <SettingsAppearance />}
       {activeTab === 'notifications' && <SettingsNotifications managers={managers} apiClient={apiClient} />}
-      {activeTab === 'auth' && <SettingsAuth wsUrl={wsUrl} target={target} apiClient={apiClient} />}
-      {activeTab === 'secrets' && target.kind === 'builder' && (
+      {activeTab === 'auth' && <SettingsAuth wsUrl={wsUrl} apiClient={apiClient} />}
+      {activeTab === 'secrets' && (
         <SettingsSecrets
           apiClient={apiClient}
           profiles={profiles}
@@ -214,7 +188,6 @@ export function SettingsPanel({
           profiles={profiles}
           managers={managers}
           previewSession={previewSession}
-          changeKey={specialistChangeKey}
           initialImportUrl={initialSkillImportUrl}
           onInitialImportUrlConsumed={onSkillImportUrlConsumed}
         />
@@ -264,18 +237,12 @@ export function SettingsPanel({
         />
       )}
       {activeTab === 'extensions' && <SettingsExtensions wsUrl={wsUrl} apiClient={apiClient} />}
-      {activeTab === 'external-chrome' && target.kind === 'builder' && <SettingsExternalChrome />}
+      {activeTab === 'external-chrome' && <SettingsExternalChrome />}
       {activeTab === 'cli-access' && <SettingsCliAccess wsUrl={wsUrl} apiClient={apiClient} />}
       {activeTab === 'stream-deck' && <SettingsStreamDeck apiClient={apiClient} />}
-      {activeTab === 'history' && target.kind === 'builder' && <SettingsHistory wsUrl={wsUrl} />}
+      {activeTab === 'history' && <SettingsHistory wsUrl={wsUrl} />}
       {activeTab === 'observability' && <SettingsObservability apiClient={apiClient} />}
-      {activeTab === 'collaboration' && (
-        <SettingsCollaboration
-          wsUrl={wsUrl}
-          initialApiBaseUrl={target.kind === 'collab' ? target.apiBaseUrl : initialCollabApiBaseUrl}
-        />
-      )}
-      {activeTab === 'about' && <SettingsAbout wsUrl={wsUrl} apiClient={apiClient} showNativeRuntimes={target.kind === 'builder'} />}
+      {activeTab === 'about' && <SettingsAbout wsUrl={wsUrl} apiClient={apiClient} showNativeRuntimes />}
     </SettingsLayout>
   )
 }

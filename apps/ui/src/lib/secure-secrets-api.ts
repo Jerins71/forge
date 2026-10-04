@@ -127,7 +127,6 @@ interface SecureVaultPrivateBridge {
 }
 
 export type SecureSecretsErrorCode =
-  | 'SECURE_BUILDER_ONLY'
   | 'SECURE_PRIVATE_API_UNAVAILABLE'
   | 'SECURE_REQUEST_INVALID'
   | 'SECURE_SOURCE_LOCKED'
@@ -145,7 +144,6 @@ export type SecureSecretsErrorCode =
   | 'SECURE_OPERATION_FAILED'
 
 const ERROR_MESSAGES: Record<SecureSecretsErrorCode, string> = {
-  SECURE_BUILDER_ONLY: 'Secrets are available only on the local Builder backend.',
   SECURE_PRIVATE_API_UNAVAILABLE: 'Secret entry is available only in the Forge desktop app.',
   SECURE_REQUEST_INVALID: 'Check the secret or SSH host settings and try again.',
   SECURE_SOURCE_LOCKED: 'The secret source is locked. Unlock it and try again.',
@@ -228,7 +226,6 @@ export async function unlockSecureMaterialEntry(): Promise<boolean> {
 export async function fetchSecureSecretsCatalog(
   apiClient: SettingsApiClient,
 ): Promise<SecureSecretsCatalog> {
-  assertBuilderTarget(apiClient)
   const [
     providerPayload,
     secretPayload,
@@ -283,7 +280,6 @@ export async function fetchSecureSecretsCatalog(
 export async function fetchSecureSecretSettings(
   apiClient: SettingsApiClient,
 ): Promise<GetSecureSecretSettingsResponse> {
-  assertBuilderTarget(apiClient)
   return await requestJson<GetSecureSecretSettingsResponse>(
     apiClient,
     '/api/settings/secure-secrets',
@@ -294,7 +290,6 @@ export async function updateSecureSecretSettings(
   apiClient: SettingsApiClient,
   patch: UpdateSecureSecretSettingsRequest,
 ): Promise<UpdateSecureSecretSettingsResponse> {
-  assertBuilderTarget(apiClient)
   return await requestJson<UpdateSecureSecretSettingsResponse>(
     apiClient,
     '/api/settings/secure-secrets',
@@ -309,7 +304,6 @@ export async function updateSecureSecretSettings(
 export async function exportSecureVaultTransfer(
   apiClient: SettingsApiClient,
 ): Promise<ExportSecureVaultTransferResult> {
-  assertBuilderTarget(apiClient)
   return await requestJson<ExportSecureVaultTransferResult>(
     apiClient,
     '/api/secure-secrets/transfer/export',
@@ -321,7 +315,6 @@ export async function importSecureVaultTransfer(
   apiClient: SettingsApiClient,
   input: ImportSecureVaultTransferRequest,
 ): Promise<ImportSecureVaultTransferResult> {
-  assertBuilderTarget(apiClient)
   return await requestJson<ImportSecureVaultTransferResult>(
     apiClient,
     '/api/secure-secrets/transfer/import',
@@ -337,7 +330,6 @@ export async function createSecureSshTrustedHost(
   apiClient: SettingsApiClient,
   input: CreateSecureSshTrustedHostRequest,
 ): Promise<SecureSshTrustedHostSummary> {
-  assertBuilderTarget(apiClient)
   return requestJson<SecureSshTrustedHostSummary>(
     apiClient,
     '/api/secure-secrets/ssh-trusted-hosts',
@@ -354,7 +346,6 @@ export async function updateSecureSshTrustedHost(
   trustedHostId: string,
   input: UpdateSecureSshTrustedHostRequest,
 ): Promise<SecureSshTrustedHostSummary> {
-  assertBuilderTarget(apiClient)
   return requestJson<SecureSshTrustedHostSummary>(
     apiClient,
     `/api/secure-secrets/ssh-trusted-hosts/${encodeURIComponent(trustedHostId)}`,
@@ -370,7 +361,6 @@ export async function deleteSecureSshTrustedHost(
   apiClient: SettingsApiClient,
   trustedHostId: string,
 ): Promise<void> {
-  assertBuilderTarget(apiClient)
   await requestEmpty(
     apiClient,
     `/api/secure-secrets/ssh-trusted-hosts/${encodeURIComponent(trustedHostId)}`,
@@ -381,7 +371,6 @@ export async function deleteSecureSshTrustedHost(
 export async function fetchSecureSessionReadiness(
   apiClient: SettingsApiClient,
 ): Promise<SecureSessionReadiness> {
-  assertBuilderTarget(apiClient)
   return requestJson<SecureSessionReadiness>(
     apiClient,
     '/api/secure-sessions/readiness',
@@ -391,7 +380,6 @@ export async function fetchSecureSessionReadiness(
 export async function installSecureRunner(
   apiClient: SettingsApiClient,
 ): Promise<SecureSessionReadiness> {
-  assertBuilderTarget(apiClient)
   return requestJson<SecureSessionReadiness>(
     apiClient,
     '/api/secure-sessions/runner/install',
@@ -403,7 +391,6 @@ export async function createLocalSecret(
   apiClient: SettingsApiClient,
   input: CreateLocalSecretInput,
 ): Promise<SecureSecretSummary> {
-  assertBuilderTarget(apiClient)
   const encryptedMaterial = await encryptMaterial(apiClient, input.material)
   return requestJson<SecureSecretSummary>(apiClient, '/api/secure-secrets/local', {
     method: 'POST',
@@ -424,7 +411,6 @@ export async function createBitwardenPasswordManagerSecret(
   providerId: string,
   input: CreateBitwardenPasswordManagerSecretInput,
 ): Promise<SecureSecretSummary> {
-  assertBuilderTarget(apiClient)
   const encryptedMaterial = await encryptMaterial(apiClient, input.material)
   return requestJson<SecureSecretSummary>(
     apiClient,
@@ -450,7 +436,6 @@ export async function updateSecureSecret(
   secretId: string,
   input: UpdateSecureSecretInput,
 ): Promise<SecureSecretSummary> {
-  assertBuilderTarget(apiClient)
   const encryptedMaterial = input.material === undefined
     ? undefined
     : await encryptMaterial(apiClient, input.material)
@@ -478,7 +463,6 @@ export async function deleteSecureSecret(
   apiClient: SettingsApiClient,
   secretId: string,
 ): Promise<void> {
-  assertBuilderTarget(apiClient)
   await requestEmpty(
     apiClient,
     `/api/secure-secrets/${encodeURIComponent(secretId)}`,
@@ -490,7 +474,6 @@ export async function connectBitwardenProvider(
   apiClient: SettingsApiClient,
   input: ConnectBitwardenInput,
 ): Promise<SecureSecretProviderSummary> {
-  assertBuilderTarget(apiClient)
   const encryptedAccessToken = await encryptMaterial(apiClient, input.accessToken)
 
   return requestJson<SecureSecretProviderSummary>(
@@ -515,7 +498,6 @@ export async function reconnectBitwardenProvider(
   providerId: string,
   accessToken: string,
 ): Promise<SecureSecretProviderSummary> {
-  assertBuilderTarget(apiClient)
   const encryptedAccessToken = await encryptMaterial(apiClient, accessToken)
   return requestJson<SecureSecretProviderSummary>(
     apiClient,
@@ -532,7 +514,6 @@ export async function connectBitwardenPasswordManager(
   apiClient: SettingsApiClient,
   displayName = 'Bitwarden Password Manager',
 ): Promise<SecureSecretProviderSummary> {
-  assertBuilderTarget(apiClient)
   return requestJson<SecureSecretProviderSummary>(
     apiClient,
     '/api/secure-secrets/providers/bitwarden-password-manager',
@@ -548,7 +529,6 @@ export async function fetchBitwardenPasswordManagerSettings(
   apiClient: SettingsApiClient,
   providerId: string,
 ): Promise<BitwardenPasswordManagerSettings> {
-  assertBuilderTarget(apiClient)
   return requestJson<BitwardenPasswordManagerSettings>(
     apiClient,
     `/api/secure-secrets/providers/${encodeURIComponent(providerId)}/collections`,
@@ -560,7 +540,6 @@ export async function unlockBitwardenPasswordManager(
   providerId: string,
   masterPassword: string,
 ): Promise<BitwardenPasswordManagerSettings> {
-  assertBuilderTarget(apiClient)
   const encryptedMasterPassword = await encryptMaterial(apiClient, masterPassword)
   return requestJson<BitwardenPasswordManagerSettings>(
     apiClient,
@@ -577,7 +556,6 @@ export async function lockBitwardenPasswordManager(
   apiClient: SettingsApiClient,
   providerId: string,
 ): Promise<SecureSecretProviderSummary> {
-  assertBuilderTarget(apiClient)
   return requestJson<SecureSecretProviderSummary>(
     apiClient,
     `/api/secure-secrets/providers/${encodeURIComponent(providerId)}/lock`,
@@ -589,7 +567,6 @@ export async function installBitwardenPasswordManagerCli(
   apiClient: SettingsApiClient,
   providerId: string,
 ): Promise<BitwardenPasswordManagerSettings> {
-  assertBuilderTarget(apiClient)
   return requestJson<BitwardenPasswordManagerSettings>(
     apiClient,
     `/api/secure-secrets/providers/${encodeURIComponent(providerId)}/cli/install`,
@@ -602,7 +579,6 @@ export async function updateBitwardenPasswordManagerCli(
   providerId: string,
   executablePath: string | null,
 ): Promise<BitwardenPasswordManagerSettings> {
-  assertBuilderTarget(apiClient)
   return requestJson<BitwardenPasswordManagerSettings>(
     apiClient,
     `/api/secure-secrets/providers/${encodeURIComponent(providerId)}/cli`,
@@ -619,7 +595,6 @@ export async function replaceBitwardenPasswordManagerCollections(
   providerId: string,
   collectionIds: string[],
 ): Promise<UpdateBitwardenPasswordManagerCollectionsResult> {
-  assertBuilderTarget(apiClient)
   return requestJson<UpdateBitwardenPasswordManagerCollectionsResult>(
     apiClient,
     `/api/secure-secrets/providers/${encodeURIComponent(providerId)}/collections`,
@@ -635,7 +610,6 @@ export async function syncBitwardenPasswordManager(
   apiClient: SettingsApiClient,
   providerId: string,
 ): Promise<UpdateBitwardenPasswordManagerCollectionsResult> {
-  assertBuilderTarget(apiClient)
   return requestJson<UpdateBitwardenPasswordManagerCollectionsResult>(
     apiClient,
     `/api/secure-secrets/providers/${encodeURIComponent(providerId)}/collections`,
@@ -647,7 +621,6 @@ export async function importBitwardenSecret(
   apiClient: SettingsApiClient,
   input: ImportBitwardenSecretInput,
 ): Promise<SecureSecretSummary> {
-  assertBuilderTarget(apiClient)
   return requestJson<SecureSecretSummary>(
     apiClient,
     `/api/secure-secrets/providers/${encodeURIComponent(input.providerId)}/secrets`,
@@ -671,7 +644,6 @@ export async function updateSecureSecretProjectDefault(
   secretId: string,
   enabled: boolean,
 ): Promise<SecureSecretProjectDefaultSummary | null> {
-  assertBuilderTarget(apiClient)
   return await requestJson<SecureSecretProjectDefaultSummary | null>(
     apiClient,
     `/api/secure-secrets/project-defaults/${encodeURIComponent(profileId)}/${encodeURIComponent(secretId)}`,
@@ -688,7 +660,6 @@ export async function updateSecureSecretAutomaticGrant(
   secretId: string,
   policy: SecureSecretAutomaticGrantPolicy,
 ): Promise<SecureSecretSummary> {
-  assertBuilderTarget(apiClient)
   return await requestJson<SecureSecretSummary>(
     apiClient,
     `/api/secure-secrets/${encodeURIComponent(secretId)}/automatic-grant`,
@@ -704,7 +675,6 @@ export async function testSecureSecretProvider(
   apiClient: SettingsApiClient,
   providerId: string,
 ): Promise<SecureSecretProviderTestResult> {
-  assertBuilderTarget(apiClient)
   return await requestJson<SecureSecretProviderTestResult>(
     apiClient,
     `/api/secure-secrets/providers/${encodeURIComponent(providerId)}/test`,
@@ -716,7 +686,6 @@ export async function disconnectSecureSecretProvider(
   apiClient: SettingsApiClient,
   providerId: string,
 ): Promise<void> {
-  assertBuilderTarget(apiClient)
   await requestEmpty(
     apiClient,
     `/api/secure-secrets/providers/${encodeURIComponent(providerId)}`,
@@ -763,12 +732,6 @@ async function encryptMaterial(
   } catch (error) {
     if (error instanceof SecureSecretsError) throw error
     throw new SecureSecretsError('SECURE_OPERATION_FAILED')
-  }
-}
-
-function assertBuilderTarget(apiClient: SettingsApiClient): void {
-  if (apiClient.target.kind !== 'builder') {
-    throw new SecureSecretsError('SECURE_BUILDER_ONLY')
   }
 }
 
@@ -862,7 +825,6 @@ function withSecureControl(init?: RequestInit): RequestInit | undefined {
 export async function fetchProjectSecureSessionsSettings(
   client: SettingsApiClient, profileId: string,
 ): Promise<ProjectSecureSessionsSettings> {
-  assertBuilderTarget(client)
   return parseProjectSecureSessionsSettings(await requestJson(client,
     `/api/secure-secrets/projects/${encodeURIComponent(profileId)}/settings`), profileId)
 }
@@ -870,7 +832,6 @@ export async function fetchProjectSecureSessionsSettings(
 export async function updateProjectSecureSessionsSettings(
   client: SettingsApiClient, profileId: string, enabled: boolean,
 ): Promise<ProjectSecureSessionsSettings> {
-  assertBuilderTarget(client)
   return parseProjectSecureSessionsSettings(await requestJson(client,
     `/api/secure-secrets/projects/${encodeURIComponent(profileId)}/settings`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }),

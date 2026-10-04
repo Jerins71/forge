@@ -1,4 +1,3 @@
-import { Globe } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import {
   DndContext,
@@ -19,21 +18,12 @@ import {
 import type { BuilderSidebarOrderRef } from '@forge/protocol'
 import type { ProfileTreeRow } from '@/lib/agent-hierarchy'
 import { builderSidebarOrderKey, resolveBuilderSidebarDragMove } from '@/lib/builder-sidebar-order'
-import type { RemoteSidebarOrigin } from './types'
 import { SortableProfileGroup } from './SortableProfileGroup'
 
-export type RoomsProjectTreeRow =
-  | {
-      kind: 'local'
-      ref: BuilderSidebarOrderRef
-      treeRow: ProfileTreeRow
-    }
-  | {
-      kind: 'remote'
-      ref: BuilderSidebarOrderRef
-      treeRow: ProfileTreeRow
-      origin: RemoteSidebarOrigin
-    }
+export interface RoomsProjectTreeRow {
+  ref: BuilderSidebarOrderRef
+  treeRow: ProfileTreeRow
+}
 
 export function RoomsProjectsTree({
   rows,
@@ -42,9 +32,7 @@ export function RoomsProjectsTree({
   dndEnabled: allowDnd = true,
   onMoveBuilderProject,
   renderRow,
-  getMemoDependencies,
   emptyState,
-  remoteOriginSections,
 }: {
   rows: readonly RoomsProjectTreeRow[]
   activeView: boolean
@@ -58,9 +46,7 @@ export function RoomsProjectsTree({
     dragHandleListeners?: DraggableSyntheticListeners,
     dragHandleAttributes?: DraggableAttributes,
   ) => ReactNode
-  getMemoDependencies?: (row: RoomsProjectTreeRow) => readonly unknown[] | undefined
   emptyState?: ReactNode
-  remoteOriginSections?: ReactNode
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -101,7 +87,6 @@ export function RoomsProjectsTree({
                 <SortableProfileGroup
                   key={sortableId}
                   sortableId={sortableId}
-                  memoDependencies={getMemoDependencies?.(row)}
                   roomsV2
                 >
                   {(dragHandleRef, dragHandleListeners, dragHandleAttributes) => (
@@ -116,9 +101,6 @@ export function RoomsProjectsTree({
           {activeDragRow ? (
             <div className="rounded-md border border-sidebar-border bg-sidebar shadow-lg">
               <div className="flex items-center gap-1.5 px-3 py-2">
-                {activeDragRow.kind === 'remote' ? (
-                  <Globe aria-hidden="true" className="sidebar-room-remote-marker sidebar-room-remote-marker--large" />
-                ) : null}
                 <span className="text-sm font-semibold">{activeDragRow.treeRow.profile.displayName}</span>
               </div>
             </div>
@@ -133,10 +115,5 @@ export function RoomsProjectsTree({
       </ul>
     )
 
-  return (
-    <>
-      {projectList}
-      {remoteOriginSections}
-    </>
-  )
+  return projectList
 }

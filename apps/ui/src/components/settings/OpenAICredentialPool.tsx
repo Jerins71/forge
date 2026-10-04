@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import type { OpenAIBrokerSettingsState, SettingsAuthProviderAuthType } from '@forge/protocol'
 import type { SettingsApiClient } from './settings-api-client'
-import type { SettingsBackendTarget } from './settings-target'
 import { CredentialPoolPanel } from './CredentialPoolPanel'
 import { OpenAIBrokerAuthPanel } from './OpenAIBrokerAuthPanel'
 
@@ -11,7 +10,6 @@ import { OpenAIBrokerAuthPanel } from './OpenAIBrokerAuthPanel'
 
 interface OpenAICredentialPoolProps {
   apiClient: SettingsApiClient
-  target: SettingsBackendTarget
   authType?: SettingsAuthProviderAuthType
   onError: (message: string) => void
   onSuccess: (message: string) => void
@@ -20,7 +18,6 @@ interface OpenAICredentialPoolProps {
 
 export function OpenAICredentialPool({
   apiClient,
-  target,
   authType,
   onError,
   onSuccess,
@@ -49,7 +46,6 @@ export function OpenAICredentialPool({
         }
         authType={authType}
         apiClient={apiClient}
-        target={target}
         readOnly={brokerActive}
         onError={onError}
         onSuccess={onSuccess}

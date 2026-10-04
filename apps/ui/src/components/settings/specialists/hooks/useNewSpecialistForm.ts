@@ -5,7 +5,6 @@ import {
   fetchWorkerTemplate,
   saveSpecialist,
   saveSharedSpecialist,
-  saveChannelSpecialist,
   type SaveSpecialistPayload,
 } from '../../specialists-api'
 import {
@@ -19,12 +18,7 @@ import {
   DEFAULT_REASONING_LEVEL,
 } from '../types'
 
-/**
- * Manages the new specialist creation form state and submission.
- *
- * When `channelId` is provided, new specialists are created as channel-local
- * definitions using the channel specialist API endpoint.
- */
+/** Manages the new specialist creation form state and submission. */
 export function useNewSpecialistForm(
   clientOrWsUrl: SettingsApiClient | string,
   selectedScope: string,
@@ -33,7 +27,6 @@ export function useNewSpecialistForm(
   loadSpecialists: () => Promise<ResolvedSpecialistDefinition[]>,
   startEditing: (s: ResolvedSpecialistDefinition) => void,
   expandPromptForId: (id: string) => void,
-  channelId?: string,
 ) {
   const [showNewForm, setShowNewForm] = useState(false)
   const [newHandle, setNewHandle] = useState('')
@@ -41,8 +34,6 @@ export function useNewSpecialistForm(
   const [newHandleDerived, setNewHandleDerived] = useState(true)
   const [newCreating, setNewCreating] = useState(false)
   const [newError, setNewError] = useState<string | null>(null)
-
-  const isChannel = !!channelId
 
   const normalizedNewHandle = normalizeHandle(newHandle)
   const handleConflict = normalizedNewHandle
@@ -111,9 +102,7 @@ export function useNewSpecialistForm(
         promptBody: template,
       }
 
-      if (isChannel) {
-        await saveChannelSpecialist(clientOrWsUrl, channelId!, normalizedNewHandle, payload)
-      } else if (isGlobal) {
+      if (isGlobal) {
         await saveSharedSpecialist(clientOrWsUrl, normalizedNewHandle, payload)
       } else {
         await saveSpecialist(clientOrWsUrl, selectedScope, normalizedNewHandle, payload)
@@ -138,8 +127,6 @@ export function useNewSpecialistForm(
     clientOrWsUrl,
     selectedScope,
     isGlobal,
-    isChannel,
-    channelId,
     normalizedNewHandle,
     newDisplayName,
     newHandleValid,

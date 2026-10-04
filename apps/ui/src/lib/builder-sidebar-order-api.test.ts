@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSettingsApiClient } from '@/components/settings/settings-api-client'
-import {
-  createBuilderSettingsTarget,
-  createCollabSettingsTarget,
-} from '@/components/settings/settings-target'
+import { createBuilderSettingsTarget } from '@/components/settings/settings-target'
 import {
   BuilderSidebarOrderApiConflictError,
   BuilderSidebarOrderApiUnavailableError,
@@ -47,19 +44,7 @@ describe('builder sidebar order API targeting', () => {
     )
   })
 
-  it('rejects a remote collaboration target before any request can be sent', () => {
-    const fetchMock = vi.fn()
-    globalThis.fetch = fetchMock as typeof fetch
-    const remoteClient = createSettingsApiClient(createCollabSettingsTarget(
-      'wss://remote.example/ws',
-      'https://remote.example/',
-    ))
-
-    expect(() => createBuilderSidebarOrderApi(remoteClient)).toThrow(/local Builder target/)
-    expect(fetchMock).not.toHaveBeenCalled()
-  })
-
-  it('constructs directly from the local WS URL regardless of an active remote URL', async () => {
+  it('constructs directly from the local WS URL', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       version: 1,
       revision: 0,
@@ -68,9 +53,7 @@ describe('builder sidebar order API targeting', () => {
     }), { status: 200, headers: { 'content-type': 'application/json' } }))
     globalThis.fetch = fetchMock as typeof fetch
 
-    const activeRemoteWsUrl = 'wss://remote.example/ws'
     const api = createLocalBuilderSidebarOrderApi('ws://127.0.0.1:47187/ws')
-    expect(activeRemoteWsUrl).not.toContain('127.0.0.1')
     await api.get()
 
     expect(fetchMock).toHaveBeenCalledWith(

@@ -4,9 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
-  type SetStateAction,
 } from 'react'
-import { reportBuilderConnected } from '@/lib/connection-health-store'
 import { AgentSidebarConnected } from '@/components/chat/AgentSidebarConnected'
 import { WorkGraphWorkerHighlightProvider } from '@/components/chat/WorkGraphWorkerHighlight'
 import { ArtifactsSidebar } from '@/components/chat/ArtifactsSidebar'
@@ -58,10 +56,8 @@ import { isCortexDiffViewerSession, resolveWorkerFetchManagerId } from '@/lib/ag
 import { hasProjectManagers } from '@/lib/onboarding-ui'
 import {
   DEFAULT_MANAGER_AGENT_ID,
-  type ActiveSurface,
   type ActiveView,
   type AppRouteState,
-  type DeckPanel,
   type StatsTab,
 } from '@/hooks/index-page/use-route-state'
 import { resolveStreamDeckNavigationRoute } from '@/hooks/index-page/stream-deck-navigation'
@@ -111,22 +107,12 @@ import {
   secureGrantMatchesSnapshot,
   shouldRefreshSecureRequestAfterError,
 } from './secure-batch-grant-reconciliation'
-import {
-  LOCAL_ORIGIN_ID,
-  forgeOriginManager,
-  originRegistry,
-  useOriginMeta,
-  useOriginSlice,
-  useOriginSnapshot,
-  type OriginId,
-} from '@/lib/origin-store'
-import { getCollaborationConnectionOptions, resolveCollaborationTarget } from '@/lib/collaboration-connections'
+import { LOCAL_ORIGIN_ID } from '@/lib/origin-store'
 import type { ManagerWsClient } from '@/lib/ws-client'
-import type { ManagerWsState } from '@/lib/ws-state'
 import { buildModelCacheHeaderSummary } from '@/components/chat/model-cache'
 import { isPiGenerationThroughputEligible } from '@/lib/generation-throughput-eligibility'
 import { deriveMissingPendingChoiceIds } from '@/lib/ws-client/utils'
-import { useOriginConnection } from '@/hooks/index-page/use-origin-connection'
+import { useLocalConnection } from '@/hooks/index-page/use-local-connection'
 import { useManagerActions } from '@/hooks/index-page/use-manager-actions'
 import { useActiveAgent } from '@/hooks/index-page/use-active-agent'
 import { useWorkspacePanels } from '@/hooks/index-page/use-workspace-panels'
@@ -154,101 +140,25 @@ import {
 
 type FileEditorCoordinator = ReturnType<typeof useFileEditorCoordinator>
 
-const selectLocalConnected = (s: ManagerWsState): boolean => s.connected
-
-type BuilderNavigationState =
-  | {
-      view: 'chat'
-      agentId: string
-      /** Target origin; omitted = stay on the currently active origin. */
-      origin?: OriginId
-      deckPanel?: DeckPanel
-    }
-  | Extract<AppRouteState, { view: 'settings' }>
-  | { view: 'stats'; statsTab?: StatsTab }
-  | { view: 'archive'; surface: ActiveSurface }
-
 interface BuilderSurfaceProps {
   wsUrl: string
   routeState: AppRouteState
   activeView: ActiveView
   navigateToRoute: (nextRouteState: AppRouteState, replace?: boolean) => void
-  /** Same-origin hosted collaboration Builder still browses server directories. */
-  directServerDirectoryBrowser?: { canCreateDirectory: boolean }
-  /**
-   * Explicit capability for Clone repository / Repositories settings.
-   * False on direct collaboration-server Builder shells.
-   */
-  repositoryCloneAvailable?: boolean
-  collaborationModeSwitch?: {
-    activeSurface: ActiveSurface
-    onSelectSurface: (surface: ActiveSurface) => void
-  }
 }
 
 export function BuilderSurface({
-  wsUrl: localWsUrl,
+  wsUrl,
   routeState,
   activeView,
-  navigateToRoute: navigateToOuterRoute,
-  directServerDirectoryBrowser,
-  repositoryCloneAvailable,
-  collaborationModeSwitch,
+  navigateToRoute,
 }: BuilderSurfaceProps) {
-  // This API is intentionally pinned to the local Builder URL. It must never
-  // derive from the active (possibly remote) origin.
   const builderSidebarOrderApi = useMemo(
-    () => createLocalBuilderSidebarOrderApi(localWsUrl),
-    [localWsUrl],
+    () => createLocalBuilderSidebarOrderApi(wsUrl),
+    [wsUrl],
   )
   const [showConversationThroughput] = useConversationThroughputDisplayPreference()
 
-  // Wave R: the route's `origin` selects which origin's state/client feed the
-  // chat surface. Absent = the local origin. Non-chat views always render
-  // against local.
-  const activeOriginId: OriginId =
-    routeState.view === 'chat' && routeState.origin ? routeState.origin : LOCAL_ORIGIN_ID
-  const isRemoteOriginActive = activeOriginId !== LOCAL_ORIGIN_ID
-  // Identity behind the active origin's connection (null on local): author
-  // chips render only for authors other than this user (SPEC §5.5).
-  const activeOriginMeta = useOriginMeta(activeOriginId)
-  const usesServerDirectoryBrowser = isRemoteOriginActive || Boolean(directServerDirectoryBrowser)
-  const cloneRepositoryEnabled =
-    repositoryCloneAvailable !== false && !isRemoteOriginActive && !usesServerDirectoryBrowser
-  const activeOriginCurrentUserId = isRemoteOriginActive
-    ? activeOriginMeta?.currentUser?.userId ?? null
-    : null
-  // The ACTIVE origin's backend URL. Every project-scoped surface below
-  // (files/git/terminals/attachments/audit/model availability) derives its
-  // HTTP endpoints from this — instance-local surfaces (settings, stats,
-  // onboarding, cortex, sidebar usage) explicitly use `localWsUrl`.
-  const wsUrl = useMemo(() => {
-    if (!isRemoteOriginActive) return localWsUrl
-    const store = originRegistry.getOrigin(activeOriginId)
-    if (store) return store.wsUrl
-    const target = getCollaborationConnectionOptions().find(
-      (candidate) => candidate.connectionId === activeOriginId,
-    )
-    return target?.wsUrl ?? localWsUrl
-  }, [activeOriginId, isRemoteOriginActive, localWsUrl])
-
-  const navigateToRoute = useCallback((nextRouteState: BuilderNavigationState, replace = false) => {
-    if (nextRouteState.view === 'chat') {
-      // Internal chat navigations stay on the active origin unless the caller
-      // targets one explicitly (sidebar cross-origin selects).
-      const resolvedOrigin = nextRouteState.origin ?? activeOriginId
-      navigateToOuterRoute({
-        view: 'chat',
-        agentId: nextRouteState.agentId,
-        surface: 'builder',
-        origin: resolvedOrigin === LOCAL_ORIGIN_ID ? undefined : resolvedOrigin,
-        deckPanel: nextRouteState.deckPanel,
-      }, replace)
-      return
-    }
-
-    navigateToOuterRoute(nextRouteState, replace)
-  }, [activeOriginId, navigateToOuterRoute])
 
   // Shell-level refs shared across the extracted controllers.  Keeping these at
   // the shell (not inside a hook) is what breaks the apparent ordering cycle
@@ -289,41 +199,13 @@ export function BuilderSurface({
     }
   }, [])
 
-  const { clientRef, httpClientRef, state, setState } = useOriginConnection(activeOriginId, localWsUrl)
-  const localState = useOriginSnapshot(LOCAL_ORIGIN_ID)
-  const localClientRef = useRef<ManagerWsClient | null>(null)
-  const localClient = originRegistry.getOrigin(LOCAL_ORIGIN_ID)?.getClient() ?? null
-  // Keep local sidebar action handlers bound to the current local-origin client
-  // during render so callbacks created below do not observe a stale ref when the
-  // active origin changes.
-  localClientRef.current = localClient
-  const setLocalState = useCallback((update: SetStateAction<ManagerWsState>) => {
-    const target = originRegistry.getOrigin(LOCAL_ORIGIN_ID)
-    if (!target) return
-    const previous = target.getSnapshot()
-    const next = typeof update === 'function'
-      ? (update as (prev: ManagerWsState) => ManagerWsState)(previous)
-      : update
-    if (next !== previous) target.ingest({ type: 'snapshot', state: next })
-  }, [])
+  const { client: localClient, clientRef, httpClientRef, state, setState } = useLocalConnection(wsUrl)
   const handleBrowserRuntimeTabStateChanged = useCallback((tab: Parameters<typeof projectRuntimeBrowserTabState>[1]) => {
-    setLocalState((previous) => projectRuntimeBrowserTabState(previous, tab))
-  }, [setLocalState])
-
-  // Sync builder WS health to the module-level store so ModeSwitch can
-  // display the builder connection dot even from the collab surface. Always
-  // reflects the LOCAL origin — remote origin health lives in origin meta.
-  const localConnected = useOriginSlice(LOCAL_ORIGIN_ID, selectLocalConnected, {
-    selectorKey: 'builder.localConnected',
-  })
-  useEffect(() => {
-    reportBuilderConnected(localConnected)
-  }, [localConnected])
+    setState((previous) => projectRuntimeBrowserTabState(previous, tab))
+  }, [setState])
 
   useEffect(() => {
     let cancelled = false
-    // Route through the origin's target-aware HTTP client (requirement 9)
-    // rather than a raw wsUrl, so remote origins carry their credentials.
     void fetchModelCacheVisualizationEnabled(httpClientRef.current ?? wsUrl)
       .then((enabled) => {
         if (!cancelled) {
@@ -355,7 +237,7 @@ export function BuilderSurface({
     error: onboardingError,
     savePreferences: saveOnboardingPreferences,
     skip: skipOnboarding,
-  } = useOnboardingState(localWsUrl)
+  } = useOnboardingState(wsUrl)
 
   const [messageSourceView, setMessageSourceView] = useState<MessageSourceView>('web')
   const [planExpanded, setPlanExpanded] = useState(false)
@@ -424,7 +306,7 @@ export function BuilderSurface({
       : null
 
   useEffect(() => {
-    if (isRemoteOriginActive || !state.connected) {
+    if (!state.connected) {
       setSecureCatalog(null)
       setSecureCatalogLoading(false)
       setSecureCatalogUnavailable(false)
@@ -455,15 +337,13 @@ export function BuilderSurface({
     }
   }, [
     activeAgentId,
-    activeOriginId,
     httpClientRef,
-    isRemoteOriginActive,
     state.connected,
     state.secureSecretCatalogRevision,
   ])
 
   const refreshSecureBrowserControl = useCallback(async () => {
-    if (isRemoteOriginActive || !state.connected) {
+    if (!state.connected) {
       setSecureBrowserControl(null)
       return null
     }
@@ -477,7 +357,7 @@ export function BuilderSurface({
       setSecureBrowserControl(null)
       return null
     }
-  }, [httpClientRef, isRemoteOriginActive, state.connected])
+  }, [httpClientRef, state.connected])
 
   useEffect(() => {
     void refreshSecureBrowserControl()
@@ -488,7 +368,7 @@ export function BuilderSurface({
     masterPassword: string,
   ) => {
     const apiClient = httpClientRef.current
-    if (!apiClient || isRemoteOriginActive) {
+    if (!apiClient) {
       throw new SecureSessionUiError('SECURE_SOURCE_UNAVAILABLE')
     }
 
@@ -508,7 +388,7 @@ export function BuilderSurface({
     } catch {
       // Unlock succeeded. The catalog revision event will retry the refresh.
     }
-  }, [httpClientRef, isRemoteOriginActive])
+  }, [httpClientRef])
 
   const {
     lockedProvider: lockedBitwardenProvider,
@@ -524,7 +404,7 @@ export function BuilderSurface({
     promptWhenNeeded: secureSessionSnapshot?.accessPolicy?.paused !== true
       && !secureSessionSnapshot?.accessPolicy?.blockedAgentIds.includes(activeAgentId ?? '')
       && secureSessionSnapshot?.projectDefaults?.some((entry) => entry.state === 'unavailable') === true,
-    active: state.connected && !isRemoteOriginActive,
+    active: state.connected && true,
     canUnlock:
       isSecureControlAvailable(secureBrowserControl?.authorized === true)
       && isPrivateSecureFulfillmentAvailable(
@@ -535,8 +415,7 @@ export function BuilderSurface({
 
   useEffect(() => {
     if (
-      isRemoteOriginActive
-      || !state.connected
+      !state.connected
       || !activeAgentId
       || !isSecureSessionRuntimeSupported(activeAgent)
     ) {
@@ -569,20 +448,12 @@ export function BuilderSurface({
   }, [
     activeAgentId,
     activeAgent,
-    activeOriginId,
     clientRef,
     httpClientRef,
-    isRemoteOriginActive,
     state.connected,
   ])
 
   const secureSessionAvailability = useMemo<SecureSessionAvailability>(() => {
-    if (isRemoteOriginActive) {
-      return {
-        state: 'remote_origin',
-        reason: 'Secure Sessions are available only in the local Builder.',
-      }
-    }
     if (!isSecureSessionRuntimeSupported(activeAgent) || secureRuntimeUnsupported) {
       return { state: 'unsupported_runtime' }
     }
@@ -592,7 +463,6 @@ export function BuilderSurface({
     return { state: 'available' }
   }, [
     activeAgent,
-    isRemoteOriginActive,
     secureCatalogUnavailable,
     secureRuntimeUnsupported,
   ])
@@ -616,14 +486,12 @@ export function BuilderSurface({
   )
   const secureOutputQuarantineUi = useMemo(
     () => resolveSecureOutputQuarantineUi({
-      snapshot: isRemoteOriginActive ? null : secureSessionSnapshotView,
-      originId: activeOriginId,
+      snapshot: secureSessionSnapshotView,
+      originId: LOCAL_ORIGIN_ID,
       acknowledgedKey: acknowledgedSecureOutputQuarantineKey,
     }),
     [
       acknowledgedSecureOutputQuarantineKey,
-      activeOriginId,
-      isRemoteOriginActive,
       secureSessionSnapshotView,
     ],
   )
@@ -670,7 +538,6 @@ export function BuilderSurface({
   const remoteUpdateSnapshot = getActiveLocalRemoteUpdateSnapshot(
     state.remoteUpdateAwarenessSnapshot,
     activeProjectId,
-    isRemoteOriginActive,
     activeAgentIsCortex,
   )
   const handleRemoteUpdateSnapshotChange = useCallback((
@@ -682,7 +549,6 @@ export function BuilderSurface({
         const currentProjection = getActiveLocalRemoteUpdateSnapshot(
           current.remoteUpdateAwarenessSnapshot,
           activeProjectId,
-          isRemoteOriginActive,
           activeAgentIsCortex,
         )
         if (!remoteUpdateSnapshotMatchesTarget(currentProjection, expectedTarget)) {
@@ -691,12 +557,12 @@ export function BuilderSurface({
       }
       return { ...current, remoteUpdateAwarenessSnapshot: snapshot }
     })
-  }, [activeAgentIsCortex, activeProjectId, isRemoteOriginActive, setState])
+  }, [activeAgentIsCortex, activeProjectId, setState])
 
   useEffect(() => {
-    if (isRemoteOriginActive || !state.connected || !activeProjectId) return
-    void activateRemoteUpdateAwarenessProject(localWsUrl, activeProjectId).catch(() => undefined)
-  }, [activeProjectId, isRemoteOriginActive, localWsUrl, state.connected])
+    if (!state.connected || !activeProjectId) return
+    void activateRemoteUpdateAwarenessProject(wsUrl, activeProjectId).catch(() => undefined)
+  }, [activeProjectId, wsUrl, state.connected])
 
   useEffect(() => {
     if (!state.connected || !shouldLoadExternalProjectAgentDirectory({
@@ -770,13 +636,11 @@ export function BuilderSurface({
   })
 
   const isCortexSession = activeAgent?.archetypeId === 'cortex'
-  const browserSessionAgentId = !isRemoteOriginActive ? activeManagerAgent?.agentId ?? null : null
-  const browserProfileId = !isRemoteOriginActive
-    ? activeManagerAgent?.profileId ?? activeManagerAgent?.agentId ?? null
-    : null
+  const browserSessionAgentId = activeManagerAgent?.agentId ?? null
+  const browserProfileId = activeManagerAgent?.profileId ?? activeManagerAgent?.agentId ?? null
   browserSelectionRef.current = { sessionAgentId: browserSessionAgentId, profileId: browserProfileId }
   const browserSessionSnapshot = browserSessionAgentId
-    ? localState.browserSessions[browserSessionAgentId] ?? null
+    ? state.browserSessions[browserSessionAgentId] ?? null
     : null
 
   // ── Workspace panels (file browser / diff viewer / artifacts / activity rail) ──
@@ -790,7 +654,7 @@ export function BuilderSurface({
     terminalCount: state.terminals.length,
     browserTabCount: countOpenBrowserTabs(browserSessionSnapshot),
     isCortexSession,
-    activeContextKey: `${activeOriginId}:${activeProjectId ?? 'none'}:${activeAgentId ?? 'none'}:${isDiffViewerCortexSession ? 'cortex' : 'workspace'}`,
+    activeContextKey: `${LOCAL_ORIGIN_ID}:${activeProjectId ?? 'none'}:${activeAgentId ?? 'none'}:${isDiffViewerCortexSession ? 'cortex' : 'workspace'}`,
     clientRef,
     messageInputRef,
     navigateToRoute,
@@ -814,23 +678,23 @@ export function BuilderSurface({
   }, [browserCommandPort, browserWorkspaceMode, panels])
 
   useEffect(() => {
-    const request = localState.streamDeckNavigationRequest
+    const request = state.streamDeckNavigationRequest
     if (!request || handledStreamDeckNavigationRef.current === request.requestId) return
     if (window.electronBridge?.windowRole !== 'main') return
     handledStreamDeckNavigationRef.current = request.requestId
     void window.electronBridge.focusMainWindow?.()
     const nextRoute = resolveStreamDeckNavigationRoute(request, activeAgentId)
-    if (nextRoute) navigateToOuterRoute(nextRoute)
+    if (nextRoute) navigateToRoute(nextRoute)
   }, [
     activeAgentId,
-    localState.streamDeckNavigationRequest,
-    navigateToOuterRoute,
+    state.streamDeckNavigationRequest,
+    navigateToRoute,
   ])
 
   useEffect(() => {
     if (routeState.view !== 'chat' || !routeState.deckPanel || !activeAgentId) return
     if (routeState.deckPanel === 'terminal' && !terminalSessionAgentId) return
-    const streamDeckRequest = localState.streamDeckNavigationRequest
+    const streamDeckRequest = state.streamDeckNavigationRequest
     const streamDeckRequestId =
       streamDeckRequest?.sessionAgentId === activeAgentId &&
       streamDeckRequest.surface === routeState.deckPanel
@@ -858,7 +722,7 @@ export function BuilderSurface({
     activeAgentId,
     browserWorkspaceMode,
     panels,
-    localState.streamDeckNavigationRequest,
+    state.streamDeckNavigationRequest,
     routeState,
     state.terminals.length,
     terminalSessionAgentId,
@@ -866,12 +730,12 @@ export function BuilderSurface({
   ])
 
   useEffect(() => {
-    const request = localState.browserPanelRevealRequest
+    const request = state.browserPanelRevealRequest
     if (!shouldRevealBrowserPanel({
       electronHostAvailable: Boolean(window.electronBridge?.browserAutomation),
       selectedSessionAgentId: browserSessionAgentId,
       request,
-      currentHostGeneration: localState.browserHost.hostGeneration,
+      currentHostGeneration: state.browserHost.hostGeneration,
     })) return
     const key = `${request!.hostGeneration}:${request!.sequence}:${request!.tabId}`
     if (handledBrowserRevealRef.current === key) return
@@ -880,7 +744,7 @@ export function BuilderSurface({
     if (browserWorkspaceMode === 'popped-out' || browserWorkspaceMode === 'opening') {
       void browserHostRef.current?.bringToFront()
     }
-  }, [browserSessionAgentId, browserWorkspaceMode, localState.browserHost.hostGeneration, localState.browserPanelRevealRequest, panels])
+  }, [browserSessionAgentId, browserWorkspaceMode, state.browserHost.hostGeneration, state.browserPanelRevealRequest, panels])
 
   // Workers belonging to the active manager session (for pill bar)
   const sessionWorkers = useMemo(() => {
@@ -910,8 +774,8 @@ export function BuilderSurface({
 
   useEffect(() => {
     if (!workerFetchManagerId || workerMetadataHydrated) return
-    hydrateSessionWorkers(activeOriginId, workerFetchManagerId)
-  }, [activeOriginId, workerFetchManagerId, workerMetadataHydrated, activeManagerWorkerCount])
+    hydrateSessionWorkers(LOCAL_ORIGIN_ID, workerFetchManagerId)
+  }, [workerFetchManagerId, workerMetadataHydrated, activeManagerWorkerCount])
 
   // Resolve parent manager label for the worker back-bar
   const parentManagerLabel = useMemo(() => {
@@ -989,24 +853,18 @@ export function BuilderSurface({
   }, [activeAgentId, state.statuses])
 
   const hasCreatedProjectManager = useMemo(() => hasProjectManagers(state.agents), [state.agents])
-  // The sidebar always renders the local tree, even while a remote origin is
-  // selected. Bind its context-menu actions to the local origin so local
-  // sessions/projects keep their normal menu without misrouting commands to the
-  // remote client.
-  const localActiveAgentId = activeOriginId === LOCAL_ORIGIN_ID ? activeAgentId : null
+  const localActiveAgentId = activeAgentId
   const localActiveAgent = localActiveAgentId
-    ? localState.agents.find((agent) => agent.agentId === localActiveAgentId) ?? null
+    ? state.agents.find((agent) => agent.agentId === localActiveAgentId) ?? null
     : null
   const localIsActiveManager = Boolean(localActiveAgent && localActiveAgent.role === 'manager')
 
   const shouldShowWelcomeForm =
     routeState.view === 'chat' &&
-    activeOriginId === LOCAL_ORIGIN_ID &&
     !hasCreatedProjectManager &&
     onboardingState?.status === 'pending'
   const shouldShowCreateManagerState =
     routeState.view === 'chat' &&
-    activeOriginId === LOCAL_ORIGIN_ID &&
     !hasCreatedProjectManager &&
     Boolean(onboardingState && onboardingState.status !== 'pending')
 
@@ -1094,17 +952,15 @@ export function BuilderSurface({
     messageListRef,
   })
   const localSidebarManager = useManagerActions({
-    wsUrl: localWsUrl,
-    clientRef: localClientRef,
-    agents: localState.agents,
+    wsUrl: wsUrl,
+    clientRef: clientRef,
+    agents: state.agents,
     activeAgent: localActiveAgent,
     activeAgentId: localActiveAgentId,
     isActiveManager: localIsActiveManager,
-    navigateToRoute: navigateToOuterRoute,
-    setState: setLocalState,
-    clearPendingResponseForAgent: activeOriginId === LOCAL_ORIGIN_ID
-      ? transcript.clearPendingResponseForAgent
-      : () => {},
+    navigateToRoute,
+    setState,
+    clearPendingResponseForAgent: transcript.clearPendingResponseForAgent,
   })
 
   const applySecureMutationResult = useCallback((
@@ -1160,7 +1016,7 @@ export function BuilderSurface({
   const handleStartSecureSession = useCallback(async () => {
     const apiClient = httpClientRef.current
     const client = clientRef.current
-    if (!apiClient || !client || !activeAgentId || isRemoteOriginActive) return false
+    if (!apiClient || !client || !activeAgentId) return false
     const transitioningWorkerCount = activeManagerAgent?.activeWorkerCount ?? 0
     try {
       if (!(await ensureBitwardenUnlocked())) return false
@@ -1200,7 +1056,6 @@ export function BuilderSurface({
     clientRef,
     ensureBitwardenUnlocked,
     httpClientRef,
-    isRemoteOriginActive,
     reportSecureMutationError,
     secureBrowserControl,
     secureCatalog,
@@ -1221,7 +1076,6 @@ export function BuilderSurface({
       || !client
       || !managerSnapshot
       || managerSnapshot.principalKind !== 'manager'
-      || isRemoteOriginActive
     ) return false
 
     try {
@@ -1260,7 +1114,6 @@ export function BuilderSurface({
     applySecureMutationResult,
     clientRef,
     httpClientRef,
-    isRemoteOriginActive,
     reportSecureMutationError,
     secureBrowserControl,
     secureCatalog,
@@ -1268,13 +1121,12 @@ export function BuilderSurface({
 
   const handleReviewProjectSecrets = useCallback(() => {
     const profileId = secureSessionSnapshot?.profileId
-    if (!isActiveManager || isRemoteOriginActive || !profileId) return
+    if (!isActiveManager || !profileId) return
     panels.fileEditorCoordinator.requestFileEditorTransition(
       { type: 'navigate-route', nextView: 'settings' },
       () => {
         navigateToRoute({
           view: 'settings',
-          surface: 'builder',
           settingsTab: 'secrets',
           settingsProfileId: profileId,
         })
@@ -1282,7 +1134,6 @@ export function BuilderSurface({
     )
   }, [
     isActiveManager,
-    isRemoteOriginActive,
     navigateToRoute,
     panels.fileEditorCoordinator,
     secureSessionSnapshot?.profileId,
@@ -1300,7 +1151,6 @@ export function BuilderSurface({
       !apiClient
       || !client
       || !principalSnapshot
-      || isRemoteOriginActive
     ) return false
     try {
       let baseRevision = principalSnapshot.revision
@@ -1351,7 +1201,6 @@ export function BuilderSurface({
     applySecureMutationResult,
     clientRef,
     httpClientRef,
-    isRemoteOriginActive,
     reportSecureMutationError,
   ])
 
@@ -1367,7 +1216,6 @@ export function BuilderSurface({
       !apiClient
       || !client
       || !principalSnapshot
-      || isRemoteOriginActive
       || grants.length === 0
     ) return false
 
@@ -1399,7 +1247,6 @@ export function BuilderSurface({
     applySecureMutationResult,
     clientRef,
     httpClientRef,
-    isRemoteOriginActive,
     reportSecureMutationError,
   ])
 
@@ -1416,7 +1263,6 @@ export function BuilderSurface({
       !apiClient
       || !client
       || !principalSnapshot
-      || isRemoteOriginActive
     ) return
     try {
       const nextSnapshot = options?.stopProcesses
@@ -1437,7 +1283,6 @@ export function BuilderSurface({
     applySecureMutationResult,
     clientRef,
     httpClientRef,
-    isRemoteOriginActive,
     reportSecureMutationError,
   ])
 
@@ -1453,7 +1298,6 @@ export function BuilderSurface({
       !apiClient
       || !client
       || !principalSnapshot
-      || isRemoteOriginActive
     ) return
     try {
       let nextSnapshot
@@ -1495,7 +1339,6 @@ export function BuilderSurface({
     applySecureMutationResult,
     clientRef,
     httpClientRef,
-    isRemoteOriginActive,
     reportSecureMutationError,
   ])
 
@@ -1512,7 +1355,6 @@ export function BuilderSurface({
       !apiClient
       || !client
       || !principalSnapshot
-      || isRemoteOriginActive
     ) return false
 
     try {
@@ -1571,7 +1413,6 @@ export function BuilderSurface({
     applySecureMutationResult,
     clientRef,
     httpClientRef,
-    isRemoteOriginActive,
     reportSecureMutationError,
   ])
 
@@ -1606,7 +1447,6 @@ export function BuilderSurface({
       || !client
       || !principalSnapshot
       || !request
-      || isRemoteOriginActive
     ) {
       throw new SecureSessionUiError('SECURE_REQUEST_INVALID')
     }
@@ -1658,13 +1498,12 @@ export function BuilderSurface({
     applySecureMutationResult,
     clientRef,
     httpClientRef,
-    isRemoteOriginActive,
     reportSecureMutationError,
   ])
 
   const handleLoadSecurePrivateDestinations = useCallback(async () => {
     const apiClient = httpClientRef.current
-    if (!apiClient || isRemoteOriginActive) return []
+    if (!apiClient) return []
     const providers = (secureCatalog?.providers ?? []).filter(
       (provider) => provider.kind === 'bitwarden_password_manager'
         && provider.enabled
@@ -1692,26 +1531,26 @@ export function BuilderSurface({
           description: `Creates a Bitwarden login in ${collection.name}.`,
         })),
     )
-  }, [httpClientRef, isRemoteOriginActive, secureCatalog?.providers])
+  }, [httpClientRef, secureCatalog?.providers])
 
   const handleCreateSecureBrowserPairing = useCallback(async () => {
     const apiClient = httpClientRef.current
-    if (!apiClient || isRemoteOriginActive) {
+    if (!apiClient) {
       throw new SecureSessionUiError('SECURE_PRIVATE_API_UNAVAILABLE')
     }
     return await createSecureBrowserPairingRequest(apiClient)
-  }, [httpClientRef, isRemoteOriginActive])
+  }, [httpClientRef])
 
   const handleClaimSecureBrowserPairing = useCallback(async (
     requestId: string,
     claimSecret: string,
   ) => {
     const apiClient = httpClientRef.current
-    if (!apiClient || isRemoteOriginActive) {
+    if (!apiClient) {
       throw new SecureSessionUiError('SECURE_PRIVATE_API_UNAVAILABLE')
     }
     return await claimSecureBrowserPairing(apiClient, requestId, claimSecret)
-  }, [httpClientRef, isRemoteOriginActive])
+  }, [httpClientRef])
 
   const handleSecureBrowserPaired = useCallback(async () => {
     await refreshSecureBrowserControl()
@@ -1723,7 +1562,7 @@ export function BuilderSurface({
   ): Promise<boolean> => {
     const apiClient = httpClientRef.current
     const client = clientRef.current
-    if (!apiClient || !client || !secureAuthorityAgentId || isRemoteOriginActive) return false
+    if (!apiClient || !client || !secureAuthorityAgentId) return false
     const current = client.getState().secureSessionSnapshots[secureAuthorityAgentId]
     if (!current?.accessPolicy) return false
     try {
@@ -1737,7 +1576,7 @@ export function BuilderSurface({
       reportSecureMutationError(client, secureAuthorityAgentId, error)
       return false
     }
-  }, [httpClientRef, clientRef, secureAuthorityAgentId, isRemoteOriginActive, applySecureMutationResult, reportSecureMutationError])
+  }, [httpClientRef, clientRef, secureAuthorityAgentId, applySecureMutationResult, reportSecureMutationError])
 
   const handleRecoverSecureAccess = useCallback(async (): Promise<boolean> => {
     try {
@@ -1756,27 +1595,27 @@ export function BuilderSurface({
   const secureSessionPicker = useMemo<SecureSessionPickerConfig | undefined>(() => {
     if (!activeAgentId || activeAgentProfile?.secureSessionsEnabled === false) return undefined
     const config: SecureSessionPickerConfig = {
-      originId: activeOriginId,
+      originId: LOCAL_ORIGIN_ID,
       availability: secureSessionAvailability,
-      snapshot: isRemoteOriginActive ? null : secureSessionSnapshotView,
+      snapshot: secureSessionSnapshotView,
       ...(!isActiveManager ? { readOnly: true } : {}),
       accessAgentId: activeAgentId,
-      lockedBitwardenProviderName: isRemoteOriginActive ? undefined : lockedBitwardenProvider?.displayName,
-      ...(!isRemoteOriginActive && isSecureControlAvailable(secureBrowserControl?.authorized === true)
+      lockedBitwardenProviderName: lockedBitwardenProvider?.displayName,
+      ...(isSecureControlAvailable(secureBrowserControl?.authorized === true)
         ? { onSetAccess: handleSetSecureAccess,
             ...(isPrivateSecureFulfillmentAvailable(secureBrowserControl?.privateEntryAvailable === true)
               ? { onRecoverAccess: handleRecoverSecureAccess } : {}) } : {}),
-      secrets: isRemoteOriginActive ? [] : secureSecretOptions,
-      ...(isRemoteOriginActive || !secureSessionSnapshotView
+      secrets: secureSecretOptions,
+      ...(!secureSessionSnapshotView
         ? {}
         : secureOutputQuarantineConfigFields(secureOutputQuarantineUi)),
       disabled:
         !state.connected
-        || (!isRemoteOriginActive && (
+        || ((
           secureCatalogLoading
           || state.secureSessionSnapshotLoadingSessionId === activeAgentId
         )),
-      ...(isRemoteOriginActive || !isActiveManager
+      ...(!isActiveManager
         ? {}
         : {
             onStart: handleStartSecureSession,
@@ -1794,14 +1633,12 @@ export function BuilderSurface({
     secureBrowserControl,
     handleSetSecureAccess,
     handleRecoverSecureAccess,
-    activeOriginId,
     handleGrantSecureSessions,
     handleApplySecureProjectDefaults,
     handleRevokeSecureSession,
     handleReviewProjectSecrets,
     handleStartSecureSession,
     isActiveManager,
-    isRemoteOriginActive,
     secureCatalogLoading,
     secureOutputQuarantineUi,
     secureSecretOptions,
@@ -1814,19 +1651,15 @@ export function BuilderSurface({
   const secureSessionRequests = useMemo<SecureSessionRequestConfig | undefined>(() => {
     if (!activeAgentId) return undefined
     return {
-      originId: activeOriginId,
+      originId: LOCAL_ORIGIN_ID,
       ...(secureSessionSnapshotView
         ? { sessionAgentId: secureSessionSnapshotView.sessionAgentId }
         : {}),
       availability: secureSessionAvailability,
-      requests: isRemoteOriginActive
-        ? []
-        : securePendingRequestViews,
-      sshTrustRequests: isRemoteOriginActive
-        ? []
-        : securePendingSshTrustRequestViews,
-      secrets: isRemoteOriginActive ? [] : secureSecretOptions,
-      ...(!isRemoteOriginActive && secureSessionSnapshot
+      requests: securePendingRequestViews,
+      sshTrustRequests: securePendingSshTrustRequestViews,
+      secrets: secureSecretOptions,
+      ...(secureSessionSnapshot
         ? {
             project: {
               profileId: secureSessionSnapshot.profileId,
@@ -1843,7 +1676,7 @@ export function BuilderSurface({
             },
           }
         : {}),
-      ...(isRemoteOriginActive || !secureSessionSnapshotView
+      ...(!secureSessionSnapshotView
         ? {}
         : {
             ...secureOutputQuarantineConfigFields(secureOutputQuarantineUi),
@@ -1851,24 +1684,21 @@ export function BuilderSurface({
           }),
       disabled: !state.connected || secureCatalogLoading,
       canApprove:
-        !isRemoteOriginActive
+        true
         && isSecureControlAvailable(secureBrowserControl?.authorized === true),
       onGrant: handleGrantSecureSession,
       onDeny: handleDenySecureRequest,
       onTrustSshHost: handleTrustSecureSshHost,
       onDismissSshTrustRequest: handleDismissSecureSshTrustRequest,
       ...(isActiveManager ? { onRevoke: handleRevokeSecureSession } : {}),
-      ...(!isRemoteOriginActive && isPrivateSecureFulfillmentAvailable(
+      ...(isPrivateSecureFulfillmentAvailable(
         secureBrowserControl?.privateEntryAvailable === true,
       )
         ? { onPrivateFulfill: handlePrivateSecureFulfillment }
         : {}),
-      ...(!isRemoteOriginActive
-        ? { loadPrivateDestinations: handleLoadSecurePrivateDestinations }
-        : {}),
+      loadPrivateDestinations: handleLoadSecurePrivateDestinations,
       ...(
-        !isRemoteOriginActive
-        && !isSecureControlAvailable(secureBrowserControl?.authorized === true)
+        !isSecureControlAvailable(secureBrowserControl?.authorized === true)
         && secureBrowserControl?.available === true
         && secureBrowserControl.secureContextRequired === false
           ? {
@@ -1881,7 +1711,6 @@ export function BuilderSurface({
     }
   }, [
     activeAgentId,
-    activeOriginId,
     handleDenySecureRequest,
     handleDismissSecureSshTrustRequest,
     handleGrantSecureSession,
@@ -1894,7 +1723,6 @@ export function BuilderSurface({
     handleDismissSecureOutputQuarantine,
     handleRevokeSecureSession,
     isActiveManager,
-    isRemoteOriginActive,
     secureCatalogLoading,
     secureCatalog,
     secureOutputQuarantineUi,
@@ -1912,7 +1740,7 @@ export function BuilderSurface({
   const sessionModelPicker =
     isActiveManager && isSessionModelPickerEligible(activeAgent, activeAgentProfile)
       ? {
-          originId: activeOriginId,
+          originId: LOCAL_ORIGIN_ID,
           httpClientRef,
           sessionAgentId: activeAgent.agentId,
           sessionLabel: activeAgent.sessionLabel || activeAgent.displayName || activeAgent.agentId,
@@ -1928,10 +1756,10 @@ export function BuilderSurface({
 
   const sessionContextModePicker =
     isActiveManager
-    && !isRemoteOriginActive
+    && true
     && isSessionModelPickerEligible(activeAgent, activeAgentProfile)
       ? {
-          originId: activeOriginId,
+          originId: LOCAL_ORIGIN_ID,
           httpClientRef,
           sessionAgentId: activeAgent.agentId,
           disabled: !state.connected,
@@ -1945,7 +1773,7 @@ export function BuilderSurface({
     && activeAgentProfile
     && isSessionModelPickerEligible(activeAgent, activeAgentProfile)
       ? {
-          originId: activeOriginId,
+          originId: LOCAL_ORIGIN_ID,
           httpClientRef,
           sessionAgentId: activeAgent.agentId,
           profileId: activeAgentProfile.profileId,
@@ -1964,20 +1792,17 @@ export function BuilderSurface({
       : undefined
 
   const localSidebarSession = useSessionActions({
-    clientRef: localClientRef,
+    clientRef: clientRef,
     fileEditorCoordinator: panels.fileEditorCoordinator,
-    state: localState,
+    state: state,
     activeAgent: localActiveAgent,
     activeAgentId: localActiveAgentId,
     isActiveManager: localIsActiveManager,
-    isLoading: activeOriginId === LOCAL_ORIGIN_ID ? isLoading : false,
-    navigateToRoute: (nextRouteState, replace) => navigateToRoute({
-      ...nextRouteState,
-      origin: LOCAL_ORIGIN_ID,
-    }, replace),
-    setState: setLocalState,
-    visibleMessages: activeOriginId === LOCAL_ORIGIN_ID ? transcript.visibleMessages : [],
-    markPendingResponse: activeOriginId === LOCAL_ORIGIN_ID ? transcript.markPendingResponse : () => {},
+    isLoading,
+    navigateToRoute,
+    setState,
+    visibleMessages: transcript.visibleMessages,
+    markPendingResponse: transcript.markPendingResponse,
     handleCompactManager: async () => {},
     startSideChat: () => {},
     messageInputRef,
@@ -1986,7 +1811,7 @@ export function BuilderSurface({
   const { replyTarget, setReplyTarget, messageForkTarget, setMessageForkTarget } = session
   const sideChatPanelProps = {
     wsUrl,
-    originId: activeOriginId,
+    originId: LOCAL_ORIGIN_ID,
     sideChatAgentId: sideChat.sideChatAgentId,
     sourceLabel: activeAgentLabel,
     isExpanded: sideChat.isExpanded,
@@ -2006,7 +1831,7 @@ export function BuilderSurface({
   } = useFileDrop({
     activeView,
     messageInputRef,
-    acceptSessionReferences: !isRemoteOriginActive && isActiveManager,
+    acceptSessionReferences: isActiveManager,
   })
 
   useEffect(() => {
@@ -2056,7 +1881,6 @@ export function BuilderSurface({
     panels.fileEditorCoordinator.requestFileEditorTransition({ type: 'navigate-route', nextView: 'settings' }, () => {
       navigateToRoute({
         view: 'settings',
-        surface: 'builder',
         settingsTab: 'project-settings',
         settingsProfileId: profileId,
       })
@@ -2067,91 +1891,33 @@ export function BuilderSurface({
     panels.fileEditorCoordinator.requestFileEditorTransition({ type: 'navigate-route', nextView: 'settings' }, () => {
       navigateToRoute({
         view: 'settings',
-        surface: 'builder',
         settingsTab: 'secrets',
         settingsProfileId: profileId,
       })
     })
   }, [navigateToRoute, panels.fileEditorCoordinator])
 
-  const projectSettingsServerDirectoryBrowser = useMemo(() => {
-    if (!directServerDirectoryBrowser || !localClient) return undefined
-    return {
-      client: {
-        listDirectories: (path?: string) => localClient.listDirectories(path),
-        validateDirectory: (path: string) => localClient.validateDirectory(path),
-        createDirectory: directServerDirectoryBrowser.canCreateDirectory
-          ? (parentPath: string, name: string) => localClient.createDirectory(parentPath, name)
-          : undefined,
-      },
-      canCreateDirectory: directServerDirectoryBrowser.canCreateDirectory,
-    }
-  }, [directServerDirectoryBrowser, localClient])
-
   const projectSettingsActions = useMemo<ProjectSettingsActions>(() => ({
     onRenameProfile: localSidebarSession.handleRenameProfile,
     onUpdateManagerModel: localSidebarSession.handleUpdateManagerModel,
     onUpdateManagerCwd: localSidebarSession.handleUpdateManagerCwd,
-    onBrowseDirectory: directServerDirectoryBrowser
-      ? undefined
-      : localSidebarSession.handleBrowseDirectoryForCwd,
+    onBrowseDirectory: localSidebarSession.handleBrowseDirectoryForCwd,
     onValidateDirectory: localSidebarSession.handleValidateDirectoryForCwd,
-    serverDirectoryBrowser: projectSettingsServerDirectoryBrowser,
     onOpenProjectSecrets: handleOpenProjectSecrets,
   }), [
-    directServerDirectoryBrowser,
     handleOpenProjectSecrets,
     localSidebarSession.handleBrowseDirectoryForCwd,
     localSidebarSession.handleRenameProfile,
     localSidebarSession.handleUpdateManagerCwd,
     localSidebarSession.handleUpdateManagerModel,
     localSidebarSession.handleValidateDirectoryForCwd,
-    projectSettingsServerDirectoryBrowser,
   ])
 
   const showActivityRail = activeView === 'chat'
 
-  // Wave R presence: other members viewing the active session (self excluded).
-  const presenceViewers = useMemo(() => {
-    const viewers =
-      (activeAgentId ? state.projectPresence[activeAgentId] : undefined) ??
-      (activeManagerId ? state.projectPresence[activeManagerId] : undefined) ??
-      []
-    return viewers.filter((viewer) => viewer.userId !== activeOriginCurrentUserId)
-  }, [activeAgentId, activeManagerId, activeOriginCurrentUserId, state.projectPresence])
-
-  // ── Wave R: origin-aware sidebar selection ──
   const handleSelectSidebarAgent = useCallback((agentId: string) => {
-    if (activeOriginId === LOCAL_ORIGIN_ID) {
-      panels.handleSelectAgent(agentId)
-      return
-    }
-    // Cross-origin select back to local: route change flips the active origin;
-    // the route→subscription sync subscribes on the local client.
-    navigateToRoute({ view: 'chat', agentId, origin: LOCAL_ORIGIN_ID })
-  }, [activeOriginId, navigateToRoute, panels])
-
-  const handleSelectRemoteAgent = useCallback((originId: string, agentId: string) => {
-    if (originId === activeOriginId) {
-      panels.handleSelectAgent(agentId)
-      return
-    }
-    navigateToRoute({ view: 'chat', agentId, origin: originId })
-  }, [activeOriginId, navigateToRoute, panels])
-
-  const handleRemoteOriginSignIn = useCallback((originId: string) => {
-    const target = resolveCollaborationTarget(originId)
-    navigateToOuterRoute({
-      view: 'settings',
-      surface: 'builder',
-      settingsTab: 'collaboration',
-      collabApiBaseUrl: target.apiBaseUrl,
-    })
-  }, [navigateToOuterRoute])
-
-  const handleRemoteOriginRetry = useCallback((originId: string) => {
-    forgeOriginManager.retryOrigin(originId)
-  }, [])
+    panels.handleSelectAgent(agentId)
+  }, [panels])
 
   const feedbackProfileId = transcript.feedbackProfileId
 
@@ -2161,7 +1927,7 @@ export function BuilderSurface({
       <BrowserAutomationHost
         ref={browserHostRef}
         client={localClient}
-        state={localState}
+        state={state}
         selectedSessionAgentId={browserSessionAgentId}
         selectedProfileId={browserProfileId}
         panelVisible={activeView === 'chat' && panels.isBrowserOpen}
@@ -2176,17 +1942,12 @@ export function BuilderSurface({
       />
 
       <AgentSidebarConnected
-        wsUrl={localWsUrl}
-        modelConfigChangeKey={localState.modelConfigChangeKey}
-        connectionEpoch={localState.connectionEpoch}
+        wsUrl={wsUrl}
+        modelConfigChangeKey={state.modelConfigChangeKey}
+        connectionEpoch={state.connectionEpoch}
         builderSidebarOrderApi={builderSidebarOrderApi}
         activityRailItems={showActivityRail ? panels.activityRailItems : undefined}
-        collaborationModeSwitch={collaborationModeSwitch}
         selectedAgentId={activeAgentId}
-        activeOriginId={activeOriginId}
-        onSelectRemoteAgent={handleSelectRemoteAgent}
-        onRemoteOriginSignIn={handleRemoteOriginSignIn}
-        onRemoteOriginRetry={handleRemoteOriginRetry}
         isSettingsActive={activeView === 'settings'}
         isStatsActive={activeView === 'stats'}
         isArchiveActive={activeView === 'archive'}
@@ -2197,7 +1958,7 @@ export function BuilderSurface({
         onDeleteAgent={localSidebarSession.handleDeleteAgent}
         onDeleteManager={localSidebarManager.handleRequestDeleteManager}
         onOpenSettings={() => panels.fileEditorCoordinator.requestFileEditorTransition({ type: 'navigate-route', nextView: 'settings' }, () => {
-          navigateToRoute({ view: 'settings', surface: 'builder' })
+          navigateToRoute({ view: 'settings' })
         })}
         onOpenProjectSettings={handleOpenProjectSettings}
         onOpenProjectSecrets={handleOpenProjectSecrets}
@@ -2205,7 +1966,7 @@ export function BuilderSurface({
           navigateToRoute({ view: 'stats' })
         })}
         onOpenArchive={() => panels.fileEditorCoordinator.requestFileEditorTransition({ type: 'navigate-route', nextView: 'archive' }, () => {
-          navigateToRoute({ view: 'archive', surface: 'builder' })
+          navigateToRoute({ view: 'archive' })
         })}
         onCreateSession={localSidebarSession.handleCreateSession}
         onStopSession={localSidebarSession.handleStopSession}
@@ -2224,7 +1985,6 @@ export function BuilderSurface({
         onUpdateManagerCwd={localSidebarSession.handleUpdateManagerCwd}
         onBrowseDirectory={localSidebarSession.handleBrowseDirectoryForCwd}
         onValidateDirectory={localSidebarSession.handleValidateDirectoryForCwd}
-        directServerDirectoryBrowser={directServerDirectoryBrowser}
         onRequestSessionWorkers={localSidebarSession.handleRequestSessionWorkers}
         onSetSessionProjectAgent={localSidebarSession.handleSetSessionProjectAgent}
         onGetProjectAgentConfig={localSidebarSession.handleGetProjectAgentConfig}
@@ -2341,14 +2101,13 @@ export function BuilderSurface({
               </div>
             ) : activeView === 'settings' ? (
               <SettingsPanel
-                wsUrl={localWsUrl}
+                wsUrl={wsUrl}
                 managers={settingsManagers}
                 profiles={state.profiles}
                 promptChangeKey={state.promptChangeKey}
                 specialistChangeKey={state.specialistChangeKey}
                 modelConfigChangeKey={state.modelConfigChangeKey}
                 connectionEpoch={state.connectionEpoch}
-                repositoryCloneAvailable={cloneRepositoryEnabled}
                 onBack={() =>
                   navigateToRoute({
                     view: 'chat',
@@ -2359,17 +2118,16 @@ export function BuilderSurface({
                 contextProfileId={routeState.view === 'settings' ? routeState.settingsProfileId : undefined}
                 projectSettingsActions={projectSettingsActions}
                 initialTab={routeState.view === 'settings' ? routeState.settingsTab : undefined}
-                initialCollabApiBaseUrl={routeState.view === 'settings' ? routeState.collabApiBaseUrl : undefined}
                 initialSkillImportUrl={routeState.view === 'settings' ? routeState.skillImportUrl : undefined}
                 onSkillImportUrlConsumed={() => {
                   if (routeState.view === 'settings' && routeState.skillImportUrl) {
-                    navigateToOuterRoute({ ...routeState, skillImportUrl: undefined }, true)
+                    navigateToRoute({ ...routeState, skillImportUrl: undefined }, true)
                   }
                 }}
               />
             ) : activeView === 'stats' ? (
               <StatsPage
-                wsUrl={localWsUrl}
+                wsUrl={wsUrl}
                 routeState={routeState as { view: 'stats'; statsTab?: StatsTab }}
                 onBack={() =>
                   navigateToRoute({
@@ -2409,7 +2167,7 @@ export function BuilderSurface({
                 </section>
               ) : <BrowserPanel
                 snapshot={browserSessionSnapshot}
-                host={localState.browserHost}
+                host={state.browserHost}
                 commandPort={browserCommandPort}
                 mode={browserWorkspaceMode}
                 popoutAvailable={Boolean(window.electronBridge?.browserWorkspace?.capability.popoutAvailable)}
@@ -2419,7 +2177,7 @@ export function BuilderSurface({
                 pendingInputCount={state.connected && activeAgent?.model.provider === 'claude-native'
                   ? state.statuses[activeAgentId ?? '']?.pendingCount ?? 0 : 0}
                 managerToolActivity={
-                  !isRemoteOriginActive && isActiveManager && state.managerToolActivity?.sessionAgentId === activeAgentId
+                  isActiveManager && state.managerToolActivity?.sessionAgentId === activeAgentId
                     ? state.managerToolActivity
                     : null
                 }
@@ -2427,7 +2185,6 @@ export function BuilderSurface({
                   connected: state.connected,
                   activeAgentId,
                   activeAgentLabel,
-                  presenceViewers,
                   wsUrl,
                   activeAgentProfileName,
                   activeAgentSessionLabel,
@@ -2443,14 +2200,14 @@ export function BuilderSurface({
                   contextWindowUsage: transcript.contextWindowUsage,
                   modelCacheHeaderSummary,
                   generationThroughputEligible:
-                    !isRemoteOriginActive && isActiveManager && isPiGenerationThroughputEligible(activeAgent),
+                    isActiveManager && isPiGenerationThroughputEligible(activeAgent),
                   showGenerationThroughput: showConversationThroughput,
                   generationThroughput:
-                    !isRemoteOriginActive && isActiveManager && activeAgentId && isPiGenerationThroughputEligible(activeAgent)
+                    isActiveManager && activeAgentId && isPiGenerationThroughputEligible(activeAgent)
                       ? state.generationThroughputByAgentId[activeAgentId]
                       : undefined,
                   generationThroughputLatestFinal:
-                    !isRemoteOriginActive && isActiveManager && activeAgentId && isPiGenerationThroughputEligible(activeAgent)
+                    isActiveManager && activeAgentId && isPiGenerationThroughputEligible(activeAgent)
                       ? state.generationThroughputLatestFinalByAgentId[activeAgentId]
                       : undefined,
                   compactionCount: activeAgent?.compactionCount,
@@ -2503,7 +2260,7 @@ export function BuilderSurface({
                   initialTab: 'incoming',
                 })}
                 lastError={state.lastError}
-                localSettingsClient={isRemoteOriginActive ? null : httpClientRef.current}
+                localSettingsClient={httpClientRef.current}
                 lastSuccess={state.lastSuccess}
                 restartRecovery={state.restartRecovery}
                 onResumeRestartRecovery={() => clientRef.current?.resumeRestartRecovery()}
@@ -2538,7 +2295,6 @@ export function BuilderSurface({
                   isLoading,
                   wsUrl,
                   activeAgentId,
-                  currentCollabUserId: activeOriginCurrentUserId ?? undefined,
                   projectAgent: activeAgent?.projectAgent,
                   onSuggestionClick: conversationActionsEnabled ? session.handleSuggestionClick : undefined,
                   onArtifactClick: conversationActionsEnabled ? panels.handleOpenArtifact : undefined,
@@ -2597,10 +2353,10 @@ export function BuilderSurface({
                         workers: sessionWorkers,
                         statuses: state.statuses,
                         activityMessages: state.activityMessages,
-                        generationThroughputByAgentId: !isRemoteOriginActive && workerMetadataHydrated
+                        generationThroughputByAgentId: workerMetadataHydrated
                           ? state.generationThroughputByAgentId
                           : undefined,
-                        generationThroughputLatestFinalByAgentId: !isRemoteOriginActive && workerMetadataHydrated
+                        generationThroughputLatestFinalByAgentId: workerMetadataHydrated
                           ? state.generationThroughputLatestFinalByAgentId
                           : undefined,
                         workerMetadataSessionIds: state.workerMetadataSessionIds,
@@ -2690,7 +2446,7 @@ export function BuilderSurface({
             <ChatSidePanels
               isCortexSession={activeAgent?.archetypeId === 'cortex'}
               cortexDashboardProps={{
-                wsUrl: localWsUrl,
+                wsUrl: wsUrl,
                 managerId: activeManagerId,
                 isOpen: panels.isArtifactsPanelOpen,
                 onClose: panels.handleGuardedArtifactsClose,
@@ -2759,7 +2515,7 @@ export function BuilderSurface({
       </div>
 
       <GlobalDialogs
-        postUpdateSource={localWsUrl}
+        postUpdateSource={wsUrl}
         artifactPanelProps={{
           artifact: panels.activeArtifact,
           wsUrl,
@@ -2770,7 +2526,7 @@ export function BuilderSurface({
         createManagerDialogProps={{
           open: isCreateManagerDialogOpen,
           wsUrl,
-          originId: activeOriginId,
+          originId: LOCAL_ORIGIN_ID,
           modelConfigChangeKey: state.modelConfigChangeKey,
           connectionEpoch: state.connectionEpoch,
           isCreatingManager,
@@ -2785,7 +2541,7 @@ export function BuilderSurface({
           scaffoldForgeResources,
           createManagerError,
           browseError,
-          cloneRepositoryEnabled,
+          cloneRepositoryEnabled: true,
           sourceMode: createProjectSourceMode,
           repositoryUrl,
           repositoryFolder,
@@ -2798,11 +2554,9 @@ export function BuilderSurface({
           onRepositoryUrlChange: handleRepositoryUrlChange,
           onRepositoryFolderChange: handleRepositoryFolderChange,
           onRepositoryBasePathChange: handleRepositoryBasePathChange,
-          onBrowseRepositoryBasePath: !usesServerDirectoryBrowser
-            ? () => {
-                void handleBrowseRepositoryBasePath()
-              }
-            : undefined,
+          onBrowseRepositoryBasePath: () => {
+            void handleBrowseRepositoryBasePath()
+          },
           onCancelClone: () => {
             void handleCancelClone()
           },
@@ -2812,41 +2566,9 @@ export function BuilderSurface({
           onModelSelectionChange: handleNewManagerModelSelectionChange,
           onReasoningLevelChange: handleNewManagerReasoningLevelChange,
           onScaffoldForgeResourcesChange: handleScaffoldForgeResourcesChange,
-          // Remote origins and direct hosted collaboration Builder both use the
-          // active server socket. Only a true local Builder uses the native picker.
-          onBrowseDirectory: usesServerDirectoryBrowser
-            ? undefined
-            : () => {
-                void handleBrowseDirectory()
-              },
-          serverDirectoryBrowser: usesServerDirectoryBrowser
-            ? {
-                client: {
-                  listDirectories: (path) => {
-                    const client = clientRef.current
-                    if (!client) return Promise.reject(new Error('Not connected to active server.'))
-                    return client.listDirectories(path)
-                  },
-                  validateDirectory: (path) => {
-                    const client = clientRef.current
-                    if (!client) return Promise.reject(new Error('Not connected to active server.'))
-                    return client.validateDirectory(path)
-                  },
-                  createDirectory: (isRemoteOriginActive
-                    ? activeOriginMeta?.capabilities?.createDirectory
-                    : directServerDirectoryBrowser?.canCreateDirectory)
-                    ? (parentPath, name) => {
-                        const client = clientRef.current
-                        if (!client) return Promise.reject(new Error('Not connected to active server.'))
-                        return client.createDirectory(parentPath, name)
-                      }
-                    : undefined,
-                },
-                canCreateDirectory: isRemoteOriginActive
-                  ? activeOriginMeta?.capabilities?.createDirectory === true
-                  : directServerDirectoryBrowser?.canCreateDirectory === true,
-              }
-            : undefined,
+          onBrowseDirectory: () => {
+            void handleBrowseDirectory()
+          },
           onSubmit: (event) => {
             void handleCreateManager(event)
           },
@@ -2902,7 +2624,7 @@ export function BuilderSurface({
         />
       ) : null}
 
-      <CortexV2OnboardingModal source={localWsUrl} />
+      <CortexV2OnboardingModal source={wsUrl} />
     </WorkGraphWorkerHighlightProvider>
   )
 }

@@ -3,10 +3,8 @@
 /**
  * Package 5 write-isolation tests.
  *
- * Proves that collab writes route through the remote collab API client
- * (credentials: include, collab base URL) and builder writes stay local
- * (credentials: same-origin, local base URL), even when both targets
- * are configured in the same runtime.
+ * Proves that builder writes stay local (credentials: same-origin, local
+ * base URL).
  *
  * These complement Package 3's API-level migration tests by testing
  * additional write operations not previously covered.
@@ -26,24 +24,15 @@ vi.mock('@/lib/api-endpoint', () => ({
   },
 }))
 
-vi.mock('@/lib/collaboration-endpoints', () => ({
-  resolveCollaborationApiBaseUrl: () => 'https://collab.example.com/',
-}))
-
 const {
-  createSettingsApiClient,
   createBuilderSettingsApiClient,
 } = await import('./settings-api-client')
-const {
-  createCollabSettingsTarget,
-} = await import('./settings-target')
 
 /* ------------------------------------------------------------------ */
 /*  Setup                                                             */
 /* ------------------------------------------------------------------ */
 
 const BUILDER_WS = 'ws://127.0.0.1:47187'
-const COLLAB_WS = 'wss://collab.example.com'
 
 let fetchSpy: MockInstance
 
@@ -56,10 +45,6 @@ function mockJsonResponse(body: unknown, status = 200): Response {
 
 function builderClient() {
   return createBuilderSettingsApiClient(BUILDER_WS)
-}
-
-function collabClient() {
-  return createSettingsApiClient(createCollabSettingsTarget(COLLAB_WS))
 }
 
 beforeEach(() => {
@@ -75,17 +60,6 @@ afterEach(() => {
 /* ================================================================== */
 
 describe('model override write isolation', () => {
-  it('resetAllModelOverrides routes through collab', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
-    const { resetAllModelOverrides } = await import('./models-api')
-
-    await resetAllModelOverrides(collabClient())
-
-    expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/model-overrides',
-      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
-    )
-  })
 
   it('resetAllModelOverrides routes through builder', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
@@ -117,19 +91,6 @@ describe('model override write isolation', () => {
 /* ================================================================== */
 
 describe('slash command write isolation', () => {
-  it('updateSlashCommand routes through collab', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({
-      command: { id: '1', name: 'test', prompt: 'updated', createdAt: '', updatedAt: '' },
-    }))
-    const { updateSlashCommand } = await import('./slash-commands-api')
-
-    await updateSlashCommand(collabClient(), '1', { prompt: 'updated' })
-
-    expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/slash-commands/1',
-      expect.objectContaining({ method: 'PUT', credentials: 'include' }),
-    )
-  })
 
   it('updateSlashCommand routes through builder', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({
@@ -165,17 +126,6 @@ describe('slash command write isolation', () => {
 /* ================================================================== */
 
 describe('env variable write isolation', () => {
-  it('updateSettingsEnvVariables routes through collab', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
-    const { updateSettingsEnvVariables } = await import('./settings-api')
-
-    await updateSettingsEnvVariables(collabClient(), { MY_KEY: 'secret' })
-
-    expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/env',
-      expect.objectContaining({ method: 'PUT', credentials: 'include' }),
-    )
-  })
 
   it('updateSettingsEnvVariables routes through builder', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
@@ -207,26 +157,6 @@ describe('env variable write isolation', () => {
 /* ================================================================== */
 
 describe('specialist write isolation', () => {
-  it('saveSpecialist routes through collab', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
-    const { saveSpecialist } = await import('./specialists-api')
-
-    await saveSpecialist(collabClient(), 'profile-1', 'backend', {
-      displayName: 'Backend',
-      color: '#2563eb',
-      enabled: true,
-      whenToUse: 'Backend work',
-      modelId: 'gpt-5',
-      provider: 'openai-codex',
-      reasoningLevel: 'high',
-      promptBody: 'You are a backend specialist.',
-    })
-
-    expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/specialists/backend?profileId=profile-1&targetSpace=collaboration',
-      expect.objectContaining({ method: 'PUT', credentials: 'include' }),
-    )
-  })
 
   it('saveSpecialist routes through builder', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
@@ -249,18 +179,6 @@ describe('specialist write isolation', () => {
     )
   })
 
-  it('deleteSpecialist routes through collab', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
-    const { deleteSpecialist } = await import('./specialists-api')
-
-    await deleteSpecialist(collabClient(), 'profile-1', 'backend')
-
-    expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/specialists/backend?profileId=profile-1&targetSpace=collaboration',
-      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
-    )
-  })
-
   it('deleteSharedSpecialist routes through builder', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
     const { deleteSharedSpecialist } = await import('./specialists-api')
@@ -280,17 +198,6 @@ describe('specialist write isolation', () => {
 /* ================================================================== */
 
 describe('prompt write isolation', () => {
-  it('savePromptOverride routes through collab', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
-    const { savePromptOverride } = await import('./prompts/prompt-api')
-
-    await savePromptOverride(collabClient(), 'archetype', 'default', 'new content', 'profile-1')
-
-    expect(fetchSpy).toHaveBeenCalledWith(
-      expect.stringContaining('https://collab.example.com/api/prompts/archetype/default'),
-      expect.objectContaining({ method: 'PUT', credentials: 'include' }),
-    )
-  })
 
   it('savePromptOverride routes through builder', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
@@ -304,17 +211,6 @@ describe('prompt write isolation', () => {
     )
   })
 
-  it('deletePromptOverride routes through collab', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
-    const { deletePromptOverride } = await import('./prompts/prompt-api')
-
-    await deletePromptOverride(collabClient(), 'archetype', 'default', 'profile-1')
-
-    expect(fetchSpy).toHaveBeenCalledWith(
-      expect.stringContaining('https://collab.example.com/api/prompts/archetype/default'),
-      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
-    )
-  })
 })
 
 /* ================================================================== */
@@ -353,18 +249,6 @@ describe('server version fetch isolation', () => {
     )
   })
 
-  it('fetchServerVersion routes through collab with credentials: include', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({ system: { serverVersion: '3.0.0' } }))
-    const { fetchServerVersion } = await import('./settings-api')
-
-    const version = await fetchServerVersion(collabClient())
-
-    expect(version).toBe('3.0.0')
-    expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/stats?range=7d',
-      expect.objectContaining({ credentials: 'include' }),
-    )
-  })
 })
 
 /* ================================================================== */
@@ -372,17 +256,6 @@ describe('server version fetch isolation', () => {
 /* ================================================================== */
 
 describe('model preset fetch isolation', () => {
-  it('fetchModelPresets routes through collab with credentials: include', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({ models: [] }))
-    const { fetchModelPresets } = await import('../../lib/model-preset')
-
-    await fetchModelPresets(collabClient())
-
-    expect(fetchSpy).toHaveBeenCalledWith(
-      'https://collab.example.com/api/settings/models',
-      expect.objectContaining({ credentials: 'include' }),
-    )
-  })
 
   it('fetchModelPresets routes through builder with same-origin', async () => {
     fetchSpy.mockResolvedValueOnce(mockJsonResponse({ models: [] }))
@@ -408,55 +281,5 @@ describe('model preset fetch isolation', () => {
       'http://127.0.0.1:47187/api/settings/models',
       expect.objectContaining({ cache: 'no-store' }),
     )
-  })
-})
-
-/* ================================================================== */
-/*  Negative assertion: collab writes never hit builder URL            */
-/* ================================================================== */
-
-describe('negative assertion: collab never hits builder', () => {
-  it('collab model override update does NOT call builder URL', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
-    const { updateModelOverride } = await import('./models-api')
-
-    await updateModelOverride(collabClient(), 'gpt-5', { enabled: false })
-
-    for (const call of fetchSpy.mock.calls) {
-      expect(call[0]).not.toContain('127.0.0.1')
-    }
-  })
-
-  it('collab slash command create does NOT call builder URL', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({
-      command: { id: '1', name: 'x', prompt: 'y', createdAt: '', updatedAt: '' },
-    }))
-    const { createSlashCommand } = await import('./slash-commands-api')
-
-    await createSlashCommand(collabClient(), { name: 'x', prompt: 'y' })
-
-    for (const call of fetchSpy.mock.calls) {
-      expect(call[0]).not.toContain('127.0.0.1')
-    }
-  })
-
-  it('collab specialist save does NOT call builder URL', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({ ok: true }))
-    const { saveSharedSpecialist } = await import('./specialists-api')
-
-    await saveSharedSpecialist(collabClient(), 'test', {
-      displayName: 'Test',
-      color: '#000',
-      enabled: true,
-      whenToUse: 'test',
-      modelId: 'gpt-5',
-      provider: 'openai-codex',
-      reasoningLevel: 'high',
-      promptBody: 'prompt',
-    })
-
-    for (const call of fetchSpy.mock.calls) {
-      expect(call[0]).not.toContain('127.0.0.1')
-    }
   })
 })

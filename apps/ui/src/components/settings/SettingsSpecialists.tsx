@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { CollaborationCategory } from '@forge/protocol'
+import { useEffect, useMemo, useState } from 'react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useHelpContext } from '@/components/help/help-hooks'
 import { Eye, Loader2, Plus } from 'lucide-react'
 import {
   Select,
   SelectContent,
+  SelectItem,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -18,14 +18,7 @@ import {
   useModelPresets,
 } from '@/lib/model-preset'
 import type { SettingsSpecialistsProps } from './specialists/types'
-import {
-  SCOPE_GLOBAL,
-  SCOPE_CHANNEL_PREFIX,
-  parseScopeKind,
-  parseCategoryId,
-  parseChannelId,
-} from './specialists/types'
-import { CollabScopeSelectItems, useCollabScopeData } from './collab-scope'
+import { SCOPE_GLOBAL } from './specialists/types'
 import { createBuilderSettingsApiClient } from './settings-api-client'
 import { useSpecialistsData } from './specialists/hooks/useSpecialistsData'
 import { useCardEditing } from './specialists/hooks/useCardEditing'
@@ -36,9 +29,6 @@ import { SpecialistCard } from './specialists/SpecialistCard'
 import { NewSpecialistForm } from './specialists/NewSpecialistForm'
 import { RosterPromptDialog } from './specialists/RosterPromptDialog'
 import { PendingSaveDialog } from './specialists/PendingSaveDialog'
-import { CollabSettingsBanner } from './specialists/CollabSettingsBanner'
-import { CategoryDefaultsView } from './specialists/CategoryDefaultsView'
-import { ChannelSpecialistSelection } from './specialists/ChannelSpecialistSelection'
 import { DelegationPresetSettingsView } from './specialists/DelegationPresetSettings'
 import {
   getBehaviorModeCardMetadata,
@@ -59,7 +49,6 @@ export function SettingsSpecialists({
   previewSession,
   specialistChangeKey,
   modelConfigChangeKey,
-  initialChannelId,
 }: SettingsSpecialistsProps) {
   useHelpContext('settings.specialists')
   const clientOrWsUrl: import('./settings-api-client').SettingsApiClient | string = apiClient ?? wsUrl
@@ -69,32 +58,13 @@ export function SettingsSpecialists({
     () => apiClient ?? createBuilderSettingsApiClient(wsUrl),
     [apiClient, wsUrl],
   )
-  const isCollab = apiClient?.target.kind === 'collab'
-
-  const [selectedScope, setSelectedScope] = useState<string>(
-    initialChannelId ? `${SCOPE_CHANNEL_PREFIX}${initialChannelId}` : SCOPE_GLOBAL,
-  )
-  const [delegationTab, setDelegationTab] = useState<'presets' | 'instructions' | 'compatibility'>(
-    isCollab ? 'instructions' : 'presets',
-  )
-  const scopeKind = parseScopeKind(selectedScope)
-  const isGlobal = scopeKind === 'global'
-  const isCategory = scopeKind === 'category'
-  const isChannel = scopeKind === 'channel'
-  const isProfile = scopeKind === 'profile'
-
-  const channelId = isChannel ? parseChannelId(selectedScope) : undefined
-  const categoryId = isCategory ? parseCategoryId(selectedScope) : undefined
+  const [selectedScope, setSelectedScope] = useState<string>(SCOPE_GLOBAL)
+  const [delegationTab, setDelegationTab] = useState<'presets' | 'instructions' | 'compatibility'>('presets')
+  const isGlobal = selectedScope === SCOPE_GLOBAL
+  const isProfile = !isGlobal
 
   const modelPresets = useModelPresets(presetsApiClient, modelConfigChangeKey, { allowDynamicPresetIds: true })
-  const selectableModels = useMemo(() => getAllSelectableModels(modelPresets).filter(model => !isCollab || !['codex-native', 'claude-native'].includes(model.provider)), [modelPresets, isCollab])
-
-  /* ---- Collab scope data (shared hook, WP-U3) ---- */
-  const { collabCategories, collabChannels, setCollabCategories } = useCollabScopeData(
-    clientOrWsUrl,
-    isCollab,
-    specialistChangeKey,
-  )
+  const selectableModels = useMemo(() => getAllSelectableModels(modelPresets), [modelPresets])
 
   /* ---- Hooks ---- */
 
@@ -103,9 +73,7 @@ export function SettingsSpecialists({
     loading,
     error,
     loadSpecialists,
-    selectedGlobalHandles,
-    missingSelectedHandles,
-  } = useSpecialistsData(clientOrWsUrl, selectedScope, isGlobal, specialistChangeKey, channelId, previewSession)
+  } = useSpecialistsData(clientOrWsUrl, selectedScope, isGlobal, specialistChangeKey, previewSession)
 
   const {
     editStates,
@@ -134,7 +102,7 @@ export function SettingsSpecialists({
     toggleFallbackExpand,
     expandPromptForId,
     resetEditing,
-  } = useCardEditing(clientOrWsUrl, selectedScope, isGlobal, specialists, loadSpecialists, modelPresets, channelId)
+  } = useCardEditing(clientOrWsUrl, selectedScope, isGlobal, specialists, loadSpecialists, modelPresets)
 
   const {
     rosterOpen,
@@ -144,7 +112,7 @@ export function SettingsSpecialists({
     rosterError,
     handleViewRoster,
     resetRoster,
-  } = useRosterPrompt(clientOrWsUrl, selectedScope, isGlobal, channelId, previewSession)
+  } = useRosterPrompt(clientOrWsUrl, selectedScope, isGlobal, previewSession)
 
   const {
     showNewForm,
@@ -169,18 +137,16 @@ export function SettingsSpecialists({
     loadSpecialists,
     startEditing,
     expandPromptForId,
-    channelId,
   )
 
-  // Ensure selected scope stays valid when profiles change (builder only)
+  // Ensure selected scope stays valid when profiles change
   useEffect(() => {
-    if (isCollab) return
     setSelectedScope((prev) => {
       if (prev === SCOPE_GLOBAL) return prev
       if (profiles.some((p) => p.profileId === prev)) return prev
       return profiles.length > 0 ? profiles[0].profileId : SCOPE_GLOBAL
     })
-  }, [profiles, isCollab])
+  }, [profiles])
 
   // Reset transient state on scope change
   useEffect(() => {
@@ -205,18 +171,11 @@ export function SettingsSpecialists({
 
   const { profileOverrides, inheritedSpecialists } = useMemo(() => {
     const sorted = [...visibleSpecialists].sort((a, b) => a.specialistId.localeCompare(b.specialistId))
-    if (isChannel) {
-      // For channel scope, split by sourceKind: 'channel' is local override, rest are inherited
-      return {
-        profileOverrides: sorted.filter((s) => s.sourceKind === 'channel'),
-        inheritedSpecialists: sorted.filter((s) => s.sourceKind !== 'channel'),
-      }
-    }
     return {
       profileOverrides: sorted.filter((s) => s.sourceKind === 'profile'),
       inheritedSpecialists: sorted.filter((s) => s.sourceKind !== 'profile'),
     }
-  }, [visibleSpecialists, isChannel])
+  }, [visibleSpecialists])
 
   const { hideDisabled, handleToggleHideDisabled } = useHideDisabled()
 
@@ -236,36 +195,12 @@ export function SettingsSpecialists({
     return inheritedSpecialists.filter((s) => s.enabled)
   }, [inheritedSpecialists, hideDisabled])
 
-  /* ---- Channel selection saved callback ---- */
-  const handleChannelSelectionSaved = useCallback(() => {
-    void loadSpecialists()
-  }, [loadSpecialists])
-
-  /* ---- Category defaults saved callback ---- */
-  const handleCategoryUpdated = useCallback((updated: CollaborationCategory) => {
-    setCollabCategories((prev) =>
-      prev.map((c) => (c.categoryId === updated.categoryId ? updated : c)),
-    )
-  }, [setCollabCategories])
-
-  /* ---- Resolve category for category scope ---- */
-  const selectedCategory = isCategory
-    ? collabCategories.find((c) => c.categoryId === categoryId)
-    : undefined
-
-  /* ---- Resolve channel label for channel scope ---- */
-  const selectedChannelLabel = isChannel
-    ? collabChannels.find((ch) => ch.channelId === channelId)?.name ?? channelId ?? ''
-    : ''
-
   const renderSystemSpecialistCard = (spec: (typeof systemSpecialists)[number]) => {
-    const isLocal = isGlobal || (isChannel
-      ? spec.sourceKind === 'channel'
-      : spec.sourceKind === 'profile')
+    const isLocal = isGlobal || spec.sourceKind === 'profile'
     const cardMode = isGlobal
       ? 'global' as const
       : isLocal
-        ? (isChannel ? 'channelLocal' as const : 'profileOverride' as const)
+        ? 'profileOverride' as const
         : 'inherited' as const
 
     return (
@@ -309,8 +244,8 @@ export function SettingsSpecialists({
     if (isGlobal) return visibleSpecialists.filter((s) => !s.enabled).length
     return [...profileOverrides, ...inheritedSpecialists].filter((s) => !s.enabled).length
   }, [isGlobal, visibleSpecialists, profileOverrides, inheritedSpecialists])
-  const showTaskInstructions = isCollab || delegationTab === 'instructions'
-  const showCompatibility = isCollab || delegationTab === 'compatibility'
+  const showTaskInstructions = delegationTab === 'instructions'
+  const showCompatibility = delegationTab === 'compatibility'
 
   const headerButtons = (
     <div className="flex items-center gap-3">
@@ -324,7 +259,7 @@ export function SettingsSpecialists({
           <span className="text-xs text-muted-foreground">Hide disabled</span>
         </label>
       )}
-      {(isProfile || isChannel) && (
+      {isProfile && (
         <Button
           variant="outline"
           size="sm"
@@ -367,18 +302,11 @@ export function SettingsSpecialists({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Collab settings banner */}
-      {isCollab && apiClient && (
-        <CollabSettingsBanner apiClient={apiClient} />
-      )}
-
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/70 pb-4">
         <div>
           <h2 className="text-lg font-semibold">Delegation</h2>
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            {isCollab
-              ? 'Configure task instructions and custom specialists shared across collaboration channels.'
-              : 'A roster is a reusable team of complete specialists. Each specialist combines task instructions with its model, reasoning, and recovery behavior.'}
+            A roster is a reusable team of complete specialists. Each specialist combines task instructions with its model, reasoning, and recovery behavior.
           </p>
         </div>
         <div className="flex flex-col gap-1.5">
@@ -387,113 +315,71 @@ export function SettingsSpecialists({
           </Label>
           <Select
             value={selectedScope}
-            disabled={!isCollab && delegationTab === 'presets'}
+            disabled={delegationTab === 'presets'}
             onValueChange={setSelectedScope}
           >
             <SelectTrigger className="w-full sm:w-64">
               <SelectValue placeholder="Select scope" />
             </SelectTrigger>
             <SelectContent>
-              <CollabScopeSelectItems
-                isCollab={isCollab}
-                profiles={profiles}
-                collabCategories={collabCategories}
-                collabChannels={collabChannels}
-                globalScopeValue={SCOPE_GLOBAL}
-                globalLabel="Global defaults"
-              />
+              <SelectItem value={SCOPE_GLOBAL}>Global defaults</SelectItem>
+              {profiles.map((profile) => (
+                <SelectItem key={profile.profileId} value={profile.profileId}>
+                  {profile.displayName || profile.profileId}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
       </div>
 
-      {!isCollab && (
-        <Tabs
-          value={delegationTab}
-          onValueChange={(value) => {
-            const nextTab = value as 'presets' | 'instructions' | 'compatibility'
-            setDelegationTab(nextTab)
-            if (nextTab === 'presets') setSelectedScope(SCOPE_GLOBAL)
-          }}
-          className="gap-4"
-        >
-          <TabsList variant="line" aria-label="Delegation settings sections">
-            <TabsTrigger value="presets">
-              Rosters
-            </TabsTrigger>
-            <TabsTrigger value="instructions">
-              Instruction library
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                {visibleSpecialists.length}
-              </span>
-            </TabsTrigger>
-            <TabsTrigger value="compatibility">
-              System & compatibility
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                {systemSpecialists.length}
-              </span>
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="presets">
-            <DelegationPresetSettingsView
-              clientOrWsUrl={clientOrWsUrl}
-              modelPresets={modelPresets}
-              selectableModels={selectableModels}
-              taskInstructions={visibleSpecialists}
-              refreshKey={modelConfigChangeKey}
-            />
-          </TabsContent>
-        </Tabs>
-      )}
+      <Tabs
+        value={delegationTab}
+        onValueChange={(value) => {
+          const nextTab = value as 'presets' | 'instructions' | 'compatibility'
+          setDelegationTab(nextTab)
+          if (nextTab === 'presets') setSelectedScope(SCOPE_GLOBAL)
+        }}
+        className="gap-4"
+      >
+        <TabsList variant="line" aria-label="Delegation settings sections">
+          <TabsTrigger value="presets">
+            Rosters
+          </TabsTrigger>
+          <TabsTrigger value="instructions">
+            Instruction library
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              {visibleSpecialists.length}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger value="compatibility">
+            System & compatibility
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              {systemSpecialists.length}
+            </span>
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="presets">
+          <DelegationPresetSettingsView
+            clientOrWsUrl={clientOrWsUrl}
+            modelPresets={modelPresets}
+            selectableModels={selectableModels}
+            taskInstructions={visibleSpecialists}
+            refreshKey={modelConfigChangeKey}
+          />
+        </TabsContent>
+      </Tabs>
 
       {showTaskInstructions && (
         <>
-      {/* ============================================================ */}
-      {/*  Category Defaults View                                       */}
-      {/* ============================================================ */}
-      {isCategory && selectedCategory && (
-        <div>
-          <CategoryDefaultsView
-            clientOrWsUrl={clientOrWsUrl}
-            category={selectedCategory}
-            specialistChangeKey={specialistChangeKey}
-            onCategoryUpdated={handleCategoryUpdated}
-          />
-        </div>
-      )}
-
-      {isCategory && !selectedCategory && !loading && (
-        <div className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
-          <p className="text-xs text-destructive">Category not found.</p>
-        </div>
-      )}
-
-      {/* ============================================================ */}
-      {/*  Channel View — Selection + Local specialists                 */}
-      {/* ============================================================ */}
-      {isChannel && (
-        <div>
-          {/* Global specialist selection controls */}
-          <ChannelSpecialistSelection
-            clientOrWsUrl={clientOrWsUrl}
-            channelId={channelId!}
-            channelLabel={selectedChannelLabel}
-            selectedGlobalHandles={selectedGlobalHandles}
-            missingHandles={missingSelectedHandles}
-            specialistChangeKey={specialistChangeKey}
-            onSelectionSaved={handleChannelSelectionSaved}
-          />
-        </div>
-      )}
-
-      {/* Loading / error states (for global, profile, and channel card views) */}
-      {!isCategory && loading && (
+      {/* Loading / error states */}
+      {loading && (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="size-5 animate-spin text-muted-foreground" />
         </div>
       )}
 
-      {!isCategory && error && (
+      {error && (
         <div className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
           <p className="text-xs text-destructive">{error}</p>
         </div>
@@ -505,10 +391,8 @@ export function SettingsSpecialists({
       {!loading && !error && isGlobal && (
         <div>
         <SettingsSection
-          label={isCollab ? 'Collaboration Task Instructions & Custom Specialists' : 'Shared Instruction Library'}
-          description={isCollab
-            ? 'Shared task-instruction prompts and custom specialist definitions available to collaboration channels.'
-            : 'Advanced shared prompts used by roster specialists, plus custom specialist definitions inherited by all projects. Builtins are editable but cannot be deleted.'}
+          label="Shared Instruction Library"
+          description="Advanced shared prompts used by roster specialists, plus custom specialist definitions inherited by all projects. Builtins are editable but cannot be deleted."
           cta={headerButtons}
         >
           {newFormElement}
@@ -554,15 +438,13 @@ export function SettingsSpecialists({
       )}
 
       {/* ============================================================ */}
-      {/*  Profile / Channel — Overrides                                */}
+      {/*  Profile — Overrides                                          */}
       {/* ============================================================ */}
-      {!loading && !error && (isProfile || isChannel) && (
+      {!loading && !error && isProfile && (
         <div>
           <SettingsSection
-            label={isChannel ? 'Channel Specialists' : 'Profile Customizations'}
-            description={isChannel
-              ? 'Channel-local specialists customize this channel only. They can shadow selected global specialists.'
-              : 'Specialists customized for this profile. These take priority over inherited defaults.'}
+            label="Profile Customizations"
+            description="Specialists customized for this profile. These take priority over inherited defaults."
             cta={headerButtons}
           >
             {newFormElement}
@@ -571,16 +453,14 @@ export function SettingsSpecialists({
               <p className="py-3 text-sm text-muted-foreground/70 italic">
                 {hideDisabled && profileOverrides.length > 0
                   ? `All ${profileOverrides.length} customization${profileOverrides.length === 1 ? '' : 's'} hidden by filter.`
-                  : isChannel
-                    ? 'No channel-local specialists. Create one below or customize a global specialist.'
-                    : 'No profile customizations. Override a specialist below to customize it for this profile.'}
+                  : 'No profile customizations. Override a specialist below to customize it for this profile.'}
               </p>
             ) : (
               <div className="space-y-2">
                 {filteredProfileOverrides.map((spec) => (
                   <SpecialistCard
                     key={spec.specialistId}
-                    mode={isChannel ? 'channelLocal' : 'profileOverride'}
+                    mode="profileOverride"
                     specialist={spec}
                     isEditing={editingIds.has(spec.specialistId)}
                     editState={editStates[spec.specialistId]}
@@ -609,14 +489,12 @@ export function SettingsSpecialists({
           </SettingsSection>
 
           {/* ============================================================ */}
-          {/*  Profile / Channel — Inherited                               */}
+          {/*  Profile — Inherited                                         */}
           {/* ============================================================ */}
           {inheritedSpecialists.length > 0 && (
             <SettingsSection
-              label={isChannel ? 'Selected Global Specialists' : 'Inherited Specialists'}
-              description={isChannel
-                ? 'Global collaboration specialists selected for this channel. Click to create a channel-local customization.'
-                : 'Baseline specialists from builtin and global definitions. Customize any of these to create a profile-specific version.'}
+              label="Inherited Specialists"
+              description="Baseline specialists from builtin and global definitions. Customize any of these to create a profile-specific version."
             >
               {filteredInheritedSpecialists.length === 0 ? (
                 <p className="py-3 text-sm text-muted-foreground/70 italic">
@@ -658,7 +536,7 @@ export function SettingsSpecialists({
         </>
       )}
 
-      {showCompatibility && !loading && !error && !isCategory && systemSpecialists.length > 0 && (
+      {showCompatibility && !loading && !error && systemSpecialists.length > 0 && (
         <SettingsSection
           label="System & Compatibility"
           description="Retained legacy and system-managed definitions. They are not offered as normal task types, but remain configurable so existing customizations are not stranded."

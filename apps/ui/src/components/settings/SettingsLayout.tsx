@@ -1,4 +1,4 @@
-import { Activity, ArrowLeft, Bell, Settings, KeyRound, Wrench, FileText, Terminal, TerminalSquare, Puzzle, UserCog, Info, Cpu, Users, Palette, GitBranch, Grid3X3, MonitorCog, ShieldCheck } from 'lucide-react'
+import { Activity, ArrowLeft, Bell, Settings, KeyRound, Wrench, FileText, Terminal, TerminalSquare, Puzzle, UserCog, Info, Cpu, Palette, GitBranch, Grid3X3, MonitorCog, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { HelpTrigger } from '@/components/help/HelpTrigger'
@@ -33,7 +33,6 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'cli-access', label: 'CLI Access', icon: <TerminalSquare className="size-4" /> },
   { id: 'stream-deck', label: 'Stream Deck', icon: <Grid3X3 className="size-4" /> },
   { id: 'observability', label: 'Observability', icon: <Activity className="size-4" /> },
-  { id: 'collaboration', label: 'Collaboration', icon: <Users className="size-4" /> },
   { id: 'about', label: 'About', icon: <Info className="size-4" /> },
 ]
 

@@ -17,7 +17,6 @@ import type {
 import type { DirectoryValidationResult } from '@/lib/ws-client'
 import type { DraggableAttributes, DraggableSyntheticListeners } from '@dnd-kit/core'
 import type { ProfileTreeRow, SessionRow } from '@/lib/agent-hierarchy'
-import type { ActiveSurface } from '@/hooks/index-page/use-route-state'
 
 export type AgentLiveStatus = {
   status: AgentStatus
@@ -25,15 +24,6 @@ export type AgentLiveStatus = {
 }
 
 export type StatusMap = Record<string, { status: AgentStatus; pendingCount: number; contextUsage?: AgentContextUsage; contextRecoveryInProgress?: boolean }>
-
-export interface RemoteSidebarOrigin {
-  originId: string
-  connected: boolean
-  /** Prebuilt once from this origin's structural agents/profile slices. */
-  treeRows: ProfileTreeRow[]
-  /** Used only before origin meta is available (tests/connection bootstrap). */
-  instanceName?: string
-}
 
 export interface AgentSidebarProps {
   connected: boolean
@@ -46,10 +36,6 @@ export interface AgentSidebarProps {
   treeRows?: ProfileTreeRow[]
   statuses: StatusMap
   unreadCounts: Record<string, number>
-  collaborationModeSwitch?: {
-    activeSurface: ActiveSurface
-    onSelectSurface: (surface: ActiveSurface) => void
-  }
   terminalScopeId?: string | null
   terminalCount?: number
   selectedAgentId: string | null
@@ -84,8 +70,6 @@ export interface AgentSidebarProps {
   onUpdateManagerCwd?: (managerId: string, cwd: string) => Promise<void>
   onBrowseDirectory?: (defaultPath: string) => Promise<string | null>
   onValidateDirectory?: (path: string) => Promise<DirectoryValidationResult>
-  /** Same-origin hosted collaboration Builder uses the server folder browser. */
-  directServerDirectoryBrowser?: { canCreateDirectory: boolean }
   onRequestSessionWorkers?: (sessionId: string) => void
   /** Reconciled local-instance authority, including hidden/offline anchors. */
   builderSidebarOrder?: BuilderSidebarOrderRef[]
@@ -100,13 +84,6 @@ export interface AgentSidebarProps {
   onDeleteProjectAgentReference?: (agentId: string, fileName: string) => Promise<{ agentId: string; fileName: string }>
   onRequestProjectAgentRecommendations?: (agentId: string) => Promise<{ whenToUse: string; systemPrompt: string }>
   onCreateAgentCreator?: (profileId: string) => void
-  /** Remote origin snapshots used in the unified mixed project list. */
-  remoteOrigins?: RemoteSidebarOrigin[]
-  /** The origin whose builder surface is active (selection highlight scoping). */
-  activeOriginId?: string
-  onSelectRemoteAgent?: (originId: string, agentId: string) => void
-  onRemoteOriginSignIn?: (originId: string) => void
-  onRemoteOriginRetry?: (originId: string) => void
 }
 
 export interface WorkerRowProps {

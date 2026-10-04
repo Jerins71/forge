@@ -24,10 +24,7 @@ vi.mock('@/components/settings/SettingsLayout', () => ({
 vi.mock('@/components/settings/SettingsGeneral', () => ({
   SettingsGeneral: (props: Record<string, unknown>) => {
     capturedGeneralProps = props
-    return createElement('div', {
-      'data-testid': 'settings-general',
-      'data-repo-clone': String(props.repositoryCloneAvailable),
-    }, 'General')
+    return createElement('div', { 'data-testid': 'settings-general' }, 'General')
   },
 }))
 vi.mock('@/components/settings/SettingsAppearance', () => ({ SettingsAppearance: () => createElement('div', null, 'Appearance') }))
@@ -52,39 +49,26 @@ vi.mock('@/components/settings/SettingsPrompts', () => ({ SettingsPrompts: () =>
 vi.mock('@/components/settings/SettingsSpecialists', () => ({ SettingsSpecialists: () => createElement('div', null, 'Specialists') }))
 vi.mock('@/components/settings/SettingsSlashCommands', () => ({ SettingsSlashCommands: () => createElement('div', null, 'Slash Commands') }))
 vi.mock('@/components/settings/SettingsExtensions', () => ({ SettingsExtensions: () => createElement('div', null, 'Extensions') }))
-vi.mock('@/components/settings/SettingsCollaboration', () => ({ SettingsCollaboration: () => createElement('div', null, 'Collaboration') }))
 vi.mock('@/components/settings/SettingsAbout', () => ({ SettingsAbout: () => createElement('div', null, 'About') }))
 
 const { SettingsPanel } = await import('./SettingsDialog')
 
 const BUILDER_TARGET: SettingsBackendTarget = {
-  kind: 'builder',
   label: 'Builder backend',
   description: 'Local Forge Builder backend.',
   wsUrl: 'ws://localhost:47187',
   apiBaseUrl: 'http://localhost:47187',
   fetchCredentials: 'same-origin',
-  requiresAdmin: false,
   availableTabs: [
     'general', 'appearance', 'notifications', 'auth', 'secrets', 'models',
     'skills', 'prompts', 'specialists', 'slash-commands', 'extensions',
-    'collaboration', 'about',
+    'about',
   ],
 }
 
-const COLLAB_TARGET: SettingsBackendTarget = {
-  kind: 'collab',
-  label: 'Collab backend',
-  description: 'Remote collab backend.',
-  wsUrl: 'wss://collab.example.com',
-  apiBaseUrl: 'https://collab.example.com',
-  fetchCredentials: 'include',
-  requiresAdmin: true,
-  availableTabs: [
-    'general', 'appearance', 'auth', 'models',
-    'skills', 'prompts', 'specialists', 'slash-commands', 'extensions',
-    'collaboration', 'about',
-  ],
+const LIMITED_TARGET: SettingsBackendTarget = {
+  ...BUILDER_TARGET,
+  availableTabs: ['general', 'appearance', 'auth', 'models', 'about'],
 }
 
 let container: HTMLDivElement
@@ -111,7 +95,6 @@ afterEach(() => {
 function makeProps(overrides: {
   initialTab?: string
   target?: SettingsBackendTarget
-  repositoryCloneAvailable?: boolean
   contextProfileId?: string
   previewSession?: { agentId: string; profileId: string } | null
   profiles?: any[]
@@ -128,16 +111,12 @@ function makeProps(overrides: {
     initialTab: overrides.initialTab,
     contextProfileId: overrides.contextProfileId,
     previewSession: overrides.previewSession,
-    ...(overrides.repositoryCloneAvailable !== undefined
-      ? { repositoryCloneAvailable: overrides.repositoryCloneAvailable }
-      : {}),
   }
 }
 
 function renderPanel(props: {
   initialTab?: string
   target?: SettingsBackendTarget
-  repositoryCloneAvailable?: boolean
   contextProfileId?: string
   previewSession?: { agentId: string; profileId: string } | null
   profiles?: any[]
@@ -152,7 +131,6 @@ function renderPanel(props: {
 function rerenderPanel(props: {
   initialTab?: string
   target?: SettingsBackendTarget
-  repositoryCloneAvailable?: boolean
   contextProfileId?: string
   previewSession?: { agentId: string; profileId: string } | null
   profiles?: any[]
@@ -207,8 +185,8 @@ describe('SettingsPanel initialTab', () => {
     renderPanel({ initialTab: 'general' })
     expect(capturedActiveTab).toBe('general')
 
-    rerenderPanel({ initialTab: 'collaboration' })
-    expect(capturedActiveTab).toBe('collaboration')
+    rerenderPanel({ initialTab: 'secrets' })
+    expect(capturedActiveTab).toBe('secrets')
   })
 
   it('syncs activeTab from undefined to a valid tab', () => {
@@ -220,11 +198,11 @@ describe('SettingsPanel initialTab', () => {
   })
 
   it('ignores initialTab change when tab is not in availableTabs', () => {
-    renderPanel({ initialTab: 'general', target: COLLAB_TARGET })
+    renderPanel({ initialTab: 'general', target: LIMITED_TARGET })
     expect(capturedActiveTab).toBe('general')
 
-    // 'notifications' is not in COLLAB_TARGET.availableTabs
-    rerenderPanel({ initialTab: 'notifications', target: COLLAB_TARGET })
+    // 'notifications' is not in LIMITED_TARGET.availableTabs
+    rerenderPanel({ initialTab: 'notifications', target: LIMITED_TARGET })
     // Should stay on general (invalid tab ignored)
     expect(capturedActiveTab).toBe('general')
   })
@@ -233,29 +211,18 @@ describe('SettingsPanel initialTab', () => {
     renderPanel({ initialTab: 'notifications', target: BUILDER_TARGET })
     expect(capturedActiveTab).toBe('notifications')
 
-    // Switch to collab target where notifications is unavailable
-    rerenderPanel({ initialTab: 'notifications', target: COLLAB_TARGET })
-    // Should repair to first collab tab
+    // Switch to a target where notifications is unavailable
+    rerenderPanel({ initialTab: 'notifications', target: LIMITED_TARGET })
+    // Should repair to the first available tab
     expect(capturedActiveTab).toBe('general')
   })
 })
 
-describe('SettingsPanel repositoryCloneAvailable derivation', () => {
-  it('enables repository settings for builder when prop is omitted', () => {
+describe('SettingsPanel General wiring', () => {
+  it('passes a client bound to the resolved target to General', () => {
     renderPanel({ target: BUILDER_TARGET })
-    expect(capturedGeneralProps?.repositoryCloneAvailable).toBe(true)
-  })
-
-  it('disables repository settings for builder when prop is explicit false', () => {
-    renderPanel({ target: BUILDER_TARGET, repositoryCloneAvailable: false })
-    expect(capturedGeneralProps?.repositoryCloneAvailable).toBe(false)
-  })
-
-  it('always disables repository settings for collab target even when prop omitted or true', () => {
-    renderPanel({ target: COLLAB_TARGET })
-    expect(capturedGeneralProps?.repositoryCloneAvailable).toBe(false)
-
-    rerenderPanel({ target: COLLAB_TARGET, repositoryCloneAvailable: true })
-    expect(capturedGeneralProps?.repositoryCloneAvailable).toBe(false)
+    expect(capturedGeneralProps?.wsUrl).toBe('ws://localhost:47187')
+    expect((capturedGeneralProps?.apiClient as { target: SettingsBackendTarget }).target).toBe(BUILDER_TARGET)
+    expect(capturedGeneralProps).not.toHaveProperty('repositoryCloneAvailable')
   })
 })

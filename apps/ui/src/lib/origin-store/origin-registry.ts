@@ -1,17 +1,14 @@
 /**
- * Origin store registry (WP-U1, requirement 1).
+ * Origin store registry.
  *
  * A map of `originId → OriginStore`.  Store create/destroy is an EXPLICIT
  * registry operation driven by connection lifecycle — never constructed inside
  * a React effect (this replaces the `use-ws-connection.ts` construct-in-effect
- * pattern).  Today only the reserved `"local"` origin is created; the registry
- * shape is already multi-origin so Wave R backends plug in without rework.
+ * pattern).  Today only the reserved `"local"` origin is created.
  *
  * The module exposes a single shared registry (`originRegistry`).  A registry
  * is intentionally tiny state — do not add per-origin domain logic here; that
  * lives in {@link OriginStore}.
- *
- * @see .internal/forge-review-2026-07/97-remote/U1-REQUIREMENTS.md (req. 1)
  */
 
 import { OriginStore, type OriginStoreOptions } from './origin-store'

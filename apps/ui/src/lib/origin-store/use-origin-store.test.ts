@@ -234,7 +234,7 @@ describe('useOriginMeta', () => {
 
 // ---------------------------------------------------------------------------
 // Ordering: a consumer that mounts BEFORE its origin exists must start
-// receiving slice notifications once the origin is created (Wave R remote
+// receiving slice notifications once the origin is created (origins may
 // origins connect after mount).  Regression for the dead-subscription bug.
 // ---------------------------------------------------------------------------
 

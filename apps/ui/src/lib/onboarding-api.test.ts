@@ -31,27 +31,12 @@ const {
 
 function makeBuilderTarget(): SettingsBackendTarget {
   return {
-    kind: 'builder',
     label: 'Builder',
     description: 'Local builder backend',
     wsUrl: 'ws://127.0.0.1:47187',
     apiBaseUrl: 'http://127.0.0.1:47187/',
     fetchCredentials: 'same-origin',
-    requiresAdmin: false,
     availableTabs: ['general'],
-  }
-}
-
-function makeCollabTarget(): SettingsBackendTarget {
-  return {
-    kind: 'collab',
-    label: 'Collab',
-    description: 'Remote collab backend',
-    wsUrl: 'wss://collab.example.com',
-    apiBaseUrl: 'https://collab.example.com/',
-    fetchCredentials: 'include',
-    requiresAdmin: true,
-    availableTabs: ['general', 'auth'],
   }
 }
 
@@ -81,7 +66,7 @@ function makeApiClient(target: SettingsBackendTarget): SettingsApiClient & { fet
 describe('onboarding-api — client functions', () => {
   describe('fetchOnboardingStateViaClient', () => {
     it('throws when response is not ok', async () => {
-      const client = makeApiClient(makeCollabTarget())
+      const client = makeApiClient(makeBuilderTarget())
       client.fetch.mockResolvedValue(
         new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
       )
@@ -103,7 +88,7 @@ describe('onboarding-api — client functions', () => {
 
   describe('saveOnboardingPreferencesViaClient', () => {
     it('throws when response is not ok', async () => {
-      const client = makeApiClient(makeCollabTarget())
+      const client = makeApiClient(makeBuilderTarget())
       client.fetch.mockResolvedValue(
         new Response(JSON.stringify({ error: 'Validation failed' }), { status: 422 }),
       )

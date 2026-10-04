@@ -110,7 +110,6 @@ vi.mock('@/components/settings/SettingsPrompts', () => ({ SettingsPrompts: () =>
 vi.mock('@/components/settings/SettingsSpecialists', () => ({ SettingsSpecialists: () => null }))
 vi.mock('@/components/settings/SettingsSlashCommands', () => ({ SettingsSlashCommands: () => null }))
 vi.mock('@/components/settings/SettingsExtensions', () => ({ SettingsExtensions: () => null }))
-vi.mock('@/components/settings/SettingsCollaboration', () => ({ SettingsCollaboration: () => null }))
 vi.mock('@/components/settings/SettingsAbout', () => ({ SettingsAbout: () => null }))
 vi.mock('@/components/settings/SettingsCliAccess', () => ({ SettingsCliAccess: () => null }))
 vi.mock('@/components/settings/SettingsObservability', () => ({ SettingsObservability: () => null }))
@@ -148,38 +147,8 @@ async function flush(): Promise<void> {
 }
 
 describe('SettingsPanel + SettingsGeneral repository clone composition', () => {
-  it('hides Repositories and does not fetch for collab target when prop omitted', async () => {
-    root = createRoot(container)
-    flushSync(() => {
-      root?.render(
-        createElement(SettingsPanel, {
-          wsUrl: 'wss://collab.example.com',
-          managers: [],
-          profiles: [],
-          promptChangeKey: 0,
-          specialistChangeKey: 0,
-          modelConfigChangeKey: 0,
-          target: {
-            kind: 'collab',
-            label: 'Collab',
-            description: 'Remote',
-            wsUrl: 'wss://collab.example.com',
-            apiBaseUrl: 'https://collab.example.com/',
-            fetchCredentials: 'include',
-            requiresAdmin: true,
-            availableTabs: ['general', 'auth', 'about'],
-          },
-        }),
-      )
-    })
-    await flush()
-    await flush()
 
-    expect(container.textContent).not.toContain('Repositories')
-    expect(repositoryApiMock.fetchRepositorySettings).not.toHaveBeenCalled()
-  })
-
-  it('loads Repositories for builder when repositoryCloneAvailable is true', async () => {
+  it('loads Repositories for the builder target', async () => {
     root = createRoot(container)
     flushSync(() => {
       root?.render(
@@ -190,15 +159,12 @@ describe('SettingsPanel + SettingsGeneral repository clone composition', () => {
           promptChangeKey: 0,
           specialistChangeKey: 0,
           modelConfigChangeKey: 0,
-          repositoryCloneAvailable: true,
           target: {
-            kind: 'builder',
             label: 'Builder',
             description: 'Local',
             wsUrl: 'ws://127.0.0.1:47187',
             apiBaseUrl: 'http://127.0.0.1:47187/',
             fetchCredentials: 'same-origin',
-            requiresAdmin: false,
             availableTabs: ['general', 'auth', 'about'],
           },
         }),

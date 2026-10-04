@@ -12,26 +12,6 @@ import type { SelectableModel } from '@/lib/model-preset'
 /* ------------------------------------------------------------------ */
 
 export const SCOPE_GLOBAL = 'global' as const
-export const SCOPE_CATEGORY_PREFIX = 'category:' as const
-export const SCOPE_CHANNEL_PREFIX = 'channel:' as const
-
-export type ScopeKind = 'global' | 'profile' | 'category' | 'channel'
-
-export function parseScopeKind(scope: string): ScopeKind {
-  if (scope === SCOPE_GLOBAL) return 'global'
-  if (scope.startsWith(SCOPE_CATEGORY_PREFIX)) return 'category'
-  if (scope.startsWith(SCOPE_CHANNEL_PREFIX)) return 'channel'
-  return 'profile'
-}
-
-export function parseCategoryId(scope: string): string {
-  return scope.slice(SCOPE_CATEGORY_PREFIX.length)
-}
-
-export function parseChannelId(scope: string): string {
-  return scope.slice(SCOPE_CHANNEL_PREFIX.length)
-}
-
 export const SPECIALIST_COLORS = [
   '#2563eb', // blue
   '#7c3aed', // violet
@@ -75,8 +55,6 @@ export interface SettingsSpecialistsProps {
   previewSession?: SettingsSessionContext | null
   specialistChangeKey: number
   modelConfigChangeKey: number
-  /** Optional: open directly to a specific channel scope. */
-  initialChannelId?: string
 }
 
 export interface CardEditState {
@@ -98,7 +76,7 @@ export interface CardEditState {
   promptBody: string
 }
 
-export type SpecialistCardMode = 'global' | 'profileOverride' | 'inherited' | 'channelLocal'
+export type SpecialistCardMode = 'global' | 'profileOverride' | 'inherited'
 
 export interface SpecialistCardProps {
   mode: SpecialistCardMode

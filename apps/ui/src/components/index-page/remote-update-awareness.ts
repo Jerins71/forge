@@ -8,11 +8,9 @@ import type { RemoteUpdateAwarenessProjectSnapshot } from '@forge/protocol'
 export function getActiveLocalRemoteUpdateSnapshot(
   snapshot: RemoteUpdateAwarenessProjectSnapshot | null,
   activeProjectId: string | null,
-  isRemoteOriginActive: boolean,
   isCortexSession: boolean,
 ): RemoteUpdateAwarenessProjectSnapshot | null {
   if (
-    isRemoteOriginActive ||
     isCortexSession ||
     !activeProjectId ||
     snapshot?.projectId !== activeProjectId

@@ -19,7 +19,6 @@ export function ProjectSecureSessionsSettings({ profile, apiClient, onManage }: 
   const [retryValue, setRetryValue] = useState<boolean | null>(null)
   const generation = useRef(0)
   const liveRevision = useRef(0)
-  const local = apiClient.target.kind === 'builder'
   useEffect(() => () => { generation.current++ }, [apiClient, profile.profileId])
   useEffect(() => {
     liveRevision.current++
@@ -67,13 +66,13 @@ export function ProjectSecureSessionsSettings({ profile, apiClient, onManage }: 
             </CardDescription>
           </div>
           <Switch id={id} checked={enabled === true} onCheckedChange={(next) => { void save(next) }}
-            disabled={!local || saving || enabled === null} aria-describedby={`${id}-description`} />
+            disabled={saving || enabled === null} aria-describedby={`${id}-description`} />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p role="status" className="text-xs text-muted-foreground">
-            {!local ? 'Available in the local Builder.' : saving ? 'Applying setting…' : enabled === null ? 'Setting unavailable' : enabled ? 'Enabled for this project' : 'Disabled for this project'}
+            {saving ? 'Applying setting…' : enabled === null ? 'Setting unavailable' : enabled ? 'Enabled for this project' : 'Disabled for this project'}
           </p>
-          <Button size="sm" variant="outline" onClick={onManage} disabled={!onManage || !local || saving}>
+          <Button size="sm" variant="outline" onClick={onManage} disabled={!onManage || saving}>
             <ShieldCheck className="mr-2 size-3.5" />Manage secrets
           </Button>
         </div>
