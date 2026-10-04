@@ -40,6 +40,8 @@ export function createExposurePolicy(options: ExposureOptions = {}): ExposurePol
   if (!host || /[\s/]/.test(host) || (!isIP(host.replace(/^\[|\]$/g, '')) && host !== 'localhost')) throw new Error('Bind host must be an IP address or localhost');
   const loopback = isLoopbackHost(host);
   const mode = options.mode ?? (loopback ? 'loopback' : 'lan');
+  if (!['loopback', 'lan', 'tailscale'].includes(mode)) throw new Error('Invalid exposure mode');
+  if (mode === 'loopback' && !loopback) throw new Error('Loopback mode requires a loopback listener');
   if (mode === 'tailscale' && !loopback) throw new Error('Tailscale mode requires a loopback backend listener');
   if ((options.tlsCert && !options.tlsKey) || (!options.tlsCert && options.tlsKey)) throw new Error('TLS requires both certificate and key');
   if (!loopback && (!options.publicBaseUrl || !(options.tlsCert && options.tlsKey) && !options.trustedProxy)) throw new Error('Non-loopback binding requires an explicit public HTTPS URL and TLS certificate/key or trusted loopback reverse proxy');

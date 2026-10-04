@@ -20,7 +20,8 @@ import { loadWindowState, trackWindowState } from './window-state.js'
 import { consumePostUpdateInfo } from './whats-new.js'
 import { createEnvironmentCredentialService, installEnvironmentCredentialsIpc, readPrimaryEnvironmentActivity, ENVIRONMENT_ARTIFACT_SCHEME } from './environment-credentials-ipc.js'
 import { ensurePrimaryEnvironmentSession, writeEnvironmentInstallationManifest } from './environment-bootstrap-ipc.js'
-import { createBackendForkOptions } from './backend-fork-options.js'
+import { createBackendForkOptions, resolveBackendExposurePolicy, type DesktopEnvironmentExposure } from './backend-fork-options.js'
+import { readSettings } from './electron-settings.js'
 import { resolveDevBetterSqlite3Binding } from './dev-native-binding.js'
 import { PackagedRemoteUiServer, resolvePackagedRemoteUiHost, startOptionalPackagedRemoteUi } from './packaged-remote-ui-server.js'
 import type { BrowserAutomationRequest, BrowserTabSnapshot } from '@forge/protocol'
@@ -161,6 +162,7 @@ protocol.registerSchemesAsPrivileged([
 class BackendSupervisor {
   private child: ChildProcess | null = null
   private currentPort: number | null = null
+  private currentPublicBaseUrl: string | null = null
   private currentDataDir: string | null = null
   private startPromise: Promise<number> | null = null
   private stopping = false
@@ -182,6 +184,7 @@ class BackendSupervisor {
       this.currentPort,
       this.currentDataDir ?? undefined,
       this.secureControlToken,
+      this.currentPublicBaseUrl ?? undefined,
     )
   }
 
@@ -317,7 +320,9 @@ class BackendSupervisor {
       electronVersion: process.versions.electron ?? '',
       execArgv,
       devBetterSqlite3Binding,
+      exposure: (readSettings() as ReturnType<typeof readSettings> & {environmentExposure?: DesktopEnvironmentExposure}).environmentExposure,
     })
+    const exposure = resolveBackendExposurePolicy(forkOptions.env ?? {})
 
     await writeEnvironmentInstallationManifest(backendEntry)
     this.initializeLaunchLogging()
@@ -378,9 +383,11 @@ class BackendSupervisor {
 
         ready = true
         this.currentPort = message.port
+        exposure.setLoopbackPort(message.port)
+        this.currentPublicBaseUrl = exposure.publicBaseUrl
         this.currentDataDir = message.dataDir && path.isAbsolute(message.dataDir) ? path.normalize(message.dataDir) : null
         lifecycleLog.record('backend_ready', { isRestart, pid: child.pid ?? null, port: message.port })
-        void ensurePrimaryEnvironmentSession({ child, baseUrl: process.env.FORGE_PUBLIC_URL ?? `http://127.0.0.1:${message.port}`, credentials: environmentCredentials }).then(() => {
+        void ensurePrimaryEnvironmentSession({ child, baseUrl: exposure.publicBaseUrl, credentials: environmentCredentials }).then(() => {
           this.onReady(message.port, isRestart)
           finalizeResolve(message.port)
         }).catch(() => finalizeReject(new Error('Primary environment pairing could not be initialized')))
@@ -1666,10 +1673,11 @@ function buildBackendBootstrap(
   port: number,
   dataDir: string | undefined,
   secureControlToken: string,
+  publicBaseUrl = `http://127.0.0.1:${port}`,
 ): BackendBootstrap {
   return {
-    backendUrl: process.env.FORGE_PUBLIC_URL ?? `http://127.0.0.1:${port}`,
-    backendWsUrl: (process.env.FORGE_PUBLIC_URL ?? `http://127.0.0.1:${port}`).replace(/^http/, 'ws'),
+    backendUrl: publicBaseUrl,
+    backendWsUrl: publicBaseUrl.replace(/^http/, 'ws'),
     version: app.getVersion(),
     platform: process.platform,
     appRuntime: app.isPackaged ? 'installed' : 'development',

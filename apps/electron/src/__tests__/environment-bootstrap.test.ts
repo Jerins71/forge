@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createEnvironmentCredentialService } from '../environment-credentials-ipc.js';
 import { requestEnvironmentBootstrap, ensurePrimaryEnvironmentSession } from '../environment-bootstrap-ipc.js';
-import { createBackendForkOptions } from '../backend-fork-options.js';
+import { createBackendForkOptions, resolveBackendExposurePolicy } from '../backend-fork-options.js';
 const power = vi.hoisted(()=>({started:false,start:vi.fn(()=>{power.started=true;return 1;}),stop:vi.fn(()=>{power.started=false;})}));
 vi.mock('electron',()=>({app:{isPackaged:false},BrowserWindow:class{},dialog:{},Notification:class{},powerSaveBlocker:{start:power.start,stop:power.stop,isStarted:()=>power.started}}));
 vi.mock('electron-updater',()=>({autoUpdater:{}}));
@@ -48,7 +48,7 @@ it('safeStorage ciphertext stays on disk; parent IPC pairs via ordinary HTTP and
   const safeStorage = { isEncryptionAvailable: () => true, getSelectedStorageBackend: () => 'keychain', encryptString: (text: string) => Buffer.from(text).map(v => v ^ 0x55), decryptString: (data: Buffer) => data.map(v => v ^ 0x55).toString() };
   const credentials = createEnvironmentCredentialService({ storePath, safeStorage });
   const entry = join(root, 'child.cjs'); await writeFile(entry, `process.on('message',m=>{if(m.type==='forge:environment-bootstrap:request')process.send({type:'forge:environment-bootstrap:result',requestId:m.requestId,grant:{environmentId:'${id}',pairingUrl:'${baseUrl}/pair#v=1&environmentId=${id}&grantId=${id}&secret=${randomBytes(32).toString('base64url')}'}})});`);
-  const child = fork(entry, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }); cleanup.push(() => { child.kill(); });
+  const child = fork(entry, [], { cwd: root, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }); cleanup.push(() => { child.kill(); });
   const paired = await ensurePrimaryEnvironmentSession({ child, baseUrl, credentials });
   expect(JSON.stringify(paired)).not.toContain(token);
   expect(await readFile(storePath, 'utf8')).not.toContain(token);
@@ -78,6 +78,13 @@ it('safeStorage ciphertext stays on disk; parent IPC pairs via ordinary HTTP and
 });
 it('Desktop defaults to loopback and refuses plaintext safeStorage fallback', async () => {
   expect(createBackendForkOptions({ runtimeRoot: '/tmp', inheritedEnv: {}, isPackaged: true, backendPort: 47187, resourcesDir: '/tmp', appVersion: '1', electronVersion: '1', execArgv: [] }).env?.FORGE_HOST).toBe('127.0.0.1');
+  const root=await mkdtemp(join(tmpdir(),'forge-exposure-child-'));cleanup.push(()=>rm(root,{recursive:true,force:true}));
+  const entry=join(root,'exposure.cjs');await writeFile(entry,`process.send({host:process.env.FORGE_HOST,mode:process.env.FORGE_EXPOSURE_MODE,publicUrl:process.env.FORGE_PUBLIC_URL,origins:process.env.FORGE_ALLOWED_CLIENT_ORIGINS});`);
+  const options=createBackendForkOptions({runtimeRoot:root,inheritedEnv:{},isPackaged:true,backendPort:47187,resourcesDir:root,appVersion:'1',electronVersion:'1',execArgv:[],exposure:{mode:'lan',host:'0.0.0.0',publicBaseUrl:'https://dev1.test',allowedClientOrigins:['https://client.test'],trustedProxy:{peer:'127.0.0.1',host:'dev1.test',proto:'https'}}});
+  const child=fork(entry,[],options);cleanup.push(()=>child.kill());
+  const [observed]=await once(child,'message');expect(observed).toMatchObject({host:'0.0.0.0',mode:'lan',publicUrl:'https://dev1.test',origins:'app://forge,https://client.test'});
+  expect(resolveBackendExposurePolicy(options.env!).publicBaseUrl).toBe('https://dev1.test');
+  expect(()=>createBackendForkOptions({runtimeRoot:root,inheritedEnv:{},isPackaged:true,backendPort:47187,resourcesDir:root,appVersion:'1',electronVersion:'1',execArgv:[],exposure:{mode:'lan',host:'0.0.0.0',allowedClientOrigins:[]}})).toThrow(/TLS/);
   const service = createEnvironmentCredentialService({ storePath: join(tmpdir(), 'unused-test-file'), safeStorage: { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => '' } });
   expect(await service.list()).toMatchObject({ ok: false, error: { code: 'UNAVAILABLE' } });
 });
