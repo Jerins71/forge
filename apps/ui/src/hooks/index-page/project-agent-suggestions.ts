@@ -5,8 +5,6 @@ import {
   type ProjectAgentExternalDirectoryEntry,
 } from '@forge/protocol'
 
-const BUILDER_SYSTEM_PROFILE_IDS = new Set(['cortex', '_collaboration'])
-
 export function shouldLoadExternalProjectAgentDirectory(options: {
   activeAgentRole: AgentDescriptor['role'] | null | undefined
   activeProfileId: string | null | undefined
@@ -18,15 +16,7 @@ export function shouldLoadExternalProjectAgentDirectory(options: {
     return false
   }
 
-  if (BUILDER_SYSTEM_PROFILE_IDS.has(activeProfileId)) {
-    return false
-  }
-
-  if (activeProfileType === 'system') {
-    return false
-  }
-
-  return true
+  return activeProfileType !== 'system'
 }
 
 export function getProjectAgentSuggestions(

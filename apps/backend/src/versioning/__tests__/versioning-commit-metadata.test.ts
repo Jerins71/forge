@@ -17,7 +17,6 @@ describe("parseVersioningCommitMetadata", () => {
           profileId: "cortex",
           sessionId: "cortex--s1",
           agentId: "cortex-worker-1",
-          reviewRunId: "review-123",
           promptCategory: "archetype",
           promptId: "review"
         }
@@ -32,7 +31,6 @@ describe("parseVersioningCommitMetadata", () => {
       profileId: "cortex",
       sessionId: "cortex--s1",
       agentId: "cortex-worker-1",
-      reviewRunId: "review-123",
       promptCategory: "archetype",
       promptId: "review",
       paths: ["shared/knowledge/common.md"]

@@ -5,7 +5,6 @@ import { slugifySessionName } from "./swarm-manager-utils.js";
 import { getProjectAgentSharingStorePath } from "./storage/data-paths.js";
 import type { AgentDescriptor } from "./types.js";
 
-const CORTEX_PROFILE_ID = "cortex";
 const STORE_VERSION = 1 as const;
 
 const METADATA_MAX = {
@@ -148,9 +147,6 @@ function isEligibleShareTargetProfile(
     return false;
   }
   if (isSystemProfile(profile)) {
-    return false;
-  }
-  if (profile.profileId === CORTEX_PROFILE_ID) {
     return false;
   }
   if (profile.archivedAt) {
@@ -499,9 +495,6 @@ export class ProjectAgentSharingService {
     const profile = this.deps.getProfiles().find((candidate) => candidate.profileId === profileId);
     if (!profile || isSystemProfile(profile)) {
       throw new Error("Project agent sharing is not available for system profiles");
-    }
-    if (profileId === CORTEX_PROFILE_ID) {
-      throw new Error("Project agent sharing is not available for this profile");
     }
     if (isProfileArchived(profile)) {
       throw new Error("Archived projects cannot be used until restored.");

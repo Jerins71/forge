@@ -241,19 +241,11 @@ describe("AgentDirectory", () => {
     const harness = createHarness();
     const root = manager("profile", "profile");
     const ordinary = manager("ordinary", "profile");
-    const cortex = manager("cortex", "cortex");
-    const review = manager("review", "profile", { sessionPurpose: "cortex_review" });
     const creator = manager("creator", "profile", { sessionPurpose: "agent_creator" });
     harness.profiles.set("profile", profile("profile"));
-    addDescriptors(harness, root, ordinary, cortex, review, creator);
+    addDescriptors(harness, root, ordinary, creator);
 
     expect(() => harness.directory.assertSessionSupportsProjectAgent(ordinary)).not.toThrow();
-    expect(() => harness.directory.assertSessionSupportsProjectAgent(cortex)).toThrow(
-      "Cortex root cannot be promoted to a project agent",
-    );
-    expect(() => harness.directory.assertSessionSupportsProjectAgent(review)).toThrow(
-      "Cortex review sessions cannot be promoted to project agents",
-    );
     expect(() => harness.directory.assertSessionSupportsProjectAgent(creator)).toThrow(
       "Agent creator sessions cannot be promoted to project agents",
     );
@@ -281,14 +273,14 @@ describe("AgentDirectory", () => {
     );
   });
 
-  it("requires a running manager and can ignore Cortex when checking availability", () => {
+  it("requires a running manager when checking availability", () => {
     const harness = createHarness();
-    const cortex = manager("cortex", "cortex", { archetypeId: " CORTEX " });
+    const running = manager("running", "running");
     const stopped = manager("stopped", "stopped", { status: "stopped" });
-    const workerDescriptor = worker("worker", "cortex");
-    addDescriptors(harness, cortex, stopped, workerDescriptor);
+    const workerDescriptor = worker("worker", "running");
+    addDescriptors(harness, running, stopped, workerDescriptor);
 
-    expect(harness.directory.assertManager("cortex", "speak")).toBe(cortex);
+    expect(harness.directory.assertManager("running", "speak")).toBe(running);
     expect(() => harness.directory.assertManager("stopped", "speak")).toThrow(
       "Manager is not running: stopped",
     );
@@ -296,7 +288,8 @@ describe("AgentDirectory", () => {
       "Only manager can speak",
     );
     expect(harness.directory.hasRunningManagers()).toBe(true);
-    expect(harness.directory.hasRunningManagers({ excludeCortex: true })).toBe(false);
+    running.status = "stopped";
+    expect(harness.directory.hasRunningManagers()).toBe(false);
   });
 });
 

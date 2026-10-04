@@ -52,8 +52,7 @@ function createHarness(): {
     refreshSessionMetaStats: vi.fn(async () => undefined),
     saveStore: vi.fn(async () => undefined),
     emitStatus: vi.fn(),
-    logDebug: vi.fn(),
-    handleManagerStatusTransition: vi.fn(async () => undefined)
+    logDebug: vi.fn()
   };
 
   return {
@@ -85,22 +84,15 @@ describe("RuntimeStatusProjector", () => {
     expect(deps.refreshSessionMetaStats).toHaveBeenCalledWith(expect.objectContaining({ agentId: manager.agentId }));
     expect(deps.saveStore).toHaveBeenCalledTimes(1);
     expect(deps.emitStatus).toHaveBeenCalledWith(manager.agentId, "idle", 0, undefined);
-    expect(deps.handleManagerStatusTransition).toHaveBeenCalledWith(
-      expect.objectContaining({ agentId: manager.agentId }),
-      "idle",
-      0
-    );
 
     const patchOrder = vi.mocked(deps.patchDescriptorFromRuntimeStatus).mock.invocationCallOrder[0];
     const statsOrder = vi.mocked(deps.refreshSessionMetaStats).mock.invocationCallOrder[0];
     const firstSaveOrder = vi.mocked(deps.saveStore).mock.invocationCallOrder[0];
     const emitOrder = vi.mocked(deps.emitStatus).mock.invocationCallOrder[0];
-    const cortexOrder = vi.mocked(deps.handleManagerStatusTransition).mock.invocationCallOrder[0];
 
     expect(patchOrder).toBeLessThan(statsOrder);
     expect(statsOrder).toBeLessThan(firstSaveOrder);
     expect(firstSaveOrder).toBeLessThan(emitOrder);
-    expect(emitOrder).toBeLessThan(cortexOrder);
   });
 
   it("projects worker idle-to-streaming with normalized context usage before meta/stats, save, and emit", async () => {

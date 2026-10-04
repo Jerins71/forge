@@ -12,7 +12,7 @@ Decomposition lives in:
 - `agent-sidebar/dialogs/` for modal flows
 - `project-agent/` for project-agent specific UI
 
-Keep hooks single-purpose. If a hook only handles search state, drag state, sidebar prefs, or cortex badge logic, keep it isolated instead of merging responsibilities.
+Keep hooks single-purpose. If a hook only handles search state, drag state, or sidebar prefs, keep it isolated instead of merging responsibilities.
 
 Do not import `ws-client` directly from sidebar components. Transport and socket state should come in through props or context.
 

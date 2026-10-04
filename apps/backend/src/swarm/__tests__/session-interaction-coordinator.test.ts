@@ -230,21 +230,9 @@ describe("SessionInteractionCoordinator", () => {
     );
   });
 
-  it("rejects update_plan outside a running, non-Cortex Builder manager session", async () => {
+  it("rejects update_plan outside a running Builder manager session", async () => {
     const harness = createHarness();
     const manager = harness.descriptors.get("manager")!;
-    manager.archetypeId = "cortex";
-    await expect(
-      harness.coordinator.updatePlan("manager", "tool", { plan: [] }),
-    ).rejects.toThrow("not available for Cortex sessions");
-    await expect(
-      harness.coordinator.acceptWorkGraphNode("manager", "tool", {
-        nodeId: "research",
-        evidence: "Verified.",
-      }),
-    ).rejects.toThrow("not available for Cortex sessions");
-
-    manager.archetypeId = "manager";
     manager.status = "stopped";
     await expect(
       harness.coordinator.updatePlan("manager", "tool", { plan: [] }),
@@ -332,12 +320,8 @@ describe("SessionInteractionCoordinator", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it("preloads only non-Cortex session plans", async () => {
+  it("preloads only Builder session plans", async () => {
     const harness = createHarness();
-    harness.descriptors.set(
-      "cortex",
-      makeManager("cortex", { archetypeId: "cortex" }),
-    );
     harness.descriptors.set(
       "profile-root",
       makeManager("profile-root", { profileId: undefined }),

@@ -17,11 +17,6 @@ interface PromptMetadataEntry {
   displayName: string;
   description: string;
   variables: PromptVariableDeclaration[];
-  /**
-   * When set, this prompt is only shown/relevant for the specified profile.
-   * Omit for prompts that apply to all profiles.
-   */
-  profileScope?: string;
 }
 
 /**
@@ -67,18 +62,6 @@ export const PROMPT_METADATA: PromptMetadataEntry[] = [
   },
   {
     category: 'archetype',
-    promptId: 'cortex',
-    displayName: 'Cortex System Prompt',
-    description: 'Instructions for the Cortex intelligence/knowledge manager.',
-    profileScope: 'cortex',
-    variables: [
-      { name: 'SWARM_DATA_DIR', description: 'Path to the Forge data directory' },
-      { name: 'SWARM_MEMORY_FILE', description: 'Path to the memory file' },
-      { name: 'SWARM_SCRIPTS_DIR', description: 'Path to the scripts directory' },
-    ],
-  },
-  {
-    category: 'archetype',
     promptId: 'merger',
     displayName: 'Merger Worker System Prompt',
     description: 'Instructions for branch-merge worker agents.',
@@ -108,15 +91,6 @@ export const PROMPT_METADATA: PromptMetadataEntry[] = [
     displayName: 'Default Memory Template',
     description:
       'Initial content for new memory files. Source: persistence-service.ts DEFAULT_MEMORY_FILE_CONTENT.',
-    variables: [],
-  },
-  {
-    category: 'operational',
-    promptId: 'common-knowledge-template',
-    displayName: 'Common Knowledge Template',
-    description:
-      'Initial content for shared/knowledge/common.md when Cortex profile is created.',
-    profileScope: 'cortex',
     variables: [],
   },
   {

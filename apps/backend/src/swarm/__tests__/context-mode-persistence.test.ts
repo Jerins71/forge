@@ -70,7 +70,6 @@ describe("context mode persistence", () => {
       getAllManagerSessions: () => sessions,
       getSessionById: (agentId) => sessions.find((item) => item.agentId === agentId),
       resolveAndValidateCwd: async (cwd) => cwd,
-      assertCanChangeManagerCwd: () => {},
       applyManagerRuntimeRecyclePolicy,
       hasActiveSecureSession: () => false,
       stopSecureSessionForLifecycle: async () => undefined,

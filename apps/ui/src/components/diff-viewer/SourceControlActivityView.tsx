@@ -1,15 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FileX2, History } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { CommitList } from './CommitList'
 import { DiffPane } from './DiffPane'
 import { FileList } from './FileList'
-import {
-  KNOWLEDGE_QUICK_FILTERS,
-  commitMatchesKnowledgeQuickFilter,
-  matchesKnowledgeQuickFilter,
-  type KnowledgeQuickFilterId,
-} from './knowledge-surface'
 import { SourceControlExplorer } from './SourceControlExplorer'
 import {
   useGitCommitDetail,
@@ -34,9 +27,6 @@ interface SourceControlActivityViewProps {
   isStatusLoading: boolean
   statusError: string | null
   refreshToken?: number
-  initialSha?: string | null
-  initialFile?: string | null
-  initialQuickFilter?: KnowledgeQuickFilterId
   focusSection: 'changes' | 'history'
   onFocusSectionChange: (section: 'changes' | 'history') => void
   onHistoryStatusChange?: (info: HistoryStatusInfo | null) => void
@@ -51,18 +41,13 @@ export function SourceControlActivityView({
   isStatusLoading,
   statusError,
   refreshToken = 0,
-  initialSha = null,
-  initialFile = null,
-  initialQuickFilter = 'all',
   focusSection,
   onFocusSectionChange,
   onHistoryStatusChange,
 }: SourceControlActivityViewProps) {
-  const [selectedWorkingFile, setSelectedWorkingFile] = useState<string | null>(initialFile)
-  const [workingQuickFilter, setWorkingQuickFilter] = useState<KnowledgeQuickFilterId>(initialQuickFilter)
-  const [selectedSha, setSelectedSha] = useState<string | null>(initialSha)
-  const [selectedCommitFile, setSelectedCommitFile] = useState<string | null>(initialFile)
-  const [historyQuickFilter, setHistoryQuickFilter] = useState<KnowledgeQuickFilterId>(initialQuickFilter)
+  const [selectedWorkingFile, setSelectedWorkingFile] = useState<string | null>(null)
+  const [selectedSha, setSelectedSha] = useState<string | null>(null)
+  const [selectedCommitFile, setSelectedCommitFile] = useState<string | null>(null)
   const [allCommits, setAllCommits] = useState<GitLogEntry[]>([])
   const [currentOffset, setCurrentOffset] = useState(0)
   const [hasMore, setHasMore] = useState(false)
@@ -72,7 +57,6 @@ export function SourceControlActivityView({
   )
   const prevContextKeyRef = useRef(`${agentId ?? ''}:${repoTarget}:${worktreeId ?? ''}`)
   const prevRefreshTokenRef = useRef(refreshToken)
-  const isKnowledgeMode = repoTarget === 'versioning'
   const files = useMemo(() => status?.files ?? [], [status?.files])
   const workingDiffQuery = useGitDiff(wsUrl, agentId, repoTarget, selectedWorkingFile, worktreeId)
   const logQuery = useGitLog(wsUrl, agentId, repoTarget, PAGE_SIZE, currentOffset, worktreeId)
@@ -81,39 +65,28 @@ export function SourceControlActivityView({
     const contextKey = `${agentId ?? ''}:${repoTarget}:${worktreeId ?? ''}`
     if (contextKey !== prevContextKeyRef.current) {
       prevContextKeyRef.current = contextKey
-      setSelectedWorkingFile(initialFile)
-      setWorkingQuickFilter(initialQuickFilter)
+      setSelectedWorkingFile(null)
       setAllCommits([])
       setCurrentOffset(0)
       setHasMore(false)
-      setSelectedSha(initialSha)
-      setSelectedCommitFile(initialFile)
-      setHistoryQuickFilter(initialQuickFilter)
+      setSelectedSha(null)
+      setSelectedCommitFile(null)
       setDetailFocus(focusSection === 'history' ? 'commit' : 'working-tree')
       onHistoryStatusChange?.(null)
     }
-  }, [agentId, focusSection, initialFile, initialQuickFilter, initialSha, onHistoryStatusChange, repoTarget, worktreeId])
+  }, [agentId, focusSection, onHistoryStatusChange, repoTarget, worktreeId])
 
   useEffect(() => {
-    setSelectedWorkingFile(initialFile)
-    setWorkingQuickFilter(initialQuickFilter)
-  }, [agentId, initialFile, initialQuickFilter, repoTarget])
-
-  const visibleWorkingFiles = useMemo(() => {
-    if (repoTarget !== 'versioning') {
-      return files
-    }
-
-    return files.filter((file) => matchesKnowledgeQuickFilter(file.path, workingQuickFilter))
-  }, [files, repoTarget, workingQuickFilter])
+    setSelectedWorkingFile(null)
+  }, [agentId, repoTarget])
 
   useEffect(() => {
-    if (visibleWorkingFiles.length > 0 && (!selectedWorkingFile || !visibleWorkingFiles.some((file) => file.path === selectedWorkingFile))) {
-      setSelectedWorkingFile(visibleWorkingFiles[0].path)
-    } else if (visibleWorkingFiles.length === 0) {
+    if (files.length > 0 && (!selectedWorkingFile || !files.some((file) => file.path === selectedWorkingFile))) {
+      setSelectedWorkingFile(files[0].path)
+    } else if (files.length === 0) {
       setSelectedWorkingFile(null)
     }
-  }, [selectedWorkingFile, visibleWorkingFiles])
+  }, [selectedWorkingFile, files])
 
   useEffect(() => {
     if (!logQuery.data) return
@@ -132,36 +105,21 @@ export function SourceControlActivityView({
     }
   }, [currentOffset, logQuery.data])
 
-  const filteredCommits = useMemo(() => {
-    if (!isKnowledgeMode) {
-      return allCommits
-    }
-
-    return allCommits.filter((commit) => commitMatchesKnowledgeQuickFilter(commit.metadata, historyQuickFilter))
-  }, [allCommits, historyQuickFilter, isKnowledgeMode])
-
   useEffect(() => {
-    if (filteredCommits.length === 0) {
+    if (allCommits.length === 0) {
       if (selectedSha !== null) {
         setSelectedSha(null)
       }
       return
     }
 
-    if (!selectedSha || !filteredCommits.some((commit) => commit.sha === selectedSha)) {
-      setSelectedSha(filteredCommits[0].sha)
+    if (!selectedSha || !allCommits.some((commit) => commit.sha === selectedSha)) {
+      setSelectedSha(allCommits[0].sha)
     }
-  }, [filteredCommits, selectedSha])
+  }, [allCommits, selectedSha])
 
   const commitDetailQuery = useGitCommitDetail(wsUrl, agentId, repoTarget, selectedSha, worktreeId)
   const commitFiles = useMemo(() => commitDetailQuery.data?.files ?? [], [commitDetailQuery.data?.files])
-  const filteredCommitFiles = useMemo(() => {
-    if (!isKnowledgeMode) {
-      return commitFiles
-    }
-
-    return commitFiles.filter((file) => matchesKnowledgeQuickFilter(file.path, historyQuickFilter))
-  }, [commitFiles, historyQuickFilter, isKnowledgeMode])
 
   useEffect(() => {
     if (selectedSha == null) {
@@ -172,14 +130,14 @@ export function SourceControlActivityView({
     }
 
     if (
-      filteredCommitFiles.length > 0 &&
-      (!selectedCommitFile || !filteredCommitFiles.some((file) => file.path === selectedCommitFile))
+      commitFiles.length > 0 &&
+      (!selectedCommitFile || !commitFiles.some((file) => file.path === selectedCommitFile))
     ) {
-      setSelectedCommitFile(filteredCommitFiles[0].path)
-    } else if (filteredCommitFiles.length === 0) {
+      setSelectedCommitFile(commitFiles[0].path)
+    } else if (commitFiles.length === 0) {
       setSelectedCommitFile(null)
     }
-  }, [filteredCommitFiles, selectedCommitFile, selectedSha])
+  }, [commitFiles, selectedCommitFile, selectedSha])
 
   const commitDiffQuery = useGitCommitDiff(wsUrl, agentId, repoTarget, selectedSha, selectedCommitFile, worktreeId)
 
@@ -215,14 +173,13 @@ export function SourceControlActivityView({
 
     const commit = allCommits.find((entry) => entry.sha === selectedSha)
     const detail = commitDetailQuery.data
-    const visibleFiles = isKnowledgeMode && historyQuickFilter !== 'all' ? filteredCommitFiles : detail.files
-    const summary = computeCommitSummary(visibleFiles)
+    const summary = computeCommitSummary(detail.files)
     onHistoryStatusChange({
       sha: detail.sha,
       shortSha: commit?.shortSha ?? detail.sha.slice(0, 7),
       author: detail.author,
       date: detail.date,
-      filesChanged: visibleFiles.length,
+      filesChanged: detail.files.length,
       insertions: summary.insertions,
       deletions: summary.deletions,
     })
@@ -230,9 +187,6 @@ export function SourceControlActivityView({
     allCommits,
     commitDetailQuery.data,
     detailFocus,
-    filteredCommitFiles,
-    historyQuickFilter,
-    isKnowledgeMode,
     onHistoryStatusChange,
     selectedSha,
   ])
@@ -256,8 +210,8 @@ export function SourceControlActivityView({
 
   const { width: sidebarWidth, isDragging: isSidebarDragging, handleRef: sidebarHandleRef } = useResizablePanel({
     storageKey: 'forge-diff-sidebar-width',
-    defaultWidth: repoTarget === 'workspace' ? 320 : 260,
-    minWidth: repoTarget === 'workspace' ? 220 : 170,
+    defaultWidth: 320,
+    minWidth: 220,
     maxWidth: 520,
   })
 
@@ -270,13 +224,13 @@ export function SourceControlActivityView({
     })
 
   const visibleWorkingSummary = {
-    filesChanged: visibleWorkingFiles.length,
-    insertions: visibleWorkingFiles.reduce((total, file) => total + (file.additions ?? 0), 0),
-    deletions: visibleWorkingFiles.reduce((total, file) => total + (file.deletions ?? 0), 0),
+    filesChanged: files.length,
+    insertions: files.reduce((total, file) => total + (file.additions ?? 0), 0),
+    deletions: files.reduce((total, file) => total + (file.deletions ?? 0), 0),
   }
   const visibleCommitSummary = {
-    filesChanged: filteredCommitFiles.length,
-    ...computeCommitSummary(filteredCommitFiles),
+    filesChanged: commitFiles.length,
+    ...computeCommitSummary(commitFiles),
   }
   const isInitialHistoryLoading = logQuery.isLoading && allCommits.length === 0
   const historyEmptyState = logQuery.error
@@ -302,9 +256,6 @@ export function SourceControlActivityView({
                 onSelectFile={handleSelectWorkingFile}
                 isLoading={isStatusLoading}
                 summary={visibleWorkingSummary}
-                repoTarget={repoTarget}
-                quickFilter={workingQuickFilter}
-                onQuickFilterChange={setWorkingQuickFilter}
               />
             ) : (
               <CompactEmptyState
@@ -318,43 +269,16 @@ export function SourceControlActivityView({
               <CompactEmptyState title={historyEmptyState.title} description={historyEmptyState.description} />
             ) : (
               <div className="flex h-full min-h-0 flex-col">
-                {isKnowledgeMode ? (
-                  <div className="border-b border-border/60 p-2">
-                    <div className="flex flex-wrap gap-1">
-                      {KNOWLEDGE_QUICK_FILTERS.map((option) => {
-                        const active = option.id === historyQuickFilter
-                        return (
-                          <button
-                            key={option.id}
-                            type="button"
-                            title={option.pathLabel}
-                            className={cn(
-                              'inline-flex h-6 items-center rounded-full border px-2 text-[10px] font-medium transition-colors',
-                              active
-                                ? 'border-primary/40 bg-primary/10 text-primary'
-                                : 'border-border/60 bg-muted/30 text-muted-foreground hover:border-border hover:text-foreground',
-                            )}
-                            aria-pressed={active}
-                            onClick={() => setHistoryQuickFilter(option.id)}
-                          >
-                            {option.label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                ) : null}
                 <div className="min-h-0 flex-1">
                   <CommitList
-                    commits={filteredCommits}
+                    commits={allCommits}
                     selectedSha={detailFocus === 'commit' ? selectedSha : null}
                     onSelectCommit={handleSelectCommit}
                     isLoading={isInitialHistoryLoading}
                     hasMore={hasMore}
                     onLoadMore={handleLoadMore}
                     isLoadingMore={isLoadingMore}
-                    repoTarget={repoTarget}
-                    emptyMessage={isKnowledgeMode && historyQuickFilter !== 'all' ? 'No commits match this filter' : 'No commits found'}
+                    emptyMessage="No commits found"
                   />
                 </div>
               </div>
@@ -382,14 +306,11 @@ export function SourceControlActivityView({
               onSelectFile={setSelectedCommitFile}
               isLoading={commitDetailQuery.isLoading}
               summary={visibleCommitSummary}
-              repoTarget={repoTarget}
-              quickFilter={historyQuickFilter}
-              onQuickFilterChange={setHistoryQuickFilter}
               listLabel="Commit files"
             />
           ) : (
             <div className="flex h-full items-center justify-center px-3 text-center text-xs text-muted-foreground">
-              {isKnowledgeMode && historyQuickFilter !== 'all' ? 'No commit matches the selected filter' : 'Select a commit to view files'}
+              Select a commit to view files
             </div>
           )}
         </div>

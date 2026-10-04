@@ -853,22 +853,6 @@ describe("git-source-control-routes", () => {
     expect(mutation.payload.errors.join(" ")).toContain("not found");
   });
 
-  it("rejects versioning repo mutations", async () => {
-    const server = await createVersioningMutationTestServer();
-
-    const branches = await fetchBranches(server, "cortex--s1", { repoTarget: "versioning" });
-    const mutation = await postMutation<GitFetchResult>(server, "/api/git/fetch", {
-      agentId: "cortex--s1",
-      repoTarget: "versioning",
-      remote: "origin",
-      expectedHead: branches.currentHead ?? "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-      expectedStatusHash: branches.statusHash ?? "0000000000000000"
-    });
-
-    expect(mutation.status).toBe(409);
-    expect(mutation.payload.errors.join(" ")).toContain("versioning");
-  });
-
   it("does not treat attached agents as a mutation preflight issue", async () => {
     const server = await createSourceControlTestServer({
       descriptors: [
@@ -1121,27 +1105,6 @@ describe("git-source-control-routes", () => {
     const payload = (await response.json()) as GitPullRequestMergeResult;
     expect(payload.success).toBe(false);
     expect(payload.errorCode).toBe("provider_unavailable");
-  });
-
-  it("rejects versioning repo merge requests without invoking gh", async () => {
-    const server = await createVersioningMutationTestServer();
-
-    const response = await fetch(`${server.baseUrl}/api/git/pull-requests/428/merge`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        agentId: "cortex--s1",
-        repoTarget: "versioning",
-        method: "squash",
-        expectedHeadSha: "abc123def456"
-      })
-    });
-
-    expect(response.status).toBe(409);
-    const payload = (await response.json()) as GitPullRequestMergeResult;
-    expect(payload.success).toBe(false);
-    expect(payload.errorCode).toBe("versioning_blocked");
-    expect(payload.errors.join(" ")).toContain("workspace");
   });
 
   it("allows merge when pending checks are explicitly acknowledged", async () => {
@@ -1506,63 +1469,6 @@ async function execGit(
 
     throw error;
   }
-}
-
-async function createVersioningMutationTestServer(): Promise<TestServer> {
-  const root = await mkdtemp(join(tmpdir(), "git-source-control-versioning-"));
-  const dataDir = join(root, "forge-data");
-  await mkdir(dataDir, { recursive: true });
-  await initGitRepo(dataDir, "common.md", "# knowledge\n", "initial knowledge");
-
-  const dataRealPath = await realpath(dataDir);
-  const descriptors = [
-    createManagerSession("cortex", "cortex--s1", { profileId: "cortex", cwd: dataRealPath })
-  ];
-  const descriptorById = new Map(descriptors.map((descriptor) => [descriptor.agentId, descriptor]));
-
-  const swarmManager = {
-    getConfig: () => ({ paths: { dataDir: dataRealPath } }),
-    getAgent: (agentId: string) => descriptorById.get(agentId),
-    listAgents: () => descriptors
-  } as unknown as SwarmManager;
-
-  const routes = createGitSourceControlRoutes({ swarmManager });
-  const server = createServer((request, response) => {
-    void handleRouteRequest(routes, request, response);
-  });
-
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", () => resolve());
-  });
-
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Unable to determine test server address.");
-  }
-
-  const testServer: TestServer = {
-    baseUrl: `http://127.0.0.1:${address.port}`,
-    root,
-    mainDir: dataRealPath,
-    secondaryDir: dataRealPath,
-    close: async () => {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve();
-        });
-      });
-
-      await rm(root, { recursive: true, force: true });
-    }
-  };
-
-  activeServers.push(testServer);
-  return testServer;
 }
 
 async function fetchBranches(

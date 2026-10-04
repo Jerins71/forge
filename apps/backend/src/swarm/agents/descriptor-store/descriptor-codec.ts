@@ -31,17 +31,24 @@ export interface DecodeStoreResult {
   skippedDescriptorCount: number;
 }
 
-/** Storage profile of the removed Collaboration server. */
-const RETIRED_COLLABORATION_PROFILE_ID = "_collaboration";
+/**
+ * Storage profiles of removed features: the Collaboration server and the Cortex
+ * system profile. Both ids stay reserved so a new profile can never collide.
+ */
+export const RETIRED_PROFILE_IDS: ReadonlySet<string> = new Set(["_collaboration", "cortex"]);
 
-function isRetiredCollaborationAgentRecord(candidate: unknown, retiredManagerIds: ReadonlySet<string>): boolean {
+/** Session purposes of removed Cortex review and capture-check sessions. */
+const RETIRED_SESSION_PURPOSES: ReadonlySet<unknown> = new Set(["cortex_review", "capture_check"]);
+
+function isRetiredAgentRecord(candidate: unknown, retiredManagerIds: ReadonlySet<string>): boolean {
   if (!isRecord(candidate)) {
     return false;
   }
 
   return (
-    candidate.profileId === RETIRED_COLLABORATION_PROFILE_ID
-    || candidate.agentId === RETIRED_COLLABORATION_PROFILE_ID
+    (typeof candidate.profileId === "string" && RETIRED_PROFILE_IDS.has(candidate.profileId))
+    || (typeof candidate.agentId === "string" && RETIRED_PROFILE_IDS.has(candidate.agentId))
+    || RETIRED_SESSION_PURPOSES.has(candidate.sessionPurpose)
     || candidate.sessionSurface === "collab"
     || (candidate.collab !== undefined && candidate.collab !== null)
     || (typeof candidate.managerId === "string" && retiredManagerIds.has(candidate.managerId))
@@ -51,7 +58,7 @@ function isRetiredCollaborationAgentRecord(candidate: unknown, retiredManagerIds
 function partitionRetiredAgentRecords(candidates: unknown[]): { active: unknown[]; retired: unknown[] } {
   const retiredManagerIds = new Set<string>();
   for (const candidate of candidates) {
-    if (isRecord(candidate) && candidate.role === "manager" && isRetiredCollaborationAgentRecord(candidate, retiredManagerIds)) {
+    if (isRecord(candidate) && candidate.role === "manager" && isRetiredAgentRecord(candidate, retiredManagerIds)) {
       const agentId = extractDescriptorAgentId(candidate);
       if (agentId) {
         retiredManagerIds.add(agentId);
@@ -62,7 +69,7 @@ function partitionRetiredAgentRecords(candidates: unknown[]): { active: unknown[
   const active: unknown[] = [];
   const retired: unknown[] = [];
   for (const candidate of candidates) {
-    (isRetiredCollaborationAgentRecord(candidate, retiredManagerIds) ? retired : active).push(candidate);
+    (isRetiredAgentRecord(candidate, retiredManagerIds) ? retired : active).push(candidate);
   }
   return { active, retired };
 }
@@ -86,10 +93,11 @@ export function decodeAgentsStoreFile(raw: string, options: DecodeStoreOptions):
   const agentRecords = partitionRetiredAgentRecords(parsed.agents);
   const profileCandidates = Array.isArray(parsed.profiles) ? parsed.profiles : [];
   const retiredProfiles = profileCandidates.filter(
-    (candidate) => isRecord(candidate) && candidate.profileId === RETIRED_COLLABORATION_PROFILE_ID,
+    (candidate) =>
+      isRecord(candidate) && typeof candidate.profileId === "string" && RETIRED_PROFILE_IDS.has(candidate.profileId),
   );
   if (agentRecords.retired.length > 0 || retiredProfiles.length > 0) {
-    options.logDebug?.("Retained retired Collaboration records without loading them", {
+    options.logDebug?.("Retained retired Collaboration/Cortex records without loading them", {
       agents: agentRecords.retired.length,
       profiles: retiredProfiles.length,
     });

@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import WebSocket from 'ws'
 import { describe, expect, it, vi } from 'vitest'
 import { AuthStorage } from '@earendil-works/pi-coding-agent'
-import type { AgentDescriptor } from '../swarm/types.js'
+import type { AgentDescriptor, ManagerProfile, SwarmConfig } from '../swarm/types.js'
 import { DAEMONIZED_ENV_VAR, getControlPidFilePath } from '../reboot/control-pid.js'
 import { CliAccessService } from '../swarm/cli-access-service.js'
 import { getProfileUnreadStatePath } from '../swarm/data-paths.js'
@@ -888,88 +888,6 @@ describe('SwarmWebSocketServer', () => {
     } finally {
       await server.stop()
     }
-  })
-
-  it('suppresses unread_notification events for cortex review sessions', async () => {
-    const port = await getAvailablePort()
-    const config = await makeTempConfig(port, true)
-
-    const manager = new TestSwarmManager(config)
-    await bootWithDefaultManager(manager, config)
-    const { sessionAgent: reviewSession } = await manager.createSession('manager', {
-      label: 'Review Run',
-      sessionPurpose: 'cortex_review',
-    })
-
-    const server = new SwarmWebSocketServer({
-      swarmManager: manager,
-      host: config.host,
-      port: config.port,
-      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
-    })
-
-    await server.start()
-
-    const reviewClient = new WebSocket(`ws://${config.host}:${config.port}`)
-    const reviewEvents: ServerEvent[] = []
-    reviewClient.on('message', (raw) => {
-      reviewEvents.push(JSON.parse(raw.toString()) as ServerEvent)
-    })
-
-    await once(reviewClient, 'open')
-    reviewClient.send(JSON.stringify({ type: 'subscribe', agentId: reviewSession.agentId }))
-    await waitForEvent(
-      reviewEvents,
-      (event) => event.type === 'ready' && event.subscribedAgentId === reviewSession.agentId,
-    )
-    await waitForEvent(
-      reviewEvents,
-      (event) => event.type === 'conversation_history' && event.agentId === reviewSession.agentId,
-    )
-
-    const managerClient = new WebSocket(`ws://${config.host}:${config.port}`)
-    const managerEvents: ServerEvent[] = []
-    managerClient.on('message', (raw) => {
-      managerEvents.push(JSON.parse(raw.toString()) as ServerEvent)
-    })
-
-    await once(managerClient, 'open')
-    managerClient.send(JSON.stringify({ type: 'subscribe', agentId: 'manager' }))
-    await waitForEvent(
-      managerEvents,
-      (event) => event.type === 'ready' && event.subscribedAgentId === 'manager',
-    )
-    await waitForEvent(
-      managerEvents,
-      (event) => event.type === 'conversation_history' && event.agentId === 'manager',
-    )
-
-    manager.emit(
-      'conversation_message',
-      {
-        type: 'conversation_message',
-        agentId: reviewSession.agentId,
-        role: 'assistant',
-        text: 'review assistant update',
-        timestamp: new Date().toISOString(),
-        source: 'speak_to_user',
-      } satisfies ServerEvent,
-    )
-
-    await waitForEvent(
-      reviewEvents,
-      (event) => event.type === 'conversation_message' && event.agentId === reviewSession.agentId && event.text === 'review assistant update',
-    )
-    await new Promise((resolve) => setTimeout(resolve, 50))
-
-    expect(reviewEvents.some((event) => event.type === 'unread_notification' && event.agentId === reviewSession.agentId)).toBe(false)
-    expect(managerEvents.some((event) => event.type === 'unread_notification' && event.agentId === reviewSession.agentId)).toBe(false)
-
-    reviewClient.close()
-    await once(reviewClient, 'close')
-    managerClient.close()
-    await once(managerClient, 'close')
-    await server.stop()
   })
 
   it('includes unread snapshot in bootstrap and marks subscribed session as read', async () => {
@@ -2779,9 +2697,11 @@ describe('SwarmWebSocketServer', () => {
 
     const manager = new TestSwarmManager(config)
     await bootWithDefaultManager(manager, config)
-    const initialCortexAgentIds = manager
+    const systemSession = await createSystemProfileSession(manager, config)
+    const systemProfileId = systemSession.profileId!
+    const initialSystemAgentIds = manager
       .listAgents()
-      .filter((agent) => agent.profileId === 'cortex' || agent.agentId === 'cortex')
+      .filter((agent) => agent.profileId === systemProfileId)
       .map((agent) => agent.agentId)
 
     const server = new SwarmWebSocketServer({
@@ -2796,11 +2716,11 @@ describe('SwarmWebSocketServer', () => {
     const { client, events } = await openCliWebSocket(`ws://${config.host}:${config.port}/api/cli/ws`, key.plaintextKey)
     client.send(JSON.stringify({
       type: 'cli_create_session',
-      requestId: 'create-cortex-session',
-      profileId: 'cortex',
-      label: 'Blocked Cortex Session',
+      requestId: 'create-system-session',
+      profileId: systemProfileId,
+      label: 'Blocked System Session',
     }))
-    const createError = await waitForCliError(events, 'create-cortex-session')
+    const createError = await waitForCliError(events, 'create-system-session')
     expect(createError).toMatchObject({
       code: 'system_profile',
       status: 403,
@@ -2810,11 +2730,11 @@ describe('SwarmWebSocketServer', () => {
 
     client.send(JSON.stringify({
       type: 'cli_run',
-      requestId: 'run-cortex-session',
-      target: { kind: 'new_session', profileId: 'cortex', label: 'Blocked Cortex Run' },
+      requestId: 'run-system-session',
+      target: { kind: 'new_session', profileId: systemProfileId, label: 'Blocked System Run' },
       text: 'do not run this',
     }))
-    const runError = await waitForCliError(events, 'run-cortex-session')
+    const runError = await waitForCliError(events, 'run-system-session')
     expect(runError).toMatchObject({
       code: 'system_profile',
       status: 403,
@@ -2851,9 +2771,9 @@ describe('SwarmWebSocketServer', () => {
     expect(
       manager
         .listAgents()
-        .filter((agent) => agent.profileId === 'cortex' || agent.agentId === 'cortex')
+        .filter((agent) => agent.profileId === systemProfileId)
         .map((agent) => agent.agentId),
-    ).toEqual(initialCortexAgentIds)
+    ).toEqual(initialSystemAgentIds)
 
     client.close()
     await once(client, 'close')
@@ -2872,10 +2792,7 @@ describe('SwarmWebSocketServer', () => {
     const manager = new TestSwarmManager(config)
     await bootWithDefaultManager(manager, config)
     const worker = await manager.spawnAgent('manager', { agentId: 'CLI Target Worker' })
-    const { sessionAgent: cortexSession } = await manager.createSession('cortex', {
-      label: 'Cortex Review Session',
-      sessionPurpose: 'cortex_review',
-    })
+    const systemSession = await createSystemProfileSession(manager, config)
 
     const server = new SwarmWebSocketServer({
       swarmManager: manager,
@@ -2914,7 +2831,7 @@ describe('SwarmWebSocketServer', () => {
     client.send(JSON.stringify({
       type: 'cli_send_message',
       requestId: 'send-system-session',
-      target: { kind: 'session', agentId: cortexSession.agentId },
+      target: { kind: 'session', agentId: systemSession.agentId },
       text: 'hello system?',
     }))
     expect(await waitForCliError(events, 'send-system-session')).toMatchObject({
@@ -2950,7 +2867,7 @@ describe('SwarmWebSocketServer', () => {
     client.send(JSON.stringify({
       type: 'compact_session',
       requestId: 'compact-system-session',
-      agentId: cortexSession.agentId,
+      agentId: systemSession.agentId,
     }))
     expect(await waitForCliError(events, 'compact-system-session')).toMatchObject({
       commandType: 'compact_session',
@@ -4757,7 +4674,6 @@ describe('SwarmWebSocketServer', () => {
   it('allows the same socket to create a replacement after deleting the last manager', async () => {
     const port = await getAvailablePort()
     const config = await makeTempConfig(port, true)
-    config.cortexEnabled = false
 
     const manager = new TestSwarmManager(config)
     const defaultManager = await bootWithDefaultManager(manager, config)
@@ -5067,7 +4983,6 @@ describe('SwarmWebSocketServer', () => {
     expect(profilesEvent.type).toBe('profiles_snapshot')
     if (profilesEvent.type === 'profiles_snapshot') {
       expect(profilesEvent.profiles.some((profile) => profile.profileId === 'manager')).toBe(true)
-      expect(profilesEvent.profiles.some((profile) => profile.profileId === 'cortex')).toBe(true)
     }
 
     client.close()
@@ -5577,3 +5492,11 @@ describe('SwarmWebSocketServer', () => {
     await server.stop()
   })
 })
+
+/** Marks a fresh manager's profile system-managed; Forge has no built-in system profile. */
+async function createSystemProfileSession(manager: TestSwarmManager, config: SwarmConfig): Promise<AgentDescriptor> {
+  const created = await manager.createManager('manager', { name: 'System Ops', cwd: config.defaultCwd })
+  const profiles = (manager as unknown as { profiles: Map<string, ManagerProfile> }).profiles
+  profiles.get(created.profileId ?? created.agentId)!.profileType = 'system'
+  return created
+}

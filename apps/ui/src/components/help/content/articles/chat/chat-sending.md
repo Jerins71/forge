@@ -13,13 +13,13 @@ Your mode preference is saved across sessions.
 
 Eligible Builder manager sessions show a compact model pill beside **Send**. The pill shows the effective model and reasoning level; hover it to see whether the session is using a model selected from the project default or a session override. Click it to open **Session Model**, where you can choose a model and reasoning level for this session. **Use Project Default** copies the current project default onto that one session. Later project-default changes affect only new conversations and do not cascade into existing sessions.
 
-The pill is hidden when you are viewing a worker or a system profile such as Cortex.
+The pill is hidden when you are viewing a worker or a system profile.
 
 ## Changing context management
 
 Eligible local Builder managers also show a compact **Context management** control beside Send. It reports the policy the runtime can use (Summary or Context v2) and the saved project default or session override. Open it to inherit the project default, force Summary, or opt into experimental Context v2. Saving a choice does not clear the current conversation; it applies at the next Compact, Smart compact, or automatic context transition.
 
-Context v2 requires a supported ordinary Pi Builder manager and an eligible model. The control is hidden for workers and system profiles such as Cortex. If the current runtime cannot execute Context v2, that option is disabled with the server's reason. Summary is used while any existing Context v2 preference stays saved. Compact and Smart compact follow the supported policy.
+Context v2 requires a supported ordinary Pi Builder manager and an eligible model. The control is hidden for workers and system profiles. If the current runtime cannot execute Context v2, that option is disabled with the server's reason. Summary is used while any existing Context v2 preference stays saved. Compact and Smart compact follow the supported policy.
 
 ### Model-change notices
 

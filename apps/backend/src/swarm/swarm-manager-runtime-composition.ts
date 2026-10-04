@@ -7,7 +7,6 @@ import { WorkerBootRecovery } from "./agents/descriptor-store/worker-boot-recove
 import { ProjectAgentMirrorReconciler } from "./agents/descriptor-store/project-agent-mirror-reconciler.js";
 import { AssistantOutputRouter } from "./assistant-output-router.js";
 import type { BrowserAutomationService } from "./browser-automation/browser-automation-service.js";
-import { CaptureCascadeCoordinator } from "./capture-cascade-coordinator.js";
 import type {
   CodexPluginDelegationTurnContext,
   CodexPluginRetryAuthorizationContext,
@@ -180,13 +179,6 @@ export interface RuntimeCompositionResolution {
   injectWorkerIdentityContext(descriptor: AgentDescriptor, systemPrompt: string): string;
   resolveDefaultModelDescriptor(): AgentModelDescriptor;
 }
-export interface RuntimeCompositionCaptureOperations {
-  forkSession(
-    sourceAgentId: string,
-    options: { label: string; fromMessageId?: string; sessionPurpose: "capture_check" },
-  ): Promise<{ sessionAgent: AgentDescriptor }>;
-  deleteSession(agentId: string): Promise<void>;
-}
 export interface RuntimeCompositionSessionOperations {
   materializeSortOrder(): void;
   deleteConversationHistory(agentId: string, sessionFile: string): void;
@@ -226,7 +218,6 @@ export interface SwarmManagerRuntimeCompositionOptions {
   runtimeResources: RuntimeCompositionRuntimeResources;
   runtimeFactory: RuntimeCompositionRuntimeFactory;
   resolution: RuntimeCompositionResolution;
-  capture: RuntimeCompositionCaptureOperations;
   sessions: RuntimeCompositionSessionOperations;
 }
 export type {
@@ -242,7 +233,6 @@ export type {
  * make that order reviewable and keep every pre-existing callback lazy.
  */
 export class SwarmManagerRuntimeComposition {
-  readonly captureCascade: CaptureCascadeCoordinator;
   readonly restartRecovery: RestartRecoveryCoordinator;
   readonly runtimeController: SwarmRuntimeController;
   readonly assistantOutput: AssistantOutputRouter;
@@ -258,7 +248,6 @@ export class SwarmManagerRuntimeComposition {
   private completed: SwarmManagerCompletedRuntimeComposition | undefined;
   constructor(private readonly options: SwarmManagerRuntimeCompositionOptions) {
     const { state, messaging } = options;
-    this.captureCascade = this.createCaptureCascade();
     this.restartRecovery = new RestartRecoveryCoordinator({
       descriptors: state.descriptors,
       getSessionTarget: (agentId) => this.requireRuntimeLifecycle().getTurnLedgerSessionTarget(agentId),
@@ -327,7 +316,6 @@ export class SwarmManagerRuntimeComposition {
     const coordination = createSwarmManagerCoordinationComposition({
       options: this.options,
       plans,
-      captureCascade: this.captureCascade,
       restartRecovery: this.restartRecovery,
       getServices: () => this.requireServices(),
       getTurnContext: () => this.requireTurnContext(),
@@ -430,12 +418,11 @@ export class SwarmManagerRuntimeComposition {
         conversationProjector: this.requireServices().conversation,
         promptService: this.requireServices().configuration.prompts,
         secretsEnvService: foundation.secrets,
-        cortexService: this.requireServices().cortex,
       }),
       getObservabilityService: () => foundation.observability.getService(),
       getPiModelsJsonPathOrThrow: runtimeResources.getPiModelsJsonPath,
       getCompactionRuntimeSettingsProvider: () =>
-        this.requireServices().knowledge.getCompactionRuntimeSettingsProvider(),
+        this.requireServices().memory.getCompactionRuntimeSettingsProvider(),
       getMemoryRuntimeResources: runtimeResources.getMemoryRuntimeResources,
       getSwarmContextFiles: runtimeResources.getSwarmContextFiles,
       resolveProjectExecutableTrustPlanForRuntime: (input) =>
@@ -458,11 +445,11 @@ export class SwarmManagerRuntimeComposition {
             this.requireRuntimeLifecycle().handleRuntimeAgentEnd(token, targetAgentId),
         }),
       updateSessionMetaForWorkerDescriptor: (descriptor, prompt) =>
-        this.requireServices().knowledge.updateSessionMetaForWorkerDescriptor(descriptor, prompt),
+        this.requireServices().memory.updateSessionMetaForWorkerDescriptor(descriptor, prompt),
       refreshSessionMetaStatsBySessionId: (sessionId, sessionFile) =>
-        this.requireServices().knowledge.refreshSessionMetaStatsBySessionId(sessionId, sessionFile),
+        this.requireServices().memory.refreshSessionMetaStatsBySessionId(sessionId, sessionFile),
       refreshSessionMetaStats: (descriptor, sessionFile) =>
-        this.requireServices().knowledge.refreshSessionMetaStats(descriptor, sessionFile),
+        this.requireServices().memory.refreshSessionMetaStats(descriptor, sessionFile),
       reportAttentionStatusTransition: (input) =>
         this.options.attention.reportStatusTransition(input),
       maybeRecordModelCapacityBlock: (agentId, descriptor, error) =>
@@ -470,7 +457,7 @@ export class SwarmManagerRuntimeComposition {
       ...createRuntimeLifecycleControllerHostCallbacks(() => this.requireRuntimeLifecycle()),
       endBrowserTurn: (profileId, sessionAgentId, turnId) => this.options.browserAutomation.endBrowserTurn(profileId, sessionAgentId, turnId),
       incrementSessionCompactionCount: (profileId, sessionId, failureLogKey) =>
-        this.requireServices().knowledge.incrementSessionCompactionCount(
+        this.requireServices().memory.incrementSessionCompactionCount(
           profileId,
           sessionId,
           failureLogKey,
@@ -493,39 +480,6 @@ export class SwarmManagerRuntimeComposition {
         this.assistantOutput.resolveManagerFinalTarget(agentId, target),
       resolveManagerAssistantFinalOutputRoute: (agentId, target) =>
         this.assistantOutput.resolveManagerFinalRoute(agentId, target),
-    });
-  }
-
-  private createCaptureCascade(): CaptureCascadeCoordinator {
-    const { state, capture, messaging, events } = this.options;
-    return new CaptureCascadeCoordinator({
-      dataDir: state.config.paths.dataDir,
-      isEnabled: () => Boolean(
-        state.config.cortexEnabled &&
-          this.requireServices().knowledge.getKnowledgeV2SettingsService().getSettings().enabled
-      ),
-      host: {
-        getDescriptor: (agentId) => state.descriptors.get(agentId),
-        executeJudgePrompt: (prompt) => this.requireServices().knowledge.executeCaptureJudgePrompt(prompt),
-        forkSession: async (sourceAgentId, options) => {
-          const fork = await capture.forkSession(sourceAgentId, {
-            label: options.label,
-            fromMessageId: options.fromMessageId,
-            sessionPurpose: "capture_check",
-          });
-          return { sessionAgentId: fork.sessionAgent.agentId };
-        },
-        sendRestrictedTurn: async (forkedAgentId, message) => {
-          await messaging.sendMessage(forkedAgentId, forkedAgentId, message, "auto", {
-            origin: "internal",
-            internalDeliveryKind: "bootstrap",
-            skipTurnLedger: true,
-          });
-        },
-        discardFork: (forkedAgentId) => capture.deleteSession(forkedAgentId),
-      },
-      now: state.now,
-      logDebug: events.logDebug,
     });
   }
 
@@ -589,9 +543,9 @@ export class SwarmManagerRuntimeComposition {
       detachRuntime: (agentId, token) => this.requireRuntimeLifecycle().detachRuntime(agentId, token),
       detachRuntimeIfMatches: (agentId, runtime, token) => this.runtimeController.detachRuntimeIfMatches(agentId, runtime, token),
       updateSessionMetaForWorkerDescriptor: (descriptor, prompt) =>
-        this.requireServices().knowledge.updateSessionMetaForWorkerDescriptor(descriptor, prompt ?? undefined),
+        this.requireServices().memory.updateSessionMetaForWorkerDescriptor(descriptor, prompt ?? undefined),
       refreshSessionMetaStatsBySessionId: (agentId) =>
-        this.requireServices().knowledge.refreshSessionMetaStatsBySessionId(agentId),
+        this.requireServices().memory.refreshSessionMetaStatsBySessionId(agentId),
       recordWorkGraphWorkerModelReroute: createWorkGraphModelRerouteRecorder({ descriptors: state.descriptors, getPlans: () => this.requirePlans() }),
       saveStore: events.saveStore,
       patchDescriptor: this.options.descriptors.transactionPatchDescriptor,
@@ -673,7 +627,7 @@ export class SwarmManagerRuntimeComposition {
       now: state.now,
       getRequiredSessionDescriptor: (agentId) => services.directory.getRequiredSessionDescriptor(agentId),
       assertManager: (agentId, action) => services.directory.assertManager(agentId, action),
-      hasRunningManagers: (filter) => services.directory.hasRunningManagers(filter),
+      hasRunningManagers: () => services.directory.hasRunningManagers(),
       generateUniqueAgentId: (source) => services.directory.generateUniqueAgentId(source),
       generateUniqueManagerId: (source) => services.directory.generateUniqueManagerId(source),
       resolveAndValidateCwd: runtimeResources.resolveAndValidateCwd,
@@ -702,10 +656,10 @@ export class SwarmManagerRuntimeComposition {
       hasSecureRuntimeBinding: (runtime) => this.runtimeController.hasSecureRuntimeBinding(runtime),
       isSecureRuntimeBindingUsable: (agentId, runtime) => this.runtimeController.isSecureRuntimeBindingUsable(agentId, runtime),
       ensureSessionFileParentDirectory: runtimeResources.ensureSessionFileParentDirectory,
-      updateSessionMetaForWorkerDescriptor: (descriptor, prompt) => services.knowledge.updateSessionMetaForWorkerDescriptor(descriptor, prompt),
-      refreshSessionMetaStatsBySessionId: (agentId) => services.knowledge.refreshSessionMetaStatsBySessionId(agentId),
-      refreshSessionMetaStats: (descriptor) => services.knowledge.refreshSessionMetaStats(descriptor),
-      captureSessionRuntimePromptMeta: (descriptor, prompt) => services.knowledge.captureSessionRuntimePromptMeta(descriptor, prompt),
+      updateSessionMetaForWorkerDescriptor: (descriptor, prompt) => services.memory.updateSessionMetaForWorkerDescriptor(descriptor, prompt),
+      refreshSessionMetaStatsBySessionId: (agentId) => services.memory.refreshSessionMetaStatsBySessionId(agentId),
+      refreshSessionMetaStats: (descriptor) => services.memory.refreshSessionMetaStats(descriptor),
+      captureSessionRuntimePromptMeta: (descriptor, prompt) => services.memory.captureSessionRuntimePromptMeta(descriptor, prompt),
       prepareManagerRuntimeCreation: (descriptor, prompt) => this.modelChangeStartupRecovery.prepareManagerRuntimeCreation(descriptor, prompt),
       appendAppliedModelChangeContinuity: (descriptor, request, runtime) =>
         this.modelChangeStartupRecovery.appendAppliedModelChangeContinuity(descriptor, request, runtime),
@@ -838,7 +792,6 @@ export class SwarmManagerRuntimeComposition {
       archive: services.archive,
       archiveHydrator: services.archiveHydrator,
       projectAgents: services.projectAgents,
-      capture: this.captureCascade,
       plans: this.requirePlans(),
       goals: this.requireGoals(),
       extensions: this.options.foundation.forgeExtensionHost,
@@ -878,7 +831,6 @@ export class SwarmManagerRuntimeComposition {
   ): SwarmBootCoordinator {
     const { state, descriptors, events, runtimeResources } = this.options;
     const profileReconciler = new ProfileBootReconciler({
-      cortexEnabled: state.config.cortexEnabled,
       defaultModel: state.config.defaultModel,
       descriptors: state.descriptors,
       profiles: state.profiles,
@@ -926,18 +878,17 @@ export class SwarmManagerRuntimeComposition {
         ensureCanonicalAuthFilePath: () => ensureCanonicalAuthFilePath(state.config).then(() => undefined),
         reloadModelCatalog: runtimeResources.reloadModelCatalog,
         loadSecrets: runtimeResources.loadSecrets,
-        loadCompactionSettings: () => services.knowledge.loadCompactionSettingsForRuntime(),
+        loadCompactionSettings: () => services.memory.loadCompactionSettingsForRuntime(),
         loadSecureSecretSettings: runtimeResources.loadSecureSecretSettings,
         reloadSkillMetadata: runtimeResources.reloadSkillMetadata,
         resolveDefaultCwd: (cwd) => runtimeResources.resolveAndValidateCwd(cwd),
-        refreshDefaultMemoryTemplate: () => services.knowledge.refreshMemoryTemplateForBoot(),
+        refreshDefaultMemoryTemplate: () => services.memory.refreshMemoryTemplateForBoot(),
       },
       domains: {
         normalizeCodexPluginWorkers: () => services.codexPlugin.normalizeWorkersForBoot(),
         reconcileWorkerSpecialistMetadata: () => lifecycle.reconcileWorkerSpecialistMetadataForBoot(),
-        ensureCortexProfile: () => services.knowledge.ensureCortexProfileForBoot(),
         loadOnboardingState: () => loadOnboardingState(state.config.paths.dataDir).then(() => undefined),
-        ensureLegacyProfileKnowledgeReferenceDocs: () => services.knowledge.migrateLegacyProfileKnowledgeForBoot(),
+        ensureLegacyProfileKnowledgeReferenceDocs: () => services.memory.migrateLegacyProfileKnowledgeForBoot(),
         reconcileProjectAgentMirror: () => new ProjectAgentMirrorReconciler({
           dataDir: state.config.paths.dataDir,
           descriptors: state.descriptors,
@@ -946,10 +897,10 @@ export class SwarmManagerRuntimeComposition {
         reconcileProjectAgentSharing: () => services.projectAgents.reconcileSharing(),
       },
       sessions: {
-        ensureMemoryFiles: () => services.knowledge.ensureMemoryFilesForBoot(),
-        rebuildSessionManifest: () => services.knowledge.rebuildSessionManifestForBoot(),
-        hydrateCompactionCounts: () => services.knowledge.hydrateCompactionCountsForBoot(),
-        startCompactionCountBackfill: () => services.knowledge.startCompactionCountBackfill(),
+        ensureMemoryFiles: () => services.memory.ensureMemoryFilesForBoot(),
+        rebuildSessionManifest: () => services.memory.rebuildSessionManifestForBoot(),
+        hydrateCompactionCounts: () => services.memory.hydrateCompactionCountsForBoot(),
+        startCompactionCountBackfill: () => services.memory.startCompactionCountBackfill(),
         loadConversationHistories: () => services.conversation.loadConversationHistoriesFromStore(),
       },
       secureSessions: this.options.secureSessions,

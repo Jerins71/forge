@@ -93,7 +93,7 @@ export async function handleSessionCommand(context: SessionCommandRouteContext):
       const created = await swarmManager.createSession(command.profileId, {
         label: command.label,
         name: command.name,
-        sessionPurpose: command.sessionPurpose
+        sessionPurpose: command.sessionPurpose === "agent_creator" ? "agent_creator" : undefined
       });
 
       send(socket, {

@@ -92,7 +92,6 @@ export function buildSessionContextMenuActions(
   session: SessionRow,
   source: SessionContextMenuActionSource,
   options: {
-    canPromoteToProjectAgent?: boolean
     onViewCreationHistory?: () => void
   } = {},
 ): SessionContextMenuActions {
@@ -107,7 +106,7 @@ export function buildSessionContextMenuActions(
     onFork: source.onForkSession ? () => source.onForkSession?.(sid) : undefined,
     onMarkUnread: source.onMarkUnread ? () => source.onMarkUnread?.(sid) : undefined,
     onPinSession: source.onPinSession,
-    onPromoteToProjectAgent: options.canPromoteToProjectAgent !== false && source.onPromoteToProjectAgent
+    onPromoteToProjectAgent: source.onPromoteToProjectAgent
       ? () => source.onPromoteToProjectAgent?.(sid)
       : undefined,
     onOpenProjectAgentSharing: source.onOpenProjectAgentSharing ? () => source.onOpenProjectAgentSharing?.(sid) : undefined,

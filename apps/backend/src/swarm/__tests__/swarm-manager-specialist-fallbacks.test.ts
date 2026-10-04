@@ -32,7 +32,7 @@ vi.mock('../agents/project-agent-analysis.js', async () => {
 
 import { readSessionMeta, writeSessionMeta } from '../session/session-manifest.js'
 import { AgentRuntime } from '../runtime/pi-agent-runtime.js'
-import type { KnowledgeMemoryCoordinator } from '../knowledge-memory-coordinator.js'
+import type { MemoryCoordinator } from '../memory-coordinator.js'
 import type { SwarmSpecialistFallbackManager } from '../swarm-specialist-fallback-manager.js'
 import type {
   AgentContextUsage,
@@ -65,8 +65,8 @@ class TestSwarmManager extends TestSwarmManagerBase {
 
   updateSessionMetaForWorkerDescriptorForTest(descriptor: AgentDescriptor): Promise<void> {
     return (this as unknown as {
-      knowledgeMemoryCoordinator: KnowledgeMemoryCoordinator
-    }).knowledgeMemoryCoordinator.updateSessionMetaForWorkerDescriptor(descriptor)
+      memoryCoordinator: MemoryCoordinator
+    }).memoryCoordinator.updateSessionMetaForWorkerDescriptor(descriptor)
   }
 
   protected override async createRuntimeForDescriptor(

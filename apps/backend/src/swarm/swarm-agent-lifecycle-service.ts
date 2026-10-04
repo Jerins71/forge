@@ -8,7 +8,6 @@ import type {
 } from "@forge/protocol";
 import { getSessionFilePath, getWorkerSessionFilePath } from "./data-paths.js";
 import { normalizeThinkingLevelForModelDescriptor, resolveModelDescriptorFromPreset, inferProviderFromModelId, parseSwarmModelPreset, parseSwarmReasoningLevel, assertSwarmModelIdNotRetired } from "./catalog/model-presets.js";
-import { normalizeArchetypeId } from "./prompts/prompt-registry.js";
 import {
   DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS,
   type RuntimeAcquisitionRequirements,
@@ -79,10 +78,9 @@ import { isBuiltinModePromptId } from "./worker-mode-prompt.js";
 import type { SecureWorkerLifecyclePort } from "./secure-sessions/secure-session-lifecycle-port.js";
 import { resolveDelegationRoute } from "./specialists/delegation-roster-store.js";
 import { getWorkerBehaviorModeLensId } from "./specialists/delegation-policy.js";
+import { RETIRED_PROFILE_IDS } from "./agents/descriptor-store/descriptor-codec.js";
 
 const MANAGER_ARCHETYPE_ID = "manager";
-const CORTEX_ARCHETYPE_ID = "cortex";
-const CORTEX_PROFILE_ID = "cortex";
 
 function getDefaultReasoningLevelForModel(provider: string, modelId: string): string {
   return modelCatalogService.getModel(modelId, provider)?.defaultReasoningLevel ?? "xhigh";
@@ -182,7 +180,7 @@ export interface SwarmAgentLifecycleServiceOptions {
   now: () => string;
   getRequiredSessionDescriptor: (agentId: string) => ProvisionedSessionDescriptor;
   assertManager: (agentId: string, action: string) => AgentDescriptor;
-  hasRunningManagers: (options?: { excludeCortex?: boolean }) => boolean;
+  hasRunningManagers: () => boolean;
   generateUniqueAgentId: (source: string) => string;
   generateUniqueManagerId: (source: string) => string;
   resolveAndValidateCwd: (cwd: string) => Promise<string>;
@@ -1475,7 +1473,7 @@ export class SwarmAgentLifecycleService {
   ): Promise<AgentDescriptor> {
     const callerDescriptor = this.options.descriptors.get(callerAgentId);
     if (!callerDescriptor || callerDescriptor.role !== "manager") {
-      const canBootstrap = !this.options.hasRunningManagers({ excludeCortex: true });
+      const canBootstrap = !this.options.hasRunningManagers();
       if (!canBootstrap) {
         throw new Error("Only manager can create managers");
       }
@@ -1492,8 +1490,8 @@ export class SwarmAgentLifecycleService {
     }
 
     const normalizedRequestedName = normalizeAgentId(requestedName);
-    if (normalizedRequestedName === CORTEX_PROFILE_ID) {
-      throw new Error('The manager name "cortex" is reserved');
+    if (RETIRED_PROFILE_IDS.has(normalizedRequestedName)) {
+      throw new Error(`The manager name "${normalizedRequestedName}" is reserved`);
     }
 
     if (input.model !== undefined && input.modelSelection !== undefined) {
@@ -1607,10 +1605,6 @@ export class SwarmAgentLifecycleService {
         throw new Error(`Unknown manager: ${targetManagerId}`);
       }
       sessionDescriptors.push(target as ProvisionedSessionDescriptor);
-    }
-
-    if (sessionDescriptors.some((descriptor) => normalizeArchetypeId(descriptor.archetypeId ?? "") === CORTEX_ARCHETYPE_ID)) {
-      throw new Error("Cortex manager cannot be deleted");
     }
 
     const terminatedWorkerIds: string[] = [];

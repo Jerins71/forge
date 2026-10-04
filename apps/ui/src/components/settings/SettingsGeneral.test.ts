@@ -19,7 +19,7 @@ vi.mock('@/components/help/HelpTooltip', () => ({
   HelpTooltip: ({ children }: { children: unknown }) => children,
 }))
 
-vi.mock('@/components/chat/cortex/OnboardingCallout', () => ({
+vi.mock('@/components/chat/OnboardingCallout', () => ({
   OnboardingCallout: () => createElement('div', { 'data-testid': 'onboarding-callout' }, 'Onboarding'),
 }))
 
@@ -77,45 +77,6 @@ vi.mock('@/lib/electron-bridge', () => ({
 vi.mock('@/lib/api-endpoint', () => ({
   resolveApiEndpoint: (_ws: string, path: string) => `http://127.0.0.1:47187${path}`,
 }))
-
-const cortexApiMock = vi.hoisted(() => ({
-  fetchCortexAutoReviewSettings: vi.fn(),
-  updateCortexAutoReviewSettings: vi.fn(),
-}))
-
-vi.mock('@/components/settings/cortex-auto-review-api', () => ({
-  fetchCortexAutoReviewSettings: (...args: unknown[]) => cortexApiMock.fetchCortexAutoReviewSettings(...args),
-  updateCortexAutoReviewSettings: (...args: unknown[]) => cortexApiMock.updateCortexAutoReviewSettings(...args),
-}))
-
-const knowledgeV2ApiMock = vi.hoisted(() => ({
-  fetchKnowledgeV2Settings: vi.fn(),
-  updateKnowledgeV2Settings: vi.fn(),
-}))
-
-vi.mock('@/components/settings/knowledge-v2-api', () => ({
-  fetchKnowledgeV2Settings: (...args: unknown[]) => knowledgeV2ApiMock.fetchKnowledgeV2Settings(...args),
-  updateKnowledgeV2Settings: (...args: unknown[]) => knowledgeV2ApiMock.updateKnowledgeV2Settings(...args),
-}))
-
-function knowledgeV2SettingsView(enabled: boolean, canEnable = true) {
-  return {
-    settings: {
-      enabled,
-      legacyCleanupConfirmed: false,
-      indexCaps: { global: 200, profile: 100 },
-      updatedAt: null,
-    },
-    defaults: {
-      enabled: false,
-      legacyCleanupConfirmed: false,
-      indexCaps: { global: 200, profile: 100 },
-      updatedAt: null,
-    },
-    constraints: { indexCaps: { min: 0, max: 1000, defaults: { global: 200, profile: 100 } } },
-    activation: { canEnable, reason: canEnable ? null : 'migration_required' },
-  }
-}
 
 const modelCacheVisualizationApiMock = vi.hoisted(() => ({
   fetchModelCacheVisualizationEnabled: vi.fn(),
@@ -213,18 +174,6 @@ beforeEach(() => {
     isMutating: false,
     error: null,
     savePreferences: vi.fn(),
-  })
-  cortexApiMock.fetchCortexAutoReviewSettings.mockResolvedValue({
-    settings: { enabled: true, intervalMinutes: 1440 },
-    cortexDisabled: false,
-  })
-  knowledgeV2ApiMock.fetchKnowledgeV2Settings.mockResolvedValue({
-    available: true,
-    response: knowledgeV2SettingsView(false),
-  })
-  knowledgeV2ApiMock.updateKnowledgeV2Settings.mockResolvedValue({
-    ok: true,
-    ...knowledgeV2SettingsView(true),
   })
   modelCacheVisualizationApiMock.fetchModelCacheVisualizationEnabled.mockResolvedValue(false)
   modelCacheVisualizationApiMock.setModelCacheVisualizationEnabledApi.mockResolvedValue(undefined)
@@ -487,180 +436,6 @@ describe('SettingsGeneral', () => {
       await flush()
 
       expect(container.textContent).toContain('The configured compaction provider is not available right now.')
-    })
-  })
-
-  /* ---- Cortex consolidation (auto-review API) ---- */
-
-  describe('cortex consolidation', () => {
-    it('renders consolidation toggle with Knowledge v2 language', async () => {
-      renderGeneral()
-      await flush()
-      await flush()
-
-      expect(container.textContent).toContain('Automatic Consolidation')
-      expect(container.textContent).toContain('merges, archives, and reindexes knowledge entries')
-      expect(container.textContent).not.toContain('Automatic Reviews')
-      expect(container.textContent).not.toContain('reviews active sessions')
-      expect(container.textContent).not.toContain('memory, and reference docs')
-    })
-
-    it('shows fixed 24-hour cadence without unsupported interval options', async () => {
-      renderGeneral()
-      await flush()
-      await flush()
-
-      expect(container.textContent).toContain('Consolidation Cadence')
-      expect(container.textContent).toContain('Every 24 hours')
-      expect(container.textContent).not.toContain('Review Interval')
-      expect(container.textContent).not.toContain('Every 15 minutes')
-      expect(container.textContent).not.toContain('Every 30 minutes')
-      expect(container.textContent).not.toContain('Every 2 hours')
-      expect(container.textContent).not.toContain('Every 12 hours')
-      expect(container.querySelector('[data-testid="cortex-consolidation-cadence"]')?.textContent).toBe(
-        'Every 24 hours',
-      )
-      expect(cortexApiMock.updateCortexAutoReviewSettings).not.toHaveBeenCalled()
-    })
-
-    it('does not PUT unsupported intervalMinutes from the Settings UI', async () => {
-      renderGeneral()
-      await flush()
-      await flush()
-
-      const intervalPuts = cortexApiMock.updateCortexAutoReviewSettings.mock.calls.filter(
-        (call: unknown[]) =>
-          Boolean(call[1] && typeof call[1] === 'object' && call[1] !== null && 'intervalMinutes' in call[1]),
-      )
-      expect(intervalPuts).toEqual([])
-    })
-
-    it('hides Cortex section when cortex is disabled', async () => {
-      cortexApiMock.fetchCortexAutoReviewSettings.mockResolvedValue({
-        settings: { enabled: false, intervalMinutes: 1440 },
-        cortexDisabled: true,
-      })
-      renderGeneral()
-      await flush()
-      await flush()
-
-      expect(container.textContent).not.toContain('Automatic Consolidation')
-      expect(container.textContent).not.toContain('Automatic Reviews')
-    })
-  })
-
-  /* ---- Knowledge v2 (New Cortex) toggle ---- */
-
-  describe('new cortex (knowledge v2) toggle', () => {
-    it('renders the toggle reflecting the fetched enabled=false state', async () => {
-      renderGeneral()
-      await flush()
-      await flush()
-
-      expect(container.textContent).toContain('New Cortex (Knowledge v2)')
-      const toggle = container.querySelector('#knowledge-v2-enabled-toggle')
-      expect(toggle).toBeTruthy()
-      expect(toggle?.getAttribute('aria-checked')).toBe('false')
-    })
-
-    it('shows migration guidance and does not PUT when activation is unavailable', async () => {
-      knowledgeV2ApiMock.fetchKnowledgeV2Settings.mockResolvedValue({
-        available: true,
-        response: knowledgeV2SettingsView(false, false),
-      })
-      renderGeneral()
-      await flush()
-      await flush()
-
-      const toggle = container.querySelector('#knowledge-v2-enabled-toggle') as HTMLInputElement | null
-      expect(toggle).toBeTruthy()
-      expect(container.textContent).toContain('Migration required')
-      flushSync(() => fireEvent.click(toggle!))
-      await flush()
-      expect(knowledgeV2ApiMock.updateKnowledgeV2Settings).not.toHaveBeenCalled()
-    })
-
-    it('clears and ignores stale activation capability when the backend source changes', async () => {
-      let resolveFirst!: (value: unknown) => void
-      const first = new Promise((resolve) => { resolveFirst = resolve })
-      knowledgeV2ApiMock.fetchKnowledgeV2Settings
-        .mockReturnValueOnce(first)
-        .mockResolvedValueOnce({ available: true, response: knowledgeV2SettingsView(false, false) })
-
-      root = createRoot(container)
-      flushSync(() => root?.render(createElement(SettingsGeneral, { wsUrl: 'ws://first' })))
-      flushSync(() => root?.render(createElement(SettingsGeneral, { wsUrl: 'ws://second' })))
-      await flush()
-      resolveFirst({ available: true, response: knowledgeV2SettingsView(false, true) })
-      await flush()
-
-      expect(container.textContent).toContain('Migration required')
-      const toggle = container.querySelector('#knowledge-v2-enabled-toggle') as HTMLInputElement | null
-      flushSync(() => fireEvent.click(toggle!))
-      await flush()
-      expect(knowledgeV2ApiMock.updateKnowledgeV2Settings).not.toHaveBeenCalled()
-    })
-
-    it('writes enabled=true via PUT when migration is complete', async () => {
-      renderGeneral()
-      await flush()
-      await flush()
-
-      const toggle = container.querySelector('#knowledge-v2-enabled-toggle') as HTMLInputElement | null
-      expect(toggle).toBeTruthy()
-
-      flushSync(() => {
-        fireEvent.click(toggle!)
-      })
-      await flush()
-
-      expect(knowledgeV2ApiMock.updateKnowledgeV2Settings).toHaveBeenCalledWith(
-        expect.anything(),
-        { enabled: true },
-      )
-      await flush()
-      const toggleAfter = container.querySelector('#knowledge-v2-enabled-toggle')
-      expect(toggleAfter?.getAttribute('aria-checked')).toBe('true')
-      expect(container.textContent).not.toContain('Migration required')
-    })
-
-    it('allows turning off even when activation capability is unavailable', async () => {
-      knowledgeV2ApiMock.fetchKnowledgeV2Settings.mockResolvedValue({
-        available: true,
-        response: knowledgeV2SettingsView(true, false),
-      })
-      renderGeneral()
-      await flush()
-      await flush()
-
-      const toggle = container.querySelector('#knowledge-v2-enabled-toggle') as HTMLInputElement | null
-      flushSync(() => fireEvent.click(toggle!))
-      await flush()
-      expect(knowledgeV2ApiMock.updateKnowledgeV2Settings).toHaveBeenCalledWith(
-        expect.anything(),
-        { enabled: false },
-      )
-    })
-
-    it('shows a disabled error row on network/server failure', async () => {
-      knowledgeV2ApiMock.fetchKnowledgeV2Settings.mockRejectedValue(new Error('backend offline'))
-      renderGeneral()
-      await flush()
-      await flush()
-
-      expect(container.textContent).toContain('New Cortex (Knowledge v2)')
-      expect(container.textContent).toContain('backend offline')
-      expect(container.querySelector('#knowledge-v2-enabled-toggle')).toBeTruthy()
-    })
-
-    it('hides the toggle when the knowledge-v2 endpoint is unavailable (404)', async () => {
-      knowledgeV2ApiMock.fetchKnowledgeV2Settings.mockResolvedValue({ available: false })
-      renderGeneral()
-      await flush()
-      await flush()
-
-      expect(container.textContent).not.toContain('New Cortex (Knowledge v2)')
-      expect(container.querySelector('#knowledge-v2-enabled-toggle')).toBeFalsy()
     })
   })
 

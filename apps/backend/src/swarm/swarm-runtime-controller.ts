@@ -122,13 +122,6 @@ export interface SwarmRuntimeControllerHost extends SwarmToolHost {
     getOpenAIAuthBrokerRuntimeService(): OpenAIAuthBrokerRuntimeService;
   };
   getObservabilityService?(): ObservabilityFacade | undefined;
-  cortexService: {
-    handleManagerStatusTransition(
-      descriptor: AgentDescriptor,
-      status: AgentStatus,
-      pendingCount: number
-    ): void | Promise<void>;
-  };
   getPiModelsJsonPathOrThrow(): string;
   getSecureRuntimeBinding?: GetSecureRuntimeBinding;
   getCompactionRuntimeSettingsProvider(): CompactionRuntimeSettingsProvider;
@@ -797,9 +790,7 @@ export class SwarmRuntimeController {
         saveStore: () => this.host.saveStore(),
         emitStatus: (agentId, status, pendingCount, contextUsage) =>
           this.host.emitStatus(agentId, status, pendingCount, contextUsage),
-        logDebug: (message, details) => this.logDebug(message, details),
-        handleManagerStatusTransition: (descriptor, status, pendingCount) =>
-          this.host.cortexService.handleManagerStatusTransition(descriptor, status, pendingCount)
+        logDebug: (message, details) => this.logDebug(message, details)
       });
     }
 

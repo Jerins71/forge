@@ -33,12 +33,6 @@ import type {
 } from "@forge/protocol";
 import type { BrowserAutomationInvocationResult } from "./browser-automation/browser-automation-service.js";
 import type {
-  KnowledgeEntry,
-  KnowledgeEntryScope,
-  KnowledgeEntryType,
-  KnowledgeSearchResult,
-} from "./knowledge-service.js";
-import type {
   RequestSecureSecretAccessToolInput,
   SecureSessionAgentView,
 } from "./secure-sessions/secure-session-tools.js";
@@ -151,21 +145,6 @@ export interface SwarmToolHost extends HistoryRecallToolHost {
     toolCallId: string,
     input: UpdateGoalInput,
   ): Promise<SessionGoalSnapshot>;
-  searchKnowledge?(
-    callerAgentId: string,
-    input: { query?: string; scope?: "global" | "profile" | "all"; limit?: number },
-  ): Promise<KnowledgeSearchResult[]>;
-  readKnowledgeEntry?(callerAgentId: string, id: string): Promise<KnowledgeEntry>;
-  saveLearning?(
-    callerAgentId: string,
-    input: {
-      type: KnowledgeEntryType;
-      scope: KnowledgeEntryScope;
-      title: string;
-      body: string;
-      evidence: "user-stated" | "observed";
-    },
-  ): Promise<KnowledgeEntry>;
   getSecureSessionAgentView?(
     callerAgentId: string,
   ): SecureSessionAgentView | Promise<SecureSessionAgentView>;

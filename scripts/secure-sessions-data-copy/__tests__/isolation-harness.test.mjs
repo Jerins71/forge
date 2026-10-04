@@ -313,7 +313,6 @@ test("launch environment is exact and refuses Collaboration bootstrap credential
     FORGE_ELECTRON_USER_DATA_DIR: electronUserDataPath,
     VITE_FORGE_WS_URL: `ws://127.0.0.1:${DEFAULT_BACKEND_PORT}`,
     FORGE_TELEMETRY: "false",
-    FORGE_CORTEX_ENABLED: "false",
     FORGE_TERMINAL_ENABLED: "false",
     FORGE_SKILL_SHARE_DISABLED: "true",
     FORGE_REMOTE_PROJECTS_ENABLED: "false",

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { DashboardTab as CortexDashboardTab } from '@/components/chat/cortex/CortexDashboardPanel'
 import type {
   DiffViewerInitialState,
   DiffViewerNavigationRequest,
@@ -38,7 +37,6 @@ export interface FileBrowserWorktreeSelection {
 
 interface UsePanelStateOptions {
   activeAgentId: string | null
-  activeAgentArchetypeId?: string | null
   /** Distinguishes agent/session contexts that may reuse the same agent id across origins or projects. */
   activeContextKey?: string
   enableKeyboardShortcuts?: boolean
@@ -46,32 +44,22 @@ interface UsePanelStateOptions {
 
 export function usePanelState({
   activeAgentId,
-  activeAgentArchetypeId,
-  activeContextKey = `${activeAgentId ?? 'none'}:${activeAgentArchetypeId ?? 'default'}`,
+  activeContextKey = activeAgentId ?? 'none',
   enableKeyboardShortcuts = true,
 }: UsePanelStateOptions) {
   const [activeArtifact, setActiveArtifact] = useState<ArtifactReference | null>(null)
   const [isArtifactsPanelOpen, setIsArtifactsPanelOpen] = useState(false)
   const [artifactsPanelTab, setArtifactsPanelTab] = useState<ArtifactsPanelTab>('artifacts')
-  const [cortexDashboardTab, setCortexDashboardTab] = useState<CortexDashboardTab>('index')
-  const [cortexDashboardTabRequest, setCortexDashboardTabRequest] = useState<{
-    tab: CortexDashboardTab
-    nonce: number
-  } | null>(null)
-  const [pendingCortexDashboardOpen, setPendingCortexDashboardOpen] = useState(false)
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false)
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false)
-  const [diffViewerInitialState, setDiffViewerInitialState] =
-    useState<DiffViewerInitialState | null>(null)
-  const [diffViewerNavigationRequest, setDiffViewerNavigationRequest] =
-    useState<DiffViewerNavigationRequest | null>(null)
-  const diffViewerInitialStateContextRef = useRef(activeContextKey)
-  const diffViewerNavigationContextRef = useRef(activeContextKey)
+  // Diff viewer targets are scoped to the context that opened them.
+  const [diffViewerTarget, setDiffViewerTarget] = useState<{
+    contextKey: string
+    initialState: DiffViewerInitialState | null
+    navigationRequest: DiffViewerNavigationRequest | null
+  } | null>(null)
   const diffViewerNavigationRequestIdRef = useRef(0)
-  const scopedDiffViewerInitialState =
-    diffViewerInitialStateContextRef.current === activeContextKey ? diffViewerInitialState : null
-  const scopedDiffViewerNavigationRequest =
-    diffViewerNavigationContextRef.current === activeContextKey ? diffViewerNavigationRequest : null
+  const scopedDiffViewerTarget = diffViewerTarget?.contextKey === activeContextKey ? diffViewerTarget : null
   const [isFileBrowserOpen, setIsFileBrowserOpen] = useState(false)
   const [isBrowserOpen, setIsBrowserOpen] = useState(false)
   const [fileBrowserWorktreeContext, setFileBrowserWorktreeContext] =
@@ -86,21 +74,13 @@ export function usePanelState({
     setActiveArtifact(null)
     setIsArtifactsPanelOpen(false)
     setArtifactsPanelTab('artifacts')
-    setCortexDashboardTab('index')
     setIsFileBrowserOpen(false)
     setIsBrowserOpen(false)
     setIsMobileSidebarOpen(false)
   }, [activeAgentId])
 
   useEffect(() => {
-    if (diffViewerInitialStateContextRef.current !== activeContextKey) {
-      diffViewerInitialStateContextRef.current = activeContextKey
-      setDiffViewerInitialState(null)
-    }
-    if (diffViewerNavigationContextRef.current !== activeContextKey) {
-      diffViewerNavigationContextRef.current = activeContextKey
-      setDiffViewerNavigationRequest(null)
-    }
+    setDiffViewerTarget((current) => (current && current.contextKey !== activeContextKey ? null : current))
   }, [activeContextKey])
 
   const closeFileBrowserForWorkspacePanel = useCallback(() => {
@@ -112,16 +92,6 @@ export function usePanelState({
     closeFileBrowserForWorkspacePanel()
     setIsBrowserOpen(false)
   }, [closeFileBrowserForWorkspacePanel])
-
-  useEffect(() => {
-    if (!pendingCortexDashboardOpen || activeAgentArchetypeId !== 'cortex') {
-      return
-    }
-
-    closeFileBrowserForWorkspacePanel()
-    setIsArtifactsPanelOpen(true)
-    setPendingCortexDashboardOpen(false)
-  }, [activeAgentArchetypeId, closeFileBrowserForWorkspacePanel, pendingCortexDashboardOpen])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -230,46 +200,19 @@ export function usePanelState({
     return () => window.removeEventListener('keydown', handler)
   }, [enableKeyboardShortcuts, toggleFileBrowser])
 
-  const requestCortexDashboardTab = useCallback(
-    (tab: CortexDashboardTab) => {
-      closeFileBrowserForWorkspacePanel()
-      setPendingCortexDashboardOpen(true)
-      setCortexDashboardTab(tab)
-      setCortexDashboardTabRequest({ tab, nonce: Date.now() })
-    },
-    [closeFileBrowserForWorkspacePanel],
-  )
-
-  const handleCortexDashboardTabChange = useCallback((tab: CortexDashboardTab) => {
-    setCortexDashboardTab(tab)
-  }, [])
-
-  const toggleCortexDashboardTab = useCallback(
-    (tab: CortexDashboardTab) => {
-      if (isArtifactsPanelOpen && cortexDashboardTab === tab) {
-        setIsArtifactsPanelOpen(false)
-        return
-      }
-      requestCortexDashboardTab(tab)
-    },
-    [cortexDashboardTab, isArtifactsPanelOpen, requestCortexDashboardTab],
-  )
-
   const openDiffViewer = useCallback((initialState: DiffViewerInitialState | null = null) => {
-    diffViewerInitialStateContextRef.current = activeContextKey
-    diffViewerNavigationContextRef.current = activeContextKey
-    setDiffViewerInitialState(initialState)
-    setDiffViewerNavigationRequest(null)
+    setDiffViewerTarget({ contextKey: activeContextKey, initialState, navigationRequest: null })
     setIsDiffViewerOpen(true)
   }, [activeContextKey])
 
   const openDiffViewerDeepLink = useCallback((initialState: DiffViewerInitialState) => {
     const requestId = diffViewerNavigationRequestIdRef.current + 1
     diffViewerNavigationRequestIdRef.current = requestId
-    diffViewerInitialStateContextRef.current = activeContextKey
-    diffViewerNavigationContextRef.current = activeContextKey
-    setDiffViewerInitialState(initialState)
-    setDiffViewerNavigationRequest({ requestId, ...initialState })
+    setDiffViewerTarget({
+      contextKey: activeContextKey,
+      initialState,
+      navigationRequest: { requestId, ...initialState },
+    })
     setIsDiffViewerOpen(true)
   }, [activeContextKey])
 
@@ -308,17 +251,12 @@ export function usePanelState({
     openArtifactsPanel,
     toggleArtifactsPanel,
     closeWorkspacePanels,
-    cortexDashboardTab,
-    cortexDashboardTabRequest,
-    requestCortexDashboardTab,
-    toggleCortexDashboardTab,
-    handleCortexDashboardTabChange,
     isMobileSidebarOpen,
     setIsMobileSidebarOpen,
     isDiffViewerOpen,
     setIsDiffViewerOpen,
-    diffViewerInitialState: scopedDiffViewerInitialState,
-    diffViewerNavigationRequest: scopedDiffViewerNavigationRequest,
+    diffViewerInitialState: scopedDiffViewerTarget?.initialState ?? null,
+    diffViewerNavigationRequest: scopedDiffViewerTarget?.navigationRequest ?? null,
     openDiffViewer,
     openDiffViewerDeepLink,
     isFileBrowserOpen,

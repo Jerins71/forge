@@ -48,8 +48,7 @@ of executing the task and does not require a separate request to remember someth
 
 Persistent session/profile memory serves durable user or project facts. Its existing explicit-user-
 request rule remains: write only when asked to remember, update, or forget durable information. The
-memory skill and all runtime wrappers distinguish this storage from task notes, including the case
-where knowledge v2 has no generated index yet. Rendering the new labels does not migrate or rewrite
+memory skill and all runtime wrappers distinguish this storage from task notes. Rendering the new labels does not migrate or rewrite
 saved user content. Secrets and highly sensitive data belong in neither surface.
 
 The core prompt refers only to capabilities exposed by the current runtime. Fresh-specific tool

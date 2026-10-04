@@ -956,7 +956,7 @@ describe('ws command parser session commands', () => {
       },
       {
         payload: { type: 'create_session', profileId: 'manager', sessionPurpose: 'bad-purpose' },
-        message: 'create_session.sessionPurpose must be "cortex_review" or "agent_creator" when provided',
+        message: 'create_session.sessionPurpose must be "agent_creator" when provided',
       },
       {
         payload: { type: 'stop_session', agentId: 42 },

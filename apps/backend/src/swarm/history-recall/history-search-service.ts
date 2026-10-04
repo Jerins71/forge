@@ -777,7 +777,7 @@ export class HistorySearchService {
       throw new HistoryRecallError("Searching outside the current project requires a specific reason");
     }
     scopeNotes.push(`Outside-project search reason: ${request.reason!.trim()}`);
-    scopeNotes.push("Effective scope is all local Builder projects, excluding restricted Cortex, plugin, and capture-check sources.");
+    scopeNotes.push("Effective scope is all local Builder projects, excluding restricted system, plugin, and internal sources.");
     return {
       scope,
       sources: catalogSources ?? listIndexableSources(this.host),

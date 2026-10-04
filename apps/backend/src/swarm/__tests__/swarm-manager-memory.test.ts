@@ -8,7 +8,6 @@ import { getCatalogModelKey } from '@forge/protocol'
 import { getConversationHistoryCacheFilePath } from '../session/conversation-history-cache.js'
 import {
   getCommonKnowledgePath,
-  getCortexReviewLogPath,
   getProfileKnowledgePath,
   getProfileMemoryPath,
   getProfilePiSkillsDir,
@@ -426,7 +425,7 @@ describe('SwarmManager', () => {
     const resources = await secondBoot.getMemoryRuntimeResourcesForTest()
     expect(resources.memoryContextFile.path).toBe(getRootSessionMemoryPath(config.paths.dataDir, 'manager'))
     expect(resources.memoryContextFile.content).toContain(persistedMemory.trim())
-    expect(resources.memoryContextFile.content).toContain('# Common Knowledge (maintained by Cortex — read-only reference)')
+    expect(resources.memoryContextFile.content).not.toContain('# Common Knowledge')
   })
 
   it('buildSessionMemoryRuntimeView composes read-only profile memory above writable session memory', () => {
@@ -484,7 +483,7 @@ describe('SwarmManager', () => {
     const resources = await manager.getMemoryRuntimeResourcesForTest('manager')
     expect(resources.memoryContextFile.content).toContain('manager-only')
     expect(resources.memoryContextFile.content).toContain(
-      '# Common Knowledge (maintained by Cortex — read-only reference)',
+      '# Common Knowledge',
     )
     expect(resources.memoryContextFile.content).toContain('keep PRs small')
   })
@@ -500,8 +499,8 @@ describe('SwarmManager', () => {
     const resources = await manager.getMemoryRuntimeResourcesForTest('manager')
     const content = resources.memoryContextFile.content
 
-    expect(content).toContain('# Common Knowledge (maintained by Cortex — read-only reference)')
-    expect(content).not.toContain('# Project Knowledge for manager (maintained by Cortex — read-only reference)')
+    expect(content).toContain('# Common Knowledge')
+    expect(content).not.toContain('# Project Knowledge for manager')
   })
 
   it('migrates legacy profile knowledge blobs into profile reference docs on boot', async () => {
@@ -656,7 +655,7 @@ describe('SwarmManager', () => {
 
     const descriptorSaveSpy = vi.spyOn((manager as any).descriptorStore, 'save')
     const auditSpy = vi.spyOn(
-      (manager as any).knowledgeMemoryCoordinator,
+      (manager as any).memoryCoordinator,
       'appendSessionMemoryMergeAuditEntry',
     )
     const snapshotSpy = vi.spyOn((manager as any).eventCoordinator, 'emitAgentsSnapshot')
@@ -984,7 +983,7 @@ describe('SwarmManager', () => {
       'utf8',
     )
 
-    ;(manager as any).knowledgeMemoryCoordinator.appendSessionMemoryMergeAuditEntry = async () => {
+    ;(manager as any).memoryCoordinator.appendSessionMemoryMergeAuditEntry = async () => {
       throw new Error('audit disk full')
     }
 
@@ -1024,7 +1023,7 @@ describe('SwarmManager', () => {
       'utf8',
     )
 
-    const coordinator = (manager as any).knowledgeMemoryCoordinator
+    const coordinator = (manager as any).memoryCoordinator
     const originalAppendSessionMemoryMergeAuditEntry =
       coordinator.appendSessionMemoryMergeAuditEntry.bind(coordinator)
     let appendFailuresRemaining = 1
@@ -1155,7 +1154,7 @@ describe('SwarmManager', () => {
       'utf8',
     )
 
-    ;(manager as any).knowledgeMemoryCoordinator.recordSessionMemoryMergeAttempt = async () => {
+    ;(manager as any).memoryCoordinator.recordSessionMemoryMergeAttempt = async () => {
       throw new Error('meta persistence unavailable')
     }
 
@@ -1313,7 +1312,7 @@ describe('SwarmManager', () => {
       additionalPreferences: 'Keep responses detailed and proactive.',
     })
 
-    const created = await manager.createManager('cortex', {
+    const created = await manager.createManager('bootstrap', {
       name: 'Project Manager',
       cwd: config.defaultCwd,
     })

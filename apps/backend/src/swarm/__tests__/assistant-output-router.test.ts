@@ -85,18 +85,18 @@ function workerParent(outputTarget: AssistantOutputTarget = webTarget): WorkerPa
 
 describe("AssistantOutputRouter", () => {
   it("resolves direct user surfaces without projecting protected turns to web", () => {
-    const { router, manager } = createHarness();
+    const { router } = createHarness();
 
-    expect(router.resolveTargetForUserInput(manager, { channel: "web", messageId: "m1" })).toEqual({
+    expect(router.resolveTargetForUserInput({ channel: "web", messageId: "m1" })).toEqual({
       kind: "session_transcript",
       channel: "web",
       sourceContext: { channel: "web", messageId: "m1" },
     });
-    expect(router.resolveTargetForUserInput(manager, { channel: "telegram", channelId: "t1" })).toEqual({
+    expect(router.resolveTargetForUserInput({ channel: "telegram", channelId: "t1" })).toEqual({
       kind: "internal_only",
       reason: "retired_external_channel",
     });
-    expect(router.resolveTargetForUserInput(manager, { channel: "cli" })).toEqual({
+    expect(router.resolveTargetForUserInput({ channel: "cli" })).toEqual({
       kind: "explicit_tool_required",
       reason: "unsupported_direct_cli_source",
     });

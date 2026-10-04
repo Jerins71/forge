@@ -16,18 +16,11 @@ import {
   isValidPromptCategory,
   isValidPromptSourceLayer,
 } from "../../../swarm/prompts/prompt-metadata.js";
-import {
-  listCortexPromptSurfaces,
-  readCortexPromptSurface,
-  resetCortexPromptSurface,
-  saveCortexPromptSurface,
-} from "../../../swarm/prompts/cortex-prompt-surfaces.js";
 import type {
   PromptEntry,
   PromptPreviewProvider,
   PromptRegistryForRoutes,
 } from "../../../swarm/prompt-contracts.js";
-import type { VersioningMutationSink } from "../../../versioning/versioning-types.js";
 import {
   SYSTEM_PROFILE_MUTATION_ERROR,
   requireNonSystemProfile,
@@ -45,9 +38,6 @@ import type { HttpRoute } from "../shared/http-route.js";
 
 const PROMPTS_LIST_PATH = "/api/prompts";
 const PROMPTS_PREVIEW_PATH = "/api/prompts/preview";
-const CORTEX_SURFACES_LIST_PATH = "/api/prompts/cortex-surfaces";
-const CORTEX_SURFACE_ITEM_PATTERN = /^\/api\/prompts\/cortex-surfaces\/([^/]+)$/;
-const CORTEX_SURFACE_RESET_PATTERN = /^\/api\/prompts\/cortex-surfaces\/([^/]+)\/reset$/;
 // Matches /api/prompts/<category>/<promptId>
 const PROMPT_ITEM_PATTERN = /^\/api\/prompts\/([^/]+)\/([^/]+)$/;
 
@@ -57,15 +47,11 @@ const PROMPT_ITEM_PATTERN = /^\/api\/prompts\/([^/]+)\/([^/]+)$/;
 
 export function createPromptRoutes(options: {
   promptRegistry: PromptRegistryForRoutes;
-  dataDir: string;
   broadcastEvent: (event: ServerEvent) => void;
   promptPreviewProvider?: PromptPreviewProvider;
-  versioning?: VersioningMutationSink;
   listProfiles?: () => ManagerProfile[];
-  cortexEnabled?: boolean;
 }): HttpRoute[] {
-  const { promptRegistry, dataDir, broadcastEvent, promptPreviewProvider, versioning } = options;
-  const cortexEnabled = options.cortexEnabled !== false;
+  const { promptRegistry, broadcastEvent, promptPreviewProvider } = options;
 
   return [
     // ── Preview full manager runtime context ──────────────────
@@ -161,12 +147,7 @@ export function createPromptRoutes(options: {
             entryMap.set(`${entry.category}:${entry.promptId}`, entry);
           }
 
-          // Filter out prompts scoped to a different profile
-          const applicableMetadata = PROMPT_METADATA.filter(
-            (meta) => !meta.profileScope || meta.profileScope === profileId,
-          );
-
-          const prompts: PromptListEntry[] = applicableMetadata.map((meta) => {
+          const prompts: PromptListEntry[] = PROMPT_METADATA.map((meta) => {
             const entry = entryMap.get(`${meta.category}:${meta.promptId}`);
             const hasProfileOverride = profileId
               ? entry?.sourceLayer === "profile"
@@ -188,187 +169,6 @@ export function createPromptRoutes(options: {
           const message = error instanceof Error ? error.message : String(error);
           sendJson(response, 500, { error: message });
         }
-      },
-    },
-
-    // ── Cortex prompt surfaces ────────────────────────────────
-    // NOTE: These routes must stay ahead of the generic PROMPT_ITEM_PATTERN route below,
-    // because `/api/prompts/cortex-surfaces/:surfaceId` would otherwise also match the
-    // generic `/api/prompts/:category/:promptId` handler.
-    {
-      methods: "GET, OPTIONS",
-      matches: (pathname) => pathname === CORTEX_SURFACES_LIST_PATH,
-      handle: async (request, response, requestUrl) => {
-        const methods = "GET, OPTIONS";
-
-        if (request.method === "OPTIONS") {
-          applyCorsHeaders(request, response, methods);
-          response.statusCode = 204;
-          response.end();
-          return;
-        }
-
-        if (request.method !== "GET") {
-          applyCorsHeaders(request, response, methods);
-          response.setHeader("Allow", methods);
-          sendJson(response, 405, { error: "Method Not Allowed" });
-          return;
-        }
-
-        applyCorsHeaders(request, response, methods);
-
-        const profileId = requestUrl.searchParams.get("profileId");
-        if (!profileId || profileId.trim().length === 0) {
-          sendJson(response, 400, { error: "profileId query parameter is required." });
-          return;
-        }
-
-        if (!cortexEnabled) {
-          sendJson(response, 200, { enabled: false, surfaces: [] });
-          return;
-        }
-
-        try {
-          const result = await listCortexPromptSurfaces({
-            dataDir,
-            profileId,
-            promptRegistry,
-          });
-          sendJson(response, 200, result as unknown as Record<string, unknown>);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          sendJson(response, 500, { error: message });
-        }
-      },
-    },
-    {
-      methods: "POST, OPTIONS",
-      matches: (pathname) => CORTEX_SURFACE_RESET_PATTERN.test(pathname),
-      handle: async (request, response, requestUrl) => {
-        const methods = "POST, OPTIONS";
-
-        if (request.method === "OPTIONS") {
-          applyCorsHeaders(request, response, methods);
-          response.statusCode = 204;
-          response.end();
-          return;
-        }
-
-        if (request.method !== "POST") {
-          applyCorsHeaders(request, response, methods);
-          response.setHeader("Allow", methods);
-          sendJson(response, 405, { error: "Method Not Allowed" });
-          return;
-        }
-
-        applyCorsHeaders(request, response, methods);
-
-        const match = requestUrl.pathname.match(CORTEX_SURFACE_RESET_PATTERN);
-        if (!match) {
-          sendJson(response, 400, { error: "Invalid Cortex prompt surface path." });
-          return;
-        }
-
-        const surfaceId = decodeURIComponent(match[1]);
-        const profileId = requestUrl.searchParams.get("profileId");
-        if (!profileId || profileId.trim().length === 0) {
-          sendJson(response, 400, { error: "profileId query parameter is required." });
-          return;
-        }
-
-        if (!cortexEnabled) {
-          sendJson(response, 404, { error: "Cortex prompt surfaces are unavailable because Cortex is disabled." });
-          return;
-        }
-
-        try {
-          await resetCortexPromptSurface({
-            dataDir,
-            profileId,
-            surfaceId,
-            promptRegistry,
-            broadcastEvent,
-            versioning,
-          });
-          sendJson(response, 200, { reset: true });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          sendJson(response, getCortexSurfaceErrorStatusCode(message), { error: message });
-        }
-      },
-    },
-    {
-      methods: "GET, PUT, OPTIONS",
-      matches: (pathname) => CORTEX_SURFACE_ITEM_PATTERN.test(pathname),
-      handle: async (request, response, requestUrl) => {
-        const methods = "GET, PUT, OPTIONS";
-
-        if (request.method === "OPTIONS") {
-          applyCorsHeaders(request, response, methods);
-          response.statusCode = 204;
-          response.end();
-          return;
-        }
-
-        applyCorsHeaders(request, response, methods);
-
-        const match = requestUrl.pathname.match(CORTEX_SURFACE_ITEM_PATTERN);
-        if (!match) {
-          sendJson(response, 400, { error: "Invalid Cortex prompt surface path." });
-          return;
-        }
-
-        const surfaceId = decodeURIComponent(match[1]);
-
-        if (!cortexEnabled) {
-          sendJson(response, 404, { error: "Cortex prompt surfaces are unavailable because Cortex is disabled." });
-          return;
-        }
-
-        if (request.method === "GET") {
-          const profileId = requestUrl.searchParams.get("profileId");
-          if (!profileId || profileId.trim().length === 0) {
-            sendJson(response, 400, { error: "profileId query parameter is required." });
-            return;
-          }
-
-          try {
-            const result = await readCortexPromptSurface({
-              dataDir,
-              profileId,
-              surfaceId,
-              promptRegistry,
-            });
-            sendJson(response, 200, result as unknown as Record<string, unknown>);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            sendJson(response, getCortexSurfaceErrorStatusCode(message), { error: message });
-          }
-          return;
-        }
-
-        if (request.method === "PUT") {
-          try {
-            const { content, profileId } = parseCortexSurfaceSaveBody(await readJsonBody(request));
-            await saveCortexPromptSurface({
-              dataDir,
-              profileId,
-              surfaceId,
-              content,
-              promptRegistry,
-              broadcastEvent,
-              versioning,
-            });
-            sendJson(response, 200, { saved: true });
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            sendJson(response, getCortexSurfaceErrorStatusCode(message), { error: message });
-          }
-          return;
-        }
-
-        response.setHeader("Allow", methods);
-        sendJson(response, 405, { error: "Method Not Allowed" });
       },
     },
 
@@ -642,14 +442,6 @@ async function handleDeletePrompt(
 // ---------------------------------------------------------------------------
 
 function parseSaveBody(value: unknown): { content: string; profileId: string } {
-  const parsed = parseCortexSurfaceSaveBody(value);
-  if (parsed.content.trim().length === 0) {
-    throw new Error("content must be a non-empty string.");
-  }
-  return parsed;
-}
-
-function parseCortexSurfaceSaveBody(value: unknown): { content: string; profileId: string } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Request body must be a JSON object.");
   }
@@ -660,8 +452,8 @@ function parseCortexSurfaceSaveBody(value: unknown): { content: string; profileI
     throw new Error("profileId must be a non-empty string.");
   }
 
-  if (typeof maybe.content !== "string") {
-    throw new Error("content must be a string.");
+  if (typeof maybe.content !== "string" || maybe.content.trim().length === 0) {
+    throw new Error("content must be a non-empty string.");
   }
 
   return {
@@ -676,26 +468,4 @@ function isBadRequestMessage(message: string): boolean {
     message.includes("required") ||
     message.includes("Request body")
   );
-}
-
-function getCortexSurfaceErrorStatusCode(message: string): number {
-  if (
-    message.includes("Unknown Cortex prompt surface") ||
-    message.includes("Prompt '") ||
-    message.includes("No profile override exists")
-  ) {
-    return 404;
-  }
-
-  if (
-    isBadRequestMessage(message) ||
-    message.includes("only available") ||
-    message.includes("does not support reset") ||
-    message.includes("read-only") ||
-    message.includes("Unsupported Cortex prompt surface")
-  ) {
-    return 400;
-  }
-
-  return 500;
 }

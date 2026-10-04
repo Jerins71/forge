@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import type { GitLogRef, GitRepoTarget } from '@forge/protocol'
+import type { GitLogRef } from '@forge/protocol'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -8,8 +8,6 @@ import {
   type CommitGraphRowMetrics,
 } from './CommitGraphColumn'
 import { commitGraphWidth, layoutCommitGraph } from './commit-graph-layout'
-import { CommitMetadataBadges } from './CommitMetadataBadges'
-import { formatCommitSummary } from './formatCommitSummary'
 import type { GitLogEntry } from './use-diff-queries'
 
 interface CommitListProps {
@@ -20,7 +18,6 @@ interface CommitListProps {
   hasMore: boolean
   onLoadMore: () => void
   isLoadingMore: boolean
-  repoTarget: GitRepoTarget
   emptyMessage?: string
 }
 
@@ -32,14 +29,11 @@ export function CommitList({
   hasMore,
   onLoadMore,
   isLoadingMore,
-  repoTarget,
   emptyMessage = 'No commits found',
 }: CommitListProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null)
-  const useEnhancedRendering = repoTarget === 'versioning'
-  const showGraph =
-    repoTarget === 'workspace' && commits.length > 0 && commits.every((commit) => Array.isArray(commit.parents))
+  const showGraph = commits.length > 0 && commits.every((commit) => Array.isArray(commit.parents))
   const graphRows = useMemo(
     () => (showGraph ? layoutCommitGraph(commits) : []),
     [commits, showGraph],
@@ -188,7 +182,7 @@ export function CommitList({
         ) : null}
         {commits.map((commit) => {
           const isSelected = selectedSha === commit.sha
-          const summary = useEnhancedRendering ? formatCommitSummary(commit) : commit.message.split('\n')[0]
+          const summary = commit.message.split('\n')[0]
 
           return (
             <button
@@ -209,14 +203,13 @@ export function CommitList({
               <span className="min-w-0 flex-1 flex flex-col gap-0.5 py-0.5">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <span className="min-w-0 flex-1 truncate text-xs font-medium leading-tight text-foreground">{summary}</span>
-                  {repoTarget === 'workspace' ? <CommitRefBadges refs={commit.refs} /> : null}
+                  <CommitRefBadges refs={commit.refs} />
                 </span>
                 <span className="flex items-center gap-1.5 text-[10px] leading-tight text-muted-foreground">
                   <span className="truncate">{commit.author}</span>
                   <span className="shrink-0 opacity-60">·</span>
                   <span className="shrink-0">{formatRelativeTime(commit.date)}</span>
                 </span>
-                {useEnhancedRendering ? <CommitMetadataBadges metadata={commit.metadata} /> : null}
               </span>
             </button>
           )

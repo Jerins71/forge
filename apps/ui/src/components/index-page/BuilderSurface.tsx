@@ -47,13 +47,11 @@ import {
   type RemoteUpdateAwarenessMutationTarget,
 } from '@/components/diff-viewer/remote-update-awareness-mutation'
 import { GlobalDialogs } from '@/components/index-page/GlobalDialogs'
-import { CortexV2OnboardingModal } from '@/components/settings/CortexV2OnboardingModal'
 import { BitwardenUnlockDialog } from '@/components/chat/secure-session/BitwardenUnlockDialog'
 import { StatsPage } from '@/components/index-page/StatsPage'
 import { shouldEnableCodexMention } from '@/components/index-page/codex-mention-utils'
 import { defaultMessageSourceViewForAgentRole } from '@/components/index-page/message-source-view'
-import { isCortexDiffViewerSession, resolveWorkerFetchManagerId } from '@/lib/agent-hierarchy'
-import { hasProjectManagers } from '@/lib/onboarding-ui'
+import { resolveWorkerFetchManagerId } from '@/lib/agent-hierarchy'
 import {
   DEFAULT_MANAGER_AGENT_ID,
   type ActiveView,
@@ -534,11 +532,9 @@ export function BuilderSurface({
   )
   const activeAgentProfileType = activeAgentProfile?.profileType ?? null
   const activeProjectId = activeAgent?.profileId ?? activeManagerAgent?.profileId ?? null
-  const activeAgentIsCortex = isCortexDiffViewerSession(activeAgent)
   const remoteUpdateSnapshot = getActiveLocalRemoteUpdateSnapshot(
     state.remoteUpdateAwarenessSnapshot,
     activeProjectId,
-    activeAgentIsCortex,
   )
   const handleRemoteUpdateSnapshotChange = useCallback((
     snapshot: RemoteUpdateAwarenessProjectSnapshot,
@@ -549,7 +545,6 @@ export function BuilderSurface({
         const currentProjection = getActiveLocalRemoteUpdateSnapshot(
           current.remoteUpdateAwarenessSnapshot,
           activeProjectId,
-          activeAgentIsCortex,
         )
         if (!remoteUpdateSnapshotMatchesTarget(currentProjection, expectedTarget)) {
           return current
@@ -557,7 +552,7 @@ export function BuilderSurface({
       }
       return { ...current, remoteUpdateAwarenessSnapshot: snapshot }
     })
-  }, [activeAgentIsCortex, activeProjectId, setState])
+  }, [activeProjectId, setState])
 
   useEffect(() => {
     if (!state.connected || !activeProjectId) return
@@ -611,16 +606,6 @@ export function BuilderSurface({
     [activeAgent, externalProjectAgentEntries, state.agents],
   )
 
-  const diffViewerSessionAgent = useMemo(() => {
-    if (!activeAgent) {
-      return null
-    }
-
-    return activeAgent.role === 'manager' ? activeAgent : activeManagerAgent ?? activeAgent
-  }, [activeAgent, activeManagerAgent])
-
-  const isDiffViewerCortexSession = isCortexDiffViewerSession(diffViewerSessionAgent)
-
   const terminalPanel = useTerminalPanel({
     wsUrl,
     sessionAgentId: terminalSessionAgentId,
@@ -635,7 +620,6 @@ export function BuilderSurface({
     },
   })
 
-  const isCortexSession = activeAgent?.archetypeId === 'cortex'
   const browserSessionAgentId = activeManagerAgent?.agentId ?? null
   const browserProfileId = activeManagerAgent?.profileId ?? activeManagerAgent?.agentId ?? null
   browserSelectionRef.current = { sessionAgentId: browserSessionAgentId, profileId: browserProfileId }
@@ -653,8 +637,7 @@ export function BuilderSurface({
     terminalPanel,
     terminalCount: state.terminals.length,
     browserTabCount: countOpenBrowserTabs(browserSessionSnapshot),
-    isCortexSession,
-    activeContextKey: `${LOCAL_ORIGIN_ID}:${activeProjectId ?? 'none'}:${activeAgentId ?? 'none'}:${isDiffViewerCortexSession ? 'cortex' : 'workspace'}`,
+    activeContextKey: `${LOCAL_ORIGIN_ID}:${activeProjectId ?? 'none'}:${activeAgentId ?? 'none'}`,
     clientRef,
     messageInputRef,
     navigateToRoute,
@@ -852,7 +835,7 @@ export function BuilderSurface({
     return state.statuses[activeAgentId]?.contextRecoveryInProgress === true
   }, [activeAgentId, state.statuses])
 
-  const hasCreatedProjectManager = useMemo(() => hasProjectManagers(state.agents), [state.agents])
+  const hasCreatedProjectManager = useMemo(() => state.agents.some((agent) => agent.role === 'manager'), [state.agents])
   const localActiveAgentId = activeAgentId
   const localActiveAgent = localActiveAgentId
     ? state.agents.find((agent) => agent.agentId === localActiveAgentId) ?? null
@@ -2083,7 +2066,6 @@ export function BuilderSurface({
                   active={panels.isInlineDiffViewerOpen}
                   wsUrl={wsUrl}
                   agentId={activeAgentId}
-                  isCortex={isDiffViewerCortexSession}
                   onClose={panels.handleCloseDiffViewer}
                   onBrowseWorktreeFiles={panels.handleBrowseWorktreeFromSourceControl}
                   onRequestSourceControlMutation={panels.handleRequestSourceControlMutation}
@@ -2092,11 +2074,7 @@ export function BuilderSurface({
                   remoteUpdateSnapshot={remoteUpdateSnapshot}
                   onRemoteUpdateSnapshotChange={handleRemoteUpdateSnapshotChange}
                   navigationRequest={panels.diffViewerNavigationRequest}
-                  initialRepoTarget={panels.diffViewerInitialState?.initialRepoTarget}
                   initialTab={panels.diffViewerInitialState?.initialTab}
-                  initialSha={panels.diffViewerInitialState?.initialSha}
-                  initialFile={panels.diffViewerInitialState?.initialFile}
-                  initialQuickFilter={panels.diffViewerInitialState?.initialQuickFilter}
                 />
               </div>
             ) : activeView === 'settings' ? (
@@ -2256,7 +2234,6 @@ export function BuilderSurface({
                 remoteUpdateSnapshot={remoteUpdateSnapshot}
                 onRemoteUpdateSnapshotChange={handleRemoteUpdateSnapshotChange}
                 onOpenRemoteUpdateIncoming={() => panels.handleOpenDiffViewerDeepLink({
-                  initialRepoTarget: 'workspace',
                   initialTab: 'incoming',
                 })}
                 lastError={state.lastError}
@@ -2444,18 +2421,6 @@ export function BuilderSurface({
 
           {activeView === 'chat' && !panels.isInlineDiffViewerOpen ? (
             <ChatSidePanels
-              isCortexSession={activeAgent?.archetypeId === 'cortex'}
-              cortexDashboardProps={{
-                wsUrl: wsUrl,
-                managerId: activeManagerId,
-                isOpen: panels.isArtifactsPanelOpen,
-                onClose: panels.handleGuardedArtifactsClose,
-                onArtifactClick: panels.handleOpenArtifact,
-                onOpenSession: panels.handleSelectAgent,
-                onOpenDiffViewer: panels.handleOpenDiffViewerModal,
-                requestedTab: panels.cortexDashboardTabRequest,
-                onActiveTabChange: panels.handleCortexDashboardTabChange,
-              }}
               artifactsSidebarProps={{
                 wsUrl,
                 managerId: activeManagerId,
@@ -2598,7 +2563,6 @@ export function BuilderSurface({
           onOpenChange: panels.handleGuardedDiffViewerOpenChange,
           wsUrl,
           agentId: activeAgentId,
-          isCortex: isDiffViewerCortexSession,
           onBrowseWorktreeFiles: panels.handleBrowseWorktreeFromSourceControl,
           onRequestSourceControlMutation: panels.handleRequestSourceControlMutation,
           onSourceControlMutationComplete: panels.handleSourceControlMutationComplete,
@@ -2606,11 +2570,7 @@ export function BuilderSurface({
           remoteUpdateSnapshot,
           onRemoteUpdateSnapshotChange: handleRemoteUpdateSnapshotChange,
           navigationRequest: panels.diffViewerNavigationRequest,
-          initialRepoTarget: panels.diffViewerInitialState?.initialRepoTarget,
           initialTab: panels.diffViewerInitialState?.initialTab,
-          initialSha: panels.diffViewerInitialState?.initialSha,
-          initialFile: panels.diffViewerInitialState?.initialFile,
-          initialQuickFilter: panels.diffViewerInitialState?.initialQuickFilter,
         }}
       />
 
@@ -2623,8 +2583,6 @@ export function BuilderSurface({
           onDismiss={dismissBitwardenPrompt}
         />
       ) : null}
-
-      <CortexV2OnboardingModal source={wsUrl} />
     </WorkGraphWorkerHighlightProvider>
   )
 }

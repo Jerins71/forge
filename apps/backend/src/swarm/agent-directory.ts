@@ -7,16 +7,12 @@ import {
   isSessionDirectlyArchived,
 } from "./archive/archive-resolver.js";
 import { cloneDescriptorForPersistence, cloneProfile } from "./agents/descriptor-store/descriptor-clone.js";
-import { normalizeArchetypeId } from "./prompts/prompt-registry.js";
 import {
   cloneDescriptor,
   normalizeAgentId,
   normalizeOptionalAgentId,
 } from "./swarm-manager-utils.js";
 import type { AgentDescriptor, ManagerProfile } from "./types.js";
-
-const CORTEX_ARCHETYPE_ID = "cortex";
-const CORTEX_PROFILE_ID = "cortex";
 
 export type ManagerSessionDescriptor = AgentDescriptor & {
   role: "manager";
@@ -174,7 +170,6 @@ export class AgentDirectory {
       currentProfiles
         .filter(
           (profile) =>
-            profile.profileId !== CORTEX_PROFILE_ID &&
             !isSystemProfile(profile) &&
             !profile.archivedAt,
         )
@@ -271,12 +266,6 @@ export class AgentDirectory {
   }
 
   assertSessionSupportsProjectAgent(descriptor: ManagerSessionDescriptor): void {
-    if (descriptor.agentId === CORTEX_PROFILE_ID && descriptor.profileId === CORTEX_PROFILE_ID) {
-      throw new Error("Cortex root cannot be promoted to a project agent");
-    }
-    if (descriptor.sessionPurpose === "cortex_review") {
-      throw new Error("Cortex review sessions cannot be promoted to project agents");
-    }
     if (descriptor.sessionPurpose === "agent_creator") {
       throw new Error("Agent creator sessions cannot be promoted to project agents");
     }
@@ -372,15 +361,9 @@ export class AgentDirectory {
     return descriptor;
   }
 
-  hasRunningManagers(options?: { excludeCortex?: boolean }): boolean {
+  hasRunningManagers(): boolean {
     for (const descriptor of this.options.descriptors.values()) {
       if (descriptor.role !== "manager") continue;
-      if (
-        options?.excludeCortex &&
-        normalizeArchetypeId(descriptor.archetypeId ?? "") === CORTEX_ARCHETYPE_ID
-      ) {
-        continue;
-      }
       if (!isNonRunningAgentStatus(descriptor.status)) return true;
     }
     return false;

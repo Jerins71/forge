@@ -12,7 +12,6 @@ import type {
   MessagePinnedEvent,
 } from './conversation-events.js'
 import type {
-  CortexPromptSurfaceChangedEvent,
   ModelConfigChangedEvent,
   PromptChangedEvent,
   SpecialistRosterChangedEvent,
@@ -222,7 +221,6 @@ export type ServerEvent =
   | DirectoryCreatedEvent
   | DirectoryPickedEvent
   | PromptChangedEvent
-  | CortexPromptSurfaceChangedEvent
   | TerminalCreatedEvent
   | TerminalUpdatedEvent
   | TerminalClosedEvent

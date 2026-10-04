@@ -47,16 +47,16 @@ describe("compaction boot settings provider", () => {
     const manager = new SwarmManager(config);
     const order: string[] = [];
 
-    const knowledgeMemoryCoordinator = (
+    const memoryCoordinator = (
       manager as never as {
-        knowledgeMemoryCoordinator: { loadCompactionSettingsForRuntime: () => Promise<void> };
+        memoryCoordinator: { loadCompactionSettingsForRuntime: () => Promise<void> };
       }
-    ).knowledgeMemoryCoordinator;
+    ).memoryCoordinator;
     const bootCoordinator = (
       manager as never as { bootCoordinator: { restoreRuntimes: () => Promise<void> } }
     ).bootCoordinator;
 
-    vi.spyOn(knowledgeMemoryCoordinator, "loadCompactionSettingsForRuntime").mockImplementation(async () => {
+    vi.spyOn(memoryCoordinator, "loadCompactionSettingsForRuntime").mockImplementation(async () => {
       order.push("compaction_settings");
     });
     vi.spyOn(bootCoordinator, "restoreRuntimes").mockImplementation(async () => {

@@ -2,11 +2,10 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { getCommonKnowledgePath, getSharedKnowledgeDir } from '../swarm/data-paths.js'
+import { getSharedKnowledgeDir } from '../swarm/data-paths.js'
 import {
   getOnboardingSnapshot,
   loadOnboardingState,
-  renderOnboardingCommonKnowledge,
   saveOnboardingPreferences,
   skipOnboarding,
   ONBOARDING_STATE_FILE_NAME,
@@ -98,35 +97,6 @@ describe('onboarding-state', () => {
     expect(skipped.completedAt).toBe(completed.completedAt)
     expect(skipped.skippedAt).toMatch(/T/)
     expect(skipped.preferences).toEqual(completed.preferences)
-  })
-
-  it('renders the managed onboarding block into common knowledge', async () => {
-    const dataDir = await createTempDataDir()
-    const commonKnowledgePath = getCommonKnowledgePath(dataDir)
-    await mkdir(dirname(commonKnowledgePath), { recursive: true })
-    await writeFile(
-      commonKnowledgePath,
-      '# Common Knowledge\n<!-- Maintained by Cortex. Last updated: {ISO timestamp} -->\n\n## Interaction Defaults\n\nManual content stays here.\n',
-      'utf8',
-    )
-
-    const state = await saveOnboardingPreferences(dataDir, {
-      preferredName: 'Ada',
-      technicalLevel: 'technical_non_developer',
-      additionalPreferences: 'Prefer plain language.',
-    })
-
-    await renderOnboardingCommonKnowledge(dataDir, state)
-    const rendered = await readFile(commonKnowledgePath, 'utf8')
-
-    expect(rendered).toContain('## User Snapshot')
-    expect(rendered).toContain('<!-- BEGIN MANAGED:ONBOARDING -->')
-    expect(rendered).toContain('Onboarding status: completed')
-    expect(rendered).toContain('Preferred name: Ada')
-    expect(rendered).toContain('Technical level: Technical (non-developer)')
-    expect(rendered).toContain('Additional preferences: Prefer plain language.')
-    expect(rendered).toContain('Manual content stays here.')
-    expect(rendered).not.toContain('{ISO timestamp}')
   })
 
   it('migrates completed legacy conversational onboarding into the new shape', async () => {

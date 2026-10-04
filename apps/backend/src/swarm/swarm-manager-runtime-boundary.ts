@@ -5,7 +5,7 @@ import type { CodexDirectSidecarCoordinator } from "./codex-app-server/codex-dir
 import type { CodexPluginDelegationCoordinator } from "./codex-app-server/codex-plugin-delegation-coordinator.js";
 import type { ConversationProjector } from "./session/conversation-projector.js";
 import type { SessionGoalCoordinator } from "./goals/session-goal-coordinator.js";
-import type { KnowledgeMemoryCoordinator } from "./knowledge-memory-coordinator.js";
+import type { MemoryCoordinator } from "./memory-coordinator.js";
 import type { ProjectAgentCoordinator } from "./project-agent-coordinator.js";
 import type { PromptRegistry } from "./prompts/prompt-registry.js";
 import type { SessionLifecycleCoordinator } from "./session-lifecycle-coordinator.js";
@@ -13,7 +13,6 @@ import type { SessionProvisioner } from "./session-provisioner.js";
 import type { SwarmBootCoordinator } from "./swarm-boot-coordinator.js";
 import type { SwarmChoiceService } from "./swarm-choice-service.js";
 import type { SwarmConfigurationCoordinator } from "./swarm-configuration-coordinator.js";
-import type { SwarmCortexService } from "./swarm-cortex-service.js";
 import type { SwarmEventCoordinator } from "./swarm-event-coordinator.js";
 import type { SwarmProjectAgentService } from "./swarm-project-agent-service.js";
 import type { SwarmRuntimeLifecycleCoordinator } from "./swarm-runtime-lifecycle-coordinator.js";
@@ -31,8 +30,7 @@ import type { SwarmAgentLifecycleService } from "./swarm-agent-lifecycle-service
 export interface SwarmManagerRuntimeBoundServices {
   conversation: ConversationProjector;
   configuration: SwarmConfigurationCoordinator;
-  knowledge: KnowledgeMemoryCoordinator;
-  cortex: SwarmCortexService;
+  memory: MemoryCoordinator;
   directory: AgentDirectory;
   eventCoordinator: SwarmEventCoordinator;
   sessionMeta: SwarmSessionMetaService;

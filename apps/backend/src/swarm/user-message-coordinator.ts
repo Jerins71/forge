@@ -16,7 +16,7 @@ import type { CodexMcpToolGateEvaluation } from "./codex-app-server/codex-mcp-to
 import type { ConversationAttachmentService } from "./conversation-attachment-service.js";
 import { resolveConversationReplyTarget } from "./conversation-reply.js";
 import { isExternalThreadDescriptor } from "./external-thread-compatibility.js";
-import type { KnowledgeMemoryCoordinator } from "./knowledge-memory-coordinator.js";
+import type { MemoryCoordinator } from "./memory-coordinator.js";
 import type { SessionGoalCoordinator } from "./goals/session-goal-coordinator.js";
 import type { ProjectAgentCoordinator } from "./project-agent-coordinator.js";
 import type { ProjectExecutableTrustCoordinator } from "./project-executable-trust-coordinator.js";
@@ -204,9 +204,9 @@ export interface UserMessageCoordinatorOptions {
       | "recordDispatchAccepted"
     >;
   };
-  knowledge: Pick<
-    KnowledgeMemoryCoordinator,
-    "compact" | "maybeRunCortexConsolidationFromIncomingMessage"
+  memory: Pick<
+    MemoryCoordinator,
+    "compact"
   >;
   projectAgents: Pick<ProjectAgentCoordinator, "preflightRuntime">;
   sessionReferences: SessionReferenceDependencies;
@@ -337,18 +337,6 @@ export class UserMessageCoordinator {
     }
 
     await this.options.projectAgents.preflightRuntime(target);
-    if (
-      target.role === "manager" &&
-      attachments.length === 0 &&
-      await this.options.knowledge.maybeRunCortexConsolidationFromIncomingMessage(
-        trimmed,
-        target,
-        sourceContext,
-      )
-    ) {
-      return;
-    }
-
     const compactCommand = target.role === "manager" && attachments.length === 0
       ? parseCompactSlashCommand(trimmed)
       : undefined;
@@ -359,7 +347,7 @@ export class UserMessageCoordinator {
         sourceContext,
         customInstructionsPreview: previewForLog(compactCommand.customInstructions ?? ""),
       });
-      await this.options.knowledge.compact(target.agentId, {
+      await this.options.memory.compact(target.agentId, {
         customInstructions: compactCommand.customInstructions,
         sourceContext,
         trigger: "slash_command",
@@ -560,7 +548,6 @@ export class UserMessageCoordinator {
     }
 
     const assistantOutputTarget = this.options.assistantOutput.resolveTargetForUserInput(
-      target,
       input.sourceContext,
     );
     const managerVisibleMessage = formatInboundUserMessageForManager(

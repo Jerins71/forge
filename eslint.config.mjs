@@ -151,7 +151,7 @@ export default tseslint.config(
       'max-lines': [
         'error',
         {
-          max: 1364,
+          max: 1311,
           skipBlankLines: false,
           skipComments: false,
         },
@@ -159,7 +159,7 @@ export default tseslint.config(
       'max-lines-per-function': [
         'error',
         {
-          max: 296,
+          max: 274,
           skipBlankLines: false,
           skipComments: false,
           IIFEs: true,
@@ -176,7 +176,7 @@ export default tseslint.config(
       'max-lines': [
         'error',
         {
-          max: 1391,
+          max: 1311,
           skipBlankLines: false,
           skipComments: false,
         },
@@ -191,7 +191,7 @@ export default tseslint.config(
       'max-lines': [
         'error',
         {
-          max: 1007,
+          max: 958,
           skipBlankLines: false,
           skipComments: false,
         },

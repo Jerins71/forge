@@ -14,7 +14,7 @@ describe('history recall tool', () => {
   it('does not expose local history to restricted runtimes or when the service is absent', () => {
     expect(buildHistoryRecallTools({}, descriptor())).toEqual([])
     for (const overrides of [
-      { sessionPurpose: 'capture_check' }, { sessionPurpose: 'cortex_review' },
+      { sessionPurpose: 'agent_creator' },
       { internalWorkerKind: 'codex_plugin' },
     ] as Partial<AgentDescriptor>[]) expect(buildHistoryRecallTools(host(), descriptor(overrides))).toEqual([])
   })

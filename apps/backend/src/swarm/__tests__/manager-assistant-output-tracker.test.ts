@@ -78,7 +78,7 @@ describe("ManagerAssistantOutputTracker", () => {
   it("does not project peer, external, explicit-tool, or missing target turns", () => {
     const targets: AssistantOutputTarget[] = [
       { kind: "peer_agent", fromAgentId: "agent-2" },
-      { kind: "explicit_tool_required", reason: "cortex_session" },
+      { kind: "explicit_tool_required", reason: "internal_session" },
       { kind: "external_channel", sourceContext: { channel: "telegram", channelId: "c1" } },
       { kind: "internal_only" },
     ];
@@ -556,7 +556,7 @@ describe("ManagerAssistantOutputTracker", () => {
 
   it("does not project assistant_progress for routed-required targets", () => {
     const { tracker, emitted } = createTracker();
-    tracker.activateTurn("manager-1", { kind: "explicit_tool_required", reason: "cortex_session" });
+    tracker.activateTurn("manager-1", { kind: "explicit_tool_required", reason: "internal_session" });
 
     tracker.handleRuntimeEvent("manager-1", assistantMessageEnd("I'll inspect the files now."));
     tracker.handleRuntimeEvent("manager-1", { type: "tool_execution_start", toolName: "read", toolCallId: "read-1", args: {} });

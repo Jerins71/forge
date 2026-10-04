@@ -9,7 +9,6 @@ import type {
 import type { SwarmManagerRuntimeBoundServices } from "./swarm-manager-runtime-boundary.js";
 import type { SwarmRuntimeLifecycleCoordinator } from "./swarm-runtime-lifecycle-coordinator.js";
 import type { TurnContextCoordinator } from "./turn-context-coordinator.js";
-import type { CaptureCascadeCoordinator } from "./capture-cascade-coordinator.js";
 
 export interface SwarmManagerCoordinationComposition {
   goals: SessionGoalCoordinator;
@@ -19,7 +18,6 @@ export interface SwarmManagerCoordinationComposition {
 export function createSwarmManagerCoordinationComposition(input: {
   options: SwarmManagerRuntimeCompositionOptions;
   plans: SessionPlanCoordinator;
-  captureCascade: CaptureCascadeCoordinator;
   restartRecovery: RestartRecoveryCoordinator;
   getServices(): SwarmManagerRuntimeBoundServices;
   getTurnContext(): TurnContextCoordinator;
@@ -58,9 +56,8 @@ export function createSwarmManagerCoordinationComposition(input: {
     syncPinnedContent: (descriptor) => foundation.sessionPins.syncPinnedContent(descriptor),
     sessionPlans: plans,
     sessionGoals: goals,
-    captureCascade: input.captureCascade,
     incrementCompactionCount: (profileId, agentId, failureLogMessage) =>
-      input.getServices().knowledge.incrementSessionCompactionCount(
+      input.getServices().memory.incrementSessionCompactionCount(
         profileId,
         agentId,
         failureLogMessage,

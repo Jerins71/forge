@@ -6,7 +6,7 @@
  * viewer presentation, source-control/file-browser refresh nonces, every
  * guarded panel-transition handler, and the derived `activityRailItems`.
  *
- * It also owns `handleSelectAgent` / `handleOpenCortexReview` because both route
+ * It also owns `handleSelectAgent` because it routes
  * an agent switch *through* the file-editor coordinator this hook creates —
  * keeping them here avoids a hook-ordering cycle with `useSessionActions`
  * (panels run before session actions; session actions and the sidebar receive
@@ -71,7 +71,6 @@ export interface UseWorkspacePanelsOptions {
   terminalPanel: TerminalPanel
   terminalCount: number
   browserTabCount: number
-  isCortexSession: boolean
   activeContextKey?: string
   clientRef: MutableRefObject<ManagerWsClient | null>
   messageInputRef: MutableRefObject<MessageInputHandle | null>
@@ -87,7 +86,6 @@ export function useWorkspacePanels({
   terminalPanel,
   terminalCount,
   browserTabCount,
-  isCortexSession,
   activeContextKey,
   clientRef,
   messageInputRef,
@@ -106,11 +104,6 @@ export function useWorkspacePanels({
     openArtifactsPanel: handleOpenArtifactsPanel,
     toggleArtifactsPanel: handleToggleArtifactsPanel,
     closeWorkspacePanels: handleCloseWorkspacePanels,
-    cortexDashboardTab,
-    cortexDashboardTabRequest,
-    requestCortexDashboardTab,
-    toggleCortexDashboardTab,
-    handleCortexDashboardTabChange,
     isMobileSidebarOpen,
     setIsMobileSidebarOpen,
     isDiffViewerOpen,
@@ -147,7 +140,6 @@ export function useWorkspacePanels({
     clearFileBrowserWorktreeContext: handleClearFileBrowserWorktreeContext,
   } = usePanelState({
     activeAgentId,
-    activeAgentArchetypeId: activeAgent?.archetypeId,
     activeContextKey,
     enableKeyboardShortcuts: false,
   })
@@ -223,14 +215,6 @@ export function useWorkspacePanels({
       clientRef.current?.subscribeToAgent(agentId)
     })
   }, [clientRef, fileEditorCoordinator, navigateToRoute])
-
-  const handleOpenCortexReview = useCallback((agentId: string) => {
-    fileEditorCoordinator.requestFileEditorTransition({ type: 'select-agent', nextAgentId: agentId }, () => {
-      navigateToRoute({ view: 'chat', agentId })
-      clientRef.current?.subscribeToAgent(agentId)
-      requestCortexDashboardTab('consolidation')
-    })
-  }, [clientRef, fileEditorCoordinator, navigateToRoute, requestCortexDashboardTab])
 
   const handleGuardedFileBrowserSelectFile = useCallback((path: string) => {
     handleFileBrowserSelectFile(path)
@@ -532,19 +516,6 @@ export function useWorkspacePanels({
     })
   }, [fileEditorCoordinator, handleOpenArtifactsPanel, handleToggleArtifactsPanel, isInlineDiffViewerOpen, setIsDiffViewerOpen])
 
-  const handleOpenCortexDashboardFromRail = useCallback((tab: 'index' | 'consolidation') => {
-    fileEditorCoordinator.requestFileEditorTransition({ type: 'open-workspace-panel', panel: 'cortex' }, () => {
-      if (isInlineDiffViewerOpen) {
-        setIsDiffViewerOpen(false)
-        setDiffViewerPresentation('modal')
-        requestCortexDashboardTab(tab)
-        return
-      }
-
-      toggleCortexDashboardTab(tab)
-    })
-  }, [fileEditorCoordinator, isInlineDiffViewerOpen, requestCortexDashboardTab, setIsDiffViewerOpen, toggleCortexDashboardTab])
-
   const handleCloseDiffViewer = useCallback(() => {
     setIsDiffViewerOpen(false)
   }, [setIsDiffViewerOpen])
@@ -619,14 +590,9 @@ export function useWorkspacePanels({
   }, [])
 
   const activityRailItems = useMemo(() => {
-    const artifactsLabel = isCortexSession ? 'Dashboard' : 'Artifacts'
     const workspaceDisabled = !isActivityRailWorkspaceAvailable(activeAgentId, activeManagerAgent)
-    const artifactsActive = isCortexSession
-      ? isArtifactsPanelOpen && cortexDashboardTab !== 'consolidation'
-      : isArtifactsPanelOpen && artifactsPanelTab === 'artifacts'
-    const schedulesActive = isCortexSession
-      ? isArtifactsPanelOpen && cortexDashboardTab === 'consolidation'
-      : isArtifactsPanelOpen && artifactsPanelTab === 'schedules'
+    const artifactsActive = isArtifactsPanelOpen && artifactsPanelTab === 'artifacts'
+    const schedulesActive = isArtifactsPanelOpen && artifactsPanelTab === 'schedules'
 
     const chatActive = !isInlineDiffViewerOpen && !isFileBrowserOpen && !isArtifactsPanelOpen && !isBrowserOpen
 
@@ -686,27 +652,15 @@ export function useWorkspacePanels({
         icon: Clock3,
         active: schedulesActive && !isInlineDiffViewerOpen,
         disabled: workspaceDisabled,
-        onClick: () => {
-          if (isCortexSession) {
-            handleOpenCortexDashboardFromRail('consolidation')
-          } else {
-            handleOpenArtifactsFromRail('schedules')
-          }
-        },
+        onClick: () => handleOpenArtifactsFromRail('schedules'),
       },
       {
         id: 'artifacts' as const,
-        label: artifactsLabel,
+        label: 'Artifacts',
         icon: Package,
         active: artifactsActive && !isInlineDiffViewerOpen,
         disabled: workspaceDisabled,
-        onClick: () => {
-          if (isCortexSession) {
-            handleOpenCortexDashboardFromRail('index')
-          } else {
-            handleOpenArtifactsFromRail('artifacts')
-          }
-        },
+        onClick: () => handleOpenArtifactsFromRail('artifacts'),
       },
     ]
   }, [
@@ -714,15 +668,12 @@ export function useWorkspacePanels({
     activeManagerAgent,
     artifactsPanelTab,
     browserTabCount,
-    cortexDashboardTab,
     handleOpenArtifactsFromRail,
-    handleOpenCortexDashboardFromRail,
     handleOpenDiffViewerInline,
     handleReturnToChatWorkspace,
     handleToggleBrowserFromRail,
     handleToggleFileBrowserFromRail,
     isArtifactsPanelOpen,
-    isCortexSession,
     isInlineDiffViewerOpen,
     isFileBrowserOpen,
     isBrowserOpen,
@@ -740,10 +691,6 @@ export function useWorkspacePanels({
     setIsArtifactsPanelOpen,
     artifactsPanelTab,
     setArtifactsPanelTab,
-    cortexDashboardTab,
-    cortexDashboardTabRequest,
-    requestCortexDashboardTab,
-    handleCortexDashboardTabChange,
     isMobileSidebarOpen,
     setIsMobileSidebarOpen,
     isDiffViewerOpen,
@@ -774,7 +721,6 @@ export function useWorkspacePanels({
     // handlers
     handleOpenArtifact,
     handleSelectAgent,
-    handleOpenCortexReview,
     handleFileEditorContentLoaded,
     handleGuardedFileBrowserSelectFile,
     handleFileBrowserOpenStickyFile,

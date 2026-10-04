@@ -20,13 +20,9 @@ const snapshot: RemoteUpdateAwarenessProjectSnapshot = {
 
 describe('getActiveLocalRemoteUpdateSnapshot', () => {
   it('keeps only the matching active local project projection', () => {
-    expect(getActiveLocalRemoteUpdateSnapshot(snapshot, 'project-a', false)).toBe(snapshot)
-    expect(getActiveLocalRemoteUpdateSnapshot(snapshot, 'project-b', false)).toBeNull()
-    expect(getActiveLocalRemoteUpdateSnapshot(snapshot, null, false)).toBeNull()
-  })
-
-  it('never exposes Cortex-session attention in chat', () => {
-    expect(getActiveLocalRemoteUpdateSnapshot(snapshot, 'project-a', true)).toBeNull()
+    expect(getActiveLocalRemoteUpdateSnapshot(snapshot, 'project-a')).toBe(snapshot)
+    expect(getActiveLocalRemoteUpdateSnapshot(snapshot, 'project-b')).toBeNull()
+    expect(getActiveLocalRemoteUpdateSnapshot(snapshot, null)).toBeNull()
   })
 
   it('requires the current projection to match the initiating project, generation, and version', () => {

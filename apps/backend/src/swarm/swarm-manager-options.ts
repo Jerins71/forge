@@ -4,8 +4,6 @@ import type { BrowserAutomationService } from "./browser-automation/browser-auto
 import type { CodexAppServerService } from "./codex-app-server/codex-app-server-service.js";
 import type { CodexAppServerServiceOptions } from "./codex-app-server/types.js";
 import type { CompactionRuntimeSettingsProvider } from "./compaction-runtime-settings-provider.js";
-import type { KnowledgeService } from "./knowledge-service.js";
-import type { KnowledgeV2SettingsService } from "./knowledge-v2-settings-service.js";
 import type {
   ExternalThreadStopInterruptCallback,
   ExternalThreadTerminateCleanupCallback,
@@ -23,7 +21,5 @@ export interface SwarmManagerOptions {
   /** Kill/delete cleanup-only seam. Distinct from stop interrupts; defaults to Codex cleanup. */
   terminateExternalThreadSidecarTurn?: ExternalThreadTerminateCleanupCallback;
   compactionRuntimeSettingsProvider?: CompactionRuntimeSettingsProvider;
-  knowledgeV2SettingsService?: KnowledgeV2SettingsService;
-  knowledgeService?: KnowledgeService;
   browserAutomationService?: BrowserAutomationService;
 }

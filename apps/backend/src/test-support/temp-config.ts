@@ -16,7 +16,6 @@ export interface TempConfigOptions {
   host?: string
   debug?: boolean
   isDesktop?: boolean
-  cortexEnabled?: boolean
   allowNonManagerSubscriptions?: boolean
   managerId?: string
   managerDisplayName?: string
@@ -132,7 +131,6 @@ export async function createTempConfig(options: TempConfigOptions = {}): Promise
     port: options.port ?? (await getAvailablePort(options.host ?? '127.0.0.1')),
     debug: options.debug ?? false,
     isDesktop: options.isDesktop ?? false,
-    cortexEnabled: options.cortexEnabled ?? true,
     allowNonManagerSubscriptions: options.allowNonManagerSubscriptions ?? false,
     managerId,
     managerDisplayName: options.managerDisplayName ?? 'Manager',

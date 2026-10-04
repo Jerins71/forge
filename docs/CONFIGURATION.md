@@ -13,7 +13,6 @@ Forge is configured through environment variables, a `.env` file, and the dashbo
 | `FORGE_DATA_DIR` | `~/.forge` (macOS/Linux) or `%LOCALAPPDATA%\forge` (Windows) | Data directory for all persistent state. |
 | `FORGE_DEBUG` | `false` | Enable debug logging. Also enables extension tool-call logging, which surfaces tool invocations from Pi extensions in the backend logs. |
 | `FORGE_TELEMETRY` | `true` | Enable or disable anonymous telemetry. It sends a random install identifier, coarse environment/provider/model metadata, and aggregate usage and feature-adoption counts; never prompts, messages, files, or secrets. |
-| `FORGE_CORTEX_ENABLED` | `true` | Enable or disable the entire Cortex subsystem. This is separate from the default-off Knowledge v2 mode switch. |
 | `FORGE_RUNTIME_TARGET` | `builder` | Only `builder` is supported. Any other value aborts startup; see [Removed collaboration settings](#removed-collaboration-settings). |
 | `FORGE_STREAM_DECK_SETUP_ENABLED` | `false` | Opt in to building, validating, staging, and bundling the optional Stream Deck plugin during Electron development and packaging. Explicit `streamdeck:*` commands remain available without this flag. |
 
@@ -149,7 +148,7 @@ Each checklist step receives a stable internal `id`. Managers preserve returned 
 
 Builder managers also expose `create_goal`, `get_goal`, and `update_goal` for explicit sustained-pursuit requests. A session may have one unfinished goal at a time, and that goal may span multiple working plans. Active goals continue from safe settled-idle boundaries, but wait while the session is stopped or archived, a choice or runtime recovery is pending, or workers are still running. Goals do not expand the manager's authority. The manager may complete a goal only after its objective and current plan are complete, and may mark it blocked only after the same blocker persists for at least three goal turns. Resuming a blocked goal starts a fresh three-turn blocking audit.
 
-The current goal is file-backed in `goal.json`; completed and cancelled records append to `goal-history.ndjson`. The header bar lets users edit, pause, resume, or cancel an unfinished goal. An optional user-requested token budget estimates manager plus worker usage, including parallel workers, and pauses pursuit at a safe idle boundary when exhausted. Stop, archive, restart, and compaction preserve the goal. Clearing a conversation cancels and archives an unfinished goal before clearing it. Forks omit current goal state and goal history. Goals are unavailable to Cortex sessions and have no settings toggle.
+The current goal is file-backed in `goal.json`; completed and cancelled records append to `goal-history.ndjson`. The header bar lets users edit, pause, resume, or cancel an unfinished goal. An optional user-requested token budget estimates manager plus worker usage, including parallel workers, and pauses pursuit at a safe idle boundary when exhausted. Stop, archive, restart, and compaction preserve the goal. Clearing a conversation cancels and archives an unfinished goal before clearing it. Forks omit current goal state and goal history. Goals have no settings toggle.
 
 ### Integrated terminals
 
@@ -214,13 +213,13 @@ Builder-only HTTP routes:
 | `GET` | `/api/agents/:agentId/context-mode` | — | session snapshot including `projectDefault`, optional `sessionOverride`, `effectiveMode`, `appliedMode`, `freshSupported`, and optional `unsupportedReason` |
 | `PUT` | `/api/agents/:agentId/context-mode` | `{ mode: "summary" \| "fresh" \| null }` | same snapshot; `null` restores inheritance |
 
-These routes are registered only on Builder. Context v2 is experimental and requires an ordinary Pi Builder manager using an existing compaction-eligible provider (OpenAI/Codex or Anthropic), with a recognized catalog model that supports tools and has at least 32,000 context tokens. Cortex/system, Cursor SDK, plugin/external threads, and workers cannot execute Context v2. Workers retain the owning manager's preference but apply Summary. The persisted/API value for Context v2 remains `fresh`. A session PUT of `fresh` on an unsupported runtime is rejected; a project can still save Context v2 as a preference.
+These routes are registered only on Builder. Context v2 is experimental and requires an ordinary Pi Builder manager using an existing compaction-eligible provider (OpenAI/Codex or Anthropic), with a recognized catalog model that supports tools and has at least 32,000 context tokens. System profiles, Cursor SDK, plugin/external threads, and workers cannot execute Context v2. Workers retain the owning manager's preference but apply Summary. The persisted/API value for Context v2 remains `fresh`. A session PUT of `fresh` on an unsupported runtime is rejected; a project can still save Context v2 as a preference.
 
 Compact and Smart compact use the policy frozen for that attempt. Summary keeps its handoff/resume path. Context v2 saves a continuation checkpoint with task-note and canonical-history entry points, without an AI summarizing pass. Busy manual Context v2 attempts are rejected until idle; an idle manager stays idle. Agent-requested transitions settle the tool batch before resetting the window. Pins and unresolved tool references are budgeted as complete pieces rather than silently cut from the end of the checkpoint.
 
 #### Task notes and continuation
 
-Task notes are factual working state for the owning session and actor. They are separate from session/profile `memory.md`, Cortex, and Knowledge v2. Maintaining them is part of carrying out the user's task; they do not automatically promote unfinished work or preferences into durable knowledge. Record the objective, relevant user corrections and constraints, completed work, open questions, evidence references, and next action. Never save credentials, secret tool output, or private reasoning traces.
+Task notes are factual working state for the owning session and actor. They are separate from session/profile `memory.md` and global `common.md`. Maintaining them is part of carrying out the user's task; they do not automatically promote unfinished work or preferences into durable knowledge. Record the objective, relevant user corrections and constraints, completed work, open questions, evidence references, and next action. Never save credentials, secret tool output, or private reasoning traces.
 
 The agent-facing `notes` tool provides:
 
@@ -291,43 +290,15 @@ Read results use source-qualified references, including `partId`, `chunkIndex`, 
 
 The existing dispatcher acknowledgement-before-durable-queue gap is unchanged.
 
-### Cortex and Knowledge v2
+### Memory
 
-`FORGE_CORTEX_ENABLED=false` disables the entire Cortex subsystem. It is not the Knowledge v2 mode switch.
+Memory is plain, user-editable Markdown on disk. Manager prompts receive these files when present; a missing file is skipped:
 
-Knowledge v2 is a default-off Builder preview controlled from **Settings → General** after migration. Its prompt sources differ deliberately:
-
-| Mode | Prompt-injected knowledge and memory |
-|------|--------------------------------------|
-| Knowledge v2 ON | Global `shared/knowledge/INDEX.md`, the active profile's `knowledge/INDEX.md`, and the current session's `memory.md` |
-| Knowledge v2 OFF | Legacy `shared/knowledge/common.md`, canonical profile `memory.md`, and current session `memory.md` |
-
-Profile `memory.md` continues to be maintained while v2 is ON. Legacy `common.md` is preserved during normal switching, but neither is prompt-injected in that mode. Normal mode switching preserves the underlying legacy and v2 files. Turning v2 OFF restores the legacy prompt sources only while the legacy originals remain.
-
-A normal false→true activation requires a strictly valid completed migration manifest and no active migration lock. Before migration, Settings shows migration-required guidance and first-launch v2 onboarding withholds the activation offer, so neither sends an enable request. A direct unsafe `PUT /api/settings/knowledge-v2` is rejected with HTTP 409 and `KNOWLEDGE_V2_MIGRATION_REQUIRED`. The toggle does not migrate data.
-
-Run the guarded migration explicitly from the repository root with a deliberate data directory:
-
-```bash
-node scripts/knowledge-v2-migrate.mjs --data-dir /path/to/forge-data
-```
-
-Migration and activation share the ownership-safe cross-process lock. A successful new migration atomically writes a completed v2 manifest with truthful `authorized_pending` authorization, releases the lock, and immediately persists v2 activation. Strictly valid manifests from the earlier v1 writer remain accepted. If activation persistence fails after the manifest commit, the valid manifest remains an authorized recovery point and v2 stays OFF; an ordinary enable attempt can then recover. After a later user disable, the same valid manifest permits ordinary re-enable.
-
-Legacy cleanup is a separate, explicit operation:
-
-```bash
-node scripts/knowledge-v2-migrate.mjs --data-dir /path/to/forge-data --cleanup-legacy --confirm
-```
-
-It archives legacy knowledge files and retired Cortex artifacts under `shared/knowledge/.archive/legacy-cleanup/<timestamp>/`, then removes the originals. After cleanup, switching v2 OFF cannot restore the prior legacy content by itself.
-
-Rollback uses the migration manifest's listed backups, disables v2, and reports that a restart is required:
-
-```bash
-node scripts/knowledge-v2-migrate.mjs --data-dir /path/to/forge-data --rollback
-node scripts/knowledge-v2-migrate.mjs --data-dir /path/to/forge-data --rollback --manifest /path/to/manifest.json
-```
+| File | Scope |
+|------|-------|
+| `shared/knowledge/common.md` | Global memory shared by every project. Maintained only by the user or by agents explicitly asked to update it. |
+| `profiles/<profileId>/memory.md` | Canonical profile memory, updated through the session memory-merge lifecycle. |
+| `profiles/<profileId>/sessions/<sessionId>/memory.md` | Session memory for durable facts and decisions the user asks the agent to remember. |
 
 ### Phoenix Observability
 
@@ -344,6 +315,17 @@ V1 only accepts loopback `http://` endpoints: `localhost`, `127.0.0.0/8`, or `::
 ### Removed collaboration settings
 
 Forge V2 removed the collaboration server, Collaboration channels, and Remote Projects. Startup aborts when `FORGE_RUNTIME_TARGET` (or `MIDDLEMAN_RUNTIME_TARGET`) is set to anything other than `builder`, when `FORGE_REMOTE_PROJECTS_ENABLED` is truthy, or when the runtime target is unset and `FORGE_COLLABORATION_ENABLED` (or `MIDDLEMAN_COLLABORATION_ENABLED`) is truthy. Unset them to start the Builder. Other former collaboration variables (`FORGE_COLLABORATION_*`, `FORGE_REMOTE_PROJECTS_*`, `FORGE_ADMIN_EMAIL`, `FORGE_ADMIN_PASSWORD`, `FORGE_PUBLIC_PORT`, `FORGE_WORKSPACES_HOST_PATH`) are ignored. Remote access is being redesigned for Forge V2.
+
+### Removed Cortex settings
+
+Forge V2 removed Cortex and Knowledge v2. `FORGE_CORTEX_ENABLED` is ignored. Existing Cortex data (knowledge entries, archives, and `INDEX.md` files under `shared/knowledge/` and `profiles/*/knowledge/`, Cortex review records, `profiles/cortex/`, `shared/config/cortex-auto-review.json`, and `shared/config/knowledge-v2.json`) is left on disk unread. To carry active V1 knowledge entries into plain memory, run the opt-in export against a deliberate data directory:
+
+```bash
+node scripts/forge-v2/export-knowledge-to-memory.mjs --data-dir /path/to/forge-data --dry-run
+node scripts/forge-v2/export-knowledge-to-memory.mjs --data-dir /path/to/forge-data
+```
+
+It appends an `## Imported knowledge (Forge V1)` section to `shared/knowledge/common.md` for global entries and to `profiles/<profileId>/memory.md` for profile entries, skipping superseded, archived, and rejected entries. It writes a timestamped backup of each target first, is idempotent on rerun, and never modifies `shared/knowledge/**` source entries.
 
 For compatibility, startup also accepts legacy `MIDDLEMAN_*` environment variables (for example, `MIDDLEMAN_HOST`, `MIDDLEMAN_PORT`, `MIDDLEMAN_DATA_DIR`, `MIDDLEMAN_DEBUG`, `VITE_MIDDLEMAN_WS_URL`).
 
@@ -439,8 +421,6 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 │   │   ├── secure-sessions.db             # Secure Session metadata and OS-encrypted material
 │   │   ├── builder-sidebar-order.json     # Unified project order
 │   │   ├── compaction-settings.json       # Manager compaction settings
-│   │   ├── cortex-auto-review.json        # Cortex consolidation cadence
-│   │   ├── knowledge-v2.json              # Knowledge v2 mode and index caps
 │   │   ├── mobile-notification-prefs.json # Mobile push preferences
 │   │   ├── model-cache-visualization.json # Model-cache visualization preference
 │   │   ├── notification-settings.json     # Notification sound preferences
@@ -464,25 +444,16 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 │   │   ├── mobile-devices.json
 │   │   ├── project-agent-shares.json
 │   │   └── .*-done                        # One-time migration/reconciliation sentinels
-│   ├── knowledge/                         # Legacy + global Knowledge v2 storage
-│   │   ├── common.md                      # Legacy global knowledge (v2 OFF only)
+│   ├── knowledge/
+│   │   ├── common.md                      # Global memory (user-editable)
 │   │   ├── onboarding-state.json
-│   │   ├── profiles/<profileId>.md        # Preserved legacy profile knowledge
-│   │   ├── entries/*.md                   # Global v2 entries
-│   │   ├── archive/                       # Archived global v2 entries
-│   │   ├── reference/                     # Knowledge reference inputs
-│   │   ├── .archive/                      # Migration/cleanup archives
-│   │   ├── .cortex-*.json*                # Cortex review/consolidation records
-│   │   ├── .knowledge-v2-migration-*      # Manifest and ownership lock
-│   │   └── INDEX.md                       # Generated global v2 index
+│   │   └── profiles/<profileId>.md        # Preserved legacy profile knowledge
 │   └── specialists/                       # Global specialist definitions
 ├── profiles/<profileId>/
-│   ├── memory.md                          # Canonical profile memory (v2 OFF injection)
+│   ├── memory.md                          # Canonical profile memory
 │   ├── merge-audit.log
 │   ├── unread-state.json
 │   ├── extensions/                        # Profile Forge extensions
-│   ├── knowledge/{entries,archive}/       # Profile Knowledge v2 entries/archive
-│   ├── knowledge/INDEX.md                 # Generated profile v2 index
 │   ├── pi/{extensions,skills,prompts,themes}/ # Profile Pi resources
 │   ├── project-agents/<handle>/           # Local-to-Forge definitions only
 │   │   ├── config.json

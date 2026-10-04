@@ -9,9 +9,9 @@ Forge passes its planned runtime tools as SDK `customTools` to Pi's `createAgent
 
 The Forge tool set is contextual rather than one universal reserved list:
 
-- Ordinary workers receive `send_message_to_agent` for meaningful interim feedback to their own manager and `knowledge`, plus `history` when available. Their final result is delivered automatically.
-- Managers can additionally receive `update_plan`, `spawn_agent`, `retry_codex_plugin_worker`, `kill_agent`, `speak_to_user`, `present_choices`, and `save_learning`.
-- Capabilities and session purpose can add `create_session` or `create_project_agent`, while Cortex and capture-check contexts filter the normal set.
+- Ordinary workers receive `send_message_to_agent` for meaningful interim feedback to their own manager, plus `history` when available. Their final result is delivered automatically.
+- Managers can additionally receive `update_plan`, `spawn_agent`, `retry_codex_plugin_worker`, `kill_agent`, `speak_to_user`, and `present_choices`.
+- Capabilities and session purpose can add `create_session` or `create_project_agent`, while side chats filter the normal set.
 - A scoped Codex Plugin worker receives delegation-specific exact plugin tool names and may receive `export_scoped_codex_plugin_result`.
 
 Treat every Forge or delegation tool name available in the target context as reserved. Do not rely on an extension implementation winning a collision, and re-check `buildSwarmTools()` plus `buildBaseRuntimeTools()` when Forge adds or filters tools. This precedence description is version-specific; audit the installed Pi source again when upgrading Pi.

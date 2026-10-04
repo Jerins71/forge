@@ -18,12 +18,6 @@ When you edit a prompt here, you're creating a profile override. If you delete t
 
 The editor shows the current prompt text with a source indicator showing where it came from.
 
-## Cortex surfaces
-
-If Cortex is enabled, a third category appears: **Cortex Surfaces**. These are grouped into system templates, seed templates, live files, and scratch surfaces. Cortex surfaces are managed separately because capture checks and entry consolidation can update Cortex-managed files while Knowledge v2 is on.
-
-When viewing the Cortex profile, the category picker is hidden and all items are shown in a single grouped dropdown.
-
 ## Preview
 
 Click **Preview** (eye icon) to inspect resolved prompt resources and their source labels, including the selected base prompt, memory, applicable inherited `AGENTS.md` or `CLAUDE.md`, and skills. This is a resource preview; provider formatting, live tool guidance, and transient turn context may differ from an actual request. The **Initial Model Input** viewer retains the provider-independent record from a session's first Pi request.

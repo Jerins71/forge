@@ -6,10 +6,7 @@ import type { PromptRegistry } from "./prompts/prompt-registry.js";
 import type { ConversationProjector } from "./session/conversation-projector.js";
 import type { SidebarPerfRecorder } from "../stats/sidebar-perf-types.js";
 import { createLiveCompactionRuntimeSettingsProvider, type CompactionRuntimeSettingsProvider } from "./compaction-runtime-settings-provider.js";
-import { KnowledgeV2SettingsService } from "./knowledge-v2-settings-service.js";
-import { KnowledgeService } from "./knowledge-service.js";
-import { CaptureCascadeCoordinator } from "./capture-cascade-coordinator.js";
-import { KnowledgeMemoryCoordinator } from "./knowledge-memory-coordinator.js";
+import { MemoryCoordinator } from "./memory-coordinator.js";
 import { RestartRecoveryCoordinator } from "./restart-recovery-coordinator.js";
 import { SwarmBootCoordinator } from "./swarm-boot-coordinator.js";
 import { SwarmObservabilityCoordinator } from "./swarm-observability-coordinator.js";
@@ -53,7 +50,6 @@ import { SkillFileService } from "./skill-file-service.js";
 import { SkillMetadataService, type SkillMetadata } from "./skills/skill-metadata-service.js";
 import { SwarmChoiceService } from "./swarm-choice-service.js";
 import { createLazySessionAttentionRuntimeHooks, SessionAttentionRuntime } from "./session/session-attention-runtime.js";
-import { SwarmCortexService } from "./swarm-cortex-service.js";
 import {
   type ProjectExecutableTrustPlan
 } from "./project-executable-trust.js";
@@ -109,11 +105,7 @@ import {
   type CodexDirectSidecarManager,
 } from "./codex-app-server/codex-direct-sidecar-coordinator.js";
 import type { SwarmManagerOptions } from "./swarm-manager-options.js";
-export {
-  analyzeLatestCortexCloseoutNeed,
-  buildSessionMemoryRuntimeView,
-  normalizeCortexUserVisiblePaths
-} from "./swarm-manager-utils.js";
+export { buildSessionMemoryRuntimeView } from "./swarm-manager-utils.js";
 export type { RestartRecoverySnapshot } from "@forge/protocol";
 export type { CodexTransportDebugAgentDiagnostics } from "./swarm-manager-facade.js";
 export type {
@@ -165,9 +157,8 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private readonly secureSecretSettingsService: SecureSecretSettingsService;
   private readonly secureSessionsService: SecureSessionsService;
   private readonly sessionMetaService: SwarmSessionMetaService;
-  private readonly cortexService: SwarmCortexService;
   private readonly memoryMergeService: SwarmMemoryMergeService;
-  private readonly knowledgeMemoryCoordinator: KnowledgeMemoryCoordinator;
+  private readonly memoryCoordinator: MemoryCoordinator;
   private readonly sessionProvisioner: SessionProvisioner;
   private readonly sessionDescriptorFactory: SessionDescriptorFactory;
   private readonly sessionPinCoordinator: SessionPinCoordinator;
@@ -196,10 +187,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private terminalArchiveHooks: TerminalArchiveHooks | undefined;
   private readonly versioningService: VersioningMutationSink | undefined;
   private readonly observabilityCoordinator: SwarmObservabilityCoordinator;
-  private readonly knowledgeV2SettingsService: KnowledgeV2SettingsService;
-  private readonly knowledgeService: KnowledgeService;
   private readonly historySearchService: HistorySearchService;
-  private readonly captureCascadeCoordinator: CaptureCascadeCoordinator;
   private readonly browserAutomationService: BrowserAutomationService;
   readonly invokeBrowserAutomation = createBrowserAutomationManagerInvoker({ getDescriptor: (id) => this.descriptors.get(id), getService: () => this.browserAutomationService });
   constructor(config: SwarmConfig, options?: SwarmManagerOptions) {
@@ -228,7 +216,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         setConversationMessagePinned: (agentId, messageId, pinned) =>
           this.conversationProjector.setConversationMessagePinned(agentId, messageId, pinned),
         captureRuntimePromptMeta: (descriptor, prompt) =>
-          this.knowledgeMemoryCoordinator.captureSessionRuntimePromptMeta(descriptor, prompt),
+          this.memoryCoordinator.captureSessionRuntimePromptMeta(descriptor, prompt),
         emitMessagePinned: (agentId, messageId, pinned, timestamp) =>
           this.eventCoordinator.emitMessagePinned(agentId, messageId, pinned, timestamp),
         emitAgentsSnapshot: () => this.eventCoordinator.emitAgentsSnapshot(),
@@ -238,13 +226,9 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       overrides: {
         observability: options?.observability,
         compactionRuntimeSettingsProvider: options?.compactionRuntimeSettingsProvider,
-        knowledgeV2SettingsService: options?.knowledgeV2SettingsService,
-        knowledgeService: options?.knowledgeService,
       },
     });
     this.config = foundation.config; this.defaultModelPreset = foundation.defaultModelPreset;
-    this.knowledgeV2SettingsService = foundation.knowledgeV2SettingsService;
-    this.knowledgeService = foundation.knowledgeService;
     this.historySearchService = foundation.historySearchService;
     this.promptRegistry = foundation.promptRegistry;
     this.forgeExtensionHost = foundation.forgeExtensionHost;
@@ -267,7 +251,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
     this.secureSessionsService = this.createSecureSessionsService(foundation.secureSessions);
     const { compactionRuntimeSettingsProvider, liveCompactionRuntimeSettingsProvider } = foundation;
     const runtimeComposition = this.createRuntimeComposition();
-    this.captureCascadeCoordinator = runtimeComposition.captureCascade;
     this.restartRecoveryCoordinator = runtimeComposition.restartRecovery;
     this.runtimeController = runtimeComposition.runtimeController;
     this.assistantOutputRouter = runtimeComposition.assistantOutput;
@@ -295,7 +278,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       descriptorStoreAdapter: {},
       persistence: {
         resolveMemoryOwnerAgentId: (descriptor) =>
-          this.knowledgeMemoryCoordinator.resolveMemoryOwnerAgentId(descriptor),
+          this.memoryCoordinator.resolveMemoryOwnerAgentId(descriptor),
       },
       conversation: {
         onEntryPersisted: (id) => this.historySearchService.markAgentDirty(id),
@@ -333,17 +316,8 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       },
       ensureSkillMetadataLoaded: () => this.skillMetadataService.ensureSkillMetadataLoaded(),
       getAdditionalSkillPaths: () => this.skillMetadataService.getAdditionalSkillPaths(),
-      getAgentMemoryPath: (agentId) => this.knowledgeMemoryCoordinator.getAgentMemoryPath(agentId),
+      getAgentMemoryPath: (agentId) => this.memoryCoordinator.getAgentMemoryPath(agentId),
       resolveSystemPromptForDescriptor: (descriptor) => this.resolveSystemPromptForDescriptor(descriptor)
-    });
-    this.cortexService = new SwarmCortexService({
-      config: this.config,
-      now: this.now,
-      descriptors: this.descriptors,
-      knowledgeService: this.knowledgeService,
-      knowledgeV2SettingsService: this.knowledgeV2SettingsService,
-      handleCaptureCascade: (descriptor, trigger) => this.captureCascadeCoordinator.run(descriptor.agentId, trigger),
-      logDebug: (message, details) => this.logDebug(message, details)
     });
     this.eventCoordinator = this.createEventCoordinator();
     this.inboundConversationAppender = this.createInboundConversationAppender();
@@ -356,7 +330,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       },
       getRequiredSessionDescriptor: (agentId) => this.agentDirectory.getRequiredSessionDescriptor(agentId),
       upsertDescriptor: (descriptor) => this.descriptorStoreAdapter.upsertDescriptor(descriptor),
-      getAgentMemoryPath: (agentId) => this.knowledgeMemoryCoordinator.getAgentMemoryPath(agentId),
+      getAgentMemoryPath: (agentId) => this.memoryCoordinator.getAgentMemoryPath(agentId),
       resolvePreferredManagerId: (options) => this.agentDirectory.resolvePreferredManagerId(options),
       resolvePromptWithFallback: (category, promptId, profileId, fallback) =>
         this.managerBootstrapCoordinator.resolvePromptWithFallback(category, promptId, profileId, fallback),
@@ -364,15 +338,15 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       ensureAgentMemoryFileInPersistence: (memoryFilePath, memoryTemplateContent) =>
         this.persistenceService.ensureAgentMemoryFile(memoryFilePath, memoryTemplateContent),
       readSessionMetaForDescriptor: (descriptor) =>
-        this.knowledgeMemoryCoordinator.readSessionMetaForDescriptor(descriptor),
+        this.memoryCoordinator.readSessionMetaForDescriptor(descriptor),
       writeSessionMemoryMergeAttemptMeta: (descriptor, attempt) =>
-        this.knowledgeMemoryCoordinator.writeSessionMemoryMergeAttemptMeta(descriptor, attempt),
+        this.memoryCoordinator.writeSessionMemoryMergeAttemptMeta(descriptor, attempt),
       recordSessionMemoryMergeAttempt: (descriptor, attempt) =>
-        this.knowledgeMemoryCoordinator.recordSessionMemoryMergeAttempt(descriptor, attempt),
+        this.memoryCoordinator.recordSessionMemoryMergeAttempt(descriptor, attempt),
       appendSessionMemoryMergeAuditEntry: (entry) =>
-        this.knowledgeMemoryCoordinator.appendSessionMemoryMergeAuditEntry(entry),
+        this.memoryCoordinator.appendSessionMemoryMergeAuditEntry(entry),
       refreshSessionMetaStatsBySessionId: (sessionAgentId) =>
-        this.knowledgeMemoryCoordinator.refreshSessionMetaStatsBySessionId(sessionAgentId),
+        this.memoryCoordinator.refreshSessionMetaStatsBySessionId(sessionAgentId),
       queueVersioningMutation: (mutation) => {
         this.queueVersioningMutation(mutation);
       },
@@ -383,7 +357,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         this.executeSessionMemoryLLMMerge(descriptor, profileMemoryContent, sessionMemoryContent),
       getPiModelsJsonPath: () => this.configurationCoordinator.getPiModelsJsonPathOrThrow()
     });
-    this.knowledgeMemoryCoordinator = this.createKnowledgeMemoryCoordinator(
+    this.memoryCoordinator = this.createMemoryCoordinator(
       compactionRuntimeSettingsProvider,
       liveCompactionRuntimeSettingsProvider,
     );
@@ -411,8 +385,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       {
         conversation: this.conversationProjector,
         configuration: this.configurationCoordinator,
-        knowledge: this.knowledgeMemoryCoordinator,
-        cortex: this.cortexService,
+        memory: this.memoryCoordinator,
         directory: this.agentDirectory,
         eventCoordinator: this.eventCoordinator,
         sessionMeta: this.sessionMetaService,
@@ -449,7 +422,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       pins: this.sessionPinCoordinator,
       projectAgents: this.projectAgentCoordinator,
       profileBookkeeping: this.profileSessionBookkeepingCoordinator,
-      knowledge: this.knowledgeMemoryCoordinator,
+      memory: this.memoryCoordinator,
       agents: this.lifecycleService,
       codexPlugin: this.codexPluginDelegationCoordinator,
       messages: this.agentMessageDispatcher,
@@ -700,13 +673,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         resolveDefaultModelDescriptor: () =>
           this.configurationCoordinator.resolveDefaultModelDescriptor(),
       },
-      capture: {
-        forkSession: (sourceAgentId, forkOptions) =>
-          this.forkSession(sourceAgentId, forkOptions),
-        deleteSession: async (agentId) => {
-          await this.deleteSession(agentId);
-        },
-      },
       sessions: {
         materializeSortOrder: () =>
           this.profileSessionBookkeepingCoordinator.materializeProfileSortOrder(),
@@ -859,20 +825,19 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       },
       prompt: {
         getAgentMemoryPath: (agentId) =>
-          this.knowledgeMemoryCoordinator.getAgentMemoryPath(agentId),
+          this.memoryCoordinator.getAgentMemoryPath(agentId),
         ensureAgentMemoryFile: (memoryFilePath, profileId) =>
-          this.knowledgeMemoryCoordinator.ensureAgentMemoryFile(memoryFilePath, profileId),
+          this.memoryCoordinator.ensureAgentMemoryFile(memoryFilePath, profileId),
         resolveMemoryOwnerAgentId: (descriptor) =>
-          this.knowledgeMemoryCoordinator.resolveMemoryOwnerAgentId(descriptor),
+          this.memoryCoordinator.resolveMemoryOwnerAgentId(descriptor),
         resolveSessionProfileId: (memoryOwnerAgentId) =>
-          this.knowledgeMemoryCoordinator.resolveSessionProfileId(memoryOwnerAgentId),
+          this.memoryCoordinator.resolveSessionProfileId(memoryOwnerAgentId),
         refreshSessionMetaStats: (descriptor) =>
-          this.knowledgeMemoryCoordinator.refreshSessionMetaStats(descriptor),
+          this.memoryCoordinator.refreshSessionMetaStats(descriptor),
         refreshSessionMetaStatsBySessionId: (sessionAgentId) =>
-          this.knowledgeMemoryCoordinator.refreshSessionMetaStatsBySessionId(sessionAgentId),
+          this.memoryCoordinator.refreshSessionMetaStatsBySessionId(sessionAgentId),
         getExternalProjectAgentDirectoryEntries: (profileId) =>
           this.projectAgentCoordinator.getExternalDirectory(profileId),
-        getKnowledgeV2Enabled: () => this.knowledgeV2SettingsService.getSettings().enabled,
       },
       applySpecialistAvailability: (roster, managerAgentId) =>
         this.codexPluginDelegationCoordinator.applySpecialistAvailability(roster, managerAgentId),
@@ -884,20 +849,15 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       logDebug: (message, details) => this.logDebug(message, details),
     });
   }
-  private createKnowledgeMemoryCoordinator(
+  private createMemoryCoordinator(
     runtimeProvider: CompactionRuntimeSettingsProvider,
     liveProvider: ReturnType<typeof createLiveCompactionRuntimeSettingsProvider>,
-  ): KnowledgeMemoryCoordinator {
-    return new KnowledgeMemoryCoordinator({
+  ): MemoryCoordinator {
+    return new MemoryCoordinator({
       config: this.config,
       descriptors: this.descriptors,
-      profiles: this.profiles,
       services: {
-        capture: this.captureCascadeCoordinator,
         compaction: this.compactionCoordinator,
-        cortex: this.cortexService,
-        knowledge: this.knowledgeService,
-        knowledgeSettings: this.knowledgeV2SettingsService,
         memory: this.memoryMergeService,
         sessionMeta: this.sessionMetaService,
       },
@@ -915,23 +875,11 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         assertMutable: (descriptor) => this.agentDirectory.assertDescriptorNotEffectivelyArchived(descriptor),
         resolvePreferredManagerId: (options) => this.agentDirectory.resolvePreferredManagerId(options),
       },
-      cortexBootstrap: {
-        sortedProfiles: () => this.agentDirectory.sortedProfiles(),
-        upsertDescriptor: (descriptor) =>
-          this.descriptorStoreAdapter.upsertDescriptorInLiveMaps(descriptor),
-        upsertProfile: (profile) => this.descriptorStoreAdapter.upsertProfileInLiveMaps(profile),
-        ensureProfileDirectories: (profileId) => this.persistenceService.ensureProfilePiDirectories(profileId),
-        ensureSessionFileParent: (sessionFile) =>
-          this.persistenceService.ensureSessionFileParentDirectory(sessionFile),
-        getAgentMemoryPath: (agentId) =>
-          this.knowledgeMemoryCoordinator.getAgentMemoryPath(agentId),
-        resolvePromptWithFallback: (category, promptId, profileId, fallback) =>
-          this.managerBootstrapCoordinator.resolvePromptWithFallback(category, promptId, profileId, fallback),
-      },
-      getPiModelsJsonPath: () => this.configurationCoordinator.getPiModelsJsonPathOrThrow(),
+      sortedProfiles: () => this.agentDirectory.sortedProfiles(),
+      resolvePromptWithFallback: (category, promptId, profileId, fallback) =>
+        this.managerBootstrapCoordinator.resolvePromptWithFallback(category, promptId, profileId, fallback),
       versioning: this.versioningService,
       now: this.now,
-      logDebug: (message, details) => this.logDebug(message, details),
     });
   }
   private createSessionComposition(runtimeComposition: ReturnType<typeof createSwarmManagerRuntimeComposition>): ReturnType<typeof createSwarmManagerSessionComposition> {
@@ -965,11 +913,11 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         ensureSessionFileParentDirectory: (sessionFile) =>
           this.persistenceService.ensureSessionFileParentDirectory(sessionFile),
         ensureAgentMemoryFile: (memoryFilePath, profileId) =>
-          this.knowledgeMemoryCoordinator.ensureAgentMemoryFile(memoryFilePath, profileId),
+          this.memoryCoordinator.ensureAgentMemoryFile(memoryFilePath, profileId),
         getAgentMemoryPath: (agentId) =>
-          this.knowledgeMemoryCoordinator.getAgentMemoryPath(agentId),
+          this.memoryCoordinator.getAgentMemoryPath(agentId),
         writeInitialSessionMeta: (descriptor) =>
-          this.knowledgeMemoryCoordinator.writeInitialSessionMeta(descriptor),
+          this.memoryCoordinator.writeInitialSessionMeta(descriptor),
         runRuntimeShutdown: (descriptor, action, options) =>
           this.runtimeLifecycleCoordinator.runRuntimeShutdown(descriptor, action, options),
         detachRuntime: (agentId, runtimeToken) =>
@@ -990,7 +938,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
           this.agentDirectory.assertSessionIsDeletable(descriptor),
         saveStore: () => this.descriptorStoreAdapter.saveStore(),
         writeInitialSessionMeta: (descriptor) =>
-          this.knowledgeMemoryCoordinator.writeInitialSessionMeta(descriptor),
+          this.memoryCoordinator.writeInitialSessionMeta(descriptor),
         notifyProjectAgentsChanged: (profileId) => this.notifyProjectAgentsChanged(profileId),
         emitSessionLifecycle: (event) => this.eventCoordinator.emitSessionLifecycle(event),
         emitAgentsSnapshot: () => this.eventCoordinator.emitAgentsSnapshot(),
@@ -1004,7 +952,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         clearPinsForConversationReset: (descriptor) =>
           this.sessionPinCoordinator.clearForConversationReset(descriptor),
         captureSessionRuntimePromptMeta: (descriptor, resolvedSystemPrompt) =>
-          this.knowledgeMemoryCoordinator.captureSessionRuntimePromptMeta(
+          this.memoryCoordinator.captureSessionRuntimePromptMeta(
             descriptor,
             resolvedSystemPrompt,
           ),
@@ -1017,7 +965,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         clearSessionGoal: async (descriptor) => { await runtimeComposition.goals.clear(descriptor); },
         copySecureAccessForFork: (sourceId, forkId) => this.secureSessionsService.copySecureSessionAccessForFork(sourceId, forkId),
         writeForkedSessionMemoryHeader: (sourceDescriptor, forkedAgentId, fromMessageId) =>
-          this.knowledgeMemoryCoordinator.writeForkedSessionMemoryHeader(
+          this.memoryCoordinator.writeForkedSessionMemoryHeader(
             sourceDescriptor,
             forkedAgentId,
             fromMessageId,
@@ -1035,7 +983,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         upsertDescriptorInLiveMaps: (descriptor) =>
           this.descriptorStoreAdapter.upsertDescriptorInLiveMaps(descriptor),
         captureSessionRuntimePromptMeta: (descriptor, resolvedSystemPrompt) =>
-          this.knowledgeMemoryCoordinator.captureSessionRuntimePromptMeta(
+          this.memoryCoordinator.captureSessionRuntimePromptMeta(
             descriptor,
             resolvedSystemPrompt,
           ),
@@ -1236,7 +1184,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         direct: this.codexDirectSidecarCoordinator,
         plugin: this.codexPluginDelegationCoordinator,
       },
-      knowledge: this.knowledgeMemoryCoordinator,
+      memory: this.memoryCoordinator,
       projectAgents: this.projectAgentCoordinator,
       sessionReferences: { descriptors: this.descriptors, profiles: this.profiles, saveStore: () => this.descriptorStoreAdapter.saveStore() },
       goals,

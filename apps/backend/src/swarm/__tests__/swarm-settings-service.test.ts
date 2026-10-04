@@ -37,7 +37,6 @@ function createConfig(rootDir: string): SwarmConfig {
     port: 47187,
     debug: false,
     isDesktop: false,
-    cortexEnabled: true,
     allowNonManagerSubscriptions: false,
     managerDisplayName: "Manager",
     defaultModel: resolveModelDescriptorFromPreset("pi-codex"),
@@ -136,7 +135,6 @@ function createService(options: {
     getAllManagerSessions: () => options.sessions,
     getSessionById: (agentId) => options.sessions.find((session) => session.agentId === agentId),
     resolveAndValidateCwd: async (cwd) => cwd,
-    assertCanChangeManagerCwd: () => {},
     applyManagerRuntimeRecyclePolicy: options.applyManagerRuntimeRecyclePolicy ?? vi.fn(async () => "none"),
     hasActiveSecureSession: options.hasActiveSecureSession ?? vi.fn(() => false),
     stopSecureSessionForLifecycle:

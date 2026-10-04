@@ -21,7 +21,6 @@ import type {
   ManagerProfile,
 } from '@forge/protocol'
 import { AgentSidebar } from './AgentSidebar'
-import { CortexRailItem } from './agent-sidebar/CortexRailItem'
 import { ActivityRail, type ActivityRailItem } from '@/components/index-page/ActivityRail'
 import type {
   AgentSidebarProps,
@@ -29,7 +28,6 @@ import type {
 } from './agent-sidebar/types'
 import {
   buildProfileTreeRows,
-  isCortexProfile,
   type ProfileTreeRow,
 } from '@/lib/agent-hierarchy'
 import { useSidebarLayout } from './agent-sidebar/hooks'
@@ -66,7 +64,7 @@ export interface AgentSidebarConnectedProps
   extends Omit<AgentSidebarProps, StoreProvidedProps> {
   /** Must be constructed against the local Builder target by BuilderSurface. */
   builderSidebarOrderApi?: BuilderSidebarOrderApi
-  /** Workspace rail is composed here so the Cortex navigator can share local Builder state. */
+  /** Workspace rail rendered beside the sidebar. */
   activityRailItems?: ActivityRailItem[]
 }
 
@@ -234,10 +232,6 @@ export const AgentSidebarConnected = memo(function AgentSidebarConnected({
     () => buildProfileTreeRows(agents, profiles),
     [agents, profiles],
   )
-  const cortexRow = useMemo(
-    () => localTreeRows.find((row) => isCortexProfile(row)) ?? null,
-    [localTreeRows],
-  )
   const discoveredOrder = useMemo<BuilderSidebarOrderRef[]>(() => (
     structuralLocalTreeRows
       .filter(isOrderableLocalRow)
@@ -364,23 +358,6 @@ export const AgentSidebarConnected = memo(function AgentSidebarConnected({
         <ActivityRail
           items={activityRailItems}
           roomsV2={roomsV2}
-          cortex={roomsV2 && cortexRow ? (
-            <CortexRailItem
-              cortexRow={cortexRow}
-              statuses={statuses}
-              unreadCounts={unreadCounts}
-              selectedAgentId={rest.selectedAgentId}
-              isSettingsActive={rest.isSettingsActive}
-              onSelect={rest.onSelectAgent}
-              onDeleteAgent={rest.onDeleteAgent}
-              onOpenSettings={rest.onOpenSettings}
-              onStopSession={rest.onStopSession}
-              onResumeSession={rest.onResumeSession}
-              onMarkUnread={rest.onMarkUnread}
-              onMarkAllRead={rest.onMarkAllRead}
-              onRequestSessionWorkers={rest.onRequestSessionWorkers}
-            />
-          ) : undefined}
         />
       ) : null}
     </>
@@ -388,5 +365,5 @@ export const AgentSidebarConnected = memo(function AgentSidebarConnected({
 })
 
 function isOrderableLocalRow(row: ProfileTreeRow): boolean {
-  return row.profile.profileType !== 'system' && !isCortexProfile(row)
+  return row.profile.profileType !== 'system'
 }

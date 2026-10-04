@@ -509,7 +509,7 @@ describe('buildSwarmTools', () => {
       makeWorkerDescriptor('worker-external', 'manager-two'),
     ])
     const tools = buildSwarmTools(host, workerCaller)
-    expect(tools.map((tool) => tool.name)).toEqual(['send_message_to_agent', 'knowledge'])
+    expect(tools.map((tool) => tool.name)).toEqual(['send_message_to_agent'])
     expect(tools.find((tool) => tool.name === 'send_message_to_agent')?.description)
       .toContain('Workers may message only their own manager')
     expect(tools.find((tool) => tool.name === 'send_message_to_agent')?.description)

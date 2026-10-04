@@ -92,7 +92,7 @@ export function SessionContextMenu({
     || (!running && Boolean(onResume))
   const hasGroup3 = Boolean(onChangeSessionModel)
     || (isModelOverridden && Boolean(onUseProjectDefault))
-    || (Boolean(onPromoteToProjectAgent) && !isProjectAgent && sessionAgent.sessionPurpose !== 'cortex_review' && sessionAgent.sessionPurpose !== 'agent_creator')
+    || (Boolean(onPromoteToProjectAgent) && !isProjectAgent && sessionAgent.sessionPurpose !== 'agent_creator')
   const hasProjectAgentGroup = isProjectAgent && (
     Boolean(onOpenProjectAgentSharing)
     || Boolean(onOpenProjectAgentSettings)
@@ -182,7 +182,7 @@ export function SessionContextMenu({
             Use Project Default
           </ContextMenuItem>
         ) : null}
-        {onPromoteToProjectAgent && !isProjectAgent && sessionAgent.sessionPurpose !== 'cortex_review' && sessionAgent.sessionPurpose !== 'agent_creator' ? (
+        {onPromoteToProjectAgent && !isProjectAgent && sessionAgent.sessionPurpose !== 'agent_creator' ? (
           <ContextMenuItem onClick={() => onPromoteToProjectAgent()}>
             <ArrowUpFromLine className="mr-2 size-3.5" />
             Promote to Project Agent

@@ -133,22 +133,6 @@ export function filterBuilderVisibleAgents(agents: AgentDescriptor[]): AgentDesc
   return agents.filter((agent) => !isSideChatAgent(agent))
 }
 
-export function isCortexDiffViewerSession(agent: AgentDescriptor | null | undefined): boolean {
-  return Boolean(
-    agent &&
-      (agent.profileId === 'cortex' ||
-        agent.archetypeId === 'cortex' ||
-        agent.sessionPurpose === 'cortex_review'),
-  )
-}
-
-export function isCortexProfile(row: ProfileTreeRow): boolean {
-  // Check if the default session (or any session) has archetypeId === 'cortex'
-  const defaultSession = row.sessions.find((s) => s.isDefault)
-  const representativeSession = defaultSession ?? row.sessions[0]
-  return representativeSession?.sessionAgent.archetypeId === 'cortex'
-}
-
 export function getPrimaryManagerId(agents: AgentDescriptor[]): string | null {
   const managers = filterBuilderVisibleAgents(agents).filter(
     (agent) => agent.role === 'manager' && isActiveAgent(agent),

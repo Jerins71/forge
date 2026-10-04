@@ -90,23 +90,13 @@ function makeProfile(
 }
 
 describe('shouldLoadExternalProjectAgentDirectory', () => {
-  it('skips Cortex even before profiles finish loading', () => {
-    expect(
-      shouldLoadExternalProjectAgentDirectory({
-        activeAgentRole: 'manager',
-        activeProfileId: 'cortex',
-        activeProfileType: null,
-      }),
-    ).toBe(false)
-  })
-
   it('skips system-managed profiles from the profile snapshot', () => {
-    const profiles = [makeProfile('cortex', { profileType: 'system' })]
+    const profiles = [makeProfile('system-profile', { profileType: 'system' })]
 
     expect(
       shouldLoadExternalProjectAgentDirectory({
         activeAgentRole: 'manager',
-        activeProfileId: 'cortex',
+        activeProfileId: 'system-profile',
         activeProfileType: profiles[0].profileType ?? null,
       }),
     ).toBe(false)

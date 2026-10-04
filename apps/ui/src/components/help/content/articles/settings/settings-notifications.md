@@ -4,7 +4,7 @@ Forge can play sounds for unread manager messages, questions that need a choice,
 
 The main toggle enables or disables every notification sound. When it is off, no notification sound plays regardless of a manager's individual settings.
 
-The **Defaults** section applies to all managers except Cortex. It includes unread-message, question, and all-done sounds plus volume. Changing a default immediately affects every manager that has not been customized.
+The **Defaults** section applies to all managers. It includes unread-message, question, and all-done sounds plus volume. Changing a default immediately affects every manager that has not been customized.
 
 ## Per-manager overrides
 
@@ -16,9 +16,7 @@ Each manager has three sound triggers:
 - **Question** plays for a structured choice request. It takes priority over the unread sound; if disabled, the regular unread sound is used instead.
 - **All done** is a completion signal, not a sound for every lifecycle change. When a manager's unread notification arrives while work is still streaming, Forge can play unread then recheck at idle. It plays all done only after the manager is idle and no workers are still streaming. A choice request never starts an all-done signal.
 
-## Cortex and custom sounds
-
-Cortex always has standalone settings and never inherits the defaults, so scheduled or direct Cortex activity can be configured separately.
+## Custom sounds
 
 You can upload MP3, WAV, or OGG sounds up to 2 MB. Preview a sound before choosing it. Removing a custom sound makes any setting that used it fall back to the built-in default.
 

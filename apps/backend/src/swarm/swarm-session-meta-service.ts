@@ -435,8 +435,6 @@ export class SwarmSessionMetaService {
       promptComponents: null,
       feedbackFileSize: null,
       lastFeedbackAt: null,
-      cortexReviewedFeedbackBytes: 0,
-      cortexReviewedFeedbackAt: null,
       memoryMergeAttemptCount: 0,
       lastMemoryMergeAttemptId: null,
       lastMemoryMergeAttemptAt: null,

@@ -31,7 +31,6 @@ export interface BootPreparationPort {
 export interface BootDomainPort {
   normalizeCodexPluginWorkers(): boolean;
   reconcileWorkerSpecialistMetadata(): Promise<void>;
-  ensureCortexProfile(): Promise<void>;
   loadOnboardingState(): Promise<void>;
   ensureLegacyProfileKnowledgeReferenceDocs(): Promise<void>;
   reconcileProjectAgentMirror(): Promise<unknown>;
@@ -124,7 +123,6 @@ export class SwarmBootCoordinator {
 
     await this.options.storeReconciler.loadAndReconcilePersistedStore();
     if (domains.normalizeCodexPluginWorkers()) await store.save();
-    await domains.ensureCortexProfile();
     await domains.loadOnboardingState();
     await domains.ensureLegacyProfileKnowledgeReferenceDocs();
 

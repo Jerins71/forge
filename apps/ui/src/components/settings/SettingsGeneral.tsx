@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useHelpContext } from '@/components/help/help-hooks'
-import { HelpTooltip } from '@/components/help/HelpTooltip'
 import { Check, Code, RotateCcw, Terminal } from 'lucide-react'
-import { OnboardingCallout } from '@/components/chat/cortex/OnboardingCallout'
+import { OnboardingCallout } from '@/components/chat/OnboardingCallout'
 import { useOnboardingState } from '@/hooks/use-onboarding-state'
 import { useConversationThroughputDisplayPreference } from '@/hooks/use-conversation-throughput-display-preference'
 import {
@@ -34,15 +33,6 @@ import {
   type EditorPreference,
 } from '@/lib/editor-preference'
 import {
-  fetchCortexAutoReviewSettings,
-  updateCortexAutoReviewSettings,
-} from '@/components/settings/cortex-auto-review-api'
-import {
-  fetchKnowledgeV2Settings,
-  updateKnowledgeV2Settings,
-} from '@/components/settings/knowledge-v2-api'
-import { CORTEX_V2_COPY } from '@/components/settings/cortex-v2-copy'
-import {
   fetchModelCacheVisualizationEnabled,
   setModelCacheVisualizationEnabledApi,
 } from '@/components/settings/model-cache-visualization-api'
@@ -62,8 +52,6 @@ import {
   getCatalogModel,
   isCompactionModelSelectionSupported,
   type CompactionSettings,
-  type CortexAutoReviewSettings,
-  type KnowledgeV2Settings,
   type GetCompactionSettingsResponse,
   type ManagerReasoningLevel,
   type ModelPresetInfo,
@@ -201,19 +189,6 @@ export function SettingsGeneral({
   const [editorPreference, setEditorPreference] = useState<EditorPreference>(() =>
     readStoredEditorPreference(),
   )
-  const [cortexSettings, setCortexSettings] = useState<CortexAutoReviewSettings | null>(null)
-  const [cortexError, setCortexError] = useState<string | null>(null)
-  const [cortexUpdating, setCortexUpdating] = useState(false)
-  const [cortexLoadFailed, setCortexLoadFailed] = useState(false)
-  const [cortexDisabled, setCortexDisabled] = useState(false)
-
-  // Knowledge v2 ("New Cortex") — Builder-only; hidden when the endpoint 404s.
-  const [knowledgeV2Settings, setKnowledgeV2Settings] = useState<KnowledgeV2Settings | null>(null)
-  const [knowledgeV2Available, setKnowledgeV2Available] = useState(false)
-  const [knowledgeV2CanEnable, setKnowledgeV2CanEnable] = useState(false)
-  const [knowledgeV2Error, setKnowledgeV2Error] = useState<string | null>(null)
-  const [knowledgeV2Updating, setKnowledgeV2Updating] = useState(false)
-
   const [modelCacheVisualizationEnabled, setModelCacheVisualizationEnabled] = useState(false)
   const [modelCacheVisualizationLoading, setModelCacheVisualizationLoading] = useState(true)
   const [modelCacheVisualizationUpdating, setModelCacheVisualizationUpdating] = useState(false)
@@ -510,58 +485,6 @@ export function SettingsGeneral({
       })
   }, [compactionDraft, compactionSource])
 
-  // Use apiClient or wsUrl for Cortex auto-review settings
-  const cortexSource = apiClient ?? wsUrl
-
-  // Fetch Cortex auto-review settings on mount
-  useEffect(() => {
-    setCortexLoadFailed(false)
-    setCortexDisabled(false)
-    void fetchCortexAutoReviewSettings(cortexSource)
-      .then((response) => {
-        setCortexSettings(response.settings)
-        setCortexDisabled(response.cortexDisabled === true)
-        setCortexLoadFailed(false)
-      })
-      .catch((err) => {
-        setCortexLoadFailed(true)
-        setCortexError(err instanceof Error ? err.message : 'Could not load Cortex settings')
-      })
-  }, [cortexSource])
-
-  // Fetch Knowledge v2 ("New Cortex") settings on mount. Reuses cortexSource.
-  useEffect(() => {
-    let cancelled = false
-    setKnowledgeV2Available(false)
-    setKnowledgeV2Settings(null)
-    setKnowledgeV2CanEnable(false)
-    setKnowledgeV2Error(null)
-    void fetchKnowledgeV2Settings(cortexSource)
-      .then((result) => {
-        if (cancelled) return
-        if (!result.available) {
-          setKnowledgeV2Available(false)
-          setKnowledgeV2Settings(null)
-          return
-        }
-        setKnowledgeV2Available(true)
-        setKnowledgeV2Settings(result.response.settings)
-        setKnowledgeV2CanEnable(result.response.activation.canEnable)
-      })
-      .catch((err) => {
-        if (cancelled) return
-        // Endpoint failures remain visible as a disabled/error row; only a
-        // confirmed 404 hides this Builder-only setting.
-        setKnowledgeV2Available(true)
-        setKnowledgeV2Settings(null)
-        setKnowledgeV2CanEnable(false)
-        setKnowledgeV2Error(err instanceof Error ? err.message : CORTEX_V2_COPY.settings.loadError)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [cortexSource])
-
   const modelCacheVisualizationSource = apiClient ?? wsUrl
 
   useEffect(() => {
@@ -673,47 +596,6 @@ export function SettingsGeneral({
         })
     },
     [modelCacheVisualizationSource, modelCacheVisualizationUpdating],
-  )
-
-  const handleCortexToggle = useCallback(
-    (enabled: boolean) => {
-      if (cortexUpdating) return
-      setCortexUpdating(true)
-      setCortexError(null)
-
-      void updateCortexAutoReviewSettings(cortexSource, { enabled })
-        .then((settings) => {
-          setCortexSettings(settings)
-        })
-        .catch((err) => {
-          setCortexError(err instanceof Error ? err.message : 'Failed to update setting')
-        })
-        .finally(() => {
-          setCortexUpdating(false)
-        })
-    },
-    [cortexSource, cortexUpdating],
-  )
-
-  const handleKnowledgeV2Toggle = useCallback(
-    (enabled: boolean) => {
-      if (knowledgeV2Updating || (enabled && !knowledgeV2CanEnable)) return
-      setKnowledgeV2Updating(true)
-      setKnowledgeV2Error(null)
-
-      void updateKnowledgeV2Settings(cortexSource, { enabled })
-        .then((response) => {
-          setKnowledgeV2Settings(response.settings)
-          setKnowledgeV2CanEnable(response.activation.canEnable)
-        })
-        .catch((err) => {
-          setKnowledgeV2Error(err instanceof Error ? err.message : CORTEX_V2_COPY.settings.updateError)
-        })
-        .finally(() => {
-          setKnowledgeV2Updating(false)
-        })
-    },
-    [cortexSource, knowledgeV2CanEnable, knowledgeV2Updating],
   )
 
   const handleEditorPreferenceChange = useCallback((nextPreference: EditorPreference) => {
@@ -1080,95 +962,6 @@ export function SettingsGeneral({
                 {sleepBlockerStatus.reason}
               </span>
             </div>
-          )}
-        </SettingsSection>
-      )}
-
-      {!cortexDisabled && (
-        <SettingsSection
-          label="Cortex"
-          description={CORTEX_V2_COPY.consolidation.sectionDescription}
-        >
-          <SettingsWithCTA
-            label={CORTEX_V2_COPY.consolidation.toggleLabel}
-            description={CORTEX_V2_COPY.consolidation.toggleDescription}
-          >
-            <div className="flex flex-col items-end gap-1.5">
-              <HelpTooltip id="settings.cortex-auto-review" side="left">
-                <Switch
-                  checked={cortexSettings?.enabled ?? false}
-                  onCheckedChange={handleCortexToggle}
-                  disabled={!cortexSettings || cortexUpdating}
-                />
-              </HelpTooltip>
-              {cortexError ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-destructive">{cortexError}</span>
-                  {cortexLoadFailed ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCortexError(null)
-                        setCortexLoadFailed(false)
-                        void fetchCortexAutoReviewSettings(cortexSource)
-                          .then((response) => {
-                            setCortexSettings(response.settings)
-                            setCortexDisabled(response.cortexDisabled === true)
-                            setCortexLoadFailed(false)
-                          })
-                          .catch((err) => {
-                            setCortexLoadFailed(true)
-                            setCortexError(err instanceof Error ? err.message : 'Could not load Cortex settings')
-                          })
-                      }}
-                      className="text-[10px] text-primary underline hover:no-underline"
-                    >
-                      Retry
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </SettingsWithCTA>
-
-          <SettingsWithCTA
-            label={CORTEX_V2_COPY.consolidation.cadenceLabel}
-            description={CORTEX_V2_COPY.consolidation.cadenceDescription}
-          >
-            <span
-              className={`text-sm text-muted-foreground ${!cortexSettings?.enabled ? 'opacity-50' : ''}`}
-              data-testid="cortex-consolidation-cadence"
-            >
-              {CORTEX_V2_COPY.consolidation.cadenceValue}
-            </span>
-          </SettingsWithCTA>
-
-          {knowledgeV2Available && (
-            <SettingsWithCTA
-              label={CORTEX_V2_COPY.settings.label}
-              description={`${CORTEX_V2_COPY.settings.description} ${CORTEX_V2_COPY.settings.revertNote}`}
-            >
-              <div className="flex flex-col items-end gap-1.5">
-                <Switch
-                  id="knowledge-v2-enabled-toggle"
-                  checked={knowledgeV2Settings?.enabled ?? false}
-                  onCheckedChange={handleKnowledgeV2Toggle}
-                  disabled={
-                    !knowledgeV2Settings
-                    || knowledgeV2Updating
-                    || (!knowledgeV2Settings.enabled && !knowledgeV2CanEnable)
-                  }
-                />
-                {knowledgeV2Settings && !knowledgeV2Settings.enabled && !knowledgeV2CanEnable ? (
-                  <span className="max-w-72 text-right text-[10px] text-amber-700 dark:text-amber-300">
-                    {CORTEX_V2_COPY.settings.migrationRequired}
-                  </span>
-                ) : null}
-                {knowledgeV2Error ? (
-                  <span className="text-[10px] text-destructive">{knowledgeV2Error}</span>
-                ) : null}
-              </div>
-            </SettingsWithCTA>
           )}
         </SettingsSection>
       )}

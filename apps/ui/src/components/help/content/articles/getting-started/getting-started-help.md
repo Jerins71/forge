@@ -24,4 +24,4 @@ Help triggers appear throughout the app — small **?** icons next to settings, 
 
 ## If you get stuck
 
-The help system covers every major surface in Forge: chat, settings, Cortex, terminals, models, and core concepts like memory, prompts, and specialists. Start with search if you're not sure where to look.
+The help system covers every major surface in Forge: chat, settings, terminals, models, and core concepts like memory, prompts, and specialists. Start with search if you're not sure where to look.

@@ -1,17 +1,10 @@
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { OnboardingPreferences, OnboardingState, OnboardingStatus, OnboardingTechnicalLevel } from "@forge/protocol";
 import { ONBOARDING_STATUSES, ONBOARDING_TECHNICAL_LEVEL_VALUES } from "@forge/protocol";
-import { readJsonFileIfExists, writeFileAtomic, writeJsonFileAtomic } from "../utils/atomic-files.js";
-import { isEnoentError } from "../utils/fs-errors.js";
-import { getCommonKnowledgePath, getSharedKnowledgeDir } from "./data-paths.js";
-import { assertKnowledgeMigrationNotBusy } from "./knowledge-v2-migration-lock.js";
-import type { KnowledgeService } from "./knowledge-service.js";
-import type { KnowledgeV2SettingsService } from "./knowledge-v2-settings-service.js";
+import { readJsonFileIfExists, writeJsonFileAtomic } from "../utils/atomic-files.js";
+import { getSharedKnowledgeDir } from "./data-paths.js";
 
 export const ONBOARDING_STATE_FILE_NAME = "onboarding-state.json";
-const ONBOARDING_COMMON_BLOCK_START = "<!-- BEGIN MANAGED:ONBOARDING -->";
-const ONBOARDING_COMMON_BLOCK_END = "<!-- END MANAGED:ONBOARDING -->";
 
 export interface SaveOnboardingPreferencesInput {
   preferredName: string;
@@ -74,78 +67,6 @@ export async function skipOnboarding(dataDir: string): Promise<OnboardingState> 
 
   await writeJsonFileAtomic(getOnboardingStatePath(dataDir), state);
   return state;
-}
-
-export async function renderOnboardingCommonKnowledge(
-  dataDir: string,
-  snapshot: OnboardingState,
-  options?: {
-    knowledgeService?: KnowledgeService;
-    settingsService?: Pick<KnowledgeV2SettingsService, "getSettings">;
-  },
-): Promise<{ path: string; content: string }> {
-  if (options?.settingsService?.getSettings().enabled === true && options.knowledgeService) {
-    return renderOnboardingKnowledgeEntries(dataDir, snapshot, options.knowledgeService);
-  }
-
-  await assertKnowledgeMigrationNotBusy(dataDir);
-  const commonKnowledgePath = getCommonKnowledgePath(dataDir);
-  const managedBlock = buildManagedOnboardingBlock(snapshot);
-  const renderedAt = nowIso();
-
-  let existing = "";
-  try {
-    existing = await readFile(commonKnowledgePath, "utf8");
-  } catch (error) {
-    if (!isEnoentError(error)) {
-      throw error;
-    }
-  }
-
-  const nextContent = ensureTrailingNewline(
-    upsertCommonKnowledgeHeader(upsertManagedOnboardingBlock(existing, managedBlock), renderedAt)
-  );
-  await writeFileAtomic(commonKnowledgePath, nextContent);
-
-  return {
-    path: commonKnowledgePath,
-    content: nextContent
-  };
-}
-
-async function renderOnboardingKnowledgeEntries(
-  dataDir: string,
-  snapshot: OnboardingState,
-  knowledgeService: KnowledgeService,
-): Promise<{ path: string; content: string }> {
-  const entries = buildManagedOnboardingLines(snapshot)
-    .filter((line) => !line.startsWith("- Onboarding status:"))
-    .map((line) => line.replace(/^-\s*/u, ""));
-
-  for (const line of entries) {
-    const [label, ...rest] = line.split(":");
-    const value = rest.join(":").trim();
-    if (!value) continue;
-    const normalizedLabel = label.trim();
-    await knowledgeService.upsertEntry({
-      id: `preference-onboarding-${normalizedLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-      type: "preference",
-      scope: "global",
-      title: `Onboarding ${normalizedLabel.toLowerCase()}`,
-      body: `${normalizedLabel}: ${truncateKnowledgeBody(value)}`,
-      evidenceTier: "explicit_user",
-      sources: [{
-        kind: "user-stated",
-        at: snapshot.completedAt ?? snapshot.skippedAt ?? new Date().toISOString(),
-      }],
-    });
-  }
-
-  const indexPath = join(getSharedKnowledgeDir(dataDir), "INDEX.md");
-  return {
-    path: indexPath,
-    content: entries.join("\n"),
-  };
 }
 
 function getOnboardingStatePath(dataDir: string): string {
@@ -337,94 +258,8 @@ function mapLegacyTechnicalLevel(value: string | null): OnboardingTechnicalLevel
   }
 }
 
-function buildManagedOnboardingBlock(snapshot: OnboardingState): string {
-  const lines = ["## User Snapshot", ONBOARDING_COMMON_BLOCK_START, ...buildManagedOnboardingLines(snapshot), ONBOARDING_COMMON_BLOCK_END];
-  return `${lines.join("\n")}\n`;
-}
-
-function buildManagedOnboardingLines(snapshot: OnboardingState): string[] {
-  const lines = [`- Onboarding status: ${humanizeValue(snapshot.status)}`];
-  const preferences = snapshot.preferences;
-
-  if (preferences?.preferredName) {
-    lines.push(`- Preferred name: ${preferences.preferredName}`);
-  }
-
-  if (preferences?.technicalLevel) {
-    lines.push(`- Technical level: ${humanizeTechnicalLevel(preferences.technicalLevel)}`);
-  }
-
-  if (preferences?.additionalPreferences) {
-    lines.push(`- Additional preferences: ${preferences.additionalPreferences}`);
-  }
-
-  return lines;
-}
-
-function humanizeTechnicalLevel(value: OnboardingTechnicalLevel): string {
-  switch (value) {
-    case "developer":
-      return "Developer";
-    case "technical_non_developer":
-      return "Technical (non-developer)";
-    case "semi_technical":
-      return "Semi-technical";
-    case "non_technical":
-      return "Non-technical";
-  }
-}
-
 function humanizeValue(value: string): string {
   return value.replace(/_/g, " ");
-}
-
-function upsertManagedOnboardingBlock(existing: string, block: string): string {
-  const normalizedExisting = existing.replace(/\r\n/g, "\n");
-  const startIndex = normalizedExisting.indexOf(ONBOARDING_COMMON_BLOCK_START);
-  const endIndex = normalizedExisting.indexOf(ONBOARDING_COMMON_BLOCK_END);
-
-  if (startIndex >= 0 && endIndex >= 0 && endIndex > startIndex) {
-    const blockStart = normalizedExisting.lastIndexOf("## User Snapshot", startIndex);
-    const replaceStart = blockStart >= 0 ? blockStart : startIndex;
-    const replaceEnd = endIndex + ONBOARDING_COMMON_BLOCK_END.length;
-    return `${normalizedExisting.slice(0, replaceStart).replace(/\n*$/, "\n\n")}${block}${normalizedExisting.slice(replaceEnd).replace(/^\n*/, "\n")}`.trimEnd();
-  }
-
-  if (!normalizedExisting.trim()) {
-    return `# Common Knowledge\n\n${block}`.trimEnd();
-  }
-
-  const interactionDefaultsIndex = normalizedExisting.indexOf("\n## Interaction Defaults");
-  if (interactionDefaultsIndex >= 0) {
-    return `${normalizedExisting.slice(0, interactionDefaultsIndex).replace(/\n*$/, "\n\n")}${block}${normalizedExisting.slice(interactionDefaultsIndex).replace(/^\n*/, "\n")}`.trimEnd();
-  }
-
-  return `${normalizedExisting.trimEnd()}\n\n${block}`.trimEnd();
-}
-
-function upsertCommonKnowledgeHeader(content: string, renderedAt: string): string {
-  const normalizedContent = content.replace(/\r\n/g, "\n").trimEnd();
-  const headerLine = `<!-- Maintained by Cortex. Last updated: ${renderedAt} -->`;
-  const headerPattern = /^# Common Knowledge(?:\n<!-- Maintained by Cortex\.(?: Last updated: .*?)? -->)?/;
-
-  if (!normalizedContent) {
-    return `# Common Knowledge\n${headerLine}`;
-  }
-
-  if (headerPattern.test(normalizedContent)) {
-    return normalizedContent.replace(headerPattern, `# Common Knowledge\n${headerLine}`);
-  }
-
-  return `# Common Knowledge\n${headerLine}\n\n${normalizedContent}`;
-}
-
-function ensureTrailingNewline(content: string): string {
-  return content.endsWith("\n") ? content : `${content}\n`;
-}
-
-function truncateKnowledgeBody(value: string): string {
-  const words = value.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
-  return words.length > 110 ? `${words.slice(0, 110).join(" ")}...` : words.join(" ");
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {

@@ -32,7 +32,6 @@ async function makeConfig(): Promise<SwarmConfig> {
     port: 47187,
     debug: false,
     isDesktop: false,
-    cortexEnabled: true,
     allowNonManagerSubscriptions: false,
     managerDisplayName: "Manager",
     defaultModel: resolveModelDescriptorFromPreset("pi-codex"),
@@ -59,38 +58,6 @@ async function makeConfig(): Promise<SwarmConfig> {
       repoMemorySkillFile: join(rootDir, "memory-skill.md"),
     },
   };
-}
-
-function createManagerDescriptor(
-  agentId: string,
-  profileId = agentId,
-  archetypeId?: string,
-): AgentDescriptor & { role: "manager"; profileId: string } {
-  return {
-    agentId,
-    profileId,
-    role: "manager",
-    status: "idle",
-    label: agentId,
-    createdAt: "2026-07-13T00:00:00.000Z",
-    updatedAt: "2026-07-13T00:00:00.000Z",
-    model: resolveModelDescriptorFromPreset("pi-codex"),
-    modelOrigin: "profile_default",
-    cwd: "/tmp",
-    sessionFile: `/tmp/${agentId}.jsonl`,
-    ...(archetypeId ? { archetypeId } : {}),
-  } as AgentDescriptor & { role: "manager"; profileId: string };
-}
-
-function createProfile(profileId: string): ManagerProfile {
-  return {
-    profileId,
-    displayName: profileId,
-    defaultSessionAgentId: profileId,
-    defaultModel: resolveModelDescriptorFromPreset("pi-codex"),
-    createdAt: "2026-07-13T00:00:00.000Z",
-    updatedAt: "2026-07-13T00:00:00.000Z",
-  } as ManagerProfile;
 }
 
 async function setup(input?: {
@@ -161,7 +128,6 @@ async function setup(input?: {
       refreshSessionMetaStats: late,
       refreshSessionMetaStatsBySessionId: late,
       getExternalProjectAgentDirectoryEntries: late,
-      getKnowledgeV2Enabled: late,
     },
     applySpecialistAvailability: late,
     applyManagerRuntimeRecyclePolicy: late,
@@ -208,17 +174,6 @@ describe("SwarmConfigurationCoordinator", () => {
       .rejects.toThrow("archived manager");
     expect(archivedGate).toHaveBeenCalledWith("manager", "update manager model");
     expect(late).not.toHaveBeenCalled();
-  });
-
-  it("keeps the Cortex working-directory prohibition inside configuration policy", async () => {
-    const descriptor = createManagerDescriptor("cortex", "cortex", "cortex");
-    const { coordinator } = await setup({
-      descriptors: [descriptor],
-      profiles: [createProfile("cortex")],
-    });
-
-    await expect(coordinator.updateManagerCwd("cortex", "/tmp"))
-      .rejects.toThrow("Cannot change working directory for Cortex profile");
   });
 
   it("fails clearly when the generated Pi model projection is requested before boot", async () => {

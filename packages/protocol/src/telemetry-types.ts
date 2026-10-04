@@ -55,7 +55,6 @@ export interface TelemetryPayload {
   skills_discovered_count?: number
   reference_docs_count: number
   slash_commands_count: number
-  cortex_auto_review_enabled: boolean
   mobile_devices_registered: number
   mobile_devices_enabled_count?: number
 

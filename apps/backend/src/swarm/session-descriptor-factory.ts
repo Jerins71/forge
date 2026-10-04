@@ -9,7 +9,6 @@ import {
 import type { AgentDescriptor, AgentModelDescriptor, ManagerProfile } from "./types.js";
 import { DEFAULT_MANAGER_POSTURE, type ManagerPosture } from "@forge/protocol";
 
-const CORTEX_PROFILE_ID = "cortex";
 const SESSION_ID_SUFFIX_SEPARATOR = "--s";
 const ROOT_SESSION_NUMBER = 1;
 
@@ -177,10 +176,6 @@ export class SessionDescriptorFactory {
     options?: SessionCreationOptions,
   ): PreparedSessionIdentity {
     const profile = this.requireProfile(profileId);
-
-    if (options?.sessionPurpose === "agent_creator" && profileId === CORTEX_PROFILE_ID) {
-      throw new Error("Agent creator sessions cannot be created in the Cortex profile");
-    }
 
     const { agentId: autoSessionAgentId, sessionNumber } =
       this.generateSessionAgentIdentity(profileId);

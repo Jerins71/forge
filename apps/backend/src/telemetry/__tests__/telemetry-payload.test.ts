@@ -30,7 +30,6 @@ function emptyFeatureAdoption(): FeatureAdoptionData {
     skillsDiscoveredCount: 0,
     referenceDocsCount: 0,
     slashCommandsCount: 0,
-    cortexAutoReviewEnabled: false,
     mobileDevicesRegistered: 0,
     mobileDevicesEnabledCount: 0,
   }

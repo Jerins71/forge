@@ -337,7 +337,6 @@ function createPayload(installId: string, reportId = 'report-1'): TelemetryPaylo
     skills_discovered_count: 0,
     reference_docs_count: 0,
     slash_commands_count: 0,
-    cortex_auto_review_enabled: false,
     mobile_devices_registered: 0,
     mobile_devices_enabled_count: 0,
     providers_used: '',

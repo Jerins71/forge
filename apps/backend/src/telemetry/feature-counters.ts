@@ -2,7 +2,6 @@ import { access, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   getAgentsStoreFilePath,
-  getCortexAutoReviewSettingsPath,
   getGlobalSlashCommandsPath,
   getProfilePiExtensionsDir,
   getProfilePiSkillsDir,
@@ -50,7 +49,6 @@ export async function collectFeatureAdoption(
     skillsDiscoveredCount,
     referenceDocsCount,
     slashCommandsCount,
-    cortexAutoReviewEnabled,
     mobileDeviceCounts,
   ] = await Promise.all([
     collectSpecialistCounts(dataDir, profileIds),
@@ -65,7 +63,6 @@ export async function collectFeatureAdoption(
     countSkills(dataDir, profileIds, rootDir),
     countReferenceDocs(dataDir, profileIds),
     countSlashCommands(dataDir, profileIds),
-    isCortexAutoReviewEnabled(dataDir),
     countMobileDevices(dataDir),
   ])
 
@@ -86,7 +83,6 @@ export async function collectFeatureAdoption(
     skillsDiscoveredCount,
     referenceDocsCount,
     slashCommandsCount,
-    cortexAutoReviewEnabled,
     mobileDevicesRegistered: mobileDeviceCounts.registeredCount,
     mobileDevicesEnabledCount: mobileDeviceCounts.enabledCount,
   }
@@ -295,15 +291,6 @@ async function countSlashCommands(dataDir: string, profileIds: string[]): Promis
     return count
   } catch {
     return 0
-  }
-}
-
-async function isCortexAutoReviewEnabled(dataDir: string): Promise<boolean> {
-  try {
-    const parsed = await readJsonFile(getCortexAutoReviewSettingsPath(dataDir))
-    return isRecord(parsed) && parsed.enabled === true
-  } catch {
-    return false
   }
 }
 

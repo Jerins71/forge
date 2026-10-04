@@ -5,7 +5,6 @@ import {
   type MessageRouteProvenance,
   type MessageRouteTargetKind,
 } from "./message-router.js";
-import { normalizeArchetypeId } from "./prompts/prompt-registry.js";
 import {
   cloneAssistantOutputTarget,
   cloneSessionTranscriptAssistantOutputTarget,
@@ -28,9 +27,6 @@ import type {
   SessionTranscriptAssistantOutputTarget,
   WorkerParentContext,
 } from "./types.js";
-
-const CORTEX_ARCHETYPE_ID = "cortex";
-const CORTEX_PROFILE_ID = "cortex";
 
 interface PendingChoiceContinuation {
   managerId: string;
@@ -100,16 +96,8 @@ export class AssistantOutputRouter implements ManagerOutputTurnPort {
   constructor(private readonly options: AssistantOutputRouterOptions) {}
 
   resolveTargetForUserInput(
-    target: AgentDescriptor,
     sourceContext: MessageSourceContext,
   ): AssistantOutputTarget {
-    if (
-      target.sessionPurpose === "cortex_review" ||
-      normalizeArchetypeId(target.archetypeId ?? "") === CORTEX_ARCHETYPE_ID
-    ) {
-      return { kind: "explicit_tool_required", reason: "cortex_session" };
-    }
-
     if (sourceContext.channel === "web") {
       return { kind: "session_transcript", channel: "web", sourceContext };
     }
@@ -541,25 +529,10 @@ export class AssistantOutputRouter implements ManagerOutputTurnPort {
       return false;
     }
 
-    if (
-      target.agentId === CORTEX_PROFILE_ID ||
-      target.profileId === CORTEX_PROFILE_ID
-    ) {
-      return false;
-    }
-
     const profile = target.profileId
       ? this.options.profiles.get(target.profileId)
       : undefined;
-    if (profile && isSystemProfile(profile)) {
-      return false;
-    }
-
-    const archetypeId = normalizeArchetypeId(target.archetypeId ?? "");
-    return !(
-      target.sessionPurpose === "cortex_review" ||
-      archetypeId === CORTEX_ARCHETYPE_ID
-    );
+    return !(profile && isSystemProfile(profile));
   }
 
   private buildProvenance(input: {
@@ -579,14 +552,11 @@ export class AssistantOutputRouter implements ManagerOutputTurnPort {
         ? { internalDeliveryKind: input.routeContext.internalDeliveryKind }
         : {}),
       ...(input.sourceContext ? { sourceContext: input.sourceContext } : {}),
-      ...(input.target.sessionPurpose ? { sessionPurpose: input.target.sessionPurpose } : {}),
-      ...(input.target.archetypeId ? { archetypeId: input.target.archetypeId } : {}),
       targetKind: input.targetKind,
       role: input.target.role,
       senderRole: input.sender.role,
       senderAgentId: input.sender.agentId,
       targetAgentId: input.target.agentId,
-      ...(input.target.profileId ? { targetProfileId: input.target.profileId } : {}),
       targetProjectAgent: input.target.projectAgent !== undefined,
       ...(input.target.creatorAgentId
         ? { targetCreatorAgentId: input.target.creatorAgentId }

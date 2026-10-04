@@ -80,7 +80,7 @@ describe("session routes", () => {
         profileId: "profile-a",
         label: "Session 1",
         name: "Session 1",
-        sessionPurpose: "general",
+        sessionPurpose: "agent_creator",
         requestId: "req-2",
       } as never,
       socket: {} as never,
@@ -95,7 +95,7 @@ describe("session routes", () => {
     expect(swarmManager.createSession).toHaveBeenCalledWith("profile-a", {
       label: "Session 1",
       name: "Session 1",
-      sessionPurpose: "general",
+      sessionPurpose: "agent_creator",
     });
     expect(send).toHaveBeenCalledWith(
       expect.anything(),

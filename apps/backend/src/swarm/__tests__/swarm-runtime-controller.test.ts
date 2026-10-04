@@ -57,7 +57,6 @@ async function makeTempConfig(port = 8897): Promise<SwarmConfig> {
     port,
     debug: false,
     isDesktop: false,
-    cortexEnabled: true,
     allowNonManagerSubscriptions: false,
     managerId: "manager",
     managerDisplayName: "Manager",
@@ -121,7 +120,6 @@ function createRuntimeControllerHarness(config: SwarmConfig): {
   consumePendingManualManagerStopNoticeIfApplicable: ReturnType<typeof vi.fn>;
   stripManagerAbortErrorFromEvent: ReturnType<typeof vi.fn>;
   finalizeWorkerIdleTurn: ReturnType<typeof vi.fn>;
-  cortexHandleManagerStatus: ReturnType<typeof vi.fn>;
   maybeRecoverWorkerWithSpecialistFallback: ReturnType<typeof vi.fn>;
   deliverTerminalObligationBackstop: ReturnType<typeof vi.fn>;
 } {
@@ -132,7 +130,6 @@ function createRuntimeControllerHarness(config: SwarmConfig): {
   const consumePendingManualManagerStopNoticeIfApplicable = vi.fn(() => false);
   const stripManagerAbortErrorFromEvent = vi.fn((event: RuntimeSessionEvent) => event);
   const finalizeWorkerIdleTurn = vi.fn();
-  const cortexHandleManagerStatus = vi.fn();
   const maybeRecoverWorkerWithSpecialistFallback = vi.fn(async () => false);
   const deliverTerminalObligationBackstop = vi.fn((_agentId: string, _reportText: string) => false);
   const forgeExtensionHost = new ForgeExtensionHost({ dataDir: config.paths.dataDir });
@@ -166,9 +163,6 @@ function createRuntimeControllerHarness(config: SwarmConfig): {
     },
     secretsEnvService: {
       getCredentialPoolService: vi.fn()
-    },
-    cortexService: {
-      handleManagerStatusTransition: cortexHandleManagerStatus
     },
     getPiModelsJsonPathOrThrow: vi.fn(() => join(config.paths.sharedCacheDir, "pi-models.json")),
     getCompactionRuntimeSettingsProvider: () => createDefaultCompactionRuntimeSettingsProvider(),
@@ -252,7 +246,6 @@ function createRuntimeControllerHarness(config: SwarmConfig): {
     consumePendingManualManagerStopNoticeIfApplicable,
     stripManagerAbortErrorFromEvent,
     finalizeWorkerIdleTurn,
-    cortexHandleManagerStatus,
     maybeRecoverWorkerWithSpecialistFallback
   };
 }

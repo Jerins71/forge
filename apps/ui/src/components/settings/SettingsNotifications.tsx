@@ -17,7 +17,6 @@ import {
   type NotificationStore,
   getAllSoundOptions,
   getAgentPrefs,
-  getEffectivePrefs,
   hasExplicitOverride,
   clearOverride,
   readNotificationStore,
@@ -184,12 +183,7 @@ export function SettingsNotifications({ managers, apiClient }: SettingsNotificat
       profileMap.set(pid, agent)
     }
   }
-  const profileAgents = Array.from(profileMap.values()).sort((a, b) => {
-    // Pin Cortex to the top of the per-manager list
-    if (a.profileId === 'cortex') return -1
-    if (b.profileId === 'cortex') return 1
-    return 0
-  })
+  const profileAgents = Array.from(profileMap.values())
 
   return (
     <div className="flex flex-col gap-8">
@@ -249,7 +243,7 @@ export function SettingsNotifications({ managers, apiClient }: SettingsNotificat
       {store.globalEnabled && (
         <SettingsSection
           label="Notification Defaults"
-          description="Applies to all managers except Cortex. Individual managers can override."
+          description="Applies to all managers. Individual managers can override."
         >
           <DefaultsNotificationSection
             prefs={store.defaults}
@@ -268,21 +262,7 @@ export function SettingsNotifications({ managers, apiClient }: SettingsNotificat
         >
           {profileAgents.map((agent) => {
             const profileId = agent.profileId!
-            const isCortex = profileId === 'cortex'
             const isOverride = hasExplicitOverride(store, profileId)
-
-            if (isCortex) {
-              return (
-                <AgentNotificationSection
-                  key={profileId}
-                  agent={agent}
-                  prefs={getEffectivePrefs(store, profileId, true)}
-                  soundOptions={soundOptions}
-                  store={store}
-                  onUpdate={(updater) => updateAgentPrefs(profileId, updater)}
-                />
-              )
-            }
 
             if (!isOverride) {
               return (

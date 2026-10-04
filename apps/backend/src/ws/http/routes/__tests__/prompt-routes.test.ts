@@ -3,20 +3,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { ServerEvent } from "@forge/protocol";
 import { applyCorsHeaders, sendJson } from "../../../http-utils.js";
 
-const cortexPromptSurfaceState = vi.hoisted(() => ({
-  listCortexPromptSurfaces: vi.fn(async () => ({ enabled: true, surfaces: [] })),
-  readCortexPromptSurface: vi.fn(async () => ({ surfaceId: "worker-prompts", content: "content" })),
-  resetCortexPromptSurface: vi.fn(async () => undefined),
-  saveCortexPromptSurface: vi.fn(async () => undefined),
-}));
-
-vi.mock("../../../../swarm/prompts/cortex-prompt-surfaces.js", () => ({
-  listCortexPromptSurfaces: (...args: unknown[]) => cortexPromptSurfaceState.listCortexPromptSurfaces(...args),
-  readCortexPromptSurface: (...args: unknown[]) => cortexPromptSurfaceState.readCortexPromptSurface(...args),
-  resetCortexPromptSurface: (...args: unknown[]) => cortexPromptSurfaceState.resetCortexPromptSurface(...args),
-  saveCortexPromptSurface: (...args: unknown[]) => cortexPromptSurfaceState.saveCortexPromptSurface(...args),
-}));
-
 import type { PromptRegistryForRoutes } from "../../../../swarm/prompt-contracts.js";
 import { createPromptRoutes } from "../prompt-routes.js";
 
@@ -29,11 +15,6 @@ const activeServers: TestServer[] = [];
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  Object.values(cortexPromptSurfaceState).forEach((mock) => mock.mockReset());
-  cortexPromptSurfaceState.listCortexPromptSurfaces.mockResolvedValue({ enabled: true, surfaces: [] });
-  cortexPromptSurfaceState.readCortexPromptSurface.mockResolvedValue({ surfaceId: "worker-prompts", content: "content" });
-  cortexPromptSurfaceState.resetCortexPromptSurface.mockResolvedValue(undefined);
-  cortexPromptSurfaceState.saveCortexPromptSurface.mockResolvedValue(undefined);
   await Promise.all(activeServers.splice(0).map((server) => server.close()));
 });
 
@@ -82,7 +63,7 @@ describe("prompt routes", () => {
   it("lists prompts with activeLayer and hasProfileOverride metadata", async () => {
     const promptRegistry = createPromptRegistryStub({
       listAll: vi.fn(async (profileId?: string) => {
-        expect(profileId).toBe("cortex");
+        expect(profileId).toBe("alpha");
         return [
           {
             category: "archetype",
@@ -93,17 +74,17 @@ describe("prompt routes", () => {
           },
           {
             category: "archetype",
-            promptId: "cortex",
-            content: "cortex content",
+            promptId: "worker",
+            content: "worker content",
             sourceLayer: "profile",
-            sourcePath: "/profiles/cortex/prompt.md",
+            sourcePath: "/profiles/alpha/prompt.md",
           },
         ];
       }),
     });
 
     const server = await createPromptRouteTestServer({ promptRegistry });
-    const response = await fetch(`${server.baseUrl}/api/prompts?profileId=cortex`);
+    const response = await fetch(`${server.baseUrl}/api/prompts?profileId=alpha`);
 
     expect(response.status).toBe(200);
     const payload = (await response.json()) as { prompts: Array<Record<string, unknown>> };
@@ -118,7 +99,7 @@ describe("prompt routes", () => {
     expect(payload.prompts).toContainEqual(
       expect.objectContaining({
         category: "archetype",
-        promptId: "cortex",
+        promptId: "worker",
         activeLayer: "profile",
         hasProfileOverride: true,
       }),
@@ -320,69 +301,6 @@ describe("prompt routes", () => {
     await expect(blockedDelete.json()).resolves.toEqual({ error: "Cannot modify system-managed profile" });
   });
 
-  it("handles cortex surface list/get/save/reset routes and disabled-mode behavior", async () => {
-    cortexPromptSurfaceState.listCortexPromptSurfaces.mockResolvedValueOnce({
-      enabled: true,
-      surfaces: [{ surfaceId: "worker-prompts", label: "Worker Prompts" }],
-    });
-    cortexPromptSurfaceState.readCortexPromptSurface.mockResolvedValueOnce({
-      surfaceId: "worker-prompts",
-      profileId: "cortex",
-      content: "surface-content",
-    });
-
-    const promptRegistry = createPromptRegistryStub();
-    const broadcastEvent = vi.fn<(event: ServerEvent) => void>();
-    const server = await createPromptRouteTestServer({ promptRegistry, broadcastEvent });
-
-    const listResponse = await fetch(`${server.baseUrl}/api/prompts/cortex-surfaces?profileId=cortex`);
-    expect(listResponse.status).toBe(200);
-    await expect(listResponse.json()).resolves.toEqual({
-      enabled: true,
-      surfaces: [{ surfaceId: "worker-prompts", label: "Worker Prompts" }],
-    });
-
-    const getResponse = await fetch(`${server.baseUrl}/api/prompts/cortex-surfaces/worker-prompts?profileId=cortex`);
-    expect(getResponse.status).toBe(200);
-    await expect(getResponse.json()).resolves.toEqual({
-      surfaceId: "worker-prompts",
-      profileId: "cortex",
-      content: "surface-content",
-    });
-
-    const saveResponse = await fetch(`${server.baseUrl}/api/prompts/cortex-surfaces/worker-prompts`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ profileId: "cortex", content: "updated" }),
-    });
-    expect(saveResponse.status).toBe(200);
-    expect(cortexPromptSurfaceState.saveCortexPromptSurface).toHaveBeenCalledWith(
-      expect.objectContaining({
-        dataDir: "/tmp/data",
-        profileId: "cortex",
-        surfaceId: "worker-prompts",
-        content: "updated",
-        promptRegistry,
-        broadcastEvent,
-      }),
-    );
-
-    const resetResponse = await fetch(`${server.baseUrl}/api/prompts/cortex-surfaces/worker-prompts/reset?profileId=cortex`, {
-      method: "POST",
-    });
-    expect(resetResponse.status).toBe(200);
-    await expect(resetResponse.json()).resolves.toEqual({ reset: true });
-
-    const disabledServer = await createPromptRouteTestServer({
-      promptRegistry,
-      cortexEnabled: false,
-    });
-    const disabledResponse = await fetch(`${disabledServer.baseUrl}/api/prompts/cortex-surfaces/worker-prompts?profileId=cortex`);
-    expect(disabledResponse.status).toBe(404);
-    await expect(disabledResponse.json()).resolves.toEqual({
-      error: "Cortex prompt surfaces are unavailable because Cortex is disabled.",
-    });
-  });
 });
 
 function createPromptRegistryStub(overrides?: Partial<PromptRegistryForRoutes>): PromptRegistryForRoutes {
@@ -413,15 +331,12 @@ async function createPromptRouteTestServer(options: {
     updatedAt: string;
     profileType?: "user" | "system";
   }>;
-  cortexEnabled?: boolean;
 }): Promise<TestServer> {
   const routes = createPromptRoutes({
     promptRegistry: options.promptRegistry,
-    dataDir: "/tmp/data",
     broadcastEvent: options.broadcastEvent ?? vi.fn(),
     promptPreviewProvider: options.promptPreviewProvider,
     listProfiles: options.listProfiles,
-    cortexEnabled: options.cortexEnabled,
   });
 
   const server = createServer((request, response) => {

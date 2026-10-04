@@ -31,10 +31,10 @@ Project settings include:
 - **System prompt** — base instructions for the manager. You can customize this or use the default.
 - **Skills** — browse and configure optional skill-backed capabilities such as Brave search (exact, navigational, freshness, or URL-oriented lookup), Exa search (semantic, conceptual, or multi-source discovery), image generation, and the separate `agent-browser` CLI workflow. These search skills are available when a task needs them; they are not used on every turn. The Automatic Browser is local to Forge Desktop, not a Skill; optional Chrome setup lives under **Use Chrome with Forge**.
 - **Delegation** — work mode, rosters, specialists, the shared instruction library, and custom specialists.
-- **Memory** — canonical project and session memory. This is distinct from project-scoped Knowledge v2 entries.
+- **Memory** — project and session `memory.md` files for durable facts and decisions.
 
 Most of these work well with defaults. Adjust them as you learn what your workflow needs.
 
 ## What's next
 
-Start a conversation. The best way to configure Forge is to use it—the manager will ask for clarification when needed. While Knowledge v2 is on, managers and bounded capture checks can save durable preferences as entries.
+Start a conversation. The best way to configure Forge is to use it—the manager will ask for clarification when needed. Ask it to remember durable preferences and it records them in memory.

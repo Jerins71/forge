@@ -53,13 +53,6 @@ const DEFAULT_AGENT_PREFS: AgentNotificationPrefs = {
   volume: 0.7,
 }
 
-const DEFAULT_AGENT_PREFS_DISABLED: AgentNotificationPrefs = {
-  unreadSound: { enabled: false, soundId: 'notification' },
-  allDoneSound: { enabled: false, soundId: 'complete' },
-  questionSound: { enabled: false, soundId: 'question' },
-  volume: 0.7,
-}
-
 const DEFAULT_STORE: NotificationStore = {
   globalEnabled: true,
   defaults: { ...DEFAULT_AGENT_PREFS },
@@ -233,18 +226,8 @@ export function getAgentPrefs(store: NotificationStore, agentId: string): AgentN
   return store.agents[agentId] ?? { ...DEFAULT_AGENT_PREFS }
 }
 
-/**
- * Resolve effective prefs for a profile, respecting the defaults cascade.
- * Cortex never inherits from defaults — it uses its own explicit prefs or disabled fallback.
- */
-export function getEffectivePrefs(
-  store: NotificationStore,
-  prefsKey: string,
-  isCortex: boolean,
-): AgentNotificationPrefs {
-  if (isCortex) {
-    return store.agents[prefsKey] ?? { ...DEFAULT_AGENT_PREFS_DISABLED }
-  }
+/** Resolve effective prefs for a profile, respecting the defaults cascade. */
+function getEffectivePrefs(store: NotificationStore, prefsKey: string): AgentNotificationPrefs {
   return store.agents[prefsKey] ?? store.defaults
 }
 
@@ -390,8 +373,7 @@ function shouldPlayQuestion(
 ): boolean {
   if (!store.globalEnabled) return false
   if (agentId === state.targetAgentId && document.hasFocus()) return false
-  const isCortex = prefsKey === 'cortex'
-  const prefs = getEffectivePrefs(store, prefsKey, isCortex)
+  const prefs = getEffectivePrefs(store, prefsKey)
   return prefs.questionSound.enabled
 }
 
@@ -404,8 +386,7 @@ function shouldPlayUnread(
   if (!store.globalEnabled) return false
   // Don't play for the currently viewed agent if the user is actively looking at it
   if (agentId === state.targetAgentId && document.hasFocus()) return false
-  const isCortex = prefsKey === 'cortex'
-  const prefs = getEffectivePrefs(store, prefsKey, isCortex)
+  const prefs = getEffectivePrefs(store, prefsKey)
   return prefs.unreadSound.enabled
 }
 
@@ -418,8 +399,7 @@ function shouldPlayAllDone(
   if (!store.globalEnabled) return false
   // Don't play for the currently viewed agent if the user is actively looking at it
   if (agentId === state.targetAgentId && document.hasFocus()) return false
-  const isCortex = prefsKey === 'cortex'
-  const prefs = getEffectivePrefs(store, prefsKey, isCortex)
+  const prefs = getEffectivePrefs(store, prefsKey)
   if (!prefs.allDoneSound.enabled) return false
   // Hard safety guard: never classify as all-done while the manager itself is streaming.
   // speak_to_user is a tool call that fires mid-turn; workers may not be spawned yet.
@@ -431,8 +411,7 @@ function shouldPlayAllDone(
 
 function playUnread(prefsKey: string, store: NotificationStore): void {
   if (!canPlay(`unread:${prefsKey}`)) return
-  const isCortex = prefsKey === 'cortex'
-  const prefs = getEffectivePrefs(store, prefsKey, isCortex)
+  const prefs = getEffectivePrefs(store, prefsKey)
   const url = resolveSoundUrl(prefs.unreadSound.soundId, store)
   if (!url) return
   playSound(url, prefs.volume)
@@ -440,8 +419,7 @@ function playUnread(prefsKey: string, store: NotificationStore): void {
 
 function playAllDone(prefsKey: string, store: NotificationStore): void {
   if (!canPlay(`allDone:${prefsKey}`)) return
-  const isCortex = prefsKey === 'cortex'
-  const prefs = getEffectivePrefs(store, prefsKey, isCortex)
+  const prefs = getEffectivePrefs(store, prefsKey)
   const url = resolveSoundUrl(prefs.allDoneSound.soundId, store)
   if (!url) return
   playSound(url, prefs.volume)
@@ -449,8 +427,7 @@ function playAllDone(prefsKey: string, store: NotificationStore): void {
 
 function playQuestion(prefsKey: string, store: NotificationStore): void {
   if (!canPlay(`question:${prefsKey}`)) return
-  const isCortex = prefsKey === 'cortex'
-  const prefs = getEffectivePrefs(store, prefsKey, isCortex)
+  const prefs = getEffectivePrefs(store, prefsKey)
   const url = resolveSoundUrl(prefs.questionSound.soundId, store)
   if (!url) return
   playSound(url, prefs.volume)

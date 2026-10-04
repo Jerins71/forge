@@ -13,7 +13,6 @@ import type { ForgePreparedRuntimeBindings } from "../forge-extension-types.js";
 import { wrapForgeToolsWithExtensionHooks } from "../forge-instrumented-tools.js";
 import { buildForgePiToolBridgeExtensionFactory } from "../forge-pi-tool-bridge.js";
 import { createCatalogRequestBehaviorExtensionFactory } from "../catalog/model-catalog-request-behaviors.js";
-import { normalizeArchetypeId } from "../prompts/prompt-registry.js";
 import type { OpenAIAuthBrokerRuntimeService } from "../openai-auth/openai-auth-broker-runtime-service.js";
 import type { SwarmToolHost } from "../swarm-tool-host.js";
 import { buildSwarmTools } from "../swarm-tools.js";
@@ -86,19 +85,11 @@ export function buildBaseRuntimeTools(host: SwarmToolHost, descriptor: AgentDesc
     swarmTools.push(buildCreateProjectAgentTool(host, descriptor));
   }
 
-  if (descriptor.sessionPurpose === "capture_check") {
-    return swarmTools.filter((tool) => CAPTURE_CHECK_TOOL_NAMES.has(tool.name));
-  }
-
   if (descriptor.sessionPurpose === "side_chat") {
     return swarmTools.filter((tool) => SIDE_CHAT_TOOL_NAMES.has(tool.name));
   }
 
-  if (normalizeArchetypeId(descriptor.archetypeId ?? "") !== CORTEX_ARCHETYPE_ID) {
-    return swarmTools;
-  }
-
-  return swarmTools.filter((tool) => !CORTEX_DISABLED_TOOL_NAMES.has(tool.name));
+  return swarmTools;
 }
 
 interface PlanPiExtensionFactoriesOptions {
@@ -192,7 +183,7 @@ function previewForLog(text: string, maxLength = 160): string {
   return `${normalized.slice(0, maxLength)}...`;
 }
 
-/** Internal purposes (Cortex review, agent creation, capture checks). A side chat is an ordinary conversation. */
+/** Internal purposes (agent creation). A side chat is an ordinary conversation. */
 export function isInternalSessionPurpose(descriptor: Pick<AgentDescriptor, "sessionPurpose">): boolean {
   return descriptor.sessionPurpose !== undefined && descriptor.sessionPurpose !== "side_chat";
 }
@@ -203,25 +194,9 @@ export function isBrowserAutomationEligible(descriptor: AgentDescriptor): boolea
     && descriptor.profileId.length > 0
     && descriptor.sessionPurpose === undefined
     && descriptor.cli === undefined
-    && descriptor.externalThread === undefined
-    && normalizeArchetypeId(descriptor.archetypeId ?? "") !== CORTEX_ARCHETYPE_ID;
+    && descriptor.externalThread === undefined;
 }
 
-const CORTEX_ARCHETYPE_ID = "cortex";
-const CORTEX_DISABLED_TOOL_NAMES = new Set([
-  "list_agents",
-  "kill_agent",
-  "update_plan",
-  "update_work_graph",
-  "accept_work_graph_node",
-  "create_goal",
-  "get_goal",
-  "update_goal",
-  "save_learning",
-  "delegate_codex_plugin",
-  "retry_codex_plugin_worker",
-]);
-const CAPTURE_CHECK_TOOL_NAMES = new Set(["knowledge", "save_learning"]);
 // A side chat is a temporary aside: no delegation, scheduling, peer messaging,
 // user publication, new secret requests, or durable memory/knowledge writes.
-const SIDE_CHAT_TOOL_NAMES = new Set(["knowledge", "present_choices", "secure_session_status"]);
+const SIDE_CHAT_TOOL_NAMES = new Set(["present_choices", "secure_session_status"]);

@@ -2,7 +2,6 @@ import type {
   BrowserAutomationInputByOperation,
   BrowserAutomationOperation,
 } from "@forge/protocol";
-import { normalizeArchetypeId } from "../prompts/prompt-registry.js";
 import type { AgentDescriptor } from "../types.js";
 import {
   type BrowserAutomationInvocationResult,
@@ -45,6 +44,5 @@ export function isEligibleLocalBuilderManager(descriptor: AgentDescriptor): bool
     && !!descriptor.profileId
     && descriptor.sessionPurpose === undefined
     && descriptor.cli === undefined
-    && descriptor.externalThread === undefined
-    && normalizeArchetypeId(descriptor.archetypeId ?? "") !== "cortex";
+    && descriptor.externalThread === undefined;
 }

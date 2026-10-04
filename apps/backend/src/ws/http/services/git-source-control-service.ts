@@ -356,22 +356,6 @@ export class GitSourceControlService {
       };
     }
 
-    if (context.repoKind === "versioning") {
-      return {
-        allowed: false,
-        issues: [
-          {
-            code: "versioning_blocked",
-            message: "Git mutations are not enabled for the Cortex versioning repository.",
-            severity: "block"
-          }
-        ],
-        currentBranch: null,
-        currentHead: null,
-        statusHash: null
-      };
-    }
-
     const git = new GitCli({ cwd: context.cwd });
     const baseGit = new GitCli({ cwd: context.baseCwd });
     const porcelain = await readPorcelainStatus(git);

@@ -8,7 +8,6 @@ import { getShortcutDefinitions } from './content/shortcuts'
 import { gettingStartedArticles } from './content/getting-started'
 import { chatArticles } from './content/chat-articles'
 import { settingsArticles } from './content/settings-articles'
-import { cortexArticles } from './content/cortex-articles'
 import { modelsArticles } from './content/models-articles'
 import { conceptsArticles } from './content/concepts-articles'
 import { terminalArticles } from './content/terminal-articles'
@@ -93,7 +92,6 @@ export function initializeHelpContent(): void {
     ...gettingStartedArticles,
     ...chatArticles,
     ...settingsArticles,
-    ...cortexArticles,
     ...modelsArticles,
     ...conceptsArticles,
     ...terminalArticles,

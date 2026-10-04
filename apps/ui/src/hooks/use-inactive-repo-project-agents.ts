@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { RepoProjectAgentInventoryItem } from '@forge/protocol'
-import { isCortexProfile, type ProfileTreeRow } from '@/lib/agent-hierarchy'
+import type { ProfileTreeRow } from '@/lib/agent-hierarchy'
 import { createBuilderSettingsApiClient } from '@/components/settings/settings-api-client'
 import {
   fetchProjectResourcesSnapshot,
@@ -18,7 +18,6 @@ export interface RepoProjectAgentSidebarEntry {
 }
 
 function getProfileResourceContext(treeRow: ProfileTreeRow): { profileId: string; sessionAgentId: string } | null {
-  if (isCortexProfile(treeRow)) return null
   const profileId = treeRow.profile.profileId
   const representativeSession = treeRow.sessions.find((session) => session.isDefault)
     ?? treeRow.sessions.find((session) => !session.sessionAgent.agentCreatorResult)

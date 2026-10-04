@@ -1,15 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { History } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { FileList } from './FileList'
 import { DiffPane } from './DiffPane'
 import { CommitList } from './CommitList'
-import {
-  KNOWLEDGE_QUICK_FILTERS,
-  commitMatchesKnowledgeQuickFilter,
-  matchesKnowledgeQuickFilter,
-  type KnowledgeQuickFilterId,
-} from './knowledge-surface'
 import { SourceControlActivityTabs } from './SourceControlActivityTabs'
 import { useGitLog, useGitCommitDetail, useGitCommitDiff } from './use-diff-queries'
 import { useResizablePanel } from './useResizablePanel'
@@ -34,9 +27,6 @@ interface HistoryViewProps {
   worktreeId?: string | null
   onStatusChange?: (info: HistoryStatusInfo | null) => void
   refreshToken?: number
-  initialSha?: string | null
-  initialFile?: string | null
-  initialQuickFilter?: KnowledgeQuickFilterId
   onActivityTabChange: (tab: 'changes' | 'history') => void
 }
 
@@ -47,21 +37,16 @@ export function HistoryView({
   worktreeId = null,
   onStatusChange,
   refreshToken = 0,
-  initialSha = null,
-  initialFile = null,
-  initialQuickFilter = 'all',
   onActivityTabChange,
 }: HistoryViewProps) {
-  const [selectedSha, setSelectedSha] = useState<string | null>(initialSha)
-  const [selectedFile, setSelectedFile] = useState<string | null>(initialFile)
+  const [selectedSha, setSelectedSha] = useState<string | null>(null)
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [allCommits, setAllCommits] = useState<GitLogEntry[]>([])
   const [currentOffset, setCurrentOffset] = useState(0)
   const [hasMore, setHasMore] = useState(false)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
-  const [quickFilter, setQuickFilter] = useState<KnowledgeQuickFilterId>(initialQuickFilter)
   const prevContextKeyRef = useRef(`${agentId ?? ''}:${repoTarget}:${worktreeId ?? ''}`)
   const prevRefreshTokenRef = useRef(refreshToken)
-  const isKnowledgeMode = repoTarget === 'versioning'
 
   const logQuery = useGitLog(wsUrl, agentId, repoTarget, PAGE_SIZE, currentOffset, worktreeId)
 
@@ -72,12 +57,11 @@ export function HistoryView({
       setAllCommits([])
       setCurrentOffset(0)
       setHasMore(false)
-      setSelectedSha(initialSha)
-      setSelectedFile(initialFile)
-      setQuickFilter(initialQuickFilter)
+      setSelectedSha(null)
+      setSelectedFile(null)
       onStatusChange?.(null)
     }
-  }, [agentId, initialFile, initialQuickFilter, initialSha, onStatusChange, repoTarget, worktreeId])
+  }, [agentId, onStatusChange, repoTarget, worktreeId])
 
   useEffect(() => {
     if (!logQuery.data) return
@@ -97,37 +81,21 @@ export function HistoryView({
     }
   }, [logQuery.data, currentOffset])
 
-  const filteredCommits = useMemo(() => {
-    if (!isKnowledgeMode) {
-      return allCommits
-    }
-
-    return allCommits.filter((commit) => commitMatchesKnowledgeQuickFilter(commit.metadata, quickFilter))
-  }, [allCommits, isKnowledgeMode, quickFilter])
-
   useEffect(() => {
-    if (filteredCommits.length === 0) {
+    if (allCommits.length === 0) {
       if (selectedSha !== null) {
         setSelectedSha(null)
       }
       return
     }
 
-    if (!selectedSha || !filteredCommits.some((commit) => commit.sha === selectedSha)) {
-      setSelectedSha(filteredCommits[0].sha)
+    if (!selectedSha || !allCommits.some((commit) => commit.sha === selectedSha)) {
+      setSelectedSha(allCommits[0].sha)
     }
-  }, [filteredCommits, selectedSha])
+  }, [allCommits, selectedSha])
 
   const commitDetailQuery = useGitCommitDetail(wsUrl, agentId, repoTarget, selectedSha, worktreeId)
   const commitFiles = useMemo(() => commitDetailQuery.data?.files ?? [], [commitDetailQuery.data?.files])
-
-  const filteredCommitFiles = useMemo(() => {
-    if (!isKnowledgeMode) {
-      return commitFiles
-    }
-
-    return commitFiles.filter((file) => matchesKnowledgeQuickFilter(file.path, quickFilter))
-  }, [commitFiles, isKnowledgeMode, quickFilter])
 
   useEffect(() => {
     if (selectedSha == null) {
@@ -138,14 +106,14 @@ export function HistoryView({
     }
 
     if (
-      filteredCommitFiles.length > 0 &&
-      (!selectedFile || !filteredCommitFiles.some((file) => file.path === selectedFile))
+      commitFiles.length > 0 &&
+      (!selectedFile || !commitFiles.some((file) => file.path === selectedFile))
     ) {
-      setSelectedFile(filteredCommitFiles[0].path)
-    } else if (filteredCommitFiles.length === 0) {
+      setSelectedFile(commitFiles[0].path)
+    } else if (commitFiles.length === 0) {
       setSelectedFile(null)
     }
-  }, [filteredCommitFiles, selectedFile, selectedSha])
+  }, [commitFiles, selectedFile, selectedSha])
 
   const fileDiffQuery = useGitCommitDiff(wsUrl, agentId, repoTarget, selectedSha, selectedFile, worktreeId)
 
@@ -181,19 +149,18 @@ export function HistoryView({
 
     const commit = allCommits.find((entry) => entry.sha === selectedSha)
     const detail = commitDetailQuery.data
-    const visibleFiles = isKnowledgeMode && quickFilter !== 'all' ? filteredCommitFiles : detail.files
-    const summary = computeCommitSummary(visibleFiles)
+    const summary = computeCommitSummary(detail.files)
 
     onStatusChange({
       sha: detail.sha,
       shortSha: commit?.shortSha ?? detail.sha.slice(0, 7),
       author: detail.author,
       date: detail.date,
-      filesChanged: visibleFiles.length,
+      filesChanged: detail.files.length,
       insertions: summary.insertions,
       deletions: summary.deletions,
     })
-  }, [selectedSha, commitDetailQuery.data, allCommits, filteredCommitFiles, isKnowledgeMode, onStatusChange, quickFilter])
+  }, [selectedSha, commitDetailQuery.data, allCommits, onStatusChange])
 
   const handleLoadMore = useCallback(() => {
     setIsLoadingMore(true)
@@ -203,8 +170,8 @@ export function HistoryView({
   const { width: commitListWidth, isDragging: isCommitListDragging, handleRef: commitListHandleRef } =
     useResizablePanel({
       storageKey: 'forge-diff-history-commits-width',
-      defaultWidth: repoTarget === 'workspace' ? 320 : 260,
-      minWidth: repoTarget === 'workspace' ? 240 : 190,
+      defaultWidth: 320,
+      minWidth: 240,
       maxWidth: 480,
     })
 
@@ -225,8 +192,8 @@ export function HistoryView({
       : null
 
   const visibleFileSummary = {
-    filesChanged: filteredCommitFiles.length,
-    ...computeCommitSummary(filteredCommitFiles),
+    filesChanged: commitFiles.length,
+    ...computeCommitSummary(commitFiles),
   }
 
   return (
@@ -234,44 +201,17 @@ export function HistoryView({
       <div className="shrink-0 border-r border-border/60" style={{ width: commitListWidth }}>
         <div className="flex h-full flex-col">
           <SourceControlActivityTabs activeTab="history" onTabChange={onActivityTabChange} />
-          {isKnowledgeMode && !historyEmptyState ? (
-            <div className="border-b border-border/60 p-2">
-              <div className="flex flex-wrap gap-1">
-                {KNOWLEDGE_QUICK_FILTERS.map((option) => {
-                  const active = option.id === quickFilter
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      title={option.pathLabel}
-                      className={cn(
-                        'inline-flex h-6 items-center rounded-full border px-2 text-[10px] font-medium transition-colors',
-                        active
-                          ? 'border-primary/40 bg-primary/10 text-primary'
-                          : 'border-border/60 bg-muted/30 text-muted-foreground hover:border-border hover:text-foreground',
-                      )}
-                      aria-pressed={active}
-                      onClick={() => setQuickFilter(option.id)}
-                    >
-                      {option.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          ) : null}
           {!historyEmptyState ? (
             <div className="min-h-0 flex-1">
               <CommitList
-                commits={filteredCommits}
+                commits={allCommits}
                 selectedSha={selectedSha}
                 onSelectCommit={setSelectedSha}
                 isLoading={isInitialLoading}
                 hasMore={hasMore}
                 onLoadMore={handleLoadMore}
                 isLoadingMore={isLoadingMore}
-                repoTarget={repoTarget}
-                emptyMessage={isKnowledgeMode && quickFilter !== 'all' ? 'No commits match this filter' : 'No commits found'}
+                emptyMessage="No commits found"
               />
             </div>
           ) : null}
@@ -297,13 +237,10 @@ export function HistoryView({
               onSelectFile={setSelectedFile}
               isLoading={commitDetailQuery.isLoading}
               summary={visibleFileSummary}
-              repoTarget={repoTarget}
-              quickFilter={quickFilter}
-              onQuickFilterChange={setQuickFilter}
             />
           ) : (
             <div className="flex h-full items-center justify-center px-3 text-center text-xs text-muted-foreground">
-              {isKnowledgeMode && quickFilter !== 'all' ? 'No commit matches the selected filter' : 'Select a commit to view files'}
+              Select a commit to view files
             </div>
           )}
         </div>

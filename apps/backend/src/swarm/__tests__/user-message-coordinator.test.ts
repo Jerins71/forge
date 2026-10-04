@@ -182,13 +182,9 @@ function createHarness() {
         recordDispatchAccepted: vi.fn(() => order.push("codex:accepted")),
       },
     },
-    knowledge: {
+    memory: {
       compact: vi.fn(async () => {
-        order.push("knowledge:compact");
-      }),
-      maybeRunCortexConsolidationFromIncomingMessage: vi.fn(async () => {
-        order.push("knowledge:cortex-route");
-        return false;
+        order.push("memory:compact");
       }),
     },
     projectAgents: {
@@ -341,20 +337,14 @@ describe("UserMessageCoordinator", () => {
     );
   });
 
-  it("short-circuits direct Codex, Cortex consolidation, and slash compaction before append", async () => {
+  it("short-circuits direct Codex and slash compaction before append", async () => {
     const harness = createHarness();
     vi.mocked(harness.options.codex.direct.maybeRouteUserMessage).mockResolvedValueOnce(true);
     await harness.coordinator.handleUserMessage("@Codex inspect");
     expect(harness.options.projectAgents.preflightRuntime).not.toHaveBeenCalled();
 
-    vi.mocked(
-      harness.options.knowledge.maybeRunCortexConsolidationFromIncomingMessage,
-    ).mockResolvedValueOnce(true);
-    await harness.coordinator.handleUserMessage("consolidate");
-    expect(harness.attachmentService.prepareConversation).not.toHaveBeenCalled();
-
     await harness.coordinator.handleUserMessage("/compact preserve decisions");
-    expect(harness.options.knowledge.compact).toHaveBeenCalledWith(harness.manager.agentId, {
+    expect(harness.options.memory.compact).toHaveBeenCalledWith(harness.manager.agentId, {
       customInstructions: "preserve decisions",
       sourceContext: { channel: "web" },
       trigger: "slash_command",

@@ -220,36 +220,6 @@ export interface ProfileGroupProps {
   onSelectInactiveRepoProjectAgent?: (entry: import('@/hooks/use-inactive-repo-project-agents').RepoProjectAgentSidebarEntry) => void
 }
 
-export interface CortexSectionProps {
-  cortexRow: ProfileTreeRow
-  /** Optional shell styling for the desktop rail popover reuse. */
-  className?: string
-  statuses: StatusMap
-  unreadCounts: Record<string, number>
-  selectedAgentId: string | null
-  isSettingsActive: boolean
-  isCollapsed: boolean
-  collapsedSessionIds: Set<string>
-  visibleSessionLimit: number
-  expandedWorkerListSessionIds: Set<string>
-  onToggleCollapsed: () => void
-  onToggleSessionCollapsed: (sessionId: string) => void
-  onShowMoreSessions: () => void
-  onShowLessSessions: () => void
-  onToggleWorkerListExpanded: (sessionId: string) => void
-  onSelect: (agentId: string) => void
-  onDeleteAgent: (agentId: string) => void
-  onOpenSettings: () => void
-  onStopSession?: (agentId: string) => void
-  onResumeSession?: (agentId: string) => void
-  onMarkUnread?: (agentId: string) => void
-  onMarkAllRead?: (profileId: string) => void
-  highlightQuery?: string
-  mutedAgents?: Set<string>
-  onToggleMute?: (agentId: string) => void
-  onMuteAllSessions?: (sessionAgentIds: string[], mute: boolean) => void
-}
-
 export interface ProjectAgentSettingsSheetProps {
   agentId: string
   sessionLabel: string

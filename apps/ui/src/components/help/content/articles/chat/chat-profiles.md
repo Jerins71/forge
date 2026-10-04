@@ -17,7 +17,7 @@ New conversations copy the profile's default model. You can override the model f
 
 ## Project Settings
 
-For a Builder project, right-click its header and choose **Project Settings**, or use the header's hover/focus **…** menu. The page stays scoped to that project even if another conversation is selected. It groups project name, working directory, default model and reasoning, Context management, Project secrets, and Repository resources `.forge` controls. Context management is the project default for Summary vs experimental Context v2; it is not a Settings → General control. It is unavailable for Cortex.
+For a Builder project, right-click its header and choose **Project Settings**, or use the header's hover/focus **…** menu. The page stays scoped to that project even if another conversation is selected. It groups project name, working directory, default model and reasoning, Context management, Project secrets, and Repository resources `.forge` controls. Context management is the project default for Summary vs experimental Context v2; it is not a Settings → General control.
 
 ## Rename a profile
 
@@ -29,8 +29,8 @@ Use **Project Settings → Default model → Change**, or the existing **Change 
 
 ## Reorder profiles
 
-Drag project headers in Inbox or Projects to reorder them. The order is saved automatically by your Builder instance and shared by browsers or the desktop app connected to that instance. It is a display preference only. Archived projects or projects unseen by one client retain their positions, and deleted projects can remain as harmless hidden anchors. Cortex remains pinned above the reordered projects.
+Drag project headers in Inbox or Projects to reorder them. The order is saved automatically by your Builder instance and shared by browsers or the desktop app connected to that instance. It is a display preference only. Archived projects or projects unseen by one client retain their positions, and deleted projects can remain as harmless hidden anchors.
 
 ## Deleting a profile
 
-Right-click the profile header and choose **Delete Manager**. This removes the profile and all its sessions, history, and memory permanently. The Cortex profile cannot be deleted.
+Right-click the profile header and choose **Delete Manager**. This removes the profile and all its sessions, history, and memory permanently.

@@ -7,13 +7,10 @@ import { FileBackedPromptRegistry } from "../prompts/prompt-registry.js";
 import { writeProjectAgentRecord } from "../storage/project-agent-storage.js";
 import { writeProjectAgentReferenceDoc } from "../reference-docs.js";
 import { SwarmPromptService } from "../swarm-prompt-service.js";
-import { estimateTokens } from "../knowledge-service.js";
 import type { SkillMetadata } from "../skills/skill-metadata-service.js";
 import type { AgentDescriptor, ManagerProfile, SwarmConfig } from "../types.js";
 import {
   getCommonKnowledgePath,
-  getKnowledgeIndexPath,
-  getProfileKnowledgeIndexPath,
   getProfileMemoryPath,
   resolveMemoryFilePath,
   getLegacySessionsDirPath,
@@ -165,7 +162,6 @@ function createPromptServiceForDescriptor(
   config: SwarmConfig,
   descriptor: AgentDescriptor,
   options?: {
-    getKnowledgeV2Enabled?: () => boolean;
     promptRegistry?: FileBackedPromptRegistry;
     specialistRoster?: Array<{ specialistId: string; promptBody: string }>;
     specialistRegistryError?: Error;
@@ -205,7 +201,6 @@ function createPromptServiceForDescriptor(
         resolveRoster: vi.fn(async () => options?.specialistRoster ?? []),
       };
     },
-    getKnowledgeV2Enabled: options?.getKnowledgeV2Enabled,
     logDebug: options?.logDebug ?? (() => {})
   });
 }
@@ -329,15 +324,13 @@ describe("SwarmPromptService", () => {
     ]);
   });
 
-  it.each([false, true])("labels persisted session facts independently of task notes (knowledge v2: %s)", async (knowledgeV2) => {
+  it("labels persisted session facts independently of task notes", async () => {
     const { config } = await makeConfig();
     const descriptor = createManagerDescriptor(config, repoRoot);
     const sessionPath = resolveMemoryFilePath(config.paths.dataDir, descriptor, undefined);
     const content = "# Saved preferences\n\nUse metric units.\n";
     await ensureMemoryFile(sessionPath, content);
-    const service = createPromptServiceForDescriptor(config, descriptor, {
-      getKnowledgeV2Enabled: () => knowledgeV2,
-    });
+    const service = createPromptServiceForDescriptor(config, descriptor);
     const resources = await service.getMemoryRuntimeResources(descriptor);
     expect(resources.memoryContextFile.content).toContain("# Session Memory (durable facts — update only on an explicit user memory request)");
     expect(resources.memoryContextFile.content).toContain("Use metric units.");
@@ -1515,54 +1508,37 @@ Always preserve the user's release notes.`,
     expect(resources.memoryContextFile.content).toContain("Common fact");
   });
 
-  it("getMemoryRuntimeResources injects only generated knowledge indexes when knowledge v2 is enabled", async () => {
+  it("getMemoryRuntimeResources injects plain memory and ignores leftover Cortex knowledge indexes", async () => {
     const { config } = await makeConfig();
     const dataDir = config.paths.dataDir;
     const profileId = "manager";
-    const descriptor = createManagerDescriptor(config, repoRoot, { archetypeId: "cortex" });
+    const descriptor = createManagerDescriptor(config, repoRoot);
     const sessionPath = resolveMemoryFilePath(
       dataDir,
       { agentId: "manager", role: "manager", profileId, managerId: "manager" },
       undefined,
     );
-    const profilePath = getProfileMemoryPath(dataDir, profileId);
-    const profileIndexPath = getProfileKnowledgeIndexPath(dataDir, profileId);
-    const globalIndexPath = getKnowledgeIndexPath(dataDir);
-    const commonPath = getCommonKnowledgePath(dataDir);
-
     await ensureMemoryFile(sessionPath, "## Session line\n");
+    await ensureMemoryFile(getProfileMemoryPath(dataDir, profileId), "## Profile line\n");
     await ensureMemoryFile(
-      profilePath,
-      `## Legacy profile line\n${Array.from({ length: 80 }, (_, index) => `legacy-profile-${index}`).join(" ")}\n`,
+      join(dataDir, "profiles", profileId, "knowledge", "INDEX.md"),
+      "# Knowledge Index (profile:manager)\n\n- [pref-a] Profile index line\n",
     );
-    await ensureMemoryFile(profileIndexPath, "# Knowledge Index (profile:manager)\n\n- [pref-a] Profile index line\n");
-    await ensureMemoryFile(globalIndexPath, "# Knowledge Index (global)\n\n- [conv-a] Global index line\n");
     await ensureMemoryFile(
-      commonPath,
-      `Legacy common fact\n${Array.from({ length: 80 }, (_, index) => `legacy-common-${index}`).join(" ")}\n`,
+      join(dataDir, "shared", "knowledge", "INDEX.md"),
+      "# Knowledge Index (global)\n\n- [conv-a] Global index line\n",
     );
+    await ensureMemoryFile(getCommonKnowledgePath(dataDir), "Common fact\n");
 
-    let knowledgeV2Enabled = true;
-    const service = createPromptServiceForDescriptor(config, descriptor, {
-      getKnowledgeV2Enabled: () => knowledgeV2Enabled,
-    });
-
-    const resources = await service.getMemoryRuntimeResources(descriptor);
-    expect(resources.memoryContextFile.path).toBe(sessionPath);
-    expect(resources.memoryContextFile.content).toContain("Profile index line");
-    expect(resources.memoryContextFile.content).toContain("Global index line");
-    expect(resources.memoryContextFile.content).toContain("Session line");
-    expect(resources.memoryContextFile.content).not.toContain("Legacy profile line");
-    expect(resources.memoryContextFile.content).not.toContain("Legacy common fact");
-    expect(resources.memoryContextFile.content).not.toContain("# Common Knowledge (maintained by Cortex");
-
-    knowledgeV2Enabled = false;
-    const legacyResources = await service.getMemoryRuntimeResources(descriptor);
-    expect(legacyResources.memoryContextFile.content).toContain("Legacy profile line");
-    expect(legacyResources.memoryContextFile.content).toContain("Legacy common fact");
-    expect(legacyResources.memoryContextFile.content).not.toContain("Profile index line");
-    expect(estimateTokens(resources.memoryContextFile.content)).toBeLessThan(
-      estimateTokens(legacyResources.memoryContextFile.content),
-    );
+    const resources = await createPromptServiceForDescriptor(config, descriptor)
+      .getMemoryRuntimeResources(descriptor);
+    const content = resources.memoryContextFile.content;
+    expect(content).toContain("Session line");
+    expect(content).toContain("Profile line");
+    expect(content).toContain("\n# Common Knowledge\n\nCommon fact");
+    expect(content).not.toContain("Cortex");
+    expect(content).not.toContain("Profile index line");
+    expect(content).not.toContain("Global index line");
   });
+
 });

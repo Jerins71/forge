@@ -31,13 +31,7 @@ interface InboxOriginSnapshot {
 function selectInboxOriginSnapshot(state: ManagerWsState): InboxOriginSnapshot {
   const profiles = state.profiles.filter((profile) => !profile.archivedAt && profile.profileType !== 'system')
   const profilesById = new Map(profiles.map((profile) => [profile.profileId, profile]))
-  const cortexProfileIds = new Set(
-    state.agents
-      .filter((agent) => agent.role === 'manager' && agent.archetypeId === 'cortex' && agent.profileId)
-      .map((agent) => agent.profileId!),
-  )
-  const visibleProfiles = profiles.filter((profile) => !cortexProfileIds.has(profile.profileId))
-  const visibleProfileIds = new Set(visibleProfiles.map((profile) => profile.profileId))
+  const visibleProfileIds = new Set(profiles.map((profile) => profile.profileId))
   const sessions = state.agents.flatMap((agent): RoomsInboxSessionInput[] => {
     const profileId = agent.profileId
     if (
@@ -68,7 +62,7 @@ function selectInboxOriginSnapshot(state: ManagerWsState): InboxOriginSnapshot {
       cli: Boolean(agent.cli),
     }]
   })
-  const projects = visibleProfiles.map((profile) => ({
+  const projects = profiles.map((profile) => ({
     originId: LOCAL_ORIGIN_ID,
     profileId: profile.profileId,
     profileName: profile.displayName,
@@ -184,12 +178,11 @@ export function RoomsInboxLive({
   }
 
   const localSessionById = useMemo(() => {
-    const sessions = new Map<string, { session: ProfileTreeRow['sessions'][number]; isCortex: boolean; sessionAgentIds: Set<string> }>()
+    const sessions = new Map<string, { session: ProfileTreeRow['sessions'][number]; sessionAgentIds: Set<string> }>()
     for (const row of localTreeRows) {
       const sessionAgentIds = new Set(row.sessions.map((session) => session.sessionAgent.agentId))
-      const isCortex = row.sessions.some((session) => session.sessionAgent.archetypeId === 'cortex')
       for (const session of row.sessions) {
-        sessions.set(session.sessionAgent.agentId, { session, isCortex, sessionAgentIds })
+        sessions.set(session.sessionAgent.agentId, { session, sessionAgentIds })
       }
     }
     return sessions
@@ -203,7 +196,6 @@ export function RoomsInboxLive({
     return {
       session: local.session,
       actions: buildSessionContextMenuActions(local.session, sessionMenuActions, {
-        canPromoteToProjectAgent: !local.isCortex,
         onViewCreationHistory: creatorSessionId && local.sessionAgentIds.has(creatorSessionId)
           ? () => onSelectLocal(creatorSessionId)
           : undefined,

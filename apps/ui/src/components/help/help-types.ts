@@ -2,7 +2,6 @@ export type HelpCategory =
   | 'getting-started'
   | 'chat'
   | 'settings'
-  | 'cortex'
   | 'models'
   | 'concepts'
   | 'terminals'

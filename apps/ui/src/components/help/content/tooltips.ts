@@ -7,10 +7,4 @@ export const helpTooltips: HelpTooltipContent[] = [
     articleId: 'settings-theme',
     contextKey: 'settings.general',
   },
-  {
-    id: 'settings.cortex-auto-review',
-    text: 'While Knowledge v2 is enabled, Cortex runs a daily consolidator that merges, archives, and reindexes existing entries. It does not review transcripts, memory files, or reference docs.',
-    articleId: 'cortex-auto-review',
-    contextKey: 'settings.general',
-  },
 ]

@@ -5,7 +5,6 @@ export type VersioningMutationSource =
   | "reference-doc"
   | "reference-index"
   | "legacy-knowledge-migration"
-  | "knowledge-v2"
   | "api-write-file"
   | "api-write-file-restore"
   | "agent-write-tool"
@@ -22,7 +21,6 @@ export interface VersioningMutation {
   promptCategory?: "archetype" | "operational";
   promptId?: string;
   agentId?: string;
-  reviewRunId?: string;
 }
 
 export interface VersioningMutationSink {

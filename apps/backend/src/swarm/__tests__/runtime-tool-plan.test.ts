@@ -54,7 +54,6 @@ function createConfig(rootDir: string): SwarmConfig {
     port: 47187,
     debug: false,
     isDesktop: false,
-    cortexEnabled: true,
     allowNonManagerSubscriptions: false,
     managerDisplayName: "Manager",
     defaultModel: {
@@ -155,11 +154,10 @@ describe("runtime tool plan", () => {
   it("plans worker and manager base tool sets deterministically", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "forge-runtime-tool-plan-"));
 
-    expect(toolNames(createDescriptor(rootDir))).toEqual(["send_message_to_agent", "knowledge"]);
+    expect(toolNames(createDescriptor(rootDir))).toEqual(["send_message_to_agent"]);
     expect(toolNames(createManagerDescriptor(rootDir))).toEqual([
       "list_agents",
       "send_message_to_agent",
-      "knowledge",
       "update_work_graph",
       "accept_work_graph_node",
       "update_plan",
@@ -172,7 +170,6 @@ describe("runtime tool plan", () => {
       "kill_agent",
       "speak_to_user",
       "present_choices",
-      "save_learning",
       "browser_status",
       "browser_open",
       "browser_navigate",
@@ -231,25 +228,13 @@ describe("runtime tool plan", () => {
     );
   });
 
-  it("filters unsafe agent-management tools for Cortex", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "forge-runtime-tool-plan-"));
-    const names = toolNames(createManagerDescriptor(rootDir, { archetypeId: "cortex" }));
-
-    expect(names).not.toContain("list_agents");
-    expect(names).not.toContain("kill_agent");
-    expect(names).not.toContain("task");
-    expect(names).not.toContain("delegate_codex_plugin");
-    expect(names).not.toContain("retry_codex_plugin_worker");
-    expect(names).toContain("spawn_agent");
-  });
-
   it("limits side chats to read-only Forge tools", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "forge-runtime-tool-plan-"));
     const names = toolNames(createManagerDescriptor(rootDir, { sessionPurpose: "side_chat", sideChatSourceAgentId: "parent" }));
 
-    expect(names).toEqual(expect.arrayContaining(["knowledge", "present_choices"]));
-    expect(names.every((name) => ["knowledge", "present_choices", "secure_session_status"].includes(name))).toBe(true);
-    for (const name of ["spawn_agent", "send_message_to_agent", "speak_to_user", "save_learning", "update_plan", "create_goal", "list_agents"]) {
+    expect(names).toEqual(expect.arrayContaining(["present_choices"]));
+    expect(names.every((name) => ["present_choices", "secure_session_status"].includes(name))).toBe(true);
+    for (const name of ["spawn_agent", "send_message_to_agent", "speak_to_user", "update_plan", "create_goal", "list_agents"]) {
       expect(names).not.toContain(name);
     }
   });

@@ -164,8 +164,8 @@ function parseRepoTarget(rawValue: string | null): GitRepoTarget {
   }
 
   const repoTarget = rawValue.trim();
-  if (repoTarget !== "workspace" && repoTarget !== "versioning") {
-    throw new Error("repoTarget must be one of: workspace, versioning.");
+  if (repoTarget !== "workspace") {
+    throw new Error("repoTarget must be: workspace.");
   }
 
   return repoTarget;

@@ -59,7 +59,7 @@ describe('SwarmManager archive gates', () => {
 
     const visibleOrder = manager
       .listProfiles()
-      .filter((profile) => profile.profileId !== 'cortex' && profile.profileType !== 'system' && !profile.archivedAt)
+      .filter((profile) => profile.profileType !== 'system' && !profile.archivedAt)
       .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
       .map((profile) => profile.profileId)
 
@@ -86,7 +86,7 @@ describe('SwarmManager archive gates', () => {
     expect(profiles.find((profile) => profile.profileId === 'beta')?.sortOrder).toBe(archivedSortOrder)
     expect(
       profiles
-        .filter((profile) => profile.profileId !== 'cortex' && profile.profileType !== 'system' && !profile.archivedAt)
+        .filter((profile) => profile.profileType !== 'system' && !profile.archivedAt)
         .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
         .map((profile) => profile.profileId),
     ).toEqual(['gamma', 'manager', 'alpha'])
@@ -113,7 +113,7 @@ describe('SwarmManager archive gates', () => {
     expect(sortOrderById.get('beta')).toBe(archivedSortOrder)
     expect(
       profiles
-        .filter((profile) => profile.profileId !== 'cortex' && profile.profileType !== 'system' && !profile.archivedAt)
+        .filter((profile) => profile.profileType !== 'system' && !profile.archivedAt)
         .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
         .map((profile) => profile.profileId),
     ).toEqual(['gamma', 'alpha', 'manager'])

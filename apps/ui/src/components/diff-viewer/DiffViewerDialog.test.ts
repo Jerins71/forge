@@ -47,18 +47,6 @@ const {
       ],
       summary: { filesChanged: 2, insertions: 11, deletions: 1 },
     },
-    versioning: {
-      repoName: 'forge-data',
-      repoRoot: '/data/forge',
-      repoKind: 'versioning' as const,
-      repoLabel: 'Cortex Knowledge',
-      branch: 'main',
-      files: [
-        { path: 'shared/knowledge/common.md', status: 'modified' as const, additions: 2, deletions: 1 },
-        { path: 'profiles/cortex/memory.md', status: 'modified' as const, additions: 4, deletions: 2 },
-      ],
-      summary: { filesChanged: 2, insertions: 6, deletions: 3 },
-    },
   },
   LOG_BY_TARGET: {
     workspace: [
@@ -77,52 +65,6 @@ const {
         author: 'Dev',
         date: '2026-03-02T12:00:00.000Z',
         filesChanged: 1,
-      },
-    ],
-    versioning: [
-      {
-        sha: 'versioning-1',
-        shortSha: 'versio1',
-        message: 'Knowledge bootstrap',
-        author: 'Cortex',
-        date: '2026-03-03T12:00:00.000Z',
-        filesChanged: 1,
-        metadata: {
-          source: 'agent-edit-tool' as const,
-          sources: ['agent-edit-tool' as const],
-          profileId: 'cortex',
-          sessionId: 'cortex--s1',
-          paths: ['shared/knowledge/common.md'],
-        },
-      },
-      {
-        sha: 'versioning-2',
-        shortSha: 'versio2',
-        message: 'Knowledge refine',
-        author: 'Cortex',
-        date: '2026-03-04T12:00:00.000Z',
-        filesChanged: 1,
-        metadata: {
-          source: 'reference-doc' as const,
-          sources: ['reference-doc' as const],
-          profileId: 'cortex',
-          paths: ['profiles/cortex/reference/refine.md'],
-        },
-      },
-      {
-        sha: 'versioning-3',
-        shortSha: 'versio3',
-        message: 'Prompt refine',
-        author: 'Cortex',
-        date: '2026-03-05T12:00:00.000Z',
-        filesChanged: 1,
-        metadata: {
-          source: 'prompt-save' as const,
-          sources: ['prompt-save' as const],
-          profileId: 'cortex',
-          sessionId: 'cortex--s2',
-          paths: ['profiles/cortex/prompts/archetypes/review.md'],
-        },
       },
     ],
   },
@@ -157,28 +99,12 @@ const {
         activeAgents: [],
       },
     ],
-    versioning: [
-      {
-        id: 'versioning-main',
-        path: '/data/forge',
-        repoRoot: '/data/forge',
-        branch: 'main',
-        headSha: 'fedcba9876543210',
-        isMainWorktree: true,
-        isCurrentContext: true,
-        dirty: true,
-        dirtySummary: { filesChanged: 2, insertions: 6, deletions: 3 },
-        activeAgents: [],
-      },
-    ],
   },
   WORKTREE_ERROR_BY_TARGET: {
     workspace: null as string | null,
-    versioning: null as string | null,
   },
   WORKTREE_NOT_INITIALIZED_BY_TARGET: {
     workspace: false,
-    versioning: false,
   },
   PULL_REQUESTS_QUERY_STATE: {
     data: null as null | {
@@ -214,13 +140,6 @@ const {
       currentHead: 'abcdef1234567890abcdef1234567890abcdef12',
       statusHash: 'abc123statushash',
     },
-    versioning: {
-      branches: [],
-      remotes: [],
-      currentBranch: 'main',
-      currentHead: null,
-      statusHash: null,
-    },
   },
   COMMIT_DETAILS: {
     workspace: {
@@ -242,65 +161,6 @@ const {
         files: [{ path: 'src/gamma.ts', status: 'modified' as const, additions: 5, deletions: 2 }],
       },
     },
-    versioning: {
-      'versioning-1': {
-        sha: 'versioning-1',
-        message: 'Knowledge bootstrap',
-        author: 'Cortex',
-        date: '2026-03-03T12:00:00.000Z',
-        metadata: {
-          source: 'agent-edit-tool' as const,
-          sources: ['agent-edit-tool' as const],
-          profileId: 'cortex',
-          sessionId: 'cortex--s1',
-          paths: ['shared/knowledge/common.md'],
-        },
-        files: [
-          { path: 'shared/knowledge/common.md', status: 'modified' as const, additions: 2, deletions: 1 },
-        ],
-      },
-      'versioning-2': {
-        sha: 'versioning-2',
-        message: 'Knowledge refine',
-        author: 'Cortex',
-        date: '2026-03-04T12:00:00.000Z',
-        metadata: {
-          source: 'reference-doc' as const,
-          sources: ['reference-doc' as const],
-          profileId: 'cortex',
-          paths: ['profiles/cortex/reference/refine.md'],
-        },
-        files: [
-          {
-            path: 'profiles/cortex/reference/refine.md',
-            status: 'modified' as const,
-            additions: 7,
-            deletions: 1,
-          },
-        ],
-      },
-      'versioning-3': {
-        sha: 'versioning-3',
-        message: 'Prompt refine',
-        author: 'Cortex',
-        date: '2026-03-05T12:00:00.000Z',
-        metadata: {
-          source: 'prompt-save' as const,
-          sources: ['prompt-save' as const],
-          profileId: 'cortex',
-          sessionId: 'cortex--s2',
-          paths: ['profiles/cortex/prompts/archetypes/review.md'],
-        },
-        files: [
-          {
-            path: 'profiles/cortex/prompts/archetypes/review.md',
-            status: 'modified' as const,
-            additions: 3,
-            deletions: 0,
-          },
-        ],
-      },
-    },
   },
 }))
 
@@ -308,7 +168,7 @@ vi.mock('./use-diff-queries', () => ({
   useGitStatus: (
     _wsUrl: string,
     agentId: string | null,
-    repoTarget: 'workspace' | 'versioning',
+    repoTarget: 'workspace',
     worktreeId?: string | null,
   ) => {
     hookCalls.status.push({ agentId, repoTarget, worktreeId: worktreeId ?? null })
@@ -322,7 +182,7 @@ vi.mock('./use-diff-queries', () => ({
   useGitBranches: (
     _wsUrl: string,
     agentId: string | null,
-    repoTarget: 'workspace' | 'versioning',
+    repoTarget: 'workspace',
     worktreeId?: string | null,
   ) => {
     hookCalls.branches.push({ agentId, repoTarget, worktreeId: worktreeId ?? null })
@@ -347,7 +207,7 @@ vi.mock('./use-diff-queries', () => ({
   useGitWorktrees: (
     _wsUrl: string,
     agentId: string | null,
-    repoTarget: 'workspace' | 'versioning',
+    repoTarget: 'workspace',
     options?: { enabled?: boolean },
   ) => {
     const enabled = options?.enabled ?? !!agentId
@@ -380,7 +240,7 @@ vi.mock('./use-diff-queries', () => ({
       refetch: vi.fn(() => hookCalls.refetches.push(`worktrees:${repoTarget}`)),
     }
   },
-  useGitDiff: (_wsUrl: string, agentId: string | null, repoTarget: 'workspace' | 'versioning', file: string | null) => {
+  useGitDiff: (_wsUrl: string, agentId: string | null, repoTarget: 'workspace', file: string | null) => {
     hookCalls.diff.push({ agentId, repoTarget, file })
     return {
       data: file
@@ -397,7 +257,7 @@ vi.mock('./use-diff-queries', () => ({
   useGitLog: (
     _wsUrl: string,
     agentId: string | null,
-    repoTarget: 'workspace' | 'versioning',
+    repoTarget: 'workspace',
     limit: number,
     offset: number,
   ) => {
@@ -417,7 +277,7 @@ vi.mock('./use-diff-queries', () => ({
   useGitCommitDetail: (
     _wsUrl: string,
     agentId: string | null,
-    repoTarget: 'workspace' | 'versioning',
+    repoTarget: 'workspace',
     sha: string | null,
   ) => {
     hookCalls.commitDetail.push({ agentId, repoTarget, sha })
@@ -431,7 +291,7 @@ vi.mock('./use-diff-queries', () => ({
   useGitCommitDiff: (
     _wsUrl: string,
     agentId: string | null,
-    repoTarget: 'workspace' | 'versioning',
+    repoTarget: 'workspace',
     sha: string | null,
     file: string | null,
   ) => {
@@ -451,7 +311,7 @@ vi.mock('./use-diff-queries', () => ({
   useGitPullRequests: (
     _wsUrl: string,
     agentId: string | null,
-    repoTarget: 'workspace' | 'versioning',
+    repoTarget: 'workspace',
     worktreeId?: string | null,
     options?: { enabled?: boolean },
   ) => {
@@ -497,9 +357,7 @@ beforeEach(() => {
   }
   invalidateGitCachesMock.mockReset()
   WORKTREE_ERROR_BY_TARGET.workspace = null
-  WORKTREE_ERROR_BY_TARGET.versioning = null
   WORKTREE_NOT_INITIALIZED_BY_TARGET.workspace = false
-  WORKTREE_NOT_INITIALIZED_BY_TARGET.versioning = false
   PULL_REQUESTS_QUERY_STATE.data = null
   PULL_REQUESTS_QUERY_STATE.error = null
   Object.values(remoteApi).forEach((mock) => mock.mockReset())
@@ -533,20 +391,6 @@ beforeEach(() => {
       activeAgents: [],
     },
   )
-  WORKTREES_BY_TARGET.versioning.splice(0, WORKTREES_BY_TARGET.versioning.length,
-    {
-      id: 'versioning-main',
-      path: '/data/forge',
-      repoRoot: '/data/forge',
-      branch: 'main',
-      headSha: 'fedcba9876543210',
-      isMainWorktree: true,
-      isCurrentContext: true,
-      dirty: true,
-      dirtySummary: { filesChanged: 2, insertions: 6, deletions: 3 },
-      activeAgents: [],
-    },
-  )
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
     configurable: true,
     writable: true,
@@ -574,12 +418,10 @@ afterEach(() => {
 function renderInlineContent(
   props: {
     active?: boolean
-    isCortex: boolean
     agentId?: string | null
     externalRefreshNonce?: number
     remoteUpdateSnapshot?: import('@forge/protocol').RemoteUpdateAwarenessProjectSnapshot | null
     onRemoteUpdateSnapshotChange?: (snapshot: import('@forge/protocol').RemoteUpdateAwarenessProjectSnapshot) => void
-    initialRepoTarget?: 'workspace' | 'versioning'
     initialTab?: 'changes' | 'history' | 'incoming' | 'worktrees' | 'pull-requests'
     navigationRequest?: import('./DiffViewerDialog').DiffViewerNavigationRequest | null
     onRequestSourceControlMutation?: (
@@ -598,13 +440,11 @@ function renderInlineContent(
           active: props.active ?? true,
           wsUrl: 'ws://localhost:47187',
           agentId: props.agentId ?? 'agent-1',
-          isCortex: props.isCortex,
           onClose: vi.fn(),
           onRequestSourceControlMutation: props.onRequestSourceControlMutation,
           externalRefreshNonce: props.externalRefreshNonce,
           remoteUpdateSnapshot: props.remoteUpdateSnapshot,
           onRemoteUpdateSnapshotChange: props.onRemoteUpdateSnapshotChange,
-          initialRepoTarget: props.initialRepoTarget,
           initialTab: props.initialTab,
           navigationRequest: props.navigationRequest,
         }),
@@ -616,7 +456,6 @@ function renderInlineContent(
 function renderInlineContentWithBrowse(
   props: {
     active?: boolean
-    isCortex: boolean
     agentId?: string | null
     onBrowseWorktreeFiles: ReturnType<typeof vi.fn>
   },
@@ -630,7 +469,6 @@ function renderInlineContentWithBrowse(
           active: props.active ?? true,
           wsUrl: 'ws://localhost:47187',
           agentId: props.agentId ?? 'agent-1',
-          isCortex: props.isCortex,
           onClose: vi.fn(),
           onBrowseWorktreeFiles: props.onBrowseWorktreeFiles,
         }),
@@ -641,14 +479,9 @@ function renderInlineContentWithBrowse(
 
 function renderDialog(
   props: {
-    isCortex: boolean
     agentId?: string | null
     open?: boolean
-    initialRepoTarget?: 'workspace' | 'versioning'
     initialTab?: 'changes' | 'history' | 'incoming' | 'worktrees' | 'pull-requests'
-    initialSha?: string | null
-    initialFile?: string | null
-    initialQuickFilter?: 'all' | 'shared-knowledge' | 'profile-memory' | 'reference-docs' | 'prompt-overrides'
     onBrowseWorktreeFiles?: ReturnType<typeof vi.fn>
     remoteUpdateSnapshot?: import('@forge/protocol').RemoteUpdateAwarenessProjectSnapshot | null
     onRemoteUpdateSnapshotChange?: (snapshot: import('@forge/protocol').RemoteUpdateAwarenessProjectSnapshot) => void
@@ -664,13 +497,8 @@ function renderDialog(
         onOpenChange: vi.fn(),
         wsUrl: 'ws://localhost:47187',
         agentId: props.agentId ?? 'agent-1',
-        isCortex: props.isCortex,
         onBrowseWorktreeFiles: props.onBrowseWorktreeFiles,
-        initialRepoTarget: props.initialRepoTarget,
         initialTab: props.initialTab,
-        initialSha: props.initialSha,
-        initialFile: props.initialFile,
-        initialQuickFilter: props.initialQuickFilter,
         remoteUpdateSnapshot: props.remoteUpdateSnapshot,
         onRemoteUpdateSnapshotChange: props.onRemoteUpdateSnapshotChange,
         navigationRequest: props.navigationRequest,
@@ -708,11 +536,10 @@ const incomingInspection = {
 }
 
 function ContextSwitchHarness() {
-  const [context, setContext] = useState({ agentId: 'workspace-agent', isCortex: false })
+  const [agentId, setAgentId] = useState('workspace-agent')
   const panelState = usePanelState({
-    activeAgentId: context.agentId,
-    activeAgentArchetypeId: context.isCortex ? 'cortex' : null,
-    activeContextKey: `local:${context.agentId}:${context.isCortex ? 'cortex' : 'workspace'}`,
+    activeAgentId: agentId,
+    activeContextKey: `local:${agentId}`,
     enableKeyboardShortcuts: false,
   })
 
@@ -721,23 +548,18 @@ function ContextSwitchHarness() {
     null,
     createElement('button', {
       type: 'button',
-      onClick: () => panelState.openDiffViewerDeepLink({
-        initialRepoTarget: 'workspace',
-        initialTab: 'incoming',
-      }),
+      onClick: () => panelState.openDiffViewerDeepLink({ initialTab: 'incoming' }),
     }, 'Open Incoming'),
     createElement('button', {
       type: 'button',
-      onClick: () => setContext({ agentId: 'cortex-agent', isCortex: true }),
-    }, 'Switch to Cortex'),
+      onClick: () => setAgentId('other-agent'),
+    }, 'Switch agent'),
     createElement(DiffViewerContent, {
       active: true,
       wsUrl: 'ws://127.0.0.1:47187',
-      agentId: context.agentId,
-      isCortex: context.isCortex,
+      agentId,
       onClose: vi.fn(),
-      remoteUpdateSnapshot: context.isCortex ? null : remoteUpdateSnapshot,
-      initialRepoTarget: panelState.diffViewerInitialState?.initialRepoTarget,
+      remoteUpdateSnapshot,
       initialTab: panelState.diffViewerInitialState?.initialTab,
       navigationRequest: panelState.diffViewerNavigationRequest,
     }),
@@ -750,23 +572,9 @@ async function flushEffects(): Promise<void> {
   await Promise.resolve()
 }
 
-function click(element: HTMLElement): void {
-  flushSync(() => {
-    fireEvent.click(element)
-  })
-}
-
-function findOptionByText(text: string, listName?: string): HTMLElement {
-  const root = listName ? getByRole(document.body, 'listbox', { name: listName }) : document.body
-  const label = getByText(root, text)
-  const option = label.closest('[role="option"]')
-  expect(option).toBeTruthy()
-  return option as HTMLElement
-}
-
 describe('DiffViewerContent', () => {
   it('renders the reusable changes surface without a dialog overlay', async () => {
-    renderInlineContent({ isCortex: false })
+    renderInlineContent({})
     await flushEffects()
 
     expect(queryByRole(document.body, 'dialog')).toBeNull()
@@ -776,12 +584,12 @@ describe('DiffViewerContent', () => {
   })
 
   it('refreshes mounted Source Control status and branches when externalRefreshNonce changes', async () => {
-    renderInlineContent({ isCortex: false, externalRefreshNonce: 0 })
+    renderInlineContent({ externalRefreshNonce: 0 })
     await flushEffects()
     hookCalls.refetches.length = 0
     invalidateGitCachesMock.mockClear()
 
-    renderInlineContent({ isCortex: false, externalRefreshNonce: 1 })
+    renderInlineContent({ externalRefreshNonce: 1 })
     await waitFor(() => {
       expect(invalidateGitCachesMock).toHaveBeenCalledWith({ agentId: 'agent-1', repoTarget: 'workspace' })
     })
@@ -793,32 +601,27 @@ describe('DiffViewerContent', () => {
   it('honors a later, uniquely identified Incoming deep link while already open', async () => {
     remoteApi.fetchRemoteUpdateAwarenessIncoming.mockResolvedValue({ incoming: incomingInspection })
     renderInlineContent({
-      isCortex: true,
       remoteUpdateSnapshot,
       navigationRequest: null,
     })
     await flushEffects()
-    expect(hookCalls.status.at(-1)?.repoTarget).toBe('versioning')
+    expect(getByRole(document.body, 'listbox', { name: 'Changed files' })).toBeTruthy()
 
     renderInlineContent({
-      isCortex: true,
       remoteUpdateSnapshot,
       navigationRequest: {
         requestId: 1,
-        initialRepoTarget: 'workspace',
         initialTab: 'incoming',
       },
     })
 
     await waitFor(() => expect(getByRole(document.body, 'heading', { name: 'Incoming' })).toBeTruthy())
-    expect(hookCalls.status.at(-1)?.repoTarget).toBe('workspace')
     expect(getByRole(document.body, 'button', { name: 'Incoming' }).getAttribute('aria-pressed')).toBe('true')
   })
 
   it('does not retain the History footer after switching to Incoming', async () => {
     remoteApi.fetchRemoteUpdateAwarenessIncoming.mockResolvedValue({ incoming: incomingInspection })
     renderInlineContent({
-      isCortex: false,
       initialTab: 'history',
       remoteUpdateSnapshot,
     })
@@ -837,7 +640,7 @@ describe('DiffViewerContent', () => {
     expect(document.body.querySelector('[aria-live="polite"]')).toBeNull()
   })
 
-  it('uses Cortex defaults after an open Incoming deep link crosses agent context', async () => {
+  it('resets to defaults after an open Incoming deep link crosses agent context', async () => {
     remoteApi.fetchRemoteUpdateAwarenessIncoming.mockResolvedValue({ incoming: incomingInspection })
     root = createRoot(container)
     act(() => root?.render(createElement(ContextSwitchHarness)))
@@ -845,17 +648,16 @@ describe('DiffViewerContent', () => {
     fireEvent.click(getByRole(document.body, 'button', { name: 'Open Incoming' }))
     await waitFor(() => expect(getByRole(document.body, 'heading', { name: 'Incoming' })).toBeTruthy())
 
-    fireEvent.click(getByRole(document.body, 'button', { name: 'Switch to Cortex' }))
+    fireEvent.click(getByRole(document.body, 'button', { name: 'Switch agent' }))
     await waitFor(() => {
-      expect(getByRole(document.body, 'button', { name: 'Toggle History section' }).getAttribute('aria-expanded')).toBe('true')
-      expect(getByRole(document.body, 'button', { name: 'Cortex Knowledge' }).getAttribute('aria-pressed')).toBe('true')
+      expect(getByRole(document.body, 'button', { name: 'Toggle Changes section' }).getAttribute('aria-expanded')).toBe('true')
     })
     expect(queryByRole(document.body, 'heading', { name: 'Incoming' })).toBeNull()
     expect(document.body.textContent).not.toContain('Incoming changes are unavailable')
   })
 
   it('shows an explicit unavailable state instead of falling through to Pull Requests without a snapshot', async () => {
-    renderInlineContent({ isCortex: false, initialTab: 'incoming', remoteUpdateSnapshot: null })
+    renderInlineContent({ initialTab: 'incoming', remoteUpdateSnapshot: null })
     await flushEffects()
 
     expect(getByRole(document.body, 'status').textContent).toContain('Incoming changes are unavailable')
@@ -876,14 +678,11 @@ describe('DiffViewerDialog', () => {
     const onSnapshotChange = vi.fn()
 
     renderDialog({
-      isCortex: false,
-      initialRepoTarget: 'workspace',
       initialTab: 'incoming',
       remoteUpdateSnapshot,
       onRemoteUpdateSnapshotChange: onSnapshotChange,
       navigationRequest: {
         requestId: 1,
-        initialRepoTarget: 'workspace',
         initialTab: 'incoming',
       },
     })
@@ -899,25 +698,8 @@ describe('DiffViewerDialog', () => {
     ))
   })
 
-  it('defaults Cortex sessions to History + versioning and renders enhanced summaries with badges', async () => {
-    renderDialog({ isCortex: true })
-    await flushEffects()
-
-    expect(getByRole(document.body, 'listbox', { name: 'Commit history' })).toBeTruthy()
-    expect(getByRole(document.body, 'group', { name: 'Repository target' })).toBeTruthy()
-    expect(queryByRole(document.body, 'listbox', { name: 'Changed files' })).toBeTruthy()
-    expect(hookCalls.status.at(-1)?.repoTarget).toBe('versioning')
-    expect(hookCalls.log.at(-1)?.repoTarget).toBe('versioning')
-    expect(getByRole(document.body, 'button', { name: 'Cortex Knowledge' }).getAttribute('aria-pressed')).toBe('true')
-    expect(getByRole(document.body, 'button', { name: 'Toggle History section' }).getAttribute('aria-expanded')).toBe('true')
-    expect(getByText(document.body, 'Updated common knowledge for cortex (session cortex--s1)')).toBeTruthy()
-    expect(getByText(document.body, 'Edit tool')).toBeTruthy()
-    expect(document.body.textContent).toContain('Profile cortex')
-    expect(document.body.textContent).toContain('Session cortex--s1')
-  })
-
-  it('defaults non-Cortex sessions to Changes + workspace and hides the selector', async () => {
-    renderDialog({ isCortex: false })
+  it('defaults to Changes + workspace without a repository selector', async () => {
+    renderDialog({})
     await flushEffects()
 
     expect(getByRole(document.body, 'listbox', { name: 'Changed files' })).toBeTruthy()
@@ -942,7 +724,7 @@ describe('DiffViewerDialog', () => {
   })
 
   it('loads worktree inventory only when the Worktrees tab is active', async () => {
-    renderDialog({ isCortex: false })
+    renderDialog({})
     await flushEffects()
     expect(hookCalls.worktrees.every((call) => call.enabled === false)).toBe(true)
 
@@ -952,7 +734,7 @@ describe('DiffViewerDialog', () => {
   })
 
   it('does not load or refresh pull requests for the badge before the Pull Requests tab has been visited', async () => {
-    renderDialog({ isCortex: false })
+    renderDialog({})
     await flushEffects()
 
     expect(hookCalls.pullRequests.every((call) => call.enabled === false)).toBe(true)
@@ -979,7 +761,7 @@ describe('DiffViewerDialog', () => {
       context: { repoTarget: 'workspace' },
     }
 
-    renderDialog({ isCortex: false })
+    renderDialog({})
     await flushEffects()
     const sourceControlShortcutsBefore = getByRole(document.body, 'navigation', { name: 'Source Control shortcuts' })
     expect(within(sourceControlShortcutsBefore).queryByText('2')).toBeNull()
@@ -1012,7 +794,7 @@ describe('DiffViewerDialog', () => {
       context: { repoTarget: 'workspace' },
     }
 
-    renderDialog({ isCortex: false, initialTab: 'pull-requests' })
+    renderDialog({ initialTab: 'pull-requests' })
     await flushEffects()
 
     const sourceControlShortcuts = getByRole(document.body, 'navigation', { name: 'Source Control shortcuts' })
@@ -1037,7 +819,7 @@ describe('DiffViewerDialog', () => {
       context: { repoTarget: 'workspace' },
     }
 
-    renderDialog({ isCortex: false, initialTab: 'pull-requests' })
+    renderDialog({ initialTab: 'pull-requests' })
     await flushEffects()
 
     const sourceControlShortcuts = getByRole(document.body, 'navigation', { name: 'Source Control shortcuts' })
@@ -1063,7 +845,7 @@ describe('DiffViewerDialog', () => {
       context: { repoTarget: 'workspace' },
     }
 
-    renderDialog({ isCortex: false, initialTab: 'pull-requests' })
+    renderDialog({ initialTab: 'pull-requests' })
     await flushEffects()
 
     const sourceControlShortcuts = getByRole(document.body, 'navigation', { name: 'Source Control shortcuts' })
@@ -1071,7 +853,7 @@ describe('DiffViewerDialog', () => {
   })
 
   it('keeps Changes and History reachable from Pull Requests without a blank activity pane', async () => {
-    renderDialog({ isCortex: false, initialTab: 'pull-requests' })
+    renderDialog({ initialTab: 'pull-requests' })
     await flushEffects()
 
     expect(getByRole(document.body, 'button', { name: 'Pull Requests' }).getAttribute('aria-pressed')).toBe('true')
@@ -1091,7 +873,7 @@ describe('DiffViewerDialog', () => {
   })
 
   it('renders the read-only Worktrees tab with compact activity navigation and worktree state', async () => {
-    renderDialog({ isCortex: false, initialTab: 'worktrees' })
+    renderDialog({ initialTab: 'worktrees' })
     await flushEffects()
 
     expect(getByRole(document.body, 'button', { name: 'Worktrees' }).getAttribute('aria-pressed')).toBe('true')
@@ -1118,7 +900,7 @@ describe('DiffViewerDialog', () => {
 
   it('invokes browse callback for a worktree', async () => {
     const onBrowseWorktreeFiles = vi.fn()
-    renderInlineContentWithBrowse({ isCortex: false, onBrowseWorktreeFiles })
+    renderInlineContentWithBrowse({ onBrowseWorktreeFiles })
     await flushEffects()
 
     fireEvent.click(getByRole(document.body, 'button', { name: 'Worktrees' }))
@@ -1135,7 +917,7 @@ describe('DiffViewerDialog', () => {
 
   it('invokes modal browse callback for a worktree', async () => {
     const onBrowseWorktreeFiles = vi.fn()
-    renderDialog({ isCortex: false, initialTab: 'worktrees', onBrowseWorktreeFiles })
+    renderDialog({ initialTab: 'worktrees', onBrowseWorktreeFiles })
     await flushEffects()
 
     fireEvent.click(getAllByRole(document.body, 'button', { name: 'Browse files' })[1])
@@ -1149,7 +931,7 @@ describe('DiffViewerDialog', () => {
   })
 
   it('selects alternate worktree context for Changes and passes worktreeId to status hook', async () => {
-    renderInlineContent({ isCortex: false })
+    renderInlineContent({})
     await flushEffects()
 
     fireEvent.click(getByRole(document.body, 'button', { name: 'Worktrees' }))
@@ -1164,7 +946,7 @@ describe('DiffViewerDialog', () => {
 
   it('keeps Changes reachable from the Worktrees empty state', async () => {
     WORKTREES_BY_TARGET.workspace.splice(0, WORKTREES_BY_TARGET.workspace.length)
-    renderDialog({ isCortex: false, initialTab: 'worktrees' })
+    renderDialog({ initialTab: 'worktrees' })
     await flushEffects()
 
     expect(getByText(document.body, 'No worktrees were reported for this repository.')).toBeTruthy()
@@ -1175,7 +957,7 @@ describe('DiffViewerDialog', () => {
 
   it('keeps History reachable from the Worktrees error state without leaving read-only mode', async () => {
     WORKTREE_ERROR_BY_TARGET.workspace = 'worktree inventory unavailable'
-    renderDialog({ isCortex: false, initialTab: 'worktrees' })
+    renderDialog({ initialTab: 'worktrees' })
     await flushEffects()
 
     expect(getByText(document.body, 'Failed to load worktrees: worktree inventory unavailable')).toBeTruthy()
@@ -1188,7 +970,7 @@ describe('DiffViewerDialog', () => {
 
   it('keeps Changes reachable from the Worktrees not-initialized state', async () => {
     WORKTREE_NOT_INITIALIZED_BY_TARGET.workspace = true
-    renderDialog({ isCortex: false, initialTab: 'worktrees' })
+    renderDialog({ initialTab: 'worktrees' })
     await flushEffects()
 
     expect(getByText(document.body, 'This workspace is not a Git repository.')).toBeTruthy()
@@ -1197,69 +979,11 @@ describe('DiffViewerDialog', () => {
     expect(getByRole(document.body, 'listbox', { name: 'Changed files' })).toBeTruthy()
   })
 
-  it('changes repo-target hook params and resets history selection state when the selector changes', async () => {
-    renderDialog({ isCortex: true })
-    await flushEffects()
-
-    click(findOptionByText('Synced reference docs for cortex'))
-    await flushEffects()
-    expect(findOptionByText('Synced reference docs for cortex').getAttribute('aria-selected')).toBe('true')
-
-    click(findOptionByText('refine.md'))
-    await flushEffects()
-    expect(findOptionByText('refine.md').getAttribute('aria-selected')).toBe('true')
-
-    click(getByRole(document.body, 'button', { name: 'Workspace' }))
-    await flushEffects()
-
-    await waitFor(() => {
-      expect(hookCalls.status.at(-1)?.repoTarget).toBe('workspace')
-      expect(hookCalls.log.at(-1)?.repoTarget).toBe('workspace')
-      expect(hookCalls.commitDetail.at(-1)?.repoTarget).toBe('workspace')
-      expect(hookCalls.commitDiff.at(-1)?.repoTarget).toBe('workspace')
-      expect(findOptionByText('Workspace bootstrap', 'Commit history').getAttribute('aria-selected')).toBe('true')
-      expect(findOptionByText('alpha.ts', 'Commit files').getAttribute('aria-selected')).toBe('true')
-      expect(queryByRole(document.body, 'button', { name: 'Cortex Knowledge' })?.getAttribute('aria-pressed')).toBe('false')
-      expect(getByRole(document.body, 'button', { name: 'Workspace' }).getAttribute('aria-pressed')).toBe('true')
-    })
-  })
-
-  it('applies deep-link initial repo target, tab, sha, file, and quick filter', async () => {
-    renderDialog({
-      isCortex: true,
-      initialRepoTarget: 'versioning',
-      initialTab: 'history',
-      initialSha: 'versioning-3',
-      initialFile: 'profiles/cortex/prompts/archetypes/review.md',
-      initialQuickFilter: 'prompt-overrides',
-    })
-    await flushEffects()
+  it('applies the deep-link initial tab', async () => {
+    renderDialog({ initialTab: 'history' })
     await flushEffects()
 
     expect(getByRole(document.body, 'button', { name: 'Toggle History section' }).getAttribute('aria-expanded')).toBe('true')
-    expect(getByRole(document.body, 'button', { name: 'Cortex Knowledge' }).getAttribute('aria-pressed')).toBe('true')
-    expect(getAllByRole(document.body, 'button', { name: 'Prompt overrides' })[0]?.getAttribute('aria-pressed')).toBe('true')
-    expect(findOptionByText('Prompt override edited for cortex (session cortex--s2)').getAttribute('aria-selected')).toBe('true')
-    expect(findOptionByText('review.md').getAttribute('aria-selected')).toBe('true')
-    expect(queryByText(document.body, 'Updated common knowledge for cortex (session cortex--s1)')).toBeNull()
   })
 
-  it('filters commit rows and file rows with knowledge quick filters', async () => {
-    renderDialog({ isCortex: true })
-    await flushEffects()
-
-    const history = getByRole(document.body, 'region', { name: 'History' })
-    const promptFilter = getAllByRole(history, 'button', { name: 'Prompt overrides' })[0]
-    click(promptFilter)
-    await flushEffects()
-    await flushEffects()
-
-    expect(getByText(history, 'Prompt override edited for cortex (session cortex--s2)')).toBeTruthy()
-    expect(queryByText(history, 'Updated common knowledge for cortex (session cortex--s1)')).toBeNull()
-    expect(queryByText(history, 'Synced reference docs for cortex')).toBeNull()
-    expect(findOptionByText('review.md', 'Commit files')).toBeTruthy()
-    const commitFiles = getByRole(document.body, 'listbox', { name: 'Commit files' })
-    expect(within(commitFiles).queryByText('common.md')).toBeNull()
-    expect(within(commitFiles).queryByText('refine.md')).toBeNull()
-  })
 })

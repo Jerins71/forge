@@ -203,13 +203,13 @@ describe("SessionDescriptorFactory", () => {
 
     const prepared = harness.factory.prepareSessionCreationFromBase("forge", base, {
       label: "Research",
-      sessionPurpose: "capture_check",
+      sessionPurpose: "side_chat",
     });
 
     expect(prepared.sessionDescriptor).toMatchObject({
       displayName: "Research",
       sessionLabel: "Research",
-      sessionPurpose: "capture_check",
+      sessionPurpose: "side_chat",
       cwd: "/workspace/base",
       model: base.model,
       modelOrigin: "session_override",
@@ -245,16 +245,6 @@ describe("SessionDescriptorFactory", () => {
       sessionLabel: "Custom Creator",
       displayName: "Custom Creator",
     });
-  });
-
-  it("rejects agent-creator sessions in Cortex", async () => {
-    const harness = await createHarness("cortex");
-
-    expect(() =>
-      harness.factory.prepareSessionCreation("cortex", {
-        sessionPurpose: "agent_creator",
-      }),
-    ).toThrow("Agent creator sessions cannot be created in the Cortex profile");
   });
 
   it("reports missing profiles and default-session templates exactly", async () => {

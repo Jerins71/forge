@@ -69,13 +69,12 @@ describe('ActivityRail', () => {
     expect(badge?.className).toContain('ring-sidebar')
   })
 
-  it('uses the Rooms inboard treatment and reserves the bottom slot for Cortex', () => {
+  it('uses the Rooms inboard treatment', () => {
     act(() => {
       root = createRoot(container)
       root.render(
         createElement(ActivityRail, {
           roomsV2: true,
-          cortex: createElement('button', { type: 'button', 'aria-label': 'Cortex' }),
           items: [{ id: 'chat', label: 'Chat', icon: MessageSquare, active: true, onClick: vi.fn() }],
         }),
       )
@@ -84,7 +83,6 @@ describe('ActivityRail', () => {
     const nav = container.querySelector('nav[aria-label="Activity rail"]')
     expect(nav?.className).toContain('border-x')
     expect(nav?.querySelector('button[aria-label="Chat"]')?.className).toContain('size-[34px]')
-    expect(nav?.querySelector('[data-testid="cortex-rail-slot"] button[aria-label="Cortex"]')).not.toBeNull()
   })
 
   it('shows shortcut labels in tooltips and aria labels', () => {

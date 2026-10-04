@@ -1265,7 +1265,7 @@ describe("RuntimeEventProjector", () => {
       role: "manager",
       managerId: "cortex-manager",
       profileId: "cortex",
-      sessionPurpose: "cortex_review",
+      sessionPurpose: "agent_creator",
     });
     const projectAgent = baseDescriptor({
       agentId: "project-agent",

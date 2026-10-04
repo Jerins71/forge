@@ -8,7 +8,7 @@ type WorkerHealthHostState = Pick<
 
 type LateBoundHostServices = Pick<
   SwarmRuntimeControllerHost,
-  "conversationProjector" | "promptService" | "secretsEnvService" | "cortexService"
+  "conversationProjector" | "promptService" | "secretsEnvService"
 >;
 
 type AdapterOwnedHostKeys =
@@ -80,9 +80,6 @@ export function createSwarmRuntimeControllerHost(
     get secretsEnvService() {
       return getLateBoundServices().secretsEnvService;
     },
-    get cortexService() {
-      return getLateBoundServices().cortexService;
-    },
 
     listAgents: toolHost.listAgents.bind(toolHost),
     getContextMode: toolHost.getContextMode.bind(toolHost),
@@ -102,9 +99,6 @@ export function createSwarmRuntimeControllerHost(
     createGoal: toolHost.createGoal.bind(toolHost),
     getGoal: toolHost.getGoal.bind(toolHost),
     updateGoal: toolHost.updateGoal.bind(toolHost),
-    searchKnowledge: toolHost.searchKnowledge?.bind(toolHost),
-    readKnowledgeEntry: toolHost.readKnowledgeEntry?.bind(toolHost),
-    saveLearning: toolHost.saveLearning?.bind(toolHost),
     isSecureSessionsEnabledForAgent: toolHost.isSecureSessionsEnabledForAgent?.bind(toolHost),
     getSecureSessionAgentView: toolHost.getSecureSessionAgentView?.bind(toolHost),
     requestSecureSecretAccess: toolHost.requestSecureSecretAccess?.bind(toolHost),

@@ -2,8 +2,6 @@ The sidebar on the left is your main navigation for everything in Forge. The new
 
 Use the Archive view from the sidebar to review archived projects and directly archived sessions. Archive entries are sorted by last user-message activity and show the last-used date. Restore and reopen them when needed. The Archive view is separate from the active session list. Other system profiles remain hidden from the sidebar/profile lists.
 
-On desktop, Cortex lives in the activity-rail popover. On mobile, and in Classic, it remains a pinned sidebar row.
-
 ## Inbox
 
 Inbox is the default new project view. It lists:
@@ -30,7 +28,7 @@ The search bar at the top filters sessions and workers by name in one result set
 
 ## Profile actions
 
-For a Builder project, right-click its header and choose **Project Settings**. You can also hover the header, or focus its actions button, then open the **…** menu. The page stays scoped to that selected project and provides its name, working directory, default model and reasoning level, Context management, Project secrets, and Repository resources `.forge` controls. Context management is the project default for Summary vs experimental Context v2. Cortex does not offer Project Settings.
+For a Builder project, right-click its header and choose **Project Settings**. You can also hover the header, or focus its actions button, then open the **…** menu. The page stays scoped to that selected project and provides its name, working directory, default model and reasoning level, Context management, Project secrets, and Repository resources `.forge` controls. Context management is the project default for Summary vs experimental Context v2.
 
 The direct header context-menu shortcuts remain: New Session, Create Project Agent, Rename, Change Default Model, Change Working Directory, Project Secrets, Mark All as Read, Mute/Unmute All Sessions, Archive Project, and Delete Manager. Changing the default model updates the project default for new conversations only; existing sessions retain their stored model. Changing the working directory updates the CWD for all sessions in the profile — active workers keep their old CWD, but new spawns inherit the new path. Archiving a project marks only the profile as archived, not each session individually, but the whole project becomes read-only and unusable until restored.
 
@@ -46,4 +44,4 @@ Sessions with active workers show a numbered amber badge. Sessions in compaction
 
 ## Mobile
 
-On smaller screens, the sidebar is hidden by default. Tap the hamburger menu in the header to open it. An unread badge shows on the menu button when there are unread messages. Cortex stays in the sidebar on mobile because the desktop activity rail is hidden.
+On smaller screens, the sidebar is hidden by default. Tap the hamburger menu in the header to open it. An unread badge shows on the menu button when there are unread messages.

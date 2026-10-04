@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { fireEvent, getByText, queryByText } from '@testing-library/dom'
+import { fireEvent, getByText } from '@testing-library/dom'
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
@@ -39,84 +39,7 @@ async function flushPromises(): Promise<void> {
 }
 
 describe('SettingsPrompts', () => {
-  it('collapses Cortex prompt selection into a single picker for the cortex profile', async () => {
-    const profiles: ManagerProfile[] = [
-      {
-        profileId: 'cortex',
-        displayName: 'Cortex',
-        defaultSessionAgentId: 'cortex',
-        defaultModel: { provider: 'openai-codex', modelId: 'gpt-5.5', thinkingLevel: 'medium' },
-        createdAt: '2026-03-16T00:00:00.000Z',
-        updatedAt: '2026-03-16T00:00:00.000Z',
-      },
-    ]
-
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [],
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          enabled: true,
-          surfaces: [
-            {
-              surfaceId: 'cortex-system-prompt',
-              title: 'Cortex System Prompt',
-              description: 'Core instructions for Cortex.',
-              group: 'system',
-              kind: 'registry',
-              editable: true,
-              resetMode: 'profileOverride',
-              runtimeEffect: 'liveImmediate',
-              category: 'archetype',
-              promptId: 'cortex',
-              activeLayer: 'builtin',
-              sourcePath: '/tmp/cortex.md',
-              seedPrompt: null,
-            },
-          ],
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          category: 'archetype',
-          promptId: 'cortex',
-          content: 'You are Cortex.',
-          sourceLayer: 'builtin',
-          sourcePath: '/tmp/cortex.md',
-          variables: [],
-        }),
-      }) as typeof fetch
-
-    root = createRoot(container)
-    flushSync(() => {
-      root?.render(
-        createElement(
-          HelpProvider,
-          null,
-          createElement(SettingsPrompts, {
-            wsUrl: 'ws://127.0.0.1:47187',
-            profiles,
-            promptChangeKey: 0,
-          }),
-        ),
-      )
-    })
-
-    await flushPromises()
-    await flushPromises()
-
-    expect(queryByText(container, 'Category')).toBeNull()
-    expect(getByText(container, 'Cortex item')).toBeTruthy()
-    expect(container.textContent).toContain('Cortex System Prompt')
-    expect(getByText(container, /Browse Cortex prompts, seed templates, live files, and scratch surfaces/)).toBeTruthy()
-  })
-
-  it('keeps category selection for non-cortex profiles', async () => {
+  it('shows category and prompt selection', async () => {
     const profiles: ManagerProfile[] = [
       {
         profileId: 'feature-manager',
@@ -143,10 +66,6 @@ describe('SettingsPrompts', () => {
             variables: [],
           },
         ],
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ enabled: false, surfaces: [] }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -180,7 +99,6 @@ describe('SettingsPrompts', () => {
 
     expect(getByText(container, 'Category')).toBeTruthy()
     expect(getByText(container, 'Prompt')).toBeTruthy()
-    expect(queryByText(container, 'Cortex item')).toBeNull()
   })
 
   it('requests preview for the active session when preview session context is provided', async () => {
@@ -212,10 +130,6 @@ describe('SettingsPrompts', () => {
             },
           ],
         }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ enabled: false, surfaces: [] }),
       })
       .mockResolvedValueOnce({
         ok: true,

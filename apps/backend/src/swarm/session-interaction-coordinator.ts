@@ -18,13 +18,11 @@ import type {
   UpdateWorkGraphInput,
   WorkGraphDispatchClaim,
 } from "./planning/work-graph-state.js";
-import { normalizeArchetypeId } from "./prompts/prompt-registry.js";
 import { resolveManagerDelegation } from "./specialists/delegation-policy.js";
 import { normalizeSpecialistHandle } from "./agents/specialists/specialist-registry.js";
 import type { SwarmAgentLifecycleService } from "./swarm-agent-lifecycle-service.js";
 import type { SwarmChoiceService } from "./swarm-choice-service.js";
 import {
-  normalizeCortexUserVisiblePaths,
   normalizeMessageSourceContext,
   normalizeMessageTargetContext,
   previewForLog,
@@ -42,8 +40,6 @@ import type {
   SendMessageReceipt,
   SpawnAgentInput,
 } from "./types.js";
-
-const CORTEX_ARCHETYPE_ID = "cortex";
 
 export type ResetManagerSessionReason = "user_new_command" | "api_reset";
 export type PublishToUserSource = "speak_to_user" | "system";
@@ -161,7 +157,6 @@ export class SessionInteractionCoordinator {
     const owners = Array.from(this.options.descriptors.values()).filter(
       (descriptor): descriptor is SessionOwner =>
         descriptor.role === "manager" &&
-        normalizeArchetypeId(descriptor.archetypeId ?? "") !== CORTEX_ARCHETYPE_ID &&
         this.options.directory.isSessionAgent(descriptor),
     );
     await this.options.plans.preload(owners);
@@ -502,10 +497,9 @@ export class SessionInteractionCoordinator {
     // profile boundary, and it is the sole path for surfacing a blocker to that
     // user while the turn's final output is routed back to the external peer.
     let resolvedTargetContext: MessageSourceContext;
-    let normalizedText = text;
 
     if (source === "speak_to_user") {
-      const descriptor = this.options.directory.assertManager(agentId, "speak to user");
+      this.options.directory.assertManager(agentId, "speak to user");
       resolvedTargetContext = this.resolveReplyTargetContext(targetContext);
       const activeTurnId = this.options.turns.getActiveTurnId(agentId);
       if (this.options.turns.hasPendingSupersedingUserInput(agentId, activeTurnId)) {
@@ -521,9 +515,6 @@ export class SessionInteractionCoordinator {
           reason: "superseded_by_user_input",
         };
       }
-      if (normalizeArchetypeId(descriptor.archetypeId ?? "") === CORTEX_ARCHETYPE_ID) {
-        normalizedText = normalizeCortexUserVisiblePaths(text);
-      }
     } else {
       resolvedTargetContext = normalizeMessageSourceContext(targetContext ?? { channel: "web" });
     }
@@ -532,7 +523,7 @@ export class SessionInteractionCoordinator {
       type: "conversation_message",
       agentId,
       role: source === "system" ? "system" : "assistant",
-      text: normalizedText,
+      text,
       timestamp: this.options.now(),
       source,
       sourceContext: resolvedTargetContext,
@@ -548,7 +539,7 @@ export class SessionInteractionCoordinator {
       source,
       agentId,
       targetContext: resolvedTargetContext,
-      textPreview: previewForLog(normalizedText),
+      textPreview: previewForLog(text),
     });
     return { targetContext: resolvedTargetContext, published: true };
   }
@@ -617,12 +608,6 @@ export class SessionInteractionCoordinator {
           ? `${operationLabel} is only available to manager sessions.`
           : "planStep is only available to manager sessions with a current working plan.",
       );
-    }
-    if (
-      operation !== "planStep" &&
-      normalizeArchetypeId(descriptor.archetypeId ?? "") === CORTEX_ARCHETYPE_ID
-    ) {
-      throw new Error(`${operationLabel} is not available for Cortex sessions.`);
     }
     if (!this.options.directory.isSessionAgent(descriptor)) {
       throw new Error(

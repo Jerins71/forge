@@ -8,7 +8,6 @@ import { getCatalogModelKey } from '@forge/protocol'
 import { getConversationHistoryCacheFilePath } from '../session/conversation-history-cache.js'
 import {
   getCommonKnowledgePath,
-  getCortexReviewLogPath,
   getProfileKnowledgePath,
   getProfileMemoryPath,
   getProfilePiSkillsDir,
@@ -855,7 +854,7 @@ describe('SwarmManager', () => {
     const resources = await manager.getMemoryRuntimeResourcesForTest()
     expect(resources.memoryContextFile.path).toBe(rootSessionMemoryPath)
     expect(resources.memoryContextFile.content).toContain(persistedMemory.trim())
-    expect(resources.memoryContextFile.content).toContain('# Common Knowledge (maintained by Cortex — read-only reference)')
+    expect(resources.memoryContextFile.content).not.toContain('# Common Knowledge')
     expect(resources.additionalSkillPaths.length).toBeGreaterThanOrEqual(9)
 
     const memorySkillPath = resources.additionalSkillPaths.find((path) => path.endsWith(join('memory', 'SKILL.md')))

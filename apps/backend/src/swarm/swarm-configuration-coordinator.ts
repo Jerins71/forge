@@ -39,7 +39,7 @@ import {
   type ResolvedSpecialistDefinitionLike,
   type SpecialistRegistryModule,
 } from "./prompt-resource-coordinator.js";
-import { normalizeArchetypeId, type PromptRegistry } from "./prompts/prompt-registry.js";
+import type { PromptRegistry } from "./prompts/prompt-registry.js";
 import type { RuntimeErrorEvent } from "./runtime-contracts.js";
 import {
   getManagedModelProviderCredentialAvailability,
@@ -65,9 +65,6 @@ import type {
   SwarmModelPreset,
   SwarmReasoningLevel,
 } from "./types.js";
-
-const CORTEX_ARCHETYPE_ID = "cortex";
-const CORTEX_PROFILE_ID = "cortex";
 
 type ManagerSessionDescriptor = AgentDescriptor & {
   role: "manager";
@@ -194,8 +191,6 @@ export class SwarmConfigurationCoordinator {
       getAllManagerSessions: options.sessions.getAllManagerSessions,
       getSessionById: options.sessions.getSessionById,
       resolveAndValidateCwd: (cwd) => this.resolveAndValidateCwd(cwd),
-      assertCanChangeManagerCwd: (profileId, sessions) =>
-        this.assertCanChangeManagerCwd(profileId, sessions),
       applyManagerRuntimeRecyclePolicy: options.applyManagerRuntimeRecyclePolicy,
       hasActiveSecureSession: (agentId) =>
         options.secureSessions.hasActiveSession(agentId),
@@ -661,21 +656,6 @@ export class SwarmConfigurationCoordinator {
 
   loadSecretsStore(): Promise<void> {
     return this.secrets.loadSecretsStore();
-  }
-
-  private assertCanChangeManagerCwd(
-    profileId: string,
-    sessions: ManagerSessionDescriptor[],
-  ): void {
-    if (
-      profileId === CORTEX_PROFILE_ID ||
-      sessions.some(
-        (descriptor) =>
-          normalizeArchetypeId(descriptor.archetypeId ?? "") === CORTEX_ARCHETYPE_ID,
-      )
-    ) {
-      throw new Error("Cannot change working directory for Cortex profile");
-    }
   }
 
   private getCwdPolicy(): { rootDir: string; allowlistRoots: string[]; enforceAllowlist: boolean } {

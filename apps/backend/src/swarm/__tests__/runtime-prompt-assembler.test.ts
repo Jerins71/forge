@@ -110,7 +110,7 @@ describe("runtime-prompt-assembler", () => {
     expect(prompt).toContain(`## ${sessionMemoryPath}`);
     expect(prompt).toContain("# Manager Memory (shared across all sessions — read-only reference)");
     expect(prompt).toContain("# Session Memory (durable facts — update only on an explicit user memory request)");
-    expect(prompt).not.toContain("# Common Knowledge (maintained by Cortex — read-only reference)");
+    expect(prompt).not.toContain("# Common Knowledge");
     expect(prompt).toContain("# Onboarding Snapshot (authoritative backend state — read-only reference)");
     expect(prompt).toContain("<available_skills>");
     expect(prompt).toContain("<name>memory</name>");

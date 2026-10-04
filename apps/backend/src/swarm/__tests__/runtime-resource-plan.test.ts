@@ -19,7 +19,6 @@ function createConfig(rootDir: string): SwarmConfig {
     port: 47187,
     debug: false,
     isDesktop: false,
-    cortexEnabled: true,
     allowNonManagerSubscriptions: false,
     managerDisplayName: "Manager",
     defaultModel: { provider: "openai-codex", modelId: "gpt-5.4", thinkingLevel: "high" },

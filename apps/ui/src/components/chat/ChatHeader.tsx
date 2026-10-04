@@ -221,8 +221,6 @@ export function ChatHeader({
       : null
   const isAgentCreator = activeAgentSessionPurpose === 'agent_creator'
   const archetypeLabel = isAgentCreator ? null : activeAgentArchetypeId?.trim()
-  const isCortex = activeAgentArchetypeId === 'cortex'
-  const panelLabel = isCortex ? 'Dashboard' : 'Artifacts'
   const anyCompactionInProgress = compactInProgress || smartCompactInProgress || autoCompactionInProgress
   const electronPlatform = typeof window !== 'undefined' ? (window.electronBridge?.platform ?? '') : ''
   const platform = electronPlatform || (typeof window !== 'undefined' ? (window.navigator.platform ?? '') : '')
@@ -638,14 +636,14 @@ export function ChatHeader({
                       : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
                   )}
                   onClick={onToggleArtifactsPanel}
-                  aria-label={isArtifactsPanelOpen ? `Close ${panelLabel.toLowerCase()}` : panelLabel}
+                  aria-label={isArtifactsPanelOpen ? 'Close artifacts' : 'Artifacts'}
                   aria-pressed={isArtifactsPanelOpen}
                 >
                   <Package className="size-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={6}>
-                {isArtifactsPanelOpen ? `Close ${panelLabel.toLowerCase()}` : panelLabel}
+                {isArtifactsPanelOpen ? 'Close artifacts' : 'Artifacts'}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

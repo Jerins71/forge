@@ -5,8 +5,6 @@ import type {
   ActivateRepoProjectAgentRequest,
   AgentRuntimeExtensionSnapshot,
   BuilderTimelineChannelView,
-  CortexConsolidationRunRecord,
-  CortexConsolidationTrigger,
   CredentialPoolState,
   GenerationThroughputSnapshotEvent,
   CredentialPoolStrategy,
@@ -61,15 +59,6 @@ import { getSessionDir } from "./data-paths.js";
 import type { DirectoryListingResult, DirectoryValidationResult } from "./cwd-policy.js";
 import type { ForgeExtensionHost } from "./forge-extension-host.js";
 import type { VersioningCommitEvent as ForgeVersioningCommitEvent } from "./forge-extension-types.js";
-import type { KnowledgeMemoryCoordinator } from "./knowledge-memory-coordinator.js";
-import type {
-  KnowledgeEntry,
-  KnowledgeEntryScope,
-  KnowledgeEntryType,
-  KnowledgeSearchResult,
-  KnowledgeService,
-} from "./knowledge-service.js";
-import type { KnowledgeV2SettingsService } from "./knowledge-v2-settings-service.js";
 import type { UpdatePlanInput, UpdatePlanResult } from "./planning/update-plan-tool.js";
 import type {
   AcceptWorkGraphNodeInput,
@@ -175,14 +164,6 @@ export interface CodexTransportDebugAgentDiagnostics {
     | "runtime_inactive"
     | "not_pi_runtime";
   websocketStats?: RuntimeCodexTransportDebugDiagnostics["websocketStats"];
-}
-
-export interface SaveLearningInput {
-  type: KnowledgeEntryType;
-  scope: KnowledgeEntryScope;
-  title: string;
-  body: string;
-  evidence: "user-stated" | "observed";
 }
 
 export interface CodexPluginScopedExportInput {
@@ -389,7 +370,7 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
   }
 
   mergeSessionMemory(agentId: string): Promise<SessionMemoryMergeResult> {
-    return this.services.knowledge.mergeSessionMemory(agentId);
+    return this.services.memory.mergeSessionMemory(agentId);
   }
 
   forkSession(
@@ -475,14 +456,14 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
     agentId: string,
     options?: CompactAgentContextOptions,
   ): Promise<unknown> {
-    return this.services.knowledge.compact(agentId, options);
+    return this.services.memory.compact(agentId, options);
   }
 
   smartCompactAgentContext(
     agentId: string,
     options?: CompactAgentContextOptions,
   ): Promise<SmartCompactResult> {
-    return this.services.knowledge.smartCompact(agentId, options);
+    return this.services.memory.smartCompact(agentId, options);
   }
 
   appendConversationUserMessage(
@@ -523,22 +504,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
 
   getProfilesSnapshotVersion(): number {
     return this.services.events.getProfilesSnapshotVersion();
-  }
-
-  listCortexConsolidationRuns(): Promise<CortexConsolidationRunRecord[]> {
-    return this.services.knowledge.listCortexConsolidationRuns();
-  }
-
-  getCortexConsolidationSnapshot(): ReturnType<
-    KnowledgeMemoryCoordinator["getCortexConsolidationSnapshot"]
-  > {
-    return this.services.knowledge.getCortexConsolidationSnapshot();
-  }
-
-  runCortexConsolidation(
-    trigger: CortexConsolidationTrigger,
-  ): Promise<CortexConsolidationRunRecord | null> {
-    return this.services.knowledge.runCortexConsolidation(trigger);
   }
 
   getConversationHistory(agentId?: string): ConversationEntryEvent[] {
@@ -1092,42 +1057,19 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
     return this.services.codexPlugin.exportScopedToolResult(workerAgentId, input);
   }
 
-  // Knowledge API.
+  // Memory and history API.
 
   getCompactionRuntimeSettingsProvider(): CompactionRuntimeSettingsProvider {
-    return this.services.knowledge.getCompactionRuntimeSettingsProvider();
+    return this.services.memory.getCompactionRuntimeSettingsProvider();
   }
 
-  getCompactionSettingsService(): CompactionSettingsService | null { return this.services.knowledge.getCompactionSettingsService(); }
-
-  getKnowledgeV2SettingsService(): KnowledgeV2SettingsService { return this.services.knowledge.getKnowledgeV2SettingsService(); }
-
-  getKnowledgeService(): KnowledgeService { return this.services.knowledge.getKnowledgeService(); }
+  getCompactionSettingsService(): CompactionSettingsService | null { return this.services.memory.getCompactionSettingsService(); }
 
   searchHistory(callerAgentId: string, request: HistorySearchRequest): Promise<HistorySearchResponse> { return this.services.conversation.history.search(callerAgentId, request); }
 
   readHistory(callerAgentId: string, request: HistoryReadRequest): Promise<HistoryReadResponse> { return this.services.conversation.history.read(callerAgentId, request); }
 
   async disposeHistoryRecall(): Promise<void> { await this.services.conversation.history.dispose(); }
-
-  searchKnowledge(
-    callerAgentId: string,
-    input: { query?: string; scope?: "global" | "profile" | "all"; limit?: number },
-  ): Promise<KnowledgeSearchResult[]> {
-    return this.services.knowledge.searchKnowledge(callerAgentId, input);
-  }
-
-  readKnowledgeEntry(callerAgentId: string, id: string): Promise<KnowledgeEntry> {
-    return this.services.knowledge.readKnowledgeEntry(callerAgentId, id);
-  }
-
-  saveLearning(callerAgentId: string, input: SaveLearningInput): Promise<KnowledgeEntry> {
-    return this.services.knowledge.saveLearning(callerAgentId, input);
-  }
-
-  handleCaptureFeedbackSignal(profileId: string, sessionId: string): Promise<void> {
-    return this.services.knowledge.handleCaptureFeedbackSignal(profileId, sessionId);
-  }
 
   // Runtime, diagnostics, observability, extensions, and host API.
 

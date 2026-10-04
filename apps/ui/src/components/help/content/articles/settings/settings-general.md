@@ -1,4 +1,4 @@
-General Settings covers editor integration, sidebar preferences, repository clone defaults, compaction, telemetry, the Cortex consolidation schedule, and the Knowledge v2 preview. Appearance has its own **Settings > Appearance** pane, and diagnostic export controls live in **Settings > Observability**.
+General Settings covers editor integration, sidebar preferences, repository clone defaults, compaction, and telemetry. Appearance has its own **Settings > Appearance** pane, and diagnostic export controls live in **Settings > Observability**.
 
 ## Appearance
 
@@ -12,7 +12,7 @@ Use **Settings > General > Repositories** to set a configured repository home fo
 
 Toggle **Show provider usage** to control whether the provider subscription usage widget appears in the sidebar toolbar. When enabled, you'll see compact usage gauges. Anthropic Claude exposes 5-hour and weekly windows. OpenAI Codex shows weekly when the provider reports it, and shows the 5-hour/Session gauge and detail card only when a session window is reported — never an empty Session card. True dual limits stay visible when both windows are present. A stored xAI OAuth credential adds a weekly-only `xAI` SuperGrok credits gauge. Click the widget to expand it for detailed metrics including reset remaining time and, where available, deficit/reserve pace and estimated runout times, and use the refresh button in the detail panel to re-poll immediately. Usage state is restored after backend restarts. OpenAI and Anthropic weekly estimates follow historical usage curves rather than simple linear interpolation; the xAI weekly gauge has no historical pace curve. Cursor SDK usage is not part of this widget — it appears in Stats token analytics and telemetry provider inference. xAI API-key-only or env-only `XAI_API_KEY` setups, and missing or unauthorized xAI OAuth, leave the xAI gauge absent without extra noise, and transient fetch failures keep the last good reading. Pooled OAuth usage polling refreshes tokens first, and pooled auth errors can suppress usage display. When OpenAI/Codex uses Forge Auth broker mode, broker-backed status and usage appear when the broker provides them. The setting is stored in your browser and applies immediately.
 
-**Use new project view** is on by default. Leave it on for Inbox and Projects; turn it off to roll back to Classic. Inbox opens first and lists **Needs you**, **Active**, and **Recent**, then an inline Projects tree. **Needs you** is server-issued work-lifecycle attention. Unread and error badges do not create it, and the UI does not synthesize it from local badges. An unanswered **Input requested** pending choice raises **Needs you** even while work still runs or follow-ups are queued; answering or cancelling retracts that item without marking the session complete, so remaining work can stay **Active**. **Done** and **Clear** dismiss those exact items; mute only hides **Needs you** and the Inbox badge. Projects keeps the project/session tree, search prefixes, pins, and drag reorder. On desktop, Cortex lives in the activity-rail popover; mobile and Classic keep the pinned sidebar row.
+**Use new project view** is on by default. Leave it on for Inbox and Projects; turn it off to roll back to Classic. Inbox opens first and lists **Needs you**, **Active**, and **Recent**, then an inline Projects tree. **Needs you** is server-issued work-lifecycle attention. Unread and error badges do not create it, and the UI does not synthesize it from local badges. An unanswered **Input requested** pending choice raises **Needs you** even while work still runs or follow-ups are queued; answering or cancelling retracts that item without marking the session complete, so remaining work can stay **Active**. **Done** and **Clear** dismiss those exact items; mute only hides **Needs you** and the Inbox badge. Projects keeps the project/session tree, search prefixes, pins, and drag reorder.
 
 ## Working plans
 
@@ -42,21 +42,9 @@ Anonymous telemetry is enabled by default. It sends a random install identifier 
 
 To opt out, set `FORGE_TELEMETRY=false` in your environment. There is no telemetry setting in the UI.
 
-## Cortex consolidation
-
-While Knowledge v2 is ON, the enabled daily Cortex schedule runs the consolidator over existing entries. It can merge duplicates, supersede conflicts, archive stale entries, and regenerate indexes, but it does not mine transcripts or create entries. Disable the schedule if you want to trigger consolidation manually from Cortex **Run**.
-
-## New Cortex (Knowledge v2)
-
-Knowledge v2 is a default-off preview. When ON, prompts receive compact global and active-profile `INDEX.md` files plus current session `memory.md`. Canonical profile `memory.md` continues to be maintained; legacy shared `common.md` is preserved during normal switching, but neither is prompt-injected. OFF restores legacy context while the originals remain. Explicit confirmed cleanup archives and removes those originals, so OFF alone cannot restore their prior content.
-
-The switch does not migrate data. A successful guarded migration commits a valid manifest and immediately activates v2. If activation persistence fails, the manifest remains an authorized recovery point with v2 OFF; it also permits ordinary re-enable after a later disable. Without a valid manifest, Settings shows migration-required guidance and does not issue an enable request.
-
-This mode switch is different from `FORGE_CORTEX_ENABLED=false`, which disables the entire Cortex subsystem.
-
 ## Welcome Preferences
 
-Edit the default preferences Forge shares with new manager sessions. These are the onboarding choices you made on first launch (name, technical level, workflow style). Forge always updates the structured onboarding state. Changes apply to future manager sessions through the active mode's store: the managed legacy `common.md` block with v2 OFF, or global v2 preference entries with v2 ON.
+Edit the default preferences Forge shares with new manager sessions. These are the onboarding choices you made on first launch (name, technical level, workflow style). Forge saves them in its structured onboarding state, and changes apply to future manager sessions.
 
 ## Observability
 

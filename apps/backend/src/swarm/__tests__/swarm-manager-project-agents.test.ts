@@ -1251,7 +1251,7 @@ describe('SwarmManager', () => {
     )
   })
 
-  it('rejects project-agent promotion collisions and cortex-only sessions', async () => {
+  it('rejects project-agent promotion collisions', async () => {
     const config = await makeTempConfig()
     const manager = new ProjectAgentAwareSwarmManager(config)
     await bootWithDefaultManager(manager, config)
@@ -1271,24 +1271,8 @@ describe('SwarmManager', () => {
     ).rejects.toThrow(
       'Project agent handle "release-notes" is already in use in this profile. Choose a different handle and try again.',
     )
-
-    await expect(
-      manager.setSessionProjectAgent('cortex', {
-        whenToUse: 'Should fail.',
-      }),
-    ).rejects.toThrow('Cortex root cannot be promoted to a project agent')
-
-    const reviewSession = await manager.createSession('cortex', {
-      label: 'Review',
-      sessionPurpose: 'cortex_review',
-    })
-
-    await expect(
-      manager.setSessionProjectAgent(reviewSession.sessionAgent.agentId, {
-        whenToUse: 'Should also fail.',
-      }),
-    ).rejects.toThrow('Cortex review sessions cannot be promoted to project agents')
   })
+
   it('emits Forge session lifecycle hooks for createAndPromoteProjectAgent', async () => {
     const config = await makeTempConfig()
     const logPath = join(config.paths.dataDir, 'project-agent-lifecycle.jsonl')
@@ -1385,7 +1369,7 @@ describe('SwarmManager', () => {
     const sessionDirsBefore = (await readdir(profileSessionsDir)).sort()
 
     vi.spyOn(
-      (manager as any).knowledgeMemoryCoordinator,
+      (manager as any).memoryCoordinator,
       'writeInitialSessionMeta',
     ).mockRejectedValueOnce(new Error('meta boom'))
 

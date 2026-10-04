@@ -14,7 +14,7 @@ vi.mock('@/components/help/HelpTooltip', () => ({
   HelpTooltip: ({ children }: { children: unknown }) => children,
 }))
 
-vi.mock('@/components/chat/cortex/OnboardingCallout', () => ({
+vi.mock('@/components/chat/OnboardingCallout', () => ({
   OnboardingCallout: () => null,
 }))
 
@@ -62,19 +62,6 @@ const repositoryApiMock = vi.hoisted(() => ({
 vi.mock('@/components/settings/repository-settings-api', () => ({
   fetchRepositorySettings: (...args: unknown[]) => repositoryApiMock.fetchRepositorySettings(...args),
   updateRepositorySettings: (...args: unknown[]) => repositoryApiMock.updateRepositorySettings(...args),
-}))
-
-vi.mock('@/components/settings/cortex-auto-review-api', () => ({
-  fetchCortexAutoReviewSettings: vi.fn().mockResolvedValue({
-    settings: { enabled: false, intervalMinutes: 120 },
-    cortexDisabled: false,
-  }),
-  updateCortexAutoReviewSettings: vi.fn(),
-}))
-
-vi.mock('@/components/settings/knowledge-v2-api', () => ({
-  fetchKnowledgeV2Settings: vi.fn().mockResolvedValue({ available: false }),
-  updateKnowledgeV2Settings: vi.fn(),
 }))
 
 vi.mock('@/components/settings/model-cache-visualization-api', () => ({

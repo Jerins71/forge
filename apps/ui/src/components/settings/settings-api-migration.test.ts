@@ -305,25 +305,6 @@ describe('slash-commands-api via client', () => {
 })
 
 /* ================================================================== */
-/*  Cortex auto-review                                                */
-/* ================================================================== */
-
-describe('cortex-auto-review-api via client', () => {
-  it('fetches cortex settings through a non-default client', async () => {
-    fetchSpy.mockResolvedValueOnce(mockJsonResponse({ settings: { enabled: true, intervalMinutes: 120 } }))
-    const { fetchCortexAutoReviewSettings } = await import('./cortex-auto-review-api')
-    const client = createSettingsApiClient(createBuilderSettingsTarget('wss://forge.example.com'))
-
-    await fetchCortexAutoReviewSettings(client)
-
-    expect(fetchSpy).toHaveBeenCalledWith(
-      'https://forge.example.com/api/settings/cortex-auto-review',
-      expect.objectContaining({ credentials: 'same-origin' }),
-    )
-  })
-})
-
-/* ================================================================== */
 /*  Specialists                                                       */
 /* ================================================================== */
 

@@ -74,7 +74,7 @@ export interface AgentContextUsage {
   percent: number;
 }
 
-export type AgentSessionPurpose = "cortex_review" | "agent_creator" | "capture_check" | "side_chat";
+export type AgentSessionPurpose = "agent_creator" | "side_chat";
 
 export type InternalWorkerKind = "codex_plugin";
 
@@ -297,7 +297,6 @@ export interface SwarmConfig {
   port: number;
   debug: boolean;
   isDesktop: boolean;
-  cortexEnabled: boolean;
   /** Feature-owned SQLite loader available in every runtime target. */
   remoteUpdateAwarenessModules?: RemoteUpdateAwarenessModuleLoaders;
   allowNonManagerSubscriptions: boolean;

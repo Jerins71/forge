@@ -103,8 +103,8 @@ export function parseSessionCommand(maybe: ClientCommandCandidate): ParsedClient
     if (name !== undefined && typeof name !== "string") {
       return fail("create_session.name must be a string when provided");
     }
-    if (sessionPurpose !== undefined && sessionPurpose !== "cortex_review" && sessionPurpose !== "agent_creator") {
-      return fail('create_session.sessionPurpose must be "cortex_review" or "agent_creator" when provided');
+    if (sessionPurpose !== undefined && sessionPurpose !== "agent_creator") {
+      return fail('create_session.sessionPurpose must be "agent_creator" when provided');
     }
     if (requestId !== undefined && typeof requestId !== "string") {
       return fail("create_session.requestId must be a string when provided");

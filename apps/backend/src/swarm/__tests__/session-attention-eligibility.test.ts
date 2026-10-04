@@ -48,8 +48,6 @@ describe("session attention eligibility (Option C)", () => {
     ["worker", manager({ role: "worker", managerId: "session-owner" }), profile(), false],
     ["non-owning manager descriptor", manager({ managerId: "session-owner" }), profile(), false],
     ["system-automation profile", manager(), profile({ profileType: "system" }), false],
-    ["Cortex review automation", manager({ sessionPurpose: "cortex_review" }), profile(), false],
-    ["capture-check automation", manager({ sessionPurpose: "capture_check" }), profile(), false],
     ["Agent Creator output session", manager({ sessionPurpose: "agent_creator" }), profile(), false],
     ["directly archived session", manager({ archivedAt: now }), profile(), false],
     ["archived project", manager(), profile({ archivedAt: now }), false],

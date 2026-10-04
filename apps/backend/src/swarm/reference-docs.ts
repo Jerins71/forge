@@ -336,7 +336,7 @@ export function buildProfileReferenceIndexTemplate(profileId: string): string {
   return [
     `# ${profileId} Reference Index`,
     "",
-    "> Pull-based profile reference docs maintained by Cortex.",
+    "> Pull-based profile reference docs.",
     "> These docs are read on demand and are not auto-injected into runtime prompts.",
     "",
     "## Core docs",
@@ -358,8 +358,8 @@ function buildLegacyProfileKnowledgeReferenceDoc(profileId: string, legacyConten
   return [
     `# ${profileId} Legacy Profile Knowledge`,
     "",
-    "> Migrated from `shared/knowledge/profiles/<profileId>.md` during the Cortex Memory v2 rollout.",
-    "> Preserve as reference while Cortex reclassifies long-form project knowledge into injected summary memory vs. pull-based docs.",
+    "> Migrated from `shared/knowledge/profiles/<profileId>.md`.",
+    "> Preserved as a pull-based reference doc; it is not injected into runtime prompts.",
     "",
     "## Legacy snapshot",
     "",
@@ -394,7 +394,7 @@ function buildProfileReferenceDocTemplate(profileId: string, fileName: string): 
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(" ");
 
-  return [`# ${profileId} ${title}`, "", "> Maintained by Cortex.", ""].join("\n");
+  return [`# ${profileId} ${title}`, ""].join("\n");
 }
 
 function buildReferenceIndexWithLink(existingContent: string, link: ProfileReferenceIndexLink): string {

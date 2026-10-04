@@ -483,10 +483,6 @@ export class MobilePushService {
 
   private async isPushSuppressedForSession(sessionAgentId: string): Promise<boolean> {
     const descriptor = this.swarmManager.getAgent(sessionAgentId);
-    if (descriptor?.role === "manager" && descriptor.sessionPurpose === "cortex_review") {
-      return true;
-    }
-
     return shouldMuteCliOriginatedNotifications({
       settingsService: this.notificationSettingsService,
       descriptor,

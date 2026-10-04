@@ -10,7 +10,6 @@ import type {
 import type { VersioningMutation } from "../versioning/versioning-types.js";
 import { ensureCanonicalAuthFilePath } from "./storage/auth-storage-paths.js";
 import { getProfileMemoryPath, getProfileMergeAuditLogPath } from "./data-paths.js";
-import { assertKnowledgeMigrationNotBusy } from "./knowledge-v2-migration-lock.js";
 import { executeLLMMerge, MEMORY_MERGE_SYSTEM_PROMPT } from "./prompts/memory-merge.js";
 import { createPiModelRegistry } from "./catalog/pi-model-registry.js";
 import type { PromptCategory } from "./prompts/prompt-registry.js";
@@ -150,9 +149,6 @@ export interface SwarmMemoryMergeServiceOptions {
   appendSessionMemoryMergeAuditEntry: (entry: SessionMemoryMergeAuditEntry) => Promise<void>;
   refreshSessionMetaStatsBySessionId: (sessionAgentId: string) => Promise<void>;
   queueVersioningMutation: (mutation: VersioningMutation) => void;
-  resolveActiveCortexReviewRunIdForDescriptor?: (
-    descriptor: AgentDescriptor
-  ) => Promise<string | undefined>;
   saveStore: () => Promise<void>;
   runSessionMemoryLLMMerge: (
     descriptor: AgentDescriptor,
@@ -216,8 +212,6 @@ export class SwarmMemoryMergeService {
     if (descriptor.agentId === profileId) {
       throw new Error(`Default session working memory merge is not supported: ${agentId}`);
     }
-
-    await assertKnowledgeMigrationNotBusy(this.options.config.paths.dataDir);
 
     const releaseMergeLock = await this.acquireProfileMergeLock(profileId);
 
@@ -427,8 +421,7 @@ export class SwarmMemoryMergeService {
           action: "write",
           source: "profile-memory-merge",
           profileId,
-          sessionId: descriptor.agentId,
-          reviewRunId: await this.options.resolveActiveCortexReviewRunIdForDescriptor?.(descriptor)
+          sessionId: descriptor.agentId
         });
       }
       failureContext.stage = "refresh_session_meta_stats";

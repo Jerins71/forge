@@ -82,7 +82,7 @@ You talk to one manager per project. Describe work at a high level — a feature
 
 Workers run in isolated worktrees so they don't step on each other. You can watch everything happen in real time from the dashboard — green worker pills show who's active, click for a peek at what each one is doing — or walk away and check in later from the mobile companion app.
 
-Fork any session from any point to branch into parallel workstreams that share prior context. The more you use Forge, the better it gets. Rate messages, explain your preferences, describe your review process — Cortex learns and adapts over time.
+Fork any session from any point to branch into parallel workstreams that share prior context. Explain your preferences and review process once, ask the manager to remember them, and they carry into future sessions.
 
 ## Core Capabilities
 
@@ -98,9 +98,9 @@ Define named specialist workers with per-specialist model configuration, system 
 
 Per-session terminals with full PTY support, persistent across restarts. Terminal state is periodically snapshotted and restored from disk — close your laptop, reopen it, and pick up exactly where you left off. No more managing dozens of terminal windows.
 
-### Cortex + Durable Memory
+### Durable Memory
 
-Cortex reviews your sessions and builds persistent knowledge over time — naming conventions, review process, architecture preferences, communication style. Common knowledge applies across all projects; project knowledge is scoped per codebase. All changes are versioned in git. Schedule reviews on a cron, trigger them manually, or let Cortex detect when sessions have new content worth analyzing.
+File-backed memory keeps what matters across sessions — naming conventions, review process, architecture preferences, communication style. Common memory applies across all projects; project memory is scoped per codebase; session memory holds decisions for one conversation. All of it is plain Markdown you can read and edit, and changes are versioned in git.
 
 ### Project Agents
 

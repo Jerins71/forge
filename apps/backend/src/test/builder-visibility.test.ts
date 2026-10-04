@@ -184,7 +184,7 @@ function createBroadcastHarness(profiles: ManagerProfile[]): {
 }
 
 describe('Builder visibility filtering', () => {
-  it('includes Cortex while hiding non-Cortex system entries from Builder bootstrap snapshots', async () => {
+  it('hides every system profile entry from Builder bootstrap snapshots', async () => {
     const userProfile = createProfile({ profileId: 'manager' })
     const cortexProfile = createProfile({ profileId: 'cortex', profileType: 'system' })
     const hiddenSystemProfile = createProfile({ profileId: '_system', profileType: 'system' })
@@ -195,11 +195,6 @@ describe('Builder visibility filtering', () => {
     const cortexRootSession = createAgent({
       agentId: 'cortex',
       profileId: cortexProfile.profileId,
-    })
-    const cortexReviewSession = createAgent({
-      agentId: 'cortex--review',
-      profileId: cortexProfile.profileId,
-      sessionPurpose: 'cortex_review',
     })
     const hiddenSystemSession = createAgent({
       agentId: '_system',
@@ -215,7 +210,7 @@ describe('Builder visibility filtering', () => {
       socket: {} as WebSocket,
       targetAgentId: builderManager.agentId,
       swarmManager: new FakeBootstrapSwarmManager(
-        [builderManager, cortexRootSession, cortexReviewSession, hiddenSystemSession, userProfileSession],
+        [builderManager, cortexRootSession, hiddenSystemSession, userProfileSession],
         [userProfile, cortexProfile, hiddenSystemProfile],
       ) as never,
       terminalService: null,
@@ -237,8 +232,6 @@ describe('Builder visibility filtering', () => {
     }
     expect(agentsSnapshot.agents.map((agent) => agent.agentId)).toEqual([
       'manager',
-      'cortex',
-      'cortex--review',
       'manager--s2',
     ])
 
@@ -247,10 +240,10 @@ describe('Builder visibility filtering', () => {
     if (!profilesSnapshot || profilesSnapshot.type !== 'profiles_snapshot') {
       throw new Error('Expected profiles_snapshot event')
     }
-    expect(profilesSnapshot.profiles.map((profile) => profile.profileId)).toEqual(['manager', 'cortex'])
+    expect(profilesSnapshot.profiles.map((profile) => profile.profileId)).toEqual(['manager'])
   })
 
-  it('includes Cortex while hiding non-Cortex system sessions from live agents_snapshot broadcasts', () => {
+  it('hides every system profile session from live agents_snapshot broadcasts', () => {
     const userProfile = createProfile({ profileId: 'manager' })
     const cortexProfile = createProfile({ profileId: 'cortex', profileType: 'system' })
     const hiddenSystemProfile = createProfile({ profileId: '_system', profileType: 'system' })
@@ -261,11 +254,6 @@ describe('Builder visibility filtering', () => {
     const cortexRootSession = createAgent({
       agentId: 'cortex',
       profileId: cortexProfile.profileId,
-    })
-    const cortexReviewSession = createAgent({
-      agentId: 'cortex--review',
-      profileId: cortexProfile.profileId,
-      sessionPurpose: 'cortex_review',
     })
     const hiddenSystemSession = createAgent({
       agentId: '_system',
@@ -279,7 +267,7 @@ describe('Builder visibility filtering', () => {
 
     const event: ServerEvent = {
       type: 'agents_snapshot',
-      agents: [builderManager, cortexRootSession, cortexReviewSession, hiddenSystemSession, userProfileSession],
+      agents: [builderManager, cortexRootSession, hiddenSystemSession, userProfileSession],
     }
 
     subscriptions.broadcastToSubscribed(event)
@@ -291,7 +279,6 @@ describe('Builder visibility filtering', () => {
     expect(event.agents.map((agent) => agent.agentId)).toEqual([
       'manager',
       'cortex',
-      'cortex--review',
       '_system',
       'manager--s2',
     ])
@@ -303,13 +290,11 @@ describe('Builder visibility filtering', () => {
     }
     expect(snapshot.agents.map((agent) => agent.agentId)).toEqual([
       'manager',
-      'cortex',
-      'cortex--review',
       'manager--s2',
     ])
   })
 
-  it('includes Cortex while hiding non-Cortex system profiles from live profiles_snapshot broadcasts', () => {
+  it('hides every system profile from live profiles_snapshot broadcasts', () => {
     const userProfile = createProfile({ profileId: 'manager' })
     const cortexProfile = createProfile({ profileId: 'cortex', profileType: 'system' })
     const hiddenSystemProfile = createProfile({ profileId: '_system', profileType: 'system' })
@@ -325,10 +310,10 @@ describe('Builder visibility filtering', () => {
     if (!snapshot || snapshot.type !== 'profiles_snapshot') {
       throw new Error('Expected filtered profiles_snapshot event')
     }
-    expect(snapshot.profiles.map((profile) => profile.profileId)).toEqual(['manager', 'cortex'])
+    expect(snapshot.profiles.map((profile) => profile.profileId)).toEqual(['manager'])
   })
 
-  it('keeps Builder sessions visible while hiding non-Cortex system sessions', () => {
+  it('keeps Builder sessions visible while hiding system sessions', () => {
     const builderManager = createAgent({
       agentId: 'manager',
       profileId: 'manager',
@@ -351,7 +336,7 @@ describe('Builder visibility filtering', () => {
       new Set(['cortex', '_system']),
     )
 
-    expect(visible.map((agent) => agent.agentId)).toEqual(['manager', 'manager--s2', 'cortex'])
+    expect(visible.map((agent) => agent.agentId)).toEqual(['manager', 'manager--s2'])
     expect(visible.some((agent) => agent.profileId === '_system')).toBe(false)
   })
 })

@@ -1,6 +1,4 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import type { AgentDescriptor, GitRepoKind, GitRepoTarget } from "@forge/protocol";
+import type { GitRepoKind, GitRepoTarget } from "@forge/protocol";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
 import { resolveWorktreeContextPath } from "../../../versioning/git-source-control-helpers.js";
 import { resolveEffectiveAgentWorkspaceCwd } from "../../ws-file-access.js";
@@ -28,10 +26,6 @@ export async function resolveReadOnlyGitContext(
   const normalizedWorktreeId = worktreeId?.trim();
 
   if (normalizedWorktreeId) {
-    if (repoTarget === "versioning") {
-      throw new Error("worktreeId is not supported for repoTarget=versioning.");
-    }
-
     return resolveGitSourceControlContext(swarmManager, agentId, repoTarget, normalizedWorktreeId);
   }
 
@@ -77,28 +71,13 @@ export function resolveCwdFromAgent(swarmManager: SwarmManager, agentId: string)
   return resolveEffectiveAgentWorkspaceCwd(swarmManager, agentId);
 }
 
-export function isCortexSession(swarmManager: SwarmManager, agentId: string): boolean {
-  return isCortexDescriptor(resolveSessionDescriptor(swarmManager, agentId));
-}
-
 export function resolveGitRepoContext(
   swarmManager: SwarmManager,
   agentId: string,
   repoTarget: GitRepoTarget = "workspace"
 ): GitRepoContext {
-  if (repoTarget === "versioning") {
-    if (!isCortexSession(swarmManager, agentId)) {
-      throw new Error("Forbidden: versioning repo is only available to Cortex sessions.");
-    }
-
-    const dataDir = swarmManager.getConfig().paths.dataDir;
-    return {
-      cwd: dataDir,
-      repoTarget,
-      repoKind: "versioning",
-      repoLabel: "Cortex Knowledge",
-      notInitialized: !existsSync(join(dataDir, ".git"))
-    };
+  if (repoTarget !== "workspace") {
+    throw new Error(`Unsupported repoTarget: ${repoTarget}`);
   }
 
   return {
@@ -107,27 +86,4 @@ export function resolveGitRepoContext(
     repoKind: "workspace",
     repoLabel: "Workspace"
   };
-}
-
-function requireAgentDescriptor(swarmManager: SwarmManager, agentId: string): AgentDescriptor {
-  const descriptor = swarmManager.getAgent(agentId);
-  if (!descriptor) {
-    throw new Error(`Unknown agent: ${agentId}`);
-  }
-
-  return descriptor;
-}
-
-function resolveSessionDescriptor(swarmManager: SwarmManager, agentId: string): AgentDescriptor {
-  const descriptor = requireAgentDescriptor(swarmManager, agentId);
-
-  if (descriptor.role === "worker") {
-    return requireAgentDescriptor(swarmManager, descriptor.managerId);
-  }
-
-  return descriptor;
-}
-
-function isCortexDescriptor(descriptor: AgentDescriptor): boolean {
-  return descriptor.profileId === "cortex" || descriptor.sessionPurpose === "cortex_review";
 }

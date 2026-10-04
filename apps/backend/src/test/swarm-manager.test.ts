@@ -32,7 +32,7 @@ vi.mock('../swarm/agents/project-agent-analysis.js', async () => {
   }
 })
 
-import type { AgentDescriptor, SwarmConfig } from '../swarm/types.js'
+import type { AgentDescriptor, ManagerProfile, SwarmConfig } from '../swarm/types.js'
 import type { RuntimeCreationOptions, SwarmAgentRuntime } from '../swarm/runtime-contracts.js'
 import {
   FakeRuntime,
@@ -1401,24 +1401,6 @@ describe('SwarmManager', () => {
     ])
   })
 
-  it('keeps Cortex direct web assistant text explicit-tool-only for now', async () => {
-    const config = await makeTempConfig()
-    const manager = new TestSwarmManager(config)
-    await bootWithDefaultManager(manager, config)
-    const state = manager as unknown as { descriptors: Map<string, AgentDescriptor> }
-    state.descriptors.get('manager')!.archetypeId = 'cortex'
-
-    await manager.handleUserMessage('cortex direct web turn')
-    await projectAssistantFinalText(
-      manager,
-      'manager',
-      manager.runtimeByAgentId.get('manager')?.sendCalls.at(-1)?.message,
-      'Cortex direct answer',
-    )
-
-    expect(assistantOutputsFor(manager, 'manager')).toEqual([])
-  })
-
   it('projects project-agent peer input clean finals in normal web-visible manager sessions', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
@@ -1449,7 +1431,7 @@ describe('SwarmManager', () => {
     ])
   })
 
-  it('projects external project-agent peer finals to the interactive web session, keeping Cortex hidden', async () => {
+  it('projects external project-agent peer finals to the interactive web session, keeping system profiles hidden', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await bootWithDefaultManager(manager, config)
@@ -1476,15 +1458,15 @@ describe('SwarmManager', () => {
       'IT Ops responded with the access guidance.',
     ])
 
-    const state = manager as unknown as { descriptors: Map<string, AgentDescriptor> }
-    state.descriptors.get('manager')!.profileId = 'cortex'
-    const cortexRuntimeMessage = await enqueueProjectAgentPeerInput(
+    const state = manager as unknown as { profiles: Map<string, ManagerProfile> }
+    state.profiles.get('manager')!.profileType = 'system'
+    const systemRuntimeMessage = await enqueueProjectAgentPeerInput(
       manager,
       'manager',
-      { fromAgentId: 'cortex-peer', fromDisplayName: 'Cortex Peer', external: false },
-      'Cortex protected update',
+      { fromAgentId: 'system-peer', fromDisplayName: 'System Peer', external: false },
+      'System protected update',
     )
-    await projectAssistantFinalText(manager, 'manager', cortexRuntimeMessage, 'Cortex peer final must stay hidden')
+    await projectAssistantFinalText(manager, 'manager', systemRuntimeMessage, 'System peer final must stay hidden')
 
     expect(assistantOutputsFor(manager, 'manager').map((entry) => entry.text)).toEqual([
       'IT Ops responded with the access guidance.',

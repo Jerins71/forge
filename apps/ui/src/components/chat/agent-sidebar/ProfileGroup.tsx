@@ -20,7 +20,6 @@ import React from 'react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { isCortexProfile } from '@/lib/agent-hierarchy'
 import type { SessionRow } from '@/lib/agent-hierarchy'
 import { cn } from '@/lib/utils'
 import { SidebarModelIcon, SidebarRoomAvatar } from './shared'
@@ -194,7 +193,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
             ) : null}
 
             {/* Project actions came from main; it must stay available in Rooms too. */}
-            {onOpenProjectSettings && !isCortexProfile(treeRow) ? (
+            {onOpenProjectSettings ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -252,7 +251,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
         </ContextMenuTrigger>
 
         <ContextMenuContent>
-          {onOpenProjectSettings && !isCortexProfile(treeRow) ? (
+          {onOpenProjectSettings ? (
             <ContextMenuItem onClick={() => onOpenProjectSettings(profile.profileId)}>
               <Settings2 className="mr-2 size-3.5" />
               Project Settings
@@ -276,13 +275,13 @@ export const ProfileGroup = React.memo(function ProfileGroup({
               Change Default Model
             </ContextMenuItem>
           ) : null}
-          {onChangeCwd && !isCortexProfile(treeRow) ? (
+          {onChangeCwd ? (
             <ContextMenuItem onClick={() => onChangeCwd(profile.profileId)}>
               <FolderOpen className="mr-2 size-3.5" />
               Change Working Directory
             </ContextMenuItem>
           ) : null}
-          {onOpenProjectSecrets && !isCortexProfile(treeRow) ? (
+          {onOpenProjectSecrets ? (
             <ContextMenuItem onClick={() => onOpenProjectSecrets(profile.profileId)}>
               <ShieldCheck className="mr-2 size-3.5" />
               Project Secrets
@@ -316,21 +315,17 @@ export const ProfileGroup = React.memo(function ProfileGroup({
               {hideCliSessions ? 'Show CLI Sessions' : 'Hide CLI Sessions'}
             </ContextMenuItem>
           ) : null}
-          {!isCortexProfile(treeRow) ? (
-            <>
-              <ContextMenuSeparator />
-              {onArchiveProfile ? (
-                <ContextMenuItem onClick={() => onArchiveProfile(profile.profileId)}>
-                  <Archive className="mr-2 size-3.5" />
-                  Archive Project
-                </ContextMenuItem>
-              ) : null}
-              <ContextMenuItem variant="destructive" onClick={() => onDeleteManager(profile.profileId)}>
-                <Trash2 className="mr-2 size-3.5" />
-                Delete Manager
-              </ContextMenuItem>
-            </>
+          <ContextMenuSeparator />
+          {onArchiveProfile ? (
+            <ContextMenuItem onClick={() => onArchiveProfile(profile.profileId)}>
+              <Archive className="mr-2 size-3.5" />
+              Archive Project
+            </ContextMenuItem>
           ) : null}
+          <ContextMenuItem variant="destructive" onClick={() => onDeleteManager(profile.profileId)}>
+            <Trash2 className="mr-2 size-3.5" />
+            Delete Manager
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
 
@@ -408,10 +403,6 @@ export const ProfileGroup = React.memo(function ProfileGroup({
               hiddenCount = regularSessions.length - visibleRegularSessions.length
             }
 
-            // Determine if sessions in this profile are eligible for project agent promotion
-            // Cortex sessions are excluded at the profile level
-            const isCortex = sessions.some((s) => s.sessionAgent.archetypeId === 'cortex')
-
             const visibleInactiveRepoProjectAgents = inactiveRepoProjectAgents.filter((entry) =>
               matchesRepoProjectAgentSearch(entry.item, highlightQuery),
             )
@@ -439,7 +430,6 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                 hideCliSessions,
                 onToggleHideCliSessions,
               }, {
-                canPromoteToProjectAgent: !isCortex,
                 onViewCreationHistory:
                   Boolean(session.sessionAgent.projectAgent?.creatorSessionId) &&
                   sessionAgentIds.has(session.sessionAgent.projectAgent!.creatorSessionId!)

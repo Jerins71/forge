@@ -1,4 +1,4 @@
-import type { AgentDescriptor, MessageSourceContext } from "./types.js";
+import type { MessageSourceContext } from "./types.js";
 
 export type MessageRouteOrigin = "user" | "internal" | "scheduled" | "worker_result";
 
@@ -30,9 +30,7 @@ export type MessageRouteReasonCode =
   | "deny:target_not_manager"
   | "deny:project_agent_exchange"
   | "deny:project_agent_worker_result"
-  | "deny:cortex_profile"
   | "deny:system_profile"
-  | "deny:cortex_review"
   | "deny:bootstrap"
   | "deny:agent_creator_bootstrap"
   | "deny:codex_operational_guidance"
@@ -42,14 +40,11 @@ export interface MessageRouteProvenance {
   origin: MessageRouteOrigin;
   internalDeliveryKind?: MessageRouteInternalDeliveryKind;
   sourceContext?: MessageSourceContext;
-  sessionPurpose?: AgentDescriptor["sessionPurpose"];
-  archetypeId?: string;
   targetKind: MessageRouteTargetKind;
   role: MessageRouteRole;
   senderRole?: MessageRouteRole;
   senderAgentId?: string;
   targetAgentId?: string;
-  targetProfileId?: string;
   targetProjectAgent?: boolean;
   targetCreatorAgentId?: string;
   targetProfileSystem?: boolean;
@@ -63,9 +58,6 @@ export interface MessageRouteDecision {
   reasonCode: MessageRouteReasonCode;
   targetKind: MessageRouteTargetKind;
 }
-
-const CORTEX_PROFILE_ID = "cortex";
-const CORTEX_ARCHETYPE_ID = "cortex";
 
 export class MessageRouter {
   resolve(input: MessageRouteProvenance): MessageRouteDecision {
@@ -89,17 +81,8 @@ export class MessageRouter {
       return drop(targetKind, "deny:project_agent_worker_result");
     }
 
-    if (input.targetAgentId === CORTEX_PROFILE_ID || input.targetProfileId === CORTEX_PROFILE_ID) {
-      return drop(targetKind, "deny:cortex_profile");
-    }
-
     if (input.targetProfileSystem) {
       return drop(targetKind, "deny:system_profile");
-    }
-
-    const archetypeId = normalizeArchetypeId(input.archetypeId ?? "");
-    if (input.sessionPurpose === "cortex_review" || archetypeId === CORTEX_ARCHETYPE_ID) {
-      return drop(targetKind, "deny:cortex_review");
     }
 
     if (input.internalDeliveryKind === "bootstrap") {
@@ -187,12 +170,4 @@ function drop(targetKind: MessageRouteTargetKind, reasonCode: MessageRouteReason
     reasonCode,
     targetKind,
   };
-}
-
-function normalizeArchetypeId(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
 }

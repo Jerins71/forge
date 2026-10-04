@@ -260,21 +260,8 @@ export async function rebuildSessionMeta(options: RebuildSessionMetaOptions): Pr
             resolvedSystemPrompt: existingMeta?.resolvedSystemPrompt ?? null,
             promptFingerprint: existingMeta?.promptFingerprint ?? null,
             promptComponents: existingMeta?.promptComponents ?? null,
-            cortexReviewedAt: existingMeta?.cortexReviewedAt,
-            cortexReviewedBytes: existingMeta?.cortexReviewedBytes,
-            cortexReviewExcludedAt: existingMeta?.cortexReviewExcludedAt ?? null,
-            cortexReviewedMemoryBytes: resolveInitialReviewedMemoryBytes(
-              existingMeta?.cortexReviewedMemoryBytes,
-              memoryFileSize
-            ),
-            cortexReviewedMemoryAt: existingMeta?.cortexReviewedMemoryAt ?? null,
             feedbackFileSize: existingMeta?.feedbackFileSize,
             lastFeedbackAt: existingMeta?.lastFeedbackAt,
-            cortexReviewedFeedbackBytes: existingMeta?.cortexReviewedFeedbackBytes,
-            cortexReviewedFeedbackAt: existingMeta?.cortexReviewedFeedbackAt,
-            cortexCaptureLastCheckedAt: existingMeta?.cortexCaptureLastCheckedAt ?? null,
-            cortexCaptureForksDay: existingMeta?.cortexCaptureForksDay ?? null,
-            cortexCaptureForksToday: existingMeta?.cortexCaptureForksToday ?? 0,
             memoryMergeAttemptCount: existingMeta?.memoryMergeAttemptCount ?? 0,
             lastMemoryMergeAttemptId: existingMeta?.lastMemoryMergeAttemptId ?? null,
             lastMemoryMergeAttemptAt: existingMeta?.lastMemoryMergeAttemptAt ?? null,
@@ -414,12 +401,6 @@ export async function updateSessionMetaStats(
     sessionFileSize,
     memoryFileSize
   });
-  if (meta.cortexReviewedMemoryBytes === undefined) {
-    meta.cortexReviewedMemoryBytes = resolveInitialReviewedMemoryBytes(undefined, memoryFileSize);
-  }
-  if (meta.cortexReviewedMemoryAt === undefined) {
-    meta.cortexReviewedMemoryAt = null;
-  }
   meta.updatedAt = (options.now ?? nowIso)();
 
   await writeSessionMeta(dataDir, meta);
@@ -464,14 +445,8 @@ function createEmptySessionMeta(profileId: string, sessionId: string, timestamp:
     resolvedSystemPrompt: null,
     promptFingerprint: null,
     promptComponents: null,
-    cortexReviewExcludedAt: null,
     feedbackFileSize: null,
     lastFeedbackAt: null,
-    cortexReviewedFeedbackBytes: 0,
-    cortexReviewedFeedbackAt: null,
-    cortexCaptureLastCheckedAt: null,
-    cortexCaptureForksDay: null,
-    cortexCaptureForksToday: 0,
     memoryMergeAttemptCount: 0,
     lastMemoryMergeAttemptId: null,
     lastMemoryMergeAttemptAt: null,
@@ -620,24 +595,6 @@ async function readFileSize(path: string): Promise<string | null> {
   }
 }
 
-function resolveInitialReviewedMemoryBytes(
-  reviewedBytes: number | undefined,
-  memoryFileSize: string | null
-): number {
-  if (typeof reviewedBytes === "number" && Number.isFinite(reviewedBytes)) {
-    return Math.max(0, Math.round(reviewedBytes));
-  }
-
-  if (typeof memoryFileSize === "string") {
-    const parsed = Number.parseInt(memoryFileSize, 10);
-    if (Number.isFinite(parsed)) {
-      return Math.max(0, parsed);
-    }
-  }
-
-  return 0;
-}
-
 async function readDescriptorsFromAgentsStore(agentsStoreFile: string): Promise<AgentDescriptor[]> {
   try {
     const raw = await readFile(agentsStoreFile, "utf8");
@@ -714,11 +671,9 @@ function coerceAgentDescriptor(value: unknown): AgentDescriptor | undefined {
     sessionLabel: normalizeOptionalString(value.sessionLabel),
     cli,
     sessionPurpose:
-      normalizeOptionalString(value.sessionPurpose) === "cortex_review"
-        ? "cortex_review"
-        : normalizeOptionalString(value.sessionPurpose) === "agent_creator"
-          ? "agent_creator"
-          : undefined,
+      normalizeOptionalString(value.sessionPurpose) === "agent_creator"
+        ? "agent_creator"
+        : undefined,
     mergedAt: normalizeOptionalString(value.mergedAt),
     specialistId,
     projectAgent:
@@ -802,18 +757,8 @@ function coerceSessionMeta(value: unknown): SessionMeta | undefined {
           profileMemoryFile: normalizeOptionalString(promptComponentsRecord.profileMemoryFile) ?? null
         }
       : null,
-    cortexReviewedAt: normalizeOptionalString(value.cortexReviewedAt),
-    cortexReviewedBytes: coerceOptionalNonNegativeInteger(value.cortexReviewedBytes),
-    cortexReviewExcludedAt: normalizeOptionalNullableString(value.cortexReviewExcludedAt),
-    cortexReviewedMemoryBytes: coerceOptionalNonNegativeInteger(value.cortexReviewedMemoryBytes),
-    cortexReviewedMemoryAt: normalizeOptionalNullableString(value.cortexReviewedMemoryAt),
     feedbackFileSize: coerceOptionalFileSizeString(value.feedbackFileSize),
     lastFeedbackAt: normalizeOptionalNullableString(value.lastFeedbackAt),
-    cortexReviewedFeedbackBytes: coerceOptionalNonNegativeInteger(value.cortexReviewedFeedbackBytes),
-    cortexReviewedFeedbackAt: normalizeOptionalNullableString(value.cortexReviewedFeedbackAt),
-    cortexCaptureLastCheckedAt: normalizeOptionalNullableString(value.cortexCaptureLastCheckedAt),
-    cortexCaptureForksDay: normalizeOptionalNullableString(value.cortexCaptureForksDay),
-    cortexCaptureForksToday: coerceOptionalNonNegativeInteger(value.cortexCaptureForksToday),
     memoryMergeAttemptCount: coerceOptionalNonNegativeInteger(value.memoryMergeAttemptCount),
     lastMemoryMergeAttemptId: normalizeOptionalNullableString(value.lastMemoryMergeAttemptId),
     lastMemoryMergeAttemptAt: normalizeOptionalNullableString(value.lastMemoryMergeAttemptAt),

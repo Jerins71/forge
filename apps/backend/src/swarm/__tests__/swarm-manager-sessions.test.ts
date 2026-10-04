@@ -320,23 +320,6 @@ Never use plain assistant text for user communication.`
     expect(creatorPrompt).not.toContain('Never use plain assistant text for user communication.')
   })
 
-  it('rejects agent_creator sessions in the cortex profile', async () => {
-    const config = await makeTempConfig()
-    const manager = new TestSwarmManager(config)
-    await bootWithDefaultManager(manager, config)
-
-    await expect(
-      manager.createSession('cortex', {
-        label: 'Agent Creator',
-        sessionPurpose: 'agent_creator',
-      }),
-    ).rejects.toThrow('Agent creator sessions cannot be created in the Cortex profile')
-
-    expect(manager.listAgents().some((agent) => agent.profileId === 'cortex' && agent.sessionPurpose === 'agent_creator')).toBe(
-      false,
-    )
-  })
-
   it('does not reuse orphaned agent creator session directories when creating a new session', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
@@ -472,16 +455,14 @@ Never use plain assistant text for user communication.`
       await bootWithDefaultManager(manager, config)
 
       const agentIds = manager.listAgents().map((agent) => agent.agentId)
-      expect(agentIds).toContain('manager')
-      expect(agentIds).toContain('cortex')
-      expect(agentIds).toHaveLength(2)
+      expect(agentIds).toEqual(['manager'])
       expect(warnings.some((entry) => entry.includes('Skipping invalid descriptor'))).toBe(true)
     } finally {
       console.warn = originalWarn
     }
   })
 
-  it('prevents creating a second cortex manager', async () => {
+  it('reserves the retired cortex manager name', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await bootWithDefaultManager(manager, config)
@@ -492,14 +473,6 @@ Never use plain assistant text for user communication.`
         cwd: config.defaultCwd,
       }),
     ).rejects.toThrow('The manager name "cortex" is reserved')
-  })
-
-  it('prevents deleting the cortex manager', async () => {
-    const config = await makeTempConfig()
-    const manager = new TestSwarmManager(config)
-    await bootWithDefaultManager(manager, config)
-
-    await expect(manager.deleteManager('manager', 'cortex')).rejects.toThrow('Cortex manager cannot be deleted')
   })
 
   it('terminates affected workers when project executable trust changes', async () => {
@@ -992,7 +965,7 @@ Never use plain assistant text for user communication.`
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    const created = await manager.createManager('cortex', {
+    const created = await manager.createManager('bootstrap', {
       name: 'Ops Manager',
       cwd: config.defaultCwd,
     })
@@ -1000,7 +973,7 @@ Never use plain assistant text for user communication.`
       label: 'Ops Child',
     })
 
-    await manager.deleteManager('cortex', created.agentId)
+    await manager.deleteManager(created.agentId, created.agentId)
 
     const events = await readJsonlFile<any>(logPath)
     expect(events).toEqual(
@@ -2148,16 +2121,6 @@ Never use plain assistant text for user communication.`
     expect(store.agents.find((agent) => agent.agentId === sessionAgent.agentId)?.cwd).toBe(resolvedCwd)
   })
 
-  it('rejects cwd updates for the Cortex profile', async () => {
-    const config = await makeTempConfig()
-    const manager = new TestSwarmManager(config)
-    await bootWithDefaultManager(manager, config)
-
-    await expect(manager.updateManagerCwd('cortex', config.defaultCwd)).rejects.toThrow(
-      'Cannot change working directory for Cortex profile',
-    )
-  })
-
   it('recycles or defers manager runtimes when the project-agent directory changes', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
@@ -2383,7 +2346,7 @@ Never use plain assistant text for user communication.`
     {
       label: 'model-specific instruction changes',
       expectedReason: 'prompt_mode_change' as const,
-      expectedAgentIds: ['cortex', 'manager', 'manager--s2'],
+      expectedAgentIds: ['manager', 'manager--s2'],
       invoke: async (manager: TestSwarmManager, rootSession: AgentDescriptor, _sessionAgent: AgentDescriptor, _config: SwarmConfig) => {
         const catalogModel = modelCatalogService.getModel(rootSession.model.modelId, rootSession.model.provider)
         expect(catalogModel).toBeDefined()
@@ -2476,8 +2439,7 @@ Never use plain assistant text for user communication.`
 
     expect(deleted.managerId).toBe('manager')
     expect(deleted.terminatedWorkerIds).toEqual([])
-    expect(manager.listAgents()).toHaveLength(1)
-    expect(manager.listAgents()[0]?.agentId).toBe('cortex')
+    expect(manager.listAgents()).toEqual([])
   })
 
   it('allows creating a new manager after deleting the default manager', async () => {
@@ -2487,7 +2449,7 @@ Never use plain assistant text for user communication.`
 
     await manager.deleteManager('manager', 'manager')
 
-    const recreated = await manager.createManager('cortex', {
+    const recreated = await manager.createManager('bootstrap', {
       name: 'Recreated Manager',
       cwd: config.defaultCwd,
     })

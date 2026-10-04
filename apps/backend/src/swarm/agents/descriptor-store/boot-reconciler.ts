@@ -39,8 +39,6 @@ export class BootReconciler {
       agents: migrationResult.updatedAgents
     };
 
-    const cortexPruneResult = this.options.profileReconciler.prunePersistedCortexStateForBoot(loaded);
-    loaded = cortexPruneResult.store;
     const workerSidecarPruneResult = prunePersistedWorkerSidecars(loaded, this.options.logDebug);
     loaded = workerSidecarPruneResult.store;
 
@@ -62,14 +60,11 @@ export class BootReconciler {
       this.options.profileReconciler.reconcileDelegationStateOnBoot(
         delegationRosterSettings.defaultRosterId,
       );
-    const normalizedSystemProfileTypes = this.options.profileReconciler.normalizeSystemProfileTypes();
     const normalizedContextModeState = this.options.profileReconciler.normalizeContextModeStateOnBoot();
     if (
-      cortexPruneResult.pruned ||
       workerSidecarPruneResult.pruned ||
       normalizedSessionModelState ||
       normalizedDelegationState ||
-      normalizedSystemProfileTypes ||
       normalizedContextModeState
     ) {
       await this.options.saveStore();

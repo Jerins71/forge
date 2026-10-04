@@ -8,12 +8,8 @@ import {
   type ContextMode,
   type SessionContextModeSnapshot,
 } from "@forge/protocol";
-import { normalizeArchetypeId } from "./prompts/prompt-registry.js";
 import type { SwarmAgentRuntime } from "./runtime-contracts.js";
 import type { AgentDescriptor, ManagerProfile } from "./types.js";
-
-const CORTEX_ARCHETYPE_ID = "cortex";
-const CORTEX_PROFILE_ID = "cortex";
 
 export const FRESH_CONTEXT_UNSUPPORTED_SPECIAL_PURPOSE =
   "Context v2 is only supported for ordinary Builder manager compaction runtimes.";
@@ -21,8 +17,6 @@ const FRESH_CONTEXT_UNSUPPORTED_PLUGIN =
   "Context v2 is not supported for plugin workers.";
 export const FRESH_CONTEXT_UNSUPPORTED_EXTERNAL_THREAD =
   "Context v2 is not supported for external-thread runtimes.";
-export const FRESH_CONTEXT_UNSUPPORTED_CORTEX =
-  "Context v2 is not supported for Cortex sessions.";
 export const FRESH_CONTEXT_UNSUPPORTED_SYSTEM_PROFILE =
   "Context v2 is not supported for system-managed profiles.";
 export const FRESH_CONTEXT_UNSUPPORTED_CURSOR_SDK =
@@ -98,14 +92,7 @@ export function evaluateFreshContextSupport(options: {
   if (manager.externalThread) {
     return { freshSupported: false, unsupportedReason: FRESH_CONTEXT_UNSUPPORTED_EXTERNAL_THREAD };
   }
-  if (
-    normalizeArchetypeId(manager.archetypeId ?? "") === CORTEX_ARCHETYPE_ID
-    || manager.profileId === CORTEX_PROFILE_ID
-    || manager.agentId === CORTEX_PROFILE_ID
-  ) {
-    return { freshSupported: false, unsupportedReason: FRESH_CONTEXT_UNSUPPORTED_CORTEX };
-  }
-  if (profile && (isSystemProfile(profile) || profile.profileId === CORTEX_PROFILE_ID)) {
+  if (profile && isSystemProfile(profile)) {
     return { freshSupported: false, unsupportedReason: FRESH_CONTEXT_UNSUPPORTED_SYSTEM_PROFILE };
   }
   if (runtime?.runtimeType === "cursor-sdk" || manager.model.provider === "cursor-sdk") {

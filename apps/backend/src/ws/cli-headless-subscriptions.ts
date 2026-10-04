@@ -175,7 +175,7 @@ export class CliHeadlessSubscriptions {
     }
 
     const profile = this.resolveProfile(descriptor.profileId ?? descriptor.agentId);
-    return profile ? !isSystemProfile(profile) : (descriptor.profileId ?? descriptor.agentId) !== "cortex";
+    return !profile || !isSystemProfile(profile);
   }
 
   private eventBelongsToSession(event: ServerEvent, sessionAgentId: string): boolean {

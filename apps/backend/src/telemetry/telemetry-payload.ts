@@ -28,7 +28,6 @@ export interface FeatureAdoptionData {
   skillsDiscoveredCount: number
   referenceDocsCount: number
   slashCommandsCount: number
-  cortexAutoReviewEnabled: boolean
   mobileDevicesRegistered: number
   mobileDevicesEnabledCount: number
 }
@@ -93,7 +92,7 @@ export function assembleFullPayload(
     skills_discovered_count: features.skillsDiscoveredCount,
     reference_docs_count: features.referenceDocsCount,
     slash_commands_count: features.slashCommandsCount,
-    cortex_auto_review_enabled: features.cortexAutoReviewEnabled,
+    // Cortex was removed in Forge V2; the field stays false until the shared payload contract drops it.
     mobile_devices_registered: features.mobileDevicesRegistered,
     mobile_devices_enabled_count: features.mobileDevicesEnabledCount,
 

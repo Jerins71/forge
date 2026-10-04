@@ -80,7 +80,6 @@ export type ObservabilityRootSource =
   | "bootstrap"
   | "agent_creator_bootstrap"
   | "codex_plugin_bootstrap"
-  | "cortex"
   | "internal_self_send"
   | "internal_agent_message"
   | "internal_other";

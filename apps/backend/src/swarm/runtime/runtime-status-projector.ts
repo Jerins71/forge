@@ -29,11 +29,6 @@ export interface RuntimeStatusProjectorDeps {
     contextUsage?: AgentContextUsage
   ): void;
   logDebug(message: string, details?: unknown): void;
-  handleManagerStatusTransition(
-    descriptor: AgentDescriptor,
-    status: AgentStatus,
-    pendingCount: number
-  ): void | Promise<void>;
 }
 
 export interface RuntimeStatusProjectionInput {
@@ -132,12 +127,6 @@ export class RuntimeStatusProjector {
       pendingCount,
       contextUsage: updatedDescriptor.contextUsage
     });
-
-    if (updatedDescriptor.role === "manager") {
-      await this.deps.handleManagerStatusTransition(updatedDescriptor, nextStatus, pendingCount);
-      // Runtime callbacks may execute inside the runtime's serialized event queue.
-      // Deferred replacement is applied before the next runtime use, never here.
-    }
 
     return statusChanged
       ? { transition: { agentId, previousStatus, nextStatus, transitionedAt: transitionedAt! } }

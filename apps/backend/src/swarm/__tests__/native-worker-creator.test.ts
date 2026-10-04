@@ -38,7 +38,7 @@ describe.each(["codex-native", "claude-native"])("%s roster worker creation", pr
   it("rejects a worker whose owning session is internal", async () => {
     const Creator = provider === "codex-native" ? CodexRuntimeCreator : ClaudeRuntimeCreator;
     await expect(new Creator({} as never).create({ descriptor: { role: "worker", model: { provider } } as AgentDescriptor,
-      sessionDescriptor: { role: "manager", sessionPurpose: "cortex_review" } as AgentDescriptor,
+      sessionDescriptor: { role: "manager", sessionPurpose: "agent_creator" } as AgentDescriptor,
       systemPrompt: "worker", runtimeToken: 1, callbacks: {} as never })).rejects.toThrow("local Builder");
   });
 });

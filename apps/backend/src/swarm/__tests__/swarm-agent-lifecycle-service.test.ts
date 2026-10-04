@@ -2496,40 +2496,6 @@ describe("SwarmAgentLifecycleService", () => {
     expect(profiles.get(created.agentId)?.sortOrder).toBe(0);
   });
 
-  it("deleteManager refuses Cortex archetype sessions", async () => {
-    const cortexManager = createAgentDescriptor({
-      agentId: "cx",
-      role: "manager",
-      managerId: "cx",
-      profileId: "cx",
-      archetypeId: "cortex",
-      status: "idle"
-    });
-    const profiles = new Map<string, ManagerProfile>([
-      [
-        "cx",
-        {
-          profileId: "cx",
-          displayName: "Cortex",
-          defaultSessionAgentId: "cx",
-          createdAt: NOW,
-          updatedAt: NOW,
-          sortOrder: 0
-        }
-      ]
-    ]);
-
-    const svc = new SwarmAgentLifecycleService(
-      baseLifecycleOptions({
-        descriptors: new Map([[cortexManager.agentId, cortexManager]]),
-        profiles,
-        getSessionsForProfile: () => [cortexManager as AgentDescriptor & { role: "manager"; profileId: string }]
-      })
-    );
-
-    await expect(svc.deleteManager("cx", "cx")).rejects.toThrow(/Cortex manager cannot be deleted/);
-  });
-
   it("deleteManager preserves recovery state when manager shutdown is incomplete", async () => {
     const manager = createAgentDescriptor({
       agentId: "m1",

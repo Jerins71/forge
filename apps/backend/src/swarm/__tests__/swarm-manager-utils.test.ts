@@ -4,12 +4,8 @@ import { join } from "node:path";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentRuntimeExtensionSnapshot } from "@forge/protocol";
-import type {
-  AgentDescriptor,
-  ConversationEntryEvent
-} from "../types.js";
+import type { AgentDescriptor } from "../types.js";
 import {
-  analyzeLatestCortexCloseoutNeed,
   areContextUsagesEqual,
   buildModelCapacityBlockKey,
   buildSessionMemoryRuntimeView,
@@ -26,7 +22,6 @@ import {
   normalizeAgentId,
   normalizeContextUsage,
   normalizeConversationAttachments,
-  normalizeCortexUserVisiblePaths,
   normalizeMemoryMergeContent,
   normalizeMemoryTemplateLines,
   normalizeMessageSourceContext,
@@ -738,99 +733,6 @@ describe("resolveModel", () => {
       thinkingLevel: "low"
     });
     expect(model).toBe(fallback);
-  });
-});
-
-describe("normalizeCortexUserVisiblePaths", () => {
-  it("rewrites absolute paths to profiles/ suffix", () => {
-    const t = "See C:\\Users\\x\\profiles\\p1\\sessions\\s1 for details";
-    expect(normalizeCortexUserVisiblePaths(t)).toContain("profiles/p1/sessions/s1");
-  });
-});
-
-describe("analyzeLatestCortexCloseoutNeed", () => {
-  const userMsg = (ts: string): ConversationEntryEvent => ({
-    type: "conversation_message",
-    agentId: "m",
-    role: "user",
-    text: "hi",
-    timestamp: ts,
-    source: "user_input"
-  });
-
-  const speak = (ts: string): ConversationEntryEvent => ({
-    type: "conversation_message",
-    agentId: "m",
-    role: "assistant",
-    text: "spoken",
-    timestamp: ts,
-    source: "speak_to_user"
-  });
-
-  const assistant = (
-    ts: string,
-    source: "assistant_output" | "assistant_progress"
-  ): ConversationEntryEvent => ({
-    type: "conversation_message",
-    agentId: "m",
-    role: "assistant",
-    text: "assistant",
-    timestamp: ts,
-    source
-  });
-
-  const agentToAgent = (ts: string): ConversationEntryEvent => ({
-    type: "agent_message",
-    agentId: "m",
-    timestamp: ts,
-    source: "agent_to_agent",
-    toAgentId: "x",
-    text: "x"
-  });
-
-  it("returns false when no user message", () => {
-    expect(analyzeLatestCortexCloseoutNeed([]).needsReminder).toBe(false);
-  });
-
-  it("flags missing speak_to_user after latest user", () => {
-    const r = analyzeLatestCortexCloseoutNeed([userMsg("2020-01-01T00:00:00.000Z")]);
-    expect(r.needsReminder).toBe(true);
-    expect(r.reason).toBe("missing_speak_to_user");
-  });
-
-  it("does not remind when speak_to_user follows user", () => {
-    const r = analyzeLatestCortexCloseoutNeed([
-      userMsg("2020-01-01T00:00:00.000Z"),
-      speak("2020-01-02T00:00:00.000Z")
-    ]);
-    expect(r.needsReminder).toBe(false);
-  });
-
-  it("does not remind when assistant_output follows user", () => {
-    const r = analyzeLatestCortexCloseoutNeed([
-      userMsg("2020-01-01T00:00:00.000Z"),
-      assistant("2020-01-02T00:00:00.000Z", "assistant_output")
-    ]);
-    expect(r.needsReminder).toBe(false);
-  });
-
-  it("does remind when only assistant_progress follows user", () => {
-    const r = analyzeLatestCortexCloseoutNeed([
-      userMsg("2020-01-01T00:00:00.000Z"),
-      assistant("2020-01-02T00:00:00.000Z", "assistant_progress")
-    ]);
-    expect(r.needsReminder).toBe(true);
-    expect(r.reason).toBe("missing_speak_to_user");
-  });
-
-  it("flags stale when worker progress after speak_to_user", () => {
-    const r = analyzeLatestCortexCloseoutNeed([
-      userMsg("2020-01-01T00:00:00.000Z"),
-      speak("2020-01-02T00:00:00.000Z"),
-      agentToAgent("2020-01-03T00:00:00.000Z")
-    ]);
-    expect(r.needsReminder).toBe(true);
-    expect(r.reason).toBe("stale_after_worker_progress");
   });
 });
 

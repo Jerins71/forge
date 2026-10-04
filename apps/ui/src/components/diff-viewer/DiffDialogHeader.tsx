@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { GitRepoTarget, RemoteUpdateAwarenessProjectSnapshot } from '@forge/protocol'
+import type { RemoteUpdateAwarenessProjectSnapshot } from '@forge/protocol'
 import { GitBranch, GitPullRequest, HardDrive, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -16,10 +16,6 @@ function formatPathLabel(path: string): string {
 interface DiffDialogHeaderProps {
   activeTab: DiffTab
   onTabChange: (tab: DiffTab) => void
-  repoTarget: GitRepoTarget
-  onRepoTargetChange: (target: GitRepoTarget) => void
-  showRepoSelector: boolean
-  repoLabel: string | null
   repoName: string | null
   branch: string | null
   currentWorktreePath?: string | null
@@ -37,10 +33,6 @@ interface DiffDialogHeaderProps {
 export function DiffDialogHeader({
   activeTab,
   onTabChange,
-  repoTarget,
-  onRepoTargetChange,
-  showRepoSelector,
-  repoLabel,
   repoName,
   branch,
   currentWorktreePath,
@@ -54,9 +46,6 @@ export function DiffDialogHeader({
   branchActions,
   remoteUpdateSnapshot,
 }: DiffDialogHeaderProps) {
-  const workspaceLabel = repoTarget === 'workspace' ? (repoLabel ?? 'Workspace') : 'Workspace'
-  const versioningLabel = repoTarget === 'versioning' ? (repoLabel ?? 'Cortex Knowledge') : 'Cortex Knowledge'
-
   const worktreeLabel = currentWorktreePath ? formatPathLabel(currentWorktreePath) : null
   const worktreeChipTitle = currentWorktreePath
     ? selectedWorktreeId
@@ -121,28 +110,6 @@ export function DiffDialogHeader({
           onClick={() => onTabChange('pull-requests')}
         />
       </nav>
-
-      {showRepoSelector ? (
-        <>
-          <span className="text-muted-foreground/30" aria-hidden>·</span>
-          <div
-            className="inline-flex h-7 items-center rounded-md border border-border/60 bg-muted/30 p-0.5"
-            role="group"
-            aria-label="Repository target"
-          >
-            <TabButton
-              label={workspaceLabel}
-              active={repoTarget === 'workspace'}
-              onClick={() => onRepoTargetChange('workspace')}
-            />
-            <TabButton
-              label={versioningLabel}
-              active={repoTarget === 'versioning'}
-              onClick={() => onRepoTargetChange('versioning')}
-            />
-          </div>
-        </>
-      ) : null}
 
       {(repoName || branch) ? (
         <span className="text-muted-foreground/30" aria-hidden>·</span>

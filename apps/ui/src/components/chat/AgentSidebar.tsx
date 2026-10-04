@@ -23,7 +23,6 @@ import {
   buildProfileTreeRows,
   getArchivedProfileRows,
   getDirectlyArchivedSessionRows,
-  isCortexProfile,
 } from '@/lib/agent-hierarchy'
 import type { ProfileTreeRow } from '@/lib/agent-hierarchy'
 import { LOCAL_ORIGIN_ID } from '@/lib/origin-store'
@@ -44,7 +43,6 @@ import { SidebarSearch } from './agent-sidebar/SidebarSearch'
 import { ProjectViewSwitcher, type SidebarProjectViewOption } from './agent-sidebar/ProjectViewSwitcher'
 import { SidebarFooter } from './agent-sidebar/SidebarFooter'
 import { ProfileGroup } from './agent-sidebar/ProfileGroup'
-import { CortexSection } from './agent-sidebar/CortexSection'
 import { RoomsInboxLive } from './agent-sidebar/RoomsInboxLive'
 import { RoomsProjectsTree, type RoomsProjectTreeRow } from './agent-sidebar/RoomsProjectsTree'
 import type { RoomsInboxOriginInput } from './agent-sidebar/rooms-inbox-selectors'
@@ -175,7 +173,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       // wait for their next authoritative connection epoch before session GC.
       inventoryReady: isConnected,
       sessions: rows
-        .filter((row) => !isCortexProfile(row) && row.profile.profileType !== 'system')
+        .filter((row) => row.profile.profileType !== 'system')
         .flatMap((row) => row.sessions.map(({ sessionAgent }) => {
           const live = originStatuses[sessionAgent.agentId]
           return {
@@ -197,7 +195,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
           }
         })),
       projects: rows
-        .filter((row) => !isCortexProfile(row) && row.profile.profileType !== 'system')
+        .filter((row) => row.profile.profileType !== 'system')
         .map((row) => ({
           originId,
           profileId: row.profile.profileId,
@@ -211,9 +209,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     return [toOriginInput(LOCAL_ORIGIN_ID, connected, treeRows, statuses, unreadCounts)]
   }, [connected, statuses, treeRows, unreadCounts])
   const projectViewOptions = useMemo<SidebarProjectViewOption[]>(() => (
-    treeRows
-      .filter((row) => !isCortexProfile(row))
-      .map((row) => ({
+    treeRows.map((row) => ({
         key: builderSidebarOrderKey({
           originId: LOCAL_ORIGIN_ID,
           profileId: row.profile.profileId,
@@ -231,13 +227,10 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   } = useProjectViews()
   const viewFilteredTreeRows = useMemo(() => {
     if (!activeProjectKeys) return treeRows
-    return treeRows.filter((row) => (
-      !isCortexProfile(row)
-      && activeProjectKeys.has(builderSidebarOrderKey({
-        originId: LOCAL_ORIGIN_ID,
-        profileId: row.profile.profileId,
-      }))
-    ))
+    return treeRows.filter((row) => activeProjectKeys.has(builderSidebarOrderKey({
+      originId: LOCAL_ORIGIN_ID,
+      profileId: row.profile.profileId,
+    })))
   }, [activeProjectKeys, treeRows])
   const {
     activeDragId,
@@ -245,7 +238,6 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     expandedSessionIds,
     expandedWorkerListSessionIds,
     regularRows,
-    cortexRow,
     parsedSearch,
     deferredSearchQuery,
     isSearchActive,
@@ -260,12 +252,6 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     searchQuery,
     onRequestSessionWorkers,
   })
-  // Project Views intentionally filter only Projects. Keep Cortex reachable in
-  // the Rooms mobile overlay even while a saved Project View is active.
-  const renderedCortexRow = useMemo(
-    () => roomsV2 ? treeRows.find((row) => isCortexProfile(row)) ?? null : cortexRow,
-    [cortexRow, roomsV2, treeRows],
-  )
   const [usagePanelOpen, setUsagePanelOpen] = useState(false)
   const handleToggleUsagePanel = useCallback(() => setUsagePanelOpen(prev => !prev), [])
   const handleCloseUsagePanel = useCallback(() => setUsagePanelOpen(false), [])
@@ -350,7 +336,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     let inactiveMatchCount = 0
 
     for (const row of viewFilteredTreeRows) {
-      if (isCortexProfile(row) || existingProfileIds.has(row.profile.profileId)) continue
+      if (existingProfileIds.has(row.profile.profileId)) continue
       const matchingInactiveEntries = getEntriesForProfile(row.profile.profileId).filter((entry) =>
         matchesRepoProjectAgentSearch(entry.item, parsedSearch.term),
       )
@@ -652,8 +638,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   // displayed rows rather than raw treeRows.
   const handleToggleHideCliSessions = useCallback(() => {
     if (!hideCliSessions && selectedAgentId && !isSettingsActive) {
-      const displayedRows = cortexRow ? [cortexRow, ...displayedRegularRows] : displayedRegularRows
-      const targetId = findCliHideNavigationTarget(selectedAgentId, agents, displayedRows)
+      const targetId = findCliHideNavigationTarget(selectedAgentId, agents, displayedRegularRows)
       if (targetId) {
         onSelectAgent(targetId)
       }
@@ -661,7 +646,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       // existing isSelectedSessionOrWorker exception in ProfileGroup.
     }
     toggleHideCliSessions()
-  }, [hideCliSessions, selectedAgentId, isSettingsActive, agents, displayedRegularRows, cortexRow, onSelectAgent, toggleHideCliSessions])
+  }, [hideCliSessions, selectedAgentId, isSettingsActive, agents, displayedRegularRows, onSelectAgent, toggleHideCliSessions])
 
   const handleMuteAllSessions = useCallback((sessionAgentIds: string[], mute: boolean) => {
     const current = getMutedAgents()
@@ -793,7 +778,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       onMoveBuilderProject={onMoveBuilderProject}
       renderRow={mixedProjectContent}
       emptyState={
-        isSearchActive && mixedProjectRows.length === 0 && !cortexRow ? (
+        isSearchActive && mixedProjectRows.length === 0 ? (
           <p className="rounded-md px-3 py-4 text-center text-xs text-muted-foreground">
             No matches found.
           </p>
@@ -898,38 +883,6 @@ export const AgentSidebar = React.memo(function AgentSidebar({
           scrollbarColor: 'var(--sidebar-border) transparent',
         }}
       >
-        {/* Pinned Cortex entry — modest inset beneath Builder/Collab switch */}
-        {renderedCortexRow ? (
-          <div className={roomsV2 ? 'mt-2 md:hidden' : 'mt-2'}>
-            <CortexSection
-              cortexRow={renderedCortexRow}
-              statuses={statuses}
-              unreadCounts={unreadCounts}
-              selectedAgentId={selectedAgentId}
-              isSettingsActive={isSettingsActive}
-              isCollapsed={isSearchActive ? false : collapsedProfileIds.has('cortex')}
-              collapsedSessionIds={expandedSessionIds}
-              visibleSessionLimit={getVisibleSessionLimit('cortex')}
-              expandedWorkerListSessionIds={expandedWorkerListSessionIds}
-              onToggleCollapsed={() => toggleProfileCollapsed(renderedCortexRow.profile.profileId)}
-              onToggleSessionCollapsed={toggleSessionCollapsed}
-              onShowMoreSessions={() => showMoreSessions(renderedCortexRow.profile.profileId)}
-              onShowLessSessions={() => showLessSessions(renderedCortexRow.profile.profileId)}
-              onToggleWorkerListExpanded={toggleWorkerListExpanded}
-              onSelect={handleSelectAgent}
-              onDeleteAgent={onDeleteAgent}
-              onOpenSettings={handleOpenSettings}
-              onStopSession={onStopSession}
-              onResumeSession={onResumeSession}
-              onMarkUnread={onMarkUnread}
-              onMarkAllRead={onMarkAllRead}
-              highlightQuery={isSearchActive ? parsedSearch.term : undefined}
-              mutedAgents={mutedAgentsState}
-              onToggleMute={handleToggleMute}
-              onMuteAllSessions={handleMuteAllSessions}
-            />
-          </div>
-        ) : null}
 
         {/* Rooms owns one mode-aware command row. Classic retains its established rows. */}
         {roomsV2 ? (
@@ -1018,7 +971,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
 
         {showProjectsBody && !roomsV2 ? (
           <>
-        {isSearchActive && mixedProjectRows.length === 0 && !cortexRow ? (
+        {isSearchActive && mixedProjectRows.length === 0 ? (
           <p className="rounded-md px-3 py-4 text-center text-xs text-muted-foreground">
             No matches found.
           </p>

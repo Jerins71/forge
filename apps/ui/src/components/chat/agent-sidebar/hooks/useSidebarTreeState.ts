@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useMemo, useState } from 'react'
-import { isCortexProfile, type ProfileTreeRow } from '@/lib/agent-hierarchy'
+import type { ProfileTreeRow } from '@/lib/agent-hierarchy'
 import { MAX_VISIBLE_SESSIONS, SESSION_PAGE_SIZE } from '../constants'
 import { filterTreeRows, parseSearchQuery } from '../utils'
 
@@ -15,7 +15,6 @@ interface UseSidebarTreeStateReturn {
   expandedSessionIds: Set<string>
   expandedWorkerListSessionIds: Set<string>
   regularRows: ProfileTreeRow[]
-  cortexRow: ProfileTreeRow | null
   parsedSearch: ReturnType<typeof parseSearchQuery>
   deferredSearchQuery: string
   isSearchActive: boolean
@@ -49,19 +48,9 @@ export function useSidebarTreeState({
     [treeRows, deferredSearchQuery],
   )
 
-  const sourceRows = useMemo(
+  const regularRows = useMemo(
     () => (isSearchActive ? filteredTreeRows : treeRows),
     [filteredTreeRows, isSearchActive, treeRows],
-  )
-
-  const regularRows = useMemo(
-    () => sourceRows.filter((row) => !isCortexProfile(row)),
-    [sourceRows],
-  )
-
-  const cortexRow = useMemo(
-    () => sourceRows.find((row) => isCortexProfile(row)) ?? null,
-    [sourceRows],
   )
 
   const toggleSessionCollapsed = useCallback((sessionId: string) => {
@@ -115,7 +104,6 @@ export function useSidebarTreeState({
     expandedSessionIds,
     expandedWorkerListSessionIds,
     regularRows,
-    cortexRow,
     parsedSearch,
     deferredSearchQuery,
     isSearchActive,

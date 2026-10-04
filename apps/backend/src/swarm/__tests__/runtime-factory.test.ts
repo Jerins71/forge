@@ -175,7 +175,6 @@ function createConfig(rootDir: string): SwarmConfig {
     port: 47187,
     debug: false,
     isDesktop: false,
-    cortexEnabled: true,
     allowNonManagerSubscriptions: false,
     managerDisplayName: "Manager",
     defaultModel: {
@@ -566,7 +565,7 @@ describe("RuntimeFactory", () => {
     expect(createdSession.setFreshContextHandler).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it.each(["manager", "worker", "cortex", "special"] as const)("scopes notes and context-control tools for %s", async kind => {
+  it.each(["manager", "worker", "special"] as const)("scopes notes and context-control tools for %s", async kind => {
     const rootDir = await mkdtemp(join(tmpdir(), "forge-runtime-context-tools-"));
     setupPiModel();
     piCodingAgentMockState.createAgentSession.mockResolvedValue({ session: createMockPiSession(), extensionsResult: { extensions: [], errors: [] } });
@@ -574,8 +573,7 @@ describe("RuntimeFactory", () => {
       getContextMode: () => "fresh", searchHistory: vi.fn(), readHistory: vi.fn(),
     } });
     const descriptor = kind === "worker" ? createDescriptor(rootDir) : createManagerDescriptor(rootDir,
-      kind === "cortex" ? { profileId: "cortex", archetypeId: "cortex" } :
-      kind === "special" ? { sessionPurpose: "cortex_review" } : {});
+      kind === "special" ? { sessionPurpose: "agent_creator" } : {});
     await factory.createRuntimeForDescriptor(descriptor, "system prompt");
     const names = (piCodingAgentMockState.createAgentSession.mock.calls.at(-1)?.[0]?.customTools as Array<{ name: string }>).map(tool => tool.name);
     expect(names.includes("notes")).toBe(kind === "manager" || kind === "worker");
@@ -623,7 +621,7 @@ describe("RuntimeFactory", () => {
     await factory.createRuntimeForDescriptor(createDescriptor(rootDir), "worker prompt");
     const workerHandler = createdSession.setFreshContextHandler.mock.calls.at(-1)?.[0] as ((request: unknown) => Promise<unknown>);
     await expect(workerHandler({ reason: "manual", willRetry: false, branchEntries: [] })).resolves.toBeUndefined();
-    await factory.createRuntimeForDescriptor(createManagerDescriptor(rootDir, { sessionPurpose: "cortex_review" }), "special prompt");
+    await factory.createRuntimeForDescriptor(createManagerDescriptor(rootDir, { sessionPurpose: "agent_creator" }), "special prompt");
     const specialHandler = createdSession.setFreshContextHandler.mock.calls.at(-1)?.[0] as ((request: unknown) => Promise<unknown>);
     await expect(specialHandler({ reason: "manual", willRetry: false, branchEntries: [] })).resolves.toBeUndefined();
   });
@@ -1462,7 +1460,7 @@ describe("RuntimeFactory", () => {
       message: "bind failed",
     });
     expect(session.setActiveToolsByName).toHaveBeenCalledWith(
-      expect.arrayContaining(["z_existing", "send_message_to_agent", "knowledge"]),
+      expect.arrayContaining(["z_existing", "send_message_to_agent"]),
     );
   });
 
@@ -1895,7 +1893,7 @@ describe("RuntimeFactory", () => {
     const sendTool = tools.find((tool) => tool.name === "send_message_to_agent");
     await sendTool?.execute("tool-context", { targetAgentId: managerDescriptor.agentId, message: "Tests passed; continuing." });
 
-    expect(tools.map((tool) => tool.name)).toEqual(["bash", "bash_process", "send_message_to_agent", "knowledge"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["bash", "bash_process", "send_message_to_agent"]);
     expect(sendTool).toBeDefined();
     expect(sendMessage).toHaveBeenCalledWith(
       descriptor.agentId, managerDescriptor.agentId, JSON.stringify({

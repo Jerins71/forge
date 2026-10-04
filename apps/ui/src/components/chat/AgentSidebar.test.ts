@@ -560,21 +560,9 @@ describe('AgentSidebar', () => {
     expect(onOpenArchive).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps Cortex and Archive in the Rooms mobile overlay', () => {
+  it('keeps Archive in the Rooms mobile overlay', () => {
     localStorageMock.setItem('forge-sidebar-layout', 'rooms-v2')
     const onOpenArchive = vi.fn()
-    const cortexRoot = {
-      ...sessionManager('cortex-root', 'cortex-project'),
-      archetypeId: 'cortex',
-      displayName: 'Cortex',
-      sessionLabel: 'Main',
-    }
-    const cortexReview = {
-      ...sessionManager('cortex-review', 'cortex-project'),
-      archetypeId: 'cortex',
-      displayName: 'Cortex',
-      sessionLabel: 'Review Run',
-    }
     const project = sessionManager('archived-project', 'archived-project')
     const archived = {
       ...sessionManager('archived-project--old', 'archived-project'),
@@ -582,11 +570,8 @@ describe('AgentSidebar', () => {
     }
 
     renderSidebar({
-      agents: [cortexRoot, cortexReview, project, archived],
-      profiles: [
-        { ...profileFor(cortexRoot), profileId: 'cortex-project', defaultSessionAgentId: 'cortex-root' },
-        profileFor(project),
-      ],
+      agents: [project, archived],
+      profiles: [profileFor(project)],
       isMobileOpen: true,
       onMobileClose: vi.fn(),
       onOpenArchive,
@@ -594,8 +579,6 @@ describe('AgentSidebar', () => {
 
     const mobileSidebar = container.querySelectorAll('aside')[1] as HTMLElement
     expect(mobileSidebar).toBeTruthy()
-    expect(queryByText(mobileSidebar, 'Cortex')).toBeTruthy()
-    expect(queryByText(mobileSidebar, 'Review Run')).toBeTruthy()
     click(getByRole(mobileSidebar, 'button', { name: 'Archive' }))
     expect(onOpenArchive).toHaveBeenCalledTimes(1)
   })
@@ -822,123 +805,6 @@ describe('AgentSidebar', () => {
     // Both profile names should be visible
     expect(queryByText(sidebar, 'alpha-mgr')).toBeTruthy()
     expect(queryByText(sidebar, 'beta-mgr')).toBeTruthy()
-  })
-
-  it('shows Cortex sessions directly without review-run badge indirection', async () => {
-    const createdAt = '2026-01-01T00:00:00.000Z'
-    const updatedAt = createdAt
-    const cortexRoot = {
-      ...sessionManager('cortex', 'cortex'),
-      displayName: 'Cortex',
-      archetypeId: 'cortex',
-      sessionLabel: 'Main',
-      createdAt,
-      updatedAt,
-    }
-    const reviewRunSession: AgentDescriptor = {
-      ...sessionManager('cortex--s2', 'cortex'),
-      displayName: 'Cortex',
-      archetypeId: 'cortex',
-      sessionLabel: 'Review Run · Full Queue',
-      sessionPurpose: 'cortex_review',
-      createdAt,
-      updatedAt,
-    }
-    const cortexProfile: ManagerProfile = {
-      profileId: 'cortex',
-      displayName: 'Cortex',
-      defaultSessionAgentId: 'cortex',
-      defaultModel: { provider: 'openai-codex', modelId: 'gpt-5.5', thinkingLevel: 'medium' },
-      createdAt,
-      updatedAt,
-    }
-
-    renderSidebar({
-      agents: [cortexRoot, reviewRunSession],
-      profiles: [cortexProfile],
-      wsUrl: 'ws://127.0.0.1:47187/ws',
-    })
-    await flushEffects()
-
-    const sidebar = getDesktopSidebar()
-    expect(getByText(sidebar, 'Review Run · Full Queue')).toBeTruthy()
-    expect(queryByText(sidebar, /^Review \d+$/)).toBeNull()
-    const cortexLabel = getByText(sidebar, 'Cortex')
-    const cortexInset = cortexLabel.closest('.mt-2')
-    expect(cortexInset).toBeTruthy()
-  })
-
-  it('hides the Cortex review badge when there are no outstanding sessions needing review', async () => {
-    const createdAt = '2026-01-01T00:00:00.000Z'
-    const updatedAt = createdAt
-    const cortexRoot = {
-      ...sessionManager('cortex', 'cortex'),
-      displayName: 'Cortex',
-      archetypeId: 'cortex',
-      sessionLabel: 'Main',
-      createdAt,
-      updatedAt,
-    }
-    const cortexProfile: ManagerProfile = {
-      profileId: 'cortex',
-      displayName: 'Cortex',
-      defaultSessionAgentId: 'cortex',
-      defaultModel: { provider: 'openai-codex', modelId: 'gpt-5.5', thinkingLevel: 'medium' },
-      createdAt,
-      updatedAt,
-    }
-
-    renderSidebar({
-      agents: [cortexRoot],
-      profiles: [cortexProfile],
-      wsUrl: 'ws://127.0.0.1:47187/ws',
-    })
-    await flushEffects()
-
-    const sidebar = getDesktopSidebar()
-    expect(queryByText(sidebar, /^Review \d+$/)).toBeNull()
-  })
-
-  it('does not show a Cortex review-run running indicator', () => {
-    const createdAt = '2026-01-01T00:00:00.000Z'
-    const updatedAt = createdAt
-    const cortexRoot = {
-      ...sessionManager('cortex', 'cortex'),
-      displayName: 'Cortex',
-      archetypeId: 'cortex',
-      sessionLabel: 'Main',
-      createdAt,
-      updatedAt,
-    }
-    const reviewRunSession: AgentDescriptor = {
-      ...sessionManager('cortex--s2', 'cortex'),
-      displayName: 'Cortex',
-      archetypeId: 'cortex',
-      sessionLabel: 'Review Run · Full Queue',
-      sessionPurpose: 'cortex_review',
-      status: 'streaming',
-      createdAt,
-      updatedAt,
-    }
-    const cortexProfile: ManagerProfile = {
-      profileId: 'cortex',
-      displayName: 'Cortex',
-      defaultSessionAgentId: 'cortex',
-      defaultModel: { provider: 'openai-codex', modelId: 'gpt-5.5', thinkingLevel: 'medium' },
-      createdAt,
-      updatedAt,
-    }
-
-    renderSidebar({
-      agents: [cortexRoot, reviewRunSession],
-      profiles: [cortexProfile],
-      statuses: {
-        'cortex--s2': { status: 'streaming', pendingCount: 0 },
-      },
-    })
-
-    const sidebar = getDesktopSidebar()
-    expect(queryByText(sidebar, 'Running')).toBeNull()
   })
 
   it('hides CLI sessions when the hide-cli-sessions localStorage pref is set', () => {
@@ -1319,45 +1185,6 @@ describe('AgentSidebar', () => {
     expect(queryByText(sidebar, 'regular-session')).toBeTruthy()
   })
 
-  it('shows the selected Cortex review-run session so it stays directly reachable', () => {
-    const createdAt = '2026-01-01T00:00:00.000Z'
-    const updatedAt = createdAt
-    const cortexRoot = {
-      ...sessionManager('cortex', 'cortex'),
-      displayName: 'Cortex',
-      archetypeId: 'cortex',
-      sessionLabel: 'Main',
-      createdAt,
-      updatedAt,
-    }
-    const reviewRunSession: AgentDescriptor = {
-      ...sessionManager('cortex--s2', 'cortex'),
-      displayName: 'Cortex',
-      archetypeId: 'cortex',
-      sessionLabel: 'Review Run · Full Queue',
-      sessionPurpose: 'cortex_review',
-      createdAt,
-      updatedAt,
-    }
-    const cortexProfile: ManagerProfile = {
-      profileId: 'cortex',
-      displayName: 'Cortex',
-      defaultSessionAgentId: 'cortex',
-      defaultModel: { provider: 'openai-codex', modelId: 'gpt-5.5', thinkingLevel: 'medium' },
-      createdAt,
-      updatedAt,
-    }
-
-    renderSidebar({
-      agents: [cortexRoot, reviewRunSession],
-      profiles: [cortexProfile],
-      selectedAgentId: 'cortex--s2',
-    })
-
-    const sidebar = getDesktopSidebar()
-    expect(getByText(sidebar, 'Review Run · Full Queue')).toBeTruthy()
-  })
-
   it('toggleHideCliSessions falls back to ref state when localStorage.getItem throws', async () => {
     // Verifies that when localStorage is completely unavailable (e.g. security
     // policy, quota error), the toggle still flips correctly using in-memory
@@ -1595,14 +1422,10 @@ describe('AgentSidebar', () => {
     }
   })
 
-  it('restores an active project view, hides every outside project and Cortex, and leaves an outside conversation', async () => {
+  it('restores an active project view, hides every outside project, and leaves an outside conversation', async () => {
     localStorageMock.setItem('forge-sidebar-layout', 'classic')
     const customerSession = sessionManager('customer-main', 'customer-project')
     const privateSession = sessionManager('private-main', 'private-project')
-    const cortexSession = {
-      ...sessionManager('cortex-main', 'cortex'),
-      archetypeId: 'cortex',
-    }
     const onSelectAgent = vi.fn()
     localStorageMock.setItem('forge-sidebar-project-views', JSON.stringify({
       version: 1,
@@ -1615,11 +1438,10 @@ describe('AgentSidebar', () => {
     }))
 
     renderSidebar({
-      agents: [customerSession, privateSession, cortexSession],
+      agents: [customerSession, privateSession],
       profiles: [
         { ...profileFor(customerSession), profileId: 'customer-project', displayName: 'Acme Project', defaultSessionAgentId: customerSession.agentId },
         { ...profileFor(privateSession), profileId: 'private-project', displayName: 'Private Project', defaultSessionAgentId: privateSession.agentId },
-        { ...profileFor(cortexSession), profileId: 'cortex', displayName: 'Cortex', defaultSessionAgentId: cortexSession.agentId },
       ],
       selectedAgentId: privateSession.agentId,
       onSelectAgent,
@@ -1629,7 +1451,6 @@ describe('AgentSidebar', () => {
     expect(getByRole(sidebar, 'button', { name: 'Project view: Acme screen share' })).toBeTruthy()
     expect(queryByText(sidebar, 'Acme Project')).toBeTruthy()
     expect(queryByText(sidebar, 'Private Project')).toBeNull()
-    expect(queryByText(sidebar, 'Cortex')).toBeNull()
     await waitFor(() => expect(onSelectAgent).toHaveBeenCalledWith(customerSession.agentId))
   })
 

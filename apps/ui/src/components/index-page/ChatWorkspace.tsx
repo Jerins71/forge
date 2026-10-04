@@ -1,5 +1,5 @@
 import { useEffect, useState, type ComponentPropsWithoutRef, type RefObject } from 'react'
-import { OnboardingCallout } from '@/components/chat/cortex/OnboardingCallout'
+import { OnboardingCallout } from '@/components/chat/OnboardingCallout'
 import { ChatHeader } from '@/components/chat/ChatHeader'
 import { ChatSearchBar } from '@/components/chat/ChatSearchBar'
 import { MessageInput, type MessageInputHandle } from '@/components/chat/MessageInput'

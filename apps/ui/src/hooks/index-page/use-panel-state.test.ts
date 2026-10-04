@@ -16,26 +16,18 @@ const capturedRef: {
   current: {
     panelState: PanelStateReturn
     setAgentId: (id: string | null) => void
-    setArchetypeId: (id: string | null | undefined) => void
   } | null
 } = { current: null }
 
 function PanelStateHarness() {
   const [activeAgentId, setActiveAgentId] = useState<string | null>('agent-1')
-  const [activeAgentArchetypeId, setActiveAgentArchetypeId] = useState<string | null | undefined>(
-    null,
-  )
 
-  const panelState = usePanelState({ activeAgentId, activeAgentArchetypeId })
+  const panelState = usePanelState({ activeAgentId })
 
   const setAgentId = useCallback((id: string | null) => setActiveAgentId(id), [])
-  const setArchetypeId = useCallback(
-    (id: string | null | undefined) => setActiveAgentArchetypeId(id),
-    [],
-  )
 
   useEffect(() => {
-    capturedRef.current = { panelState, setAgentId, setArchetypeId }
+    capturedRef.current = { panelState, setAgentId }
   })
 
   return null
@@ -144,103 +136,12 @@ describe('usePanelState', () => {
     })
   })
 
-  describe('Cortex pending-open only opens for Cortex', () => {
-    it('opens artifacts panel when cortex dashboard tab is requested and archetype becomes cortex', () => {
-      render()
-
-      // Request cortex dashboard tab — sets pendingCortexDashboardOpen
-      act(() => {
-        capturedRef.current!.panelState.requestCortexDashboardTab('index')
-      })
-      // Panel should not open yet because archetype is not cortex
-      expect(capturedRef.current!.panelState.isArtifactsPanelOpen).toBe(false)
-
-      // Set archetype to cortex — useEffect opens the panel
-      act(() => {
-        capturedRef.current!.setArchetypeId('cortex')
-      })
-      expect(capturedRef.current!.panelState.isArtifactsPanelOpen).toBe(true)
-    })
-
-    it('does not open artifacts panel for non-cortex archetype even with pending request', () => {
-      render()
-
-      act(() => {
-        capturedRef.current!.panelState.requestCortexDashboardTab('index')
-      })
-
-      act(() => {
-        capturedRef.current!.setArchetypeId('default')
-      })
-      expect(capturedRef.current!.panelState.isArtifactsPanelOpen).toBe(false)
-    })
-
-    it('cortex dashboard tab request sets nonce and tab', () => {
-      render()
-
-      expect(capturedRef.current!.panelState.cortexDashboardTabRequest).toBeNull()
-
-      act(() => {
-        capturedRef.current!.panelState.requestCortexDashboardTab('index')
-      })
-
-      expect(capturedRef.current!.panelState.cortexDashboardTabRequest).not.toBeNull()
-      expect(capturedRef.current!.panelState.cortexDashboardTabRequest!.tab).toBe('index')
-      expect(typeof capturedRef.current!.panelState.cortexDashboardTabRequest!.nonce).toBe('number')
-    })
-
-    it('requesting cortex dashboard tab hides file browser and preserves selected file', () => {
-      render()
-
-      act(() => {
-        capturedRef.current!.setArchetypeId('cortex')
-      })
-      act(() => {
-        capturedRef.current!.panelState.toggleFileBrowser()
-      })
-      act(() => {
-        capturedRef.current!.panelState.selectFileBrowserFile('/tmp/example.ts')
-      })
-      expect(capturedRef.current!.panelState.isFileBrowserOpen).toBe(true)
-      expect(capturedRef.current!.panelState.selectedFileBrowserFile).toBe('/tmp/example.ts')
-
-      act(() => {
-        capturedRef.current!.panelState.requestCortexDashboardTab('consolidation')
-      })
-
-      expect(capturedRef.current!.panelState.isFileBrowserOpen).toBe(false)
-      expect(capturedRef.current!.panelState.selectedFileBrowserFile).toBe('/tmp/example.ts')
-      expect(capturedRef.current!.panelState.isArtifactsPanelOpen).toBe(true)
-    })
-
-    it('toggleCortexDashboardTab closes file browser when opening from rail', () => {
-      render()
-
-      act(() => {
-        capturedRef.current!.setArchetypeId('cortex')
-      })
-      act(() => {
-        capturedRef.current!.panelState.toggleFileBrowser()
-      })
-      expect(capturedRef.current!.panelState.isFileBrowserOpen).toBe(true)
-
-      act(() => {
-        capturedRef.current!.panelState.toggleCortexDashboardTab('index')
-      })
-
-      expect(capturedRef.current!.panelState.isFileBrowserOpen).toBe(false)
-      expect(capturedRef.current!.panelState.selectedFileBrowserFile).toBeNull()
-      expect(capturedRef.current!.panelState.isArtifactsPanelOpen).toBe(true)
-    })
-  })
-
   describe('Source Control deep links', () => {
     it('issues a new request identity without toggling an already-open viewer closed', () => {
       render()
 
       act(() => {
         capturedRef.current!.panelState.openDiffViewerDeepLink({
-          initialRepoTarget: 'workspace',
           initialTab: 'incoming',
         })
       })
@@ -248,13 +149,11 @@ describe('usePanelState', () => {
       expect(capturedRef.current!.panelState.isDiffViewerOpen).toBe(true)
       expect(firstRequest).toMatchObject({
         requestId: 1,
-        initialRepoTarget: 'workspace',
         initialTab: 'incoming',
       })
 
       act(() => {
         capturedRef.current!.panelState.openDiffViewerDeepLink({
-          initialRepoTarget: 'workspace',
           initialTab: 'incoming',
         })
       })
@@ -272,15 +171,13 @@ describe('usePanelState', () => {
 
       act(() => {
         capturedRef.current!.panelState.openDiffViewerDeepLink({
-          initialRepoTarget: 'workspace',
           initialTab: 'incoming',
         })
       })
       expect(capturedRef.current!.panelState.diffViewerInitialState?.initialTab).toBe('incoming')
 
       act(() => {
-        capturedRef.current!.setAgentId('cortex-agent')
-        capturedRef.current!.setArchetypeId('cortex')
+        capturedRef.current!.setAgentId('agent-2')
       })
 
       expect(capturedRef.current!.panelState.diffViewerInitialState).toBeNull()
@@ -544,8 +441,7 @@ describe('usePanelState', () => {
       render()
 
       const initialState = {
-        initialTab: 'changes' as const,
-        initialSha: 'abc123',
+        initialTab: 'history' as const,
       }
 
       act(() => {

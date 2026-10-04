@@ -14,8 +14,6 @@ import {
 } from "./compaction-runtime-settings-provider.js";
 import { ConversationAttachmentService } from "./conversation-attachment-service.js";
 import { ForgeExtensionHost } from "./forge-extension-host.js";
-import { KnowledgeService } from "./knowledge-service.js";
-import { KnowledgeV2SettingsService } from "./knowledge-v2-settings-service.js";
 import {
   DEFAULT_SWARM_MODEL_PRESET,
   inferSwarmModelPresetFromDescriptor,
@@ -63,8 +61,6 @@ export interface SecureSessionsFoundation {
 export interface SwarmManagerFoundationOverrides {
   observability?: ObservabilityFacade;
   compactionRuntimeSettingsProvider?: CompactionRuntimeSettingsProvider;
-  knowledgeV2SettingsService?: KnowledgeV2SettingsService;
-  knowledgeService?: KnowledgeService;
 }
 
 export interface SwarmManagerFoundationOptions {
@@ -85,8 +81,6 @@ export interface SwarmManagerFoundation {
   defaultModelPreset: SwarmModelPreset;
   compactionRuntimeSettingsProvider: CompactionRuntimeSettingsProvider;
   liveCompactionRuntimeSettingsProvider: LiveCompactionRuntimeSettingsProvider;
-  knowledgeV2SettingsService: KnowledgeV2SettingsService;
-  knowledgeService: KnowledgeService;
   historySearchService: HistorySearchService;
   promptRegistry: PromptRegistry;
   forgeExtensionHost: ForgeExtensionHost;
@@ -124,17 +118,6 @@ export function createSwarmManagerFoundation(
   const liveCompactionRuntimeSettingsProvider = createLiveCompactionRuntimeSettingsProvider();
   const compactionRuntimeSettingsProvider =
     overrides.compactionRuntimeSettingsProvider ?? liveCompactionRuntimeSettingsProvider;
-  const knowledgeV2SettingsService =
-    overrides.knowledgeV2SettingsService ??
-    new KnowledgeV2SettingsService({ dataDir: config.paths.dataDir });
-  const knowledgeService =
-    overrides.knowledgeService ??
-    new KnowledgeService({
-      dataDir: config.paths.dataDir,
-      settingsService: knowledgeV2SettingsService,
-      versioning: options.versioningService,
-      now: () => new Date(options.now()),
-    });
 
   const resourcesDir = config.paths.resourcesDir ?? config.paths.rootDir;
   const promptRegistry = new FileBackedPromptRegistry({
@@ -231,8 +214,6 @@ export function createSwarmManagerFoundation(
     defaultModelPreset,
     compactionRuntimeSettingsProvider,
     liveCompactionRuntimeSettingsProvider,
-    knowledgeV2SettingsService,
-    knowledgeService,
     historySearchService: new HistorySearchService({
       config,
       getAgent: (id) => options.descriptors.get(id),

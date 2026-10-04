@@ -1,5 +1,4 @@
 import type { LucideIcon } from 'lucide-react'
-import type { ReactNode } from 'react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
@@ -25,9 +24,7 @@ export interface ActivityRailItem {
 
 interface ActivityRailProps {
   items: ActivityRailItem[]
-  /** Rooms-only bottom entry. Classic retains the established rail unchanged. */
-  cortex?: ReactNode
-  /** Gates all Rooms rail styling and the Cortex entry. */
+  /** Gates all Rooms rail styling. */
   roomsV2?: boolean
 }
 
@@ -85,7 +82,7 @@ function ActivityRailButton({ item, roomsV2 = false }: { item: ActivityRailItem;
   )
 }
 
-export function ActivityRail({ items, cortex, roomsV2 = false }: ActivityRailProps) {
+export function ActivityRail({ items, roomsV2 = false }: ActivityRailProps) {
   return (
     <TooltipProvider delayDuration={200}>
       <nav
@@ -100,11 +97,6 @@ export function ActivityRail({ items, cortex, roomsV2 = false }: ActivityRailPro
             <ActivityRailButton item={item} roomsV2={roomsV2} />
           </div>
         ))}
-        {roomsV2 && cortex ? (
-          <div className="mt-auto flex w-full justify-center" data-testid="cortex-rail-slot">
-            {cortex}
-          </div>
-        ) : null}
       </nav>
     </TooltipProvider>
   )

@@ -105,7 +105,6 @@ describe("persisted profile posture boundary", () => {
       deleteProfile: (profileId) => profiles.delete(profileId),
     };
     const reconciler = new ProfileBootReconciler({
-      cortexEnabled: true,
       defaultModel: DEFAULT_MODEL,
       descriptors,
       profiles,

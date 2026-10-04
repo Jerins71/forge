@@ -6,8 +6,6 @@ import { assembleRuntimePrompt, discoverAgentsMd } from "./runtime-prompt-assemb
 import { isSessionAgentDescriptor } from "./agent-directory.js";
 import {
   getCommonKnowledgePath,
-  getKnowledgeIndexPath,
-  getProfileKnowledgeIndexPath,
   getProfileMemoryPath,
   getProjectAgentPromptPath,
 } from "./data-paths.js";
@@ -53,9 +51,7 @@ You are running as a Cursor SDK worker. Your coding tools (file read/write/edit,
 
 Your final assistant response is returned to the manager automatically. Do not call a messaging tool to report completion.`;
 const MANAGER_ARCHETYPE_ID = "manager";
-const CORTEX_ARCHETYPE_ID = "cortex";
-const COMMON_KNOWLEDGE_MEMORY_HEADER =
-  "# Common Knowledge (maintained by Cortex — read-only reference)";
+const COMMON_KNOWLEDGE_MEMORY_HEADER = "# Common Knowledge";
 const ONBOARDING_SNAPSHOT_MEMORY_HEADER =
   "# Onboarding Snapshot (authoritative backend state — read-only reference)";
 const SWARM_CONTEXT_FILE_NAME = "SWARM.md";
@@ -137,7 +133,6 @@ export interface SwarmPromptServiceOptions {
   loadSpecialistRegistryModule: () => Promise<SpecialistRegistryModuleLike>;
   resolveSpecialistRosterForManager?: (manager: AgentDescriptor) => Promise<ResolvedSpecialistDefinitionLike[]>;
   resolveSkillRosterForDescriptor?: (descriptor: AgentDescriptor) => Promise<SkillMetadata[] | null | undefined>;
-  getKnowledgeV2Enabled?: () => boolean;
   logDebug: (message: string, details?: unknown) => void;
 }
 
@@ -598,42 +593,34 @@ export class SwarmPromptService {
     let memoryContent = `# Session Memory (durable facts — update only on an explicit user memory request)\n\n${sessionMemoryContent.trimEnd()}`;
 
     const profileMemoryOwnerId = this.options.resolveSessionProfileId(memoryOwnerAgentId);
-    if (this.options.getKnowledgeV2Enabled?.() === true) {
-      memoryContent = await this.buildKnowledgeV2MemoryRuntimeView(profileMemoryOwnerId, sessionMemoryContent);
-    } else {
-      if (profileMemoryOwnerId) {
-        const profileMemoryPath = getProfileMemoryPath(this.options.config.paths.dataDir, profileMemoryOwnerId);
-        await this.options.ensureAgentMemoryFile(profileMemoryPath, profileMemoryOwnerId);
-        const profileMemoryContent = await readFile(profileMemoryPath, "utf8");
-        memoryContent = buildSessionMemoryRuntimeView(profileMemoryContent, sessionMemoryContent);
-      }
+    if (profileMemoryOwnerId) {
+      const profileMemoryPath = getProfileMemoryPath(this.options.config.paths.dataDir, profileMemoryOwnerId);
+      await this.options.ensureAgentMemoryFile(profileMemoryPath, profileMemoryOwnerId);
+      const profileMemoryContent = await readFile(profileMemoryPath, "utf8");
+      memoryContent = buildSessionMemoryRuntimeView(profileMemoryContent, sessionMemoryContent);
+    }
 
-      const commonKnowledgePath = getCommonKnowledgePath(this.options.config.paths.dataDir);
-      try {
-        const commonKnowledgeContent = (await readFile(commonKnowledgePath, "utf8")).trim();
-        if (commonKnowledgeContent.length > 0) {
-          const baseMemoryContent = memoryContent.trimEnd();
-          memoryContent = [
-            baseMemoryContent,
-            "",
-            "---",
-            "",
-            COMMON_KNOWLEDGE_MEMORY_HEADER,
-            "",
-            commonKnowledgeContent,
-          ].join("\n");
-        }
-      } catch (error) {
-        if (!isEnoentError(error)) {
-          throw error;
-        }
+    const commonKnowledgePath = getCommonKnowledgePath(this.options.config.paths.dataDir);
+    try {
+      const commonKnowledgeContent = (await readFile(commonKnowledgePath, "utf8")).trim();
+      if (commonKnowledgeContent.length > 0) {
+        memoryContent = [
+          memoryContent.trimEnd(),
+          "",
+          "---",
+          "",
+          COMMON_KNOWLEDGE_MEMORY_HEADER,
+          "",
+          commonKnowledgeContent,
+        ].join("\n");
+      }
+    } catch (error) {
+      if (!isEnoentError(error)) {
+        throw error;
       }
     }
 
-    if (
-      descriptor.role === "manager" &&
-      normalizeArchetypeId(descriptor.archetypeId ?? "") !== CORTEX_ARCHETYPE_ID
-    ) {
+    if (descriptor.role === "manager") {
       const onboardingSnapshot = await getOnboardingSnapshot(this.options.config.paths.dataDir);
       if (shouldInjectOnboardingSnapshot(onboardingSnapshot)) {
         memoryContent = [
@@ -662,32 +649,6 @@ export class SwarmPromptService {
       additionalSkillPaths: skillMetadata.map((skill) => skill.path),
       skillMetadata,
     };
-  }
-
-  private async buildKnowledgeV2MemoryRuntimeView(
-    profileId: string | undefined,
-    sessionMemoryContent: string,
-  ): Promise<string> {
-    const indexSections: string[] = [];
-    if (profileId) {
-      const profileIndex = await readOptionalTextFile(getProfileKnowledgeIndexPath(this.options.config.paths.dataDir, profileId));
-      if (profileIndex?.trim()) {
-        indexSections.push(profileIndex.trimEnd());
-      }
-    }
-
-    const globalIndex = await readOptionalTextFile(getKnowledgeIndexPath(this.options.config.paths.dataDir));
-    if (globalIndex?.trim()) {
-      indexSections.push(globalIndex.trimEnd());
-    }
-
-    const normalizedSessionMemory = sessionMemoryContent.trimEnd();
-    return [
-      ...(indexSections.length > 0 ? [indexSections.join("\n\n---\n\n"), "", "---", ""] : []),
-      "# Session Memory (durable facts — update only on an explicit user memory request)",
-      "",
-      normalizedSessionMemory,
-    ].join("\n").trimEnd();
   }
 
   private async getActiveWorkPromptPreviewSection(
@@ -776,14 +737,6 @@ export class SwarmPromptService {
     return {
       SWARM_DATA_DIR: this.options.config.paths.dataDir,
       SWARM_MEMORY_FILE: memoryFilePath,
-      SWARM_SCRIPTS_DIR: join(
-        this.options.config.paths.rootDir,
-        "apps",
-        "backend",
-        "src",
-        "swarm",
-        "scripts",
-      ),
     };
   }
 
@@ -1151,15 +1104,4 @@ function buildOnboardingSnapshotMemoryBlock(
   }
 
   return `${lines.join("\n")}\n`;
-}
-
-async function readOptionalTextFile(path: string): Promise<string | undefined> {
-  try {
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if (isEnoentError(error)) {
-      return undefined;
-    }
-    throw error;
-  }
 }

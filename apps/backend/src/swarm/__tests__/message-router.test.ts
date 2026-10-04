@@ -13,7 +13,6 @@ const baseTurn: MessageRouteProvenance = {
   senderRole: "manager",
   senderAgentId: "manager-1",
   targetAgentId: "manager-1",
-  targetProfileId: "profile-1",
 };
 
 describe("MessageRouter", () => {
@@ -73,24 +72,9 @@ describe("MessageRouter", () => {
         reasonCode: "route:external_channel",
       },
       {
-        name: "D6 cortex profile",
-        input: { targetProfileId: "cortex" },
-        reasonCode: "deny:cortex_profile",
-      },
-      {
         name: "D7 system profile",
         input: { targetProfileSystem: true },
         reasonCode: "deny:system_profile",
-      },
-      {
-        name: "D8 cortex review purpose",
-        input: { sessionPurpose: "cortex_review" },
-        reasonCode: "deny:cortex_review",
-      },
-      {
-        name: "D8 cortex archetype",
-        input: { archetypeId: "Cortex" },
-        reasonCode: "deny:cortex_review",
       },
       {
         name: "bootstrap self-send",
@@ -102,14 +86,12 @@ describe("MessageRouter", () => {
         input: {
           origin: "internal",
           internalDeliveryKind: "agent_creator_bootstrap",
-          sessionPurpose: "agent_creator",
-          archetypeId: "agent-architect",
         },
         reasonCode: "deny:agent_creator_bootstrap",
       },
       {
         name: "normal agent creator user turn remains visible",
-        input: { sessionPurpose: "agent_creator", archetypeId: "agent-architect" },
+        input: {},
         reasonCode: "render:user_web",
         visible: true,
         channel: "web",

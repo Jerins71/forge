@@ -11,14 +11,6 @@ export interface PromptChangedEvent {
   action: 'saved' | 'deleted'
 }
 
-export interface CortexPromptSurfaceChangedEvent {
-  type: 'cortex_prompt_surface_changed'
-  profileId: string
-  surfaceId: string
-  filePath: string
-  updatedAt: string
-}
-
 export interface SpecialistRosterChangedEvent {
   type: 'specialist_roster_changed'
   profileId: string

@@ -39,7 +39,6 @@ const CATEGORIES: { key: HelpCategory; label: string }[] = [
   { key: 'getting-started', label: 'Start' },
   { key: 'chat', label: 'Chat' },
   { key: 'settings', label: 'Settings' },
-  { key: 'cortex', label: 'Cortex' },
   { key: 'models', label: 'Models' },
   { key: 'concepts', label: 'Concepts' },
   { key: 'terminals', label: 'Terminals' },

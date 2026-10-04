@@ -340,38 +340,6 @@ describe('MobilePushService', () => {
     expect(sendMock).not.toHaveBeenCalled()
   })
 
-  it('suppresses push notifications for cortex review sessions', async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), 'mobile-push-service-'))
-    const manager = new FakeSwarmManager([createManagerDescriptor('cortex', 'review-run', 'cortex_review')])
-
-    const sendMock = vi.fn(async () => ({ ok: true, retryable: false, ticketId: 'ticket-1' }))
-
-    const service = new MobilePushService({
-      swarmManager: manager as unknown as SwarmManager,
-      dataDir,
-      expoPushClient: {
-        send: sendMock,
-        getReceipts: vi.fn(async () => ({})),
-      } as unknown as ExpoPushClient,
-      isSessionActive: () => false,
-      receiptPollIntervalMs: 60_000,
-    })
-
-    await service.registerDevice({
-      token: 'ExpoPushToken[test-device]',
-      platform: 'ios',
-      deviceName: 'Review Phone',
-    })
-
-    await service.start()
-    emitAttention(manager, 'review-run')
-
-    await flushAsync()
-    await service.stop()
-
-    expect(sendMock).not.toHaveBeenCalled()
-  })
-
   it('retries transient send failures and disables DeviceNotRegistered tokens', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'mobile-push-service-'))
     const manager = new FakeSwarmManager([createManagerDescriptor()])

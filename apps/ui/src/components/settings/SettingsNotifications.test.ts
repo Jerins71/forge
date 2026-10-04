@@ -28,7 +28,6 @@ const notificationMock = vi.hoisted(() => ({
   writeNotificationStore: vi.fn(),
   getAllSoundOptions: vi.fn(),
   getAgentPrefs: vi.fn(),
-  getEffectivePrefs: vi.fn(),
   hasExplicitOverride: vi.fn(),
   clearOverride: vi.fn(),
   setAgentPrefs: vi.fn(),
@@ -42,7 +41,6 @@ vi.mock('@/lib/notification-service', () => ({
   writeNotificationStore: (...args: unknown[]) => notificationMock.writeNotificationStore(...args),
   getAllSoundOptions: (...args: unknown[]) => notificationMock.getAllSoundOptions(...args),
   getAgentPrefs: (...args: unknown[]) => notificationMock.getAgentPrefs(...args),
-  getEffectivePrefs: (...args: unknown[]) => notificationMock.getEffectivePrefs(...args),
   hasExplicitOverride: (...args: unknown[]) => notificationMock.hasExplicitOverride(...args),
   clearOverride: (...args: unknown[]) => notificationMock.clearOverride(...args),
   setAgentPrefs: (...args: unknown[]) => notificationMock.setAgentPrefs(...args),
@@ -115,7 +113,6 @@ beforeEach(() => {
     { id: 'question', name: 'Agent Has a Question', url: '/sounds/question.mp3', builtIn: true },
   ])
   notificationMock.getAgentPrefs.mockReturnValue({ ...DEFAULT_PREFS })
-  notificationMock.getEffectivePrefs.mockReturnValue({ ...DEFAULT_PREFS })
   notificationMock.hasExplicitOverride.mockReturnValue(false)
 })
 

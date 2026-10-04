@@ -3,7 +3,6 @@ import {
   combineCompactionCustomInstructions,
   type PinRegistry,
 } from "./session/message-pins.js";
-import type { CaptureCascadeCoordinator } from "./capture-cascade-coordinator.js";
 import type { SessionGoalCoordinator } from "./goals/session-goal-coordinator.js";
 import type { SessionPlanCoordinator } from "./planning/session-plan-coordinator.js";
 import type {
@@ -37,7 +36,6 @@ export interface SwarmCompactionCoordinatorOptions {
   syncPinnedContent: (descriptor: ManagerDescriptor) => Promise<PinRegistry>;
   sessionPlans: SessionPlanCoordinator;
   sessionGoals: Pick<SessionGoalCoordinator, "appendCompactionInstructions">;
-  captureCascade: CaptureCascadeCoordinator;
   incrementCompactionCount: (
     profileId: string,
     agentId: string,
@@ -48,7 +46,7 @@ export interface SwarmCompactionCoordinatorOptions {
   logDebug: (message: string, details?: unknown) => void;
 }
 
-/** Owns explicit and smart manager-context compaction from validation through capture. */
+/** Owns explicit and smart manager-context compaction from validation through count bookkeeping. */
 export class SwarmCompactionCoordinator {
   constructor(private readonly options: SwarmCompactionCoordinatorOptions) {}
 
@@ -85,7 +83,6 @@ export class SwarmCompactionCoordinator {
         agentId,
         trigger: options?.trigger ?? "api",
       });
-      await this.options.captureCascade.run(agentId, "compaction");
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -153,9 +150,6 @@ export class SwarmCompactionCoordinator {
         compacted: result.compacted,
         reason: result.compacted ? undefined : result.reason,
       });
-      if (result.compacted) {
-        await this.options.captureCascade.run(agentId, "compaction");
-      }
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

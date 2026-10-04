@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  FRESH_CONTEXT_UNSUPPORTED_CORTEX,
   FRESH_CONTEXT_UNSUPPORTED_CURSOR_SDK,
   FRESH_CONTEXT_UNSUPPORTED_EXTERNAL_THREAD,
   FRESH_CONTEXT_UNSUPPORTED_PROVIDER,
@@ -96,7 +95,7 @@ describe("context mode resolution", () => {
 
   it("reports unsupported runtimes honestly without changing the saved preference", () => {
     expect(evaluateFreshContextSupport({
-      manager: { ...MANAGER, sessionPurpose: "cortex_review" },
+      manager: { ...MANAGER, sessionPurpose: "agent_creator" },
     }).unsupportedReason).toBe(FRESH_CONTEXT_UNSUPPORTED_SPECIAL_PURPOSE);
     expect(evaluateFreshContextSupport({
       manager: {
@@ -105,11 +104,8 @@ describe("context mode resolution", () => {
       },
     }).unsupportedReason).toBe(FRESH_CONTEXT_UNSUPPORTED_EXTERNAL_THREAD);
     expect(evaluateFreshContextSupport({
-      manager: { ...MANAGER, archetypeId: "cortex" },
-    }).unsupportedReason).toBe(FRESH_CONTEXT_UNSUPPORTED_CORTEX);
-    expect(evaluateFreshContextSupport({
       manager: MANAGER,
-      profile: { profileId: "cortex", profileType: "system" },
+      profile: { profileId: "_system", profileType: "system" },
     }).unsupportedReason).toBe(FRESH_CONTEXT_UNSUPPORTED_SYSTEM_PROFILE);
     expect(evaluateFreshContextSupport({
       manager: { ...MANAGER, model: { ...MANAGER.model, provider: "cursor-sdk" } },

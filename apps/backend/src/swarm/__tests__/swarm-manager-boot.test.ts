@@ -10,8 +10,6 @@ import { getConversationHistoryCacheFilePath } from '../session/conversation-his
 import { resolveModelDescriptorFromPreset } from '../catalog/model-presets.js'
 import {
   getCommonKnowledgePath,
-  getCortexConsolidationRunsPath,
-  getCortexReviewLogPath,
   getProfileKnowledgePath,
   getProfileMemoryPath,
   getProfilePiSkillsDir,
@@ -405,20 +403,14 @@ async function readJsonlFile<T>(path: string): Promise<T[]> {
 
 
 describe('SwarmManager', () => {
-  it('auto-creates a singleton cortex manager on boot when the store is empty', async () => {
+  it('boots an empty store without creating any session', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
 
     await manager.boot()
 
-    const agents = manager.listAgents()
-    expect(agents).toHaveLength(1)
-    expect(agents[0]).toMatchObject({
-      agentId: 'cortex',
-      role: 'manager',
-      archetypeId: 'cortex',
-      profileId: 'cortex',
-    })
+    expect(manager.listAgents()).toEqual([])
+    expect(manager.listProfiles()).toEqual([])
     expect(manager.createdRuntimeIds).toEqual([])
     expect(manager.runtimeByAgentId.size).toBe(0)
   })
@@ -426,10 +418,10 @@ describe('SwarmManager', () => {
   it('reconciles secure-session orphans only after persisted profiles and sessions hydrate', async () => {
     const config = await makeTempConfig()
     const firstBoot = new TestSwarmManager(config)
-    await firstBoot.boot()
-    expect(firstBoot.getAgent('cortex')).toMatchObject({
-      agentId: 'cortex',
-      profileId: 'cortex',
+    await bootWithDefaultManager(firstBoot, config)
+    expect(firstBoot.getAgent('manager')).toMatchObject({
+      agentId: 'manager',
+      profileId: 'manager',
     })
     await firstBoot.closeSecureSessions()
 
@@ -451,7 +443,7 @@ describe('SwarmManager', () => {
         providerId: 'restart-local-provider',
         displayAlias: 'live/project',
         scopeKind: 'profile',
-        profileId: 'cortex',
+        profileId: 'manager',
         retention: 'saved',
         sourceLocator: 'local',
         encryptedMaterial: Buffer.from('live-project-material'),
@@ -463,7 +455,7 @@ describe('SwarmManager', () => {
       }],
     })
     store.putProjectDefault({
-      profileId: 'cortex',
+      profileId: 'manager',
       secretId: 'live-project-secret',
     })
     store.createSecretWithBindings({
@@ -504,8 +496,8 @@ describe('SwarmManager', () => {
       profileId: 'deleted-project',
       secretId: 'orphaned-project-secret',
     })
-    store.getOrCreateSessionState('cortex', {
-      profileId: 'cortex',
+    store.getOrCreateSessionState('manager', {
+      profileId: 'manager',
       executionMode: 'standard',
       environmentStatus: 'stopped',
     })
@@ -548,74 +540,14 @@ describe('SwarmManager', () => {
     ])
     expect(verified.listProjectDefaults()).toEqual([
       expect.objectContaining({
-        profileId: 'cortex',
+        profileId: 'manager',
         secretId: 'live-project-secret',
       }),
     ])
     expect(verified.listSessionStates().map(({ sessionAgentId }) => sessionAgentId))
-      .toEqual(['cortex'])
+      .toEqual(['manager'])
     verified.close()
     await restarted.closeSecureSessions()
-  })
-
-  it('recreates the Cortex root session when only review-run Cortex descriptors remain on boot', async () => {
-    const config = await makeTempConfig()
-    const createdAt = '2026-03-27T00:00:00.000Z'
-    await writeFile(
-      config.paths.agentsStoreFile,
-      `${JSON.stringify({
-        agents: [
-          {
-            agentId: 'cortex--review',
-            displayName: 'Review Run',
-            role: 'manager',
-            managerId: 'cortex--review',
-            profileId: 'cortex',
-            archetypeId: 'cortex',
-            sessionPurpose: 'cortex_review',
-            status: 'streaming',
-            createdAt,
-            updatedAt: createdAt,
-            cwd: config.defaultCwd,
-            model: config.defaultModel,
-            sessionFile: join(getLegacySessionsDirPath(config.paths.dataDir), 'cortex--review.jsonl'),
-          },
-        ],
-        profiles: [
-          {
-            profileId: 'cortex',
-            displayName: 'Cortex',
-            defaultSessionAgentId: 'cortex--review',
-            defaultModel: config.defaultModel,
-            createdAt,
-            updatedAt: createdAt,
-            profileType: 'system',
-          },
-        ],
-      }, null, 2)}\n`,
-      'utf8',
-    )
-    const manager = new TestSwarmManager(config)
-
-    await manager.boot()
-
-    const cortexRoot = manager.getAgent('cortex')
-    expect(cortexRoot).toMatchObject({
-      agentId: 'cortex',
-      role: 'manager',
-      archetypeId: 'cortex',
-      profileId: 'cortex',
-    })
-    expect(cortexRoot?.sessionPurpose).toBeUndefined()
-    expect(manager.getAgent('cortex--review')).toMatchObject({
-      agentId: 'cortex--review',
-      sessionPurpose: 'cortex_review',
-      status: 'idle',
-    })
-    expect(manager.listProfiles().find((profile) => profile.profileId === 'cortex')).toMatchObject({
-      defaultSessionAgentId: 'cortex',
-      profileType: 'system',
-    })
   })
 
   it('reconciles persisted streaming Codex external-thread sidecars to idle on boot and persists the store', async () => {
@@ -844,79 +776,82 @@ describe('SwarmManager', () => {
     await expect(stat(sidecarCacheFile)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('prunes persisted Cortex state on boot when Cortex is disabled', async () => {
+  it('retains removed Cortex records verbatim without loading them across save and restart', async () => {
     const config = await makeTempConfig()
-    config.cortexEnabled = false
-
+    const sessionsDir = getLegacySessionsDirPath(config.paths.dataDir)
+    const base = {
+      status: 'idle',
+      createdAt: '2026-03-27T00:00:00.000Z',
+      updatedAt: '2026-03-27T00:00:00.000Z',
+      cwd: config.defaultCwd,
+      model: config.defaultModel,
+    }
+    const cortexRoot = {
+      ...base,
+      agentId: 'cortex',
+      displayName: 'Cortex',
+      role: 'manager',
+      managerId: 'cortex',
+      profileId: 'cortex',
+      archetypeId: 'cortex',
+      sessionFile: join(sessionsDir, 'cortex.jsonl'),
+    }
+    const cortexReview = {
+      ...base,
+      agentId: 'cortex--review',
+      displayName: 'Review Run',
+      role: 'manager',
+      managerId: 'cortex--review',
+      profileId: 'cortex',
+      archetypeId: 'cortex',
+      sessionPurpose: 'cortex_review',
+      status: 'streaming',
+      sessionFile: join(sessionsDir, 'cortex--review.jsonl'),
+    }
+    // No Cortex markers of its own: retained because its manager is retired.
+    const cortexWorker = {
+      ...base,
+      agentId: 'cortex--worker',
+      displayName: 'Cortex Worker',
+      role: 'worker',
+      managerId: 'cortex--review',
+      sessionFile: join(sessionsDir, 'cortex--worker.jsonl'),
+    }
+    // A capture-check fork lives in an ordinary profile but is still retired.
+    const captureFork = {
+      ...base,
+      agentId: 'manager--s9',
+      displayName: 'Capture check',
+      role: 'manager',
+      managerId: 'manager--s9',
+      profileId: 'manager',
+      sessionPurpose: 'capture_check',
+      sessionFile: join(sessionsDir, 'manager--s9.jsonl'),
+    }
+    const cortexProfile = {
+      profileId: 'cortex',
+      displayName: 'Cortex',
+      defaultSessionAgentId: 'cortex',
+      profileType: 'system',
+      createdAt: '2026-03-27T00:00:00.000Z',
+      updatedAt: '2026-03-27T00:00:00.000Z',
+    }
+    const builderManager = {
+      ...base,
+      agentId: 'manager',
+      displayName: 'Manager',
+      role: 'manager',
+      managerId: 'manager',
+      profileId: 'manager',
+      archetypeId: 'manager',
+      sessionFile: join(sessionsDir, 'manager.jsonl'),
+    }
     await writeFile(
       config.paths.agentsStoreFile,
       `${JSON.stringify({
-        agents: [
-          {
-            agentId: 'cortex',
-            displayName: 'Cortex',
-            role: 'manager',
-            managerId: 'cortex',
-            profileId: 'cortex',
-            archetypeId: 'cortex',
-            status: 'idle',
-            createdAt: '2026-03-27T00:00:00.000Z',
-            updatedAt: '2026-03-27T00:00:00.000Z',
-            cwd: config.defaultCwd,
-            model: config.defaultModel,
-            sessionFile: join(getLegacySessionsDirPath(config.paths.dataDir), 'cortex.jsonl'),
-          },
-          {
-            agentId: 'cortex--review',
-            displayName: 'Review Run',
-            role: 'manager',
-            managerId: 'cortex--review',
-            profileId: 'cortex',
-            archetypeId: 'cortex',
-            sessionPurpose: 'cortex_review',
-            status: 'streaming',
-            createdAt: '2026-03-27T00:01:00.000Z',
-            updatedAt: '2026-03-27T00:01:00.000Z',
-            cwd: config.defaultCwd,
-            model: config.defaultModel,
-            sessionFile: join(getLegacySessionsDirPath(config.paths.dataDir), 'cortex--review.jsonl'),
-          },
-          {
-            agentId: 'cortex--worker',
-            displayName: 'Cortex Worker',
-            role: 'worker',
-            managerId: 'cortex--review',
-            profileId: 'cortex',
-            status: 'streaming',
-            createdAt: '2026-03-27T00:02:00.000Z',
-            updatedAt: '2026-03-27T00:02:00.000Z',
-            cwd: config.defaultCwd,
-            model: config.defaultModel,
-            sessionFile: join(getLegacySessionsDirPath(config.paths.dataDir), 'cortex--worker.jsonl'),
-          },
-          {
-            agentId: 'manager',
-            displayName: 'Manager',
-            role: 'manager',
-            managerId: 'manager',
-            profileId: 'manager',
-            archetypeId: 'manager',
-            status: 'idle',
-            createdAt: '2026-03-27T00:03:00.000Z',
-            updatedAt: '2026-03-27T00:03:00.000Z',
-            cwd: config.defaultCwd,
-            model: config.defaultModel,
-            sessionFile: join(getLegacySessionsDirPath(config.paths.dataDir), 'manager.jsonl'),
-          },
-        ],
+        agents: [cortexRoot, cortexReview, builderManager, cortexWorker, captureFork],
         profiles: [
-          {
-            profileId: 'cortex',
-            displayName: 'Cortex',
-            defaultSessionAgentId: 'cortex',
-            createdAt: '2026-03-27T00:00:00.000Z',
-            updatedAt: '2026-03-27T00:00:00.000Z',
-          },
+          cortexProfile,
           {
             profileId: 'manager',
             displayName: 'Manager',
@@ -929,28 +864,38 @@ describe('SwarmManager', () => {
       'utf8',
     )
 
-    const manager = new TestSwarmManager(config)
-    await manager.boot()
-
-    expect(manager.listAgents().map((descriptor) => descriptor.agentId)).toEqual(['manager'])
-    expect(manager.listProfiles().map((profile) => profile.profileId)).toEqual(['manager'])
-    await expect(readFile(getCommonKnowledgePath(config.paths.dataDir), 'utf8')).resolves.toContain('# Common Knowledge')
-
-    const persistedStore = JSON.parse(await readFile(config.paths.agentsStoreFile, 'utf8')) as {
-      agents: Array<{ agentId: string; profileId?: string; sessionPurpose?: string }>
-      profiles: Array<{ profileId: string }>
+    const readStore = async () => JSON.parse(await readFile(config.paths.agentsStoreFile, 'utf8')) as {
+      agents: Array<Record<string, unknown>>
+      profiles: Array<Record<string, unknown>>
     }
-    expect(persistedStore.agents).toEqual([
-      expect.objectContaining({ agentId: 'manager', profileId: 'manager' }),
-    ])
-    expect(persistedStore.profiles).toEqual([
-      expect.objectContaining({ profileId: 'manager' }),
-    ])
+    const expectHiddenAndRetained = async (manager: TestSwarmManager) => {
+      expect(manager.listAgents().map((descriptor) => descriptor.agentId)).toEqual(['manager'])
+      expect(manager.listProfiles().map((profile) => profile.profileId)).toEqual(['manager'])
+      const persisted = await readStore()
+      for (const record of [cortexRoot, cortexReview, cortexWorker, captureFork]) {
+        expect(persisted.agents).toContainEqual(record)
+      }
+      expect(persisted.profiles).toContainEqual(cortexProfile)
+    }
+
+    const first = new TestSwarmManager(config)
+    await first.boot()
+    await expectHiddenAndRetained(first)
+    // Common knowledge is plain user memory now; boot never seeds it.
+    await expect(readFile(getCommonKnowledgePath(config.paths.dataDir), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+
+    // A Builder mutation rewrites agents.json from the live maps.
+    await first.renameSession('manager', 'Renamed Manager')
+    expect((await readStore()).agents).toContainEqual(expect.objectContaining({ agentId: 'manager', sessionLabel: 'Renamed Manager' }))
+    await expectHiddenAndRetained(first)
+
+    const restarted = new TestSwarmManager(config)
+    await restarted.boot()
+    await expectHiddenAndRetained(restarted)
   })
 
   it('retains removed Collaboration records verbatim without loading them across save and restart', async () => {
     const config = await makeTempConfig()
-    config.cortexEnabled = false
     const sessionsDir = getLegacySessionsDirPath(config.paths.dataDir)
     const collabRoot = {
       agentId: '_collaboration',
@@ -1065,22 +1010,6 @@ describe('SwarmManager', () => {
     await expect(readFile(join(config.paths.managerAgentDir, 'SYSTEM.md'), 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',
     })
-  })
-
-  it('bootstraps common Cortex knowledge and operational files when missing', async () => {
-    const config = await makeTempConfig()
-    const manager = new TestSwarmManager(config)
-
-    await manager.boot()
-
-    const commonKnowledge = await readFile(getCommonKnowledgePath(config.paths.dataDir), 'utf8')
-    expect(commonKnowledge).toContain('# Common Knowledge')
-    expect(commonKnowledge).toContain('Maintained by Cortex')
-    const reviewLog = await readFile(getCortexReviewLogPath(config.paths.dataDir), 'utf8')
-    expect(reviewLog).toBe('')
-
-    const consolidationRuns = getCortexConsolidationRunsPath(config.paths.dataDir)
-    await expect(readFile(consolidationRuns, 'utf8')).resolves.toBe(`${JSON.stringify({ version: 1, runs: [] }, null, 2)}\n`)
   })
 
   it('materializes descriptor-backed project-agent storage on boot and stays idempotent across reboots', async () => {

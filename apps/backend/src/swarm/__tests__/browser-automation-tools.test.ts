@@ -259,7 +259,7 @@ describe("browser automation tools", () => {
       "manager-1", "profile-1", "open", { show: false, reuseExistingTab: false }, { requiredTargetAffinity: "managed-electron" },
     );
 
-    current = descriptor({ sessionPurpose: "capture_check" });
+    current = descriptor({ sessionPurpose: "agent_creator" });
     await expect(managerInvoke("manager-1", "status", {})).resolves.toMatchObject({
       ok: false,
       error: { code: "session-not-found" },
@@ -270,11 +270,9 @@ describe("browser automation tools", () => {
   it("limits eligibility to normal local Builder managers", () => {
     expect(isBrowserAutomationEligible(descriptor())).toBe(true);
     expect(isBrowserAutomationEligible(descriptor({ role: "worker", managerId: "manager-1" }))).toBe(false);
-    expect(isBrowserAutomationEligible(descriptor({ sessionPurpose: "capture_check" }))).toBe(false);
     expect(isBrowserAutomationEligible(descriptor({ sessionPurpose: "agent_creator" }))).toBe(false);
-    expect(isBrowserAutomationEligible(descriptor({ archetypeId: "cortex" }))).toBe(false);
     expect(isBrowserAutomationEligible(descriptor({ cli: { transport: "headless", connectedAt: "2026-07-22T00:00:00.000Z" } as never }))).toBe(false);
     expect(buildBaseRuntimeTools(host(), descriptor()).map((tool) => tool.name)).toContain("browser_snapshot");
-    expect(buildBaseRuntimeTools(host(), descriptor({ sessionPurpose: "capture_check" })).map((tool) => tool.name)).not.toContain("browser_snapshot");
+    expect(buildBaseRuntimeTools(host(), descriptor({ sessionPurpose: "agent_creator" })).map((tool) => tool.name)).not.toContain("browser_snapshot");
   });
 });

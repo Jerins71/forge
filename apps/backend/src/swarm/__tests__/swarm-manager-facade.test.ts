@@ -274,10 +274,7 @@ function createServices(): SwarmManagerFacadeServices {
       notifyProjectAgentsChanged: vi.fn(async () => undefined),
     },
     profileBookkeeping: { reorderProfiles: vi.fn(async () => undefined) },
-    knowledge: {
-      searchKnowledge: vi.fn(async () => []),
-      listCortexConsolidationRuns: vi.fn(async () => []),
-    },
+    memory: {},
     agents: { notifySpecialistRosterChanged: vi.fn(async () => undefined) },
     codexPlugin: { browseCatalog: vi.fn(async () => ({})) },
     messages: {},

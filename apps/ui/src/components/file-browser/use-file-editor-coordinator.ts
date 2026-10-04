@@ -31,7 +31,7 @@ export type FileEditorTransitionAction =
   | { type: 'source-control-mutation'; mutation: 'switch-branch' | 'create-branch' | 'pull-ff-only' | 'push'; agentId: string; worktreeId: string | null }
   | { type: 'select-agent'; nextAgentId: string }
   | { type: 'navigate-route'; nextView: 'chat' | 'settings' | 'stats' | 'archive' }
-  | { type: 'open-workspace-panel'; panel: 'artifacts' | 'cortex' | 'source-control' | 'chat' }
+  | { type: 'open-workspace-panel'; panel: 'artifacts' | 'source-control' | 'chat' }
 
 interface RegisteredGuard {
   key: FileEditorSessionKey

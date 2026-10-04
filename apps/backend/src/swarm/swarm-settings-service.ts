@@ -108,7 +108,6 @@ export interface SwarmSettingsServiceOptions {
   getAllManagerSessions: () => SessionDescriptor[];
   getSessionById: (agentId: string) => SessionDescriptor | undefined;
   resolveAndValidateCwd: (cwd: string) => Promise<string>;
-  assertCanChangeManagerCwd: (profileId: string, sessions: SessionDescriptor[]) => void;
   applyManagerRuntimeRecyclePolicy: (
     agentId: string,
     reason: ManagerRuntimeRecycleReason
@@ -728,7 +727,6 @@ export class SwarmSettingsService {
     }
 
     const sessions = this.options.getSessionsForProfile(profile.profileId);
-    this.options.assertCanChangeManagerCwd(profile.profileId, sessions);
 
     const resolvedCwd = await this.options.resolveAndValidateCwd(newCwd);
     if (sessions.every((session) => session.cwd === resolvedCwd)) {

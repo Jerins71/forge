@@ -182,7 +182,7 @@ export interface ManagerProfile {
   sortOrder?: number
 }
 
-export type AgentSessionPurpose = 'cortex_review' | 'agent_creator' | 'capture_check' | 'side_chat'
+export type AgentSessionPurpose = 'agent_creator' | 'side_chat'
 
 export const EXTERNAL_THREAD_TYPES = ['codex_app_server'] as const
 export type ExternalThreadType = (typeof EXTERNAL_THREAD_TYPES)[number]

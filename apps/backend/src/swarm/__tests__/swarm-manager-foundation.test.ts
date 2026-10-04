@@ -2,8 +2,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { KnowledgeService } from "../knowledge-service.js";
-import { KnowledgeV2SettingsService } from "../knowledge-v2-settings-service.js";
 import { createSwarmManagerFoundation } from "../swarm-manager-foundation.js";
 import type { SessionPinCoordinatorHost } from "../session-pin-coordinator.js";
 import type { SwarmConfig } from "../types.js";
@@ -25,7 +23,6 @@ async function makeConfig(): Promise<SwarmConfig> {
     port: 47187,
     debug: false,
     isDesktop: false,
-    cortexEnabled: true,
     allowNonManagerSubscriptions: false,
     managerDisplayName: "Manager",
     defaultModel: {
@@ -110,15 +107,8 @@ describe("createSwarmManagerFoundation", () => {
     expect(foundation.secretsEnvService).toBeDefined();
   });
 
-  it("preserves explicit knowledge and compaction overrides by identity", async () => {
+  it("preserves explicit compaction overrides by identity", async () => {
     const config = await makeConfig();
-    const knowledgeV2SettingsService = new KnowledgeV2SettingsService({
-      dataDir: config.paths.dataDir,
-    });
-    const knowledgeService = new KnowledgeService({
-      dataDir: config.paths.dataDir,
-      settingsService: knowledgeV2SettingsService,
-    });
     const compactionRuntimeSettingsProvider = {
       getCompactionRuntimeSettings: () => ({
         timeoutMs: 1234,
@@ -137,14 +127,10 @@ describe("createSwarmManagerFoundation", () => {
       sessionPins: lazyPinHost(),
       logDebug: vi.fn(),
       overrides: {
-        knowledgeV2SettingsService,
-        knowledgeService,
         compactionRuntimeSettingsProvider,
       },
     });
 
-    expect(foundation.knowledgeV2SettingsService).toBe(knowledgeV2SettingsService);
-    expect(foundation.knowledgeService).toBe(knowledgeService);
     expect(foundation.compactionRuntimeSettingsProvider).toBe(compactionRuntimeSettingsProvider);
     expect(foundation.liveCompactionRuntimeSettingsProvider).not.toBe(
       compactionRuntimeSettingsProvider,

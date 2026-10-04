@@ -15,7 +15,6 @@ export function handleConfigEvent(
       return true
 
     case 'prompt_changed':
-    case 'cortex_prompt_surface_changed':
       context.updateState({ promptChangeKey: context.state.promptChangeKey + 1 })
       return true
 

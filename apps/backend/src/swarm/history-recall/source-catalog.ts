@@ -3,8 +3,6 @@ import type { AgentDescriptor, ManagerProfile } from "../types.js";
 import { getSessionFilePath, getWorkerSessionFilePath } from "../storage/data-paths.js";
 import type { HistorySearchServiceHost, HistorySourceDescriptor } from "./types.js";
 
-const CORTEX_PROFILE_ID = "cortex";
-
 export function isRestrictedDescriptor(descriptor: AgentDescriptor | undefined): boolean {
   if (!descriptor) {
     return true;
@@ -15,21 +13,14 @@ export function isRestrictedDescriptor(descriptor: AgentDescriptor | undefined):
   if (descriptor.externalThread) {
     return true;
   }
-  if (descriptor.internalWorkerKind === "codex_plugin") {
-    return true;
-  }
-  const profileId = resolveProfileId(descriptor);
-  if (profileId === CORTEX_PROFILE_ID) {
-    return true;
-  }
-  return false;
+  return descriptor.internalWorkerKind === "codex_plugin";
 }
 
 export function isRestrictedProfile(profile: ManagerProfile | undefined): boolean {
   if (!profile) {
     return false;
   }
-  return isSystemProfile(profile) || profile.profileId === CORTEX_PROFILE_ID;
+  return isSystemProfile(profile);
 }
 
 export function resolveCallerSession(

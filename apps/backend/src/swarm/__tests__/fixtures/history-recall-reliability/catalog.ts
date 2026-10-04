@@ -99,7 +99,7 @@ export function compactAgentSpecs(archiveCount: number): SyntheticAgentSpec[] {
       profileId: PROFILE.cortex,
       displayName: "Cortex Review",
       cwd: "/tmp/hrr/cortex",
-      sessionPurpose: "cortex_review",
+      sessionPurpose: "agent_creator",
     },
   ];
 }

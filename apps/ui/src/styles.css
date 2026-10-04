@@ -47,12 +47,6 @@
   --sidebar-room-remote-surface: #eff6ff;
   --sidebar-room-remote-border: #bfdbfe;
   --sidebar-room-remote-foreground: #1d4ed8;
-  --sidebar-room-cortex-surface: #eff6ff;
-  --sidebar-room-cortex-hover-surface: #dbeafe;
-  --sidebar-room-cortex-active-surface: #bfdbfe;
-  --sidebar-room-cortex-border: #93c5fd;
-  --sidebar-room-cortex-foreground: #2563eb;
-  --sidebar-room-cortex-hover-foreground: #1d4ed8;
   --sidebar-room-glow-shadow: rgb(217 119 6 / 0.48);
   --sidebar-room-compaction-glow-shadow: rgb(124 58 237 / 0.45);
   --sidebar-room-section-surface: #fffdfb;
@@ -142,12 +136,6 @@
   --sidebar-room-remote-surface: #162331;
   --sidebar-room-remote-border: #315678;
   --sidebar-room-remote-foreground: #93c5fd;
-  --sidebar-room-cortex-surface: #162331;
-  --sidebar-room-cortex-hover-surface: #1e3a5f;
-  --sidebar-room-cortex-active-surface: #274c77;
-  --sidebar-room-cortex-border: #315678;
-  --sidebar-room-cortex-foreground: #93c5fd;
-  --sidebar-room-cortex-hover-foreground: #bfdbfe;
   --sidebar-room-glow-shadow: rgb(245 158 11 / 0.5);
   --sidebar-room-compaction-glow-shadow: rgb(167 139 250 / 0.45);
   --sidebar-room-section-surface: #1b1b1b;
@@ -299,19 +287,6 @@ body {
 }
 .sidebar-room-remote-status-action:hover {
   background: var(--sidebar-room-card-hover);
-}
-.sidebar-room-cortex-rail-trigger {
-  border-color: var(--sidebar-room-cortex-border);
-  background: var(--sidebar-room-cortex-surface);
-  color: var(--sidebar-room-cortex-foreground);
-}
-.sidebar-room-cortex-rail-trigger:hover {
-  background: var(--sidebar-room-cortex-hover-surface);
-  color: var(--sidebar-room-cortex-hover-foreground);
-}
-.sidebar-room-cortex-rail-trigger--open {
-  background: var(--sidebar-room-cortex-active-surface);
-  color: var(--sidebar-room-cortex-hover-foreground);
 }
 .sidebar-room-header {
   display: flex;

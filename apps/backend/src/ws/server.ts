@@ -25,13 +25,9 @@ import {
   readControlPidFromFile,
   readDaemonizedEnv
 } from "../reboot/control-pid.js";
-import {
-  CortexAutoReviewSettingsService
-} from "../swarm/cortex-auto-review-settings.js";
 import { BuilderSidebarOrderService } from "../swarm/builder-sidebar-order-service.js";
 import { CompactionSettingsService } from "../swarm/compaction-settings-service.js";
 import { SecureSecretSettingsService } from "../swarm/secure-sessions/secure-secret-settings-service.js";
-import { KnowledgeV2SettingsService } from "../swarm/knowledge-v2-settings-service.js";
 import { CliAccessService, readCliApiKeyEnv } from "../swarm/cli-access-service.js";
 import { StreamDeckAccessService } from "../swarm/stream-deck-access-service.js";
 import { SecureBrowserAccessService } from "../swarm/secure-browser-access-service.js";
@@ -68,11 +64,9 @@ import { createCliAccessSettingsRoutes } from "./http/routes/cli-access-settings
 import { createCliRoutes } from "./http/routes/cli-routes.js";
 import { createStreamDeckRoutes } from "./http/routes/stream-deck-routes.js";
 import { createStreamDeckPairingRoutes } from "./http/routes/stream-deck-pairing-routes.js";
-import { createCortexAutoReviewRoutes } from "./http/routes/cortex-auto-review-routes.js";
 import { createCompactionSettingsRoutes } from "./http/routes/compaction-settings-routes.js";
 import { createContextModeRoutes } from "./http/routes/context-mode-routes.js";
 import { createSecureSecretSettingsRoutes } from "./http/routes/secure-secret-settings-routes.js";
-import { createCortexRoutes } from "./http/routes/cortex-routes.js";
 import { createDebugRoutes } from "./http/routes/debug-routes.js";
 import { createExtensionRoutes } from "./http/routes/extension-routes.js";
 import { createFeedbackRoutes } from "./http/routes/feedback-routes.js";
@@ -83,7 +77,6 @@ import { createGitSourceControlRoutes } from "./http/routes/git-source-control-r
 import { createHistoryIndexRoutes } from "./http/routes/history-index-routes.js";
 import { createRemoteUpdateAwarenessRoutes } from "./http/routes/remote-update-awareness-routes.js";
 import { createHealthRoutes } from "./http/routes/health-routes.js";
-import { createKnowledgeV2SettingsRoutes } from "./http/routes/knowledge-v2-settings-routes.js";
 import { createMermaidPreviewRoutes } from "./http/routes/mermaid-preview-routes.js";
 import { createMobileRoutes } from "./http/routes/mobile-routes.js";
 import { createManagerSelectionCatalogRoutes } from "./http/routes/manager-selection-catalog-routes.js";
@@ -91,6 +84,7 @@ import { createModelConfigRoutes } from "./http/routes/model-config-routes.js";
 import { createOpenRouterRoutes } from "./http/routes/openrouter-routes.js";
 import { createProjectResourceRoutes } from "./http/routes/project-resource-routes.js";
 import { createPhoenixObservabilityRoutes } from "./http/routes/phoenix-observability-routes.js";
+import { createOnboardingRoutes } from "./http/routes/onboarding-routes.js";
 import { createPromptRoutes } from "./http/routes/prompt-routes.js";
 import { createSchedulerRoutes } from "./http/routes/scheduler-routes.js";
 import { createSessionAuditRoutes } from "./http/routes/session-audit-routes.js";
@@ -160,9 +154,7 @@ export class SwarmWebSocketServer {
   private readonly host: string;
   private readonly port: number;
   private actualPort: number | null = null;
-  private readonly cortexAutoReviewSettingsService: CortexAutoReviewSettingsService;
   private readonly builderSidebarOrderService: BuilderSidebarOrderService | null;
-  private readonly knowledgeV2SettingsService: KnowledgeV2SettingsService | null;
   private readonly compactionSettingsService: CompactionSettingsService | null;
   private readonly secureSecretSettingsService: SecureSecretSettingsService | null;
   private readonly repositorySettingsService: RepositorySettingsService | null;
@@ -393,7 +385,8 @@ export class SwarmWebSocketServer {
     const sessionDescriptor = this.swarmManager.getAgent(sessionAgentId);
     const cliOriginated = await isCliOriginatedSession(sessionDescriptor);
 
-    const suppressUnreadNotification = this.isUnreadNotificationSuppressed(agentId, cliOriginated);
+    const suppressUnreadNotification =
+      cliOriginated && this.notificationSettingsService.getSettings().muteCliOriginatedNotifications;
     if (!suppressUnreadNotification) {
       this.wsHandler.broadcastToSubscribed({
         type: "unread_notification",
@@ -411,19 +404,6 @@ export class SwarmWebSocketServer {
         this.wsHandler.broadcastUnreadCountUpdate(sessionAgentId, newCount);
       }
     }
-  }
-
-  private isUnreadNotificationSuppressed(agentId: string, cliOriginated: boolean): boolean {
-    const descriptor = this.swarmManager.getAgent(agentId);
-    if (descriptor?.role === "manager" && descriptor.sessionPurpose === "cortex_review") {
-      return true;
-    }
-
-    if (cliOriginated && this.notificationSettingsService.getSettings().muteCliOriginatedNotifications) {
-      return true;
-    }
-
-    return false;
   }
 
   private resolveUnreadContext(sessionAgentId: string): { profileId: string | null } {
@@ -467,7 +447,6 @@ export class SwarmWebSocketServer {
     secureBrowserAccessService?: SecureBrowserAccessService;
     notificationSettingsService?: NotificationSettingsService;
     builderSidebarOrderService?: BuilderSidebarOrderService;
-    knowledgeV2SettingsService?: KnowledgeV2SettingsService;
     compactionSettingsService?: CompactionSettingsService;
     secureSecretSettingsService?: SecureSecretSettingsService;
     observabilityService?: ObservabilityFacade;
@@ -480,18 +459,9 @@ export class SwarmWebSocketServer {
     this.host = options.host;
     this.port = options.port;
     this.secureControlToken = options.secureControlToken ?? "";
-    const cortexEnabled = this.swarmManager.getConfig().cortexEnabled;
-    this.cortexAutoReviewSettingsService = new CortexAutoReviewSettingsService({
-      dataDir: this.swarmManager.getConfig().paths.dataDir,
-      cortexEnabled,
-    });
     this.builderSidebarOrderService =
       options.builderSidebarOrderService ??
       new BuilderSidebarOrderService({ dataDir: this.swarmManager.getConfig().paths.dataDir });
-    this.knowledgeV2SettingsService =
-      options.knowledgeV2SettingsService ??
-      this.swarmManager.getKnowledgeV2SettingsService?.() ??
-      null;
     this.compactionSettingsService =
       options.compactionSettingsService ?? this.swarmManager.getCompactionSettingsService();
     this.secureSecretSettingsService =
@@ -687,17 +657,7 @@ export class SwarmWebSocketServer {
         : []),
       ...createFeedbackRoutes({ swarmManager: this.swarmManager, feedbackService: this.feedbackService }),
       ...createPhoenixObservabilityRoutes({ observabilityService: this.observabilityService }),
-      ...createCortexRoutes({ swarmManager: this.swarmManager, cortexEnabled }),
-      ...createCortexAutoReviewRoutes({
-        settingsService: this.cortexAutoReviewSettingsService,
-        cortexEnabled,
-      }),
-      ...(this.knowledgeV2SettingsService
-        ? createKnowledgeV2SettingsRoutes({
-            settingsService: this.knowledgeV2SettingsService,
-            dataDir: this.swarmManager.getConfig().paths.dataDir,
-          })
-        : []),
+      ...createOnboardingRoutes({ swarmManager: this.swarmManager }),
       ...(this.compactionSettingsService
         ? createCompactionSettingsRoutes({
             settingsService: this.compactionSettingsService,
@@ -756,12 +716,9 @@ export class SwarmWebSocketServer {
       ...(options.promptRegistry
         ? createPromptRoutes({
             promptRegistry: options.promptRegistry,
-            dataDir: this.swarmManager.getConfig().paths.dataDir,
             broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
             promptPreviewProvider: this.swarmManager,
-            versioning: this.swarmManager.getVersioningService(),
             listProfiles: () => this.swarmManager.listProfiles(),
-            cortexEnabled,
           })
         : []),
       ...createStaticUiRoutes({
@@ -786,12 +743,8 @@ export class SwarmWebSocketServer {
       return;
     }
 
-    await this.cortexAutoReviewSettingsService.load();
     if (this.builderSidebarOrderService) {
       await this.builderSidebarOrderService.load();
-    }
-    if (this.knowledgeV2SettingsService) {
-      await this.knowledgeV2SettingsService.load();
     }
     if (this.compactionSettingsService) {
       await this.compactionSettingsService.load();

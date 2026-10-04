@@ -30,7 +30,7 @@ Treat those items as separate follow-up changes, not reasons to broaden unrelate
 - `swarm-event-coordinator.ts` - server-event projection, snapshot versioning, activity bookkeeping, and conversation/status publication.
 - `restart-recovery-coordinator.ts` - boot recovery snapshot creation, single-claim resume delivery, and dismissal.
 - `swarm-observability-coordinator.ts` - runtime/input/tool/lifecycle trace coordination with bounded fail-open projection.
-- `swarm-compaction-coordinator.ts` - runtime compaction orchestration, retry/recovery state, and capture/plan lifecycle hooks.
+- `swarm-compaction-coordinator.ts` - runtime compaction orchestration, retry/recovery state, and plan lifecycle hooks.
 - `context-mode.ts` - Summary/Fresh policy resolution, Fresh runtime support, and session snapshots; saved preferences and actual runtime policy are distinct.
 - `task-notes-store.ts` / `task-notes-tool.ts` - bounded actor-scoped working notes, independent of durable memory; context rollover preserves them, while conversation reset settles runtime writers before clearing them.
 - `history-recall/` / `history-recall-tool.ts` - rebuildable contentless lexical history cache and the agent-only `history` tool; bounded canonical traversal and reads remain available independently of the index. Canonical JSONL remains authoritative and the index payload is not read authority. Pause preference lives in `shared/config/history-index.json`, outside the disposable cache.
@@ -41,10 +41,9 @@ Treat those items as separate follow-up changes, not reasons to broaden unrelate
 - `codex-app-server/codex-plugin-artifact-files.ts` - collision-safe artifact and manifest file writes for scoped Codex Plugin exports.
 - `swarm-memory-merge-service.ts` - session memory merge flow, audit logging, and profile memory writes.
 - `swarm-prompt-service.ts` - prompt preview and runtime prompt assembly for managers, workers, and specialists.
-- `swarm-cortex-service.ts` - Cortex review/run lifecycle, closeout reminders, and Cortex-specific session handling.
 - `session-provisioner.ts` - session creation/disposal plumbing, file setup, rollback, and runtime bootstrap/teardown.
 - `session-descriptor-factory.ts` - reserved identity checks, numeric and slug collision policy, and new manager-session descriptor construction.
-- `agents/descriptor-store/profile-boot-reconciler.ts` - boot-time profile/manager relationship repair, disabled-Cortex pruning, and system-profile type normalization.
+- `agents/descriptor-store/profile-boot-reconciler.ts` - boot-time profile/manager relationship repair and session model/delegation/context-mode normalization.
 - `agents/descriptor-store/worker-boot-recovery.ts` - persisted worker-cache sidecar pruning and terminated worker reconstruction from canonical transcript headers.
 - `swarm-boot-coordinator.ts` - ordered boot transaction across persisted reconciliation, recovery, session metadata, runtime restoration, publication, and health startup.
 - `session-lifecycle-coordinator.ts` - application-level create, archive, restore, stop, delete, clear, rename, and fork sequencing across focused session services and cleanup/notification hooks.
@@ -60,8 +59,7 @@ Treat those items as separate follow-up changes, not reasons to broaden unrelate
 - `planning/session-plan-coordinator.ts` - live checklist/work-graph plan state, persistence, usage accounting, summary projection, and runtime context.
 - `remote-update-awareness/` - local Builder Git remote-update observation, scheduling, SQLite-backed settings/state, and bounded incoming-change tracking.
 - `stream-deck-access-service.ts` - local Stream Deck pairing, revocable device-token authentication, and scoped device-access persistence.
-- `capture-cascade-coordinator.ts` - Cortex capture cadence, watermarks, judge decisions, and temporary capture-fork lifecycle.
-- `knowledge-memory-coordinator.ts` - application-level knowledge, Cortex, capture, session-memory, session-meta boot, and compaction-settings policy; composes the focused state owners without reimplementing them.
+- `memory-coordinator.ts` - application-level session-memory, profile-memory merge, session-meta boot, and compaction-settings policy; composes the focused state owners without reimplementing them.
 - `swarm-manager-utils.ts` - shared helpers, normalizers, formatters, and invariant-preserving utility code.
 
 ## Import directions
@@ -97,7 +95,7 @@ Treat the explicit `SwarmManagerFacade` application API as stable. Any signature
 - Boot ordering matters. Session/meta hydration, prompt/runtime setup, and lifecycle recovery are intentionally sequenced; do not reorder casually.
 - Specialist fallback replay must preserve buffered callbacks and prepared replay snapshots so the replacement runtime sees the same work stream.
 - The `SwarmManager` file and constructor ESLint budgets are ratchets. Lower them after extractions; do not raise them to land a feature.
-- History recall indexes autonomously after local Builder hydration and prefers recent sources. Partial catalogs must not purge live sources. Newest searches may use a bounded chronological prefix only when it contains enough matches; otherwise the complete FTS-led query runs and relevance ranking is unchanged. Unreadable sources are `degraded` or `unavailable`, not endless `building`. Cortex/system, plugin, and external-thread runtimes stay excluded; Secure Sessions secrets stay out of indexed text. Pause waits for bounded current work, then gates background indexing and search/read catch-up while conversation recording, cached hits, and canonical reads remain available. The dispatcher acknowledgement-before-durable-queue gap is unchanged.
+- History recall indexes autonomously after local Builder hydration and prefers recent sources. Partial catalogs must not purge live sources. Newest searches may use a bounded chronological prefix only when it contains enough matches; otherwise the complete FTS-led query runs and relevance ranking is unchanged. Unreadable sources are `degraded` or `unavailable`, not endless `building`. System-profile, internal-purpose, plugin, and external-thread runtimes stay excluded; Secure Sessions secrets stay out of indexed text. Pause waits for bounded current work, then gates background indexing and search/read catch-up while conversation recording, cached hits, and canonical reads remain available. The dispatcher acknowledgement-before-durable-queue gap is unchanged.
 
 ## Tests to update
 
@@ -105,7 +103,6 @@ When changing this area, check the related coverage in:
 
 - `apps/backend/src/swarm/__tests__/runtime-factory.test.ts`
 - `apps/backend/src/swarm/__tests__/session-plan-coordinator.test.ts`
-- `apps/backend/src/swarm/__tests__/capture-cascade-coordinator.test.ts`
 - `apps/backend/src/swarm/__tests__/codex-plugin-delegation-coordinator.test.ts`
 - `apps/backend/src/swarm/__tests__/user-message-coordinator.test.ts`
 - `apps/backend/src/swarm/__tests__/swarm-manager-restart-recovery.characterization.test.ts`

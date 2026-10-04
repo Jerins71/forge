@@ -6,7 +6,6 @@ import {
 import type {
   AgentDescriptor,
   AgentModelDescriptor,
-  AgentsStoreFile,
   ManagerProfile,
 } from "../types.js";
 
@@ -18,60 +17,6 @@ const DEFAULT_MODEL: AgentModelDescriptor = {
 };
 
 describe("ProfileBootReconciler", () => {
-  it("prunes disabled Cortex managers, review sessions, their workers, and the system profile", () => {
-    const harness = createHarness({ cortexEnabled: false });
-    const forge = makeManager("forge", "forge");
-    const forgeWorker = makeWorker("forge-worker", "forge");
-    const cortex = makeManager("cortex", "cortex");
-    const cortexWorker = makeWorker("cortex-worker", "cortex");
-    const review = makeManager("review-run", "forge", { sessionPurpose: "cortex_review" });
-    const reviewWorker = makeWorker("review-worker", "review-run");
-    const cortexScopedWorker = makeWorker("cortex-scoped-worker", "forge", {
-      profileId: "cortex",
-    });
-    const store: AgentsStoreFile = {
-      agents: [
-        forge,
-        forgeWorker,
-        cortex,
-        cortexWorker,
-        review,
-        reviewWorker,
-        cortexScopedWorker,
-      ],
-      profiles: [makeProfile("forge"), makeProfile("cortex", { profileType: "system" })],
-    };
-
-    const result = harness.reconciler.prunePersistedCortexStateForBoot(store);
-
-    expect(result.pruned).toBe(true);
-    expect(result.store.agents.map((descriptor) => descriptor.agentId)).toEqual([
-      "forge",
-      "forge-worker",
-    ]);
-    expect(result.store.profiles?.map((profile) => profile.profileId)).toEqual(["forge"]);
-    expect(harness.logDebug).toHaveBeenCalledWith("boot:cortex:pruned_disabled_state", {
-      removedAgents: 5,
-      removedProfiles: 1,
-    });
-    expect(store.agents).toHaveLength(7);
-    expect(store.profiles).toHaveLength(2);
-  });
-
-  it("returns enabled Cortex state unchanged", () => {
-    const harness = createHarness({ cortexEnabled: true });
-    const store: AgentsStoreFile = {
-      agents: [makeManager("cortex", "cortex")],
-      profiles: [makeProfile("cortex")],
-    };
-
-    const result = harness.reconciler.prunePersistedCortexStateForBoot(store);
-
-    expect(result).toEqual({ store, pruned: false });
-    expect(result.store).toBe(store);
-    expect(harness.logDebug).not.toHaveBeenCalled();
-  });
-
   it("creates missing profiles and repairs blank manager profile ids", () => {
     const manager = makeManager("forge", "forge", { profileId: "   " });
     const worker = makeWorker("worker", "forge", {
@@ -294,15 +239,6 @@ describe("ProfileBootReconciler", () => {
     expect(malformed.contextModeOverride).toBeUndefined();
     expect(harness.reconciler.normalizeContextModeStateOnBoot()).toBe(false);
   });
-
-  it("marks the Cortex profile as system and is idempotent", () => {
-    const cortex = makeProfile("cortex", { profileType: "user" });
-    const harness = createHarness({ profiles: [cortex] });
-
-    expect(harness.reconciler.normalizeSystemProfileTypes()).toBe(true);
-    expect(harness.profiles.get("cortex")?.profileType).toBe("system");
-    expect(harness.reconciler.normalizeSystemProfileTypes()).toBe(false);
-  });
 });
 
 interface Harness {
@@ -316,7 +252,6 @@ interface Harness {
 }
 
 function createHarness(options: {
-  cortexEnabled?: boolean;
   descriptors?: AgentDescriptor[];
   profiles?: ManagerProfile[];
 } = {}): Harness {
@@ -350,7 +285,6 @@ function createHarness(options: {
 
   return {
     reconciler: new ProfileBootReconciler({
-      cortexEnabled: options.cortexEnabled ?? true,
       defaultModel: DEFAULT_MODEL,
       descriptors,
       profiles,

@@ -24,6 +24,7 @@ import {
   type GitPullRequestsQueryResult,
 } from './use-diff-queries'
 
+const repoTarget = 'workspace' as const
 const PULL_REQUEST_LIST_WIDTH_STORAGE_KEY = 'forge-diff-pull-requests-list-width-v2'
 const PULL_REQUEST_LIST_DEFAULT_WIDTH = 460
 const PULL_REQUEST_LIST_MIN_WIDTH = 280
@@ -32,7 +33,6 @@ const PULL_REQUEST_LIST_MAX_WIDTH = 720
 interface PullRequestsTabProps {
   wsUrl: string
   agentId: string | null
-  repoTarget: 'workspace' | 'versioning'
   worktreeId?: string | null
   currentBranch: string | null
   pullRequestsQuery: GitPullRequestsQueryResult
@@ -401,7 +401,6 @@ function PullRequestDetailPane({
 export function PullRequestsTab({
   wsUrl,
   agentId,
-  repoTarget,
   worktreeId,
   currentBranch,
   pullRequestsQuery,
@@ -487,9 +486,6 @@ export function PullRequestsTab({
   }, [])
 
   const mergeDisabledReason = useMemo(() => {
-    if (repoTarget === 'versioning') {
-      return 'Pull request merge is unavailable for the versioning repository.'
-    }
     if (!detailQuery.data) {
       return detailQuery.isLoading ? 'Loading latest pull request details…' : 'Latest pull request details are required before merge.'
     }
@@ -503,7 +499,7 @@ export function PullRequestsTab({
       return detailQuery.data.mergeBlockedReason ?? 'Pull request is not mergeable.'
     }
     return null
-  }, [detailQuery.data, detailQuery.isLoading, repoTarget])
+  }, [detailQuery.data, detailQuery.isLoading])
 
   const handleConfirmMerge = useCallback(
     async (options: {
@@ -563,7 +559,7 @@ export function PullRequestsTab({
         setIsMerging(false)
       }
     },
-    [agentId, detailQuery, onMergeComplete, refetch, repoTarget, selectedNumber, worktreeId, wsUrl],
+    [agentId, detailQuery, onMergeComplete, refetch, selectedNumber, worktreeId, wsUrl],
   )
 
   if (!agentId) {

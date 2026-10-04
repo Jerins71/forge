@@ -5,11 +5,8 @@ import { isContextMode, isManagerPosture } from "@forge/protocol";
 import type {
   AgentDescriptor,
   AgentModelDescriptor,
-  AgentsStoreFile,
   ManagerProfile,
 } from "../../types.js";
-
-const CORTEX_PROFILE_ID = "cortex";
 
 export interface ProfileBootMutations {
   upsertDescriptor(descriptor: AgentDescriptor): void;
@@ -18,7 +15,6 @@ export interface ProfileBootMutations {
 }
 
 export interface ProfileBootReconcilerOptions {
-  cortexEnabled: boolean;
   defaultModel: AgentModelDescriptor;
   descriptors: Map<string, AgentDescriptor>;
   profiles: Map<string, ManagerProfile>;
@@ -212,72 +208,6 @@ export class ProfileBootReconciler {
       }
     }
     return changed;
-  }
-
-  prunePersistedCortexStateForBoot(store: AgentsStoreFile): {
-    store: AgentsStoreFile;
-    pruned: boolean;
-  } {
-    if (this.options.cortexEnabled) {
-      return { store, pruned: false };
-    }
-
-    const agents = Array.isArray(store.agents) ? store.agents : [];
-    const profiles = Array.isArray(store.profiles) ? store.profiles : [];
-    const removedManagerIds = new Set(
-      agents
-        .filter(
-          (descriptor) =>
-            descriptor.role === "manager" &&
-            (descriptor.agentId === CORTEX_PROFILE_ID ||
-              descriptor.profileId === CORTEX_PROFILE_ID ||
-              descriptor.sessionPurpose === "cortex_review"),
-        )
-        .map((descriptor) => descriptor.agentId),
-    );
-    const filteredAgents = agents.filter(
-      (descriptor) =>
-        !(
-          descriptor.agentId === CORTEX_PROFILE_ID ||
-          descriptor.profileId === CORTEX_PROFILE_ID ||
-          descriptor.sessionPurpose === "cortex_review" ||
-          removedManagerIds.has(descriptor.managerId)
-        ),
-    );
-    const filteredProfiles = profiles.filter(
-      (profile) => profile.profileId !== CORTEX_PROFILE_ID,
-    );
-    const pruned =
-      filteredAgents.length !== agents.length || filteredProfiles.length !== profiles.length;
-
-    if (pruned) {
-      this.options.logDebug("boot:cortex:pruned_disabled_state", {
-        removedAgents: agents.length - filteredAgents.length,
-        removedProfiles: profiles.length - filteredProfiles.length,
-      });
-    }
-
-    return {
-      store: {
-        ...store,
-        agents: filteredAgents,
-        profiles: filteredProfiles,
-      },
-      pruned,
-    };
-  }
-
-  normalizeSystemProfileTypes(): boolean {
-    const cortexProfile = this.options.profiles.get(CORTEX_PROFILE_ID);
-    if (!cortexProfile || cortexProfile.profileType === "system") {
-      return false;
-    }
-
-    this.options.mutations.upsertProfile({
-      ...cortexProfile,
-      profileType: "system",
-    });
-    return true;
   }
 
   private getSessionsForProfile(

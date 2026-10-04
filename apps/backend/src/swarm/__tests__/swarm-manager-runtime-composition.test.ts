@@ -6,7 +6,7 @@ import type { CodexDirectSidecarCoordinator } from "../codex-app-server/codex-di
 import type { CodexPluginDelegationCoordinator } from "../codex-app-server/codex-plugin-delegation-coordinator.js";
 import type { ConversationProjector } from "../session/conversation-projector.js";
 import { ForgeExtensionHost } from "../forge-extension-host.js";
-import type { KnowledgeMemoryCoordinator } from "../knowledge-memory-coordinator.js";
+import type { MemoryCoordinator } from "../memory-coordinator.js";
 import type { ProjectAgentCoordinator } from "../project-agent-coordinator.js";
 import { RuntimeRecoveryState } from "../runtime/runtime-recovery-state.js";
 import type { SecretsEnvService } from "../secrets-env-service.js";
@@ -14,7 +14,6 @@ import type { SessionPinCoordinator } from "../session-pin-coordinator.js";
 import type { SessionProvisioner } from "../session-provisioner.js";
 import type { SwarmChoiceService } from "../swarm-choice-service.js";
 import type { SwarmConfigurationCoordinator } from "../swarm-configuration-coordinator.js";
-import type { SwarmCortexService } from "../swarm-cortex-service.js";
 import type { SwarmEventCoordinator } from "../swarm-event-coordinator.js";
 import {
   createSwarmManagerRuntimeComposition,
@@ -36,7 +35,6 @@ function config(): SwarmConfig {
     port: 47187,
     debug: false,
     isDesktop: false,
-    cortexEnabled: false,
     allowNonManagerSubscriptions: false,
     managerDisplayName: "Manager",
     defaultModel: { provider: "openai-codex", modelId: "gpt-5.4", thinkingLevel: "high" },
@@ -175,7 +173,6 @@ function createOptions(late: ReturnType<typeof vi.fn>): SwarmManagerRuntimeCompo
       injectWorkerIdentityContext: late,
       resolveDefaultModelDescriptor: late,
     },
-    capture: { forkSession: late, deleteSession: late },
     sessions: {
       materializeSortOrder: late,
       deleteConversationHistory: late,
@@ -191,8 +188,7 @@ function boundServices(): SwarmManagerRuntimeBoundServices {
     configuration: {
       promptResources: { modelCapacityBlocks: new Map() },
     } as unknown as SwarmConfigurationCoordinator,
-    knowledge: {} as KnowledgeMemoryCoordinator,
-    cortex: {} as SwarmCortexService,
+    memory: {} as MemoryCoordinator,
     directory: {} as AgentDirectory,
     eventCoordinator: {} as SwarmEventCoordinator,
     sessionMeta: {} as SwarmSessionMetaService,

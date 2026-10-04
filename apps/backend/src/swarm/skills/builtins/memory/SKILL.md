@@ -25,5 +25,5 @@ Do not write persistent memory for normal one-off requests. Task-local working n
 4. Never store secrets (passwords, API keys, tokens, private keys) or highly sensitive personal data.
 5. If the request is ambiguous, ask a clarifying question before writing.
 6. After updating memory:
-   - manager: confirm with the appropriate output path (normal final text for normal web/session chat, including a closeout reached from an internal worker result; `speak_to_user` for Cortex/review, non-web, or protected delivery),
+   - manager: confirm with the appropriate output path (normal final text for normal web/session chat, including a closeout reached from an internal worker result; `speak_to_user` for non-web or protected delivery),
    - worker: include the update in the final assistant response, which Forge returns to the manager automatically.

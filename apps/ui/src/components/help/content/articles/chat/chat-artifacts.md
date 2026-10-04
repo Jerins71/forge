@@ -2,7 +2,7 @@ The artifact panel is a slide-out viewer for files that agents create or referen
 
 ## Opening the panel
 
-Click a file reference in a chat message, or toggle the panel with the **sidebar icon** in the header (the rightmost icon). For Cortex sessions, this button opens the Cortex dashboard instead.
+Click a file reference in a chat message, or toggle the panel with the **sidebar icon** in the header (the rightmost icon).
 
 ## Context v2 files
 

@@ -10,7 +10,6 @@ import {
   PROJECT_AGENT_CAPABILITIES,
   isContextMode,
   isManagerPosture,
-  isTerminalAssistantConversationMessage,
   type AgentRuntimeExtensionSnapshot,
   type ConversationReplyTarget,
   type SessionMemoryMergeFailureStage
@@ -42,7 +41,6 @@ import type {
   ConversationAttachment,
   ConversationAttachmentMetadata,
   ConversationBinaryAttachment,
-  ConversationEntryEvent,
   ConversationTextAttachment,
   ExternalThreadInfo,
   MessageSourceContext,
@@ -235,11 +233,10 @@ export function validateAgentDescriptor(value: unknown): AgentDescriptor | strin
 
   if (
     value.sessionPurpose !== undefined &&
-    value.sessionPurpose !== "cortex_review" &&
     value.sessionPurpose !== "agent_creator" &&
     value.sessionPurpose !== "side_chat"
   ) {
-    return 'sessionPurpose must be "cortex_review", "agent_creator", or "side_chat" when provided';
+    return 'sessionPurpose must be "agent_creator" or "side_chat" when provided';
   }
 
   if (value.sideChatSourceAgentId !== undefined && typeof value.sideChatSourceAgentId !== "string") {
@@ -971,88 +968,6 @@ function synthesizeCatalogBackedPiModel(descriptor: AgentModelDescriptor): Model
       catalogModel.contextWindow,
     maxTokens: catalogModel.maxOutputTokens
   };
-}
-
-export function normalizeCortexUserVisiblePaths(text: string): string {
-  return text.replace(/(?:[A-Za-z]:)?(?:[\\/][^,\s`]+)+[\\/]profiles(?:[\\/][^,\s`]+)+/g, (matchedPath) => {
-    const normalized = matchedPath.replace(/\\/g, "/");
-    const profilesIndex = normalized.toLowerCase().lastIndexOf("/profiles/");
-    if (profilesIndex < 0) {
-      return matchedPath;
-    }
-
-    return normalized.slice(profilesIndex + 1);
-  });
-}
-
-export function analyzeLatestCortexCloseoutNeed(
-  history: ConversationEntryEvent[]
-): { needsReminder: boolean; userTimestamp?: number; reason?: "missing_speak_to_user" | "stale_after_worker_progress" } {
-  let latestUserIndex = -1;
-
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const entry = history[index];
-    if (entry.type === "conversation_message" && entry.role === "user" && entry.source === "user_input") {
-      latestUserIndex = index;
-      break;
-    }
-  }
-
-  if (latestUserIndex < 0) {
-    return { needsReminder: false };
-  }
-
-  const latestUserEntry = history[latestUserIndex];
-  const userTimestamp =
-    latestUserEntry.type === "conversation_message"
-      ? parseTimestampToMillis(latestUserEntry.timestamp)
-      : undefined;
-
-  let lastCloseoutTimestamp: number | undefined;
-  for (let index = latestUserIndex + 1; index < history.length; index += 1) {
-    const entry = history[index];
-    if (!isTerminalAssistantConversationMessage(entry)) {
-      continue;
-    }
-
-    const timestamp = parseTimestampToMillis(entry.timestamp);
-    if (typeof timestamp === "number") {
-      lastCloseoutTimestamp = timestamp;
-    }
-  }
-
-  if (typeof lastCloseoutTimestamp !== "number") {
-    return {
-      needsReminder: true,
-      userTimestamp,
-      reason: "missing_speak_to_user"
-    };
-  }
-
-  for (let index = latestUserIndex + 1; index < history.length; index += 1) {
-    const entry = history[index];
-    if (!isCortexCloseoutFollowUpEntry(entry)) {
-      continue;
-    }
-
-    const timestamp = parseTimestampToMillis(entry.timestamp);
-    if (typeof timestamp === "number" && timestamp > lastCloseoutTimestamp) {
-      return {
-        needsReminder: true,
-        userTimestamp,
-        reason: "stale_after_worker_progress"
-      };
-    }
-  }
-
-  return {
-    needsReminder: false,
-    userTimestamp
-  };
-}
-
-function isCortexCloseoutFollowUpEntry(entry: ConversationEntryEvent): boolean {
-  return entry.type === "agent_message" && entry.source === "agent_to_agent";
 }
 
 export function parseTimestampToMillis(value: string | undefined): number | undefined {

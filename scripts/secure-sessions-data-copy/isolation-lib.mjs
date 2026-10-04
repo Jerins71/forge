@@ -700,7 +700,6 @@ export function assertLaunchEnvironment(
     FORGE_ELECTRON_USER_DATA_DIR: electronUserDataPath,
     VITE_FORGE_WS_URL: `ws://127.0.0.1:${backendPort}`,
     FORGE_TELEMETRY: "false",
-    FORGE_CORTEX_ENABLED: "false",
     FORGE_TERMINAL_ENABLED: "false",
     FORGE_SKILL_SHARE_DISABLED: "true",
     FORGE_REMOTE_PROJECTS_ENABLED: "false",

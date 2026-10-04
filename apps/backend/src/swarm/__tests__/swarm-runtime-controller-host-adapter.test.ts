@@ -80,8 +80,7 @@ function createAdapter(options?: {
           conversationProjector: {},
           promptService: {},
           secretsEnvService: {},
-          cortexService: {},
-        }) as ReturnType<SwarmRuntimeControllerHostAdapterOptions["getLateBoundServices"]>),
+            }) as ReturnType<SwarmRuntimeControllerHostAdapterOptions["getLateBoundServices"]>),
   });
 }
 
@@ -255,7 +254,6 @@ describe("createSwarmRuntimeControllerHost", () => {
       conversationProjector: {},
       promptService: {},
       secretsEnvService: {},
-      cortexService: {},
     } as ReturnType<SwarmRuntimeControllerHostAdapterOptions["getLateBoundServices"]>;
     const getWorkerHealthState = vi.fn(() => workerHealthState);
     const getLateBoundServices = vi.fn(() => lateBoundServices);

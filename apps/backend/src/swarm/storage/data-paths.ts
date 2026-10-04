@@ -348,14 +348,6 @@ export function getKnowledgeArchiveDir(dataDir: string): string {
   return join(getSharedKnowledgeDir(dataDir), "archive");
 }
 
-export function getKnowledgeLegacyArchiveDir(dataDir: string): string {
-  return join(getSharedKnowledgeDir(dataDir), ".archive");
-}
-
-export function getKnowledgeReferenceDir(dataDir: string): string {
-  return join(getSharedKnowledgeDir(dataDir), "reference");
-}
-
 export function getKnowledgeIndexPath(dataDir: string): string {
   return join(getSharedKnowledgeDir(dataDir), "INDEX.md");
 }
@@ -376,14 +368,6 @@ export function getProfileKnowledgeIndexPath(dataDir: string, profileId: string)
   return join(getProfileKnowledgeV2Dir(dataDir, profileId), "INDEX.md");
 }
 
-export function getKnowledgeMigrationLockPath(dataDir: string): string {
-  return join(getSharedKnowledgeDir(dataDir), ".knowledge-v2-migration.lock.json");
-}
-
-export function getKnowledgeMigrationManifestPath(dataDir: string): string {
-  return join(getSharedKnowledgeDir(dataDir), ".knowledge-v2-migration-manifest.json");
-}
-
 export function getProfileKnowledgeDir(dataDir: string): string {
   return join(getSharedKnowledgeDir(dataDir), "profiles");
 }
@@ -394,14 +378,6 @@ export function getProfileKnowledgePath(dataDir: string, profileId: string): str
 
 export function getCommonKnowledgePath(dataDir: string): string {
   return join(getSharedKnowledgeDir(dataDir), "common.md");
-}
-
-export function getCortexReviewLogPath(dataDir: string): string {
-  return join(getSharedKnowledgeDir(dataDir), ".cortex-review-log.jsonl");
-}
-
-export function getCortexConsolidationRunsPath(dataDir: string): string {
-  return join(getSharedKnowledgeDir(dataDir), ".cortex-consolidation-runs.json");
 }
 
 export function getSharedAuthDir(dataDir: string): string {
@@ -450,14 +426,6 @@ export function getBuilderSidebarOrderPath(dataDir: string): string {
 
 export function getPhoenixObservabilitySettingsPath(dataDir: string): string {
   return join(getSharedConfigDir(dataDir), "phoenix-observability.json");
-}
-
-export function getCortexAutoReviewSettingsPath(dataDir: string): string {
-  return join(getSharedConfigDir(dataDir), "cortex-auto-review.json");
-}
-
-export function getKnowledgeV2SettingsPath(dataDir: string): string {
-  return join(getSharedConfigDir(dataDir), "knowledge-v2.json");
 }
 
 export function getCompactionSettingsPath(dataDir: string): string {

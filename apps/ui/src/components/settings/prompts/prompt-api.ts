@@ -3,8 +3,6 @@
 /* ------------------------------------------------------------------ */
 
 import type {
-  CortexPromptSurfaceContentResponse,
-  CortexPromptSurfaceListResponse,
   PromptCategory,
   PromptContentResponse,
   PromptListEntry,
@@ -107,68 +105,6 @@ export async function deletePromptOverride(
   const response = await client.fetch(
     `/api/prompts/${encodeURIComponent(category)}/${encodeURIComponent(promptId)}?${params}`,
     { method: 'DELETE' },
-  )
-  if (!response.ok) throw new Error(await client.readApiError(response))
-}
-
-export async function fetchCortexPromptSurfaceList(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
-  profileId: string,
-): Promise<CortexPromptSurfaceListResponse> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
-  const params = new URLSearchParams({ profileId })
-  const response = await client.fetch(`/api/prompts/cortex-surfaces?${params}`)
-  if (!response.ok) throw new Error(await client.readApiError(response))
-
-  const data = (await response.json()) as Partial<CortexPromptSurfaceListResponse>
-  return {
-    enabled: data.enabled === true,
-    surfaces: Array.isArray(data.surfaces) ? data.surfaces : [],
-  }
-}
-
-export async function fetchCortexPromptSurfaceContent(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
-  surfaceId: string,
-  profileId: string,
-): Promise<CortexPromptSurfaceContentResponse> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
-  const params = new URLSearchParams({ profileId })
-  const response = await client.fetch(
-    `/api/prompts/cortex-surfaces/${encodeURIComponent(surfaceId)}?${params}`,
-  )
-  if (!response.ok) throw new Error(await client.readApiError(response))
-  return (await response.json()) as CortexPromptSurfaceContentResponse
-}
-
-export async function saveCortexPromptSurface(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
-  surfaceId: string,
-  content: string,
-  profileId: string,
-): Promise<void> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
-  const response = await client.fetch(
-    `/api/prompts/cortex-surfaces/${encodeURIComponent(surfaceId)}`,
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, profileId }),
-    },
-  )
-  if (!response.ok) throw new Error(await client.readApiError(response))
-}
-
-export async function resetCortexPromptSurface(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
-  surfaceId: string,
-  profileId: string,
-): Promise<void> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
-  const params = new URLSearchParams({ profileId })
-  const response = await client.fetch(
-    `/api/prompts/cortex-surfaces/${encodeURIComponent(surfaceId)}/reset?${params}`,
-    { method: 'POST' },
   )
   if (!response.ok) throw new Error(await client.readApiError(response))
 }

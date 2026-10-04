@@ -12,7 +12,7 @@ A practical guide to going from first launch to daily use. Covers setup, core co
 4. [Working with Your Manager](#4-working-with-your-manager)
 5. [Session Management](#5-session-management)
 6. [Teaching Forge How You Work](#6-teaching-forge-how-you-work)
-7. [Cortex — The Brain](#7-cortex--the-brain)
+7. [Memory](#7-memory)
 8. [Reliability & Continuity](#8-reliability--continuity)
 9. [Settings & Configuration](#9-settings--configuration)
 10. [Advanced Usage](#10-advanced-usage)
@@ -26,7 +26,7 @@ A practical guide to going from first launch to daily use. Covers setup, core co
 
 After cloning the repo and running `pnpm prod:daemon`, open the UI at [http://127.0.0.1:47189](http://127.0.0.1:47189).
 
-You'll see a short welcome form from Cortex, Forge's learning system. It asks for your name, technical level, and a few baseline preferences. Forge always stores the structured onboarding state. With Knowledge v2 OFF, Settings renders and updates a managed block in legacy `common.md`; with v2 ON, it upserts global v2 preference entries instead. Take 30 seconds and fill it out honestly.
+You'll see a short welcome form. It asks for your name, technical level, and a few baseline preferences. Forge stores them as structured onboarding state and shares them with future managers. Take 30 seconds and fill it out honestly.
 
 ### Setting Up Authentication
 
@@ -82,7 +82,7 @@ You're the executive. The manager is your team lead. Selected Work Mode decides 
 
 A session is a conversation thread within a manager. Your first session is created automatically when you create the manager. You can create additional sessions for different workstreams: one for a feature, one for bug fixes, one for documentation. Each session has its own conversation history, its own memory, and can run workers independently. New sessions copy the profile's default manager model; existing sessions keep their stored model unless you override that session explicitly.
 
-In eligible Builder manager sessions, a compact pill beside **Send** shows the effective model and reasoning level. Click it to open **Session Model**, choose a session override, or select **Use Project Default** to copy the current project default onto that one session. Later project-default changes do not cascade. The pill is not shown in worker views or system profiles such as Cortex.
+In eligible Builder manager sessions, a compact pill beside **Send** shows the effective model and reasoning level. Click it to open **Session Model**, choose a session override, or select **Use Project Default** to copy the current project default onto that one session. Later project-default changes do not cascade. The pill is not shown in worker views or system profiles.
 
 The Send-adjacent work-mode control chooses how the manager owns subsequent turns:
 
@@ -222,9 +222,7 @@ Inbox lists **Needs you**, **Active**, and **Recent**, then an inline Projects t
 
 In Projects, click a project header to expand or collapse its nested sessions; the header itself does not select a conversation. Select a session row to switch conversations, search by name or message content (with highlights), rename sessions, create new ones with the + button, and fork sessions from any point in a conversation. Session rows can show status badges, including active worker counts and a violet pulsing `C` while compaction or context recovery is active. Use the Archive nav in the Builder sidebar to view archived local projects and directly archived sessions. Archive entries are sorted by last user-message activity and show the last-used date. Restore and reopen them from there.
 
-On desktop, Cortex lives in the activity-rail popover. On mobile, and in Classic, it remains a pinned sidebar row.
-
-For a local Builder project, right-click the project header or open its hover/focus **…** menu and choose **Project Settings**. This page remains scoped to that project and lets you rename it, change its working directory, change its default model and reasoning, choose **Context management** (Summary remains the default; Context v2 is experimental), open its Project secrets, and manage **Project Settings → Repository resources**. Repository resources shows the repo-root `.forge` inventory, executable trust controls, and an existing-`.forge` directory override. Eligible local Builder managers can also override or inherit that project default from a compact **Context management** control beside Send. Saving a mode does not clear the current conversation; it applies at the next context transition. The direct Rename, Change Default Model, Change Working Directory, and Project Secrets context-menu shortcuts remain. Cortex does not have Project Settings.
+For a local Builder project, right-click the project header or open its hover/focus **…** menu and choose **Project Settings**. This page remains scoped to that project and lets you rename it, change its working directory, change its default model and reasoning, choose **Context management** (Summary remains the default; Context v2 is experimental), open its Project secrets, and manage **Project Settings → Repository resources**. Repository resources shows the repo-root `.forge` inventory, executable trust controls, and an existing-`.forge` directory override. Eligible local Builder managers can also override or inherit that project default from a compact **Context management** control beside Send. Saving a mode does not clear the current conversation; it applies at the next context transition. The direct Rename, Change Default Model, Change Working Directory, and Project Secrets context-menu shortcuts remain.
 
 **Pinning sessions:** Right-click any session and select "Pin" to keep it at the top of the sidebar. Pinned sessions appear below project agents but above regular sessions and are never hidden by the "Show N more" pagination. Click "Unpin" to return a session to regular sorting. Sessions are pinned per profile — forked sessions don't inherit pin state.
 
@@ -240,7 +238,7 @@ When agents create plans, design documents, or other working files that aren't p
 
 ### Schedules
 
-If you've set up scheduled tasks (including the managed daily Cortex consolidation schedule), they appear in the sidebar's Schedules pane.
+If you've set up scheduled tasks, they appear in the sidebar's Schedules pane.
 
 ### Provider Usage
 
@@ -386,7 +384,7 @@ Sometimes you want a session to serve as a persistent specialist that other sess
 
 Each creation attempt starts a fresh dedicated Agent Architect session. After successful creation, the wizard session automatically hides from the sidebar. You can revisit the creation conversation anytime by right-clicking the created agent and selecting "View Creation History."
 
-Agent Creator sessions cannot be promoted, forked, or created within the Cortex profile.
+Agent Creator sessions cannot be promoted or forked.
 
 **Discovery:** Once promoted, project agents appear at the top of the sidebar in their profile with a special badge. Other local session agents in the same profile, plus sessions in profiles that have an explicit sharing grant, can discover them through the injected directory and send fire-and-forget messages using the existing `send_message_to_agent` tool.
 
@@ -416,7 +414,7 @@ Before diving into implementation, have some conceptual conversations with your 
 - What's your testing philosophy?
 - Do you prefer small incremental changes or big-bang implementations?
 
-These conversations give your manager useful context. When a durable preference is saved as knowledge, future managers can find and apply it.
+These conversations give your manager useful context. Ask it to remember the durable parts, and they are saved to memory for future sessions.
 
 > "Don't just use it as 'I'm using what I have and that's what I get.' Use it as somebody you're almost trying to mentor and teach how you like to work."
 
@@ -433,7 +431,7 @@ This approach has enabled one-shotting features with 20,000+ lines of code. It's
 
 ### The Feedback System
 
-Message feedback in Forge sits behind one feedback trigger and popover. It offers **Good response**, **Needs work**, and **Add/update comment** actions, and feeds directly into Cortex's learning system.
+Message feedback in Forge sits behind one feedback trigger and popover. It offers **Good response**, **Needs work**, and **Add/update comment** actions.
 
 **Needs work** — When the manager or a worker does something wrong. You can optionally select a category or write a comment explaining what was bad. This is your most important feedback signal.
 
@@ -441,69 +439,23 @@ Message feedback in Forge sits behind one feedback trigger and popover. It offer
 
 **Add/update comment** — For patterns you're noticing. "I'm seeing a tendency to over-engineer simple solutions" or "Always check for null before accessing nested properties in this codebase." Comments don't require a positive or negative rating.
 
-**Session-level ratings** — You can also rate entire sessions, which helps Cortex understand which conversations were productive.
+**Session-level ratings** — You can also rate entire sessions to record which conversations were productive.
 
 You don't need to rate every message. Focus on the meaningful ones: the spectacular successes, the frustrating failures, and the patterns you want to reinforce or correct.
 
-### How Feedback Becomes Learning
-
-Feedback signals can trigger a bounded Cortex capture check, which verifies whether a durable fact should be saved. Cortex does not run the former transcript-review pipeline. More on the current architecture in the Cortex section.
-
 ---
 
-## 7. Cortex — The Brain
+## 7. Memory
 
-Cortex is Forge's durable learning system. On desktop it opens from the activity-rail popover; mobile and Classic keep the pinned sidebar row. In Knowledge v2 mode, it maintains provenance-bearing entries that managers can search and read on demand.
+Forge keeps durable memory as plain Markdown files that you can open and edit:
 
-### Knowledge v2 is an opt-in preview
+- **Session memory** — each session's `memory.md` holds facts and decisions you ask the agent to remember.
+- **Profile memory** — each project's canonical `memory.md` holds shared project facts, conventions, and decisions. Approved session insights reach it through the memory-merge lifecycle.
+- **Common memory** — `shared/knowledge/common.md` holds cross-project preferences. Only you, or agents you explicitly ask, maintain it.
 
-Knowledge v2 is **off by default**. It is separate from `FORGE_CORTEX_ENABLED`: the mode switch chooses v2 or legacy prompt sourcing, while `FORGE_CORTEX_ENABLED=false` disables the entire Cortex subsystem.
+Managers receive common, profile, and session memory in their prompts; a missing file is skipped. Task notes are separate working state that survive context transitions without becoming memory, and older conversation evidence stays recoverable with the agent-only `history` tool.
 
-Prompt sources are explicit:
-
-- **Knowledge v2 ON:** the generated global `shared/knowledge/INDEX.md`, active-profile `knowledge/INDEX.md`, and current session `memory.md`.
-- **Knowledge v2 OFF:** legacy shared `common.md`, canonical profile `memory.md`, and current session `memory.md`.
-
-Canonical profile memory continues to be maintained with v2 ON. Legacy common knowledge is preserved during normal switching, but neither is prompt-injected in that mode. Normal mode switching preserves both stores. Turning v2 OFF restores the legacy prompt sources only while those originals remain; explicit legacy cleanup archives and removes them. Profile memory and profile-scoped v2 knowledge are different stores.
-
-### Guarded activation
-
-A normal false→true activation is allowed only after a guarded migration has produced a strictly valid completed manifest and released its ownership-safe cross-process lock. A successful migration commits that manifest, releases the lock, and immediately persists v2 activation. Earlier valid v1 manifests remain accepted; new migrations write a truthful v2 `authorized_pending` authorization. If activation persistence fails after the manifest commit, the manifest remains an authorized recovery point and v2 stays OFF. It permits an ordinary recovery enable, as well as ordinary re-enable after a later user disable.
-
-**Settings → General** and first-launch v2 onboarding use the backend's fail-closed capability result. Before migration, Settings shows migration-required guidance and onboarding does not offer or request activation. The ordinary toggle never migrates data. Direct unsafe activation is rejected with HTTP 409 and `KNOWLEDGE_V2_MIGRATION_REQUIRED`.
-
-Operators run migration explicitly from the repository root with a deliberate data directory:
-
-```bash
-node scripts/knowledge-v2-migrate.mjs --data-dir /path/to/forge-data
-```
-
-Cleanup and rollback are separate explicit operations:
-
-```bash
-node scripts/knowledge-v2-migrate.mjs --data-dir /path/to/forge-data --cleanup-legacy --confirm
-node scripts/knowledge-v2-migrate.mjs --data-dir /path/to/forge-data --rollback
-node scripts/knowledge-v2-migrate.mjs --data-dir /path/to/forge-data --rollback --manifest /path/to/manifest.json
-```
-
-Cleanup archives legacy files and retired Cortex artifacts under `shared/knowledge/.archive/legacy-cleanup/<timestamp>/` and removes the originals, so OFF alone can no longer restore their prior content. Rollback restores manifest-listed legacy backups, disables v2, and reports that a restart is required.
-
-### How learning works
-
-Managers can save durable facts directly with `save_learning`. At bounded compaction, idle, and session-archive checkpoints, a deterministic cadence check and small judge can launch a restricted capture-check fork for facts that may have been missed; feedback signals bypass the judge and trigger that check directly. Managers use the `knowledge` tool to search and read full entries behind the compact indexes.
-
-While Knowledge v2 is ON, Cortex's consolidator reads entries only. It merges duplicates, supersedes conflicts, archives stale entries, and regenerates token-capped indexes. It does **not** mine transcripts or create new entries.
-
-### Cortex dashboard
-
-Open Cortex from the desktop activity-rail popover, or from the pinned sidebar row on mobile and in Classic. The resizable dashboard has four tabs:
-
-- **Index** — View generated global/profile indexes and token-cost meters.
-- **Entries** — Read entry bodies and provenance details; the current dashboard is read-only.
-- **Log** — Inspect verified consolidation log activity.
-- **Run** — Use **Consolidate now**, see **Last run**, and inspect the **Promotion review queue**.
-
-While Knowledge v2 is ON, the daily consolidation schedule can be enabled or disabled under **Settings → General**, and manual consolidation is available from **Run**.
+Upgrading from Forge V1? Cortex and Knowledge v2 were removed in V2. Their files stay on disk unread; see [Removed Cortex settings](CONFIGURATION.md#removed-cortex-settings) for the opt-in export into memory.
 
 ---
 
@@ -526,7 +478,7 @@ On **Summary**, Smart compaction works as before:
 5. **Pinned messages** — Any messages you've pinned (up to 10 per session) are preserved verbatim in the summary under a dedicated "Preserved Messages (Pinned)" section.
 6. **Resume** — If compaction happened while the session was active, interrupted, or waiting on dispatch, the agent comes back with the detailed recent context, a high-level summary of older work, pinned messages, and the handoff file.
 
-On **Context v2**, Compact and Smart compact skip that Smart LLM handoff and instead write a deterministic checkpoint: current goal/plan, pins, and unconsumed tool-result references. Older transcript remains on disk and is recoverable with the agent-only `history` tool. Context v2 is experimental and executable only by supported ordinary Pi Builder managers (OpenAI/Codex or Anthropic). Cortex/system, Cursor SDK, plugin/external threads, and workers cannot run it; workers inherit the owning manager. A project can still save Context v2 as a preference even when the current runtime cannot execute it.
+On **Context v2**, Compact and Smart compact skip that Smart LLM handoff and instead write a deterministic checkpoint: current goal/plan, pins, and unconsumed tool-result references. Older transcript remains on disk and is recoverable with the agent-only `history` tool. Context v2 is experimental and executable only by supported ordinary Pi Builder managers (OpenAI/Codex or Anthropic). System profiles, Cursor SDK, plugin/external threads, and workers cannot run it; workers inherit the owning manager. A project can still save Context v2 as a preference even when the current runtime cannot execute it.
 
 If you trigger Smart compact manually on **Summary** while the Pi-backed manager is already idle, it compacts and stays idle afterward. If it was active, interrupted, or dispatch-pending, it resumes after compaction. On **Context v2**, a busy manual Compact or Smart compact is rejected until streaming, tools, and prompt dispatch settle; retry when idle. An idle Context v2 manager stays idle after a successful manual transition. Saving Summary or Context v2 does not reset the current window; it applies at the next context transition. While compaction or context recovery is active, the session row shows a violet pulsing `C` badge in the sidebar. **Settings → General → Compaction** still controls the compaction model, reasoning, and timeout for supported Pi-backed OpenAI/Codex and Anthropic manager compaction runtimes only, not Cursor SDK, xAI/Grok, or user-added OpenRouter manager models; OpenRouter manager eligibility is a separate policy and OpenRouter models are not compaction choices. Context continuation itself lives in **Project Settings → Context management**, with an optional session inherit/override beside Send.
 
@@ -538,7 +490,7 @@ Local Builder managers and ordinary workers can recover compacted or older conve
 
 Indexing starts autonomously after local Builder hydration and prefers recent sources. Hits return source-qualified references, not bare entry IDs; long entries may include part locators. Reads expand those references from canonical JSONL. Historical evidence is not current authority or proof of current state. Coverage is `building`, `ready`, `degraded`, or `unavailable`. Incomplete catch-up or `building` coverage means a no-match is not proof of absence. Unreadable sources surface as `degraded` or `unavailable`, not endless building. Canonical `session.jsonl` remains the source of truth; `shared/cache/history-recall.db` is a rebuildable derived index. See [Configuration](CONFIGURATION.md#history-recall) for index and read limits.
 
-Cortex/system, plugin, and external-thread runtimes do not get this tool. Workers inherit the owning manager's context policy and can search the same Builder history. Secure Sessions secrets are excluded from indexed text.
+System-profile, plugin, and external-thread runtimes do not get this tool. Workers inherit the owning manager's context policy and can search the same Builder history. Secure Sessions secrets are excluded from indexed text.
 
 ### Pinning Messages
 
@@ -603,11 +555,10 @@ You'll rarely need these. The automated safeguards handle most failure cases.
 
 ### Notifications
 
-Go to **Settings → Notifications** to set a global sound toggle and defaults for managers, then customize an individual manager only when needed. Cortex always has separate settings.
+Go to **Settings → Notifications** to set a global sound toggle and defaults for managers, then customize an individual manager only when needed.
 
 - **Project sessions:** Turn on **All done** for a clean completion signal. After an ordinary unread notification, Forge plays it only when the manager is idle and no workers are still streaming; if work is active first, it can play unread and recheck at idle.
 - **Question:** Use the dedicated question sound for structured choices. It takes priority over unread; disabling it falls back to unread.
-- **Cortex:** Configure it separately if you want sounds for scheduled consolidation or direct Cortex activity.
 
 The **Mute CLI-originated notifications** setting suppresses audio—but not unread badges—for CLI-created sessions and replies to CLI-originated messages. You can upload MP3, WAV, or OGG sounds up to 2 MB and use them in defaults or per-manager overrides.
 
@@ -625,7 +576,7 @@ The Automatic Browser is not configured as a Skill and remains local to Forge De
 
 ### System Prompt Preview
 
-Go to **Settings → Prompts** and click **Preview** to see the exact system prompt being sent to your session agent. This is the full runtime prompt, not just your customizations: system instructions, Cortex knowledge, loaded skills, and operational directives.
+Go to **Settings → Prompts** and click **Preview** to see the exact system prompt being sent to your session agent. This is the full runtime prompt, not just your customizations: system instructions, memory, loaded skills, and operational directives.
 
 You can see exactly what Forge is telling your agents to do, and you can edit the customizable portions. Your edits are local to your instance. Future updates won't overwrite your changes.
 
@@ -755,24 +706,13 @@ Builder state is mostly file-backed (JSON, JSONL, Markdown, and terminal journal
 │   │   ├── auth/                  # Provider auth, pools, broker source, CLI keys
 │   │   ├── secrets.json           # Shared secret values
 │   │   ├── history-index.json     # Persistent History indexing pause preference
-│   │   ├── knowledge-v2.json      # Default-off Knowledge v2 mode settings
 │   │   └── terminal-settings.json # Saved terminal default shell
 │   ├── cache/                     # Regenerable stats/model/provider caches plus history-recall.db
 │   ├── state/                     # Devices, project-agent shares, migration markers
 │   └── knowledge/
-│       ├── common.md              # Legacy common knowledge (prompt source only with v2 OFF)
-│       ├── entries/               # Global Knowledge v2 entries
-│       ├── archive/               # Archived global Knowledge v2 entries
-│       ├── .archive/              # Migration backups and explicit legacy-cleanup archives
-│       ├── INDEX.md               # Generated global Knowledge v2 index
-│       ├── .knowledge-v2-migration-manifest.json
-│       └── .knowledge-v2-migration.lock.json/ # Cross-process lock while busy
+│       └── common.md              # Global common memory (user-editable)
 └── profiles/<profileId>/
-    ├── memory.md                  # Canonical profile memory (prompt source only with v2 OFF)
-    ├── knowledge/
-    │   ├── entries/               # Profile-scoped Knowledge v2 entries
-    │   ├── archive/               # Archived profile-scoped entries
-    │   └── INDEX.md               # Generated profile Knowledge v2 index
+    ├── memory.md                  # Canonical profile memory
     ├── project-agents/<handle>/   # Local-to-Forge definitions only
     │   ├── config.json            # Agent config (handle, whenToUse, agentId, timestamps)
     │   ├── prompt.md              # Project Agent role instructions (editable, layered with Forge's base prompt)
@@ -795,8 +735,6 @@ Builder state is mostly file-backed (JSON, JSONL, Markdown, and terminal journal
 
 Cached conversation sidecars rebuild from canonical `session.jsonl` on first load if they are stale or truncated, so sessions affected by async deliveries should show full history again after refresh. The history-recall cache under `shared/cache/history-recall.db` is a rebuildable recognized v4 contentless index; canonical JSONL remains the source of truth, and the index payload is not read authority.
 
-Cortex is architecturally just another manager agent. It lives in the same profile structure with its own sessions and workers.
-
 See [Configuration](CONFIGURATION.md#data-directory) for the fuller canonical layout and which files are secrets, state, or regenerable caches.
 
 **Backing up:** Copy the authoritative `FORGE_DATA_DIR` while Forge is stopped or through a storage-level consistent snapshot. Back up repository/workspace mounts separately—Forge does not copy working trees into its data directory.
@@ -811,7 +749,7 @@ Every time you create or fork a session, give it a real name. "fix-pagination-bu
 
 ### Rate the Meaningful Messages
 
-You don't need to rate everything. But when your manager nails a complex task, thumbs up. When it makes the same mistake for the third time, thumbs down with a comment. When you notice a pattern, leave a comment. These signals feed through Cortex into real behavioral improvement.
+You don't need to rate everything. But when your manager nails a complex task, thumbs up. When it makes the same mistake for the third time, thumbs down with a comment. When you notice a pattern, leave a comment, and ask the manager to remember the durable lessons.
 
 ### Don't Just Use It — Teach It
 
@@ -838,7 +776,7 @@ Also be aware of prompt injection risks when agents browse the web. Malicious we
 
 ### Back Up Your Data Directory
 
-`~/.forge` (or your configured `FORGE_DATA_DIR`) contains Forge application state such as conversation history, Cortex knowledge, preferences, and session memory. Copy it periodically while Forge is stopped or with a storage-level consistent snapshot. Repository and workspace directories are not copied into the Forge data directory, so back them up separately.
+`~/.forge` (or your configured `FORGE_DATA_DIR`) contains Forge application state such as conversation history, memory files, preferences, and session state. Copy it periodically while Forge is stopped or with a storage-level consistent snapshot. Repository and workspace directories are not copied into the Forge data directory, so back them up separately.
 
 ### Watch GitHub Releases for Updates
 
@@ -861,13 +799,11 @@ If you can describe the task to a capable colleague, you can describe it to your
 
 Once you're comfortable with the basics:
 
-1. **Build your workflow preferences** — Have conversations with your manager about how you like to work and save the durable parts as knowledge.
-2. **Explore Cortex** — When Knowledge v2 is active, inspect **Index**, read-only **Entries**, **Log**, and **Run**.
-3. **Try forking** — Next time you finish a discovery conversation, fork it into parallel workstreams and dispatch different tasks.
-4. **Experiment with parallel execution** — Give your manager multiple tasks and watch it coordinate workers.
-5. **Review consolidation settings** — While Knowledge v2 is ON, use **Settings → General** for the daily entry consolidation schedule; manual consolidation is available under Cortex **Run**.
-6. **Explore multi-model routing** — If you have multiple providers configured, teach your manager which providers and models to use for different kinds of work. Use **Change Default Model** for the profile default (new conversations only), **Override Session Model** for a one-off session, and **Use Project Default** to copy the current default onto that one session.
-7. **Try extensions** — Use `~/.forge/extensions/` for Forge-native hooks or `~/.forge/agent/extensions/` for Pi-native runtime extensions. See [FORGE_EXTENSIONS.md](FORGE_EXTENSIONS.md) and [PI_EXTENSIONS.md](PI_EXTENSIONS.md).
+1. **Build your workflow preferences** — Have conversations with your manager about how you like to work and ask it to remember the durable parts.
+2. **Try forking** — Next time you finish a discovery conversation, fork it into parallel workstreams and dispatch different tasks.
+3. **Experiment with parallel execution** — Give your manager multiple tasks and watch it coordinate workers.
+4. **Explore multi-model routing** — If you have multiple providers configured, teach your manager which providers and models to use for different kinds of work. Use **Change Default Model** for the profile default (new conversations only), **Override Session Model** for a one-off session, and **Use Project Default** to copy the current default onto that one session.
+5. **Try extensions** — Use `~/.forge/extensions/` for Forge-native hooks or `~/.forge/agent/extensions/` for Pi-native runtime extensions. See [FORGE_EXTENSIONS.md](FORGE_EXTENSIONS.md) and [PI_EXTENSIONS.md](PI_EXTENSIONS.md).
 
 > "Forge builds Forge. When I'm working on other projects, as soon as I run into something that's either a bug or a little feature I want, I just pop down, click the conversation with Forge, tell it, and then it chews on it, plans it, whatever."
 

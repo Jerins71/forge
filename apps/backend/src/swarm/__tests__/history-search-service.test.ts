@@ -1348,7 +1348,7 @@ async function createFixture() {
     profileId: "cortex",
     displayName: "Cortex",
     cwd: "/tmp/cortex",
-    sessionPurpose: "cortex_review",
+    sessionPurpose: "agent_creator",
   });
   const agents = [session, worker, otherSession, fork, outsideSession, cortex];
   const profiles = [profile, outsideProfile, cortexProfile];

@@ -16,7 +16,7 @@ const api = vi.hoisted(() => ({
 }))
 
 vi.mock('@/components/settings/remote-update-awareness-api', () => api)
-vi.mock('@/components/chat/cortex/OnboardingCallout', () => ({ OnboardingCallout: () => null }))
+vi.mock('@/components/chat/OnboardingCallout', () => ({ OnboardingCallout: () => null }))
 vi.mock('@/components/chat/ChatHeader', () => ({ ChatHeader: () => null }))
 vi.mock('@/components/chat/ChatSearchBar', () => ({ ChatSearchBar: () => null }))
 vi.mock('@/components/chat/MessageInput', () => ({ MessageInput: () => null }))

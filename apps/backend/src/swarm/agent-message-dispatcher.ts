@@ -17,7 +17,6 @@ import {
   formatProjectAgentRuntimeMessage,
   getProjectAgentPublicName,
 } from "./agents/project-agents.js";
-import { normalizeArchetypeId } from "./prompts/prompt-registry.js";
 import { areSessionsReferenced } from "./session-references.js";
 import type { ExternalProjectAgentDeliveryAuthorization } from "./project-agent-sharing-service.js";
 import type { PlanStepAssignment } from "./planning/plan-usage-tracker.js";
@@ -51,7 +50,6 @@ import type {
   WorkerParentContext,
 } from "./types.js";
 
-const CORTEX_ARCHETYPE_ID = "cortex";
 const INTERNAL_MODEL_MESSAGE_PREFIX = "SYSTEM: ";
 const WORKER_FOLLOWUP_REMINDER =
   "[Forge follow-up instructions]\n" +
@@ -1120,10 +1118,7 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
   }
 
   private async appendCoordinationContext(target: AgentDescriptor, text: string): Promise<string> {
-    if (
-      !isSessionAgentDescriptor(target) ||
-      normalizeArchetypeId(target.archetypeId ?? "") === CORTEX_ARCHETYPE_ID
-    ) {
+    if (!isSessionAgentDescriptor(target)) {
       return text;
     }
     const withRoster = await this.options.delegation.appendToManagerInput(target, text);

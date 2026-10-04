@@ -650,7 +650,6 @@ function renderActions(options: {
       createElement(SourceControlBranchActions, {
         wsUrl: 'ws://127.0.0.1:47187',
         agentId: 'agent-1',
-        repoTarget: 'workspace',
         worktreeId: options.worktreeId,
         branchesQuery: {
           data: options.branchData ?? branchData,

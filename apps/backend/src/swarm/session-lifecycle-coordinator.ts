@@ -18,7 +18,6 @@ import type {
   RestoreSessionResult,
 } from "./archive/archive-service.js";
 import type { BrowserAutomationService } from "./browser-automation/browser-automation-service.js";
-import type { CaptureCascadeCoordinator } from "./capture-cascade-coordinator.js";
 import type { ForgeExtensionHost } from "./forge-extension-host.js";
 import type { SessionGoalCoordinator } from "./goals/session-goal-coordinator.js";
 import {
@@ -117,7 +116,6 @@ export interface SessionLifecycleCoordinatorOptions {
   >;
   archiveHydrator: Pick<ArchiveLastUsedHydrator, "hydrateArchivedRowsIfMissing">;
   projectAgents: Pick<ProjectAgentCoordinator, "createAndPromoteProjectAgent">;
-  capture: Pick<CaptureCascadeCoordinator, "run">;
   plans: Pick<SessionPlanCoordinator, "forget">;
   goals: Pick<
     SessionGoalCoordinator,
@@ -302,7 +300,6 @@ export class SessionLifecycleCoordinator {
           agentId,
           "archive",
         );
-        await this.options.capture.run(agentId, "archive");
         this.cleanupCodex(agentId);
         const result = await this.options.archive.archiveSession(agentId);
         await this.options.browser.archiveSession(descriptor.profileId, agentId);

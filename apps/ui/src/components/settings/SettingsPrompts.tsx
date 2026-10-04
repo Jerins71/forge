@@ -4,9 +4,7 @@ import { Eye, Loader2 } from 'lucide-react'
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -29,43 +27,28 @@ import {
 
 import { SettingsSection } from './settings-row'
 import { PromptEditor } from './prompts/PromptEditor'
-import { PromptSurfaceEditor } from './prompts/PromptSurfaceEditor'
 import {
-  fetchCortexPromptSurfaceList,
   fetchPromptList,
   fetchPromptPreview,
   type PromptPreviewSection,
 } from './prompts/prompt-api'
 import type { SettingsApiClient } from './settings-api-client'
 import type {
-  CortexPromptSurfaceGroup,
-  CortexPromptSurfaceListEntry,
   PromptCategory,
   PromptListEntry,
   ManagerProfile,
 } from '@forge/protocol'
 
-const CORTEX_PROFILE_ID = 'cortex'
-
-const CATEGORY_OPTIONS: Array<{ value: PromptCategory | 'cortex'; label: string }> = [
+const CATEGORY_OPTIONS: Array<{ value: PromptCategory; label: string }> = [
   { value: 'archetype', label: 'Archetypes' },
   { value: 'operational', label: 'Operational' },
 ]
-
-const CORTEX_GROUP_LABELS: Record<CortexPromptSurfaceGroup, string> = {
-  system: 'System Templates',
-  seed: 'Seed Templates',
-  live: 'Live Cortex Files',
-  scratch: 'Scratch / Supplemental',
-}
-
-type SurfaceCategory = PromptCategory | 'cortex'
 
 interface SettingsPromptsProps {
   wsUrl: string
   apiClient?: SettingsApiClient
   profiles: ManagerProfile[]
-  /** Bumped when a prompt_changed or cortex_prompt_surface_changed WS event fires */
+  /** Bumped when a prompt_changed WS event fires */
   promptChangeKey: number
   /** Optional active session context for per-session runtime prompt preview. */
   previewSession?: {
@@ -80,11 +63,9 @@ export function SettingsPrompts({ wsUrl, apiClient, profiles, promptChangeKey, p
 
   const defaultProfileId = profiles.length > 0 ? profiles[0].profileId : ''
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId)
-  const [selectedCategory, setSelectedCategory] = useState<SurfaceCategory>('archetype')
+  const [selectedCategory, setSelectedCategory] = useState<PromptCategory>('archetype')
   const [selectedItemId, setSelectedItemId] = useState<string>('')
   const [promptList, setPromptList] = useState<PromptListEntry[]>([])
-  const [cortexSurfaces, setCortexSurfaces] = useState<CortexPromptSurfaceListEntry[]>([])
-  const [cortexEnabled, setCortexEnabled] = useState(false)
   const [listLoading, setListLoading] = useState(false)
   const [listError, setListError] = useState<string | null>(null)
 
@@ -100,13 +81,7 @@ export function SettingsPrompts({ wsUrl, apiClient, profiles, promptChangeKey, p
     setListLoading(true)
     setListError(null)
     try {
-      const [list, cortexResponse] = await Promise.all([
-        fetchPromptList(clientOrWsUrl, selectedProfileId),
-        fetchCortexPromptSurfaceList(clientOrWsUrl, selectedProfileId),
-      ])
-      setPromptList(list)
-      setCortexEnabled(cortexResponse.enabled)
-      setCortexSurfaces(cortexResponse.surfaces)
+      setPromptList(await fetchPromptList(clientOrWsUrl, selectedProfileId))
     } catch (err) {
       setListError(err instanceof Error ? err.message : 'Failed to load prompts')
     } finally {
@@ -118,69 +93,12 @@ export function SettingsPrompts({ wsUrl, apiClient, profiles, promptChangeKey, p
     void loadPromptData()
   }, [loadPromptData, promptChangeKey])
 
-  const isCortexProfileSelected = selectedProfileId === CORTEX_PROFILE_ID
-  const useCollapsedCortexPicker = isCortexProfileSelected
-
-  useEffect(() => {
-    if (useCollapsedCortexPicker) {
-      if (selectedCategory !== 'cortex') {
-        setSelectedCategory('cortex')
-        setSelectedItemId('')
-      }
-      return
-    }
-
-    if (!cortexEnabled && selectedCategory === 'cortex') {
-      setSelectedCategory('archetype')
-      setSelectedItemId('')
-    }
-  }, [cortexEnabled, selectedCategory, useCollapsedCortexPicker])
-
-  const hiddenGenericPromptKeys = useMemo(() => {
-    if (!cortexEnabled) return new Set<string>()
-    return new Set(
-      cortexSurfaces
-        .filter((surface) => surface.kind === 'registry' && surface.category && surface.promptId)
-        .map((surface) => `${surface.category}:${surface.promptId}`),
-    )
-  }, [cortexEnabled, cortexSurfaces])
-
   const categoryPrompts = useMemo(
-    () => promptList.filter((prompt) => {
-      if (prompt.category !== selectedCategory) return false
-      return !hiddenGenericPromptKeys.has(`${prompt.category}:${prompt.promptId}`)
-    }),
-    [hiddenGenericPromptKeys, promptList, selectedCategory],
+    () => promptList.filter((prompt) => prompt.category === selectedCategory),
+    [promptList, selectedCategory],
   )
 
-  const groupedCortexSurfaces = useMemo(() => {
-    const groups: Record<CortexPromptSurfaceGroup, CortexPromptSurfaceListEntry[]> = {
-      system: [],
-      seed: [],
-      live: [],
-      scratch: [],
-    }
-
-    for (const surface of cortexSurfaces) {
-      groups[surface.group].push(surface)
-    }
-
-    return groups
-  }, [cortexSurfaces])
-
   useEffect(() => {
-    if (selectedCategory === 'cortex') {
-      if (cortexSurfaces.length === 0) {
-        setSelectedItemId('')
-        return
-      }
-      const currentStillValid = cortexSurfaces.some((surface) => surface.surfaceId === selectedItemId)
-      if (!currentStillValid) {
-        setSelectedItemId(cortexSurfaces[0].surfaceId)
-      }
-      return
-    }
-
     if (categoryPrompts.length === 0) {
       setSelectedItemId('')
       return
@@ -189,39 +107,12 @@ export function SettingsPrompts({ wsUrl, apiClient, profiles, promptChangeKey, p
     if (!currentStillValid) {
       setSelectedItemId(categoryPrompts[0].promptId)
     }
-  }, [categoryPrompts, cortexSurfaces, selectedCategory, selectedItemId])
+  }, [categoryPrompts, selectedItemId])
 
   const selectedPrompt = useMemo(
     () => promptList.find((prompt) => prompt.category === selectedCategory && prompt.promptId === selectedItemId),
     [promptList, selectedCategory, selectedItemId],
   )
-
-  const selectedCortexSurface = useMemo(
-    () => cortexSurfaces.find((surface) => surface.surfaceId === selectedItemId),
-    [cortexSurfaces, selectedItemId],
-  )
-
-  const availableCategories = useMemo(
-    () => (cortexEnabled ? [...CATEGORY_OPTIONS, { value: 'cortex', label: 'Cortex Surfaces' }] : CATEGORY_OPTIONS),
-    [cortexEnabled],
-  )
-
-  const selectedProfileLabel = useMemo(
-    () => profiles.find((profile) => profile.profileId === selectedProfileId)?.displayName ?? selectedProfileId,
-    [profiles, selectedProfileId],
-  )
-
-  const sectionDescription = useMemo(() => {
-    if (useCollapsedCortexPicker) {
-      return `Browse Cortex prompts, seed templates, live files, and scratch surfaces for ${selectedProfileLabel}.`
-    }
-
-    if (cortexEnabled && selectedCategory === 'cortex') {
-      return `Browse Cortex seed templates, live files, and scratch surfaces for ${selectedProfileLabel}.`
-    }
-
-    return 'Browse and edit system prompts. Overrides are scoped to the selected profile.'
-  }, [cortexEnabled, selectedCategory, selectedProfileLabel, useCollapsedCortexPicker])
 
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewSections, setPreviewSections] = useState<PromptPreviewSection[]>([])
@@ -296,7 +187,7 @@ export function SettingsPrompts({ wsUrl, apiClient, profiles, promptChangeKey, p
 
       <SettingsSection
         label="Prompt Templates"
-        description={sectionDescription}
+        description="Browse and edit system prompts. Overrides are scoped to the selected profile."
         cta={
           profiles.length <= 1 ? (
             <TooltipProvider>
@@ -320,67 +211,41 @@ export function SettingsPrompts({ wsUrl, apiClient, profiles, promptChangeKey, p
         }
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          {!useCollapsedCortexPicker ? (
-            <div className="flex flex-col gap-1.5 sm:w-48">
-              <Label className="text-xs font-medium text-muted-foreground">Category</Label>
-              <Select
-                value={selectedCategory}
-                onValueChange={(value) => setSelectedCategory(value as SurfaceCategory)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableCategories.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          ) : null}
+          <div className="flex flex-col gap-1.5 sm:w-48">
+            <Label className="text-xs font-medium text-muted-foreground">Category</Label>
+            <Select
+              value={selectedCategory}
+              onValueChange={(value) => setSelectedCategory(value as PromptCategory)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CATEGORY_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <Label className="text-xs font-medium text-muted-foreground">
-              {useCollapsedCortexPicker
-                ? 'Cortex item'
-                : selectedCategory === 'cortex'
-                  ? 'Cortex surface'
-                  : 'Prompt'}
-            </Label>
+            <Label className="text-xs font-medium text-muted-foreground">Prompt</Label>
             <Select
               value={selectedItemId}
               onValueChange={setSelectedItemId}
-              disabled={(useCollapsedCortexPicker || selectedCategory === 'cortex') ? cortexSurfaces.length === 0 : categoryPrompts.length === 0}
+              disabled={categoryPrompts.length === 0}
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder={listLoading ? 'Loading…' : useCollapsedCortexPicker ? 'Select Cortex item' : 'Select prompt'} />
+                <SelectValue placeholder={listLoading ? 'Loading…' : 'Select prompt'} />
               </SelectTrigger>
               <SelectContent>
-                {useCollapsedCortexPicker || selectedCategory === 'cortex' ? (
-                  (Object.entries(groupedCortexSurfaces) as Array<[CortexPromptSurfaceGroup, CortexPromptSurfaceListEntry[]]>).map(
-                    ([group, surfaces]) => {
-                      if (surfaces.length === 0) return null
-                      return (
-                        <SelectGroup key={group}>
-                          <SelectLabel>{CORTEX_GROUP_LABELS[group]}</SelectLabel>
-                          {surfaces.map((surface) => (
-                            <SelectItem key={surface.surfaceId} value={surface.surfaceId}>
-                              {surface.title}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      )
-                    },
-                  )
-                ) : (
-                  categoryPrompts.map((prompt) => (
-                    <SelectItem key={prompt.promptId} value={prompt.promptId}>
-                      {prompt.displayName}
-                    </SelectItem>
-                  ))
-                )}
+                {categoryPrompts.map((prompt) => (
+                  <SelectItem key={prompt.promptId} value={prompt.promptId}>
+                    {prompt.displayName}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -399,20 +264,7 @@ export function SettingsPrompts({ wsUrl, apiClient, profiles, promptChangeKey, p
         </div>
       )}
 
-      {!listLoading && (useCollapsedCortexPicker || selectedCategory === 'cortex') && selectedCortexSurface && selectedProfileId ? (
-        <>
-          <Separator />
-          <PromptSurfaceEditor
-            key={`cortex:${selectedCortexSurface.surfaceId}:${selectedProfileId}:${promptChangeKey}`}
-            clientOrWsUrl={clientOrWsUrl}
-            profileId={selectedProfileId}
-            surface={selectedCortexSurface}
-            refreshKey={promptChangeKey}
-          />
-        </>
-      ) : null}
-
-      {!listLoading && !useCollapsedCortexPicker && selectedCategory !== 'cortex' && selectedPrompt && selectedProfileId ? (
+      {!listLoading && selectedPrompt && selectedProfileId ? (
         <>
           <Separator />
           <PromptEditor

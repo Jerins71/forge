@@ -46,7 +46,6 @@ describe("SwarmBootCoordinator", () => {
       "refreshDefaultMemoryTemplate",
       "loadAndReconcilePersistedStore",
       "normalizeCodexPluginWorkers",
-      "ensureCortexProfile",
       "loadOnboardingState",
       "ensureLegacyProfileKnowledgeReferenceDocs",
       "restartRecovery",
@@ -234,7 +233,6 @@ function createHarness(
       return false;
     },
     reconcileWorkerSpecialistMetadata: mark("reconcileWorkerSpecialistMetadata"),
-    ensureCortexProfile: mark("ensureCortexProfile"),
     loadOnboardingState: mark("loadOnboardingState"),
     ensureLegacyProfileKnowledgeReferenceDocs: mark("ensureLegacyProfileKnowledgeReferenceDocs"),
     reconcileProjectAgentMirror: mark("reconcileProjectAgentMirror"),
@@ -327,7 +325,6 @@ function config(overrides: Partial<SwarmConfig> = {}): SwarmConfig {
     port: 4711,
     debug: false,
     isDesktop: false,
-    cortexEnabled: false,
     allowNonManagerSubscriptions: false,
     managerDisplayName: "Manager",
     defaultModel: { provider: "openai-codex", modelId: "gpt-5", thinkingLevel: "none" },

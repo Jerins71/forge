@@ -26,6 +26,8 @@ import {
   shouldAutoFetchOrigin,
 } from './source-control-auto-fetch'
 
+const repoTarget = 'workspace' as const
+
 type PendingMutation =
   | { kind: 'switch'; branch: string }
   | { kind: 'create'; branch: string; startPoint?: string }
@@ -35,7 +37,6 @@ type PendingMutation =
 interface SourceControlBranchActionsProps {
   wsUrl: string
   agentId: string | null
-  repoTarget: 'workspace' | 'versioning'
   worktreeId?: string | null
   selectedWorktreePath?: string | null
   branchesQuery: GitBranchesQueryResult
@@ -54,7 +55,6 @@ interface SourceControlBranchActionsProps {
 export function SourceControlBranchActions({
   wsUrl,
   agentId,
-  repoTarget,
   worktreeId,
   selectedWorktreePath,
   branchesQuery,
@@ -78,7 +78,7 @@ export function SourceControlBranchActions({
   const autoFetchInFlightKeyRef = useRef<string | null>(null)
 
   const branchData = branchesQuery.data
-  const mutationsDisabled = repoTarget === 'versioning' || !agentId || !branchData?.currentHead || !branchData.statusHash
+  const mutationsDisabled = !agentId || !branchData?.currentHead || !branchData.statusHash
 
   const currentBranch = branchData?.currentBranch ?? null
   const currentBranchSummary = useMemo(
@@ -192,13 +192,13 @@ export function SourceControlBranchActions({
     return () => {
       cancelled = true
     }
-  }, [agentId, pendingMutation, repoTarget, worktreeId, wsUrl])
+  }, [agentId, pendingMutation, worktreeId, wsUrl])
 
   const invalidateAfterMutation = useCallback(() => {
     invalidateGitCaches({ agentId, repoTarget })
     invalidateFileBrowserCaches()
     onMutationComplete()
-  }, [agentId, onMutationComplete, repoTarget])
+  }, [agentId, onMutationComplete])
 
   const autoFetchKey = useMemo(() => {
     if (!agentId) {
@@ -210,7 +210,7 @@ export function SourceControlBranchActions({
       worktreeId,
       remote: 'origin',
     })
-  }, [agentId, repoTarget, worktreeId])
+  }, [agentId, worktreeId])
 
   const handleFetch = useCallback(async (options?: { source?: 'manual' | 'auto' }) => {
     const source = options?.source ?? 'manual'
@@ -266,7 +266,7 @@ export function SourceControlBranchActions({
         setFetchState('idle')
       }
     }
-  }, [agentId, autoFetchKey, branchData, invalidateAfterMutation, repoTarget, worktreeId, wsUrl])
+  }, [agentId, autoFetchKey, branchData, invalidateAfterMutation, worktreeId, wsUrl])
 
   useEffect(() => {
     if (!sourceControlActive || !autoFetchKey || !branchData) {
@@ -295,7 +295,7 @@ export function SourceControlBranchActions({
         autoFetchInFlightKeyRef.current = null
       }
     })
-  }, [agentId, autoFetchKey, branchData, handleFetch, repoTarget, sourceControlActive])
+  }, [agentId, autoFetchKey, branchData, handleFetch, sourceControlActive])
 
   const requestMutationGuard = useCallback((
     mutation: 'switch-branch' | 'create-branch' | 'pull-ff-only' | 'push',
@@ -429,7 +429,6 @@ export function SourceControlBranchActions({
     onRemoteUpdateSnapshotChange,
     pendingMutation,
     remoteUpdateSnapshot,
-    repoTarget,
     worktreeId,
     wsUrl,
   ])

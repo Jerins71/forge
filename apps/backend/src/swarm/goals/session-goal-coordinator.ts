@@ -4,7 +4,6 @@ import type {
   SessionGoalSnapshotEvent,
 } from "@forge/protocol";
 import { isNonRunningAgentStatus } from "../agent-state-machine.js";
-import { normalizeArchetypeId } from "../prompts/prompt-registry.js";
 import { emptyTokenUsage, scanSessionTokenUsage } from "../session/session-token-usage.js";
 import type { SwarmToolSideEffectEvent } from "../swarm-tool-host.js";
 import type { AgentDescriptor, SendMessageReceipt } from "../types.js";
@@ -16,7 +15,6 @@ import {
 import type { SessionGoalState } from "./session-goal-state.js";
 import { SessionGoalStore } from "./session-goal-store.js";
 
-const CORTEX_ARCHETYPE_ID = "cortex";
 const GOAL_CONTINUATION_DELAY_MS = 100;
 const GOAL_CONTINUATION_MESSAGE = [
   "[goalContinuation] Continue pursuing the active goal from the current persisted state.",
@@ -121,16 +119,6 @@ export class SessionGoalCoordinator {
     if (!descriptor || descriptor.role !== "manager" || !this.options.isSessionAgent(descriptor)) {
       throw new Error("read session goals requires a manager session with profile context.");
     }
-    if (!this.supportsGoals(descriptor)) {
-      return {
-        type: "session_goal_snapshot",
-        sessionAgentId: descriptor.agentId,
-        profileId: descriptor.profileId,
-        revision: 0,
-        measuredAt: this.options.now(),
-        goal: null,
-      };
-    }
     return this.toEvent(descriptor, await this.buildSnapshot(descriptor, await this.getState(descriptor)));
   }
 
@@ -182,8 +170,7 @@ export class SessionGoalCoordinator {
     const owners = Array.from(this.options.descriptors.values()).filter(
       (descriptor): descriptor is SessionGoalOwner =>
         descriptor.role === "manager" &&
-        this.options.isSessionAgent(descriptor) &&
-        this.supportsGoals(descriptor),
+        this.options.isSessionAgent(descriptor),
     );
     await Promise.all(owners.map(async (owner) => {
       this.statesByAgentId.set(owner.agentId, await this.store(owner).load());
@@ -196,7 +183,7 @@ export class SessionGoalCoordinator {
   }
 
   async noteUserTurn(descriptor: AgentDescriptor): Promise<void> {
-    if (!this.options.isSessionAgent(descriptor) || !this.supportsGoals(descriptor)) return;
+    if (!this.options.isSessionAgent(descriptor)) return;
     this.cancelScheduledContinuation(descriptor.agentId);
     const state = await this.getState(descriptor);
     if (state.goal?.status !== "active") return;
@@ -254,7 +241,6 @@ export class SessionGoalCoordinator {
       if (
         descriptor.status === "idle" &&
         this.options.isSessionAgent(descriptor) &&
-        this.supportsGoals(descriptor) &&
         this.statesByAgentId.get(descriptor.agentId)?.goal?.status === "active"
       ) this.scheduleContinuation(descriptor);
     }
@@ -270,9 +256,6 @@ export class SessionGoalCoordinator {
     if (!descriptor || descriptor.role !== "manager" || !this.options.isSessionAgent(descriptor)) {
       throw new Error(`${action} requires a manager session with profile context.`);
     }
-    if (normalizeArchetypeId(descriptor.archetypeId ?? "") === CORTEX_ARCHETYPE_ID) {
-      throw new Error(`${action} is not available for Cortex sessions.`);
-    }
     this.options.assertNotArchived(descriptor);
     if (requireRunning && isNonRunningAgentStatus(descriptor.status)) {
       throw new Error(`Manager is not running: ${agentId}`);
@@ -286,10 +269,6 @@ export class SessionGoalCoordinator {
     throw new Error(
       `External project-agent messages are restricted to a direct reply back to ${context.fromDisplayName} (${context.fromAgentId}). ${capability} is disabled for this turn.`,
     );
-  }
-
-  private supportsGoals(owner: SessionGoalOwner): boolean {
-    return normalizeArchetypeId(owner.archetypeId ?? "") !== CORTEX_ARCHETYPE_ID;
   }
 
   private store(owner: SessionGoalOwner): SessionGoalStore {
@@ -402,7 +381,6 @@ export class SessionGoalCoordinator {
         generation !== this.getContinuationGeneration(agentId) ||
         !this.options.isSessionAgent(descriptor) ||
         descriptor.status !== "idle" ||
-        !this.supportsGoals(descriptor) ||
         this.options.isArchived(descriptor) ||
         this.options.isRestartRecoveryDecisionPending() ||
         this.options.isRuntimeRecoveryActive(agentId) ||

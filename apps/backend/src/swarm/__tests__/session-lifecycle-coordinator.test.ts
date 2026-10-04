@@ -34,9 +34,8 @@ describe("SessionLifecycleCoordinator", () => {
     expect(harness.deps.sessions.createSession).toHaveBeenCalledTimes(1);
   });
 
-  it("archives a session in capture, Codex, archive, tools, snapshot order", async () => {
+  it("archives a session in Codex, archive, tools, snapshot order", async () => {
     const harness = createHarness();
-    harness.deps.capture.run = vi.fn(async () => harness.calls.push("capture"));
     harness.deps.archive.archiveSession = vi.fn(async () => {
       harness.calls.push("archive");
       return {
@@ -54,7 +53,6 @@ describe("SessionLifecycleCoordinator", () => {
       "goals.cancel:forge--s2",
       "browser.cancel:forge--s2",
       "browser.release:archive:forge:forge--s2",
-      "capture",
       "codex.close:forge--s2",
       "archive",
       "browser.archive:forge:forge--s2",
@@ -686,9 +684,6 @@ function createHarness(): Harness {
         handle: "project-agent",
         profileId: "forge",
       })),
-    },
-    capture: {
-      run: vi.fn(async () => undefined),
     },
     plans: {
       forget: (agentId) => calls.push(`plans:${agentId}`),

@@ -1,17 +1,11 @@
 import { isSystemProfile, type AgentDescriptor, type ManagerProfile } from "@forge/protocol";
 
-const CORTEX_PROFILE_ID = "cortex";
-
-function isBuilderVisibleSystemProfileId(profileId: string | undefined): boolean {
-  return profileId === CORTEX_PROFILE_ID;
-}
-
 function isHiddenSystemProfileId(profileId: string | undefined, systemProfileIds: Set<string>): boolean {
-  return Boolean(profileId && systemProfileIds.has(profileId) && !isBuilderVisibleSystemProfileId(profileId));
+  return Boolean(profileId && systemProfileIds.has(profileId));
 }
 
 export function filterBuilderVisibleProfiles(profiles: ManagerProfile[]): ManagerProfile[] {
-  return profiles.filter((profile) => !isSystemProfile(profile) || isBuilderVisibleSystemProfileId(profile.profileId));
+  return profiles.filter((profile) => !isSystemProfile(profile));
 }
 
 /**

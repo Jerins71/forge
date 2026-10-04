@@ -6,8 +6,6 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import type {
   AgentDescriptor,
-  GitCommitDetail,
-  GitLogResult,
   GitStatusResult
 } from "@forge/protocol";
 import { afterEach, describe, expect, it } from "vitest";
@@ -59,117 +57,7 @@ describe("git-diff-routes", () => {
     expect(explicitPayload.files.map((file) => file.path)).toContain("workspace.txt");
   });
 
-  it("routes Cortex versioning requests to the data-dir repo", async () => {
-    const server = await createGitDiffTestServer({
-      descriptors: [createManagerSession("alpha", "review--s1", { sessionPurpose: "cortex_review" })]
-    });
-
-    await initGitRepo(server.workspaceDir, "workspace.txt", "workspace v1\n", "workspace commit");
-    await initGitRepo(server.dataDir, "shared/knowledge/common.md", "# Common\n", "knowledge commit");
-    await writeFile(join(server.dataDir, "shared/knowledge/common.md"), "# Common\n\n- updated\n", "utf8");
-
-    const statusResponse = await fetch(
-      `${server.baseUrl}/api/git/status?agentId=review--s1&repoTarget=versioning`
-    );
-    expect(statusResponse.status).toBe(200);
-
-    const statusPayload = (await statusResponse.json()) as GitStatusResult;
-    expect(statusPayload.repoKind).toBe("versioning");
-    expect(statusPayload.repoLabel).toBe("Cortex Knowledge");
-    expect(statusPayload.repoRoot).toBe(server.dataDir);
-    expect(statusPayload.repoName).toBe(basename(server.dataDir));
-    expect(statusPayload.files.map((file) => file.path)).toContain("shared/knowledge/common.md");
-
-    const logResponse = await fetch(
-      `${server.baseUrl}/api/git/log?agentId=review--s1&repoTarget=versioning&limit=10&offset=0`
-    );
-    expect(logResponse.status).toBe(200);
-
-    const logPayload = (await logResponse.json()) as GitLogResult;
-    expect(logPayload.notInitialized).toBeUndefined();
-    expect(logPayload.commits[0]?.message).toBe("knowledge commit");
-  });
-
-  it("returns parsed metadata and numstat in versioning history responses", async () => {
-    const server = await createGitDiffTestServer({
-      descriptors: [createManagerSession("cortex", "cortex--s1")]
-    });
-
-    await initGitRepo(server.dataDir, "profiles/alpha/memory.md", "# Memory\n\n- first\n", "initial knowledge");
-    await execGit(server.dataDir, ["mv", "profiles/alpha/memory.md", "profiles/alpha/memory-renamed.md"]);
-    await writeFile(
-      join(server.dataDir, "profiles/alpha/memory-renamed.md"),
-      "# Memory\n\n- second\n- third\n",
-      "utf8"
-    );
-    await commitGit(
-      server.dataDir,
-      "memory(alpha): merge session alpha--s1",
-      [
-        "Reason: manual",
-        "Source: profile-memory-merge",
-        "Profile: alpha",
-        "Session: alpha--s1",
-        "Agent: alpha-worker-1",
-        "Review-Run: review-123",
-        "Paths:",
-        "- profiles/alpha/memory-renamed.md"
-      ].join("\n")
-    );
-
-    const headSha = (await execGit(server.dataDir, ["rev-parse", "HEAD"])).stdout.trim();
-
-    const logResponse = await fetch(
-      `${server.baseUrl}/api/git/log?agentId=cortex--s1&repoTarget=versioning&limit=10&offset=0`
-    );
-    expect(logResponse.status).toBe(200);
-
-    const logPayload = (await logResponse.json()) as GitLogResult;
-    expect(logPayload.commits[0]?.sha).toBe(headSha);
-    expect(logPayload.commits[0]?.metadata).toEqual({
-      reason: "manual",
-      source: "profile-memory-merge",
-      sources: ["profile-memory-merge"],
-      profileId: "alpha",
-      sessionId: "alpha--s1",
-      agentId: "alpha-worker-1",
-      reviewRunId: "review-123",
-      paths: ["profiles/alpha/memory-renamed.md"]
-    });
-
-    const commitResponse = await fetch(
-      `${server.baseUrl}/api/git/commit?agentId=cortex--s1&repoTarget=versioning&sha=${headSha}`
-    );
-    expect(commitResponse.status).toBe(200);
-
-    const commitPayload = (await commitResponse.json()) as GitCommitDetail;
-    expect(commitPayload.metadata).toEqual({
-      reason: "manual",
-      source: "profile-memory-merge",
-      sources: ["profile-memory-merge"],
-      profileId: "alpha",
-      sessionId: "alpha--s1",
-      agentId: "alpha-worker-1",
-      reviewRunId: "review-123",
-      paths: ["profiles/alpha/memory-renamed.md"]
-    });
-    expect(commitPayload.files).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "profiles/alpha/memory-renamed.md",
-          additions: expect.any(Number)
-        })
-      ])
-    );
-    expect(
-      commitPayload.files.some(
-        (file) => file.path === "profiles/alpha/memory-renamed.md" && (file.additions ?? 0) > 0
-      )
-    ).toBe(true);
-    expect(commitPayload.files.some((file) => (file.deletions ?? 0) > 0)).toBe(true);
-  });
-
-  it("rejects versioning access for non-Cortex sessions", async () => {
+  it("rejects the removed versioning repo target", async () => {
     const server = await createGitDiffTestServer({
       descriptors: [createManagerSession("alpha", "alpha--s1")]
     });
@@ -178,53 +66,9 @@ describe("git-diff-routes", () => {
       `${server.baseUrl}/api/git/status?agentId=alpha--s1&repoTarget=versioning`
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(400);
     const payload = (await response.json()) as { error?: string };
-    expect(payload.error).toContain("versioning repo is only available to Cortex sessions");
-  });
-
-  it("rejects versioning access for workers whose manager session is not Cortex", async () => {
-    const server = await createGitDiffTestServer({
-      descriptors: [
-        createManagerSession("alpha", "alpha--s1"),
-        createWorker("alpha--w1", "alpha--s1", { archetypeId: "cortex" })
-      ]
-    });
-
-    const response = await fetch(
-      `${server.baseUrl}/api/git/status?agentId=alpha--w1&repoTarget=versioning`
-    );
-
-    expect(response.status).toBe(403);
-    const payload = (await response.json()) as { error?: string };
-    expect(payload.error).toContain("versioning repo is only available to Cortex sessions");
-  });
-
-  it("returns a graceful empty state when the versioning repo is not initialized", async () => {
-    const server = await createGitDiffTestServer({
-      descriptors: [createManagerSession("cortex", "cortex--s1")]
-    });
-
-    const statusResponse = await fetch(
-      `${server.baseUrl}/api/git/status?agentId=cortex--s1&repoTarget=versioning`
-    );
-    expect(statusResponse.status).toBe(200);
-
-    const statusPayload = (await statusResponse.json()) as GitStatusResult;
-    expect(statusPayload.notInitialized).toBe(true);
-    expect(statusPayload.repoKind).toBe("versioning");
-    expect(statusPayload.repoLabel).toBe("Cortex Knowledge");
-    expect(statusPayload.repoRoot).toBe(server.dataDir);
-    expect(statusPayload.files).toEqual([]);
-    expect(statusPayload.summary).toEqual({ filesChanged: 0, insertions: 0, deletions: 0 });
-
-    const logResponse = await fetch(
-      `${server.baseUrl}/api/git/log?agentId=cortex--s1&repoTarget=versioning&limit=10&offset=0`
-    );
-    expect(logResponse.status).toBe(200);
-
-    const logPayload = (await logResponse.json()) as GitLogResult;
-    expect(logPayload).toEqual({ commits: [], hasMore: false, notInitialized: true });
+    expect(payload.error).toContain("repoTarget must be: workspace.");
   });
 
   it("routes workspace status through a validated worktreeId", async () => {
@@ -447,32 +291,6 @@ function createManagerSession(
   };
 }
 
-function createWorker(
-  agentId: string,
-  managerId: string,
-  overrides: Partial<AgentDescriptor> = {}
-): AgentDescriptor {
-  const timestamp = new Date().toISOString();
-
-  return {
-    agentId,
-    managerId,
-    displayName: agentId,
-    role: "worker",
-    status: "idle",
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    cwd: "/tmp",
-    model: {
-      provider: "openai-codex",
-      modelId: "gpt-5.5",
-      thinkingLevel: "medium"
-    },
-    sessionFile: `/tmp/${agentId}.jsonl`,
-    ...overrides
-  };
-}
-
 async function initGitRepo(cwd: string, relativePath: string, content: string, message: string): Promise<void> {
   await mkdir(join(cwd, dirnameSafe(relativePath)), { recursive: true });
   await writeFile(join(cwd, relativePath), content, "utf8");
@@ -481,11 +299,6 @@ async function initGitRepo(cwd: string, relativePath: string, content: string, m
   await execGit(cwd, ["config", "user.email", "forge-test@example.com"]);
   await execGit(cwd, ["add", relativePath]);
   await execGit(cwd, ["commit", "-m", message]);
-}
-
-async function commitGit(cwd: string, subject: string, body: string): Promise<void> {
-  await execGit(cwd, ["add", "-A"]);
-  await execGit(cwd, ["commit", "-m", subject, "-m", body]);
 }
 
 function dirnameSafe(relativePath: string): string {
