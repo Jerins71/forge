@@ -17,6 +17,7 @@ import { ProjectSecureSessionsSettings } from './ProjectSecureSessionsSettings'
 import { ContextManagementSettings } from './ContextManagementSettings'
 import type { SettingsApiClient } from './settings-api-client'
 import { SettingsProjectResources } from './SettingsProjectResources'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 
 export interface ProjectSettingsActions {
   onRenameProfile?: (profileId: string, displayName: string) => void
@@ -36,7 +37,6 @@ export interface ProjectSettingsActions {
 }
 
 interface SettingsProjectSettingsProps {
-  wsUrl: string
   profile: ManagerProfile
   manager?: AgentDescriptor
   apiClient: SettingsApiClient
@@ -51,7 +51,6 @@ interface SettingsProjectSettingsProps {
  * their existing profile/session-scoped API surface.
  */
 export function SettingsProjectSettings({
-  wsUrl,
   profile,
   manager,
   apiClient,
@@ -61,6 +60,7 @@ export function SettingsProjectSettings({
 }: SettingsProjectSettingsProps) {
   const [renaming, setRenaming] = useState(false)
   const [changingModel, setChangingModel] = useState(false)
+  const primaryEnvironmentId = useOptionalEnvironmentContext()?.primaryEnvironmentId ?? ''
   const [changingCwd, setChangingCwd] = useState(false)
   const projectContext = manager
     ? { profileId: profile.profileId, sessionAgentId: manager.agentId }
@@ -169,7 +169,7 @@ export function SettingsProjectSettings({
       ) : null}
       {changingModel && actions?.onUpdateManagerModel ? (
         <ChangeModelDialog
-          wsUrl={wsUrl}
+          originId={primaryEnvironmentId}
           apiClient={apiClient}
           modelConfigChangeKey={modelConfigChangeKey}
           connectionEpoch={connectionEpoch}

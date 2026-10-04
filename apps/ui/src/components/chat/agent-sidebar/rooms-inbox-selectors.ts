@@ -1,5 +1,5 @@
 import type { AgentStatus, SessionAttention, SessionAttentionReason } from '@forge/protocol'
-import { LOCAL_ORIGIN_ID, type OriginId } from '@/lib/origin-store'
+import type { OriginId } from '@/lib/origin-store'
 import { isSessionActivelyWorking } from './utils'
 import type { StatusMap } from './types'
 
@@ -47,7 +47,7 @@ export interface RoomsInboxProjectInput {
 
 export interface RoomsInboxOriginInput {
   originId: OriginId
-  /** Remote origins are included only while connected; local remains available offline. */
+  /** Offline environments stay visible with their cached rows. */
   connected: boolean
   /** False while this origin is still receiving its agent/profile bootstrap snapshots. */
   inventoryReady?: boolean
@@ -89,6 +89,8 @@ export interface SelectRoomsInboxOptions {
   hideCliSessions?: boolean
   /** Local mute preference: hides Needs You only; Active/Recent still list the room. */
   mutedSessionIds?: ReadonlySet<string>
+  /** Mute preferences are stored per primary-environment session ID. */
+  primaryOriginId?: string
 }
 
 export const MAX_SECTION_ITEMS = 5
@@ -165,8 +167,9 @@ function compareRecent(left: RoomsInboxSessionInput, right: RoomsInboxSessionInp
 function isLocallyMuted(
   session: RoomsInboxSessionInput,
   mutedSessionIds: ReadonlySet<string> | undefined,
+  primaryOriginId: string | undefined,
 ): boolean {
-  return session.identity.originId === LOCAL_ORIGIN_ID
+  return session.identity.originId === primaryOriginId
     && mutedSessionIds?.has(session.identity.sessionAgentId) === true
 }
 
@@ -210,9 +213,8 @@ export function getRoomsInboxVisibleSessions(
   origins: readonly RoomsInboxOriginInput[],
   options: Pick<SelectRoomsInboxOptions, 'selected' | 'hideCliSessions'> = {},
 ): RoomsInboxSessionInput[] {
-  const visibleOrigins = origins.filter((origin) => origin.originId === LOCAL_ORIGIN_ID || origin.connected)
   const sessionByIdentity = new Map<string, RoomsInboxSessionInput>()
-  for (const session of visibleOrigins.flatMap((origin) => origin.sessions)) {
+  for (const session of origins.flatMap((origin) => origin.sessions)) {
     const key = getRoomsInboxIdentityKey(session.identity.originId, session.identity.sessionAgentId)
     if (!sessionByIdentity.has(key)) sessionByIdentity.set(key, session)
   }
@@ -224,7 +226,7 @@ export function getRoomsInboxVisibleSessions(
 function getVisibleAttentionBySession(origins: readonly RoomsInboxOriginInput[]): Map<string, SessionAttention> {
   const attentions = new Map<string, SessionAttention>()
   for (const origin of origins) {
-    if ((origin.originId !== LOCAL_ORIGIN_ID && !origin.connected) || !origin.attentionAvailable) continue
+    if (!origin.attentionAvailable) continue
     for (const attention of origin.attentions ?? []) {
       if (!attentions.has(getRoomsInboxIdentityKey(origin.originId, attention.sessionAgentId))) {
         attentions.set(getRoomsInboxIdentityKey(origin.originId, attention.sessionAgentId), attention)
@@ -259,7 +261,7 @@ export function selectRoomsInboxSections(
     if (!attention) continue
     // Mute is a local display preference. It must not dismiss server attention,
     // but it also must not claim the user's attention.
-    if (isLocallyMuted(session, options.mutedSessionIds)) continue
+    if (isLocallyMuted(session, options.mutedSessionIds, options.primaryOriginId)) continue
     attentionSessionKeys.add(key)
     needsYouCandidates.push({
       session,
@@ -316,8 +318,7 @@ export function selectRoomsInboxSections(
       timestamp: sessionTimestamp(session),
     }))
 
-  const visibleOrigins = origins.filter((origin) => origin.originId === LOCAL_ORIGIN_ID || origin.connected)
-  const projects = visibleOrigins
+  const projects = origins
     .flatMap((origin) => origin.projects)
     .filter((project) => !project.archived)
     .map((project) => ({

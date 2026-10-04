@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { TerminalDescriptor, TerminalIssueTicketResponse } from '@forge/protocol'
+import type { TerminalDescriptor } from '@forge/protocol'
+import type { EnvironmentClient } from '@forge/client-runtime'
 import { Button } from '@/components/ui/button'
 import { TerminalTabBar } from '@/components/terminal/TerminalTabBar'
 import { TerminalViewport, type TerminalSelectionContext } from '@/components/terminal/TerminalViewport'
@@ -7,7 +8,7 @@ import type { TerminalPanelMode } from '@/hooks/useTerminalPanel'
 import { cn } from '@/lib/utils'
 
 interface TerminalPanelProps {
-  wsUrl: string
+  environmentClient: EnvironmentClient | null
   sessionAgentId: string | null
   terminals: TerminalDescriptor[]
   panelMode: TerminalPanelMode
@@ -17,7 +18,6 @@ interface TerminalPanelProps {
   maxTerminalsPerManager: number
   editingTerminalId: string | null
   renameDraft: string
-  initialTickets: Record<string, { ticket: string; ticketExpiresAt: string }>
   onSelectTerminal: (terminalId: string) => void
   onCreateTerminal: () => void
   onCloseTerminal: (terminalId: string) => Promise<void>
@@ -32,18 +32,13 @@ interface TerminalPanelProps {
   onPanelHeightChange: (height: number) => void
   onFocusChatInput: () => void
   onAddToChat?: (context: TerminalSelectionContext) => void
-  issueTicket: (
-    terminalId: string,
-    sessionAgentId: string,
-    requesterAgentId: string,
-  ) => Promise<TerminalIssueTicketResponse>
 }
 
 const HANDLE_HEIGHT_PX = 6
 const MIN_EXPANDED_HEIGHT_PX = 120
 
 export function TerminalPanel({
-  wsUrl,
+  environmentClient,
   sessionAgentId,
   terminals,
   panelMode,
@@ -53,7 +48,6 @@ export function TerminalPanel({
   maxTerminalsPerManager,
   editingTerminalId,
   renameDraft,
-  initialTickets,
   onSelectTerminal,
   onCreateTerminal,
   onCloseTerminal,
@@ -68,7 +62,6 @@ export function TerminalPanel({
   onPanelHeightChange,
   onFocusChatInput,
   onAddToChat,
-  issueTicket,
 }: TerminalPanelProps) {
   const [isDragging, setIsDragging] = useState(false)
   const handleNodeRef = useRef<HTMLDivElement | null>(null)
@@ -164,7 +157,7 @@ export function TerminalPanel({
     }
   }, [isDragging, isMobile, onCollapsePanel, onMaximizePanel, onPanelHeightChange, onRestorePanel])
 
-  if (!sessionAgentId || panelMode === 'hidden') {
+  if (!sessionAgentId || !environmentClient || panelMode === 'hidden') {
     return null
   }
 
@@ -250,14 +243,11 @@ export function TerminalPanel({
         activeTerminal ? (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <TerminalViewport
-              key={activeTerminal.terminalId}
-              wsUrl={wsUrl}
+              key={`${environmentClient.environmentId}:${activeTerminal.terminalId}`}
+              environmentClient={environmentClient}
               terminal={activeTerminal}
-              sessionAgentId={sessionAgentId}
               onFocusChatInput={handleEscapeFromTerminal}
               onAddToChat={onAddToChat}
-              issueTicket={issueTicket}
-              initialTicket={initialTickets[activeTerminal.terminalId]}
             />
           </div>
         ) : (

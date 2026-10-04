@@ -169,7 +169,7 @@ export function SettingsPanel({
         />
       )}
       {activeTab === 'git-monitoring' && (
-        <SettingsGitMonitoring wsUrl={wsUrl} profiles={profiles} />
+        <SettingsGitMonitoring apiClient={apiClient} profiles={profiles} />
       )}
       {activeTab === 'appearance' && <SettingsAppearance />}
       {activeTab === 'notifications' && <SettingsNotifications managers={managers} apiClient={apiClient} />}
@@ -214,7 +214,6 @@ export function SettingsPanel({
       )}
       {isProjectSettings && selectedProject ? (
         <SettingsProjectSettings
-          wsUrl={wsUrl}
           profile={selectedProject}
           manager={selectedProjectManager}
           apiClient={apiClient}

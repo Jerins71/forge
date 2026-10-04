@@ -6,6 +6,7 @@ import {
   dismissRemoteUpdateAwarenessProjectUpdate,
   fetchRemoteUpdateAwarenessIncoming,
   refreshRemoteUpdateAwarenessProject,
+  type RemoteUpdateAwarenessClient,
 } from '@/components/settings/remote-update-awareness-api'
 import {
   createRemoteUpdateAwarenessMutationTarget,
@@ -38,12 +39,12 @@ function snapshotTargetKey(snapshot: RemoteUpdateAwarenessProjectSnapshot | null
 }
 
 export function RemoteUpdateAwarenessBanner({
-  wsUrl,
+  client,
   snapshot,
   onInspect,
   onSnapshotChange,
 }: {
-  wsUrl: string
+  client: RemoteUpdateAwarenessClient
   snapshot: RemoteUpdateAwarenessProjectSnapshot | null
   onInspect: () => void
   onSnapshotChange: RemoteUpdateAwarenessSnapshotChange
@@ -110,7 +111,7 @@ export function RemoteUpdateAwarenessBanner({
     if (!request) return
     const { target, targetEpoch } = request
     try {
-      const response = await refreshRemoteUpdateAwarenessProject(wsUrl, target.projectId)
+      const response = await refreshRemoteUpdateAwarenessProject(client, target.projectId)
       if (isCurrentRequest(target, targetEpoch)) {
         onSnapshotChange(response.snapshot, target)
       }
@@ -130,7 +131,7 @@ export function RemoteUpdateAwarenessBanner({
     const { target, targetEpoch } = request
     try {
       const response = await dismissRemoteUpdateAwarenessProjectUpdate(
-        wsUrl,
+        client,
         target.projectId,
         target.generation!,
       )
@@ -195,11 +196,11 @@ export function RemoteUpdateAwarenessBanner({
 }
 
 export function RemoteUpdateAwarenessIncoming({
-  wsUrl,
+  client,
   projectId,
   generation,
 }: {
-  wsUrl: string
+  client: RemoteUpdateAwarenessClient
   projectId: string
   generation: number | null
 }) {
@@ -211,7 +212,7 @@ export function RemoteUpdateAwarenessIncoming({
     let cancelled = false
     setIncoming(null)
     setError(null)
-    void fetchRemoteUpdateAwarenessIncoming(wsUrl, projectId).then(
+    void fetchRemoteUpdateAwarenessIncoming(client, projectId).then(
       (response) => {
         if (!cancelled) setIncoming(response.incoming)
       },
@@ -222,7 +223,7 @@ export function RemoteUpdateAwarenessIncoming({
     return () => {
       cancelled = true
     }
-  }, [generation, loadRequest, projectId, wsUrl])
+  }, [generation, loadRequest, projectId, client])
 
   if (error) {
     return (

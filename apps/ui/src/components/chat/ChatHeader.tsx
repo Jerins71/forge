@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { EnvironmentClient } from '@forge/client-runtime'
 import { ClipboardList, FolderOpen, GitBranch, Loader2, Menu, Minimize2, MoreHorizontal, Package, ScrollText, Sparkles, Square, SquareTerminal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -32,7 +33,8 @@ interface ChatHeaderProps {
   connected: boolean
   activeAgentId: string | null
   activeAgentLabel: string
-  wsUrl?: string
+  /** The active session's environment. */
+  environmentClient?: EnvironmentClient | null
   activeAgentProfileName?: string
   activeAgentSessionLabel?: string
   totalUnreadCount?: number
@@ -153,7 +155,7 @@ export function ChatHeader({
   connected,
   activeAgentId,
   activeAgentLabel,
-  wsUrl,
+  environmentClient = null,
   activeAgentProfileName,
   activeAgentSessionLabel,
   totalUnreadCount = 0,
@@ -658,7 +660,7 @@ export function ChatHeader({
           onOpenChange={setPromptOpen}
           agentId={activeAgentId}
           agentLabel={activeAgentLabel}
-          wsUrl={wsUrl}
+          environmentClient={environmentClient}
         />
       ) : null}
     </header>

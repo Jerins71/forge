@@ -1,7 +1,8 @@
 import type React from 'react'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { SESSION_ATTENTION_MAX_DISMISS_IDS } from '@forge/protocol'
-import { LOCAL_ORIGIN_ID, originRegistry, useAllOrigins } from '@/lib/origin-store'
+import { originRegistry, useAllOrigins } from '@/lib/origin-store'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import { isSideChatAgent, type ProfileTreeRow } from '@/lib/agent-hierarchy'
 import type { ManagerWsState } from '@/lib/ws-state'
 import { RoomsInbox } from './RoomsInbox'
@@ -46,7 +47,8 @@ function selectInboxOriginSnapshot(state: ManagerWsState): InboxOriginSnapshot {
     if (!profile) return []
     const live = state.statuses[agent.agentId]
     return [{
-      identity: { originId: LOCAL_ORIGIN_ID, profileId, sessionAgentId: agent.agentId },
+      // The owning environment ID is applied when origins are combined below.
+      identity: { originId: '', profileId, sessionAgentId: agent.agentId },
       label: agent.sessionLabel || agent.displayName || agent.agentId,
       profileName: profile.displayName,
       agentStatus: live?.status ?? agent.status,
@@ -63,7 +65,7 @@ function selectInboxOriginSnapshot(state: ManagerWsState): InboxOriginSnapshot {
     }]
   })
   const projects = profiles.map((profile) => ({
-    originId: LOCAL_ORIGIN_ID,
+    originId: '',
     profileId: profile.profileId,
     profileName: profile.displayName,
     updatedAt: profile.updatedAt,
@@ -153,12 +155,14 @@ export function RoomsInboxLive({
     const liveOriginIds = new Set(liveOrigins.map((origin) => origin.originId))
     return [...liveOrigins, ...fallbackOrigins.filter((origin) => !liveOriginIds.has(origin.originId))]
   }, [fallbackOrigins, originSnapshots])
+  const primaryOriginId = useOptionalEnvironmentContext()?.primaryEnvironmentId
   const sections = useMemo(() => selectRoomsInboxSections(origins, {
     selected,
     searchQuery,
     hideCliSessions,
     mutedSessionIds,
-  }), [hideCliSessions, mutedSessionIds, origins, searchQuery, selected])
+    primaryOriginId,
+  }), [hideCliSessions, mutedSessionIds, origins, primaryOriginId, searchQuery, selected])
 
   // The Inbox badge is a global attention claim, so it must ignore the search
   // filter. Filtering it would let an unrelated query report that nothing needs
@@ -167,10 +171,11 @@ export function RoomsInboxLive({
     selected,
     hideCliSessions,
     mutedSessionIds,
-  }).needsYou.length, [hideCliSessions, mutedSessionIds, origins, selected])
+    primaryOriginId,
+  }).needsYou.length, [hideCliSessions, mutedSessionIds, origins, primaryOriginId, selected])
 
   const handleSelectSession = (identity: RoomsInboxIdentity) => {
-    if (identity.originId === LOCAL_ORIGIN_ID) {
+    if (identity.originId === primaryOriginId) {
       onSelectLocal(identity.sessionAgentId)
     } else {
       onSelectRemote?.(identity.originId, identity.sessionAgentId)
@@ -189,7 +194,7 @@ export function RoomsInboxLive({
   }, [localTreeRows])
 
   const resolveSessionMenu = useCallback((view: RoomsInboxSessionViewModel) => {
-    if (view.identity.originId !== LOCAL_ORIGIN_ID || !sessionMenuActions) return null
+    if (view.identity.originId !== primaryOriginId || !sessionMenuActions) return null
     const local = localSessionById.get(view.identity.sessionAgentId)
     if (!local) return null
     const creatorSessionId = local.session.sessionAgent.projectAgent?.creatorSessionId
@@ -201,7 +206,7 @@ export function RoomsInboxLive({
           : undefined,
       }),
     }
-  }, [localSessionById, onSelectLocal, sessionMenuActions])
+  }, [localSessionById, onSelectLocal, primaryOriginId, sessionMenuActions])
 
   const dismissNeedsYou = (sessions: readonly RoomsInboxSessionViewModel[]) => {
     const attempt = ++dismissalAttemptRef.current

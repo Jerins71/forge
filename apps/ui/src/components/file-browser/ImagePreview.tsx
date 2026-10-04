@@ -1,29 +1,24 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
+import type { EnvironmentPanels } from '@/lib/environment-panel-context'
 import { ImageOff } from 'lucide-react'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
+import { useFilePreviewUrl } from './use-file-preview-url'
 import '@/styles/file-browser.css'
 
 interface ImagePreviewProps {
-  wsUrl: string
+  panel: EnvironmentPanels | null
   filePath: string
   agentId: string
   worktreeId?: string | null
 }
 
-export function ImagePreview({ wsUrl, filePath, agentId, worktreeId = null }: ImagePreviewProps) {
+export function ImagePreview({ panel, filePath, agentId, worktreeId = null }: ImagePreviewProps) {
   const [loadError, setLoadError] = useState(false)
 
-  const imageUrl = useMemo(() => {
-    const params = new URLSearchParams({ path: filePath, agentId })
-    if (worktreeId) {
-      params.set('worktreeId', worktreeId)
-    }
-    return resolveApiEndpoint(wsUrl, `/api/read-file?${params.toString()}`)
-  }, [wsUrl, filePath, agentId, worktreeId])
+  const { url: imageUrl, error } = useFilePreviewUrl(panel, { agentId, path: filePath, worktreeId, kind: 'image' })
 
   const fileName = filePath.split('/').pop() ?? 'Image'
 
-  if (loadError) {
+  if (loadError || error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
         <ImageOff className="size-10 opacity-40" />
@@ -35,14 +30,13 @@ export function ImagePreview({ wsUrl, filePath, agentId, worktreeId = null }: Im
 
   return (
     <div className="file-browser-scroll flex h-full flex-col items-center justify-center gap-4 overflow-auto p-8">
-      <img
-        crossOrigin="use-credentials"
+      {imageUrl ? <img
         src={imageUrl}
         alt={fileName}
         className="max-h-[calc(100%-3rem)] max-w-full rounded-lg border border-border/50 bg-muted/20 object-contain"
         loading="lazy"
         onError={() => setLoadError(true)}
-      />
+      /> : null}
       <p className="shrink-0 font-mono text-xs text-muted-foreground/70">
         {fileName}
       </p>

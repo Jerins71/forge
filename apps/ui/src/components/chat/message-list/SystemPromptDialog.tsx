@@ -8,17 +8,15 @@ import {
   InitialModelInputContent,
   type InitialModelInputViewMode,
 } from './InitialModelInputContent'
-import {
-  fetchAgentSystemPrompt,
-  type AgentSystemPromptResponse,
-} from './system-prompt-api'
+import type { AgentSystemPromptResponse } from '@forge/protocol'
+import type { EnvironmentClient } from '@forge/client-runtime'
 
 interface SystemPromptDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   agentId: string
   agentLabel: string
-  wsUrl?: string
+  environmentClient: EnvironmentClient | null
 }
 
 export function SystemPromptDialog({
@@ -26,7 +24,7 @@ export function SystemPromptDialog({
   onOpenChange,
   agentId,
   agentLabel,
-  wsUrl,
+  environmentClient,
 }: SystemPromptDialogProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -45,7 +43,8 @@ export function SystemPromptDialog({
     setData(null)
     setViewMode('prompt')
     try {
-      const result = await fetchAgentSystemPrompt(wsUrl, agentId)
+      if (!environmentClient) throw new Error('Environment unavailable')
+      const result = await environmentClient.features.sessions.systemPrompt(agentId)
       if (requestGeneration.current === generation) {
         setData(result)
       }
@@ -58,7 +57,7 @@ export function SystemPromptDialog({
         setLoading(false)
       }
     }
-  }, [wsUrl, agentId])
+  }, [environmentClient, agentId])
 
   useEffect(() => {
     if (!open) {

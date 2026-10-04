@@ -6,6 +6,8 @@ import {
   persistDrafts,
   loadAttachmentDrafts,
   persistAttachmentDrafts,
+  isEnvironmentDraftKey,
+  subscribeEnvironmentDraftPurge,
 } from '../draft-storage'
 
 interface UseDraftOptions {
@@ -63,6 +65,18 @@ export function useDraft({ draftKey }: UseDraftOptions): UseDraftReturn {
     persistAttachmentDrafts(attachmentDraftsRef.current)
     prevDraftKeyRef.current = draftKey
   }, [attachedFilesRef, draftKey, inputRef])
+
+  useEffect(() => subscribeEnvironmentDraftPurge((environmentId) => {
+    for (const drafts of [draftsRef.current, attachmentDraftsRef.current]) {
+      for (const key of Object.keys(drafts)) {
+        if (isEnvironmentDraftKey(key, environmentId)) delete drafts[key]
+      }
+    }
+    if (draftKey && isEnvironmentDraftKey(draftKey, environmentId)) {
+      setInput('')
+      setAttachedFiles([])
+    }
+  }), [draftKey])
 
   // Flush current draft on page unload so it survives refresh.
   useEffect(() => {

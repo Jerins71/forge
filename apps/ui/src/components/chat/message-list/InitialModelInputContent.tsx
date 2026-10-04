@@ -7,7 +7,7 @@ import {
   estimateTextTokens,
   type InitialModelInputTokenEstimates,
 } from './initial-model-input-token-estimates'
-import type { AgentSystemPromptResponse } from './system-prompt-api'
+import type { AgentSystemPromptResponse } from '@forge/protocol'
 
 type AvailableInitialModelInput = Extract<
   AgentSystemPromptResponse['initialModelInput'],

@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
+import type { EnvironmentPanels } from '@/lib/environment-panel-context'
 import type { FileContentResult, FileSaveConflictResponse, FileVersionToken } from '@forge/protocol'
 import {
   applySuccessfulFileSaveToCaches,
@@ -7,7 +8,7 @@ import {
   setFileContentCache,
 } from './use-file-browser-queries'
 import { doesDeleteAffectFile } from './file-browser-utils'
-import type { FileEditorDirtySnapshot, FileEditorGuardApi, FileEditorSessionKey } from './use-file-editor-coordinator'
+import { fileEditorKeyId, sameFileScope, type FileEditorDirtySnapshot, type FileEditorGuardApi, type FileEditorSessionKey } from './use-file-editor-coordinator'
 
 export type FileEditMode = 'preview' | 'edit'
 export type FileSaveState = 'idle' | 'saving' | 'saved' | 'error' | 'conflict' | 'reloading'
@@ -57,8 +58,14 @@ const EMPTY_STATE: FileEditSessionState = {
   conflict: null,
 }
 
-function serializeKey(key: FileEditorSessionKey): string {
-  return `${key.agentId}\u0000${key.worktreeId ?? ''}\u0000${key.filePath}`
+const serializeKey = fileEditorKeyId
+
+/** Editor I/O only goes to the key's own environment; a stale tab never writes through another host. */
+function panelForKey(panel: EnvironmentPanels | null, key: FileEditorSessionKey): EnvironmentPanels {
+  if (!panel || panel.session.environmentId !== key.environmentId) {
+    throw new Error('This file belongs to an environment that is not open')
+  }
+  return panel
 }
 
 function fileNameFromPath(filePath: string): string {
@@ -131,19 +138,19 @@ export interface FileEditSessionsController {
   getDirtySnapshots: () => FileEditorDirtySnapshot[]
   getSessionKeys: () => FileEditorSessionKey[]
   removeSession: (key: FileEditorSessionKey) => void
-  removeSessionsAffectedByDelete: (scope: { agentId: string; worktreeId: string | null; path: string; entryType: 'file' | 'directory' }) => void
+  removeSessionsAffectedByDelete: (scope: { environmentId: string; agentId: string; worktreeId: string | null; path: string; entryType: 'file' | 'directory' }) => void
   handleContentLoaded: (key: FileEditorSessionKey, content: FileContentResult | null) => void
   handleSavedContent: (saved: KeyedFileEditorContent) => void
 }
 
 export function useFileEditSessions({
-  wsUrl,
+  panel,
   activeKey,
   editingEnabled,
   onSavedContent,
   onDirtyChange,
 }: {
-  wsUrl: string
+  panel: EnvironmentPanels | null
   activeKey: FileEditorSessionKey | null
   editingEnabled: boolean
   onSavedContent?: (saved: KeyedFileEditorContent) => void
@@ -227,7 +234,7 @@ export function useFileEditSessions({
     updateState(key, (previous) => ({ ...previous, saveState: 'saving', error: null, conflict: null }))
 
     try {
-      const result = await saveFileContent(wsUrl, {
+      const result = await saveFileContent(panelForKey(panel, key), {
         agentId: key.agentId,
         worktreeId: key.worktreeId,
         path: key.filePath,
@@ -242,6 +249,7 @@ export function useFileEditSessions({
       }
 
       const applied = applySuccessfulFileSaveToCaches({
+        environmentId: key.environmentId,
         agentId: key.agentId,
         worktreeId: key.worktreeId,
         filePath: key.filePath,
@@ -274,7 +282,7 @@ export function useFileEditSessions({
       }))
       return false
     }
-  }, [onSavedContent, updateState, wsUrl])
+  }, [onSavedContent, updateState, panel])
 
   const reloadKey = useCallback(async (key: FileEditorSessionKey): Promise<boolean> => {
     const currentState = getState(key)
@@ -282,7 +290,7 @@ export function useFileEditSessions({
     const reloadDraftSnapshot = currentState.draft
     updateState(key, (previous) => ({ ...previous, saveState: 'reloading', error: null, conflict: null }))
     try {
-      const fresh = await fetchFileContent(wsUrl, key.agentId, key.filePath, key.worktreeId)
+      const fresh = await fetchFileContent(panelForKey(panel, key), key.agentId, key.filePath, key.worktreeId)
       if (fresh.binary || fresh.content == null || !fresh.version || fresh.editability?.editable !== true) {
         updateState(key, (previous) => ({
           ...previous,
@@ -292,7 +300,7 @@ export function useFileEditSessions({
         }))
         return false
       }
-      setFileContentCache(key.agentId, key.worktreeId, key.filePath, fresh)
+      setFileContentCache(key.environmentId, key.agentId, key.worktreeId, key.filePath, fresh)
       setContents((previous) => ({ ...previous, [serializeKey(key)]: fresh }))
       onSavedContent?.({ key, content: fresh })
       updateState(key, (previous) => {
@@ -318,7 +326,7 @@ export function useFileEditSessions({
       }))
       return false
     }
-  }, [getState, onSavedContent, updateState, wsUrl])
+  }, [getState, onSavedContent, updateState, panel])
 
   const discardKey = useCallback((key: FileEditorSessionKey) => {
     updateState(key, (previous) => {
@@ -347,11 +355,10 @@ export function useFileEditSessions({
     })
   }, [])
 
-  const removeSessionsAffectedByDelete = useCallback(({ agentId, worktreeId, path, entryType }: { agentId: string; worktreeId: string | null; path: string; entryType: 'file' | 'directory' }) => {
+  const removeSessionsAffectedByDelete = useCallback(({ path, entryType, ...scope }: { environmentId: string; agentId: string; worktreeId: string | null; path: string; entryType: 'file' | 'directory' }) => {
     const shouldRemove = (state: FileEditSessionState | undefined) => Boolean(
       state?.key &&
-      state.key.agentId === agentId &&
-      state.key.worktreeId === worktreeId &&
+      sameFileScope(state.key, scope) &&
       doesDeleteAffectFile(path, entryType, state.key.filePath),
     )
 

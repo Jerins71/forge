@@ -1,3 +1,4 @@
+import type { EnvironmentClient } from '@forge/client-runtime'
 import {
   forwardRef,
   useCallback,
@@ -53,7 +54,7 @@ export interface MessageListProps {
   /** Agent descriptors for actor label enrichment. Optional — raw ids used when absent. */
   agents?: AgentDescriptor[]
   isLoading: boolean
-  wsUrl?: string
+  environmentClient?: EnvironmentClient | null
   activeAgentId?: string | null
   projectAgent?: ProjectAgentInfo | null
   onSuggestionClick?: (suggestion: string) => void
@@ -422,7 +423,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
   messages,
   agents,
   isLoading,
-  wsUrl,
+  environmentClient,
   activeAgentId,
   projectAgent,
   onSuggestionClick,
@@ -1198,7 +1199,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
         <div data-message-id={feedbackTargetId}>
           <ConversationMessageRow
             message={entry.message}
-            wsUrl={wsUrl}
+            environmentClient={environmentClient}
             activeAgentDisplayName={
               activeAgentId ? agentDisplayMap.get(activeAgentId)?.primaryLabel : undefined
             }

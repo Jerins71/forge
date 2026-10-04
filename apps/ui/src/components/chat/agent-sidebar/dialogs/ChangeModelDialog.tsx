@@ -27,13 +27,12 @@ import {
   projectSelectableManagerModelRows,
 } from '@/lib/manager-selection-catalog'
 import { useManagerSelectionCatalog } from '@/lib/use-manager-selection-catalog'
-import { LOCAL_ORIGIN_ID } from '@/lib/origin-store'
+import { useEnvironmentSettingsClient } from '@/hooks/use-environment-settings-client'
 import { formatManagerReasoningLevel } from '@/lib/reasoning-level-labels'
 
 export function ChangeModelDialog({
-  wsUrl,
   apiClient,
-  originId = LOCAL_ORIGIN_ID,
+  originId,
   modelConfigChangeKey,
   connectionEpoch,
   profileId,
@@ -43,9 +42,10 @@ export function ChangeModelDialog({
   onConfirm,
   onClose,
 }: {
-  wsUrl?: string
-  apiClient?: SettingsApiClient
-  originId?: string
+  /** Defaults to the authenticated client of the `originId` environment. */
+  apiClient?: SettingsApiClient | null
+  /** Environment UUID whose model catalog is shown. */
+  originId: string
   modelConfigChangeKey?: number
   connectionEpoch?: number
   profileId: string
@@ -55,6 +55,7 @@ export function ChangeModelDialog({
   onConfirm: (profileId: string, modelSelection: ManagerExactModelSelection, reasoningLevel?: ManagerReasoningLevel) => void
   onClose: () => void
 }) {
+  const environmentSettingsClient = useEnvironmentSettingsClient(originId)
   const {
     catalog,
     loading: availabilityLoading,
@@ -62,7 +63,7 @@ export function ChangeModelDialog({
     refetch: loadAvailability,
   } = useManagerSelectionCatalog({
     originId,
-    client: apiClient ?? wsUrl,
+    client: apiClient ?? environmentSettingsClient,
     modelConfigChangeKey,
     connectionEpoch,
     forceOnEnabled: true,

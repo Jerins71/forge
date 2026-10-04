@@ -13,10 +13,9 @@ import type {
   FileSaveSuccessResponse,
   FileSearchResult,
   FileVersionToken,
-  ProjectResourceMutationResponse,
   ProjectResourcesSnapshotResponse,
 } from '@forge/protocol'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
+import type { EnvironmentPanels } from '@/lib/environment-panel-context'
 import { invalidateGitCaches } from '@/components/diff-viewer/use-diff-queries'
 
 export type {
@@ -35,58 +34,18 @@ export type {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Generic fetch wrapper                                              */
+/*  Query keys                                                         */
 /* ------------------------------------------------------------------ */
 
-async function fetchFileBrowserApi<T>(
-  wsUrl: string,
-  path: string,
-  params: Record<string, string>,
-): Promise<T> {
-  const searchParams = new URLSearchParams(params)
-  return fetchJson<T>(wsUrl, `${path}?${searchParams.toString()}`)
-}
-
-function buildFileBrowserParams(
-  agentId: string,
-  extraParams: Record<string, string> = {},
-  worktreeId?: string | null,
-): Record<string, string> {
-  const params: Record<string, string> = {
-    agentId,
-    ...extraParams,
-  }
-
-  if (worktreeId) {
-    params.worktreeId = worktreeId
-  }
-
-  return params
-}
-
+/** Keys carry the environment: equal session IDs on two hosts never share cache entries. */
 function buildFileBrowserQueryKey(
   scope: string,
+  environmentId: string | null | undefined,
   agentId: string | null,
   worktreeId: string | null | undefined,
   ...parts: string[]
 ): string {
-  return `${scope}:${agentId ?? ''}:${worktreeId ?? ''}:${parts.join(':')}`
-}
-
-async function fetchJson<T>(
-  wsUrl: string,
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
-  const url = resolveApiEndpoint(wsUrl, path)
-  const response = await fetch(url, { credentials: 'include', ...init })
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }))
-    throw new Error(body.error ?? `HTTP ${response.status}`)
-  }
-
-  return response.json() as Promise<T>
+  return `${scope}:${environmentId ?? ''}:${agentId ?? ''}:${worktreeId ?? ''}:${parts.join(':')}`
 }
 
 const FILE_SAVE_CONFLICT_REASONS = new Set([
@@ -133,27 +92,6 @@ function isFileSaveResponse(value: unknown): value is FileSaveResponse {
   }
 
   return false
-}
-
-async function parseResponseJson(response: Response): Promise<unknown> {
-  try {
-    return await response.json()
-  } catch {
-    return null
-  }
-}
-
-function getResponseErrorMessage(payload: unknown, response: Response): string {
-  const statusPrefix = `HTTP ${response.status}`
-
-  if (payload && typeof payload === 'object') {
-    const error = (payload as { error?: unknown }).error
-    if (typeof error === 'string' && error.trim().length > 0) {
-      return `${statusPrefix}: ${error}`
-    }
-  }
-
-  return response.statusText ? `${statusPrefix}: ${response.statusText}` : statusPrefix
 }
 
 /* ------------------------------------------------------------------ */
@@ -265,168 +203,114 @@ function useSimpleQuery<T>(
 /* ------------------------------------------------------------------ */
 
 export function useDirectoryListing(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   dirPath: string,
   worktreeId?: string | null,
 ) {
-  const queryKey = buildFileBrowserQueryKey('files:list', agentId, worktreeId, dirPath)
+  const queryKey = buildFileBrowserQueryKey('files:list', panel?.session.environmentId, agentId, worktreeId, dirPath)
   const fetchFn = useCallback(
-    () =>
-      fetchFileBrowserApi<FileListResult>(
-        wsUrl,
-        '/api/files/list',
-        buildFileBrowserParams(agentId!, { path: dirPath }, worktreeId),
-      ),
-    [wsUrl, agentId, dirPath, worktreeId],
+    () => panel!.features.files.list({ agentId: agentId!, path: dirPath, worktreeId, signal: panel!.signal }),
+    [panel, agentId, dirPath, worktreeId],
   )
 
   return useSimpleQuery<FileListResult>(queryKey, fetchFn, {
-    enabled: !!agentId,
+    enabled: !!panel && !!agentId,
     staleTime: 30_000,
   })
 }
 
 export function useFileCount(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   worktreeId?: string | null,
 ) {
-  const queryKey = buildFileBrowserQueryKey('files:count', agentId, worktreeId)
+  const queryKey = buildFileBrowserQueryKey('files:count', panel?.session.environmentId, agentId, worktreeId)
   const fetchFn = useCallback(
-    () =>
-      fetchFileBrowserApi<FileCountResult>(
-        wsUrl,
-        '/api/files/count',
-        buildFileBrowserParams(agentId!, {}, worktreeId),
-      ),
-    [wsUrl, agentId, worktreeId],
+    () => panel!.features.files.count({ agentId: agentId!, worktreeId, signal: panel!.signal }),
+    [panel, agentId, worktreeId],
   )
 
   return useSimpleQuery<FileCountResult>(queryKey, fetchFn, {
-    enabled: !!agentId,
+    enabled: !!panel && !!agentId,
     staleTime: 120_000,
   })
 }
 
 export function useFileSearch(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   query: string,
   limit = 50,
   worktreeId?: string | null,
 ) {
-  const queryKey = buildFileBrowserQueryKey('files:search', agentId, worktreeId, query, String(limit))
+  const queryKey = buildFileBrowserQueryKey('files:search', panel?.session.environmentId, agentId, worktreeId, query, String(limit))
   const fetchFn = useCallback(
-    () =>
-      fetchFileBrowserApi<FileSearchResult>(
-        wsUrl,
-        '/api/files/search',
-        buildFileBrowserParams(
-          agentId!,
-          {
-            query,
-            limit: String(limit),
-          },
-          worktreeId,
-        ),
-      ),
-    [wsUrl, agentId, query, limit, worktreeId],
+    () => panel!.features.files.search({ agentId: agentId!, query, worktreeId, signal: panel!.signal }),
+    [panel, agentId, query, worktreeId],
   )
 
   return useSimpleQuery<FileSearchResult>(queryKey, fetchFn, {
-    enabled: !!agentId && query.trim().length >= 2,
+    enabled: !!panel && !!agentId && query.trim().length >= 2,
     staleTime: 30_000,
   })
 }
 
 export function useProjectResourcesSnapshot(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   params: { profileId: string | null; sessionAgentId: string | null },
 ) {
-  const queryKey = `project-resources:${params.profileId ?? ''}:${params.sessionAgentId ?? ''}`
+  const queryKey = `project-resources:${panel?.session.environmentId ?? ''}:${params.profileId ?? ''}:${params.sessionAgentId ?? ''}`
   const fetchFn = useCallback(
-    () => {
-      const search = new URLSearchParams({
-        profileId: params.profileId!,
-        sessionAgentId: params.sessionAgentId!,
-      })
-      return fetchJson<ProjectResourcesSnapshotResponse>(wsUrl, `/api/settings/project-resources?${search.toString()}`)
-    },
-    [wsUrl, params.profileId, params.sessionAgentId],
+    () => panel!.features.files.resources(
+      { profileId: params.profileId!, sessionAgentId: params.sessionAgentId! },
+      panel!.signal,
+    ),
+    [panel, params.profileId, params.sessionAgentId],
   )
 
   return useSimpleQuery<ProjectResourcesSnapshotResponse>(queryKey, fetchFn, {
-    enabled: !!params.profileId && !!params.sessionAgentId,
+    enabled: !!panel && !!params.profileId && !!params.sessionAgentId,
     staleTime: 30_000,
   })
 }
 
-export function seedProjectResources(
-  wsUrl: string,
-  params: { profileId: string; sessionAgentId: string },
-): Promise<ProjectResourceMutationResponse> {
-  return fetchJson<ProjectResourceMutationResponse>(wsUrl, '/api/settings/project-resources/seed', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(params),
-  })
-}
-
 export async function createFilePath(
-  wsUrl: string,
+  panel: EnvironmentPanels,
   request: FileCreateRequest,
 ): Promise<FileCreateResponse> {
-  return fetchJson<FileCreateResponse>(wsUrl, '/api/files/create', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(request),
-  })
+  return panel.features.files.create(request, panel.signal)
 }
 
 export async function renameFilePath(
-  wsUrl: string,
+  panel: EnvironmentPanels,
   request: FileRenameRequest,
 ): Promise<FileRenameResponse> {
-  return fetchJson<FileRenameResponse>(wsUrl, '/api/files/rename', {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(request),
-  })
+  return panel.features.files.rename(request, panel.signal)
 }
 
 export async function deleteFilePath(
-  wsUrl: string,
+  panel: EnvironmentPanels,
   request: { agentId: string; path: string; worktreeId?: string | null },
 ): Promise<FileDeleteResponse> {
-  const params = buildFileBrowserParams(request.agentId, { path: request.path }, request.worktreeId)
-  const searchParams = new URLSearchParams(params)
-  const url = resolveApiEndpoint(wsUrl, `/api/files/content?${searchParams.toString()}`)
-  const response = await fetch(url, { method: 'DELETE', credentials: 'include' })
-
-  const payload = await parseResponseJson(response)
-  if (!response.ok) {
-    throw new Error(getResponseErrorMessage(payload, response))
-  }
-
-  if (!payload || typeof payload !== 'object' || (payload as FileDeleteResponse).success !== true) {
-    throw new Error(`Malformed file delete response (HTTP ${response.status})`)
-  }
-
-  return payload as FileDeleteResponse
+  const payload = await panel.features.files.delete(request, panel.signal)
+  if (payload?.success !== true) throw new Error('Malformed file delete response')
+  return payload
 }
 
 export interface ApplySuccessfulFileCreateOptions {
+  environmentId: string
   agentId: string
   worktreeId?: string | null
 }
 
 export function applySuccessfulFileCreateToCaches(options: ApplySuccessfulFileCreateOptions): void {
   invalidateFileBrowserMetadataCaches()
-  invalidateGitCaches({ agentId: options.agentId, repoTarget: 'workspace' })
+  invalidateGitCaches({ environmentId: options.environmentId, agentId: options.agentId, repoTarget: 'workspace' })
 }
 
 export interface ApplySuccessfulFileRenameOptions {
+  environmentId: string
   agentId: string
   worktreeId?: string | null
   path: string
@@ -435,12 +319,13 @@ export interface ApplySuccessfulFileRenameOptions {
 }
 
 export function applySuccessfulFileRenameToCaches(options: ApplySuccessfulFileRenameOptions): void {
-  invalidateFileContentCachesForDelete(options.agentId, options.worktreeId, options.path, options.entryType)
+  invalidateFileContentCachesForDelete(options.environmentId, options.agentId, options.worktreeId, options.path, options.entryType)
   invalidateFileBrowserMetadataCaches()
-  invalidateGitCaches({ agentId: options.agentId, repoTarget: 'workspace' })
+  invalidateGitCaches({ environmentId: options.environmentId, agentId: options.agentId, repoTarget: 'workspace' })
 }
 
 export interface ApplySuccessfulFileDeleteOptions {
+  environmentId: string
   agentId: string
   worktreeId?: string | null
   path: string
@@ -449,22 +334,24 @@ export interface ApplySuccessfulFileDeleteOptions {
 
 export function applySuccessfulFileDeleteToCaches(options: ApplySuccessfulFileDeleteOptions): void {
   invalidateFileContentCachesForDelete(
+    options.environmentId,
     options.agentId,
     options.worktreeId,
     options.path,
     options.entryType,
   )
   invalidateFileBrowserMetadataCaches()
-  invalidateGitCaches({ agentId: options.agentId, repoTarget: 'workspace' })
+  invalidateGitCaches({ environmentId: options.environmentId, agentId: options.agentId, repoTarget: 'workspace' })
 }
 
 function invalidateFileContentCachesForDelete(
+  environmentId: string,
   agentId: string,
   worktreeId: string | null | undefined,
   deletedPath: string,
   entryType: 'file' | 'directory',
 ) {
-  const prefix = `files:content:${agentId}:${worktreeId ?? ''}:`
+  const prefix = buildFileBrowserQueryKey('files:content', environmentId, agentId, worktreeId)
   for (const key of queryCache.keys()) {
     if (!key.startsWith(prefix)) continue
 
@@ -481,43 +368,16 @@ function invalidateFileContentCachesForDelete(
 }
 
 export async function saveFileContent(
-  wsUrl: string,
+  panel: EnvironmentPanels,
   request: FileSaveRequest,
 ): Promise<FileSaveResponse> {
-  const url = resolveApiEndpoint(wsUrl, '/api/files/content')
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(request),
-  })
-
-  const payload = await parseResponseJson(response)
-
-  if (response.status === 200 || response.status === 409) {
-    if (!isFileSaveResponse(payload)) {
-      throw new Error(`Malformed file save response (HTTP ${response.status})`)
-    }
-
-    if (response.status === 200 && payload.success === true) {
-      return payload
-    }
-
-    if (response.status === 409 && payload.success === false && payload.conflict === true) {
-      return payload
-    }
-
-    throw new Error(`Malformed file save response (HTTP ${response.status})`)
-  }
-
-  if (!response.ok) {
-    throw new Error(getResponseErrorMessage(payload, response))
-  }
-
-  throw new Error(`Unexpected file save status ${response.status}`)
+  const payload: unknown = await panel.features.files.save(request, panel.signal)
+  if (!isFileSaveResponse(payload)) throw new Error('Malformed file save response')
+  return payload
 }
 
 export interface ApplySuccessfulFileSaveOptions {
+  environmentId: string
   agentId: string
   worktreeId?: string | null
   filePath: string
@@ -539,6 +399,7 @@ export interface ApplySuccessfulFileSaveResult {
 }
 
 export function applySuccessfulFileSaveToCaches({
+  environmentId,
   agentId,
   worktreeId = null,
   filePath,
@@ -559,9 +420,9 @@ export function applySuccessfulFileSaveToCaches({
       : undefined,
   }
 
-  setFileContentCache(agentId, worktreeId, filePath, nextContent)
+  setFileContentCache(environmentId, agentId, worktreeId, filePath, nextContent)
   invalidateFileBrowserMetadataCaches()
-  invalidateGitCaches({ agentId, repoTarget: 'workspace' })
+  invalidateGitCaches({ environmentId, agentId, repoTarget: 'workspace' })
 
   return {
     content: nextContent,
@@ -575,44 +436,41 @@ export function applySuccessfulFileSaveToCaches({
 }
 
 export function useFileContent(
-  wsUrl: string,
+  panel: EnvironmentPanels | null,
   agentId: string | null,
   filePath: string | null,
   worktreeId?: string | null,
   refreshNonce = 0,
 ) {
-  const queryKey = `${buildFileBrowserQueryKey('files:content', agentId, worktreeId, filePath ?? '')}:refresh:${refreshNonce}`
+  const queryKey = `${buildFileBrowserQueryKey('files:content', panel?.session.environmentId, agentId, worktreeId, filePath ?? '')}:refresh:${refreshNonce}`
   const fetchFn = useCallback(
-    () => fetchFileContent(wsUrl, agentId!, filePath!, worktreeId),
-    [wsUrl, agentId, filePath, worktreeId],
+    () => fetchFileContent(panel!, agentId!, filePath!, worktreeId),
+    [panel, agentId, filePath, worktreeId],
   )
 
   return useSimpleQuery<FileContentResult>(queryKey, fetchFn, {
-    enabled: !!agentId && !!filePath,
+    enabled: !!panel && !!agentId && !!filePath,
     staleTime: 30_000,
   })
 }
 
 export async function fetchFileContent(
-  wsUrl: string,
+  panel: EnvironmentPanels,
   agentId: string,
   filePath: string,
   worktreeId?: string | null,
 ): Promise<FileContentResult> {
-  return fetchFileBrowserApi<FileContentResult>(
-    wsUrl,
-    '/api/files/content',
-    buildFileBrowserParams(agentId, { path: filePath }, worktreeId),
-  )
+  return panel.features.files.content({ agentId, path: filePath, worktreeId, signal: panel.signal })
 }
 
 export function setFileContentCache(
+  environmentId: string,
   agentId: string,
   worktreeId: string | null | undefined,
   filePath: string,
   content: FileContentResult,
 ) {
-  const queryKey = buildFileBrowserQueryKey('files:content', agentId, worktreeId, filePath)
+  const queryKey = buildFileBrowserQueryKey('files:content', environmentId, agentId, worktreeId, filePath)
   queryCache.set(queryKey, { data: content, fetchedAt: Date.now() })
   evictOldestCacheEntries()
 }

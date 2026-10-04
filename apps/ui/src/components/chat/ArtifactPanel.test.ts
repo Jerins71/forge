@@ -6,7 +6,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/dom'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import type { ArtifactReference } from '@/lib/artifacts'
+import { createFeatureClients, type EnvironmentClient } from '@forge/client-runtime'
 import { ArtifactPanel } from './ArtifactPanel'
+
+/** Feature requests go through the addressed environment's authenticated transport (here: global fetch). */
+function environmentClient(): EnvironmentClient {
+  const entry = { environmentId: 'env-remote' }
+  const fetchPath = (path: string, init?: RequestInit) => fetch(`https://forge.example.test${path}`, init)
+  return {
+    environmentId: entry.environmentId,
+    features: createFeatureClients(
+      { entry, fetch: fetchPath, json: async (path, init) => (await fetchPath(path, init)).json() },
+      { request: () => Promise.reject(new Error('unused')), subscribe: () => () => {} },
+    ),
+  } as unknown as EnvironmentClient
+}
 
 const pdfPreviewProps: Array<Record<string, unknown>> = []
 
@@ -54,7 +68,7 @@ function renderPanel(artifact: ArtifactReference) {
       null,
       createElement(ArtifactPanel, {
         artifact,
-        wsUrl: 'wss://forge.example.test/socket?origin=remote',
+        environmentClient: environmentClient(),
         activeAgentId: 'fallback-manager',
         onClose: vi.fn(),
       }),
@@ -81,7 +95,7 @@ describe('ArtifactPanel transcript-authorized reads', () => {
       ticket: { url: 'https://attacker.example/image', expiresAt: new Date(Date.now() + 30_000).toISOString() },
     }), { status: 200 })))
     renderPanel(imageArtifact())
-    await waitFor(() => expect(document.body.textContent).toContain('Invalid image ticket response.'))
+    await waitFor(() => expect(document.body.textContent).toContain('Invalid artifact ticket'))
     expect(document.querySelector('img[alt="result.png"]')).toBeNull()
   })
 

@@ -1,3 +1,4 @@
+import type { EnvironmentClient } from '@forge/client-runtime'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CodexCatalogPlugin } from '@/lib/codex-catalog-api'
 import {
@@ -28,7 +29,7 @@ interface UseMentionsOptions {
   projectAgents?: ProjectAgentSuggestion[]
   enableCodexMention?: boolean
   managerAgentId?: string
-  wsUrl?: string
+  environmentClient?: EnvironmentClient | null
   input: string
   setInputWithDraft: (value: string) => void
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
@@ -60,7 +61,7 @@ export function useMentions({
   projectAgents,
   enableCodexMention = false,
   managerAgentId,
-  wsUrl,
+  environmentClient = null,
   input,
   setInputWithDraft,
   textareaRef,
@@ -95,20 +96,20 @@ export function useMentions({
   )
 
   useEffect(() => {
-    if (!enableCodexMention || !managerAgentId) {
+    if (!enableCodexMention || !managerAgentId || !environmentClient) {
       return
     }
 
-    ensureCodexCatalogWarm(wsUrl, managerAgentId)
-  }, [enableCodexMention, managerAgentId, wsUrl])
+    ensureCodexCatalogWarm(environmentClient, managerAgentId)
+  }, [enableCodexMention, environmentClient, managerAgentId])
 
   useEffect(() => {
-    if (!codexToolMode || !enableCodexMention || !managerAgentId) {
+    if (!codexToolMode || !enableCodexMention || !managerAgentId || !environmentClient) {
       return
     }
 
     let cancelled = false
-    const cached = getCachedCodexCatalog(managerAgentId)
+    const cached = getCachedCodexCatalog(environmentClient, managerAgentId)
     if (cached) {
       setCodexPluginSuggestions(mapPluginsToSuggestions(cached.plugins ?? []))
       setCodexCatalogError(false)
@@ -120,7 +121,7 @@ export function useMentions({
       setCodexCatalogErrorMessage(undefined)
     }
 
-    void fetchCodexCatalogWithCache(wsUrl, managerAgentId, { forceRefresh: true }).then((result) => {
+    void fetchCodexCatalogWithCache(environmentClient, managerAgentId, { forceRefresh: true }).then((result) => {
       if (cancelled) {
         return
       }
@@ -144,7 +145,7 @@ export function useMentions({
     return () => {
       cancelled = true
     }
-  }, [codexToolMode, enableCodexMention, managerAgentId, mapPluginsToSuggestions, wsUrl])
+  }, [codexToolMode, enableCodexMention, environmentClient, managerAgentId, mapPluginsToSuggestions])
 
   const filteredMentions = useMemo(() => {
     const suggestions: MentionSuggestion[] = []

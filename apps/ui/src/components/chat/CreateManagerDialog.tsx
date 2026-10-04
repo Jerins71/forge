@@ -37,7 +37,7 @@ import {
   resolveCreateManagerDefault,
 } from '@/lib/manager-selection-catalog'
 import { useManagerSelectionCatalog } from '@/lib/use-manager-selection-catalog'
-import { LOCAL_ORIGIN_ID } from '@/lib/origin-store'
+import { useEnvironmentSettingsClient } from '@/hooks/use-environment-settings-client'
 import {
   ServerDirectoryBrowserDialog,
   type ServerDirectoryBrowserClient,
@@ -53,9 +53,10 @@ export type CreateProjectSourceMode = 'local_folder' | 'clone_repository'
 
 interface CreateManagerDialogProps {
   open: boolean
-  wsUrl?: string
-  apiClient?: SettingsApiClient
-  originId?: string
+  /** Defaults to the authenticated client of the `originId` environment. */
+  apiClient?: SettingsApiClient | null
+  /** Environment UUID the project is created on. */
+  originId: string
   modelConfigChangeKey?: number
   connectionEpoch?: number
   isCreatingManager: boolean
@@ -104,9 +105,8 @@ interface CreateManagerDialogProps {
 
 export function CreateManagerDialog({
   open,
-  wsUrl,
   apiClient,
-  originId = LOCAL_ORIGIN_ID,
+  originId,
   modelConfigChangeKey,
   connectionEpoch,
   isCreatingManager,
@@ -148,6 +148,7 @@ export function CreateManagerDialog({
 }: CreateManagerDialogProps) {
   const [serverBrowserOpen, setServerBrowserOpen] = useState(false)
   const [basePathBrowserOpen, setBasePathBrowserOpen] = useState(false)
+  const environmentSettingsClient = useEnvironmentSettingsClient(originId)
   const {
     catalog,
     loading: availabilityLoading,
@@ -156,7 +157,7 @@ export function CreateManagerDialog({
   } = useManagerSelectionCatalog({
     originId,
     enabled: open,
-    client: apiClient ?? wsUrl,
+    client: apiClient ?? environmentSettingsClient,
     modelConfigChangeKey,
     connectionEpoch,
     forceOnEnabled: true,
@@ -497,7 +498,7 @@ export function CreateManagerDialog({
             </p>
           </div>
 
-          {originId === LOCAL_ORIGIN_ID && onSecureSessionsEnabledChange ? (
+          {onSecureSessionsEnabledChange ? (
             <div className="flex items-start gap-2">
               <Checkbox
                 id="project-secure-sessions"

@@ -9,8 +9,9 @@ import {
   updateRemoteUpdateAwarenessProjectOverride,
   updateRemoteUpdateAwarenessSettings,
 } from './remote-update-awareness-api'
+import type { SettingsApiClient } from './settings-api-client'
 
-export function SettingsGitMonitoring({ wsUrl, profiles }: { wsUrl: string; profiles: ManagerProfile[] }) {
+export function SettingsGitMonitoring({ apiClient, profiles }: { apiClient: SettingsApiClient; profiles: ManagerProfile[] }) {
   const [snapshot, setSnapshot] = useState<RemoteUpdateAwarenessSettingsSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [updating, setUpdating] = useState(false)
@@ -18,11 +19,11 @@ export function SettingsGitMonitoring({ wsUrl, profiles }: { wsUrl: string; prof
   const load = useCallback(async () => {
     try {
       setError(null)
-      setSnapshot(await fetchRemoteUpdateAwarenessSettings(wsUrl))
+      setSnapshot(await fetchRemoteUpdateAwarenessSettings(apiClient))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Git monitoring is unavailable.')
     }
-  }, [wsUrl])
+  }, [apiClient])
 
   useEffect(() => { void load() }, [load])
 
@@ -31,7 +32,7 @@ export function SettingsGitMonitoring({ wsUrl, profiles }: { wsUrl: string; prof
     setUpdating(true)
     try {
       setError(null)
-      setSnapshot(await updateRemoteUpdateAwarenessSettings(wsUrl, globalEnabled))
+      setSnapshot(await updateRemoteUpdateAwarenessSettings(apiClient, globalEnabled))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to update Git monitoring.')
     } finally {
@@ -42,7 +43,7 @@ export function SettingsGitMonitoring({ wsUrl, profiles }: { wsUrl: string; prof
     setUpdating(true)
     try {
       setError(null)
-      const response = await updateRemoteUpdateAwarenessProjectOverride(wsUrl, projectId, override)
+      const response = await updateRemoteUpdateAwarenessProjectOverride(apiClient, projectId, override)
       setSnapshot((current) => current && {
         ...current,
         projects: current.projects.map((project) => project.projectId === projectId ? response.project : project),

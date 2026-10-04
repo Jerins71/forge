@@ -62,7 +62,11 @@ import { resolveStreamDeckNavigationRoute } from '@/hooks/index-page/stream-deck
 import { fetchModelCacheVisualizationEnabled } from '@/components/settings/model-cache-visualization-api'
 import { activateRemoteUpdateAwarenessProject } from '@/components/settings/remote-update-awareness-api'
 import { getActiveLocalRemoteUpdateSnapshot } from '@/components/index-page/remote-update-awareness'
-import { createLocalBuilderSidebarOrderApi } from '@/lib/builder-sidebar-order-api'
+import {
+  BuilderSidebarOrderApiConflictError,
+  createLocalBuilderSidebarOrderApi,
+  type BuilderSidebarOrderApi,
+} from '@/lib/builder-sidebar-order-api'
 import {
   applySecureSessionProjectDefaults,
   approveSecureSshHostTrustRequest,
@@ -105,12 +109,11 @@ import {
   secureGrantMatchesSnapshot,
   shouldRefreshSecureRequestAfterError,
 } from './secure-batch-grant-reconciliation'
-import { LOCAL_ORIGIN_ID } from '@/lib/origin-store'
 import type { ManagerWsClient } from '@/lib/ws-client'
 import { buildModelCacheHeaderSummary } from '@/components/chat/model-cache'
 import { isPiGenerationThroughputEligible } from '@/lib/generation-throughput-eligibility'
 import { deriveMissingPendingChoiceIds } from '@/lib/ws-client/utils'
-import { useLocalConnection } from '@/hooks/index-page/use-local-connection'
+import { useEnvironmentConnection } from '@/hooks/index-page/use-environment-connection'
 import { useManagerActions } from '@/hooks/index-page/use-manager-actions'
 import { useActiveAgent } from '@/hooks/index-page/use-active-agent'
 import { useWorkspacePanels } from '@/hooks/index-page/use-workspace-panels'
@@ -130,8 +133,10 @@ import { useDynamicFavicon } from '@/hooks/use-dynamic-favicon'
 import { useTerminalPanel } from '@/hooks/useTerminalPanel'
 import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import { useEnvironmentNavigation } from '@/components/chat/agent-sidebar/hooks/useEnvironmentNavigation'
-import { EnvironmentSessionView, LaunchSessionWorkspace } from '@/components/index-page/EnvironmentSessionWorkspace'
+import { EnvironmentSessionStrip, EnvironmentSessionView, LaunchSessionWorkspace } from '@/components/index-page/EnvironmentSessionWorkspace'
 import type { SessionRef } from '@forge/protocol/environment-v2'
+import { qualifiedKey } from '@forge/client-runtime'
+import { useRevokedDraftPurge } from '@/hooks/use-revoked-draft-purge'
 import {
   type AgentDescriptor,
   type ProjectAgentExternalDirectoryEntry,
@@ -155,10 +160,6 @@ export function BuilderSurface({
   activeView,
   navigateToRoute,
 }: BuilderSurfaceProps) {
-  const builderSidebarOrderApi = useMemo(
-    () => createLocalBuilderSidebarOrderApi(wsUrl),
-    [wsUrl],
-  )
   const [showConversationThroughput] = useConversationThroughputDisplayPreference()
 
 
@@ -201,7 +202,29 @@ export function BuilderSurface({
     }
   }, [])
 
-  const { client: localClient, clientRef, httpClientRef, state, setState } = useLocalConnection(wsUrl)
+  // ── Environment addressing ──
+  // The chat workspace and every project panel address the routed session's own environment. The
+  // sidebar tree, project actions and app-wide views stay on the primary environment. An unknown
+  // environment is never opened against another host.
+  const environmentContext = useOptionalEnvironmentContext()
+  const primaryEnvironmentId = environmentContext?.primaryEnvironmentId || null
+  const routedEnvironmentId = routeState.view === 'chat' ? routeState.environmentId : undefined
+  const selectedEnvironmentId = routedEnvironmentId ?? primaryEnvironmentId
+  const { client: localClient, clientRef, httpClientRef, state, setState } = useEnvironmentConnection(selectedEnvironmentId)
+  const primary = useEnvironmentConnection(primaryEnvironmentId)
+  const environmentClient = localClient.getEnvironmentClient() ?? null
+  useRevokedDraftPurge()
+  const isPrimarySelected = selectedEnvironmentId === primaryEnvironmentId
+  const builderSidebarOrderApi = useMemo(
+    () => withPrimaryOrderOrigin(createLocalBuilderSidebarOrderApi(wsUrl), primaryEnvironmentId),
+    [primaryEnvironmentId, wsUrl],
+  )
+  // Primary routes keep their environment-free URLs.
+  const navigateToBuilderRoute = useCallback((next: AppRouteState, replace?: boolean) => {
+    navigateToRoute(next.view === 'chat' && next.environmentId === primaryEnvironmentId
+      ? { ...next, environmentId: undefined }
+      : next, replace)
+  }, [navigateToRoute, primaryEnvironmentId])
   const handleBrowserRuntimeTabStateChanged = useCallback((tab: Parameters<typeof projectRuntimeBrowserTabState>[1]) => {
     setState((previous) => projectRuntimeBrowserTabState(previous, tab))
   }, [setState])
@@ -256,28 +279,23 @@ export function BuilderSurface({
   // ── Environment-qualified routes ──
   // A session on another environment, or a launch draft, is rendered from the environment runtime.
   // The local route→subscription sync must not see its session ID, so it is never opened locally.
-  const environmentContext = useOptionalEnvironmentContext()
-  const primaryEnvironmentId = environmentContext?.primaryEnvironmentId ?? null
-  const routedEnvironmentId = routeState.view === 'chat' ? routeState.environmentId : undefined
   const routedSessionId = routeState.view === 'chat' ? routeState.agentId : undefined
   const environmentSession = useMemo<SessionRef | null>(
-    () => routedEnvironmentId && routedSessionId && routedEnvironmentId !== primaryEnvironmentId
+    () => routedEnvironmentId && routedSessionId && !isPrimarySelected
       ? { environmentId: routedEnvironmentId, sessionId: routedSessionId }
       : null,
-    [primaryEnvironmentId, routedEnvironmentId, routedSessionId],
+    [isPrimarySelected, routedEnvironmentId, routedSessionId],
   )
   const launchGroupKey = routeState.view === 'chat' && environmentContext ? routeState.launch ?? null : null
-  const isEnvironmentView = environmentSession !== null || launchGroupKey !== null
+  const isUnknownEnvironment = routedEnvironmentId !== undefined && !environmentClient
   const localRouteState = useMemo<AppRouteState>(
-    // Any non-chat view leaves the current local subscription untouched.
-    () => (isEnvironmentView ? { view: 'archive' } : routeState),
-    [isEnvironmentView, routeState],
+    // A launch draft or unknown environment leaves the current subscription untouched.
+    () => (launchGroupKey !== null || isUnknownEnvironment ? { view: 'archive' } : routeState),
+    [isUnknownEnvironment, launchGroupKey, routeState],
   )
   const handleSelectEnvironmentSession = useCallback((session: SessionRef) => {
-    navigateToRoute(session.environmentId === primaryEnvironmentId
-      ? { view: 'chat', agentId: session.sessionId }
-      : { view: 'chat', agentId: session.sessionId, environmentId: session.environmentId })
-  }, [navigateToRoute, primaryEnvironmentId])
+    navigateToBuilderRoute({ view: 'chat', agentId: session.sessionId, environmentId: session.environmentId })
+  }, [navigateToBuilderRoute])
   const handleNewEnvironmentSession = useCallback((groupKey: string) => {
     navigateToRoute({ view: 'chat', agentId: DEFAULT_MANAGER_AGENT_ID, launch: groupKey })
   }, [navigateToRoute])
@@ -302,7 +320,7 @@ export function BuilderSurface({
   } = useActiveAgent({
     state,
     routeState: localRouteState,
-    navigateToRoute,
+    navigateToRoute: navigateToBuilderRoute,
     clientRef,
     fileEditorCoordinatorRef,
     previousAgentsByIdRef,
@@ -523,10 +541,11 @@ export function BuilderSurface({
   const secureOutputQuarantineUi = useMemo(
     () => resolveSecureOutputQuarantineUi({
       snapshot: secureSessionSnapshotView,
-      originId: LOCAL_ORIGIN_ID,
+      originId: selectedEnvironmentId ?? '',
       acknowledgedKey: acknowledgedSecureOutputQuarantineKey,
     }),
     [
+      selectedEnvironmentId,
       acknowledgedSecureOutputQuarantineKey,
       secureSessionSnapshotView,
     ],
@@ -594,8 +613,9 @@ export function BuilderSurface({
 
   useEffect(() => {
     if (!state.connected || !activeProjectId) return
-    void activateRemoteUpdateAwarenessProject(wsUrl, activeProjectId).catch(() => undefined)
-  }, [activeProjectId, wsUrl, state.connected])
+    if (!environmentClient) return
+    void activateRemoteUpdateAwarenessProject(environmentClient.features.settings, activeProjectId).catch(() => undefined)
+  }, [activeProjectId, environmentClient, state.connected])
 
   useEffect(() => {
     if (!state.connected || !shouldLoadExternalProjectAgentDirectory({
@@ -645,7 +665,7 @@ export function BuilderSurface({
   )
 
   const terminalPanel = useTerminalPanel({
-    wsUrl,
+    environmentClient,
     sessionAgentId: terminalSessionAgentId,
     sessionCwd: activeManagerAgent?.cwd ?? activeAgent?.cwd ?? null,
     terminals: state.terminals,
@@ -667,7 +687,7 @@ export function BuilderSurface({
 
   // ── Workspace panels (file browser / diff viewer / artifacts / activity rail) ──
   const panels = useWorkspacePanels({
-    wsUrl,
+    environmentClient,
     activeAgentId,
     activeAgent,
     activeManagerAgent,
@@ -675,10 +695,9 @@ export function BuilderSurface({
     terminalPanel,
     terminalCount: state.terminals.length,
     browserTabCount: countOpenBrowserTabs(browserSessionSnapshot),
-    activeContextKey: `${LOCAL_ORIGIN_ID}:${activeProjectId ?? 'none'}:${activeAgentId ?? 'none'}`,
     clientRef,
     messageInputRef,
-    navigateToRoute,
+    navigateToRoute: navigateToBuilderRoute,
   })
 
   // Keep the shell-level coordinator ref current for the active-agent route-sync
@@ -794,9 +813,9 @@ export function BuilderSurface({
   )
 
   useEffect(() => {
-    if (!workerFetchManagerId || workerMetadataHydrated) return
-    hydrateSessionWorkers(LOCAL_ORIGIN_ID, workerFetchManagerId)
-  }, [workerFetchManagerId, workerMetadataHydrated, activeManagerWorkerCount])
+    if (!selectedEnvironmentId || !workerFetchManagerId || workerMetadataHydrated) return
+    hydrateSessionWorkers(selectedEnvironmentId, workerFetchManagerId)
+  }, [selectedEnvironmentId, workerFetchManagerId, workerMetadataHydrated, activeManagerWorkerCount])
 
   // Resolve parent manager label for the worker back-bar
   const parentManagerLabel = useMemo(() => {
@@ -874,9 +893,10 @@ export function BuilderSurface({
   }, [activeAgentId, state.statuses])
 
   const hasCreatedProjectManager = useMemo(() => state.agents.some((agent) => agent.role === 'manager'), [state.agents])
-  const localActiveAgentId = activeAgentId
+  // Sidebar actions act on the primary environment's own sessions.
+  const localActiveAgentId = isPrimarySelected ? activeAgentId : null
   const localActiveAgent = localActiveAgentId
-    ? state.agents.find((agent) => agent.agentId === localActiveAgentId) ?? null
+    ? primary.state.agents.find((agent) => agent.agentId === localActiveAgentId) ?? null
     : null
   const localIsActiveManager = Boolean(localActiveAgent && localActiveAgent.role === 'manager')
 
@@ -892,6 +912,19 @@ export function BuilderSurface({
   const { slashCommands } = useSlashCommands({ wsUrl, activeView })
   const builderSlashCommands = useMemo(() => [SIDE_SLASH_COMMAND, ...slashCommands], [slashCommands])
 
+  // Project creation and sidebar project actions address the primary environment.
+  const localSidebarManager = useManagerActions({
+    wsUrl,
+    environmentClient: primary.client.getEnvironmentClient() ?? null,
+    clientRef: primary.clientRef,
+    agents: primary.state.agents,
+    activeAgent: localActiveAgent,
+    activeAgentId: localActiveAgentId,
+    isActiveManager: localIsActiveManager,
+    navigateToRoute,
+    setState: primary.setState,
+    clearPendingResponseForAgent: transcript.clearPendingResponseForAgent,
+  })
   const {
     isCreateManagerDialogOpen,
     newManagerName,
@@ -929,6 +962,8 @@ export function BuilderSurface({
     handleBrowseRepositoryBasePath,
     handleCancelClone,
     isCancellingClone,
+  } = localSidebarManager
+  const {
     isCompactingManager,
     handleCompactManager,
     isSmartCompactingManager,
@@ -937,6 +972,7 @@ export function BuilderSurface({
     handleStopAllAgents,
   } = useManagerActions({
     wsUrl,
+    environmentClient,
     clientRef,
     agents: state.agents,
     activeAgent,
@@ -946,6 +982,7 @@ export function BuilderSurface({
     setState,
     clearPendingResponseForAgent: transcript.clearPendingResponseForAgent,
   })
+
 
   const sideChat = useSideChat({
     clientRef,
@@ -971,17 +1008,6 @@ export function BuilderSurface({
     startSideChat: sideChat.startSideChat,
     messageInputRef,
     messageListRef,
-  })
-  const localSidebarManager = useManagerActions({
-    wsUrl: wsUrl,
-    clientRef: clientRef,
-    agents: state.agents,
-    activeAgent: localActiveAgent,
-    activeAgentId: localActiveAgentId,
-    isActiveManager: localIsActiveManager,
-    navigateToRoute,
-    setState,
-    clearPendingResponseForAgent: transcript.clearPendingResponseForAgent,
   })
 
   const applySecureMutationResult = useCallback((
@@ -1616,7 +1642,7 @@ export function BuilderSurface({
   const secureSessionPicker = useMemo<SecureSessionPickerConfig | undefined>(() => {
     if (!activeAgentId || activeAgentProfile?.secureSessionsEnabled === false) return undefined
     const config: SecureSessionPickerConfig = {
-      originId: LOCAL_ORIGIN_ID,
+      originId: selectedEnvironmentId ?? '',
       availability: secureSessionAvailability,
       snapshot: secureSessionSnapshotView,
       ...(!isActiveManager ? { readOnly: true } : {}),
@@ -1648,6 +1674,7 @@ export function BuilderSurface({
     }
     return shouldShowSecureSessionPicker(config) ? config : undefined
   }, [
+    selectedEnvironmentId,
     activeAgentProfile?.secureSessionsEnabled,
     activeAgentId,
     lockedBitwardenProvider,
@@ -1672,7 +1699,7 @@ export function BuilderSurface({
   const secureSessionRequests = useMemo<SecureSessionRequestConfig | undefined>(() => {
     if (!activeAgentId) return undefined
     return {
-      originId: LOCAL_ORIGIN_ID,
+      originId: selectedEnvironmentId ?? '',
       ...(secureSessionSnapshotView
         ? { sessionAgentId: secureSessionSnapshotView.sessionAgentId }
         : {}),
@@ -1731,6 +1758,7 @@ export function BuilderSurface({
       ),
     }
   }, [
+    selectedEnvironmentId,
     activeAgentId,
     handleDenySecureRequest,
     handleDismissSecureSshTrustRequest,
@@ -1761,7 +1789,7 @@ export function BuilderSurface({
   const sessionModelPicker =
     isActiveManager && isSessionModelPickerEligible(activeAgent, activeAgentProfile)
       ? {
-          originId: LOCAL_ORIGIN_ID,
+          originId: selectedEnvironmentId ?? '',
           httpClientRef,
           sessionAgentId: activeAgent.agentId,
           sessionLabel: activeAgent.sessionLabel || activeAgent.displayName || activeAgent.agentId,
@@ -1780,7 +1808,7 @@ export function BuilderSurface({
     && true
     && isSessionModelPickerEligible(activeAgent, activeAgentProfile)
       ? {
-          originId: LOCAL_ORIGIN_ID,
+          originId: selectedEnvironmentId ?? '',
           httpClientRef,
           sessionAgentId: activeAgent.agentId,
           disabled: !state.connected,
@@ -1794,7 +1822,7 @@ export function BuilderSurface({
     && activeAgentProfile
     && isSessionModelPickerEligible(activeAgent, activeAgentProfile)
       ? {
-          originId: LOCAL_ORIGIN_ID,
+          originId: selectedEnvironmentId ?? '',
           httpClientRef,
           sessionAgentId: activeAgent.agentId,
           profileId: activeAgentProfile.profileId,
@@ -1813,15 +1841,15 @@ export function BuilderSurface({
       : undefined
 
   const localSidebarSession = useSessionActions({
-    clientRef: clientRef,
+    clientRef: primary.clientRef,
     fileEditorCoordinator: panels.fileEditorCoordinator,
-    state: state,
+    state: primary.state,
     activeAgent: localActiveAgent,
     activeAgentId: localActiveAgentId,
     isActiveManager: localIsActiveManager,
     isLoading,
     navigateToRoute,
-    setState,
+    setState: primary.setState,
     visibleMessages: transcript.visibleMessages,
     markPendingResponse: transcript.markPendingResponse,
     handleCompactManager: async () => {},
@@ -1832,7 +1860,7 @@ export function BuilderSurface({
   const { replyTarget, setReplyTarget, messageForkTarget, setMessageForkTarget } = session
   const sideChatPanelProps = {
     wsUrl,
-    originId: LOCAL_ORIGIN_ID,
+    environmentId: selectedEnvironmentId ?? '',
     sideChatAgentId: sideChat.sideChatAgentId,
     sourceLabel: activeAgentLabel,
     isExpanded: sideChat.isExpanded,
@@ -1937,8 +1965,8 @@ export function BuilderSurface({
   const showActivityRail = activeView === 'chat'
 
   const handleSelectSidebarAgent = useCallback((agentId: string) => {
-    panels.handleSelectAgent(agentId)
-  }, [panels])
+    panels.handleSelectAgent(agentId, primaryEnvironmentId ?? undefined)
+  }, [panels, primaryEnvironmentId])
 
   const feedbackProfileId = transcript.feedbackProfileId
 
@@ -1968,7 +1996,7 @@ export function BuilderSurface({
         connectionEpoch={state.connectionEpoch}
         builderSidebarOrderApi={builderSidebarOrderApi}
         activityRailItems={showActivityRail ? panels.activityRailItems : undefined}
-        selectedAgentId={isEnvironmentView ? null : activeAgentId}
+        selectedAgentId={isPrimarySelected && launchGroupKey === null ? activeAgentId : null}
         environmentNavigation={environmentNavigation}
         isSettingsActive={activeView === 'settings'}
         isStatsActive={activeView === 'stats'}
@@ -2033,7 +2061,7 @@ export function BuilderSurface({
 
           {activeView === 'chat' && !panels.isInlineDiffViewerOpen && panels.isArtifactsPanelOpen ? (
             <ArtifactsSidebar
-              wsUrl={wsUrl}
+              environmentClient={environmentClient}
               managerId={activeManagerId}
               artifacts={transcript.collectedArtifacts}
               isOpen={panels.isArtifactsPanelOpen}
@@ -2049,7 +2077,7 @@ export function BuilderSurface({
 
           {activeView === 'chat' && !panels.isInlineDiffViewerOpen && !panels.isArtifactsPanelOpen ? (
             <FileBrowserSidebar
-              wsUrl={wsUrl}
+              panel={panels.environmentPanels}
               agentId={activeAgentId}
               isOpen={panels.isFileBrowserOpen}
               onClose={panels.handleGuardedToggleFileBrowser}
@@ -2073,7 +2101,7 @@ export function BuilderSurface({
 
           {activeView === 'chat' && !panels.isInlineDiffViewerOpen && panels.isFileBrowserOpen && panels.selectedFileBrowserFile ? (
             <FileBrowserPanel
-              wsUrl={wsUrl}
+              panel={panels.environmentPanels}
               agentId={activeAgentId}
               filePath={panels.selectedFileBrowserFile}
               onClose={panels.handleGuardedFileBrowserClosePanel}
@@ -2103,7 +2131,7 @@ export function BuilderSurface({
               <div className="diff-viewer flex min-h-0 flex-1 flex-col overflow-hidden bg-background" aria-label="Source Control workspace">
                 <DiffViewerContent
                   active={panels.isInlineDiffViewerOpen}
-                  wsUrl={wsUrl}
+                  panel={panels.environmentPanels}
                   agentId={activeAgentId}
                   onClose={panels.handleCloseDiffViewer}
                   onBrowseWorktreeFiles={panels.handleBrowseWorktreeFromSourceControl}
@@ -2191,19 +2219,18 @@ export function BuilderSurface({
               />
             ) : launchGroupKey ? (
               <LaunchSessionWorkspace key={launchGroupKey} groupKey={launchGroupKey} onLaunched={handleSelectEnvironmentSession} />
-            ) : environmentSession ? (
-              environmentContext ? (
-                <EnvironmentSessionView
-                  session={environmentSession}
-                  onOpenEnvironmentSettings={() => navigateToRoute({ view: 'settings', settingsTab: 'environments' })}
-                />
-              ) : (
-                <p className="m-auto p-6 text-sm text-muted-foreground" data-testid="environment-empty-state">
-                  This link points to a session on another environment, which this client cannot open.
-                </p>
-              )
+            ) : isUnknownEnvironment ? (
+              <EnvironmentSessionView
+                onOpenEnvironmentSettings={() => navigateToRoute({ view: 'settings', settingsTab: 'environments' })}
+              />
             ) : (
+              <div
+                className="flex min-h-0 min-w-0 flex-1 flex-col"
+                data-testid={environmentSession ? 'environment-session' : undefined}
+                data-environment-id={selectedEnvironmentId ?? undefined}
+              >
               <ChatWorkspace
+                environmentStrip={environmentSession ? <EnvironmentSessionStrip session={environmentSession} /> : null}
                 pendingInputCount={state.connected && activeAgent?.model.provider === 'claude-native'
                   ? state.statuses[activeAgentId ?? '']?.pendingCount ?? 0 : 0}
                 managerToolActivity={
@@ -2215,7 +2242,7 @@ export function BuilderSurface({
                   connected: state.connected,
                   activeAgentId,
                   activeAgentLabel,
-                  wsUrl,
+                  environmentClient,
                   activeAgentProfileName,
                   activeAgentSessionLabel,
                   totalUnreadCount,
@@ -2322,7 +2349,7 @@ export function BuilderSurface({
                   messages: transcript.visibleMessages,
                   agents: state.agents,
                   isLoading,
-                  wsUrl,
+                  environmentClient,
                   activeAgentId,
                   projectAgent: activeAgent?.projectAgent,
                   onSuggestionClick: conversationActionsEnabled ? session.handleSuggestionClick : undefined,
@@ -2403,8 +2430,9 @@ export function BuilderSurface({
                       }
                     : undefined
                 }
+                environmentClient={environmentClient}
                 terminalPanelProps={{
-                  wsUrl,
+                  environmentClient,
                   sessionAgentId: terminalSessionAgentId,
                   terminals: state.terminals,
                   panelMode: terminalPanel.panelMode,
@@ -2414,7 +2442,6 @@ export function BuilderSurface({
                   maxTerminalsPerManager: terminalPanel.maxTerminalsPerManager,
                   editingTerminalId: terminalPanel.editingTerminalId,
                   renameDraft: terminalPanel.renameDraft,
-                  initialTickets: terminalPanel.initialTickets,
                   onSelectTerminal: terminalPanel.setActiveTerminalId,
                   onCreateTerminal: () => {
                     void terminalPanel.createTerminal()
@@ -2431,7 +2458,6 @@ export function BuilderSurface({
                   onPanelHeightChange: terminalPanel.setPanelHeight,
                   onFocusChatInput: session.handleFocusChatInput,
                   onAddToChat: session.handleTerminalAddToChat,
-                  issueTicket: terminalPanel.issueTicket,
                 }}
                 messageInputRef={messageInputRef}
                 messageInputProps={{
@@ -2445,7 +2471,9 @@ export function BuilderSurface({
                   allowWhileLoading: true,
                   agentLabel: activeAgentLabel,
                   wsUrl,
+                  environmentClient,
                   agentId: activeAgentId ?? undefined,
+                  draftKey: activeAgentId && selectedEnvironmentId ? qualifiedKey(selectedEnvironmentId, activeAgentId) : undefined,
                   slashCommands: isActiveManager ? builderSlashCommands : slashCommands,
                   projectAgents: projectAgentSuggestions,
                   enableCodexMention: shouldEnableCodexMention(activeAgent),
@@ -2458,6 +2486,7 @@ export function BuilderSurface({
                   secureSessionPicker,
                 }}
               />
+              </div>
             )}
             {activeView === 'chat' && !panels.isInlineDiffViewerOpen ? (
               <BrowserPreviewSurface hidden={panels.isBrowserOpen} onOpenManagedTab={handleOpenManagedPreviewTab} />
@@ -2474,7 +2503,7 @@ export function BuilderSurface({
           {activeView === 'chat' && !panels.isInlineDiffViewerOpen ? (
             <ChatSidePanels
               artifactsSidebarProps={{
-                wsUrl,
+                environmentClient,
                 managerId: activeManagerId,
                 artifacts: transcript.collectedArtifacts,
                 isOpen: panels.isArtifactsPanelOpen,
@@ -2488,7 +2517,7 @@ export function BuilderSurface({
               fileBrowserPanelProps={
                 panels.isFileBrowserOpen && panels.selectedFileBrowserFile
                   ? {
-                      wsUrl,
+                      panel: panels.environmentPanels,
                       agentId: activeAgentId,
                       filePath: panels.selectedFileBrowserFile,
                       onClose: panels.handleGuardedFileBrowserClosePanel,
@@ -2508,7 +2537,7 @@ export function BuilderSurface({
                   : null
               }
               fileBrowserSidebarProps={{
-                wsUrl,
+                panel: panels.environmentPanels,
                 agentId: activeAgentId,
                 isOpen: panels.isFileBrowserOpen,
                 onClose: panels.handleGuardedToggleFileBrowser,
@@ -2535,15 +2564,14 @@ export function BuilderSurface({
         postUpdateSource={wsUrl}
         artifactPanelProps={{
           artifact: panels.activeArtifact,
-          wsUrl,
+          environmentClient,
           activeAgentId,
           onClose: panels.handleGuardedArtifactDialogClose,
           onArtifactClick: panels.handleOpenArtifact,
         }}
         createManagerDialogProps={{
           open: isCreateManagerDialogOpen,
-          wsUrl,
-          originId: LOCAL_ORIGIN_ID,
+          originId: primaryEnvironmentId ?? '',
           modelConfigChangeKey: state.modelConfigChangeKey,
           connectionEpoch: state.connectionEpoch,
           isCreatingManager,
@@ -2613,7 +2641,7 @@ export function BuilderSurface({
         diffViewerDialogProps={{
           open: panels.isDiffViewerOpen && panels.diffViewerPresentation === 'modal',
           onOpenChange: panels.handleGuardedDiffViewerOpenChange,
-          wsUrl,
+          panel: panels.environmentPanels,
           agentId: activeAgentId,
           onBrowseWorktreeFiles: panels.handleBrowseWorktreeFromSourceControl,
           onRequestSourceControlMutation: panels.handleRequestSourceControlMutation,
@@ -2637,4 +2665,25 @@ export function BuilderSurface({
       ) : null}
     </WorkGraphWorkerHighlightProvider>
   )
+}
+
+/** Orders saved before environment identity used the reserved `local` origin; read them as the primary. */
+function withPrimaryOrderOrigin(api: BuilderSidebarOrderApi, primaryEnvironmentId: string | null): BuilderSidebarOrderApi {
+  if (!primaryEnvironmentId) return api
+  const migrate = <T extends Awaited<ReturnType<BuilderSidebarOrderApi['get']>>>(state: T): T => ({
+    ...state,
+    order: state.order.map((ref) => (ref.originId === 'local' ? { ...ref, originId: primaryEnvironmentId } : ref)),
+  })
+  return {
+    get: async () => migrate(await api.get()),
+    put: async (request) => {
+      try {
+        return migrate(await api.put(request))
+      } catch (error) {
+        throw error instanceof BuilderSidebarOrderApiConflictError
+          ? new BuilderSidebarOrderApiConflictError(migrate(error.current))
+          : error
+      }
+    },
+  }
 }

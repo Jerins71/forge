@@ -1,4 +1,5 @@
 import type { GitBranchSummary, RemoteUpdateAwarenessProjectSnapshot } from '@forge/protocol'
+import type { EnvironmentPanels } from '@/lib/environment-panel-context'
 import { ArrowDown, ArrowUp, ChevronDown, GitBranch, Plus, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -35,7 +36,7 @@ type PendingMutation =
   | { kind: 'push' }
 
 interface SourceControlBranchActionsProps {
-  wsUrl: string
+  panel: EnvironmentPanels | null
   agentId: string | null
   worktreeId?: string | null
   selectedWorktreePath?: string | null
@@ -53,7 +54,7 @@ interface SourceControlBranchActionsProps {
 }
 
 export function SourceControlBranchActions({
-  wsUrl,
+  panel,
   agentId,
   worktreeId,
   selectedWorktreePath,
@@ -136,7 +137,7 @@ export function SourceControlBranchActions({
   }, [aheadBehind.ahead, aheadBehind.behind, branchData?.remotes, currentBranch, hasUpstream])
 
   useEffect(() => {
-    if (!pendingMutation || !agentId) {
+    if (!panel || !pendingMutation || !agentId) {
       setPreflightWarnings([])
       setPreflightBlockedReasons([])
       return
@@ -152,7 +153,7 @@ export function SourceControlBranchActions({
             : 'pull-ff-only'
 
     let cancelled = false
-    void fetchMutationPreflight(wsUrl, {
+    void fetchMutationPreflight(panel, {
       agentId,
       repoTarget,
       worktreeId: worktreeId ?? undefined,
@@ -192,13 +193,13 @@ export function SourceControlBranchActions({
     return () => {
       cancelled = true
     }
-  }, [agentId, pendingMutation, worktreeId, wsUrl])
+  }, [agentId, pendingMutation, worktreeId, panel])
 
   const invalidateAfterMutation = useCallback(() => {
-    invalidateGitCaches({ agentId, repoTarget })
+    invalidateGitCaches({ environmentId: panel?.session.environmentId, agentId, repoTarget })
     invalidateFileBrowserCaches()
     onMutationComplete()
-  }, [agentId, onMutationComplete])
+  }, [agentId, onMutationComplete, panel?.session.environmentId])
 
   const autoFetchKey = useMemo(() => {
     if (!agentId) {
@@ -214,7 +215,7 @@ export function SourceControlBranchActions({
 
   const handleFetch = useCallback(async (options?: { source?: 'manual' | 'auto' }) => {
     const source = options?.source ?? 'manual'
-    if (!agentId || !branchData?.currentHead || !branchData.statusHash) {
+    if (!panel || !agentId || !branchData?.currentHead || !branchData.statusHash) {
       return
     }
 
@@ -225,7 +226,7 @@ export function SourceControlBranchActions({
     }
 
     try {
-      const result = await fetchGitOrigin(wsUrl, {
+      const result = await fetchGitOrigin(panel, {
         agentId,
         repoTarget,
         worktreeId: worktreeId ?? undefined,
@@ -266,7 +267,7 @@ export function SourceControlBranchActions({
         setFetchState('idle')
       }
     }
-  }, [agentId, autoFetchKey, branchData, invalidateAfterMutation, worktreeId, wsUrl])
+  }, [agentId, autoFetchKey, branchData, invalidateAfterMutation, worktreeId, panel])
 
   useEffect(() => {
     if (!sourceControlActive || !autoFetchKey || !branchData) {
@@ -341,7 +342,7 @@ export function SourceControlBranchActions({
   }, [createFromRemote, newBranchName, requestMutationGuard])
 
   const confirmMutation = useCallback(async () => {
-    if (!pendingMutation || !agentId || !branchData?.currentHead || !branchData.statusHash) {
+    if (!panel || !pendingMutation || !agentId || !branchData?.currentHead || !branchData.statusHash) {
       return
     }
 
@@ -365,23 +366,23 @@ export function SourceControlBranchActions({
         | Awaited<ReturnType<typeof pushGitUpstream>>
 
       if (pendingMutation.kind === 'switch') {
-        result = await switchGitBranch(wsUrl, {
+        result = await switchGitBranch(panel, {
           ...baseRequest,
           branch: pendingMutation.branch,
         })
       } else if (pendingMutation.kind === 'create') {
-        result = await createGitBranch(wsUrl, {
+        result = await createGitBranch(panel, {
           ...baseRequest,
           branch: pendingMutation.branch,
           startPoint: pendingMutation.startPoint,
         })
       } else if (pendingMutation.kind === 'push') {
-        result = await pushGitUpstream(wsUrl, {
+        result = await pushGitUpstream(panel, {
           ...baseRequest,
           remote: 'origin',
         })
       } else {
-        result = await pullGitFfOnly(wsUrl, {
+        result = await pullGitFfOnly(panel, {
           ...baseRequest,
           remote: 'origin',
         })
@@ -407,7 +408,7 @@ export function SourceControlBranchActions({
       invalidateAfterMutation()
 
       if (completedPull) {
-        void dismissVisibleRemoteUpdateBanner(wsUrl, bannerToDismiss)
+        void dismissVisibleRemoteUpdateBanner(panel.features.settings, bannerToDismiss)
           .then((dismissed) => {
             if (dismissed) {
               onRemoteUpdateSnapshotChange?.(dismissed.snapshot, dismissed.expectedTarget)
@@ -430,7 +431,7 @@ export function SourceControlBranchActions({
     pendingMutation,
     remoteUpdateSnapshot,
     worktreeId,
-    wsUrl,
+    panel,
   ])
 
   const pendingDialog = useMemo(() => {

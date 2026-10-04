@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { EnvironmentClient } from '@forge/client-runtime'
 import { ChevronDown, ChevronRight, File, FileText, ImageIcon, TerminalSquare, ZoomIn } from 'lucide-react'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
 import { cn } from '@/lib/utils'
 import { usePeekPreview } from '@/hooks/use-peek-preview'
 import { ContentZoomDialog } from '../ContentZoomDialog'
@@ -56,22 +56,48 @@ function isImageFileAttachment(attachment: ConversationMessageAttachment): boole
   return attachment.type !== 'text' && attachment.type !== 'binary' && attachment.mimeType.startsWith('image/')
 }
 
+/** Stored attachments load as authenticated Blob URLs from the session's environment. */
+function useStoredAttachmentUrls(
+  environmentClient: EnvironmentClient | null,
+  attachments: PreviewableMessageImageAttachment[],
+): ReadonlyMap<string, string> {
+  const fileRefsKey = attachments
+    .flatMap((attachment) => (!isInlineImageAttachment(attachment) && hasAttachmentFileRef(attachment) ? [attachment.fileRef] : []))
+    .join('\u0000')
+  const [urls, setUrls] = useState<ReadonlyMap<string, string>>(() => new Map())
+  useEffect(() => {
+    setUrls(new Map())
+    const fileRefs = fileRefsKey ? fileRefsKey.split('\u0000') : []
+    if (!environmentClient || fileRefs.length === 0) return
+    const controller = new AbortController()
+    const releases: Array<() => void> = []
+    for (const fileRef of fileRefs) {
+      void environmentClient.features.sessions.attachmentUrl(fileRef, controller.signal).then(
+        (asset) => {
+          if (controller.signal.aborted) return asset.release()
+          releases.push(asset.release)
+          setUrls((previous) => new Map(previous).set(fileRef, asset.url))
+        },
+        () => {},
+      )
+    }
+    return () => {
+      controller.abort()
+      for (const release of releases) release()
+    }
+  }, [environmentClient, fileRefsKey])
+  return urls
+}
+
 function resolveMessageImageSrc(
   attachment: PreviewableMessageImageAttachment,
-  wsUrl?: string,
+  storedUrls: ReadonlyMap<string, string>,
 ): string | null {
   if (isInlineImageAttachment(attachment)) {
     return `data:${attachment.mimeType};base64,${attachment.data}`
   }
 
-  if (hasAttachmentFileRef(attachment)) {
-    return resolveApiEndpoint(
-      wsUrl,
-      `/api/attachments/${encodeURIComponent(attachment.fileRef)}`,
-    )
-  }
-
-  return null
+  return hasAttachmentFileRef(attachment) ? storedUrls.get(attachment.fileRef) ?? null : null
 }
 
 function fileAttachmentSubtitle(attachment: ConversationMessageAttachment): string {
@@ -101,13 +127,14 @@ function attachmentIcon(attachment: ConversationMessageAttachment) {
 function MessageImageAttachments({
   attachments,
   isUser,
-  wsUrl,
+  environmentClient,
 }: {
   attachments: PreviewableMessageImageAttachment[]
   isUser: boolean
-  wsUrl?: string
+  environmentClient: EnvironmentClient | null
 }) {
   const { target: zoomTarget, clearTarget, bind } = usePeekPreview<{ src: string; alt: string }>()
+  const storedUrls = useStoredAttachmentUrls(environmentClient, attachments)
 
   if (attachments.length === 0) {
     return null
@@ -117,7 +144,7 @@ function MessageImageAttachments({
     <>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {attachments.map((attachment, index) => {
-          const src = resolveMessageImageSrc(attachment, wsUrl)
+          const src = resolveMessageImageSrc(attachment, storedUrls)
           if (!src) {
             return null
           }
@@ -138,7 +165,6 @@ function MessageImageAttachments({
               aria-label={`View full size: ${altText}`}
             >
               <img
-                crossOrigin="use-credentials"
                 src={src}
                 alt={altText}
                 className={cn(
@@ -174,7 +200,6 @@ function MessageImageAttachments({
       >
         {zoomTarget ? (
           <img
-            crossOrigin="use-credentials"
             src={zoomTarget.src}
             alt={zoomTarget.alt}
             className="h-auto max-h-full w-auto max-w-full rounded-md"
@@ -353,11 +378,11 @@ function MessageFileAttachments({
 export function MessageAttachments({
   attachments,
   isUser,
-  wsUrl,
+  environmentClient = null,
 }: {
   attachments: ConversationMessageAttachment[]
   isUser: boolean
-  wsUrl?: string
+  environmentClient?: EnvironmentClient | null
 }) {
   const imageAttachments = attachments.filter(isMessageImageAttachment)
   const fileAttachments = attachments.filter((attachment) => !isMessageImageAttachment(attachment))
@@ -368,7 +393,7 @@ export function MessageAttachments({
 
   return (
     <>
-      <MessageImageAttachments attachments={imageAttachments} isUser={isUser} wsUrl={wsUrl} />
+      <MessageImageAttachments attachments={imageAttachments} isUser={isUser} environmentClient={environmentClient} />
       <MessageFileAttachments attachments={fileAttachments} isUser={isUser} />
     </>
   )

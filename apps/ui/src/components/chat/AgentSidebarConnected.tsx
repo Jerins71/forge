@@ -32,10 +32,10 @@ import {
 } from '@/lib/agent-hierarchy'
 import { useSidebarLayout } from './agent-sidebar/hooks'
 import {
-  LOCAL_ORIGIN_ID,
   useAllOrigins,
   useOriginSlice,
 } from '@/lib/origin-store'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import type { ManagerWsState } from '@/lib/ws-state'
 import {
   BuilderSidebarOrderApiUnavailableError,
@@ -185,34 +185,36 @@ export const AgentSidebarConnected = memo(function AgentSidebarConnected({
   const rest = useStableHandlers(props)
   const sidebarLayout = useSidebarLayout()
   const roomsV2 = sidebarLayout === 'rooms-v2'
+  // The project tree is the primary environment's; other environments render as logical groups.
+  const primaryOriginId = useOptionalEnvironmentContext()?.primaryEnvironmentId ?? ''
   const originStructures = useAllOrigins(selectSidebarStructure, {
     selectorKey: 'sidebar.structure',
     equalityFn: equalSidebarStructure,
   })
-  const localStructure = originStructures.find((entry) => entry.originId === LOCAL_ORIGIN_ID)?.value
+  const localStructure = originStructures.find((entry) => entry.originId === primaryOriginId)?.value
     ?? EMPTY_STRUCTURE
   const { profiles, connected } = localStructure
   // Local actions still receive live descriptors; the cross-origin tree model
   // below is held stable when only volatile worker status/count fields change.
-  const agents = useOriginSlice(LOCAL_ORIGIN_ID, selectAgents, { selectorKey: 'sidebar.agents' })
-  const statuses = useOriginSlice(LOCAL_ORIGIN_ID, selectStatuses, {
+  const agents = useOriginSlice(primaryOriginId, selectAgents, { selectorKey: 'sidebar.agents' })
+  const statuses = useOriginSlice(primaryOriginId, selectStatuses, {
     selectorKey: 'sidebar.statuses',
     equalityFn: equalSidebarStatuses,
   })
-  const unreadCounts = useOriginSlice(LOCAL_ORIGIN_ID, selectUnreadCounts, {
+  const unreadCounts = useOriginSlice(primaryOriginId, selectUnreadCounts, {
     selectorKey: 'sidebar.unreadCounts',
   })
-  const terminalScopeId = useOriginSlice(LOCAL_ORIGIN_ID, selectTerminalScopeId, {
+  const terminalScopeId = useOriginSlice(primaryOriginId, selectTerminalScopeId, {
     selectorKey: 'sidebar.terminalScopeId',
   })
-  const terminalCount = useOriginSlice(LOCAL_ORIGIN_ID, selectTerminalCount, {
+  const terminalCount = useOriginSlice(primaryOriginId, selectTerminalCount, {
     selectorKey: 'sidebar.terminalCount',
   })
-  const connectionEpoch = useOriginSlice(LOCAL_ORIGIN_ID, selectConnectionEpoch, {
+  const connectionEpoch = useOriginSlice(primaryOriginId, selectConnectionEpoch, {
     selectorKey: 'sidebar.connectionEpoch',
   })
   const invalidatedRevision = useOriginSlice(
-    LOCAL_ORIGIN_ID,
+    primaryOriginId,
     selectBuilderSidebarOrderRevision,
     { selectorKey: 'sidebar.builderSidebarOrderRevision' },
   )
@@ -224,7 +226,7 @@ export const AgentSidebarConnected = memo(function AgentSidebarConnected({
     treeRows: buildProfileTreeRows(entry.value.agents, entry.value.profiles),
   })), [originStructures])
   const structuralLocalTreeRows = originTreeModels.find(
-    (entry) => entry.originId === LOCAL_ORIGIN_ID,
+    (entry) => entry.originId === primaryOriginId,
   )?.treeRows ?? EMPTY_TREE_ROWS
   // Overlay local volatile descriptor changes for local badges/status fallbacks
   // without feeding those identities back into structural discovery.
@@ -235,8 +237,8 @@ export const AgentSidebarConnected = memo(function AgentSidebarConnected({
   const discoveredOrder = useMemo<BuilderSidebarOrderRef[]>(() => (
     structuralLocalTreeRows
       .filter(isOrderableLocalRow)
-      .map((row) => ({ originId: LOCAL_ORIGIN_ID, profileId: row.profile.profileId }))
-  ), [structuralLocalTreeRows])
+      .map((row) => ({ originId: primaryOriginId, profileId: row.profile.profileId }))
+  ), [primaryOriginId, structuralLocalTreeRows])
 
   const structuralOrderKey = useMemo(
     () => JSON.stringify(discoveredOrder.map(builderSidebarOrderKey)),

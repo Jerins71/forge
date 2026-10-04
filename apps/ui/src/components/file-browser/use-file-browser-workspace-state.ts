@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useState } from 'react'
 import type { FileBrowserWorktreeSelection } from '@/hooks/index-page/use-panel-state'
 import { doesDeleteAffectFile } from './file-browser-utils'
-import type { FileEditorSessionKey } from './use-file-editor-coordinator'
+import { fileEditorKeyId, type FileEditorSessionKey } from './use-file-editor-coordinator'
 
 export interface FileBrowserScopeKey {
+  environmentId: string
   agentId: string
   worktreeId: string | null
 }
@@ -40,17 +41,13 @@ interface FileBrowserScopeState {
 }
 
 function scopeId(scope: FileBrowserScopeKey): string {
-  return `${scope.agentId}\u0000${scope.worktreeId ?? ''}`
-}
-
-export function fileBrowserTabId(key: FileEditorSessionKey): string {
-  return `${key.agentId}\u0000${key.worktreeId ?? ''}\u0000${key.filePath}`
+  return JSON.stringify([scope.environmentId, scope.agentId, scope.worktreeId ?? ''])
 }
 
 function createTab(scope: FileBrowserScopeKey, filePath: string, sticky: boolean): FileBrowserTab {
-  const key = { agentId: scope.agentId, worktreeId: scope.worktreeId, filePath }
+  const key = { ...scope, filePath }
   return {
-    id: fileBrowserTabId(key),
+    id: fileEditorKeyId(key),
     key,
     filePath,
     sticky,
@@ -89,17 +86,19 @@ function renamedFilePath(path: string, newPath: string, entryType: 'file' | 'dir
 }
 
 export function useFileBrowserWorkspaceState({
+  activeEnvironmentId,
   activeAgentId,
   worktreeContext,
 }: {
+  activeEnvironmentId: string | null
   activeAgentId: string | null
   worktreeContext: FileBrowserWorktreeSelection | null
 }) {
   const [scopes, setScopes] = useState<Record<string, FileBrowserScopeState>>({})
   const activeScope = useMemo<FileBrowserScopeKey | null>(() => {
-    if (!activeAgentId) return null
-    return { agentId: activeAgentId, worktreeId: worktreeContext?.worktreeId ?? null }
-  }, [activeAgentId, worktreeContext?.worktreeId])
+    if (!activeEnvironmentId || !activeAgentId) return null
+    return { environmentId: activeEnvironmentId, agentId: activeAgentId, worktreeId: worktreeContext?.worktreeId ?? null }
+  }, [activeEnvironmentId, activeAgentId, worktreeContext?.worktreeId])
   const activeScopeId = activeScope ? scopeId(activeScope) : null
   const activeState = activeScopeId ? (scopes[activeScopeId] ?? emptyScopeState()) : emptyScopeState()
   const activeTab = activeState.tabs.find((tab) => tab.id === activeState.activeTabId) ?? null

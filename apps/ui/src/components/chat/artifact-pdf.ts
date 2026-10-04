@@ -1,5 +1,4 @@
 import { CHAT_ARTIFACT_MAX_PDF_BYTES } from '@forge/protocol'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
 import { isPdfFile } from '@/components/file-browser/file-browser-utils'
 
 export const ARTIFACT_PDF_FILE_PATTERN = /\.pdf$/i
@@ -19,7 +18,8 @@ export interface ArtifactPdfTicketFile {
   ticket?: { url: string; expiresAt: string }
 }
 
-export function resolveSafeArtifactPdfTicketUrl(wsUrl: string, file: ArtifactPdfTicketFile): string {
+/** Validates a PDF ticket response; the runtime fetches the ticket path from the same environment. */
+export function resolveSafeArtifactPdfTicketUrl(file: ArtifactPdfTicketFile): string {
   const contentType = file.contentType?.trim().toLowerCase()
   const expiresAt = file.ticket ? Date.parse(file.ticket.expiresAt) : Number.NaN
   if (
@@ -35,49 +35,5 @@ export function resolveSafeArtifactPdfTicketUrl(wsUrl: string, file: ArtifactPdf
   ) {
     throw new Error('Invalid PDF ticket response.')
   }
-
-  const endpoint = new URL(resolveApiEndpoint(wsUrl, '/api/chat-artifacts/read'), window.location.href)
-  const ticket = new URL(file.ticket.url, endpoint)
-  if (
-    ticket.origin !== endpoint.origin
-    || !/^https?:$/.test(ticket.protocol)
-    || !/^\/api\/chat-artifacts\/tickets\/[A-Za-z0-9_-]{16,128}$/.test(ticket.pathname)
-    || ticket.username
-    || ticket.password
-    || ticket.search
-    || ticket.hash
-  ) {
-    throw new Error('Invalid PDF ticket response.')
-  }
-
-  return ticket.toString()
-}
-
-export async function createArtifactPdfBlobUrl(ticketUrl: string, signal?: AbortSignal): Promise<string> {
-  const response = await fetch(ticketUrl, {
-    method: 'GET',
-    credentials: 'include',
-    signal,
-  })
-  if (!response.ok) {
-    throw new Error('Unable to load PDF preview.')
-  }
-
-  const contentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase()
-  if (contentType !== 'application/pdf') {
-    throw new Error('Invalid PDF ticket response.')
-  }
-
-  const bytes = await response.arrayBuffer()
-  if (bytes.byteLength > CHAT_ARTIFACT_MAX_PDF_BYTES) {
-    throw new Error('This PDF is too large to preview.')
-  }
-
-  return URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
-}
-
-export function revokeArtifactPdfBlobUrl(url: string | null | undefined): void {
-  if (url?.startsWith('blob:')) {
-    URL.revokeObjectURL(url)
-  }
+  return file.ticket.url
 }

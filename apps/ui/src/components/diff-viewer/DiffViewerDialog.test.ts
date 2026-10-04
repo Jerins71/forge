@@ -160,7 +160,7 @@ const {
 
 vi.mock('./use-diff-queries', () => ({
   useGitStatus: (
-    _wsUrl: string,
+    _panel: unknown,
     agentId: string | null,
     repoTarget: 'workspace',
     worktreeId?: string | null,
@@ -174,7 +174,7 @@ vi.mock('./use-diff-queries', () => ({
     }
   },
   useGitBranches: (
-    _wsUrl: string,
+    _panel: unknown,
     agentId: string | null,
     repoTarget: 'workspace',
     worktreeId?: string | null,
@@ -199,7 +199,7 @@ vi.mock('./use-diff-queries', () => ({
     }
   },
   useGitWorktrees: (
-    _wsUrl: string,
+    _panel: unknown,
     agentId: string | null,
     repoTarget: 'workspace',
     options?: { enabled?: boolean },
@@ -232,7 +232,7 @@ vi.mock('./use-diff-queries', () => ({
       refetch: vi.fn(() => hookCalls.refetches.push(`worktrees:${repoTarget}`)),
     }
   },
-  useGitDiff: (_wsUrl: string, agentId: string | null, repoTarget: 'workspace', file: string | null) => {
+  useGitDiff: (_panel: unknown, agentId: string | null, repoTarget: 'workspace', file: string | null) => {
     hookCalls.diff.push({ agentId, repoTarget, file })
     return {
       data: file
@@ -247,7 +247,7 @@ vi.mock('./use-diff-queries', () => ({
     }
   },
   useGitLog: (
-    _wsUrl: string,
+    _panel: unknown,
     agentId: string | null,
     repoTarget: 'workspace',
     limit: number,
@@ -267,7 +267,7 @@ vi.mock('./use-diff-queries', () => ({
     }
   },
   useGitCommitDetail: (
-    _wsUrl: string,
+    _panel: unknown,
     agentId: string | null,
     repoTarget: 'workspace',
     sha: string | null,
@@ -281,7 +281,7 @@ vi.mock('./use-diff-queries', () => ({
     }
   },
   useGitCommitDiff: (
-    _wsUrl: string,
+    _panel: unknown,
     agentId: string | null,
     repoTarget: 'workspace',
     sha: string | null,
@@ -301,7 +301,7 @@ vi.mock('./use-diff-queries', () => ({
     }
   },
   useGitPullRequests: (
-    _wsUrl: string,
+    _panel: unknown,
     agentId: string | null,
     repoTarget: 'workspace',
     worktreeId?: string | null,
@@ -424,7 +424,7 @@ function renderDialog(
       createElement(DiffViewerDialog, {
         open: props.open ?? true,
         onOpenChange: vi.fn(),
-        wsUrl: 'ws://localhost:47187',
+        panel: null,
         agentId: props.agentId ?? 'agent-1',
         onBrowseWorktreeFiles: props.onBrowseWorktreeFiles,
         initialTab: props.initialTab,

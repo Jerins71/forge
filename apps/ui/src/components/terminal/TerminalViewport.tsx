@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { TerminalDescriptor, TerminalIssueTicketResponse } from '@forge/protocol'
+import type { TerminalDescriptor } from '@forge/protocol'
+import type { EnvironmentClient } from '@forge/client-runtime'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TerminalOverlay } from '@/components/terminal/TerminalOverlay'
 import { TerminalSelectionAction } from '@/components/terminal/TerminalSelectionAction'
-import { TerminalWsClient, type TerminalWsState } from '@/lib/terminal-ws-client'
+import { EnvironmentTerminalClient, type TerminalWsState } from '@/lib/environment-terminal-client'
 
 export interface TerminalSelectionContext {
   text: string
@@ -12,17 +13,11 @@ export interface TerminalSelectionContext {
 }
 
 interface TerminalViewportProps {
-  wsUrl: string
+  /** Terminal bytes share this environment's application socket; the runtime renews attach tickets. */
+  environmentClient: EnvironmentClient
   terminal: TerminalDescriptor
-  sessionAgentId: string
   onFocusChatInput: () => void
   onAddToChat?: (context: TerminalSelectionContext) => void
-  issueTicket: (
-    terminalId: string,
-    sessionAgentId: string,
-    requesterAgentId: string,
-  ) => Promise<TerminalIssueTicketResponse>
-  initialTicket?: { ticket: string; ticketExpiresAt: string }
 }
 
 const TERMINAL_FONT_FAMILY = 'Geist Mono, SFMono-Regular, SF Mono, Menlo, Monaco, Cascadia Code, Fira Code, JetBrains Mono, Consolas, monospace'
@@ -67,17 +62,14 @@ function measureCellDimensions(container: HTMLElement): { width: number; height:
 }
 
 export function TerminalViewport({
-  wsUrl,
+  environmentClient,
   terminal,
-  sessionAgentId,
   onFocusChatInput,
   onAddToChat,
-  issueTicket,
-  initialTicket,
 }: TerminalViewportProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const surfaceRef = useRef<HTMLDivElement | null>(null)
-  const clientRef = useRef<TerminalWsClient | null>(null)
+  const clientRef = useRef<EnvironmentTerminalClient | null>(null)
   const terminalInstanceRef = useRef<{ focus(): void } | null>(null)
   const terminalStateRef = useRef(terminal.state)
   const [connectionState, setConnectionState] = useState<TerminalWsState | 'loading'>('loading')
@@ -280,16 +272,11 @@ export function TerminalViewport({
           return true
         })
 
-        clientRef.current = new TerminalWsClient({
-          wsUrl,
-          terminalId: terminal.terminalId,
-          sessionAgentId: terminal.sessionAgentId,
-          requesterAgentId: sessionAgentId,
-          ticketProvider: {
-            getTicket: ({ terminalId, sessionAgentId, requesterAgentId }) => issueTicket(terminalId, sessionAgentId, requesterAgentId),
-          },
-          initialTicket,
-        })
+        clientRef.current = new EnvironmentTerminalClient(
+          environmentClient,
+          { environmentId: environmentClient.environmentId, sessionId: terminal.sessionAgentId },
+          terminal.terminalId,
+        )
 
         clientRef.current.onOutput = (chunk) => {
           terminalInstance?.write(chunk)
@@ -395,7 +382,7 @@ export function TerminalViewport({
       xtermRef.current = null
       terminalInstance?.dispose()
     }
-  }, [initialTicket, issueTicket, onFocusChatInput, sessionAgentId, terminal.sessionAgentId, terminal.terminalId, wsUrl, updateSelectionButton, computeSelectionButtonPosition])
+  }, [environmentClient, onFocusChatInput, terminal.sessionAgentId, terminal.terminalId, updateSelectionButton, computeSelectionButtonPosition])
 
   return (
     <div ref={surfaceRef} className="forge-terminal-surface relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#141726] p-1">

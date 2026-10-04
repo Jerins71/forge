@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { EnvironmentPanels } from '@/lib/environment-panel-context'
 import {
   AlertCircle,
   CheckCircle2,
@@ -31,7 +32,7 @@ const PULL_REQUEST_LIST_MIN_WIDTH = 280
 const PULL_REQUEST_LIST_MAX_WIDTH = 720
 
 interface PullRequestsTabProps {
-  wsUrl: string
+  panel: EnvironmentPanels | null
   agentId: string | null
   worktreeId?: string | null
   currentBranch: string | null
@@ -399,7 +400,7 @@ function PullRequestDetailPane({
 }
 
 export function PullRequestsTab({
-  wsUrl,
+  panel,
   agentId,
   worktreeId,
   currentBranch,
@@ -414,7 +415,7 @@ export function PullRequestsTab({
   const [mergeSuccessMessage, setMergeSuccessMessage] = useState<string | null>(null)
 
   const detailQuery = useGitPullRequestDetail(
-    wsUrl,
+    panel,
     agentId,
     repoTarget,
     selectedNumber,
@@ -506,7 +507,7 @@ export function PullRequestsTab({
       method: 'squash' | 'merge' | 'rebase'
       acknowledgeCheckFailures: boolean
     }) => {
-      if (!agentId || !detailQuery.data || selectedNumber == null) {
+      if (!panel || !agentId || !detailQuery.data || selectedNumber == null) {
         return
       }
 
@@ -514,7 +515,7 @@ export function PullRequestsTab({
       setMergeError(null)
 
       try {
-        const result = await mergeGitPullRequest(wsUrl, selectedNumber, {
+        const result = await mergeGitPullRequest(panel, selectedNumber, {
           agentId,
           repoTarget,
           worktreeId: worktreeId ?? undefined,
@@ -528,7 +529,7 @@ export function PullRequestsTab({
           setMergeSuccessMessage(
             `Merge request submitted for pull request #${result.number} using ${options.method}. GitHub reports it is still open.`,
           )
-          invalidateGitCaches({ agentId, repoTarget })
+          invalidateGitCaches({ environmentId: panel?.session.environmentId, agentId, repoTarget })
           await Promise.all([refetch(), detailQuery.refetch()])
           onMergeComplete?.()
           return
@@ -550,7 +551,7 @@ export function PullRequestsTab({
         setMergeSuccessMessage(
           `Merged pull request #${result.number} using ${options.method}.`,
         )
-        invalidateGitCaches({ agentId, repoTarget })
+        invalidateGitCaches({ environmentId: panel?.session.environmentId, agentId, repoTarget })
         await Promise.all([refetch(), detailQuery.refetch()])
         onMergeComplete?.()
       } catch (mergeFailure) {
@@ -559,7 +560,7 @@ export function PullRequestsTab({
         setIsMerging(false)
       }
     },
-    [agentId, detailQuery, onMergeComplete, refetch, selectedNumber, worktreeId, wsUrl],
+    [agentId, detailQuery, onMergeComplete, refetch, selectedNumber, worktreeId, panel],
   )
 
   if (!agentId) {

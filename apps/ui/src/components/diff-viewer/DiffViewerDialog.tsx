@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { EnvironmentPanels } from '@/lib/environment-panel-context'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import type { GitWorktreeSummary, RemoteUpdateAwarenessProjectSnapshot } from '@forge/protocol'
 import { Dialog, DialogOverlay, DialogPortal, DialogTitle } from '@/components/ui/dialog'
@@ -38,7 +39,7 @@ type SourceControlMutationGuard = (
 interface DiffViewerDialogProps extends DiffViewerInitialState {
   open: boolean
   onOpenChange: (open: boolean) => void
-  wsUrl: string
+  panel: EnvironmentPanels | null
   agentId: string | null
   onBrowseWorktreeFiles?: (worktree: GitWorktreeSummary) => void
   onRequestSourceControlMutation?: SourceControlMutationGuard
@@ -51,7 +52,7 @@ interface DiffViewerDialogProps extends DiffViewerInitialState {
 
 interface DiffViewerContentProps extends DiffViewerInitialState {
   active: boolean
-  wsUrl: string
+  panel: EnvironmentPanels | null
   agentId: string | null
   onClose: () => void
   onBrowseWorktreeFiles?: (worktree: GitWorktreeSummary) => void
@@ -67,7 +68,7 @@ const repoTarget = 'workspace' as const
 
 export function DiffViewerContent({
   active,
-  wsUrl,
+  panel,
   agentId,
   onClose,
   initialTab,
@@ -133,19 +134,19 @@ export function DiffViewerContent({
   const effectiveWorktreeId = selectedWorktreeId
   const shouldLoadWorktrees = active && !!agentId && activeTab === 'worktrees'
   const shouldLoadPullRequests = active && !!agentId && hasVisitedPullRequests
-  const statusQuery = useGitStatus(wsUrl, active ? agentId : null, repoTarget, effectiveWorktreeId)
-  const branchesQuery = useGitBranches(wsUrl, active ? agentId : null, repoTarget, effectiveWorktreeId, {
+  const statusQuery = useGitStatus(panel, active ? agentId : null, repoTarget, effectiveWorktreeId)
+  const branchesQuery = useGitBranches(panel, active ? agentId : null, repoTarget, effectiveWorktreeId, {
     enabled: active && !!agentId,
   })
-  const worktreesQuery = useGitWorktrees(wsUrl, active ? agentId : null, repoTarget, {
+  const worktreesQuery = useGitWorktrees(panel, active ? agentId : null, repoTarget, {
     enabled: shouldLoadWorktrees,
   })
-  const pullRequestsQuery = useGitPullRequests(wsUrl, active ? agentId : null, repoTarget, effectiveWorktreeId, {
+  const pullRequestsQuery = useGitPullRequests(panel, active ? agentId : null, repoTarget, effectiveWorktreeId, {
     enabled: shouldLoadPullRequests,
   })
 
   const handleRefresh = useCallback(() => {
-    invalidateGitCaches({ agentId, repoTarget })
+    invalidateGitCaches({ environmentId: panel?.session.environmentId, agentId, repoTarget })
     setRefreshToken((previous) => previous + 1)
     statusQuery.refetch()
     branchesQuery.refetch()
@@ -155,7 +156,7 @@ export function DiffViewerContent({
     if (activeTab === 'pull-requests') {
       pullRequestsQuery.refetch()
     }
-  }, [activeTab, agentId, branchesQuery, pullRequestsQuery, statusQuery, worktreesQuery])
+  }, [activeTab, agentId, panel?.session.environmentId, branchesQuery, pullRequestsQuery, statusQuery, worktreesQuery])
 
   const handleSourceControlMutationComplete = useCallback(() => {
     handleRefresh()
@@ -221,7 +222,7 @@ export function DiffViewerContent({
         remoteUpdateSnapshot={remoteUpdateSnapshot}
         branchActions={
           <SourceControlBranchActions
-            wsUrl={wsUrl}
+            panel={panel}
             agentId={agentId}
             worktreeId={effectiveWorktreeId}
             selectedWorktreePath={contextWorktree?.path ?? null}
@@ -236,19 +237,19 @@ export function DiffViewerContent({
         }
       />
 
-      <RemoteUpdateAwarenessBanner
-        wsUrl={wsUrl}
+      {panel ? <RemoteUpdateAwarenessBanner
+        client={panel.features.settings}
         snapshot={remoteUpdateSnapshot}
         onInspect={() => setActiveTab('incoming')}
         onSnapshotChange={onRemoteUpdateSnapshotChange ?? (() => undefined)}
-      />
+      /> : null}
 
       {/* Content */}
       <div className="min-h-0 flex-1">
         {activeTab === 'incoming' ? (
-          remoteUpdateSnapshot ? (
+          remoteUpdateSnapshot && panel ? (
             <RemoteUpdateAwarenessIncoming
-              wsUrl={wsUrl}
+              client={panel.features.settings}
               projectId={remoteUpdateSnapshot.projectId}
               generation={remoteUpdateSnapshot.dismissalTarget?.generation ?? null}
             />
@@ -270,7 +271,7 @@ export function DiffViewerContent({
         ) : activeTab === 'changes' || activeTab === 'history' ? (
           <SourceControlActivityView
             key={`${changesViewKey}:${historyViewKey}`}
-            wsUrl={wsUrl}
+            panel={panel}
             agentId={active ? agentId : null}
             repoTarget={repoTarget}
             worktreeId={effectiveWorktreeId}
@@ -292,7 +293,7 @@ export function DiffViewerContent({
           />
         ) : activeTab === 'pull-requests' ? (
           <PullRequestsTab
-            wsUrl={wsUrl}
+            panel={panel}
             agentId={active ? agentId : null}
             worktreeId={effectiveWorktreeId}
             currentBranch={statusQuery.data?.branch ?? contextWorktree?.branch ?? null}
@@ -377,7 +378,7 @@ export function DiffViewerContent({
 export function DiffViewerDialog({
   open,
   onOpenChange,
-  wsUrl,
+  panel,
   agentId,
   initialTab,
   onBrowseWorktreeFiles,
@@ -419,7 +420,7 @@ export function DiffViewerDialog({
           <DialogTitle className="sr-only">Source Control</DialogTitle>
           <DiffViewerContent
             active={open}
-            wsUrl={wsUrl}
+            panel={panel}
             agentId={agentId}
             onClose={handleClose}
             onBrowseWorktreeFiles={onBrowseWorktreeFiles}

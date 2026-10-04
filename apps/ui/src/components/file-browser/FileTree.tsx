@@ -1,3 +1,4 @@
+import type { EnvironmentPanels } from '@/lib/environment-panel-context'
 import {
   forwardRef,
   useCallback,
@@ -27,9 +28,7 @@ import {
 import '@/styles/file-browser.css'
 import { FileTreeNode } from './FileTreeNode'
 import { FileIcon } from './FileIcon'
-import type { FileListResult } from './use-file-browser-queries'
 import { useFileSearch } from './use-file-browser-queries'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
 
 /* ------------------------------------------------------------------ */
 /*  Stable useTree — fixes React 18+ Object.is setState bailout       */
@@ -100,7 +99,7 @@ export interface FileTreeHandle {
 }
 
 interface FileTreeProps {
-  wsUrl: string
+  panel: EnvironmentPanels | null
   agentId: string
   cwd: string
   selectedFile: string | null
@@ -117,33 +116,6 @@ interface FileTreeProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Fetch helper (direct, not via hooks — used in tree data loader)    */
-/* ------------------------------------------------------------------ */
-
-async function fetchDirectoryListing(
-  wsUrl: string,
-  agentId: string,
-  dirPath: string,
-  worktreeId?: string | null,
-): Promise<FileListResult> {
-  const params = new URLSearchParams({ agentId, path: dirPath })
-  if (worktreeId) {
-    params.set('worktreeId', worktreeId)
-  }
-  const url = resolveApiEndpoint(wsUrl, `/api/files/list?${params.toString()}`)
-  const response = await fetch(url, { credentials: 'include' })
-
-  if (!response.ok) {
-    const body = await response
-      .json()
-      .catch(() => ({ error: response.statusText }))
-    throw new Error(body.error ?? `HTTP ${response.status}`)
-  }
-
-  return response.json() as Promise<FileListResult>
-}
-
-/* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -152,7 +124,7 @@ const ROW_HEIGHT = 28
 
 export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
   function FileTree(
-    { wsUrl, agentId, cwd, selectedFile, onSelectFile, onOpenStickyFile, treeSnapshot, onTreeSnapshotChange, fileCount, fileCountMethod, worktreeId = null, onRequestDelete, onRequestCreateFile, onRequestRename },
+    { panel, agentId, cwd, selectedFile, onSelectFile, onOpenStickyFile, treeSnapshot, onTreeSnapshotChange, fileCount, fileCountMethod, worktreeId = null, onRequestDelete, onRequestCreateFile, onRequestRename },
     ref,
   ) {
     const [filterText, setFilterText] = useState(treeSnapshot?.filterText ?? '')
@@ -176,7 +148,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     latestSearchScrollTopRef.current = treeSnapshot?.searchScrollTop ?? latestSearchScrollTopRef.current
 
     // Deep search hook
-    const searchResult = useFileSearch(wsUrl, agentId, searchQuery, 50, worktreeId)
+    const searchResult = useFileSearch(panel, agentId, searchQuery, 50, worktreeId)
 
     // Mutable ref-based stores so the tree data loader closures see fresh data
     // without causing tree config re-creation on every state change.
@@ -184,22 +156,24 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     const childrenIdsRef = useRef<Map<string, string[]>>(new Map())
 
     // Stable fetch function ref
-    const wsUrlRef = useRef(wsUrl)
+    const panelRef = useRef(panel)
     const agentIdRef = useRef(agentId)
     const worktreeIdRef = useRef(worktreeId)
-    wsUrlRef.current = wsUrl
+    panelRef.current = panel
     agentIdRef.current = agentId
     worktreeIdRef.current = worktreeId
 
     const loadAndCacheChildren = useCallback(
       async (itemId: string): Promise<string[]> => {
         const dirPath = itemId === ROOT_ID ? '' : itemId
-        const result = await fetchDirectoryListing(
-          wsUrlRef.current,
-          agentIdRef.current,
-          dirPath,
-          worktreeIdRef.current,
-        )
+        const current = panelRef.current
+        if (!current) return []
+        const result = await current.features.files.list({
+          agentId: agentIdRef.current,
+          path: dirPath,
+          worktreeId: worktreeIdRef.current,
+          signal: current.signal,
+        })
 
         const ids: string[] = []
         for (const entry of result.entries) {

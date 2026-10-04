@@ -85,3 +85,28 @@ export function persistAttachmentDrafts(drafts: Record<string, PendingAttachment
     // localStorage full or unavailable — silently ignore
   }
 }
+
+// --- Environment purge ---
+
+const purgeListeners = new Set<(environmentId: string) => void>()
+
+/** Draft keys qualified with `qualifiedKey(environmentId, …)` belong to that environment. */
+export function isEnvironmentDraftKey(key: string, environmentId: string): boolean {
+  return key.startsWith(`${JSON.stringify([environmentId]).slice(0, -1)},`)
+}
+
+/** A revoked device loses its protected drafts for that environment, including open composers. */
+export function purgeEnvironmentDrafts(environmentId: string): void {
+  const drop = <T>(drafts: Record<string, T>) =>
+    Object.fromEntries(Object.entries(drafts).filter(([key]) => !isEnvironmentDraftKey(key, environmentId)))
+  persistDrafts(drop(loadDrafts()))
+  persistAttachmentDrafts(drop(loadAttachmentDrafts()))
+  for (const listener of purgeListeners) listener(environmentId)
+}
+
+export function subscribeEnvironmentDraftPurge(listener: (environmentId: string) => void): () => void {
+  purgeListeners.add(listener)
+  return () => {
+    purgeListeners.delete(listener)
+  }
+}

@@ -48,6 +48,10 @@ import type {
   TerminalRenameResponse,
   TerminalIssueTicketRequest,
   TerminalIssueTicketResponse,
+  AgentSystemPromptResponse,
+  SessionContextArtifacts,
+  ChatArtifactReadRequest,
+  ChatArtifactReadResponse,
 } from '@forge/protocol'
 import type {
   Method,
@@ -74,12 +78,45 @@ export interface GitReadOptions {
   worktreeId?: string | null
   limit?: number
   offset?: number
+  closedLimit?: number
 }
 type FileInput = {
   agentId: Target
   path?: string
   worktreeId?: string | null
   signal?: AbortSignal
+}
+export type FileDeleteInput = Omit<FileDeleteRequest, 'agentId'> & {
+  agentId: Target
+}
+/** `raw` streams /api/files/raw (PDF/HTML); `image` reads /api/read-file. */
+export type FilePreviewInput = FileInput & {
+  path: string
+  kind: 'raw' | 'image'
+}
+export interface AssetUrl {
+  url: string
+  release(): void
+}
+/** A failed feature request keeps the server's status and machine code for compatibility retries. */
+export class FeatureRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message)
+  }
+}
+/** Legacy `/api/read-file` body for artifacts without transcript provenance. */
+export interface ReadFileResponse {
+  path?: string
+  content?: string
+  binary?: boolean
+  encoding?: string
+  contentType?: string
+  truncated?: boolean
+  totalBytes?: number
 }
 export interface TerminalAttachment {
   input(data: string): Promise<void>
@@ -109,13 +146,15 @@ export interface EnvironmentFeatureClients {
       signal?: AbortSignal,
     ): Promise<FileCreateResponse>
     delete(
-      input: FileDeleteRequest,
+      input: FileDeleteInput,
       signal?: AbortSignal,
     ): Promise<FileDeleteResponse>
     rename(
       input: FileRenameRequest,
       signal?: AbortSignal,
     ): Promise<FileRenameResponse>
+    /** Authenticated bytes as a revocable Blob URL; credentials never enter the URL. */
+    previewUrl(input: FilePreviewInput): Promise<AssetUrl>
   }
   git: {
     branches(
@@ -229,6 +268,49 @@ export interface EnvironmentFeatureClients {
     ): Promise<ManagerSelectionCatalogResponse>
   }
   settings: FeatureRequest
+  sessions: {
+    compact(
+      agentId: Target,
+      input?: { customInstructions?: string },
+      signal?: AbortSignal,
+    ): Promise<void>
+    smartCompact(agentId: Target, signal?: AbortSignal): Promise<void>
+    systemPrompt(
+      agentId: Target,
+      signal?: AbortSignal,
+    ): Promise<AgentSystemPromptResponse>
+    contextArtifacts(
+      managerId: Target,
+      signal?: AbortSignal,
+    ): Promise<SessionContextArtifacts>
+    schedules(
+      managerId: Target,
+      signal?: AbortSignal,
+    ): Promise<{ schedules?: unknown }>
+    attachmentUrl(fileRef: string, signal?: AbortSignal): Promise<AssetUrl>
+    /** Codex app-server apps/plugins/tools for a manager; the UI owns the snapshot shape. */
+    codexCatalog(managerId: Target, signal?: AbortSignal): Promise<unknown>
+  }
+  chatArtifacts: {
+    read(
+      input: ChatArtifactReadRequest,
+      signal?: AbortSignal,
+    ): Promise<ChatArtifactReadResponse>
+    readFile(
+      input: { path: string; agentId?: string },
+      signal?: AbortSignal,
+    ): Promise<ReadFileResponse>
+    fileUrl(
+      input: { path: string; agentId?: string },
+      signal?: AbortSignal,
+    ): Promise<AssetUrl>
+    /** Fetches a short-lived ticket returned by `read` from this environment only. */
+    ticketUrl(
+      ticketUrl: string,
+      expect: { contentType: RegExp; maxBytes: number },
+      signal?: AbortSignal,
+    ): Promise<AssetUrl>
+  }
   terminals: {
     attach(
       terminalId: string,
@@ -293,27 +375,96 @@ function query(value: Record<string, unknown>): string {
     }
   return params.toString()
 }
+async function requestError(response: Response): Promise<FeatureRequestError> {
+  let message = `Request failed (${response.status})`
+  let code: string | undefined
+  try {
+    const p = (await response.json()) as {
+      message?: unknown
+      error?: unknown
+      code?: unknown
+    }
+    if (typeof p.error === 'string' && p.error) message = p.error
+    else if (typeof p.message === 'string' && p.message) message = p.message
+    if (typeof p.code === 'string') code = p.code
+  } catch {
+    /* status message */
+  }
+  return new FeatureRequestError(message, response.status, code)
+}
+async function errorMessage(response: Response): Promise<string> {
+  return (await requestError(response)).message
+}
+const CHAT_ARTIFACT_TICKET_PATH =
+  /^\/api\/chat-artifacts\/tickets\/[A-Za-z0-9_-]{16,128}$/
 export function createFeatureClients(
   http: HttpFeatureTransport,
   rpc: RpcFeatureTransport,
+  objectUrl: (blob: Blob) => AssetUrl = (blob) => {
+    const url = URL.createObjectURL(blob)
+    return { url, release: () => URL.revokeObjectURL(url) }
+  },
 ): EnvironmentFeatureClients {
   const id = (ref: Target) => {
     if (typeof ref === 'string') return ref
     assertEnvironment(http.entry.environmentId, ref)
     return ref.sessionId
   }
+  /** Server errors keep their message; `conflict` routes return their typed 409 payload. */
+  const json = async <T>(
+    path: string,
+    init: RequestInit & { conflict?: boolean } = {},
+  ): Promise<T> => {
+    const { conflict, ...rest } = init
+    const response = await http.fetch(path, rest)
+    if (response.ok || (conflict && response.status === 409))
+      return (await response.json()) as T
+    throw await requestError(response)
+  }
+  const blobUrl = async (
+    path: string,
+    signal: AbortSignal | undefined,
+    expect: { contentType?: RegExp; maxBytes: number } = { maxBytes: 26214400 },
+  ): Promise<AssetUrl> => {
+    const response = await http.fetch(path, { signal })
+    if (!response.ok) throw await requestError(response)
+    const type = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ?? ''
+    if (expect.contentType && !expect.contentType.test(type))
+      throw new Error('Unexpected preview content type')
+    const blob = await response.blob()
+    if (blob.size > expect.maxBytes) throw new Error('Preview too large')
+    const asset = objectUrl(blob)
+    if (signal?.aborted) {
+      asset.release()
+      throw new Error('Preview request aborted')
+    }
+    return asset
+  }
+  const agentPath = (agentId: Target, route: string) =>
+    `/api/agents/${encodeURIComponent(id(agentId))}/${route}`
   const get = <T>(
     path: string,
     params: Record<string, unknown>,
     signal?: AbortSignal,
-  ) => http.json<T>(`${path}?${query(params)}`, { signal })
-  const post = <T>(path: string, input: unknown, signal?: AbortSignal) =>
-    http.json<T>(path, {
-      method: 'POST',
+  ) => json<T>(`${path}?${query(params)}`, { signal })
+  const send = <T>(
+    method: string,
+    path: string,
+    input: unknown,
+    signal?: AbortSignal,
+    conflict = false,
+  ) =>
+    json<T>(path, {
+      method,
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
+      body: input === undefined ? undefined : JSON.stringify(input),
       signal,
+      conflict,
     })
+  const post = <T>(path: string, input: unknown, signal?: AbortSignal) =>
+    send<T>('POST', path, input, signal)
+  const mutate = <T>(path: string, input: unknown, signal?: AbortSignal) =>
+    send<T>('POST', path, input, signal, true)
   const file = (input: FileInput) => ({
     agentId: id(input.agentId),
     path: input.path,
@@ -402,7 +553,7 @@ export function createFeatureClients(
   }
   const checkSetting = (path: string) => {
     if (
-      !/^\/api\/(settings|stats|auth|skills|specialists|prompts|extensions|slash-commands|secure-sessions|secure-secrets|onboarding|observability|credentials|model-catalog)(\/|\?|$)/.test(
+      !/^\/api\/(settings|stats|auth|skills|specialists|prompts|extensions|slash-commands|secure-sessions|secure-secrets|onboarding|observability|credentials|model-catalog|git\/remote-update-awareness)(\/|\?|$)/.test(
         path,
       )
     )
@@ -412,19 +563,7 @@ export function createFeatureClients(
     checkSetting(path)
     return http.fetch(path, init)
   }
-  const readApiError = async (response: Response) => {
-    try {
-      const p = (await response.json()) as {
-        message?: unknown
-        error?: unknown
-      }
-      if (typeof p.error === 'string') return p.error
-      if (typeof p.message === 'string') return p.message
-    } catch {
-      /* status below */
-    }
-    return `Request failed (${response.status})`
-  }
+  const readApiError = errorMessage
   return {
     files: {
       resources: (input, signal) =>
@@ -436,16 +575,21 @@ export function createFeatureClients(
       search: (i) =>
         get('/api/files/search', { ...file(i), query: i.query }, i.signal),
       content: (i) => get('/api/files/content', file(i), i.signal),
-      save: (i, s) => post('/api/files/content', i, s),
+      save: (i, s) => send('PUT', '/api/files/content', i, s, true),
       create: (i, s) => post('/api/files/create', i, s),
       delete: (i, s) =>
-        http.json('/api/files/content', {
+        json(`/api/files/content?${query(file(i))}`, {
           method: 'DELETE',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(i),
           signal: s,
         }),
-      rename: (i, s) => post('/api/files/rename', i, s),
+      rename: (i, s) => send('PATCH', '/api/files/rename', i, s),
+      previewUrl: (i) =>
+        blobUrl(
+          i.kind === 'raw'
+            ? `/api/files/raw?${query(file(i))}`
+            : `/api/read-file?${query({ path: i.path, agentId: id(i.agentId), worktreeId: i.worktreeId })}`,
+          i.signal,
+        ),
     },
     git: {
       branches: (i, s, q) => git('branches', i, s, { ...q }),
@@ -462,12 +606,12 @@ export function createFeatureClients(
       pullRequest: (i, number, s, q) =>
         git(`pull-requests/${number}`, i, s, { ...q }),
       mergePullRequest: (number, i, s) =>
-        post(`/api/git/pull-requests/${number}/merge`, i, s),
-      fetch: (i, s) => post('/api/git/fetch', i, s),
-      switchBranch: (i, s) => post('/api/git/switch-branch', i, s),
-      createBranch: (i, s) => post('/api/git/create-branch', i, s),
-      pull: (i, s) => post('/api/git/pull-ff-only', i, s),
-      push: (i, s) => post('/api/git/push', i, s),
+        mutate(`/api/git/pull-requests/${number}/merge`, i, s),
+      fetch: (i, s) => mutate('/api/git/fetch', i, s),
+      switchBranch: (i, s) => mutate('/api/git/switch-branch', i, s),
+      createBranch: (i, s) => mutate('/api/git/create-branch', i, s),
+      pull: (i, s) => mutate('/api/git/pull-ff-only', i, s),
+      push: (i, s) => mutate('/api/git/push', i, s),
     },
     audit: {
       events: (i, s) =>
@@ -510,7 +654,7 @@ export function createFeatureClients(
         i?: { method?: string; body?: unknown; signal?: AbortSignal },
       ) => {
         checkSetting(p)
-        return http.json<T>(p, {
+        return json<T>(p, {
           method: i?.method,
           signal: i?.signal,
           ...(i?.body === undefined
@@ -520,6 +664,45 @@ export function createFeatureClients(
                 body: JSON.stringify(i.body),
               }),
         })
+      },
+    },
+    sessions: {
+      compact: async (agentId, input = {}, signal) => {
+        await send('POST', agentPath(agentId, 'compact'), input, signal)
+      },
+      smartCompact: async (agentId, signal) => {
+        await send('POST', agentPath(agentId, 'smart-compact'), {}, signal)
+      },
+      systemPrompt: (agentId, signal) =>
+        json(agentPath(agentId, 'system-prompt'), { signal }),
+      contextArtifacts: (managerId, signal) =>
+        json(agentPath(managerId, 'context-artifacts'), { signal }),
+      schedules: (managerId, signal) =>
+        json(`/api/managers/${encodeURIComponent(id(managerId))}/schedules`, {
+          signal,
+        }),
+      attachmentUrl: (fileRef, signal) =>
+        blobUrl(`/api/attachments/${encodeURIComponent(fileRef)}`, signal),
+      codexCatalog: (managerId, signal) =>
+        get('/api/codex-app-server/catalog', { managerAgentId: id(managerId) }, signal),
+    },
+    chatArtifacts: {
+      read: (input, signal) => post('/api/chat-artifacts/read', input, signal),
+      readFile: (input, signal) => post('/api/read-file', input, signal),
+      fileUrl: (input, signal) =>
+        blobUrl(`/api/read-file?${query(input)}`, signal),
+      ticketUrl: (ticketUrl, expect, signal) => {
+        // Only the path is used: the request stays pinned to this environment's origin.
+        const ticket = new URL(ticketUrl, 'http://ticket.invalid')
+        if (
+          !CHAT_ARTIFACT_TICKET_PATH.test(ticket.pathname) ||
+          ticket.username ||
+          ticket.password ||
+          ticket.search ||
+          ticket.hash
+        )
+          return Promise.reject(new Error('Invalid artifact ticket'))
+        return blobUrl(ticket.pathname, signal, expect)
       },
     },
     terminals: {
@@ -532,7 +715,7 @@ export function createFeatureClients(
       subscribe: (m, i, o) => rpc.subscribe(m, i, o),
       create: (i) => post('/api/terminals', i),
       rename: (terminalId, i) =>
-        http.json(`/api/terminals/${encodeURIComponent(terminalId)}`, {
+        json(`/api/terminals/${encodeURIComponent(terminalId)}`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(i),

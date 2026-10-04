@@ -8,70 +8,68 @@ import type {
   UpdateRemoteUpdateAwarenessProjectOverrideResponse,
   UpdateRemoteUpdateAwarenessSettingsResponse,
 } from '@forge/protocol'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
+import type { SettingsApiClient } from './settings-api-client'
 
 const BASE_PATH = '/api/git/remote-update-awareness'
 
-async function request<T>(wsUrl: string, path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(resolveApiEndpoint(wsUrl, `${BASE_PATH}${path}`), {
+/** The addressed environment's authenticated client (settings client or `features.settings`). */
+export type RemoteUpdateAwarenessClient = Pick<SettingsApiClient, 'fetchJson'>
+
+function request<T>(client: RemoteUpdateAwarenessClient, path: string, init?: RequestInit): Promise<T> {
+  return client.fetchJson<T>(`${BASE_PATH}${path}`, {
     cache: 'no-store',
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { error?: unknown } | null
-    throw new Error(typeof payload?.error === 'string' ? payload.error : 'Git monitoring request failed.')
-  }
-  return response.json() as Promise<T>
 }
 
-export function fetchRemoteUpdateAwarenessSettings(wsUrl: string): Promise<GetRemoteUpdateAwarenessSettingsResponse> {
-  return request(wsUrl, '/settings')
+export function fetchRemoteUpdateAwarenessSettings(client: RemoteUpdateAwarenessClient): Promise<GetRemoteUpdateAwarenessSettingsResponse> {
+  return request(client, '/settings')
 }
 
 export function updateRemoteUpdateAwarenessSettings(
-  wsUrl: string,
+  client: RemoteUpdateAwarenessClient,
   globalEnabled: boolean,
 ): Promise<UpdateRemoteUpdateAwarenessSettingsResponse> {
-  return request(wsUrl, '/settings', { method: 'PATCH', body: JSON.stringify({ globalEnabled }) })
+  return request(client, '/settings', { method: 'PATCH', body: JSON.stringify({ globalEnabled }) })
 }
 
 export function updateRemoteUpdateAwarenessProjectOverride(
-  wsUrl: string,
+  client: RemoteUpdateAwarenessClient,
   projectId: string,
   override: RemoteUpdateAwarenessProjectOverride,
 ): Promise<UpdateRemoteUpdateAwarenessProjectOverrideResponse> {
-  return request(wsUrl, '/project', { method: 'PATCH', body: JSON.stringify({ projectId, override }) })
+  return request(client, '/project', { method: 'PATCH', body: JSON.stringify({ projectId, override }) })
 }
 
 export function activateRemoteUpdateAwarenessProject(
-  wsUrl: string,
+  client: RemoteUpdateAwarenessClient,
   projectId: string,
 ): Promise<ActivateRemoteUpdateAwarenessProjectResponse> {
-  return request(wsUrl, '/activate', { method: 'POST', body: JSON.stringify({ projectId }) })
+  return request(client, '/activate', { method: 'POST', body: JSON.stringify({ projectId }) })
 }
 
 export function refreshRemoteUpdateAwarenessProject(
-  wsUrl: string,
+  client: RemoteUpdateAwarenessClient,
   projectId: string,
 ): Promise<RefreshRemoteUpdateAwarenessProjectResponse> {
-  return request(wsUrl, '/refresh', { method: 'POST', body: JSON.stringify({ projectId }) })
+  return request(client, '/refresh', { method: 'POST', body: JSON.stringify({ projectId }) })
 }
 
 export function dismissRemoteUpdateAwarenessProjectUpdate(
-  wsUrl: string,
+  client: RemoteUpdateAwarenessClient,
   projectId: string,
   generation: number,
 ): Promise<DismissRemoteUpdateAwarenessProjectUpdateResponse> {
-  return request(wsUrl, '/dismiss', {
+  return request(client, '/dismiss', {
     method: 'POST',
     body: JSON.stringify({ projectId, dismissalTarget: { generation } }),
   })
 }
 
 export function fetchRemoteUpdateAwarenessIncoming(
-  wsUrl: string,
+  client: RemoteUpdateAwarenessClient,
   projectId: string,
 ): Promise<GetRemoteUpdateAwarenessIncomingResponse> {
-  return request(wsUrl, `/incoming?projectId=${encodeURIComponent(projectId)}`)
+  return request(client, `/incoming?projectId=${encodeURIComponent(projectId)}`)
 }

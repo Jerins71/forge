@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { ManagerSelectionCatalogResponse } from '@forge/protocol'
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
-import { resolveSettingsApiClient } from '@/components/settings/settings-api-client'
 import { fetchManagerSelectionCatalog } from '@/lib/manager-selection-catalog-api'
 
 interface CatalogCacheEntry {
@@ -22,11 +21,10 @@ export function managerSelectionCatalogQueryKey(originId: string): string {
 
 
 function resolveClient(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  client: SettingsApiClient | null | undefined,
   httpClientRef?: RefObject<SettingsApiClient | null>,
 ): SettingsApiClient | null {
-  if (httpClientRef) return httpClientRef.current
-  return resolveSettingsApiClient(clientOrWsUrl)
+  return httpClientRef ? httpClientRef.current : client ?? null
 }
 
 function cachedCatalog(queryKey: string, cacheToken: string): ManagerSelectionCatalogResponse | null {
@@ -71,7 +69,8 @@ function requestCatalog(
 export interface UseManagerSelectionCatalogOptions {
   originId: string
   enabled?: boolean
-  client?: SettingsApiClient | string
+  /** The addressed environment's authenticated client; there is no URL-based fallback. */
+  client?: SettingsApiClient | null
   httpClientRef?: RefObject<SettingsApiClient | null>
   /** Bump from `model_config_changed` so the catalog fetch refreshes. */
   modelConfigChangeKey?: number

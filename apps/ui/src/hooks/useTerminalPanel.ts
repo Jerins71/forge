@@ -1,16 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type {
-  TerminalCreateResponse,
-  TerminalDescriptor,
-  TerminalIssueTicketResponse,
-} from '@forge/protocol'
+import type { TerminalCreateResponse, TerminalDescriptor } from '@forge/protocol'
+import type { EnvironmentClient } from '@forge/client-runtime'
 import '@/lib/electron-bridge'
-import {
-  closeTerminal as closeTerminalRequest,
-  createTerminal as createTerminalRequest,
-  issueTerminalTicket,
-  renameTerminal as renameTerminalRequest,
-} from '@/lib/terminal-api'
 
 const PANEL_HEIGHT_STORAGE_KEY = 'forge-terminal-panel-height'
 const DEFAULT_PANEL_HEIGHT = 250
@@ -28,13 +19,9 @@ const MAX_TERMINALS_PER_MANAGER = 10
  */
 export type TerminalPanelMode = 'hidden' | 'tabs-only' | 'open' | 'maximized'
 
-export interface TerminalTicketCacheEntry {
-  ticket: string
-  ticketExpiresAt: string
-}
-
 interface UseTerminalPanelOptions {
-  wsUrl: string
+  /** Terminal lifecycle goes to the session's own environment; attach tickets stay inside the runtime. */
+  environmentClient: EnvironmentClient | null
   sessionAgentId: string | null
   sessionCwd?: string | null
   terminals: TerminalDescriptor[]
@@ -47,7 +34,6 @@ interface UseTerminalPanelResult {
   activeTerminalId: string | null
   panelHeight: number
   isMobile: boolean
-  initialTickets: Record<string, TerminalTicketCacheEntry>
   editingTerminalId: string | null
   renameDraft: string
   maxTerminalsPerManager: number
@@ -69,11 +55,6 @@ interface UseTerminalPanelResult {
   setRenameDraft: (value: string) => void
   commitRenameTerminal: () => Promise<void>
   cancelRenameTerminal: () => void
-  issueTicket: (
-    terminalId: string,
-    sessionAgentId: string,
-    requesterAgentId: string,
-  ) => Promise<TerminalIssueTicketResponse>
 }
 
 function clampPanelHeight(value: number): number {
@@ -140,7 +121,7 @@ function useIsMobileViewport(): boolean {
 }
 
 export function useTerminalPanel({
-  wsUrl,
+  environmentClient,
   sessionAgentId,
   sessionCwd,
   terminals,
@@ -151,7 +132,6 @@ export function useTerminalPanel({
   const [panelMode, setPanelMode] = useState<TerminalPanelMode>('hidden')
   const [panelHeight, setPanelHeightState] = useState<number>(loadStoredPanelHeight)
   const [activeTerminalId, setActiveTerminalIdState] = useState<string | null>(null)
-  const [initialTickets, setInitialTickets] = useState<Record<string, TerminalTicketCacheEntry>>({})
   const [editingTerminalId, setEditingTerminalId] = useState<string | null>(null)
   const [renameDraft, setRenameDraftState] = useState('')
   const autoHiddenRef = useRef(false)
@@ -213,7 +193,7 @@ export function useTerminalPanel({
   }, [onError])
 
   const createTerminal = useCallback(async (): Promise<TerminalCreateResponse | null> => {
-    if (!sessionAgentId) {
+    if (!sessionAgentId || !environmentClient) {
       handleError('Open a manager session before creating a terminal.')
       return null
     }
@@ -224,18 +204,10 @@ export function useTerminalPanel({
     }
 
     try {
-      const response = await createTerminalRequest(wsUrl, {
+      const response = await environmentClient.features.terminals.create({
         sessionAgentId,
         cwd: sessionCwd ?? undefined,
       })
-
-      setInitialTickets((previous) => ({
-        ...previous,
-        [response.terminal.terminalId]: {
-          ticket: response.ticket,
-          ticketExpiresAt: response.ticketExpiresAt,
-        },
-      }))
       setActiveTerminalIdState(response.terminal.terminalId)
       setPanelMode('open')
       return response
@@ -243,23 +215,15 @@ export function useTerminalPanel({
       handleError(error instanceof Error ? error.message : 'Failed to create terminal.')
       return null
     }
-  }, [handleError, sessionAgentId, sessionCwd, terminals.length, wsUrl])
+  }, [environmentClient, handleError, sessionAgentId, sessionCwd, terminals.length])
 
   const closeTerminal = useCallback(async (terminalId: string): Promise<void> => {
-    if (!sessionAgentId) {
+    if (!sessionAgentId || !environmentClient) {
       return
     }
 
     try {
-      await closeTerminalRequest(wsUrl, terminalId, { sessionAgentId })
-      setInitialTickets((previous) => {
-        if (!(terminalId in previous)) {
-          return previous
-        }
-        const next = { ...previous }
-        delete next[terminalId]
-        return next
-      })
+      await environmentClient.features.terminals.close(terminalId, sessionAgentId)
       if (activeTerminalId === terminalId) {
         const remaining = terminals.filter((terminal) => terminal.terminalId !== terminalId)
         setActiveTerminalIdState(remaining[0]?.terminalId ?? null)
@@ -267,7 +231,7 @@ export function useTerminalPanel({
     } catch (error) {
       handleError(error instanceof Error ? error.message : 'Failed to close terminal.')
     }
-  }, [activeTerminalId, handleError, sessionAgentId, terminals, wsUrl])
+  }, [activeTerminalId, environmentClient, handleError, sessionAgentId, terminals])
 
   const startRenameTerminal = useCallback((terminalId: string) => {
     const terminal = terminals.find((entry) => entry.terminalId === terminalId)
@@ -285,7 +249,7 @@ export function useTerminalPanel({
   }, [])
 
   const commitRenameTerminal = useCallback(async (): Promise<void> => {
-    if (!editingTerminalId || !sessionAgentId) {
+    if (!editingTerminalId || !sessionAgentId || !environmentClient) {
       return
     }
 
@@ -296,7 +260,7 @@ export function useTerminalPanel({
     }
 
     try {
-      await renameTerminalRequest(wsUrl, editingTerminalId, {
+      await environmentClient.features.terminals.rename(editingTerminalId, {
         sessionAgentId,
         name: nextName,
       })
@@ -304,7 +268,7 @@ export function useTerminalPanel({
     } catch (error) {
       handleError(error instanceof Error ? error.message : 'Failed to rename terminal.')
     }
-  }, [cancelRenameTerminal, editingTerminalId, handleError, renameDraft, sessionAgentId, wsUrl])
+  }, [cancelRenameTerminal, editingTerminalId, environmentClient, handleError, renameDraft, sessionAgentId])
 
   const togglePanel = useCallback(() => {
     if (panelMode === 'hidden') {
@@ -359,7 +323,6 @@ export function useTerminalPanel({
   useEffect(() => {
     if (previousSessionIdRef.current !== sessionAgentId) {
       previousSessionIdRef.current = sessionAgentId
-      setInitialTickets({})
       setEditingTerminalId(null)
       setRenameDraftState('')
     }
@@ -385,23 +348,6 @@ export function useTerminalPanel({
       setActiveTerminalIdState(terminals[0]?.terminalId ?? null)
     }
   }, [activeTerminalId, panelMode, terminals])
-
-  // Prune stale ticket cache entries
-  useEffect(() => {
-    setInitialTickets((previous) => {
-      if (Object.keys(previous).length === 0) {
-        return previous
-      }
-
-      const validTerminalIds = new Set(terminals.map((terminal) => terminal.terminalId))
-      const nextEntries = Object.entries(previous).filter(([terminalId]) => validTerminalIds.has(terminalId))
-      if (nextEntries.length === Object.keys(previous).length) {
-        return previous
-      }
-
-      return Object.fromEntries(nextEntries)
-    })
-  }, [terminals])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -468,19 +414,11 @@ export function useTerminalPanel({
     }
   }, [createTerminal, enabled, selectNextTerminal, selectPreviousTerminal, togglePanel])
 
-  const issueTicket = useCallback((terminalId: string, terminalSessionAgentId: string, requesterAgentId: string) => {
-    return issueTerminalTicket(wsUrl, terminalId, {
-      sessionAgentId: terminalSessionAgentId,
-      requesterAgentId,
-    })
-  }, [wsUrl])
-
   return {
     panelMode,
     activeTerminalId,
     panelHeight: panelMode === 'tabs-only' ? TABS_ONLY_HEIGHT : panelHeight,
     isMobile,
-    initialTickets,
     editingTerminalId,
     renameDraft,
     maxTerminalsPerManager: MAX_TERMINALS_PER_MANAGER,
@@ -502,6 +440,5 @@ export function useTerminalPanel({
     setRenameDraft: setRenameDraftState,
     commitRenameTerminal,
     cancelRenameTerminal,
-    issueTicket,
   }
 }

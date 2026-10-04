@@ -20,17 +20,14 @@ import { useSelectionContainment } from '@/hooks/useSelectionContainment'
 import { useDrawerResize } from '@/hooks/use-drawer-resize'
 import { MarkdownMessage } from './MarkdownMessage'
 import { PdfPreview } from '@/components/file-browser/PdfPreview'
-import {
-  createArtifactPdfBlobUrl,
-  isArtifactPdfPath,
-  resolveSafeArtifactPdfTicketUrl,
-  revokeArtifactPdfBlobUrl,
-} from './artifact-pdf'
-import { CHAT_ARTIFACT_MAX_TEXT_BYTES, type ChatArtifactReadResponse } from '@forge/protocol'
+import { isArtifactPdfPath, resolveSafeArtifactPdfTicketUrl } from './artifact-pdf'
+import { CHAT_ARTIFACT_MAX_PDF_BYTES, CHAT_ARTIFACT_MAX_TEXT_BYTES, type ChatArtifactReadResponse } from '@forge/protocol'
+import { FeatureRequestError, type EnvironmentClient } from '@forge/client-runtime'
 
 interface ArtifactPanelProps {
   artifact: ArtifactReference | null
-  wsUrl: string
+  /** The active session's environment; artifacts are read from the host that owns them. */
+  environmentClient: EnvironmentClient | null
   activeAgentId?: string | null
   onClose: () => void
   onArtifactClick?: (artifact: ArtifactReference) => void
@@ -61,7 +58,7 @@ const HTML_FILE_PATTERN = /\.html?$/i
 // Popups escape to the desktop window-open policy, which hands http(s) links to the system browser.
 const HTML_PREVIEW_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals'
 
-export function ArtifactPanel({ artifact, wsUrl, activeAgentId, onClose, onArtifactClick }: ArtifactPanelProps) {
+export function ArtifactPanel({ artifact, environmentClient, activeAgentId, onClose, onArtifactClick }: ArtifactPanelProps) {
   const [isVisible, setIsVisible] = useState(false)
   const [isClosing, setIsClosing] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -119,16 +116,13 @@ export function ArtifactPanel({ artifact, wsUrl, activeAgentId, onClose, onArtif
   }, [artifactPath])
 
   useEffect(() => {
-    if (!artifactPath) {
-      setContent('')
-      setImagePreviewUrl(null)
-      setPdfPreviewUrl((current) => {
-        revokeArtifactPdfBlobUrl(current)
-        return null
-      })
-      setResolvedPath(null)
-      setPreviewInfo(null)
-      setError(null)
+    setContent('')
+    setImagePreviewUrl(null)
+    setPdfPreviewUrl(null)
+    setResolvedPath(null)
+    setPreviewInfo(null)
+    setError(null)
+    if (!artifactPath || !environmentClient) {
       setIsLoading(false)
       return
     }
@@ -138,110 +132,77 @@ export function ArtifactPanel({ artifact, wsUrl, activeAgentId, onClose, onArtif
     const isPdfArtifact = isArtifactPdfPath(artifactFileName, artifactPath)
     const isHtmlArtifact = HTML_FILE_PATTERN.test(artifactFileName ?? '') || HTML_FILE_PATTERN.test(artifactPath)
     const hasTranscriptProvenance = Boolean(transcriptAgentId && transcriptMessageId)
-    if (isImageArtifact && !hasTranscriptProvenance) {
-      setContent('')
-      setImagePreviewUrl(resolveReadFileUrl(wsUrl, artifactPath, artifactSourceAgentId ?? activeAgentId))
-      setPdfPreviewUrl((current) => {
-        revokeArtifactPdfBlobUrl(current)
-        return null
-      })
-      setResolvedPath(artifactPath)
-      setPreviewInfo(null)
-      setError(null)
-      setIsLoading(false)
-      return
-    }
-    if (isPdfArtifact && !hasTranscriptProvenance) {
-      const legacyPdfUrl = resolveReadFileUrl(wsUrl, artifactPath, artifactSourceAgentId ?? activeAgentId)
-      setContent('')
-      setImagePreviewUrl(null)
-      setPdfPreviewUrl((current) => {
-        revokeArtifactPdfBlobUrl(current)
-        return legacyPdfUrl
-      })
-      setResolvedPath(artifactPath)
-      setPreviewInfo(null)
-      setError(null)
-      setIsLoading(false)
-      return
-    }
-
+    const readAgentId = (artifactSourceAgentId ?? activeAgentId)?.trim() || undefined
+    const artifacts = environmentClient.features.chatArtifacts
     const abortController = new AbortController()
-    let ownedBlobUrl: string | null = null
+    const { signal } = abortController
+    // Blob URLs belong to this effect run and are revoked with it.
+    const releases: Array<() => void> = []
+    const own = (asset: { url: string; release(): void }) => {
+      releases.push(asset.release)
+      return asset.url
+    }
 
     setIsLoading(true)
-    setError(null)
-    setContent('')
-    setImagePreviewUrl(null)
-    setPdfPreviewUrl((current) => {
-      revokeArtifactPdfBlobUrl(current)
-      return null
-    })
-    setResolvedPath(null)
-    setPreviewInfo(null)
 
     void (async () => {
       try {
+        if ((isImageArtifact || isPdfArtifact) && !hasTranscriptProvenance) {
+          const url = own(await artifacts.fileUrl({ path: artifactPath, agentId: readAgentId }, signal))
+          if (signal.aborted) return
+          if (isImageArtifact) setImagePreviewUrl(url)
+          else setPdfPreviewUrl(url)
+          setResolvedPath(artifactPath)
+          return
+        }
+
         const file = hasTranscriptProvenance
-          ? await readTranscriptArtifactFile({
-              wsUrl,
+          ? await readTranscriptArtifactFile(environmentClient, {
               transcriptAgentId: transcriptAgentId!,
               messageId: transcriptMessageId!,
               path: artifactPath,
               // A rendered page needs the whole document, not the text-preview prefix.
               previewBytes: isHtmlArtifact ? CHAT_ARTIFACT_MAX_TEXT_BYTES : TRANSCRIPT_ARTIFACT_PREVIEW_BYTES,
-              signal: abortController.signal,
-            })
-          : await readLegacyArtifactFile({
-              wsUrl,
-              path: artifactPath,
-              agentId: artifactSourceAgentId ?? activeAgentId,
-              signal: abortController.signal,
-            })
+            }, signal)
+          : toReadFileResult(await artifacts.readFile({ path: artifactPath, agentId: readAgentId }, signal), artifactPath)
 
-        if (abortController.signal.aborted) {
+        if (signal.aborted) {
           return
         }
 
         if (isImageArtifact) {
           setImagePreviewUrl(file.transport === 'http_ticket'
-            ? resolveSafeArtifactTicketUrl(wsUrl, file)
+            ? own(await artifacts.ticketUrl(resolveSafeArtifactTicketUrl(file), {
+                contentType: /^image\/(?:png|jpeg|gif|webp|svg\+xml)$/,
+                maxBytes: 4 * 1024 * 1024,
+              }, signal))
             : toSafeImageDataUrl(file))
-          setContent('')
         } else if (isPdfArtifact) {
           if (file.transport !== 'http_ticket') {
             throw new Error('PDF preview requires an authorized ticket response.')
           }
-          const ticketUrl = resolveSafeArtifactPdfTicketUrl(wsUrl, file)
-          ownedBlobUrl = await createArtifactPdfBlobUrl(ticketUrl, abortController.signal)
-          if (abortController.signal.aborted) {
-            revokeArtifactPdfBlobUrl(ownedBlobUrl)
-            ownedBlobUrl = null
-            return
-          }
-          setPdfPreviewUrl(ownedBlobUrl)
-          setContent('')
+          setPdfPreviewUrl(own(await artifacts.ticketUrl(resolveSafeArtifactPdfTicketUrl(file), {
+            contentType: /^application\/pdf$/,
+            maxBytes: CHAT_ARTIFACT_MAX_PDF_BYTES,
+          }, signal)))
         } else {
           if (file.binary) {
             throw new Error('Binary files cannot be displayed as text.')
           }
           setContent(file.content)
         }
+        if (signal.aborted) return
         setResolvedPath(file.path)
         setPreviewInfo(typeof file.truncated === 'boolean' && typeof file.totalBytes === 'number'
           ? { truncated: file.truncated, totalBytes: file.totalBytes }
           : null)
-        setError(null)
       } catch (readError) {
-        if (abortController.signal.aborted) {
+        if (signal.aborted) {
           return
         }
-
-        revokeArtifactPdfBlobUrl(ownedBlobUrl)
-        ownedBlobUrl = null
         setError(readError instanceof Error ? readError.message : 'Failed to read file.')
       } finally {
-        if (!abortController.signal.aborted) {
+        if (!signal.aborted) {
           setIsLoading(false)
         }
       }
@@ -249,16 +210,16 @@ export function ArtifactPanel({ artifact, wsUrl, activeAgentId, onClose, onArtif
 
     return () => {
       abortController.abort()
-      revokeArtifactPdfBlobUrl(ownedBlobUrl)
+      for (const release of releases) release()
     }
   }, [
     activeAgentId,
     artifactFileName,
     artifactPath,
     artifactSourceAgentId,
+    environmentClient,
     transcriptAgentId,
     transcriptMessageId,
-    wsUrl,
   ])
 
   useEffect(() => {
@@ -584,7 +545,6 @@ export function ArtifactPanel({ artifact, wsUrl, activeAgentId, onClose, onArtif
                   <div className="mx-auto flex max-w-[820px] justify-center">
                     <img
                       src={imagePreviewUrl}
-                      crossOrigin="use-credentials"
                       alt={artifact?.fileName || 'Artifact image'}
                       onError={() => setError('Unable to load image preview.')}
                       className="max-h-[calc(100vh-180px)] max-w-full rounded-lg border border-border/60 bg-muted/20 object-contain"
@@ -630,94 +590,22 @@ const HEADER_ACTION_CLASS = cn(
   'hover:bg-muted hover:text-foreground',
 )
 
-async function readLegacyArtifactFile({
-  wsUrl,
-  path,
-  agentId,
-  signal,
-}: {
-  wsUrl: string
-  path: string
-  agentId?: string | null
-  signal: AbortSignal
-}): Promise<ReadFileResult> {
-  return readArtifactFileResponse(
-    resolveReadFileEndpoint(wsUrl),
-    { path, agentId: agentId?.trim() || undefined },
-    path,
-    signal,
-  )
-}
-
-async function readTranscriptArtifactFile({
-  wsUrl,
-  transcriptAgentId,
-  messageId,
-  path,
-  previewBytes,
-  signal,
-}: {
-  wsUrl: string
-  transcriptAgentId: string
-  messageId: string
-  path: string
-  previewBytes: number
-  signal: AbortSignal
-}): Promise<ReadFileResult> {
-  return readArtifactFileResponse(
-    resolveApiEndpoint(wsUrl, '/api/chat-artifacts/read'),
-    {
-      transcriptAgentId,
-      messageId,
-      path,
-      previewBytes,
-      imageTransport: 'http_ticket',
-    },
-    path,
-    signal,
-    true,
-  ).catch((error: unknown) => {
-    // One compatibility retry only: old Forge versions reject the two additive request fields.
-    if (!(error instanceof ArtifactReadError) || error.status !== 400 || error.code !== 'invalid_request') throw error
-    return readArtifactFileResponse(
-      resolveApiEndpoint(wsUrl, '/api/chat-artifacts/read'),
-      { transcriptAgentId, messageId, path },
-      path,
-      signal,
-      true,
-    )
-  })
-}
-
-async function readArtifactFileResponse(
-  endpoint: string,
-  body: Record<string, unknown>,
-  requestedPath: string,
+async function readTranscriptArtifactFile(
+  environmentClient: EnvironmentClient,
+  request: { transcriptAgentId: string; messageId: string; path: string; previewBytes: number },
   signal: AbortSignal,
-  includeCredentials = false,
 ): Promise<ReadFileResult> {
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    ...(includeCredentials ? { credentials: 'include' as const } : {}),
-    body: JSON.stringify(body),
-    signal,
+  const artifacts = environmentClient.features.chatArtifacts
+  const response = await artifacts.read({ ...request, imageTransport: 'http_ticket' }, signal).catch((error: unknown) => {
+    // One compatibility retry only: old Forge versions reject the two additive request fields.
+    if (!(error instanceof FeatureRequestError) || error.status !== 400 || error.code !== 'invalid_request') throw error
+    const { previewBytes: _previewBytes, ...legacyRequest } = request
+    return artifacts.read(legacyRequest, signal)
   })
-  const payload: unknown = await response.json().catch(() => null)
+  return toReadFileResult(response, request.path)
+}
 
-  if (!response.ok) {
-    const message =
-      payload && typeof payload === 'object' && typeof (payload as { error?: unknown }).error === 'string'
-        ? (payload as { error: string }).error
-        : `File read failed (${response.status})`
-    const code = payload && typeof payload === 'object' && typeof (payload as { code?: unknown }).code === 'string'
-      ? (payload as { code: string }).code
-      : undefined
-    throw new ArtifactReadError(message, response.status, code)
-  }
-
+function toReadFileResult(payload: unknown, requestedPath: string): ReadFileResult {
   if (!payload || typeof payload !== 'object') {
     throw new Error('Invalid file read response.')
   }
@@ -739,11 +627,8 @@ async function readArtifactFileResponse(
   return parsed as ReadFileResult & Partial<ChatArtifactReadResponse>
 }
 
-class ArtifactReadError extends Error {
-  constructor(message: string, readonly status: number, readonly code?: string) { super(message) }
-}
-
-function resolveSafeArtifactTicketUrl(wsUrl: string, file: ReadFileResult): string {
+/** Validates an image ticket response; the runtime fetches the ticket path from the same environment. */
+function resolveSafeArtifactTicketUrl(file: ReadFileResult): string {
   const contentType = file.contentType?.trim().toLowerCase()
   const expiresAt = file.ticket ? Date.parse(file.ticket.expiresAt) : Number.NaN
   if (
@@ -754,17 +639,7 @@ function resolveSafeArtifactTicketUrl(wsUrl: string, file: ReadFileResult): stri
   ) {
     throw new Error('Invalid image ticket response.')
   }
-  const endpoint = new URL(resolveApiEndpoint(wsUrl, '/api/chat-artifacts/read'), window.location.href)
-  const ticket = new URL(file.ticket.url, endpoint)
-  if (
-    ticket.origin !== endpoint.origin ||
-    !/^https?:$/.test(ticket.protocol) ||
-    !/^\/api\/chat-artifacts\/tickets\/[A-Za-z0-9_-]{16,128}$/.test(ticket.pathname) ||
-    ticket.username || ticket.password || ticket.search || ticket.hash
-  ) {
-    throw new Error('Invalid image ticket response.')
-  }
-  return ticket.toString()
+  return file.ticket.url
 }
 
 function toSafeImageDataUrl(file: ReadFileResult): string {
@@ -782,36 +657,4 @@ function toSafeImageDataUrl(file: ReadFileResult): string {
     throw new Error('Invalid image response.')
   }
   return `data:${contentType};base64,${base64}`
-}
-
-function resolveReadFileEndpoint(wsUrl: string): string {
-  return resolveApiEndpoint(wsUrl, '/api/read-file')
-}
-
-function resolveApiEndpoint(wsUrl: string, pathname: string): string {
-  try {
-    const parsed = new URL(wsUrl)
-    parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:'
-    parsed.pathname = pathname
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString()
-  } catch {
-    return pathname
-  }
-}
-
-function resolveReadFileUrl(wsUrl: string, path: string, agentId?: string | null): string {
-  const endpoint = resolveReadFileEndpoint(wsUrl)
-  const searchParams = new URLSearchParams({
-    path,
-  })
-
-  const normalizedAgentId = agentId?.trim()
-  if (normalizedAgentId) {
-    searchParams.set('agentId', normalizedAgentId)
-  }
-
-  const separator = endpoint.includes('?') ? '&' : '?'
-  return `${endpoint}${separator}${searchParams.toString()}`
 }

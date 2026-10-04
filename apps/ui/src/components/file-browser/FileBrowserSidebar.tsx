@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { EnvironmentPanels } from '@/lib/environment-panel-context'
 import { FilePlus, FolderOpen, FolderPlus, GitBranch, HardDrive, Loader2, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -13,7 +14,6 @@ import {
   useDirectoryListing,
   useFileCount,
   useProjectResourcesSnapshot,
-  seedProjectResources,
   invalidateFileBrowserCaches,
 } from './use-file-browser-queries'
 import type { FileBrowserWorktreeSelection } from '@/hooks/index-page/use-panel-state'
@@ -22,7 +22,7 @@ import type { FileBrowserWorktreeSelection } from '@/hooks/index-page/use-panel-
 const SKELETON_WIDTHS = [72, 85, 63, 90, 68, 78, 82, 65, 88, 70, 76, 84]
 
 interface FileBrowserSidebarProps {
-  wsUrl: string
+  panel: EnvironmentPanels | null
   agentId: string | null
   isOpen: boolean
   onClose: () => void
@@ -45,7 +45,7 @@ interface FileBrowserSidebarProps {
 }
 
 export function FileBrowserSidebar({
-  wsUrl,
+  panel,
   agentId,
   isOpen,
   onClose,
@@ -84,9 +84,9 @@ export function FileBrowserSidebar({
   const gatedAgentId = isOpen ? agentId : null
   const worktreeId = worktreeContext?.worktreeId ?? null
 
-  const rootList = useDirectoryListing(wsUrl, gatedAgentId, '', worktreeId)
-  const fileCount = useFileCount(wsUrl, gatedAgentId, worktreeId)
-  const projectResources = useProjectResourcesSnapshot(wsUrl, {
+  const rootList = useDirectoryListing(panel, gatedAgentId, '', worktreeId)
+  const fileCount = useFileCount(panel, gatedAgentId, worktreeId)
+  const projectResources = useProjectResourcesSnapshot(panel, {
     profileId: isOpen ? (projectResourceProfileId ?? null) : null,
     sessionAgentId: isOpen ? (projectResourceSessionAgentId ?? null) : null,
   })
@@ -138,13 +138,13 @@ export function FileBrowserSidebar({
   }, [handleRefresh, refreshNonce])
 
   const handleSeedProjectForge = useCallback(() => {
-    if (!projectResourceProfileId || !projectResourceSessionAgentId || seedStatus === 'saving') return
+    if (!panel || !projectResourceProfileId || !projectResourceSessionAgentId || seedStatus === 'saving') return
     setSeedStatus('saving')
     setSeedError(null)
-    void seedProjectResources(wsUrl, {
-      profileId: projectResourceProfileId,
-      sessionAgentId: projectResourceSessionAgentId,
-    })
+    void panel.features.files.seedResources(
+      { profileId: projectResourceProfileId, sessionAgentId: projectResourceSessionAgentId },
+      panel.signal,
+    )
       .then(() => {
         setSeedStatus('success')
         handleRefresh({ resetSeedStatus: false })
@@ -153,7 +153,7 @@ export function FileBrowserSidebar({
         setSeedStatus('idle')
         setSeedError(error instanceof Error ? error.message : 'Could not create .forge resources')
       })
-  }, [handleRefresh, projectResourceProfileId, projectResourceSessionAgentId, seedStatus, wsUrl])
+  }, [handleRefresh, projectResourceProfileId, projectResourceSessionAgentId, seedStatus, panel])
 
   const handleRequestCreateFile = useCallback((directoryPath: string) => {
     if (!onCreateFile) return
@@ -444,9 +444,9 @@ export function FileBrowserSidebar({
           </div>
         ) : gatedAgentId ? (
           <FileTree
-            key={`${gatedAgentId}:${worktreeId ?? 'session'}`}
+            key={`${panel?.session.environmentId ?? ""}:${gatedAgentId}:${worktreeId ?? "session"}`}
             ref={fileTreeRef}
-            wsUrl={wsUrl}
+            panel={panel}
             agentId={gatedAgentId}
             cwd={rootList.data?.cwd ?? ''}
             selectedFile={selectedFile}
