@@ -72,16 +72,17 @@ async function runTurn(turn, text) {
       if (!result.answers?.['fixture-choice']) throw new Error('Fixture choice response missing');
       reply = `fixture:${fixture.instanceId}:choice answered`;
     }
-    if (text.includes('[fixture:spawn]')) {
+    if (text.includes('[fixture:spawn]') || text.includes('[fixture:spawn-choice]')) {
       count('workerSpawns');
-      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-worker', customSpecialist: 'fixture-worker',
-        cwd: checkout, initialMessage: '[fixture:worker] Return the synthetic worker result.' });
+      const result = await dynamicTool(turn, 'spawn_agent', { agentId: text.includes('[fixture:spawn-choice]') ? 'fixture-choice-worker' : 'fixture-worker', customSpecialist: 'fixture-worker',
+        cwd: checkout, initialMessage: text.includes('[fixture:spawn-choice]') ? '[fixture:choice] Request the synthetic worker choice.' : '[fixture:worker] Return the synthetic worker result.' });
       if (result.success !== true) throw new Error('Fixture worker spawn failed');
       reply = `fixture:${fixture.instanceId}:worker spawned`;
     }
     if (text.includes('[fixture:worker]')) reply = `fixture:${fixture.instanceId}:worker result`;
     if (text.includes('[fixture:long-tool]')) {
       await dynamicTool(turn, 'notes', { op: 'write', path: 'fixture-output.txt', text: 'synthetic-output '.repeat(3000) });
+      await dynamicTool(turn, 'notes', { op: 'read', path: 'fixture-output.txt', maxChars: 16000 });
     }
     if (turn.done) return;
     write(join(checkout, 'fixture-provider-marker.txt'), `${fixture.instanceId}:turns=${counters.turnStarts}\n`);

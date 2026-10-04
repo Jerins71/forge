@@ -102,7 +102,8 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     if (JSON.stringify(worker) !== prior?.worker_json) eventSink.append(tx, { topic: "detail", sessionId: descriptor.managerId, event: { type: "worker.upsert", worker } });
   }
   function item(entry: ConversationEntryEvent, sessionId: string): DetailItem | null {
-    if (!["conversation_message", "activity_summary", "agent_message"].includes(entry.type)) return null;
+    if (!["conversation_message", "activity_summary", "agent_message", "agent_tool_call"].includes(entry.type)) return null;
+    if (entry.type === "agent_tool_call" && entry.kind !== "tool_execution_end") return null;
     if (entry.type === "conversation_message" && entry.terminal === false) return null;
     const id = entry.timelineEntryId ?? ("id" in entry && typeof entry.id === "string" ? entry.id : undefined);
     if (!id) return null;
@@ -110,7 +111,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const user = entry.type === "conversation_message" && entry.role === "user";
     return { itemId: id, userTurnId: user ? entry.id ?? id : userTurns.get(sessionId) ?? ("turnId" in entry ? entry.turnId : undefined) ?? id,
       actorId: "actorAgentId" in entry ? entry.actorAgentId : entry.agentId,
-      kind: entry.type === "conversation_message" ? user ? "user" : "assistant" : entry.type === "agent_message" ? "worker_result" : "activity",
+      kind: entry.type === "conversation_message" ? user ? "user" : "assistant" : entry.type === "agent_message" ? "worker_result" : entry.type === "agent_tool_call" ? "tool" : "activity",
       timestamp: entry.timestamp, text: text.slice(0, 8192), contentRef: text.length > 8192 ? id : null,
       artifacts: (wireProjection.artifacts?.(entry, sessionId) ?? []).slice(0, 20),
       commandId: entry.type === "conversation_message" ? entry.controlCommandId ?? null : null };
@@ -277,7 +278,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
   const mirror: SwarmEventMirror = {
     attach() {
       if (attached || disposed) return; attached = true;
-      for (const name of ["conversation_message", "activity_summary", "agent_message"]) listen(name, observeCanonical);
+      for (const name of ["conversation_message", "activity_summary", "agent_message", "agent_tool_call"]) listen(name, observeCanonical);
       listen("choice_request", (event: ChoiceRequestEvent) => { eventSink.transaction(tx => choice(tx, event)); });
       listen("agent_status", (event: { agentId: string }) => { const descriptor = swarmManager.getAgentForInternalUse(event.agentId); if (!descriptor) return; eventSink.transaction(tx => { if (descriptor.role === "worker") upsertWorker(tx, descriptor); upsertSession(tx, descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId); }); });
       listen("session_workers_snapshot", (event: { sessionAgentId: string; workers: AgentDescriptor[] }) => {

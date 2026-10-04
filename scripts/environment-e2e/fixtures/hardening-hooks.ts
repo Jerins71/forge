@@ -11,6 +11,7 @@ import { SwarmManager } from '../../../apps/backend/src/swarm/swarm-manager.js';
 import { ConversationTimeline } from '../../../apps/backend/src/swarm/session/conversation-timeline.js';
 import { RpcSendQueue } from '../../../apps/backend/src/ws/rpc/rpc-send-queue.js';
 import { StreamQueue } from '../../../apps/backend/src/environment/streams/stream-budget.js';
+import { TerminalService } from '../../../apps/backend/src/terminal/terminal-service.js';
 import { WebSocket } from './ws.js';
 import type NativeSocket from 'ws';
 import type { AgentDescriptor } from '../../../apps/backend/src/swarm/types.js';
@@ -25,6 +26,10 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
   const markerPath = join(checkout, '.fixture-crash.json');
   let armed: { commandId: string; boundary: CrashBoundary } | null = null;
   let manager: SwarmManager | undefined;
+  let terminalService: TerminalService | undefined;
+  let held: { commandId: string; reached: boolean; release: () => void; wait: Promise<void> } | undefined;
+  const createTerminal = TerminalService.prototype.create;
+  TerminalService.prototype.create = function (...args) { terminalService = this; return createTerminal.apply(this, args); };
   let tick = 0;
   const timeline = new ConversationTimeline({ now: () => new Date().toISOString() });
   const overlay = new Map<string, AgentDescriptor>();
@@ -136,7 +141,10 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
     return originalApply.call(this, text, { ...input, controlledInput: {
       ...control,
       onLocator(locator) { hit('post-JSONL', control.commandId); control.onLocator?.(locator); },
-      async beforeDispatch() { const result = await control.beforeDispatch(); if (result === 'dispatch') hit('post-dispatch-marker', control.commandId); return result; },
+      async beforeDispatch() {
+        if (held?.commandId === control.commandId) { held.reached = true; await held.wait; }
+        const result = await control.beforeDispatch(); if (result === 'dispatch') hit('post-dispatch-marker', control.commandId); return result;
+      },
       async onDispatchAccepted() { hit('post-provider-accept', control.commandId); await control.onDispatchAccepted(); },
     } });
   };
@@ -145,7 +153,18 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       if (!/^[0-9a-f-]{36}$/.test(input.commandId) || !crashBoundaries.includes(input.boundary)) throw new Error('Invalid controlled crash request');
       armed = input; return { armed: true, pid: process.pid };
     },
-    async operate(input: { operation: string; sessionId?: string; count?: number; hz?: number; durationMs?: number; textBytes?: number; status?: AgentDescriptor['status']; gc?: boolean }) {
+    async operate(input: { operation: string; commandId?: string; sessionId?: string; count?: number; hz?: number; durationMs?: number; textBytes?: number; status?: AgentDescriptor['status']; gc?: boolean }) {
+      if (input.operation === 'hold-dispatch') {
+        if (!input.commandId || held) throw new Error('Invalid fixture hold');
+        let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; });
+        held = { commandId: input.commandId, reached: false, wait, release }; return { armed: true };
+      }
+      if (input.operation === 'hold-state') return { reached: held?.reached ?? false };
+      if (input.operation === 'release-dispatch') { held?.release(); held = undefined; return { released: true }; }
+      if (input.operation === 'host-terminal-create') {
+        if (!terminalService || !input.sessionId) throw new Error('Fixture terminal owner unavailable');
+        return terminalService.create({ sessionAgentId: input.sessionId, shell: '/bin/sh', shellArgs: [] });
+      }
       if (input.operation === 'metrics') {
         if (input.gc) (globalThis as unknown as { gc?: () => void }).gc?.();
         const active = [...sockets].map(ref => ref.deref()).filter((socket): socket is NativeSocket => !!socket && socket.readyState === WebSocket.OPEN);
@@ -156,7 +175,10 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       const descriptor = manager.getAgentForInternalUse(input.sessionId); if (!descriptor) throw new Error('Unknown fixture session');
       const inject = () => {
         const timestamp = new Date(Date.now() + tick++).toISOString();
-        const next = { ...descriptor, status: input.status ?? 'streaming' as const, updatedAt: timestamp };
+        // A provider's coalesced detail updates do not advance its session's activity time every token.
+        // Status changes once at turn start; shell-burst separately exercises the real shell update path.
+        const next = input.operation === 'stream-start' && overlay.has(descriptor.agentId) ? overlay.get(descriptor.agentId)!
+          : { ...descriptor, status: input.status ?? 'streaming' as const, updatedAt: timestamp };
         overlay.set(descriptor.agentId, next);
         if (input.operation !== 'shell-burst') {
           const event = { type: 'conversation_message' as const, agentId: descriptor.agentId, role: 'assistant' as const, source: 'speak_to_user' as const, text: `Synthetic provider update ${tick} ` + 'x'.repeat(input.textBytes ?? 64), timestamp, terminal: true, id: randomUUID() };
@@ -171,7 +193,7 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
         return { started: true };
       }
       if (!['burst', 'shell-burst'].includes(input.operation) || !input.count || input.count > 10000 || (input.textBytes ?? 0) > 60000) throw new Error('Invalid fixture burst');
-      for (let index = 0; index < input.count; index++) { inject(); if (input.operation === 'burst' && index % 20 === 19) await new Promise<void>(resolve => setImmediate(resolve)); }
+      for (let index = 0; index < input.count; index++) inject();
       return { injected: input.count };
     },
   };
