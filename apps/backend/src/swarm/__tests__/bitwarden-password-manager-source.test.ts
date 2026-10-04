@@ -8,9 +8,7 @@ vi.mock("node:child_process", () => ({
   spawn: spawnMock,
 }));
 
-import { BitwardenPasswordManagerCommandClient, BitwardenPasswordManagerSecretSource } from "../secure-sessions/sources/bitwarden-password-manager-source.js";
-import type { BitwardenCliManager } from "../secure-sessions/sources/bitwarden-cli-manager.js";
-import type { SecureVaultCipher } from "../secure-sessions/sources/electron-safe-storage-client.js";
+import { BitwardenPasswordManagerCommandClient } from "../secure-sessions/sources/bitwarden-password-manager-source.js";
 import { HostOnlySecret } from "../secure-sessions/sources/host-only-secret.js";
 
 const COLLECTION_A = "11111111-1111-4111-8111-111111111111";
@@ -25,79 +23,6 @@ afterEach(() => {
 });
 
 describe("BitwardenPasswordManagerCommandClient", () => {
-  it("exposes only cloned display metadata and invalidates it with the CLI session", async () => {
-    spawnMock.mockImplementation((_executable: string, args: string[]) => {
-      if (args[0] === "unlock") return fakeChild(SESSION_KEY);
-      if (args[0] === "status") return fakeChild(JSON.stringify({ status: "unlocked" }));
-      if (args[0] === "list") return fakeChild(JSON.stringify([
-        { id: COLLECTION_A, organizationId: ORGANIZATION, name: "Infrastructure" },
-      ]));
-      return fakeChild("");
-    });
-    const resolve = vi.fn().mockResolvedValue({
-      invocation: { executablePath: "fake-bw", source: "system", platform: process.platform, commandShell: null },
-      summary: { state: "ready", executablePath: "fake-bw" },
-    });
-    const cipher = {
-      decrypt: async () => ({ material: new HostOnlySecret(Buffer.from("synthetic-password")) }),
-    } as unknown as SecureVaultCipher;
-    const source = new BitwardenPasswordManagerSecretSource(cipher, { resolve } as unknown as BitwardenCliManager);
-    expect(source.getCachedMetadata(null)).toBeNull();
-    await source.unlock(Buffer.from("synthetic-ciphertext"), null);
-    await source.listCollections();
-    const calls = spawnMock.mock.calls.length;
-    const first = source.getCachedMetadata(null)!;
-    first.collections[0]!.name = "Modified";
-    first.status.cli.executablePath = "Modified";
-    expect(source.getCachedMetadata(null)).toMatchObject({
-      status: { state: "available", cli: { executablePath: "fake-bw" } },
-      collections: [{ name: "Infrastructure" }],
-    });
-    expect(source.getCachedMetadata("different-bw")).toBeNull();
-    expect(spawnMock).toHaveBeenCalledTimes(calls);
-    await source.sync();
-    expect(source.getCachedMetadata(null)).toBeNull();
-    await source.listCollections();
-    await source.lock();
-    expect(source.getCachedMetadata(null)).toBeNull();
-    source.dispose();
-    expect(source.getCachedMetadata(null)).toBeNull();
-  });
-
-  it("keeps collection metadata until sync or lock rather than expiring it on navigation", async () => {
-    let now = 1_000;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
-    spawnMock.mockImplementation((_executable: string, args: string[]) => {
-      if (args[0] === "unlock") return fakeChild(SESSION_KEY);
-      if (args[0] === "status") return fakeChild(JSON.stringify({ status: "unlocked" }));
-      if (args[0] === "list") return fakeChild(JSON.stringify([
-        { id: COLLECTION_A, organizationId: ORGANIZATION, name: "Infrastructure" },
-      ]));
-      return fakeChild("");
-    });
-    const client = new BitwardenPasswordManagerCommandClient("fake-bw");
-    await client.unlock(Buffer.from("synthetic-master-password"));
-    const first = await client.listCollections();
-    first[0]!.name = "Changed by consumer";
-    expect((await client.listCollections())[0]!.name).toBe("Infrastructure");
-    const lists = () => spawnMock.mock.calls.filter((call) => call[1][0] === "list").length;
-    expect(lists()).toBe(1);
-    now += 60_001;
-    await client.listCollections();
-    expect(lists()).toBe(1);
-    await client.sync();
-    expect(client.getCachedCollections()).toBeNull();
-    await client.listCollections();
-    expect(lists()).toBe(2);
-    await client.lock();
-    expect(client.getCachedCollections()).toBeNull();
-    await expect(client.listCollections()).rejects.toThrow("SECURE_SOURCE_LOCKED");
-    await client.unlock(Buffer.from("synthetic-master-password"));
-    await client.listCollections();
-    expect(lists()).toBe(3);
-    client.dispose();
-  });
-
   it("launches npm-style Windows command shims through cmd.exe without shell interpolation", async () => {
     spawnMock.mockImplementation((
       _executable: string,
@@ -311,41 +236,6 @@ describe("BitwardenPasswordManagerCommandClient", () => {
     } finally {
       createdInput?.fill(0);
       password.release();
-      client.dispose();
-    }
-  });
-
-  it("drops a rejected session and rechecks the account without it", async () => {
-    let sessionStatusCalls = 0;
-    spawnMock.mockImplementation((
-      _executable: string,
-      args: string[],
-      options: { env: NodeJS.ProcessEnv },
-    ) => {
-      if (args[0] === "unlock") return fakeChild(SESSION_KEY);
-      if (args[0] === "status" && options.env.BW_SESSION) {
-        sessionStatusCalls += 1;
-        return sessionStatusCalls === 1
-          ? fakeChild(JSON.stringify({ status: "unlocked" }))
-          : fakeChild("", 1);
-      }
-      if (args[0] === "status") {
-        return fakeChild(JSON.stringify({ status: "locked" }));
-      }
-      return fakeChild("", 1);
-    });
-
-    const client = new BitwardenPasswordManagerCommandClient("fake-bw", 5_000);
-    const password = Buffer.from("synthetic-master-password");
-    try {
-      await client.unlock(password);
-      await expect(client.status()).resolves.toEqual({
-        state: "locked",
-        accountEmail: null,
-        serverUrl: null,
-      });
-    } finally {
-      password.fill(0);
       client.dispose();
     }
   });

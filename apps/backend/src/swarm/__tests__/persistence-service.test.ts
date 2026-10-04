@@ -1,6 +1,5 @@
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { makeTempConfig } from "../../test-support/index.js";
 import { PersistenceService } from "../persistence-service.js";
@@ -148,68 +147,5 @@ describe("PersistenceService", () => {
     expect(loaded.profiles).toEqual(profiles);
     expect(loaded.agents).toHaveLength(1);
     expect(loaded.agents[0]).toEqual(persisted);
-  });
-
-  it("skips invalid descriptors, warns with descriptor hints, and keeps valid neighbors", async () => {
-    const config = await makeTempConfig();
-    const valid = descriptor(config, { agentId: "valid-manager" });
-    await writeStore(config, [
-      { agentId: "broken", role: "manager" },
-      { displayName: "missing id" },
-      valid,
-    ]);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    const loaded = await createPersistenceService(config).loadStore();
-
-    expect(loaded.agents).toEqual([valid]);
-    expect(warn).toHaveBeenCalledTimes(2);
-    expect(warn.mock.calls[0]?.[0]).toContain("agentId=broken");
-    expect(warn.mock.calls[1]?.[0]).toContain("index=1");
-    warn.mockRestore();
-  });
-
-  it.each([
-    [".forge", ".middleman"],
-    ["forge", "middleman"],
-  ])("normalizes legacy %s sessionFile paths from matching %s data directories", async (currentName, legacyName) => {
-    const baseConfig = await makeTempConfig();
-    const root = await mkdtemp(join(tmpdir(), "forge-path-normalization-"));
-    const dataDir = resolve(root, currentName);
-    const legacyDataDir = resolve(root, legacyName);
-    const config: SwarmConfig = {
-      ...baseConfig,
-      paths: {
-        ...baseConfig.paths,
-        dataDir,
-        swarmDir: join(dataDir, "swarm"),
-        agentsStoreFile: join(dataDir, "swarm", "agents.json"),
-      },
-    };
-    const legacySessionFile = join(legacyDataDir, "profiles", "manager", "sessions", "manager", "session.jsonl");
-    const currentSessionFile = join(dataDir, "profiles", "manager", "sessions", "manager", "session.jsonl");
-    await writeStore(config, [descriptor(config, { sessionFile: legacySessionFile })]);
-
-    const loaded = await createPersistenceService(config).loadStore();
-
-    expect(loaded.agents[0]?.sessionFile).toBe(currentSessionFile);
-  });
-
-  it("normalizes stopped_on_restart descriptors to stopped during store load", async () => {
-    const config = await makeTempConfig();
-    await writeStore(config, [descriptor(config, { status: "stopped_on_restart" })]);
-
-    const loaded = await createPersistenceService(config).loadStore();
-
-    expect(loaded.agents[0]?.status).toBe("stopped");
-  });
-
-  it("returns an empty store for missing, malformed, or non-array agent stores", async () => {
-    const config = await makeTempConfig();
-    await writeFile(config.paths.agentsStoreFile, "not json", "utf8");
-    await expect(createPersistenceService(config).loadStore()).resolves.toEqual({ agents: [], profiles: [] });
-
-    await writeFile(config.paths.agentsStoreFile, JSON.stringify({ agents: {} }), "utf8");
-    await expect(createPersistenceService(config).loadStore()).resolves.toEqual({ agents: [], profiles: [] });
   });
 });

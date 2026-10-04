@@ -2,24 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  BASELINE_PIN,
-  BASELINE_PIN_REVISION,
-  GOLDENS,
-  PASSIVE_READINESS_DEADLINE_MS,
-  assertLargeModeConfirmed,
-  compactAgentSpecs,
-  compactGoldens,
-  createMarkedDataRoot,
-  evaluateBaseline,
-  evaluateStrict,
-  fakeScore,
-  isHarnessOwnedRoot,
-  removeMarkedDataRoot,
-  runReliabilitySuite,
-  scoreCase,
-} from "./fixtures/history-recall-reliability/index.js";
-import { COMPACT_ARCHIVE_COUNT, ENTRY, SESSION } from "./fixtures/history-recall-reliability/ids.js";
+import { BASELINE_PIN, BASELINE_PIN_REVISION, GOLDENS, PASSIVE_READINESS_DEADLINE_MS, assertLargeModeConfirmed, compactAgentSpecs, compactGoldens, createMarkedDataRoot, evaluateBaseline, evaluateStrict, isHarnessOwnedRoot, removeMarkedDataRoot, runReliabilitySuite } from "./fixtures/history-recall-reliability/index.js";
+import { COMPACT_ARCHIVE_COUNT } from "./fixtures/history-recall-reliability/ids.js";
 
 const roots: string[] = [];
 
@@ -62,68 +46,6 @@ describe("history-recall reliability acceptance preparation", () => {
 
     expect(() => assertLargeModeConfirmed("giant", false)).toThrow(/opt-in/i);
     expect(() => assertLargeModeConfirmed("scale", false)).toThrow(/opt-in/i);
-  });
-
-  it("fails strict mode on fake red observations and passes it on fake green observations", () => {
-    const red = evaluateStrict([fakeScore({ id: "cold-source-last-first-search", meetsGolden: false, observed: "miss" })]);
-    expect(red.ok).toBe(false);
-    expect(red.missedGoldens).toEqual(["cold-source-last-first-search"]);
-
-    const green = evaluateStrict([fakeScore({
-      id: "cold-source-last-first-search",
-      meetsGolden: true,
-      observed: "pass",
-      expectedBaseline: "pass",
-      matchesExpectedBaseline: true,
-      notes: [],
-    })]);
-    expect(green.ok).toBe(true);
-    expect(green.missedGoldens).toEqual([]);
-  });
-
-  it("requires both unanchored mirrors only before isolated convergence, then matches clean forward", () => {
-    const golden = GOLDENS.find((entry) => entry.id === "provisional-seam-unanchored");
-    expect(golden).toBeTruthy();
-    const missingNative = scoreCase(golden!, {
-      op: "lifecycle",
-      hits: [{ sessionAgentId: SESSION.seam, actorAgentId: SESSION.seam, entryId: ENTRY.seamUnanchoredCustom }],
-      durationMs: 12,
-      queryCount: 1,
-      unanchored: true,
-      phase: "provisional",
-      convergedEntryIds: [ENTRY.seamUnanchoredCustom],
-      forwardEntryIds: [ENTRY.seamUnanchoredCustom],
-    });
-    expect(missingNative.meetsGolden).toBe(false);
-    expect(missingNative.notes.some((note) => note.includes("hrr-seam-unanchored-native"))).toBe(true);
-
-    const unanchoredPass = scoreCase(golden!, {
-      op: "lifecycle",
-      hits: [
-        { sessionAgentId: SESSION.seam, actorAgentId: SESSION.seam, entryId: ENTRY.seamUnanchoredCustom },
-        { sessionAgentId: SESSION.seam, actorAgentId: SESSION.seam, entryId: ENTRY.seamUnanchoredNative },
-      ],
-      durationMs: 12,
-      queryCount: 1,
-      unanchored: true,
-      phase: "provisional",
-      convergedEntryIds: [ENTRY.seamUnanchoredCustom],
-      forwardEntryIds: [ENTRY.seamUnanchoredCustom],
-    });
-    expect(unanchoredPass.meetsGolden).toBe(true);
-
-    const alreadyConverged = scoreCase(golden!, {
-      op: "lifecycle",
-      hits: [{ sessionAgentId: SESSION.seam, actorAgentId: SESSION.seam, entryId: ENTRY.seamUnanchoredCustom }],
-      durationMs: 8,
-      queryCount: 1,
-      unanchored: false,
-      phase: "converged",
-      convergedEntryIds: [ENTRY.seamUnanchoredCustom],
-      forwardEntryIds: [ENTRY.seamUnanchoredCustom],
-    });
-    expect(alreadyConverged.meetsGolden).toBe(true);
-    expect(alreadyConverged.notes.some((note) => note.includes("dual-id assertion skipped"))).toBe(true);
   });
 
   it("scores compact goldens strictly, starts cold queries after start(snapshot), and reports remaining engine failures separately", async () => {

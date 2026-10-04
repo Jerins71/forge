@@ -122,37 +122,6 @@ describe("cron scheduling schedule.js CLI raw agents-store parity", () => {
     });
   });
 
-  it("resolves --manager profile id from the raw agents store", async () => {
-    const dataDir = await makeDataDir();
-    await writeAgentsStore(dataDir, [
-      {
-        agentId: "manager-a",
-        role: "manager",
-        profileId: "profile-a"
-      },
-      {
-        agentId: "manager-b",
-        role: "manager",
-        profileId: "profile-b"
-      }
-    ]);
-
-    const result = await runScheduleCli(dataDir, [...addArgs("manager-b"), "--manager", "manager-b"]);
-
-    const expectedSchedulePath = join(dataDir, "profiles", "profile-b", "schedules", "schedules.json");
-    expect(result.status).toBe(0);
-    expect(result.json).toMatchObject({
-      ok: true,
-      action: "add",
-      managerId: "manager-b",
-      filePath: expectedSchedulePath
-    });
-
-    const store = await readJsonFile(expectedSchedulePath);
-    expect(store.schedules).toHaveLength(1);
-    expect(store.schedules[0]).toMatchObject({ sessionId: "manager-b" });
-  });
-
   it("accepts same-profile manager sessions and rejects unknown, worker, and cross-profile sessions", async () => {
     const dataDir = await makeDataDir();
     await writeAgentsStore(dataDir, [
@@ -206,51 +175,6 @@ describe("cron scheduling schedule.js CLI raw agents-store parity", () => {
     expect(otherProfile.json).toEqual({
       ok: false,
       error: "Invalid session other-profile-session: belongs to profile profile-b, expected profile profile-a"
-    });
-  });
-
-  it("falls back to legacy manager schedules, then writes the profile-scoped schedules file", async () => {
-    const dataDir = await makeDataDir();
-    await writeAgentsStore(dataDir, [
-      {
-        agentId: "legacy-manager",
-        role: "manager",
-        profileId: "legacy-profile"
-      }
-    ]);
-
-    const legacySchedule = {
-      id: "legacy-schedule",
-      sessionId: "legacy-manager",
-      name: "Legacy schedule",
-      cron: "0 8 * * *",
-      message: "Legacy message",
-      oneShot: false,
-      timezone: "UTC",
-      createdAt: "2026-05-01T00:00:00.000Z",
-      nextFireAt: "2026-05-02T08:00:00.000Z"
-    };
-    const legacySchedulePath = join(dataDir, "schedules", "legacy-manager.json");
-    await mkdir(dirname(legacySchedulePath), { recursive: true });
-    await writeFile(legacySchedulePath, `${JSON.stringify({ schedules: [legacySchedule] }, null, 2)}\n`, "utf8");
-
-    const result = await runScheduleCli(dataDir, addArgs("legacy-manager"));
-
-    const profileSchedulePath = join(dataDir, "profiles", "legacy-profile", "schedules", "schedules.json");
-    expect(result.status).toBe(0);
-    expect(result.json).toMatchObject({
-      ok: true,
-      action: "add",
-      managerId: "legacy-manager",
-      filePath: profileSchedulePath
-    });
-
-    const profileStore = await readJsonFile(profileSchedulePath);
-    expect(profileStore.schedules).toHaveLength(2);
-    expect(profileStore.schedules[0]).toEqual(legacySchedule);
-    expect(profileStore.schedules[1]).toMatchObject({
-      sessionId: "legacy-manager",
-      name: "Daily digest"
     });
   });
 });

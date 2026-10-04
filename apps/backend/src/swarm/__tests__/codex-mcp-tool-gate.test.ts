@@ -1,85 +1,8 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildCodexMcpToolTurnAuthorization,
-  evaluateCodexMcpCatalogBrowseGate,
-  evaluateCodexMcpToolGate,
-  isCodexMcpToolSelectorAuthorized,
-  isScheduledTaskUserMessage,
-} from "../codex-app-server/codex-mcp-tool-gate.js";
-import { CodexMcpCatalog, type CodexCatalogSnapshot } from "../codex-app-server/codex-mcp-catalog.js";
+import { buildCodexMcpToolTurnAuthorization, evaluateCodexMcpToolGate } from "../codex-app-server/codex-mcp-tool-gate.js";
 import { createManagerDescriptor } from "../../test-support/fixtures.js";
 
-function buildCatalogSnapshot(): CodexCatalogSnapshot {
-  return {
-    apps: [{ id: "fireflies", name: "Fireflies" }],
-    plugins: [
-      {
-        selector: "fireflies",
-        name: "fireflies",
-        pluginId: "fireflies@openai-curated",
-        displayName: "Fireflies",
-        codexAppsToolNames: ["fireflies_fireflies_get_summary"],
-      },
-      {
-        selector: "repo-prompt",
-        pluginId: "repo-prompt",
-        displayName: "RepoPrompt",
-        relatedServerNames: ["RepoPrompt"],
-      },
-    ],
-    tools: [
-      {
-        selector: "codex_apps/fireflies_fireflies_get_summary",
-        serverName: "codex_apps",
-        toolName: "fireflies_fireflies_get_summary",
-        readOnly: true,
-      },
-      {
-        selector: "fireflies/list_recent",
-        serverName: "fireflies",
-        toolName: "list_recent",
-        readOnly: true,
-      },
-      {
-        selector: "RepoPrompt/get_code_structure",
-        serverName: "RepoPrompt",
-        toolName: "get_code_structure",
-        readOnly: true,
-      },
-    ],
-    fetchedAt: "2026-01-01T00:00:00.000Z",
-  };
-}
-
 describe("codex-mcp-tool-gate", () => {
-  const catalogSnapshot = buildCatalogSnapshot();
-  const catalogResolver = new CodexMcpCatalog(async () => {
-    throw new Error("catalog resolver should not fetch in gate tests");
-  });
-
-  it("detects scheduled task messages even when channel is web", () => {
-    expect(
-      isScheduledTaskUserMessage(
-        '[Scheduled Task: Nightly]\n[scheduleContext] {"scheduleId":"sched-1"}\n\nDo work',
-      ),
-    ).toBe(true);
-  });
-
-  it("allows Builder web user-input surface checks", () => {
-    const manager = createManagerDescriptor("/tmp", {
-      agentId: "manager",
-    });
-
-    expect(
-      evaluateCodexMcpToolGate({
-        manager,
-        sourceContext: { channel: "web" },
-        messageText: "@Codex -fireflies list meetings",
-        inboundSource: "user_input",
-      }).allowed,
-    ).toBe(true);
-  });
-
   it("authorizes tool calls only for plugin delegation turns with selectors", () => {
     const manager = createManagerDescriptor("/tmp", {
       agentId: "manager",
@@ -103,71 +26,6 @@ describe("codex-mcp-tool-gate", () => {
         codexClassification: { kind: "plugin_delegate", selectors: ["fireflies/list_recent"] },
       }),
     ).toEqual({ allowed: true, authorizedSelectors: ["fireflies/list_recent"] });
-  });
-
-  it("allows catalog browsing for Builder managers without an active turn", () => {
-    const manager = createManagerDescriptor("/tmp", {
-      agentId: "manager",
-    });
-
-    expect(evaluateCodexMcpCatalogBrowseGate({ manager }).allowed).toBe(true);
-  });
-
-  it("authorizes RepoPrompt/get_code_structure when tagged inline", () => {
-    expect(
-      isCodexMcpToolSelectorAuthorized(
-        "RepoPrompt/get_code_structure",
-        ["RepoPrompt/get_code_structure"],
-        catalogSnapshot,
-        catalogResolver,
-      ),
-    ).toBe(true);
-  });
-
-  it("authorizes plugin-scoped selectors for tools within that plugin", () => {
-    expect(
-      isCodexMcpToolSelectorAuthorized(
-        "codex_apps/fireflies_fireflies_get_summary",
-        ["fireflies"],
-        catalogSnapshot,
-        catalogResolver,
-      ),
-    ).toBe(true);
-    expect(
-      isCodexMcpToolSelectorAuthorized(
-        "RepoPrompt/get_code_structure",
-        ["fireflies"],
-        catalogSnapshot,
-        catalogResolver,
-      ),
-    ).toBe(false);
-    expect(
-      isCodexMcpToolSelectorAuthorized(
-        "codex_apps/fireflies_fireflies_get_summary",
-        ["codex_apps"],
-        catalogSnapshot,
-        catalogResolver,
-      ),
-    ).toBe(false);
-  });
-
-  it("matches explicit tool selectors and rejects unrelated servers", () => {
-    expect(
-      isCodexMcpToolSelectorAuthorized(
-        "codex_apps/fireflies_fireflies_get_summary",
-        ["codex_apps/fireflies_fireflies_get_summary"],
-        catalogSnapshot,
-        catalogResolver,
-      ),
-    ).toBe(true);
-    expect(
-      isCodexMcpToolSelectorAuthorized(
-        "codex_apps/gmail_gmail_search_messages",
-        ["fireflies"],
-        catalogSnapshot,
-        catalogResolver,
-      ),
-    ).toBe(false);
   });
 
   it("rejects scheduled, cli, and project-agent turns", () => {

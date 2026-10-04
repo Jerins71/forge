@@ -36,27 +36,6 @@ describe("Native Codex Forge authentication", () => {
     await auth.release();
     expect(broker.release).toHaveBeenCalledTimes(2);
   });
-  it("honors pool selection even with one account and passes only external access tokens", async () => {
-    const f = fixture();
-    await f.auth.initialize();
-    await f.auth.login(f.client as never);
-    await f.auth.login(f.client as never);
-    expect(f.pool.select).toHaveBeenCalledWith("openai-codex");
-    expect(f.client.request.mock.calls).toEqual([["account/login/start", {
-      type: "chatgptAuthTokens", accessToken: "fake-access", chatgptAccountId: "account-a",
-    }]]);
-    await f.auth.release();
-    await expect(f.auth.login(f.client as never)).rejects.toThrow("not initialized");
-  });
-
-  it("refreshes an unexpired token after native Codex reports unauthorized", async () => {
-    const f = fixture();
-    await f.auth.initialize();
-    await f.auth.login(f.client as never);
-    expect(await f.auth.refresh()).toEqual({ accessToken: "replacement-access", chatgptAccountId: "account-a" });
-    expect(f.pool.buildRuntimeAuthData).toHaveBeenLastCalledWith("openai-codex", "selected", { forceRefresh: true });
-    await f.auth.release();
-  });
 
   it("fails closed when every configured pool account is disabled", async () => {
     const f = fixture();

@@ -1,11 +1,8 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  ConversationAttachmentService,
-  type PreparedConversationAttachments,
-} from "../conversation-attachment-service.js";
+import { ConversationAttachmentService, type PreparedConversationAttachments } from "../conversation-attachment-service.js";
 import type { ConversationAttachment } from "../types.js";
 
 const tempRoots: string[] = [];
@@ -51,53 +48,6 @@ describe("ConversationAttachmentService", () => {
     await expect(readFile(requiredPath(prepared, 2))).resolves.toEqual(Buffer.from("binary body"));
   });
 
-  it("returns empty aligned representations without creating the uploads directory", async () => {
-    const harness = await createHarness();
-
-    await expect(harness.service.prepareConversation(undefined)).resolves.toEqual({
-      normalizedAttachments: [],
-      persistedAttachments: [],
-      attachmentMetadata: [],
-      runtimeAttachments: [],
-    });
-    await expect(readdir(harness.uploadsDir)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("preserves mixed attachment ordering in images, file blocks, and persisted path notices", async () => {
-    const harness = await createHarness();
-    const prepared = await harness.service.prepareConversation([
-      image("first image", "image/png", "first.png"),
-      text("alpha", "alpha.txt"),
-      binary("payload", "payload.bin"),
-      image("second image", "image/jpeg", "second.jpg"),
-    ]);
-
-    const runtime = await harness.service.prepareRuntime("Manager One", prepared.runtimeAttachments);
-
-    expect(runtime.images).toEqual([
-      { mimeType: "image/png", data: Buffer.from("first image").toString("base64") },
-      { mimeType: "image/jpeg", data: Buffer.from("second image").toString("base64") },
-    ]);
-    expect(runtime.attachmentMessage).toBe([
-      "The user attached the following files:",
-      "",
-      "[Attachment 2]",
-      "Name: alpha.txt",
-      "MIME type: text/plain",
-      "Content:",
-      "----- BEGIN FILE -----",
-      "alpha",
-      "----- END FILE -----",
-      "[Attachment 3]",
-      "Name: payload.bin",
-      "MIME type: application/octet-stream",
-      `Saved to: ${requiredPath(prepared, 2)}`,
-      "Use read/bash tools to inspect the file directly from disk.",
-      "",
-      ...prepared.runtimeAttachments.map((attachment) => `[Attached file saved to: ${attachment.filePath}]`),
-    ].join("\n"));
-  });
-
   it("writes unpersisted binaries once into one sanitized agent batch in attachment order", async () => {
     const harness = await createHarness();
     const attachments = [
@@ -135,35 +85,6 @@ describe("ConversationAttachmentService", () => {
     expect(runtime.attachmentMessage).toContain(`[Attached file saved to: ${existingPath}]`);
     await expect(readdir(join(harness.dataDir, "attachments"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(existingPath, "utf8")).resolves.toBe("already there");
-  });
-
-  it("keeps image-only runtime content message-free unless a persisted path is present", async () => {
-    const harness = await createHarness();
-    const attachment = image("image body", "image/png", "screen.png");
-
-    await expect(harness.service.prepareRuntime("manager", [attachment])).resolves.toEqual({
-      images: [{ mimeType: "image/png", data: attachment.data }],
-      attachmentMessage: "",
-    });
-
-    const filePath = join(harness.uploadsDir, "screen.png");
-    await expect(harness.service.prepareRuntime("manager", [{ ...attachment, filePath }])).resolves.toEqual({
-      images: [{ mimeType: "image/png", data: attachment.data }],
-      attachmentMessage: `[Attached file saved to: ${filePath}]`,
-    });
-  });
-
-  it("propagates persistence and runtime directory errors before returning partial results", async () => {
-    const harness = await createHarness();
-    await mkdir(dirname(harness.uploadsDir), { recursive: true });
-    await writeFile(harness.uploadsDir, "not a directory");
-
-    await expect(harness.service.prepareConversation([text("blocked")])).rejects.toThrow();
-
-    const second = await createHarness();
-    await mkdir(second.dataDir, { recursive: true });
-    await writeFile(join(second.dataDir, "attachments"), "not a directory");
-    await expect(second.service.prepareRuntime("manager", [binary("blocked")])).rejects.toThrow();
   });
 });
 

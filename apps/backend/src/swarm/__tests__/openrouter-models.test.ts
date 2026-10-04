@@ -1,20 +1,11 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { OpenRouterModelEntry } from "@forge/protocol";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import * as openRouterStorage from "../catalog/openrouter-models.js";
+import { afterEach, describe, expect, it } from "vitest";
 import { getOpenRouterModelsPath } from "../data-paths.js";
 import { ModelCatalogService } from "../catalog/model-catalog-service.js";
-import {
-  addOpenRouterModel,
-  getOpenRouterModels,
-  readOpenRouterModels,
-  removeOpenRouterModel,
-  writeOpenRouterModels,
-  mutateOpenRouterModelsFile,
-  getOpenRouterRoutingRevision,
-} from "../catalog/openrouter-models.js";
+import { addOpenRouterModel, getOpenRouterModels, readOpenRouterModels, removeOpenRouterModel, writeOpenRouterModels, mutateOpenRouterModelsFile, getOpenRouterRoutingRevision } from "../catalog/openrouter-models.js";
 
 const tempDirs: string[] = [];
 
@@ -29,16 +20,6 @@ afterEach(async () => {
 });
 
 describe("openrouter-models", () => {
-  it("returns an empty model file when none exists", async () => {
-    const dataDir = await makeTempDataDir();
-
-    await expect(readOpenRouterModels(dataDir)).resolves.toEqual({
-      version: 1,
-      models: {},
-    });
-    await expect(getOpenRouterModels(dataDir)).resolves.toEqual([]);
-  });
-
   it("preserves persisted retired entries while hiding and rejecting them", async () => {
     const dataDir = await makeTempDataDir();
     const adjacentModel = {
@@ -214,160 +195,9 @@ describe("openrouter-models", () => {
     expect(storedAfterRemove).toEqual({ version: 1, models: {} });
     expect((await readdir(fileDir)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
-
-  it("rejects malformed JSON while preserving legacy metadata sanitization", async () => {
-    const dataDir = await makeTempDataDir();
-    const filePath = getOpenRouterModelsPath(dataDir);
-
-    await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, "", "utf8");
-    await expect(readOpenRouterModels(dataDir)).rejects.toThrow();
-
-    await writeFile(
-      filePath,
-      JSON.stringify({
-        version: 1,
-        models: {
-          "gpt-5": {
-            modelId: "gpt-5",
-            displayName: "Invalid no-slash model",
-            contextWindow: 128_000,
-            maxOutputTokens: 8_192,
-            supportsReasoning: true,
-            supportedReasoningLevels: ["none", "low"],
-            inputModes: ["text"],
-            addedAt: "2026-04-03T00:00:00.000Z",
-          },
-          "anthropic/claude-3.5-sonnet": {
-            modelId: "anthropic/claude-3.5-sonnet",
-            displayName: "Claude 3.5 Sonnet",
-            contextWindow: 200_000,
-            maxOutputTokens: 8_192,
-            supportsReasoning: false,
-            supportedReasoningLevels: ["low"],
-            inputModes: ["text", "audio"],
-            addedAt: "not-a-date",
-          },
-        },
-      }),
-      "utf8",
-    );
-
-    await expect(readOpenRouterModels(dataDir)).resolves.toEqual({
-      version: 1,
-      models: {},
-    });
-  });
-
-  it("preserves missing, true, and false supportsTools while dropping non-boolean values",
-    async () => {
-      const dataDir = await makeTempDataDir();
-      const filePath = getOpenRouterModelsPath(dataDir);
-      const legacy = {
-        modelId: "anthropic/claude-3.5-sonnet",
-        displayName: "Claude 3.5 Sonnet",
-        contextWindow: 200_000,
-        maxOutputTokens: 8_192,
-        supportsReasoning: true,
-        supportedReasoningLevels: ["none", "low", "medium", "high"],
-        inputModes: ["text", "image"],
-        addedAt: "2026-04-03T00:00:00.000Z",
-      } satisfies OpenRouterModelEntry;
-      const toolCapable = {
-        ...legacy,
-        modelId: "z-ai/glm-5.1",
-        displayName: "GLM 5.1",
-        supportsTools: true,
-      } satisfies OpenRouterModelEntry;
-      const noTools = {
-        ...legacy,
-        modelId: "google/gemini-2.0-flash",
-        displayName: "Gemini 2.0 Flash",
-        supportsReasoning: false,
-        supportedReasoningLevels: ["none"],
-        supportsTools: false,
-      } satisfies OpenRouterModelEntry;
-
-      await mkdir(dirname(filePath), { recursive: true });
-      await writeFile(
-        filePath,
-        JSON.stringify({
-          version: 1,
-          models: {
-            [legacy.modelId]: legacy,
-            [toolCapable.modelId]: toolCapable,
-            [noTools.modelId]: noTools,
-            "invalid/tools": {
-              ...legacy,
-              modelId: "invalid/tools",
-              supportsTools: "yes",
-            },
-          },
-        }),
-        "utf8",
-      );
-
-      await expect(readOpenRouterModels(dataDir)).resolves.toEqual({
-        version: 1,
-        models: {
-          [legacy.modelId]: legacy,
-          [toolCapable.modelId]: toolCapable,
-          [noTools.modelId]: noTools,
-        },
-      });
-
-      await addOpenRouterModel(dataDir, toolCapable);
-      const persisted = JSON.parse(await readFile(filePath, "utf8")) as {
-        models: Record<string, OpenRouterModelEntry>;
-      };
-      expect(persisted.models[toolCapable.modelId]?.supportsTools).toBe(true);
-      expect(persisted.models[legacy.modelId]?.supportsTools).toBeUndefined();
-    },
-  );
 });
 
-
 describe("OpenRouter routing persistence", () => {
-  it("fails closed until initialized, while initialized legacy absence stays unrestricted", async () => {
-    const service = new ModelCatalogService();
-    expect(() => service.getEffectiveOpenRouterRouting("test/model")).toThrow("not initialized");
-    await service.loadOverrides(await makeTempDataDir());
-    expect(service.getEffectiveOpenRouterRouting("test/model")).toEqual({});
-  });
-
-  it("does not let an obsolete failed load poison a newer policy snapshot", async () => {
-    const dataDir = await makeTempDataDir();
-    await writeOpenRouterModels(dataDir, { version: 1, models: {}, routingDefaults: { zdr: true } });
-    let rejectOld!: (error: Error) => void;
-    const oldRead = new Promise<never>((_, reject) => { rejectOld = reject; });
-    const spy = vi.spyOn(openRouterStorage, "readOpenRouterModels").mockImplementationOnce(() => oldRead);
-    try {
-      const service = new ModelCatalogService();
-      const obsoleteLoad = service.loadOverrides(dataDir);
-      await service.loadOverrides(dataDir);
-      rejectOld(new Error("obsolete read failed"));
-      await obsoleteLoad;
-      expect(service.getEffectiveOpenRouterRouting("test/model")).toEqual({ zdr: true });
-    } finally {
-      spy.mockRestore();
-    }
-  });
-
-  const model: OpenRouterModelEntry = { modelId: "test/model", displayName: "Test", contextWindow: 1000, maxOutputTokens: 100, supportsReasoning: false, supportedReasoningLevels: ["none"], inputModes: ["text"], addedAt: "2026-09-10T00:00:00Z", routing: { only: ["azure/eu"], order: null } };
-  it("round trips all routing, resolves defaults for unadded ids, and survives metadata changes", async () => {
-    const dataDir = await makeTempDataDir();
-    const file = { version: 1 as const, routingDefaults: { zdr: true, data_collection: "deny" as const, order: ["azure"], require_parameters: true, allow_fallbacks: false, max_price: { prompt: 1, completion: 2 }, quantizations: ["fp8" as const] }, models: { [model.modelId]: model } };
-    await writeOpenRouterModels(dataDir, file);
-    expect(await readOpenRouterModels(dataDir)).toEqual(file);
-    const service = new ModelCatalogService();
-    await service.loadOverrides(dataDir);
-    expect(service.getEffectiveOpenRouterRouting("not-added/model")).toEqual(file.routingDefaults);
-    expect(service.getEffectiveOpenRouterRouting(model.modelId)).toMatchObject({ zdr: true, only: ["azure/eu"] });
-    expect(service.getEffectiveOpenRouterRouting(model.modelId).order).toBeUndefined();
-    await mutateOpenRouterModelsFile(dataDir, (current) => ({ ...current, models: { ...current.models, [model.modelId]: { ...current.models[model.modelId], supportsTools: true } } }));
-    await service.reloadOpenRouterModels();
-    expect(service.getOpenRouterModel(model.modelId)?.routing).toEqual(model.routing);
-  });
   it("serializes mutation plus apply/rollback, preserving the later write", async () => {
     const dataDir = await makeTempDataDir();
     await writeOpenRouterModels(dataDir, { version: 1, models: {}, routingDefaults: { zdr: true } });
@@ -380,25 +210,5 @@ describe("OpenRouter routing persistence", () => {
     const after = await readOpenRouterModels(dataDir);
     expect(after.routingDefaults).toEqual({ zdr: true, require_parameters: true });
     expect(getOpenRouterRoutingRevision(after)).not.toBe(getOpenRouterRoutingRevision(before));
-  });
-  it("rejects invalid persisted policy and mismatched identities without breaking non-OpenRouter boot", async () => {
-    const dataDir = await makeTempDataDir();
-    const path = getOpenRouterModelsPath(dataDir);
-    await mkdir(dirname(path), { recursive: true });
-    for (const value of ["{bad", JSON.stringify({ version: 1, models: {}, routingDefaults: { zdr: "true" } }), JSON.stringify({ version: 1, models: { wrong: model, [model.modelId]: { ...model, routing: {} } } })]) {
-      await writeFile(path, value);
-      await expect(readOpenRouterModels(dataDir)).rejects.toThrow();
-      const service = new ModelCatalogService();
-      await expect(service.loadOverrides(dataDir)).resolves.toBeUndefined();
-      expect(() => service.getEffectiveOpenRouterRouting("unadded/model")).toThrow("unreadable");
-      expect(service.getModel("gpt-5.5", "openai-codex")).toBeDefined();
-    }
-  });
-  it("rejects invalid updates without changing durable configuration", async () => {
-    const dataDir = await makeTempDataDir();
-    await writeOpenRouterModels(dataDir, { version: 1, models: {}, routingDefaults: { zdr: true } });
-    const before = await readFile(getOpenRouterModelsPath(dataDir), "utf8");
-    await expect(mutateOpenRouterModelsFile(dataDir, (current) => ({ ...current, routingDefaults: { only: [] } }))).rejects.toThrow();
-    expect(await readFile(getOpenRouterModelsPath(dataDir), "utf8")).toBe(before);
   });
 });

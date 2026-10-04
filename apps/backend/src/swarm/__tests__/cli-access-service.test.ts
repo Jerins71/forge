@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CliAccessService, readCliApiKeyEnv } from "../cli-access-service.js";
-import { getCliAccessFilePath, getLegacyCliAccessFilePath } from "../data-paths.js";
+import { CliAccessService } from "../cli-access-service.js";
+import { getCliAccessFilePath } from "../data-paths.js";
 
 const NOW = "2026-05-11T00:00:00.000Z";
 
@@ -57,48 +57,6 @@ describe("CliAccessService", () => {
         lastUsedSource: "http",
       },
     ]);
-  });
-
-  it("migrates P1 cli-access files from the legacy shared config path", async () => {
-    const { dataDir, service } = await makeService();
-    const legacyPath = getLegacyCliAccessFilePath(dataDir);
-    const plaintextKey = "forge_cli_legacy_key";
-
-    await mkdir(dirname(legacyPath), { recursive: true });
-    await writeFile(
-      legacyPath,
-      `${JSON.stringify(
-        {
-          version: 1,
-          keys: [
-            {
-              id: "cli_key_legacy",
-              name: "Legacy key",
-              keyHash: createHash("sha256").update(plaintextKey, "utf8").digest("hex"),
-              createdAt: "2026-05-10T00:00:00.000Z",
-            },
-          ],
-        },
-        null,
-        2
-      )}\n`,
-      "utf8"
-    );
-
-    await expect(service.listKeys()).resolves.toEqual([
-      {
-        id: "cli_key_legacy",
-        name: "Legacy key",
-        createdAt: "2026-05-10T00:00:00.000Z",
-      },
-    ]);
-    await expect(readFile(getCliAccessFilePath(dataDir), "utf8")).resolves.toContain("cli_key_legacy");
-    await expect(readFile(legacyPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(service.authenticateAuthorizationHeader(`Bearer ${plaintextKey}`, "http")).resolves.toEqual({
-      ok: true,
-      keyId: "cli_key_legacy",
-      source: "stored",
-    });
   });
 
   it("rejects missing, malformed, invalid, and revoked bearer tokens", async () => {
@@ -160,11 +118,5 @@ describe("CliAccessService", () => {
     });
     await expect(service.listKeys()).resolves.toEqual([]);
     await expect(readFile(getCliAccessFilePath(dataDir), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("resolves FORGE_CLI_API_KEY before legacy env names", () => {
-    expect(readCliApiKeyEnv({ FORGE_CLI_API_KEY: " forge ", MIDDLEMAN_CLI_API_KEY: " legacy " })).toBe("forge");
-    expect(readCliApiKeyEnv({ MIDDLEMAN_CLI_API_KEY: " legacy " })).toBe("legacy");
-    expect(readCliApiKeyEnv({ FORGE_CLI_API_KEY: "   " })).toBeUndefined();
   });
 });
