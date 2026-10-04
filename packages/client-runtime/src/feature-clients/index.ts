@@ -347,6 +347,8 @@ export interface EnvironmentFeatureClients {
 }
 export interface HttpFeatureTransport {
   entry: { environmentId: string }
+  /** Responses arrive as UTF-8 text, so only textual previews survive the transport. */
+  textOnly?: boolean
   fetch(path: string, init?: RequestInit): Promise<Response>
   json<T>(path: string, init?: RequestInit): Promise<T>
 }
@@ -395,6 +397,8 @@ async function requestError(response: Response): Promise<FeatureRequestError> {
 async function errorMessage(response: Response): Promise<string> {
   return (await requestError(response)).message
 }
+const TEXTUAL_CONTENT_TYPE =
+  /^(?:text\/[\w.+-]+|application\/(?:json|xml|javascript|[\w.+-]+\+(?:json|xml))|image\/svg\+xml)$/
 const CHAT_ARTIFACT_TICKET_PATH =
   /^\/api\/chat-artifacts\/tickets\/[A-Za-z0-9_-]{16,128}$/
 export function createFeatureClients(
@@ -431,6 +435,12 @@ export function createFeatureClients(
     const type = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ?? ''
     if (expect.contentType && !expect.contentType.test(type))
       throw new Error('Unexpected preview content type')
+    if (http.textOnly && !TEXTUAL_CONTENT_TYPE.test(type))
+      throw new FeatureRequestError(
+        'Binary previews are not available through this Desktop connection yet',
+        501,
+        'BINARY_TRANSPORT_UNAVAILABLE',
+      )
     const blob = await response.blob()
     if (blob.size > expect.maxBytes) throw new Error('Preview too large')
     const asset = objectUrl(blob)
