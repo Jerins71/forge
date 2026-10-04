@@ -4,7 +4,6 @@ import type {
   UpdateCompactionSettingsResponse,
 } from "@forge/protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isBuilderRuntimeTarget, type RuntimeTarget } from "../../../runtime-target.js";
 import {
   CompactionSettingsService,
   CompactionSettingsValidationError,
@@ -17,16 +16,15 @@ const COMPACTION_SETTINGS_METHODS = "GET, PUT, OPTIONS";
 
 export function createCompactionSettingsRoutes(options: {
   settingsService: CompactionSettingsService;
-  runtimeTarget: RuntimeTarget;
 }): HttpRoute[] {
-  const { settingsService, runtimeTarget } = options;
+  const { settingsService } = options;
 
   return [
     {
       methods: COMPACTION_SETTINGS_METHODS,
       matches: (pathname) => pathname === COMPACTION_SETTINGS_ENDPOINT,
       handle: async (request, response) => {
-        await handleCompactionSettingsRequest(request, response, settingsService, runtimeTarget);
+        await handleCompactionSettingsRequest(request, response, settingsService);
       },
     },
   ];
@@ -36,7 +34,6 @@ async function handleCompactionSettingsRequest(
   request: IncomingMessage,
   response: ServerResponse,
   settingsService: CompactionSettingsService,
-  runtimeTarget: RuntimeTarget,
 ): Promise<void> {
   if (request.method === "OPTIONS") {
     applyCorsHeaders(request, response, COMPACTION_SETTINGS_METHODS);
@@ -46,11 +43,6 @@ async function handleCompactionSettingsRequest(
   }
 
   applyCorsHeaders(request, response, COMPACTION_SETTINGS_METHODS);
-
-  if (!isBuilderRuntimeTarget(runtimeTarget)) {
-    sendJson(response, 404, { error: "Compaction settings are only available in Builder runtime." });
-    return;
-  }
 
   if (request.method === "GET") {
     const view = await settingsService.getSettingsView();

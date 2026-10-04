@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileBackedPromptRegistry } from "../prompts/prompt-registry.js";
 import { writeProjectAgentRecord } from "../storage/project-agent-storage.js";
 import { writeProjectAgentReferenceDoc } from "../reference-docs.js";
-import { writeReferenceDoc } from "../storage/asset-root-storage.js";
 import { SwarmPromptService } from "../swarm-prompt-service.js";
 import { estimateTokens } from "../knowledge-service.js";
 import type { SkillMetadata } from "../skills/skill-metadata-service.js";
@@ -16,9 +15,6 @@ import {
   getKnowledgeIndexPath,
   getProfileKnowledgeIndexPath,
   getProfileMemoryPath,
-  getSessionContextPromptPath,
-  getSessionContextReferenceDir,
-  getSessionReferenceDir,
   resolveMemoryFilePath,
   getLegacySessionsDirPath,
 } from "../data-paths.js";
@@ -666,7 +662,7 @@ Always preserve the user's release notes.`,
     expect(handsOn).not.toContain("Workers normally own substantive implementation")
   });
 
-  it.each(["manager", "project-agent", "collaboration-channel"] as const)(
+  it.each(["manager", "project-agent"] as const)(
     "keeps Hands-on ownership consistent across the assembled %s prompt",
     async (surface) => {
       const { config } = await makeConfig();
@@ -674,11 +670,6 @@ Always preserve the user's release notes.`,
         managerPosture: "hands_on",
         ...(surface === "project-agent" ? {
           projectAgent: { handle: "direct-owner", whenToUse: "Own direct execution" },
-        } : {}),
-        ...(surface === "collaboration-channel" ? {
-          archetypeId: "collaboration-channel",
-          sessionSurface: "collab" as const,
-          collab: { workspaceId: "workspace-1", channelId: "channel-1" },
         } : {}),
       });
       const service = createPromptServiceForDescriptor(config, descriptor);
@@ -691,14 +682,7 @@ Always preserve the user's release notes.`,
       expect(prompt).toMatch(/(?:do not independently grant|not a separate work mode or permission grant)/);
       expect(prompt).not.toMatch(/Maximize delegation|<delegation_first>|return to delegation-first|direct work becomes broad/);
       expect(prompt).not.toContain("Your own project work remains read-only");
-      if (surface === "collaboration-channel") {
-        expect(prompt).toContain("Every user-facing reply MUST go through `speak_to_user`");
-        expect(prompt).not.toContain("Direct request or accepted closeout: normal final text");
-        expect(prompt).toContain("Do not forward a worker claim as completion");
-        expect(prompt).not.toMatch(/update_plan|update_work_graph|accept_work_graph_node|create_goal|get_goal|update_goal|`history`|Checklist|Graph/);
-      } else {
-        expectCurrentProjectAgentRoutingFooter(prompt);
-      }
+      expectCurrentProjectAgentRoutingFooter(prompt);
     },
   );
 
@@ -737,107 +721,6 @@ Always preserve the user's release notes.`,
     expect(resolved).not.toContain("$" + "{MODEL_SPECIFIC_INSTRUCTIONS}");
     expect(resolved).toContain("Specialist roster for tests.");
     expect(resolved).not.toContain("Legacy routing guidance for tests.");
-  });
-
-  it("buildResolvedManagerPrompt resolves collaboration specialist roster for collab sessions", async () => {
-    const { config } = await makeConfig();
-    const descriptor = createManagerDescriptor(config, repoRoot, {
-      sessionSurface: "collab",
-      collab: { workspaceId: "workspace-1", channelId: "channel-1" },
-    });
-    const profiles = new Map<string, ManagerProfile>([["manager", createProfile("manager")]]);
-    const descriptors = new Map<string, AgentDescriptor>([["manager", descriptor]]);
-    const promptRegistry = new FileBackedPromptRegistry({
-      dataDir: config.paths.dataDir,
-      repoDir: config.paths.rootDir,
-      builtinArchetypesDir: BUILTIN_ARCHETYPES,
-      builtinOperationalDir: BUILTIN_OPERATIONAL,
-    });
-    const specialistRegistry = {
-      ...specialistRegistryStub(),
-      resolveRoster: vi.fn(async (_profileId: string, targetSpace?: string) =>
-        targetSpace === "collaboration"
-          ? [{ specialistId: "collab-specialist", promptBody: "Collab prompt" }]
-          : [{ specialistId: "builder-specialist", promptBody: "Builder prompt" }],
-      ),
-      generateRosterBlock: vi.fn((roster: Array<{ specialistId: string }>) =>
-        roster.map((entry) => entry.specialistId).join("\n"),
-      ),
-    };
-
-    const service = new SwarmPromptService({
-      config,
-      descriptors,
-      profiles,
-      promptRegistry,
-      skillMetadataService: {} as never,
-      getAgentMemoryPath: () => "/tmp/memory.md",
-      ensureAgentMemoryFile: async () => {},
-      resolveMemoryOwnerAgentId: (d) => d.agentId,
-      resolveSessionProfileId: () => "manager",
-      refreshSessionMetaStats: async () => {},
-      refreshSessionMetaStatsBySessionId: async () => {},
-      getSessionsForProfile: () => [descriptor],
-      loadSpecialistRegistryModule: async () => specialistRegistry,
-      logDebug: () => {},
-    });
-
-    const resolved = await service.buildResolvedManagerPrompt(descriptor);
-    expect(specialistRegistry.resolveRoster).toHaveBeenCalledWith("manager", "collaboration");
-    expect(resolved).toContain("collab-specialist");
-    expect(resolved).not.toContain("builder-specialist");
-  });
-
-  it("resolveSystemPromptForDescriptor resolves specialist prompts in collaboration space for collab workers", async () => {
-    const { config } = await makeConfig();
-    const manager = createManagerDescriptor(config, repoRoot, {
-      sessionSurface: "collab",
-      collab: { workspaceId: "workspace-1", channelId: "channel-1" },
-    });
-    const worker: AgentDescriptor = {
-      ...createManagerDescriptor(config, repoRoot, { agentId: "worker", managerId: manager.agentId, profileId: "manager" }),
-      role: "worker",
-      specialistId: "collab-specialist",
-    };
-    const profiles = new Map<string, ManagerProfile>([["manager", createProfile("manager")]]);
-    const descriptors = new Map<string, AgentDescriptor>([
-      [manager.agentId, manager],
-      [worker.agentId, worker],
-    ]);
-    const promptRegistry = new FileBackedPromptRegistry({
-      dataDir: config.paths.dataDir,
-      repoDir: config.paths.rootDir,
-      builtinArchetypesDir: BUILTIN_ARCHETYPES,
-      builtinOperationalDir: BUILTIN_OPERATIONAL,
-    });
-    const specialistRegistry = {
-      ...specialistRegistryStub(),
-      resolveRoster: vi.fn(async (_profileId: string, targetSpace?: string) =>
-        targetSpace === "collaboration"
-          ? [{ specialistId: "collab-specialist", promptBody: "Collaboration worker prompt" }]
-          : [{ specialistId: "collab-specialist", promptBody: "Builder worker prompt" }],
-      ),
-    };
-
-    const service = new SwarmPromptService({
-      config,
-      descriptors,
-      profiles,
-      promptRegistry,
-      skillMetadataService: {} as never,
-      getAgentMemoryPath: () => "/tmp/memory.md",
-      ensureAgentMemoryFile: async () => {},
-      resolveMemoryOwnerAgentId: (d) => d.agentId,
-      resolveSessionProfileId: () => "manager",
-      refreshSessionMetaStats: async () => {},
-      refreshSessionMetaStatsBySessionId: async () => {},
-      getSessionsForProfile: () => [manager],
-      loadSpecialistRegistryModule: async () => specialistRegistry,
-      logDebug: () => {},
-    });
-
-    await expect(service.resolveSystemPromptForDescriptor(worker)).resolves.toBe("Collaboration worker prompt");
-    expect(specialistRegistry.resolveRoster).toHaveBeenCalledWith("manager", "collaboration");
   });
 
   it("gives every worker an exact manager identity and meaningful interim feedback contract", async () => {
@@ -1089,7 +972,7 @@ Always preserve the user's release notes.`,
   it("keeps built-in source and resolved prompts aligned with the web-only speak_to_user schema", async () => {
     const { config } = await makeConfig();
     const invalidSpeakTargetGuidance = /Telegram|non-web|channelId|threadTs|proactive external|explicit-target|target metadata/i;
-    const archetypes = ["manager", "collaboration-channel", "agent-architect"] as const;
+    const archetypes = ["manager", "agent-architect"] as const;
 
     for (const archetypeId of archetypes) {
       const source = await readFile(join(BUILTIN_ARCHETYPES, `${archetypeId}.md`), "utf8");
@@ -1098,12 +981,6 @@ Always preserve the user's release notes.`,
       const descriptor = createManagerDescriptor(config, repoRoot, {
         agentId: `${archetypeId}-prompt-agent`,
         archetypeId,
-        ...(archetypeId === "collaboration-channel"
-          ? {
-              sessionSurface: "collab" as const,
-              collab: { workspaceId: "workspace-1", channelId: "channel-1" },
-            }
-          : {}),
       });
       const resolved = await createPromptServiceForDescriptor(config, descriptor)
         .resolveSystemPromptForDescriptor(descriptor);
@@ -1120,218 +997,6 @@ Always preserve the user's release notes.`,
     expect(managerPrompt).toContain("response expectations and use its `fromAgentId`");
     expect(managerPrompt).toContain("Honor `[projectAgentContext]` response expectations");
     expect(managerPrompt).toContain("no courtesy acknowledgments");
-  });
-
-  it("previewManagerSystemPromptForAgent uses the requested collab session and appends session context overlays", async () => {
-    const { config } = await makeConfig();
-    const dataDir = config.paths.dataDir;
-    const profileId = "manager";
-    const defaultDescriptor = createManagerDescriptor(config, repoRoot, {
-      agentId: "default-manager",
-      profileId,
-      archetypeId: "manager",
-    });
-    const collabDescriptor = createManagerDescriptor(config, repoRoot, {
-      agentId: "collab-preview",
-      profileId,
-      archetypeId: "collaboration-channel",
-      sessionSurface: "collab",
-      collab: {
-        workspaceId: "workspace-1",
-        channelId: "channel-1",
-      },
-    });
-    const profiles = new Map<string, ManagerProfile>([[profileId, createProfile(defaultDescriptor.agentId)]]);
-    const descriptors = new Map<string, AgentDescriptor>([
-      [defaultDescriptor.agentId, defaultDescriptor],
-      [collabDescriptor.agentId, collabDescriptor],
-    ]);
-
-    const defaultSessionMemoryPath = resolveMemoryFilePath(
-      dataDir,
-      { agentId: defaultDescriptor.agentId, role: "manager", profileId, managerId: defaultDescriptor.agentId },
-      undefined
-    );
-    const collabSessionMemoryPath = resolveMemoryFilePath(
-      dataDir,
-      { agentId: collabDescriptor.agentId, role: "manager", profileId, managerId: collabDescriptor.agentId },
-      undefined
-    );
-    const profileMemoryPath = getProfileMemoryPath(dataDir, profileId);
-    const collabPromptPath = getSessionContextPromptPath(dataDir, profileId, collabDescriptor.agentId);
-    const collabReferenceDir = getSessionReferenceDir(dataDir, profileId, collabDescriptor.agentId);
-    await ensureMemoryFile(defaultSessionMemoryPath, "# Default session mem\n");
-    await ensureMemoryFile(collabSessionMemoryPath, "# Collaboration session mem\n");
-    await ensureMemoryFile(profileMemoryPath, "# Profile mem\n");
-    await mkdir(dirname(collabPromptPath), { recursive: true });
-    await writeFile(collabPromptPath, "Collaboration-specific prompt overlay", "utf8");
-    await writeReferenceDoc(collabReferenceDir, "playbook.md", "Use the escalation playbook.");
-
-    const promptRegistry = new FileBackedPromptRegistry({
-      dataDir,
-      repoDir: config.paths.rootDir,
-      builtinArchetypesDir: BUILTIN_ARCHETYPES,
-      builtinOperationalDir: BUILTIN_OPERATIONAL
-    });
-
-    const service = new SwarmPromptService({
-      config,
-      descriptors,
-      profiles,
-      promptRegistry,
-      skillMetadataService: {
-        ensureSkillMetadataLoaded: async () => {},
-        getSkillMetadata: () => [{ skillName: "memory", description: "Memory skill", path: "/tmp/memory/SKILL.md" }],
-        getAdditionalSkillPaths: () => []
-      } as never,
-      getAgentMemoryPath: (agentId) =>
-        resolveMemoryFilePath(
-          dataDir,
-          { agentId, role: "manager", profileId, managerId: agentId },
-          undefined
-        ),
-      ensureAgentMemoryFile: async (path) => {
-        await mkdir(dirname(path), { recursive: true });
-        try {
-          await readFile(path);
-        } catch {
-          await writeFile(path, "# m\n", "utf8");
-        }
-      },
-      resolveMemoryOwnerAgentId: (d) => d.agentId,
-      resolveSessionProfileId: () => profileId,
-      refreshSessionMetaStats: async () => {},
-      refreshSessionMetaStatsBySessionId: async () => {},
-      getSessionsForProfile: () => [defaultDescriptor, collabDescriptor],
-      loadSpecialistRegistryModule: async () => ({
-        resolveRoster: async () => [],
-        resolveTierConfigs: async () => [],
-        generateRosterBlock: () => "Specialist roster block",
-      }),
-      logDebug: () => {}
-    });
-
-    const defaultPreview = await service.previewManagerSystemPrompt(profileId);
-    const defaultSystemPrompt = defaultPreview.sections[0]?.content ?? "";
-    expect(defaultSystemPrompt).not.toContain("# Collaboration channel instructions");
-    expect(defaultSystemPrompt).not.toContain("Collaboration-specific prompt overlay");
-
-    const preview = await service.previewManagerSystemPromptForAgent(collabDescriptor.agentId);
-    const systemPrompt = preview.sections[0]?.content ?? "";
-    const memoryComposite = preview.sections[1]?.content ?? "";
-
-    expect(systemPrompt).toContain("You are the manager agent for a collaboration channel in a multi-agent swarm.");
-    expect(systemPrompt).toContain("Specialist roster block");
-    expect(systemPrompt).toContain("# Collaboration channel instructions");
-    expect(systemPrompt).toContain("# Additional instructions\n\nCollaboration-specific prompt overlay");
-    expect(systemPrompt).toContain("# Channel Reference: playbook.md\n\nUse the escalation playbook.");
-    expect(systemPrompt).toContain("<available_skills>");
-    expect(systemPrompt).toContain("<name>memory</name>");
-    expect(memoryComposite).toContain("Collaboration session mem");
-    expect(memoryComposite).not.toContain("Default session mem");
-  });
-
-  it("migrates legacy collab context reference docs to session-root reference docs on prompt access", async () => {
-    const { config } = await makeConfig();
-    const dataDir = config.paths.dataDir;
-    const profileId = "manager";
-    const collabDescriptor = createManagerDescriptor(config, repoRoot, {
-      agentId: "collab-legacy-reference",
-      profileId,
-      archetypeId: "collaboration-channel",
-      sessionSurface: "collab",
-      collab: {
-        workspaceId: "workspace-1",
-        channelId: "channel-1",
-      },
-    });
-    const legacyReferenceDir = getSessionContextReferenceDir(dataDir, profileId, collabDescriptor.agentId);
-    const rootReferenceDir = getSessionReferenceDir(dataDir, profileId, collabDescriptor.agentId);
-    await writeReferenceDoc(legacyReferenceDir, "legacy-playbook.md", "Legacy escalation playbook.");
-
-    const promptRegistry = new FileBackedPromptRegistry({
-      dataDir,
-      repoDir: config.paths.rootDir,
-      builtinArchetypesDir: BUILTIN_ARCHETYPES,
-      builtinOperationalDir: BUILTIN_OPERATIONAL
-    });
-    const service = new SwarmPromptService({
-      config,
-      descriptors: new Map([[collabDescriptor.agentId, collabDescriptor]]),
-      profiles: new Map([[profileId, createProfile(collabDescriptor.agentId)]]),
-      promptRegistry,
-      skillMetadataService: {} as never,
-      getAgentMemoryPath: () => "/tmp/memory.md",
-      ensureAgentMemoryFile: async () => {},
-      resolveMemoryOwnerAgentId: (d) => d.agentId,
-      resolveSessionProfileId: () => profileId,
-      refreshSessionMetaStats: async () => {},
-      refreshSessionMetaStatsBySessionId: async () => {},
-      getSessionsForProfile: () => [collabDescriptor],
-      loadSpecialistRegistryModule: async () => specialistRegistryStub(),
-      logDebug: () => {}
-    });
-
-    const resolved = await service.buildResolvedManagerPrompt(collabDescriptor);
-
-    expect(resolved).toContain("# Channel Reference: legacy-playbook.md\n\nLegacy escalation playbook.");
-    await expect(readFile(join(rootReferenceDir, "legacy-playbook.md"), "utf8")).resolves.toContain(
-      "Legacy escalation playbook."
-    );
-  });
-
-  it("uses session-root collab reference docs without falling back to legacy docs when root docs exist", async () => {
-    const { config } = await makeConfig();
-    const dataDir = config.paths.dataDir;
-    const profileId = "manager";
-    const collabDescriptor = createManagerDescriptor(config, repoRoot, {
-      agentId: "collab-root-reference",
-      profileId,
-      archetypeId: "collaboration-channel",
-      sessionSurface: "collab",
-      collab: {
-        workspaceId: "workspace-1",
-        channelId: "channel-1",
-      },
-    });
-    await writeReferenceDoc(
-      getSessionReferenceDir(dataDir, profileId, collabDescriptor.agentId),
-      "root-playbook.md",
-      "Root reference wins."
-    );
-    await writeReferenceDoc(
-      getSessionContextReferenceDir(dataDir, profileId, collabDescriptor.agentId),
-      "legacy-playbook.md",
-      "Legacy reference should not be injected."
-    );
-
-    const promptRegistry = new FileBackedPromptRegistry({
-      dataDir,
-      repoDir: config.paths.rootDir,
-      builtinArchetypesDir: BUILTIN_ARCHETYPES,
-      builtinOperationalDir: BUILTIN_OPERATIONAL
-    });
-    const service = new SwarmPromptService({
-      config,
-      descriptors: new Map([[collabDescriptor.agentId, collabDescriptor]]),
-      profiles: new Map([[profileId, createProfile(collabDescriptor.agentId)]]),
-      promptRegistry,
-      skillMetadataService: {} as never,
-      getAgentMemoryPath: () => "/tmp/memory.md",
-      ensureAgentMemoryFile: async () => {},
-      resolveMemoryOwnerAgentId: (d) => d.agentId,
-      resolveSessionProfileId: () => profileId,
-      refreshSessionMetaStats: async () => {},
-      refreshSessionMetaStatsBySessionId: async () => {},
-      getSessionsForProfile: () => [collabDescriptor],
-      loadSpecialistRegistryModule: async () => specialistRegistryStub(),
-      logDebug: () => {}
-    });
-
-    const resolved = await service.buildResolvedManagerPrompt(collabDescriptor);
-
-    expect(resolved).toContain("# Channel Reference: root-playbook.md\n\nRoot reference wins.");
-    expect(resolved).not.toContain("Legacy reference should not be injected.");
   });
 
   it("project-agent with no custom prompt uses base prompt without requiring an archetype", async () => {

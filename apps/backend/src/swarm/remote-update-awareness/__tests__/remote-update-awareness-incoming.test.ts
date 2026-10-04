@@ -27,7 +27,7 @@ describe("remote update awareness Incoming projection", () => {
       ? { stdout: "1752969600\0Subject\nwith control\0", stderr: "", exitCode: 0 }
       : { stdout: "A\0secret/path.txt\0R100\0old-secret.txt\0new-secret.txt\0", stderr: "", exitCode: 0 });
     const manager = {
-      getConfig: () => ({ runtimeTarget: "builder", paths: {} }),
+      getConfig: () => ({ paths: {} }),
       listProfiles: () => [profile],
       getAgent: () => agent,
     } as unknown as SwarmManager;

@@ -19,7 +19,6 @@ describe("knowledge v2 settings routes", () => {
     const server = await createRouteServer(createKnowledgeV2SettingsRoutes({
       settingsService: service,
       dataDir,
-      runtimeTarget: "builder",
     }));
 
     const getResponse = await fetch(`${server.baseUrl}/api/settings/knowledge-v2`);

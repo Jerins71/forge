@@ -256,13 +256,6 @@ describe("KnowledgeMemoryCoordinator", () => {
         reasoningLevel: "low",
         timeoutMs: 123_000,
       });
-
-    const collaborationHarness = await createHarness({ runtimeTarget: "collaboration-server" });
-    const createService = vi.fn(() => service);
-    collaborationHarness.options.compactionSettings.createService = createService;
-    await collaborationHarness.coordinator.loadCompactionSettingsForRuntime();
-    expect(createService).not.toHaveBeenCalled();
-    expect(collaborationHarness.coordinator.getCompactionSettingsService()).toBeNull();
   });
 
   it("materializes the Cortex system profile and operational files in a stable order", async () => {
@@ -343,7 +336,7 @@ interface Harness {
 }
 
 async function createHarness(
-  overrides: { runtimeTarget?: "builder" | "collaboration-server"; cortexEnabled?: boolean } = {},
+  overrides: { cortexEnabled?: boolean } = {},
 ): Promise<Harness> {
   const dataDir = await mkdtemp(join(tmpdir(), "knowledge-memory-coordinator-"));
   tempDirs.push(dataDir);
@@ -407,7 +400,6 @@ async function createHarness(
   } satisfies KnowledgeMemoryCoordinatorOptions["services"];
   const options: KnowledgeMemoryCoordinatorOptions = {
     config: {
-      runtimeTarget: overrides.runtimeTarget ?? "builder",
       cortexEnabled: overrides.cortexEnabled ?? true,
       defaultCwd: "/workspace",
       defaultModel: { provider: "openai", modelId: "gpt-5", thinkingLevel: "high" },

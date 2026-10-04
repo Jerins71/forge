@@ -1,7 +1,11 @@
 import { readFile } from "node:fs/promises";
 import type { AgentDescriptor, AgentsStoreFile, ManagerProfile } from "../types.js";
 import { writeFileAtomic } from "../../utils/atomic-files.js";
-import { decodeAgentsStoreFile, encodeAgentsStoreFile } from "./descriptor-store/descriptor-codec.js";
+import {
+  decodeAgentsStoreFile,
+  encodeAgentsStoreFile,
+  type RetiredStoreRecords
+} from "./descriptor-store/descriptor-codec.js";
 import {
   cloneDescriptorForPersistence,
   cloneDescriptorForPublic,
@@ -26,6 +30,12 @@ export interface AgentDescriptorStoreTransactionOptions {
   onSaveError?: (error: unknown) => void;
 }
 
+/**
+ * Retired records seen when each store file was last loaded. Store instances
+ * are short-lived (one per save), so retention is keyed by file, not instance.
+ */
+const retiredRecordsByStoreFile = new Map<string, RetiredStoreRecords>();
+
 export class AgentDescriptorStore {
   private readonly descriptors = new Map<string, AgentDescriptor>();
   private readonly profiles = new Map<string, ManagerProfile>();
@@ -40,8 +50,9 @@ export class AgentDescriptorStore {
         storeFilePath: this.options.storeFilePath,
         logDebug: this.options.logDebug,
         warn: this.options.warn
-      }).store;
-      this.replace(decoded);
+      });
+      retiredRecordsByStoreFile.set(this.options.storeFilePath, decoded.retired);
+      this.replace(decoded.store);
       return this.snapshotForPersistence();
     } catch {
       this.replace({ agents: [], profiles: [] });
@@ -77,7 +88,10 @@ export class AgentDescriptorStore {
 
   async save(): Promise<void> {
     const target = this.options.storeFilePath;
-    await writeFileAtomic(target, encodeAgentsStoreFile(this.snapshotForPersistence()));
+    await writeFileAtomic(
+      target,
+      encodeAgentsStoreFile(this.snapshotForPersistence(), retiredRecordsByStoreFile.get(target))
+    );
   }
 
   get(agentId: string): AgentDescriptor | undefined {

@@ -3,7 +3,6 @@ import type {
   BuilderSidebarOrderUpdatedEvent,
 } from "@forge/protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isBuilderRuntimeTarget, type RuntimeTarget } from "../../../runtime-target.js";
 import {
   BuilderSidebarOrderConflictError,
   BuilderSidebarOrderService,
@@ -18,7 +17,6 @@ const METHODS = "GET, PUT, OPTIONS";
 
 export function createBuilderSidebarOrderRoutes(options: {
   service: BuilderSidebarOrderService;
-  runtimeTarget: RuntimeTarget;
   broadcastEvent?: (event: BuilderSidebarOrderUpdatedEvent) => void;
 }): HttpRoute[] {
   return [
@@ -37,18 +35,9 @@ async function handleRequest(
   response: ServerResponse,
   options: {
     service: BuilderSidebarOrderService;
-    runtimeTarget: RuntimeTarget;
     broadcastEvent?: (event: BuilderSidebarOrderUpdatedEvent) => void;
   },
 ): Promise<void> {
-  // Fail closed before even advertising CORS/method support. The production
-  // collaboration runtime does not mount this route at all; this guard also
-  // protects direct factory use and tests.
-  if (!isBuilderRuntimeTarget(options.runtimeTarget)) {
-    sendJson(response, 404, { error: "Builder sidebar order is only available in Builder runtime." });
-    return;
-  }
-
   if (request.method === "OPTIONS") {
     applyCorsHeaders(request, response, METHODS);
     response.statusCode = 204;

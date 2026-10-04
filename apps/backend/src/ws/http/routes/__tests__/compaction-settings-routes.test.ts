@@ -27,7 +27,7 @@ describe("createCompactionSettingsRoutes", () => {
     });
     await service.load();
     const server = await createRouteServer(
-      createCompactionSettingsRoutes({ settingsService: service, runtimeTarget: "builder" }),
+      createCompactionSettingsRoutes({ settingsService: service }),
     );
 
     const response = await fetch(`${server.baseUrl}/api/settings/compaction`);
@@ -52,7 +52,7 @@ describe("createCompactionSettingsRoutes", () => {
     });
     await service.load();
     const server = await createRouteServer(
-      createCompactionSettingsRoutes({ settingsService: service, runtimeTarget: "builder" }),
+      createCompactionSettingsRoutes({ settingsService: service }),
     );
 
     const response = await fetch(`${server.baseUrl}/api/settings/compaction`, {
@@ -77,7 +77,7 @@ describe("createCompactionSettingsRoutes", () => {
     });
     await service.load();
     const server = await createRouteServer(
-      createCompactionSettingsRoutes({ settingsService: service, runtimeTarget: "builder" }),
+      createCompactionSettingsRoutes({ settingsService: service }),
     );
 
     const lowResponse = await fetch(`${server.baseUrl}/api/settings/compaction`, {
@@ -109,7 +109,7 @@ describe("createCompactionSettingsRoutes", () => {
     });
     await service.load();
     const server = await createRouteServer(
-      createCompactionSettingsRoutes({ settingsService: service, runtimeTarget: "builder" }),
+      createCompactionSettingsRoutes({ settingsService: service }),
     );
 
     const response = await fetch(`${server.baseUrl}/api/settings/compaction`, {
@@ -131,7 +131,7 @@ describe("createCompactionSettingsRoutes", () => {
     });
     await service.load();
     const server = await createRouteServer(
-      createCompactionSettingsRoutes({ settingsService: service, runtimeTarget: "builder" }),
+      createCompactionSettingsRoutes({ settingsService: service }),
     );
 
     const response = await fetch(`${server.baseUrl}/api/settings/compaction`, {
@@ -153,7 +153,7 @@ describe("createCompactionSettingsRoutes", () => {
     });
     await service.load();
     const server = await createRouteServer(
-      createCompactionSettingsRoutes({ settingsService: service, runtimeTarget: "builder" }),
+      createCompactionSettingsRoutes({ settingsService: service }),
     );
 
     const response = await fetch(`${server.baseUrl}/api/settings/compaction`, {
@@ -175,7 +175,7 @@ describe("createCompactionSettingsRoutes", () => {
     });
     await service.load();
     const server = await createRouteServer(
-      createCompactionSettingsRoutes({ settingsService: service, runtimeTarget: "builder" }),
+      createCompactionSettingsRoutes({ settingsService: service }),
     );
 
     const response = await fetch(`${server.baseUrl}/api/settings/compaction`, {
@@ -197,7 +197,7 @@ describe("createCompactionSettingsRoutes", () => {
     });
     await service.load();
     const server = await createRouteServer(
-      createCompactionSettingsRoutes({ settingsService: service, runtimeTarget: "builder" }),
+      createCompactionSettingsRoutes({ settingsService: service }),
     );
 
     const response = await fetch(`${server.baseUrl}/api/settings/compaction`, {
@@ -211,20 +211,6 @@ describe("createCompactionSettingsRoutes", () => {
     expect(body.error).toMatch(/^Request body too large\./);
   });
 
-  it("returns 404 for collaboration runtime", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "forge-compaction-routes-collab-"));
-    const service = new CompactionSettingsService({ dataDir });
-    await service.load();
-    const server = await createRouteServer(
-      createCompactionSettingsRoutes({ settingsService: service, runtimeTarget: "collaboration-server" }),
-    );
-
-    const response = await fetch(`${server.baseUrl}/api/settings/compaction`);
-    const body = (await response.json()) as { error: string };
-
-    expect(response.status).toBe(404);
-    expect(body.error).toContain("Builder runtime");
-  });
 });
 
 async function createRouteServer(routes: HttpRoute[]): Promise<{ baseUrl: string; close: () => Promise<void> }> {

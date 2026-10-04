@@ -8,8 +8,6 @@ import type {
   SessionMemoryMergeResult,
   SessionMeta,
 } from "@forge/protocol";
-import type { RuntimeTarget } from "../runtime-target.js";
-import { isBuilderRuntimeTarget } from "../runtime-target.js";
 import type {
   VersioningMutation,
   VersioningMutationSink,
@@ -131,7 +129,7 @@ export interface KnowledgeMemoryCoordinatorOptions {
   config: Pick<
     SwarmConfig,
     "cortexEnabled" | "defaultCwd" | "defaultModel" | "paths"
-  > & { runtimeTarget: RuntimeTarget };
+  >;
   descriptors: Map<string, AgentDescriptor>;
   profiles: Map<string, ManagerProfile>;
   services: {
@@ -216,7 +214,7 @@ export class KnowledgeMemoryCoordinator {
   }
 
   async loadCompactionSettingsForRuntime(): Promise<void> {
-    if (!isBuilderRuntimeTarget(this.options.config.runtimeTarget) || this.compactionSettingsService) {
+    if (this.compactionSettingsService) {
       return;
     }
 

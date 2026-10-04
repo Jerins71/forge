@@ -98,8 +98,6 @@ describe("PersistenceService", () => {
       profileId: "manager",
       sessionLabel: "Release notes",
       sessionPurpose: "agent_creator",
-      sessionSurface: "collab",
-      collab: { workspaceId: "workspace-1", channelId: "channel-1" },
       creatorAgentId: "agent-architect",
       sessionSystemPrompt: "Use this session-specific prompt.",
       pinnedAt: "2026-01-02T00:00:00.000Z",

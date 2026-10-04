@@ -18,7 +18,6 @@ import type {
   SkillImportTarget,
   SkillInventoryEntry,
   SkillShareResponse,
-  SpecialistTargetSpace,
   UpdateOpenAIBrokerSettingsRequest,
 } from "@forge/protocol";
 import type { CredentialPoolService } from "./credential-pool.js";
@@ -41,7 +40,6 @@ import {
   type SpecialistRegistryModule,
 } from "./prompt-resource-coordinator.js";
 import { normalizeArchetypeId, type PromptRegistry } from "./prompts/prompt-registry.js";
-import { isCollaborationServerRuntimeTarget } from "../runtime-target.js";
 import type { RuntimeErrorEvent } from "./runtime-contracts.js";
 import {
   getManagedModelProviderCredentialAvailability,
@@ -80,7 +78,6 @@ export interface SwarmConfigurationAccessPolicy {
   assertManagerSettingsTargetNotArchived(managerId: string, action: string): void;
   assertProfileNotArchived(profileId: string): void;
   getRequiredBuilderSessionDescriptor(agentId: string, action: string): AgentDescriptor;
-  getRequiredCollaborationSessionDescriptor(agentId: string, action: string): AgentDescriptor;
   assertDescriptorNotEffectivelyArchived(descriptor: AgentDescriptor): void;
 }
 
@@ -219,8 +216,7 @@ export class SwarmConfigurationCoordinator {
       ...options.prompt,
       getSessionsForProfile: options.sessions.getSessionsForProfile,
       loadSpecialistRegistryModule: () => this.loadSpecialistRegistryModule(),
-      resolveSpecialistRosterForManager: (manager, targetSpace) =>
-        this.resolveSpecialistRosterForManager(manager, targetSpace),
+      resolveSpecialistRosterForManager: (manager) => this.resolveSpecialistRosterForManager(manager),
       resolveSkillRosterForDescriptor: (descriptor) =>
         this.resolveSkillRosterForDescriptor(descriptor),
       logDebug: options.logDebug,
@@ -251,19 +247,6 @@ export class SwarmConfigurationCoordinator {
       "update manager model",
     );
     await this.settings.updateManagerModel(managerId, modelPreset, reasoningLevel);
-  }
-
-  async updateCollaborationSessionModel(
-    sessionAgentId: string,
-    modelPreset: SwarmModelPreset,
-    reasoningLevel?: SwarmReasoningLevel,
-  ): Promise<void> {
-    const descriptor = this.options.access.getRequiredCollaborationSessionDescriptor(
-      sessionAgentId,
-      "update collaboration session model",
-    );
-    this.options.access.assertDescriptorNotEffectivelyArchived(descriptor);
-    await this.settings.updateManagerModel(sessionAgentId, modelPreset, reasoningLevel);
   }
 
   async updateManagerExactModel(
@@ -434,10 +417,6 @@ export class SwarmConfigurationCoordinator {
     sessionAgentId?: string,
   ): Promise<SkillInventoryEntry[]> {
     return this.settings.listSkillMetadata(profileId, sessionAgentId);
-  }
-
-  getCollaborationGlobalSkillHandles(): Iterable<string> {
-    return this.skills.getSkillMetadata().map((skill) => skill.directoryName);
   }
 
   listSkillFiles(
@@ -613,21 +592,13 @@ export class SwarmConfigurationCoordinator {
 
   resolveSpecialistRosterForProfile(
     profileId: string,
-    targetSpace: SpecialistTargetSpace = "builder",
     workspaceSpecialistsDir?: string,
   ): Promise<ResolvedSpecialistDefinitionLike[]> {
-    return this.promptResources.resolveSpecialistRosterForProfile(
-      profileId,
-      targetSpace,
-      workspaceSpecialistsDir,
-    );
+    return this.promptResources.resolveSpecialistRosterForProfile(profileId, workspaceSpecialistsDir);
   }
 
-  resolveSpecialistRosterForManager(
-    manager: AgentDescriptor,
-    targetSpace: SpecialistTargetSpace = "builder",
-  ): Promise<ResolvedSpecialistDefinitionLike[]> {
-    return this.promptResources.resolveSpecialistRosterForManager(manager, targetSpace);
+  resolveSpecialistRosterForManager(manager: AgentDescriptor): Promise<ResolvedSpecialistDefinitionLike[]> {
+    return this.promptResources.resolveSpecialistRosterForManager(manager);
   }
 
   resolveSkillRosterForDescriptor(descriptor: AgentDescriptor): Promise<SkillMetadata[] | null> {
@@ -680,11 +651,8 @@ export class SwarmConfigurationCoordinator {
     return this.prompts.getSwarmContextFiles(cwd);
   }
 
-  resolveAndValidateCwd(
-    cwd: string,
-    options?: { enforceAllowlist?: boolean },
-  ): Promise<string> {
-    return validateDirectoryPath(cwd, this.getCwdPolicy(options));
+  resolveAndValidateCwd(cwd: string): Promise<string> {
+    return validateDirectoryPath(cwd, this.getCwdPolicy());
   }
 
   getPiModelsJsonPathOrThrow(): string {
@@ -719,16 +687,11 @@ export class SwarmConfigurationCoordinator {
     }
   }
 
-  private getCwdPolicy(options?: { enforceAllowlist?: boolean }): {
-    rootDir: string;
-    allowlistRoots: string[];
-    enforceAllowlist: boolean;
-  } {
-    const collabServer = isCollaborationServerRuntimeTarget(this.options.config.runtimeTarget);
+  private getCwdPolicy(): { rootDir: string; allowlistRoots: string[]; enforceAllowlist: boolean } {
     return {
       rootDir: this.options.config.paths.rootDir,
       allowlistRoots: normalizeAllowlistRoots(this.options.config.cwdAllowlistRoots),
-      enforceAllowlist: options?.enforceAllowlist ?? collabServer,
+      enforceAllowlist: false,
     };
   }
 

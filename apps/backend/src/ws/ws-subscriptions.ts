@@ -5,12 +5,9 @@ import {
   isWorkerQuickLookActivity,
   type BootstrapFailureCode,
   type BuilderTimelineChannelView,
-  type ProjectPresenceViewer,
   type ServerEvent,
   type TerminalDescriptor,
 } from "@forge/protocol";
-import { getCollaborationSocketAuthContext } from "../collaboration/auth/collaboration-auth-middleware.js";
-import { isBuilderRuntimeTarget, isCollaborationServerRuntimeTarget } from "../runtime-target.js";
 import type { SidebarPerfRecorder } from "../stats/sidebar-perf-types.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
 import { isEligibleLocalBuilderManager, type BrowserAutomationService } from "../swarm/browser-automation/index.js";
@@ -135,55 +132,8 @@ export class WsSubscriptions {
     }
   }
 
-  /**
-   * Wave R presence (SPEC §4.7): broadcast the full viewer snapshot for a
-   * session to every socket subscribed to it. Viewer identities come from
-   * the collaboration auth contexts attached at upgrade; builder-runtime
-   * sockets carry none, so local instances emit nothing.
-   */
-  private emitProjectPresence(sessionAgentId: string): void {
-    // Presence is a collaboration-server feature: local builder sockets have
-    // no member identities to report.
-    if (!isCollaborationServerRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-      return;
-    }
-
-    const viewersByUserId = new Map<string, ProjectPresenceViewer>();
-    const subscribers: WebSocket[] = [];
-    for (const [socket, subscribedAgentId] of this.conversationSubscriptions()) {
-      if (subscribedAgentId !== sessionAgentId || socket.readyState !== WebSocket.OPEN) {
-        continue;
-      }
-      subscribers.push(socket);
-      const authContext = getCollaborationSocketAuthContext(socket);
-      if (!authContext) {
-        continue;
-      }
-      viewersByUserId.set(authContext.userId, {
-        userId: authContext.userId,
-        displayName: authContext.name,
-        role: authContext.role,
-      });
-    }
-
-    const event: ServerEvent = {
-      type: "project_presence",
-      sessionAgentId,
-      profileId: this.resolveProfileIdForAgent(sessionAgentId),
-      viewers: [...viewersByUserId.values()],
-    };
-
-    for (const socket of subscribers) {
-      this.send(socket, event);
-    }
-  }
-
   remove(socket: WebSocket): void {
-    const previousAgentId = this.getSubscribedAgentId(socket);
     this.removeInternal(socket);
-    if (previousAgentId) {
-      this.emitProjectPresence(previousAgentId);
-    }
   }
 
   private removeInternal(socket: WebSocket): void {
@@ -434,16 +384,12 @@ export class WsSubscriptions {
 
   /**
    * Count-only throughput stays on the local Builder socket. In particular it
-   * intentionally does not use the Collaboration subscription manager or CLI.
+   * intentionally does not use the CLI transport.
    */
   broadcastGenerationThroughput(
     sessionAgentId: string,
     event: Extract<ServerEvent, { type: "generation_throughput" }>,
   ): void {
-    if (!isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-      return;
-    }
-
     const wss = this.getServer();
     if (!wss) return;
     for (const client of wss.clients) {
@@ -459,15 +405,11 @@ export class WsSubscriptions {
   /**
    * Ephemeral manager-turn tool progress is local Builder-only. It is scoped to
    * the manager's exact session subscription and never travels through the
-   * Collaboration or CLI transport paths.
+   * CLI transport path.
    */
   broadcastManagerToolActivity(
     event: Extract<ServerEvent, { type: "manager_tool_activity" }>,
   ): void {
-    if (!isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-      return;
-    }
-
     this.broadcastToExactSubscription(event.sessionAgentId, event);
   }
 
@@ -676,9 +618,6 @@ export class WsSubscriptions {
     this.conversationViews.set(socket, conversationView);
     this.conversationPagingCapabilities.set(socket, supportsConversationPaging);
     this.goalControlRequestIdCapabilities.set(socket, supportsGoalControlRequestId);
-    if (previousAgentId && previousAgentId !== targetAgentId) {
-      this.emitProjectPresence(previousAgentId);
-    }
 
     const readSessionAgentId = resolveSessionAgentIdForUnread(this.swarmManager, targetAgentId) ?? targetAgentId;
     const readProfileId = this.resolveProfileIdForAgent(readSessionAgentId);
@@ -698,7 +637,6 @@ export class WsSubscriptions {
       supportsGoalControlRequestId,
       subscriptionId,
     );
-    this.emitProjectPresence(targetAgentId);
   }
 
   resolveSubscribedAgentId(socket: WebSocket): string | undefined {

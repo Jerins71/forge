@@ -4,7 +4,6 @@ import type {
   DelegationRoute,
   EffortTier,
   ManagerExactModelSelection,
-  SpecialistTargetSpace,
   TierConfig,
 } from "@forge/protocol";
 import { getSessionFilePath, getWorkerSessionFilePath } from "./data-paths.js";
@@ -56,8 +55,7 @@ import {
   normalizeOptionalAgentId,
   normalizeOptionalModelId,
   resolveNextCapacityFallbackModelId,
-  shouldRetrySpecialistSpawnWithFallback,
-  isCollabSession
+  shouldRetrySpecialistSpawnWithFallback
 } from "./swarm-manager-utils.js";
 import { resolveExactManagerModelSelection } from "./catalog/manager-model-selection.js";
 import { modelCatalogService } from "./catalog/model-catalog-service.js";
@@ -195,14 +193,8 @@ export interface SwarmAgentLifecycleServiceOptions {
     normalizedAgentId: string,
     profileId: string
   ) => Promise<string | undefined>;
-  resolveSpecialistRosterForProfile: (
-    profileId: string,
-    targetSpace?: SpecialistTargetSpace
-  ) => Promise<ResolvedSpecialistDefinitionLike[]>;
-  resolveSpecialistRosterForManager?: (
-    manager: AgentDescriptor,
-    targetSpace?: SpecialistTargetSpace
-  ) => Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveSpecialistRosterForProfile: (profileId: string) => Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveSpecialistRosterForManager?: (manager: AgentDescriptor) => Promise<ResolvedSpecialistDefinitionLike[]>;
   normalizeSpecialistHandle: (value: string) => Promise<string | undefined>;
   resolveSystemPromptForDescriptor: (descriptor: AgentDescriptor) => Promise<string>;
   injectWorkerIdentityContext: (descriptor: AgentDescriptor, systemPrompt: string) => string;
@@ -642,14 +634,8 @@ export class SwarmAgentLifecycleService {
     let selectedDelegationRoute: DelegationRoute | undefined;
 
     const resolveRoster = async () => this.options.resolveSpecialistRosterForManager
-      ? await this.options.resolveSpecialistRosterForManager(
-          manager,
-          isCollabSession(manager) ? "collaboration" : "builder"
-        )
-      : await this.options.resolveSpecialistRosterForProfile(
-          managerProfileId,
-          isCollabSession(manager) ? "collaboration" : "builder"
-        );
+      ? await this.options.resolveSpecialistRosterForManager(manager)
+      : await this.options.resolveSpecialistRosterForProfile(managerProfileId);
 
     if (requestedRoute) {
       const behaviorMode = input.behaviorMode ?? "general";
@@ -718,14 +704,8 @@ export class SwarmAgentLifecycleService {
       let tierConfig = await resolveTierConfig(this.options.dataDir, tierSelection.tier);
       selectedTierConfig = tierConfig;
       const roster = this.options.resolveSpecialistRosterForManager
-        ? await this.options.resolveSpecialistRosterForManager(
-            manager,
-            isCollabSession(manager) ? "collaboration" : "builder"
-          )
-        : await this.options.resolveSpecialistRosterForProfile(
-            managerProfileId,
-            isCollabSession(manager) ? "collaboration" : "builder"
-          );
+        ? await this.options.resolveSpecialistRosterForManager(manager)
+        : await this.options.resolveSpecialistRosterForProfile(managerProfileId);
       const lensId = tierSelection.lens;
       if (lensId) {
         specialist = roster.find((entry) => entry.specialistId === lensId);
@@ -1780,7 +1760,7 @@ export class SwarmAgentLifecycleService {
     if (sessionAgentId) {
       const manager = this.options.descriptors.get(sessionAgentId);
       const roster = manager && this.options.resolveSpecialistRosterForManager
-        ? await this.options.resolveSpecialistRosterForManager(manager, "collaboration")
+        ? await this.options.resolveSpecialistRosterForManager(manager)
         : [];
       await this.syncWorkerSpecialistMetadata(profileId, roster, sessionAgentId, options);
       return;
@@ -1789,18 +1769,14 @@ export class SwarmAgentLifecycleService {
     if (this.options.resolveSpecialistRosterForManager) {
       const sessions = this.options.getSessionsForProfile(profileId);
       await Promise.all(sessions.map(async (manager) => {
-        const targetSpace = isCollabSession(manager) ? "collaboration" : "builder";
-        const roster = await this.options.resolveSpecialistRosterForManager!(manager, targetSpace);
+        const roster = await this.options.resolveSpecialistRosterForManager!(manager);
         await this.syncWorkerSpecialistMetadata(profileId, roster, manager.agentId, options);
       }));
       return;
     }
 
-    const [builderRoster, collaborationRoster] = await Promise.all([
-      this.options.resolveSpecialistRosterForProfile(profileId, "builder"),
-      this.options.resolveSpecialistRosterForProfile(profileId, "collaboration"),
-    ]);
-    await this.syncWorkerSpecialistMetadata(profileId, [...builderRoster, ...collaborationRoster], undefined, options);
+    const roster = await this.options.resolveSpecialistRosterForProfile(profileId);
+    await this.syncWorkerSpecialistMetadata(profileId, roster, undefined, options);
   }
 
   async notifyProjectAgentsChanged(profileId: string): Promise<void> {

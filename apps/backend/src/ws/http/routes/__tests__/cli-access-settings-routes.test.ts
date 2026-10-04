@@ -164,13 +164,6 @@ describe("CLI access settings routes", () => {
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 
-  it("returns no routes for collaboration runtime", () => {
-    const routes = createCliAccessSettingsRoutes({
-      cliAccessService: {} as CliAccessService,
-      runtimeTarget: "collaboration-server",
-    });
-    expect(routes).toEqual([]);
-  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -774,7 +767,6 @@ async function setup(options: { remoteAddress?: string } = {}): Promise<{ servic
 
   const routes = createCliAccessSettingsRoutes({
     cliAccessService: service,
-    runtimeTarget: "builder",
   });
 
   const httpServer = createServer((request, response) => {

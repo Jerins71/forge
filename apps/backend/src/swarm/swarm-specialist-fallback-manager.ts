@@ -1,4 +1,3 @@
-import type { SpecialistTargetSpace } from "@forge/protocol";
 import { isNonRunningAgentStatus } from "./agent-state-machine.js";
 import { inferProviderFromModelId, normalizeThinkingLevelForModelDescriptor } from "./catalog/model-presets.js";
 import type {
@@ -18,8 +17,7 @@ import {
   extractRuntimeMessageText,
   normalizeOptionalAgentId,
   previewForLog,
-  shouldRetrySpecialistSpawnWithFallback,
-  isCollabSession
+  shouldRetrySpecialistSpawnWithFallback
 } from "./swarm-manager-utils.js";
 import type { SwarmWorkerHealthService } from "./swarm-worker-health-service.js";
 import { normalizeEffortTier, resolveTierConfig } from "./agents/specialists/specialist-registry.js";
@@ -84,14 +82,8 @@ export interface SwarmSpecialistFallbackManagerOptions {
   clearRuntimeCreationPromiseIfCurrent(agentId: string, promise: Promise<SwarmAgentRuntime>): boolean;
   workerHealthService: SwarmWorkerHealthService;
   now: () => string;
-  resolveSpecialistRosterForProfile(
-    profileId: string,
-    targetSpace?: SpecialistTargetSpace
-  ): Promise<ResolvedSpecialistDefinitionLike[]>;
-  resolveSpecialistRosterForManager?(
-    manager: AgentDescriptor,
-    targetSpace?: SpecialistTargetSpace
-  ): Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveSpecialistRosterForProfile(profileId: string): Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveSpecialistRosterForManager?(manager: AgentDescriptor): Promise<ResolvedSpecialistDefinitionLike[]>;
   resolveSpawnModelWithCapacityFallback(model: AgentModelDescriptor): AgentModelDescriptor;
   resolveSystemPromptForDescriptor(descriptor: AgentDescriptor): Promise<string>;
   injectWorkerIdentityContext(descriptor: AgentDescriptor, systemPrompt: string): string;
@@ -526,14 +518,8 @@ export class SwarmSpecialistFallbackManager {
 
     const managerDescriptor = this.options.descriptors.get(descriptor.managerId);
     const roster = managerDescriptor && this.options.resolveSpecialistRosterForManager
-      ? await this.options.resolveSpecialistRosterForManager(
-          managerDescriptor,
-          managerDescriptor && isCollabSession(managerDescriptor) ? "collaboration" : "builder"
-        )
-      : await this.options.resolveSpecialistRosterForProfile(
-          descriptor.profileId,
-          managerDescriptor && isCollabSession(managerDescriptor) ? "collaboration" : "builder"
-        );
+      ? await this.options.resolveSpecialistRosterForManager(managerDescriptor)
+      : await this.options.resolveSpecialistRosterForProfile(descriptor.profileId);
     const specialist = roster.find((entry) => entry.specialistId === specialistId);
     if (!specialist?.fallbackModelId) {
       return undefined;

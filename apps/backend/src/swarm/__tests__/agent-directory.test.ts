@@ -196,7 +196,7 @@ describe("AgentDirectory", () => {
     expect(harness.directory.resolvePreferredManagerId()).toBeUndefined();
   });
 
-  it("enforces session, manager, and Builder/Collaboration lookup contracts", () => {
+  it("enforces session, manager, and Builder lookup contracts", () => {
     const harness = createHarness();
     const builder = manager("builder", "profile");
     const collab = manager("collab", "profile", { sessionSurface: "collab" });
@@ -213,9 +213,6 @@ describe("AgentDirectory", () => {
     expect(() => harness.directory.getRequiredBuilderSessionDescriptor("collab", "edit")).toThrow(
       "Cannot edit for collaboration-backed session collab.",
     );
-    expect(() =>
-      harness.directory.getRequiredCollaborationSessionDescriptor("builder", "edit"),
-    ).toThrow("Cannot edit for Builder session builder.");
     expect(harness.directory.getRequiredManagerDescriptor("builder")).toBe(builder);
     expect(() => harness.directory.getRequiredManagerDescriptor("child")).toThrow(
       "Unknown manager: child",

@@ -65,7 +65,6 @@ describe("Stream Deck routes", () => {
       }),
     ];
     const options = {
-      runtimeTarget: "builder",
       cliAccessService: {},
       swarmManager: {
         listProfiles: () => [profile],

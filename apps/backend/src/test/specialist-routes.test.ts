@@ -251,40 +251,12 @@ describe("specialist routes", () => {
     });
   });
 
-  it("lists global specialists using explicit collaboration targetSpace", async () => {
-    specialistRegistryState.resolveSharedRoster.mockResolvedValueOnce([
-      {
-        specialistId: "collab-specialist",
-        displayName: "Collab",
-        enabled: true,
-        sourcePath: "/tmp/global/collab.md",
-      },
-    ]);
-
+  it("ignores the retired targetSpace query and resolves the Builder roster", async () => {
     const server = await createSpecialistRouteTestServer();
     const response = await fetch(`${server.baseUrl}/api/settings/specialists?targetSpace=collaboration`);
 
     expect(response.status).toBe(200);
-    expect(specialistRegistryState.resolveSharedRoster).toHaveBeenCalledWith("/tmp/data", "collaboration");
-    await expect(response.json()).resolves.toEqual({
-      specialists: [
-        {
-          specialistId: "collab-specialist",
-          displayName: "Collab",
-          enabled: true,
-        },
-      ],
-    });
-  });
-
-  it("rejects invalid targetSpace query values before resolving rosters", async () => {
-    const server = await createSpecialistRouteTestServer();
-    const response = await fetch(`${server.baseUrl}/api/settings/specialists?targetSpace=invalid`);
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: "targetSpace query must be builder or collaboration" });
-    expect(specialistRegistryState.resolveSharedRoster).not.toHaveBeenCalled();
-    expect(specialistRegistryState.resolveRoster).not.toHaveBeenCalled();
+    expect(specialistRegistryState.resolveSharedRoster).toHaveBeenCalledWith("/tmp/data");
   });
 
   it("returns 404 for unknown profile-scoped specialist requests", async () => {
@@ -371,7 +343,6 @@ describe("specialist routes", () => {
       "alpha",
       "/tmp/data",
       join(workspaceRealpath, ".forge", "specialists"),
-      "builder",
     );
     await expect(listResponse.json()).resolves.toMatchObject({ specialists: [{ specialistId: "repo-specialist" }] });
 
@@ -382,59 +353,8 @@ describe("specialist routes", () => {
       "alpha",
       "/tmp/data",
       join(workspaceRealpath, ".forge", "specialists"),
-      "builder",
     );
     await expect(promptResponse.json()).resolves.toEqual({ markdown: "## Specialists\n- repo\n" });
-  });
-
-  it("lists profile-scoped specialists and roster prompt using explicit collaboration targetSpace", async () => {
-    specialistRegistryState.resolveRoster
-      .mockResolvedValueOnce([
-        {
-          specialistId: "collab-specialist",
-          handle: "collab",
-          displayName: "Collab",
-          enabled: true,
-          sourcePath: "/tmp/profiles/alpha/collab.md",
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          specialistId: "collab-specialist",
-          handle: "collab",
-          displayName: "Collab",
-          enabled: true,
-          sourcePath: "/tmp/profiles/alpha/collab.md",
-        },
-      ]);
-    specialistRegistryState.generateRosterBlock.mockReturnValueOnce("## Specialists\n- collab\n");
-
-    const server = await createSpecialistRouteTestServer({
-      profiles: [{ profileId: "alpha", displayName: "Alpha" }],
-    });
-
-    const listResponse = await fetch(
-      `${server.baseUrl}/api/settings/specialists?profileId=alpha&targetSpace=collaboration`,
-    );
-    expect(listResponse.status).toBe(200);
-    expect(specialistRegistryState.resolveRoster).toHaveBeenNthCalledWith(1, "alpha", "/tmp/data", "collaboration");
-    await expect(listResponse.json()).resolves.toEqual({
-      specialists: [
-        {
-          specialistId: "collab-specialist",
-          handle: "collab",
-          displayName: "Collab",
-          enabled: true,
-        },
-      ],
-    });
-
-    const promptResponse = await fetch(
-      `${server.baseUrl}/api/settings/specialists/roster-prompt?profileId=alpha&targetSpace=collaboration`,
-    );
-    expect(promptResponse.status).toBe(200);
-    expect(specialistRegistryState.resolveRoster).toHaveBeenNthCalledWith(2, "alpha", "/tmp/data", "collaboration");
-    await expect(promptResponse.json()).resolves.toEqual({ markdown: "## Specialists\n- collab\n" });
   });
 
   it("rejects invalid targetSpace entries in save payloads", async () => {
@@ -448,25 +368,6 @@ describe("specialist routes", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "targetSpace entries must be builder or collaboration" });
     expect(specialistRegistryState.saveSharedSpecialist).not.toHaveBeenCalled();
-  });
-
-  it("saves global specialists with targetSpace from explicit query when body omits it", async () => {
-    const server = await createSpecialistRouteTestServer({
-      profiles: [{ profileId: "alpha", displayName: "Alpha" }],
-    });
-
-    const response = await fetch(`${server.baseUrl}/api/settings/specialists/collab?targetSpace=collaboration`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...validSpecialistPayload(), targetSpace: undefined }),
-    });
-
-    expect(response.status).toBe(200);
-    expect(specialistRegistryState.saveSharedSpecialist).toHaveBeenCalledWith(
-      "/tmp/data",
-      "collab",
-      expect.objectContaining({ targetSpace: ["collaboration"] }),
-    );
   });
 
   it("saves global specialists and notifies every user profile", async () => {
@@ -507,46 +408,6 @@ describe("specialist routes", () => {
         profileId: "alpha",
         specialistIds: ["alpha-one"],
         updatedAt: expect.any(String),
-      }),
-    );
-  });
-
-  it("notifies collaboration backing sessions individually when global specialists change", async () => {
-    specialistRegistryState.resolveRoster.mockImplementation(async (profileId: string) => [
-      { specialistId: `${profileId}-specialist`, handle: "worker", sourcePath: `/tmp/${profileId}.md` },
-    ]);
-
-    const notifySpecialistRosterChanged = vi.fn(async () => undefined);
-    const broadcastEvent = vi.fn<(event: ServerEvent) => void>();
-    const server = await createSpecialistRouteTestServer({
-      profiles: [
-        { profileId: "alpha", displayName: "Alpha" },
-        { profileId: "_collaboration", displayName: "Collaboration" },
-      ],
-      agents: [
-        { agentId: "channel-a", role: "manager", profileId: "_collaboration", sessionSurface: "collab" },
-        { agentId: "channel-b", role: "manager", profileId: "_collaboration", sessionSurface: "collab" },
-      ],
-      notifySpecialistRosterChanged,
-      broadcastEvent,
-    });
-
-    const response = await fetch(`${server.baseUrl}/api/settings/specialists/collab?targetSpace=collaboration`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(validSpecialistPayload()),
-    });
-
-    expect(response.status).toBe(200);
-    expect(notifySpecialistRosterChanged).toHaveBeenCalledWith("alpha");
-    expect(notifySpecialistRosterChanged).not.toHaveBeenCalledWith("_collaboration");
-    expect(notifySpecialistRosterChanged).toHaveBeenCalledWith("_collaboration", { sessionAgentId: "channel-a" });
-    expect(notifySpecialistRosterChanged).toHaveBeenCalledWith("_collaboration", { sessionAgentId: "channel-b" });
-    expect(broadcastEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "specialist_roster_changed",
-        profileId: "_collaboration",
-        specialistIds: ["_collaboration-specialist"],
       }),
     );
   });

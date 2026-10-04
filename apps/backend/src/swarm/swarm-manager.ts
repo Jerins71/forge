@@ -14,7 +14,6 @@ import { RestartRecoveryCoordinator } from "./restart-recovery-coordinator.js";
 import { SwarmBootCoordinator } from "./swarm-boot-coordinator.js";
 import { SwarmObservabilityCoordinator } from "./swarm-observability-coordinator.js";
 import { SwarmEventCoordinator } from "./swarm-event-coordinator.js";
-import { CollaborationStorageProvisioner } from "./collaboration-storage-provisioner.js";
 import { AgentMessageDispatcher, type AgentMessageLedgerPort } from "./agent-message-dispatcher.js";
 import { SwarmCompactionCoordinator } from "./swarm-compaction-coordinator.js";
 import { AgentDescriptorStore } from "./agents/agent-descriptor-store.js";
@@ -166,7 +165,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private readonly secureSecretSettingsService: SecureSecretSettingsService;
   private readonly secureSessionsService: SecureSessionsService;
   private readonly sessionMetaService: SwarmSessionMetaService;
-  private readonly collaborationStorageProvisioner: CollaborationStorageProvisioner;
   private readonly cortexService: SwarmCortexService;
   private readonly memoryMergeService: SwarmMemoryMergeService;
   private readonly knowledgeMemoryCoordinator: KnowledgeMemoryCoordinator;
@@ -339,7 +337,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       getAgentMemoryPath: (agentId) => this.knowledgeMemoryCoordinator.getAgentMemoryPath(agentId),
       resolveSystemPromptForDescriptor: (descriptor) => this.resolveSystemPromptForDescriptor(descriptor)
     });
-    this.collaborationStorageProvisioner = this.createCollaborationStorageProvisioner();
     this.cortexService = new SwarmCortexService({
       config: this.config,
       now: this.now,
@@ -480,7 +477,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         projector: this.conversationProjector,
         sidebarPerf: this.sidebarPerfRecorder,
       },
-      collaboration: this.collaborationStorageProvisioner,
       trust: this.projectExecutableTrustCoordinator,
       observability: this.observabilityCoordinator,
       persistence: this.sessionMetaService,
@@ -658,8 +654,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         getPiModelsJsonPath: () => this.configurationCoordinator.getPiModelsJsonPathOrThrow(),
         getMemoryRuntimeResources: (descriptor) => this.getMemoryRuntimeResources(descriptor),
         getSwarmContextFiles: (cwd) => this.getSwarmContextFiles(cwd),
-        resolveAndValidateCwd: (cwd, cwdOptions) =>
-          this.configurationCoordinator.resolveAndValidateCwd(cwd, cwdOptions),
+        resolveAndValidateCwd: (cwd) => this.configurationCoordinator.resolveAndValidateCwd(cwd),
         ensureSessionFileParentDirectory: (sessionFile) =>
           this.persistenceService.ensureSessionFileParentDirectory(sessionFile),
         ensureDirectories: () => this.persistenceService.ensureDirectories(),
@@ -683,10 +678,10 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
             profileId,
             fallback,
           ),
-        resolveSpecialistRosterForProfile: (profileId, targetSpace) =>
-          this.configurationCoordinator.resolveSpecialistRosterForProfile(profileId, targetSpace),
-        resolveSpecialistRosterForManager: (manager, targetSpace) =>
-          this.configurationCoordinator.resolveSpecialistRosterForManager(manager, targetSpace),
+        resolveSpecialistRosterForProfile: (profileId) =>
+          this.configurationCoordinator.resolveSpecialistRosterForProfile(profileId),
+        resolveSpecialistRosterForManager: (manager) =>
+          this.configurationCoordinator.resolveSpecialistRosterForManager(manager),
         resolveSpawnModelWithCapacityFallback: (model) =>
           this.resolveSpawnModelWithCapacityFallback(model),
         resolveSpawnWorkerArchetypeId: (input, normalizedAgentId, profileId) =>
@@ -854,8 +849,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
           this.agentDirectory.assertManagerSettingsTargetNotArchived(managerId, action),
         assertProfileNotArchived: (profileId) => this.agentDirectory.assertProfileNotArchived(profileId),
         getRequiredBuilderSessionDescriptor: (agentId, action) => this.agentDirectory.getRequiredBuilderSessionDescriptor(agentId, action),
-        getRequiredCollaborationSessionDescriptor: (agentId, action) =>
-          this.agentDirectory.getRequiredCollaborationSessionDescriptor(agentId, action),
         assertDescriptorNotEffectivelyArchived: (descriptor) => this.agentDirectory.assertDescriptorNotEffectivelyArchived(descriptor),
       },
       persistence: {
@@ -882,12 +875,8 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
           this.projectAgentCoordinator.getExternalDirectory(profileId),
         getKnowledgeV2Enabled: () => this.knowledgeV2SettingsService.getSettings().enabled,
       },
-      applySpecialistAvailability: (roster, targetSpace, managerAgentId) =>
-        this.codexPluginDelegationCoordinator.applySpecialistAvailability(
-          roster,
-          targetSpace,
-          managerAgentId,
-        ),
+      applySpecialistAvailability: (roster, managerAgentId) =>
+        this.codexPluginDelegationCoordinator.applySpecialistAvailability(roster, managerAgentId),
       applyManagerRuntimeRecyclePolicy: (agentId, reason) =>
         this.projectExecutableTrustCoordinator.applyManagerRuntimeRecyclePolicy(agentId, reason),
       emitModelChangeNotice: (agentId, sourceModel, targetModel) =>
@@ -943,27 +932,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       getPiModelsJsonPath: () => this.configurationCoordinator.getPiModelsJsonPathOrThrow(),
       versioning: this.versioningService,
       now: this.now,
-      logDebug: (message, details) => this.logDebug(message, details),
-    });
-  }
-  private createCollaborationStorageProvisioner(): CollaborationStorageProvisioner {
-    return new CollaborationStorageProvisioner({
-      config: this.config,
-      now: this.now,
-      getDescriptor: (agentId) => this.descriptors.get(agentId),
-      getProfile: (profileId) => this.profiles.get(profileId),
-      upsertDescriptor: (descriptor) => this.descriptorStoreAdapter.upsertDescriptorInLiveMaps(descriptor),
-      upsertProfile: (profile) => this.descriptorStoreAdapter.upsertProfileInLiveMaps(profile),
-      ensureProfileDirectories: (profileId) => this.persistenceService.ensureProfilePiDirectories(profileId),
-      ensureSessionFileParent: (sessionFile) => this.persistenceService.ensureSessionFileParentDirectory(sessionFile),
-      ensureMemoryFile: (path, profileId) =>
-        this.knowledgeMemoryCoordinator.ensureAgentMemoryFile(path, profileId),
-      getAgentMemoryPath: (agentId) => this.knowledgeMemoryCoordinator.getAgentMemoryPath(agentId),
-      writeInitialSessionMeta: (descriptor) =>
-        this.knowledgeMemoryCoordinator.writeInitialSessionMeta(descriptor),
-      refreshSessionMetaStats: (descriptor) =>
-        this.knowledgeMemoryCoordinator.refreshSessionMetaStats(descriptor),
-      saveStore: () => this.descriptorStoreAdapter.saveStore(),
       logDebug: (message, details) => this.logDebug(message, details),
     });
   }

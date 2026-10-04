@@ -10,7 +10,6 @@ import {
   type RemoteUpdateAwarenessProjectSnapshot,
   type RemoteUpdateAwarenessSettingsSnapshot,
 } from "@forge/protocol";
-import { isBuilderRuntimeTarget } from "../../../runtime-target.js";
 import {
   closeRemoteUpdateAwarenessDb,
   getOrCreateRemoteUpdateAwarenessDb,
@@ -63,9 +62,6 @@ export class LocalRemoteUpdateAwarenessService {
   private stopPromise: Promise<void> | null = null;
 
   constructor(private readonly options: LocalRemoteUpdateAwarenessServiceOptions) {
-    if (!isBuilderRuntimeTarget(options.swarmManager.getConfig().runtimeTarget)) {
-      throw new Error("Remote update awareness is available only in the local Builder runtime");
-    }
     this.core = options.coreService ?? null;
     this.scheduler = options.scheduler ?? null;
     this.gitFactory = options.gitFactory ?? ((cwd) => new GitCli({ cwd }));

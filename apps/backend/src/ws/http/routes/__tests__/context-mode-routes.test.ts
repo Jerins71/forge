@@ -13,19 +13,17 @@ afterEach(async () => {
 });
 
 describe("createContextModeRoutes", () => {
-  it("serves uncached read-only context artifacts and rejects writes and non-Builder access", async () => {
+  it("serves uncached read-only context artifacts and rejects writes", async () => {
     const payload = { contextMode: { sessionAgentId: "manager" }, revision: 1, files: [] };
     const read = vi.fn(async () => payload);
     const swarmManager = { getSessionContextArtifacts: read } as unknown as SwarmManager;
-    const server = await createRouteServer(createContextModeRoutes({ swarmManager, runtimeTarget: "builder" }));
+    const server = await createRouteServer(createContextModeRoutes({ swarmManager }));
     const response = await fetch(`${server.baseUrl}/api/agents/manager/context-artifacts`);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual(payload);
     expect(read).toHaveBeenCalledWith("manager");
     expect((await fetch(`${server.baseUrl}/api/agents/manager/context-artifacts`, { method: "PUT" })).status).toBe(405);
-    const other = await createRouteServer(createContextModeRoutes({ swarmManager, runtimeTarget: "collaboration-server" }));
-    expect((await fetch(`${other.baseUrl}/api/agents/manager/context-artifacts`)).status).toBe(404);
     expect(read).toHaveBeenCalledTimes(1);
     read.mockRejectedValueOnce(new Error("Unknown agent: missing"));
     expect((await fetch(`${server.baseUrl}/api/agents/missing/context-artifacts`)).status).toBe(404);
@@ -43,7 +41,7 @@ describe("createContextModeRoutes", () => {
       }),
     } as unknown as SwarmManager;
     const server = await createRouteServer(
-      createContextModeRoutes({ swarmManager, runtimeTarget: "builder" }),
+      createContextModeRoutes({ swarmManager }),
     );
 
     const initial = await fetch(`${server.baseUrl}/api/profiles/forge/context-mode`);
@@ -81,7 +79,7 @@ describe("createContextModeRoutes", () => {
       }),
     } as unknown as SwarmManager;
     const server = await createRouteServer(
-      createContextModeRoutes({ swarmManager, runtimeTarget: "builder" }),
+      createContextModeRoutes({ swarmManager }),
     );
 
     const summary = await fetch(`${server.baseUrl}/api/agents/manager/context-mode`, {
@@ -128,7 +126,7 @@ describe("createContextModeRoutes", () => {
       }),
     } as unknown as SwarmManager;
     const server = await createRouteServer(
-      createContextModeRoutes({ swarmManager, runtimeTarget: "builder" }),
+      createContextModeRoutes({ swarmManager }),
     );
 
     const response = await fetch(`${server.baseUrl}/api/agents/cursor/context-mode`, {
@@ -150,7 +148,7 @@ describe("createContextModeRoutes", () => {
       }),
     } as unknown as SwarmManager;
     const server = await createRouteServer(
-      createContextModeRoutes({ swarmManager, runtimeTarget: "builder" }),
+      createContextModeRoutes({ swarmManager }),
     );
 
     const response = await fetch(`${server.baseUrl}/api/agents/worker-1/context-mode`, {
@@ -165,20 +163,6 @@ describe("createContextModeRoutes", () => {
     expect(swarmManager.updateSessionContextMode).toHaveBeenCalledWith("worker-1", "fresh");
   });
 
-  it("returns 404 for collaboration runtime", async () => {
-    const server = await createRouteServer(
-      createContextModeRoutes({
-        swarmManager: {} as SwarmManager,
-        runtimeTarget: "collaboration-server",
-      }),
-    );
-
-    const response = await fetch(`${server.baseUrl}/api/profiles/forge/context-mode`);
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toMatchObject({
-      error: "Context mode settings are only available in Builder runtime.",
-    });
-  });
 });
 
 async function createRouteServer(routes: HttpRoute[]): Promise<{ baseUrl: string; close: () => Promise<void> }> {

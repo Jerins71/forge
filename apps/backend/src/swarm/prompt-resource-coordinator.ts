@@ -1,17 +1,12 @@
-import type { SpecialistTargetSpace, TierConfig } from "@forge/protocol";
-import { createCollaborationDbHelpers } from "../collaboration/collab-db-helpers.js";
-import { parseCollaborationSpecialistHandlesJson } from "../collaboration/specialist-selection.js";
-import { isCollaborationServerRuntimeTarget } from "../runtime-target.js";
+import type { TierConfig } from "@forge/protocol";
 import { normalizeArchetypeId, type PromptRegistry } from "./prompts/prompt-registry.js";
 import { ProjectResourceSettingsStore } from "./project-resource-settings.js";
 import { ProjectWorkspaceResolver } from "./project-workspace-resolver.js";
 import { classifyRuntimeCapacityError } from "./runtime/runtime-utils.js";
 import type { SkillMetadata, SkillMetadataService } from "./skills/skill-metadata-service.js";
-import { resolveCollaborationSkillRoster } from "./skills/collaboration-skill-resolver.js";
 import {
   generateRosterBlock,
   normalizeSpecialistHandle,
-  resolveCollaborationChannelRoster,
   resolveRoster,
   resolveTierConfigs,
   resolveWorkspaceRoster,
@@ -30,8 +25,6 @@ import type { RuntimeErrorEvent } from "./runtime-contracts.js";
 import {
   buildModelCapacityBlockKey,
   clampModelCapacityBlockDurationMs,
-  getCollabSessionInfo,
-  isCollabSession,
   normalizeOptionalAgentId,
   normalizeOptionalModelId,
   previewForLog,
@@ -61,10 +54,7 @@ export interface ResolvedSpecialistDefinitionLike {
 }
 
 export interface SpecialistRegistryModule {
-  resolveRoster(
-    profileId: string,
-    targetSpace?: SpecialistTargetSpace,
-  ): Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveRoster(profileId: string): Promise<ResolvedSpecialistDefinitionLike[]>;
   generateRosterBlock(roster: ResolvedSpecialistDefinitionLike[], tierConfigs?: readonly TierConfig[]): string;
   resolveTierConfigs(): Promise<TierConfig[]>;
   normalizeSpecialistHandle(value: string): string;
@@ -86,7 +76,6 @@ export interface PromptResourceCoordinatorOptions {
   getDescriptor(agentId: string): AgentDescriptor | undefined;
   applySpecialistAvailability(
     roster: ResolvedSpecialistDefinitionLike[],
-    targetSpace: SpecialistTargetSpace,
     managerAgentId: string,
   ): ResolvedSpecialistDefinitionLike[] | Promise<ResolvedSpecialistDefinitionLike[]>;
   now: () => string;
@@ -179,8 +168,8 @@ export class PromptResourceCoordinator {
     if (!this.specialistRegistryModulePromise) {
       const dataDir = this.options.config.paths.dataDir;
       this.specialistRegistryModulePromise = Promise.resolve({
-        resolveRoster: (profileId, targetSpace) =>
-          resolveRoster(profileId, dataDir, targetSpace) as Promise<ResolvedSpecialistDefinitionLike[]>,
+        resolveRoster: (profileId) =>
+          resolveRoster(profileId, dataDir) as Promise<ResolvedSpecialistDefinitionLike[]>,
         generateRosterBlock: generateRosterBlock as SpecialistRegistryModule["generateRosterBlock"],
         resolveTierConfigs: () => resolveTierConfigs(dataDir),
         normalizeSpecialistHandle,
@@ -191,55 +180,25 @@ export class PromptResourceCoordinator {
 
   async resolveSpecialistRosterForProfile(
     profileId: string,
-    targetSpace: SpecialistTargetSpace = "builder",
     workspaceSpecialistsDir?: string,
   ): Promise<ResolvedSpecialistDefinitionLike[]> {
-    if (workspaceSpecialistsDir && targetSpace !== "collaboration") {
+    if (workspaceSpecialistsDir) {
       return resolveWorkspaceRoster(
         profileId,
         this.options.config.paths.dataDir,
         workspaceSpecialistsDir,
-        targetSpace,
       ) as Promise<ResolvedSpecialistDefinitionLike[]>;
     }
-    return (await this.loadSpecialistRegistryModule()).resolveRoster(profileId, targetSpace);
+    return (await this.loadSpecialistRegistryModule()).resolveRoster(profileId);
   }
 
-  async resolveSpecialistRosterForManager(
-    manager: AgentDescriptor,
-    targetSpace: SpecialistTargetSpace = "builder",
-  ): Promise<ResolvedSpecialistDefinitionLike[]> {
-    if (targetSpace !== "collaboration" || !isCollabSession(manager)) {
-      const workspace = await this.resolveProjectWorkspaceForManager(manager);
-      const roster = await this.resolveSpecialistRosterForProfile(
-        manager.profileId ?? manager.agentId,
-        targetSpace,
-        workspace?.repoRootResources.specialistsDir,
-      );
-      return this.options.applySpecialistAvailability(roster, targetSpace, manager.agentId);
-    }
-
-    const channelId = manager.collab?.channelId;
-    if (!channelId || !isCollaborationServerRuntimeTarget(this.options.config.runtimeTarget)) {
-      return this.resolveCollaborationSpecialists(manager.agentId, []);
-    }
-
-    try {
-      const channel = (await createCollaborationDbHelpers(this.options.config)).getChannel(channelId);
-      return channel
-        ? this.resolveCollaborationSpecialists(
-            channel.backingSessionAgentId,
-            parseCollaborationSpecialistHandlesJson(channel.activeSpecialistHandlesJson),
-          )
-        : this.resolveCollaborationSpecialists(manager.agentId, []);
-    } catch (error) {
-      this.options.logDebug("collaboration:specialists:resolve_error", {
-        agentId: manager.agentId,
-        channelId,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      return this.resolveCollaborationSpecialists(manager.agentId, []);
-    }
+  async resolveSpecialistRosterForManager(manager: AgentDescriptor): Promise<ResolvedSpecialistDefinitionLike[]> {
+    const workspace = await this.resolveProjectWorkspaceForManager(manager);
+    const roster = await this.resolveSpecialistRosterForProfile(
+      manager.profileId ?? manager.agentId,
+      workspace?.repoRootResources.specialistsDir,
+    );
+    return this.options.applySpecialistAvailability(roster, manager.agentId);
   }
 
   async buildDelegationRosterModelContext(manager: AgentDescriptor): Promise<string> {
@@ -269,15 +228,6 @@ export class PromptResourceCoordinator {
     const manager = descriptor.role === "manager"
       ? descriptor
       : this.options.getDescriptor(descriptor.managerId);
-    const collabInfo = getCollabSessionInfo(manager);
-    if (manager?.role === "manager" && collabInfo) {
-      return this.resolveCollaborationSkills(
-        descriptor,
-        manager as AgentDescriptor & { role: "manager" },
-        collabInfo.channelId,
-      );
-    }
-
     const profileId = manager?.role === "manager"
       ? normalizeOptionalAgentId(manager.profileId) ?? manager.agentId
       : normalizeOptionalAgentId(descriptor.profileId);
@@ -292,49 +242,6 @@ export class PromptResourceCoordinator {
       profileId,
       workspace?.effectiveForgeDirRealpath,
     );
-  }
-
-  private resolveCollaborationSpecialists(
-    sessionAgentId: string,
-    selectedGlobalHandles: string[],
-  ): Promise<ResolvedSpecialistDefinitionLike[]> {
-    return resolveCollaborationChannelRoster(this.options.config.paths.dataDir, {
-      sessionAgentId,
-      selectedGlobalHandles,
-    }) as Promise<ResolvedSpecialistDefinitionLike[]>;
-  }
-
-  private async resolveCollaborationSkills(
-    descriptor: AgentDescriptor,
-    manager: AgentDescriptor & { role: "manager" },
-    channelId: string,
-  ): Promise<SkillMetadata[]> {
-    try {
-      const channel = (await createCollaborationDbHelpers(this.options.config)).getChannel(channelId);
-      if (!channel) {
-        this.options.logDebug("collaboration:skills:channel_missing", {
-          agentId: descriptor.agentId,
-          managerId: manager.agentId,
-          channelId,
-        });
-      }
-      const roster = await resolveCollaborationSkillRoster({
-        selectionJson: channel?.activeSkillHandlesJson ?? "[]",
-        skillMetadataService: this.options.skillMetadataService,
-      });
-      return roster.skills;
-    } catch (error) {
-      this.options.logDebug("collaboration:skills:resolve_error", {
-        agentId: descriptor.agentId,
-        managerId: manager.agentId,
-        channelId,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      return (await resolveCollaborationSkillRoster({
-        selectionJson: "[]",
-        skillMetadataService: this.options.skillMetadataService,
-      })).skills;
-    }
   }
 }
 

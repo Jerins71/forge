@@ -1,10 +1,4 @@
 import { createConfig } from "./config.js";
-import { bootstrapCollaborationAdmin } from "./collaboration/auth/admin-bootstrap.js";
-import { clearCollaborationBetterAuthService, getOrCreateCollaborationBetterAuthService } from "./collaboration/auth/better-auth-service.js";
-import { closeCollaborationAuthDb, getOrCreateCollaborationAuthDb } from "./collaboration/auth/collaboration-db.js";
-import { runCollaborationAuthMigrations } from "./collaboration/auth/migration-runner.js";
-import { CollaborationSettingsService } from "./collaboration/settings-service.js";
-import { createCollaborationReadinessService, type CollaborationReadinessRequestService } from "./collaboration/readiness-service.js";
 import { StatsService } from "./stats/stats-service.js";
 import { collectFeatureAdoption } from "./telemetry/feature-counters.js";
 import {
@@ -13,13 +7,11 @@ import {
   extractProvidersUsed
 } from "./telemetry/telemetry-payload.js";
 import { TelemetryService } from "./telemetry/telemetry-service.js";
-import { createNoopObservabilityFacade } from "./observability/noop-observability.js";
 import { ObservabilityService } from "./observability/observability-service.js";
 import type { ObservabilityFacade } from "./observability/observability-types.js";
 import { CronSchedulerService } from "./scheduler/cron-scheduler-service.js";
 import { getScheduleFilePath } from "./scheduler/schedule-storage.js";
 import { acquireRuntimeLock } from "./runtime-lock.js";
-import { isBuilderRuntimeTarget, isCollaborationServerRuntimeTarget } from "./runtime-target.js";
 import { FeedbackService } from "./swarm/feedback-service.js";
 import { SwarmManager } from "./swarm/swarm-manager.js";
 import { BrowserAutomationService } from "./swarm/browser-automation/index.js";
@@ -71,12 +63,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
   const logger = createLogger(options.logger);
 
   const runtimeLock = acquireRuntimeLock(config.paths.dataDir);
-  const observabilityService: ObservabilityFacade = isBuilderRuntimeTarget(config.runtimeTarget)
-    ? new ObservabilityService({
-        dataDir: config.paths.dataDir,
-        runtimeTarget: config.runtimeTarget,
-      })
-    : createNoopObservabilityFacade(config.runtimeTarget);
+  const observabilityService: ObservabilityFacade = new ObservabilityService({ dataDir: config.paths.dataDir });
 
   // Signal-driven shutdown is owned by index.ts so the lock remains held until
   // graceful shutdown completes. This hook is only a final best-effort fallback
@@ -110,14 +97,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
   });
 
   try {
-    await seedBuiltins(config.paths.dataDir, { runtimeTarget: config.runtimeTarget });
-    await runCollaborationAuthMigrations(config);
-
-    if (isCollaborationServerRuntimeTarget(config.runtimeTarget)) {
-      const authService = await getOrCreateCollaborationBetterAuthService(config);
-      const collaborationDatabase = await getOrCreateCollaborationAuthDb(config);
-      await bootstrapCollaborationAdmin(config, collaborationDatabase, authService);
-    }
+    await seedBuiltins(config.paths.dataDir);
 
     await observabilityService.initialize();
 
@@ -133,8 +113,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       observabilityService.shutdown({ timeoutMs: 3000 }),
       versioningService.stop(),
     ]);
-    clearCollaborationBetterAuthService(config);
-    closeCollaborationAuthDb(config);
     releaseRuntimeLock();
     throw error;
   }
@@ -201,22 +179,9 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
   let handleTerminalSessionLifecycle: (event: SessionLifecycleEvent) => void = () => undefined;
   let handleTerminalAgentsSnapshot: () => void = () => undefined;
   let server: BackendServer | null = null;
-  let collaborationReadinessService: CollaborationReadinessRequestService | undefined;
-  let collaborationSettingsService: CollaborationSettingsService | undefined;
 
   try {
     await swarmManager.boot();
-
-    if (isCollaborationServerRuntimeTarget(config.runtimeTarget)) {
-      const collaborationDatabase = await getOrCreateCollaborationAuthDb(config);
-      collaborationReadinessService = await createCollaborationReadinessService(
-        config,
-        collaborationDatabase,
-        swarmManager,
-      );
-      collaborationSettingsService = new CollaborationSettingsService(config, collaborationReadinessService);
-      await collaborationReadinessService.ensureCollaborationReady();
-    }
 
     let telemetryService: TelemetryService | null = null;
     const statsService = new StatsService(swarmManager, {
@@ -393,8 +358,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       telemetryService,
       observabilityService,
       feedbackService,
-      collaborationSettingsService,
-      collaborationReadinessService,
       browserAutomationService,
       secureControlToken: options.secureControlToken,
     });
@@ -439,8 +402,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
         observabilityService.shutdown({ timeoutMs: 3000 }),
         versioningService.stop(),
       ]);
-      clearCollaborationBetterAuthService(config);
-      closeCollaborationAuthDb(config);
       releaseRuntimeLock();
     }
     throw error;
@@ -518,8 +479,6 @@ class BackendServer implements StartedServer {
         this.terminalService?.shutdown(),
         this.observabilityService.shutdown({ timeoutMs: 3000 }),
         this.versioningService.stop(),
-        Promise.resolve().then(() => clearCollaborationBetterAuthService(this.config)),
-        Promise.resolve().then(() => closeCollaborationAuthDb(this.config)),
       ]);
 
       try {

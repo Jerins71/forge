@@ -8,10 +8,6 @@ export const CLI_WS_PATH = "/api/cli/ws";
 export const CLI_HTTP_METHODS = "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS";
 export const CLI_CORS_ALLOWED_HEADERS = "content-type, authorization";
 
-export function isCliHttpPath(pathname: string): boolean {
-  return pathname === CLI_HTTP_ROUTE_PREFIX || pathname.startsWith(`${CLI_HTTP_ROUTE_PREFIX}/`);
-}
-
 export function isCliWebSocketPath(pathname: string): boolean {
   return pathname === CLI_WS_PATH;
 }

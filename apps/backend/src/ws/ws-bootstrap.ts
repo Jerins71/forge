@@ -18,7 +18,6 @@ import {
 } from "../swarm/session/history-policy.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
 import type { BrowserAutomationService } from "../swarm/browser-automation/index.js";
-import { isBuilderRuntimeTarget } from "../runtime-target.js";
 import { filterBuilderVisibleAgents, filterBuilderVisibleProfiles, isBuilderInventorySession } from "./builder-visibility.js";
 import { MAX_WS_EVENT_BYTES } from "./ws-send.js";
 import { warnWsThrottled } from "./ws-log-throttle.js";
@@ -175,8 +174,6 @@ export async function sendSubscriptionBootstrap(options: {
   let payloadBytesTotal = 0;
 
   const allProfiles = swarmManager.listProfiles();
-  const localBuilderRuntime = typeof (swarmManager as Partial<Pick<SwarmManager, "getConfig">>).getConfig === "function"
-    && isBuilderRuntimeTarget(swarmManager.getConfig().runtimeTarget);
   const systemProfileIds = new Set(
     allProfiles.filter((profile) => isSystemProfile(profile)).map((profile) => profile.profileId),
   );
@@ -297,7 +294,6 @@ export async function sendSubscriptionBootstrap(options: {
   if (
     secureSnapshotProvider
     && secureTarget
-    && isBuilderRuntimeTarget(secureSnapshotProvider.getConfig().runtimeTarget)
   ) {
     try {
       const snapshots = secureTarget.role === "manager"
@@ -324,8 +320,7 @@ export async function sendSubscriptionBootstrap(options: {
   // the authoritative session roster before count-only worker telemetry so a
   // reconnect cannot classify Pi/Cursor measurements from a preserved cache.
   const throughputSessionAgentId = resolveGenerationThroughputSessionAgentId(targetAgentId);
-  const localBuilderThroughputSession = throughputSessionAgentId && localBuilderRuntime;
-  if (localBuilderThroughputSession) {
+  if (throughputSessionAgentId && typeof swarmManager.listWorkersForSession === "function") {
     await sendMeasured("sessionWorkersSnapshot", {
       type: "session_workers_snapshot",
       sessionAgentId: throughputSessionAgentId,
@@ -336,7 +331,7 @@ export async function sendSubscriptionBootstrap(options: {
   // This snapshot is deliberately outside conversation bootstrap/history and
   // only exists for the local Builder transport. It contains no generated text.
   if (
-    localBuilderThroughputSession
+    throughputSessionAgentId
     && typeof swarmManager.getGenerationThroughputSnapshot === "function"
   ) {
     // Historical telemetry can require cold-cache recovery. It must neither block
@@ -354,7 +349,6 @@ export async function sendSubscriptionBootstrap(options: {
   const managerToolActivitySessionAgentId = resolveManagerToolActivitySessionAgentId(targetAgentId);
   if (
     managerToolActivitySessionAgentId &&
-    localBuilderRuntime &&
     typeof swarmManager.getManagerToolActivitySnapshot === "function"
   ) {
     await sendMeasured(

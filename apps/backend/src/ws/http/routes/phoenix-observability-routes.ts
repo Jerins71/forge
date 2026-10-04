@@ -2,7 +2,6 @@ import type {
   PhoenixObservabilitySettingsPatch,
 } from "@forge/protocol";
 import type { ObservabilityFacade } from "../../../observability/observability-types.js";
-import { isBuilderRuntimeTarget, type RuntimeTarget } from "../../../runtime-target.js";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
 
@@ -13,9 +12,8 @@ const OBSERVABILITY_METHODS = "GET, PUT, POST, OPTIONS";
 
 export function createPhoenixObservabilityRoutes(options: {
   observabilityService: ObservabilityFacade;
-  runtimeTarget: RuntimeTarget;
 }): HttpRoute[] {
-  const { observabilityService, runtimeTarget } = options;
+  const { observabilityService } = options;
 
   return [
     {
@@ -27,11 +25,6 @@ export function createPhoenixObservabilityRoutes(options: {
         if (request.method === "OPTIONS") {
           response.statusCode = 204;
           response.end();
-          return;
-        }
-
-        if (!isBuilderRuntimeTarget(runtimeTarget)) {
-          sendJson(response, 404, { error: "Phoenix observability is only available in Builder runtime." });
           return;
         }
 

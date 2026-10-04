@@ -85,7 +85,7 @@ function manager(options: { secureSnapshotError?: Error } = {}) {
     return [secureSnapshot()];
   });
   return {
-    getConfig: () => ({ runtimeTarget: "builder" as const }),
+    getConfig: () => ({}),
     listBootstrapAgents: () => [agent, worker],
     listWorkersForSession: vi.fn(() => [worker]),
     getAgent: (agentId: string) =>

@@ -84,26 +84,7 @@ export const PROMPT_METADATA: PromptMetadataEntry[] = [
     description: 'Instructions for branch-merge worker agents.',
     variables: [],
   },
-  {
-    category: 'archetype',
-    promptId: 'collaboration-channel',
-    displayName: 'Collaboration Channel System Prompt',
-    description: 'Instructions for manager sessions that back collaboration channels.',
-    variables: [
-      {
-        name: 'MANAGER_POSTURE',
-        description: 'Selected manager operating posture composed by Forge.',
-      },
-      {
-        name: 'MODEL_SPECIFIC_INSTRUCTIONS',
-        description: 'Optional user-authored instructions for the active manager model.',
-      },
-      {
-        name: 'SPECIALIST_ROSTER',
-        description: 'Specialist roster block injected into manager prompts when specialists are enabled.',
-      },
-    ],
-  },
+
 
   // ── Operational ─────────────────────────────────────────────
   {

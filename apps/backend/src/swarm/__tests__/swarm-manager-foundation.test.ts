@@ -25,7 +25,6 @@ async function makeConfig(): Promise<SwarmConfig> {
     port: 47187,
     debug: false,
     isDesktop: false,
-    runtimeTarget: "builder",
     cortexEnabled: true,
     allowNonManagerSubscriptions: false,
     managerDisplayName: "Manager",

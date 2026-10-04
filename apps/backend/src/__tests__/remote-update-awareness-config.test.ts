@@ -15,7 +15,6 @@ describe("remote update awareness config", () => {
       );
       expect(config.remoteUpdateAwarenessModules).toBeDefined();
       expect(await config.remoteUpdateAwarenessModules?.loadDatabaseModule()).toBeTypeOf("function");
-      expect(config.collaborationModules).toBeUndefined();
     } finally {
       if (oldData === undefined) delete process.env.FORGE_DATA_DIR;
       else process.env.FORGE_DATA_DIR = oldData;

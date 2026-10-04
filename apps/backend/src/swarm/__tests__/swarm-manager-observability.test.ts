@@ -39,7 +39,6 @@ class RecordingObservability implements ObservabilityFacade {
   getStatus(): PhoenixObservabilityStatus {
     return {
       enabled: true,
-      runtimeTarget: 'builder',
       contentMode: 'rich',
       exporter: {
         configured: true,

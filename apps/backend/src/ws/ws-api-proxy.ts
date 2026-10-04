@@ -102,7 +102,6 @@ export class WsApiProxy {
   async routeApiProxyCommand(
     command: ApiProxyCommand,
     subscribedAgentId: string,
-    artifactTicketAuthBinding?: string,
   ): Promise<ApiProxyResponseEvent> {
     const parsedPath = parseApiProxyPath(command.path);
     if (!parsedPath.ok) {
@@ -159,7 +158,7 @@ export class WsApiProxy {
       }
 
       if (pathname === API_PROXY_CHAT_ARTIFACT_READ_PATH) {
-        return await this.handleApiProxyChatArtifactRead(command, payload, subscribedAgentId, artifactTicketAuthBinding);
+        return await this.handleApiProxyChatArtifactRead(command, payload, subscribedAgentId);
       }
 
       if (pathname === HTML_ARTIFACT_PREVIEW_ENDPOINT) {
@@ -169,7 +168,6 @@ export class WsApiProxy {
           store: this.htmlPreviewStore,
           payload,
           subscribedAgentId,
-          ...(artifactTicketAuthBinding ? { authBinding: artifactTicketAuthBinding } : {}),
           // Matches this surface's read-file rule (readApiProxyFile).
           includeCwdAllowlistRootsForAgent: true,
         });
@@ -363,7 +361,7 @@ export class WsApiProxy {
     return this.createApiProxyJsonResponse(command.requestId, result.status, result.payload, result.headers);
   }
 
-  private async handleApiProxyChatArtifactRead(command: ApiProxyCommand, payload: unknown, subscribedAgentId: string, artifactTicketAuthBinding?: string): Promise<ApiProxyResponseEvent> {
+  private async handleApiProxyChatArtifactRead(command: ApiProxyCommand, payload: unknown, subscribedAgentId: string): Promise<ApiProxyResponseEvent> {
     if (command.method !== "POST") return this.createApiProxyMethodNotAllowedResponse(command.requestId, "POST");
     if (!isRecord(payload) || Object.keys(payload).some(key => !["messageId", "path", "previewBytes", "imageTransport"].includes(key)) || typeof payload.messageId !== "string" || typeof payload.path !== "string") {
       return this.createApiProxyJsonResponse(command.requestId, 400, { error: "invalid_request", code: "invalid_request" });
@@ -378,10 +376,7 @@ export class WsApiProxy {
           ...(payload.previewBytes !== undefined ? { previewBytes: payload.previewBytes } : {}),
           ...(payload.imageTransport !== undefined ? { imageTransport: payload.imageTransport } : {}),
         },
-        {
-          ticketStore: this.artifactTicketStore,
-          ...(artifactTicketAuthBinding ? { ticketAuthBinding: artifactTicketAuthBinding } : {}),
-        },
+        { ticketStore: this.artifactTicketStore },
       );
       const response = this.createApiProxyJsonResponse(command.requestId, 200, { ...result });
       if (apiProxyResponseEventByteLength(response) <= MAX_WS_EVENT_BYTES) return response;

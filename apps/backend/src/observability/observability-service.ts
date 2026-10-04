@@ -6,7 +6,6 @@ import type {
   PhoenixObservabilityStatus,
   PhoenixObservabilityTestResponse,
 } from "@forge/protocol";
-import { isBuilderRuntimeTarget } from "../runtime-target.js";
 import { PhoenixOtlpExporter } from "./phoenix-otlp-exporter.js";
 import { ObservabilityCorrelator } from "./observability-correlator.js";
 import {
@@ -24,7 +23,6 @@ import type {
   ObservabilityRuntimeInputInput,
   ObservabilityRuntimeErrorInput,
   ObservabilityRuntimeSessionEventInput,
-  ObservabilityRuntimeTarget,
   ObservabilityToolSideEffectInput,
   ObservabilityUserVisibleMessageInput,
   ObservabilityAgentDeliveryInput,
@@ -32,7 +30,6 @@ import type {
 
 export interface ObservabilityServiceOptions {
   dataDir: string;
-  runtimeTarget: ObservabilityRuntimeTarget;
   version?: string;
   exporterFactory?: (settings: PhoenixObservabilitySettings) => PhoenixOtlpExporter;
 }
@@ -50,11 +47,6 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   async initialize(): Promise<void> {
-    if (!this.isBuilderRuntime()) {
-      this.settings = this.getDefaultStatusSettings();
-      return;
-    }
-
     try {
       this.settings = await this.settingsService.load();
       await this.configureExporter(this.settings, { throwOnFailure: false });
@@ -64,10 +56,6 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   async getSettings(): Promise<PhoenixObservabilitySettings> {
-    if (!this.isBuilderRuntime()) {
-      return cloneSettings(this.getDefaultStatusSettings());
-    }
-
     if (!this.settings) {
       this.settings = await this.settingsService.getSettings();
     }
@@ -76,10 +64,6 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   async updateSettings(patch: PhoenixObservabilitySettingsPatch): Promise<PhoenixObservabilitySettings> {
-    if (!this.isBuilderRuntime()) {
-      throw new Error("Phoenix observability is only available in Builder runtime.");
-    }
-
     const current = await this.getSettings();
     const candidate = normalizePhoenixObservabilitySettings(patch, current);
     validatePhoenixEndpoint(candidate.endpoint);
@@ -125,7 +109,7 @@ export class ObservabilityService implements ObservabilityFacade {
 
     return {
       enabled: settings.enabled,
-      runtimeTarget: this.options.runtimeTarget,
+      runtimeTarget: "builder",
       contentMode: settings.contentMode,
       exporter: {
         configured: Boolean(this.exporter),
@@ -141,14 +125,6 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   async testConnection(patch?: PhoenixObservabilitySettingsPatch): Promise<PhoenixObservabilityTestResponse> {
-    if (!this.isBuilderRuntime()) {
-      return {
-        ok: false,
-        status: this.getStatus(),
-        error: "Phoenix observability is only available in Builder runtime.",
-      };
-    }
-
     const base = await this.getSettings();
     const candidate = patch ? normalizePhoenixObservabilitySettings(patch, base) : base;
 
@@ -172,7 +148,7 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   recordPromptResolved(input: ObservabilityPromptResolvedInput): void {
-    if (!this.isBuilderRuntime() || !this.settings?.enabled || this.settings.contentMode === "metadata_only" || !this.settings.capture.prompts || !this.exporter) {
+    if (!this.settings?.enabled || this.settings.contentMode === "metadata_only" || !this.settings.capture.prompts || !this.exporter) {
       return;
     }
 
@@ -186,7 +162,7 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   recordRuntimeCreated(input: ObservabilityRuntimeCreatedInput): void {
-    if (!this.isBuilderRuntime() || !this.settings?.enabled || !this.exporter) {
+    if (!this.settings?.enabled || !this.exporter) {
       return;
     }
 
@@ -203,7 +179,7 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   beginRuntimeInput(input: ObservabilityRuntimeInputInput): ObservabilityRuntimeInputHandle | undefined {
-    if (!this.isBuilderRuntime() || !this.settings?.enabled || !this.exporter) {
+    if (!this.settings?.enabled || !this.exporter) {
       return undefined;
     }
 
@@ -218,7 +194,7 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   completeRuntimeInput(handle: ObservabilityRuntimeInputHandle | undefined, patch: ObservabilityRuntimeInputCompletion): void {
-    if (!handle || !this.isBuilderRuntime() || !this.settings?.enabled || !this.exporter) {
+    if (!handle || !this.settings?.enabled || !this.exporter) {
       return;
     }
 
@@ -230,7 +206,7 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   cancelRuntimeInput(handle: ObservabilityRuntimeInputHandle | undefined, reason: string): void {
-    if (!handle || !this.isBuilderRuntime() || !this.settings?.enabled || !this.exporter) {
+    if (!handle || !this.settings?.enabled || !this.exporter) {
       return;
     }
 
@@ -247,7 +223,7 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   recordRuntimeSessionEvent(input: ObservabilityRuntimeSessionEventInput): void {
-    if (!this.isBuilderRuntime() || !this.settings?.enabled || !this.exporter) {
+    if (!this.settings?.enabled || !this.exporter) {
       return;
     }
 
@@ -269,7 +245,7 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   recordRuntimeError(input: ObservabilityRuntimeErrorInput): void {
-    if (!this.isBuilderRuntime() || !this.settings?.enabled || !this.exporter) {
+    if (!this.settings?.enabled || !this.exporter) {
       return;
     }
 
@@ -282,7 +258,7 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   recordToolSideEffect(input: ObservabilityToolSideEffectInput): void {
-    if (!this.isBuilderRuntime() || !this.settings?.enabled || !this.exporter) {
+    if (!this.settings?.enabled || !this.exporter) {
       return;
     }
 
@@ -295,7 +271,7 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   recordUserVisibleMessage(input: ObservabilityUserVisibleMessageInput): void {
-    if (!this.isBuilderRuntime() || !this.settings?.enabled || !this.exporter) {
+    if (!this.settings?.enabled || !this.exporter) {
       return;
     }
 
@@ -308,7 +284,7 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   recordAgentDelivery(input: ObservabilityAgentDeliveryInput): void {
-    if (!this.isBuilderRuntime() || !this.settings?.enabled || !this.exporter) {
+    if (!this.settings?.enabled || !this.exporter) {
       return;
     }
 
@@ -321,7 +297,7 @@ export class ObservabilityService implements ObservabilityFacade {
   }
 
   recordFeedback(event: FeedbackSubmitEvent): void {
-    if (!this.isBuilderRuntime() || !this.settings?.enabled || !this.exporter) {
+    if (!this.settings?.enabled || !this.exporter) {
       return;
     }
 
@@ -375,7 +351,7 @@ export class ObservabilityService implements ObservabilityFacade {
     this.exporter = null;
     await oldExporter?.shutdown().catch((error) => this.recordError(error));
 
-    if (!this.isBuilderRuntime() || !settings.enabled) {
+    if (!settings.enabled) {
       return;
     }
 
@@ -390,10 +366,6 @@ export class ObservabilityService implements ObservabilityFacade {
         throw error;
       }
     }
-  }
-
-  private isBuilderRuntime(): boolean {
-    return isBuilderRuntimeTarget(this.options.runtimeTarget);
   }
 
   private createExporter(settings: PhoenixObservabilitySettings): PhoenixOtlpExporter {

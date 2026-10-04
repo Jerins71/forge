@@ -1,5 +1,4 @@
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
-import { getCollaborationRequestAuthContext } from "../../../collaboration/auth/collaboration-auth-middleware.js";
 import {
   ChatArtifactError,
   PresentedChatArtifactTicketStore,
@@ -27,7 +26,6 @@ export function createChatArtifactRoutes(options: {
       response.setHeader("Cache-Control", "no-store");
       applyCorsHeaders(request, response, METHODS);
       if (request.method === "OPTIONS") { response.statusCode = 204; response.end(); return; }
-      const authBinding = getCollaborationRequestAuthContext(request)?.userId;
 
       if (requestUrl.pathname.startsWith(TICKET_PATH_PREFIX)) {
         if (request.method !== "GET") {
@@ -37,7 +35,7 @@ export function createChatArtifactRoutes(options: {
         }
         const token = requestUrl.pathname.slice(TICKET_PATH_PREFIX.length);
         try {
-          const result = await ticketStore.redeem(token, authBinding);
+          const result = await ticketStore.redeem(token);
           response.statusCode = 200;
           response.setHeader("Content-Type", result.contentType);
           response.setHeader("Content-Length", String(result.content.byteLength));
@@ -63,7 +61,6 @@ export function createChatArtifactRoutes(options: {
         const result = await readPresentedChatArtifact(options.swarmManager, body as any, {
           securityPlatform: options.artifactSecurityPlatform,
           ticketStore,
-          ...(authBinding ? { ticketAuthBinding: authBinding } : {}),
         });
         sendJson(response, 200, { ...result });
       } catch (error) {

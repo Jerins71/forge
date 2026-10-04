@@ -4,8 +4,6 @@ import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { normalizeAllowlistRoots, parseCwdAllowlistRootsEnv } from "./swarm/cwd-policy.js";
 import {
   getAgentsStoreFilePath,
-  getCollaborationAuthDbPath,
-  getCollaborationAuthSecretPath,
   getLegacyAuthFilePath,
   getLegacySecretsFilePath,
   getProfilesDir,
@@ -21,8 +19,6 @@ import {
   getUploadsDir
 } from "./swarm/data-paths.js";
 import type { SwarmConfig } from "./swarm/types.js";
-import { isCollaborationServerRuntimeTarget, resolveRuntimeTargetFromEnv } from "./runtime-target.js";
-import { parseRemoteProjectsEnv } from "./collaboration/remote-projects-env.js";
 import { loadConfiguredSqliteDatabaseConstructor } from "./sqlite-database-loader.js";
 
 export function readTelemetryEnvOverride(): boolean | undefined {
@@ -48,8 +44,6 @@ export function createConfig(): SwarmConfig {
   const sharedAuthDir = getSharedAuthDir(dataDir);
   const sharedAuthFile = getSharedAuthFilePath(dataDir);
   const sharedSecretsFile = getSharedSecretsFilePath(dataDir);
-  const collaborationAuthDbPath = getCollaborationAuthDbPath(dataDir);
-  const collaborationAuthSecretPath = getCollaborationAuthSecretPath(dataDir);
   const remoteUpdateAwarenessDbPath = getRemoteUpdateAwarenessDbPath(dataDir);
   // Legacy flat-layout paths retained for backward compatibility.
   const authFile = getLegacyAuthFilePath(dataDir);
@@ -63,62 +57,22 @@ export function createConfig(): SwarmConfig {
   const defaultCwd = rootDir;
 
   const isDesktop = parseBooleanEnv(process.env.FORGE_DESKTOP);
-  const runtimeTarget = resolveRuntimeTargetFromEnv();
-  const cwdAllowlistRoots = resolveCwdAllowlistRoots(runtimeTarget, rootDir);
-  const adminEmail = parseOptionalStringEnv(
-    process.env.FORGE_ADMIN_EMAIL ?? process.env.MIDDLEMAN_ADMIN_EMAIL,
-  );
-  const adminPassword = parseOptionalStringEnv(
-    process.env.FORGE_ADMIN_PASSWORD ?? process.env.MIDDLEMAN_ADMIN_PASSWORD,
-  );
-  const collaborationAuthSecret = parseOptionalStringEnv(
-    process.env.FORGE_COLLABORATION_AUTH_SECRET ?? process.env.MIDDLEMAN_COLLABORATION_AUTH_SECRET,
-  );
-  const collaborationAuthCookieName = parseOptionalStringEnv(
-    process.env.FORGE_COLLABORATION_AUTH_COOKIE_NAME ??
-      process.env.MIDDLEMAN_COLLABORATION_AUTH_COOKIE_NAME,
-  );
-  const collaborationBaseUrl = parseOptionalStringEnv(
-    process.env.FORGE_COLLABORATION_BASE_URL ?? process.env.MIDDLEMAN_COLLABORATION_BASE_URL,
-  );
-  const collaborationTrustedOrigins = parseOptionalStringListEnv(
-    process.env.FORGE_COLLABORATION_TRUSTED_ORIGINS ??
-      process.env.MIDDLEMAN_COLLABORATION_TRUSTED_ORIGINS,
-  );
-  const collaborationModules = isCollaborationServerRuntimeTarget(runtimeTarget)
-    ? {
-        loadAuthModule: () => import("better-auth"),
-        loadDatabaseModule: loadConfiguredSqliteDatabaseConstructor,
-      }
-    : undefined;
-  // Collaboration-server only: Builder ignores these variables entirely.
-  // Invalid values fail startup (thrown from parseRemoteProjectsEnv).
-  const remoteProjectsEnv = isCollaborationServerRuntimeTarget(runtimeTarget)
-    ? parseRemoteProjectsEnv(process.env)
-    : undefined;
+  assertNoRemovedCollaborationServerEnv();
+  const cwdAllowlistRoots = resolveCwdAllowlistRoots(rootDir);
 
   return {
     host: process.env.FORGE_HOST ?? process.env.MIDDLEMAN_HOST ?? "127.0.0.1",
     port: Number.parseInt(process.env.FORGE_PORT ?? process.env.MIDDLEMAN_PORT ?? "47187", 10),
     debug: (process.env.FORGE_DEBUG ?? process.env.MIDDLEMAN_DEBUG ?? "false") === "true",
     isDesktop,
-    runtimeTarget,
     cortexEnabled:
       parseOptionalBooleanEnv(
         process.env.FORGE_CORTEX_ENABLED ?? process.env.MIDDLEMAN_CORTEX_ENABLED,
         "FORGE_CORTEX_ENABLED"
       ) !== false,
-    adminEmail,
-    adminPassword,
-    collaborationAuthSecret,
-    collaborationAuthCookieName,
-    collaborationBaseUrl,
-    collaborationTrustedOrigins,
-    collaborationModules,
     remoteUpdateAwarenessModules: {
       loadDatabaseModule: loadConfiguredSqliteDatabaseConstructor,
     },
-    remoteProjectsEnv,
     allowNonManagerSubscriptions: true,
     managerId,
     managerDisplayName: "Manager",
@@ -144,8 +98,6 @@ export function createConfig(): SwarmConfig {
       sharedAuthDir,
       sharedAuthFile,
       sharedSecretsFile,
-      collaborationAuthDbPath,
-      collaborationAuthSecretPath,
       remoteUpdateAwarenessDbPath,
       authFile,
       secretsFile,
@@ -157,27 +109,42 @@ export function createConfig(): SwarmConfig {
 }
 
 /**
- * Collaboration-server / remote-build CWD selection uses an explicit allowlist.
- * Local Builder keeps unrestricted selection and retains the historical default
- * roots for file-access helpers only.
+ * The collaboration server was removed in Forge V2. The local Builder has no
+ * authentication, so a host still configured as a collaboration server (or for
+ * Remote Projects) must abort startup instead of silently exposing the Builder.
+ */
+export function assertNoRemovedCollaborationServerEnv(env: NodeJS.ProcessEnv = process.env): void {
+  const runtimeTarget = (env.FORGE_RUNTIME_TARGET ?? env.MIDDLEMAN_RUNTIME_TARGET)?.trim();
+  const removedSettings: string[] = [];
+  if (runtimeTarget && runtimeTarget !== "builder") {
+    removedSettings.push(`FORGE_RUNTIME_TARGET=${JSON.stringify(runtimeTarget)}`);
+  }
+  if (!runtimeTarget && parseBooleanEnv(env.FORGE_COLLABORATION_ENABLED ?? env.MIDDLEMAN_COLLABORATION_ENABLED)) {
+    removedSettings.push("FORGE_COLLABORATION_ENABLED");
+  }
+  if (parseBooleanEnv(env.FORGE_REMOTE_PROJECTS_ENABLED)) {
+    removedSettings.push("FORGE_REMOTE_PROJECTS_ENABLED");
+  }
+
+  if (removedSettings.length > 0) {
+    throw new Error(
+      `Unsupported configuration: ${removedSettings.join(", ")}. ` +
+        "The Forge collaboration server and Remote Projects were removed in Forge V2; only the local Builder is supported. " +
+        "Unset these variables to start the Builder.",
+    );
+  }
+}
+
+/**
+ * Roots used by Builder file-access helpers. CWD selection is unrestricted.
  *
  * `FORGE_CWD_ALLOWLIST_ROOTS` delimiters: `;` and newlines always; `:` also on
- * non-Windows. Do not assume the image `/app` checkout is a user workspace —
- * Docker should set this to a mounted path such as `/workspaces`.
+ * non-Windows.
  */
-function resolveCwdAllowlistRoots(
-  runtimeTarget: ReturnType<typeof resolveRuntimeTargetFromEnv>,
-  rootDir: string,
-): string[] {
+function resolveCwdAllowlistRoots(rootDir: string): string[] {
   const configuredRoots = parseCwdAllowlistRootsEnv(
     process.env.FORGE_CWD_ALLOWLIST_ROOTS ?? process.env.MIDDLEMAN_CWD_ALLOWLIST_ROOTS,
   );
-
-  if (isCollaborationServerRuntimeTarget(runtimeTarget)) {
-    // Fail closed when unset/empty: remote selection/create/change must not
-    // silently fall back to the container image root.
-    return normalizeAllowlistRoots(configuredRoots);
-  }
 
   if (configuredRoots.length > 0) {
     return normalizeAllowlistRoots(configuredRoots);
@@ -272,20 +239,6 @@ function isSwarmRepoRoot(path: string): boolean {
 function parseBooleanEnv(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
-}
-
-function parseOptionalStringEnv(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function parseOptionalStringListEnv(value: string | undefined): string[] | undefined {
-  const entries = value
-    ?.split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
-  return entries?.length ? entries : undefined;
 }
 
 function parseOptionalBooleanEnv(

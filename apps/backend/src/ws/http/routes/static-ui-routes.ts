@@ -3,7 +3,6 @@ import { readFile, stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { extname, isAbsolute, relative, resolve } from 'node:path'
 import mime from 'mime'
-import type { RuntimeTarget } from '../../../runtime-target.js'
 import { applyCorsHeaders, sendJson } from '../../http-utils.js'
 import type { HttpRoute } from '../shared/http-route.js'
 
@@ -14,10 +13,9 @@ const STATIC_UI_SHELL_CANDIDATES = ['index.html', '_shell.html'] as const
 export function createStaticUiRoutes(options: {
   rootDir: string
   resourcesDir?: string
-  runtimeTarget: RuntimeTarget
   nodeEnv?: string
 }): HttpRoute[] {
-  if (!shouldEnableStaticUi(options.runtimeTarget, options.nodeEnv)) {
+  if (options.nodeEnv !== 'production') {
     return []
   }
 
@@ -40,10 +38,6 @@ export function createStaticUiRoutes(options: {
       },
     },
   ]
-}
-
-function shouldEnableStaticUi(runtimeTarget: RuntimeTarget, nodeEnv: string | undefined): boolean {
-  return runtimeTarget === 'collaboration-server' || nodeEnv === 'production'
 }
 
 function resolveStaticUiRoot(rootDir: string, resourcesDir?: string): string | null {

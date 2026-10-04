@@ -1,56 +1,25 @@
 import { randomUUID } from "node:crypto";
 import type {
-  AgentMessageEvent,
-  AgentStatusEvent,
-  AgentToolCallEvent,
   ApiProxyCommand,
   BrowserClientCommand,
   BuilderTimelineChannelView,
-  ChoiceRequestEvent,
-  CollaborationServerEvent,
-  ConversationMessageEvent,
   ServerEvent,
-  SessionWorkersSnapshotEvent,
   TerminalDescriptor,
 } from "@forge/protocol";
-import {
-  getCollaborationSocketAuthContext,
-} from "../collaboration/auth/collaboration-auth-middleware.js";
-import {
-  getOrCreateCollaborationBetterAuthService,
-} from "../collaboration/auth/better-auth-service.js";
-import { CollaborationChannelMessageService } from "../collaboration/channel-message-service.js";
-import { createCollaborationSkillHandleProvider } from "../collaboration/skill-handle-provider.js";
-import { CollaborationChannelService } from "../collaboration/channel-service.js";
-import { createCollaborationDbHelpers } from "../collaboration/collab-db-helpers.js";
-import type { CollaborationReadinessRequestService } from "../collaboration/readiness-service.js";
-import { CollaborationUserService } from "../collaboration/user-service.js";
 import type { MobilePushService } from "../mobile/mobile-push-service.js";
-import { isBuilderRuntimeTarget } from "../runtime-target.js";
 import type { SidebarPerfRecorder } from "../stats/sidebar-perf-types.js";
 import { FeedbackService } from "../swarm/feedback-service.js";
-import {
-  getCachedSharedSpecialistHandles,
-  resolveSharedRoster,
-} from "../swarm/agents/specialists/specialist-registry.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
 import { BrowserAutomationService, isEligibleLocalBuilderManager } from "../swarm/browser-automation/index.js";
-import { isCollabSession } from "../swarm/swarm-manager-utils.js";
 import type { UnreadTracker } from "../swarm/session/unread-tracker.js";
 import type { TerminalService } from "../terminal/terminal-service.js";
 import { WebSocketServer, type RawData, WebSocket } from "ws";
-import { evaluateApiProxyMemberAccess, evaluateBuilderCommandAccess, isInventoryCommandAllowed } from "./builder-command-access.js";
+import { isInventoryCommandAllowed } from "./inventory-command-access.js";
 import { handleAgentCommand } from "./commands/agent-command-handler.js";
 import { handleBrowserCommand } from "./commands/browser-command-handler.js";
-import {
-  CollabCommandHandler,
-  isCollaborationClientCommand,
-  toCollaborationCommandError,
-} from "./commands/collab-command-handler.js";
 import { handleConversationCommand } from "./commands/conversation-command-handler.js";
 import { handleManagerCommand } from "./commands/manager-command-handler.js";
 import { handleSessionCommand } from "./commands/session-command-handler.js";
-import { CollabSubscriptionManager } from "./collab-subscription-manager.js";
 import { extractRequestId, parseClientCommand } from "./ws-command-parser.js";
 import { WsApiProxy } from "./ws-api-proxy.js";
 import { hasRequestId, sendWsEvent, sendWsEventWithBackpressure } from "./ws-send.js";
@@ -65,16 +34,11 @@ const MAX_CONVERSATION_PAGE_REQUESTS_PER_WINDOW = 8;
 export class WsHandler {
   private readonly swarmManager: SwarmManager;
   private readonly allowNonManagerSubscriptions: boolean;
-  private readonly isRemoteBuildEnabled: () => boolean;
-  private readonly areRemoteTerminalsEnabled: () => boolean;
   private readonly unreadTracker: UnreadTracker | null;
   private readonly browserAutomationService: BrowserAutomationService;
   private readonly subscriptionManager: WsSubscriptions;
   private readonly browserConnectionIds = new WeakMap<WebSocket, string>();
   private readonly apiProxy: WsApiProxy;
-  private readonly collabSubscriptionManager: CollabSubscriptionManager;
-  private readonly collabCommandHandler: CollabCommandHandler;
-  private collaborationMessageServicePromise: Promise<CollaborationChannelMessageService> | null = null;
   private repositoryProjectCreationService: RepositoryProjectCreationService | null = null;
   private readonly conversationPageRequestTimes = new WeakMap<WebSocket, number[]>();
 
@@ -88,10 +52,7 @@ export class WsHandler {
     listTerminalsForSession?: (sessionAgentId: string) => TerminalDescriptor[];
     unreadTracker?: UnreadTracker;
     perf: SidebarPerfRecorder;
-    collaborationReadinessService?: CollaborationReadinessRequestService;
     feedbackService?: FeedbackService;
-    isRemoteBuildEnabled?: () => boolean;
-    areRemoteTerminalsEnabled?: () => boolean;
     browserAutomationService?: BrowserAutomationService;
     getRemoteUpdateAwarenessBootstrapEvent?: (
       projectId: string
@@ -101,10 +62,6 @@ export class WsHandler {
   }) {
     this.swarmManager = options.swarmManager;
     this.allowNonManagerSubscriptions = options.allowNonManagerSubscriptions;
-    // Default off: without the instance setting wired in, members get no
-    // builder access (the remote-projects kill switch fails closed).
-    this.isRemoteBuildEnabled = options.isRemoteBuildEnabled ?? (() => false);
-    this.areRemoteTerminalsEnabled = options.areRemoteTerminalsEnabled ?? (() => true);
     this.unreadTracker = options.unreadTracker ?? null;
     this.browserAutomationService = options.browserAutomationService ?? new BrowserAutomationService({
       dataDir: this.swarmManager.getConfig().paths.dataDir,
@@ -137,31 +94,18 @@ export class WsHandler {
       artifactTicketStore: options.artifactTicketStore,
       htmlPreviewStore: options.htmlPreviewStore,
     });
-
-    this.collabSubscriptionManager = new CollabSubscriptionManager(
-      (socket, event) => this.send(socket, event),
-      async () => createCollaborationDbHelpers(this.swarmManager.getConfig()),
-    );
-    this.collabCommandHandler = new CollabCommandHandler(
-      this.swarmManager,
-      this.collabSubscriptionManager,
-      (socket, event) => this.send(socket, event),
-      async () => this.getCollaborationMessageService(),
-      options.collaborationReadinessService,
-    );
   }
 
   setRepositoryProjectCreationService(service: RepositoryProjectCreationService | null): void {
     this.repositoryProjectCreationService = service;
   }
 
-  sendToSocket(socket: WebSocket, event: ServerEvent | CollaborationServerEvent): void {
+  sendToSocket(socket: WebSocket, event: ServerEvent): void {
     this.send(socket, event);
   }
 
   attach(server: WebSocketServer): void {
     this.wss = server;
-    this.collabSubscriptionManager.attach(server);
 
     server.on("connection", (socket) => {
       this.browserConnectionIds.set(socket, randomUUID());
@@ -172,13 +116,11 @@ export class WsHandler {
       socket.on("close", () => {
         this.unregisterBrowserHost(socket);
         this.subscriptionManager.remove(socket);
-        this.collabSubscriptionManager.remove(socket);
       });
 
       socket.on("error", () => {
         this.unregisterBrowserHost(socket);
         this.subscriptionManager.remove(socket);
-        this.collabSubscriptionManager.remove(socket);
       });
     });
   }
@@ -186,7 +128,6 @@ export class WsHandler {
   reset(): void {
     this.wss = null;
     this.subscriptionManager.clear();
-    this.collabSubscriptionManager.clear();
   }
 
   broadcastToSubscribed(event: ServerEvent): void {
@@ -240,58 +181,6 @@ export class WsHandler {
     return this.subscriptionManager.hasActiveSubscriptionForSession(sessionAgentId);
   }
 
-  broadcastCollaborationConversationMessage(event: ConversationMessageEvent): void {
-    if (isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-      return;
-    }
-
-    this.collabSubscriptionManager.handleConversationMessage(event);
-  }
-
-  broadcastCollaborationAgentMessage(event: AgentMessageEvent): void {
-    if (isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-      return;
-    }
-
-    this.collabSubscriptionManager.handleAgentMessage(event);
-  }
-
-  broadcastCollaborationAgentToolCall(event: AgentToolCallEvent): void {
-    if (isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-      return;
-    }
-
-    this.collabSubscriptionManager.handleAgentToolCall(event);
-  }
-
-  broadcastCollaborationAgentStatus(event: AgentStatusEvent): void {
-    if (isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-      return;
-    }
-
-    this.collabSubscriptionManager.handleAgentStatus(event);
-  }
-
-  broadcastCollaborationSessionWorkersSnapshot(event: SessionWorkersSnapshotEvent): void {
-    if (isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-      return;
-    }
-
-    this.collabSubscriptionManager.handleSessionWorkersSnapshot(event);
-  }
-
-  broadcastCollaborationChoiceRequest(event: ChoiceRequestEvent, backingSessionAgentId: string): void {
-    if (isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-      return;
-    }
-
-    this.collabSubscriptionManager.handleChoiceRequest(event, backingSessionAgentId);
-  }
-
-  getCollaborationSubscriptionManager(): CollabSubscriptionManager {
-    return this.collabSubscriptionManager;
-  }
-
   private async handleSocketMessage(socket: WebSocket, raw: RawData): Promise<void> {
     const parsed = parseClientCommand(raw);
     if (!parsed.ok) {
@@ -315,8 +204,6 @@ export class WsHandler {
       this.send(targetSocket, event, () =>
         !this.subscriptionManager.isInventorySubscription(targetSocket) || isInventoryCommandAllowed(command));
     };
-    const collaborationEnabled = !isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget);
-    const authContext = collaborationEnabled ? getCollaborationSocketAuthContext(socket) : null;
     this.logDebug("command:received", {
       type: command.type,
       requestId: extractRequestId(command),
@@ -327,16 +214,11 @@ export class WsHandler {
         this.send(socket, { type: "inventory_pong", serverTime: new Date().toISOString() });
         return;
       }
-      // Members may hold builder subscriptions (remote projects); prefer the
-      // builder subscription when present, else fall back to the collab one.
-      const builderSubscribedAgentId = this.subscriptionManager.getSubscribedAgentId(socket);
       this.send(socket, {
         type: "ready",
         serverTime: new Date().toISOString(),
         subscribedAgentId:
-          collaborationEnabled && authContext?.role !== "admin"
-            ? builderSubscribedAgentId ?? this.collabSubscriptionManager.getReadySubscriptionId(socket)
-            : builderSubscribedAgentId ?? this.resolveDefaultSubscriptionAgentId(),
+          this.subscriptionManager.getSubscribedAgentId(socket) ?? this.resolveDefaultSubscriptionAgentId(),
         ...(this.subscriptionManager.supportsGoalControlRequestId(socket)
           ? { goalControlRequestId: true as const }
           : {}),
@@ -345,53 +227,7 @@ export class WsHandler {
       return;
     }
 
-    if (isCollaborationClientCommand(command)) {
-      if (!collaborationEnabled) {
-        this.send(socket, toCollaborationCommandError(
-          "COLLABORATION_DISABLED",
-          "Collaboration WebSocket commands are unavailable while collaboration mode is disabled.",
-        ));
-        return;
-      }
-
-      if (!authContext) {
-        this.send(socket, toCollaborationCommandError(
-          "COLLABORATION_AUTH_REQUIRED",
-          "Authentication is required for collaboration WebSocket commands.",
-        ));
-        return;
-      }
-
-      await this.collabCommandHandler.handleCommand(socket, authContext, command);
-      return;
-    }
-
-    if (collaborationEnabled) {
-      const access = evaluateBuilderCommandAccess({
-        commandType: command.type,
-        authContext,
-        remoteBuildEnabled: this.isRemoteBuildEnabled(),
-      });
-      if (!access.ok) {
-        this.logDebug("command:rejected:builder_access", {
-          type: command.type,
-          reason: access.reason,
-          role: authContext?.role,
-        });
-        this.send(socket, toCollaborationCommandError(
-          "COLLABORATION_COMMAND_NOT_ALLOWED",
-          access.message ?? "This command is not permitted for this account.",
-          extractRequestId(command),
-        ));
-        return;
-      }
-    }
-
     if (command.type === "subscribe_inventory") {
-      if (!isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-        this.send(socket, { type: "error", code: "INVENTORY_NOT_SUPPORTED", message: "Inventory subscriptions require a local Builder server.", requestId: command.requestId });
-        return;
-      }
       try {
         await this.subscriptionManager.handleSubscribeInventory(socket, command.requestId);
       } catch {
@@ -462,14 +298,6 @@ export class WsHandler {
         return;
       }
 
-      if (isCollabSession(descriptor)) {
-        this.send(socket, toCollaborationCommandError(
-          "COLLABORATION_COMMAND_NOT_ALLOWED",
-          "Builder unread commands cannot target collaboration-backed sessions.",
-        ));
-        return;
-      }
-
       const profileId = this.subscriptionManager.resolveProfileIdForAgent(descriptor.agentId) ?? descriptor.agentId;
       this.unreadTracker.markUnread(profileId, descriptor.agentId);
       this.broadcastUnreadCountUpdate(
@@ -486,7 +314,7 @@ export class WsHandler {
 
       const { profileId } = command;
       for (const agent of this.swarmManager.listAgents()) {
-        if (agent.role !== "manager" || isCollabSession(agent)) {
+        if (agent.role !== "manager") {
           continue;
         }
 
@@ -548,28 +376,7 @@ export class WsHandler {
     }
 
     if (command.type === "api_proxy") {
-      // Second gate for members: the proxy fronts HTTP-shaped surfaces, so it
-      // gets the HTTP discipline — per-path allowlist with default deny.
-      if (collaborationEnabled && authContext && authContext.role !== "admin") {
-        const proxyAccess = evaluateApiProxyMemberAccess({
-          pathname: resolveApiProxyPathname(command.path),
-          method: command.method,
-          authContext,
-          terminalsEnabled: this.areRemoteTerminalsEnabled(),
-        });
-        if (!proxyAccess.ok) {
-          this.send(socket, {
-            type: "api_proxy_response",
-            requestId: command.requestId,
-            status: proxyAccess.statusCode ?? 403,
-            body: JSON.stringify({ error: proxyAccess.message ?? "Forbidden" }),
-            headers: { "content-type": "application/json; charset=utf-8" },
-          });
-          return;
-        }
-      }
-
-      await this.handleApiProxyCommand(socket, command, subscribedAgentId, authContext?.userId);
+      await this.handleApiProxyCommand(socket, command, subscribedAgentId);
       return;
     }
 
@@ -715,10 +522,6 @@ export class WsHandler {
       send: sendForCommand,
       logDebug: (message, details) => this.logDebug(message, details),
       resolveConfiguredManagerId: () => this.resolveConfiguredManagerId(),
-      dispatchCollaborationUserMessage: async (params) => {
-        const service = await this.getCollaborationMessageService();
-        await service.dispatchUserMessage(params);
-      },
     });
     if (conversationHandled) {
       return;
@@ -735,19 +538,14 @@ export class WsHandler {
     socket: WebSocket,
     command: ApiProxyCommand,
     subscribedAgentId: string,
-    artifactTicketAuthBinding?: string,
   ): Promise<void> {
-    const response = await this.routeApiProxyCommand(command, subscribedAgentId, artifactTicketAuthBinding);
+    const response = await this.routeApiProxyCommand(command, subscribedAgentId);
     this.send(socket, response, () =>
       !this.subscriptionManager.isInventorySubscription(socket) || isInventoryCommandAllowed(command));
   }
 
-  private async routeApiProxyCommand(
-    command: ApiProxyCommand,
-    subscribedAgentId: string,
-    artifactTicketAuthBinding?: string,
-  ) {
-    return this.apiProxy.routeApiProxyCommand(command, subscribedAgentId, artifactTicketAuthBinding);
+  private async routeApiProxyCommand(command: ApiProxyCommand, subscribedAgentId: string) {
+    return this.apiProxy.routeApiProxyCommand(command, subscribedAgentId);
   }
 
   private async handleSubscribe(
@@ -812,46 +610,6 @@ export class WsHandler {
     return normalized.length > 0 ? normalized : undefined;
   }
 
-  private async getCollaborationMessageService(): Promise<CollaborationChannelMessageService> {
-    if (isBuilderRuntimeTarget(this.swarmManager.getConfig().runtimeTarget)) {
-      throw new Error("Collaboration message dispatch requested while collaboration mode is disabled");
-    }
-
-    if (!this.collaborationMessageServicePromise) {
-      this.collaborationMessageServicePromise = this.createCollaborationMessageService().catch((error) => {
-        this.collaborationMessageServicePromise = null;
-        throw error;
-      });
-    }
-
-    return this.collaborationMessageServicePromise;
-  }
-
-  private async createCollaborationMessageService(): Promise<CollaborationChannelMessageService> {
-    const config = this.swarmManager.getConfig();
-    const [dbHelpers, authService] = await Promise.all([
-      createCollaborationDbHelpers(config),
-      getOrCreateCollaborationBetterAuthService(config),
-    ]);
-
-    const [availableGlobalSpecialistHandles, availableGlobalSkillHandles] = await Promise.all([
-      resolveSharedRoster(config.paths.dataDir, "collaboration").then((roster) =>
-        roster.map((entry) => entry.specialistId),
-      ),
-      createCollaborationSkillHandleProvider({
-        config,
-        source: this.swarmManager,
-      }),
-    ]);
-    const channelService = new CollaborationChannelService(dbHelpers, this.swarmManager, config.paths.dataDir, {
-      availableGlobalSpecialistHandles: () =>
-        getCachedSharedSpecialistHandles(config.paths.dataDir, "collaboration") ?? availableGlobalSpecialistHandles,
-      availableGlobalSkillHandles,
-    });
-    const userService = new CollaborationUserService(dbHelpers.database, authService);
-    return new CollaborationChannelMessageService(this.swarmManager, channelService, dbHelpers, userService);
-  }
-
   private getBrowserConnectionId(socket: WebSocket): string {
     const existing = this.browserConnectionIds.get(socket);
     if (existing) return existing;
@@ -894,7 +652,7 @@ export class WsHandler {
     console.log(prefix, details);
   }
 
-  private send(socket: WebSocket, event: ServerEvent | CollaborationServerEvent, shouldSend?: () => boolean): number | null {
+  private send(socket: WebSocket, event: ServerEvent, shouldSend?: () => boolean): number | null {
     if (shouldSend?.() === false) return null;
     // Request/response events (requestId present) must not be silently dropped
     // under transient backpressure — the requesting client would hang on its
@@ -925,7 +683,7 @@ export class WsHandler {
 
   private sendWithBackpressure(
     socket: WebSocket,
-    event: ServerEvent | CollaborationServerEvent,
+    event: ServerEvent,
     shouldSend?: () => boolean,
   ): Promise<number | null> {
     return sendWsEventWithBackpressure({
@@ -939,7 +697,6 @@ export class WsHandler {
   private dropSocket(socket: WebSocket): void {
     this.unregisterBrowserHost(socket);
     this.subscriptionManager.remove(socket);
-    this.collabSubscriptionManager.remove(socket);
 
     try {
       socket.terminate();
@@ -951,12 +708,4 @@ export class WsHandler {
 
 function isBrowserClientCommand(command: { type: string }): command is BrowserClientCommand {
   return command.type.startsWith("browser_");
-}
-
-function resolveApiProxyPathname(path: string): string {
-  try {
-    return new URL(path, "http://api-proxy.local").pathname;
-  } catch {
-    return path;
-  }
 }

@@ -5,8 +5,8 @@ import { createHistoryIndexRoutes } from "../history-index-routes.js";
 
 const activeServers: Array<{ close: () => Promise<void> }> = [];
 afterEach(async () => Promise.all(activeServers.splice(0).map((server) => server.close())));
-function manager(runtimeTarget = "builder") {
-  return { getConfig: () => ({ runtimeTarget }), getHistoryIndexStatus: vi.fn(async () => ({ paused: false })),
+function manager() {
+  return { getHistoryIndexStatus: vi.fn(async () => ({ paused: false })),
     setHistoryIndexPaused: vi.fn(async (paused: boolean) => ({ paused })) };
 }
 function routes(service: ReturnType<typeof manager>) {
@@ -34,9 +34,6 @@ describe("History index routes", () => {
     }
     expect((await fetch(`${server.baseUrl}/api/history/index`, { method: "POST", body: '{}' })).status).toBe(405);
     expect(service.setHistoryIndexPaused).not.toHaveBeenCalled();
-  });
-  it("does not expose local history on Collaboration/Remote runtimes", async () => {
-    expect(routes(manager("collaboration-server"))).toEqual([]);
   });
   it("sanitizes persistence failures", async () => {
     const service = manager();

@@ -73,9 +73,9 @@ describe("CodexPluginDelegationCoordinator", () => {
       { kind: "plugin_delegate", selectors: ["fireflies"], strippedText: "find it" },
     );
 
-    expect(harness.coordinator.applySpecialistAvailability([], "builder", harness.manager.agentId)).toEqual([]);
+    expect(harness.coordinator.applySpecialistAvailability([], harness.manager.agentId)).toEqual([]);
     harness.coordinator.activateManagerTurn(harness.manager.agentId, { gate, delegation: context });
-    const visible = harness.coordinator.applySpecialistAvailability([], "builder", harness.manager.agentId);
+    const visible = harness.coordinator.applySpecialistAvailability([], harness.manager.agentId);
     expect(visible).toEqual([
       expect.objectContaining({
         specialistId: CODEX_PLUGIN_SPECIALIST_ID,
@@ -85,8 +85,7 @@ describe("CodexPluginDelegationCoordinator", () => {
     ]);
 
     harness.coordinator.completeProviderCycle(harness.manager.agentId);
-    expect(harness.coordinator.applySpecialistAvailability([], "builder", harness.manager.agentId)).toEqual([]);
-    expect(harness.coordinator.applySpecialistAvailability([], "collaboration", harness.manager.agentId)).toEqual([]);
+    expect(harness.coordinator.applySpecialistAvailability([], harness.manager.agentId)).toEqual([]);
   });
 
   it("materializes a scoped worker, mutates its identity, and delivers one server-built bootstrap", async () => {
@@ -367,7 +366,7 @@ describe("CodexPluginDelegationCoordinator", () => {
       promptBody: "custom",
       available: true,
     };
-    expect(harness.coordinator.applySpecialistAvailability([configured], "builder", harness.manager.agentId))
+    expect(harness.coordinator.applySpecialistAvailability([configured], harness.manager.agentId))
       .toEqual([configured]);
   });
 });

@@ -1,4 +1,4 @@
-import type { GenerationMeasurementRecordV1, GenerationThroughputEvent, SessionActiveToolsSnapshotEvent, SessionGoalSnapshotEvent, SpecialistTargetSpace } from "@forge/protocol";
+import type { GenerationMeasurementRecordV1, GenerationThroughputEvent, SessionActiveToolsSnapshotEvent, SessionGoalSnapshotEvent } from "@forge/protocol";
 import type { VersioningMutationSink } from "../versioning/versioning-types.js";
 import { ensureCanonicalAuthFilePath } from "./storage/auth-storage-paths.js";
 import { BootReconciler } from "./agents/descriptor-store/boot-reconciler.js";
@@ -140,7 +140,7 @@ export interface RuntimeCompositionRuntimeResources {
     skillMetadata: SkillMetadata[];
   }>;
   getSwarmContextFiles(cwd: string): Promise<Array<{ path: string; content: string }>>;
-  resolveAndValidateCwd(cwd: string, options?: { enforceAllowlist?: boolean }): Promise<string>;
+  resolveAndValidateCwd(cwd: string): Promise<string>;
   ensureSessionFileParentDirectory(sessionFile: string): Promise<void>;
   ensureDirectories(): Promise<void>;
   loadStore(): Promise<AgentsStoreFile>;
@@ -167,14 +167,8 @@ export interface RuntimeCompositionResolution {
     profileId: string,
     fallback: string,
   ): Promise<string>;
-  resolveSpecialistRosterForProfile(
-    profileId: string,
-    targetSpace?: SpecialistTargetSpace,
-  ): Promise<ResolvedSpecialistDefinitionLike[]>;
-  resolveSpecialistRosterForManager(
-    manager: AgentDescriptor,
-    targetSpace?: SpecialistTargetSpace,
-  ): Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveSpecialistRosterForProfile(profileId: string): Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveSpecialistRosterForManager(manager: AgentDescriptor): Promise<ResolvedSpecialistDefinitionLike[]>;
   resolveSpawnModelWithCapacityFallback(model: AgentModelDescriptor): AgentModelDescriptor;
   resolveSpawnWorkerArchetypeId(
     input: SpawnAgentInput,
@@ -935,7 +929,7 @@ export class SwarmManagerRuntimeComposition {
         loadCompactionSettings: () => services.knowledge.loadCompactionSettingsForRuntime(),
         loadSecureSecretSettings: runtimeResources.loadSecureSecretSettings,
         reloadSkillMetadata: runtimeResources.reloadSkillMetadata,
-        resolveDefaultCwd: (cwd) => runtimeResources.resolveAndValidateCwd(cwd, { enforceAllowlist: false }),
+        resolveDefaultCwd: (cwd) => runtimeResources.resolveAndValidateCwd(cwd),
         refreshDefaultMemoryTemplate: () => services.knowledge.refreshMemoryTemplateForBoot(),
       },
       domains: {

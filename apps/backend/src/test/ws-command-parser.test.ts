@@ -938,47 +938,10 @@ describe('ws command parser session commands', () => {
     })
   })
 
-  it('parses collaboration websocket commands', () => {
-    expect(parseJsonCommand({ type: 'collab_bootstrap' })).toEqual({
-      ok: true,
-      command: { type: 'collab_bootstrap' },
-    })
-
-    expect(parseJsonCommand({
-      type: 'collab_subscribe_channel',
-      channelId: '  channel-1  ',
-    })).toEqual({
-      ok: true,
-      command: {
-        type: 'collab_subscribe_channel',
-        channelId: 'channel-1',
-      },
-    })
-
-    expect(parseJsonCommand({
-      type: 'collab_user_message',
-      channelId: 'channel-1',
-      content: '  hello  ',
-    })).toEqual({
-      ok: true,
-      command: {
-        type: 'collab_user_message',
-        channelId: 'channel-1',
-        content: 'hello',
-        attachments: undefined,
-      },
-    })
-
-    expect(parseJsonCommand({
-      type: 'collab_mark_channel_read',
-      channelId: 'channel-1',
-    })).toEqual({
-      ok: true,
-      command: {
-        type: 'collab_mark_channel_read',
-        channelId: 'channel-1',
-      },
-    })
+  it('rejects removed collaboration websocket commands as unknown', () => {
+    for (const type of ['collab_bootstrap', 'collab_subscribe_channel', 'collab_user_message']) {
+      expect(parseJsonCommand({ type, channelId: 'channel-1' })).toEqual({ ok: false, error: 'Unknown command type' })
+    }
   })
 
   it('rejects invalid session command payloads', () => {
@@ -1244,70 +1207,6 @@ describe('ws command parser session commands', () => {
       const parsed = parseJsonCommand(testCase.payload)
       expect(parsed).toEqual({ ok: false, error: testCase.message })
     }
-  })
-
-  it('parses collaboration choice and pin commands', () => {
-    expect(parseJsonCommand({
-      type: 'collab_choice_response',
-      channelId: ' channel-1 ',
-      choiceId: ' choice-1 ',
-      answers: [
-        {
-          questionId: 'question-1',
-          selectedOptionIds: ['option-1'],
-        },
-      ],
-    })).toEqual({
-      ok: true,
-      command: {
-        type: 'collab_choice_response',
-        channelId: 'channel-1',
-        choiceId: 'choice-1',
-        answers: [
-          {
-            questionId: 'question-1',
-            selectedOptionIds: ['option-1'],
-          },
-        ],
-      },
-    })
-
-    expect(parseJsonCommand({
-      type: 'collab_pin_message',
-      channelId: ' channel-1 ',
-      messageId: ' message-1 ',
-      pinned: true,
-    })).toEqual({
-      ok: true,
-      command: {
-        type: 'collab_pin_message',
-        channelId: 'channel-1',
-        messageId: 'message-1',
-        pinned: true,
-      },
-    })
-  })
-
-  it('rejects malformed collaboration choice and pin commands', () => {
-    expect(parseJsonCommand({
-      type: 'collab_choice_response',
-      channelId: 'channel-1',
-      choiceId: 'choice-1',
-      answers: 'nope',
-    })).toEqual({
-      ok: false,
-      error: 'collab_choice_response.answers must be an array of valid ChoiceAnswer objects',
-    })
-
-    expect(parseJsonCommand({
-      type: 'collab_pin_message',
-      channelId: 'channel-1',
-      messageId: 'message-1',
-      pinned: 'yes',
-    })).toEqual({
-      ok: false,
-      error: 'collab_pin_message.pinned must be a boolean',
-    })
   })
 
   it('extracts request ids for new session commands', () => {
