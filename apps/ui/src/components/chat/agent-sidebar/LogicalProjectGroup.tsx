@@ -313,7 +313,9 @@ export function OtherEnvironmentProjects({ navigation }: { navigation: Environme
 
 function findGroupKey(groups: ReadonlyMap<string, LogicalProjectGroupModel>, environmentId: string, projectId: string): string | undefined {
   for (const group of groups.values()) {
-    if (group.members.some((member) => member.environmentId === environmentId && member.projectId === projectId)) return group.key
+    // One remote member list belongs to one primary row, even when several profiles share a checkout.
+    const primaryProjects = group.members.filter(member => member.environmentId === environmentId).map(member => member.projectId).sort()
+    if (primaryProjects[0] === projectId) return group.key
   }
   return undefined
 }
