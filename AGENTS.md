@@ -102,8 +102,8 @@ variable catalogs, or release runbooks back into this file. Link to their mainta
 - Never run destructive Git operations such as `git reset --hard`, `git push --force`, or rebase of a
   protected branch without first verifying local and remote state. If unpushed work exists, preserve it
   on a branch or worktree. Do not push unless the user requests it.
-- For Collaboration SQLite schema or migration work, follow the
-  [migration policy](docs/collaboration/DEVELOPMENT.md#sqlite-migration-policy). Migrations must not
+- For SQLite schema or migration work, follow the
+  [migration policy](docs/SQLITE_MIGRATIONS.md). Migrations must not
   delete, overwrite, or normalize user-authored file-backed content.
 - Treat authentication data, credential-pool files, exported connector artifacts, and session data as
   sensitive. Do not print secrets or copy sensitive payloads into chat, fixtures, or committed docs.
