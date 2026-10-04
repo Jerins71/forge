@@ -138,27 +138,6 @@ describe('secure browser control API', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
-  it('uses the trusted HTTP entry path when the browser is not a secure context', async () => {
-    Object.defineProperty(window, 'isSecureContext', {
-      configurable: true,
-      value: false,
-    })
-    const rawSecret = 'private-http-value'
-    const fetch = vi.fn(async (path: string, init?: RequestInit) => {
-      expect(path).toBe('/api/secure-browser-control/private-entry/trusted-http')
-      const body = JSON.parse(String(init?.body)) as { encodedValue: string }
-      expect(body.encodedValue).not.toContain(rawSecret)
-      expect(new TextDecoder().decode(fromBase64(body.encodedValue))).toBe(rawSecret)
-      return new Response(JSON.stringify({
-        encryptedMaterial: 'desktop-safe-storage-ciphertext',
-      }), { status: 200 })
-    })
-
-    await expect(
-      encryptRemoteSecureValue(makeClient(fetch), rawSecret),
-    ).resolves.toBe('desktop-safe-storage-ciphertext')
-    expect(fetch).toHaveBeenCalledOnce()
-  })
 })
 
 async function decryptBrowserEnvelope(

@@ -215,32 +215,3 @@ export function makeManagerSelectionCatalog(
     ...overrides,
   }
 }
-
-export const FUTURE_MODEL = model({
-  provider: 'future-labs',
-  providerLabel: 'Future Labs',
-  modelId: 'oracle-9',
-  label: 'Oracle 9',
-  familyId: 'oracle',
-  familyLabel: 'Oracle',
-  reasoningIds: ['low', 'high', 'ultra'],
-  defaultReasoningId: 'high',
-})
-
-export const FUTURE_WORK_MODE: WorkModeOption = {
-  id: 'review_led',
-  label: 'Review led',
-  description: 'A future server-defined mode.',
-  selectable: true,
-}
-
-export const OPENROUTER_GLM = model({
-  provider: 'openrouter',
-  providerLabel: 'OpenRouter',
-  modelId: 'z-ai/glm-5.1',
-  label: 'Z.ai: GLM 5.1',
-  familyId: 'openrouter',
-  familyLabel: 'OpenRouter',
-  reasoningIds: ['none', 'low', 'medium', 'high'],
-  defaultReasoningId: 'medium',
-})
