@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { GitRepoTarget } from "@forge/protocol";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
 import { applyCorsHeaders, sendJson } from "../../http-utils.js";
@@ -47,7 +48,7 @@ export function createGitDiffRoutes(options: { swarmManager: SwarmManager }): Ht
     }
   });
 
-  return [
+  return withEnvironmentRouteAccess([
     handleGet("/api/git/status", async (requestUrl) => {
       const agentId = requireNonEmptyQuery(requestUrl.searchParams, "agentId");
       const repoTarget = parseRepoTarget(requestUrl.searchParams.get("repoTarget"));
@@ -93,7 +94,7 @@ export function createGitDiffRoutes(options: { swarmManager: SwarmManager }): Ht
 
       return service.getCommitFileDiff(repoContext.cwd, sha, file);
     })
-  ];
+  ], { GET: { scopes: ['workspace:read'] }, HEAD: { scopes: ['workspace:read'] }, POST: { scopes: ['workspace:read'] }, PUT: { scopes: ['workspace:read'] }, PATCH: { scopes: ['workspace:read'] }, DELETE: { scopes: ['workspace:read'] } });
 }
 
 function optionalTrimmedQuery(value: string | null): string | undefined {

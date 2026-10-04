@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import {
   SECURE_SECRET_RETENTIONS,
   parseSetSecureSessionAccessRequest,
@@ -132,7 +133,7 @@ export function createSecureSessionRoutes(options: {
 }): HttpRoute[] {
   const methods = "GET, POST, DELETE, OPTIONS";
 
-  return [{
+  return withEnvironmentRouteAccess([{
     methods,
     matches: (pathname) =>
       pathname === SECURE_SESSIONS_PATH
@@ -436,7 +437,7 @@ export function createSecureSessionRoutes(options: {
         handleSecureRouteError(response, error);
       }
     },
-  }];
+  }], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:operate'] }, PUT: { scopes: ['session:operate'] }, PATCH: { scopes: ['session:operate'] }, DELETE: { scopes: ['session:operate'] } });
 }
 
 function parseStartInput(value: unknown): StartSecureSessionInput {

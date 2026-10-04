@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { SessionAuditEntryCategory, SessionAuditEntryDetailRequest, SessionAuditPageRequest } from '@forge/protocol'
 import { SessionAuditError, SessionAuditService, type SessionAuditServiceHost } from '../../../swarm/session/session-audit-service.js'
@@ -24,7 +25,7 @@ const SESSION_AUDIT_ENTRY_CATEGORY_VALUES = [
 export function createSessionAuditRoutes(options: { swarmManager: SessionAuditServiceHost }): HttpRoute[] {
   const auditService = new SessionAuditService(options.swarmManager)
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: METHODS,
       matches: (pathname) => SESSION_AUDIT_ENTRY_ENDPOINT_PATTERN.test(pathname),
@@ -39,7 +40,7 @@ export function createSessionAuditRoutes(options: { swarmManager: SessionAuditSe
         await handleSessionAuditRequest(auditService, request, response, requestUrl)
       },
     },
-  ]
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:read'] }, PUT: { scopes: ['session:read'] }, PATCH: { scopes: ['session:read'] }, DELETE: { scopes: ['session:read'] } })
 }
 
 async function handleSessionAuditEntryRequest(

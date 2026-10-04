@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   MANAGER_REASONING_LEVELS,
@@ -48,7 +49,7 @@ export function createSpecialistRoutes(options: {
 }): HttpRoute[] {
   const { swarmManager, broadcastEvent } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: SETTINGS_MODELS_METHODS,
       matches: (pathname) => pathname === SETTINGS_MODELS_ENDPOINT_PATH,
@@ -72,7 +73,7 @@ export function createSpecialistRoutes(options: {
         await handleSpecialistRequest(swarmManager, broadcastEvent, request, response, requestUrl);
       },
     },
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['workspace:write'] }, PUT: { scopes: ['workspace:write'] }, PATCH: { scopes: ['workspace:write'] }, DELETE: { scopes: ['workspace:write'] } });
 }
 
 async function handleDelegationRostersRequest(

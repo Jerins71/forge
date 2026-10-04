@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { createReadStream } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { HTML_ARTIFACT_PREVIEW_ENDPOINT, HTML_ARTIFACT_PREVIEW_PATH_PREFIX } from "@forge/protocol";
@@ -23,7 +24,7 @@ export function createArtifactPreviewRoutes(options: {
   previewStore?: HtmlArtifactPreviewStore;
 }): HttpRoute[] {
   const store = options.previewStore ?? new HtmlArtifactPreviewStore();
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: ISSUE_METHODS,
       matches: (pathname) => pathname === HTML_ARTIFACT_PREVIEW_ENDPOINT,
@@ -70,7 +71,7 @@ export function createArtifactPreviewRoutes(options: {
         }
       },
     },
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:read'] }, PUT: { scopes: ['session:read'] }, PATCH: { scopes: ['session:read'] }, DELETE: { scopes: ['session:read'] } });
 }
 
 function requestOrigin(request: IncomingMessage): string {

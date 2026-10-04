@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type {
   StatsRange,
   TokenAnalyticsAttributionFilter,
@@ -35,7 +36,7 @@ export function createStatsRoutes(options: {
 }): HttpRoute[] {
   const { statsService, tokenAnalyticsService, generationThroughputService } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: "GET, OPTIONS",
       matches: (pathname) => pathname === STATS_ENDPOINT_PATH,
@@ -336,7 +337,7 @@ export function createStatsRoutes(options: {
         }
       }
     },
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:read'] }, PUT: { scopes: ['session:read'] }, PATCH: { scopes: ['session:read'] }, DELETE: { scopes: ['session:read'] } });
 }
 
 function handleGenerationThroughputError(response: NodeJS.WritableStream & { statusCode?: number; setHeader(name: string, value: string): void }, error: unknown): void {

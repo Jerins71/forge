@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type {
   ProjectContextModeSnapshot,
   SessionContextModeSnapshot,
@@ -20,7 +21,7 @@ const CONTEXT_MODE_METHODS = "GET, PUT, OPTIONS";
 export function createContextModeRoutes(options: {
   swarmManager: SwarmManager;
 }): HttpRoute[] {
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: "GET, OPTIONS",
       matches: pathname => CONTEXT_ARTIFACTS_PATTERN.test(pathname),
@@ -64,7 +65,7 @@ export function createContextModeRoutes(options: {
         await handleAgentContextModeRequest(options, request, response, requestUrl);
       },
     },
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:operate'] }, PUT: { scopes: ['session:operate'] }, PATCH: { scopes: ['session:operate'] }, DELETE: { scopes: ['session:operate'] } });
 }
 
 async function handleProfileContextModeRequest(

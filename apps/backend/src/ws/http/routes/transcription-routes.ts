@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { AuthStorage, type AuthCredential } from "@earendil-works/pi-coding-agent";
 import { ensureCanonicalAuthFilePath } from "../../../swarm/storage/auth-storage-paths.js";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
@@ -31,7 +32,7 @@ const ALLOWED_TRANSCRIBE_MIME_TYPES = new Set([
 export function createTranscriptionRoutes(options: { swarmManager: SwarmManager }): HttpRoute[] {
   const { swarmManager } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: TRANSCRIBE_METHODS,
       matches: (pathname) => pathname === TRANSCRIBE_ENDPOINT_PATH,
@@ -149,7 +150,7 @@ export function createTranscriptionRoutes(options: { swarmManager: SwarmManager 
         }
       }
     }
-  ];
+  ], { GET: { scopes: ['session:operate'] }, HEAD: { scopes: ['session:operate'] }, POST: { scopes: ['session:operate'] }, PUT: { scopes: ['session:operate'] }, PATCH: { scopes: ['session:operate'] }, DELETE: { scopes: ['session:operate'] } });
 }
 
 async function resolveOpenAiApiKey(swarmManager: SwarmManager): Promise<string | undefined> {

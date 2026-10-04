@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type {
   AvailableTerminalShell,
   GetAvailableTerminalShellsResponse,
@@ -48,7 +49,7 @@ export function createTerminalRoutes(options: {
   const { terminalService, settingsService } = options;
   const discoverShells = options.discoverShells ?? discoverAvailableShells;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: TERMINAL_SETTINGS_METHODS,
       matches: (pathname) => pathname === TERMINAL_SETTINGS_PATH,
@@ -249,7 +250,7 @@ export function createTerminalRoutes(options: {
         }
       },
     },
-  ];
+  ], { GET: { scopes: ['terminal:operate'] }, HEAD: { scopes: ['terminal:operate'] }, POST: { scopes: ['terminal:operate'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['terminal:operate'] }, DELETE: { scopes: ['terminal:operate'] } });
 }
 
 function beginTerminalRequest(

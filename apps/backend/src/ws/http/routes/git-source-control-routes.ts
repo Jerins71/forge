@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type {
   GitCreateBranchRequest,
   GitFetchRequest,
@@ -28,7 +29,7 @@ export function createGitSourceControlRoutes(options: {
   const { swarmManager, hostedProviderOptions } = options;
   const service = new GitSourceControlService({ hostedProviderOptions });
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: GIT_GET_METHODS,
       matches: (pathname) => pathname === "/api/git/worktrees",
@@ -323,7 +324,7 @@ export function createGitSourceControlRoutes(options: {
         }
       }
     }
-  ];
+  ], { GET: { scopes: ['workspace:read'] }, HEAD: { scopes: ['workspace:read'] }, POST: { scopes: ['workspace:write'] }, PUT: { scopes: ['workspace:write'] }, PATCH: { scopes: ['workspace:write'] }, DELETE: { scopes: ['workspace:write'] } });
 }
 
 function createMutationRoute<T extends { agentId: string; repoTarget?: GitRepoTarget; worktreeId?: string }>(

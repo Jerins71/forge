@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type {
   FileBrowserSourceContext,
   FileContentResult,
@@ -74,7 +75,7 @@ export function createFileBrowserRoutes(options: { swarmManager: SwarmManager })
     }
   });
 
-  return [
+  return withEnvironmentRouteAccess([
     handleGet("/api/files/list", async (requestUrl) => {
       const agentId = requireNonEmptyQuery(requestUrl.searchParams, "agentId");
       const requestedPath = requestUrl.searchParams.get("path") ?? "";
@@ -244,7 +245,7 @@ export function createFileBrowserRoutes(options: { swarmManager: SwarmManager })
         }
       }
     }
-  ];
+  ], { GET: { scopes: ['workspace:read'] }, HEAD: { scopes: ['workspace:read'] }, POST: { scopes: ['workspace:write'] }, PUT: { scopes: ['workspace:write'] }, PATCH: { scopes: ['workspace:write'] }, DELETE: { scopes: ['workspace:write'] } });
 }
 
 async function handlePutFileContent(

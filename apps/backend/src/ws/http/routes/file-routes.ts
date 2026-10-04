@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { readFile, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { isPathWithinRoots } from "../../../swarm/cwd-policy.js";
@@ -64,7 +65,7 @@ export function createFileRoutes(options: { swarmManager: SwarmManager }): HttpR
     return join(swarmManager.getConfig().paths.uploadsDir, normalizedRef);
   };
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: ATTACHMENT_METHODS,
       matches: (pathname) => pathname.startsWith(ATTACHMENT_ENDPOINT_PREFIX),
@@ -260,5 +261,5 @@ export function createFileRoutes(options: { swarmManager: SwarmManager }): HttpR
         }
       }
     }
-  ];
+  ], { GET: { scopes: ['workspace:read'] }, HEAD: { scopes: ['workspace:read'] }, POST: { scopes: ['workspace:read'] }, PUT: { scopes: ['workspace:read'] }, PATCH: { scopes: ['workspace:read'] }, DELETE: { scopes: ['workspace:read'] } });
 }

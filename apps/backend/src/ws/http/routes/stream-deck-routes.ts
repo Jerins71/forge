@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   STREAM_DECK_ACTION_TYPES,
@@ -72,7 +73,7 @@ export function createStreamDeckRoutes(options: {
   broadcastEvent: (event: ServerEvent) => void;
   environmentControl?: { control: ControlService; principalForRequest(request: IncomingMessage): Principal };
 }): HttpRoute[] {
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: STREAM_DECK_HTTP_METHODS,
       matches: (pathname) =>
@@ -82,7 +83,7 @@ export function createStreamDeckRoutes(options: {
         await handleStreamDeckRequest(options, request, response, requestUrl);
       },
     },
-  ];
+  ], { GET: { integration: 'stream-deck' }, POST: { integration: 'stream-deck' } });
 }
 
 async function handleStreamDeckRequest(

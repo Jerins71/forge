@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { createOpenRouterRoutingRoutes } from "./openrouter-routing-routes.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getModels } from "../../../swarm/pi/pi-ai-compat.js";
@@ -77,7 +78,7 @@ export function createOpenRouterRoutes(options: {
 }): HttpRoute[] {
   const { swarmManager, broadcastEvent } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     ...createOpenRouterRoutingRoutes(options),
     {
       methods: AVAILABLE_MODELS_METHODS,
@@ -93,7 +94,7 @@ export function createOpenRouterRoutes(options: {
         await handleOpenRouterModelsRequest(swarmManager, broadcastEvent, request, response, requestUrl);
       },
     },
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }
 
 async function handleAvailableModelsRequest(

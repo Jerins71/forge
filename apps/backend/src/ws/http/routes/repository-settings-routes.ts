@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {
   GetRepositorySettingsResponse,
@@ -19,7 +20,7 @@ export function createRepositorySettingsRoutes(options: {
 }): HttpRoute[] {
   const { settingsService } = options
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: REPOSITORY_SETTINGS_METHODS,
       matches: (pathname) => pathname === REPOSITORY_SETTINGS_ENDPOINT,
@@ -27,7 +28,7 @@ export function createRepositorySettingsRoutes(options: {
         await handleRepositorySettingsRequest(request, response, settingsService)
       },
     },
-  ]
+  ], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } })
 }
 
 async function handleRepositorySettingsRequest(

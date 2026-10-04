@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { DiscoveredExtensionMetadata, SettingsExtensionsResponse } from "@forge/protocol";
@@ -24,7 +25,7 @@ const PI_DISCOVERY_SOURCE_SORT_ORDER: Record<DiscoveredExtensionMetadata["source
 export function createExtensionRoutes(options: { swarmManager: SwarmManager }): HttpRoute[] {
   const { swarmManager } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: SETTINGS_EXTENSIONS_METHODS,
       matches: (pathname) => pathname === SETTINGS_EXTENSIONS_ENDPOINT_PATH,
@@ -73,7 +74,7 @@ export function createExtensionRoutes(options: { swarmManager: SwarmManager }): 
         sendJson(response, 200, payload as unknown as Record<string, unknown>);
       }
     }
-  ];
+  ], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }
 
 async function discoverPiExtensionsOnDisk(options: {

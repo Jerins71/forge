@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -100,7 +101,7 @@ export function createSlashCommandRoutes(options: { swarmManager: SwarmManager }
   // Run migration asynchronously (fire and forget - will complete before first request)
   void migrateProfileSlashCommandsToGlobal(swarmManager.getConfig().paths.dataDir);
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: "GET, POST, PUT, DELETE, OPTIONS",
       matches: (pathname) =>
@@ -220,7 +221,7 @@ export function createSlashCommandRoutes(options: { swarmManager: SwarmManager }
         sendJson(response, 405, { error: "Method Not Allowed" });
       }
     }
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['workspace:write'] }, PUT: { scopes: ['workspace:write'] }, PATCH: { scopes: ['workspace:write'] }, DELETE: { scopes: ['workspace:write'] } });
 }
 
 function resolveSlashCommandRoute(pathname: string): SlashCommandsRoute | null {

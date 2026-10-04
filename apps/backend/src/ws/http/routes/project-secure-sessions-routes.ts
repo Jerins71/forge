@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { ProjectSecureSessionsSettings } from "@forge/protocol";
 import { SecureSessionsContractError } from "@forge/protocol";
 import type { HttpRoute } from "../shared/http-route.js";
@@ -14,7 +15,7 @@ export function createProjectSecureSessionsRoutes(options: { service: {
   updateProjectSecureSessionsSettings(profileId: string, enabled: boolean): Promise<ProjectSecureSessionsSettings>;
 } }): HttpRoute[] {
   const methods = "GET, PUT, OPTIONS";
-  return [{
+  return withEnvironmentRouteAccess([{
     methods,
     matches: pathname => PATH.test(pathname),
     async handle(request, response, url) {
@@ -35,5 +36,5 @@ export function createProjectSecureSessionsRoutes(options: { service: {
         }
       } catch (error) { handleSecureRouteError(response, error); }
     },
-  }];
+  }], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:operate'] }, PUT: { scopes: ['session:operate'] }, PATCH: { scopes: ['session:operate'] }, DELETE: { scopes: ['session:operate'] } });
 }

@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type {
   SecureBrowserControlStatus,
@@ -107,7 +108,7 @@ export function createSecureBrowserControlRoutes(options: {
   vaultService: SecureBrowserVaultService;
   secureControlAvailable: boolean;
 }): HttpRoute[] {
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: METHODS,
       matches: isSecureBrowserControlPath,
@@ -365,7 +366,7 @@ export function createSecureBrowserControlRoutes(options: {
         }
       },
     },
-  ];
+  ], { GET: { integration: 'secure-browser-control' }, POST: { integration: 'secure-browser-control' }, PUT: { integration: 'secure-browser-control' }, PATCH: { integration: 'secure-browser-control' }, DELETE: { integration: 'secure-browser-control' } });
 }
 
 async function authenticateRequest(

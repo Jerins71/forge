@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type {
   GetCompactionSettingsResponse,
   UpdateCompactionSettingsRequest,
@@ -19,7 +20,7 @@ export function createCompactionSettingsRoutes(options: {
 }): HttpRoute[] {
   const { settingsService } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: COMPACTION_SETTINGS_METHODS,
       matches: (pathname) => pathname === COMPACTION_SETTINGS_ENDPOINT,
@@ -27,7 +28,7 @@ export function createCompactionSettingsRoutes(options: {
         await handleCompactionSettingsRequest(request, response, settingsService);
       },
     },
-  ];
+  ], { GET: { scopes: ['settings:admin'] }, HEAD: { scopes: ['settings:admin'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['settings:admin'] }, PATCH: { scopes: ['settings:admin'] }, DELETE: { scopes: ['settings:admin'] } });
 }
 
 async function handleCompactionSettingsRequest(

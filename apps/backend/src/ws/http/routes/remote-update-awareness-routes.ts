@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { RemoteUpdateAwarenessProjectOverride } from "@forge/protocol";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
 import {
@@ -15,7 +16,7 @@ export function createRemoteUpdateAwarenessRoutes(options: {
   service: LocalRemoteUpdateAwarenessService;
 }): HttpRoute[] {
   const { service } = options;
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: "GET, PATCH, OPTIONS",
       matches: (pathname) => pathname === `${BASE}/settings`,
@@ -109,7 +110,7 @@ export function createRemoteUpdateAwarenessRoutes(options: {
         }
       },
     },
-  ];
+  ], { GET: { scopes: ['workspace:read'] }, HEAD: { scopes: ['workspace:read'] }, POST: { scopes: ['workspace:write'] }, PUT: { scopes: ['workspace:write'] }, PATCH: { scopes: ['workspace:write'] }, DELETE: { scopes: ['workspace:write'] } });
 }
 
 function createProjectMutationRoute(

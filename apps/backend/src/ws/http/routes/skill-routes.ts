@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type {
   SkillBundleManifestV1,
@@ -37,7 +38,7 @@ interface SkillRouteSwarmManager {
 export function createSkillRoutes(options: { swarmManager: SkillRouteSwarmManager }): HttpRoute[] {
   const { swarmManager } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: SKILL_ROUTE_METHODS,
       matches: (pathname) => pathname === SETTINGS_SKILLS_ENDPOINT_PATH
@@ -58,7 +59,7 @@ export function createSkillRoutes(options: { swarmManager: SkillRouteSwarmManage
         }
       }
     }
-  ];
+  ], { GET: { scopes: ['workspace:read'] }, HEAD: { scopes: ['workspace:read'] }, POST: { scopes: ['workspace:write'] }, PUT: { scopes: ['workspace:write'] }, PATCH: { scopes: ['workspace:write'] }, DELETE: { scopes: ['workspace:write'] } });
 }
 
 async function handleSkillHttpRequest(

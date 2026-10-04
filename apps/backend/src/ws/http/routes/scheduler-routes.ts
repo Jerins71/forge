@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import { readFile } from "node:fs/promises";
 import { getScheduleFilePath } from "../../../scheduler/schedule-storage.js";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
@@ -27,7 +28,7 @@ interface ScheduleHttpRecord {
 export function createSchedulerRoutes(options: { swarmManager: SwarmManager }): HttpRoute[] {
   const { swarmManager } = options;
 
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: "GET, OPTIONS",
       matches: (pathname) => MANAGER_SCHEDULES_ENDPOINT_PATTERN.test(pathname),
@@ -92,7 +93,7 @@ export function createSchedulerRoutes(options: { swarmManager: SwarmManager }): 
         }
       }
     }
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:read'] }, PUT: { scopes: ['session:read'] }, PATCH: { scopes: ['session:read'] }, DELETE: { scopes: ['session:read'] } });
 }
 
 type SchedulesRoute = {

@@ -1,3 +1,4 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type {
   BuilderSidebarOrderConflictResponse,
   BuilderSidebarOrderUpdatedEvent,
@@ -19,7 +20,7 @@ export function createBuilderSidebarOrderRoutes(options: {
   service: BuilderSidebarOrderService;
   broadcastEvent?: (event: BuilderSidebarOrderUpdatedEvent) => void;
 }): HttpRoute[] {
-  return [
+  return withEnvironmentRouteAccess([
     {
       methods: METHODS,
       matches: (pathname) => pathname === BUILDER_SIDEBAR_ORDER_ENDPOINT,
@@ -27,7 +28,7 @@ export function createBuilderSidebarOrderRoutes(options: {
         await handleRequest(request, response, options);
       },
     },
-  ];
+  ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['workspace:write'] }, PUT: { scopes: ['workspace:write'] }, PATCH: { scopes: ['workspace:write'] }, DELETE: { scopes: ['workspace:write'] } });
 }
 
 async function handleRequest(
