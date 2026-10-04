@@ -99,13 +99,6 @@ export function listProjectAgents(
   return ProjectAgentRegistry.fromIterable({ dataDir: "", descriptors }).list(profileId, options);
 }
 
-export function findProjectAgentByHandle(
-  descriptors: Iterable<AgentDescriptor>,
-  profileId: string,
-  handle: string
-): ProjectAgentDescriptor | undefined {
-  return ProjectAgentRegistry.fromIterable({ dataDir: "", descriptors }).findByHandle(profileId, handle);
-}
 
 export class ProjectAgentRegistry {
   static fromIterable(options: { dataDir: string; descriptors: Iterable<AgentDescriptor> }): ProjectAgentRegistry {

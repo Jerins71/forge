@@ -10,7 +10,6 @@ import {
   type ProjectAgentDirectoryEntry
 } from "./project-agent-registry.js";
 export {
-  findProjectAgentByHandle,
   getProjectAgentHandleCollisionError,
   getProjectAgentPublicName,
   getReservedProjectAgentHandleError,

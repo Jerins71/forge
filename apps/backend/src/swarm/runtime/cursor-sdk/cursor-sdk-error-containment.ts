@@ -382,23 +382,7 @@ export function classifyCursorSdkFailure(
   };
 }
 
-export function emitCursorSdkBackgroundFailureForTests(reason: unknown): boolean {
-  return tryContain(reason);
-}
 
-export function getCursorSdkErrorContainmentStateForTests(): {
-  hooksInstalled: boolean;
-  activeScopeCount: number;
-  retainedClosedScopeCount: number;
-  scopeCount: number;
-} {
-  return {
-    hooksInstalled,
-    activeScopeCount: activeScopeIds.size,
-    retainedClosedScopeCount: scopesById.size - activeScopeIds.size,
-    scopeCount: scopesById.size
-  };
-}
 
 export function resetCursorSdkErrorContainmentForTests(): void {
   removeProcessHooks();

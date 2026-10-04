@@ -38,6 +38,3 @@ export function formatElapsed(ms: number): string {
 }
 
 /** Format an unread count for a compact badge, capping at "99+". */
-export function formatUnreadCount(count: number): string {
-  return count > 99 ? '99+' : String(count)
-}

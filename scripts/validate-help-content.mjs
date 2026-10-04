@@ -5,7 +5,7 @@
  *
  * Permanent validation (`pnpm help:validate`, `--strict`):
  * - Every article uses a raw Markdown import (no template-literal bodies)
- * - Import paths, referenced bodies, graph/metadata/tooltip integrity, Markdown hygiene
+ * - Import paths, referenced bodies, graph/metadata integrity, Markdown hygiene
  * - Does not require `.internal/help-content-baseline.json`
  *
  * Migration fidelity (`pnpm help:validate:migration`, `--strict --fidelity`):
@@ -31,7 +31,6 @@ const REGISTRY_PATH = path.join(
   REPO_ROOT,
   'apps/ui/src/components/help/help-registry.ts',
 )
-const TOOLTIPS_PATH = path.join(HELP_CONTENT_DIR, 'tooltips.ts')
 const ARTICLES_ROOT = path.join(HELP_CONTENT_DIR, 'articles')
 
 const ARTICLE_MODULE_FILES = [
@@ -407,47 +406,6 @@ function validateNoTopLevelH1(text, relativePath) {
   }
 }
 
-function validateTooltips(articleIds) {
-  const sourceFile = parseSourceFile(TOOLTIPS_PATH)
-
-  sourceFile.forEachChild(function visit(node) {
-    if (
-      !ts.isVariableStatement(node) ||
-      !node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
-    ) {
-      ts.forEachChild(node, visit)
-      return
-    }
-
-    for (const declaration of node.declarationList.declarations) {
-      if (
-        !declaration.initializer ||
-        !ts.isArrayLiteralExpression(declaration.initializer)
-      ) {
-        continue
-      }
-
-      for (const element of declaration.initializer.elements) {
-        if (!ts.isObjectLiteralExpression(element)) continue
-
-        let articleId = null
-        for (const property of element.properties) {
-          if (!ts.isPropertyAssignment(property)) continue
-          const key = getPropertyName(property.name)
-          if (key === 'articleId') {
-            articleId = getStringLiteralValue(property.initializer)
-          }
-        }
-
-        if (articleId && !articleIds.has(articleId)) {
-          fail(`tooltips.ts: articleId "${articleId}" does not match any help article`)
-        }
-      }
-    }
-
-    ts.forEachChild(node, visit)
-  })
-}
 
 function validateBaselineProvenance(baseline) {
   if (!baseline.provenance || typeof baseline.provenance !== 'object') {
@@ -673,7 +631,6 @@ function main() {
     }
   }
 
-  validateTooltips(articleIds)
 
   for (const mdPath of findMarkdownFiles(ARTICLES_ROOT)) {
     validateMarkdownFile(mdPath, referencedMdPaths)

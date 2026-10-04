@@ -27,14 +27,6 @@ function hasCachedSnapshot(entry: CacheEntry | undefined): entry is CacheEntry {
   return entry !== undefined && entry.fetchedAtMs > 0
 }
 
-export function clearCodexCatalogCache(managerAgentId?: string): void {
-  if (managerAgentId) {
-    cacheByManager.delete(managerAgentId)
-    return
-  }
-
-  cacheByManager.clear()
-}
 
 export function getCachedCodexCatalog(managerAgentId: string): CodexCatalogSnapshot | null {
   const entry = cacheByManager.get(managerAgentId)

@@ -1008,13 +1008,7 @@ function normalizeRelativePath(pathValue: string): string {
   return pathValue.replace(/^[.][\\/]/, "").replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
-export function normalizeRelativePathForTest(pathValue: string): string {
-  return normalizeRelativePath(pathValue);
-}
 
-export function splitRelativePathSegmentsForTest(relativePath: string): string[] {
-  return splitRelativePathSegments(relativePath);
-}
 
 function isErrorCode(error: unknown, code: string): boolean {
   return (
@@ -1052,4 +1046,3 @@ function toFileExtension(name: string): string | undefined {
 
   return extension.slice(1).toLowerCase();
 }
-

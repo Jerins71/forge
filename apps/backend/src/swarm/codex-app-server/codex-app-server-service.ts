@@ -188,9 +188,6 @@ export class CodexAppServerService {
     }
   }
 
-  getOperationLockForTest(): CodexOperationLock {
-    return this.operationLock;
-  }
 
   private async startEphemeralThread(cwd: string): Promise<string> {
     const client = await this.ensureSharedClient();

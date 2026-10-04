@@ -38,7 +38,3 @@ export function warnWsThrottled(
       : details,
   );
 }
-
-export function resetWsLogThrottleForTest(): void {
-  throttledWarns.clear();
-}

@@ -638,22 +638,6 @@ export async function importBitwardenSecret(
   )
 }
 
-export async function updateSecureSecretProjectDefault(
-  apiClient: SettingsApiClient,
-  profileId: string,
-  secretId: string,
-  enabled: boolean,
-): Promise<SecureSecretProjectDefaultSummary | null> {
-  return await requestJson<SecureSecretProjectDefaultSummary | null>(
-    apiClient,
-    `/api/secure-secrets/project-defaults/${encodeURIComponent(profileId)}/${encodeURIComponent(secretId)}`,
-    {
-      method: 'PUT',
-      headers: jsonHeaders(),
-      body: JSON.stringify({ enabled }),
-    },
-  )
-}
 
 export async function updateSecureSecretAutomaticGrant(
   apiClient: SettingsApiClient,

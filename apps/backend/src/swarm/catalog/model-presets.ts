@@ -1,7 +1,6 @@
 import {
   getSpawnPresetFamilies,
   getRetiredCodexModelReplacement,
-  type ModelPresetInfo,
 } from "@forge/protocol";
 import type { AgentModelDescriptor, SwarmModelPreset, SwarmReasoningLevel } from "../types.js";
 import { SWARM_MODEL_PRESETS, SWARM_REASONING_LEVELS } from "../types.js";
@@ -150,9 +149,6 @@ function isSlashScopedOpenRouterModelId(modelId: string): boolean {
   return slashIndex > 0 && slashIndex < modelId.length - 1;
 }
 
-export function getModelPresetInfoList(): ModelPresetInfo[] {
-  return modelCatalogService.getModelPresetInfoList();
-}
 
 export function resolveModelDescriptorFromPreset(preset: SwarmModelPreset): AgentModelDescriptor {
   return modelCatalogService.resolveModelDescriptor(preset);

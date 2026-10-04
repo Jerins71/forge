@@ -1,10 +1,5 @@
 import type { MessageSourceContext } from "../types.js";
 import type { AgentDescriptor } from "../types.js";
-import {
-  type CodexCatalogSnapshot,
-  type CodexMcpCatalog,
-  isToolSelectorAuthorizedInCatalog,
-} from "./codex-mcp-catalog.js";
 
 export interface CodexMcpToolGateEvaluation {
   allowed: boolean;
@@ -91,28 +86,4 @@ export function buildCodexMcpToolTurnAuthorization(params: {
     allowed: false,
     reason: "Codex MCP tools are only available on turns with Codex tool mention tags.",
   };
-}
-
-export function isCodexMcpToolSelectorAuthorized(
-  requestedSelector: string,
-  authorizedSelectors: string[],
-  catalog: CodexCatalogSnapshot,
-  catalogResolver: Pick<CodexMcpCatalog, "resolveTool" | "resolvePlugin" | "toolMatchesPluginScope">,
-): boolean {
-  const trimmedRequested = requestedSelector.trim();
-  if (!trimmedRequested || authorizedSelectors.length === 0) {
-    return false;
-  }
-
-  const requestedTool = catalogResolver.resolveTool(trimmedRequested, catalog);
-  if (!requestedTool) {
-    return false;
-  }
-
-  return isToolSelectorAuthorizedInCatalog(
-    requestedTool,
-    authorizedSelectors,
-    catalog,
-    catalogResolver,
-  );
 }

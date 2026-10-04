@@ -48,7 +48,3 @@ export function shouldAutoFetchOrigin(key: string, now = Date.now()): boolean {
 export function markOriginFetchCompleted(key: string, fetchedAt = Date.now()): void {
   lastFetchAtByKey.set(key, fetchedAt)
 }
-
-export function resetSourceControlAutoFetchFreshnessForTests(): void {
-  lastFetchAtByKey.clear()
-}

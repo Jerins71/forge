@@ -16,7 +16,6 @@ import { useCallback, useDebugValue, useRef, useSyncExternalStore } from 'react'
 import type { ManagerWsState } from '@/lib/ws-state'
 import { originRegistry } from './origin-registry'
 import type { OriginSelector } from './origin-store'
-import type { OriginMetaState } from './origin-meta'
 import { compositeKey, type OriginId } from './origin-key'
 
 type Unsubscribe = () => void
@@ -157,23 +156,6 @@ export function useOriginSnapshot(originId: OriginId): ManagerWsState {
 }
 
 /** Subscribe to one origin's meta slice (requirement 5). */
-export function useOriginMeta(originId: OriginId): OriginMetaState | null {
-  const subscribe = useCallback(
-    (onStoreChange: () => void) =>
-      subscribeViaRegistry(onStoreChange, (cb) => {
-        const store = originRegistry.getOrigin(originId)
-        return store ? store.subscribeMeta(cb) : NO_STORE_UNSUB
-      }),
-    [originId],
-  )
-
-  const getSnapshot = useCallback(
-    (): OriginMetaState | null => originRegistry.getOrigin(originId)?.getMetaSnapshot() ?? null,
-    [originId],
-  )
-
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-}
 
 export interface OriginSliceResult<T> {
   originId: OriginId

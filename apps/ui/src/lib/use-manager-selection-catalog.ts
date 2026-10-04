@@ -20,13 +20,6 @@ export function managerSelectionCatalogQueryKey(originId: string): string {
   return `manager-selection-catalog:${originId}`
 }
 
-export function invalidateManagerSelectionCatalog(originId?: string): void {
-  if (originId) {
-    queryCache.delete(managerSelectionCatalogQueryKey(originId))
-    return
-  }
-  queryCache.clear()
-}
 
 function resolveClient(
   clientOrWsUrl: SettingsApiClient | string | undefined,

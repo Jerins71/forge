@@ -1,7 +1,6 @@
 import type {
   HelpArticle,
   HelpCategory,
-  HelpTooltipContent,
   ShortcutDef,
 } from './help-types'
 import { getShortcutDefinitions } from './content/shortcuts'
@@ -11,10 +10,8 @@ import { settingsArticles } from './content/settings-articles'
 import { modelsArticles } from './content/models-articles'
 import { conceptsArticles } from './content/concepts-articles'
 import { terminalArticles } from './content/terminal-articles'
-import { helpTooltips } from './content/tooltips'
 
 const articleRegistry = new Map<string, HelpArticle>()
-const tooltipRegistry = new Map<string, HelpTooltipContent>()
 const shortcutRegistry = new Map<string, ShortcutDef>()
 
 let isInitialized = false
@@ -23,9 +20,6 @@ function registerArticle(article: HelpArticle): void {
   articleRegistry.set(article.id, article)
 }
 
-function registerTooltip(tooltip: HelpTooltipContent): void {
-  tooltipRegistry.set(tooltip.id, tooltip)
-}
 
 function registerShortcut(shortcut: ShortcutDef): void {
   shortcutRegistry.set(shortcut.id, shortcut)
@@ -61,9 +55,6 @@ export function searchArticles(query: string): HelpArticle[] {
   })
 }
 
-export function getTooltip(id: string): HelpTooltipContent | undefined {
-  return tooltipRegistry.get(id)
-}
 
 export function getShortcuts(scope?: string): ShortcutDef[] {
   const shortcuts = [...shortcutRegistry.values()]
@@ -99,10 +90,6 @@ export function initializeHelpContent(): void {
 
   for (const article of allArticles) {
     registerArticle(article)
-  }
-
-  for (const tooltip of helpTooltips) {
-    registerTooltip(tooltip)
   }
 
   isInitialized = true

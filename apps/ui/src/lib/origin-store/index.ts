@@ -33,7 +33,6 @@ export {
 export {
   useOriginSlice,
   useOriginSnapshot,
-  useOriginMeta,
   useAllOrigins,
   type UseOriginSliceOptions,
   type OriginSliceResult,

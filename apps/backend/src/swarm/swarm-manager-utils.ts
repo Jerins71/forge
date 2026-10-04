@@ -970,14 +970,6 @@ function synthesizeCatalogBackedPiModel(descriptor: AgentModelDescriptor): Model
   };
 }
 
-export function parseTimestampToMillis(value: string | undefined): number | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
 
 export function previewForLog(text: string, maxLength = 160): string {
   const normalized = text.replace(/\s+/g, " ").trim();

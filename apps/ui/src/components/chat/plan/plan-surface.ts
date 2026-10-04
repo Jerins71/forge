@@ -55,7 +55,6 @@ export const SCROLLBAR_HIDDEN_CLASS =
 export const PLAN_DOCK_POPOVER_SCROLL_CLASS = `overflow-x-hidden overflow-y-auto ${SCROLLBAR_HIDDEN_CLASS}`
 
 /** PopoverContent default width from `components/ui/popover` — must not survive dock merge. */
-export const POPOVER_CONTENT_BASE_WIDTH_CLASS = 'w-72'
 
 /** Width thresholds shared by dock popover and inline work-graph surfaces. */
 export function workGraphColumnCount(stageWidth: number): number {

@@ -17,12 +17,6 @@ export interface HelpArticle {
   contextKeys: string[]
 }
 
-export interface HelpTooltipContent {
-  id: string
-  text: string
-  articleId?: string
-  contextKey: string
-}
 
 export interface ShortcutDef {
   id: string

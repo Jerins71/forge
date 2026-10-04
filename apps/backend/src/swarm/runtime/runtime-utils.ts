@@ -436,24 +436,6 @@ export function getOpenAICodexWebSocketConstructorDiagnostics(): OpenAICodexWebS
   return { ...openAICodexWebSocketDiagnostics };
 }
 
-export function resetOpenAICodexWebSocketConstructorDiagnosticsForTest(): void {
-  openAICodexWebSocketDiagnostics.enabled = false;
-  openAICodexWebSocketDiagnostics.installed = false;
-  openAICodexWebSocketDiagnostics.installError = undefined;
-  openAICodexWebSocketDiagnostics.constructorCalls = 0;
-  openAICodexWebSocketDiagnostics.constructorErrors = 0;
-  openAICodexWebSocketDiagnostics.sendCalls = 0;
-  openAICodexWebSocketDiagnostics.closeCalls = 0;
-  openAICodexWebSocketDiagnostics.lastConstructorAt = undefined;
-  openAICodexWebSocketDiagnostics.lastSendAt = undefined;
-  openAICodexWebSocketDiagnostics.lastCloseAt = undefined;
-  openAICodexWebSocketDiagnostics.lastUrlHost = undefined;
-  openAICodexWebSocketDiagnostics.lastUrlPath = undefined;
-  if (originalDiagnosticWebSocket) {
-    globalThis.WebSocket = originalDiagnosticWebSocket as typeof globalThis.WebSocket;
-    originalDiagnosticWebSocket = undefined;
-  }
-}
 
 function readOpenAICodexWebSocketUrl(value: string | URL): URL | undefined {
   let url: URL;
@@ -490,4 +472,3 @@ function copyOpenAICodexWebSocketStaticProperties(source: DiagnosticWebSocketCon
     if (descriptor) Object.defineProperty(target, key, descriptor);
   }
 }
-

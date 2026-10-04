@@ -14,7 +14,7 @@ export const MAX_WS_CATALOG_SNAPSHOT_BYTES = 4 * 1024 * 1024;
  * Forge may legitimately send. A smaller cap made every reconnect drop live
  * status and unread events while the catalog snapshot was still queued.
  */
-export const MAX_WS_BUFFERED_AMOUNT_BYTES = MAX_WS_CATALOG_SNAPSHOT_BYTES;
+const MAX_WS_BUFFERED_AMOUNT_BYTES = MAX_WS_CATALOG_SNAPSHOT_BYTES;
 
 /**
  * Bootstrap-critical event types must never be dropped under transient backpressure: losing any of

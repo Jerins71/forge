@@ -43,13 +43,7 @@ function loadPiCompactionMeasurementModule(): PiCompactionMeasurementModule | nu
   return piCompactionMeasurementModule;
 }
 
-export function __resetPiCompactionMeasurementModuleForTests(): void {
-  piCompactionMeasurementModule = undefined;
-}
 
-export function __forcePiCompactionMeasurementFallbackForTests(): void {
-  piCompactionMeasurementModule = null;
-}
 
 function fallbackSerializeMessagesForCompactionMeasurement(messages: AgentMessage[]): string {
   return safeStableStringify(messages);

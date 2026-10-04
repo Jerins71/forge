@@ -340,33 +340,12 @@ export function getSharedKnowledgeDir(dataDir: string): string {
   return join(getSharedDir(dataDir), "knowledge");
 }
 
-export function getKnowledgeEntriesDir(dataDir: string): string {
-  return join(getSharedKnowledgeDir(dataDir), "entries");
-}
 
-export function getKnowledgeArchiveDir(dataDir: string): string {
-  return join(getSharedKnowledgeDir(dataDir), "archive");
-}
 
-export function getKnowledgeIndexPath(dataDir: string): string {
-  return join(getSharedKnowledgeDir(dataDir), "INDEX.md");
-}
 
-export function getProfileKnowledgeV2Dir(dataDir: string, profileId: string): string {
-  return join(getProfileDir(dataDir, profileId), "knowledge");
-}
 
-export function getProfileKnowledgeEntriesDir(dataDir: string, profileId: string): string {
-  return join(getProfileKnowledgeV2Dir(dataDir, profileId), "entries");
-}
 
-export function getProfileKnowledgeArchiveDir(dataDir: string, profileId: string): string {
-  return join(getProfileKnowledgeV2Dir(dataDir, profileId), "archive");
-}
 
-export function getProfileKnowledgeIndexPath(dataDir: string, profileId: string): string {
-  return join(getProfileKnowledgeV2Dir(dataDir, profileId), "INDEX.md");
-}
 
 export function getProfileKnowledgeDir(dataDir: string): string {
   return join(getSharedKnowledgeDir(dataDir), "profiles");

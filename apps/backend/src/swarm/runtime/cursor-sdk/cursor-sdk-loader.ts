@@ -103,10 +103,8 @@ export class CursorSdkUnavailableError extends Error {
   }
 }
 
-type CursorSdkImporter = (specifier: string) => Promise<unknown>;
 
 let cachedModule: CursorSdkModule | undefined;
-let importerForTests: CursorSdkImporter | undefined;
 
 export async function loadCursorSdkModule(): Promise<CursorSdkModule> {
   if (cachedModule) {
@@ -114,11 +112,10 @@ export async function loadCursorSdkModule(): Promise<CursorSdkModule> {
   }
 
   const specifier = "@cursor/sdk";
-  const importer = importerForTests ?? ((moduleSpecifier: string) => import(moduleSpecifier));
 
   let loaded: unknown;
   try {
-    loaded = await importer(specifier);
+    loaded = await import(specifier);
   } catch (error) {
     throw new CursorSdkUnavailableError(
       "Cursor SDK runtime is unavailable: @cursor/sdk could not be loaded.",
@@ -136,15 +133,7 @@ export async function loadCursorSdkModule(): Promise<CursorSdkModule> {
   return loaded;
 }
 
-export function setCursorSdkImporterForTests(importer: CursorSdkImporter): void {
-  importerForTests = importer;
-  cachedModule = undefined;
-}
 
-export function resetCursorSdkLoaderForTests(): void {
-  importerForTests = undefined;
-  cachedModule = undefined;
-}
 
 function isCursorSdkModule(value: unknown): value is CursorSdkModule {
   if (!value || typeof value !== "object") {
