@@ -1,3 +1,4 @@
+import { createTestEnvironment } from "../../test-support/environment-auth.js";
 import { once } from "node:events";
 import type { ServerEvent } from "@forge/protocol";
 import { describe, expect, it } from "vitest";
@@ -27,7 +28,10 @@ describe("secure session server transport", () => {
     const { sessionAgent: otherSession } = await manager.createSession("manager", {
       label: "Other",
     });
+    const { environment, unreadTracker, paired } = await createTestEnvironment(manager);
+    const pairedFetch = (input: string, init?: RequestInit) => fetch(input, { ...init, headers: { ...paired.headers, ...init?.headers } });
     const server = new SwarmWebSocketServer({
+      environment, unreadTracker,
       swarmManager: manager,
       host: config.host,
       port: config.port,
@@ -48,19 +52,19 @@ describe("secure session server transport", () => {
 
     await server.start();
     const projectSettingsUrl = `http://${config.host}:${config.port}/api/secure-secrets/projects/manager/settings`;
-    const projectSettings = await fetch(projectSettingsUrl);
+    const projectSettings = await pairedFetch(projectSettingsUrl);
     expect(await projectSettings.json()).toEqual({ profileId: "manager", enabled: false });
-    const unauthorizedProjectChange = await fetch(projectSettingsUrl, {
+    const unauthorizedProjectChange = await pairedFetch(projectSettingsUrl, {
       method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }),
     });
     expect(unauthorizedProjectChange.status).toBe(403);
-    const hostileProjectChange = await fetch(projectSettingsUrl, {
+    const hostileProjectChange = await pairedFetch(projectSettingsUrl, {
       method: "PUT", headers: { "content-type": "application/json", "x-forge-secure-control": secureControlToken, Origin: "https://evil.example" },
       body: JSON.stringify({ enabled: true }),
     });
     expect(hostileProjectChange.status).toBe(403);
     // This test project must now explicitly opt into the secure flows it exercises.
-    const enabledProject = await fetch(projectSettingsUrl, {
+    const enabledProject = await pairedFetch(projectSettingsUrl, {
       method: "PUT", headers: { "content-type": "application/json", "x-forge-secure-control": secureControlToken },
       body: JSON.stringify({ enabled: true }),
     });
@@ -73,13 +77,13 @@ describe("secure session server transport", () => {
         {},
         { Origin: `http://${config.host}:${config.port}` },
       ]) {
-        const settingsRead = await fetch(settingsUrl, { headers });
+        const settingsRead = await pairedFetch(settingsUrl, { headers });
         expect(settingsRead.status).toBe(200);
         await expect(settingsRead.json()).resolves.toMatchObject({
           settings: { maxProjectDefaults: 50 },
         });
       }
-      const hostileSettingsRead = await fetch(settingsUrl, {
+      const hostileSettingsRead = await pairedFetch(settingsUrl, {
         headers: { Origin: "https://evil.example" },
       });
       expect(hostileSettingsRead.status).toBe(403);
@@ -88,20 +92,20 @@ describe("secure session server transport", () => {
       throw error;
     }
 
-    const hostileHttpResponse = await fetch(
+    const hostileHttpResponse = await pairedFetch(
       `http://${config.host}:${config.port}/api/secure-secrets/providers`,
       { headers: { Origin: "https://evil.example" } },
     );
     expect(hostileHttpResponse.status).toBe(403);
 
-    const unauthorizedAccessMutation = await fetch(
+    const unauthorizedAccessMutation = await pairedFetch(
       `http://${config.host}:${config.port}/api/secure-sessions/manager/access`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ baseRevision: 0, subject: { kind: "task" }, blocked: false }),
       });
     expect(unauthorizedAccessMutation.status).toBe(403);
 
-    const unauthorizedDefaultMutation = await fetch(
+    const unauthorizedDefaultMutation = await pairedFetch(
       `http://${config.host}:${config.port}/api/secure-secrets/project-defaults/manager/secret-1`,
       {
         method: "PUT",
@@ -115,7 +119,7 @@ describe("secure session server transport", () => {
       error: "SECURE_PRIVATE_API_UNAVAILABLE",
     });
 
-    const unauthorizedSettingsMutation = await fetch(
+    const unauthorizedSettingsMutation = await pairedFetch(
       `http://${config.host}:${config.port}/api/settings/secure-secrets`,
       {
         method: "PUT",
@@ -129,7 +133,7 @@ describe("secure session server transport", () => {
       error: "SECURE_PRIVATE_API_UNAVAILABLE",
     });
 
-    const hostileSettingsMutation = await fetch(
+    const hostileSettingsMutation = await pairedFetch(
       `http://${config.host}:${config.port}/api/settings/secure-secrets`,
       {
         method: "PUT",
@@ -143,7 +147,7 @@ describe("secure session server transport", () => {
     );
     expect(hostileSettingsMutation.status).toBe(403);
 
-    const authorizedMissingSecretMutation = await fetch(
+    const authorizedMissingSecretMutation = await pairedFetch(
       `http://${config.host}:${config.port}/api/secure-secrets/project-defaults/manager/secret-1`,
       {
         method: "PUT",
@@ -156,7 +160,7 @@ describe("secure session server transport", () => {
     );
     expect(authorizedMissingSecretMutation.status).not.toBe(403);
 
-    const authorizedSettingsMutation = await fetch(
+    const authorizedSettingsMutation = await pairedFetch(
       `http://${config.host}:${config.port}/api/settings/secure-secrets`,
       {
         method: "PUT",
@@ -170,7 +174,7 @@ describe("secure session server transport", () => {
     expect(authorizedSettingsMutation.status).toBe(200);
 
     const browserOrigin = `http://${config.host}:${config.port}`;
-    const pairingCreated = await fetch(
+    const pairingCreated = await pairedFetch(
       `${browserOrigin}/api/secure-browser-control/pairing/requests`,
       {
         method: "POST",
@@ -189,7 +193,7 @@ describe("secure session server transport", () => {
       requestId: string;
       claimSecret: string;
     };
-    const desktopSettingsPreflight = await fetch(
+    const desktopSettingsPreflight = await pairedFetch(
       `${browserOrigin}/api/settings/secure-browsers`,
       {
         method: "OPTIONS",
@@ -204,7 +208,7 @@ describe("secure session server transport", () => {
     expect(desktopSettingsPreflight.headers.get("access-control-allow-headers"))
       .toContain("x-forge-secure-control");
     await secureBrowserAccessService.approvePairing(pairing.requestId);
-    const pairingClaimed = await fetch(
+    const pairingClaimed = await pairedFetch(
       `${browserOrigin}/api/secure-browser-control/pairing/requests/${encodeURIComponent(pairing.requestId)}/claim`,
       {
         method: "POST",
@@ -218,7 +222,7 @@ describe("secure session server transport", () => {
     expect(pairingClaimed.status).toBe(200);
     const pairedCookie = pairingClaimed.headers.get("set-cookie")?.split(";")[0];
     expect(pairedCookie).toMatch(/^forge_secure_browser=/u);
-    const pairedBrowserMutation = await fetch(
+    const pairedBrowserMutation = await pairedFetch(
       `http://${config.host}:${config.port}/api/secure-secrets/project-defaults/manager/secret-1`,
       {
         method: "PUT",
@@ -231,7 +235,7 @@ describe("secure session server transport", () => {
       },
     );
     expect(pairedBrowserMutation.status).not.toBe(403);
-    const pairedBrowserSecretSettingsMutation = await fetch(
+    const pairedBrowserSecretSettingsMutation = await pairedFetch(
       `${browserOrigin}/api/settings/secure-secrets`,
       {
         method: "PUT",
@@ -244,7 +248,7 @@ describe("secure session server transport", () => {
       },
     );
     expect(pairedBrowserSecretSettingsMutation.status).toBe(200);
-    const pairedBrowserSettings = await fetch(
+    const pairedBrowserSettings = await pairedFetch(
       `${browserOrigin}/api/settings/secure-browsers`,
       {
         headers: {
@@ -254,7 +258,7 @@ describe("secure session server transport", () => {
       },
     );
     expect(pairedBrowserSettings.status).toBe(403);
-    const pairedBrowserTransferExport = await fetch(
+    const pairedBrowserTransferExport = await pairedFetch(
       `${browserOrigin}/api/secure-secrets/transfer/export`,
       {
         method: "POST",
@@ -279,7 +283,7 @@ describe("secure session server transport", () => {
     const requestId = pending.pendingRequests[0]!.requestId;
     const requestUrl =
       `http://${config.host}:${config.port}/api/secure-sessions/manager/access-requests/${requestId}`;
-    const dismissed = await fetch(requestUrl, {
+    const dismissed = await pairedFetch(requestUrl, {
       method: "DELETE",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ baseRevision: pending.revision }),
@@ -289,7 +293,7 @@ describe("secure session server transport", () => {
       pendingRequests: unknown[];
     }).pendingRequests).toEqual([]);
 
-    const unauthorizedApproval = await fetch(`${requestUrl}/resolve`, {
+    const unauthorizedApproval = await pairedFetch(`${requestUrl}/resolve`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -303,7 +307,7 @@ describe("secure session server transport", () => {
       error: "SECURE_PRIVATE_API_UNAVAILABLE",
     });
 
-    const hostileDismissal = await fetch(requestUrl, {
+    const hostileDismissal = await pairedFetch(requestUrl, {
       method: "DELETE",
       headers: {
         "content-type": "application/json",
@@ -319,10 +323,10 @@ describe("secure session server transport", () => {
     );
     expect(hostileWebSocketStatus).toBe(403);
 
-    const managerClient = new WebSocket(`ws://${config.host}:${config.port}`);
-    const workerClient = new WebSocket(`ws://${config.host}:${config.port}`);
-    const siblingClient = new WebSocket(`ws://${config.host}:${config.port}`);
-    const otherClient = new WebSocket(`ws://${config.host}:${config.port}`);
+    const managerClient = new WebSocket(`ws://${config.host}:${config.port}`, await paired.protocols());
+    const workerClient = new WebSocket(`ws://${config.host}:${config.port}`, await paired.protocols());
+    const siblingClient = new WebSocket(`ws://${config.host}:${config.port}`, await paired.protocols());
+    const otherClient = new WebSocket(`ws://${config.host}:${config.port}`, await paired.protocols());
     const managerEvents: ServerEvent[] = [];
     const workerEvents: ServerEvent[] = [];
     const siblingEvents: ServerEvent[] = [];

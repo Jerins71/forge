@@ -1,5 +1,9 @@
 /** @vitest-environment jsdom */
 
+import { createFixtureEnvironmentRegistry, defaultFixtureSeeds, type EnvironmentRegistry } from '@forge/client-runtime'
+import { EnvironmentProvider } from '@/lib/origin-store/environment-provider'
+import { originRegistry } from '@/lib/origin-store/origin-registry'
+import type { OriginStore } from '@/lib/origin-store/origin-store'
 import { getByRole, queryByText } from '@testing-library/dom'
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -21,48 +25,11 @@ import {
   type VirtualizationHarness,
 } from '@/components/chat/message-list/test-virtualization-harness'
 
-type ListenerMap = Record<string, Array<(event?: any) => void>>
-
-class FakeWebSocket {
-  static readonly OPEN = 1
-  static readonly CLOSED = 3
-  static instances: FakeWebSocket[] = []
-
-  readonly sentPayloads: string[] = []
-  readonly listeners: ListenerMap = {}
-
-  readyState = FakeWebSocket.OPEN
-
-  constructor(_url: string) {
-    FakeWebSocket.instances.push(this)
-  }
-
-  addEventListener(type: string, listener: (event?: any) => void): void {
-    this.listeners[type] ??= []
-    this.listeners[type].push(listener)
-  }
-
-  send(payload: string): void {
-    this.sentPayloads.push(payload)
-  }
-
-  close(): void {
-    this.readyState = FakeWebSocket.CLOSED
-    this.emit('close')
-  }
-
-  emit(type: string, event?: any): void {
-    const handlers = this.listeners[type] ?? []
-    for (const handler of handlers) {
-      handler(event)
-    }
-  }
-}
-
-function emitServerEvent(socket: FakeWebSocket, event: unknown): void {
-  socket.emit('message', {
-    data: JSON.stringify(event),
-  })
+let fixtureRegistry: EnvironmentRegistry | null = null
+const primaryEnvironmentId = '00000000-0000-4000-8000-000000000001'
+function emitServerEvent(store: OriginStore, event: any): void {
+  if (event.type === 'agents_snapshot') store.ingest({ type: 'snapshot', state: { agents: event.agents } })
+  else store.ingest({ type: 'event', event })
 }
 
 function click(element: HTMLElement): void {
@@ -113,17 +80,14 @@ let container: HTMLDivElement
 let root: Root | null = null
 let virt: VirtualizationHarness | null = null
 
-const originalWebSocket = globalThis.WebSocket
 const originalScrollIntoView = HTMLElement.prototype.scrollIntoView
 const originalMatchMedia = window.matchMedia
 const originalFetch = globalThis.fetch
 const managerSelectionCatalog = makeManagerSelectionCatalog()
 
 beforeEach(() => {
-  FakeWebSocket.instances = []
   vi.useFakeTimers()
   window.history.replaceState(null, '', '/')
-  ;(globalThis as any).WebSocket = FakeWebSocket
   // Mock the server-owned catalog used by CreateManagerDialog.
   globalThis.fetch = vi.fn().mockImplementation((url: string) => {
     if (typeof url === 'string' && url.includes('manager-selection-catalog')) {
@@ -184,6 +148,9 @@ afterEach(() => {
   }
 
   root = null
+  void fixtureRegistry?.dispose()
+  fixtureRegistry = null
+  originRegistry.destroyAll()
   container.remove()
 
   // Drain any pending virtualizer scroll-reset/settle timers before swapping
@@ -192,7 +159,6 @@ afterEach(() => {
   virt?.restore()
   virt = null
   vi.useRealTimers()
-  ;(globalThis as any).WebSocket = originalWebSocket
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
     configurable: true,
     writable: true,
@@ -206,33 +172,22 @@ afterEach(() => {
   globalThis.fetch = originalFetch
 })
 
-async function renderPage(): Promise<FakeWebSocket> {
+async function renderPage(): Promise<OriginStore> {
+  const seed = defaultFixtureSeeds()[0]!
+  const project = { ...seed.shell!.projects[0]!, projectId: 'manager', cwd: '/tmp/manager' }
+  const session = { ...seed.shell!.sessions[0]!, projectId: 'manager', sessionId: 'manager', title: 'manager', workspace: { kind: 'current_checkout' as const, cwd: '/tmp/manager', branch: null } }
+  seed.shell = { projects: [project], sessions: [session] }
+  seed.details = { manager: { session, items: [], workers: [], choices: [], historyCursor: null, workersCursor: null } }
+  fixtureRegistry = createFixtureEnvironmentRegistry([seed])
+  originRegistry.attach(fixtureRegistry)
   root = createRoot(container)
-
   flushSync(() => {
-    root?.render(createElement(HelpProvider, null, createElement(IndexPage)))
+    root?.render(createElement(EnvironmentProvider, { registry: fixtureRegistry!, primaryEnvironmentId, children: createElement(HelpProvider, null, createElement(IndexPage)) }))
   })
-
-  await Promise.resolve()
-  vi.advanceTimersByTime(60)
-
-  const socket = FakeWebSocket.instances[0]
-  expect(socket).toBeDefined()
-
-  socket.emit('open')
-  expect(JSON.parse(socket.sentPayloads.at(0) ?? '{}')).toEqual({
-    type: 'subscribe',
-    conversationPaging: true,
-    conversationView: 'web',
-    subscriptionId: expect.any(String),
-  })
-  emitServerEvent(socket, {
-    type: 'ready',
-    serverTime: new Date().toISOString(),
-    subscribedAgentId: 'manager',
-  })
-
-  return socket
+  await vi.advanceTimersByTimeAsync(60)
+  const store = originRegistry.getOrigin(primaryEnvironmentId)
+  expect(store).toBeDefined()
+  return store!
 }
 
 describe('IndexPage smoke', () => {
@@ -252,11 +207,7 @@ describe('IndexPage smoke', () => {
 
     click(getByRole(container, 'button', { name: 'All' }))
     await vi.advanceTimersByTimeAsync(0)
-    expect(JSON.parse(socket.sentPayloads.at(-1) ?? '{}')).toMatchObject({
-      type: 'subscribe',
-      conversationPaging: true,
-      conversationView: 'all',
-    })
+
 
     emitServerEvent(socket, {
       type: 'conversation_history',

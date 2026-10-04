@@ -1,3 +1,4 @@
+import type { ExposureOptions } from "./environment/exposure-policy.js";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
@@ -276,4 +277,16 @@ function migrateLegacyPiAuthFileIfNeeded(targetAuthFile: string): void {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[swarm] Failed to migrate legacy Pi auth file: ${message}`);
   }
+}
+
+/** The same explicit exposure plan is used by Desktop, headless serve and HTTP policy. */
+export function readEnvironmentExposure(config: Pick<SwarmConfig, "host" | "port">, env: NodeJS.ProcessEnv = process.env): ExposureOptions {
+  const mode = env.FORGE_EXPOSURE_MODE;
+  if (mode && !["loopback", "lan", "tailscale"].includes(mode)) throw new Error("Invalid environment exposure mode");
+  const peer = env.FORGE_TRUSTED_PROXY_PEER;
+  if ((peer || env.FORGE_TRUSTED_PROXY_HOST || env.FORGE_TRUSTED_PROXY_PROTO) && (!peer || !env.FORGE_TRUSTED_PROXY_HOST || env.FORGE_TRUSTED_PROXY_PROTO !== "https")) throw new Error("Incomplete trusted proxy configuration");
+  return { host: config.host, port: config.port, mode: mode as ExposureOptions["mode"],
+    publicBaseUrl: env.FORGE_PUBLIC_URL, allowedClientOrigins: env.FORGE_ALLOWED_CLIENT_ORIGINS?.split(",").map(value => value.trim()).filter(Boolean),
+    tlsCert: env.FORGE_TLS_CERT, tlsKey: env.FORGE_TLS_KEY,
+    trustedProxy: peer ? { peer, host: env.FORGE_TRUSTED_PROXY_HOST!, proto: "https" } : undefined };
 }

@@ -44,7 +44,7 @@ export class WsHandler {
   private readonly apiProxy: WsApiProxy;
   private repositoryProjectCreationService: RepositoryProjectCreationService | null = null;
   private readonly conversationPageRequestTimes = new WeakMap<WebSocket, number[]>();
-  private environmentControl: { access: EnvironmentAccessPort; control: ControlService } | null = null;
+  private environmentControl: { access: EnvironmentAccessPort; control: ControlService & Partial<Pick<import("../environment/control/command-service.js").EnvironmentControlService, "resumeSession">> } | null = null;
   private readonly principals = new WeakMap<WebSocket, Principal>();
   private readonly featureListeners = new Map<string, Set<(event: ServerEvent) => void>>();
 
@@ -106,7 +106,7 @@ export class WsHandler {
     this.repositoryProjectCreationService = service;
   }
 
-  setEnvironmentControl(deps: { access: EnvironmentAccessPort; control: ControlService }): void {
+  setEnvironmentControl(deps: { access: EnvironmentAccessPort; control: ControlService & Partial<Pick<import("../environment/control/command-service.js").EnvironmentControlService, "resumeSession">> }): void {
     this.environmentControl = deps;
   }
 
@@ -119,7 +119,7 @@ export class WsHandler {
 
   legacyPorts(): LegacyHandlerPorts {
     return {
-      executeCommand: async ({ sessionId, command, signal, send }) => {
+      executeCommand: async ({ principal, sessionId, command, signal, send }) => {
         if (signal.aborted) return;
         if (!this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session.");
         // Handler identity is a token, never a socket. Handlers touch it only through send.
@@ -171,6 +171,12 @@ export class WsHandler {
             broadcastToSession: (id, event) => this.broadcastToSession(id, event),
             hydrateHostSessions: () => this.hydrateBrowserHostSessions(),
           });
+          return;
+        }
+        if (command.type === "resume_session" && this.swarmManager.getAgent(command.agentId)?.role !== "worker") {
+          if (!this.environmentControl?.control.resumeSession) throw new StreamFault("UNAVAILABLE", "Controlled resume is not composed");
+          await this.environmentControl.control.resumeSession(principal, command.agentId, () => this.swarmManager.resumeSession(command.agentId));
+          send({ type: "session_resumed", agentId: command.agentId, profileId: this.subscriptionManager.resolveProfileIdForAgent(command.agentId) ?? command.agentId, requestId: command.requestId });
           return;
         }
         if (await handleManagerCommand({ ...context, broadcastToSubscribed: event => { send(event); this.broadcastToSubscribed(event); } })) return;
@@ -330,7 +336,14 @@ export class WsHandler {
       const scope = migrated ? "session:operate" : command.type === "subscribe" || command.type === "subscribe_inventory" || command.type === "get_conversation_page" || command.type === "get_session_workers" ? "session:read" : legacyCommandScopes[command.type];
       if (scope === "unsupported") throw new StreamFault("FORBIDDEN", "Legacy command is unavailable on this transport.");
       this.environmentControl.access.authorize(principal, [scope]);
+      if (command.type === "resume_session" && this.swarmManager.getAgent(command.agentId)?.role !== "worker") {
+        if (!this.environmentControl.control.resumeSession) throw new StreamFault("UNAVAILABLE", "Controlled resume is not composed");
+        await this.environmentControl.control.resumeSession(principal, command.agentId, () => this.swarmManager.resumeSession(command.agentId));
+        this.send(socket, { type: "session_resumed", agentId: command.agentId, profileId: this.subscriptionManager.resolveProfileIdForAgent(command.agentId) ?? command.agentId, requestId: command.requestId });
+        return;
+      }
       if (migrated) {
+        const stoppedWorkerIds = command.type === "stop_session" ? this.swarmManager.listWorkersForSession(command.agentId).map(worker => worker.agentId) : [];
         const receipt = await awaitLegacyReceipt(this.environmentControl.control, principal,
           await executeMigratedLegacyCommand(this.environmentControl.control, principal, command,
             this.subscriptionManager.getSubscribedAgentId(socket) ?? ""));
@@ -341,7 +354,7 @@ export class WsHandler {
           this.send(socket, { type: "session_created", sessionAgent, profile, requestId: command.requestId });
         } else if (command.type === "stop_session") {
           this.send(socket, { type: "session_stopped", agentId: command.agentId,
-            profileId: this.subscriptionManager.resolveProfileIdForAgent(command.agentId) ?? command.agentId, terminatedWorkerIds: [], requestId: command.requestId });
+            profileId: this.subscriptionManager.resolveProfileIdForAgent(command.agentId) ?? command.agentId, terminatedWorkerIds: stoppedWorkerIds, requestId: command.requestId });
         }
         return;
       }

@@ -51,6 +51,10 @@ export class StreamDeckAccessService {
   private readonly generateSecret: (bytes: number) => string;
   private readonly generateVerificationCode: () => string;
   private readonly pending = new Map<string, PendingPairing>();
+  private onCredentialRevoked: ((id: string) => void) | undefined;
+
+  setCredentialRevocationHook(hook: (id: string) => void): void { this.onCredentialRevoked = hook; }
+
   private writeQueue: Promise<unknown> = Promise.resolve();
 
   constructor(options: StreamDeckAccessServiceOptions) {
@@ -108,13 +112,15 @@ export class StreamDeckAccessService {
       tokenHash: hash(accessToken),
       createdAt: this.now(),
     };
+    const replaced: string[] = [];
     await this.updateFile((file) => ({
       version: FILE_VERSION,
       devices: [stored, ...file.devices.map((device) =>
         device.deviceId === stored.deviceId && !device.revokedAt
-          ? { ...device, revokedAt: stored.createdAt }
+          ? (replaced.push(device.id), { ...device, revokedAt: stored.createdAt })
           : device)],
     }));
+    for (const id of replaced) this.onCredentialRevoked?.(id);
     pending.state = "approved";
     pending.approvedToken = accessToken;
     pending.approvedDevice = toDeviceDescriptor(stored);
@@ -159,6 +165,7 @@ export class StreamDeckAccessService {
         return revoked;
       }),
     }));
+    if (revoked) this.onCredentialRevoked?.(id);
     return revoked ? toDeviceDescriptor(revoked) : null;
   }
 

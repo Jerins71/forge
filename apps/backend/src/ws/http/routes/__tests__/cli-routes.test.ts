@@ -1,3 +1,4 @@
+import { createAuthOnlyTestEnvironment } from "../../../../test-support/environment-auth.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -136,7 +137,9 @@ describe("CLI routes and bearer auth", () => {
     const manager = new FakeSwarmManager(configHandle.config, [
       createManagerDescriptor(configHandle.config.paths.rootDir, "manager"),
     ]);
+    const { environment } = await createAuthOnlyTestEnvironment(configHandle.config.host, configHandle.config.port);
     const server = new SwarmWebSocketServer({
+      environment,
       swarmManager: manager as unknown as never,
       host: configHandle.config.host,
       port: configHandle.config.port,

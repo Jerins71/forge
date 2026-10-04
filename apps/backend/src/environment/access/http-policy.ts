@@ -50,7 +50,7 @@ export function createEnvironmentHttpPolicy(options: {
       }
       if (preflight) {
         if (origin === null) throw new AccessError('FORBIDDEN', 'Preflight requires Origin');
-        const allowedHeaders = ['content-type', 'authorization', 'x-forge-csrf', 'x-forge-environment-protocol', 'x-forge-file-name'];
+        const allowedHeaders = ['content-type', 'authorization', 'x-forge-csrf', 'x-forge-environment-protocol', 'x-forge-file-name', 'x-forge-secure-control'];
         const headers = typeof request.headers['access-control-request-headers'] === 'string' ? request.headers['access-control-request-headers'].split(',').map(h => h.trim().toLowerCase()) : [];
         if (headers.some(h => !allowedHeaders.includes(h))) throw new AccessError('FORBIDDEN', 'Preflight header is not allowed');
         response.setHeader('Access-Control-Allow-Methods', requested!); response.setHeader('Access-Control-Allow-Headers', allowedHeaders.join(', ')); response.statusCode = 204; response.end(); return { handled: true };

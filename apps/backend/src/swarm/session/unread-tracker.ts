@@ -28,6 +28,17 @@ export class UnreadTracker {
 
   private readonly counts = new Map<string, Map<string, number>>();
   private readonly dirtyProfiles = new Set<string>();
+  private readonly observers = new Set<(sessionId: string) => void>();
+
+  observe(listener: (sessionId: string) => void): () => void {
+    this.observers.add(listener);
+    return () => { this.observers.delete(listener); };
+  }
+
+  private notify(sessionId: string): void {
+    for (const listener of this.observers) listener(sessionId);
+  }
+
   private flushTimer: NodeJS.Timeout | null = null;
   private flushInFlight: Promise<void> | null = null;
 
@@ -94,6 +105,7 @@ export class UnreadTracker {
 
     map.set(sessionAgentId, next);
     this.markDirty(profileId);
+    this.notify(sessionAgentId);
     return next;
   }
 
@@ -114,6 +126,7 @@ export class UnreadTracker {
     }
 
     this.markDirty(profileId);
+    this.notify(sessionAgentId);
     return previous;
   }
 
@@ -127,6 +140,7 @@ export class UnreadTracker {
 
     map.set(sessionAgentId, 1);
     this.markDirty(profileId);
+    this.notify(sessionAgentId);
     return previous;
   }
 
@@ -142,11 +156,14 @@ export class UnreadTracker {
     }
 
     this.markDirty(profileId);
+    this.notify(sessionAgentId);
   }
 
   clearProfile(profileId: string): void {
+    const sessions = [...(this.counts.get(profileId)?.keys() ?? [])];
     this.counts.delete(profileId);
     this.markDirty(profileId);
+    for (const sessionId of sessions) this.notify(sessionId);
   }
 
   getSnapshot(): Record<string, number> {

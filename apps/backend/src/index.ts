@@ -1,5 +1,7 @@
 import "./stdio-epipe-guard-install.js";
 
+import { installEnvironmentParentBootstrap } from "./environment/parent-bootstrap.js";
+import { recoverLocalEnvironment } from "./environment/environment-recovery.js";
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +31,12 @@ async function main(): Promise<void> {
   await checkDataDirMigration({ isDesktop });
 
   const config = createConfig();
+  const authorizedPhysicalParent = Boolean(process.send) && process.env.FORGE_ENVIRONMENT_BOOTSTRAP_PARENT === "1";
+  delete process.env.FORGE_ENVIRONMENT_BOOTSTRAP_PARENT;
+  if (process.env.FORGE_ENVIRONMENT_RECOVERY) {
+    await recoverLocalEnvironment(config.paths.dataDir, process.env.FORGE_ENVIRONMENT_RECOVERY, process.env.FORGE_ENVIRONMENT_ADOPT_FROM);
+    return;
+  }
   if (!config.isDesktop && (!process.env.FORGE_APP_VERSION || process.env.FORGE_APP_VERSION.trim().length === 0)) {
     process.env.FORGE_APP_VERSION = await readServerVersion(config.paths.rootDir);
   }
@@ -40,12 +48,11 @@ async function main(): Promise<void> {
   const server = await startServer({
     config,
     secureControlToken,
-    onReady: ({ port }) => {
-      if (config.isDesktop) {
-        process.send?.({ type: "ready", port, dataDir: config.paths.dataDir });
-      }
+    onReady: ({ port, environment }) => {
+      process.send?.({ type: "ready", port, dataDir: config.paths.dataDir, environment });
     },
   });
+  installEnvironmentParentBootstrap({ authorizedPhysicalParent, createGrant: () => server.createBootstrapGrant() });
   console.log(`Forge backend listening on ws://${server.host}:${server.port}`);
 
   registerProcessLifecycle(server, config.isDesktop);

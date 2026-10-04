@@ -437,3 +437,33 @@ describe('durable control acceptance on real SQLite', () => {
   })
 
 })
+
+it('resumes stopped control state under the writer barrier, preserves input identity and fences failed/revoked resumes', async () => {
+  const f = await fixture()
+  const service = f.core.controlService as typeof f.core.controlService & { resumeSession<T>(principal: Principal, sessionId: string, resume: () => Promise<T>): Promise<T> }
+  const receipt = await service.execute(principal, 'session.launch', launch)
+  await f.core.effectWorker.drain()
+  await service.execute(principal, 'session.stop', { commandId: STOP, sessionId: receipt.sessionId! })
+  await f.core.effectWorker.drain()
+  const before = f.core.database.prepare('SELECT desired_state,run_generation FROM control_sessions WHERE session_id=?').get(receipt.sessionId!) as { desired_state: string; run_generation: number }
+  expect(before.desired_state).toBe('stopped')
+  const inputCount = count(f.core, 'control_inputs')
+  await expect(service.resumeSession(principal, receipt.sessionId!, async () => { throw new Error('unsafe writer') })).rejects.toThrow('unsafe writer')
+  expect((f.core.database.prepare('SELECT desired_state FROM control_sessions WHERE session_id=?').get(receipt.sessionId!) as { desired_state: string }).desired_state).toBe('stopped')
+  await service.resumeSession(principal, receipt.sessionId!, async () => {
+    expect(f.core.database.inTransaction).toBe(false)
+    const state = f.core.database.prepare('SELECT desired_state,run_generation FROM control_sessions WHERE session_id=?').get(receipt.sessionId!) as { desired_state: string; run_generation: number }
+    expect(state.desired_state).toBe('running')
+    expect(state.run_generation).toBeGreaterThan(before.run_generation)
+  })
+  expect(count(f.core, 'control_inputs')).toBe(inputCount)
+  expect(f.counts().dispatchCount).toBe(1)
+  await service.execute(principal, 'session.send', { commandId: SEND, sessionId: receipt.sessionId!, message: { text: 'after resume', artifactIds: [] } })
+  await f.core.effectWorker.drain()
+  expect(f.counts().dispatchCount).toBe(2)
+  await f.core.close()
+  const restarted = await f.open()
+  expect((restarted.database.prepare('SELECT desired_state FROM control_sessions WHERE session_id=?').get(receipt.sessionId!) as { desired_state: string }).desired_state).toBe('running')
+  f.revoke()
+  await expect((restarted.controlService as typeof service).resumeSession(principal, receipt.sessionId!, async () => { throw new Error('must not run') })).rejects.toMatchObject({ code: 'FORBIDDEN' })
+})

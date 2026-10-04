@@ -73,7 +73,12 @@ export function canonicalRequest(method: ControlMethod, input: unknown): { norma
   return { normalized, hash: createHash('sha256').update(method + '\n' + normalized).digest('hex') }
 }
 
-export function createCommandService(sink: EventSink, options: ControlCoreOptions): ControlService & { close(): void } {
+export interface EnvironmentControlService extends ControlService {
+  /** Compatibility resume changes only desired lifecycle state; it never accepts or replays input. */
+  resumeSession<T>(principal: Principal, sessionId: string, resume: () => Promise<T>): Promise<T>
+  close(): void
+}
+export function createCommandService(sink: EventSink, options: ControlCoreOptions): EnvironmentControlService {
   const database = sink.database
   const launches = new Map<string, Promise<unknown>>()
   let closed = false
@@ -200,6 +205,35 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     })
   }
   return {
+    async resumeSession(principal, sessionId, resume) {
+      const generation = sink.transaction(tx => {
+        if (closed) throw new ControlError('UNAVAILABLE', 'Control service is shutting down', true)
+        if (!principal.scopes.has('session:operate') || options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError('FORBIDDEN', 'Session operation is not authorized')
+        const row = database.prepare('SELECT * FROM control_sessions WHERE session_id=?').get(sessionId) as SessionRow | undefined
+        if (!row || row.desired_state !== 'stopped') return null
+        if (database.prepare("SELECT 1 FROM effects WHERE session_id=? AND kind='session.stop' AND state IN ('pending','claimed') LIMIT 1").get(sessionId)) throw new ControlError('UNAVAILABLE', 'Session stop is still settling', true)
+        const next = row.run_generation + 1
+        database.prepare("UPDATE control_sessions SET desired_state='running',run_generation=? WHERE session_id=?").run(next, sessionId)
+        setSessionStatus(sink, tx, sessionId, 'idle', options.clock)
+        return next
+      })
+      try {
+        const result = await resume()
+        if (generation !== null) sink.transaction(() => {
+          const current = readSession(sink, sessionId)
+          if (current.run_generation !== generation || current.desired_state !== 'running') throw new ControlError('CONFLICT', 'Session lifecycle changed while resuming')
+        })
+        return result
+      } catch (error) {
+        if (generation !== null) sink.transaction(tx => {
+          const current = readSession(sink, sessionId)
+          if (current.run_generation !== generation || current.desired_state !== 'running') return
+          database.prepare("UPDATE control_sessions SET desired_state='stopped',run_generation=run_generation+1 WHERE session_id=?").run(sessionId)
+          setSessionStatus(sink, tx, sessionId, 'stopped', options.clock)
+        })
+        throw error
+      }
+    },
     async execute(principal, method, input) {
       if (closed) throw new ControlError('UNAVAILABLE', 'Control service is shutting down', true)
       if (!validators[method]?.Check(input)) throw new ControlError('INVALID_INPUT', 'Invalid control command')

@@ -1,3 +1,4 @@
+import { createPairedTestAccess } from '../../test-support/environment-auth.js'
 import { createServer, request as httpRequest, type Server } from 'node:http'
 import { once } from 'node:events'
 import WebSocket from 'ws'
@@ -80,7 +81,8 @@ function createService() {
 }
 
 async function startProxy(service: ReturnType<typeof createService>) {
-  const proxy = new TerminalWsProxy({ terminalService: service.service as never, runtimeConfig: config })
+  const paired = await createPairedTestAccess()
+  const proxy = new TerminalWsProxy({ terminalService: service.service as never, runtimeConfig: config, environmentAccess: paired.access })
   const server = createServer()
   server.on('upgrade', (request, socket, head) => {
     const pathname = new URL(request.url ?? '/', `http://${request.headers.host}`).pathname
@@ -90,7 +92,7 @@ async function startProxy(service: ReturnType<typeof createService>) {
   await once(server, 'listening')
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('server did not bind')
-  return { proxy, server, port: address.port }
+  return { proxy, server, port: address.port, paired }
 }
 
 function wsUrl(port: number, ticket = 'valid-ticket', requesterAgentId = 'requester-1'): string {
@@ -150,8 +152,8 @@ describe('TerminalWsProxy over a real HTTP upgrade', () => {
 
   it('transports binary I/O and control frames, and detaches on close', async () => {
     const service = createService()
-    const { server, proxy, port } = await startProxy(service)
-    const client = new WebSocket(wsUrl(port), { origin: 'http://127.0.0.1' })
+    const { server, proxy, port, paired } = await startProxy(service)
+    const client = new WebSocket(wsUrl(port), { origin: 'http://127.0.0.1', headers: paired.headers })
     try {
       await once(client, 'open')
       const received: Array<{ binary: boolean; data: Buffer }> = []

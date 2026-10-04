@@ -1,4 +1,5 @@
 
+import { createTestEnvironment } from '../test-support/environment-auth.js'
 import { once } from 'node:events'
 import WebSocket from 'ws'
 import { describe, expect, it } from 'vitest'
@@ -14,7 +15,7 @@ import {
 async function waitForEvent(
   events: ServerEvent[],
   predicate: (event: ServerEvent) => boolean,
-  timeoutMs = 2000,
+  timeoutMs = 5000,
 ): Promise<ServerEvent> {
   return waitForEventAfter(events, 0, predicate, timeoutMs)
 }
@@ -23,7 +24,7 @@ async function waitForEventAfter(
   events: ServerEvent[],
   startIndex: number,
   predicate: (event: ServerEvent) => boolean,
-  timeoutMs = 2000,
+  timeoutMs = 5000,
 ): Promise<ServerEvent> {
   const started = Date.now()
 
@@ -46,7 +47,9 @@ describe('SwarmWebSocketServer', () => {
     const manager = new TestSwarmManager(config)
     await bootWithDefaultManager(manager, config)
 
+    const { environment, unreadTracker, paired } = await createTestEnvironment(manager)
     const server = new SwarmWebSocketServer({
+      environment, unreadTracker,
       swarmManager: manager,
       host: config.host,
       port: config.port,
@@ -54,8 +57,9 @@ describe('SwarmWebSocketServer', () => {
     })
 
     await server.start()
+    environment.start()
 
-    const clientA = new WebSocket(`ws://${config.host}:${config.port}`)
+    const clientA = new WebSocket(`ws://${config.host}:${config.port}`, await paired.protocols())
     const eventsA: ServerEvent[] = []
     clientA.on('message', (raw) => {
       eventsA.push(JSON.parse(raw.toString()) as ServerEvent)
@@ -77,7 +81,7 @@ describe('SwarmWebSocketServer', () => {
     clientA.close()
     await once(clientA, 'close')
 
-    const clientB = new WebSocket(`ws://${config.host}:${config.port}`)
+    const clientB = new WebSocket(`ws://${config.host}:${config.port}`, await paired.protocols())
     const eventsB: ServerEvent[] = []
     clientB.on('message', (raw) => {
       eventsB.push(JSON.parse(raw.toString()) as ServerEvent)
@@ -118,7 +122,9 @@ describe('SwarmWebSocketServer', () => {
       }
     }
 
+    const { environment, unreadTracker, paired } = await createTestEnvironment(manager)
     const server = new SwarmWebSocketServer({
+      environment, unreadTracker,
       swarmManager: manager,
       host: config.host,
       port: config.port,
@@ -126,8 +132,9 @@ describe('SwarmWebSocketServer', () => {
     })
 
     await server.start()
+    environment.start()
 
-    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const client = new WebSocket(`ws://${config.host}:${config.port}`, await paired.protocols())
     const events: ServerEvent[] = []
 
     client.on('message', (raw) => {
@@ -200,6 +207,7 @@ describe('SwarmWebSocketServer', () => {
       (event) => event.type === 'session_resumed' && event.agentId === sessionAgentId && event.requestId === 'resume-1',
     )
     expect(resumed.type).toBe('session_resumed')
+    expect((environment.database.prepare('SELECT desired_state FROM control_sessions WHERE session_id=?').get(sessionAgentId) as { desired_state: string }).desired_state).toBe('running')
 
     client.send(
       JSON.stringify({
@@ -265,6 +273,8 @@ describe('SwarmWebSocketServer', () => {
       expect(forked.newSessionAgent.pinnedAt).toBeUndefined()
     }
     expect(forkedAgentId).not.toBe('')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(environment.database.prepare('SELECT session_id FROM control_sessions WHERE session_id=?').get(forkedAgentId)).toBeDefined()
 
     client.send(
       JSON.stringify({

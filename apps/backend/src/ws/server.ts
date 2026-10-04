@@ -3,6 +3,14 @@ import { createClaudeAuthRoutes } from "./http/routes/claude-auth-routes.js";
 import { createNativeRuntimeRoutes, NATIVE_RUNTIMES_PATH } from "./http/routes/native-runtime-routes.js";
 import { NativeRuntimeUpdateService } from "../swarm/runtime/runtime-updates/native-runtime-update-service.js";
 import { createProjectSecureSessionsRoutes } from "./http/routes/project-secure-sessions-routes.js";
+import { createHash } from "node:crypto";
+import { createServer as createHttpsServer } from "node:https";
+import type { WebSocket } from "ws";
+import type { Principal } from "../environment/control/control-types.js";
+import type { EnvironmentService } from "../environment/environment-service.js";
+import { AccessError } from "../environment/access/access-service.js";
+import { createEnvironmentHttpPolicy, createRouteInventory, wsTicketFromProtocols } from "../environment/access/http-policy.js";
+import { bindHttpPrincipal, requireHttpPrincipal } from "./rpc/http-principal.js";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
@@ -47,10 +55,10 @@ import { HtmlArtifactPreviewStore } from "../swarm/session/html-artifact-preview
 import {
   validateSecureBuilderControlOrigin,
   validateSecureBuilderControlCapability,
-  validateTerminalWsOrigin,
 } from "../terminal/terminal-access-policy.js";
 
 import {
+  authenticateCliHttpRequest,
   authenticateCliWebSocketRequest,
   isCliWebSocketPath,
 } from "./cli-auth.js";
@@ -166,6 +174,12 @@ export class SwarmWebSocketServer {
   private readonly unreadTracker: UnreadTracker;
   private readonly notificationSettingsService: NotificationSettingsService;
   private readonly remoteUpdateAwarenessService: LocalRemoteUpdateAwarenessService | null;
+
+  private readonly environment: EnvironmentService | undefined;
+  private readonly environmentTransport: ReturnType<EnvironmentService["composeTransport"]> | undefined;
+  private readonly httpPolicy: ReturnType<typeof createEnvironmentHttpPolicy> | undefined;
+  private readonly socketPrincipals = new WeakMap<WebSocket, Principal>();
+  private readonly tls: { cert: string; key: string } | undefined;
 
   private httpServer: HttpServer | null = null;
   private wss: WebSocketServer | null = null;
@@ -432,6 +446,8 @@ export class SwarmWebSocketServer {
 
   constructor(options: {
     swarmManager: SwarmManager;
+    environment?: EnvironmentService;
+    tls?: { cert: string; key: string };
     host: string;
     port: number;
     allowNonManagerSubscriptions: boolean;
@@ -456,6 +472,8 @@ export class SwarmWebSocketServer {
     secureControlToken?: string;
   }) {
     this.swarmManager = options.swarmManager;
+    this.environment = options.environment;
+    this.tls = options.tls;
     this.host = options.host;
     this.port = options.port;
     this.secureControlToken = options.secureControlToken ?? "";
@@ -474,6 +492,8 @@ export class SwarmWebSocketServer {
     this.streamDeckAccessService = options.streamDeckAccessService ?? new StreamDeckAccessService({
       dataDir: this.swarmManager.getConfig().paths.dataDir,
     });
+    this.cliAccessService.setCredentialRevocationHook(id => this.environment?.access.revokeIntegrationPrincipal({ integration: "cli", credentialId: id }));
+    this.streamDeckAccessService.setCredentialRevocationHook(id => this.environment?.access.revokeIntegrationPrincipal({ integration: "stream-deck", credentialId: id }));
     this.secureBrowserAccessService =
       options.secureBrowserAccessService ??
       new SecureBrowserAccessService({
@@ -492,6 +512,7 @@ export class SwarmWebSocketServer {
         ? new TerminalWsProxy({
             terminalService: this.terminalService,
             runtimeConfig: this.terminalRuntimeConfig,
+            environmentAccess: this.environment?.access,
           })
         : null;
     this.observabilityService =
@@ -572,6 +593,13 @@ export class SwarmWebSocketServer {
         : undefined,
     });
     this.cliWsHandler = new CliWsHandler(this.swarmManager);
+    this.environmentTransport = this.environment?.composeTransport(this.wsHandler, this.terminalService);
+    if (this.environment) this.cliWsHandler.setEnvironmentControl({ control: this.environment.control, principalForSocket: socket => {
+      const principal = this.socketPrincipals.get(socket);
+      if (!principal) throw new AccessError("UNAUTHENTICATED", "Integration authentication required");
+      this.environment!.access.authorize(principal, ["session:operate"]);
+      return principal;
+    } });
     wsHandlerRef = this.wsHandler;
 
     this.repositorySettingsService = new RepositorySettingsService({ dataDir: this.swarmManager.getConfig().paths.dataDir });
@@ -606,6 +634,7 @@ export class SwarmWebSocketServer {
       & SecureBrowserVaultService;
 
     this.httpRoutes = [
+      ...(this.environment?.routes ?? []),
       ...createCliRoutes({
         cliAccessService: this.cliAccessService,
         swarmManager: this.swarmManager,
@@ -617,6 +646,7 @@ export class SwarmWebSocketServer {
         unreadTracker: this.unreadTracker,
         statsService: this.statsService,
         broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
+        environmentControl: this.environment ? { control: this.environment.control, principalForRequest: requireHttpPrincipal } : undefined,
         onUnreadChanged: (sessionAgentId, count) =>
           this.wsHandler.broadcastUnreadCountUpdate(sessionAgentId, count),
       }),
@@ -689,7 +719,7 @@ export class SwarmWebSocketServer {
       ...createContextModeRoutes({ swarmManager: this.swarmManager }),
       ...createSessionAuditRoutes({ swarmManager: this.swarmManager }),
       ...createCodexCatalogRoutes({ swarmManager: this.swarmManager }),
-      ...(this.terminalService ? createTerminalRoutes({ terminalService: this.terminalService, settingsService: this.terminalSettingsService }) : []),
+      ...(this.terminalService ? createTerminalRoutes({ terminalService: this.terminalService, settingsService: this.terminalSettingsService, terminalTransport: this.environmentTransport?.terminalTransport }) : []),
       ...(this.claudeAuthService ? createClaudeAuthRoutes(this.claudeAuthService) : []),
       ...(this.nativeRuntimeUpdateService ? createNativeRuntimeRoutes(this.nativeRuntimeUpdateService) : []),
       ...this.settingsRoutes.routes,
@@ -727,6 +757,34 @@ export class SwarmWebSocketServer {
         nodeEnv: process.env.NODE_ENV,
       }),
     ];
+    this.httpPolicy = this.environment ? createEnvironmentHttpPolicy({ access: this.environment.access, exposure: this.environment.exposure,
+      inventory: createRouteInventory(this.httpRoutes), integrationAuthenticators: {
+        cli: async request => { bindHttpPrincipal(request, await this.authenticateCliPrincipal(request)); },
+        "stream-deck": async request => {
+          const result = await this.streamDeckAccessService.authenticateAuthorizationHeader(request.headers.authorization);
+          const principal = result.ok ? this.environment!.access.ensureIntegrationPrincipal({ integration: "stream-deck", credentialId: result.deviceId, label: "Stream Deck", scopes: ["session:read", "session:operate"] }) : await this.authenticateCliPrincipal(request);
+          bindHttpPrincipal(request, principal);
+        },
+        "secure-browser-control": async request => {
+          if (isPublicSecureBrowserPairingPath(request.method, resolveRequestUrl(request, `${this.host}:${this.getPort()}`).pathname)) return;
+          if (validateSecureBuilderControlCapability(request, this.secureControlToken)) return;
+          const result = await this.secureBrowserAccessService.authenticateToken(readSecureBrowserCookie(request.headers.cookie));
+          if (!result.ok) throw new AccessError("UNAUTHENTICATED", "Secure browser authentication required");
+          setSecureBrowserRequestDevice(request, result.device);
+        },
+      } }) : undefined;
+  }
+
+  private async authenticateCliPrincipal(request: IncomingMessage): Promise<Principal> {
+    const result = await authenticateCliHttpRequest(this.cliAccessService, request);
+    if (!result.ok) throw new AccessError(result.statusCode === 403 ? "FORBIDDEN" : "UNAUTHENTICATED", result.message);
+    if (!this.environment) throw new AccessError("UNAUTHENTICATED", "Environment authentication unavailable");
+    return this.cliPrincipalForAuth(request, result);
+  }
+
+  private cliPrincipalForAuth(request: IncomingMessage, result: Extract<import("../swarm/cli-access-service.js").CliAccessAuthResult, { ok: true }>): Principal {
+    const credentialId = result.source === "env" ? "env:" + createHash("sha256").update(request.headers.authorization!.slice(7).trim()).digest("hex").slice(0, 16) : result.keyId;
+    return this.environment!.access.ensureIntegrationPrincipal({ integration: "cli", credentialId, label: "CLI", scopes: ["session:read", "session:operate"] });
   }
 
   /**
@@ -756,14 +814,13 @@ export class SwarmWebSocketServer {
       await this.repositorySettingsService.load();
     }
     await this.notificationSettingsService.load();
-    await this.unreadTracker.load();
+    if (!this.environment) await this.unreadTracker.load();
     await this.swarmManager.loadModelCacheVisualizationSettings?.();
     await this.remoteUpdateAwarenessService?.start();
 
-    const httpServer = createServer((request, response) => {
-      void this.handleHttpRequest(request, response);
-    });
-    const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_INCOMING_PAYLOAD_BYTES });
+    const listener = (request: IncomingMessage, response: ServerResponse) => { void this.handleHttpRequest(request, response); };
+    const httpServer = this.tls ? createHttpsServer({ cert: await readFile(this.tls.cert), key: await readFile(this.tls.key) }, listener) : createServer(listener);
+    const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_INCOMING_PAYLOAD_BYTES, handleProtocols: protocols => protocols.has("forge.v2") ? "forge.v2" : false });
     const cliWss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_INCOMING_PAYLOAD_BYTES });
 
     this.httpServer = httpServer;
@@ -924,6 +981,8 @@ export class SwarmWebSocketServer {
     this.httpServer = null;
     this.actualPort = null;
 
+    await this.environmentTransport?.rpc.stop();
+
     // Close ingress immediately, but retain handler state until in-flight work
     // has settled. Repository creation shutdown can still depend on the real
     // socket bookkeeping while it aborts and cleans up active operations.
@@ -968,34 +1027,33 @@ export class SwarmWebSocketServer {
     }
 
     const requestUrl = resolveRequestUrl(request, `${this.host}:${this.getPort()}`);
-    if (isCliWebSocketPath(requestUrl.pathname)) {
-      await this.handleCliUpgrade(request, socket, head);
-      return;
-    }
-
-    if (this.terminalWsProxy?.canHandleUpgrade(requestUrl.pathname)) {
-      const handled = this.terminalWsProxy.handleUpgrade(request, socket, head, requestUrl.pathname);
-      if (handled) {
+    try {
+      if (!this.environment) throw new AccessError("UNAUTHENTICATED", "Environment authentication unavailable");
+      this.environment.exposure.validateForwarding(request);
+      if (!this.environment.exposure.allowsOrigin(request.headers.origin ?? null)) throw new AccessError("FORBIDDEN", "Origin is not allowed");
+      if (requestUrl.pathname === "/api/v2/rpc") {
+        await this.environmentTransport!.rpc.handleUpgrade(request, socket, head, requestUrl.pathname);
         return;
       }
+      if (isCliWebSocketPath(requestUrl.pathname) && !requestUrl.search) {
+        await this.handleCliUpgrade(request, socket, head);
+        return;
+      }
+      if (this.terminalWsProxy?.canHandleUpgrade(requestUrl.pathname)) {
+        await this.terminalWsProxy.handleUpgrade(request, socket, head, requestUrl.pathname);
+        return;
+      }
+      if (requestUrl.pathname !== "/") { rejectWebSocketUpgrade(socket, 404, "Not Found"); return; }
+      if (requestUrl.search) throw new AccessError("UNAUTHENTICATED", "Socket queries are not allowed");
+      const principal = await this.environment.access.consumeWsTicket({ ticket: wsTicketFromProtocols(request.headers["sec-websocket-protocol"]),
+        audience: "legacy", origin: request.headers.origin ?? null, protocolVersion: 1 });
+      this.wss.handleUpgrade(request, socket, head, client => {
+        this.wsHandler.bindPrincipal(client, principal);
+        this.wss!.emit("connection", client, request);
+      });
+    } catch (error) {
+      rejectWebSocketUpgrade(socket, error instanceof AccessError && error.code === "FORBIDDEN" ? 403 : 401, "Environment socket access denied");
     }
-
-    const originValidation = validateTerminalWsOrigin(request);
-    if (!originValidation.ok) {
-      rejectWebSocketUpgrade(socket, 403, originValidation.errorMessage);
-      return;
-    }
-
-    const wss = this.wss;
-    if (!wss) {
-      ignoreSocketErrors(socket);
-      socket.destroy();
-      return;
-    }
-
-    wss.handleUpgrade(request, socket, head, (client) => {
-      wss.emit("connection", client, request);
-    });
   }
 
   private async handleCliUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
@@ -1012,7 +1070,11 @@ export class SwarmWebSocketServer {
       return;
     }
 
+    const principal = this.cliPrincipalForAuth(request, authResult);
     cliWss.handleUpgrade(request, socket, head, (client) => {
+      this.socketPrincipals.set(client, principal);
+      const unregister = this.environment!.access.registerResource(principal, force => { if (force) client.terminate(); else client.close(4401, "Authentication expired or revoked"); });
+      client.once("close", unregister);
       cliWss.emit("connection", client, request);
     });
   }
@@ -1022,6 +1084,10 @@ export class SwarmWebSocketServer {
     let route: HttpRoute | undefined;
 
     try {
+      if (!this.httpPolicy) { sendJson(response, 503, { error: "Environment access is not initialized" }); return; }
+      const gate = await this.httpPolicy(request, response, requestUrl);
+      if (gate.handled) return;
+      if (gate.principal) bindHttpPrincipal(request, gate.principal);
       // Both start local processes the server chooses; only the Builder's own UI may ask.
       if ((this.claudeAuthService && requestUrl.pathname === "/api/settings/claude-native")
         || (this.nativeRuntimeUpdateService && requestUrl.pathname === NATIVE_RUNTIMES_PATH)) {
@@ -1097,7 +1163,7 @@ export class SwarmWebSocketServer {
           return;
         }
       }
-      route = this.httpRoutes.find((candidate) => candidate.matches(requestUrl.pathname));
+      route = this.httpRoutes.find((candidate) => candidate.methods.split(",").map(method => method.trim()).includes(request.method ?? "") && candidate.matches(requestUrl.pathname));
 
       if (!route) {
         applyCorsHeaders(request, response, "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");

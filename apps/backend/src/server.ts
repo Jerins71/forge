@@ -1,4 +1,9 @@
-import { createConfig } from "./config.js";
+import type { EnvironmentDescriptor } from "@forge/protocol/environment-v2";
+import { createEnvironmentService, type EnvironmentService } from "./environment/environment-service.js";
+import { createExposurePolicy, enableTailscaleServe } from "./environment/exposure-policy.js";
+import { getEnvironmentDbPath } from "./swarm/storage/data-paths.js";
+import { dirname, join } from "node:path";
+import { createConfig, readEnvironmentExposure } from "./config.js";
 import { StatsService } from "./stats/stats-service.js";
 import { collectFeatureAdoption } from "./telemetry/feature-counters.js";
 import {
@@ -36,6 +41,7 @@ export interface ServerReadyInfo {
   host: string;
   port: number;
   config: SwarmConfig;
+  environment: EnvironmentDescriptor;
 }
 
 export interface StartServerOptions {
@@ -43,10 +49,12 @@ export interface StartServerOptions {
   logger?: Partial<ServerLogger>;
   onReady?: (info: ServerReadyInfo) => Promise<void> | void;
   secureControlToken?: string;
+  environmentIdentity?: { installationStateDir?: string; label?: string };
 }
 
 export interface StartedServer extends ServerReadyInfo {
   stop(): Promise<void>;
+  createBootstrapGrant(): ReturnType<EnvironmentService["access"]["createBootstrapGrant"]>;
   /** Test hook for the route-inventory classification gate. */
   listRegisteredHttpRoutes(): ReadonlyArray<{ methods: string; matches: (pathname: string) => boolean }>;
 }
@@ -60,6 +68,8 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
 
   const config = options.config ?? createConfig();
   const logger = createLogger(options.logger);
+  const exposureOptions = readEnvironmentExposure(config);
+  const exposure = createExposurePolicy(exposureOptions);
 
   const runtimeLock = acquireRuntimeLock(config.paths.dataDir);
   const observabilityService: ObservabilityFacade = new ObservabilityService({ dataDir: config.paths.dataDir });
@@ -82,6 +92,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
 
   let swarmManager: SwarmManager | undefined;
   let wsServer: SwarmWebSocketServer | undefined;
+  let environment: EnvironmentService | undefined;
   const browserAutomationService = new BrowserAutomationService({
     dataDir: config.paths.dataDir,
     onSessionChanged: (snapshot, reason) => wsServer?.broadcastBrowserSessionChanged(snapshot, reason),
@@ -170,7 +181,22 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
   let server: BackendServer | null = null;
 
   try {
+    const unreadTracker = new UnreadTracker({
+      dataDir: config.paths.dataDir,
+      getProfileIds: () => swarmManager.listProfiles().map((profile) => profile.profileId),
+      getSessionAgentIds: (profileId) =>
+        swarmManager
+          .listAgents()
+          .filter(
+            (descriptor) =>
+              descriptor.role === "manager" &&
+              (descriptor.profileId ?? descriptor.agentId) === profileId,
+          )
+          .map((descriptor) => descriptor.agentId),
+    });
+    environment = await createEnvironmentService({ config, swarmManager, unreadTracker, exposure, identityOptions: options.environmentIdentity });
     await swarmManager.boot();
+    await environment.initialize();
 
     let telemetryService: TelemetryService | null = null;
     const statsService = new StatsService(swarmManager, {
@@ -197,19 +223,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       },
     });
 
-    const unreadTracker = new UnreadTracker({
-      dataDir: config.paths.dataDir,
-      getProfileIds: () => swarmManager.listProfiles().map((profile) => profile.profileId),
-      getSessionAgentIds: (profileId) =>
-        swarmManager
-          .listAgents()
-          .filter(
-            (descriptor) =>
-              descriptor.role === "manager" &&
-              (descriptor.profileId ?? descriptor.agentId) === profileId,
-          )
-          .map((descriptor) => descriptor.agentId),
-    });
+
 
     await queueSchedulerSync(collectSchedulerProfileIds(swarmManager.listAgents(), config.managerId));
     swarmManager.on("agents_snapshot", handleAgentsSnapshot);
@@ -335,6 +349,8 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
 
     wsServer = new SwarmWebSocketServer({
       swarmManager,
+      environment,
+      tls: exposureOptions.tlsCert && exposureOptions.tlsKey ? { cert: exposureOptions.tlsCert, key: exposureOptions.tlsKey } : undefined,
       host: config.host,
       port: config.port,
       allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
@@ -352,8 +368,14 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
     });
 
     await wsServer.start();
+    exposure.setLoopbackPort(wsServer.getPort());
+    if (process.env.FORGE_TAILSCALE_SERVE === "1") {
+      await enableTailscaleServe({ backendPort: wsServer.getPort(), publicBaseUrl: exposure.publicBaseUrl,
+        ownershipFile: join(dirname(getEnvironmentDbPath(config.paths.dataDir)), "tailscale-serve.json"), environmentId: environment.descriptor().environmentId });
+    }
     server = new BackendServer({
       config,
+      environment,
       port: wsServer.getPort(),
       swarmManager,
       observabilityService,
@@ -371,7 +393,9 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       host: server.host,
       port: server.port,
       config,
+      environment: environment.descriptor(),
     });
+    environment.start();
     return server;
   } catch (error) {
     if (server) {
@@ -382,6 +406,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
         swarmManager?.off("session_lifecycle", handleTerminalSessionLifecycle);
         swarmManager?.off("agents_snapshot", handleTerminalAgentsSnapshot);
       }
+      await environment?.stop();
       await Promise.allSettled([
         wsServer?.stop(),
         queueSchedulerSync(new Set<string>()),
@@ -399,6 +424,8 @@ class BackendServer implements StartedServer {
   readonly host: string;
   port: number;
   readonly config: SwarmConfig;
+  readonly environment: EnvironmentDescriptor;
+  private readonly environmentService: EnvironmentService;
 
   private readonly swarmManager: SwarmManager;
   private readonly observabilityService: ObservabilityFacade;
@@ -414,6 +441,7 @@ class BackendServer implements StartedServer {
 
   constructor(options: {
     config: SwarmConfig;
+    environment: EnvironmentService;
     port: number;
     swarmManager: SwarmManager;
     observabilityService: ObservabilityFacade;
@@ -428,6 +456,8 @@ class BackendServer implements StartedServer {
     this.host = options.config.host;
     this.port = options.port;
     this.config = options.config;
+    this.environmentService = options.environment;
+    this.environment = options.environment.descriptor();
     this.swarmManager = options.swarmManager;
     this.observabilityService = options.observabilityService;
     this.wsServer = options.wsServer;
@@ -437,6 +467,10 @@ class BackendServer implements StartedServer {
     this.handleTerminalSessionLifecycle = options.handleTerminalSessionLifecycle;
     this.handleTerminalAgentsSnapshot = options.handleTerminalAgentsSnapshot;
     this.releaseRuntimeLock = options.releaseRuntimeLock;
+  }
+
+  createBootstrapGrant(): ReturnType<EnvironmentService["access"]["createBootstrapGrant"]> {
+    return this.environmentService.access.createBootstrapGrant({ reachableBaseUrl: this.environmentService.exposure.publicBaseUrl });
   }
 
   listRegisteredHttpRoutes(): ReadonlyArray<{ methods: string; matches: (pathname: string) => boolean }> {
@@ -454,6 +488,7 @@ class BackendServer implements StartedServer {
     this.swarmManager.off("agents_snapshot", this.handleTerminalAgentsSnapshot);
 
     try {
+      await this.environmentService.stop();
       await this.wsServer.stop();
     } finally {
       await Promise.allSettled([

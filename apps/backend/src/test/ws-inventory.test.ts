@@ -1,3 +1,4 @@
+import { createPairedTestAccess } from '../test-support/environment-auth.js'
 import { describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import type { AgentDescriptor, ManagerProfile, ServerEvent } from '@forge/protocol'
@@ -14,7 +15,7 @@ function socket() {
   return { readyState: WebSocket.OPEN, bufferedAmount: 0, send: vi.fn(), close: vi.fn(), terminate: vi.fn(), _socket: { write: vi.fn() } } as any
 }
 const perf = () => ({ recordDuration: vi.fn(), increment: vi.fn(), readSummary: vi.fn(), readRecentSlowEvents: vi.fn() })
-function fixture() {
+async function fixture() {
   const agents = [agent('a'), agent('b'), agent('hidden', { profileId: 'hidden' }), agent('worker', { role: 'worker', managerId: 'a' })]
   const profiles = [{ profileId: 'p', displayName: 'P', createdAt: at, updatedAt: at }, { profileId: 'hidden', displayName: 'Hidden', profileType: 'system', createdAt: at, updatedAt: at }] as ManagerProfile[]
   let revision = 1
@@ -41,6 +42,18 @@ function fixture() {
   const handler = new WsHandler({ swarmManager: manager as any, unreadTracker: unread as any, mobilePushService: {} as any, allowNonManagerSubscriptions: true, perf: perf() })
   const owner = (handler as any).subscriptionManager as WsSubscriptions
   const a = socket(), b = socket()
+  const paired = await createPairedTestAccess()
+  handler.setEnvironmentControl({ access: paired.access, control: {
+    execute: async (_principal, method, input: any) => {
+      if (method !== 'session.launch') throw new Error('Unexpected control command')
+      const created = await manager.createSession(input.projectId, { label: input.title })
+      agents.push(created.sessionAgent)
+      return { commandId: input.commandId, method, sessionId: created.sessionAgent.agentId, state: 'succeeded',
+        acceptedSequence: 1, updatedSequence: 2, acceptedAt: at, updatedAt: at, inputId: null, delivery: 'none', error: null }
+    }, getReceipt: async () => { throw new Error('Unexpected receipt lookup') },
+  } })
+  await paired.bind(handler, a)
+  await paired.bind(handler, b)
   // In-memory only: no server, upgrade, listener or network is started.
   ;(handler as any).wss = { clients: new Set([a, b]) }
   const command = (target: typeof a, value: unknown) => (handler as any).handleSocketMessage(target, Buffer.from(JSON.stringify(value))) as Promise<void>
@@ -51,7 +64,7 @@ async function flush() { for (let i = 0; i < 50; i++) await Promise.resolve() }
 
 describe('passive Builder inventory contract', () => {
   it('initial/refresh/demotion never read; a real unattended-message path increments while inventory remains connected', async () => {
-    const f = fixture()
+    const f = await fixture()
     await f.command(f.a, { type: 'subscribe_inventory', requestId: 'first' })
     await f.command(f.a, { type: 'subscribe_inventory', requestId: 'refresh' })
     expect(f.unread.markRead).not.toHaveBeenCalled()
@@ -87,7 +100,7 @@ describe('passive Builder inventory contract', () => {
   })
 
   it('inventory A and chat B permit addressed create/catalog on A without viewing a default; implicit authority stays denied', async () => {
-    const f = fixture()
+    const f = await fixture()
     await f.command(f.a, { type: 'subscribe_inventory', requestId: 'inventory-a' })
     await f.command(f.b, { type: 'subscribe', agentId: 'b' })
     f.unread.markRead.mockClear()
@@ -97,7 +110,8 @@ describe('passive Builder inventory contract', () => {
     await flush()
     expect(f.manager.createManager).toHaveBeenCalledWith('a', expect.objectContaining({ name: 'New' }))
     expect(f.manager.createSession).toHaveBeenCalledWith('p', expect.anything())
-    expect(f.manager.getManagerSelectionCatalog).toHaveBeenCalledOnce()
+    expect(f.manager.getManagerSelectionCatalog).not.toHaveBeenCalled()
+    expect(events(f.a).at(-1)).toMatchObject({ type: 'error', code: 'ENVIRONMENT_COMMAND_REJECTED' })
     expect(f.owner.getSubscribedAgentId(f.a)).toBeUndefined()
     expect(f.owner.getSubscribedAgentId(f.b)).toBe('b')
     expect(f.unread.markRead).not.toHaveBeenCalled()
@@ -110,13 +124,13 @@ describe('passive Builder inventory contract', () => {
     ]) {
       await f.command(f.a, command)
       await flush()
-      expect(events(f.a).at(-1)).toMatchObject({ type: 'error', code: 'NOT_SUBSCRIBED' })
+      expect(events(f.a).at(-1)).toMatchObject({ type: 'error', code: command.type === 'merge_session_memory' ? 'NOT_SUBSCRIBED' : 'ENVIRONMENT_COMMAND_REJECTED' })
     }
     expect(f.owner.getSubscribedAgentId(f.a)).toBeUndefined()
   })
 
   it('allows only filtered inventory fanout, not conversation, sensitive metadata, or request responses', async () => {
-    const f = fixture()
+    const f = await fixture()
     await f.command(f.a, { type: 'subscribe_inventory', requestId: 'inventory' })
     f.a.send.mockClear()
     for (const type of ['conversation_message', 'conversation_history', 'choice_request', 'session_plan_snapshot', 'session_goal_snapshot', 'secure_session_snapshot', 'browser_session_changed', 'terminals_snapshot', 'session_workers_snapshot', 'manager_created']) {

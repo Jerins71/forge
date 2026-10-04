@@ -54,6 +54,10 @@ export class CliAccessService {
   private readonly now: () => string;
   private readonly generateKeyBytes: () => Buffer;
   private readonly generateId: () => string;
+  private onCredentialRevoked: ((id: string) => void) | undefined;
+
+  setCredentialRevocationHook(hook: (id: string) => void): void { this.onCredentialRevoked = hook; }
+
   private writeQueue: Promise<unknown> = Promise.resolve();
 
   constructor(options: CliAccessServiceOptions) {
@@ -109,6 +113,7 @@ export class CliAccessService {
       return { ...file, keys };
     });
 
+    if (revoked) this.onCredentialRevoked?.(keyId);
     return revoked ? toDescriptor(revoked) : null;
   }
 

@@ -230,8 +230,8 @@ export function createSecureSecretRoutes(options: {
   return withEnvironmentRouteAccess([{
     methods,
     matches: (pathname) =>
-      pathname === SECURE_SECRETS_PATH
-      || pathname.startsWith(`${SECURE_SECRETS_PATH}/`),
+      (pathname === SECURE_SECRETS_PATH || pathname.startsWith(`${SECURE_SECRETS_PATH}/`))
+      && !/^\/api\/secure-secrets\/projects\/[^/]+\/settings$/.test(pathname),
     handle: async (request, response, requestUrl) => {
       applySecureHeaders(request, response, methods);
 

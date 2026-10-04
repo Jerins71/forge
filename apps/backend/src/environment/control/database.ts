@@ -4,7 +4,7 @@ import type { Database } from 'better-sqlite3'
 import { loadConfiguredSqliteDatabaseConstructor } from '../../sqlite-database-loader.js'
 import { getEnvironmentDbPath } from '../../swarm/storage/data-paths.js'
 import { migrateControlDatabase } from './migrations.js'
-import type { ControlService } from './control-types.js'
+import type { EnvironmentControlService } from './command-service.js'
 import type { EventSink } from './event-sink.js'
 import type { EffectWorker } from './effect-worker.js'
 import { createEventSink } from './event-sink.js'
@@ -14,7 +14,7 @@ import type { ControlCoreOptions } from './effect-types.js'
 
 export interface ControlCore {
   database: Database
-  controlService: ControlService
+  controlService: EnvironmentControlService
   eventSink: EventSink
   effectWorker: EffectWorker
   reconcileOnBoot(): Promise<void>

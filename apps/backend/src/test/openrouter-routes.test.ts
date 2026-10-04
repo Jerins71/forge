@@ -1,3 +1,4 @@
+import { createTestEnvironment } from "../test-support/environment-auth.js";
 import { readFile, rm } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getModels } from "../swarm/pi/pi-ai-compat.js";
@@ -59,13 +60,17 @@ async function startServer(): Promise<{
   config: SwarmConfig;
   manager: TestSwarmManager;
   server: SwarmWebSocketServer;
+  pairedFetch: typeof fetch;
 }> {
   const port = await getAvailablePort();
   const config = await makeTempConfig(port);
   const manager = new TestSwarmManager(config);
   await bootWithDefaultManager(manager, config, { clearBootstrapSendCalls: false });
 
+  const { environment, unreadTracker, paired } = await createTestEnvironment(manager);
+  const pairedFetch: typeof fetch = (input, init) => fetch(input, { ...init, headers: { ...paired.headers, ...init?.headers } });
   const server = new SwarmWebSocketServer({
+    environment, unreadTracker,
     swarmManager: manager,
     host: config.host,
     port: config.port,
@@ -73,7 +78,7 @@ async function startServer(): Promise<{
   });
   await server.start();
 
-  return { config, manager, server };
+  return { config, manager, server, pairedFetch };
 }
 
 describe("openrouter-routes", () => {
@@ -110,11 +115,11 @@ describe("openrouter-routes", () => {
       return originalFetch(input as Parameters<typeof fetch>[0], init);
     });
 
-    const { config, server } = await startServer();
+    const { config, server, pairedFetch } = await startServer();
     const modelId = "z-ai/glm-5.1";
 
     try {
-      const addResponse = await fetch(
+      const addResponse = await pairedFetch(
         `http://${config.host}:${config.port}/api/settings/openrouter/models/${encodeURIComponent(modelId)}`,
         {
           method: "PUT",
@@ -151,12 +156,12 @@ describe("openrouter-routes", () => {
 
   it("rolls back overlay and override files when OpenRouter deletion fails during mutation", async () => {
     process.env.OPENROUTER_API_KEY = "sk-or-test";
-    const { config, server } = await startServer();
+    const { config, server, pairedFetch } = await startServer();
     const modelId = TEST_OPENROUTER_MODEL_ID;
     const overrideKey = `openrouter:${modelId}`;
 
     try {
-      const addResponse = await fetch(
+      const addResponse = await pairedFetch(
         `http://${config.host}:${config.port}/api/settings/openrouter/models/${encodeURIComponent(modelId)}`,
         { method: "PUT" },
       );
@@ -171,7 +176,7 @@ describe("openrouter-routes", () => {
       const writeSpy = vi.spyOn(modelOverrides, "resetModelOverride").mockRejectedValueOnce(
         new Error("override write failed"),
       );
-      const failedDeleteResponse = await fetch(
+      const failedDeleteResponse = await pairedFetch(
         `http://${config.host}:${config.port}/api/settings/openrouter/models/${encodeURIComponent(modelId)}`,
         { method: "DELETE" },
       );
@@ -194,7 +199,7 @@ describe("openrouter-routes", () => {
 
   it("adds and removes URL-encoded model ids, regenerates the projection, and exposes OpenRouter selector entries", async () => {
     process.env.OPENROUTER_API_KEY = "sk-or-test";
-    const { config, manager, server } = await startServer();
+    const { config, manager, server, pairedFetch } = await startServer();
     const modelId = TEST_OPENROUTER_MODEL_ID;
     const projectionPath = getPiModelsProjectionPath(config.paths.dataDir);
     const addReloadSpy = vi.spyOn(manager, "reloadOpenRouterModelsAndProjection");
@@ -206,7 +211,7 @@ describe("openrouter-routes", () => {
       };
       expect(initialProjection.providers.openrouter).toBeUndefined();
 
-      const addResponse = await fetch(
+      const addResponse = await pairedFetch(
         `http://${config.host}:${config.port}/api/settings/openrouter/models/${encodeURIComponent(modelId)}`,
         { method: "PUT" },
       );
@@ -225,7 +230,7 @@ describe("openrouter-routes", () => {
       expect(addReloadSpy).toHaveBeenCalledTimes(1);
       expect(deleteReloadSpy).not.toHaveBeenCalled();
 
-      const duplicateAddResponse = await fetch(
+      const duplicateAddResponse = await pairedFetch(
         `http://${config.host}:${config.port}/api/settings/openrouter/models/${encodeURIComponent(modelId)}`,
         { method: "PUT" },
       );
@@ -249,7 +254,7 @@ describe("openrouter-routes", () => {
         expect.objectContaining({ id: modelId }),
       ]);
 
-      const openRouterModelsResponse = await fetch(`http://${config.host}:${config.port}/api/settings/openrouter/models`);
+      const openRouterModelsResponse = await pairedFetch(`http://${config.host}:${config.port}/api/settings/openrouter/models`);
       expect(openRouterModelsResponse.status).toBe(200);
       const openRouterModelsPayload = (await openRouterModelsResponse.json()) as {
         models: Array<{ modelId: string }>;
@@ -258,7 +263,7 @@ describe("openrouter-routes", () => {
       expect(openRouterModelsPayload.isConfigured).toBe(true);
       expect(openRouterModelsPayload.models.map((model) => model.modelId)).toEqual([modelId]);
 
-      const selectableResponse = await fetch(`http://${config.host}:${config.port}/api/settings/models`);
+      const selectableResponse = await pairedFetch(`http://${config.host}:${config.port}/api/settings/models`);
       expect(selectableResponse.status).toBe(200);
       const selectablePayload = (await selectableResponse.json()) as {
         models: Array<{ provider: string; modelId: string; presetId: string }>;
@@ -272,7 +277,7 @@ describe("openrouter-routes", () => {
       );
       deleteReloadSpy.mockClear();
 
-      const deleteResponse = await fetch(
+      const deleteResponse = await pairedFetch(
         `http://${config.host}:${config.port}/api/settings/openrouter/models/${encodeURIComponent(modelId)}`,
         { method: "DELETE" },
       );
@@ -285,14 +290,14 @@ describe("openrouter-routes", () => {
       };
       expect(afterDeleteProjection.providers.openrouter).toBeUndefined();
 
-      const afterDeleteModelsResponse = await fetch(`http://${config.host}:${config.port}/api/settings/openrouter/models`);
+      const afterDeleteModelsResponse = await pairedFetch(`http://${config.host}:${config.port}/api/settings/openrouter/models`);
       expect(afterDeleteModelsResponse.status).toBe(200);
       const afterDeleteModelsPayload = (await afterDeleteModelsResponse.json()) as {
         models: Array<{ modelId: string }>;
       };
       expect(afterDeleteModelsPayload.models).toEqual([]);
 
-      const afterDeleteSelectableResponse = await fetch(`http://${config.host}:${config.port}/api/settings/models`);
+      const afterDeleteSelectableResponse = await pairedFetch(`http://${config.host}:${config.port}/api/settings/models`);
       expect(afterDeleteSelectableResponse.status).toBe(200);
       const afterDeleteSelectablePayload = (await afterDeleteSelectableResponse.json()) as {
         models: Array<{ provider: string; modelId: string; presetId: string }>;
@@ -314,35 +319,35 @@ describe("openrouter-routes", () => {
 
 describe("OpenRouter routing settings API", () => {
   it("saves global and exact-model routing, rejects stale/invalid changes, and rolls back failed apply", async () => {
-    const { config, manager, server } = await startServer();
+    const { config, manager, server, pairedFetch } = await startServer();
     const base = `http://${config.host}:${config.port}/api/settings/openrouter/routing`;
     const modelId = "test/routing-model";
     const modelUrl = `${base}/models/${encodeURIComponent(modelId)}`;
-    const put = (url: string, body: unknown) => fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const put = (url: string, body: unknown) => pairedFetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     try {
-      const initial = await (await fetch(base)).json() as { revision: string };
+      const initial = await (await pairedFetch(base)).json() as { revision: string };
       const saved = await put(base, { revision: initial.revision, routing: { zdr: true, data_collection: "deny", only: ["azure"], max_price: { prompt: 1 } } });
       expect(saved.status).toBe(200);
       const global = await saved.json() as { revision: string };
       expect((await put(base, { revision: initial.revision, routing: {} })).status).toBe(409);
       expect((await put(base, { revision: global.revision, routing: { only: [] } })).status).toBe(400);
       expect((await put(base, { revision: global.revision, routing: { zdr: "false" } })).status).toBe(400);
-      expect((await fetch(modelUrl)).status).toBe(404);
+      expect((await pairedFetch(modelUrl)).status).toBe(404);
       await addOpenRouterModel(config.paths.dataDir, { modelId, displayName: "Test", contextWindow: 1000, maxOutputTokens: 100, supportsReasoning: false, supportedReasoningLevels: ["none"], inputModes: ["text"], addedAt: "2026-09-10T00:00:00Z" });
-      const model = await (await fetch(modelUrl)).json() as { revision: string };
+      const model = await (await pairedFetch(modelUrl)).json() as { revision: string };
       const modelSave = await put(modelUrl, { revision: model.revision, routing: { zdr: null, data_collection: "allow", only: ["openai"], max_price: null, sort: "latency" } });
       expect(modelSave.status).toBe(200);
       const modelSaved = await modelSave.json() as { revision: string; effective: unknown; routing: unknown };
       expect(modelSaved.effective).toEqual({ zdr: true, data_collection: "deny", only: ["openai"], sort: "latency" });
       expect(modelSaved.routing).toMatchObject({ zdr: null, max_price: null });
-      const reloaded = await (await fetch(modelUrl)).json();
+      const reloaded = await (await pairedFetch(modelUrl)).json();
       expect(reloaded).toEqual(modelSaved);
       const projection = JSON.parse(await readFile(getPiModelsProjectionPath(config.paths.dataDir), "utf8"));
       expect(projection.providers.openrouter.models.find((entry: { id: string }) => entry.id === modelId).compat.openRouterRouting).toEqual(modelSaved.effective);
       const spy = vi.spyOn(manager, "reloadOpenRouterModelsAndProjection").mockRejectedValueOnce(new Error("apply failed"));
       expect((await put(base, { revision: modelSaved.revision, routing: { zdr: true } })).status).toBe(500);
       spy.mockRestore();
-      expect(await (await fetch(modelUrl)).json()).toEqual(modelSaved);
+      expect(await (await pairedFetch(modelUrl)).json()).toEqual(modelSaved);
       // Two editors of different scopes still share one file-wide revision.
       const outcomes = await Promise.all([
         put(base, { revision: modelSaved.revision, routing: { zdr: true } }),
