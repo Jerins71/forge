@@ -18,7 +18,7 @@ import {
 } from './main-renderer-recovery.js'
 import { loadWindowState, trackWindowState } from './window-state.js'
 import { consumePostUpdateInfo } from './whats-new.js'
-import { createEnvironmentCredentialService, installEnvironmentCredentialsIpc, ENVIRONMENT_ARTIFACT_SCHEME } from './environment-credentials-ipc.js'
+import { createEnvironmentCredentialService, installEnvironmentCredentialsIpc, readPrimaryEnvironmentActivity, ENVIRONMENT_ARTIFACT_SCHEME } from './environment-credentials-ipc.js'
 import { ensurePrimaryEnvironmentSession, writeEnvironmentInstallationManifest } from './environment-bootstrap-ipc.js'
 import { createBackendForkOptions } from './backend-fork-options.js'
 import { resolveDevBetterSqlite3Binding } from './dev-native-binding.js'
@@ -1018,12 +1018,12 @@ if (!hasSingleInstanceLock) {
     installManagedBrowserFocusAggregation(mainWindow)
     initAutoUpdater({
       mainWindow,
-      getBackendBaseUrl: () => backendBootstrap?.backendUrl ?? null,
+      readActivity: () => readPrimaryEnvironmentActivity(environmentCredentials),
       prepareQuitForUpdate,
       quiesceHook: externalChromeUpdateQuiesceHook,
     })
     sleepBlockerService = new SleepBlockerService({
-      getBackendBaseUrl: () => backendBootstrap?.backendUrl ?? null,
+      readActivity: () => readPrimaryEnvironmentActivity(environmentCredentials),
       onStatusChange: (status) => {
         sendSleepBlockerStatusToWindow(mainWindow, status)
       },
@@ -1668,8 +1668,8 @@ function buildBackendBootstrap(
   secureControlToken: string,
 ): BackendBootstrap {
   return {
-    backendUrl: `http://127.0.0.1:${port}`,
-    backendWsUrl: `ws://127.0.0.1:${port}`,
+    backendUrl: process.env.FORGE_PUBLIC_URL ?? `http://127.0.0.1:${port}`,
+    backendWsUrl: (process.env.FORGE_PUBLIC_URL ?? `http://127.0.0.1:${port}`).replace(/^http/, 'ws'),
     version: app.getVersion(),
     platform: process.platform,
     appRuntime: app.isPackaged ? 'installed' : 'development',

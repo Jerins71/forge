@@ -10,7 +10,7 @@ const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export interface EnvironmentCredentialError { code: 'INVALID_INPUT' | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'IDENTITY_MISMATCH' | 'UNAVAILABLE' | 'INTERNAL'; message: string; retryable: boolean }
 export type EnvironmentCredentialResult<T> = { ok: true; value: T } | { ok: false; error: EnvironmentCredentialError };
-export interface DesktopEnvironmentTarget { environmentId: string; baseUrl: string; label: string; primary: boolean }
+export interface DesktopEnvironmentTarget { environmentId: string; baseUrl: string; label: string; primary: boolean; deviceSessionId:string; deviceName:string; scopes:Scope[]; pairedAt:string; expiresAt:string }
 export interface EnvironmentPairInput { baseUrl: string; environmentId: string; credential: PairingExchange['credential']; deviceName: string; requestedScopes: Scope[] }
 export interface EnvironmentHttpInput { environmentId: string; path: string; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; headers?: Record<string, string>; body?: string }
 export interface EnvironmentArtifactInput { environmentId: string; artifactId: string; range?: string }
@@ -35,13 +35,13 @@ export interface EnvironmentSafeStorage {
   encryptStringAsync?(plainText: string): Promise<Buffer>;
   decryptStringAsync?(encrypted: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>;
 }
-export interface EnvironmentPersistenceInput { environmentId: string; deviceSessionId: string; key: 'shell' | 'pending' }
+export interface EnvironmentPersistenceInput { environmentId: string; deviceSessionId?: string; key: 'shell' | 'pending' }
 export interface EnvironmentPersistenceBridge {
   load(input: EnvironmentPersistenceInput): Promise<EnvironmentCredentialResult<string | null>>;
   save(input: EnvironmentPersistenceInput & {value: string}): Promise<EnvironmentCredentialResult<void>>;
   clear(input: {environmentId: string}): Promise<EnvironmentCredentialResult<void>>;
 }
-interface StoredTarget extends DesktopEnvironmentTarget { bearerToken: string; deviceSessionId: string }
+interface StoredTarget extends DesktopEnvironmentTarget { bearerToken: string }
 class CredentialFailure extends Error {
   constructor(readonly code: EnvironmentCredentialError['code'], message: string, readonly retryable = false) { super(message); }
 }
@@ -60,7 +60,7 @@ async function boundedBytes(response: Response, maximum = MAX_ARTIFACT_BYTES): P
   finally { reader.releaseLock(); }
   const result = new Uint8Array(bytes); let offset = 0; for (const part of parts) { result.set(part, offset); offset += part.length; } return result;
 }
-function publicTarget(value: StoredTarget): DesktopEnvironmentTarget { return { environmentId: value.environmentId, baseUrl: value.baseUrl, label: value.label, primary: value.primary }; }
+function publicTarget(value: StoredTarget): DesktopEnvironmentTarget { return { environmentId: value.environmentId, baseUrl: value.baseUrl, label: value.label, primary: value.primary, deviceSessionId:value.deviceSessionId,deviceName:value.deviceName,scopes:[...value.scopes],pairedAt:value.pairedAt,expiresAt:value.expiresAt }; }
 export function createEnvironmentCredentialService(options: { storePath: string; safeStorage: EnvironmentSafeStorage; fetch?: typeof fetch }) {
   const fetcher = options.fetch ?? fetch;
   let targets: StoredTarget[] | null = null;
@@ -84,7 +84,7 @@ export function createEnvironmentCredentialService(options: { storePath: string;
       const s = options.safeStorage;
       const plain = s.decryptStringAsync ? (await s.decryptStringAsync(encrypted)).result : s.decryptString?.(encrypted);
       const decoded = JSON.parse(plain ?? '') as StoredTarget[];
-      if (!Array.isArray(decoded) || decoded.some(t => !UUID.test(t.environmentId) || !/^[A-Za-z0-9_-]{43}$/.test(t.bearerToken) || targetUrl(t.baseUrl) !== t.baseUrl)) fail('UNAVAILABLE', 'Environment credential storage is invalid');
+      if (!Array.isArray(decoded) || decoded.some(t => !UUID.test(t.environmentId) || typeof t.label!=='string' || t.label.length<1 || t.label.length>80 || !UUID.test(t.deviceSessionId) || !Array.isArray(t.scopes) || t.scopes.length<1 || t.scopes.length>7 || typeof t.deviceName!=='string' || t.deviceName.length>80 || !Number.isFinite(Date.parse(t.pairedAt)) || !Number.isFinite(Date.parse(t.expiresAt)) || !/^[A-Za-z0-9_-]{43}$/.test(t.bearerToken) || targetUrl(t.baseUrl) !== t.baseUrl)) fail('UNAVAILABLE', 'Environment credential storage is invalid');
       targets = decoded;
     } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') targets = []; else if (error instanceof CredentialFailure) throw error; else fail('UNAVAILABLE', 'Environment credentials could not be decrypted'); }
     return targets!;
@@ -116,7 +116,7 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     if (!response.ok) fail('UNAVAILABLE', 'Environment request was rejected');
     try { return JSON.parse(new TextDecoder().decode(await boundedBytes(response, 1_048_576))); } catch (e) { if (e instanceof CredentialFailure) throw e; return fail('UNAVAILABLE', 'Invalid environment response'); }
   }
-  async function pinned(t: StoredTarget) {
+  async function pinned(t: Pick<StoredTarget,'environmentId'|'baseUrl'>) {
     const response = await fetcher(t.baseUrl + '/api/v2/environment', { redirect: 'error', signal: AbortSignal.timeout(10_000) });
     const environment = await checkedJson(response) as EnvironmentDescriptor;
     if (environment.environmentId !== t.environmentId) { await clearRuntime(t.environmentId); fail('IDENTITY_MISMATCH', 'Environment identity changed; explicitly pair the replacement'); }
@@ -127,9 +127,10 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     try { return { ok: true, value: await fn() }; } catch (error) { return { ok: false, error: error instanceof CredentialFailure ? { code: error.code, message: error.message, retryable: error.retryable } : { code: 'INTERNAL', message: 'Environment credential operation failed', retryable: false } }; }
   }
   async function pairInternal(input: EnvironmentPairInput, primary = false) {
+    if (!input || typeof input.baseUrl !== 'string') return fail('INVALID_INPUT','Invalid pairing input');
     const baseUrl = targetUrl(input.baseUrl); await load();
     if (!UUID.test(input.environmentId) || typeof input.deviceName !== 'string' || input.deviceName.length < 1 || input.deviceName.length > 80 || !Array.isArray(input.requestedScopes)) fail('INVALID_INPUT', 'Invalid pairing input');
-    const temporary: StoredTarget = { environmentId: input.environmentId, baseUrl, label: '', primary, bearerToken: '', deviceSessionId: '' };
+    const temporary: StoredTarget = { environmentId: input.environmentId, baseUrl, label: '', primary, bearerToken: '', deviceSessionId: '',deviceName:input.deviceName,scopes:input.requestedScopes,pairedAt:'',expiresAt:'' };
     await pinned(temporary);
     const post = async (path: string, value: unknown) => checkedJson(await fetcher(baseUrl + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'app://forge' }, body: JSON.stringify(value), redirect: 'error', signal: AbortSignal.timeout(10_000) }));
     const challenge = await post('/api/v2/access/challenge', {}) as { challengeId: string; nonce: string };
@@ -138,10 +139,10 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     const digest = createHash('sha256').update(canonical(fields)).digest('hex');
     const proof = sign('sha256', Buffer.from(`forge-pair-v1\n${fields.environmentId}\n${fields.challengeId}\n${fields.nonce}\n${digest}`), { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url');
     const result = await post('/api/v2/access/exchange', { ...fields, proof }) as { environment: EnvironmentDescriptor; deviceSession: DeviceSession; bearerToken: string };
-    if (result.environment.environmentId !== input.environmentId || !/^[A-Za-z0-9_-]{43}$/.test(result.bearerToken)) fail('IDENTITY_MISMATCH', 'Pairing returned a different environment');
+    if (result.environment.environmentId !== input.environmentId || typeof result.environment.label!=='string' || result.environment.label.length<1 || result.environment.label.length>80 || !Array.isArray(result.deviceSession.scopes) || result.deviceSession.scopes.length<1 || result.deviceSession.scopes.length>7 || typeof result.deviceSession.deviceName!=='string' || result.deviceSession.deviceName.length>80 || !Number.isFinite(Date.parse(result.deviceSession.createdAt)) || !Number.isFinite(Date.parse(result.deviceSession.expiresAt)) || !UUID.test(result.deviceSession.deviceSessionId) || !/^[A-Za-z0-9_-]{43}$/.test(result.bearerToken)) fail('IDENTITY_MISMATCH', 'Pairing returned a different environment');
     const previous = targets!;
     targets = previous.filter(t => t.environmentId !== input.environmentId).map(t => primary ? { ...t, primary: false } : t);
-    targets.push({ ...temporary, label: result.environment.label, bearerToken: result.bearerToken, deviceSessionId: result.deviceSession.deviceSessionId, primary: primary || previous.some(t => t.environmentId === input.environmentId && t.primary) });
+    targets.push({ ...temporary, label: result.environment.label, bearerToken: result.bearerToken, deviceSessionId: result.deviceSession.deviceSessionId,deviceName:result.deviceSession.deviceName,scopes:result.deviceSession.scopes,pairedAt:result.deviceSession.createdAt,expiresAt:result.deviceSession.expiresAt, primary: primary || previous.some(t => t.environmentId === input.environmentId && t.primary) });
     try { await save(); await clearRuntime(input.environmentId); } catch (e) { targets = previous; throw e; }
     return { environment: result.environment, deviceSession: result.deviceSession };
   }
@@ -174,9 +175,9 @@ export function createEnvironmentCredentialService(options: { storePath: string;
   }
   async function clearRuntime(environmentId: string) { return runtimeMutation(async () => { const data = await loadRuntime(); for (const key of Object.keys(data)) if (key.startsWith(environmentId + '/')) delete data[key]; await encryptFile(runtimePath,data); }); }
   async function persistenceKey(input: EnvironmentPersistenceInput) {
-    if (!input || !['shell','pending'].includes(input.key) || !UUID.test(input.deviceSessionId)) return fail('INVALID_INPUT', 'Invalid runtime persistence scope');
-    const t = await target(input.environmentId); if (t.deviceSessionId !== input.deviceSessionId) return fail('UNAUTHENTICATED', 'Runtime persistence belongs to another device session');
-    return input.environmentId + '/' + input.deviceSessionId + '/' + input.key;
+    if (!input || !['shell','pending'].includes(input.key) || input.deviceSessionId !== undefined && !UUID.test(input.deviceSessionId)) return fail('INVALID_INPUT', 'Invalid runtime persistence scope');
+    const t = await target(input.environmentId); if (input.deviceSessionId !== undefined && t.deviceSessionId !== input.deviceSessionId) return fail('UNAUTHENTICATED', 'Runtime persistence belongs to another device session');
+    return input.environmentId + '/' + t.deviceSessionId + '/' + input.key;
   }
   const persistence: EnvironmentPersistenceBridge = {
     load: input => envelope(() => runtimeMutation(async () => { const key = await persistenceKey(input); return (await loadRuntime())[key] ?? null; })),
@@ -190,12 +191,12 @@ export function createEnvironmentCredentialService(options: { storePath: string;
         const value = pending.pop();
         if (typeof value === 'string' && tokens.some(token => value.includes(token))) return fail('INVALID_INPUT', 'Credentials cannot enter runtime persistence');
         if (value && typeof value === 'object') for (const [name, child] of Object.entries(value)) {
-          if (['bearerToken','csrfToken','ticket','credential','secret','apiKey','authorization'].includes(name)) return fail('INVALID_INPUT', 'Credentials cannot enter runtime persistence');
+          if (['bearertoken','csrftoken','ticket','credential','secret','apikey','authorization'].includes(name.toLowerCase().replaceAll('_','').replaceAll('-',''))) return fail('INVALID_INPUT', 'Credentials cannot enter runtime persistence');
           if (name === 'commandId' && typeof child === 'string') commands.add(child); pending.push(child);
         }
       }
       if (input.key === 'pending' && commands.size > 100) return fail('INVALID_INPUT', 'Pending command count exceeds 100');
-      const data = await loadRuntime(); data[key] = input.value; await encryptFile(runtimePath,data);
+      const data = await loadRuntime(); const previous = data[key]; data[key] = input.value; try {await encryptFile(runtimePath,data);} catch(e) {if(previous===undefined)delete data[key];else data[key]=previous;throw e;}
     })),
     clear: input => envelope(async () => { if (!input || !UUID.test(input.environmentId)) return fail('INVALID_INPUT', 'Invalid environment identity'); await clearRuntime(input.environmentId); }),
   };
@@ -233,7 +234,7 @@ export function createEnvironmentCredentialService(options: { storePath: string;
       const parsed = new URL(url); const match = parsed.pathname.match(/^\/([^/]+)\/([^/]+)$/);
       if (parsed.protocol !== 'forge-artifact:' || parsed.hostname !== 'artifact' || !match || parsed.search || parsed.hash) return new Response(null, { status: 400 });
       const response = await artifactResponse({ environmentId: match[1]!, artifactId: match[2]!, range });
-      const bytes = await boundedBytes(response); const headers = safeHeaders(response); headers['Cache-Control'] = 'no-store';
+      const bytes = await boundedBytes(response); const headers = safeHeaders(response); headers['Cache-Control'] = 'no-store'; headers['X-Content-Type-Options']='nosniff'; if(!headers['content-security-policy'] && response.headers.get('content-type')?.includes('text/html'))headers['Content-Security-Policy']="sandbox; default-src 'none'";
       return new Response(Buffer.from(bytes), { status: response.status, headers });
     } catch { return new Response(null, { status: 403 }); }
   } };
@@ -276,4 +277,18 @@ export function createEnvironmentCredentialsBridge(ipc: { invoke(channel: string
 
 export function createEnvironmentPersistenceBridge(ipc: {invoke(channel:string,input:unknown):Promise<unknown>}): EnvironmentPersistenceBridge {
   return {load:input=>ipc.invoke(ENVIRONMENT_PERSISTENCE_CHANNEL,{operation:'load',input}) as Promise<EnvironmentCredentialResult<string|null>>,save:input=>ipc.invoke(ENVIRONMENT_PERSISTENCE_CHANNEL,{operation:'save',input}) as Promise<EnvironmentCredentialResult<void>>,clear:input=>ipc.invoke(ENVIRONMENT_PERSISTENCE_CHANNEL,{operation:'clear',input}) as Promise<EnvironmentCredentialResult<void>>};
+}
+
+/** Normalized main-process activity state, obtained only through the paired primary transport. */
+export interface EnvironmentActivity {activeSessions:number;activeWorkers:number;hasActivity:boolean}
+export async function readPrimaryEnvironmentActivity(credentials: Pick<EnvironmentCredentialsBridge,'primary'|'request'>):Promise<EnvironmentActivity|null> {
+  try {
+    const primary=await credentials.primary();if(!primary.ok||!primary.value)return null;
+    const response=await credentials.request({environmentId:primary.value.environmentId,path:'/api/activity',method:'GET'});
+    if(!response.ok||response.value.status!==200)return null;
+    const body=JSON.parse(response.value.body) as Record<string,unknown>;
+    const activeSessions=body.activeSessions,activeWorkers=body.activeWorkers;
+    if(typeof activeSessions!=='number'||!Number.isSafeInteger(activeSessions)||activeSessions<0||typeof activeWorkers!=='number'||!Number.isSafeInteger(activeWorkers)||activeWorkers<0||typeof body.hasActiveSessions!=='boolean'||typeof body.hasActiveWorkers!=='boolean')return null;
+    return {activeSessions,activeWorkers,hasActivity:body.hasActiveSessions||body.hasActiveWorkers||activeSessions>0||activeWorkers>0};
+  } catch {return null;}
 }

@@ -5,6 +5,7 @@ import {
   type UpdateDownloadedEvent,
   type UpdateInfo,
 } from 'electron-updater'
+import type {EnvironmentActivity} from './environment-credentials-ipc.js'
 import { readSettings, writeSettings } from './electron-settings.js'
 import { sendToRendererWindow } from './renderer-ipc.js'
 
@@ -23,15 +24,6 @@ const GITHUB_FEED = {
   repo: 'forge',
 }
 
-type BackendHealthResponse = {
-  ok?: boolean
-  swarm?: {
-    activeSessions?: number
-    activeWorkers?: number
-    hasActiveSessions?: boolean
-    hasActiveWorkers?: boolean
-  }
-}
 
 export type UpdateStatus =
   | { type: 'checking' }
@@ -52,7 +44,8 @@ export interface UpdateQuiesceHook {
 
 export function initAutoUpdater(options: {
   mainWindow: BrowserWindow
-  getBackendBaseUrl: () => string | null
+  getBackendBaseUrl?: () => string | null
+  readActivity?: () => Promise<EnvironmentActivity | null>
   prepareQuitForUpdate: () => Promise<void>
   quiesceHook?: UpdateQuiesceHook
   quiesceTimeoutMs?: number
@@ -200,7 +193,7 @@ export function initAutoUpdater(options: {
     restartPromptOpen = true
 
     try {
-      const backendHasActiveSessions = await hasActiveSessions(options.getBackendBaseUrl)
+      const backendHasActiveSessions = await hasActiveSessions(options.readActivity ?? (async () => null))
       if (backendHasActiveSessions) {
         pendingDownloadedUpdate = event
         showDesktopNotification('Forge update ready', 'An update has been downloaded. Finish active agent runs, then restart Forge to install it.')
@@ -386,29 +379,9 @@ function setWindowProgress(mainWindow: BrowserWindow, value: number): void {
   }
 }
 
-async function hasActiveSessions(getBackendBaseUrl: () => string | null): Promise<boolean> {
-  const backendBaseUrl = getBackendBaseUrl()
-  if (!backendBaseUrl) {
-    return false
-  }
-
-  try {
-    const response = await fetch(new URL('/api/health', backendBaseUrl), {
-      signal: AbortSignal.timeout(5_000),
-    })
-
-    if (!response.ok) {
-      return false
-    }
-
-    const payload = (await response.json()) as BackendHealthResponse
-    const activeSessions = payload.swarm?.activeSessions ?? 0
-    const activeWorkers = payload.swarm?.activeWorkers ?? 0
-    return Boolean(payload.swarm?.hasActiveSessions) || Boolean(payload.swarm?.hasActiveWorkers) || activeSessions > 0 || activeWorkers > 0
-  } catch (error) {
-    console.warn('[auto-update] Backend activity probe failed', formatError(error))
-    return false
-  }
+export async function hasActiveSessions(readActivity: () => Promise<EnvironmentActivity | null>): Promise<boolean> {
+  try { const activity = await readActivity(); return activity === null || activity.hasActivity; }
+  catch { return true; }
 }
 
 function showDesktopNotification(title: string, body: string): void {

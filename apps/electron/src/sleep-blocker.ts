@@ -1,10 +1,9 @@
-import { net, powerSaveBlocker } from 'electron'
+import { powerSaveBlocker } from 'electron'
+import type {EnvironmentActivity} from './environment-credentials-ipc.js'
 import { readSettings, writeSettings } from './electron-settings.js'
 
 const DEFAULT_GRACE_PERIOD_MINUTES = 30
-const HEALTH_POLL_INTERVAL_MS = 5_000
-const HEALTH_REQUEST_TIMEOUT_MS = 5_000
-const MAX_CONSECUTIVE_FAILURES = 3
+const ACTIVITY_POLL_INTERVAL_MS = 5_000
 
 const EMPTY_ACTIVITY = {
   activeSessions: 0,
@@ -12,21 +11,7 @@ const EMPTY_ACTIVITY = {
   hasActivity: false,
 }
 
-type BackendHealthResponse = {
-  ok?: boolean
-  swarm?: {
-    activeSessions?: number
-    activeWorkers?: number
-    hasActiveSessions?: boolean
-    hasActiveWorkers?: boolean
-  }
-}
-
-type ActivitySnapshot = {
-  activeSessions: number
-  activeWorkers: number
-  hasActivity: boolean
-}
+type ActivitySnapshot = EnvironmentActivity
 
 export type SleepBlockerSettingsPatch = {
   enabled?: boolean
@@ -48,20 +33,20 @@ export class SleepBlockerService {
   private graceTimer: NodeJS.Timeout | null = null
   private pollTimer: NodeJS.Timeout | null = null
   private graceStartedAt: number | null = null
-  private consecutiveFailures = 0
   private lastActivity: ActivitySnapshot = { ...EMPTY_ACTIVITY }
   private pollInFlight = false
   private disposed = false
   private lastEmittedStatusJson: string | null = null
 
-  private readonly getBackendBaseUrl: () => string | null
+  private readonly readActivity: () => Promise<EnvironmentActivity | null>
   private readonly onStatusChange: (status: SleepBlockerStatus) => void
 
   constructor(options: {
-    getBackendBaseUrl: () => string | null
+    getBackendBaseUrl?: () => string | null
+    readActivity?: () => Promise<EnvironmentActivity | null>
     onStatusChange: (status: SleepBlockerStatus) => void
   }) {
-    this.getBackendBaseUrl = options.getBackendBaseUrl
+    this.readActivity = options.readActivity ?? (async () => null)
     this.onStatusChange = options.onStatusChange
   }
 
@@ -76,7 +61,7 @@ export class SleepBlockerService {
     if (this.enabled) {
       this.startPolling()
       this.emitStatusIfChanged()
-      void this.pollHealth()
+      void this.pollActivity()
       return
     }
 
@@ -101,7 +86,6 @@ export class SleepBlockerService {
     writeSettings(settings)
 
     if (!this.enabled) {
-      this.consecutiveFailures = 0
       this.lastActivity = { ...EMPTY_ACTIVITY }
       this.stopPolling()
       this.clearGraceTimer()
@@ -113,7 +97,7 @@ export class SleepBlockerService {
     this.startPolling()
     this.refreshGraceTimerAfterSettingsChange()
     this.emitStatusIfChanged()
-    void this.pollHealth()
+    void this.pollActivity()
     return this.getStatus()
   }
 
@@ -143,8 +127,8 @@ export class SleepBlockerService {
     }
 
     this.pollTimer = setInterval(() => {
-      void this.pollHealth()
-    }, HEALTH_POLL_INTERVAL_MS)
+      void this.pollActivity()
+    }, ACTIVITY_POLL_INTERVAL_MS)
     this.pollTimer.unref?.()
   }
 
@@ -157,48 +141,19 @@ export class SleepBlockerService {
     this.pollTimer = null
   }
 
-  private async pollHealth(): Promise<void> {
-    if (!this.enabled || this.disposed || this.pollInFlight) {
-      return
-    }
-
-    const backendBaseUrl = this.getBackendBaseUrl()
-    if (!backendBaseUrl) {
-      this.handlePollFailure(new Error('Backend base URL is not available yet'))
-      return
-    }
-
+  private async pollActivity(): Promise<void> {
+    if (!this.enabled || this.disposed || this.pollInFlight) return
     this.pollInFlight = true
-
     try {
-      const response = await net.fetch(new URL('/api/health', backendBaseUrl).toString(), {
-        signal: AbortSignal.timeout(HEALTH_REQUEST_TIMEOUT_MS),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Health check returned HTTP ${response.status}`)
-      }
-
-      const payload = (await response.json()) as BackendHealthResponse
-
-      if (!this.enabled || this.disposed) {
-        return
-      }
-
-      this.handlePollSuccess(summarizeActivity(payload))
-    } catch (error) {
-      if (!this.enabled || this.disposed) {
-        return
-      }
-
-      this.handlePollFailure(error)
-    } finally {
-      this.pollInFlight = false
-    }
+      const activity = await this.readActivity()
+      if (activity === null || !this.enabled || this.disposed) return
+      this.handlePollSuccess(activity)
+    } catch {
+      // Unknown activity does not replace the last authenticated observation.
+    } finally { this.pollInFlight = false }
   }
 
   private handlePollSuccess(activity: ActivitySnapshot): void {
-    this.consecutiveFailures = 0
     this.lastActivity = activity
 
     if (activity.hasActivity) {
@@ -217,27 +172,6 @@ export class SleepBlockerService {
     this.emitStatusIfChanged()
   }
 
-  private handlePollFailure(error: unknown): void {
-    this.consecutiveFailures += 1
-    this.lastActivity = { ...EMPTY_ACTIVITY }
-    console.warn(
-      `[sleep-blocker] Health check failed (${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`,
-      formatError(error),
-    )
-
-    if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-      this.clearGraceTimer()
-      this.stopBlocker()
-      this.emitStatusIfChanged()
-      return
-    }
-
-    if (this.isBlocking() && this.graceStartedAt === null) {
-      this.startGraceTimer()
-    }
-
-    this.emitStatusIfChanged()
-  }
 
   private startBlocker(): void {
     if (this.isBlocking()) {
@@ -346,10 +280,6 @@ export class SleepBlockerService {
       return `${describeActivity(this.lastActivity)} active. Preventing system sleep.`
     }
 
-    if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-      return `Backend health checks failed ${MAX_CONSECUTIVE_FAILURES} times in a row. Sleep prevention was released.`
-    }
-
     return 'Sleep prevention is enabled and waiting for agent activity.'
   }
 
@@ -366,33 +296,9 @@ export class SleepBlockerService {
   }
 }
 
-function summarizeActivity(payload: BackendHealthResponse): ActivitySnapshot {
-  const activeSessions = normalizeCount(payload.swarm?.activeSessions)
-  const activeWorkers = normalizeCount(payload.swarm?.activeWorkers)
-  const hasActivity =
-    payload.swarm?.hasActiveSessions === true ||
-    payload.swarm?.hasActiveWorkers === true ||
-    activeSessions > 0 ||
-    activeWorkers > 0
-
-  return {
-    activeSessions,
-    activeWorkers,
-    hasActivity,
-  }
-}
-
 function normalizeGracePeriodMinutes(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback
-  }
-
-  return Math.max(0, Math.round(value))
-}
-
-function normalizeCount(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return 0
   }
 
   return Math.max(0, Math.round(value))
@@ -435,8 +341,4 @@ function formatDuration(durationMs: number): string {
   }
 
   return `${hours}h ${minutes}m`
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
