@@ -1,321 +1,127 @@
-/**
- * Per-origin selector store (WP-U1).
- *
- * Wraps ONE {@link ManagerWsClient} — the existing transport + event reducer —
- * and adds a per-(origin, selector) notification layer on top of the client's
- * whole-state `subscribe`.  This is the fix for the whole-snapshot re-render
- * finding: today every WS event replaces `ManagerWsState` and notifies every
- * React consumer (`ws-client.ts` `updateState`), so a worker-status tick
- * re-renders sidebar + transcript + header.  Here, a subscriber registers under
- * a `selectorKey`; on each state change the store recomputes only the selectors
- * that currently have subscribers and notifies only the sets whose selected
- * value identity changed.
- *
- * Origin isolation is structural: each origin has its own `OriginStore`
- * instance with its own client and its own listener sets, so an event on origin
- * A can never wake origin B's subscribers.  Within an origin, per-selector
- * memoization means a slice whose value is unchanged is not notified.
- *
- * Ingestion is transport-agnostic (requirement 7): {@link ingest} hydrates the
- * store from a `snapshot` or a single `event` with no socket, no `window`, and
- * no reload side effects. A reconnect re-hydrates WS state in place (the client
- * re-subscribes on transport open) rather than reloading the page.
- *
- * @see apps/ui/src/lib/connection-health-store.ts (useSyncExternalStore precedent)
- */
-
 import type { ServerEvent } from '@forge/protocol'
-import { ManagerWsClient } from '@/lib/ws-client'
-import type { ConversationSnapshotCache } from '@/lib/ws-client/conversation-snapshot-cache'
-import type { ManagerWsState } from '@/lib/ws-state'
-import { handleConversationEvent } from '@/lib/ws-client/event-handlers/conversation-event-handlers'
 import {
-  reduceSessionAttentionSnapshot,
-  reduceSessionAttentionUpdate,
-} from '@/lib/ws-client/event-handlers/session-attention-event-handlers'
-import { reduceAgentStatus } from '@/lib/ws-client/snapshot-reducers'
-import { createBuilderSettingsApiClient, type SettingsApiClient } from '@/components/settings/settings-api-client'
+  KeyedSelectorStore,
+  type EnvironmentClient,
+} from '@forge/client-runtime'
+import { ManagerWsClient } from '@/lib/ws-client'
+import type { ManagerWsState } from '@/lib/ws-state'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
+import { createBuilderSettingsTarget } from '@/components/settings/settings-target'
+import { handleConversationEvent } from '@/lib/ws-client/event-handlers/conversation-event-handlers'
 import {
   createInitialOriginMetaState,
   type OriginMetaState,
 } from './origin-meta'
 import type { OriginId } from './origin-key'
-
-/** A pure selector over an origin's domain state. */
 export type OriginSelector<T> = (state: ManagerWsState) => T
-
-type Unsubscribe = () => void
-
-/**
- * A registered per-selector subscription.  We memoize the last selected value
- * so we only notify when the value identity (per `equalityFn`) changes.
- */
-interface SliceSubscription<T = unknown> {
-  selector: OriginSelector<T>
-  equalityFn: (a: T, b: T) => boolean
-  lastValue: T
-  listeners: Set<() => void>
-}
-
 export interface OriginStoreOptions {
-  originId: OriginId
-  /** WebSocket URL for this origin's backend. */
-  wsUrl: string
-  /**
-   * Optional explicit HTTP client.  When omitted, a same-origin Builder client
-   * derived from `wsUrl` is used.
-   */
+  environmentClient: EnvironmentClient
   httpClient?: SettingsApiClient
-  /**
-   * When `true`, do NOT start a live WebSocket connection.  Used by tests and
-   * by transport-agnostic ingestion so a second origin can be exercised with
-   * no real socket.  Defaults to `false`.
-   */
-  offline?: boolean
-  /** Shared application-owned presentation cache. */
-  conversationSnapshotCache?: ConversationSnapshotCache
 }
-
+/** React/legacy projection wrapper. Runtime owns every connection and authoritative store. */
 export class OriginStore {
   readonly originId: OriginId
   readonly wsUrl: string
-
   private readonly client: ManagerWsClient
+  private readonly state: KeyedSelectorStore<ManagerWsState>
+  private readonly meta = new KeyedSelectorStore<OriginMetaState>(
+    createInitialOriginMetaState(),
+  )
+  private readonly detach: () => void
+  private readonly detachConnection: () => void
   private readonly httpClient: SettingsApiClient
-  private readonly conversationSnapshotCache?: ConversationSnapshotCache
-
-  private state: ManagerWsState
-  private meta: OriginMetaState
-
-  /** Per-selector-key subscriptions (domain slices). */
-  private readonly slices = new Map<string, SliceSubscription>()
-  /** Meta-slice listeners (separate from domain state). */
-  private readonly metaListeners = new Set<() => void>()
-
-  private readonly detachClient: Unsubscribe
-  private transportStarted = false
-
-  constructor(options: OriginStoreOptions) {
-    this.originId = options.originId
-    this.wsUrl = options.wsUrl
-    this.conversationSnapshotCache = options.conversationSnapshotCache
-
-    this.client = new ManagerWsClient(options.wsUrl, null, {
-      originId: options.originId,
-      conversationSnapshotCache: options.conversationSnapshotCache,
+  constructor(readonly options: OriginStoreOptions) {
+    const environment = options.environmentClient
+    this.originId = environment.environmentId
+    this.wsUrl = ''
+    this.client = new ManagerWsClient('', null, {
+      environmentClient: environment,
     })
-    this.state = this.client.getState()
-    this.meta = createInitialOriginMetaState()
-
-    this.httpClient = options.httpClient ?? defaultHttpClientFor(options)
-
-    // Bridge the client's whole-state notifications into the per-slice layer.
-    // The client remains the single source of `ManagerWsState`; the store only
-    // fans changes out to the subscribers whose selected value actually moved.
-    this.detachClient = this.client.subscribe((next) => {
-      this.applyState(next)
-    })
-
-    if (!options.offline) {
-      this.startTransport()
-    }
-  }
-
-  /**
-   * Open the live WebSocket for this origin. Idempotent.
-   */
-  startTransport(): void {
-    if (this.transportStarted) return
-    this.transportStarted = true
-    this.patchMeta({ connectionStatus: 'connecting' })
-    this.client.start()
-  }
-
-  /** Whether {@link startTransport} has been called on this store. */
-  hasStartedTransport(): boolean {
-    return this.transportStarted
-  }
-
-  // -----------------------------------------------------------------------
-  // Snapshots
-  // -----------------------------------------------------------------------
-
-  /** Current domain snapshot (stable identity between changes). */
-  getSnapshot(): ManagerWsState {
-    return this.state
-  }
-
-  /** Current meta snapshot (stable identity between changes). */
-  getMetaSnapshot(): OriginMetaState {
-    return this.meta
-  }
-
-  // -----------------------------------------------------------------------
-  // Command / request facade (requirement 6) + HTTP (requirement 9)
-  // -----------------------------------------------------------------------
-
-  /**
-   * The command/request facade for this origin.  Optimistic patches applied by
-   * client methods land only on this origin's store.  Per-client internals
-   * (RequestDispatcher / BootstrapBuffer / SessionWorkerCache) stay per-client.
-   */
-  getClient(): ManagerWsClient {
-    return this.client
-  }
-
-  /**
-   * Per-origin HTTP client.  Feature APIs take this client, never a raw
-   * `wsUrl`.
-   */
-  getHttpClient(): SettingsApiClient {
-    return this.httpClient
-  }
-
-  // -----------------------------------------------------------------------
-  // Subscriptions — per (origin, selector)
-  // -----------------------------------------------------------------------
-
-  /**
-   * Subscribe to a domain slice under a caller-provided `selectorKey`.  Two
-   * subscribers sharing a key share one memoized selection (so equal selectors
-   * do not each recompute).  The listener fires only when the selected value's
-   * identity changes per `equalityFn` (default `Object.is`).
-   */
-  subscribeSlice<T>(
-    selectorKey: string,
-    selector: OriginSelector<T>,
-    listener: () => void,
-    equalityFn: (a: T, b: T) => boolean = Object.is,
-  ): Unsubscribe {
-    let entry = this.slices.get(selectorKey) as SliceSubscription<T> | undefined
-    if (!entry) {
-      entry = {
-        selector,
-        equalityFn: equalityFn as (a: T, b: T) => boolean,
-        lastValue: selector(this.state),
-        listeners: new Set(),
-      }
-      this.slices.set(selectorKey, entry as SliceSubscription)
-    }
-    entry.listeners.add(listener)
-
-    return () => {
-      const current = this.slices.get(selectorKey)
-      if (!current) return
-      current.listeners.delete(listener)
-      if (current.listeners.size === 0) {
-        this.slices.delete(selectorKey)
-      }
-    }
-  }
-
-  /** Read a slice's current value (for `useSyncExternalStore` getSnapshot). */
-  readSlice<T>(selector: OriginSelector<T>): T {
-    return selector(this.state)
-  }
-
-  /** Subscribe to the origin meta slice (requirement 5). */
-  subscribeMeta(listener: () => void): Unsubscribe {
-    this.metaListeners.add(listener)
-    return () => {
-      this.metaListeners.delete(listener)
-    }
-  }
-
-  // -----------------------------------------------------------------------
-  // Transport-agnostic ingestion (requirement 7)
-  // -----------------------------------------------------------------------
-
-  /**
-   * Hydrate the store from a `snapshot` or a single domain `event` with no
-   * socket.  Used by tests and by non-WebSocket transports.  This
-   * routes conversation and agent-status events through the SAME pure reducers
-   * the live client uses, so id-keyed bootstrap-merge
-   * behavior stays in one place (see Coordination-with-WP-P1 in the store dir
-   * README).  There is no `window` access and no reload side effect here.
-   */
-  ingest(input: { type: 'snapshot'; state: Partial<ManagerWsState> } | { type: 'event'; event: ServerEvent }): void {
-    if (input.type === 'snapshot') {
-      this.applyState({ ...this.state, ...input.state })
-      return
-    }
-
-    if (input.event.type === 'agent_status') {
-      this.applyState(reduceAgentStatus({ state: this.state, event: input.event }).nextState)
-      return
-    }
-
-    if (input.event.type === 'session_attention_snapshot') {
-      this.applyState({ ...this.state, ...reduceSessionAttentionSnapshot(input.event) })
-      return
-    }
-
-    if (input.event.type === 'session_attention_update') {
-      const patch = reduceSessionAttentionUpdate(this.state, input.event)
-      if (patch) this.applyState({ ...this.state, ...patch })
-      return
-    }
-
-    // Route the event through the shared conversation reducer with an
-    // origin-scoped context. Other event families are handled by the live
-    // client and remain outside transport-agnostic ingestion for now.
-    handleConversationEvent(input.event, {
-      state: this.state,
-      updateState: (patch) => this.applyState({ ...this.state, ...patch }),
-    })
-  }
-
-  /** Write the origin meta slice. */
-  patchMeta(patch: Partial<OriginMetaState>): void {
-    const next = { ...this.meta, ...patch }
-    this.meta = next
-    for (const listener of this.metaListeners) listener()
-  }
-
-  // -----------------------------------------------------------------------
-  // Lifecycle
-  // -----------------------------------------------------------------------
-
-  destroy(): void {
-    this.conversationSnapshotCache?.evictOrigin(this.originId)
-    this.detachClient()
-    this.client.destroy()
-    this.slices.clear()
-    this.metaListeners.clear()
-  }
-
-  // -----------------------------------------------------------------------
-  // Internals
-  // -----------------------------------------------------------------------
-
-  /**
-   * Adopt a new whole-state object and notify only the slices whose selected
-   * value moved.  Mirrors the connection status into the meta slice from the
-   * domain `connected` flag so meta subscribers see connect/disconnect without
-   * the connection manager wiring (local origin convenience).
-   */
-  private applyState(next: ManagerWsState): void {
-    if (next === this.state) return
-    const previous = this.state
-    this.state = next
-
-    for (const entry of this.slices.values()) {
-      const value = entry.selector(next)
-      if (!entry.equalityFn(entry.lastValue, value)) {
-        entry.lastValue = value
-        for (const listener of entry.listeners) listener()
-      }
-    }
-
-    if (previous.connected !== next.connected) {
+    this.state = new KeyedSelectorStore(this.client.getState())
+    this.detach = this.client.subscribe((next) => this.state.set(next))
+    const updateConnection = () => {
+      const c = environment.connection.getSnapshot()
       this.patchMeta({
-        connectionStatus: next.connected ? 'connected' : 'reconnecting',
-        lastError: next.connected ? null : this.meta.lastError,
+        connectionStatus:
+          c.phase === 'online'
+            ? 'connected'
+            : c.phase === 'connecting' ||
+                c.phase === 'preparing' ||
+                c.phase === 'synchronizing'
+              ? 'connecting'
+              : c.phase === 'backoff'
+                ? 'reconnecting'
+                : c.phase === 'disabled'
+                  ? 'idle'
+                  : 'disconnected',
+        lastError: c.reason,
       })
     }
+    updateConnection()
+    this.detachConnection = environment.connection.subscribe(
+      (s) => s,
+      updateConnection,
+    )
+    const features = environment.features.settings
+    const target = createBuilderSettingsTarget('')
+    target.label = environment.descriptor()?.label ?? environment.environmentId
+    target.description = 'Settings on this environment'
+    this.httpClient = options.httpClient ?? {
+      target,
+      endpoint: () => {
+        throw new Error('Use the environment authenticated HTTP client')
+      },
+      fetch: (p, i) => features.fetch(p, i),
+      fetchJson: (p, i) => features.fetchJson(p, i),
+      readApiError: (r) => features.readApiError(r),
+    }
   }
-}
-
-function defaultHttpClientFor(options: OriginStoreOptions): SettingsApiClient {
-  return createBuilderSettingsApiClient(options.wsUrl)
+  getSnapshot() {
+    return this.state.getSnapshot()
+  }
+  getMetaSnapshot() {
+    return this.meta.getSnapshot()
+  }
+  getClient() {
+    return this.client
+  }
+  getHttpClient() {
+    return this.httpClient
+  }
+  subscribeSlice<T>(
+    _key: string,
+    selector: OriginSelector<T>,
+    listener: () => void,
+    equal: (a: T, b: T) => boolean = Object.is,
+  ) {
+    return this.state.subscribe(selector, listener, equal)
+  }
+  readSlice<T>(selector: OriginSelector<T>): T {
+    return selector(this.getSnapshot())
+  }
+  subscribeMeta(listener: () => void) {
+    return this.meta.subscribe((s) => s, listener)
+  }
+  patchMeta(patch: Partial<OriginMetaState>) {
+    this.meta.set({ ...this.getMetaSnapshot(), ...patch })
+  }
+  ingest(
+    input:
+      | { type: 'snapshot'; state: Partial<ManagerWsState> }
+      | { type: 'event'; event: ServerEvent },
+  ): void {
+    if (input.type === 'snapshot') {
+      this.client.applyCompatibilitySnapshot(input.state)
+      return
+    }
+    handleConversationEvent(input.event, {
+      state: this.getSnapshot(),
+      updateState: (patch) => this.client.applyCompatibilitySnapshot(patch),
+    })
+  }
+  destroy() {
+    this.detach()
+    this.detachConnection()
+    this.client.destroy()
+  }
 }

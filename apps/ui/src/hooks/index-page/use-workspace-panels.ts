@@ -26,6 +26,10 @@ import {
   useState,
   type MutableRefObject,
 } from 'react'
+import type { EnvironmentClient } from '@forge/client-runtime'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
+import type { SessionRef } from '@forge/protocol/environment-v2'
+import { createEnvironmentPanelContext } from '@/lib/environment-panel-context'
 import { Clock3, FolderOpen, GitBranch, Globe2, MessageSquare, Package, SquareTerminal } from 'lucide-react'
 import type { AgentDescriptor, GitWorktreeSummary } from '@forge/protocol'
 import type { DiffViewerInitialState } from '@/components/diff-viewer/DiffViewerDialog'
@@ -64,6 +68,8 @@ interface BuilderNavigationState {
 
 export interface UseWorkspacePanelsOptions {
   wsUrl: string
+  sessionRef?: SessionRef | null
+  environmentClient?: EnvironmentClient
   activeAgentId: string | null
   activeAgent: AgentDescriptor | null
   activeManagerAgent: AgentDescriptor | null
@@ -79,6 +85,8 @@ export interface UseWorkspacePanelsOptions {
 
 export function useWorkspacePanels({
   wsUrl,
+  sessionRef,
+  environmentClient,
   activeAgentId,
   activeAgent,
   activeManagerAgent,
@@ -91,6 +99,27 @@ export function useWorkspacePanels({
   messageInputRef,
   navigateToRoute,
 }: UseWorkspacePanelsOptions) {
+  const registry = useOptionalEnvironmentContext()?.registry
+  const environment =
+    environmentClient ??
+    (sessionRef ? registry?.get(sessionRef.environmentId) : undefined)
+  const panelEnvironmentId =
+    sessionRef?.environmentId ?? environment?.environmentId
+  const panelSessionId = sessionRef?.sessionId ?? activeAgentId
+  const environmentPanels = useMemo(
+    () =>
+      environment && panelEnvironmentId && panelSessionId
+        ? createEnvironmentPanelContext(environment, {
+            environmentId: panelEnvironmentId,
+            sessionId: panelSessionId,
+          })
+        : null,
+    [environment, panelEnvironmentId, panelSessionId],
+  )
+
+  useEffect(() => () => environmentPanels?.dispose(), [environmentPanels])
+  const qualifiedContextKey =
+    environmentPanels?.queryKey('panels') ?? activeContextKey
   const [diffViewerPresentation, setDiffViewerPresentation] = useState<'modal' | 'inline'>('modal')
 
   const {
@@ -140,7 +169,7 @@ export function useWorkspacePanels({
     clearFileBrowserWorktreeContext: handleClearFileBrowserWorktreeContext,
   } = usePanelState({
     activeAgentId,
-    activeContextKey,
+    activeContextKey: qualifiedContextKey,
     enableKeyboardShortcuts: false,
   })
 
@@ -685,6 +714,7 @@ export function useWorkspacePanels({
   ])
 
   return {
+    environmentPanels,
     // panel state / values
     activeArtifact,
     isArtifactsPanelOpen,
