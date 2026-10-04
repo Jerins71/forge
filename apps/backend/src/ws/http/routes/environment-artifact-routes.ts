@@ -8,8 +8,8 @@ import type { HttpRoute } from "../shared/http-route.js";
 export function createEnvironmentArtifactRoutes({ access, artifactService }: {
   access: Pick<EnvironmentAccessPort, "authenticateHttp" | "registerResource">;
   artifactService: ArtifactService;
-}): HttpRoute[] {
-  return [{
+}): import("../../../environment/access/http-policy.js").EnvironmentHttpRoute[] {
+  const route: HttpRoute = {
     methods: "GET, POST",
     matches: pathname => pathname === "/api/v2/artifacts" || /^\/api\/v2\/artifacts\/[^/]+$/.test(pathname),
     async handle(request, response, url) {
@@ -51,5 +51,9 @@ export function createEnvironmentArtifactRoutes({ access, artifactService }: {
         sendJson(response, statuses[code] ?? 500, { error: { code, message: code === "INTERNAL" ? "Artifact operation failed." : error.message, retryable: false } });
       } finally { unregister?.(); response.removeListener("close", disconnect); }
     },
-  }];
+  };
+  return [
+    { ...route, methods: "POST", matches: pathname => pathname === "/api/v2/artifacts", access: { scopes: ["session:operate"] } },
+    { ...route, methods: "GET", matches: pathname => /^\/api\/v2\/artifacts\/[^/]+$/.test(pathname), access: { scopes: ["session:read"] } },
+  ] satisfies import("../../../environment/access/http-policy.js").EnvironmentHttpRoute[];
 }
