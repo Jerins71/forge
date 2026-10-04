@@ -66,8 +66,12 @@ export async function writeInfrastructureArtifacts(manifest: FleetManifest, mani
   await writeFile(join(root, 'assertions.json'), bytes);
   const { stdout: commit } = await promisify(execFile)('git', ['rev-parse', 'HEAD'], { cwd: manifest.repositoryRoot });
   const playwright = JSON.parse(await readFile(join(manifest.repositoryRoot, 'node_modules/@playwright/test/package.json'), 'utf8')) as { version: string };
+  // The launcher's latest manifest is reused by subsequent runs. Keep this run's
+  // public descriptor/lifecycle metadata alongside its immutable evidence.
+  const archivedManifestPath = join(root, 'manifest.json');
+  await writeFile(archivedManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   const index: ArtifactIndex = {
-    formatVersion: 1, runId: manifest.runId, suite: 'infrastructure', status: manifest.status === 'failed' ? 'failed' : 'passed', manifestPath,
+    formatVersion: 1, runId: manifest.runId, suite: 'infrastructure', status: manifest.status === 'failed' ? 'failed' : 'passed', manifestPath: archivedManifestPath,
     commit: commit.trim(), runtime: { node: process.version, playwright: playwright.version, platform: process.platform, arch: process.arch },
     rerunCommand: `pnpm e2e:env --environments ${manifest.environments.length} --provider fixture ${smoke ? '--legacy-smoke' : '--smoke'} --out ${JSON.stringify(manifestPath)}`,
     artifacts: [{ kind: 'assertions', path: 'assertions.json', sha256: createHash('sha256').update(bytes).digest('hex'), sizeBytes: bytes.length }],
