@@ -1,6 +1,6 @@
 Skills give agents reusable instructions and optional capabilities such as web search, image generation, and the separate `agent-browser` CLI workflow. The Skills page lets you browse installed skills, inspect their files, configure API keys and settings, and share or import user-created skills from links.
 
-Browser is a local Forge Desktop capability for normal local Builder managers, not a Skill. Forge automatically uses either an embedded surface or a Chrome-backed tab. Optional Chrome setup and repair live in **Settings → Use Chrome with Forge**. Browser is not forwarded to Remote Projects or Collaboration.
+Browser is a local Forge Desktop capability for normal local Builder managers, not a Skill. Forge automatically uses either an embedded surface or a Chrome-backed tab. Optional Chrome setup and repair live in **Settings → Use Chrome with Forge**.
 
 ## Scope and skill browser
 
@@ -37,13 +37,3 @@ Use the Share button on a user-created global or project skill to generate a tem
 Use **Import from URL** to paste a Forge skill-share link or a `forge://skill-import` deep link. Forge always opens a preview first so you can review files, warnings, and conflicts before anything is installed.
 
 Conflicts default to reject. If the target directory already exists or the import would install an override, you must explicitly confirm the replacement before install.
-
-## Collaboration skill selection
-
-In Collaboration mode, the Skills page adds category and channel scopes to the scope dropdown. This lets you control which skills are loaded for each collaboration context:
-
-- **Global** — browse all collaboration skills shared across channels.
-- **Category** — set the default skill selection for new channels in that category (all or custom).
-- **Channel** — choose which skills are loaded for a specific channel session.
-
-Skill selection supports two modes: **All skills** (loads every available skill) or **Custom selection** (a curated list you choose). Always-on skills like `memory` are always included and cannot be turned off. There is no channel-local skill authoring in V1 — collaboration only stores the selection state.

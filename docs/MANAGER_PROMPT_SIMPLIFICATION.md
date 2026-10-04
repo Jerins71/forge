@@ -2,8 +2,7 @@
 
 Forge's built-in manager prompt describes a capable collaborator who completes the user's intended
 work, exercises judgment, and maintains continuity across interruptions and context changes. The
-behavioral foundation is shared by Builder managers and Project Agents. Collaboration channels use
-the same conversational direction within their different delivery and tool capabilities.
+behavioral foundation is shared by Builder managers and Project Agents.
 
 This is a behavioral redesign, not a claim that a shorter prompt alone improves a model. The supplied
 Codex-style instructions informed collaboration, autonomy, communication, and continuity. Forge keeps
@@ -90,7 +89,6 @@ repository context, memory, skills, and runtime-specific capabilities.
 | --- | --- |
 | Ordinary Builder manager | A nonempty session prompt replaces the archetype. Otherwise the registry resolves profile override, repository override, then installed built-in. Selected posture and required routing remain composed. |
 | Project Agent | The installed Project Agent operating contract remains the base. Session, repository, profile, or descriptor role instructions are appended according to existing role precedence. |
-| Collaboration channel | Its channel archetype and overlays retain `speak_to_user` delivery and channel visibility. Builder-only planning/history/context tools are not promised. |
 | Worker | Its worker or specialist contract remains independently owned. It does not receive the manager's entire conversation or peer directory. |
 
 The prompt preview reports the actual source of ordinary session replacements, even when an unused

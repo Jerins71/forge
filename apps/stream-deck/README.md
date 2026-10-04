@@ -15,7 +15,7 @@ Stream Deck setup is disabled by default. To prepare the direct-distribution ins
 4. Approve the matching request in **Forge Settings → Stream Deck**.
 
 Forge gives each device a dedicated, revocable credential scoped to local Builder snapshot reads and Stream
-Deck actions. Remote Projects and Collaboration servers are not Stream Deck targets. The plaintext credential is delivered to the plugin exactly once and Forge persists
+Deck actions. The plaintext credential is delivered to the plugin exactly once and Forge persists
 only its hash. It cannot authenticate the Forge CLI. Connection URLs remain available as advanced
 property-inspector settings for development and non-default local instances.
 

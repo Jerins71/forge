@@ -3,7 +3,6 @@ import type { HelpArticle } from '../help-types'
 import settingsAboutContent from './articles/settings/settings-about.md?raw'
 import settingsAuthContent from './articles/settings/settings-auth.md?raw'
 import settingsCliAccessContent from './articles/settings/settings-cli-access.md?raw'
-import settingsCollaborationContent from './articles/settings/settings-collaboration.md?raw'
 import settingsEditorContent from './articles/settings/settings-editor.md?raw'
 import settingsExtensionsContent from './articles/settings/settings-extensions.md?raw'
 import settingsExternalChromeContent from './articles/settings/settings-external-chrome.md?raw'
@@ -69,7 +68,7 @@ export const settingsArticles: HelpArticle[] = [
       'needs you',
       'rooms',
     ],
-    relatedIds: ['settings-theme', 'settings-editor', 'settings-collaboration', 'settings-observability', 'settings-about', 'chat-compaction', 'settings-project-settings', 'models-providers', 'cortex-overview', 'cortex-knowledge', 'cortex-onboarding'],
+    relatedIds: ['settings-theme', 'settings-editor', 'settings-observability', 'settings-about', 'chat-compaction', 'settings-project-settings', 'models-providers', 'cortex-overview', 'cortex-knowledge', 'cortex-onboarding'],
     contextKeys: ['settings.general'],
   },
   {
@@ -139,33 +138,6 @@ export const settingsArticles: HelpArticle[] = [
     ],
     relatedIds: ['settings-oauth', 'getting-started-configuration', 'models-providers'],
     contextKeys: ['settings.auth'],
-  },
-  {
-    id: 'settings-collaboration',
-    title: 'Collaboration and Remote Projects',
-    category: 'settings',
-    summary: 'Connect Forge servers, sign in, and open remote projects safely from the unified Builder sidebar.',
-    content: settingsCollaborationContent,
-    keywords: [
-      'collaboration',
-      'remote projects',
-      'remote server',
-      'connection',
-      'server url',
-      'sign in',
-      'remote sidebar',
-      'globe',
-      'active origin',
-      'presence',
-      'remote files',
-      'remote git',
-      'remote terminal',
-      'trusted members',
-      'protocol version',
-      'unreachable',
-    ],
-    relatedIds: ['chat-sidebar', 'chat-overview', 'terminal-overview', 'settings-auth'],
-    contextKeys: ['settings.collaboration'],
   },
   {
     id: 'settings-observability',
@@ -352,9 +324,6 @@ export const settingsArticles: HelpArticle[] = [
       'deep link',
       'preview',
       'conflict',
-      'collaboration',
-      'channel',
-      'category',
       'selection',
     ],
     relatedIds: ['settings-auth', 'settings-extensions', 'settings-specialists', 'chat-browser'],

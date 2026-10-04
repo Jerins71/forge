@@ -134,9 +134,8 @@ provider locator.
 Team Secure Mode is available for supported local Pi-backed and native Codex Builder
 managers, and eligible local Forge Pi workers in the same project. Unsupported worker
 runtimes fail closed before secure work is dispatched; Forge does not silently run
-that assignment without the secure boundary. Cursor SDK, Remote Projects,
-Collaboration channels, Codex plugin/external-thread workers, and ordinary integrated
-terminals are not Secure Sessions execution paths.
+that assignment without the secure boundary. Cursor SDK, Codex plugin/external-thread
+workers, and ordinary integrated terminals are not Secure Sessions execution paths.
 
 Managers mark secret-dependent delegation with
 `spawn_agent(..., requiresSecureRuntime=true)`. Forge selects a compatible configured
@@ -244,9 +243,7 @@ Forge Desktop lists that pending request under **Settings → Secrets → Paired
 browsers**. Approval creates a revocable, browser-scoped token whose hash is persisted;
 the token itself is delivered once in an HttpOnly, SameSite cookie. Pairing does not
 expose the per-launch Desktop capability. HTTP browser control is allowed only through
-this explicit paired trusted-network path; HTTPS remains the preferred path. Remote
-Projects and Collaboration remain separate authority boundaries and do not inherit
-this local Desktop vault connection.
+this explicit paired trusted-network path; HTTPS remains the preferred path.
 
 Every saved secret has an availability scope:
 
@@ -467,8 +464,8 @@ explicit start restores a task pause and explicit stop records one.
 
 Runtime setup for projects without grants or trusted SSH hosts keeps its existing
 tool and extension policy. Protected Pi runtimes retain the existing restriction on
-external Pi extensions and the same host tool output guard. Unsupported runtimes,
-Remote Projects, and Collaboration do not inherit local secrets.
+external Pi extensions and the same host tool output guard. Unsupported runtimes do
+not inherit local secrets.
 
 
 Each `secure_bash` command receives only the active grants named in its

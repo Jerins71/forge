@@ -42,6 +42,6 @@ their path is trusted.
 
 The direct header context-menu shortcuts for Rename, Change Default Model,
 Change Working Directory, and Project Secrets remain available. **Project
-Settings** is unavailable for Cortex and Remote Projects. Repository resources
+Settings** is unavailable for Cortex. Repository resources
 are managed through **Project Settings → Repository resources**, not as a
 top-level Settings tab.

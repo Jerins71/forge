@@ -3,7 +3,6 @@ displayName: Research
 color: "#e11d48"
 enabled: true
 whenToUse: Research, fact-checking, documentation lookup, current web/source verification, technical background investigation, and citation/source-quality synthesis.
-TargetSpace: [builder, collaboration]
 defaultTier: standard
 builtin: true
 webSearch: false

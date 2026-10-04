@@ -70,9 +70,8 @@ Each built-in task-instruction prompt or custom specialist is a **markdown file 
 - **Global specialists** (shared across all profiles): `~/.forge/shared/specialists/<handle>.md`
 - **Workspace specialists** (repo-scoped passive resources): `<repo>/.forge/specialists/<handle>.md`
 - **Project-specific specialists**: `~/.forge/profiles/<profileId>/specialists/<handle>.md`
-- **Collaboration channel-local specialists**: `~/.forge/profiles/_collaboration/sessions/<sessionId>/specialists/<handle>.md`
 
-Project specialists shadow global ones with the same filename. Forge seeds the shipped task-instruction prompts into the global directory on startup. Builder and Collaboration share the same modes where `TargetSpace` allows it; each surface filters the specialist definitions by `TargetSpace`.
+Project specialists shadow global ones with the same filename. Forge seeds the shipped task-instruction prompts into the global directory on startup.
 
 ## Frontmatter Fields
 
@@ -100,8 +99,6 @@ fallbackModelId: gpt-5.5
 fallbackReasoningLevel: medium
 # Optional: keep your edits to a builtin; Forge will not overwrite it on startup
 pinned: true
-# Optional: builder, collaboration, or [builder, collaboration]
-TargetSpace: builder
 # Internal: marks Forge-shipped specialists (do not set manually)
 builtin: true
 ---
@@ -109,7 +106,7 @@ builtin: true
 
 Every frontmatter value must fit on one line. The parser reads `key: value` pairs line by line and does not support YAML block scalars (`>-`, `|`), so a multi-line `whenToUse` is read as the literal text `>-` and the continuation lines are dropped. Put comments on their own lines as shown above; trailing inline comments are treated as part of the field value.
 
-`TargetSpace` is the canonical frontmatter key and is case-sensitive when Forge writes files. Use `builder` for normal Builder managers, `collaboration` for collaboration channel managers, or `[builder, collaboration]` for a shared definition available in both surfaces. Files without `TargetSpace` default to Builder-only for legacy compatibility. Collaboration channel-local specialist files are always treated as collaboration-scoped.
+A legacy `TargetSpace` key from the removed Collaboration surface is tolerated and ignored; every specialist resolves for the Builder.
 
 `defaultTier` can be one of `light`, `fast`, `standard`, `deep`, or `max`. It remains part of the persisted compatibility format and supplies a default for direct custom-specialist use when no model is stored.
 
@@ -129,10 +126,10 @@ Tier settings remain global at `~/.forge/shared/specialists/tier-configs.json` f
 
 Forge uses four editable builtin prompts for non-general task types:
 
-- `planner` (`defaultTier: deep`, Builder and Collaboration)
-- `code-reviewer` (`defaultTier: deep`, Builder and Collaboration)
-- `code-reviewer-2` (`defaultTier: deep`, Builder and Collaboration)
-- `researcher` (`defaultTier: standard`, Builder and Collaboration)
+- `planner` (`defaultTier: deep`)
+- `code-reviewer` (`defaultTier: deep`)
+- `code-reviewer-2` (`defaultTier: deep`)
+- `researcher` (`defaultTier: standard`)
 
 Build & execute workers use the worker archetype prompt. The legacy `architect` prompt remains readable for existing descriptors, but new architecture work uses `mode: general` with `route` omitted or a clearly matching named route. Codex Plugin delegation is a dedicated contextual tool and server-owned authorization path, not a normal task type or custom specialist.
 
@@ -244,21 +241,17 @@ Codex Plugin delegation is contextual. It is available only when a user turn inc
 ### Resolution Order
 
 When resolving specialist definitions for a Builder project:
-1. Project-specific specialists whose `TargetSpace` includes `builder` (in `~/.forge/profiles/<profileId>/specialists/`)
-2. Workspace specialists whose `TargetSpace` includes `builder` and either introduce a new handle or explicitly override a non-builtin global specialist with `forgePrecedence: override` (in `<repo>/.forge/specialists/`)
-3. Global specialists whose `TargetSpace` includes `builder` (in `~/.forge/shared/specialists/`)
+1. Project-specific specialists (in `~/.forge/profiles/<profileId>/specialists/`)
+2. Workspace specialists that either introduce a new handle or explicitly override a non-builtin global specialist with `forgePrecedence: override` (in `<repo>/.forge/specialists/`)
+3. Global specialists (in `~/.forge/shared/specialists/`)
 
-When resolving a collaboration channel roster:
-1. Channel-local specialists (in `~/.forge/profiles/_collaboration/sessions/<sessionId>/specialists/`)
-2. Selected global specialists whose `TargetSpace` includes `collaboration` (in `~/.forge/shared/specialists/`)
-
-Project or channel-local files shadow global files with the same handle. Workspace specialists are Builder-only passive project resources and do not override builtins. Collaboration category defaults select global handles for newly created channels only; existing channels keep their own selected-handle list in SQLite.
+Project files shadow global files with the same handle. Workspace specialists are passive project resources and do not override builtins.
 
 ### Native Claude and Codex workers
 
 Local Builder rosters can select **Claude native** and **Codex native** as primary or availability-fallback models. These workers run through the same native runtimes as native managers, with their assigned specialist instructions and Forge-owned completion delivery. They inherit the owning session's project trust, memory, and Secure Sessions authority; choosing a native model does not grant manager tools or permission to launch a second delegation system.
 
-Claude native uses the connection in **Settings → Authentication → Claude native**. Codex native uses Forge's OpenAI connection and requires the Codex executable. Native selections are stored with their provider, so changing a roster preserves the selected runtime across reloads. Existing roster choices are unchanged. Collaboration and internal/system workers remain outside this native Builder support.
+Claude native uses the connection in **Settings → Authentication → Claude native**. Codex native uses Forge's OpenAI connection and requires the Codex executable. Native selections are stored with their provider, so changing a roster preserves the selected runtime across reloads. Existing roster choices are unchanged. Internal/system workers remain outside this native Builder support.
 
 Native models can be fallback targets, and native primary workers use configured fallbacks for eligible availability failures during setup. Once a native turn starts, Forge does not replay it automatically on a different model; the native engine handles its own retries and unresolved failures return to the manager. This preserves the native runtime's existing execution and shutdown behavior.
 

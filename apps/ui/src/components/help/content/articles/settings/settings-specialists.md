@@ -36,17 +36,12 @@ Forge's **Default** roster is designed for Hands-on mode. It provides a Plan con
 
 Consultation results return automatically. The manager integrates useful findings and continues; a follow-up to a completed worker is another assignment.
 
-## Global, project, and Collaboration scopes
+## Global and project scopes
 
 Use the scope selector to edit shared definitions or narrower overrides:
 
 - **Global** — task-instruction prompts and custom specialists shared by all Builder projects.
 - **Project** — overrides for one Builder project.
-- **Collaboration global** — shared definitions available to collaboration channels.
-- **Category** — default task-instruction and custom-specialist availability for new channels in a category.
-- **Channel** — available shared task instructions and custom specialists plus channel-local definitions for one channel.
-
-Definitions use `TargetSpace` to stay in Builder, Collaboration, or both. Channel-local files shadow the same global handle only inside that channel. Skill selection is managed on the **Skills** settings page.
 
 ## Custom specialists
 
@@ -74,4 +69,4 @@ Codex Plugin is not a normal task type or custom specialist. When a user include
 
 ## Prompt preview
 
-In project or channel scope, use the prompt preview to inspect the compact instruction/custom-specialist block injected into the manager prompt. The active roster is supplied separately in a versioned runtime context so roster changes do not rewrite the stable system-prompt prefix.
+In project scope, use the prompt preview to inspect the compact instruction/custom-specialist block injected into the manager prompt. The active roster is supplied separately in a versioned runtime context so roster changes do not rewrite the stable system-prompt prefix.

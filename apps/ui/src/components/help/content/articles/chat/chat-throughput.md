@@ -16,7 +16,7 @@ When conversation response throughput is enabled, active worker pills and Quick 
 
 ## Response-throughput statistics
 
-Open **Stats → Response throughput** for historical manager/worker totals, role comparison, daily model trends, model summaries, and recent calls. The view is local to Builder even while a Remote Project is selected. Filter by range (including a custom range), project, role, provider/model, attribution, or specialist.
+Open **Stats → Response throughput** for historical manager/worker totals, role comparison, daily model trends, model summaries, and recent calls. Filter by range (including a custom range), project, role, provider/model, attribution, or specialist.
 
 - **All measured responses** (the default) includes terminal calls with provider-final output and a positive complete request duration.
 - **Observed-output diagnostics** additionally requires an observed output-through-stream-end boundary. This is a diagnostic filter, not a different response-throughput denominator.

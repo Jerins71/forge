@@ -1,4 +1,4 @@
-**Settings → History** is local Builder only. It shows indexing activity for agent-only history recall and can pause or resume that work. Restricted runtimes, Remote Projects, and Collaboration history are not included.
+**Settings → History** is local Builder only. It shows indexing activity for agent-only history recall and can pause or resume that work. Restricted runtimes are not included.
 
 History search is not a toggle. Indexing starts on its own after local Builder hydration. Pause stops indexing; it does not enable or disable search, stop conversation recording, or rebuild or delete the cache.
 

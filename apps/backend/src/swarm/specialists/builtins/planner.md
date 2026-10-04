@@ -3,7 +3,6 @@ displayName: Plan
 color: "#7c3aed"
 enabled: true
 whenToUse: Task breakdown, implementation planning, design docs, sequencing, risk analysis, discovery investigations. Not for implementation or code changes — output is plans and analysis only.
-TargetSpace: [builder, collaboration]
 defaultTier: deep
 builtin: true
 ---

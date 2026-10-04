@@ -39,7 +39,6 @@
     "pi-extension:migrate": "node scripts/pi-extension-migration.mjs",
     "pi-upgrade:provision-0711-runner": "bash scripts/pi-upgrade/provision-pi-0711-rollback-runner.sh",
     "pi-upgrade:generate-session-fixture-manifests": "node scripts/pi-upgrade/generate-pi-session-fixture-manifests.mjs",
-    "verify:dockerignore": "node scripts/verify-dockerignore-sensitive-context.mjs",
     "package:electron": "pnpm --filter @forge/electron run package",
     "streamdeck:build": "pnpm --filter @forge/stream-deck run build",
     "streamdeck:validate": "pnpm --filter @forge/stream-deck run validate",

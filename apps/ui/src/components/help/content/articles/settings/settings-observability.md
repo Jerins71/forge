@@ -1,4 +1,4 @@
-Use **Settings > Observability** to export Forge runtime traces to a local Arize Phoenix instance. This is a Builder-only V1 feature. Collaboration mode does not export traces and fails closed/no-op for the Phoenix settings routes.
+Use **Settings > Observability** to export Forge runtime traces to a local Arize Phoenix instance.
 
 ## Status and test export
 

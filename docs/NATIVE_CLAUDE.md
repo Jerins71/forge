@@ -39,8 +39,7 @@ copied into this runtime.
 Sign-in URLs and codes are transient control data, never conversation messages,
 model inputs, or Forge settings. An unfinished flow can be cancelled, expires after
 five minutes, and is stopped when the backend shuts down. A failed status check is
-reported separately from a signed-out account. These controls are available on the
-local Builder, not Collaboration backends.
+reported separately from a signed-out account.
 
 Advanced environment settings:
 

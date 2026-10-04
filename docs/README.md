@@ -10,7 +10,6 @@ Start with the guide that matches your task:
 | Configure delegation workers | [Specialists](SPECIALISTS.md) |
 | Use approved secrets in local Builder work | [Secure Sessions](SECURE_SESSIONS.md) |
 | Set up automatic browser use | [Browser Automation](BROWSER_AUTOMATION.md) |
-| Connect or operate collaboration servers and Remote Projects | [Collaboration](collaboration/README.md) |
 | Build or release Forge Desktop | [Electron README](../apps/electron/README.md) |
 | Run local validation | [Quality](QUALITY.md) |
 

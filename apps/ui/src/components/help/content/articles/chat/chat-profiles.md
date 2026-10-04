@@ -15,11 +15,9 @@ Each profile can have multiple sessions. Sessions start from the profile's confi
 
 New conversations copy the profile's default model. You can override the model for any individual session — including the root session — without affecting other sessions. Changing **Project Settings → Default model** or **Change Default Model** updates the project default for new conversations only; existing sessions retain their stored model. **Use Project Default** copies the current default onto that one session; later project-default changes do not cascade. The override action is available from the session context menu alongside the other session-management actions.
 
-Remote profiles remain authoritative on their Forge server. Their project headers appear with blue styling and a globe marker when the connection's Remote Projects preference and server policy are enabled; nested session rows use status dots. Header actions are limited to **Change Working Directory**, which opens the server directory browser. Local rename, archive, delete, fork, and model actions remain absent. A remote connection may instead show connecting, sign-in-required, unreachable, server-disabled, update-required, or empty status until its projects can be selected.
-
 ## Project Settings
 
-For a local Builder project, right-click its header and choose **Project Settings**, or use the header's hover/focus **…** menu. The page stays scoped to that project even if another conversation is selected. It groups project name, working directory, default model and reasoning, Context management, Project secrets, and Repository resources `.forge` controls. Context management is the project default for Summary vs experimental Context v2; it is not a Settings → General control. It is unavailable for Cortex and Remote Projects.
+For a Builder project, right-click its header and choose **Project Settings**, or use the header's hover/focus **…** menu. The page stays scoped to that project even if another conversation is selected. It groups project name, working directory, default model and reasoning, Context management, Project secrets, and Repository resources `.forge` controls. Context management is the project default for Summary vs experimental Context v2; it is not a Settings → General control. It is unavailable for Cortex.
 
 ## Rename a profile
 
@@ -31,7 +29,7 @@ Use **Project Settings → Default model → Change**, or the existing **Change 
 
 ## Reorder profiles
 
-Drag local and connected remote project headers in Inbox or Projects to intermix them. The order is saved automatically by your local Builder instance and shared by browsers or the desktop app connected to that instance. It is a display preference, not an access list: Forge does not write it to remote collaboration servers, and reordering a remote profile does not grant access or alter server policy. Projects that are offline, disabled, archived, or simply unseen by one client retain their positions. Forge never treats one browser's connection list or project snapshot as permission to remove another client's saved positions, so deleted projects or removed connections can remain as harmless hidden anchors until explicit local-instance cleanup is available. Local Cortex remains pinned above the reordered projects.
+Drag project headers in Inbox or Projects to reorder them. The order is saved automatically by your Builder instance and shared by browsers or the desktop app connected to that instance. It is a display preference only. Archived projects or projects unseen by one client retain their positions, and deleted projects can remain as harmless hidden anchors. Cortex remains pinned above the reordered projects.
 
 ## Deleting a profile
 

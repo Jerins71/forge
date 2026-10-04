@@ -15,7 +15,6 @@ Run `node ./manage-rosters.mjs` from this skill directory. The helper uses Forge
 
 - The user only wants to select an existing roster for a project or session.
 - The user wants to author task-instruction or custom-specialist markdown rather than a roster definition.
-- The session is running in Collaboration or a Remote Project. Roster writes are local instance-admin settings; explain that boundary instead of trying to bypass it.
 
 ## Workflow
 

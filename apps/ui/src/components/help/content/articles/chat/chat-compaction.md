@@ -4,7 +4,7 @@ As a conversation grows, it uses more of the model's context window. **Summary**
 
 Choose the project default in **Project Settings → Context management**. Eligible local Builder managers can inherit that default or override it from **Context management** beside Send. Saving a mode does not clear the current conversation; it applies at the next context transition.
 
-The session control shows the policy the current runtime can use. If a saved Context v2 preference is unsupported, it shows **Summary**, keeps your saved preference, and explains the restriction. Context v2 requires a supported ordinary Pi Builder manager and an eligible model. Collaboration, Cortex/system, Cursor SDK, plugin/external threads, and workers use Summary. **Settings → General → Compaction** controls the Summary compaction model, reasoning, and timeout; it does not select Summary or Context v2.
+The session control shows the policy the current runtime can use. If a saved Context v2 preference is unsupported, it shows **Summary**, keeps your saved preference, and explains the restriction. Context v2 requires a supported ordinary Pi Builder manager and an eligible model. Cortex/system, Cursor SDK, plugin/external threads, and workers use Summary. **Settings → General → Compaction** controls the Summary compaction model, reasoning, and timeout; it does not select Summary or Context v2.
 
 ## Continuing with Context v2
 
@@ -31,7 +31,7 @@ Local Builder managers and ordinary workers can use the agent-only `history` too
 
 History supports ranked word searches for discovery and literal searches for exact wording, paths, or errors. Results indicate whether coverage or a bounded scan is incomplete. An empty result from incomplete coverage does not establish that something never happened. The agent should read relevant evidence and verify current state before acting on it.
 
-**Settings → History** controls background indexing and shows its progress. Pausing the index leaves conversation recording and direct same-session recovery available. Restricted runtime content and Secure Sessions secrets remain excluded. Remote Projects keep their own origin-scoped history. There is no separate human history drawer.
+**Settings → History** controls background indexing and shows its progress. Pausing the index leaves conversation recording and direct same-session recovery available. Restricted runtime content and Secure Sessions secrets remain excluded. There is no separate human history drawer.
 
 ## Pinned messages
 

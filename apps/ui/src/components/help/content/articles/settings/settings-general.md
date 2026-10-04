@@ -6,13 +6,13 @@ Open **Settings > Appearance** to choose Light, Dark, System, or a custom local 
 
 ## Repositories
 
-Use **Settings > General > Repositories** to set a configured repository home for **Clone repository** during project creation. Precedence is: configured home → last successfully used clone base → your home directory. Clearing the configured home falls back to last-used or home. This section is local Builder only; collaboration-server Builder shells hide it and do not call the repositories settings API. Private clones require ambient noninteractive Git/SSH credentials on the Builder host.
+Use **Settings > General > Repositories** to set a configured repository home for **Clone repository** during project creation. Precedence is: configured home → last successfully used clone base → your home directory. Clearing the configured home falls back to last-used or home. Private clones require ambient noninteractive Git/SSH credentials on the Builder host.
 
 ## Sidebar
 
 Toggle **Show provider usage** to control whether the provider subscription usage widget appears in the sidebar toolbar. When enabled, you'll see compact usage gauges. Anthropic Claude exposes 5-hour and weekly windows. OpenAI Codex shows weekly when the provider reports it, and shows the 5-hour/Session gauge and detail card only when a session window is reported — never an empty Session card. True dual limits stay visible when both windows are present. A stored xAI OAuth credential adds a weekly-only `xAI` SuperGrok credits gauge. Click the widget to expand it for detailed metrics including reset remaining time and, where available, deficit/reserve pace and estimated runout times, and use the refresh button in the detail panel to re-poll immediately. Usage state is restored after backend restarts. OpenAI and Anthropic weekly estimates follow historical usage curves rather than simple linear interpolation; the xAI weekly gauge has no historical pace curve. Cursor SDK usage is not part of this widget — it appears in Stats token analytics and telemetry provider inference. xAI API-key-only or env-only `XAI_API_KEY` setups, and missing or unauthorized xAI OAuth, leave the xAI gauge absent without extra noise, and transient fetch failures keep the last good reading. Pooled OAuth usage polling refreshes tokens first, and pooled auth errors can suppress usage display. When OpenAI/Codex uses Forge Auth broker mode, broker-backed status and usage appear when the broker provides them. The setting is stored in your browser and applies immediately.
 
-**Use new project view** is on by default. Leave it on for Inbox and Projects; turn it off to roll back to Classic. Inbox opens first and lists **Needs you**, **Active**, and **Recent**, then an inline Projects tree. **Needs you** is server-issued work-lifecycle attention. Unread and error badges do not create it, and the UI does not synthesize it from local badges. An unanswered **Input requested** pending choice raises **Needs you** even while work still runs or follow-ups are queued; answering or cancelling retracts that item without marking the session complete, so remaining work can stay **Active**. **Done** and **Clear** dismiss those exact items; mute only hides **Needs you** and the Inbox badge. Origins that do not support session attention omit **Needs you**. Projects keeps the project/session tree, search prefixes, pins, and drag reorder. On desktop, Cortex lives in the activity-rail popover; mobile and Classic keep the pinned sidebar row.
+**Use new project view** is on by default. Leave it on for Inbox and Projects; turn it off to roll back to Classic. Inbox opens first and lists **Needs you**, **Active**, and **Recent**, then an inline Projects tree. **Needs you** is server-issued work-lifecycle attention. Unread and error badges do not create it, and the UI does not synthesize it from local badges. An unanswered **Input requested** pending choice raises **Needs you** even while work still runs or follow-ups are queued; answering or cancelling retracts that item without marking the session complete, so remaining work can stay **Active**. **Done** and **Clear** dismiss those exact items; mute only hides **Needs you** and the Inbox badge. Projects keeps the project/session tree, search prefixes, pins, and drag reorder. On desktop, Cortex lives in the activity-rail popover; mobile and Classic keep the pinned sidebar row.
 
 ## Working plans
 
@@ -26,7 +26,7 @@ This pane does not choose Summary vs Context v2. That project default lives in *
 
 ## Conversation Response Throughput
 
-**Show response throughput in conversations** is off by default. Turn it on to show final Pi response throughput in manager headers, worker pills, and Worker Quick Look in Builder and Collaboration conversations. The rate uses provider-final output across the complete request duration. This browser setting applies immediately. Turning it off hides only those conversation controls: **Stats → Response throughput** continues collecting and showing historical response throughput.
+**Show response throughput in conversations** is off by default. Turn it on to show final Pi response throughput in manager headers, worker pills, and Worker Quick Look in Builder conversations. The rate uses provider-final output across the complete request duration. This browser setting applies immediately. Turning it off hides only those conversation controls: **Stats → Response throughput** continues collecting and showing historical response throughput.
 
 ## Prompt Cache Visualization
 
@@ -57,20 +57,6 @@ This mode switch is different from `FORGE_CORTEX_ENABLED=false`, which disables 
 ## Welcome Preferences
 
 Edit the default preferences Forge shares with new manager sessions. These are the onboarding choices you made on first launch (name, technical level, workflow style). Forge always updates the structured onboarding state. Changes apply to future manager sessions through the active mode's store: the managed legacy `common.md` block with v2 OFF, or global v2 preference entries with v2 ON.
-
-## Collaboration
-
-Open **Settings > Collaboration** to manage one or more server connections. Choose **Add connection**, enter the server URL, select **Test**, then select **Add**. Sign in to the saved connection with your collaboration account. The Builder/Collab switch opens that server's Collaboration channels; the separate per-connection **Remote projects** switch can show its normal Builder projects in the unified Builder sidebar.
-
-Settings are contextual: Builder mode Settings continue to configure the local backend, while Collab mode Settings configure the selected collaboration backend. Collab Settings are admin-only, and provider auth entered there writes directly to the selected collaboration backend instead of copying or sharing the local Builder auth file.
-
-Collab Settings also include members and invites, plus password management, all scoped to the selected backend connection. Admins can manage members and invites, issue temporary-password resets that require a password change, and users can change their own password. Creating an invite for an existing member or an email with an active pending invite is rejected and shows the server's error. Revoke the pending invite before creating a new one. If a collaboration session or socket gets invalidated by a lifecycle change, the public UI shows sign-in recovery instead of looping on reconnect or staying stuck on loading.
-
-Collaboration channels are session-backed and can carry per-channel instructions and reference docs. Channel guidance is labeled **Additional instructions**.
-
-The Collaboration status panel reflects the selected connection, not the local Builder backend. Terminal settings remain hidden for Collaboration channels. That is separate from Remote Projects: when the server operator allows remote Builder terminals, those PTYs run on the remote server host and follow its terminal policy.
-
-See **Collaboration and Remote Projects** for connection states, automatic opt-in rules, data locality, and security boundaries.
 
 ## Observability
 

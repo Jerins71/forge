@@ -82,7 +82,7 @@ Durations accept milliseconds by default or `ms`, `s`, and `m` suffixes. Example
 
 The CLI waits for the backend compaction mutation to finish or fail, then prints the normalized result. JSON output includes `action`, `sessionAgentId`, `profileId` when available, `outcome` (`compacted`, `skipped`, or `not_reduced`), `compacted`, `reason` when no compaction happened, `customInstructionsProvided`, and `completedAt`. Human output prints the same compact summary. Context before/after values are shown only if the server includes them.
 
-Compaction is Builder-runtime-only in v1 and requires the server to advertise the `sessionCompaction` capability. Older servers, collaboration runtimes, worker sessions, and runtime providers that do not support compaction return stable unsupported or usage errors instead of falling back to slash commands. Context v2 is executable only by supported ordinary Pi Builder managers (OpenAI/Codex or Anthropic); unsupported surfaces cannot run it. If the CLI WebSocket disconnects before the request result arrives, the CLI exits with the connection error code and does not infer whether compaction continued server-side.
+Compaction is Builder-runtime-only in v1 and requires the server to advertise the `sessionCompaction` capability. Older servers, worker sessions, and runtime providers that do not support compaction return stable unsupported or usage errors instead of falling back to slash commands. Context v2 is executable only by supported ordinary Pi Builder managers (OpenAI/Codex or Anthropic); unsupported surfaces cannot run it. If the CLI WebSocket disconnects before the request result arrives, the CLI exits with the connection error code and does not infer whether compaction continued server-side.
 
 ## Run semantics
 

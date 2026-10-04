@@ -16,7 +16,7 @@ You'll need three things:
 
 Choose **Clone repository** to clone over HTTPS or SSH into a destination base path, then create the project in the cloned folder. Forge derives an editable folder name from the URL and shows the final path before cloning.
 
-Private repositories need ambient system Git or SSH credentials already available noninteractively (Forge does not prompt for passwords or tokens during clone). You can cancel only before the repository is published; after publication this dialog stays open while Forge finishes creating the project. Destination collisions are refused (no overwrite). Configure the default base path under **Settings → General → Repositories** (configured home, then last-used base, otherwise your home directory). Clone repository is available on local Builder only — not on collaboration-server Builder shells.
+Private repositories need ambient system Git or SSH credentials already available noninteractively (Forge does not prompt for passwords or tokens during clone). You can cancel only before the repository is published; after publication this dialog stays open while Forge finishes creating the project. Destination collisions are refused (no overwrite). Configure the default base path under **Settings → General → Repositories** (configured home, then last-used base, otherwise your home directory).
 
 By default, the Create Project dialog also seeds repo-root `.forge` project resources. Leave that checked if you want the starter `.forge/` tree; turn it off to skip the scaffold.
 

@@ -79,7 +79,7 @@ Admission follows the main-process control lifecycle rather than renderer UI sta
 - The cluster accepts no page clicks, typing, scrolling, refresh, browser-viewport resize, recording, or Take Control action. Pointer interaction moves or resizes the preview stack, changes the front thumbnail, or opens the front managed tab in the Browser workspace. Arrow keys can move or resize the stack when its card or resize handle has focus.
 - Screen lock and system suspend immediately discard retained pixels and block new frames. Unlock resumes automatic capture. Selected workspace/host changes, tab removal, turn/session release, window close, and shutdown clear or invalidate the relevant in-memory state.
 
-Preview pixels stay in bounded main/renderer memory and are delivered over preview-only pull IPC. They are not written to browser state, conversation history, artifacts, logs, the backend, Remote Projects, or Collaboration. Although the surface runs in the privileged main renderer, it uses only the preview snapshot/frame-pull APIs and does not invoke Automatic Browser, workspace, Chrome setup, file, or secure-vault commands.
+Preview pixels stay in bounded main/renderer memory and are delivered over preview-only pull IPC. They are not written to browser state, conversation history, artifacts, logs, or the backend. Although the surface runs in the privileged main renderer, it uses only the preview snapshot/frame-pull APIs and does not invoke Automatic Browser, workspace, Chrome setup, file, or secure-vault commands.
 
 The workspace renderer registers one Desktop host with the local Builder backend and forwards bounded calls through trusted IPC. It transiently relays complete `browser_status` inventory responses between the trusted bridge and backend, but does not project that inventory into Browser workspace UI or canonical renderer state. The renderer exposes no tab-attachment, group, lease, or authority controls.
 
@@ -185,9 +185,9 @@ Canonical data paths and OS registration targets are in [Configuration](CONFIGUR
 
 ## Local-only boundary
 
-The Automatic Browser Host is attached only to the normal local Builder backend reached by Forge Desktop. An ordinary browser client has no local host. Forge does not forward its Electron views, Chrome relay, extension connection, private target affinity, authority, recovery checkpoints, or IPC through active-origin routing.
+The Automatic Browser Host is attached only to the normal local Builder backend reached by Forge Desktop. An ordinary browser client has no local host. Forge does not forward its Electron views, Chrome relay, extension connection, private target affinity, authority, recovery checkpoints, or IPC to another backend.
 
-A normal manager running on a remote backend may still have structurally planned browser tools. Without a Desktop host connected directly to that backend, calls return `unavailable-host`; the viewing machine's Desktop does not satisfy them. Collaboration channel sessions receive neither the host nor browser tools.
+A normal manager running on a remote backend may still have structurally planned browser tools. Without a Desktop host connected directly to that backend, calls return `unavailable-host`; the viewing machine's Desktop does not satisfy them.
 
 ## `agent-browser` Skill
 

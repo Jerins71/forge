@@ -47,7 +47,6 @@ package manager version.
 - `apps/chrome-extension/` and `apps/native-messaging-host/` — optional Chrome adapter extension and bounded native relay.
 - `packages/protocol/` — shared wire types, API contracts, and event definitions.
 - `packages/cli/` — first-party Forge CLI.
-- `docs/collaboration/` — Collaboration architecture, development, operations, and project tracking.
 
 ## Sources of truth
 
@@ -56,8 +55,6 @@ package manager version.
 | Setup, common commands, ports, project layout | [`README.md`](README.md) |
 | Configuration, environment variables, data layout | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) and `.env.example` |
 | Local validation tiers and reports | [`docs/QUALITY.md`](docs/QUALITY.md) |
-| Collaboration | [`docs/collaboration/`](docs/collaboration/) |
-| Remote Projects | [`docs/collaboration/REMOTE_PROJECTS.md`](docs/collaboration/REMOTE_PROJECTS.md) |
 | Automatic Browser Host | [`docs/BROWSER_AUTOMATION.md`](docs/BROWSER_AUTOMATION.md) |
 | Model catalog and model additions | [`docs/MODEL_CATALOG.md`](docs/MODEL_CATALOG.md) and [`docs/ADDING_MODELS.md`](docs/ADDING_MODELS.md) |
 | Specialists | [`docs/SPECIALISTS.md`](docs/SPECIALISTS.md) |
@@ -83,10 +80,8 @@ variable catalogs, or release runbooks back into this file. Link to their mainta
   settings, and compatibility artifacts rather than leaving two competing systems.
 - Use `apps/backend/src/swarm/storage/data-paths.ts` for Forge data-path resolution. Do not recreate
   storage paths ad hoc.
-- Structured Collaboration state belongs in SQLite. User-authored specialist markdown, prompts,
-  reference docs, and skill definitions remain file-backed.
-- Keep durable Collaboration project tracking in `docs/collaboration/project/`, not in local scratch
-  files or transient chat context.
+- User-authored specialist markdown, prompts, reference docs, and skill definitions remain
+  file-backed. Do not move them into SQLite.
 - Model-specific instructions are optional, user-authored per-model additions. Forge does not provide
   built-in model-specific instruction defaults.
 - Forge Desktop's Automatic Browser is a local Builder capability, not a Skill. An enabled and
@@ -94,8 +89,8 @@ variable catalogs, or release runbooks back into this file. Link to their mainta
   `browser_status` exposes a bounded inventory transiently to the manager/model path, not Browser
   workspace UI or canonical renderer state, and `browser_open` can select an inventory tab ID or the
   active/most-recent eligible tab without OS focus. Non-open operations remain sticky, and possibly
-  mutating operations are never replayed during fallback. The capability is not forwarded to
-  Remote Projects or Collaboration. Browser recording and saved browser artifacts remain embedded-only.
+  mutating operations are never replayed during fallback. Browser recording and saved browser
+  artifacts remain embedded-only.
 
 ## Safety
 

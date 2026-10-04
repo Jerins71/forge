@@ -3,7 +3,6 @@ displayName: Architect
 color: "#f59e0b"
 enabled: true
 whenToUse: Complex architecture, system design, high-risk multi-file refactors, cross-cutting changes, deep debugging. Not for routine single-file edits, quick lookups, or documentation.
-TargetSpace: [builder, collaboration]
 defaultTier: max
 builtin: true
 ---

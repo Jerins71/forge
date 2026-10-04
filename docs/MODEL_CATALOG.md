@@ -55,7 +55,7 @@ Manager eligibility does not change compaction policy. OpenRouter is not in the 
 
 ### OpenRouter routing and privacy
 
-**Settings → Models** also stores shared OpenRouter provider routing and privacy filters on the selected backend. **OpenRouter defaults** apply to every OpenRouter manager and worker call on that backend, including exact IDs that are not added yet. **Configure routing** on an added model stores an exact-model override; add the model before configuring that override. On a Collaboration server this configuration is admin-only.
+**Settings → Models** also stores shared OpenRouter provider routing and privacy filters on the selected backend. **OpenRouter defaults** apply to every OpenRouter manager and worker call on that backend, including exact IDs that are not added yet. **Configure routing** on an added model stores an exact-model override; add the model before configuring that override.
 
 The dialog groups **Privacy** and **Providers** first. **Advanced routing** and **Scope & privacy details** start collapsed. The footer is **Save changes** / **Cancel**. Each field has a source badge (**Default**, **Override** or **Custom**, **Cleared**, **Required**) whose menu is **Use shared default** on a model override, **Use OpenRouter default** on shared defaults, and **Clear · no additional restriction**.
 
@@ -73,7 +73,7 @@ These filters constrain OpenRouter HTTPS completions routing only. They do not e
 
 ## Codex app-server sidecar
 
-The Builder web `@Codex` surface has two paths. A plain leading `@Codex` or `[@Codex]` text message uses the Codex CLI app-server as a direct sidecar thread. Selector forms like `@Codex -<plugin>`, `@Codex:<plugin>`, and `[@Codex:<plugin>]` scope the turn to a plugin and delegate it to the visible `Codex Plugin` specialist worker. The plugin-scoped path is read-only/safety-gated, uses server-owned scoped exact plugin tools, and returns preview/metadata-bounded normal tool output. Full connector exports use the scoped export artifact path instead of chat chunk relay. The direct sidecar path is Builder web only, text-only, excluded from Collaboration, and limited to one active direct Codex turn globally. Parent session display cards are append-only and excluded from model context; forked sessions omit historical Codex display cards.
+The Builder web `@Codex` surface has two paths. A plain leading `@Codex` or `[@Codex]` text message uses the Codex CLI app-server as a direct sidecar thread. Selector forms like `@Codex -<plugin>`, `@Codex:<plugin>`, and `[@Codex:<plugin>]` scope the turn to a plugin and delegate it to the visible `Codex Plugin` specialist worker. The plugin-scoped path is read-only/safety-gated, uses server-owned scoped exact plugin tools, and returns preview/metadata-bounded normal tool output. Full connector exports use the scoped export artifact path instead of chat chunk relay. The direct sidecar path is Builder web only, text-only, and limited to one active direct Codex turn globally. Parent session display cards are append-only and excluded from model context; forked sessions omit historical Codex display cards.
 
 
 ## Cursor SDK provider

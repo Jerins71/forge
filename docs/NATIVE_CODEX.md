@@ -82,8 +82,7 @@ session's native tool definitions.
 ## First-release boundaries
 
 - Native Codex is a local Builder manager option. Workers continue to use their
-  configured existing runtimes. Collaboration, system sessions, and native workers
-  are excluded.
+  configured existing runtimes. System sessions and native workers are excluded.
 - Secure Sessions and secret-delivery tools are unavailable for native managers.
   A model switch cannot bypass an active Secure Session. Use the existing Pi runtime
   for secret-backed work during this validation phase.

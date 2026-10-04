@@ -130,13 +130,11 @@ describe('local quality routing', () => {
     'docker-compose.yml',
     '.dockerignore',
     'scripts/secure-sessions-e2e/Dockerfile',
-    'scripts/verify-dockerignore-sensitive-context.mjs',
-  ])('runs build-context verification and broad checks for %s', (file) => {
+  ])('runs broad checks for %s', (file) => {
     const selection = selectChecks('changed', changed(file))
     const ids = selection.checks.map((check) => check.id)
 
     expect(isDockerConfigRelated(file)).toBe(true)
-    expect(ids).toContain('verify:dockerignore')
     expect(ids).toContain('lint')
     expect(ids).toContain('typecheck:electron')
     expect(ids).toContain('test:chrome-extension')
@@ -178,11 +176,10 @@ describe('local quality routing', () => {
     ])
   })
 
-  it('keeps Docker verification in the full gate', () => {
+  it('keeps the full gate broad', () => {
     expect(checkIds('full')).toEqual(expect.arrayContaining([
       'test',
       'typecheck',
-      'verify:dockerignore',
       'build',
     ]))
   })

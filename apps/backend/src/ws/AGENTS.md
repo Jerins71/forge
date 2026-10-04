@@ -24,16 +24,11 @@ Keep parsing and execution separated so the handler layer stays thin and the per
 `subscribe_inventory` is parsed by the utility domain parser. It requires a nonempty bounded
 `requestId` (128 characters) and rejects extra fields such as a conversation target or options.
 
-- Capability is local Builder only. On a `collaboration-server` runtime, including Remote Projects,
-  Builder authorization runs first. Requests denied by that gate may receive
-  `COLLABORATION_COMMAND_NOT_ALLOWED`. Only authorized requests that reach the local-runtime
-  capability check receive `INVENTORY_NOT_SUPPORTED` before inventory state is installed, including
-  authenticated admins.
 - An old server without the command fails closed with `INVALID_COMMAND` (`Unknown command type`).
   Do not recover that rejection, a timeout, or a malformed inventory command by sending ordinary
   `subscribe`.
 - Explicit conversation `subscribe` remains supported. Inventory and conversation subscriptions are
-  distinct targets on the existing owner. Viewer, presence, last-seen, session, terminal, and
+  distinct targets on the existing owner. Viewer, last-seen, session, terminal, and
   conversation lookup paths use conversation-only accessors.
 - Installing or refreshing inventory must not resolve or hydrate a default conversation, read
   transcript, mark read, or record a viewer. Unattended unread continues to increment while only
@@ -56,4 +51,4 @@ Keep parsing and execution separated so the handler layer stays thin and the per
 - Route code should not reach directly into `swarm/` internals.
 - Use `SwarmManager` as the boundary when websocket or HTTP work needs swarm behavior.
 - Shared helpers belong in `ws/http/shared/` or the relevant command/service module, not in route handlers.
-- Builder-only adapters such as local Git Monitoring, Stream Deck pairing, and History index diagnostics belong behind focused HTTP services/routes. Do not compose them for Collaboration or Remote Projects. `GET` / `PATCH /api/history/index` is Builder-only; `PATCH` accepts only boolean `paused`.
+- Builder-only adapters such as local Git Monitoring, Stream Deck pairing, and History index diagnostics belong behind focused HTTP services/routes. `GET` / `PATCH /api/history/index` is Builder-only; `PATCH` accepts only boolean `paused`.

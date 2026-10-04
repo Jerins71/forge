@@ -2,7 +2,7 @@ Git Monitoring lets local Builder projects notice when a configured Git remote h
 
 ## Where it applies
 
-This Builder-only setting is available at **Settings → Git Monitoring**. It applies only to eligible local Git projects that Forge knows about. Remote Projects and Collaboration servers do not receive this local monitoring service.
+This Builder-only setting is available at **Settings → Git Monitoring**. It applies only to eligible local Git projects that Forge knows about.
 
 The global switch is the master switch. When it is Off, no project runs monitoring: a project set to **On** does not override global Off. When the master switch is On, each eligible project can inherit the global setting or explicitly choose **On** or **Off**. Projects that are archived, removed, moved to a different working directory, or no longer valid local Git repositories are removed from monitoring eligibility.
 

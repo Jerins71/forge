@@ -42,8 +42,7 @@ To use private entry from the same running Builder in another browser, choose
 persists across restarts, and can be revoked from Desktop. It does not expose the
 Desktop master capability. Remote browser entry uses HTTPS by default and can use the explicit
 trusted-network HTTP path only when a user or operator has established that the
-connection is private and trusted. Remote Projects and Collaboration remain separate
-hosts and do not inherit the local Desktop vault.
+connection is private and trusted.
 
 ## Connect Bitwarden
 
@@ -186,7 +185,7 @@ before model calls. Keep credential use inside `forge.secure_bash` and never wri
 values into workspace files. Existing native threads without the secure tools need
 a new session or fork for this capability; ordinary continuation still works.
 Browser login delivery is not included in the native path. Supported local Forge Pi workers can participate with
-the manager session's authority. Cursor SDK, Remote Projects, Collaboration, Codex
+the manager session's authority. Cursor SDK, Codex
 plugin/external-thread workers, and the integrated terminal are not secure-session
 execution paths. Secure Bash is non-interactive pipe execution
 rather than a PTY. SSH passwords work through the `SSH_ASKPASS` binding.

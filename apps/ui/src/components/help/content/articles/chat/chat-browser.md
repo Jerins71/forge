@@ -1,4 +1,4 @@
-Forge Desktop presents one **Automatic Browser** experience for local Builder managers. The Automatic Browser is not a Skill and is not forwarded to Remote Projects or Collaboration.
+Forge Desktop presents one **Automatic Browser** experience for local Builder managers. The Automatic Browser is not a Skill.
 
 On Windows, Automatic Browser and External Chrome remain available as a beta feature with known issues. Setup, repair, and the hash-pinned native-host trust model are unchanged.
 
@@ -23,7 +23,7 @@ An embedded thumbnail normally updates from bounded native-viewport capture. For
 
 A Chrome thumbnail is not live and does not poll. It mirrors only the latest successful agent snapshot of that exact tab and disappears when the retained image is discarded after five minutes. Showing the thumbnail does not attach the debugger, extend control, or request another snapshot.
 
-The floating stack is read-only and accepts no page clicks, typing, scrolling, refresh, recording, or Take Control. Screen lock and system suspend discard pixels and block new frames; unlock resumes automatic capture. Preview images stay in bounded local memory and are never saved to browser state, conversation history, artifacts, Remote Projects, or Collaboration.
+The floating stack is read-only and accepts no page clicks, typing, scrolling, refresh, recording, or Take Control. Screen lock and system suspend discard pixels and block new frames; unlock resumes automatic capture. Preview images stay in bounded local memory and are never saved to browser state, conversation history, or artifacts.
 
 ## Chrome setup
 

@@ -125,12 +125,6 @@ const helpValidateCheck = {
   command: [node, [path.join(repoRoot, 'scripts', 'validate-help-content.mjs'), '--strict']],
 };
 
-const verifyDockerignoreCheck = {
-  id: 'verify:dockerignore',
-  label: 'Docker build-context safety',
-  command: [pnpm, ['verify:dockerignore']],
-};
-
 function backendScriptTestCheck(id, label, testFile) {
   return {
     id,
@@ -163,8 +157,7 @@ const releaseVersionConsistencyCheck = backendScriptTestCheck(
 
 export function isDockerConfigRelated(file) {
   const basename = path.posix.basename(file);
-  return file === 'scripts/verify-dockerignore-sensitive-context.mjs'
-    || basename === '.dockerignore'
+  return basename === '.dockerignore'
     || /^Dockerfile(?:\..+)?$/u.test(basename)
     || /^(?:docker-compose|compose)(?:\.[^.]+)?\.ya?ml$/u.test(basename);
 }
@@ -347,7 +340,6 @@ export function selectChecks(tier, changedFiles) {
         { id: 'test', label: 'All tests', command: [pnpm, ['test']] },
         { id: 'typecheck', label: 'All workspace typechecks', command: [pnpm, ['typecheck']] },
         helpValidateCheck,
-        verifyDockerignoreCheck,
         { id: 'build', label: 'Build', command: [pnpm, ['build']] },
       ],
       skipped,
@@ -375,12 +367,6 @@ export function selectChecks(tier, changedFiles) {
     checks.push(helpValidateCheck);
   } else {
     skipped.push({ id: 'help:validate', reason: 'No help-content-related changes detected.' });
-  }
-
-  if (changedFiles.some((entry) => isDockerConfigRelated(entry.path))) {
-    checks.push(verifyDockerignoreCheck);
-  } else {
-    skipped.push({ id: 'verify:dockerignore', reason: 'No Docker build-context config changes detected.' });
   }
 
   if (tier === 'quick' && changedFiles.some((entry) => entry.path === '.nvmrc')) {

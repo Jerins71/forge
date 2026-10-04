@@ -3,7 +3,6 @@ displayName: Correctness Review
 color: "#10b981"
 enabled: true
 whenToUse: Code review, bug hunting, correctness verification, contract validation, edge case analysis. Not for implementation, planning, or design/style reviews — use Design Review for maintainability concerns.
-TargetSpace: [builder, collaboration]
 defaultTier: deep
 builtin: true
 ---

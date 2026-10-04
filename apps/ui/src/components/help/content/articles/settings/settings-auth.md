@@ -1,4 +1,4 @@
-The Authentication pane manages model-provider credentials for the selected Builder or Collaboration backend. Its controls differ by provider: status and auth-type badges appear only on applicable cards.
+The Authentication pane manages model-provider credentials for the Builder backend. Its controls differ by provider: status and auth-type badges appear only on applicable cards.
 
 ## Supported providers
 
@@ -25,7 +25,7 @@ While broker mode is active, local OpenAI OAuth/API-key and pool credentials bel
 
 If `FORGE_OPENAI_CODEX_AUTH_MODE` is set in the environment, it overrides the Settings value and disables invite paste and manual broker edits in the UI. In `central_broker` mode, saved broker URL/token values are ignored and Forge uses `FORGE_OPENAI_AUTH_BROKER_URL`, `FORGE_OPENAI_AUTH_BROKER_TOKEN`, `FORGE_OPENAI_AUTH_BROKER_INSTANCE_ID`, and `FORGE_OPENAI_AUTH_BROKER_INSTANCE_LABEL` from the environment instead.
 
-Provider auth changes propagate by recycling matching idle manager runtimes or deferring the recycle until busy runtimes are idle. This includes collaboration channel sessions, direct OAuth login changes, and credential pool strategy changes, so the common case does not require recreating sessions or restarting the backend.
+Provider auth changes propagate by recycling matching idle manager runtimes or deferring the recycle until busy runtimes are idle. This includes direct OAuth login changes, and credential pool strategy changes, so the common case does not require recreating sessions or restarting the backend.
 
 ## OAuth login
 

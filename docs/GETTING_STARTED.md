@@ -50,24 +50,6 @@ If you use pooled OpenAI or Anthropic OAuth credentials, Forge refreshes them th
 
 You can fine-tune the app under **Settings → Appearance**. It supports Light, Dark, and System mode, appearance templates, editable accent/background/foreground colors, and UI/code font choices. Changes are drafted first, then saved with **Apply**. The browser renderer keeps those preferences locally in browser storage, so they do not travel with server-side profile config.
 
-### Connecting Remote Projects (Optional)
-
-Remote Projects lets this Builder open projects that remain on another Forge collaboration server. To connect one:
-
-1. Open **Settings → Collaboration** and choose **Add connection**.
-2. Enter the server URL, select **Test**, and confirm the connection succeeds.
-3. Select **Add**, then sign in to that connection with your collaboration email and password.
-4. Turn on **Remote projects** for the connection. A newly added connection is opted in automatically only when its successful Test response advertised Remote Projects support; an existing connection's preference is not silently changed.
-5. Return to Builder. Select a nested remote session row to make that server active. The blue, globe-marked project header only expands or collapses its session list; nested session rows use status dots.
-
-The **Remote projects** switch is a browser-local display/connection preference, not an access control. The collaboration server must separately enable its Remote Projects policy. Remote paths, Files operations, Git and `gh` commands, terminals, agents, and session data run or remain on that server—there is no local clone or sync. Secure Sessions, the local vault, paired-browser secret entry, and Team Secure Mode remain on the local Builder and are not available to Remote Projects. **New Project** uses the remote server directory browser (or a manually entered server path) under `FORGE_CWD_ALLOWLIST_ROOTS`, never the viewing machine's native folder picker. When remote terminal access is disabled, existing terminal descriptors or read visibility may remain, but subsequent member terminal lifecycle mutations and new ticket issuance are denied; an already attached terminal socket is not terminated. Members should be trusted instance operators: Remote Projects provides broad Builder read/write access to exposed projects and has no per-project ACL.
-
-In remote chat, author chips identify messages from other users. The viewer indicator is a snapshot of authenticated people subscribed to that session; it is not typing presence, an edit lock, or proof that someone is actively reading.
-
-If you open the UI directly on a collaboration-server origin and its collaboration session cookie is missing or expired, Forge shows a non-dismissible email/password dialog before opening the Builder connection. Successful sign-in reloads the current URL, preserves the requested route, and re-evaluates the account role: admins may continue to Builder, while members are routed to Collaboration. This direct-hosted flow is separate from a configured Remote Projects connection's sign-in and recovery flow under local **Settings → Collaboration**.
-
-See the [Remote Projects guide](collaboration/REMOTE_PROJECTS.md) for server policy, security boundaries, status meanings, and troubleshooting.
-
 > **Tip:** You don't need every provider to get started. One configured provider is enough to run agents, while multiple providers give you more multi-model routing options (more on this in [Advanced Usage](#10-advanced-usage)).
 
 ### First Impressions
@@ -100,7 +82,7 @@ You're the executive. The manager is your team lead. Selected Work Mode decides 
 
 A session is a conversation thread within a manager. Your first session is created automatically when you create the manager. You can create additional sessions for different workstreams: one for a feature, one for bug fixes, one for documentation. Each session has its own conversation history, its own memory, and can run workers independently. New sessions copy the profile's default manager model; existing sessions keep their stored model unless you override that session explicitly.
 
-In eligible Builder manager sessions, a compact pill beside **Send** shows the effective model and reasoning level. Click it to open **Session Model**, choose a session override, or select **Use Project Default** to copy the current project default onto that one session. Later project-default changes do not cascade. The pill is not shown in worker views, Collaboration channels, or system profiles such as Cortex.
+In eligible Builder manager sessions, a compact pill beside **Send** shows the effective model and reasoning level. Click it to open **Session Model**, choose a session override, or select **Use Project Default** to copy the current project default onto that one session. Later project-default changes do not cascade. The pill is not shown in worker views or system profiles such as Cortex.
 
 The Send-adjacent work-mode control chooses how the manager owns subsequent turns:
 
@@ -169,7 +151,7 @@ Forge chooses the target automatically. When the Forge extension is enabled and 
 
 There is no Chrome profile confirmation prompt or picker. Optional Chrome use requires Chrome 125+, Developer Mode, and the pinned unpacked extension. Open **Settings → Use Chrome with Forge**, reveal and load the exact extension folder through `chrome://extensions`, confirm extension ID `fcchfcnadajoejfbiclihglkmbcfhajd`, then return to Settings to enable Chrome. Repeat setup for every Chrome profile and `FORGE_DATA_DIR` you intend to use. Use a dedicated Chrome profile containing only the accounts needed for Forge work.
 
-A connected Forge Desktop host is required. Ordinary web clients do not attempt local browser IPC, and the capability is not forwarded to Remote Projects or Collaboration. See [Browser automation](BROWSER_AUTOMATION.md) for the full behavior, persistence, permissions, repair, and troubleshooting reference.
+A connected Forge Desktop host is required. Ordinary web clients do not attempt local browser IPC. See [Browser automation](BROWSER_AUTOMATION.md) for the full behavior, persistence, permissions, repair, and troubleshooting reference.
 
 ### Secure Sessions
 
@@ -238,11 +220,11 @@ The new project view is on by default. Use **Settings → General → Sidebar �
 
 Inbox lists **Needs you**, **Active**, and **Recent**, then an inline Projects tree. **Active** is capped at five currently working sessions, with **N more** opening Projects. **Recent** lists idle sessions updated in the last 7 days, excluding **Needs you** and **Active**. It initially shows five rows; **Show N more** expands the remaining matching rows inline in Inbox, and **Show less** collapses back to five without switching to Projects. **Needs you** is server-issued work-lifecycle attention. Unread badges and error dots do not create it, and the UI does not synthesize it from local badges. An unanswered **Input requested** pending choice raises **Needs you** even while work still runs or follow-ups are queued; answering or cancelling retracts that item without marking the session complete, so remaining work can stay **Active**. **Done** and **Clear** dismiss those exact items. Muting a session only hides it from **Needs you** and the Inbox badge; it does not dismiss the attention. Origins that do not support session attention omit **Needs you** instead of inventing items.
 
-In Projects, click a project header to expand or collapse its nested sessions; the header itself does not select a conversation. Select a session row to switch conversations, search by name or message content (with highlights), rename sessions, create new ones with the + button, and fork sessions from any point in a conversation. Enabled remote project headers are mixed into this list with blue styling and a globe marker; their nested session rows use status dots. Remote actions are limited: **Change Working Directory** is available on a project header through the server directory browser, while local rename, archive, delete, fork, and model actions are absent. Their connection section can show connecting, sign-in required, unreachable, **Update Forge to connect**, Remote Projects disabled on the server, or connected with no projects. Selecting a remote session targets supported chat/workspace surfaces at that server; selecting a local session switches them back. Dragging local and remote project headers only changes the order saved by the local Builder instance—it does not grant remote access. Session rows can show status badges, including active worker counts and a violet pulsing `C` while compaction or context recovery is active. Use the Archive nav in the Builder sidebar to view archived local projects and directly archived sessions; Archive itself remains local when a remote session is selected. Archive entries are sorted by last user-message activity and show the last-used date. Restore and reopen them from there.
+In Projects, click a project header to expand or collapse its nested sessions; the header itself does not select a conversation. Select a session row to switch conversations, search by name or message content (with highlights), rename sessions, create new ones with the + button, and fork sessions from any point in a conversation. Session rows can show status badges, including active worker counts and a violet pulsing `C` while compaction or context recovery is active. Use the Archive nav in the Builder sidebar to view archived local projects and directly archived sessions. Archive entries are sorted by last user-message activity and show the last-used date. Restore and reopen them from there.
 
 On desktop, Cortex lives in the activity-rail popover. On mobile, and in Classic, it remains a pinned sidebar row.
 
-For a local Builder project, right-click the project header or open its hover/focus **…** menu and choose **Project Settings**. This page remains scoped to that project and lets you rename it, change its working directory, change its default model and reasoning, choose **Context management** (Summary remains the default; Context v2 is experimental), open its Project secrets, and manage **Project Settings → Repository resources**. Repository resources shows the repo-root `.forge` inventory, executable trust controls, and an existing-`.forge` directory override. Eligible local Builder managers can also override or inherit that project default from a compact **Context management** control beside Send. Saving a mode does not clear the current conversation; it applies at the next context transition. The direct Rename, Change Default Model, Change Working Directory, and Project Secrets context-menu shortcuts remain. Cortex and Remote Projects do not have Project Settings.
+For a local Builder project, right-click the project header or open its hover/focus **…** menu and choose **Project Settings**. This page remains scoped to that project and lets you rename it, change its working directory, change its default model and reasoning, choose **Context management** (Summary remains the default; Context v2 is experimental), open its Project secrets, and manage **Project Settings → Repository resources**. Repository resources shows the repo-root `.forge` inventory, executable trust controls, and an existing-`.forge` directory override. Eligible local Builder managers can also override or inherit that project default from a compact **Context management** control beside Send. Saving a mode does not clear the current conversation; it applies at the next context transition. The direct Rename, Change Default Model, Change Working Directory, and Project Secrets context-menu shortcuts remain. Cortex does not have Project Settings.
 
 **Pinning sessions:** Right-click any session and select "Pin" to keep it at the top of the sidebar. Pinned sessions appear below project agents but above regular sessions and are never hidden by the "Show N more" pagination. Click "Unpin" to return a session to regular sorting. Sessions are pinned per profile — forked sessions don't inherit pin state.
 
@@ -250,7 +232,7 @@ For a local Builder project, right-click the project header or open its hover/fo
 
 When workers are active, small green pills appear at the bottom of the chat window. Each pill represents a running worker and shows an elapsed timer. Click a pill to open that worker's transcript; worker transcripts default to the **All** view so their activity is visible.
 
-Quick at-a-glance view of parallel work in progress. Codex app-server sidecars appear as worker-like external-thread cards. They persist by default, can be stopped through the same session stop path, and can be reused after stop. Plain `@Codex` / `[@Codex]` text follow-ups continue the direct sidecar thread; plugin selector mentions open the plugin-scoped path, which reaches the manager and is delegated to the visible `Codex Plugin` specialist worker with read-only scoped tools, bounded redacted results, artifact-backed full exports when needed, and normal manager follow-up while scope remains active. If a scoped Codex Plugin worker is stopped or fails, clear continuation or retry turns can reuse the server-stored scope without re-tagging; unrelated turns clear that retry context. The sidecar path is Builder web only, text-only, excludes Collaboration, and allows only one active direct Codex turn globally.
+Quick at-a-glance view of parallel work in progress. Codex app-server sidecars appear as worker-like external-thread cards. They persist by default, can be stopped through the same session stop path, and can be reused after stop. Plain `@Codex` / `[@Codex]` text follow-ups continue the direct sidecar thread; plugin selector mentions open the plugin-scoped path, which reaches the manager and is delegated to the visible `Codex Plugin` specialist worker with read-only scoped tools, bounded redacted results, artifact-backed full exports when needed, and normal manager follow-up while scope remains active. If a scoped Codex Plugin worker is stopped or fails, clear continuation or retry turns can reuse the server-stored scope without re-tagging; unrelated turns clear that retry context. The sidecar path is Builder web only, text-only, and allows only one active direct Codex turn globally.
 
 ### Artifacts Panel
 
@@ -270,7 +252,7 @@ Usage data survives backend restarts via a shared cache. OpenAI and Anthropic we
 
 ### Response throughput
 
-Open **Stats → Response throughput** to compare manager and worker response throughput, daily model trends, model summaries, and recent calls. Filter by date range (including a custom range), project, role, provider/model, attribution, or specialist. Stats remains a local Builder surface even when a Remote Project is selected.
+Open **Stats → Response throughput** to compare manager and worker response throughput, daily model trends, model summaries, and recent calls. Filter by date range (including a custom range), project, role, provider/model, attribution, or specialist. Stats is a local Builder surface.
 
 Response throughput is intentionally **Pi-runtime-only**: it records manager and worker model calls that run through Pi, rather than treating a provider name or every runtime as evidence of support. Other runtime paths do not add records. The rate is provider-final output tokens divided by the complete monotonic `requestWallMs` duration from request start to terminal completion (`request_wall_monotonic`). It does not include gaps between separate model calls, but it does include hidden reasoning, buffered tool calls, and batched deltas within that request. An agent-level Pi retry becomes a separate call; provider-internal retries and Codex WebSocket replays are not timed as separate rates.
 
@@ -544,7 +526,7 @@ On **Summary**, Smart compaction works as before:
 5. **Pinned messages** — Any messages you've pinned (up to 10 per session) are preserved verbatim in the summary under a dedicated "Preserved Messages (Pinned)" section.
 6. **Resume** — If compaction happened while the session was active, interrupted, or waiting on dispatch, the agent comes back with the detailed recent context, a high-level summary of older work, pinned messages, and the handoff file.
 
-On **Context v2**, Compact and Smart compact skip that Smart LLM handoff and instead write a deterministic checkpoint: current goal/plan, pins, and unconsumed tool-result references. Older transcript remains on disk and is recoverable with the agent-only `history` tool. Context v2 is experimental and executable only by supported ordinary Pi Builder managers (OpenAI/Codex or Anthropic). Collaboration, Cortex/system, Cursor SDK, plugin/external threads, and workers cannot run it; workers inherit the owning manager. A project can still save Context v2 as a preference even when the current runtime cannot execute it.
+On **Context v2**, Compact and Smart compact skip that Smart LLM handoff and instead write a deterministic checkpoint: current goal/plan, pins, and unconsumed tool-result references. Older transcript remains on disk and is recoverable with the agent-only `history` tool. Context v2 is experimental and executable only by supported ordinary Pi Builder managers (OpenAI/Codex or Anthropic). Cortex/system, Cursor SDK, plugin/external threads, and workers cannot run it; workers inherit the owning manager. A project can still save Context v2 as a preference even when the current runtime cannot execute it.
 
 If you trigger Smart compact manually on **Summary** while the Pi-backed manager is already idle, it compacts and stays idle afterward. If it was active, interrupted, or dispatch-pending, it resumes after compaction. On **Context v2**, a busy manual Compact or Smart compact is rejected until streaming, tools, and prompt dispatch settle; retry when idle. An idle Context v2 manager stays idle after a successful manual transition. Saving Summary or Context v2 does not reset the current window; it applies at the next context transition. While compaction or context recovery is active, the session row shows a violet pulsing `C` badge in the sidebar. **Settings → General → Compaction** still controls the compaction model, reasoning, and timeout for supported Pi-backed OpenAI/Codex and Anthropic manager compaction runtimes only, not Cursor SDK, xAI/Grok, or user-added OpenRouter manager models; OpenRouter manager eligibility is a separate policy and OpenRouter models are not compaction choices. Context continuation itself lives in **Project Settings → Context management**, with an optional session inherit/override beside Send.
 
@@ -556,7 +538,7 @@ Local Builder managers and ordinary workers can recover compacted or older conve
 
 Indexing starts autonomously after local Builder hydration and prefers recent sources. Hits return source-qualified references, not bare entry IDs; long entries may include part locators. Reads expand those references from canonical JSONL. Historical evidence is not current authority or proof of current state. Coverage is `building`, `ready`, `degraded`, or `unavailable`. Incomplete catch-up or `building` coverage means a no-match is not proof of absence. Unreadable sources surface as `degraded` or `unavailable`, not endless building. Canonical `session.jsonl` remains the source of truth; `shared/cache/history-recall.db` is a rebuildable derived index. See [Configuration](CONFIGURATION.md#history-recall) for index and read limits.
 
-Collaboration, Cortex/system, plugin, and external-thread runtimes do not get this tool. Workers inherit the owning manager's context policy and can search the same origin-scoped Builder history. Remote Projects search the selected remote origin's Builder history, not the viewing client's. Secure Sessions secrets are excluded from indexed text.
+Cortex/system, plugin, and external-thread runtimes do not get this tool. Workers inherit the owning manager's context policy and can search the same Builder history. Secure Sessions secrets are excluded from indexed text.
 
 ### Pinning Messages
 
@@ -639,7 +621,7 @@ Go to **Settings → Skills** to configure optional skill-backed agent capabilit
 - **Custom skills** — Reusable custom skills can be scaffolded and validated with the built-in `create-skill` helper, which can create global skills, profile/project skills, or repository `.forge/skills` skills as needed.
 - **Skill sharing** — Share a user-created global or project skill to generate a temporary bearer link from the skill share service. Recipients can open the link or a `forge://skill-import` deep link, but Forge always shows a preview first and never auto-installs. Conflicts default to reject; replacing an existing directory or installing an override requires explicit confirmation. Built-in and repository skills are not shareable in v1.
 
-The Automatic Browser is not configured as a Skill and remains local to Forge Desktop. Optional Chrome setup and repair live in **Settings → Use Chrome with Forge**. The capability is not forwarded to Remote Projects or Collaboration.
+The Automatic Browser is not configured as a Skill and remains local to Forge Desktop. Optional Chrome setup and repair live in **Settings → Use Chrome with Forge**.
 
 ### System Prompt Preview
 
@@ -657,25 +639,15 @@ Right now these are text snippets for commonly used prompts. Functional slash co
 
 **Project Settings → Context management** is the project default for Summary vs experimental Context v2. Eligible local Builder managers can inherit or override that default from the compact control beside Send. Saving a mode applies at the next context transition. **Settings → General → Compaction** still chooses only the compaction model, reasoning, and timeout; it is not the home for this policy.
 
-### Remote Projects
-
-Use **Settings → Collaboration** to manage collaboration connections and their separate **Remote projects** preferences. Adding a connection uses **Add connection → URL → Test → Add**. After you sign in, the Builder/Collab switch opens collaboration channels, while the per-connection **Remote projects** switch controls whether that server's normal Builder projects appear in your unified Builder sidebar. These are two different controls and Remote Projects are not Collaboration channels.
-
-A remote selection makes supported project-scoped surfaces use the remote origin: chat and execution, Files, Source Control, attachments, Session Audit, model availability, and terminals. If the server disables member terminal access, existing descriptors or read visibility may remain while subsequent lifecycle mutations and ticket issuance are denied. Non-chat Settings, Stats, Archive, onboarding, Cortex, provider-usage data, and the mixed sidebar-order setting remain local. Remote New Project and Change Working Directory browse paths on the server rather than opening a local native folder picker.
-
-Turning the browser preference off does not revoke the collaboration session, stop remote agents, or change server policy. Likewise, a server disabling Remote Projects denies subsequent member Builder HTTP requests and commands but does not disconnect existing sockets or subscriptions. Disabling remote terminals blocks subsequent member terminal lifecycle and ticket access; it does not terminate an already attached terminal socket or make the server a full sandbox. See the [canonical Remote Projects guide](collaboration/REMOTE_PROJECTS.md).
-
 ### OpenRouter routing
 
-**Settings → Models** stores shared OpenRouter provider routing and privacy filters on the selected backend, including Remote Projects' selected server. Shared defaults apply to every OpenRouter call on that backend; a per-model override requires the model to be added first. On a Collaboration server this is admin-only. Changes apply to the next OpenRouter model call. Hard filters fail closed and suppress Forge automatic model fallback; preferences-only order or sort do not. OpenRouter endpoint fallback is not Forge model fallback. These filters constrain OpenRouter inference routing only — not local transcripts, tools, or non-OpenRouter summarization/compaction. Endpoint discovery is advisory and is not a paid test. See [Configuration](CONFIGURATION.md#openrouter-routing).
+**Settings → Models** stores shared OpenRouter provider routing and privacy filters in the Forge data directory. Shared defaults apply to every OpenRouter call; a per-model override requires the model to be added first. Changes apply to the next OpenRouter model call. Hard filters fail closed and suppress Forge automatic model fallback; preferences-only order or sort do not. OpenRouter endpoint fallback is not Forge model fallback. These filters constrain OpenRouter inference routing only — not local transcripts, tools, or non-OpenRouter summarization/compaction. Endpoint discovery is advisory and is not a paid test. See [Configuration](CONFIGURATION.md#openrouter-routing).
 
 Each added OpenRouter card also has a **Context window** token input with **Apply** and **Reset**. Enter a positive whole number of tokens; blank Apply or Reset removes only the cap. The effective maximum is the lower of the advertised window and the cap, so a cap cannot increase capacity. Manager-enabled and **Configure routing** stay independent. Caps persist on the existing `openrouter:<model-id>` override in `shared/config/model-overrides.json` and apply when an agent next starts; running agents keep their current snapshot. Removing the model deletes that override key; re-adding it starts with manager access off and no cap.
 
 ### Observability
 
 **Settings → Observability** configures the Builder-only Arize Phoenix exporter. Forge sends OTLP HTTP/protobuf traces to a local loopback endpoint, defaulting to `http://127.0.0.1:6006/v1/traces`. Rich capture can include runtime, prompt, LLM, tool, delivery, lifecycle, error, and feedback spans. Use the capture toggles, redaction settings, and content caps to control what goes into Phoenix.
-
-Collaboration mode is not supported in V1. It uses a no-op/fail-closed observability facade and does not export traces.
 
 ### Editor Preference
 
@@ -773,7 +745,7 @@ Forge application state uses a single data directory (repository and workspace f
 - **macOS/Linux:** `~/.forge`
 - **Windows:** `%LOCALAPPDATA%\forge`
 
-Normal Builder state is file-backed (JSON, JSONL, Markdown, and terminal journals/snapshots). A collaboration-server data directory also contains SQLite at `shared/config/collaboration/auth.db` for authentication and structured collaboration domain state; user-authored prompts, references, specialists, and skills remain file-backed. Key paths are:
+Builder state is mostly file-backed (JSON, JSONL, Markdown, and terminal journals/snapshots); user-authored prompts, references, specialists, and skills remain file-backed. Key paths are:
 
 ```
 ~/.forge/
@@ -781,9 +753,6 @@ Normal Builder state is file-backed (JSON, JSONL, Markdown, and terminal journal
 ├── shared/
 │   ├── config/
 │   │   ├── auth/                  # Provider auth, pools, broker source, CLI keys
-│   │   ├── collaboration/
-│   │   │   ├── auth.db            # Collaboration auth + structured state
-│   │   │   └── auth-secret.key    # Generated collaboration auth secret
 │   │   ├── secrets.json           # Shared secret values
 │   │   ├── history-index.json     # Persistent History indexing pause preference
 │   │   ├── knowledge-v2.json      # Default-off Knowledge v2 mode settings
@@ -830,7 +799,7 @@ Cortex is architecturally just another manager agent. It lives in the same profi
 
 See [Configuration](CONFIGURATION.md#data-directory) for the fuller canonical layout and which files are secrets, state, or regenerable caches.
 
-**Backing up:** Copy the authoritative `FORGE_DATA_DIR` while Forge is stopped or through a storage-level consistent snapshot; this includes the collaboration SQLite file when present. Back up repository/workspace mounts separately—Forge does not copy working trees into its data directory. For Remote Projects, both the data directory and workspace live on the selected server, not the viewing client.
+**Backing up:** Copy the authoritative `FORGE_DATA_DIR` while Forge is stopped or through a storage-level consistent snapshot. Back up repository/workspace mounts separately—Forge does not copy working trees into its data directory.
 
 ---
 
@@ -869,7 +838,7 @@ Also be aware of prompt injection risks when agents browse the web. Malicious we
 
 ### Back Up Your Data Directory
 
-`~/.forge` (or your configured `FORGE_DATA_DIR`) contains Forge application state such as conversation history, Cortex knowledge, preferences, and session memory. Copy it periodically while Forge is stopped or with a storage-level consistent snapshot. Repository and workspace directories are not copied into the Forge data directory, so back them up separately; Remote Projects state and workspaces must be backed up on the server that hosts them.
+`~/.forge` (or your configured `FORGE_DATA_DIR`) contains Forge application state such as conversation history, Cortex knowledge, preferences, and session memory. Copy it periodically while Forge is stopped or with a storage-level consistent snapshot. Repository and workspace directories are not copied into the Forge data directory, so back them up separately.
 
 ### Watch GitHub Releases for Updates
 

@@ -17,8 +17,6 @@ Shared protocol types come from `@forge/protocol`. Do not redefine backend DTOs 
   hooks into the nearest existing subdirectory.
 - Prefer local state and focused hooks. Do not introduce a new state library for a feature without an
   explicit architectural need.
-- Preserve origin scoping for remote-project state. An event from one origin must not update or
-  rerender another origin's subscribers.
 - Preserve desktop and mobile behavior intentionally; do not assume hover, wide viewports, or a
   filesystem-capable client.
 

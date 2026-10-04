@@ -18,12 +18,6 @@ Internally, Forge retains stable task-mode and route identifiers for persistence
 
 A custom specialist is a complete saved domain-specific execution template with its own name, standalone prompt, model settings, fallback, and "when to use" guidance. It is an escape hatch for durable roles that do not fit the shared task types. Managers select a custom specialist directly rather than combining it with a mode or roster route.
 
-## TargetSpace and scope
-
-Task-instruction prompts and custom specialists are TargetSpace-aware. Builder and Collaboration each receive the appropriate roster. Collaboration also supports channel-local definitions that shadow a selected global handle only for that channel.
-
-Global task instructions are file-backed and can be overridden per project. Channel selection state is stored separately from the markdown definitions so definitions can be reused without coupling them to one channel.
-
 ## Routing and fallback
 
 The manager receives a compact instruction/custom-specialist block plus a separate versioned `[delegationRoster]` context containing the active roster specialists. Forge pins the resolved specialist, model, and fallback on each attempt, then handles availability fallback and worker-result attribution internally. Capability escalation is a distinct new-attempt decision. Hard OpenRouter routing/privacy filters on the primary model suppress that automatic model fallback; preferences-only OpenRouter settings do not. OpenRouter endpoint fallback is a different control from Forge specialist fallback.

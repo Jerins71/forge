@@ -1,4 +1,4 @@
-The **Stream Deck** settings page connects a local Elgato Stream Deck plugin to Forge Desktop. It is optional and Builder-only; it does not expose controls to Remote Projects or Collaboration servers.
+The **Stream Deck** settings page connects a local Elgato Stream Deck plugin to Forge Desktop. It is optional and Builder-only.
 
 ## Pair a device
 
