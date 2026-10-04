@@ -57,9 +57,9 @@ describe("CodexPluginDelegationCoordinator", () => {
     expect(guidance).toContain("attachment payloads are not forwarded");
 
     expect(() => harness.coordinator.classifyAndPreflightUserTurn(
-      { ...harness.manager, collab: { workspaceId: "w", channelId: "c" } },
+      harness.manager,
       "@Codex:fireflies summarize",
-      { channel: "web" },
+      { channel: "cli" },
     )).toThrow(/Builder web manager sessions/i);
   });
 

@@ -1,4 +1,4 @@
-import type { CollaborationServerEvent, ServerEvent } from "@forge/protocol";
+import type { ServerEvent } from "@forge/protocol";
 import { WebSocket } from "ws";
 import { warnWsThrottled } from "./ws-log-throttle.js";
 
@@ -47,7 +47,7 @@ export const BOOTSTRAP_CRITICAL_EVENT_TYPES: ReadonlySet<string> = new Set([
  * saturated the socket left the sidebar/pill worker lists empty with every retry de-duped onto
  * the dead request. Treat these like bootstrap-critical: await drain instead of dropping.
  */
-export function hasRequestId(event: ServerEvent | CollaborationServerEvent): boolean {
+export function hasRequestId(event: ServerEvent): boolean {
   const requestId = (event as { requestId?: unknown }).requestId;
   if (typeof requestId === "string" && requestId.length > 0) return true;
   // Browser broker requests carry their correlation ID in the nested request
@@ -77,7 +77,7 @@ export type SocketSendPathValidationResult =
 
 export function sendWsEvent(options: {
   socket: WebSocket;
-  event: ServerEvent | CollaborationServerEvent;
+  event: ServerEvent;
   onDropSocket: (socket: WebSocket) => void;
 }): number | null {
   const { socket, event, onDropSocket } = options;
@@ -163,7 +163,7 @@ export function sendWsEvent(options: {
  */
 export async function sendWsEventWithBackpressure(options: {
   socket: WebSocket;
-  event: ServerEvent | CollaborationServerEvent;
+  event: ServerEvent;
   onDropSocket: (socket: WebSocket) => void;
   timeoutMs?: number;
   /** Rechecked after a drain wait so a superseded bootstrap cannot leak its next frame. */

@@ -170,7 +170,7 @@ export class CliHeadlessSubscriptions {
   }
 
   private isCliSessionDescriptor(descriptor: AgentDescriptor | undefined): descriptor is AgentDescriptor & { role: "manager" } {
-    if (!descriptor || descriptor.role !== "manager" || descriptor.sessionSurface === "collab") {
+    if (!descriptor || descriptor.role !== "manager") {
       return false;
     }
 

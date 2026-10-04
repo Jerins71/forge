@@ -1,8 +1,6 @@
 /**
- * Local Builder instance preference for the unified local + remote project list.
- *
- * The preference is intentionally owned by the local Builder backend. Remote
- * collaboration servers never expose this API or receive these values.
+ * Local Builder preference for the project list order, keyed by
+ * `(originId, profileId)` so it can hold projects from several backends.
  */
 
 export const BUILDER_SIDEBAR_ORDER_VERSION = 1 as const

@@ -110,8 +110,7 @@ async function setup(input?: {
   const access: SwarmConfigurationAccessPolicy = {
     assertManagerSettingsTargetNotArchived: vi.fn(),
     assertProfileNotArchived: vi.fn(),
-    getRequiredBuilderSessionDescriptor: (agentId) => descriptors.get(agentId)!,
-    getRequiredCollaborationSessionDescriptor: (agentId) => descriptors.get(agentId)!,
+    getRequiredSessionDescriptor: (agentId) => descriptors.get(agentId)!,
     assertDescriptorNotEffectivelyArchived: vi.fn(),
     ...input?.access,
   };

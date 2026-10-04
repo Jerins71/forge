@@ -9,9 +9,6 @@ export function isRestrictedDescriptor(descriptor: AgentDescriptor | undefined):
   if (!descriptor) {
     return true;
   }
-  if (descriptor.sessionSurface === "collab" || descriptor.collab) {
-    return true;
-  }
   if (descriptor.sessionPurpose) {
     return true;
   }

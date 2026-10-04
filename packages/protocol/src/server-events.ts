@@ -19,29 +19,6 @@ import type {
   ModelCacheVisualizationSettingsChangedEvent,
 } from './config-events.js'
 import type {
-  CollaborationBootstrapEvent,
-  CollaborationCategoryCreatedEvent,
-  CollaborationCategoryDeletedEvent,
-  CollaborationCategoryReorderedEvent,
-  CollaborationCategoryUpdatedEvent,
-  CollaborationChannelActivityUpdatedEvent,
-  CollaborationChannelArchivedEvent,
-  CollaborationChannelCreatedEvent,
-  CollaborationChannelHistoryEvent,
-  CollaborationChannelMessageEvent,
-  CollaborationChannelReadyEvent,
-  CollaborationChannelReorderedEvent,
-  CollaborationChannelStatusEvent,
-  CollaborationChannelUpdatedEvent,
-  CollaborationChoiceRequestEvent,
-  CollaborationMessagePinnedEvent,
-  CollaborationReadStateUpdatedEvent,
-  CollaborationSessionActivityEvent,
-  CollaborationSessionActivitySnapshotEvent,
-  CollaborationSessionAgentStatusEvent,
-  CollaborationSessionWorkersSnapshotEvent,
-} from './collaboration.js'
-import type {
   DirectoriesListedEvent,
   DirectoryCreatedEvent,
   DirectoryPickedEvent,
@@ -126,7 +103,6 @@ import type {
   PendingChoicesSnapshotEvent,
   ReadyEvent,
 } from './transport-events.js'
-import type { ProjectPresenceEvent } from './presence.js'
 import type { RestartRecoverySnapshotEvent } from './restart-recovery.js'
 import type {
   RemoteUpdateAwarenessProjectChangedEvent,
@@ -174,27 +150,6 @@ export type ServerEvent =
   | CodexElicitationRequestEvent
   | CodexElicitationDismissedEvent
   | ReadyEvent
-  | CollaborationBootstrapEvent
-  | CollaborationChannelReadyEvent
-  | CollaborationChannelHistoryEvent
-  | CollaborationChannelMessageEvent
-  | CollaborationChannelStatusEvent
-  | CollaborationSessionWorkersSnapshotEvent
-  | CollaborationSessionActivitySnapshotEvent
-  | CollaborationSessionActivityEvent
-  | CollaborationSessionAgentStatusEvent
-  | CollaborationChannelActivityUpdatedEvent
-  | CollaborationReadStateUpdatedEvent
-  | CollaborationChoiceRequestEvent
-  | CollaborationMessagePinnedEvent
-  | CollaborationChannelCreatedEvent
-  | CollaborationChannelUpdatedEvent
-  | CollaborationChannelArchivedEvent
-  | CollaborationChannelReorderedEvent
-  | CollaborationCategoryCreatedEvent
-  | CollaborationCategoryUpdatedEvent
-  | CollaborationCategoryDeletedEvent
-  | CollaborationCategoryReorderedEvent
   | ConversationResetEvent
   | ConversationHistoryEvent
   | ConversationPageEvent
@@ -209,7 +164,6 @@ export type ServerEvent =
   | GenerationThroughputEvent
   | GenerationThroughputSnapshotEvent
   | ManagerToolActivityEvent
-  | ProjectPresenceEvent
   | SessionPlanSnapshotEvent
   | SessionGoalSnapshotEvent
   | SessionAttentionSnapshotEvent

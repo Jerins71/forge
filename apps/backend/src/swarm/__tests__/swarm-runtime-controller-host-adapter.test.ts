@@ -217,7 +217,7 @@ describe("createSwarmRuntimeControllerHost", () => {
     toolHost.getSecureSessionAgentView = vi.fn();
     const host = createAdapter({ toolHost });
     const descriptor = { agentId: "manager", managerId: "manager", role: "manager",
-      sessionSurface: "builder", model: { provider: "openai-codex" },
+      model: { provider: "openai-codex" },
     } as AgentDescriptor;
 
     expect(host.isSecureSessionsEnabledForAgent?.("manager")).toBe(false);

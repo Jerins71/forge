@@ -28,13 +28,9 @@ import {
   resolveModelDescriptorFromPreset,
 } from "./catalog/model-presets.js";
 import type { SessionPlanCoordinator } from "./planning/session-plan-coordinator.js";
-import type {
-  SessionCreationBaseDescriptor,
-  SessionCreationOptions,
-} from "./session-descriptor-factory.js";
+import type { SessionCreationOptions } from "./session-descriptor-factory.js";
 import type { SwarmAgentLifecycleService } from "./swarm-agent-lifecycle-service.js";
 import {
-  assertBuilderSession,
   cloneDescriptor,
   normalizeOptionalAgentId,
   normalizeOptionalModelId,
@@ -54,8 +50,6 @@ export interface SessionCreationOverrides {
   model?: AgentModelDescriptor;
   cwd?: string;
   sessionSystemPrompt?: string;
-  sessionSurface?: AgentDescriptor["sessionSurface"];
-  collab?: AgentDescriptor["collab"];
 }
 
 export interface CreateSessionFromAgentInput {
@@ -108,7 +102,6 @@ export interface SessionLifecycleCoordinatorOptions {
     SwarmSessionService,
     | "createSession"
     | "createSessionWithOverrides"
-    | "createSessionFromBaseDescriptor"
     | "deleteSession"
     | "clearSessionConversation"
     | "renameSession"
@@ -208,23 +201,6 @@ export class SessionLifecycleCoordinator {
     this.assertProfileNotArchived(profileId);
     const created = await this.options.sessions.createSessionWithOverrides(
       profileId,
-      options,
-      overrides,
-    );
-    await this.emitExtensionLifecycle("created", created.sessionAgent);
-    return created;
-  }
-
-  async createSessionFromBaseDescriptor(
-    profileId: string,
-    base: SessionCreationBaseDescriptor,
-    options: SessionCreationOptions = {},
-    overrides: Pick<SessionCreationOverrides, "sessionSurface" | "collab"> = {},
-  ): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
-    this.assertProfileNotArchived(profileId);
-    const created = await this.options.sessions.createSessionFromBaseDescriptor(
-      profileId,
-      base,
       options,
       overrides,
     );
@@ -426,27 +402,24 @@ export class SessionLifecycleCoordinator {
   }
 
   async stopSession(agentId: string): Promise<{ terminatedWorkerIds: string[] }> {
-    this.getRequiredBuilderSessionDescriptor(agentId, "stop Builder sessions");
+    this.getRequiredSessionDescriptor(agentId);
     return this.stopValidatedSession(agentId);
   }
 
   async resumeSession(agentId: string): Promise<void> {
-    const descriptor = this.getRequiredBuilderSessionDescriptor(
-      agentId,
-      "resume Builder sessions",
-    );
+    const descriptor = this.getRequiredSessionDescriptor(agentId);
     this.assertDescriptorNotEffectivelyArchived(descriptor);
     await this.options.runtime.beforeResumeSession(descriptor);
     await this.options.lifecycle.resumeSession(agentId);
     this.options.goals.scheduleContinuation(
-      this.getRequiredBuilderSessionDescriptor(agentId, "resume Builder sessions"),
+      this.getRequiredSessionDescriptor(agentId),
     );
   }
 
   async resumeStoppedSessionForUserInput(agentId: string): Promise<void> {
     const pending = this.userInputRecoveries.get(agentId);
     if (pending) return pending;
-    const descriptor = this.getRequiredBuilderSessionDescriptor(agentId, "resume Builder sessions");
+    const descriptor = this.getRequiredSessionDescriptor(agentId);
     this.assertDescriptorNotEffectivelyArchived(descriptor);
     if (descriptor.status !== "stopped") return;
     const recovery = (async () => {
@@ -460,10 +433,7 @@ export class SessionLifecycleCoordinator {
   }
 
   async deleteSession(agentId: string): Promise<{ terminatedWorkerIds: string[] }> {
-    const requiredDescriptor = this.getRequiredBuilderSessionDescriptor(
-      agentId,
-      "delete Builder sessions",
-    );
+    const requiredDescriptor = this.getRequiredSessionDescriptor(agentId);
     await this.deleteSideChatsOf(agentId);
     const descriptor = cloneDescriptor(requiredDescriptor);
     return await this.withSecureLifecycleFence(
@@ -490,20 +460,14 @@ export class SessionLifecycleCoordinator {
   }
 
   async clearSessionConversation(agentId: string): Promise<void> {
-    const descriptor = this.getRequiredBuilderSessionDescriptor(
-      agentId,
-      "clear Builder conversations",
-    );
+    const descriptor = this.getRequiredSessionDescriptor(agentId);
     this.assertDescriptorNotEffectivelyArchived(descriptor);
     await this.options.sessions.clearSessionConversation(agentId);
     this.options.activeTools.clearSession(agentId);
   }
 
   async renameSession(agentId: string, label: string): Promise<void> {
-    const descriptor = this.getRequiredBuilderSessionDescriptor(
-      agentId,
-      "rename Builder sessions",
-    );
+    const descriptor = this.getRequiredSessionDescriptor(agentId);
     this.assertDescriptorNotEffectivelyArchived(descriptor);
     const wasProjectAgent = Boolean(descriptor.projectAgent);
     await this.options.sessions.renameSession(agentId, label);
@@ -525,7 +489,7 @@ export class SessionLifecycleCoordinator {
     },
   ): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
     const source = cloneDescriptor(
-      this.getRequiredBuilderSessionDescriptor(sourceAgentId, "fork Builder sessions"),
+      this.getRequiredSessionDescriptor(sourceAgentId),
     );
     this.assertDescriptorNotEffectivelyArchived(source);
     if (options?.sessionPurpose === "side_chat") {
@@ -826,15 +790,6 @@ export class SessionLifecycleCoordinator {
       throw new Error(`Unknown session agent: ${agentId}`);
     }
     return descriptor as AgentDescriptor & { role: "manager"; profileId: string };
-  }
-
-  private getRequiredBuilderSessionDescriptor(
-    agentId: string,
-    action: string,
-  ): AgentDescriptor & { role: "manager"; profileId: string } {
-    const descriptor = this.getRequiredSessionDescriptor(agentId);
-    assertBuilderSession(descriptor, action);
-    return descriptor;
   }
 
   private async deleteSideChatsOf(sourceAgentId: string): Promise<void> {

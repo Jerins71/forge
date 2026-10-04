@@ -191,14 +191,14 @@ describe("ProjectAgentSharingService", () => {
     expect(replaced.snapshot.grants[0]?.targetProfileId).toBe("web");
   });
 
-  it("excludes cortex, collaboration, system, archived, and self targets", async () => {
+  it("excludes cortex, system, archived, and self targets", async () => {
     const source = makeProjectAgent("docs--s1", "forge", "documentation");
     const { service } = await createService({
       profiles: [
         makeProfile("forge"),
         makeProfile("mobile"),
         makeProfile("cortex", { profileType: "system" }),
-        makeProfile("_collaboration", { profileType: "system" }),
+        makeProfile("_system", { profileType: "system" }),
         makeProfile("archived", { archivedAt: "2026-05-01T00:00:00.000Z" }),
       ],
       descriptors: [source],

@@ -360,7 +360,7 @@ describe("CLI routes and bearer auth", () => {
     ).resolves.toMatchObject({ status: 400, json: { error: { code: "invalid_offset" } } });
   });
 
-  it("uses stable ids only and excludes system/collaboration surfaces", async () => {
+  it("uses stable ids only and excludes system surfaces", async () => {
     const { service } = await makeCliAccessService();
     const generated = await service.generateKey({ name: "Stable ID test" });
     const server = await createCliRouteTestServer(service, createCliRouteState());
@@ -371,16 +371,6 @@ describe("CLI routes and bearer auth", () => {
       json: { error: { code: "not_found" } },
     });
     await expect(parseJsonResponse(await fetch(`${server.baseUrl}/api/cli/agents/Docs%20Agent`, { headers }))).resolves.toMatchObject({
-      status: 404,
-      json: { error: { code: "not_found" } },
-    });
-    await expect(parseJsonResponse(await fetch(`${server.baseUrl}/api/cli/sessions/collab-session`, { headers }))).resolves.toMatchObject({
-      status: 404,
-      json: { error: { code: "not_found" } },
-    });
-    await expect(
-      parseJsonResponse(await fetch(`${server.baseUrl}/api/cli/sessions/collab-session/transcript`, { headers }))
-    ).resolves.toMatchObject({
       status: 404,
       json: { error: { code: "not_found" } },
     });
@@ -513,12 +503,6 @@ function createCliRouteState(): {
         capabilities: ["create_session"],
       },
       sessionSystemPrompt: "secret session prompt",
-    }),
-    createRouteAgent({
-      agentId: "collab-session",
-      profileId: "profile-a",
-      sessionSurface: "collab",
-      collab: { workspaceId: "workspace", channelId: "channel" },
     }),
     createRouteAgent({ agentId: "cortex-session", profileId: "cortex" }),
   ];

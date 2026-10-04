@@ -6,7 +6,6 @@ export function isSessionModelPickerEligible(
 ): agent is AgentDescriptor & { role: 'manager' } {
   return Boolean(
     agent?.role === 'manager' &&
-    agent.sessionSurface !== 'collab' &&
     profile &&
     profile.profileId === agent.profileId &&
     profile.profileType !== 'system',

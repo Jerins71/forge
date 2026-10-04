@@ -8,7 +8,6 @@ import type {
   ConversationHistoryPageMetadata,
   ManagerProfile,
   RemoteUpdateAwarenessProjectSnapshot,
-  ProjectPresenceViewer,
   SessionPlanSnapshotEvent,
   SessionGoalSnapshotEvent,
   SecureSessionSnapshot,
@@ -122,8 +121,6 @@ export interface ManagerWsState {
   sessionAttentions: Record<string, SessionAttention>
   /** Latest local-instance order invalidation; the full preference is refetched over HTTP. */
   builderSidebarOrderRevision: number | null
-  /** Wave R presence: connected member identities per session (SPEC §4.7). */
-  projectPresence: Record<string, ProjectPresenceViewer[]>
   terminals: TerminalDescriptor[]
   terminalSessionScopeId: string | null
   planSnapshots: Record<string, SessionPlanSnapshotEvent>
@@ -211,7 +208,6 @@ export function createInitialManagerWsState(targetAgentId: string | null): Manag
     sessionAttentionRevision: -1,
     sessionAttentions: {},
     builderSidebarOrderRevision: null,
-    projectPresence: {},
     terminals: [],
     terminalSessionScopeId: null,
     planSnapshots: {},

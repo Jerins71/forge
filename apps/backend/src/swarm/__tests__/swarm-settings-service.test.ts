@@ -1213,28 +1213,27 @@ describe("SwarmSettingsService.updateManagerModel", () => {
 });
 
 describe("SwarmSettingsService auth provider runtime recycling", () => {
-  it("recycles matching provider managers after local auth updates, including collaboration sessions", async () => {
+  it("recycles matching provider managers after local auth updates, including deferred sessions", async () => {
     const root = await createTempRoot();
     const builderOpenAISession = createSession(root, "manager", { provider: "openai-codex", modelId: "gpt-5.5" });
     const builderAnthropicSession = createSession(root, "manager--anthropic", {
       provider: "anthropic",
       modelId: "claude-sonnet-5"
     });
-    const collaborationOpenAISession = {
-      ...createSession(root, "collab-channel", { provider: "openai-codex", modelId: "gpt-5.5" }),
-      managerId: "_collaboration",
-      profileId: "_collaboration",
-      sessionSurface: "collab" as const
+    const deferredOpenAISession = {
+      ...createSession(root, "other-project", { provider: "openai-codex", modelId: "gpt-5.5" }),
+      managerId: "other-project",
+      profileId: "other-project"
     };
     const secretsEnvService = {
       updateSettingsAuth: vi.fn(async () => undefined)
     };
     const applyManagerRuntimeRecyclePolicy = vi.fn(async (agentId: string) =>
-      agentId === collaborationOpenAISession.agentId ? "deferred" : "recycled"
+      agentId === deferredOpenAISession.agentId ? "deferred" : "recycled"
     );
     const service = createService({
       rootDir: root,
-      sessions: [builderOpenAISession, builderAnthropicSession, collaborationOpenAISession],
+      sessions: [builderOpenAISession, builderAnthropicSession, deferredOpenAISession],
       applyManagerRuntimeRecyclePolicy,
       secretsEnvService
     });
@@ -1244,7 +1243,7 @@ describe("SwarmSettingsService auth provider runtime recycling", () => {
     expect(secretsEnvService.updateSettingsAuth).toHaveBeenCalledWith({ "openai-codex": "sk-test" });
     expect(applyManagerRuntimeRecyclePolicy.mock.calls).toEqual([
       ["manager", "auth_source_change"],
-      ["collab-channel", "auth_source_change"]
+      ["other-project", "auth_source_change"]
     ]);
   });
 

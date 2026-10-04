@@ -378,7 +378,6 @@ function listCliAgents(swarmManager: CliRouteSwarmManager, profiles: ManagerProf
   const allowedProfileIds = new Set(profiles.map((profile) => profile.profileId));
   return swarmManager
     .listAgents()
-    .filter((agent) => agent.sessionSurface !== "collab")
     .filter((agent) => allowedProfileIds.has(agent.profileId ?? agent.agentId));
 }
 

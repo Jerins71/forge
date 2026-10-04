@@ -6,7 +6,6 @@ import { writeFileAtomic } from "../../../utils/atomic-files.js";
 import {
   type EffortTier,
   type ResolvedSpecialistDefinition,
-  type SpecialistTargetSpace,
   type TierConfig,
 } from "@forge/protocol";
 import {
@@ -46,10 +45,6 @@ const REMOVED_BUILTIN_SPECIALIST_FILES = new Set([
   "collab-scout.md",
   "collab-researcher.md",
 ]);
-export const SPECIALIST_TARGET_SPACE_FRONTMATTER_KEY = "TargetSpace";
-const LEGACY_SPECIALIST_TARGET_SPACE_FRONTMATTER_KEY = "targetSpace";
-const BUILDER_TARGET_SPACE: SpecialistTargetSpace = "builder";
-const DEFAULT_SPECIALIST_TARGET_SPACE: SpecialistTargetSpace[] = [BUILDER_TARGET_SPACE];
 
 export const EFFORT_TIER_ORDER = ["light", "fast", "standard", "deep", "max"] as const satisfies readonly EffortTier[];
 
@@ -165,7 +160,6 @@ export interface SpecialistFrontmatter {
   builtin: boolean;
   pinned: boolean;
   webSearch: boolean;
-  targetSpace: SpecialistTargetSpace[];
   defaultTier?: EffortTier;
   forgePrecedence?: "override";
 }
@@ -183,7 +177,6 @@ export interface SaveSpecialistRequest {
   fallbackReasoningLevel?: string;
   pinned?: boolean;
   webSearch?: boolean;
-  targetSpace?: SpecialistTargetSpace[];
   defaultTier?: EffortTier;
   promptBody: string;
 }
@@ -297,9 +290,8 @@ export async function resolveWorkspaceRoster(
 }
 
 /**
- * Only Builder-visible specialists are resolved. Files whose TargetSpace omits
- * builder (for example, specialists authored for the removed Collaboration
- * server) still parse but stay hidden.
+ * Every specialist resolves for the local Builder. A legacy `TargetSpace`
+ * frontmatter key (from the removed Collaboration server) is tolerated and ignored.
  */
 async function resolveDirectorySpecialists(
   directoryPath: string,
@@ -317,7 +309,7 @@ async function resolveDirectorySpecialists(
     handles.map(async ({ file, handle }) => {
       const filePath = join(directoryPath, file.name);
       const parsed = await parseSpecialistFile(filePath);
-      if (!parsed || !parsed.frontmatter.targetSpace.includes(BUILDER_TARGET_SPACE)) {
+      if (!parsed) {
         return null;
       }
       if (REMOVED_BUILTIN_SPECIALIST_FILES.has(file.name) && parsed.frontmatter.builtin) {
@@ -756,10 +748,6 @@ function parseSpecialistMarkdown(markdown: string): ParsedSpecialistFile | null 
   const webSearch = parseOptionalBoolean(frontmatterValues.webSearch);
   const forgePrecedence = parseOptionalString(frontmatterValues.forgePrecedence) === "override" ? "override" : undefined;
   const defaultTier = parseEffortTier(frontmatterValues.defaultTier);
-  const targetSpace = parseTargetSpace(
-    frontmatterValues[SPECIALIST_TARGET_SPACE_FRONTMATTER_KEY] ??
-      frontmatterValues[LEGACY_SPECIALIST_TARGET_SPACE_FRONTMATTER_KEY],
-  );
 
   if (frontmatterValues.enabled !== undefined && enabled === undefined) {
     return null;
@@ -774,10 +762,6 @@ function parseSpecialistMarkdown(markdown: string): ParsedSpecialistFile | null 
   }
 
   if (frontmatterValues.webSearch !== undefined && webSearch === undefined) {
-    return null;
-  }
-
-  if (targetSpace === undefined) {
     return null;
   }
 
@@ -829,7 +813,6 @@ function parseSpecialistMarkdown(markdown: string): ParsedSpecialistFile | null 
       builtin: builtin ?? false,
       pinned: pinned ?? false,
       webSearch: webSearch ?? false,
-      targetSpace,
       defaultTier,
       forgePrecedence,
     },
@@ -895,11 +878,6 @@ function validateSaveRequest(data: SaveSpecialistRequest): SpecialistFrontmatter
       ? fallbackReasoningLevel
       : undefined;
 
-  const targetSpace = normalizeTargetSpace(data.targetSpace);
-  if (!targetSpace) {
-    throw new Error("targetSpace must contain builder and/or collaboration");
-  }
-
   return {
     displayName,
     color,
@@ -915,7 +893,6 @@ function validateSaveRequest(data: SaveSpecialistRequest): SpecialistFrontmatter
     builtin: false,
     pinned: data.pinned ?? false,
     webSearch: modelId ? normalizeWebSearchForModelId(provider, modelId, data.webSearch === true) : false,
-    targetSpace,
     defaultTier: data.defaultTier,
   };
 }
@@ -960,26 +937,6 @@ function parseOptionalString(value: string | undefined): string | undefined {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function parseTargetSpace(value: string | undefined): SpecialistTargetSpace[] | undefined {
-  if (value === undefined) {
-    return [...DEFAULT_SPECIALIST_TARGET_SPACE];
-  }
-
-  const rawEntries = value.trim().startsWith("[") && value.trim().endsWith("]")
-    ? value.trim().slice(1, -1).split(",")
-    : [value];
-
-  const entries = rawEntries
-    .map((entry) => parseYamlStringValue(entry).trim())
-    .filter((entry) => entry.length > 0);
-
-  if (entries.length === 0) {
-    return undefined;
-  }
-
-  return normalizeTargetSpace(entries);
 }
 
 function isLegacyModelFieldModelId(modelId: string, provider: string | undefined): boolean {
@@ -1071,24 +1028,6 @@ function parseTierConfig(value: unknown): TierConfig | undefined {
     ...(fallbackProvider ? { fallbackProvider } : {}),
     ...(fallbackModelId && fallbackReasoningLevel ? { fallbackReasoningLevel } : {}),
   };
-}
-
-function normalizeTargetSpace(values: readonly string[] | undefined): SpecialistTargetSpace[] | undefined {
-  if (!values) {
-    return [...DEFAULT_SPECIALIST_TARGET_SPACE];
-  }
-
-  const normalized: SpecialistTargetSpace[] = [];
-  for (const value of values) {
-    if (value !== "builder" && value !== "collaboration") {
-      return undefined;
-    }
-    if (!normalized.includes(value)) {
-      normalized.push(value);
-    }
-  }
-
-  return normalized.length > 0 ? normalized : undefined;
 }
 
 function parseOptionalBoolean(value: string | undefined): boolean | undefined {
@@ -1248,7 +1187,7 @@ function toResolvedSpecialistDefinition(options: {
     builtin: options.frontmatter.builtin,
     pinned: options.frontmatter.pinned,
     webSearch,
-    targetSpace: [...options.frontmatter.targetSpace],
+    targetSpace: ["builder"],
     promptBody: options.body,
     sourceKind: options.sourceKind,
     sourcePath: options.sourcePath,
@@ -1268,7 +1207,6 @@ function serializeSpecialistFile(frontmatter: SpecialistFrontmatter, body: strin
     `color: ${quoteYamlString(frontmatter.color)}`,
     `enabled: ${frontmatter.enabled ? "true" : "false"}`,
     `whenToUse: ${quoteYamlString(frontmatter.whenToUse)}`,
-    `${SPECIALIST_TARGET_SPACE_FRONTMATTER_KEY}: [${frontmatter.targetSpace.join(", ")}]`,
   ];
 
   if (frontmatter.defaultTier) {

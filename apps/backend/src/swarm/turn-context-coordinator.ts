@@ -1,4 +1,3 @@
-import type { CollaborationAuthor } from "@forge/protocol";
 import { extractMessageText, extractRole } from "./session/message-utils.js";
 import type {
   MessageRouteInternalDeliveryKind,
@@ -41,7 +40,6 @@ export interface InboundTurnContextInput<
   runtimeMessageText?: string;
   projectAgentContext?: ConversationMessageEvent["projectAgentContext"];
   sourceContext?: MessageSourceContext;
-  collaborationAuthor?: CollaborationAuthor;
   assistantOutputTarget?: AssistantOutputTarget;
   assistantOutputProjectionTarget?: AssistantOutputTarget;
   codexMcpToolGate?: TCodexGate;
@@ -73,7 +71,6 @@ export interface ActiveMessageRouteActivation {
   internalDeliveryKind?: MessageRouteInternalDeliveryKind;
   sourceWorkerId?: string;
   requiresVisibleResponse: boolean;
-  collaboration?: boolean;
 }
 
 export interface ManagerOutputTurnActivation {
@@ -127,7 +124,6 @@ export interface TurnDispatchLedgerInput {
   agentId: string;
   role: AgentDescriptor["role"];
   kind: TurnLedgerInboundKind;
-  initiatedBy: string;
 }
 
 export interface TurnContextLedgerPort {
@@ -306,7 +302,6 @@ export class TurnContextCoordinator<
         agentId,
         role: descriptor.role,
         kind: classifyInboundKind(queuedContext.source),
-        initiatedBy: queuedContext.collaborationAuthor?.userId ?? "local",
       }).catch((error) => {
         this.options.logDebug("turn_ledger:dispatch:error", {
           agentId,
@@ -584,7 +579,6 @@ export class TurnContextCoordinator<
               requiresVisibleResponse:
                 context?.requiresVisibleResponse ??
                 (context?.source === "user_input" || context?.routeOrigin === "scheduled"),
-              ...(context?.collaborationAuthor?.channelId ? { collaboration: true } : {}),
             },
           }
         : {}),

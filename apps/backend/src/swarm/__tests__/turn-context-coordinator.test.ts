@@ -181,11 +181,6 @@ describe("TurnContextCoordinator", () => {
     const handle = await harness.coordinator.enqueue("manager-1", {
       source: "user_input",
       runtimeMessageText: "hello",
-      collaborationAuthor: {
-        userId: "user-7",
-        workspaceId: "workspace-1",
-        role: "member",
-      },
     });
 
     expect(harness.ledgerRecords).toEqual([{
@@ -193,7 +188,6 @@ describe("TurnContextCoordinator", () => {
       agentId: "manager-1",
       role: "manager",
       kind: "user",
-      initiatedBy: "user-7",
     }]);
     expect(harness.coordinator.getPendingContextCount("manager-1")).toBe(1);
     expect(harness.attentionPendingCounts).toEqual([1]);
@@ -299,7 +293,6 @@ describe("TurnContextCoordinator", () => {
       agentId: "manager-1",
       role: "manager",
       kind: "worker_report",
-      initiatedBy: "local",
     }]);
   });
 

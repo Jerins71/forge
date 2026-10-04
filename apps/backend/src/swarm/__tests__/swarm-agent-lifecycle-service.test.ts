@@ -2683,8 +2683,7 @@ describe("SwarmAgentLifecycleService", () => {
     const worker = createWorkerDescriptor("/p", manager.agentId, { agentId: "claude-worker", status: "streaming", model: { ...manager.model } });
     const failed = createAgentDescriptor({ ...manager, agentId: "claude-failed" });
     const pi = createAgentDescriptor({ agentId: "pi-manager", status: "idle" });
-    const collab = createAgentDescriptor({ ...manager, agentId: "collab-manager", sessionSurface: "collab" });
-    const descriptors = new Map([manager, worker, failed, pi, collab].map(d => [d.agentId, d]));
+    const descriptors = new Map([manager, worker, failed, pi].map(d => [d.agentId, d]));
     const runtimes = new Map([...descriptors.values()].map(d => [d.agentId, makeRuntimeStub({ descriptor: d, getStatus: () => d.status })]));
     const managerRuntime = runtimes.get(manager.agentId)!;
     const workerRuntime = runtimes.get(worker.agentId)!;
@@ -2700,7 +2699,6 @@ describe("SwarmAgentLifecycleService", () => {
     expect(runtimes.get(failed.agentId)).toBe(failedRuntime);
     expect(runtimeRecoveryState.getPendingManagerRuntimeRecycleReason(failed.agentId)).toBe("auth_source_change");
     expect(runtimes.get(pi.agentId)!.recycle).not.toHaveBeenCalled();
-    expect(runtimes.get(collab.agentId)!.recycle).not.toHaveBeenCalled();
     worker.status = "idle";
     await expect(svc.applyAgentRuntimeRecyclePolicy(worker.agentId, "idle_transition")).resolves.toBe("recycled");
     expect(workerRuntime.recycle).toHaveBeenCalledOnce();
@@ -3875,19 +3873,19 @@ describe("SwarmAgentLifecycleService", () => {
       profileId: "profile-1",
       status: "idle"
     });
-    const collabWorker = createWorkerDescriptor("/proj", "builder-manager", {
-      agentId: "collab-worker",
+    const rosterWorker = createWorkerDescriptor("/proj", "builder-manager", {
+      agentId: "roster-worker",
       profileId: "profile-1",
-      specialistId: "collab-specialist"
+      specialistId: "roster-specialist"
     });
     const descriptors = new Map([
       [builderManager.agentId, builderManager],
-      [collabWorker.agentId, collabWorker]
+      [rosterWorker.agentId, rosterWorker]
     ]);
     const saveStore = vi.fn(async () => {});
     const emitAgentsSnapshot = vi.fn();
     const resolveSpecialistRosterForProfile = vi.fn(async () => [
-      { specialistId: "collab-specialist", displayName: "Collab Specialist", color: "#222" },
+      { specialistId: "roster-specialist", displayName: "Roster Specialist", color: "#222" },
     ]);
 
     const svc = new SwarmAgentLifecycleService(
@@ -3903,8 +3901,8 @@ describe("SwarmAgentLifecycleService", () => {
     await svc.notifySpecialistRosterChanged("profile-1");
 
     expect(resolveSpecialistRosterForProfile).toHaveBeenCalledWith("profile-1");
-    expect(collabWorker.specialistDisplayName).toBe("Collab Specialist");
-    expect(collabWorker.specialistColor).toBe("#222");
+    expect(rosterWorker.specialistDisplayName).toBe("Roster Specialist");
+    expect(rosterWorker.specialistColor).toBe("#222");
     expect(saveStore).toHaveBeenCalled();
     expect(emitAgentsSnapshot).toHaveBeenCalled();
   });

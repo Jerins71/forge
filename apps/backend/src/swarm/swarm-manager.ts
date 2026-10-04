@@ -220,7 +220,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
             this.agentDirectory.isSessionAgent(descriptor),
         ),
         requireSession: (agentId) => this.agentDirectory.getRequiredSessionDescriptor(agentId),
-        requireBuilderSession: (agentId, action) => this.agentDirectory.getRequiredBuilderSessionDescriptor(agentId, action),
         assertMutable: (descriptor) =>
           this.agentDirectory.assertDescriptorNotEffectivelyArchived(descriptor),
         getConversationHistory: (agentId) => this.getConversationHistory(agentId),
@@ -526,7 +525,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       updateProjectEnabled: (profileId, enabled) => this.configurationCoordinator.updateProjectSecureSessionsEnabled(profileId, enabled),
       isProfileArchived: (profileId) => Boolean(this.profiles.get(profileId)?.archivedAt),
       isSessionArchived: (agentId) => Boolean(this.descriptors.get(agentId)?.archivedAt),
-      requireBuilderSession: (agentId, action) => this.agentDirectory.getRequiredBuilderSessionDescriptor(agentId, action),
+      requireBuilderSession: (agentId) => this.agentDirectory.getRequiredSessionDescriptor(agentId),
       emitSnapshot: (event) => this.emit("secure_session_snapshot", event),
       emitCatalogChanged: (event) => this.emit("secure_secret_catalog_changed", event),
       applyModeRuntimeRecycle: (agentId) => this.projectExecutableTrustCoordinator.applyManagerRuntimeRecyclePolicy(agentId, "secure_session_mode_change"),
@@ -632,7 +631,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         emitModelCacheObservation: (event) =>
           this.eventCoordinator.emitModelCacheObservation(event),
         // Deliberately direct: count-only throughput must not enter the
-        // conversation projector or Collaboration fanout path.
+        // conversation projector.
         emitGenerationThroughput: (event) => this.emit("generation_throughput", event),
         onHistorySourceChanged: (id) => this.historySearchService.markAgentDirty(id), emitGenerationMeasurementTerminalPersisted: (record) =>
           this.emit("generation_measurement_terminal_persisted", record),
@@ -834,7 +833,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         completeLifecycleFence: (fenceId, outcome) => secureSessions.completeSecureSessionLifecycleFence(fenceId, outcome),
       },
       sessions: {
-        getSessionsForProfile: (profileId) => this.agentDirectory.getBuilderSessionsForProfile(profileId),
+        getSessionsForProfile: (profileId) => this.agentDirectory.getSessionsForProfile(profileId),
         getAllManagerSessions: () => Array.from(this.descriptors.values()).filter(
           (descriptor): descriptor is AgentDescriptor & { role: "manager"; profileId: string } =>
             this.agentDirectory.isSessionAgent(descriptor),
@@ -845,10 +844,10 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         },
       },
       access: {
-        assertManagerSettingsTargetNotArchived: (managerId, action) =>
-          this.agentDirectory.assertManagerSettingsTargetNotArchived(managerId, action),
+        assertManagerSettingsTargetNotArchived: (managerId) =>
+          this.agentDirectory.assertManagerSettingsTargetNotArchived(managerId),
         assertProfileNotArchived: (profileId) => this.agentDirectory.assertProfileNotArchived(profileId),
-        getRequiredBuilderSessionDescriptor: (agentId, action) => this.agentDirectory.getRequiredBuilderSessionDescriptor(agentId, action),
+        getRequiredSessionDescriptor: (agentId) => this.agentDirectory.getRequiredSessionDescriptor(agentId),
         assertDescriptorNotEffectivelyArchived: (descriptor) => this.agentDirectory.assertDescriptorNotEffectivelyArchived(descriptor),
       },
       persistence: {
@@ -911,8 +910,8 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
           }),
       },
       sessions: {
-        requireBuilderSession: (agentId, operation) =>
-          this.agentDirectory.getRequiredBuilderSessionDescriptor(agentId, operation),
+        requireBuilderSession: (agentId) =>
+          this.agentDirectory.getRequiredSessionDescriptor(agentId),
         assertMutable: (descriptor) => this.agentDirectory.assertDescriptorNotEffectivelyArchived(descriptor),
         resolvePreferredManagerId: (options) => this.agentDirectory.resolvePreferredManagerId(options),
       },
@@ -1054,8 +1053,8 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       },
       projectAgentWorkflows: {
         access: {
-          getRequiredBuilderSession: (agentId, operation) =>
-            this.agentDirectory.getRequiredBuilderSessionDescriptor(agentId, operation),
+          getRequiredBuilderSession: (agentId) =>
+            this.agentDirectory.getRequiredSessionDescriptor(agentId),
           assertDescriptorNotEffectivelyArchived: (descriptor) =>
             this.agentDirectory.assertDescriptorNotEffectivelyArchived(descriptor),
           assertSessionSupportsProjectAgent: (descriptor) =>

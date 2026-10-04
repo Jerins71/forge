@@ -1302,34 +1302,10 @@ describe('SwarmManager', () => {
   })
 
 
-  it('does not project direct assistant final text for collaboration or telegram inputs', async () => {
+  it('does not project direct assistant final text for telegram inputs', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await bootWithDefaultManager(manager, config)
-
-    await manager.dispatchRuntimeUserMessage({
-      targetAgentId: 'manager',
-      text: 'collab update',
-      sourceContext: { channel: 'web', channelId: 'collab-channel', userId: 'user-1' },
-      collaborationAuthor: {
-        userId: 'user-1',
-        displayName: 'Adam',
-        role: 'admin',
-        workspaceId: 'workspace-1',
-        channelId: 'collab-channel',
-      },
-    })
-    const collabRuntimeMessage = manager.runtimeByAgentId.get('manager')?.sendCalls.at(-1)?.message
-    expect(typeof collabRuntimeMessage).toBe('string')
-    await (manager as any).handleRuntimeSessionEvent('manager', {
-      type: 'message_start',
-      message: { role: 'user', content: collabRuntimeMessage },
-    })
-    await (manager as any).handleRuntimeSessionEvent('manager', {
-      type: 'message_end',
-      message: { role: 'assistant', content: 'Collab direct final', stopReason: 'stop' },
-    })
-    await (manager as any).handleRuntimeSessionEvent('manager', { type: 'turn_end', toolResults: [] })
 
     await manager.handleUserMessage('telegram update', {
       sourceContext: { channel: 'telegram', channelId: 'telegram-channel', userId: 'telegram-user' },
@@ -1353,22 +1329,11 @@ describe('SwarmManager', () => {
     expect(assistantOutputs).toEqual([])
   })
 
-  it('gates remembered web transcript targets through manager surface policy', async () => {
+  it('projects remembered web transcript targets', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await bootWithDefaultManager(manager, config)
-    const state = manager as unknown as { descriptors: Map<string, AgentDescriptor> }
 
-    state.descriptors.get('manager')!.sessionSurface = 'collab'
-    setActiveAssistantOutputTarget(manager, 'manager', {
-      kind: 'session_transcript',
-      channel: 'web',
-      sourceContext: { channel: 'web' },
-    })
-    await emitCleanManagerAssistantMessage(manager, 'manager', 'Misclassified collab final must not project')
-    expect(assistantOutputsFor(manager, 'manager')).toEqual([])
-
-    state.descriptors.get('manager')!.sessionSurface = undefined
     setActiveAssistantOutputTarget(manager, 'manager', {
       kind: 'session_transcript',
       channel: 'web',
@@ -1484,7 +1449,7 @@ describe('SwarmManager', () => {
     ])
   })
 
-  it('projects external project-agent peer finals to the interactive web session, keeping collab and Cortex hidden', async () => {
+  it('projects external project-agent peer finals to the interactive web session, keeping Cortex hidden', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await bootWithDefaultManager(manager, config)
@@ -1512,16 +1477,6 @@ describe('SwarmManager', () => {
     ])
 
     const state = manager as unknown as { descriptors: Map<string, AgentDescriptor> }
-    state.descriptors.get('manager')!.sessionSurface = 'collab'
-    const collabRuntimeMessage = await enqueueProjectAgentPeerInput(
-      manager,
-      'manager',
-      { fromAgentId: 'collab-peer', fromDisplayName: 'Collab Peer', external: false },
-      'Collaboration protected update',
-    )
-    await projectAssistantFinalText(manager, 'manager', collabRuntimeMessage, 'Collab peer final must stay hidden')
-
-    state.descriptors.get('manager')!.sessionSurface = undefined
     state.descriptors.get('manager')!.profileId = 'cortex'
     const cortexRuntimeMessage = await enqueueProjectAgentPeerInput(
       manager,

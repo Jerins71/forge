@@ -120,15 +120,12 @@ describe("AgentDirectory", () => {
     const harness = createHarness({
       pendingChoices: new Map([
         ["builder", 3],
-        ["collab", 7],
       ]),
     });
     const builder = manager("builder", "profile");
-    const collab = manager("collab", "profile", { sessionSurface: "collab" });
     const active = worker("active", "builder", { status: "streaming", sessionSystemPrompt: "secret" });
     const idle = worker("idle", "builder");
-    const collabWorker = worker("collab-worker", "collab");
-    addDescriptors(harness, collabWorker, idle, collab, active, builder);
+    addDescriptors(harness, idle, active, builder);
 
     expect(harness.directory.listManagerAgents()).toEqual([
       expect.objectContaining({
@@ -145,9 +142,6 @@ describe("AgentDirectory", () => {
       "active",
       "idle",
     ]);
-    expect(harness.directory.listWorkersForSession("collab").map(({ agentId }) => agentId)).toEqual([
-      "collab-worker",
-    ]);
     expect(harness.directory.listWorkersForSession("builder")[0]).not.toHaveProperty(
       "sessionSystemPrompt",
     );
@@ -155,21 +149,19 @@ describe("AgentDirectory", () => {
     expect(builder).not.toHaveProperty("workerCount");
   });
 
-  it("reads live maps and separates all profile sessions from Builder sessions", () => {
+  it("reads live maps for profile sessions", () => {
     const harness = createHarness();
     const builder = manager("builder", "profile");
-    const collab = manager("collab", "profile", { sessionSurface: "collab" });
     const other = manager("other", "other");
-    addDescriptors(harness, builder, collab, other);
+    addDescriptors(harness, builder, other);
 
-    expect(harness.directory.getSessionsForProfile("profile")).toEqual([builder, collab]);
-    expect(harness.directory.getBuilderSessionsForProfile("profile")).toEqual([builder]);
+    expect(harness.directory.getSessionsForProfile("profile")).toEqual([builder]);
     expect(harness.directory.getAgent("builder")).toEqual(builder);
     expect(harness.directory.getAgent("missing")).toBeUndefined();
 
     const later = manager("later", "profile", { createdAt: LATE });
     harness.descriptors.set(later.agentId, later);
-    expect(harness.directory.getSessionsForProfile("profile")).toEqual([builder, collab, later]);
+    expect(harness.directory.getSessionsForProfile("profile")).toEqual([builder, later]);
   });
 
   it("resolves the configured or earliest available manager with restart semantics", () => {
@@ -196,13 +188,12 @@ describe("AgentDirectory", () => {
     expect(harness.directory.resolvePreferredManagerId()).toBeUndefined();
   });
 
-  it("enforces session, manager, and Builder lookup contracts", () => {
+  it("enforces session and manager lookup contracts", () => {
     const harness = createHarness();
     const builder = manager("builder", "profile");
-    const collab = manager("collab", "profile", { sessionSurface: "collab" });
     const legacy = manager("legacy", undefined);
     const child = worker("child", "builder");
-    addDescriptors(harness, builder, collab, legacy, child);
+    addDescriptors(harness, builder, legacy, child);
 
     expect(harness.directory.isSessionAgent(builder)).toBe(true);
     expect(harness.directory.isSessionAgent(legacy)).toBe(false);
@@ -210,15 +201,9 @@ describe("AgentDirectory", () => {
     expect(() => harness.directory.getRequiredSessionDescriptor("child")).toThrow(
       "Unknown session agent: child",
     );
-    expect(() => harness.directory.getRequiredBuilderSessionDescriptor("collab", "edit")).toThrow(
-      "Cannot edit for collaboration-backed session collab.",
-    );
     expect(harness.directory.getRequiredManagerDescriptor("builder")).toBe(builder);
     expect(() => harness.directory.getRequiredManagerDescriptor("child")).toThrow(
       "Unknown manager: child",
-    );
-    expect(() => harness.directory.getRequiredBuilderManagerDescriptor("collab", "reset")).toThrow(
-      "Cannot reset for collaboration-backed session collab.",
     );
   });
 
@@ -248,7 +233,7 @@ describe("AgentDirectory", () => {
       "Archived projects can’t be used until restored.",
     );
     expect(() =>
-      harness.directory.assertManagerSettingsTargetNotArchived("project-session", "change model"),
+      harness.directory.assertManagerSettingsTargetNotArchived("project-session"),
     ).toThrow("Archived projects can’t be used until restored.");
   });
 
@@ -256,17 +241,13 @@ describe("AgentDirectory", () => {
     const harness = createHarness();
     const root = manager("profile", "profile");
     const ordinary = manager("ordinary", "profile");
-    const collab = manager("collab", "profile", { sessionSurface: "collab" });
     const cortex = manager("cortex", "cortex");
     const review = manager("review", "profile", { sessionPurpose: "cortex_review" });
     const creator = manager("creator", "profile", { sessionPurpose: "agent_creator" });
     harness.profiles.set("profile", profile("profile"));
-    addDescriptors(harness, root, ordinary, collab, cortex, review, creator);
+    addDescriptors(harness, root, ordinary, cortex, review, creator);
 
     expect(() => harness.directory.assertSessionSupportsProjectAgent(ordinary)).not.toThrow();
-    expect(() => harness.directory.assertSessionSupportsProjectAgent(collab)).toThrow(
-      "Cannot promote Builder sessions to project agents for collaboration-backed session collab.",
-    );
     expect(() => harness.directory.assertSessionSupportsProjectAgent(cortex)).toThrow(
       "Cortex root cannot be promoted to a project agent",
     );

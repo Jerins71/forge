@@ -43,7 +43,6 @@ export function createBrowserAutomationManagerInvoker(options: BrowserAutomation
 export function isEligibleLocalBuilderManager(descriptor: AgentDescriptor): boolean {
   return descriptor.role === "manager"
     && !!descriptor.profileId
-    && descriptor.sessionSurface !== "collab"
     && descriptor.sessionPurpose === undefined
     && descriptor.cli === undefined
     && descriptor.externalThread === undefined

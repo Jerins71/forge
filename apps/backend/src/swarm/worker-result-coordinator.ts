@@ -95,7 +95,6 @@ export function createWorkGraphResultRecorder(options: {
       !manager
       || manager.role !== "manager"
       || !manager.profileId
-      || manager.sessionSurface === "collab"
     ) return;
     await options.getPlans().recordWorkGraphWorkerResult(
       manager as AgentDescriptor & { role: "manager"; profileId: string },
@@ -116,7 +115,6 @@ export function createWorkGraphModelRerouteRecorder(options: {
       !manager
       || manager.role !== "manager"
       || !manager.profileId
-      || manager.sessionSurface === "collab"
     ) return;
     await options.getPlans().recordWorkGraphWorkerModelReroute(
       { agentId: manager.agentId, profileId: manager.profileId },

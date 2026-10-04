@@ -11,7 +11,6 @@ import type {
   SwarmAgentRuntime,
 } from "./runtime-contracts.js";
 import {
-  assertBuilderSession,
   normalizeMessageSourceContext,
   previewForLog,
 } from "./swarm-manager-utils.js";
@@ -190,12 +189,6 @@ export class SwarmCompactionCoordinator {
     if (descriptor.role !== "manager") {
       throw new Error(`${operation} is only supported for manager agents: ${agentId}`);
     }
-    assertBuilderSession(
-      descriptor,
-      operation === "Compaction"
-        ? "compact Builder sessions"
-        : "smart-compact Builder sessions",
-    );
     return descriptor as ManagerDescriptor;
   }
 

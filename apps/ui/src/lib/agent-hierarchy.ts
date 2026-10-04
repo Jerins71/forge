@@ -126,31 +126,11 @@ export function findSideChatForSource(
 }
 
 /**
- * Builder-surface agents a user can list or select. Side chats are excluded:
- * they live only in their source session's side panel.
+ * Agents a user can list or select. Side chats are excluded: they live only
+ * in their source session's side panel.
  */
 export function filterBuilderVisibleAgents(agents: AgentDescriptor[]): AgentDescriptor[] {
-  return filterBuilderSurfaceAgents(agents).filter((agent) => !isSideChatAgent(agent))
-}
-
-/**
- * All Builder-surface agents (collab sessions excluded). WS state keeps hidden
- * side chats so their panel can read descriptors and statuses.
- */
-export function filterBuilderSurfaceAgents(agents: AgentDescriptor[]): AgentDescriptor[] {
-  const collabManagerIds = new Set(
-    agents
-      .filter((agent) => agent.role === 'manager' && agent.sessionSurface === 'collab')
-      .map((agent) => agent.agentId),
-  )
-
-  return agents.filter((agent) => {
-    if (agent.role === 'manager') {
-      return agent.sessionSurface !== 'collab'
-    }
-
-    return !collabManagerIds.has(agent.managerId)
-  })
+  return agents.filter((agent) => !isSideChatAgent(agent))
 }
 
 export function isCortexDiffViewerSession(agent: AgentDescriptor | null | undefined): boolean {

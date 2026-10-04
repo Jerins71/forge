@@ -130,17 +130,15 @@ describe('isSessionModelPickerEligible', () => {
   const manager = {
     role: 'manager',
     profileId: 'profile-1',
-    sessionSurface: 'builder',
   } as AgentDescriptor
   const profile = {
     profileId: 'profile-1',
     profileType: 'user',
   } as ManagerProfile
 
-  it('allows only matching user-profile Builder managers', () => {
+  it('allows only matching user-profile managers', () => {
     expect(isSessionModelPickerEligible(manager, profile)).toBe(true)
     expect(isSessionModelPickerEligible({ ...manager, role: 'worker' }, profile)).toBe(false)
-    expect(isSessionModelPickerEligible({ ...manager, sessionSurface: 'collab' }, profile)).toBe(false)
     expect(isSessionModelPickerEligible(manager, { ...profile, profileType: 'system' })).toBe(false)
     expect(isSessionModelPickerEligible(manager, { ...profile, profileId: 'other-profile' })).toBe(false)
     expect(isSessionModelPickerEligible(manager, null)).toBe(false)

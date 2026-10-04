@@ -16,10 +16,10 @@ function socket() {
 }
 const perf = () => ({ recordDuration: vi.fn(), increment: vi.fn(), readSummary: vi.fn(), readRecentSlowEvents: vi.fn() })
 function fixture() {
-  const agents = [agent('a'), agent('b'), agent('hidden', { profileId: 'hidden' }), agent('collab', { sessionSurface: 'collab' }), agent('worker', { role: 'worker', managerId: 'a' })]
+  const agents = [agent('a'), agent('b'), agent('hidden', { profileId: 'hidden' }), agent('worker', { role: 'worker', managerId: 'a' })]
   const profiles = [{ profileId: 'p', displayName: 'P', createdAt: at, updatedAt: at }, { profileId: 'hidden', displayName: 'Hidden', profileType: 'system', createdAt: at, updatedAt: at }] as ManagerProfile[]
   let revision = 1
-  const counts: Record<string, number> = { a: 4, b: 7, hidden: 9, collab: 9 }
+  const counts: Record<string, number> = { a: 4, b: 7, hidden: 9 }
   const unread = {
     getSnapshot: () => ({ ...counts }),
     markRead: vi.fn((_profileId: string, id: string) => { const old = counts[id] ?? 0; counts[id] = 0; return old }),
@@ -29,7 +29,7 @@ function fixture() {
     getConfig: () => ({ managerId: 'a', debug: false, paths: { dataDir: '/fixture' } }),
     getAgent: (id: string) => agents.find((a) => a.agentId === id), listAgents: () => agents,
     listBootstrapAgents: () => agents.filter((a) => a.role === 'manager'), listProfiles: () => profiles,
-    getSessionAttentionSnapshot: () => ({ revision, attentions: ['a', 'hidden', 'collab'].map((id) => ({ sessionAgentId: id, profileId: 'p', attentionId: `attention-${id}`, reason: 'work_settled' as const, raisedAt: at })) }),
+    getSessionAttentionSnapshot: () => ({ revision, attentions: ['a', 'hidden'].map((id) => ({ sessionAgentId: id, profileId: 'p', attentionId: `attention-${id}`, reason: 'work_settled' as const, raisedAt: at })) }),
     getAgentsSnapshotVersion: () => 1, getProfilesSnapshotVersion: () => 1,
     listWorkersForSession: () => [], getPendingChoiceIdsForSession: () => [], getPendingChoiceRequestsForSession: () => [],
     getConversationHistory: vi.fn(() => []), getConversationHistoryWithDiagnostics: vi.fn(() => ({ history: [], diagnostics: {} })),
@@ -130,15 +130,14 @@ describe('passive Builder inventory contract', () => {
     expect(originB.owner.getSubscribedAgentId(originB.a)).toBe('a')
   })
 
-  it('allows only filtered inventory fanout, not conversation, sensitive metadata, presence or request responses', async () => {
+  it('allows only filtered inventory fanout, not conversation, sensitive metadata, or request responses', async () => {
     const f = fixture()
     await f.command(f.a, { type: 'subscribe_inventory', requestId: 'inventory' })
     f.a.send.mockClear()
-    for (const type of ['conversation_message', 'conversation_history', 'choice_request', 'session_plan_snapshot', 'session_goal_snapshot', 'secure_session_snapshot', 'browser_session_changed', 'terminals_snapshot', 'project_presence', 'session_workers_snapshot', 'manager_created']) {
+    for (const type of ['conversation_message', 'conversation_history', 'choice_request', 'session_plan_snapshot', 'session_goal_snapshot', 'secure_session_snapshot', 'browser_session_changed', 'terminals_snapshot', 'session_workers_snapshot', 'manager_created']) {
       f.owner.broadcastToSubscribed({ type, agentId: 'a', sessionAgentId: 'a', text: 'must not leak', requestId: 'other-request' } as any)
     }
     f.owner.broadcastToSubscribed({ type: 'agent_status', agentId: 'hidden', status: 'idle', pendingCount: 0 })
-    f.owner.broadcastUnreadCountUpdate('collab', 20)
     f.owner.broadcastToManagerSession('a', { type: 'conversation_message', agentId: 'a' } as any)
     f.owner.broadcastToProfile('p', { type: 'terminals_snapshot', terminals: [] })
     await flush()

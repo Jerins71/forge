@@ -38,9 +38,8 @@ export class CodexRuntimeCreator {
     callbacks: SwarmRuntimeCallbacks; creationOptions?: RuntimeCreationOptions }): Promise<SwarmAgentRuntime> {
     const { descriptor } = options;
     const sessionDescriptor = descriptor.role === "manager" ? descriptor : options.sessionDescriptor;
-    if (!sessionDescriptor || sessionDescriptor.sessionSurface === "collab" || sessionDescriptor.collab
-      || isInternalSessionPurpose(sessionDescriptor) || sessionDescriptor.internalWorkerKind
-      || descriptor.sessionSurface === "collab" || descriptor.collab || isInternalSessionPurpose(descriptor) || descriptor.internalWorkerKind) {
+    if (!sessionDescriptor || isInternalSessionPurpose(sessionDescriptor) || sessionDescriptor.internalWorkerKind
+      || isInternalSessionPurpose(descriptor) || descriptor.internalWorkerKind) {
       throw new Error("Codex native is available for ordinary local Builder sessions and their roster workers.");
     }
     const trust = await this.deps.resolveProjectExecutableTrustPlan({ descriptor, sessionDescriptor });

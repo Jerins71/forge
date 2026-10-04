@@ -7020,7 +7020,6 @@ function descriptor(agentId: string, profileId: string, cwd: string): AgentDescr
     model: { provider: "openai", modelId: "test" },
     sessionFile: `/tmp/${agentId}.jsonl`,
     profileId,
-    sessionSurface: "builder",
   } as AgentDescriptor;
 }
 
@@ -7043,7 +7042,6 @@ function workerDescriptor(
     model: { provider: "openai", modelId: "test" },
     sessionFile: `/tmp/${agentId}.jsonl`,
     profileId,
-    sessionSurface: "builder",
     ...(assignmentId
       ? {
           workerParentContext: {

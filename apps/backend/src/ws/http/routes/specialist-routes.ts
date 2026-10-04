@@ -4,7 +4,6 @@ import {
   type ManagerReasoningLevel,
   type ModelPresetInfo,
   type ServerEvent,
-  type SpecialistTargetSpace,
   type TierConfig,
 } from "@forge/protocol";
 import {
@@ -478,7 +477,6 @@ function parseSaveSpecialistBody(value: unknown): SaveSpecialistRequest {
     fallbackReasoningLevel: readOptionalStringField(obj, "fallbackReasoningLevel"),
     pinned: readOptionalBooleanField(obj, "pinned"),
     webSearch: readOptionalBooleanField(obj, "webSearch"),
-    targetSpace: readOptionalTargetSpaceField(obj, "targetSpace") ?? ["builder"],
     defaultTier: readOptionalEffortTierField(obj, "defaultTier"),
     promptBody: readRequiredStringField(obj, "promptBody"),
   };
@@ -537,32 +535,6 @@ function readOptionalBooleanField(obj: Record<string, unknown>, key: string): bo
   }
 
   return value;
-}
-
-function readOptionalTargetSpaceField(
-  obj: Record<string, unknown>,
-  key: string,
-): SpecialistTargetSpace[] | undefined {
-  const value = obj[key];
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    throw new Error(`${key} must be an array when provided`);
-  }
-
-  const spaces: SpecialistTargetSpace[] = [];
-  for (const entry of value) {
-    if (entry !== "builder" && entry !== "collaboration") {
-      throw new Error(`${key} entries must be builder or collaboration`);
-    }
-    if (!spaces.includes(entry)) {
-      spaces.push(entry);
-    }
-  }
-
-  return spaces;
 }
 
 function parseHandleFromRelativePath(relativePath: string): string | null {

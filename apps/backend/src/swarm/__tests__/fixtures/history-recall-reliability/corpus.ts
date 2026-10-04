@@ -230,11 +230,6 @@ function transcriptFor(agent: SyntheticAgentSpec, options: MaterializeCorpusOpti
         sessionHeader(`${agent.agentId}-header`, cwd, TIME.archive),
         nativeUser(ENTRY.cortex, NEEDLE.cortex, TIME.september),
       ]);
-    case SESSION.collab:
-      return joinJsonl([
-        sessionHeader(`${agent.agentId}-header`, cwd, TIME.archive),
-        nativeUser(ENTRY.collab, NEEDLE.collab, TIME.september),
-      ]);
     case SESSION.giant:
       return giantTranscript(cwd, options.giantPadBytes ?? 200 * 1024 * 1024);
     default:

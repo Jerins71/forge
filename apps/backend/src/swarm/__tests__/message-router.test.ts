@@ -24,7 +24,7 @@ describe("MessageRouter", () => {
       input: Partial<MessageRouteProvenance>;
       reasonCode: MessageRouteReasonCode;
       visible?: boolean;
-      channel?: "web" | "telegram" | "cli" | "collab";
+      channel?: "web" | "telegram" | "cli";
     }> = [
       {
         name: "D1 target is not a manager",
@@ -68,27 +68,9 @@ describe("MessageRouter", () => {
         reasonCode: "deny:project_agent_worker_result",
       },
       {
-        name: "D4 collab surface routes to collab",
-        input: { targetSessionSurface: "collab" },
-        reasonCode: "route:collab",
-        channel: "collab",
-      },
-      {
-        name: "targetCollab takes precedence over an external target",
-        input: { targetCollab: true, targetKind: "external_channel" },
-        reasonCode: "route:collab",
-        channel: "collab",
-      },
-      {
         name: "non-retired external channel routes externally",
         input: { targetKind: "external_channel", sourceContext: { channel: "web" } },
         reasonCode: "route:external_channel",
-      },
-      {
-        name: "D5 collaboration profile",
-
-        input: { targetProfileId: "_collaboration" },
-        reasonCode: "deny:collaboration_profile",
       },
       {
         name: "D6 cortex profile",
@@ -109,11 +91,6 @@ describe("MessageRouter", () => {
         name: "D8 cortex archetype",
         input: { archetypeId: "Cortex" },
         reasonCode: "deny:cortex_review",
-      },
-      {
-        name: "D8 collaboration channel archetype",
-        input: { archetypeId: "collaboration channel" },
-        reasonCode: "deny:collaboration_channel",
       },
       {
         name: "bootstrap self-send",

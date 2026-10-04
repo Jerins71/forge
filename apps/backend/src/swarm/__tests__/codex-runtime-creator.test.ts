@@ -20,7 +20,7 @@ it("passes project SSH policy through the production host adapter while preservi
   const root = await mkdtemp(join(tmpdir(), "forge-codex-creator-"));
   roots.push(root);
   const descriptor = { agentId: "manager", managerId: "manager", profileId: "project", role: "manager",
-    sessionSurface: "builder", cwd: root, model: { provider: "codex-native", modelId: "gpt-6-astra" },
+    cwd: root, model: { provider: "codex-native", modelId: "gpt-6-astra" },
   } as AgentDescriptor;
   let enabled = true;
   const getSecureRuntimeBinding = vi.fn();

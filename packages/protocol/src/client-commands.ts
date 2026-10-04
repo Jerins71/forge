@@ -8,16 +8,6 @@ import type { CodexElicitationDecision, CodexElicitationPersistScope } from './c
 import type { SessionGoalControlAction } from './goals.js'
 import type { DismissSessionAttentionCommand } from './session-attention.js'
 import type {
-  CollaborationBootstrapCommand,
-  CollaborationChoiceCancelCommand,
-  CollaborationChoiceResponseCommand,
-  CollaborationMarkChannelReadCommand,
-  CollaborationPinMessageCommand,
-  CollaborationSubscribeChannelCommand,
-  CollaborationUnsubscribeChannelCommand,
-  CollaborationUserMessageCommand,
-} from './collaboration.js'
-import type {
   CancelRepositoryProjectCreationCommandFields,
   CreateRepositoryProjectCommandFields,
 } from './repository-project.js'
@@ -77,14 +67,6 @@ export type ClientCommand =
       /** Manager sessions referenced in the text (dragged in as [@name]); linked as peers. */
       sessionReferenceAgentIds?: string[]
     }
-  | CollaborationBootstrapCommand
-  | CollaborationSubscribeChannelCommand
-  | CollaborationUnsubscribeChannelCommand
-  | CollaborationUserMessageCommand
-  | CollaborationMarkChannelReadCommand
-  | CollaborationChoiceResponseCommand
-  | CollaborationChoiceCancelCommand
-  | CollaborationPinMessageCommand
   | BrowserClientCommand
   | ApiProxyCommand
   | { type: 'kill_agent'; agentId: string }

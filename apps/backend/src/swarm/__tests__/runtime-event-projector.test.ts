@@ -961,7 +961,7 @@ describe("RuntimeEventProjector", () => {
     descriptors.set(manager.agentId, manager);
     projector.activateManagerAssistantOutputTurn(manager.agentId, {
       kind: "explicit_tool_required",
-      reason: "collaboration_channel",
+      reason: "cortex_session",
     });
 
     await projector.projectEvent({
@@ -1194,7 +1194,7 @@ describe("RuntimeEventProjector", () => {
 
   it("does not project protected non-web manager assistant output turns", async () => {
     for (const target of [
-      { kind: "explicit_tool_required" as const, reason: "collaboration_channel" },
+      { kind: "explicit_tool_required" as const, reason: "cortex_session" },
       { kind: "external_channel" as const, sourceContext: { channel: "telegram" as const, channelId: "chat-1" } },
       { kind: "internal_only" as const },
     ]) {
@@ -1260,12 +1260,6 @@ describe("RuntimeEventProjector", () => {
 
   it("does not render denied manager finals but persists worker finals as worker_report", async () => {
     const { projector, deps, descriptors } = createHarness();
-    const collabManager = baseDescriptor({
-      agentId: "collab-manager",
-      role: "manager",
-      managerId: "collab-manager",
-      sessionSurface: "collab",
-    });
     const cortexManager = baseDescriptor({
       agentId: "cortex-manager",
       role: "manager",
@@ -1280,12 +1274,12 @@ describe("RuntimeEventProjector", () => {
       projectAgent: { handle: "agent", whenToUse: "test" },
     });
     const worker = baseDescriptor({ agentId: "worker-1", role: "worker", managerId: "manager-1" });
-    for (const descriptor of [collabManager, cortexManager, projectAgent, worker]) {
+    for (const descriptor of [cortexManager, projectAgent, worker]) {
       descriptors.set(descriptor.agentId, descriptor);
     }
     vi.mocked(deps.resolveManagerAssistantFinalOutputTarget).mockReturnValue(undefined);
 
-    for (const descriptor of [collabManager, cortexManager, projectAgent, worker]) {
+    for (const descriptor of [cortexManager, projectAgent, worker]) {
       await projector.projectEvent({
         agentId: descriptor.agentId,
         event: { type: "message_end", message: { role: "assistant", content: "Hidden final.", stopReason: "stop" } },

@@ -1,5 +1,4 @@
 import type {
-  CollaborationAuthor,
   ConversationReplyTarget,
   ConversationReplyTargetInput,
 } from "@forge/protocol";
@@ -51,7 +50,6 @@ export interface AppendConversationUserMessageOptions {
   targetAgentId?: string;
   attachments?: ConversationAttachment[];
   sourceContext?: MessageSourceContext;
-  collaborationAuthor?: CollaborationAuthor;
   replyTo?: ConversationReplyTarget;
   dispatchRuntime?: boolean;
 }
@@ -70,7 +68,6 @@ export interface DispatchRuntimeUserMessageOptions {
   targetAgentId: string;
   text: string;
   sourceContext: MessageSourceContext;
-  collaborationAuthor?: CollaborationAuthor;
   runtimeAttachments?: ConversationAttachment[];
   persistedAttachmentCount?: number;
   delivery?: RequestedDeliveryMode;
@@ -82,7 +79,6 @@ export interface HandleUserMessageOptions {
   attachments?: ConversationAttachment[];
   sourceContext?: MessageSourceContext;
   replyTo?: ConversationReplyTargetInput;
-  collaborationAuthor?: CollaborationAuthor;
   clientRequestId?: string;
   /** Manager sessions the user referenced in this message; linked as peers of the target. */
   sessionReferenceAgentIds?: string[];
@@ -94,7 +90,6 @@ export interface PreparedInboundConversationPayload {
   timestamp?: string;
   source: "user_input" | "project_agent_input";
   sourceContext?: MessageSourceContext;
-  collaborationAuthor?: CollaborationAuthor;
   clientRequestId?: string;
   projectAgentContext?: ConversationMessageEvent["projectAgentContext"];
   attachments?: ConversationAttachment[];
@@ -142,8 +137,6 @@ export class InboundConversationAppender {
       timestamp,
       source: payload.source,
       sourceContext: payload.source === "user_input" ? payload.sourceContext : undefined,
-      collaborationAuthor:
-        payload.source === "user_input" ? payload.collaborationAuthor : undefined,
       clientRequestId: payload.source === "user_input" ? payload.clientRequestId : undefined,
       projectAgentContext:
         payload.source === "project_agent_input" ? payload.projectAgentContext : undefined,
@@ -243,7 +236,6 @@ interface RuntimeDispatchInput {
   persistedAttachmentCount: number;
   visibleMessageId?: string;
   delivery?: RequestedDeliveryMode;
-  collaborationAuthor?: CollaborationAuthor;
   codexClassification?: CodexClassification;
   codexPluginDelegationContext?: CodexPluginDelegationTurnContext;
   codexPluginRetryAuthorizationContext?: CodexPluginRetryAuthorizationContext;
@@ -277,7 +269,6 @@ export class UserMessageCoordinator {
       trimmed,
       attachments,
       sourceContext,
-      options?.collaborationAuthor,
       options?.replyTo,
     );
     if (!options?.dispatchRuntime) {
@@ -293,7 +284,6 @@ export class UserMessageCoordinator {
         runtimeAttachments: appended.runtimeAttachments,
         persistedAttachmentCount: appended.persistedAttachments.length,
         visibleMessageId: appended.event.id,
-        collaborationAuthor: appended.event.collaborationAuthor,
       });
       return appended;
     });
@@ -313,7 +303,6 @@ export class UserMessageCoordinator {
         Math.trunc(options.persistedAttachmentCount ?? runtimeAttachments.length),
       ),
       delivery: options.delivery,
-      collaborationAuthor: options.collaborationAuthor,
     });
   }
 
@@ -401,7 +390,6 @@ export class UserMessageCoordinator {
         trimmed,
         attachments,
         sourceContext,
-        options?.collaborationAuthor,
         resolvedReplyTo,
         options?.clientRequestId,
       );
@@ -427,7 +415,6 @@ export class UserMessageCoordinator {
         persistedAttachmentCount: appended.persistedAttachments.length,
         visibleMessageId: appended.event.id,
         delivery: options?.delivery,
-        collaborationAuthor: options?.collaborationAuthor,
         codexClassification,
         codexPluginDelegationContext: preparedCodexTurn.delegationContext,
         codexPluginRetryAuthorizationContext: preparedCodexTurn.retryAuthorizationContext,
@@ -451,7 +438,7 @@ export class UserMessageCoordinator {
     if (isNonRunningAgentStatus(target.status)) {
       const recoverableCodexRetry = isExternalThreadDescriptor(target) && target.status === "error";
       const recoverableStoppedSession = allowStoppedSession && target.status === "stopped"
-        && target.role === "manager" && target.sessionSurface !== "collab";
+        && target.role === "manager";
       if (!recoverableCodexRetry && !recoverableStoppedSession) {
         throw new Error(`Target agent is not running: ${resolvedTargetAgentId}`);
       }
@@ -464,7 +451,6 @@ export class UserMessageCoordinator {
     text: string,
     attachments: ConversationAttachment[],
     sourceContext: MessageSourceContext,
-    collaborationAuthor?: CollaborationAuthor,
     replyTo?: ConversationReplyTarget,
     clientRequestId?: string,
   ): Promise<AppendConversationUserMessageResult> {
@@ -476,14 +462,6 @@ export class UserMessageCoordinator {
       sourceContext,
       textPreview: previewForLog(text),
       attachmentCount: attachments.length,
-      collaborationAuthor: collaborationAuthor
-        ? {
-            userId: collaborationAuthor.userId,
-            workspaceId: collaborationAuthor.workspaceId,
-            channelId: collaborationAuthor.channelId,
-            role: collaborationAuthor.role,
-          }
-        : undefined,
     });
 
     const appended = await this.options.inboundConversation.append(target, {
@@ -491,7 +469,6 @@ export class UserMessageCoordinator {
       timestamp: receivedAt,
       source: "user_input",
       sourceContext,
-      collaborationAuthor,
       clientRequestId,
       attachments,
       replyTo,
@@ -526,7 +503,6 @@ export class UserMessageCoordinator {
       ? formatInboundUserMessageForManager(
           input.text,
           input.sourceContext,
-          undefined,
           undefined,
           input.replyTo,
         )
@@ -586,12 +562,10 @@ export class UserMessageCoordinator {
     const assistantOutputTarget = this.options.assistantOutput.resolveTargetForUserInput(
       target,
       input.sourceContext,
-      input.collaborationAuthor,
     );
     const managerVisibleMessage = formatInboundUserMessageForManager(
       input.text,
       input.sourceContext,
-      input.collaborationAuthor,
       assistantOutputTarget,
       input.replyTo,
     );
@@ -630,7 +604,6 @@ export class UserMessageCoordinator {
     const metadata = {
       attachmentCount: input.persistedAttachmentCount,
       codexPluginDelegation: Boolean(input.codexPluginDelegationContext),
-      collaboration: Boolean(input.collaborationAuthor?.channelId),
     };
     const observabilityInput = this.options.observability.beginRuntimeInput({
       target,
@@ -648,7 +621,6 @@ export class UserMessageCoordinator {
       rootTurnId: observabilityInput?.rootTurnId,
       runtimeMessageText: runtimeText,
       sourceContext: input.sourceContext,
-      collaborationAuthor: input.collaborationAuthor,
       assistantOutputTarget,
       codexMcpToolGate,
       codexPluginDelegationContext: input.codexPluginDelegationContext,

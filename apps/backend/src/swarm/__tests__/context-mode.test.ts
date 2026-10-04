@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  FRESH_CONTEXT_UNSUPPORTED_COLLAB,
   FRESH_CONTEXT_UNSUPPORTED_CORTEX,
   FRESH_CONTEXT_UNSUPPORTED_CURSOR_SDK,
   FRESH_CONTEXT_UNSUPPORTED_EXTERNAL_THREAD,
@@ -27,14 +26,12 @@ const MANAGER: Pick<
   | "agentId"
   | "role"
   | "profileId"
-  | "sessionSurface"
   | "sessionPurpose"
   | "internalWorkerKind"
   | "externalThread"
   | "archetypeId"
   | "model"
   | "contextModeOverride"
-  | "collab"
 > = {
   agentId: "manager",
   role: "manager",
@@ -98,12 +95,6 @@ describe("context mode resolution", () => {
   });
 
   it("reports unsupported runtimes honestly without changing the saved preference", () => {
-    expect(evaluateFreshContextSupport({
-      manager: { ...MANAGER, sessionSurface: "collab" },
-    })).toEqual({
-      freshSupported: false,
-      unsupportedReason: FRESH_CONTEXT_UNSUPPORTED_COLLAB,
-    });
     expect(evaluateFreshContextSupport({
       manager: { ...MANAGER, sessionPurpose: "cortex_review" },
     }).unsupportedReason).toBe(FRESH_CONTEXT_UNSUPPORTED_SPECIAL_PURPOSE);

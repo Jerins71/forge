@@ -65,7 +65,6 @@ function lazyPinHost(): SessionPinCoordinatorHost {
   return {
     listSessions: fail,
     requireSession: fail,
-    requireBuilderSession: fail,
     assertMutable: fail,
     getConversationHistory: fail,
     getRuntime: fail,

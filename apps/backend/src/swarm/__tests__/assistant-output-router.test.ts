@@ -282,10 +282,6 @@ describe("AssistantOutputRouter", () => {
       reason: "no_active_parent",
     };
 
-    const collab = createHarness();
-    collab.manager.collab = true;
-    expect(collab.router.resolveWorkerParentOutputTarget("manager-1")).toEqual(expected);
-
     const projectAgent = createHarness();
     projectAgent.manager.projectAgent = {
       handle: "docs",

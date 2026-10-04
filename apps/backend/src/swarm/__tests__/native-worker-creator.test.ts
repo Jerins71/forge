@@ -35,10 +35,10 @@ describe.each(["codex-native", "claude-native"])("%s roster worker creation", pr
       expect(options.tools.map(t => t.name)).not.toContain("spawn_agent");
     } finally { create.mockRestore(); await rm(root, { recursive: true, force: true }); }
   });
-  it("rejects a worker whose owning session is Collaboration", async () => {
+  it("rejects a worker whose owning session is internal", async () => {
     const Creator = provider === "codex-native" ? CodexRuntimeCreator : ClaudeRuntimeCreator;
     await expect(new Creator({} as never).create({ descriptor: { role: "worker", model: { provider } } as AgentDescriptor,
-      sessionDescriptor: { role: "manager", sessionSurface: "collab" } as AgentDescriptor,
+      sessionDescriptor: { role: "manager", sessionPurpose: "cortex_review" } as AgentDescriptor,
       systemPrompt: "worker", runtimeToken: 1, callbacks: {} as never })).rejects.toThrow("local Builder");
   });
 });

@@ -80,7 +80,7 @@ export interface PhoenixObservabilityExporterStatus {
 
 export interface PhoenixObservabilityStatus {
   enabled: boolean;
-  runtimeTarget: "builder" | "collaboration-server";
+  runtimeTarget: "builder";
   contentMode: PhoenixObservabilityContentMode;
   exporter: PhoenixObservabilityExporterStatus;
   counters: PhoenixObservabilityCounters;

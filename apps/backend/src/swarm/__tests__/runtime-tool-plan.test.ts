@@ -243,19 +243,6 @@ describe("runtime tool plan", () => {
     expect(names).toContain("spawn_agent");
   });
 
-  it("does not advertise Codex Plugin delegation tools to Collaboration managers", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "forge-runtime-tool-plan-"));
-    const names = toolNames(createManagerDescriptor(rootDir, {
-      sessionSurface: "collab",
-      collab: { workspaceId: "workspace-1", channelId: "channel-1" },
-    }));
-
-    expect(names).not.toContain("delegate_codex_plugin");
-    expect(names).not.toContain("retry_codex_plugin_worker");
-    expect(names).not.toContain("browser_snapshot");
-    expect(names).toContain("spawn_agent");
-  });
-
   it("limits side chats to read-only Forge tools", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "forge-runtime-tool-plan-"));
     const names = toolNames(createManagerDescriptor(rootDir, { sessionPurpose: "side_chat", sideChatSourceAgentId: "parent" }));

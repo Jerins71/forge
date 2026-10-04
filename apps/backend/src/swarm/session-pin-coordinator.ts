@@ -25,7 +25,6 @@ export interface SessionPinRuntime {
 export interface SessionPinCoordinatorHost {
   listSessions: () => SessionPinOwner[];
   requireSession: (agentId: string) => SessionPinOwner;
-  requireBuilderSession: (agentId: string, action: string) => SessionPinOwner;
   assertMutable: (descriptor: SessionPinOwner) => void;
   getConversationHistory: (agentId: string) => ConversationEntryEvent[];
   getRuntime: (agentId: string) => SessionPinRuntime | undefined;
@@ -136,7 +135,7 @@ export class SessionPinCoordinator {
   }
 
   async clearAllPins(agentId: string): Promise<void> {
-    const descriptor = this.options.host.requireBuilderSession(agentId, "clear Builder pins");
+    const descriptor = this.options.host.requireSession(agentId);
     this.options.host.assertMutable(descriptor);
     const previouslyPinnedMessageIds = await clearAllSessionPins(this.getSessionDir(descriptor));
 
@@ -196,7 +195,7 @@ export class SessionPinCoordinator {
   }
 
   async pinSession(agentId: string, pinned: boolean): Promise<{ pinnedAt: string | null }> {
-    const descriptor = this.options.host.requireBuilderSession(agentId, "pin Builder sessions");
+    const descriptor = this.options.host.requireSession(agentId);
     this.options.host.assertMutable(descriptor);
 
     const updatedDescriptor = await this.options.host.patchDescriptor(agentId, (current) => {

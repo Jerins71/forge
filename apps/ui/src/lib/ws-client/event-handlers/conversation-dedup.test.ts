@@ -40,7 +40,7 @@ describe('conversation echo/dedup reducer', () => {
     const earlier = userMessage({ id: 'srv-0', text: 'earlier' })
     const context = makeContext({ messages: [earlier, optimistic] })
 
-    const echo = userMessage({ id: 'srv-1', clientRequestId: 'req-1', collaborationAuthor: { userId: 'u1', displayName: 'Ada', role: 'member' } })
+    const echo = userMessage({ id: 'srv-1', clientRequestId: 'req-1' })
     handleConversationEvent(echo, context)
 
     expect(context.state.messages).toHaveLength(2)
@@ -109,26 +109,5 @@ describe('conversation echo/dedup reducer', () => {
     }, context)
 
     expect(context.state.activityMessages).toHaveLength(1)
-  })
-})
-
-describe('project_presence reducer', () => {
-  it('stores per-session viewer snapshots and clears empty ones', () => {
-    const context = makeContext()
-    handleConversationEvent(
-      {
-        type: 'project_presence',
-        sessionAgentId: 'agent-1',
-        viewers: [{ userId: 'u1', displayName: 'Ada', role: 'member' }],
-      },
-      context,
-    )
-    expect(context.state.projectPresence['agent-1']).toHaveLength(1)
-
-    handleConversationEvent(
-      { type: 'project_presence', sessionAgentId: 'agent-1', viewers: [] },
-      context,
-    )
-    expect(context.state.projectPresence['agent-1']).toBeUndefined()
   })
 })

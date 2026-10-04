@@ -121,18 +121,3 @@ function uniqueSelectors(selectors: string[]): string[] {
 
   return result;
 }
-
-export function isBuilderWebCodexRoutingSurface(
-  sourceContext: { channel?: string },
-  sessionDescriptor: { sessionSurface?: string; collab?: unknown },
-): boolean {
-  if (sourceContext.channel !== "web") {
-    return false;
-  }
-
-  if (sessionDescriptor.sessionSurface === "collab" || sessionDescriptor.collab) {
-    return false;
-  }
-
-  return true;
-}

@@ -79,10 +79,6 @@ export class SessionDescriptorFactory {
       throw new Error(`Profile default session is missing: ${profile.defaultSessionAgentId}`);
     }
 
-    if (templateDescriptor.sessionSurface === "collab") {
-      throw new Error(`Profile default session must remain Builder-only: ${templateDescriptor.agentId}`);
-    }
-
     return this.prepareSessionCreationFromBase(
       profileId,
       {
@@ -246,7 +242,7 @@ export class SessionDescriptorFactory {
   private generateSessionAgentIdentity(
     profileId: string,
   ): { agentId: string; sessionNumber: number } {
-    const existingSessions = this.getBuilderSessionsForProfile(profileId);
+    const existingSessions = this.getSessionsForProfile(profileId);
     let highestSessionNumber = existingSessions.some(
       (descriptor) => descriptor.agentId === profileId,
     )
@@ -293,12 +289,11 @@ export class SessionDescriptorFactory {
     );
   }
 
-  private getBuilderSessionsForProfile(profileId: string): AgentDescriptor[] {
+  private getSessionsForProfile(profileId: string): AgentDescriptor[] {
     return Array.from(this.descriptors.values()).filter(
       (descriptor) =>
         descriptor.role === "manager" &&
-        descriptor.profileId === profileId &&
-        descriptor.sessionSurface !== "collab",
+        descriptor.profileId === profileId,
     );
   }
 }

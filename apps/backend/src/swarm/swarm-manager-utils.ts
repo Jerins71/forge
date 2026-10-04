@@ -12,7 +12,6 @@ import {
   isManagerPosture,
   isTerminalAssistantConversationMessage,
   type AgentRuntimeExtensionSnapshot,
-  type CollaborationAuthor,
   type ConversationReplyTarget,
   type SessionMemoryMergeFailureStage
 } from "@forge/protocol";
@@ -64,7 +63,6 @@ const SYNTHETIC_PI_MODEL_BLUEPRINTS: Readonly<Record<string, Readonly<Record<str
   }
 };
 const VALID_PERSISTED_PROJECT_AGENT_CAPABILITIES = new Set<string>(PROJECT_AGENT_CAPABILITIES);
-const VALID_PERSISTED_SESSION_SURFACES = new Set(["builder", "collab"]);
 const VALID_PERSISTED_CLI_SESSION_COMMANDS = new Set<CliSessionMetadata["command"]>(["run", "launch", "sessions create"]);
 const VALID_PERSISTED_AGENT_STATUSES = new Set([
   "idle",
@@ -86,45 +84,6 @@ export function cloneProjectAgentInfoValue(
   }
 
   return cloneProjectAgentForPublic(projectAgent);
-}
-
-export function isCollabSession(
-  descriptor: Pick<AgentDescriptor, "sessionSurface"> | null | undefined
-): boolean {
-  return descriptor?.sessionSurface === "collab";
-}
-
-export function getCollabSessionInfo(
-  descriptor: Pick<AgentDescriptor, "sessionSurface" | "collab"> | null | undefined
-): { workspaceId: string; channelId: string } | null {
-  if (descriptor?.sessionSurface !== "collab") {
-    return null;
-  }
-
-  const collab = descriptor.collab;
-  if (!isRecord(collab)) {
-    return null;
-  }
-
-  if (!isNonEmptyString(collab.workspaceId) || !isNonEmptyString(collab.channelId)) {
-    return null;
-  }
-
-  return {
-    workspaceId: collab.workspaceId,
-    channelId: collab.channelId
-  };
-}
-
-export function assertBuilderSession(
-  descriptor: Pick<AgentDescriptor, "agentId" | "sessionSurface"> | null | undefined,
-  action = "perform this Builder operation"
-): void {
-  if (descriptor?.sessionSurface !== "collab") {
-    return;
-  }
-
-  throw new Error(`Cannot ${action} for collaboration-backed session ${descriptor.agentId}.`);
 }
 
 export function cloneDescriptor(descriptor: AgentDescriptor): AgentDescriptor {
@@ -285,35 +244,6 @@ export function validateAgentDescriptor(value: unknown): AgentDescriptor | strin
 
   if (value.sideChatSourceAgentId !== undefined && typeof value.sideChatSourceAgentId !== "string") {
     return "sideChatSourceAgentId must be a string when provided";
-  }
-
-  if (
-    value.sessionSurface !== undefined &&
-    (!isNonEmptyString(value.sessionSurface) || !VALID_PERSISTED_SESSION_SURFACES.has(value.sessionSurface))
-  ) {
-    return 'sessionSurface must be "builder" or "collab" when provided';
-  }
-
-  if (value.collab !== undefined) {
-    if (!isRecord(value.collab)) {
-      return "collab must be an object when provided";
-    }
-
-    if (!isNonEmptyString(value.collab.workspaceId)) {
-      return "collab.workspaceId must be a non-empty string";
-    }
-
-    if (!isNonEmptyString(value.collab.channelId)) {
-      return "collab.channelId must be a non-empty string";
-    }
-  }
-
-  if (value.sessionSurface === "collab" && value.collab === undefined) {
-    return 'collab metadata is required when sessionSurface is "collab"';
-  }
-
-  if (value.sessionSurface !== "collab" && value.collab !== undefined) {
-    return 'collab metadata must be omitted unless sessionSurface is "collab"';
   }
 
   let normalizedCli: CliSessionMetadata | undefined;
@@ -535,9 +465,17 @@ export function validateAgentDescriptor(value: unknown): AgentDescriptor | strin
     fastModePolicy: _fastModePolicy,
     fastModeOverride: _fastModeOverride,
     contextModeOverride: rawContextModeOverride,
+    // Retired Collaboration fields; Builder records may still carry `sessionSurface: "builder"`.
+    sessionSurface: _sessionSurface,
+    collab: _collab,
     ...descriptorWithoutFastMode
   } =
-    descriptor as AgentDescriptor & { fastModePolicy?: unknown; fastModeOverride?: unknown };
+    descriptor as AgentDescriptor & {
+      fastModePolicy?: unknown;
+      fastModeOverride?: unknown;
+      sessionSurface?: unknown;
+      collab?: unknown;
+    };
 
   return {
     ...descriptorWithoutFastMode,
@@ -1474,17 +1412,10 @@ export function extractRuntimeMessageText(message: string | RuntimeUserMessage):
 export function formatInboundUserMessageForManager(
   text: string,
   sourceContext: MessageSourceContext,
-  collaborationAuthor?: CollaborationAuthor,
   assistantOutputTarget?: AssistantOutputTarget,
   replyTo?: ConversationReplyTarget,
 ): string {
   const metadataLines = [`[sourceContext] ${JSON.stringify(sourceContext)}`];
-  if (collaborationAuthor) {
-    metadataLines.push(`[collaborationAuthor] ${JSON.stringify({
-      displayName: collaborationAuthor.displayName,
-      role: collaborationAuthor.role,
-    })}`);
-  }
   if (assistantOutputTarget) {
     metadataLines.push(formatAssistantOutputTargetMetadata(assistantOutputTarget));
   }

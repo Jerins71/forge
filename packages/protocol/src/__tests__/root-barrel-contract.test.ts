@@ -10,8 +10,6 @@ import type {
   AgentDescriptor,
   CliCapabilities,
   ClientCommand,
-  CollaborationChannel,
-  CollaborationCategory,
   ManagerProfile,
   ServerEvent,
   TerminalDescriptor,
@@ -22,14 +20,6 @@ type ClientCommandType = ClientCommand['type']
 const ALL_CLIENT_COMMAND_TYPES = [
   'subscribe',
   'user_message',
-  'collab_bootstrap',
-  'collab_subscribe_channel',
-  'collab_unsubscribe_channel',
-  'collab_user_message',
-  'collab_mark_channel_read',
-  'collab_choice_response',
-  'collab_choice_cancel',
-  'collab_pin_message',
   'browser_host_register',
   'browser_host_hydrate',
   'browser_host_focus',
@@ -224,31 +214,6 @@ const terminal = {
   updatedAt: now,
 } satisfies TerminalDescriptor
 
-const channel = {
-  channelId: 'channel-1',
-  workspaceId: 'workspace-1',
-  sessionAgentId: agent.agentId,
-  name: 'General',
-  slug: 'general',
-  aiEnabled: true,
-  activeSelectedSpecialistHandles: [],
-  position: 0,
-  archived: false,
-  lastMessageSeq: 0,
-  createdAt: now,
-  updatedAt: now,
-} satisfies CollaborationChannel
-
-const category = {
-  categoryId: 'category-1',
-  workspaceId: 'workspace-1',
-  name: 'Category',
-  defaultSelectedSpecialistHandles: [],
-  position: 0,
-  createdAt: now,
-  updatedAt: now,
-} satisfies CollaborationCategory
-
 const serverEventsByLeafModule = [
   { type: 'ready', serverTime: now, subscribedAgentId: agent.agentId },
   {
@@ -272,13 +237,6 @@ const serverEventsByLeafModule = [
     commandType: 'cli_send_message',
     code: 'bad_request',
     message: 'Bad request',
-  },
-  {
-    type: 'collab_bootstrap',
-    currentUser: { userId: 'user-1', email: 'user@example.com', name: 'User', role: 'admin', disabled: false },
-    workspace: null,
-    categories: [category],
-    channels: [{ ...channel, readState: { channelId: channel.channelId, lastReadMessageSeq: 0, unreadCount: 0 } }],
   },
   { type: 'conversation_message', agentId: agent.agentId, role: 'assistant', text: 'hello', timestamp: now, source: 'speak_to_user' },
   { type: 'conversation_message', agentId: agent.agentId, role: 'assistant', text: 'hello', timestamp: now, source: 'assistant_output' },
@@ -722,9 +680,8 @@ describe('protocol root barrel contract', () => {
     expectTypeOf<Exclude<ClientCommandType, (typeof ALL_CLIENT_COMMAND_TYPES)[number]>>(undefined as never).toEqualTypeOf<never>(undefined as never)
     expectTypeOf<Exclude<(typeof ALL_CLIENT_COMMAND_TYPES)[number], ClientCommandType>>(undefined as never).toEqualTypeOf<never>(undefined as never)
 
-    expect(ALL_CLIENT_COMMAND_TYPES).toHaveLength(76)
+    expect(ALL_CLIENT_COMMAND_TYPES).toHaveLength(68)
     expect(new Set(ALL_CLIENT_COMMAND_TYPES).size).toBe(ALL_CLIENT_COMMAND_TYPES.length)
-    expect(ALL_CLIENT_COMMAND_TYPES).toContain('collab_user_message')
     expect(ALL_CLIENT_COMMAND_TYPES).toContain('api_proxy')
     expect(ALL_CLIENT_COMMAND_TYPES).toContain('mark_all_read')
   })
@@ -747,7 +704,6 @@ describe('protocol root barrel contract', () => {
       'manager_tool_activity',
       'cli_request_success',
       'cli_request_error',
-      'collab_bootstrap',
       'conversation_message',
       'conversation_message',
       'agent_status',

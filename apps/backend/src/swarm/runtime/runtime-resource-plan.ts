@@ -1,6 +1,5 @@
 import { readdirSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
-import type { ExtensionFactory, LoadExtensionsResult, ResourceDiagnostic, Skill } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory, LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
 import {
   getProfilePiExtensionsDir,
   getProfilePiPromptsDir,
@@ -38,10 +37,6 @@ export interface PiResourceLoaderOptionsPlan {
   };
   extensionFactories: ExtensionFactory[];
   extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
-  skillsOverride?: (current: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => {
-    skills: Skill[];
-    diagnostics: ResourceDiagnostic[];
-  };
   systemPrompt: string;
   appendSystemPromptOverride: (base: string[]) => string[];
 }
@@ -55,7 +50,6 @@ export interface PlanPiResourceLoaderOptionsOptions {
   extensionFactories: ExtensionFactory[];
   trustedProjectPiExtensionPaths?: string[];
   extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
-  isCollaborationRuntime: boolean;
   mergeRuntimeContextFiles: (
     baseAgentsFiles: Array<{ path: string; content: string }>,
     options: {
@@ -93,15 +87,10 @@ export function planPiResourceLoaderOptions(options: PlanPiResourceLoaderOptions
     extensionFactories,
     trustedProjectPiExtensionPaths = [],
     extensionsOverride,
-    isCollaborationRuntime,
     mergeRuntimeContextFiles,
   } = options;
 
   const additionalSkillPaths = [...memoryResources.additionalSkillPaths];
-  const skillsOverride = isCollaborationRuntime
-    ? buildCollaborationSkillsOverride(memoryResources.skillMetadata)
-    : undefined;
-
   return {
     cwd: descriptor.cwd,
     agentDir: pathsPlan.runtimeAgentDir,
@@ -123,59 +112,9 @@ export function planPiResourceLoaderOptions(options: PlanPiResourceLoaderOptions
     }),
     extensionFactories,
     ...(extensionsOverride ? { extensionsOverride } : {}),
-    ...(skillsOverride ? { skillsOverride } : {}),
     systemPrompt: promptPlan.systemPrompt,
     appendSystemPromptOverride: promptPlan.appendSystemPromptOverride,
   };
-}
-
-export function buildCollaborationSkillsOverride(skillMetadata: SkillMetadata[]) {
-  const allowedByHandle = new Map<string, SkillMetadata[]>();
-  for (const skill of skillMetadata) {
-    const handle = normalizeSkillHandle(skill.directoryName);
-    allowedByHandle.set(handle, [...(allowedByHandle.get(handle) ?? []), skill]);
-  }
-
-  return (current: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => ({
-    skills: current.skills.filter((skill) => {
-      const skillHandle = getPiSkillDirectoryHandle(skill);
-      if (!skillHandle) {
-        return false;
-      }
-
-      const allowedSkills = allowedByHandle.get(skillHandle) ?? [];
-      return allowedSkills.some(
-        (allowedSkill) =>
-          skillPathMatches(skill.filePath, allowedSkill.path) || skillPathMatches(skill.baseDir, allowedSkill.rootPath)
-      );
-    }),
-    diagnostics: current.diagnostics,
-  });
-}
-
-function getPiSkillDirectoryHandle(skill: Skill): string | undefined {
-  const candidates = [skill.baseDir, skill.filePath ? dirname(skill.filePath) : undefined];
-
-  for (const candidate of candidates) {
-    const handle = normalizeSkillHandle(basename(candidate ?? ""));
-    if (handle.length > 0) {
-      return handle;
-    }
-  }
-
-  return undefined;
-}
-
-function normalizeSkillHandle(value: string): string {
-  return value.trim().toLowerCase();
-}
-
-function skillPathMatches(actual: string | undefined, expected: string): boolean {
-  if (!actual) {
-    return false;
-  }
-
-  return resolve(actual) === resolve(expected);
 }
 
 function dirHasFiles(dirPath: string): boolean {

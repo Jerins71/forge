@@ -8,7 +8,6 @@ import { isExternalThreadDescriptor } from "../external-thread-compatibility.js"
 import { CodexAppServerService } from "./codex-app-server-service.js";
 import {
   classifyCodexUserMessage,
-  isBuilderWebCodexRoutingSurface,
   parseLeadingCodexMention,
 } from "./codex-mention-router.js";
 import {
@@ -143,7 +142,7 @@ export class CodexDirectSidecarCoordinator {
       if (!manager || manager.role !== "manager") {
         throw new Error(`Codex sidecar ${target.agentId} is missing its parent manager session.`);
       }
-      if (!isBuilderWebCodexRoutingSurface(sourceContext, manager)) {
+      if (sourceContext.channel !== "web") {
         throw new Error("Selected Codex sidecar only accepts direct sends from Builder web sessions.");
       }
       if (attachments.length > 0) {
@@ -162,7 +161,7 @@ export class CodexDirectSidecarCoordinator {
       return true;
     }
 
-    if (target.role !== "manager" || !isBuilderWebCodexRoutingSurface(sourceContext, target)) {
+    if (target.role !== "manager" || sourceContext.channel !== "web") {
       return false;
     }
 

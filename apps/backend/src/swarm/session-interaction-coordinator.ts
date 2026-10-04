@@ -84,7 +84,7 @@ export interface SessionInteractionCoordinatorOptions {
     AgentDirectory,
     | "assertDescriptorNotEffectivelyArchived"
     | "assertManager"
-    | "getRequiredBuilderManagerDescriptor"
+    | "getRequiredManagerDescriptor"
     | "getRequiredSessionDescriptor"
     | "isSessionAgent"
     | "resolvePreferredManagerId"
@@ -161,7 +161,6 @@ export class SessionInteractionCoordinator {
     const owners = Array.from(this.options.descriptors.values()).filter(
       (descriptor): descriptor is SessionOwner =>
         descriptor.role === "manager" &&
-        descriptor.sessionSurface !== "collab" &&
         normalizeArchetypeId(descriptor.archetypeId ?? "") !== CORTEX_ARCHETYPE_ID &&
         this.options.directory.isSessionAgent(descriptor),
     );
@@ -562,10 +561,7 @@ export class SessionInteractionCoordinator {
       managerIdOrReason,
       maybeReason,
     );
-    const manager = this.options.directory.getRequiredBuilderManagerDescriptor(
-      managerId,
-      "reset Builder conversations",
-    );
+    const manager = this.options.directory.getRequiredManagerDescriptor(managerId);
     const profileId = manager.profileId ?? manager.agentId;
 
     this.options.logDebug("manager:reset:start", { managerId, reason, profileId });
@@ -621,9 +617,6 @@ export class SessionInteractionCoordinator {
           ? `${operationLabel} is only available to manager sessions.`
           : "planStep is only available to manager sessions with a current working plan.",
       );
-    }
-    if (descriptor.sessionSurface === "collab") {
-      throw new Error(`${operationLabel} is not available for Collaboration sessions.`);
     }
     if (
       operation !== "planStep" &&

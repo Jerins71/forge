@@ -445,15 +445,6 @@ export class CliWsHandler {
       );
     }
 
-    if (descriptor.sessionSurface === "collab") {
-      throw new CliCommandError(
-        "unsupported_session_surface",
-        `Session ${agentId} is not available to the builder CLI.`,
-        403,
-        [{ field: "agentId", message: "Collaboration sessions cannot be targeted by the builder CLI." }],
-      );
-    }
-
     const profileId = descriptor.profileId ?? descriptor.agentId;
     const profile = this.swarmManager.listProfiles().find((candidate) => candidate.profileId === profileId);
     if (!profile) {

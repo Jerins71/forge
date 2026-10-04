@@ -41,9 +41,9 @@ const USER_PROFILES: ManagerProfile[] = [
 const ALL_PROFILES: ManagerProfile[] = [
   ...USER_PROFILES,
   {
-    profileId: "_collaboration",
-    displayName: "Collaboration",
-    defaultSessionAgentId: "_collaboration",
+    profileId: "_system",
+    displayName: "System",
+    defaultSessionAgentId: "_system",
     defaultModel: { ...DEFAULT_MODEL },
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -192,11 +192,11 @@ describe("manager command handler", () => {
     const send = vi.fn();
     const swarmManager = {
       listProfiles: vi.fn(() => ALL_PROFILES),
-      deleteManager: vi.fn(async () => ({ managerId: "_collaboration", terminatedWorkerIds: [] })),
+      deleteManager: vi.fn(async () => ({ managerId: "_system", terminatedWorkerIds: [] })),
     };
 
     await handleManagerCommand({
-      command: { type: "delete_manager", managerId: "_collaboration", requestId: "req-system-delete" } as never,
+      command: { type: "delete_manager", managerId: "_system", requestId: "req-system-delete" } as never,
       socket: {} as never,
       subscribedAgentId: "manager",
       swarmManager: swarmManager as never,
@@ -255,8 +255,8 @@ describe("manager command handler", () => {
     await handleManagerCommand({
       command: {
         type: "rename_profile",
-        profileId: "_collaboration",
-        displayName: "Collab Renamed",
+        profileId: "_system",
+        displayName: "System Renamed",
         requestId: "req-system-rename",
       } as never,
       socket: {} as never,
@@ -309,7 +309,7 @@ describe("manager command handler", () => {
     await handleManagerCommand({
       command: {
         type: "reorder_profiles",
-        profileIds: ["beta", "_collaboration", "alpha"],
+        profileIds: ["beta", "_system", "alpha"],
         requestId: "req-system-reorder",
       } as never,
       socket: {} as never,
@@ -335,7 +335,7 @@ describe("manager command handler", () => {
     await handleManagerCommand({
       command: {
         type: "update_manager_model",
-        managerId: "_collaboration",
+        managerId: "_system",
         model: "balanced",
         requestId: "req-system-model",
       } as never,
@@ -599,8 +599,8 @@ describe("manager command handler", () => {
     const swarmManager = {
       listProfiles: vi.fn(() => ALL_PROFILES),
       getAgent: vi.fn((agentId: string) =>
-        agentId === "_collaboration--s2"
-          ? { agentId, role: "manager", profileId: "_collaboration" }
+        agentId === "_system--s2"
+          ? { agentId, role: "manager", profileId: "_system" }
           : undefined,
       ),
       updateManagerModel: vi.fn(async () => undefined),
@@ -609,7 +609,7 @@ describe("manager command handler", () => {
     await handleManagerCommand({
       command: {
         type: "update_manager_model",
-        managerId: "_collaboration--s2",
+        managerId: "_system--s2",
         model: "balanced",
         requestId: "req-system-session-model",
       } as never,
@@ -638,14 +638,14 @@ describe("manager command handler", () => {
     const send = vi.fn();
     const swarmManager = {
       listProfiles: vi.fn(() => ALL_PROFILES),
-      updateManagerCwd: vi.fn(async () => "/tmp/collab"),
+      updateManagerCwd: vi.fn(async () => "/tmp/system"),
     };
 
     await handleManagerCommand({
       command: {
         type: "update_manager_cwd",
-        managerId: "_collaboration",
-        cwd: "/tmp/collab",
+        managerId: "_system",
+        cwd: "/tmp/system",
         requestId: "req-system-cwd",
       } as never,
       socket: {} as never,

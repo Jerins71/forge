@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   classifyCodexUserMessage,
   extractInlineCodexToolSelectors,
-  isBuilderWebCodexRoutingSurface,
   parseLeadingCodexMention,
   stripInlineCodexToolTokens,
 } from "../codex-app-server/codex-mention-router.js";
@@ -78,28 +77,5 @@ describe("extractInlineCodexToolSelectors", () => {
 describe("stripInlineCodexToolTokens", () => {
   it("removes inline codex tool tokens from visible text", () => {
     expect(stripInlineCodexToolTokens("run @Codex:fireflies now")).toBe("run now");
-  });
-});
-
-describe("isBuilderWebCodexRoutingSurface", () => {
-  it("allows Builder web manager sessions and excludes collab", () => {
-    expect(
-      isBuilderWebCodexRoutingSurface(
-        { channel: "web" },
-        { sessionSurface: "builder" },
-      ),
-    ).toBe(true);
-    expect(
-      isBuilderWebCodexRoutingSurface(
-        { channel: "web" },
-        { sessionSurface: "collab", collab: { channelId: "ch-1" } },
-      ),
-    ).toBe(false);
-    expect(
-      isBuilderWebCodexRoutingSurface(
-        { channel: "cli" },
-        { sessionSurface: "builder" },
-      ),
-    ).toBe(false);
   });
 });

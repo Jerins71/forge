@@ -77,7 +77,7 @@ type ManagerSessionDescriptor = AgentDescriptor & {
 export interface SwarmConfigurationAccessPolicy {
   assertManagerSettingsTargetNotArchived(managerId: string, action: string): void;
   assertProfileNotArchived(profileId: string): void;
-  getRequiredBuilderSessionDescriptor(agentId: string, action: string): AgentDescriptor;
+  getRequiredSessionDescriptor(agentId: string): AgentDescriptor;
   assertDescriptorNotEffectivelyArchived(descriptor: AgentDescriptor): void;
 }
 
@@ -285,10 +285,7 @@ export class SwarmConfigurationCoordinator {
     modelPreset?: SwarmModelPreset,
     reasoningLevel?: SwarmReasoningLevel,
   ): Promise<void> {
-    const descriptor = this.options.access.getRequiredBuilderSessionDescriptor(
-      sessionAgentId,
-      "update Builder session model",
-    );
+    const descriptor = this.options.access.getRequiredSessionDescriptor(sessionAgentId);
     this.options.access.assertDescriptorNotEffectivelyArchived(descriptor);
     await this.settings.updateSessionModel(sessionAgentId, mode, modelPreset, reasoningLevel);
   }
@@ -336,10 +333,7 @@ export class SwarmConfigurationCoordinator {
     sessionAgentId: string,
     mode: Parameters<SwarmSettingsService["updateSessionContextMode"]>[1],
   ): ReturnType<SwarmSettingsService["updateSessionContextMode"]> {
-    const descriptor = this.options.access.getRequiredBuilderSessionDescriptor(
-      sessionAgentId,
-      "update Builder session context mode",
-    );
+    const descriptor = this.options.access.getRequiredSessionDescriptor(sessionAgentId);
     this.options.access.assertDescriptorNotEffectivelyArchived(descriptor);
     return this.settings.updateSessionContextMode(sessionAgentId, mode);
   }
@@ -349,10 +343,7 @@ export class SwarmConfigurationCoordinator {
     modelSelection: ManagerExactModelSelection,
     reasoningLevel?: SwarmReasoningLevel,
   ): Promise<AgentDescriptor["model"]> {
-    const descriptor = this.options.access.getRequiredBuilderSessionDescriptor(
-      sessionAgentId,
-      "update Builder session model",
-    );
+    const descriptor = this.options.access.getRequiredSessionDescriptor(sessionAgentId);
     this.options.access.assertDescriptorNotEffectivelyArchived(descriptor);
     return this.settings.updateSessionExactModel(sessionAgentId, modelSelection, reasoningLevel);
   }

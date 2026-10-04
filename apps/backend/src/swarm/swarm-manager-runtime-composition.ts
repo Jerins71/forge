@@ -94,7 +94,7 @@ export interface RuntimeCompositionEvents {
   saveStore(): Promise<void>;
   queueVersionedToolMutation: RuntimeHost["queueVersionedToolMutation"];
   emitModelCacheObservation: RuntimeHost["emitModelCacheObservation"];
-  /** Ephemeral Builder-only count telemetry; never conversation or Collaboration projection. */
+  /** Ephemeral count-only telemetry; never conversation projection. */
   emitGenerationThroughput(event: GenerationThroughputEvent): void;
   /** Internal post-append cache freshness notification; never client transport. */
   onHistorySourceChanged?(agentId: string): void; emitGenerationMeasurementTerminalPersisted(record: GenerationMeasurementRecordV1): void;

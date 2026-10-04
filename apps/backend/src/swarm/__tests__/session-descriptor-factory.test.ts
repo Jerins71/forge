@@ -73,10 +73,6 @@ describe("SessionDescriptorFactory", () => {
   it("allocates after the highest Builder number and skips reserved directories", async () => {
     const harness = await createHarness();
     harness.descriptors.set("forge--s4", makeManagerDescriptor("forge--s4", "forge"));
-    harness.descriptors.set(
-      "forge--s99",
-      makeManagerDescriptor("forge--s99", "forge", { sessionSurface: "collab" }),
-    );
     harness.descriptors.set("worker--s100", makeWorkerDescriptor("worker--s100", "forge"));
     await mkdir(getSessionDir(harness.dataDir, "forge", "forge--s5"), { recursive: true });
 
@@ -261,7 +257,7 @@ describe("SessionDescriptorFactory", () => {
     ).toThrow("Agent creator sessions cannot be created in the Cortex profile");
   });
 
-  it("reports missing profiles and invalid default-session templates exactly", async () => {
+  it("reports missing profiles and default-session templates exactly", async () => {
     const harness = await createHarness();
 
     expect(() => harness.factory.prepareSessionCreation("missing")).toThrow(
@@ -276,14 +272,6 @@ describe("SessionDescriptorFactory", () => {
     harness.descriptors.set("forge", makeWorkerDescriptor("forge", "forge"));
     expect(() => harness.factory.prepareSessionCreation("forge")).toThrow(
       "Profile default session is missing: forge",
-    );
-
-    harness.descriptors.set(
-      "forge",
-      makeManagerDescriptor("forge", "forge", { sessionSurface: "collab" }),
-    );
-    expect(() => harness.factory.prepareSessionCreation("forge")).toThrow(
-      "Profile default session must remain Builder-only: forge",
     );
   });
 });

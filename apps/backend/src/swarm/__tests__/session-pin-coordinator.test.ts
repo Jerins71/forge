@@ -203,7 +203,6 @@ async function createHarness(): Promise<Harness> {
   const host: SessionPinCoordinatorHost = {
     listSessions: () => [...descriptors.values()],
     requireSession: (agentId) => requireDescriptor(descriptors, agentId),
-    requireBuilderSession: (agentId) => requireDescriptor(descriptors, agentId),
     assertMutable: (descriptor) => {
       if (descriptor.archivedAt) throw new Error("archived");
     },

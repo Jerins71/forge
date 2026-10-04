@@ -54,7 +54,6 @@ describe("createSwarmManagerSessionComposition", () => {
       host: {
         listSessions: late,
         requireSession: late,
-        requireBuilderSession: late,
         assertMutable: late,
         getConversationHistory: late,
         getRuntime: late,

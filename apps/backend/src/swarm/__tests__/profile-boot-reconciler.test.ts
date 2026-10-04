@@ -109,10 +109,9 @@ describe("ProfileBootReconciler", () => {
         thinkingLevel: "high",
       },
     });
-    const collab = makeManager("collab", "forge", { sessionSurface: "collab" });
     const profile = makeProfile("forge", { defaultSessionAgentId: "missing" });
     const harness = createHarness({
-      descriptors: [root, inherited, overridden, collab],
+      descriptors: [root, inherited, overridden],
       profiles: [profile],
     });
 
@@ -123,7 +122,6 @@ describe("ProfileBootReconciler", () => {
     expect(root.modelOrigin).toBe("profile_default");
     expect(inherited.modelOrigin).toBe("profile_default");
     expect(overridden.modelOrigin).toBe("session_override");
-    expect(collab.modelOrigin).toBeUndefined();
   });
 
   it("synthesizes an invalid profile model from its default session", () => {
@@ -252,13 +250,12 @@ describe("ProfileBootReconciler", () => {
       managerPosture: "hands_on",
       delegationRosterId: "special",
     });
-    const collab = makeManager("collab", "forge", { sessionSurface: "collab" });
     const profile = makeProfile("forge", {
       defaultManagerPosture: "hands_on",
       defaultDelegationRosterId: "project-roster",
     });
     const harness = createHarness({
-      descriptors: [productDefault, projectDefault, explicit, collab],
+      descriptors: [productDefault, projectDefault, explicit],
       profiles: [profile],
     });
 
@@ -275,7 +272,6 @@ describe("ProfileBootReconciler", () => {
       delegationRosterId: "special",
       delegationRosterOrigin: "session_override",
     });
-    expect(collab.managerPosture).toBeUndefined();
     expect(harness.reconciler.reconcileDelegationStateOnBoot("global-roster")).toBe(false);
   });
 

@@ -114,9 +114,9 @@ describe("session routes", () => {
       listProfiles: vi.fn(() => [
         ...USER_PROFILES,
         {
-          profileId: "_collaboration",
-          displayName: "Collaboration",
-          defaultSessionAgentId: "_collaboration",
+          profileId: "_system",
+          displayName: "System",
+          defaultSessionAgentId: "_system",
           defaultModel: { ...DEFAULT_MODEL },
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
@@ -129,7 +129,7 @@ describe("session routes", () => {
     };
 
     await handleSessionCommand({
-      command: { type: "create_session", profileId: "_collaboration", requestId: "req-system-create" } as never,
+      command: { type: "create_session", profileId: "_system", requestId: "req-system-create" } as never,
       socket: {} as never,
       subscribedAgentId: "manager-1",
       swarmManager: swarmManager as never,
@@ -275,21 +275,21 @@ describe("session routes", () => {
       listProfiles: vi.fn(() => [
         ...USER_PROFILES,
         {
-          profileId: "_collaboration",
-          displayName: "Collaboration",
-          defaultSessionAgentId: "_collaboration",
+          profileId: "_system",
+          displayName: "System",
+          defaultSessionAgentId: "_system",
           defaultModel: { ...DEFAULT_MODEL },
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
           profileType: "system" as const,
         },
       ]),
-      getAgent: vi.fn(() => ({ agentId: "collab-session", role: "manager", profileId: "_collaboration" })),
+      getAgent: vi.fn(() => ({ agentId: "system-session", role: "manager", profileId: "_system" })),
       deleteSession: vi.fn(async () => ({ terminatedWorkerIds: [] })),
     };
 
     await handleSessionCommand({
-      command: { type: "delete_session", agentId: "collab-session", requestId: "req-system-delete" } as never,
+      command: { type: "delete_session", agentId: "system-session", requestId: "req-system-delete" } as never,
       socket: {} as never,
       subscribedAgentId: "manager-1",
       swarmManager: swarmManager as never,
@@ -351,21 +351,21 @@ describe("session routes", () => {
       listProfiles: vi.fn(() => [
         ...USER_PROFILES,
         {
-          profileId: "_collaboration",
-          displayName: "Collaboration",
-          defaultSessionAgentId: "_collaboration",
+          profileId: "_system",
+          displayName: "System",
+          defaultSessionAgentId: "_system",
           defaultModel: { ...DEFAULT_MODEL },
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
           profileType: "system" as const,
         },
       ]),
-      getAgent: vi.fn(() => ({ agentId: "collab-session", role: "manager", profileId: "_collaboration" })),
+      getAgent: vi.fn(() => ({ agentId: "system-session", role: "manager", profileId: "_system" })),
       clearSessionConversation: vi.fn(async () => undefined),
     };
 
     await handleSessionCommand({
-      command: { type: "clear_session", agentId: "collab-session", requestId: "req-system-clear" } as never,
+      command: { type: "clear_session", agentId: "system-session", requestId: "req-system-clear" } as never,
       socket: {} as never,
       subscribedAgentId: "manager-1",
       swarmManager: swarmManager as never,
@@ -422,21 +422,21 @@ describe("session routes", () => {
       listProfiles: vi.fn(() => [
         ...USER_PROFILES,
         {
-          profileId: "_collaboration",
-          displayName: "Collaboration",
-          defaultSessionAgentId: "_collaboration",
+          profileId: "_system",
+          displayName: "System",
+          defaultSessionAgentId: "_system",
           defaultModel: { ...DEFAULT_MODEL },
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
           profileType: "system" as const,
         },
       ]),
-      getAgent: vi.fn(() => ({ agentId: "collab-session", role: "manager", profileId: "_collaboration" })),
+      getAgent: vi.fn(() => ({ agentId: "system-session", role: "manager", profileId: "_system" })),
       renameSession: vi.fn(async () => undefined),
     };
 
     await handleSessionCommand({
-      command: { type: "rename_session", agentId: "collab-session", label: "Renamed", requestId: "req-system-rename" } as never,
+      command: { type: "rename_session", agentId: "system-session", label: "Renamed", requestId: "req-system-rename" } as never,
       socket: {} as never,
       subscribedAgentId: "manager-1",
       swarmManager: swarmManager as never,
@@ -530,21 +530,21 @@ describe("session routes", () => {
       listProfiles: vi.fn(() => [
         ...USER_PROFILES,
         {
-          profileId: "_collaboration",
-          displayName: "Collaboration",
-          defaultSessionAgentId: "_collaboration",
+          profileId: "_system",
+          displayName: "System",
+          defaultSessionAgentId: "_system",
           defaultModel: { ...DEFAULT_MODEL },
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
           profileType: "system" as const,
         },
       ]),
-      getAgent: vi.fn(() => ({ agentId: "collab-session", role: "manager", profileId: "_collaboration" })),
+      getAgent: vi.fn(() => ({ agentId: "system-session", role: "manager", profileId: "_system" })),
       pinSession: vi.fn(async () => ({ pinnedAt: "2026-04-08T12:00:00.000Z" })),
     };
 
     await handleSessionCommand({
-      command: { type: "pin_session", agentId: "collab-session", pinned: true, requestId: "req-system-pin" } as never,
+      command: { type: "pin_session", agentId: "system-session", pinned: true, requestId: "req-system-pin" } as never,
       socket: {} as never,
       subscribedAgentId: "manager-1",
       swarmManager: swarmManager as never,
@@ -620,26 +620,26 @@ describe("session routes", () => {
       listProfiles: vi.fn(() => [
         ...USER_PROFILES,
         {
-          profileId: "_collaboration",
-          displayName: "Collaboration",
-          defaultSessionAgentId: "_collaboration",
+          profileId: "_system",
+          displayName: "System",
+          defaultSessionAgentId: "_system",
           defaultModel: { ...DEFAULT_MODEL },
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
           profileType: "system" as const,
         },
       ]),
-      getAgent: vi.fn(() => ({ agentId: "collab-session", role: "manager", profileId: "_collaboration" })),
+      getAgent: vi.fn(() => ({ agentId: "system-session", role: "manager", profileId: "_system" })),
       forkSession: vi.fn(async () => ({
         sessionAgent: { agentId: "forked", role: "manager", label: "Forked" },
-        profile: { profileId: "_collaboration", displayName: "Collaboration" },
+        profile: { profileId: "_system", displayName: "System" },
       })),
     };
 
     await handleSessionCommand({
       command: {
         type: "fork_session",
-        sourceAgentId: "collab-session",
+        sourceAgentId: "system-session",
         requestId: "req-system-fork",
       } as never,
       socket: {} as never,

@@ -27,11 +27,5 @@ export function filterBuilderVisibleAgents(
   agents: AgentDescriptor[],
   systemProfileIds: Set<string>,
 ): AgentDescriptor[] {
-  return agents.filter((agent) => {
-    if (agent.sessionSurface === "collab") {
-      return false;
-    }
-
-    return !isHiddenSystemProfileId(agent.profileId, systemProfileIds);
-  });
+  return agents.filter((agent) => !isHiddenSystemProfileId(agent.profileId, systemProfileIds));
 }

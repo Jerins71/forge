@@ -70,10 +70,6 @@ export function planForgePiToolBridgeFactory(options: {
 export function buildBaseRuntimeTools(host: SwarmToolHost, descriptor: AgentDescriptor): ToolDefinition[] {
   const swarmTools = buildSwarmTools(host, descriptor);
 
-  if (descriptor.sessionSurface === "collab") {
-    return swarmTools.filter((tool) => !BUILDER_COORDINATION_TOOL_NAMES.has(tool.name));
-  }
-
   if (descriptor.role !== "manager") {
     return swarmTools;
   }
@@ -205,7 +201,6 @@ export function isBrowserAutomationEligible(descriptor: AgentDescriptor): boolea
   return descriptor.role === "manager"
     && typeof descriptor.profileId === "string"
     && descriptor.profileId.length > 0
-    && descriptor.sessionSurface !== "collab"
     && descriptor.sessionPurpose === undefined
     && descriptor.cli === undefined
     && descriptor.externalThread === undefined
@@ -213,16 +208,6 @@ export function isBrowserAutomationEligible(descriptor: AgentDescriptor): boolea
 }
 
 const CORTEX_ARCHETYPE_ID = "cortex";
-const BUILDER_COORDINATION_TOOL_NAMES = new Set([
-  "update_plan",
-  "update_work_graph",
-  "accept_work_graph_node",
-  "create_goal",
-  "get_goal",
-  "update_goal",
-  "delegate_codex_plugin",
-  "retry_codex_plugin_worker",
-]);
 const CORTEX_DISABLED_TOOL_NAMES = new Set([
   "list_agents",
   "kill_agent",

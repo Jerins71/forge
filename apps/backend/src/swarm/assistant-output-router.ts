@@ -1,4 +1,4 @@
-import { isSystemProfile, type CollaborationAuthor } from "@forge/protocol";
+import { isSystemProfile } from "@forge/protocol";
 import {
   MessageRouter,
   type MessageRouteDecision,
@@ -31,7 +31,6 @@ import type {
 
 const CORTEX_ARCHETYPE_ID = "cortex";
 const CORTEX_PROFILE_ID = "cortex";
-const COLLABORATION_PROFILE_ID = "_collaboration";
 
 interface PendingChoiceContinuation {
   managerId: string;
@@ -103,12 +102,7 @@ export class AssistantOutputRouter implements ManagerOutputTurnPort {
   resolveTargetForUserInput(
     target: AgentDescriptor,
     sourceContext: MessageSourceContext,
-    collaborationAuthor?: CollaborationAuthor,
   ): AssistantOutputTarget {
-    if (collaborationAuthor?.channelId) {
-      return { kind: "explicit_tool_required", reason: "collaboration_channel" };
-    }
-
     if (
       target.sessionPurpose === "cortex_review" ||
       normalizeArchetypeId(target.archetypeId ?? "") === CORTEX_ARCHETYPE_ID
@@ -241,7 +235,7 @@ export class AssistantOutputRouter implements ManagerOutputTurnPort {
     }
 
     const descriptor = this.options.descriptors.get(continuation.managerId);
-    if (!descriptor || descriptor.role !== "manager" || descriptor.collab) {
+    if (!descriptor || descriptor.role !== "manager") {
       return false;
     }
 
@@ -547,13 +541,7 @@ export class AssistantOutputRouter implements ManagerOutputTurnPort {
       return false;
     }
 
-    if (target.sessionSurface === "collab" || target.collab) {
-      return false;
-    }
-
     if (
-      target.agentId === COLLABORATION_PROFILE_ID ||
-      target.profileId === COLLABORATION_PROFILE_ID ||
       target.agentId === CORTEX_PROFILE_ID ||
       target.profileId === CORTEX_PROFILE_ID
     ) {
@@ -570,8 +558,7 @@ export class AssistantOutputRouter implements ManagerOutputTurnPort {
     const archetypeId = normalizeArchetypeId(target.archetypeId ?? "");
     return !(
       target.sessionPurpose === "cortex_review" ||
-      archetypeId === CORTEX_ARCHETYPE_ID ||
-      archetypeId === "collaboration-channel"
+      archetypeId === CORTEX_ARCHETYPE_ID
     );
   }
 
@@ -600,10 +587,6 @@ export class AssistantOutputRouter implements ManagerOutputTurnPort {
       senderAgentId: input.sender.agentId,
       targetAgentId: input.target.agentId,
       ...(input.target.profileId ? { targetProfileId: input.target.profileId } : {}),
-      ...(input.target.sessionSurface
-        ? { targetSessionSurface: input.target.sessionSurface }
-        : {}),
-      targetCollab: Boolean(input.target.collab || input.routeContext?.collaboration),
       targetProjectAgent: input.target.projectAgent !== undefined,
       ...(input.target.creatorAgentId
         ? { targetCreatorAgentId: input.target.creatorAgentId }

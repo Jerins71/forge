@@ -70,20 +70,6 @@ function memoryResources(rootDir: string, metadata: SkillMetadata[] = []): Runti
   };
 }
 
-function skillMetadata(rootDir: string, directoryName: string): SkillMetadata {
-  return {
-    skillId: `global:${directoryName}`,
-    skillName: directoryName,
-    directoryName,
-    path: join(rootDir, directoryName, "SKILL.md"),
-    rootPath: join(rootDir, directoryName),
-    env: [],
-    sourceKind: "global",
-    isInherited: false,
-    isEffective: true,
-  };
-}
-
 describe("runtime resource plan", () => {
   it("plans manager and worker runtime agent dirs with profile ID fallback", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "forge-runtime-resource-"));
@@ -121,7 +107,6 @@ describe("runtime resource plan", () => {
       promptPlan: { systemPrompt: "prompt", appendSystemPromptOverride: () => [] },
       swarmContextFiles: [],
       extensionFactories: [],
-      isCollaborationRuntime: false,
       mergeRuntimeContextFiles: (base) => base,
     });
 
@@ -130,46 +115,6 @@ describe("runtime resource plan", () => {
     expect(plan.additionalSkillPaths).not.toContain(pathsPlan.profilePiSkillsDir);
     expect(plan.additionalPromptTemplatePaths).toEqual([]);
     expect(plan.additionalThemePaths).toEqual([pathsPlan.profilePiThemesDir]);
-  });
-
-  it("excludes profile skill dirs for collaboration and admits selected memory skills by handle and path/rootPath only", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "forge-runtime-resource-"));
-    const config = createConfig(rootDir);
-    const agent = descriptor({ profileId: "collab" });
-    const pathsPlan = planRuntimeResourcePaths({ config, descriptor: agent });
-    mkdirSync(pathsPlan.profilePiSkillsDir, { recursive: true });
-    writeFileSync(join(pathsPlan.profilePiSkillsDir, "SKILL.md"), "profile skill", "utf8");
-    const allowed = skillMetadata(join(rootDir, "allowed"), "Researcher");
-
-    const plan = planPiResourceLoaderOptions({
-      descriptor: agent,
-      pathsPlan,
-      memoryResources: memoryResources(rootDir, [allowed]),
-      promptPlan: { systemPrompt: "prompt", appendSystemPromptOverride: () => [] },
-      swarmContextFiles: [],
-      extensionFactories: [],
-      isCollaborationRuntime: true,
-      mergeRuntimeContextFiles: (base) => base,
-    });
-
-    expect(plan.additionalSkillPaths).toEqual([join(rootDir, "memory-skills")]);
-    expect(plan.skillsOverride).toEqual(expect.any(Function));
-
-    const diagnostics = [{ level: "warn", message: "kept" }];
-    const result = plan.skillsOverride!({
-      skills: [
-        { baseDir: allowed.rootPath, filePath: join(rootDir, "wrong", "Researcher", "SKILL.md") },
-        { baseDir: join(rootDir, "other", "Researcher"), filePath: allowed.path },
-        { baseDir: join(rootDir, "other", "Researcher"), filePath: join(rootDir, "wrong", "Researcher", "SKILL.md") },
-        { baseDir: join(rootDir, "other", "Different"), filePath: allowed.path },
-      ] as never,
-      diagnostics: diagnostics as never,
-    });
-
-    expect(result.skills).toHaveLength(2);
-    expect(result.skills[0]).toMatchObject({ baseDir: allowed.rootPath });
-    expect(result.skills[1]).toMatchObject({ filePath: allowed.path });
-    expect(result.diagnostics).toBe(diagnostics);
   });
 
   it("merges agents files before appending startup recovery context", async () => {
@@ -190,7 +135,6 @@ describe("runtime resource plan", () => {
       promptPlan,
       swarmContextFiles: [{ path: join(rootDir, "AGENTS.md"), content: "agents" }],
       extensionFactories: [],
-      isCollaborationRuntime: false,
       mergeRuntimeContextFiles: (base, options) => [
         ...base,
         options.memoryContextFile,

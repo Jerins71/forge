@@ -233,18 +233,6 @@ describe("SessionInteractionCoordinator", () => {
   it("rejects update_plan outside a running, non-Cortex Builder manager session", async () => {
     const harness = createHarness();
     const manager = harness.descriptors.get("manager")!;
-    manager.sessionSurface = "collab";
-    await expect(
-      harness.coordinator.updatePlan("manager", "tool", { plan: [] }),
-    ).rejects.toThrow("not available for Collaboration sessions");
-    await expect(
-      harness.coordinator.acceptWorkGraphNode("manager", "tool", {
-        nodeId: "research",
-        evidence: "Verified.",
-      }),
-    ).rejects.toThrow("not available for Collaboration sessions");
-
-    manager.sessionSurface = "builder";
     manager.archetypeId = "cortex";
     await expect(
       harness.coordinator.updatePlan("manager", "tool", { plan: [] }),
@@ -344,12 +332,8 @@ describe("SessionInteractionCoordinator", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it("preloads only non-Collaboration, non-Cortex session plans", async () => {
+  it("preloads only non-Cortex session plans", async () => {
     const harness = createHarness();
-    harness.descriptors.set(
-      "collab",
-      makeManager("collab", { sessionSurface: "collab" }),
-    );
     harness.descriptors.set(
       "cortex",
       makeManager("cortex", { archetypeId: "cortex" }),
@@ -618,7 +602,7 @@ function createHarness(): Harness {
         if (!descriptor || descriptor.role !== "manager") throw new Error("not manager");
         return descriptor;
       }),
-      getRequiredBuilderManagerDescriptor: vi.fn((agentId) => {
+      getRequiredManagerDescriptor: vi.fn((agentId) => {
         const descriptor = descriptors.get(agentId);
         if (!descriptor || descriptor.role !== "manager") throw new Error("not manager");
         return descriptor as AgentDescriptor & { role: "manager"; profileId: string };

@@ -183,12 +183,6 @@ export interface ManagerProfile {
 }
 
 export type AgentSessionPurpose = 'cortex_review' | 'agent_creator' | 'capture_check' | 'side_chat'
-export type AgentSessionSurface = 'builder' | 'collab'
-
-export interface AgentCollaborationLink {
-  workspaceId: string
-  channelId: string
-}
 
 export const EXTERNAL_THREAD_TYPES = ['codex_app_server'] as const
 export type ExternalThreadType = (typeof EXTERNAL_THREAD_TYPES)[number]
@@ -232,8 +226,6 @@ export interface AgentDescriptor {
   sessionPurpose?: AgentSessionPurpose
   /** Parent Builder session of a temporary `side_chat` fork. At most one side chat exists per parent. */
   sideChatSourceAgentId?: string
-  sessionSurface?: AgentSessionSurface
-  collab?: AgentCollaborationLink
   cli?: CliSessionMetadata
   pinnedAt?: string
   archivedAt?: string

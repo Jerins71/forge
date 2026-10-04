@@ -15,8 +15,6 @@ import type { AgentDescriptor, ManagerProfile } from "./types.js";
 const CORTEX_ARCHETYPE_ID = "cortex";
 const CORTEX_PROFILE_ID = "cortex";
 
-export const FRESH_CONTEXT_UNSUPPORTED_COLLAB =
-  "Context v2 is not supported for Collaboration sessions.";
 export const FRESH_CONTEXT_UNSUPPORTED_SPECIAL_PURPOSE =
   "Context v2 is only supported for ordinary Builder manager compaction runtimes.";
 const FRESH_CONTEXT_UNSUPPORTED_PLUGIN =
@@ -78,13 +76,11 @@ export function evaluateFreshContextSupport(options: {
     | "role"
     | "agentId"
     | "profileId"
-    | "sessionSurface"
     | "sessionPurpose"
     | "internalWorkerKind"
     | "externalThread"
     | "archetypeId"
     | "model"
-    | "collab"
   >;
   profile?: Pick<ManagerProfile, "profileId" | "profileType">;
   runtime?: Pick<SwarmAgentRuntime, "runtimeType">;
@@ -92,9 +88,6 @@ export function evaluateFreshContextSupport(options: {
   const { manager, profile, runtime } = options;
   if (manager.role !== "manager") {
     return { freshSupported: false, unsupportedReason: FRESH_CONTEXT_UNSUPPORTED_WORKER };
-  }
-  if (manager.sessionSurface === "collab" || manager.collab) {
-    return { freshSupported: false, unsupportedReason: FRESH_CONTEXT_UNSUPPORTED_COLLAB };
   }
   if (manager.sessionPurpose !== undefined) {
     return { freshSupported: false, unsupportedReason: FRESH_CONTEXT_UNSUPPORTED_SPECIAL_PURPOSE };
@@ -140,13 +133,11 @@ export function buildSessionContextModeSnapshot(options: {
     | "profileId"
     | "contextModeOverride"
     | "role"
-    | "sessionSurface"
     | "sessionPurpose"
     | "internalWorkerKind"
     | "externalThread"
     | "archetypeId"
     | "model"
-    | "collab"
   >;
   runtime?: Pick<SwarmAgentRuntime, "runtimeType">;
   actor?: Pick<AgentDescriptor, "role">;

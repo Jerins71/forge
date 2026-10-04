@@ -5,7 +5,6 @@ import {
   type CodexMcpCatalog,
   isToolSelectorAuthorizedInCatalog,
 } from "./codex-mcp-catalog.js";
-import { isBuilderWebCodexRoutingSurface } from "./codex-mention-router.js";
 
 export interface CodexMcpToolGateEvaluation {
   allowed: boolean;
@@ -34,10 +33,6 @@ export function evaluateCodexMcpCatalogBrowseGate(params: {
     return { allowed: false, reason: "Codex MCP catalog browsing requires a manager session." };
   }
 
-  if (params.manager.sessionSurface === "collab" || params.manager.collab) {
-    return { allowed: false, reason: "Codex MCP catalog browsing is not available on collab sessions." };
-  }
-
   return { allowed: true };
 }
 
@@ -51,12 +46,8 @@ export function evaluateCodexMcpToolGate(params: {
     return { allowed: false, reason: "Codex MCP tools require a manager session." };
   }
 
-  if (!isBuilderWebCodexRoutingSurface(params.sourceContext, params.manager)) {
-    return { allowed: false, reason: "Codex MCP tools are only available on Builder web manager sessions." };
-  }
-
   if (params.sourceContext.channel !== "web") {
-    return { allowed: false, reason: "Codex MCP tools are only available for web user turns." };
+    return { allowed: false, reason: "Codex MCP tools are only available on Builder web manager sessions." };
   }
 
   if (params.inboundSource === "project_agent_input") {

@@ -2117,7 +2117,7 @@ export class SwarmAgentLifecycleService {
   /** Saved CLI credentials changed; preserve active work and refresh at its existing idle boundary. */
   async notifyClaudeNativeAuthChanged(): Promise<void> {
     const agents = [...this.options.descriptors.values()].filter(descriptor =>
-      descriptor.model.provider === "claude-native" && descriptor.sessionSurface !== "collab" && !descriptor.collab,
+      descriptor.model.provider === "claude-native",
     );
     const results = await Promise.allSettled(agents.map(descriptor =>
       this.applyAgentRuntimeRecyclePolicy(descriptor.agentId, "auth_source_change"),

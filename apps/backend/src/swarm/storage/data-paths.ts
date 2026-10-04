@@ -230,26 +230,6 @@ export function getSessionBrowserArtifactsDir(dataDir: string, profileId: string
   return join(getSessionDir(dataDir, profileId, sessionAgentId), "artifacts", "browser");
 }
 
-export function getSessionContextDir(dataDir: string, profileId: string, sessionAgentId: string): string {
-  return join(getSessionDir(dataDir, profileId, sessionAgentId), "context");
-}
-
-export function getSessionContextPromptPath(dataDir: string, profileId: string, sessionAgentId: string): string {
-  return join(getSessionContextDir(dataDir, profileId, sessionAgentId), "prompt.md");
-}
-
-export function getSessionReferenceDir(dataDir: string, profileId: string, sessionAgentId: string): string {
-  return join(getSessionDir(dataDir, profileId, sessionAgentId), "reference");
-}
-
-/**
- * Legacy collaboration channel reference-doc location.
- * Keep only for read fallback and non-destructive migration to getSessionReferenceDir().
- */
-export function getSessionContextReferenceDir(dataDir: string, profileId: string, sessionAgentId: string): string {
-  return join(getSessionContextDir(dataDir, profileId, sessionAgentId), "reference");
-}
-
 export function getSessionTerminalsDir(dataDir: string, profileId: string, sessionAgentId: string): string {
   return join(getSessionDir(dataDir, profileId, sessionAgentId), "terminals");
 }

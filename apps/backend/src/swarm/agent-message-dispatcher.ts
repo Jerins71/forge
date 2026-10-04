@@ -1017,9 +1017,6 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
     if (!isSessionAgentDescriptor(sender)) {
       throw new Error("planStep is only available to manager sessions with a current working plan.");
     }
-    if (sender.sessionSurface === "collab") {
-      throw new Error("planStep is not available for Collaboration sessions.");
-    }
     return {
       descriptor: sender,
       assignment: await this.options.plans.resolveAssignment(sender, requestedStep),
@@ -1130,9 +1127,6 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
       return text;
     }
     const withRoster = await this.options.delegation.appendToManagerInput(target, text);
-    if (target.sessionSurface === "collab") {
-      return withRoster;
-    }
     const withGoal = await this.options.goals.appendToManagerInput(target, withRoster);
     return this.options.plans.appendToManagerInput(target, withGoal);
   }

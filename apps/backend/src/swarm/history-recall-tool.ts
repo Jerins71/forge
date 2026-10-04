@@ -22,7 +22,7 @@ export interface HistoryRecallToolHost {
 const identifier = () => Type.String({ minLength: 1, maxLength: 512 })
 
 export function buildHistoryRecallTools(host: HistoryRecallToolHost, descriptor: AgentDescriptor): ToolDefinition[] {
-  if (!host.searchHistory || !host.readHistory || descriptor.sessionSurface === 'collab'
+  if (!host.searchHistory || !host.readHistory
     || descriptor.sessionPurpose || descriptor.externalThread || descriptor.internalWorkerKind === 'codex_plugin') return []
 
   const sessionsOp = Type.Object({

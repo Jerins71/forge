@@ -17,8 +17,6 @@ export interface SyntheticAgentSpec {
   cwd: string;
   archivedAt?: string;
   sessionPurpose?: AgentDescriptor["sessionPurpose"];
-  sessionSurface?: AgentDescriptor["sessionSurface"];
-  collab?: AgentDescriptor["collab"];
 }
 
 export interface SyntheticProfileSpec {
@@ -103,16 +101,6 @@ export function compactAgentSpecs(archiveCount: number): SyntheticAgentSpec[] {
       cwd: "/tmp/hrr/cortex",
       sessionPurpose: "cortex_review",
     },
-    {
-      agentId: SESSION.collab,
-      managerId: SESSION.collab,
-      role: "manager",
-      profileId: PROFILE.alpha,
-      displayName: "Collab Session",
-      cwd: "/tmp/hrr/collab",
-      sessionSurface: "collab",
-      collab: { workspaceId: "ws-hrr", channelId: "ch-hrr" },
-    },
   ];
 }
 
@@ -180,8 +168,6 @@ export function toDescriptors(specs: readonly SyntheticAgentSpec[]): AgentDescri
     profileId: spec.profileId,
     archivedAt: spec.archivedAt,
     sessionPurpose: spec.sessionPurpose,
-    sessionSurface: spec.sessionSurface,
-    collab: spec.collab,
   }));
 }
 

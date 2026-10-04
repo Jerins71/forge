@@ -48,7 +48,7 @@ export interface LocalRemoteUpdateAwarenessServiceOptions {
   closeDatabase?: typeof closeRemoteUpdateAwarenessDb;
 }
 
-/** Local Builder composition adapter. Collaboration runtimes never construct it. */
+/** Local Builder composition adapter. */
 export class LocalRemoteUpdateAwarenessService {
   private core: CoreRemoteUpdateAwarenessService | null;
   private scheduler: RemoteUpdateAwarenessScheduler | null;

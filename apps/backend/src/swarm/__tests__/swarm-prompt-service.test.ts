@@ -896,55 +896,6 @@ Always preserve the user's release notes.`,
     expect(prompt).not.toContain("This route id must not become a behavior prompt.");
   });
 
-  it("does not append repository reference inventory to workers owned by collaboration managers", async () => {
-    const { config } = await makeConfig();
-    const workspace = await mkdtemp(join(tmpdir(), "forge-collab-worker-reference-"));
-    execFileSync("git", ["init"], { cwd: workspace, stdio: "ignore" });
-    await mkdir(join(workspace, ".forge", "reference"), { recursive: true });
-    await writeFile(join(workspace, ".forge", "reference", "private.md"), "Do not leak.", "utf8");
-
-    const manager = createManagerDescriptor(config, workspace, {
-      sessionSurface: "collab",
-      collab: { workspaceId: "workspace-1", channelId: "channel-1" },
-    });
-    const worker: AgentDescriptor = {
-      ...createManagerDescriptor(config, workspace, { agentId: "worker", managerId: manager.agentId, profileId: "manager" }),
-      role: "worker",
-      specialistId: "collab-specialist",
-    };
-    const specialistRegistry = {
-      ...specialistRegistryStub(),
-      resolveRoster: vi.fn(async () => [{ specialistId: "collab-specialist", promptBody: "Collaboration worker prompt" }]),
-    };
-
-    const service = new SwarmPromptService({
-      config,
-      descriptors: new Map([[manager.agentId, manager], [worker.agentId, worker]]),
-      profiles: new Map([["manager", createProfile("manager")]]),
-      promptRegistry: new FileBackedPromptRegistry({
-        dataDir: config.paths.dataDir,
-        repoDir: config.paths.rootDir,
-        builtinArchetypesDir: BUILTIN_ARCHETYPES,
-        builtinOperationalDir: BUILTIN_OPERATIONAL,
-      }),
-      skillMetadataService: {} as never,
-      getAgentMemoryPath: () => "/tmp/memory.md",
-      ensureAgentMemoryFile: async () => {},
-      resolveMemoryOwnerAgentId: (d) => d.agentId,
-      resolveSessionProfileId: () => "manager",
-      refreshSessionMetaStats: async () => {},
-      refreshSessionMetaStatsBySessionId: async () => {},
-      getSessionsForProfile: () => [manager],
-      loadSpecialistRegistryModule: async () => specialistRegistry,
-      logDebug: () => {},
-    });
-
-    const prompt = await service.resolveSystemPromptForDescriptor(worker);
-    expect(prompt).toBe("Collaboration worker prompt");
-    expect(prompt).not.toContain("Repository Reference Documents");
-    expect(prompt).not.toContain("private.md");
-  });
-
   it("gives a lens-less worker the automatic structured-result contract", async () => {
     const { config } = await makeConfig();
     const worker = {
@@ -952,8 +903,6 @@ Always preserve the user's release notes.`,
         agentId: "light-worker",
         managerId: "manager",
         profileId: "manager",
-        sessionSurface: "collab",
-        collab: { workspaceId: "workspace-1", channelId: "channel-1" },
       }),
       role: "worker" as const,
       archetypeId: "worker",
@@ -1449,7 +1398,7 @@ Always preserve the user's release notes.`,
   it("uses descriptor-aware skills for preview, memory resources, Claude, and Cursor SDK prompts", async () => {
     const { config } = await makeConfig();
     const dataDir = config.paths.dataDir;
-    const descriptor = createManagerDescriptor(config, repoRoot, { sessionSurface: "collab" });
+    const descriptor = createManagerDescriptor(config, repoRoot);
     const profiles = new Map<string, ManagerProfile>([["manager", createProfile("manager")]]);
     const descriptors = new Map<string, AgentDescriptor>([["manager", descriptor]]);
     const promptRegistry = new FileBackedPromptRegistry({

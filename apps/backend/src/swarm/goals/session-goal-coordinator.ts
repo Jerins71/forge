@@ -270,9 +270,6 @@ export class SessionGoalCoordinator {
     if (!descriptor || descriptor.role !== "manager" || !this.options.isSessionAgent(descriptor)) {
       throw new Error(`${action} requires a manager session with profile context.`);
     }
-    if (descriptor.sessionSurface === "collab") {
-      throw new Error(`${action} is not available for Collaboration sessions.`);
-    }
     if (normalizeArchetypeId(descriptor.archetypeId ?? "") === CORTEX_ARCHETYPE_ID) {
       throw new Error(`${action} is not available for Cortex sessions.`);
     }
@@ -292,8 +289,7 @@ export class SessionGoalCoordinator {
   }
 
   private supportsGoals(owner: SessionGoalOwner): boolean {
-    return owner.sessionSurface !== "collab" &&
-      normalizeArchetypeId(owner.archetypeId ?? "") !== CORTEX_ARCHETYPE_ID;
+    return normalizeArchetypeId(owner.archetypeId ?? "") !== CORTEX_ARCHETYPE_ID;
   }
 
   private store(owner: SessionGoalOwner): SessionGoalStore {

@@ -237,9 +237,9 @@ describe("prompt routes", () => {
       promptRegistry,
       listProfiles: () => [
         {
-          profileId: "_collaboration",
-          displayName: "Collaboration",
-          defaultSessionAgentId: "_collaboration",
+          profileId: "_system",
+          displayName: "System",
+          defaultSessionAgentId: "_system",
           createdAt: "2026-04-14T00:00:00.000Z",
           updatedAt: "2026-04-14T00:00:00.000Z",
           profileType: "system",
@@ -250,7 +250,7 @@ describe("prompt routes", () => {
     const response = await fetch(`${server.baseUrl}/api/prompts/archetype/manager`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ profileId: "_collaboration", content: "Blocked" }),
+      body: JSON.stringify({ profileId: "_system", content: "Blocked" }),
     });
 
     expect(response.status).toBe(403);
@@ -276,9 +276,9 @@ describe("prompt routes", () => {
           profileType: "user",
         },
         {
-          profileId: "_collaboration",
-          displayName: "Collaboration",
-          defaultSessionAgentId: "_collaboration",
+          profileId: "_system",
+          displayName: "System",
+          defaultSessionAgentId: "_system",
           createdAt: "2026-04-14T00:00:00.000Z",
           updatedAt: "2026-04-14T00:00:00.000Z",
           profileType: "system",
@@ -312,11 +312,11 @@ describe("prompt routes", () => {
     });
     await expect(response.json()).resolves.toEqual({ deleted: true });
 
-    const blockedDelete = await fetch(`${server.baseUrl}/api/prompts/archetype/manager?profileId=_collaboration`, {
+    const blockedDelete = await fetch(`${server.baseUrl}/api/prompts/archetype/manager?profileId=_system`, {
       method: "DELETE",
     });
     expect(blockedDelete.status).toBe(403);
-    expect(deleteOverride).not.toHaveBeenCalledWith("archetype", "manager", "_collaboration");
+    expect(deleteOverride).not.toHaveBeenCalledWith("archetype", "manager", "_system");
     await expect(blockedDelete.json()).resolves.toEqual({ error: "Cannot modify system-managed profile" });
   });
 

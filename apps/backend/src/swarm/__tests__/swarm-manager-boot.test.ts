@@ -1517,6 +1517,8 @@ describe('SwarmManager', () => {
     const persistedStore = JSON.parse(await readFile(config.paths.agentsStoreFile, 'utf8')) as { agents: AgentDescriptor[] }
     const persisted = persistedStore.agents.find((agent) => agent.agentId === 'release-notes')
     expect((persisted?.model as AgentDescriptor["model"] & { serviceTier?: unknown } | undefined)?.serviceTier).toBeUndefined()
+    // The retired Collaboration `sessionSurface` field is dropped from legacy Builder records.
+    expect(persisted).not.toHaveProperty('sessionSurface')
     expect(persisted).toMatchObject({
       creatorAgentId: 'agent-creator',
       status: 'stopped',
@@ -1530,7 +1532,6 @@ describe('SwarmManager', () => {
       profileId: 'manager',
       sessionLabel: 'Release Notes',
       sessionPurpose: 'agent_creator',
-      sessionSurface: 'builder',
       sessionSystemPrompt: 'Session prompt survives boot.',
       pinnedAt: '2026-01-03T00:00:00.000Z',
       contextUsage: { tokens: 123, contextWindow: 456, percent: 27 },

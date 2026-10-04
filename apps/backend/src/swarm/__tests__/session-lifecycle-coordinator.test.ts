@@ -242,7 +242,7 @@ describe("SessionLifecycleCoordinator", () => {
     ]);
   });
 
-  it("validates the session surface before stop cleanup", async () => {
+  it("runs stop cleanup in order", async () => {
     const harness = createHarness();
     harness.deps.lifecycle.stopSession = vi.fn(async () => {
       harness.calls.push("lifecycle.stop");
@@ -258,13 +258,6 @@ describe("SessionLifecycleCoordinator", () => {
       "lifecycle.stop",
       "tools:forge--s2",
     ]);
-
-    harness.calls.length = 0;
-    harness.descriptors.get("forge--s2")!.sessionSurface = "collab";
-    await expect(harness.coordinator.stopSession("forge--s2")).rejects.toThrow(
-      "Cannot stop Builder sessions",
-    );
-    expect(harness.calls).toEqual([]);
   });
 
   it("tears down secure authority before every destructive Builder lifecycle mutation", async () => {
@@ -641,7 +634,6 @@ function createHarness(): Harness {
     sessions: {
       createSession: vi.fn(async () => makeCreatedSession("created")),
       createSessionWithOverrides: vi.fn(async () => makeCreatedSession("created")),
-      createSessionFromBaseDescriptor: vi.fn(async () => makeCreatedSession("created")),
       deleteSession: vi.fn(async () => ({ terminatedWorkerIds: [] })),
       clearSessionConversation: vi.fn(async () => undefined),
       renameSession: vi.fn(async () => undefined),

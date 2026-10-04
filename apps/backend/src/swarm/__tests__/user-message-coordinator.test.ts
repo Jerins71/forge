@@ -253,7 +253,6 @@ describe("InboundConversationAppender", () => {
       text: "hello",
       source: "user_input",
       sourceContext: { channel: "web" },
-      collaborationAuthor: { userId: "u1", displayName: "Ada" },
       clientRequestId: "request-1",
       attachments: [textAttachment()],
       replyTo,
@@ -292,12 +291,11 @@ describe("UserMessageCoordinator", () => {
     expect(h.order.indexOf("runtime:recover")).toBeLessThan(h.order.indexOf("event:conversation"));
   });
 
-  it.each(["worker", "archived", "collab", "terminated", "error"])("does not auto-resume %s targets", async kind => {
+  it.each(["worker", "archived", "terminated", "error"])("does not auto-resume %s targets", async kind => {
     const h = createHarness();
     const target = kind === "worker" ? h.worker : h.manager;
     target.status = kind === "terminated" || kind === "error" ? kind : "stopped";
     if (kind === "archived") target.archivedAt = now;
-    if (kind === "collab") target.sessionSurface = "collab";
     await expect(h.coordinator.handleUserMessage("Continue", { targetAgentId: target.agentId })).rejects.toThrow();
     expect(h.options.runtime.recoverStoppedSession).not.toHaveBeenCalled();
     expect(h.emittedConversations).toEqual([]);
@@ -322,19 +320,12 @@ describe("UserMessageCoordinator", () => {
     })).rejects.toThrow(`Target agent is not running: ${harness.worker.agentId}`);
   });
 
-  it("atomically admits collaboration append plus runtime dispatch", async () => {
+  it("atomically admits append plus runtime dispatch", async () => {
     const harness = createHarness();
 
-    const appended = await harness.coordinator.appendConversationUserMessage("channel message", {
+    const appended = await harness.coordinator.appendConversationUserMessage("hello", {
       targetAgentId: harness.manager.agentId,
-      sourceContext: { channel: "web", channelId: "channel-1", userId: "user-1" },
-      collaborationAuthor: {
-        userId: "user-1",
-        displayName: "Ada",
-        role: "member",
-        workspaceId: "workspace-1",
-        channelId: "channel-1",
-      },
+      sourceContext: { channel: "web" },
       dispatchRuntime: true,
     });
 

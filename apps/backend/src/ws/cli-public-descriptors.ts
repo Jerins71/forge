@@ -29,7 +29,6 @@ export function toPublicCliAgentDescriptor(agent: AgentDescriptor): AgentDescrip
     ...withoutPrompt,
     model: { ...withoutPrompt.model },
     ...(withoutPrompt.contextUsage !== undefined ? { contextUsage: { ...withoutPrompt.contextUsage } } : {}),
-    ...(withoutPrompt.collab !== undefined ? { collab: { ...withoutPrompt.collab } } : {}),
     ...(withoutPrompt.cli !== undefined ? { cli: { ...withoutPrompt.cli } } : {}),
     projectAgent: publicProjectAgent,
   };

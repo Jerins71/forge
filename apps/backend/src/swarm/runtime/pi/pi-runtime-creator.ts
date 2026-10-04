@@ -63,7 +63,7 @@ import { mapForgeReasoningToPiThinkingLevel } from "../../pi-thinking-level.js";
 import type { SkillMetadata } from "../../skills/skill-metadata-service.js";
 import type { SwarmToolHost } from "../../swarm-tool-host.js";
 import { isCodexPluginWorkerDescriptor } from "../../codex-app-server/codex-plugin-scope-service.js";
-import { isCollabSession, resolveExactModel } from "../../swarm-manager-utils.js";
+import { resolveExactModel } from "../../swarm-manager-utils.js";
 import type {
   AgentContextUsage,
   AgentDescriptor,
@@ -380,7 +380,7 @@ export class PiRuntimeCreator {
     const contextTools: ToolDefinition[] = browserDiscovery ? [browserDiscovery.tool] : [];
     let taskNotesStartupContext: string | undefined;
     // Use the established tool plan's history eligibility instead of inventing a
-    // second list of excluded system, collaboration, and plugin runtimes.
+    // second list of excluded system and plugin runtimes.
     if (descriptor.profileId && !isRestrictedDescriptor(descriptor)
       && (!sessionDescriptor || !isRestrictedDescriptor(sessionDescriptor))
       && runtimeSwarmTools.some(tool => tool.name === "history")) {
@@ -475,7 +475,6 @@ export class PiRuntimeCreator {
           trustPlan: projectExecutableTrustPlan
         })
       ),
-      isCollaborationRuntime: isCollabSession(sessionDescriptor),
       mergeRuntimeContextFiles: this.deps.mergeRuntimeContextFiles
     });
     const effectiveResourcePlan = secureRuntimeBinding

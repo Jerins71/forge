@@ -29,7 +29,6 @@ function manager(
       thinkingLevel: "medium",
     },
     sessionFile: "/data/manager.jsonl",
-    sessionSurface: "builder",
     ...patch,
   };
 }
@@ -210,31 +209,6 @@ describe("secure session agent tools", () => {
         "request_ssh_host_trust",
       ]),
     );
-  });
-
-  it("excludes Collaboration while treating legacy unspecified surfaces as Builder", () => {
-    const collabManager = manager({ sessionSurface: "collab" });
-    const collabHost = host({ listAgents: () => [collabManager] });
-    const collabNames = buildSwarmTools(collabHost, collabManager).map(
-      (tool) => tool.name,
-    );
-    const collabWorkerNames = buildSwarmTools(collabHost, worker()).map(
-      (tool) => tool.name,
-    );
-    const unspecifiedManagerNames = buildSwarmTools(
-      host(),
-      manager({ sessionSurface: undefined }),
-    ).map((tool) => tool.name);
-
-    expect(collabNames).not.toContain("secure_session_status");
-    expect(collabNames).not.toContain("request_secret_access");
-    expect(collabNames).not.toContain("request_ssh_host_trust");
-    expect(collabWorkerNames).not.toContain("secure_session_status");
-    expect(collabWorkerNames).not.toContain("request_secret_access");
-    expect(collabWorkerNames).not.toContain("request_ssh_host_trust");
-    expect(unspecifiedManagerNames).toContain("secure_session_status");
-    expect(unspecifiedManagerNames).toContain("request_secret_access");
-    expect(unspecifiedManagerNames).toContain("request_ssh_host_trust");
   });
 
   it("gates each tool on its corresponding optional host capability", () => {

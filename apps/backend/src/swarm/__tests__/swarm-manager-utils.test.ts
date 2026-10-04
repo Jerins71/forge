@@ -458,8 +458,8 @@ describe("validateAgentDescriptor", () => {
     const descriptor = baseDescriptor({
       creatorAgentId: "creator-session",
       sessionPurpose: "agent_creator",
-      sessionSurface: "collab",
-      collab: { workspaceId: "workspace", channelId: "channel" },
+      // Retired Collaboration field still present on legacy Builder records.
+      ...({ sessionSurface: "builder" } as Partial<AgentDescriptor>),
       cli: {
         createdBy: "forge-cli",
         runId: "run-critical",
@@ -491,15 +491,17 @@ describe("validateAgentDescriptor", () => {
     });
 
     const result = validateAgentDescriptor(descriptor);
+    const { sessionSurface: _retiredSurface, ...expected } = descriptor as AgentDescriptor & { sessionSurface?: string };
 
     expect(result).toEqual({
-      ...descriptor,
+      ...expected,
       model: {
         provider: "openai-codex",
         modelId: "gpt-5.5",
         thinkingLevel: "xhigh"
       }
     });
+    expect(result).not.toHaveProperty("sessionSurface");
   });
 
   it("validates and normalizes Codex external-thread metadata", () => {
@@ -967,7 +969,6 @@ describe("formatInboundUserMessageForManager", () => {
     const out = formatInboundUserMessageForManager(
       "follow up",
       { channel: "web" },
-      undefined,
       undefined,
       {
         messageId: "msg-1",

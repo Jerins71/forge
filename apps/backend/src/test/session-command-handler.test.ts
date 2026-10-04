@@ -19,9 +19,9 @@ const ALL_PROFILES: ManagerProfile[] = [
     profileType: "user",
   },
   {
-    profileId: "_collaboration",
-    displayName: "Collaboration",
-    defaultSessionAgentId: "_collaboration",
+    profileId: "_system",
+    displayName: "System",
+    defaultSessionAgentId: "_system",
     defaultModel: { ...DEFAULT_MODEL },
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -323,21 +323,21 @@ describe("session command handler", () => {
     const send = vi.fn();
     const swarmManager = {
       listProfiles: vi.fn(() => ALL_PROFILES),
-      getAgent: vi.fn((agentId: string) => ({ agentId, role: "manager", profileId: "_collaboration" })),
+      getAgent: vi.fn((agentId: string) => ({ agentId, role: "manager", profileId: "_system" })),
       archiveSession: vi.fn(async () => ({
-        agentId: "_collaboration--s2",
-        profileId: "_collaboration",
+        agentId: "_system--s2",
+        profileId: "_system",
         archivedAt: "2026-05-20T00:00:00.000Z",
       })),
       restoreSession: vi.fn(async () => ({
-        agentId: "_collaboration--s2",
-        profileId: "_collaboration",
-        openAgentId: "_collaboration--s2",
+        agentId: "_system--s2",
+        profileId: "_system",
+        openAgentId: "_system--s2",
       })),
     };
 
     await handleSessionCommand({
-      command: { type: "archive_session", agentId: "_collaboration--s2", requestId: "req-system-archive" } as never,
+      command: { type: "archive_session", agentId: "_system--s2", requestId: "req-system-archive" } as never,
       socket: {} as never,
       subscribedAgentId: "manager",
       swarmManager: swarmManager as never,
@@ -347,7 +347,7 @@ describe("session command handler", () => {
     });
 
     await handleSessionCommand({
-      command: { type: "restore_session", agentId: "_collaboration--s2", requestId: "req-system-restore" } as never,
+      command: { type: "restore_session", agentId: "_system--s2", requestId: "req-system-restore" } as never,
       socket: {} as never,
       subscribedAgentId: "manager",
       swarmManager: swarmManager as never,
@@ -550,14 +550,14 @@ describe("session command handler", () => {
     const send = vi.fn();
     const swarmManager = {
       listProfiles: vi.fn(() => ALL_PROFILES),
-      getAgent: vi.fn((agentId: string) => ({ agentId, role: "manager", profileId: "_collaboration" })),
+      getAgent: vi.fn((agentId: string) => ({ agentId, role: "manager", profileId: "_system" })),
       updateSessionModel: vi.fn(async () => undefined),
     };
 
     await handleSessionCommand({
       command: {
         type: "update_session_model",
-        sessionAgentId: "_collaboration--s2",
+        sessionAgentId: "_system--s2",
         mode: "inherit",
         requestId: "req-system-session-model",
       } as never,

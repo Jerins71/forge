@@ -13,8 +13,6 @@ export interface SessionAttentionEligibilityInput {
     | "managerId"
     | "role"
     | "profileId"
-    | "sessionSurface"
-    | "collab"
     | "sessionPurpose"
     | "archivedAt"
   >;
@@ -27,8 +25,8 @@ export type SessionAttentionEligibilityPredicate = (
 ) => boolean;
 
 /**
- * Option C: active, non-archived Builder manager sessions only. Collaboration
- * and system automation are excluded; Project Agent sessions remain eligible.
+ * Option C: active, non-archived Builder manager sessions only. System
+ * automation is excluded; Project Agent sessions remain eligible.
  */
 export const isSessionAttentionEligible: SessionAttentionEligibilityPredicate = ({
   manager,
@@ -36,7 +34,6 @@ export const isSessionAttentionEligible: SessionAttentionEligibilityPredicate = 
 }) => {
   if (manager.role !== "manager" || manager.managerId !== manager.agentId) return false;
   if (!manager.profileId || !profile || profile.profileId !== manager.profileId) return false;
-  if (manager.sessionSurface === "collab" || manager.collab) return false;
   if (manager.archivedAt || profile.archivedAt || profile.profileType === "system") return false;
 
   // All current non-user session purposes are system automation, including the

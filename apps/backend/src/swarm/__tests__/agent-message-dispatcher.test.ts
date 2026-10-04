@@ -348,29 +348,6 @@ describe("AgentMessageDispatcher worker assignments and results", () => {
     );
   });
 
-  it("adds roster context to Collaboration managers without adding Builder plan state", async () => {
-    const harness = createHarness();
-    harness.manager.sessionSurface = "collab";
-    harness.manager.collab = { workspaceId: "workspace-1", channelId: "channel-1" };
-    harness.delegationAppend.mockImplementationOnce(
-      async (_owner, text) => `${text}\n\n[delegationRoster] {"id":"balanced"}`,
-    );
-
-    const runtimeInput = await harness.dispatcher.prepareModelInboundMessage(
-      harness.manager.agentId,
-      { text: "Start the channel work", attachments: [] },
-      "user",
-    );
-
-    expect(runtimeInput).toContain('[delegationRoster] {"id":"balanced"}');
-    expect(harness.delegationAppend).toHaveBeenCalledWith(
-      harness.manager,
-      "Start the channel work",
-    );
-    expect(harness.goalAppend).not.toHaveBeenCalled();
-    expect(harness.planAppend).not.toHaveBeenCalled();
-  });
-
   it("persists a manager assignment with its parent route before starting the worker", async () => {
     const harness = createHarness();
 

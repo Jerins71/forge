@@ -292,7 +292,7 @@ describe("presented chat artifact authorization", () => {
     expect(await errorCode(() => issue())).toBe("file_too_large");
   });
 
-  it("keeps another Collaboration principal's ticket through a deterministic 257-ticket flood", async () => {
+  it("keeps another auth-binding principal's ticket through a deterministic 257-ticket flood", async () => {
     const f = await fixture();
     const image = join(f.dataDir, "fair-cap.png"); await writeFile(image, Buffer.from([137, 80, 78, 71]));
     let sequence = 0;
@@ -310,7 +310,7 @@ describe("presented chat artifact authorization", () => {
     await expect(store.redeem(flooderTokens.at(-1)!, "flooder")).resolves.toMatchObject({ totalBytes: 4 });
   });
 
-  it("bounds each Collaboration principal by evicting only that principal's oldest ticket", async () => {
+  it("bounds each auth-binding principal by evicting only that principal's oldest ticket", async () => {
     const f = await fixture();
     const image = join(f.dataDir, "principal-cap.png"); await writeFile(image, Buffer.from([137, 80, 78, 71]));
     let sequence = 0;
@@ -495,10 +495,9 @@ describe("presented chat artifact authorization", () => {
     expect(await errorCode(() => resolveCanonicalPresentedArtifactTarget("T:/aliases/missing.md", hooks))).toBe("file_not_found");
   });
 
-  it("rejects collaboration, archived, orphan and noncanonical worker descriptors", async () => {
+  it("rejects archived, orphan and noncanonical worker descriptors", async () => {
     const f = await fixture(); const target = join(f.dataDir, "a"); await writeFile(target, "a"); await writeFile(f.sessionFile, line(message("m", `[x](swarm-file://${target})`)));
     f.profiles.splice(0); expect(await errorCode(() => readPresentedChatArtifact(f.source, { transcriptAgentId: f.agentId, messageId: "m", path: target }))).toBe("invalid_transcript_owner"); f.profiles.push({ profileId: f.profileId });
-    f.manager.collab = { channelId: "c" }; expect(await errorCode(() => readPresentedChatArtifact(f.source, { transcriptAgentId: f.agentId, messageId: "m", path: target }))).toBe("invalid_transcript_owner"); delete f.manager.collab;
     f.manager.archivedAt = "now"; expect(await errorCode(() => readPresentedChatArtifact(f.source, { transcriptAgentId: f.agentId, messageId: "m", path: target }))).toBe("invalid_transcript_owner"); delete f.manager.archivedAt;
     const worker: any = { agentId: "worker", managerId: "missing", role: "worker", profileId: f.profileId, sessionFile: getWorkerSessionFilePath(f.dataDir, f.profileId, f.agentId, "worker") };
     f.source.getAgent = (id: string) => id === "worker" ? worker : id === f.agentId ? f.manager : undefined;

@@ -23,14 +23,12 @@ export const SESSION = {
   seam: "hrr-seam",
   outside: "hrr-outside",
   cortex: "hrr-cortex",
-  collab: "hrr-collab",
   giant: "hrr-giant",
   scale: (index: number) => `hrr-scale-${String(index).padStart(3, "0")}`,
 } as const;
 
 export const ACTOR = {
   worker: "hrr-worker-w1",
-  collabWorker: "hrr-collab-w1",
 } as const;
 
 export const ENTRY = {
@@ -67,7 +65,6 @@ export const ENTRY = {
   coldTail: "hrr-cold-tail-latest",
   outside: "hrr-outside-needle",
   cortex: "hrr-cortex-restricted",
-  collab: "hrr-collab-restricted",
   secret: "hrr-secret-tool",
   giantTail: "hrr-giant-tail",
   scaleTail: (index: number) => `hrr-scale-tail-${String(index).padStart(3, "0")}`,
@@ -110,7 +107,6 @@ export const NEEDLE = {
   coldTail: "HRR_COLD_TAIL_NEEDLE_SEPTEMBER_2026",
   outside: "HRR_OUTSIDE_PROJECT_NEEDLE",
   cortex: "HRR_CORTEX_RESTRICTED_NEEDLE",
-  collab: "HRR_COLLAB_RESTRICTED_NEEDLE",
   secret: "HRR_FAKE_SECRET_MARKER_NOT_A_CREDENTIAL",
   giantTail: "HRR_200MB_TAIL_NEEDLE",
   scaleTail: "HRR_SCALE9_TAIL_NEEDLE",

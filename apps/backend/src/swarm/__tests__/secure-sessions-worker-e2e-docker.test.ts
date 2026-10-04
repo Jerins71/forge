@@ -148,7 +148,6 @@ function managerDescriptor(workspacePath: string): AgentDescriptor {
     model: { provider: "openai", modelId: "test" },
     sessionFile: join(workspacePath, `${MANAGER}.jsonl`),
     profileId: PROFILE,
-    sessionSurface: "builder",
   } as AgentDescriptor;
 }
 
@@ -169,7 +168,6 @@ function workerDescriptor(
     model: { provider: "openai", modelId: "test" },
     sessionFile: join(workspacePath, `${agentId}.jsonl`),
     profileId: PROFILE,
-    sessionSurface: "builder",
     workerParentContext: {
       schemaVersion: 1,
       assignmentId,

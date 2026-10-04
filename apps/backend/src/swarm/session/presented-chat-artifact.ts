@@ -407,14 +407,14 @@ export function resolveActiveBuilderTranscriptDescriptor(source: PresentedArtifa
   const descriptor = source.getAgent(id); const dataDir = source.getConfig().paths.dataDir;
   const profiles = new Map(source.listProfiles().map(p => [p.profileId, p]));
   const isManager = (d: AgentDescriptor | undefined): boolean => {
-    if (!d || d.role !== "manager" || d.managerId !== d.agentId || d.archivedAt || d.sessionSurface === "collab" || d.collab || d.externalThread || !d.profileId) return false;
+    if (!d || d.role !== "manager" || d.managerId !== d.agentId || d.archivedAt || d.externalThread || !d.profileId) return false;
     const profile = profiles.get(d.profileId);
     return Boolean(profile && !profile.archivedAt && samePath(path.normalize(d.sessionFile), path.normalize(getSessionFilePath(dataDir, d.profileId, d.agentId))));
   };
   if (isManager(descriptor)) return descriptor!;
   if (!descriptor) fail("invalid_transcript_owner");
   const worker = descriptor!;
-  if (worker.role !== "worker" || worker.archivedAt || worker.collab || worker.sessionSurface === "collab" || worker.externalThread || worker.internalWorkerKind) fail("invalid_transcript_owner");
+  if (worker.role !== "worker" || worker.archivedAt || worker.externalThread || worker.internalWorkerKind) fail("invalid_transcript_owner");
   const owner = source.getAgent(worker.managerId);
   if (!owner || !isManager(owner) || (worker.profileId && worker.profileId !== owner.profileId) || !samePath(path.normalize(worker.sessionFile), path.normalize(getWorkerSessionFilePath(dataDir, owner.profileId!, owner.agentId, worker.agentId)))) fail("invalid_transcript_owner");
   return worker;

@@ -480,22 +480,6 @@ function fixedSuccess(payload: Record<string, unknown>) {
   };
 }
 
-function isBuilderSurface(
-  host: SwarmToolHost,
-  descriptor: AgentDescriptor,
-): boolean {
-  if (descriptor.role === "manager") {
-    return descriptor.sessionSurface !== "collab";
-  }
-  const owner = host
-    .listAgents()
-    .find(
-      (agent) =>
-        agent.role === "manager" && agent.agentId === descriptor.managerId,
-    );
-  return owner?.sessionSurface !== "collab";
-}
-
 function statusTool(host: SwarmToolHost, descriptor: AgentDescriptor): ToolDefinition {
   return {
     name: "secure_session_status",
@@ -610,7 +594,7 @@ export function buildSecureSessionTools(
 ): ToolDefinition[] {
   // Native threads bind tool definitions at creation. Preserve that contract across
   // project toggles; current project policy gates execution and runtime instructions.
-  if (!isBuilderSurface(host, descriptor) || (!["codex-native", "claude-native"].includes(descriptor.model.provider) && host.isSecureSessionsEnabledForAgent?.(descriptor.agentId) === false)) {
+  if (!["codex-native", "claude-native"].includes(descriptor.model.provider) && host.isSecureSessionsEnabledForAgent?.(descriptor.agentId) === false) {
     return [];
   }
 

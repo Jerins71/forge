@@ -2,7 +2,6 @@ import type { ClaudeAuthService } from "../../../swarm/runtime/claude/claude-aut
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
 
-/** Composed only by the local Builder; never a Collab credential endpoint. */
 export function createClaudeAuthRoutes(service: Pick<ClaudeAuthService, "status" | "start" | "cancel" | "submitCode">): HttpRoute[] {
   const path = "/api/settings/claude-native";
   const methods = "GET, POST, DELETE, OPTIONS";

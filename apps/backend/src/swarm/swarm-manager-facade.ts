@@ -85,10 +85,7 @@ import type {
   RuntimeSessionEvent,
   SmartCompactResult,
 } from "./runtime-contracts.js";
-import type {
-  SessionCreationBaseDescriptor,
-  SessionCreationOptions,
-} from "./session-descriptor-factory.js";
+import type { SessionCreationOptions } from "./session-descriptor-factory.js";
 import type {
   CreateProjectAgentInput,
   CreateSessionFromAgentInput,
@@ -149,11 +146,6 @@ export interface ForkSessionOptions {
   fromMessageId?: string;
   sessionPurpose?: AgentDescriptor["sessionPurpose"];
 }
-
-export type CreateSessionBaseInput = Pick<
-  SessionCreationBaseDescriptor,
-  "model" | "cwd" | "archetypeId" | "sessionSystemPrompt"
->;
 
 type SessionTranscriptAssistantOutputTarget = Extract<
   AssistantOutputTarget,
@@ -295,20 +287,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
     overrides: SessionCreationOverrides = {},
   ): ReturnType<SessionLifecycleCoordinator["createSessionWithOverrides"]> {
     return this.services.sessions.createSessionWithOverrides(profileId, options, overrides);
-  }
-
-  createSessionFromBaseDescriptor(
-    profileId: string,
-    base: CreateSessionBaseInput,
-    options: SessionCreationOptions = {},
-    overrides: Pick<SessionCreationOverrides, "sessionSurface" | "collab"> = {},
-  ): ReturnType<SessionLifecycleCoordinator["createSessionFromBaseDescriptor"]> {
-    return this.services.sessions.createSessionFromBaseDescriptor(
-      profileId,
-      base,
-      options,
-      overrides,
-    );
   }
 
   createSessionFromAgent(

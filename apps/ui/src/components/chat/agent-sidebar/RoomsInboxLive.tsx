@@ -46,7 +46,6 @@ function selectInboxOriginSnapshot(state: ManagerWsState): InboxOriginSnapshot {
       || !visibleProfileIds.has(profileId)
       || agent.archivedAt
       || agent.agentCreatorResult
-      || agent.sessionSurface === 'collab'
       || isSideChatAgent(agent)
     ) return []
     const profile = profilesById.get(profileId)

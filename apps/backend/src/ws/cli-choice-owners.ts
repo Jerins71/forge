@@ -18,7 +18,7 @@ export function findCliVisibleChoiceSession(
   sessionAgentId: string,
 ): (AgentDescriptor & { role: "manager" }) | undefined {
   const descriptor = getAgent(provider, sessionAgentId);
-  if (!descriptor || descriptor.role !== "manager" || descriptor.sessionSurface === "collab") {
+  if (!descriptor || descriptor.role !== "manager") {
     return undefined;
   }
 

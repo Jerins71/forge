@@ -23,7 +23,6 @@ export type MessageRouteReasonCode =
   | "render:worker_result_closeout"
   | "route:retired_external_channel"
   | "route:cli"
-  | "route:collab"
   | "route:external_channel"
   | "route:peer_agent"
   | "route:worker_result_all_view"
@@ -31,11 +30,9 @@ export type MessageRouteReasonCode =
   | "deny:target_not_manager"
   | "deny:project_agent_exchange"
   | "deny:project_agent_worker_result"
-  | "deny:collaboration_profile"
   | "deny:cortex_profile"
   | "deny:system_profile"
   | "deny:cortex_review"
-  | "deny:collaboration_channel"
   | "deny:bootstrap"
   | "deny:agent_creator_bootstrap"
   | "deny:codex_operational_guidance"
@@ -53,8 +50,6 @@ export interface MessageRouteProvenance {
   senderAgentId?: string;
   targetAgentId?: string;
   targetProfileId?: string;
-  targetSessionSurface?: "builder" | "collab";
-  targetCollab?: boolean;
   targetProjectAgent?: boolean;
   targetCreatorAgentId?: string;
   targetProfileSystem?: boolean;
@@ -64,15 +59,13 @@ export interface MessageRouteProvenance {
 export interface MessageRouteDecision {
   visible: boolean;
   decision: "render" | "route" | "drop";
-  channel?: "web" | "cli" | "collab";
+  channel?: "web" | "cli";
   reasonCode: MessageRouteReasonCode;
   targetKind: MessageRouteTargetKind;
 }
 
 const CORTEX_PROFILE_ID = "cortex";
-const COLLABORATION_PROFILE_ID = "_collaboration";
 const CORTEX_ARCHETYPE_ID = "cortex";
-const COLLABORATION_CHANNEL_ARCHETYPE_ID = "collaboration-channel";
 
 export class MessageRouter {
   resolve(input: MessageRouteProvenance): MessageRouteDecision {
@@ -96,14 +89,6 @@ export class MessageRouter {
       return drop(targetKind, "deny:project_agent_worker_result");
     }
 
-    if (input.targetSessionSurface === "collab" || input.targetCollab) {
-      return route(targetKind, "route:collab", "collab");
-    }
-
-    if (input.targetAgentId === COLLABORATION_PROFILE_ID || input.targetProfileId === COLLABORATION_PROFILE_ID) {
-      return drop(targetKind, "deny:collaboration_profile");
-    }
-
     if (input.targetAgentId === CORTEX_PROFILE_ID || input.targetProfileId === CORTEX_PROFILE_ID) {
       return drop(targetKind, "deny:cortex_profile");
     }
@@ -115,10 +100,6 @@ export class MessageRouter {
     const archetypeId = normalizeArchetypeId(input.archetypeId ?? "");
     if (input.sessionPurpose === "cortex_review" || archetypeId === CORTEX_ARCHETYPE_ID) {
       return drop(targetKind, "deny:cortex_review");
-    }
-
-    if (archetypeId === COLLABORATION_CHANNEL_ARCHETYPE_ID) {
-      return drop(targetKind, "deny:collaboration_channel");
     }
 
     if (input.internalDeliveryKind === "bootstrap") {

@@ -184,10 +184,10 @@ function createBroadcastHarness(profiles: ManagerProfile[]): {
 }
 
 describe('Builder visibility filtering', () => {
-  it('includes Cortex while hiding collaboration/system entries from Builder bootstrap snapshots', async () => {
+  it('includes Cortex while hiding non-Cortex system entries from Builder bootstrap snapshots', async () => {
     const userProfile = createProfile({ profileId: 'manager' })
     const cortexProfile = createProfile({ profileId: 'cortex', profileType: 'system' })
-    const collaborationProfile = createProfile({ profileId: '_collaboration', profileType: 'system' })
+    const hiddenSystemProfile = createProfile({ profileId: '_system', profileType: 'system' })
     const builderManager = createAgent({
       agentId: 'manager',
       profileId: userProfile.profileId,
@@ -201,17 +201,10 @@ describe('Builder visibility filtering', () => {
       profileId: cortexProfile.profileId,
       sessionPurpose: 'cortex_review',
     })
-    const collaborationSession = createAgent({
-      agentId: '_collaboration',
-      profileId: collaborationProfile.profileId,
+    const hiddenSystemSession = createAgent({
+      agentId: '_system',
+      profileId: hiddenSystemProfile.profileId,
     })
-    const collabSurfaceSession = {
-      ...createAgent({
-        agentId: 'manager--collab',
-        profileId: userProfile.profileId,
-      }),
-      sessionSurface: 'collab' as const,
-    } as AgentDescriptor
     const userProfileSession = createAgent({
       agentId: 'manager--s2',
       profileId: userProfile.profileId,
@@ -222,8 +215,8 @@ describe('Builder visibility filtering', () => {
       socket: {} as WebSocket,
       targetAgentId: builderManager.agentId,
       swarmManager: new FakeBootstrapSwarmManager(
-        [builderManager, cortexRootSession, cortexReviewSession, collaborationSession, collabSurfaceSession, userProfileSession],
-        [userProfile, cortexProfile, collaborationProfile],
+        [builderManager, cortexRootSession, cortexReviewSession, hiddenSystemSession, userProfileSession],
+        [userProfile, cortexProfile, hiddenSystemProfile],
       ) as never,
       terminalService: null,
       unreadTracker: null,
@@ -257,10 +250,10 @@ describe('Builder visibility filtering', () => {
     expect(profilesSnapshot.profiles.map((profile) => profile.profileId)).toEqual(['manager', 'cortex'])
   })
 
-  it('includes Cortex while hiding collaboration/system sessions from live agents_snapshot broadcasts', () => {
+  it('includes Cortex while hiding non-Cortex system sessions from live agents_snapshot broadcasts', () => {
     const userProfile = createProfile({ profileId: 'manager' })
     const cortexProfile = createProfile({ profileId: 'cortex', profileType: 'system' })
-    const collaborationProfile = createProfile({ profileId: '_collaboration', profileType: 'system' })
+    const hiddenSystemProfile = createProfile({ profileId: '_system', profileType: 'system' })
     const builderManager = createAgent({
       agentId: 'manager',
       profileId: userProfile.profileId,
@@ -274,26 +267,19 @@ describe('Builder visibility filtering', () => {
       profileId: cortexProfile.profileId,
       sessionPurpose: 'cortex_review',
     })
-    const collaborationSession = createAgent({
-      agentId: '_collaboration',
-      profileId: collaborationProfile.profileId,
+    const hiddenSystemSession = createAgent({
+      agentId: '_system',
+      profileId: hiddenSystemProfile.profileId,
     })
-    const collabSurfaceSession = {
-      ...createAgent({
-        agentId: 'manager--collab',
-        profileId: userProfile.profileId,
-      }),
-      sessionSurface: 'collab' as const,
-    } as AgentDescriptor
     const userProfileSession = createAgent({
       agentId: 'manager--s2',
       profileId: userProfile.profileId,
     })
-    const { sentEvents, subscriptions } = createBroadcastHarness([userProfile, cortexProfile, collaborationProfile])
+    const { sentEvents, subscriptions } = createBroadcastHarness([userProfile, cortexProfile, hiddenSystemProfile])
 
     const event: ServerEvent = {
       type: 'agents_snapshot',
-      agents: [builderManager, cortexRootSession, cortexReviewSession, collaborationSession, collabSurfaceSession, userProfileSession],
+      agents: [builderManager, cortexRootSession, cortexReviewSession, hiddenSystemSession, userProfileSession],
     }
 
     subscriptions.broadcastToSubscribed(event)
@@ -306,8 +292,7 @@ describe('Builder visibility filtering', () => {
       'manager',
       'cortex',
       'cortex--review',
-      '_collaboration',
-      'manager--collab',
+      '_system',
       'manager--s2',
     ])
 
@@ -324,15 +309,15 @@ describe('Builder visibility filtering', () => {
     ])
   })
 
-  it('includes Cortex while hiding collaboration/system profiles from live profiles_snapshot broadcasts', () => {
+  it('includes Cortex while hiding non-Cortex system profiles from live profiles_snapshot broadcasts', () => {
     const userProfile = createProfile({ profileId: 'manager' })
     const cortexProfile = createProfile({ profileId: 'cortex', profileType: 'system' })
-    const collaborationProfile = createProfile({ profileId: '_collaboration', profileType: 'system' })
-    const { sentEvents, subscriptions } = createBroadcastHarness([userProfile, cortexProfile, collaborationProfile])
+    const hiddenSystemProfile = createProfile({ profileId: '_system', profileType: 'system' })
+    const { sentEvents, subscriptions } = createBroadcastHarness([userProfile, cortexProfile, hiddenSystemProfile])
 
     subscriptions.broadcastToSubscribed({
       type: 'profiles_snapshot',
-      profiles: [userProfile, cortexProfile, collaborationProfile],
+      profiles: [userProfile, cortexProfile, hiddenSystemProfile],
     })
 
     const snapshot = sentEvents[0]
@@ -343,7 +328,7 @@ describe('Builder visibility filtering', () => {
     expect(snapshot.profiles.map((profile) => profile.profileId)).toEqual(['manager', 'cortex'])
   })
 
-  it('keeps Builder sessions visible while hiding collab-surface and non-Cortex system sessions', () => {
+  it('keeps Builder sessions visible while hiding non-Cortex system sessions', () => {
     const builderManager = createAgent({
       agentId: 'manager',
       profileId: 'manager',
@@ -356,25 +341,17 @@ describe('Builder visibility filtering', () => {
       agentId: 'cortex',
       profileId: 'cortex',
     })
-    const collaborationSession = createAgent({
-      agentId: '_collaboration',
-      profileId: '_collaboration',
+    const hiddenSystemSession = createAgent({
+      agentId: '_system',
+      profileId: '_system',
     })
-    const collabSurfaceSession = {
-      ...createAgent({
-        agentId: 'manager--collab',
-        profileId: 'manager',
-      }),
-      sessionSurface: 'collab' as const,
-    } as AgentDescriptor
 
     const visible = filterBuilderVisibleAgents(
-      [builderManager, siblingSession, cortexSession, collaborationSession, collabSurfaceSession],
-      new Set(['cortex', '_collaboration']),
+      [builderManager, siblingSession, cortexSession, hiddenSystemSession],
+      new Set(['cortex', '_system']),
     )
 
     expect(visible.map((agent) => agent.agentId)).toEqual(['manager', 'manager--s2', 'cortex'])
-    expect(visible.some((agent) => agent.profileId === '_collaboration')).toBe(false)
-    expect(visible.some((agent) => (agent as { sessionSurface?: string }).sessionSurface === 'collab')).toBe(false)
+    expect(visible.some((agent) => agent.profileId === '_system')).toBe(false)
   })
 })

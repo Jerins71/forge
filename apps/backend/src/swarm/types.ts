@@ -1,7 +1,6 @@
 import {
   MANAGER_MODEL_PRESETS,
   type EffortTier,
-  type AgentCollaborationLink,
   type AgentCreatorResult,
   type CliSessionMetadata,
   type ConversationMessageSource,
@@ -11,9 +10,7 @@ import {
   type DelegationBehaviorMode,
   type DelegationRosterOrigin,
   type AgentModelOrigin,
-  type AgentSessionSurface,
   type ChoiceRequestEvent,
-  type CollaborationAuthor,
   type ConversationReplyTarget,
   type PersistedMessageChannel as ProtocolPersistedMessageChannel,
   type ContextMode,
@@ -34,9 +31,7 @@ export type AgentArchetypeId = string;
 
 export type { AgentStatus };
 export type {
-  AgentCollaborationLink,
   AgentModelOrigin,
-  AgentSessionSurface,
   CliSessionMetadata,
   DelegationBehaviorMode,
   ContextMode,
@@ -128,8 +123,6 @@ export interface AgentDescriptor {
   sessionPurpose?: AgentSessionPurpose;
   /** Parent Builder session of a temporary `side_chat` fork. */
   sideChatSourceAgentId?: string;
-  sessionSurface?: AgentSessionSurface;
-  collab?: AgentCollaborationLink;
   cli?: CliSessionMetadata;
   sessionSystemPrompt?: string;
   pinnedAt?: string;
@@ -367,7 +360,6 @@ export interface ConversationMessageEvent extends ConversationTimelineEntryMetad
   timestamp: string;
   source: ConversationMessageSource;
   sourceContext?: MessageSourceContext;
-  collaborationAuthor?: CollaborationAuthor;
   /** Echo of the sender-provided `user_message.clientRequestId` (Wave R). */
   clientRequestId?: string;
   projectAgentContext?: ProjectAgentMessageContext;

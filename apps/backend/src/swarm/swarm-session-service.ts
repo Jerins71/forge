@@ -2,7 +2,7 @@ import { isEnoentError } from "../utils/fs-errors.js";
 import { TaskNotesStore } from './task-notes-store.js';
 import { writeFile } from "node:fs/promises";
 import { DEFAULT_MANAGER_POSTURE } from "@forge/protocol";
-import { assertBuilderSession, cloneDescriptor } from "./swarm-manager-utils.js";
+import { cloneDescriptor } from "./swarm-manager-utils.js";
 import { SessionProvisioner, type ProvisionedSessionDescriptor } from "./session-provisioner.js";
 import type { SwarmAgentRuntime } from "./runtime-contracts.js";
 import type { AgentDescriptor, AgentModelDescriptor, ManagerProfile, SessionLifecycleEvent } from "./types.js";
@@ -29,19 +29,6 @@ interface SessionCreationOverrides {
   model?: AgentModelDescriptor;
   cwd?: string;
   sessionSystemPrompt?: string;
-  sessionSurface?: AgentDescriptor["sessionSurface"];
-  collab?: AgentDescriptor["collab"];
-}
-
-interface SessionCreationBaseDescriptor {
-  model: AgentModelDescriptor;
-  cwd: string;
-  archetypeId?: AgentDescriptor["archetypeId"];
-  sessionSystemPrompt?: string;
-  managerPosture?: AgentDescriptor["managerPosture"];
-  managerPostureOrigin?: AgentDescriptor["managerPostureOrigin"];
-  delegationRosterId?: AgentDescriptor["delegationRosterId"];
-  delegationRosterOrigin?: AgentDescriptor["delegationRosterOrigin"];
 }
 
 interface PreparedSessionCreation {
@@ -58,11 +45,6 @@ export interface SwarmSessionServiceOptions {
   provisioner: SessionProvisioner;
   prepareSessionCreation: (
     profileId: string,
-    options?: SessionCreationOptions
-  ) => PreparedSessionCreation;
-  prepareSessionCreationFromBase: (
-    profileId: string,
-    base: SessionCreationBaseDescriptor,
     options?: SessionCreationOptions
   ) => PreparedSessionCreation;
   resolveGlobalDelegationRosterId: () => Promise<string>;
@@ -130,8 +112,6 @@ export class SwarmSessionService {
     options: SessionCreationOptions = {},
     overrides: SessionCreationOverrides = {}
   ): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
-    this.assertValidSessionOverrides(overrides);
-
     const prepared = this.options.prepareSessionCreation(profileId, options);
     const sessionDescriptor = prepared.sessionDescriptor as ProvisionedSessionDescriptor;
 
@@ -148,68 +128,21 @@ export class SwarmSessionService {
       sessionDescriptor.sessionSystemPrompt = overrides.sessionSystemPrompt;
     }
 
-    if (overrides.sessionSurface !== undefined) {
-      sessionDescriptor.sessionSurface = overrides.sessionSurface;
-    }
-
-    if (overrides.collab !== undefined) {
-      sessionDescriptor.collab = overrides.collab ? { ...overrides.collab } : undefined;
-    }
-
     return this.createSessionWithPreparedDescriptor(prepared, sessionDescriptor);
-  }
-
-  createSessionFromBaseDescriptor(
-    profileId: string,
-    base: SessionCreationBaseDescriptor,
-    options: SessionCreationOptions = {},
-    overrides: Pick<SessionCreationOverrides, "sessionSurface" | "collab"> = {}
-  ): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
-    this.assertValidSessionOverrides(overrides);
-
-    const prepared = this.options.prepareSessionCreationFromBase(profileId, base, options);
-    const sessionDescriptor = prepared.sessionDescriptor as ProvisionedSessionDescriptor;
-
-    if (overrides.sessionSurface !== undefined) {
-      sessionDescriptor.sessionSurface = overrides.sessionSurface;
-    }
-
-    if (overrides.collab !== undefined) {
-      sessionDescriptor.collab = overrides.collab ? { ...overrides.collab } : undefined;
-    }
-
-    return this.createSessionWithPreparedDescriptor(prepared, sessionDescriptor);
-  }
-
-  private assertValidSessionOverrides(
-    overrides: Pick<SessionCreationOverrides, "sessionSurface" | "collab">
-  ): void {
-    if (overrides.sessionSurface === "collab" && overrides.collab === undefined) {
-      throw new Error("Collaboration-backed sessions require collab metadata.");
-    }
-
-    if (overrides.sessionSurface !== "collab" && overrides.collab !== undefined) {
-      throw new Error("Collab metadata is only valid for collaboration-backed sessions.");
-    }
   }
 
   private async createSessionWithPreparedDescriptor(
     prepared: PreparedSessionCreation,
     sessionDescriptor: ProvisionedSessionDescriptor
   ): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
-    const shouldInitializeRuntime = sessionDescriptor.sessionSurface !== "collab";
     await this.ensureEffectiveDelegationRoster(sessionDescriptor);
 
     await this.options.provisioner.provisionSession({
       descriptor: sessionDescriptor,
-      ...(shouldInitializeRuntime
-        ? {
-            initializeRuntime: async () => {
-              const runtime = await this.options.getOrCreateRuntimeForDescriptor(sessionDescriptor);
-              sessionDescriptor.contextUsage = runtime.getContextUsage();
-            }
-          }
-        : {})
+      initializeRuntime: async () => {
+        const runtime = await this.options.getOrCreateRuntimeForDescriptor(sessionDescriptor);
+        sessionDescriptor.contextUsage = runtime.getContextUsage();
+      }
     });
 
     await this.options.saveStore();
@@ -234,7 +167,6 @@ export class SwarmSessionService {
 
   async deleteSession(agentId: string): Promise<{ terminatedWorkerIds: string[] }> {
     const descriptor = this.options.getRequiredSessionDescriptor(agentId);
-    assertBuilderSession(descriptor, "delete Builder sessions");
     return this.deleteSessionDescriptor(descriptor);
   }
 
@@ -283,7 +215,6 @@ export class SwarmSessionService {
 
   async clearSessionConversation(agentId: string): Promise<void> {
     const descriptor = this.options.getRequiredSessionDescriptor(agentId);
-    assertBuilderSession(descriptor, "clear Builder conversations");
     await this.options.withRuntimeShutdownBarrier(agentId, async () => {
       const runtime = this.options.runtimes.get(agentId);
       const { unsafeShutdownAgentIds } = await this.options.stopSessionInternal(agentId, {
@@ -335,7 +266,6 @@ export class SwarmSessionService {
 
   async renameSession(agentId: string, label: string): Promise<void> {
     const descriptor = this.options.getRequiredSessionDescriptor(agentId);
-    assertBuilderSession(descriptor, "rename Builder sessions");
     const normalizedLabel = label.trim();
     if (!normalizedLabel) {
       throw new Error("Session label must be non-empty");
@@ -372,7 +302,6 @@ export class SwarmSessionService {
     options?: { label?: string; fromMessageId?: string; sessionPurpose?: AgentDescriptor["sessionPurpose"] }
   ): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
     const sourceDescriptor = this.options.getRequiredSessionDescriptor(sourceAgentId);
-    assertBuilderSession(sourceDescriptor, "fork Builder sessions");
     const profile = this.options.profiles.get(sourceDescriptor.profileId);
     const normalizedFromMessageId = options?.fromMessageId?.trim() || undefined;
     if (!profile) {

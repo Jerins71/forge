@@ -357,17 +357,20 @@ describe("specialist routes", () => {
     await expect(promptResponse.json()).resolves.toEqual({ markdown: "## Specialists\n- repo\n" });
   });
 
-  it("rejects invalid targetSpace entries in save payloads", async () => {
+  it("ignores a legacy targetSpace field in save payloads", async () => {
     const server = await createSpecialistRouteTestServer();
     const response = await fetch(`${server.baseUrl}/api/settings/specialists/releases`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...validSpecialistPayload(), targetSpace: ["builder", "invalid"] }),
+      body: JSON.stringify({ ...validSpecialistPayload(), targetSpace: ["collaboration", "invalid"] }),
     });
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: "targetSpace entries must be builder or collaboration" });
-    expect(specialistRegistryState.saveSharedSpecialist).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(specialistRegistryState.saveSharedSpecialist).toHaveBeenCalledWith(
+      "/tmp/data",
+      "releases",
+      expect.not.objectContaining({ targetSpace: expect.anything() }),
+    );
   });
 
   it("saves global specialists and notifies every user profile", async () => {
@@ -453,11 +456,11 @@ describe("specialist routes", () => {
     const server = await createSpecialistRouteTestServer({
       profiles: [
         { profileId: "alpha", displayName: "Alpha" },
-        { profileId: "_collaboration", displayName: "Collaboration", profileType: "system" },
+        { profileId: "_system", displayName: "System", profileType: "system" },
       ],
     });
 
-    const response = await fetch(`${server.baseUrl}/api/settings/specialists/backend?profileId=_collaboration`, {
+    const response = await fetch(`${server.baseUrl}/api/settings/specialists/backend?profileId=_system`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(validSpecialistPayload()),
@@ -502,11 +505,11 @@ describe("specialist routes", () => {
     const server = await createSpecialistRouteTestServer({
       profiles: [
         { profileId: "alpha", displayName: "Alpha" },
-        { profileId: "_collaboration", displayName: "Collaboration", profileType: "system" },
+        { profileId: "_system", displayName: "System", profileType: "system" },
       ],
     });
 
-    const response = await fetch(`${server.baseUrl}/api/settings/specialists/backend?profileId=_collaboration`, {
+    const response = await fetch(`${server.baseUrl}/api/settings/specialists/backend?profileId=_system`, {
       method: "DELETE",
     });
 
@@ -577,7 +580,7 @@ async function createSpecialistRouteTestServer(options?: {
   profiles?: Array<{ profileId: string; displayName: string; profileType?: "user" | "system" }>;
   notifySpecialistRosterChanged?: (profileId: string, options?: { sessionAgentId?: string }) => Promise<void>;
   broadcastEvent?: (event: ServerEvent) => void;
-  agents?: Array<{ agentId: string; role: string; profileId?: string; sessionSurface?: string; cwd?: string }>;
+  agents?: Array<{ agentId: string; role: string; profileId?: string; cwd?: string }>;
   dataDir?: string;
   onReloadModelCatalog?: () => Promise<void>;
   getDelegationRosterSettings?: () => Promise<unknown>;

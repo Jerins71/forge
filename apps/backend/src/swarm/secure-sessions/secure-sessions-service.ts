@@ -5835,8 +5835,6 @@ export class SecureSessionsService {
       descriptor.role !== "worker"
       || ["codex-native", "claude-native"].includes(descriptor.model.provider)
       || descriptor.archivedAt
-      || descriptor.sessionSurface === "collab"
-      || descriptor.collab
       || !descriptor.profileId
       || isExternalThreadDescriptor(descriptor)
       || isCodexPluginWorkerDescriptor(descriptor)
@@ -5896,7 +5894,6 @@ export class SecureSessionsService {
         || descriptor.role !== "manager"
         || descriptor.managerId !== descriptor.agentId
         || descriptor.profileId !== profileId
-        || descriptor.sessionSurface === "collab"
       ) {
         throw new SecureSessionsServiceError("SECURE_REQUEST_INVALID");
       }
@@ -6481,8 +6478,6 @@ function isBuilderManager(
     && descriptor.managerId === descriptor.agentId
     && descriptor.profileId
     && !descriptor.archivedAt
-    && descriptor.sessionSurface !== "collab"
-    && !descriptor.collab
     && !isExternalThreadDescriptor(descriptor),
   );
 }

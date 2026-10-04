@@ -2876,11 +2876,6 @@ describe('SwarmWebSocketServer', () => {
       label: 'Cortex Review Session',
       sessionPurpose: 'cortex_review',
     })
-    const { sessionAgent: collabSession } = await manager.createSessionWithOverrides(
-      'manager',
-      { label: 'Collab Session' },
-      { sessionSurface: 'collab', collab: { workspaceId: 'workspace-1', channelId: 'channel-1' } },
-    )
 
     const server = new SwarmWebSocketServer({
       swarmManager: manager,
@@ -2929,18 +2924,6 @@ describe('SwarmWebSocketServer', () => {
     })
 
     client.send(JSON.stringify({
-      type: 'cli_send_message',
-      requestId: 'send-collab-session',
-      target: { kind: 'session', agentId: collabSession.agentId },
-      text: 'hello collab?',
-    }))
-    expect(await waitForCliError(events, 'send-collab-session')).toMatchObject({
-      code: 'unsupported_session_surface',
-      status: 403,
-      fieldErrors: [{ field: 'agentId' }],
-    })
-
-    client.send(JSON.stringify({
       type: 'compact_session',
       requestId: 'compact-missing-session',
       agentId: 'missing-session',
@@ -2972,18 +2955,6 @@ describe('SwarmWebSocketServer', () => {
     expect(await waitForCliError(events, 'compact-system-session')).toMatchObject({
       commandType: 'compact_session',
       code: 'system_profile',
-      status: 403,
-      fieldErrors: [{ field: 'agentId' }],
-    })
-
-    client.send(JSON.stringify({
-      type: 'smart_compact_session',
-      requestId: 'smart-compact-collab-session',
-      agentId: collabSession.agentId,
-    }))
-    expect(await waitForCliError(events, 'smart-compact-collab-session')).toMatchObject({
-      commandType: 'smart_compact_session',
-      code: 'unsupported_session_surface',
       status: 403,
       fieldErrors: [{ field: 'agentId' }],
     })

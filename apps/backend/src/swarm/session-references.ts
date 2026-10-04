@@ -38,7 +38,6 @@ export async function linkSessionReferences(
       target !== undefined &&
       target.agentId !== sender.agentId &&
       target.role === "manager" &&
-      target.sessionSurface !== "collab" &&
       !target.archivedAt &&
       !isNonRunningAgentStatus(target.status),
     );

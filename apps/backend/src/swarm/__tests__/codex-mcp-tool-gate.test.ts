@@ -68,7 +68,6 @@ describe("codex-mcp-tool-gate", () => {
   it("allows Builder web user-input surface checks", () => {
     const manager = createManagerDescriptor("/tmp", {
       agentId: "manager",
-      sessionSurface: "builder",
     });
 
     expect(
@@ -84,7 +83,6 @@ describe("codex-mcp-tool-gate", () => {
   it("authorizes tool calls only for plugin delegation turns with selectors", () => {
     const manager = createManagerDescriptor("/tmp", {
       agentId: "manager",
-      sessionSurface: "builder",
     });
     const surfaceGate = evaluateCodexMcpToolGate({
       manager,
@@ -110,15 +108,9 @@ describe("codex-mcp-tool-gate", () => {
   it("allows catalog browsing for Builder managers without an active turn", () => {
     const manager = createManagerDescriptor("/tmp", {
       agentId: "manager",
-      sessionSurface: "builder",
     });
 
     expect(evaluateCodexMcpCatalogBrowseGate({ manager }).allowed).toBe(true);
-    expect(
-      evaluateCodexMcpCatalogBrowseGate({
-        manager: { ...manager, sessionSurface: "collab", collab: { channelId: "ch-1" } },
-      }).allowed,
-    ).toBe(false);
   });
 
   it("authorizes RepoPrompt/get_code_structure when tagged inline", () => {
@@ -178,10 +170,9 @@ describe("codex-mcp-tool-gate", () => {
     ).toBe(false);
   });
 
-  it("rejects scheduled, collab, cli, and project-agent turns", () => {
+  it("rejects scheduled, cli, and project-agent turns", () => {
     const manager = createManagerDescriptor("/tmp", {
       agentId: "manager",
-      sessionSurface: "builder",
     });
 
     expect(
@@ -189,14 +180,6 @@ describe("codex-mcp-tool-gate", () => {
         manager,
         sourceContext: { channel: "web" },
         messageText: '[Scheduled Task: Nightly]\n[scheduleContext] {"scheduleId":"1"}',
-        inboundSource: "user_input",
-      }).allowed,
-    ).toBe(false);
-
-    expect(
-      evaluateCodexMcpToolGate({
-        manager: { ...manager, sessionSurface: "collab", collab: { channelId: "ch-1" } },
-        sourceContext: { channel: "web" },
         inboundSource: "user_input",
       }).allowed,
     ).toBe(false);

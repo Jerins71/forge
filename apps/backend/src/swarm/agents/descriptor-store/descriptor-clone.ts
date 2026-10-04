@@ -106,7 +106,6 @@ export function cloneDescriptorForPersistence(descriptor: AgentDescriptor): Agen
       includeSource: true,
       includePublicSourceKind: false
     }),
-    collab: descriptor.collab ? { ...descriptor.collab } : undefined,
     cli: cloneCliSessionMetadata(descriptor),
     externalThread: descriptor.externalThread ? cloneExternalThread(descriptor.externalThread) : undefined,
     workerParentContext: cloneWorkerParentContext(descriptor.workerParentContext),

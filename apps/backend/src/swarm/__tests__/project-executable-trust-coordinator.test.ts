@@ -53,13 +53,11 @@ describe("ProjectExecutableTrustCoordinator", () => {
     ]);
   });
 
-  it("suppresses collab, absent-surface, dismissed, and stale prompt answers", async () => {
-    const collab = makeManager("collab", { collab: { workspaceId: "w", channelId: "c" } });
+  it("suppresses absent-surface, dismissed, and stale prompt answers", async () => {
     const noSurface = makeManager("no-surface");
     const dismissed = makeManager("dismissed");
     const stale = makeManager("stale");
-    const harness = new CoordinatorHarness([collab, noSurface, dismissed, stale]);
-    harness.resources.setResolution(collab.agentId, makeResolution(collab, "/collab/.forge"));
+    const harness = new CoordinatorHarness([noSurface, dismissed, stale]);
     harness.resources.setResolution(noSurface.agentId, makeResolution(noSurface, "/none/.forge"));
     harness.resources.setResolution(dismissed.agentId, makeResolution(dismissed, "/dismissed/.forge"));
     harness.resources.setResolution(stale.agentId, makeResolution(stale, TRUST_KEY_A));
@@ -67,7 +65,6 @@ describe("ProjectExecutableTrustCoordinator", () => {
     harness.existingPaths.delete(`/repo-${noSurface.agentId}/.forge/extensions`);
     const coordinator = harness.createCoordinator();
 
-    coordinator.schedulePrompt(collab);
     await coordinator.maybePrompt(noSurface);
     await coordinator.maybePrompt(dismissed);
     harness.choiceImplementation = async () => {

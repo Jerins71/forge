@@ -679,7 +679,6 @@ function managerDescriptor(
     model: { provider: "openai", modelId: "test" },
     sessionFile: `/tmp/${agentId}.jsonl`,
     profileId,
-    sessionSurface: "builder",
   } as AgentDescriptor;
 }
 
@@ -703,7 +702,6 @@ function workerDescriptor(
     model: { provider, modelId: "test" },
     sessionFile: `/tmp/${agentId}.jsonl`,
     profileId,
-    sessionSurface: "builder",
     workerParentContext: {
       schemaVersion: 1,
       assignmentId,

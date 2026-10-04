@@ -503,9 +503,6 @@ export class ProjectAgentSharingService {
     if (profileId === CORTEX_PROFILE_ID) {
       throw new Error("Project agent sharing is not available for this profile");
     }
-    if (descriptor.sessionSurface === "collab") {
-      throw new Error("Project agent sharing is not available for collaboration sessions");
-    }
     if (isProfileArchived(profile)) {
       throw new Error("Archived projects cannot be used until restored.");
     }

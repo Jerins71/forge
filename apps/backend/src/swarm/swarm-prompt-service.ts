@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { isRepoProjectAgentSource, type PromptPreviewResponse, type PromptPreviewSection, type TierConfig } from "@forge/protocol";
 import { assembleRuntimePrompt, discoverAgentsMd } from "./runtime-prompt-assembler.js";
@@ -10,9 +10,6 @@ import {
   getProfileKnowledgeIndexPath,
   getProfileMemoryPath,
   getProjectAgentPromptPath,
-  getSessionContextPromptPath,
-  getSessionContextReferenceDir,
-  getSessionReferenceDir,
 } from "./data-paths.js";
 import { modelCatalogService } from "./catalog/model-catalog-service.js";
 import { getOnboardingSnapshot } from "./onboarding-state.js";
@@ -39,17 +36,11 @@ import {
   listProjectAgentReferenceDocs,
   readProjectAgentReferenceDoc,
 } from "./reference-docs.js";
-import {
-  listReferenceDocs,
-  readPromptFile,
-  readReferenceDoc,
-} from "./storage/asset-root-storage.js";
 import type { SkillMetadata, SkillMetadataService } from "./skills/skill-metadata-service.js";
 import type { AgentDescriptor, ManagerProfile, SwarmConfig } from "./types.js";
 import {
   buildSessionMemoryRuntimeView,
   escapeXmlForPreview,
-  isCollabSession,
   isEnoentError,
   normalizeOptionalAgentId,
 } from "./swarm-manager-utils.js";
@@ -68,11 +59,6 @@ const COMMON_KNOWLEDGE_MEMORY_HEADER =
 const ONBOARDING_SNAPSHOT_MEMORY_HEADER =
   "# Onboarding Snapshot (authoritative backend state — read-only reference)";
 const SWARM_CONTEXT_FILE_NAME = "SWARM.md";
-const COLLABORATION_CHANNEL_INSTRUCTIONS = `This session backs a trusted Forge collaboration channel with multiple human participants.
-- Treat every reply as visible to the full channel audience.
-- Keep answers concise, easy to scan, and explicit about decisions, blockers, and next steps when relevant.
-- Normal manager capabilities remain available here, including specialists, workers, current activity visibility, and current tool behavior.
-- Delegate when it helps, then summarize the outcome back into the channel in a way humans can follow.`;
 const PROJECT_AGENT_BASE_PROMPT_ID = "project-agent-base";
 const PROJECT_AGENT_BASE_FALLBACK = `# Forge Project Agent Operating Contract
 
@@ -328,11 +314,7 @@ export class SwarmPromptService {
       }
     }
 
-    if (isCollabSession(descriptor)) {
-      prompt = await this.appendCollabContextOverlays(descriptor, prompt);
-    } else {
-      prompt = await this.appendRepositoryReferenceInventory(prompt, descriptor);
-    }
+    prompt = await this.appendRepositoryReferenceInventory(prompt, descriptor);
 
     if (projectAgentComposition || managerArchetypeId === MANAGER_ARCHETYPE_ID) {
       prompt = `${prompt.trimEnd()}\n\n${USER_FACING_VISUALIZATION_GUIDANCE}`;
@@ -517,10 +499,6 @@ export class SwarmPromptService {
     const managerDescriptor = descriptor.role === "manager"
       ? descriptor
       : this.options.descriptors.get(descriptor.managerId);
-    if (isCollabSession(descriptor) || (managerDescriptor && isCollabSession(managerDescriptor))) {
-      return systemPrompt;
-    }
-
     try {
       const profileId = managerDescriptor?.profileId ?? descriptor.profileId ?? descriptor.managerId ?? descriptor.agentId;
       const sessionAgentId = managerDescriptor?.agentId ?? (descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId);
@@ -1049,75 +1027,6 @@ export class SwarmPromptService {
     }
 
     return onDiskRecord;
-  }
-
-  private async appendCollabContextOverlays(descriptor: AgentDescriptor, basePrompt: string): Promise<string> {
-    const profileId = descriptor.profileId ?? descriptor.agentId;
-    const dataDir = this.options.config.paths.dataDir;
-    const promptPath = getSessionContextPromptPath(dataDir, profileId, descriptor.agentId);
-    const referenceDocs = await this.resolveCollabReferenceDocs(dataDir, profileId, descriptor.agentId);
-    const sections: string[] = [basePrompt.trimEnd()];
-
-    sections.push(`# Collaboration channel instructions\n\n${COLLABORATION_CHANNEL_INSTRUCTIONS}`);
-
-    const contextPrompt = (await readPromptFile(promptPath))?.trim();
-    if (contextPrompt) {
-      sections.push(`# Additional instructions\n\n${contextPrompt}`);
-    }
-
-    for (const referenceDoc of referenceDocs.docs) {
-      const content = (await readReferenceDoc(referenceDocs.dir, referenceDoc.fileName))?.trim();
-      if (!content) {
-        continue;
-      }
-
-      sections.push(`# Channel Reference: ${referenceDoc.fileName}\n\n${content}`);
-    }
-
-    return sections.join("\n\n");
-  }
-
-  private async resolveCollabReferenceDocs(
-    dataDir: string,
-    profileId: string,
-    sessionAgentId: string,
-  ): Promise<{ dir: string; docs: Awaited<ReturnType<typeof listReferenceDocs>> }> {
-    const referenceDir = getSessionReferenceDir(dataDir, profileId, sessionAgentId);
-    const legacyReferenceDir = getSessionContextReferenceDir(dataDir, profileId, sessionAgentId);
-
-    let docs = await listReferenceDocs(referenceDir);
-    if (docs.length > 0) {
-      return { dir: referenceDir, docs };
-    }
-
-    const legacyDocs = await listReferenceDocs(legacyReferenceDir);
-    if (legacyDocs.length === 0) {
-      return { dir: referenceDir, docs };
-    }
-
-    try {
-      await mkdir(referenceDir, { recursive: true });
-      for (const legacyDoc of legacyDocs) {
-        const targetExists = existsSync(join(referenceDir, legacyDoc.fileName));
-        if (!targetExists) {
-          await copyFile(legacyDoc.path, join(referenceDir, legacyDoc.fileName));
-        }
-      }
-      docs = await listReferenceDocs(referenceDir);
-      if (docs.length > 0) {
-        return { dir: referenceDir, docs };
-      }
-    } catch (error) {
-      this.options.logDebug("collaboration:reference:migration:error", {
-        profileId,
-        sessionAgentId,
-        referenceDir,
-        legacyReferenceDir,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    return { dir: legacyReferenceDir, docs: legacyDocs };
   }
 
   private async appendAvailableSkillsBlock(systemPrompt: string, descriptor: AgentDescriptor): Promise<string> {

@@ -35,9 +35,6 @@ conversation subscription and must not be treated as a compatible alias of `subs
   events and do not participate in JSONL history or replay.
 - Older servers reject the distinct command as unknown (`INVALID_COMMAND`). Clients must fail closed
   and must not recover that rejection or a timeout by sending ordinary `subscribe`.
-- On collaboration-server and Remote Projects runtimes, Builder authorization runs first. Requests
-  denied by that gate may receive `COLLABORATION_COMMAND_NOT_ALLOWED`. Only authorized requests that
-  reach the local-runtime capability check receive `INVENTORY_NOT_SUPPORTED`.
 - Legacy conversation `subscribe` remains the viewed-session contract on Builder sockets. Ordinary
   `ping`/`ready` remain transport compatibility on non-inventory sockets.
 

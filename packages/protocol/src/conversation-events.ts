@@ -1,6 +1,5 @@
 // Builder event changes are additive-only for remote version skew; removals require a protocolVersion bump.
 import type { ConversationMessageAttachment } from './attachments.js'
-import type { CollaborationAuthor } from './collaboration.js'
 import type {
   AcceptedDeliveryMode,
   ChoiceAnswer,
@@ -152,7 +151,6 @@ export interface ConversationMessageEvent {
   timestamp: string
   source: ConversationMessageSource
   sourceContext?: MessageSourceContext
-  collaborationAuthor?: CollaborationAuthor
   /**
    * Echo of the sender-provided `user_message.clientRequestId`, when one was
    * supplied. Lets the originating client reconcile its optimistic entry.

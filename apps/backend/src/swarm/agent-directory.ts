@@ -9,7 +9,6 @@ import {
 import { cloneDescriptorForPersistence, cloneProfile } from "./agents/descriptor-store/descriptor-clone.js";
 import { normalizeArchetypeId } from "./prompts/prompt-registry.js";
 import {
-  assertBuilderSession,
   cloneDescriptor,
   normalizeAgentId,
   normalizeOptionalAgentId,
@@ -224,12 +223,6 @@ export class AgentDirectory {
     );
   }
 
-  getBuilderSessionsForProfile(profileId: string): ManagerSessionDescriptor[] {
-    return this.getSessionsForProfile(profileId).filter(
-      (descriptor) => descriptor.sessionSurface !== "collab",
-    );
-  }
-
   getWorkersForManager(managerId: string): AgentDescriptor[] {
     return this.buildWorkerVisibilityGroups().workersByManagerId.get(managerId) ?? [];
   }
@@ -269,12 +262,6 @@ export class AgentDirectory {
     return descriptor;
   }
 
-  getRequiredBuilderSessionDescriptor(agentId: string, action: string): ManagerSessionDescriptor {
-    const descriptor = this.getRequiredSessionDescriptor(agentId);
-    assertBuilderSession(descriptor, action);
-    return descriptor;
-  }
-
   getRequiredManagerDescriptor(managerId: string): AgentDescriptor {
     const descriptor = this.options.descriptors.get(managerId);
     if (!descriptor || descriptor.role !== "manager") {
@@ -283,15 +270,7 @@ export class AgentDirectory {
     return descriptor;
   }
 
-  getRequiredBuilderManagerDescriptor(managerId: string, action: string): AgentDescriptor {
-    const descriptor = this.getRequiredManagerDescriptor(managerId);
-    assertBuilderSession(descriptor, action);
-    return descriptor;
-  }
-
   assertSessionSupportsProjectAgent(descriptor: ManagerSessionDescriptor): void {
-    assertBuilderSession(descriptor, "promote Builder sessions to project agents");
-
     if (descriptor.agentId === CORTEX_PROFILE_ID && descriptor.profileId === CORTEX_PROFILE_ID) {
       throw new Error("Cortex root cannot be promoted to a project agent");
     }
@@ -326,13 +305,13 @@ export class AgentDirectory {
     }
   }
 
-  assertManagerSettingsTargetNotArchived(managerId: string, operation: string): void {
+  assertManagerSettingsTargetNotArchived(managerId: string): void {
     if (this.options.profiles.has(managerId)) {
       this.assertProfileNotArchived(managerId);
       return;
     }
 
-    const descriptor = this.getRequiredBuilderSessionDescriptor(managerId, operation);
+    const descriptor = this.getRequiredSessionDescriptor(managerId);
     this.assertDescriptorNotEffectivelyArchived(descriptor);
   }
 
@@ -413,7 +392,7 @@ export class AgentDirectory {
 
     for (const descriptor of this.sortedDescriptors()) {
       if (descriptor.role === "manager") {
-        if (descriptor.sessionSurface !== "collab") managers.push(descriptor);
+        managers.push(descriptor);
         continue;
       }
 

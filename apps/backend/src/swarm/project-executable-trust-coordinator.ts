@@ -150,7 +150,6 @@ export class ProjectExecutableTrustCoordinator {
   }
 
   schedulePrompt(descriptor: ProjectExecutableTrustManager): void {
-    if (descriptor.collab) return;
     void this.maybePrompt(descriptor).catch((error) => {
       this.options.host.logDebug("project_resources:trust_prompt:error", {
         agentId: descriptor.agentId,
@@ -379,7 +378,7 @@ export class ProjectExecutableTrustCoordinator {
     const managerIds = new Set<string>();
     const resolver = this.createResourceAccess().resolver;
     for (const descriptor of this.options.host.listDescriptors()) {
-      if (descriptor.role !== "manager" || descriptor.collab) continue;
+      if (descriptor.role !== "manager") continue;
       try {
         const resolution = await resolver.resolve(
           toWorkspaceResolveOptions(descriptor as ProjectExecutableTrustManager),
@@ -425,7 +424,7 @@ export class ProjectExecutableTrustCoordinator {
     if (activation) activation.protectAllRuntimeCreations = true;
 
     for (const descriptor of this.options.host.listDescriptors()) {
-      if (descriptor.role !== "manager" || descriptor.collab) continue;
+      if (descriptor.role !== "manager") continue;
       try {
         const resolution = await resolver.resolve(
           toWorkspaceResolveOptions(descriptor as ProjectExecutableTrustManager),
@@ -460,7 +459,7 @@ export class ProjectExecutableTrustCoordinator {
   ): Promise<void> {
     const affectedManagers: ProjectExecutableTrustManager[] = [];
     for (const descriptor of this.options.host.listDescriptors()) {
-      if (descriptor.role !== "manager" || descriptor.collab) continue;
+      if (descriptor.role !== "manager") continue;
       const resolution = await this.createResourceAccess().resolver.resolve(
         toWorkspaceResolveOptions(descriptor as ProjectExecutableTrustManager),
       );

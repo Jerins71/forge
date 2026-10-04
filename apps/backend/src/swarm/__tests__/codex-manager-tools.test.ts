@@ -16,7 +16,6 @@ function createManager(): AgentDescriptor {
     cwd: "/tmp/project",
     model: { provider: "openai", modelId: "gpt-5", thinkingLevel: "medium" },
     sessionFile: "/tmp/project/manager.jsonl",
-    sessionSurface: "builder",
   };
 }
 

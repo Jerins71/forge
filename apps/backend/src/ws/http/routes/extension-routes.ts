@@ -100,7 +100,7 @@ async function discoverPiExtensionsOnDisk(options: {
   });
   for (const descriptor of options.swarmManager
     .listAgents()
-    .filter((entry) => entry.role === "manager" && !entry.collab)
+    .filter((entry) => entry.role === "manager")
     .sort((left, right) => left.agentId.localeCompare(right.agentId))) {
     const resolution = await resolver.resolve({
       profileId: descriptor.profileId ?? descriptor.agentId,

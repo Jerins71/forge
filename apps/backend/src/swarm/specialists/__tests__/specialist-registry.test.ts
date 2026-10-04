@@ -397,135 +397,60 @@ describe("specialist-registry", () => {
     expect(parsed?.frontmatter.webSearch).toBe(true);
   });
 
-  it("parses exact TargetSpace frontmatter from inline array and scalar forms", async () => {
+  it("tolerates legacy TargetSpace frontmatter and ignores its value", async () => {
     const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const arrayPath = join(root, "dual.md");
-    const scalarPath = join(root, "collab.md");
+    const variants = [
+      "TargetSpace: [builder, collaboration]",
+      "TargetSpace: collaboration",
+      "targetSpace: collaboration",
+      "TargetSpace: unknown-space",
+      undefined,
+    ];
 
-    await writeFile(
-      arrayPath,
-      [
-        "---",
-        "displayName: Dual Specialist",
-        "color: '#2563eb'",
-        "enabled: true",
-        "whenToUse: Dual-space tasks",
-        "modelId: gpt-5.5",
-        "TargetSpace: [builder, collaboration]",
-        "---",
-        "",
-        "Dual body.",
-      ].join("\n"),
-      "utf8",
-    );
-    await writeFile(
-      scalarPath,
-      [
-        "---",
-        "displayName: Collab Specialist",
-        "color: '#2563eb'",
-        "enabled: true",
-        "whenToUse: Collaboration tasks",
-        "modelId: gpt-5.5",
-        "TargetSpace: collaboration",
-        "---",
-        "",
-        "Collab body.",
-      ].join("\n"),
-      "utf8",
-    );
+    for (const [index, targetSpaceLine] of variants.entries()) {
+      const filePath = join(root, `legacy-${index}.md`);
+      await writeFile(
+        filePath,
+        [
+          "---",
+          "displayName: Legacy Specialist",
+          "color: '#2563eb'",
+          "enabled: true",
+          "whenToUse: Legacy tasks",
+          "modelId: gpt-5.5",
+          ...(targetSpaceLine ? [targetSpaceLine] : []),
+          "---",
+          "",
+          "Legacy body.",
+        ].join("\n"),
+        "utf8",
+      );
 
-    expect((await parseSpecialistFile(arrayPath))?.frontmatter.targetSpace).toEqual(["builder", "collaboration"]);
-    expect((await parseSpecialistFile(scalarPath))?.frontmatter.targetSpace).toEqual(["collaboration"]);
+      const parsed = await parseSpecialistFile(filePath);
+      expect(parsed, targetSpaceLine).not.toBeNull();
+      expect(parsed?.frontmatter).not.toHaveProperty("targetSpace");
+    }
   });
 
-  it("accepts legacy lowercase targetSpace frontmatter while preserving canonical TargetSpace precedence", async () => {
-    const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const legacyPath = join(root, "legacy-lowercase.md");
-    const bothPath = join(root, "both.md");
-
-    await writeFile(
-      legacyPath,
-      [
-        "---",
-        "displayName: Legacy Lowercase Specialist",
-        "color: '#2563eb'",
-        "enabled: true",
-        "whenToUse: Collaboration tasks",
-        "modelId: gpt-5.5",
-        "targetSpace: collaboration",
-        "---",
-        "",
-        "Legacy lowercase body.",
-      ].join("\n"),
-      "utf8",
-    );
-    await writeFile(
-      bothPath,
-      [
-        "---",
-        "displayName: Canonical Specialist",
-        "color: '#2563eb'",
-        "enabled: true",
-        "whenToUse: Canonical tasks",
-        "modelId: gpt-5.5",
-        "TargetSpace: builder",
-        "targetSpace: collaboration",
-        "---",
-        "",
-        "Canonical body.",
-      ].join("\n"),
-      "utf8",
-    );
-
-    expect((await parseSpecialistFile(legacyPath))?.frontmatter.targetSpace).toEqual(["collaboration"]);
-    expect((await parseSpecialistFile(bothPath))?.frontmatter.targetSpace).toEqual(["builder"]);
-  });
-
-  it("defaults missing TargetSpace frontmatter to builder for legacy compatibility", async () => {
-    const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
-    const filePath = join(root, "legacy-target-space.md");
-
-    await writeFile(
-      filePath,
-      [
-        "---",
-        "displayName: Legacy Target Specialist",
-        "color: '#2563eb'",
-        "enabled: true",
-        "whenToUse: Legacy tasks",
-        "modelId: gpt-5.5",
-        "---",
-        "",
-        "Legacy body.",
-      ].join("\n"),
-      "utf8",
-    );
-
-    expect((await parseSpecialistFile(filePath))?.frontmatter.targetSpace).toEqual(["builder"]);
-  });
-
-  it("serializes exact TargetSpace frontmatter when saving", async () => {
+  it("does not write TargetSpace frontmatter when saving", async () => {
     const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
     const dataDir = join(root, "data");
-    const specialistPath = join(dataDir, "shared", "specialists", "dual-specialist.md");
+    const specialistPath = join(dataDir, "shared", "specialists", "plain-specialist.md");
 
-    await saveSharedSpecialist(dataDir, "dual-specialist", {
-      displayName: "Dual Specialist",
+    await saveSharedSpecialist(dataDir, "plain-specialist", {
+      displayName: "Plain Specialist",
       color: "#123abc",
       enabled: true,
-      whenToUse: "Dual tasks",
+      whenToUse: "Plain tasks",
       modelId: "gpt-5.5",
-      targetSpace: ["builder", "collaboration"],
-      promptBody: "Dual prompt body",
+      promptBody: "Plain prompt body",
     });
 
     const markdown = await readFile(specialistPath, "utf8");
-    expect(markdown).toContain("TargetSpace: [builder, collaboration]");
-    expect(markdown).not.toContain("targetSpace:");
+    expect(markdown).not.toMatch(/targetSpace:/i);
   });
 
-  it("roundtrips fallback, model routing, pinned, web search, and TargetSpace fields through markdown saves", async () => {
+  it("roundtrips fallback, model routing, pinned, and web search fields through markdown saves", async () => {
     const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
     const dataDir = join(root, "data");
     const specialistPath = join(dataDir, "shared", "specialists", "full-routing.md");
@@ -543,7 +468,6 @@ describe("specialist-registry", () => {
       fallbackReasoningLevel: "medium",
       pinned: true,
       webSearch: true,
-      targetSpace: ["collaboration", "builder"],
       promptBody: "Full routing prompt body.",
     });
 
@@ -555,7 +479,6 @@ describe("specialist-registry", () => {
     expect(markdown).toContain('fallbackReasoningLevel: "medium"');
     expect(markdown).toContain("pinned: true");
     expect(markdown).toContain("webSearch: true");
-    expect(markdown).toContain("TargetSpace: [collaboration, builder]");
 
     const parsed = await parseSpecialistFile(specialistPath);
     expect(parsed?.frontmatter).toMatchObject({
@@ -566,7 +489,6 @@ describe("specialist-registry", () => {
       fallbackReasoningLevel: "medium",
       pinned: true,
       webSearch: true,
-      targetSpace: ["collaboration", "builder"],
     });
   });
 
@@ -602,7 +524,6 @@ describe("specialist-registry", () => {
       fallbackModelId: "grok-build",
       fallbackProvider: "xai",
       fallbackReasoningLevel: "medium",
-      targetSpace: ["builder"],
       promptBody: "Native Composer prompt body.",
     });
 
@@ -935,7 +856,7 @@ describe("specialist-registry", () => {
     });
   });
 
-  it("resolves only Builder-visible specialists while still parsing collaboration-only files", async () => {
+  it("resolves every specialist for the Builder regardless of legacy TargetSpace", async () => {
     const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
     const dataDir = join(root, "data");
     const sharedDir = join(dataDir, "shared", "specialists");
@@ -990,13 +911,9 @@ describe("specialist-registry", () => {
       "utf8",
     );
 
-    expect((await resolveRoster("profile-a", dataDir)).map((entry) => entry.specialistId)).toEqual([
-      "builder-only",
-      "dual",
-    ]);
-    expect((await parseSpecialistFile(join(sharedDir, "collab-only.md")))?.frontmatter.targetSpace).toEqual([
-      "collaboration",
-    ]);
+    const roster = await resolveRoster("profile-a", dataDir);
+    expect(roster.map((entry) => entry.specialistId)).toEqual(["builder-only", "collab-only", "dual"]);
+    expect(roster.every((entry) => entry.targetSpace.length === 1 && entry.targetSpace[0] === "builder")).toBe(true);
   });
 
   it("generates a roster block with only enabled and available specialists", () => {
@@ -1480,7 +1397,6 @@ describe("specialist-registry", () => {
       whenToUse: "Plan for this profile.",
       modelId: "removed-mode-model",
       provider: "openai-codex",
-      targetSpace: ["builder", "collaboration"],
       defaultTier: "deep",
       promptBody: "Profile planning instructions.",
     });
@@ -1493,7 +1409,7 @@ describe("specialist-registry", () => {
     expect(profileBlock).not.toContain("`planner`: Plan for this profile");
   });
 
-  it("does not let a collaboration-only profile file shadow a Builder specialist", async () => {
+  it("lets a legacy collaboration-only profile file shadow the shared specialist", async () => {
     const root = await mkdtemp(join(tmpdir(), "specialist-registry-test-"));
     const dataDir = join(root, "data");
     const sharedDir = join(dataDir, "shared", "specialists");
@@ -1539,9 +1455,9 @@ describe("specialist-registry", () => {
     expect(builderRoster).toHaveLength(1);
     expect(builderRoster[0]).toMatchObject({
       specialistId: "worker",
-      sourceKind: "global",
-      displayName: "Shared Builder Worker",
-      shadowsGlobal: false,
+      sourceKind: "profile",
+      displayName: "Profile Collaboration Worker",
+      shadowsGlobal: true,
       targetSpace: ["builder"],
     });
   });

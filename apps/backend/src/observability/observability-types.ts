@@ -83,7 +83,6 @@ export type ObservabilityRootSource =
   | "cortex"
   | "internal_self_send"
   | "internal_agent_message"
-  | "collaboration_excluded"
   | "internal_other";
 
 export interface ObservabilityRuntimeInputHandle {

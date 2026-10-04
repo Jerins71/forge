@@ -38,59 +38,6 @@ export interface NotificationSettingsMutationResponse extends NotificationSettin
   ok: true
 }
 
-/**
- * Remote-projects (Wave R) instance settings. `enabled` is the product kill
- * switch: nothing member-facing activates while it is false. Admin-only writes.
- */
-export interface RemoteBuildSettings {
-  enabled: boolean
-  terminalsEnabled: boolean
-  /** Admin-set display name; null falls back to the host name at read time. */
-  instanceName: string | null
-  updatedAt: string | null
-}
-
-export interface UpdateRemoteBuildSettingsRequest {
-  enabled?: boolean
-  terminalsEnabled?: boolean
-  instanceName?: string | null
-}
-
-/** Per-field origin for effective Remote Projects policy values. */
-export type RemoteBuildSettingsFieldSource = 'environment' | 'settings'
-
-export type RemoteBuildSettingsControlledField = 'enabled' | 'terminalsEnabled' | 'instanceName'
-
-export interface RemoteBuildSettingsSources {
-  enabled: RemoteBuildSettingsFieldSource
-  terminalsEnabled: RemoteBuildSettingsFieldSource
-  instanceName: RemoteBuildSettingsFieldSource
-}
-
-/**
- * Admin GET/PUT payload. `settings` is the effective runtime policy
- * (environment overrides win per field). Current collaboration-server responses
- * also include `persistedSettings` (v1 JSON file contents) and per-field
- * `sources`; both remain optional on the wire so legacy `{ settings }` payloads
- * stay assignable. `updatedAt` remains the last persisted write.
- */
-export interface RemoteBuildSettingsResponse {
-  settings: RemoteBuildSettings
-  persistedSettings?: RemoteBuildSettings
-  sources?: RemoteBuildSettingsSources
-}
-
-export interface RemoteBuildSettingsMutationResponse extends RemoteBuildSettingsResponse {
-  ok: true
-}
-
-/** Stable HTTP 409 body when a PUT touches an env-controlled field. */
-export interface RemoteBuildSettingsEnvOverrideErrorBody {
-  error: string
-  code: 'REMOTE_BUILD_SETTINGS_ENV_OVERRIDE'
-  controlledFields: RemoteBuildSettingsControlledField[]
-}
-
 export interface SettingsAuthProvider {
   provider: SettingsAuthProviderId
   configured: boolean

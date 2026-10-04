@@ -56,7 +56,7 @@ export interface SwarmManagerSessionCompositionServices {
 }
 
 type ProvisionerOwnedKeys = "dataDir" | "runtimes" | "forgetPinnedMessages" | "conversationProjector";
-type SessionOwnedKeys = "profiles" | "runtimes" | "provisioner" | "prepareSessionCreation" | "prepareSessionCreationFromBase" | "resolveGlobalDelegationRosterId" | "deleteProjectAgentRecord" | "copySessionHistoryForFork" | "copyPinnedMessagesForFork" | "resetConversationHistory";
+type SessionOwnedKeys = "profiles" | "runtimes" | "provisioner" | "prepareSessionCreation" | "resolveGlobalDelegationRosterId" | "deleteProjectAgentRecord" | "copySessionHistoryForFork" | "copyPinnedMessagesForFork" | "resetConversationHistory";
 type ProjectAgentOwnedKeys = "dataDir" | "descriptors" | "provisioner" | "now" | "prepareSessionCreation";
 type SharingOwnedKeys = "dataDir" | "now" | "getProfiles" | "getDescriptor" | "getDescriptors";
 type ProjectCoordinatorOwnedKeys = "config" | "descriptors" | "profiles" | "projectAgents" | "sharing" | "now";
@@ -135,8 +135,6 @@ export function createSwarmManagerSessionComposition(
     provisioner,
     prepareSessionCreation: (profileId, creationOptions) =>
       services.descriptorFactory.prepareSessionCreation(profileId, creationOptions),
-    prepareSessionCreationFromBase: (profileId, base, creationOptions) =>
-      services.descriptorFactory.prepareSessionCreationFromBase(profileId, base, creationOptions),
     resolveGlobalDelegationRosterId: async () =>
       (await resolveDelegationRosterSettings(state.config.paths.dataDir)).defaultRosterId,
     deleteProjectAgentRecord: (profileId, handle) =>

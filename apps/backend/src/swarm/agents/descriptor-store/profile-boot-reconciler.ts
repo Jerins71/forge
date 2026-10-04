@@ -99,7 +99,7 @@ export class ProfileBootReconciler {
         changed = true;
       }
 
-      const profileSessions = this.getBuilderSessionsForProfile(profileId);
+      const profileSessions = this.getSessionsForProfile(profileId);
       if (profileSessions.length === 0) {
         const rootSessionDescriptor = managerDescriptorsById.get(profileId);
         if (!rootSessionDescriptor || rootSessionDescriptor.role !== "manager") {
@@ -127,7 +127,7 @@ export class ProfileBootReconciler {
         changed = true;
       }
 
-      for (const session of this.getBuilderSessionsForProfile(profileId)) {
+      for (const session of this.getSessionsForProfile(profileId)) {
         if (session.modelOrigin !== undefined) {
           continue;
         }
@@ -162,7 +162,7 @@ export class ProfileBootReconciler {
         ? "project_default" as const
         : "global_default" as const;
 
-      for (const session of this.getBuilderSessionsForProfile(profile.profileId)) {
+      for (const session of this.getSessionsForProfile(profile.profileId)) {
         let sessionChanged = false;
         if (session.managerPosture === undefined) {
           session.managerPosture = inheritedPosture;
@@ -280,7 +280,7 @@ export class ProfileBootReconciler {
     return true;
   }
 
-  private getBuilderSessionsForProfile(
+  private getSessionsForProfile(
     profileId: string,
   ): Array<AgentDescriptor & { role: "manager"; profileId: string }> {
     return Array.from(this.options.descriptors.values()).filter(
@@ -288,8 +288,7 @@ export class ProfileBootReconciler {
         descriptor,
       ): descriptor is AgentDescriptor & { role: "manager"; profileId: string } =>
         descriptor.role === "manager" &&
-        descriptor.profileId === profileId &&
-        descriptor.sessionSurface !== "collab",
+        descriptor.profileId === profileId,
     );
   }
 }
