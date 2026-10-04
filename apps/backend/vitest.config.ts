@@ -6,9 +6,13 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   resolve: {
-    alias: {
-      "@forge/protocol": resolve(__dirname, "../../packages/protocol/src/index.ts"),
-    },
+    alias: [
+      {
+        find: /^@forge\/protocol\/environment-v2$/,
+        replacement: resolve(__dirname, "../../packages/protocol/src/environment-v2.ts"),
+      },
+      { find: /^@forge\/protocol$/, replacement: resolve(__dirname, "../../packages/protocol/src/index.ts") },
+    ],
   },
   test: {
     environment: "node",
@@ -22,7 +26,9 @@ export default defineConfig({
       "src/swarm/specialists/__tests__/**/*.test.ts",
       "src/observability/__tests__/**/*.test.ts",
       "src/telemetry/__tests__/**/*.test.ts",
-      "src/terminal/__tests__/**/*.test.ts",
+      "src/terminal/**/*.test.ts",
+      "src/environment/**/*.test.ts",
+      "src/ws/rpc/**/*.test.ts",
       "src/utils/__tests__/**/*.test.ts",
       "src/__tests__/**/*.test.ts",
       "../../scripts/__tests__/**/*.test.mjs"
