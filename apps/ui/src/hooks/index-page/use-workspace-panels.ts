@@ -27,7 +27,7 @@ import {
   type MutableRefObject,
 } from 'react'
 import type { EnvironmentClient } from '@forge/client-runtime'
-import { createEnvironmentPanelContext } from '@/lib/environment-panel-context'
+import { createEnvironmentPanelContext, type EnvironmentPanels } from '@/lib/environment-panel-context'
 import { Clock3, FolderOpen, GitBranch, Globe2, MessageSquare, Package, SquareTerminal } from 'lucide-react'
 import type { AgentDescriptor, GitWorktreeSummary } from '@forge/protocol'
 import type { DiffViewerInitialState } from '@/components/diff-viewer/DiffViewerDialog'
@@ -93,18 +93,25 @@ export function useWorkspacePanels({
   navigateToRoute,
 }: UseWorkspacePanelsOptions) {
   const environmentId = environmentClient?.environmentId ?? null
-  const environmentPanels = useMemo(
-    () =>
-      environmentClient && activeAgentId
-        ? createEnvironmentPanelContext(environmentClient, {
-            environmentId: environmentClient.environmentId,
-            sessionId: activeAgentId,
-          })
-        : null,
-    [environmentClient, activeAgentId],
-  )
-
-  useEffect(() => () => environmentPanels?.dispose(), [environmentPanels])
+  // The panel scope is created and disposed by one effect so StrictMode's mount/unmount/mount
+  // never leaves consumers holding an already-aborted signal.
+  const [panelScope, setPanelScope] = useState<EnvironmentPanels | null>(null)
+  useEffect(() => {
+    if (!environmentClient || !activeAgentId) {
+      setPanelScope(null)
+      return
+    }
+    const scope = createEnvironmentPanelContext(environmentClient, {
+      environmentId: environmentClient.environmentId,
+      sessionId: activeAgentId,
+    })
+    setPanelScope(scope)
+    return () => scope.dispose()
+  }, [environmentClient, activeAgentId])
+  const environmentPanels =
+    panelScope?.client === environmentClient && panelScope?.session.sessionId === activeAgentId
+      ? panelScope
+      : null
   const [diffViewerPresentation, setDiffViewerPresentation] = useState<'modal' | 'inline'>('modal')
 
   const {

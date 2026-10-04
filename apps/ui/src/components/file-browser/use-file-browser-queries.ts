@@ -107,6 +107,8 @@ interface QueryResult<T> {
 
 const MAX_CACHE_ENTRIES = 200
 const queryCache = new Map<string, { data: unknown; fetchedAt: number }>()
+/** Consumers of one key share a single request; an aborted panel's request is never joined. */
+const inflight = new Map<string, { promise: Promise<unknown>; signal: AbortSignal | undefined }>()
 
 function evictOldestCacheEntries() {
   if (queryCache.size <= MAX_CACHE_ENTRIES) return
@@ -120,10 +122,29 @@ function evictOldestCacheEntries() {
   }
 }
 
+/** One request per key across consumers; its result is cached unless the key was invalidated meanwhile. */
+function sharedRequest<T>(queryKey: string, signal: AbortSignal | undefined, fetchFn: () => Promise<T>): Promise<T> {
+  const shared = inflight.get(queryKey)
+  if (shared && !shared.signal?.aborted) return shared.promise as Promise<T>
+  const promise: Promise<T> = fetchFn()
+    .then((data) => {
+      if (inflight.get(queryKey)?.promise === promise) {
+        queryCache.set(queryKey, { data, fetchedAt: Date.now() })
+        evictOldestCacheEntries()
+      }
+      return data
+    })
+    .finally(() => {
+      if (inflight.get(queryKey)?.promise === promise) inflight.delete(queryKey)
+    })
+  inflight.set(queryKey, { promise, signal })
+  return promise
+}
+
 function useSimpleQuery<T>(
   queryKey: string,
   fetchFn: () => Promise<T>,
-  options: { enabled: boolean; staleTime: number },
+  options: { enabled: boolean; staleTime: number; signal?: AbortSignal },
 ): QueryResult<T> {
   const [dataState, setDataState] = useState<{ queryKey: string; data: T | null }>(() => {
     const cached = queryCache.get(queryKey)
@@ -166,11 +187,9 @@ function useSimpleQuery<T>(
     const key = ++fetchKeyRef.current
     setIsLoading(true)
 
-    void fetchFn()
+    void sharedRequest(queryKey, options.signal, fetchFn)
       .then((result) => {
         if (key !== fetchKeyRef.current) return
-        queryCache.set(queryKey, { data: result, fetchedAt: Date.now() })
-        evictOldestCacheEntries()
         setDataState({ queryKey, data: result })
         setError(null)
       })
@@ -182,10 +201,11 @@ function useSimpleQuery<T>(
         if (key !== fetchKeyRef.current) return
         setIsLoading(false)
       })
-  }, [queryKey, options.enabled, options.staleTime, fetchFn])
+  }, [queryKey, options.enabled, options.staleTime, options.signal, fetchFn])
 
   const refetch = useCallback(() => {
     queryCache.delete(queryKey)
+    inflight.delete(queryKey)
     doFetch()
   }, [queryKey, doFetch])
 
@@ -217,7 +237,23 @@ export function useDirectoryListing(
   return useSimpleQuery<FileListResult>(queryKey, fetchFn, {
     enabled: !!panel && !!agentId,
     staleTime: 30_000,
+    signal: panel?.signal,
   })
+}
+
+/** Directory children for the tree loader; shares the listing hook's cache and in-flight request. */
+export function fetchDirectoryListing(
+  panel: EnvironmentPanels,
+  agentId: string,
+  dirPath: string,
+  worktreeId?: string | null,
+): Promise<FileListResult> {
+  const queryKey = buildFileBrowserQueryKey('files:list', panel.session.environmentId, agentId, worktreeId, dirPath)
+  const cached = queryCache.get(queryKey)
+  if (cached && Date.now() - cached.fetchedAt < 30_000) return Promise.resolve(cached.data as FileListResult)
+  return sharedRequest(queryKey, panel.signal, () =>
+    panel.features.files.list({ agentId, path: dirPath, worktreeId, signal: panel.signal }),
+  )
 }
 
 export function useFileCount(
@@ -234,6 +270,7 @@ export function useFileCount(
   return useSimpleQuery<FileCountResult>(queryKey, fetchFn, {
     enabled: !!panel && !!agentId,
     staleTime: 120_000,
+    signal: panel?.signal,
   })
 }
 
@@ -253,6 +290,7 @@ export function useFileSearch(
   return useSimpleQuery<FileSearchResult>(queryKey, fetchFn, {
     enabled: !!panel && !!agentId && query.trim().length >= 2,
     staleTime: 30_000,
+    signal: panel?.signal,
   })
 }
 
@@ -272,6 +310,7 @@ export function useProjectResourcesSnapshot(
   return useSimpleQuery<ProjectResourcesSnapshotResponse>(queryKey, fetchFn, {
     enabled: !!panel && !!params.profileId && !!params.sessionAgentId,
     staleTime: 30_000,
+    signal: panel?.signal,
   })
 }
 
@@ -451,6 +490,7 @@ export function useFileContent(
   return useSimpleQuery<FileContentResult>(queryKey, fetchFn, {
     enabled: !!panel && !!agentId && !!filePath,
     staleTime: 30_000,
+    signal: panel?.signal,
   })
 }
 
@@ -476,18 +516,22 @@ export function setFileContentCache(
 }
 
 export function invalidateFileBrowserMetadataCaches() {
-  for (const key of queryCache.keys()) {
-    if (key.startsWith('files:list') || key.startsWith('files:count') || key.startsWith('files:search')) {
-      queryCache.delete(key)
+  for (const cache of [queryCache, inflight]) {
+    for (const key of cache.keys()) {
+      if (key.startsWith('files:list') || key.startsWith('files:count') || key.startsWith('files:search')) {
+        cache.delete(key)
+      }
     }
   }
 }
 
 /** Invalidate all file browser caches (call on manual refresh) */
 export function invalidateFileBrowserCaches() {
-  for (const key of queryCache.keys()) {
-    if (key.startsWith('files:') || key.startsWith('project-resources:')) {
-      queryCache.delete(key)
+  for (const cache of [queryCache, inflight]) {
+    for (const key of cache.keys()) {
+      if (key.startsWith('files:') || key.startsWith('project-resources:')) {
+        cache.delete(key)
+      }
     }
   }
 }

@@ -28,7 +28,7 @@ import {
 import '@/styles/file-browser.css'
 import { FileTreeNode } from './FileTreeNode'
 import { FileIcon } from './FileIcon'
-import { useFileSearch } from './use-file-browser-queries'
+import { fetchDirectoryListing, useFileSearch } from './use-file-browser-queries'
 
 /* ------------------------------------------------------------------ */
 /*  Stable useTree — fixes React 18+ Object.is setState bailout       */
@@ -168,12 +168,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         const dirPath = itemId === ROOT_ID ? '' : itemId
         const current = panelRef.current
         if (!current) return []
-        const result = await current.features.files.list({
-          agentId: agentIdRef.current,
-          path: dirPath,
-          worktreeId: worktreeIdRef.current,
-          signal: current.signal,
-        })
+        const result = await fetchDirectoryListing(current, agentIdRef.current, dirPath, worktreeIdRef.current)
 
         const ids: string[] = []
         for (const entry of result.entries) {
