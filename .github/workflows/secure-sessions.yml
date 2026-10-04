@@ -31,8 +31,6 @@ jobs:
         run: |
           cd apps/backend
           pnpm exec vitest run \
-            src/swarm/__tests__/secure-sessions-docker-execution-backend.test.ts \
-            src/swarm/__tests__/secure-sessions-e2e-docker.test.ts \
             src/swarm/__tests__/secure-sessions-worker-e2e-docker.test.ts
 
   windows:

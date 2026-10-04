@@ -53,6 +53,6 @@ Today `BACKEND_BUNDLE_EXTERNAL_PACKAGES` externalizes `@earendil-works/pi-coding
 
 Not applicable — no Forge shims.
 
-## Follow-up after atomic pins
+## Extension migration
 
-Source + staged packaged gates now cover old-specifier / unsupported-subpath extension loads through real `DefaultResourceLoader + createAgentSession`, package-relative theme/export asset adjudication, and four-family identity/skew checks. See [`BETA_RELEASE_RUNBOOK.md`](./BETA_RELEASE_RUNBOOK.md) for breaking migration, none/ultra→max mapping, snapshot+old-binary rollback, Windows trust CI, and remaining owner gates (extracted installer smoke, live provider canary, copied-data downgrade rehearsal). Those gates do not reopen temporary shims unless new evidence shows Forge can own resolution without patching upstream loader aliases.
+See [`PI_EXTENSIONS.md`](../PI_EXTENSIONS.md) for the maintained extension migration policy. The singleton and package-relative asset requirements above do not permit temporary shims.
