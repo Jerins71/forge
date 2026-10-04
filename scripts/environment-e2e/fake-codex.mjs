@@ -108,6 +108,7 @@ async function request(method, params = {}) {
     if (params.type !== 'apiKey' || params.apiKey !== 'forge-fixture-inert-not-a-provider-key') throw new Error('Fixture accepts synthetic identity only');
     return { type: 'apiKey' };
   }
+  if (method === 'thread/backgroundTerminals/clean') return {};
   if (method === 'account/read') return { account: null, requiresOpenaiAuth: false };
   if (method === 'model/list') return { data: [{ id: 'gpt-6-sol', model: 'gpt-6-sol', displayName: 'Fixture Codex',
     description: 'Deterministic fixture', isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'high', description: 'Fixture' }], defaultReasoningEffort: 'high' }], nextCursor: null };

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { once } from 'node:events';
+import { get as httpGet } from 'node:http';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -11,6 +12,7 @@ import { seedUiEnvironment, readLaunchEvidence, type UiEnvironment } from './fix
 import { fixtureRpcOnce, openFixtureRpc, until } from './fixtures/rpc-client.js';
 import { getEnvironmentDbPath, getSessionMetaPath, getSessionFilePath } from '../../apps/backend/src/swarm/storage/data-paths.js';
 import { loadConfiguredSqliteDatabaseConstructor } from '../../apps/backend/src/sqlite-database-loader.js';
+import { WebSocket } from './fixtures/ws.js';
 import { proxySelfTest } from './fixtures/proxy-self-test.js';
 import { startFaultProxy } from './fault-proxy.js';
 
@@ -30,7 +32,7 @@ test.beforeAll(async () => {
     sessions.push(session); projects.push(await seedUiEnvironment(environment, session));
   }
 });
-test.afterAll(async () => { if (manifest) await writeFile(join(manifest.artifactRoot, 'slice-assertions.json'), JSON.stringify(evidence, null, 2)); });
+test.afterAll(async () => { if (manifest) { await writeFile(join(manifest.artifactRoot, 'slice-assertions.json'), JSON.stringify(evidence, null, 2)); await writeFile(join(manifest.artifactRoot, 'wire-metrics.json'), JSON.stringify({ launch: evidence.wire, resume: evidence.resume }, null, 2)); } });
 const b = () => manifest.environments[1]!;
 async function readDb<T>(read: (db: InstanceType<Awaited<ReturnType<typeof loadConfiguredSqliteDatabaseConstructor>>>) => T, index = 1): Promise<T> {
   const Constructor = await loadConfiguredSqliteDatabaseConstructor();
@@ -74,6 +76,8 @@ test('9.2.2 server repository identity and repeated session IDs are environment 
   evidence.repository = { groupedAB: true, independentC: true, repeatedIdsIsolated: true, manualGrouping: 'not-yet' };
 });
 test('9.2.3 B new worktree + attachment and post-COMMIT lost ack retry execute once', async () => {
+  const providerMarker = (index: number) => readFile(join(manifest.environments[index]!.checkout, 'fixture-provider-marker.txt'), 'utf8').catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''; throw error; });
+  const untouched = await Promise.all([providerMarker(0), providerMarker(2)]);
   const upload = await fetch(`${b().baseUrl}/api/v2/artifacts?projectId=${projects[1]!.sessionId}&uploadId=${randomUUID()}`, { method: 'POST', headers: { Authorization: `Bearer ${sessions[1]!.bearer}`, 'Content-Type': 'text/plain', 'x-forge-environment-protocol': '1', 'x-forge-file-name': 'synthetic.txt' }, body: 'synthetic attachment' });
   expect(upload.status).toBe(200); attachmentId = (await upload.json()).artifactId;
   const proxy = await startFaultProxy({ upstream: b().baseUrl });
@@ -99,7 +103,8 @@ test('9.2.3 B new worktree + attachment and post-COMMIT lost ack retry execute o
     const worktrees = (await exec('git', ['worktree', 'list', '--porcelain'], { cwd: b().checkout })).stdout;
     expect(worktrees.split('branch refs/heads/slice/' + launchCommandId).length - 1).toBe(1);
     for (const index of [0, 2]) expect(await readFile(join(manifest.environments[index]!.checkout, 'environment-marker.txt'), 'utf8')).toBe(`${manifest.environments[index]!.name}\n`);
-    evidence.launch = { ...counts, ...rows, canonicalUserInputs: 1, metaOwned: true, gitWorktrees: 1, lostResults: proxy.metrics().droppedResponses };
+    expect(await Promise.all([providerMarker(0), providerMarker(2)])).toEqual(untouched);
+    evidence.launch = { ...counts, ...rows, descriptors: 1, canonicalUserInputs: 1, metaOwned: true, gitWorktrees: 1, otherProviderMarkersUnchanged: 2, lostResults: proxy.metrics().droppedResponses };
     evidence.wire = proxy.metrics();
   } finally { rpc.close(); await proxy.stop(); }
 });
@@ -126,6 +131,31 @@ test('9.2.4 real manager choice, lost answer ack, conflict and native worker res
     expect(Array.isArray(history.items)).toBe(true);
     evidence.choiceWorker = { managerChoice: true, lostChoiceAckRetry: true, distinctAnswerConflicts: true, nativeWorker: true, resultMirrored: true, historyAuthenticated: true, truncatedToolContent: 'not-yet', workerChoice: 'not-yet' };
   } finally { rpc.close(); answerRpc.close(); await proxy.stop(); }
+});
+test('9.2.5 authenticated B feature queries and B/C multiplexed terminal CWD routing', async () => {
+  const headers = { Authorization: `Bearer ${sessions[1]!.bearer}` };
+  const target = encodeURIComponent(launchedSessionId);
+  const files = await fetch(`${b().baseUrl}/api/files/content?agentId=${target}&path=environment-marker.txt`, { headers });
+  expect(files.status).toBe(200); expect(JSON.stringify(await files.json())).toContain('env-b');
+  for (const path of [`/api/git/status?agentId=${target}`, `/api/sessions/${target}/audit`, '/api/settings/manager-selection-catalog']) expect((await fetch(b().baseUrl + path, { headers })).status).toBe(200);
+  const routed = [];
+  for (const index of [1, 2]) {
+    const environment = manifest.environments[index]!; const sessionId = index === 1 ? launchedSessionId : projects[index]!.sessionId;
+    const auth = { Authorization: `Bearer ${sessions[index]!.bearer}`, 'Content-Type': 'application/json' };
+    const created = await fetch(`${environment.baseUrl}/api/terminals`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionAgentId: sessionId, shell: '/bin/sh', shellArgs: [], cols: 80, rows: 24 }) });
+    expect(created.status).toBe(201); const terminal = (await created.json()).terminal;
+    const rpc = await openFixtureRpc(environment.baseUrl, sessions[index]!);
+    try {
+      const ticket = await (await fetch(`${environment.baseUrl}/api/terminals/${terminal.terminalId}/ticket`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionAgentId: sessionId, requesterAgentId: sessionId }) })).json();
+      const attached = await rpc.call('terminal.attach', { sessionId, terminalId: terminal.terminalId, ticket: ticket.ticket });
+      await rpc.call('terminal.input', { subscriptionId: attached.subscriptionId, inputId: randomUUID(), data: 'pwd\n' });
+      await until(() => rpc.frames.filter(frame => frame.subscriptionId === attached.subscriptionId).map(frame => frame.item?.data ?? '').join(''), output => output.includes(terminal.cwd));
+      if (index === 1) expect(terminal.cwd).toBe(await readDb(db => (db.prepare('SELECT path FROM workspace_reservations WHERE session_id=?').get(sessionId) as { path: string }).path));
+      else expect(terminal.cwd).toBe(environment.checkout);
+      routed.push({ environment: environment.name, cwdMatches: true, multiplexed: true });
+    } finally { rpc.close(); await fetch(`${environment.baseUrl}/api/terminals/${terminal.terminalId}?sessionAgentId=${sessionId}`, { method: 'DELETE', headers: auth }); }
+  }
+  evidence.features = { files: true, git: true, audit: true, modelCatalog: true, terminals: routed, mountedUiAndSimultaneousStreams: 'not-yet' };
 });
 test('9.2.6 small-gap shell/detail resume and restart preserve epoch', async () => {
   const rpc = await openFixtureRpc(b().baseUrl, sessions[1]!);
@@ -164,25 +194,69 @@ test('9.2.8 stop, controlled resume and fork mirrored to shell', async () => {
       expect(JSON.stringify(fork)).toContain('session_forked');
       await until(() => next.frames.find(frame => frame.item?.event?.type === 'session.upsert' && frame.item.event.session.title === 'Slice fork'), Boolean);
       expect((await readDb(db => db.prepare('SELECT desired_state FROM control_sessions WHERE session_id=?').get(launchedSessionId)) as { desired_state: string }).desired_state).toBe('running');
-      evidence.stopResumeFork = { activeTurnStopped: true, restartStoppedState: true, controlledResume: true, forkShellMirrored: true, pendingChoiceRestart: 'not-yet', writerExclusion: 'covered-control-acceptance' };
+      await next.call('session.subscribe', { sessionId: launchedSessionId });
+      const pending = await next.call('session.send', { commandId: randomUUID(), sessionId: launchedSessionId, message: { text: '[fixture:choice]', artifactIds: [] } });
+      await settled(pending.commandId);
+      const oldChoice = await until<any>(() => next.frames.map(frame => frame.item?.event).find(event => event?.type === 'choice.upsert' && event.choice.status === 'pending')?.choice, Boolean);
+      await controlEnvironment(manifest, b().name, 'stop'); await controlEnvironment(manifest, b().name, 'start');
+      expect((await readDb(db => db.prepare('SELECT state FROM control_choices WHERE choice_id=?').get(oldChoice.choiceId)) as { state: string }).state).toBe('interrupted');
+      await expect(fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.choose', { commandId: randomUUID(), sessionId: launchedSessionId, choiceId: oldChoice.choiceId, answers: [{ questionId: oldChoice.questions[0].id, selectedOptionIds: [oldChoice.questions[0].options[0].id] }] })).rejects.toMatchObject({ code: 'CONFLICT' });
+      evidence.stopResumeFork = { activeTurnStopped: true, restartStoppedState: true, controlledResume: true, forkShellMirrored: true, pendingChoiceRestart: true, writerExclusion: 'covered-control-acceptance' };
     } finally { next.close(); }
   } finally { rpc.close(); }
 });
+test('9.2.10 real HTTP/RPC negative auth, scope, ticket, payload and command-body checks', async () => {
+  const environment = manifest.environments[0]!;
+  const headers = { Authorization: `Bearer ${sessions[0]!.bearer}`, 'Content-Type': 'application/json' };
+  expect((await fetch(`${environment.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers, body: JSON.stringify({ audience: 'rpc', protocolVersion: 2 }) })).status).toBe(409);
+  expect((await fetch(`${environment.baseUrl}/api/not-classified`, { headers })).status).toBe(403);
+  expect((await fetch(`${environment.baseUrl}/api/v2/access/session`)).status).toBe(401);
+  expect((await fetch(`${environment.baseUrl}/api/v2/artifacts/unknown`, { method: 'POST', headers })).status).toBe(403);
+  const forged = new WebSocket(`${environment.baseUrl.replace('http:', 'ws:')}/api/v2/rpc`, ['forge.v2', `ticket.${'A'.repeat(43)}`]);
+  const rejected = new Promise<number>((resolve) => forged.once('unexpected-response', (_request, response) => { response.resume(); forged.terminate(); resolve(response.statusCode!); }));
+  forged.on('error', () => {}); expect(await rejected).toBe(401);
+  const rpc = await openFixtureRpc(b().baseUrl, sessions[1]!);
+  try {
+    await expect(rpc.call('not.a.method', {})).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(rpc.call('session.history', { sessionId: launchedSessionId, turns: 21 })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(rpc.call('session.choose', { commandId: randomUUID(), sessionId: launchedSessionId, choiceId: randomUUID(), answers: [] })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(rpc.call('session.launch', { commandId: launchCommandId, projectId: projects[1]!.sessionId, title: 'changed retry body', workspaceStrategy: { kind: 'current_checkout' } })).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(rpc.call('legacy.session.read', { sessionId: launchedSessionId, command: { type: 'api_proxy', method: 'GET', path: '/api/health', requestId: 'forbidden-api-proxy' } })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  } finally { rpc.close(); }
+  const grant = await fixtureRpcOnce(environment.baseUrl, sessions[0]!, 'access.grant.create', { kind: 'link', label: 'read only fixture', scopes: ['session:read'], expiresInSeconds: 300, reachableBaseUrl: environment.baseUrl });
+  const readOnly = await redeemFixtureGrant(environment, grant, 'link', ['session:read']);
+  await expect(fixtureRpcOnce(environment.baseUrl, readOnly, 'session.send', { commandId: randomUUID(), sessionId: projects[0]!.sessionId, message: { text: 'denied', artifactIds: [] } })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  const large = await openFixtureRpc(environment.baseUrl, sessions[0]!); const closed = once(large.socket, 'close');
+  large.socket.send('x'.repeat(1048577)); expect((await closed)[0]).toBe(1009);
+  evidence.negative = { wrongProtocol: true, unclassifiedApi: true, absentAuth: true, exactArtifactVerb: true, forgedTicket: true, unsupportedMethod: true, oversizedHistoryPage: true, invalidChoice: true, changedCommandBody: true, genericProxyForbidden: true, missingScope: true, oversizedFrame: true, copiedRootBarrierOverflow: 'not-yet-in-real-fleet' };
+});
 test('9.2.9 revocation closes C RPC and denies subsequent tickets/API while A/B remain healthy', async () => {
   const c = manifest.environments[2]!;
+  const auth = { Authorization: `Bearer ${sessions[2]!.bearer}`, 'Content-Type': 'application/json' };
+  const created = await fetch(`${c.baseUrl}/api/terminals`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionAgentId: projects[2]!.sessionId, shell: '/bin/sh', shellArgs: [] }) });
+  expect(created.status).toBe(201); const terminal = (await created.json()).terminal;
   const rpc = await openFixtureRpc(c.baseUrl, sessions[2]!);
+  const ticket = await (await fetch(`${c.baseUrl}/api/terminals/${terminal.terminalId}/ticket`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionAgentId: projects[2]!.sessionId, requesterAgentId: projects[2]!.sessionId }) })).json();
+  await rpc.call('terminal.attach', { sessionId: projects[2]!.sessionId, terminalId: terminal.terminalId, ticket: ticket.ticket });
+  const upload = await fetch(`${c.baseUrl}/api/v2/artifacts?projectId=${projects[2]!.sessionId}&uploadId=${randomUUID()}`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/octet-stream', 'x-forge-environment-protocol': '1', 'x-forge-file-name': 'synthetic.bin' }, body: Buffer.alloc(25 * 1024 * 1024, 120) });
+  expect(upload.status).toBe(200); const artifactId = (await upload.json()).artifactId;
+  const download = await new Promise<import('node:http').IncomingMessage>((resolve, reject) => { const request = httpGet(`${c.baseUrl}/api/v2/artifacts/${artifactId}`, { agent: false, headers: { Authorization: auth.Authorization, 'x-forge-environment-protocol': '1' } }, response => { response.pause(); response.on('error', () => {}); resolve(response); }); request.on('error', reject); });
+  expect(download.statusCode).toBe(200); const downloadClosed = new Promise<void>(resolve => download.once('close', resolve));
   const closed = once(rpc.socket, 'close');
   const started = Date.now();
   await fixtureRpcOnce(c.baseUrl, sessions[2]!, 'access.devices.revoke', { deviceSessionId: sessions[2]!.deviceSession!.deviceSessionId }).catch(() => undefined);
-  const [code] = await closed; expect(code).toBe(4401); expect(Date.now() - started).toBeLessThan(1000);
+  const [code] = await closed; expect(code).toBe(1008); expect(Date.now() - started).toBeLessThan(1000);
+  download.resume(); await downloadClosed; expect(download.complete).toBe(false);
+  expect(terminal.pid).toBeGreaterThan(0);
+  await until(async () => { try { process.kill(terminal.pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } }, Boolean, 1000);
   expect((await fetch(`${c.baseUrl}/api/v2/access/session`, { headers: { Authorization: `Bearer ${sessions[2]!.bearer}` } })).status).toBe(401);
   expect((await fetch(`${c.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { Authorization: `Bearer ${sessions[2]!.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ audience: 'rpc', protocolVersion: 1 }) })).status).toBe(401);
   for (const i of [0, 1]) expect((await fixtureRpcOnce(manifest.environments[i]!.baseUrl, sessions[i]!, 'environment.get', {})).environmentId).toBe(sessions[i]!.environmentId);
-  evidence.revoke = { closeCode: code, elapsedMs: Date.now() - started, futureAccessDenied: true, isolationAB: true, activeDownloadPTY: 'not-yet' };
+  evidence.revoke = { closeCode: code, elapsedMs: Date.now() - started, futureAccessDenied: true, isolationAB: true, activeDownloadAborted: !download.complete, deviceCreatedPtyEnded: true, hostOwnedAndUnsentEffects: 'not-yet' };
 });
 
 for (const name of [
   '9.2.5 mounted UI files/diff/audit/model/terminal target routing and A/C streams',
   '9.2.7 controlled crash at all seven effect boundaries',
-  '9.2.10 complete negative-auth/oversize/copied-root/barrier/overflow matrix',
+  '9.2.10 copied-root, snapshot-barrier race and slow-consumer overflow in real fleet',
 ]) test.fixme(name, async () => {});

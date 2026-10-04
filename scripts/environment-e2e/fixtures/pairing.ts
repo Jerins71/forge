@@ -5,7 +5,7 @@ import { canonicalPairingFields, pairingProofMessage } from '../../../apps/backe
 import type { BootstrapSession, EnvironmentFixture } from '../launch.js';
 
 export const fixtureScopes: Scope[] = ['session:read', 'session:operate', 'workspace:read', 'workspace:write', 'terminal:operate', 'settings:admin', 'access:admin'];
-export async function redeemFixtureGrant(environment: EnvironmentFixture, grant: RpcOutput<'access.grant.create'>, mode: 'link' | 'code' = 'link'): Promise<BootstrapSession> {
+export async function redeemFixtureGrant(environment: EnvironmentFixture, grant: RpcOutput<'access.grant.create'>, mode: 'link' | 'code' = 'link', requestedScopes: Scope[] = fixtureScopes): Promise<BootstrapSession> {
   const descriptor = await (await fetch(`${environment.baseUrl}/api/v2/environment`)).json();
   const challenge = await (await fetch(`${environment.baseUrl}/api/v2/access/challenge`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
   const fragment = new URLSearchParams(new URL(grant.pairingUrl ?? environment.baseUrl).hash.slice(1));
@@ -13,12 +13,12 @@ export async function redeemFixtureGrant(environment: EnvironmentFixture, grant:
   const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const jwk = publicKey.export({ format: 'jwk' });
   const input = { environmentId: descriptor.environmentId, challengeId: challenge.challengeId, nonce: challenge.nonce,
-    credential, deviceKind: 'desktop', deviceName: `Fixture ${environment.name}`, delivery: 'bearer', requestedScopes: fixtureScopes,
+    credential, deviceKind: 'desktop', deviceName: `Fixture ${environment.name}`, delivery: 'bearer', requestedScopes,
     proofKey: { kty: 'EC', crv: 'P-256', x: jwk.x!, y: jwk.y! } } as Omit<PairingExchange, 'proof'>;
   const hash = createHash('sha256').update(canonicalPairingFields(input)).digest('hex');
   const response = await fetch(`${environment.baseUrl}/api/v2/access/exchange`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...input, proof: sign('sha256', Buffer.from(pairingProofMessage(input, hash)), { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url') }) });
-  if (!response.ok) throw new Error(`Fixture pairing failed (${response.status})`);
+  if (!response.ok) throw Object.assign(new Error(`Fixture pairing failed (${response.status})`), { code: 'UNAUTHENTICATED' });
   const result = await response.json() as PairingExchangeResult;
   if (!result.bearerToken || result.environment.environmentId !== descriptor.environmentId) throw new Error('Fixture pairing identity mismatch');
   return { environmentId: result.environment.environmentId, label: result.environment.label, bearer: result.bearerToken, deviceSession: result.deviceSession, environment: result.environment };

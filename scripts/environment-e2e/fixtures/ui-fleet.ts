@@ -27,12 +27,10 @@ export interface UiFleet {
 export interface UiFleetIntegration {
   bootstrap(environment: EnvironmentFixture): Promise<BootstrapSession>;
   seed(environment: EnvironmentFixture, session: BootstrapSession): Promise<UiEnvironment>;
-  // D supplies the fixture platform adapter through this in-memory port. It must
-  // obtain credentials/tickets through its platform port, never persist a bearer.
+  // Platform credentials/tickets stay in the test process, never in a bearer-bearing script.
   platformScript(primary: UiEnvironment, session: BootstrapSession): Promise<string>;
 }
-/** Pending A private bootstrap has a concrete port; the D platform adapter is
- * separately explicit. No fabricated environment UUIDs or unauthenticated fallbacks. */
+/** Pair real owned backends through private parent bootstrap and the normal exchange. */
 export async function openUiFleet(manifestPath: string, options: { integration?: UiFleetIntegration; uiRoot?: string } = {}): Promise<UiFleet> {
   const manifest = await readManifest(manifestPath);
   assert(manifest.environments.length >= 3, 'UI acceptance requires three real environments');
@@ -105,7 +103,7 @@ export async function serveBuiltUi(rootPath: string, bootstrapScript = '', optio
         const { operation, input } = JSON.parse(Buffer.concat(chunks).toString()) as { operation: string; input: unknown };
         let result: unknown;
         try { result = { ok: true, value: await options.platform(operation, input) }; }
-        catch { result = { ok: false, error: { code: 'UNAVAILABLE', message: 'Fixture platform operation failed', retryable: false } }; }
+        catch (error) { const unauthenticated = (error as { code?: string }).code === 'UNAUTHENTICATED'; result = { ok: false, error: { code: unauthenticated ? 'UNAUTHENTICATED' : 'UNAVAILABLE', message: unauthenticated ? 'Pairing credential is invalid, expired, or already used' : 'Fixture platform operation failed', retryable: false } }; }
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(result)); return;
       }
       if (req.method !== 'GET'  && req.method !== 'HEAD') { res.writeHead(405).end(); return; }
@@ -155,23 +153,30 @@ export async function authenticatedRpc<T>(baseUrl: string, session: BootstrapSes
   } finally { ws.terminate(); }
 }
 export async function seedUiEnvironment(environment: EnvironmentFixture, session: BootstrapSession): Promise<UiEnvironment> {
-  // Current serializer/API creates synthetic project descriptors. This path uses
-  // the authenticated legacy adapter once A/C land, never an unauthenticated seam.
+  // Seed through the authenticated legacy inventory and existing serializer/API.
   if (environment.name === 'env-c') await promisify(execFile)('git', ['remote', 'set-url', 'origin', 'https://fixture.invalid/forge/independent-fixture.git'], { cwd: environment.checkout, env: sanitizedEnvironment() });
   const ws = new WebSocket(environment.baseUrl.replace('http:', 'ws:'), ['forge.v2', `ticket.${await ticket(environment.baseUrl, session, 'legacy')}`]);
   const title = environment.name === 'env-c' ? 'Independent fixture' : 'Shared fixture';
+  const profileTitles = new Map<string, string>();
+  const existingIds = new Set<string>();
+  let creating = false;
   try {
     await once(ws, 'open');
-    const result = new Promise<{ manager: { agentId: string } }>((resolveSeed, reject) => {
+    const result = new Promise<{ manager: { agentId: string; profileId?: string } }>((resolveSeed, reject) => {
       const frameTypes: string[] = [];
       const timer = setTimeout(() => reject(new Error(`Authenticated fixture descriptor seed timed out (${frameTypes.join(',')})`)), 10_000);
       ws.on('message', data => {
-        const frame = JSON.parse(data.toString()) as { type: string; agents?: { agentId: string; role: string }[]; manager: { agentId: string } };
+        const frame = JSON.parse(data.toString()) as { type: string; agents?: { agentId: string; role: string; profileId?: string }[]; profiles?: { profileId: string; displayName: string }[]; manager: { agentId: string; profileId?: string } };
         frameTypes.push(frame.type);
-        if (frame.type === 'inventory_snapshot') ws.send(JSON.stringify({ type: 'create_manager', name: title, cwd: environment.checkout,
-          secureSessionsEnabled: false, modelSelection: { provider: 'codex-native', modelId: 'gpt-6-sol' }, requestId: 'ui-fixture-seed' }));
-        if (frame.type === 'agents_snapshot') {
-          const manager = frame.agents?.find(agent => agent.role === 'manager');
+        for (const profile of frame.profiles ?? []) profileTitles.set(profile.profileId, profile.displayName);
+        if (frame.type === 'inventory_snapshot') {
+          for (const agent of frame.agents ?? []) existingIds.add(agent.agentId);
+          creating = true;
+          ws.send(JSON.stringify({ type: 'create_manager', name: title, cwd: environment.checkout,
+            secureSessionsEnabled: false, modelSelection: { provider: 'codex-native', modelId: 'gpt-6-sol' }, requestId: 'ui-fixture-seed' }));
+        }
+        if (frame.type === 'agents_snapshot' && creating) {
+          const manager = frame.agents?.find(agent => agent.role === 'manager' && !existingIds.has(agent.agentId));
           if (manager) { clearTimeout(timer); resolveSeed({ manager }); }
         }
         if (frame.type === 'manager_created') { clearTimeout(timer); resolveSeed(frame); }
@@ -180,7 +185,7 @@ export async function seedUiEnvironment(environment: EnvironmentFixture, session
       ws.send(JSON.stringify({ type: 'subscribe_inventory', requestId: 'ui-fixture-inventory' }));
     });
     const seeded = await result;
-    return { environmentId: session.environmentId, label: session.label ?? environment.name, baseUrl: environment.baseUrl, projectTitle: title, sessionId: seeded.manager.agentId };
+    return { environmentId: session.environmentId, label: session.label ?? environment.name, baseUrl: environment.baseUrl, projectTitle: profileTitles.get(seeded.manager.profileId ?? seeded.manager.agentId) ?? title, sessionId: seeded.manager.agentId };
   } finally { ws.terminate(); }
 }
 /** Only selected synthetic counts leave this reader. It never exports a DB,
@@ -188,6 +193,7 @@ export async function seedUiEnvironment(environment: EnvironmentFixture, session
 export async function readLaunchEvidence(environment: EnvironmentFixture, sessionId: string): Promise<LaunchEvidence> {
   const store = new AgentDescriptorStore({ dataDir: environment.dataDir, storeFilePath: getAgentsStoreFilePath(environment.dataDir) });
   const descriptors = await store.load();
+  assert.equal(descriptors.agents.filter(agent => agent.agentId === sessionId).length, 1, 'one persisted session descriptor');
   const descriptor = descriptors.agents.find(agent => agent.agentId === sessionId);
   if (!descriptor) throw new Error('Fixture session descriptor is missing');
   assert(isWithin(resolve(environment.checkout, '..'), descriptor.cwd), 'session checkout must stay inside owned environment');

@@ -13,13 +13,14 @@ export async function legacySmoke(environment: EnvironmentFixture, session: Boot
   const ticket = (await response.json() as { ticket: string }).ticket;
   const socket = new WebSocket(environment.baseUrl.replace('http:', 'ws:'), ['forge.v2', `ticket.${ticket}`]);
   const frames: Frame[] = [];
+  let phase = 'inventory';
   const listeners = new Set<() => void>();
   socket.on('message', data => { frames.push(JSON.parse(data.toString()) as Frame); for (const listener of listeners) listener(); });
   await once(socket, 'open');
   function send(frame: Frame) { socket.send(JSON.stringify(frame)); }
   function wait(predicate: (frame: Frame) => boolean, since = 0): Promise<Frame> {
     return new Promise((resolveWait, reject) => {
-      const timer = setTimeout(() => { cleanup(); reject(new Error('Legacy fixture smoke timed out')); }, 20_000);
+      const timer = setTimeout(() => { cleanup(); reject(new Error(`Legacy fixture smoke timed out at ${phase} (${frames.slice(since).map(frame => frame.type).slice(-20).join(',')})`)); }, 20_000);
       const check = () => {
         const error = frames.slice(since).find(frame => frame.type === 'error');
         if (error) { cleanup(); reject(new Error(`Legacy fixture command rejected (${String(error.code)})`)); return; }
@@ -33,6 +34,7 @@ export async function legacySmoke(environment: EnvironmentFixture, session: Boot
   try {
     send({ type: 'subscribe_inventory', requestId: 'legacy-smoke-inventory' });
     await wait(frame => frame.type === 'inventory_snapshot');
+    phase = 'create manager';
     send({ type: 'create_manager', name: 'Synthetic native fixture', cwd: environment.checkout,
       secureSessionsEnabled: false, modelSelection: { provider: 'codex-native', modelId: 'gpt-6-sol' },
       reasoningLevel: 'high', requestId: 'fixture-manager' });
@@ -41,23 +43,34 @@ export async function legacySmoke(environment: EnvironmentFixture, session: Boot
     assert.equal(manager.model.provider, 'codex-native');
     assert.equal(manager.cwd, environment.checkout);
     let since = frames.length;
+    phase = 'subscribe conversation';
     send({ type: 'subscribe', agentId: manager.agentId, conversationView: 'all' });
     await wait(frame => frame.type === 'ready' && frame.subscribedAgentId === manager.agentId, since);
+    // Inventory exposes the descriptor before provisioning finishes. Conversation
+    // subscription can receive the completion event that inventory deliberately filters.
+    phase = 'manager provisioning';
+    await wait(frame => frame.type === 'manager_created');
     async function message(text: string, expected: string) {
+      phase = 'hello reply';
       const start = frames.length;
       send({ type: 'user_message', agentId: manager.agentId, text });
-      await wait(frame => frame.type === 'conversation_message' && frame.agentId === manager.agentId && frame.role === 'assistant' && String(frame.text).includes(expected), start);
-      await wait(frame => frame.type === 'agent_status' && frame.agentId === manager.agentId && frame.status === 'idle', start);
+      const reply = await wait(frame => frame.type === 'conversation_message' && frame.agentId === manager.agentId && frame.role === 'assistant' && String(frame.text).includes(expected), start);
+      phase = 'hello idle';
+      await wait(frame => frame.type === 'agent_status' && frame.agentId === manager.agentId && frame.status === 'idle', frames.indexOf(reply) + 1);
     }
     await message('Synthetic smoke hello.', `fixture:${environment.instanceId}:assistant reply`);
     since = frames.length;
+    phase = 'choice request';
     send({ type: 'user_message', agentId: manager.agentId, text: '[fixture:choice]' });
     const choice = await wait(frame => frame.type === 'choice_request' && frame.status === 'pending', since);
+    phase = 'choice answer';
     send({ type: 'choice_response', agentId: manager.agentId, choiceId: choice.choiceId,
       answers: [{ questionId: 'fixture-choice', selectedOptionIds: ['0'] }] });
-    await wait(frame => frame.type === 'conversation_message' && frame.role === 'assistant' && String(frame.text).includes('choice answered'), since);
-    await wait(frame => frame.type === 'agent_status' && frame.agentId === manager.agentId && frame.status === 'idle', since);
+    const answerReply = await wait(frame => frame.type === 'conversation_message' && frame.role === 'assistant' && String(frame.text).includes('choice answered'), since);
+    phase = 'choice idle';
+    await wait(frame => frame.type === 'agent_status' && frame.agentId === manager.agentId && frame.status === 'idle', frames.indexOf(answerReply) + 1);
     since = frames.length;
+    phase = 'worker result';
     send({ type: 'user_message', agentId: manager.agentId, text: '[fixture:spawn]' });
     await wait(frame => frame.type === 'conversation_message' && frame.agentId === manager.agentId && frame.source === 'worker_report' && String(frame.text).includes('worker result'), since);
     await wait(frame => frame.type === 'agent_status' && frame.agentId === manager.agentId && frame.status === 'idle', since);

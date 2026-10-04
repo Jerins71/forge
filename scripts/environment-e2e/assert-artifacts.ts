@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { readFile, writeFile, realpath } from 'node:fs/promises';
+import { readFile, writeFile, realpath, readdir } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -60,7 +60,7 @@ export async function writeInfrastructureArtifacts(manifest: FleetManifest, mani
     markedRootRemoved: manifest.teardown?.rootRemoved ?? false,
     failureRootPreserved: manifest.status === 'failed',
     nativeLegacySmoke: smoke ?? null,
-    deferred: ['V2 auth/RPC/control/UI/load gates await streams A-M'],
+    deferred: ['Full slice and load acceptance are separate from infrastructure health; see available per-test assertions'],
   };
   const bytes = Buffer.from(`${JSON.stringify(assertions, null, 2)}\n`);
   await writeFile(join(root, 'assertions.json'), bytes);
@@ -73,6 +73,23 @@ export async function writeInfrastructureArtifacts(manifest: FleetManifest, mani
     artifacts: [{ kind: 'assertions', path: 'assertions.json', sha256: createHash('sha256').update(bytes).digest('hex'), sizeBytes: bytes.length }],
     deferred: assertions.deferred,
   };
+  for (const [report, kind] of [
+    ['slice-assertions.json', 'assertions'], ['ui/ui-assertions.json', 'assertions'],
+    ['playwright-results.json', 'assertions'], ['wire-metrics.json', 'wire-metrics'],
+  ] as const) {
+    const content = await readFile(join(root, report)).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; });
+    if (!content) continue;
+    index.artifacts.push({ kind, path: report, sha256: createHash('sha256').update(content).digest('hex'), sizeBytes: content.length });
+    if ((report === 'slice-assertions.json' || report === 'ui/ui-assertions.json') && index.status !== 'failed') index.status = 'incomplete';
+  }
+  for (const file of await readdir(join(root, 'ui')).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; })) {
+    if (!/^[a-z-]+\.png$/.test(file)) continue;
+    const content = await readFile(join(root, 'ui', file));
+    index.artifacts.push({ kind: 'screenshot', path: `ui/${file}`, sha256: createHash('sha256').update(content).digest('hex'), sizeBytes: content.length });
+  }
+  if (index.artifacts.some(artifact => artifact.path === 'slice-assertions.json' || artifact.path === 'ui/ui-assertions.json')) {
+    index.rerunCommand = 'pnpm exec playwright test scripts/environment-e2e/slice.spec.ts scripts/environment-e2e/ui.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium';
+  }
   const path = join(root, 'artifact-index.json');
   await writeFile(path, `${JSON.stringify(index, null, 2)}\n`);
   await validateArtifactIndex(path);

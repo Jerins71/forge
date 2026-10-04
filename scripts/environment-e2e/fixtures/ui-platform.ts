@@ -41,13 +41,14 @@ export function createFixturePlatform(environments: EnvironmentFixture[], primar
     if (operation === 'primary') return metadata(first);
     if (operation === 'list') return [...sessions.values()].map(metadata);
     if (operation === 'pair') {
-      const environment = environments.find(environment => environment.baseUrl === input.baseUrl && environment.environment?.environmentId === input.environmentId);
+      const environment = environments.find(environment => environment.baseUrl === input.baseUrl);
+      if (input.expectedEnvironmentId && input.expectedEnvironmentId !== environment?.environment?.environmentId) throw new Error('Pairing target mismatch');
       if (!environment) throw new Error('Pairing target mismatch');
       const credential = input.credential;
-      const grant: RpcOutput<'access.grant.create'> = { environmentId: input.environmentId, grantId: credential.grantId ?? '00000000-0000-4000-8000-000000000000',
+      const grant: RpcOutput<'access.grant.create'> = { environmentId: environment.environment!.environmentId, grantId: credential.grantId ?? '00000000-0000-4000-8000-000000000000',
         expiresAt: new Date().toISOString(), scopes: fixtureScopes, code: credential.kind === 'code' ? credential.code : null,
         pairingUrl: credential.kind === 'link' ? `${environment.baseUrl}/pair#secret=${credential.secret}` : null };
-      const session = await redeemFixtureGrant(environment, grant, credential.kind);
+      const session = await redeemFixtureGrant(environment, grant, credential.kind, input.requestedScopes);
       sessions.set(session.environmentId, session);
       return { environment: session.environment, deviceSession: session.deviceSession };
     }

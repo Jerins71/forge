@@ -1,15 +1,15 @@
 // Visible-UI acceptance for the Forge V2 environment slice (spec §8 row E, §9.2 items 1, 2, 3, 9).
 // It drives the built UI against the harness fleet: A is the primary environment, B pairs by link,
 // C pairs by short code. Run after the fleet is up:
-//   pnpm exec playwright test --config scripts/environment-e2e/playwright.config.ts --project chromium scripts/environment-e2e/ui.spec.ts
+//   pnpm exec playwright test scripts/environment-e2e/ui.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
 //
-// Harness contract (stream M owns it; until it exists every test is skipped with the reason):
+// Harness contract:
 //   scripts/environment-e2e/fixtures/ui-fleet.ts exports `openUiFleet(manifest)` returning UiFleet below.
-//   Grants are minted in the test process through each environment's authenticated session and are
-//   never written to the manifest, traces or artifacts.
+//   Grants are minted in the test process through each environment's authenticated session.
+//   Pairing request bodies and traces are excluded from artifacts.
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { expect, test, type Page, type Request } from '@playwright/test'
+import { expect, test as base, type BrowserContext, type Page, type Request } from '@playwright/test'
 
 interface UiEnvironment { environmentId: string; label: string; baseUrl: string; projectTitle: string; sessionId: string }
 interface UiFleet {
@@ -32,10 +32,25 @@ let fleet: UiFleet | null = null
 let skipReason: string | null = null
 const secrets: string[] = []
 const leaks: string[] = []
+let sharedContext: BrowserContext
+let sharedPage: Page
+// These serial scenarios exercise a single device's persisted environment catalog.
+// Credentials stay in the Node platform bridge; the browser retains only public catalog state.
+const test = base.extend({
+  page: async ({}, use) => { await use(sharedPage) },
+})
 
 test.describe.configure({ mode: 'serial' })
+test.use({ screenshot: 'off' })
 
-test.beforeAll(async () => {
+test.beforeAll(async ({ browser }) => {
+  sharedContext = await browser.newContext()
+  sharedPage = await sharedContext.newPage()
+  // The exchange body is the only carrier for pairing secrets.
+  sharedPage.on('request', (request: Request) => {
+    const exposed = [request.url(), request.headers().referer ?? '']
+    if (secrets.some((secret) => exposed.some((value) => value.includes(secret)))) leaks.push(new URL(request.url()).pathname)
+  })
   const manifestPath = process.env.FORGE_E2E_MANIFEST
   if (!manifestPath) { skipReason = 'FORGE_E2E_MANIFEST is not set'; return }
   const modulePath = './fixtures/ui-fleet.js'
@@ -48,6 +63,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
+  await sharedContext?.close()
   if (!fleet) return
   const dir = join(fleet.artifactRoot, 'ui')
   await mkdir(dir, { recursive: true })
@@ -55,13 +71,8 @@ test.afterAll(async () => {
   await fleet.dispose()
 })
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(() => {
   test.skip(skipReason !== null, skipReason ?? '')
-  // Pairing secrets must never appear in a request URL or Referer; the exchange body is the only carrier.
-  page.on('request', (request: Request) => {
-    const exposed = [request.url(), request.headers().referer ?? '']
-    if (secrets.some((secret) => exposed.some((value) => value.includes(secret)))) leaks.push(new URL(request.url()).pathname)
-  })
 })
 
 test.afterEach(() => {
@@ -81,12 +92,12 @@ async function openEnvironmentsSettings(page: Page) {
 }
 
 function environmentRow(page: Page, environment: UiEnvironment) {
-  return page.locator(`li[data-environment-id="${environment.environmentId}"]`)
+  return page.locator(`li[data-environment-status][data-environment-id="${environment.environmentId}"]`)
 }
 
 async function pairByLink(page: Page, pairingUrl: string) {
   await page.getByRole('button', { name: 'Add environment' }).click()
-  await page.getByLabel('Pairing link').fill(pairingUrl)
+  await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(pairingUrl)
   await page.getByRole('button', { name: 'Pair', exact: true }).click()
 }
 
@@ -116,7 +127,7 @@ test('9.2.1 B pairs by link, C pairs by code, and consumed grants cannot be repl
   // Lowercase without hyphens is accepted as typed.
   await page.getByLabel('Pairing code').fill(code.code!.toLowerCase().replace(/-/g, ''))
   // Needed later to list and revoke this device's session on C.
-  await page.getByLabel('Manage pairing and devices').check()
+  await page.getByRole('dialog').getByRole('checkbox', { name: 'Manage pairing and devices' }).check()
   await page.getByRole('button', { name: 'Pair', exact: true }).click()
   await expect(page.getByTestId('pairing-success')).toContainText(c.label)
   await page.getByRole('button', { name: 'Done' }).click()
@@ -124,7 +135,8 @@ test('9.2.1 B pairs by link, C pairs by code, and consumed grants cannot be repl
 
   // The link input is cleared once the dialog closes.
   await page.getByRole('button', { name: 'Add environment' }).click()
-  await expect(page.getByLabel('Pairing link')).toHaveValue('')
+  await page.getByRole('tab', { name: 'Pairing link', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Pairing link', exact: true })).toHaveValue('')
   await page.getByRole('button', { name: 'Cancel' }).click()
   assertions.pairing = { linkPaired: b.environmentId, codePaired: c.environmentId, replayRejected: true }
 })
@@ -132,12 +144,15 @@ test('9.2.1 B pairs by link, C pairs by code, and consumed grants cannot be repl
 test('9.2.2 A/B group by repository, manual split/merge works, C stays independent, sessions stay environment-qualified', async ({ page }) => {
   const { a, b, c } = fleet!
   await page.goto(fleet!.uiUrl)
-  const bRows = page.locator(`[data-session-ref="${b.environmentId}:${b.sessionId}"]`)
+  const sidebar = page.getByRole('complementary')
+  const bRows = sidebar.locator(`[data-session-ref="${b.environmentId}:${b.sessionId}"]`)
   // B's session is under A's project row (no duplicate top-level project) and carries B's badge.
-  await expect(page.getByText('Other environments')).toBeVisible()
+  await expect(sidebar.getByText('Other environments')).toBeVisible()
   await expect(bRows).toHaveCount(1)
   await expect(bRows).toContainText(b.label)
-  const standalone = page.getByTestId('other-environment-projects').getByTestId('logical-project-group')
+  const standalone = sidebar.getByTestId('other-environment-projects').getByTestId('logical-project-group')
+  await shot(page, 'grouping-observed')
+  assertions.observedGroups = await standalone.allTextContents()
   await expect(standalone.filter({ hasText: c.projectTitle })).toHaveCount(1)
 
   // Same session ID on two environments is two rows with two routes.
@@ -147,7 +162,7 @@ test('9.2.2 A/B group by repository, manual split/merge works, C stays independe
     await expect(page.getByTestId('environment-session')).toHaveAttribute('data-environment-id', b.environmentId)
   }
 
-  await page.getByRole('button', { name: /Grouping options/ }).first().click()
+  await sidebar.getByRole('button', { name: /Grouping options/ }).first().click()
   await page.getByRole('menuitem', { name: `Split ${b.label} checkout` }).click()
   await expect(standalone).toHaveCount(2)
   await standalone.filter({ hasText: b.projectTitle }).getByRole('button', { name: /Grouping options/ }).click()
@@ -169,16 +184,19 @@ test('9.2.3 Run on B with a new worktree and an attachment uploaded to B; enviro
   await page.keyboard.press('Enter')
   const options = page.getByRole('option')
   await expect(options).toHaveCount(2)
+  assertions.runOnMembers = await options.allTextContents()
   await options.filter({ hasText: b.label }).focus()
   await page.keyboard.press('Enter')
   await expect(runOn).toContainText(b.label)
+  assertions.runOnSelected = b.environmentId
 
   await page.getByTestId('workspace-picker').click()
-  await page.getByRole('option', { name: /New worktree/ }).click()
+  await page.getByRole('option', { name: /New worktree/ }).focus()
+  await page.keyboard.press('Enter')
   await page.getByLabel('New branch name (optional)').fill('forge-e2e-b')
   await page.locator('input[type=file]').setInputFiles({ name: 'note.txt', mimeType: 'text/plain', buffer: Buffer.from('routed to B') })
   await shot(page, 'run-on-workspace')
-  await page.getByRole('textbox').fill('Write the fixture marker')
+  await page.getByRole('combobox', { name: 'Message agent...' }).fill('Write the fixture marker')
   await page.keyboard.press('Enter')
 
   await expect(page).toHaveURL(new RegExp(`env=${b.environmentId}`))
@@ -186,8 +204,8 @@ test('9.2.3 Run on B with a new worktree and an attachment uploaded to B; enviro
   await expect(session.getByTestId('session-machine')).toContainText(b.label)
   await expect(session.getByTestId('workspace-locked')).toContainText('forge-e2e-b')
   const sessionId = new URL(page.url()).searchParams.get('agent')!
+  await expect.poll(() => fleet!.launchEvidence(b, sessionId)).toMatchObject({ commands: 1, worktrees: 1, dispatches: 1, markerChanged: true })
   const evidence = await fleet!.launchEvidence(b, sessionId)
-  expect(evidence).toMatchObject({ commands: 1, worktrees: 1, dispatches: 1, markerChanged: true })
   assertions.launch = { environmentId: b.environmentId, sessionId, ...evidence }
 })
 
@@ -253,13 +271,9 @@ test('narrow layout keeps Run on and Workspace reachable', async ({ page }) => {
   assertions.narrow = { width: 390, pickersVisible: true }
 })
 
-async function logicalGroupKey(page: Page, environment: UiEnvironment): Promise<string> {
+async function logicalGroupKey(page: Page, _environment: UiEnvironment): Promise<string> {
   await page.goto(fleet!.uiUrl)
-  const key = await page.locator(`li[data-environment-id="${environment.environmentId}"]`).first()
-    .locator('xpath=ancestor::ul[@data-logical-project]').getAttribute('data-logical-project')
-    .catch(() => null)
-  if (key) return key
   // A's project is rendered by its own row; the group key is on the "Other environments" member list.
-  const memberList = page.locator('ul[data-logical-project]').first()
+  const memberList = page.getByRole('complementary').locator('ul[data-logical-project]').first()
   return (await memberList.getAttribute('data-logical-project'))!
 }

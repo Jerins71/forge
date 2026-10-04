@@ -12,19 +12,15 @@ try {
   const environment = fleet.manifest.environments[0]!;
   const session = await controlEnvironment<BootstrapSession>(fleet.manifest, environment.name, 'bootstrap');
   const smoke = await legacySmoke(environment, session);
-  // Exercise infrastructure without claiming A/D auth or platform acceptance.
-  const ui = await openUiFleet(fleet.manifestPath, { integration: {
-    bootstrap: async environment => ({ environmentId: `00000000-0000-4000-8000-00000000000${fleet.manifest.environments.findIndex(value => value.name === environment.name) + 1}`, bearer: 'synthetic-inert-ui-test-identity' }),
-    seed: async (environment, session) => ({ environmentId: session.environmentId, label: environment.name, baseUrl: environment.baseUrl,
-      projectTitle: 'Synthetic UI infrastructure', sessionId: smoke.sessionId }),
-    platformScript: async () => 'globalThis.__fixtureInfrastructure = true;',
-  } });
+  const ui = await openUiFleet(fleet.manifestPath);
   try {
     assert.equal((await fetch(ui.uiUrl)).status, 200, 'real built UI shell');
     assert((await (await fetch(ui.uiUrl)).text()).includes('/__forge_e2e_platform.js'));
-    assert.equal(await (await fetch(`${ui.uiUrl}/__forge_e2e_platform.js`)).text(), 'globalThis.__fixtureInfrastructure = true;');
+    const platformCode = await (await fetch(`${ui.uiUrl}/__forge_e2e_platform.js`)).text();
+    assert(platformCode.includes('__forgeE2EPlatform'));
+    assert(!platformCode.includes(session.bearer), 'platform script contains no credential');
     const evidence = await ui.launchEvidence(ui.a, smoke.sessionId);
-    assert.equal(evidence.commands, 0, 'current backend has no V2 command DB');
+    assert.equal(evidence.commands, 0, 'legacy fixture created no V2 launch command');
     assert.equal(evidence.worktrees, 0);
     assert(evidence.dispatches >= 3);
     assert.equal(evidence.markerChanged, true);
@@ -39,9 +35,8 @@ try {
     assert.notEqual(b.pid, originalPid);
     assert.equal(await readFile(join(b.checkout, 'environment-marker.txt'), 'utf8'), marker);
     await verifyFleetHealth(fleet.manifest);
-    await writeFile(join(fleet.manifest.artifactRoot, 'ui-infrastructure.json'), JSON.stringify({ builtUiServed: true, restartedSameUrl: true, othersHealthy: true, evidence, v2AuthPlatformDeferred: true }, null, 2));
+    await writeFile(join(fleet.manifest.artifactRoot, 'ui-infrastructure.json'), JSON.stringify({ builtUiServed: true, restartedSameUrl: true, othersHealthy: true, evidence, realPrivatePairing: true, credentialFreePlatformScript: true }, null, 2));
   } finally { await ui.dispose(); }
-  await assert.rejects(openUiFleet(fleet.manifestPath), /bootstrap/);
   failed = false;
   await fleet.stop();
   const indexPath = await writeInfrastructureArtifacts(fleet.manifest, fleet.manifestPath, smoke);
