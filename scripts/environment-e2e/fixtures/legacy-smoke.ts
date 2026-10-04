@@ -3,12 +3,15 @@ import { once } from 'node:events';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { WebSocket } from './ws.js';
-import type { EnvironmentFixture } from '../launch.js';
+import type { BootstrapSession, EnvironmentFixture } from '../launch.js';
 
 type Frame = Record<string, unknown>;
 export interface LegacySmokeEvidence { sessionId: string; assistantReplies: number; workerResults: number; dispatches: number; choices: number; workerSpawns: number; streamingDeltas: number; }
-export async function legacySmoke(environment: EnvironmentFixture): Promise<LegacySmokeEvidence> {
-  const socket = new WebSocket(environment.baseUrl.replace('http:', 'ws:'));
+export async function legacySmoke(environment: EnvironmentFixture, session: BootstrapSession): Promise<LegacySmokeEvidence> {
+  const response = await fetch(`${environment.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { Authorization: `Bearer ${session.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ audience: 'legacy', protocolVersion: 1 }) });
+  if (!response.ok) throw new Error('Legacy smoke requires paired auth');
+  const ticket = (await response.json() as { ticket: string }).ticket;
+  const socket = new WebSocket(environment.baseUrl.replace('http:', 'ws:'), ['forge.v2', `ticket.${ticket}`]);
   const frames: Frame[] = [];
   const listeners = new Set<() => void>();
   socket.on('message', data => { frames.push(JSON.parse(data.toString()) as Frame); for (const listener of listeners) listener(); });
@@ -28,13 +31,13 @@ export async function legacySmoke(environment: EnvironmentFixture): Promise<Lega
     });
   }
   try {
-    send({ type: 'subscribe' });
-    await wait(frame => frame.type === 'ready');
+    send({ type: 'subscribe_inventory', requestId: 'legacy-smoke-inventory' });
+    await wait(frame => frame.type === 'inventory_snapshot');
     send({ type: 'create_manager', name: 'Synthetic native fixture', cwd: environment.checkout,
       secureSessionsEnabled: false, modelSelection: { provider: 'codex-native', modelId: 'gpt-6-sol' },
       reasoningLevel: 'high', requestId: 'fixture-manager' });
-    const created = await wait(frame => frame.type === 'manager_created' && frame.requestId === 'fixture-manager');
-    const manager = created.manager as { agentId: string; model: { provider: string }; cwd: string };
+    const catalog = await wait(frame => frame.type === 'agents_snapshot' && (frame.agents as { role: string }[]).some(agent => agent.role === 'manager'));
+    const manager = (catalog.agents as { role: string; agentId: string; model: { provider: string }; cwd: string }[]).find(agent => agent.role === 'manager')!;
     assert.equal(manager.model.provider, 'codex-native');
     assert.equal(manager.cwd, environment.checkout);
     let since = frames.length;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { launchFleet, verifyFleetHealth, repositoryRoot } from '../launch.js';
+import { launchFleet, verifyFleetHealth, repositoryRoot, controlEnvironment, type BootstrapSession } from '../launch.js';
 import { legacySmoke } from './legacy-smoke.js';
 import { openUiFleet } from './ui-fleet.js';
 import { writeInfrastructureArtifacts, validateArtifactIndex } from '../assert-artifacts.js';
@@ -9,7 +9,9 @@ import { writeInfrastructureArtifacts, validateArtifactIndex } from '../assert-a
 const fleet = await launchFleet({ environments: 3, out: join(repositoryRoot, '.internal/forge-v2-remote/harness-ui-infrastructure.json') });
 let failed = true;
 try {
-  const smoke = await legacySmoke(fleet.manifest.environments[0]!);
+  const environment = fleet.manifest.environments[0]!;
+  const session = await controlEnvironment<BootstrapSession>(fleet.manifest, environment.name, 'bootstrap');
+  const smoke = await legacySmoke(environment, session);
   // Exercise infrastructure without claiming A/D auth or platform acceptance.
   const ui = await openUiFleet(fleet.manifestPath, { integration: {
     bootstrap: async environment => ({ environmentId: `00000000-0000-4000-8000-00000000000${fleet.manifest.environments.findIndex(value => value.name === environment.name) + 1}`, bearer: 'synthetic-inert-ui-test-identity' }),

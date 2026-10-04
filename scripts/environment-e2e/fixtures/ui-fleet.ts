@@ -157,21 +157,27 @@ export async function authenticatedRpc<T>(baseUrl: string, session: BootstrapSes
 export async function seedUiEnvironment(environment: EnvironmentFixture, session: BootstrapSession): Promise<UiEnvironment> {
   // Current serializer/API creates synthetic project descriptors. This path uses
   // the authenticated legacy adapter once A/C land, never an unauthenticated seam.
-  const ws = new WebSocket(environment.baseUrl.replace('http:', 'ws:'), ['forge.v2', `ticket.${await ticket(environment.baseUrl, session, 'legacy')}`]);
   if (environment.name === 'env-c') await promisify(execFile)('git', ['remote', 'set-url', 'origin', 'https://fixture.invalid/forge/independent-fixture.git'], { cwd: environment.checkout, env: sanitizedEnvironment() });
+  const ws = new WebSocket(environment.baseUrl.replace('http:', 'ws:'), ['forge.v2', `ticket.${await ticket(environment.baseUrl, session, 'legacy')}`]);
   const title = environment.name === 'env-c' ? 'Independent fixture' : 'Shared fixture';
   try {
     await once(ws, 'open');
     const result = new Promise<{ manager: { agentId: string } }>((resolveSeed, reject) => {
-      const timer = setTimeout(() => reject(new Error('Authenticated fixture descriptor seed timed out')), 10_000);
+      const frameTypes: string[] = [];
+      const timer = setTimeout(() => reject(new Error(`Authenticated fixture descriptor seed timed out (${frameTypes.join(',')})`)), 10_000);
       ws.on('message', data => {
-        const frame = JSON.parse(data.toString()) as { type: string; manager: { agentId: string } };
-        if (frame.type === 'ready') ws.send(JSON.stringify({ type: 'create_manager', name: title, cwd: environment.checkout,
+        const frame = JSON.parse(data.toString()) as { type: string; agents?: { agentId: string; role: string }[]; manager: { agentId: string } };
+        frameTypes.push(frame.type);
+        if (frame.type === 'inventory_snapshot') ws.send(JSON.stringify({ type: 'create_manager', name: title, cwd: environment.checkout,
           secureSessionsEnabled: false, modelSelection: { provider: 'codex-native', modelId: 'gpt-6-sol' }, requestId: 'ui-fixture-seed' }));
+        if (frame.type === 'agents_snapshot') {
+          const manager = frame.agents?.find(agent => agent.role === 'manager');
+          if (manager) { clearTimeout(timer); resolveSeed({ manager }); }
+        }
         if (frame.type === 'manager_created') { clearTimeout(timer); resolveSeed(frame); }
         if (frame.type === 'error') { clearTimeout(timer); reject(new Error('Authenticated fixture descriptor seed rejected')); }
       });
-      ws.send(JSON.stringify({ type: 'subscribe' }));
+      ws.send(JSON.stringify({ type: 'subscribe_inventory', requestId: 'ui-fixture-inventory' }));
     });
     const seeded = await result;
     return { environmentId: session.environmentId, label: session.label ?? environment.name, baseUrl: environment.baseUrl, projectTitle: title, sessionId: seeded.manager.agentId };

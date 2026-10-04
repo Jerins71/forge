@@ -1,4 +1,6 @@
 import type { EnvironmentDescriptor, DeviceSession } from '@forge/protocol/environment-v2';
+import { fixtureRpcOnce } from './fixtures/rpc-client.js';
+import { redeemFixtureGrant, fixtureScopes } from './fixtures/pairing.js';
 import { bootstrapFixtureChild } from './fixtures/pairing.js';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -84,7 +86,7 @@ export async function verifyFleetHealth(manifest: FleetManifest): Promise<void> 
     assert.equal(fixture.instanceId, environment.instanceId);
     assert.equal(await readFile(join(environment.checkout, 'environment-marker.txt'), 'utf8'), `${environment.name}\n`);
     const remote = await command(['remote', 'get-url', 'origin'], environment.checkout, sanitizedEnvironment());
-    assert.equal(remote, origin);
+    assert(environment.name === 'env-c' ? [origin, 'https://fixture.invalid/forge/independent-fixture.git'].includes(remote) : remote === origin, 'fixture remote identity');
   }
 }
 
@@ -104,7 +106,15 @@ export async function launchFleet(options: { environments?: number; out?: string
     controlSocket: join(root, 'fleet-control.sock'), createdAt: new Date().toISOString(), status: 'running', provider: 'fixture', environments: [] };
   const children: ChildProcess[] = [];
   const paused = new Set<string>();
-  const pairing = options.pairingHooks ?? { bootstrap: bootstrapFixtureChild, pair: pendingPairingHooks.pair };
+  const hostSessions = new Map<string, BootstrapSession>();
+  const pairing: PairingHooks = options.pairingHooks ?? {
+    async bootstrap(child, environment) { const session = await bootstrapFixtureChild(child, environment); hostSessions.set(environment.name, session); return session; },
+    async pair(environment, mode) {
+      const admin = hostSessions.get(environment.name) ?? await this.bootstrap(children[manifest.environments.indexOf(environment)]!, environment);
+      const grant = await fixtureRpcOnce(environment.baseUrl, admin, 'access.grant.create', { kind: mode, label: 'Fixture paired device', scopes: fixtureScopes, expiresInSeconds: 300, reachableBaseUrl: environment.baseUrl });
+      return redeemFixtureGrant(environment, grant, mode);
+    },
+  };
   let controlServer: ReturnType<typeof createServer> | undefined;
   let lifecycle: Promise<unknown> = Promise.resolve();
   const startFunctions = new Map<string, () => Promise<EnvironmentFixture>>();
@@ -284,7 +294,7 @@ async function main() {
   process.once('SIGINT', onSignal); process.once('SIGTERM', onSignal);
   try {
     if (args.includes('--smoke') || args.includes('--legacy-smoke')) {
-      const evidence = args.includes('--legacy-smoke') ? await legacySmoke(fleet.manifest.environments[0]!) : undefined;
+      const evidence = args.includes('--legacy-smoke') ? await legacySmoke(fleet.manifest.environments[0]!, await fleet.pairing.bootstrap(fleet.children[0]!, fleet.manifest.environments[0]!)) : undefined;
       await fleet.stop();
       await writeInfrastructureArtifacts(fleet.manifest, fleet.manifestPath, evidence);
       console.log('Fleet health and owned-child teardown passed');
