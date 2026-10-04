@@ -108,7 +108,17 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
       () => this.readCache.clear(),
       (r) => this.applyReceipt(r),
     )
-    this.features = createFeatureClients(this.http, this)
+    this.features = createFeatureClients(this.http, this, (blob) => {
+      const url = this.ports.createObjectUrl?.(blob) ?? URL.createObjectURL(blob)
+      this.urls.add(url)
+      return {
+        url,
+        release: () => {
+          if (this.urls.delete(url))
+            (this.ports.revokeObjectUrl ?? URL.revokeObjectURL)(url)
+        },
+      }
+    })
     this.detachConnection = this.connection.subscribe(
       (s) => s.transportHealthy,
       () => {
