@@ -1,8 +1,6 @@
 import {
   useCallback,
-  useEffect,
   useRef,
-  useState,
   useSyncExternalStore,
 } from 'react'
 import type {
@@ -10,7 +8,6 @@ import type {
   SelectorStore,
   ShellState,
 } from '@forge/client-runtime'
-import type { SessionRef } from '@forge/protocol/environment-v2'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 export function useSelectorStore<S, T>(
   store: SelectorStore<S>,
@@ -68,53 +65,4 @@ export function useLogicalProjects() {
 }
 function identity<T>(value: T): T {
   return value
-}
-export function useSessionDetail(ref: SessionRef | null) {
-  const registry = useEnvironmentRegistry()
-  const environmentId = ref?.environmentId,
-    sessionId = ref?.sessionId
-  const [active, setActive] = useState<{
-    environmentId: string
-    sessionId: string
-    lease: ReturnType<
-      import('@forge/client-runtime').EnvironmentClient['acquireDetail']
-    >
-  } | null>(null)
-  useEffect(() => {
-    if (!environmentId || !sessionId) {
-      setActive(null)
-      return
-    }
-    const lease = registry.get(environmentId).acquireDetail(sessionId)
-    setActive({ environmentId, sessionId, lease })
-    return () => lease.release()
-  }, [registry, environmentId, sessionId])
-  const lease =
-    active?.environmentId === environmentId && active?.sessionId === sessionId
-      ? active?.lease
-      : null
-  const subscribe = useCallback(
-    (listener: () => void) =>
-      lease?.store.subscribe(identity, listener) ?? (() => {}),
-    [lease],
-  )
-  const snapshot = useCallback(
-    () => lease?.store.getSnapshot() ?? null,
-    [lease],
-  )
-  return useSyncExternalStore(subscribe, snapshot, snapshot)
-}
-
-export function useCommandReceipt(environmentId: string, commandId: string) {
-  const store = useEnvironmentRegistry().get(environmentId).receipts
-  const selector = useCallback(
-    (
-      receipts: ReadonlyMap<
-        string,
-        import('@forge/protocol/environment-v2').CommandReceipt
-      >,
-    ) => receipts.get(commandId) ?? null,
-    [commandId],
-  )
-  return useSelectorStore(store, selector, [commandId])
 }

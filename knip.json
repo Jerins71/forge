@@ -6,6 +6,9 @@
     ],
     "@forge/client-runtime": [
       "packages/client-runtime/src/index.ts"
+    ],
+    "@forge/protocol/environment-v2": [
+      "packages/protocol/src/environment-v2.ts"
     ]
   },
   "typescript": true,
@@ -48,6 +51,10 @@
       ],
       "project": [
         "scripts/**/*.mjs"
+      ],
+      "ignoreDependencies": [
+        "tsx",
+        "@forge/protocol"
       ]
     },
     "apps/backend": {
@@ -68,8 +75,7 @@
       "entry": [
         "src/router.tsx",
         "src/routeTree.gen.ts",
-        "src/**/*.test.ts",
-        "src/**/__tests__/**/*.ts"
+        "src/**/*.test.ts"
       ],
       "project": [
         "src/**/*.{ts,tsx}"
@@ -135,7 +141,6 @@
     },
     "packages/client-runtime": {
       "entry": [
-        "src/index.ts",
         "src/**/*.test.ts"
       ],
       "project": [

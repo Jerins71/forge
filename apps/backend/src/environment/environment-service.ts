@@ -18,7 +18,7 @@ import { createLegacyBuilderAdapter } from '../ws/rpc/legacy-builder-adapter.js'
 import { createTerminalRpcTransport } from '../terminal/terminal-rpc-transport.js';
 import { createEnvironmentArtifactRoutes } from '../ws/http/routes/environment-artifact-routes.js';
 import { loadEnvironmentIdentity, EnvironmentIdentityMismatch, type IdentityOptions } from './identity.js';
-import { createEnvironmentAccess } from './access/access-service.js';
+import { createEnvironmentAccess, type EnvironmentAccess } from './access/access-service.js';
 import { applyAccessMigrations } from './access/access-migrations.js';
 import type { ExposurePolicy } from './exposure-policy.js';
 import { createControlCore, type ControlCore } from './control/database.js';
@@ -35,7 +35,7 @@ import { StreamFault } from './streams/stream-budget.js';
 /** One environment owner; network ingress remains on the existing server. */
 export interface EnvironmentService {
   database: Database.Database;
-  access: ReturnType<typeof createEnvironmentAccess>;
+  access: EnvironmentAccess;
   control: import('./control/command-service.js').EnvironmentControlService;
   exposure: ExposurePolicy;
   descriptor(): EnvironmentDescriptor;
@@ -64,7 +64,7 @@ export async function createEnvironmentService(options: {
   let core: ControlCore | undefined;
   let mirror: SwarmEventMirror | undefined;
   let rpc: ReturnType<typeof createEnvironmentRpcServer> | undefined;
-  let access: ReturnType<typeof createEnvironmentAccess> | undefined;
+  let access: EnvironmentAccess | undefined;
   try {
     const workspaceService = createWorkspaceService({ database, dataDir: config.paths.dataDir, swarmManager });
     const artifactService = createArtifactService({ database, dataDir: config.paths.dataDir, swarmManager });
