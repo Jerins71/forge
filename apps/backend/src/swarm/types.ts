@@ -99,6 +99,8 @@ export interface ManagerProfile {
 
 export interface AgentDescriptor {
   agentId: string;
+  /** Durable control intent owning this manager session. */
+  controlCommandId?: string;
   displayName: string;
   role: AgentRole;
   managerId: string;
@@ -361,6 +363,8 @@ export interface ConversationMessageEvent extends ConversationTimelineEntryMetad
   sourceContext?: MessageSourceContext;
   /** Echo of the sender-provided `user_message.clientRequestId` (Wave R). */
   clientRequestId?: string;
+  controlCommandId?: string;
+  controlInputHash?: string;
   projectAgentContext?: ProjectAgentMessageContext;
   externalThreadContext?: ExternalThreadMessageContext;
   terminal?: boolean;

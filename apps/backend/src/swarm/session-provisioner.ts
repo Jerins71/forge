@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { ConversationTimeline } from "./session/conversation-timeline.js";
 import { rm } from "node:fs/promises";
 import {
   getProfileMemoryPath,
@@ -27,6 +29,8 @@ export interface ProvisionSessionOptions {
   onError?: (error: unknown) => Promise<void>;
   beforeRollbackRemoval?: () => Promise<void>;
   removeProfileOnRollback?: boolean;
+  /** Controlled ownership evidence must survive a partial provisioning failure. */
+  retainOnError?: boolean;
 }
 
 export interface DisposeSessionOptions {
@@ -106,6 +110,9 @@ export class SessionProvisioner {
       }
 
       await this.options.writeInitialSessionMeta(descriptor);
+      if (descriptor.controlCommandId && !this.options.runtimes.has(descriptor.agentId) && !existsSync(descriptor.sessionFile)) {
+        new ConversationTimeline({ now: () => descriptor.createdAt }).ensureSessionFileHeader(descriptor);
+      }
       await beforeRuntime?.();
       await initializeRuntime?.();
     } catch (error) {
@@ -119,6 +126,8 @@ export class SessionProvisioner {
           });
         }
       }
+
+      if (options.retainOnError) throw error;
 
       const rollback = await this.rollbackCreatedSession(descriptor, {
         removeProfileId: removeProfileOnRollback && profile ? profile.profileId : undefined,

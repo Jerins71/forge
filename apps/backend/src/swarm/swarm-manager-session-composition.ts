@@ -56,7 +56,7 @@ export interface SwarmManagerSessionCompositionServices {
 }
 
 type ProvisionerOwnedKeys = "dataDir" | "runtimes" | "forgetPinnedMessages" | "conversationProjector";
-type SessionOwnedKeys = "profiles" | "runtimes" | "provisioner" | "prepareSessionCreation" | "resolveGlobalDelegationRosterId" | "deleteProjectAgentRecord" | "copySessionHistoryForFork" | "copyPinnedMessagesForFork" | "resetConversationHistory";
+type SessionOwnedKeys = "profiles" | "runtimes" | "getDescriptor" | "provisioner" | "prepareSessionCreation" | "resolveGlobalDelegationRosterId" | "deleteProjectAgentRecord" | "copySessionHistoryForFork" | "copyPinnedMessagesForFork" | "resetConversationHistory";
 type ProjectAgentOwnedKeys = "dataDir" | "descriptors" | "provisioner" | "now" | "prepareSessionCreation";
 type SharingOwnedKeys = "dataDir" | "now" | "getProfiles" | "getDescriptor" | "getDescriptors";
 type ProjectCoordinatorOwnedKeys = "config" | "descriptors" | "profiles" | "projectAgents" | "sharing" | "now";
@@ -128,6 +128,7 @@ export function createSwarmManagerSessionComposition(
     },
   });
   const sessionService = new SwarmSessionService({
+    getDescriptor: (agentId) => state.descriptors.get(agentId),
     dataDir: state.config.paths.dataDir,
     ...options.sessions,
     profiles: state.profiles,

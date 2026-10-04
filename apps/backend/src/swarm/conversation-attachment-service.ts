@@ -24,6 +24,13 @@ import type {
   ConversationBinaryAttachment,
 } from "./types.js";
 
+const trustedPersistedAttachments = new WeakSet<ConversationAttachment>();
+
+/** Internal artifact authority; transport parsers cannot manufacture this object identity. */
+export function trustPersistedConversationAttachment(attachment: ConversationAttachment): ConversationAttachment {
+  trustedPersistedAttachments.add(attachment); return attachment;
+}
+
 export interface PreparedConversationAttachments {
   normalizedAttachments: ConversationAttachment[];
   persistedAttachments: ConversationAttachment[];
@@ -49,7 +56,9 @@ export class ConversationAttachmentService {
   constructor(private readonly options: ConversationAttachmentServiceOptions) {}
 
   normalize(attachments: ConversationAttachment[] | undefined): ConversationAttachment[] {
-    return normalizeConversationAttachments(attachments);
+    return (attachments ?? []).flatMap(attachment => trustedPersistedAttachments.has(attachment)
+      ? [trustPersistedConversationAttachment({ ...attachment })]
+      : normalizeConversationAttachments([attachment]));
   }
 
   /** Persists inbound payloads before the canonical conversation event is emitted. */
@@ -57,9 +66,9 @@ export class ConversationAttachmentService {
     attachments: ConversationAttachment[] | undefined,
   ): Promise<PreparedConversationAttachments> {
     const normalizedAttachments = this.normalize(attachments);
-    const persistedAttachments = normalizedAttachments.length === 0
-      ? []
-      : await persistConversationAttachments(normalizedAttachments, this.options.uploadsDir);
+    const persistedAttachments = await Promise.all(normalizedAttachments.map(async attachment =>
+      trustedPersistedAttachments.has(attachment) ? attachment
+        : (await persistConversationAttachments([attachment], this.options.uploadsDir))[0]));
     const attachmentMetadata = toConversationAttachmentMetadata(
       persistedAttachments,
       this.options.uploadsDir,

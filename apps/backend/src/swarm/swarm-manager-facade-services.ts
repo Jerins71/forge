@@ -41,7 +41,7 @@ export interface TerminalArchiveHooks {
 export interface SwarmManagerFacadeRuntimeServices {
   controller: Pick<
     SwarmRuntimeController,
-    "getGenerationThroughputSnapshot" | "listRuntimeExtensionSnapshots"
+    "getGenerationThroughputSnapshot" | "listRuntimeExtensionSnapshots" | "isRuntimeShutdownQuarantined"
   >;
   lifecycle: Pick<
     SwarmRuntimeLifecycleCoordinator,
@@ -102,7 +102,7 @@ export interface SwarmManagerFacadeServices extends SwarmManagerSessionFacadeSer
     SessionAttentionCoordinator,
     "initialize" | "getSnapshot" | "dismissAttentionIds"
   >;
-  recovery: Pick<RestartRecoveryCoordinator, "dismiss" | "getSnapshot" | "resume">;
+  recovery: Pick<RestartRecoveryCoordinator, "dismiss" | "getSnapshot" | "resume" | "setControlledRecoveryPolicy">;
   configuration: SwarmConfigurationCoordinator;
   registry: {
     directory: AgentDirectory;
@@ -110,7 +110,7 @@ export interface SwarmManagerFacadeServices extends SwarmManagerSessionFacadeSer
   runtime: SwarmManagerFacadeRuntimeServices;
   events: Pick<
     SwarmEventCoordinator,
-    "emitModelCacheObservation" | "getAgentsSnapshotVersion" | "getProfilesSnapshotVersion"
+    "emitModelCacheObservation" | "getAgentsSnapshotVersion" | "getProfilesSnapshotVersion" | "observeCatalogDirty"
   >;
   conversation: {
     history: Pick<HistorySearchService, "search" | "read" | "sessions" | "items" | "windows" | "startFromRegistry" | "dispose" | "getIndexStatus" | "setIndexPaused">;

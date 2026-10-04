@@ -4,6 +4,7 @@ import type { AgentDescriptor, ChoiceAnswer, ChoiceQuestion, ChoiceRequestStatus
 
 interface PendingChoiceRequest {
   choiceId: string;
+  runtimeGeneration: string;
   agentId: string;
   sessionAgentId: string;
   questions: ChoiceQuestion[];
@@ -58,6 +59,7 @@ export class SwarmChoiceService {
     const promise = new Promise<ChoiceAnswer[]>((resolve, reject) => {
       const pending: PendingChoiceRequest = {
         choiceId,
+        runtimeGeneration: randomUUID(),
         agentId,
         sessionAgentId,
         questions,
@@ -189,8 +191,8 @@ export class SwarmChoiceService {
       timestamp?: string;
     },
   ): ChoiceRequestEvent {
-    return {
-      type: "choice_request",
+    return Object.defineProperty({
+      type: "choice_request" as const,
       agentId: pending.agentId,
       sessionAgentId: pending.sessionAgentId,
       choiceId: pending.choiceId,
@@ -198,6 +200,6 @@ export class SwarmChoiceService {
       status,
       ...(overrides?.answers ? { answers: overrides.answers } : {}),
       timestamp: overrides?.timestamp ?? pending.createdAt,
-    };
+    }, "runtimeGeneration", { value: pending.runtimeGeneration, enumerable: false });
   }
 }

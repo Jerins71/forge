@@ -115,7 +115,7 @@ import type {
   SwarmReasoningLevel,
 } from "./types.js";
 import { normalizeOptionalAgentId } from "./swarm-manager-utils.js";
-import { SwarmManagerSessionAttentionFacade } from "./swarm-manager-session-attention-facade.js";
+import { SwarmManagerControlFacade } from "./swarm-manager-control-facade.js";
 
 export interface CreateManagerInput {
   secureSessionsEnabled?: boolean;
@@ -189,7 +189,7 @@ import type {
  * coordinators above, while this class keeps the manager's compatibility
  * surface explicit without forcing every delegate into the composition root.
  */
-export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFacade {
+export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
   protected abstract getFacadeServices(): SwarmManagerFacadeServices;
   flushPendingPersistence(): Promise<void> { return this.services.persistence.flushPendingTurnSeqPersists(); }
   getSessionPlanSnapshot(
@@ -1186,7 +1186,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
     this.services.runtime.turns.afterRuntimeEventProjection(agentId, runtimeToken, event);
   }
 
-
   getActiveTurnId(agentId: string, runtimeToken?: number): string | undefined {
     return this.services.runtime.turns.getActiveTurnId(agentId, runtimeToken);
   }
@@ -1223,7 +1222,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
       sessions: this.listAgents().filter((descriptor) => descriptor.role === "manager"),
     });
   }
-
 
   setTerminalArchiveHooks(hooks?: TerminalArchiveHooks): void {
     this.services.host.setTerminalArchiveHooks(hooks);

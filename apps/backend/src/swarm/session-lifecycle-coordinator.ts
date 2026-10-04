@@ -101,6 +101,7 @@ export interface SessionLifecycleCoordinatorOptions {
     SwarmSessionService,
     | "createSession"
     | "createSessionWithOverrides"
+    | "ensureControlledSession"
     | "deleteSession"
     | "clearSessionConversation"
     | "renameSession"
@@ -204,6 +205,11 @@ export class SessionLifecycleCoordinator {
     );
     await this.emitExtensionLifecycle("created", created.sessionAgent);
     return created;
+  }
+
+  async ensureControlledSession(input: Parameters<SwarmSessionService["ensureControlledSession"]>[0]): ReturnType<SwarmSessionService["ensureControlledSession"]> {
+    this.assertProfileNotArchived(input.projectId);
+    return this.options.sessions.ensureControlledSession(input);
   }
 
   async createSessionFromAgent(

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { statSync } from "node:fs";
+import { createReadStream, closeSync, fsyncSync, openSync, statSync } from "node:fs";
+import { createInterface } from "node:readline";
 import {
   CONVERSATION_ENTRY_TYPE,
   ConversationTimeline,
@@ -67,6 +68,12 @@ type ConversationEventName =
   | "choice_request"
   | "plan_summary"
   | "model_cache_observation";
+
+export interface ControlledAppendContext {
+  inputId: string; commandId: string; contentHash: string;
+  sourceOffset?: number;
+  onLocator?(locator: { fileGeneration: string; byteOffset: number; entryId: string }): void;
+}
 
 interface ConversationHistoryWithDiagnostics {
   history: ConversationEntryEvent[];
@@ -330,6 +337,58 @@ export class ConversationProjector {
     this.historyCacheStore.queueCacheSnapshotWrite(resolvedSessionFile, null);
   }
 
+  /** Uses the existing canonical writer, then acknowledges bytes actually persisted to JSONL. */
+  async appendControlledConversationMessage(event: ConversationMessageEvent, control: ControlledAppendContext): Promise<ConversationMessageEvent> {
+    const descriptor = this.deps.descriptors.get(event.agentId);
+    if (!descriptor) throw new Error("Controlled canonical source is missing.");
+    const existing = await this.findControlledInput(descriptor.sessionFile, control.inputId, control.sourceOffset ?? 0);
+    if (existing) {
+      if (existing.controlCommandId !== control.commandId || existing.controlInputHash !== control.contentHash) {
+        throw Object.assign(new Error("Canonical input ID has conflicting content."), { code: "CONFLICT", retryable: false });
+      }
+      const fd = openSync(descriptor.sessionFile, "r");
+      try { fsyncSync(fd); } finally { closeSync(fd); }
+      return existing;
+    }
+    let offset = 0;
+    try { offset = statSync(descriptor.sessionFile).size; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (this.deps.runtimes.has(event.agentId)) {
+        throw Object.assign(new Error("This fresh runtime has not materialized its canonical file yet."), { code: "UNAVAILABLE", retryable: true });
+      }
+    }
+    event.id = control.inputId;
+    event.controlCommandId = control.commandId;
+    event.controlInputHash = control.contentHash;
+    this.emitConversationEntry(event, { requirePersistence: true });
+    const persisted = await this.findControlledInput(descriptor.sessionFile, control.inputId, offset);
+    if (!persisted || persisted.controlInputHash !== control.contentHash) {
+      throw new Error("Canonical writer did not persist the controlled input.");
+    }
+    const fd = openSync(descriptor.sessionFile, "r");
+    try { fsyncSync(fd); } finally { closeSync(fd); }
+    const source = statSync(descriptor.sessionFile);
+    control.onLocator?.({ fileGeneration: `${source.dev}:${source.ino}`, byteOffset: offset, entryId: persisted.timelineEntryId ?? persisted.id! });
+    this.deps.emitServerEvent("conversation_message", persisted satisfies ServerEvent);
+    return persisted;
+  }
+
+  private async findControlledInput(sessionFile: string, inputId: string, start: number): Promise<ConversationMessageEvent | undefined> {
+    let size: number;
+    try { size = statSync(sessionFile).size; } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+    const stream = createReadStream(sessionFile, { start: start <= size ? start : 0 });
+    const lines = createInterface({ input: stream, crlfDelay: Infinity });
+    try {
+      for await (const line of lines) {
+        let entry: { customType?: string; data?: ConversationMessageEvent };
+        try { entry = JSON.parse(line) as typeof entry; } catch { continue; }
+        if (entry.customType === CONVERSATION_ENTRY_TYPE && entry.data?.type === "conversation_message" && entry.data.id === inputId) return entry.data;
+      }
+    } finally { lines.close(); stream.destroy(); }
+    return undefined;
+  }
+
   emitConversationMessage(event: ConversationMessageEvent, options?: { routingReceipt?: MessageRoutingReceiptRecord }): void {
     this.emitConversationEntry(event, options);
     this.deps.emitServerEvent("conversation_message", event satisfies ServerEvent);
@@ -449,7 +508,7 @@ export class ConversationProjector {
 
   private emitConversationEntry(
     event: ConversationEntryEvent,
-    options?: { historyAgentId?: string; routingReceipt?: MessageRoutingReceiptRecord },
+    options?: { historyAgentId?: string; routingReceipt?: MessageRoutingReceiptRecord; requirePersistence?: boolean },
   ): void {
     const historyAgentId = resolveHistoryAgentId(event, options?.historyAgentId);
     const descriptor = this.deps.descriptors.get(historyAgentId);
@@ -507,6 +566,10 @@ export class ConversationProjector {
       this.historyCacheStore.incrementPersistedEntryCount(descriptor.sessionFile);
       this.queueConversationHistoryCacheWrite(historyAgentId, history);
     } catch (error) {
+      if (options?.requirePersistence) {
+        const index = history.indexOf(event); if (index >= 0) history.splice(index, 1);
+        throw error;
+      }
       this.deps.logDebug("history:save:error", {
         message: error instanceof Error ? error.message : String(error)
       });
