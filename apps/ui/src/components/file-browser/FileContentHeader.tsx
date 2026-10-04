@@ -18,7 +18,7 @@ import {
   EDITOR_LABELS,
 } from '@/lib/editor-preference'
 import { toEditorHref } from '@/lib/artifacts'
-import { useIsRemoteEnvironment } from '@/components/chat/agent-sidebar/EnvironmentStatusChip'
+import { useIsRemoteEnvironment } from '@/components/chat/agent-sidebar/hooks/useEnvironmentStatus'
 import {
   Tooltip,
   TooltipContent,

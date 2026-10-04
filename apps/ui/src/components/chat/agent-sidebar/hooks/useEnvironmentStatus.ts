@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useEnvironmentCatalog, useEnvironmentSelector } from '@/hooks/use-environment-selector'
-import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
+import { useEnvironmentRegistry, useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import { environmentLabel, selectConnection } from '@/components/settings/environments/environment-runtime'
 import { describeEnvironmentStatus, type EnvironmentStatus } from '@/components/settings/environments/environment-status'
 
@@ -24,6 +24,12 @@ export function useEnvironmentLabel(environmentId: string): string {
   // Subscribing to connection changes keeps a refreshed descriptor label current.
   useEnvironmentSelector(environmentId, 'connection', selectPhase)
   return environmentLabel(catalog.get(environmentId), registry.get(environmentId).descriptor())
+}
+
+/** True only for a known environment other than the primary; local-path actions are unavailable there. */
+export function useIsRemoteEnvironment(environmentId: string | null | undefined): boolean {
+  const primaryEnvironmentId = useOptionalEnvironmentContext()?.primaryEnvironmentId
+  return !!environmentId && !!primaryEnvironmentId && environmentId !== primaryEnvironmentId
 }
 
 const selectPhase = (state: { phase: string }) => state.phase

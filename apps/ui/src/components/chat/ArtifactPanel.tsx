@@ -8,7 +8,7 @@ import { Dialog, DialogOverlay, DialogPortal, DialogTitle } from '@/components/u
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { ArtifactReference } from '@/lib/artifacts'
 import { toEditorHref } from '@/lib/artifacts'
-import { useIsRemoteEnvironment } from '@/components/chat/agent-sidebar/EnvironmentStatusChip'
+import { useIsRemoteEnvironment } from '@/components/chat/agent-sidebar/hooks/useEnvironmentStatus'
 import {
   EDITOR_LABELS,
   EDITOR_URL_SCHEMES,

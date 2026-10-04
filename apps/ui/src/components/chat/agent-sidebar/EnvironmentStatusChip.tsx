@@ -2,8 +2,7 @@ import { memo } from 'react'
 import { cn } from '@/lib/utils'
 import type { EnvironmentStatus, EnvironmentStatusKind } from '@/components/settings/environments/environment-status'
 import { Server } from 'lucide-react'
-import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
-import { useEnvironmentLabel, useEnvironmentStatus } from './hooks/useEnvironmentStatus'
+import { useEnvironmentLabel, useEnvironmentStatus, useIsRemoteEnvironment } from './hooks/useEnvironmentStatus'
 
 const TONE: Record<EnvironmentStatusKind, string> = {
   online: 'bg-emerald-500',
@@ -63,12 +62,6 @@ export function EnvironmentBadge({ label, className }: { label: string; classNam
       <span className="truncate">{label}</span>
     </span>
   )
-}
-
-/** True only for a known environment other than the primary; local-path actions are unavailable there. */
-export function useIsRemoteEnvironment(environmentId: string | null | undefined): boolean {
-  const primaryEnvironmentId = useOptionalEnvironmentContext()?.primaryEnvironmentId
-  return !!environmentId && !!primaryEnvironmentId && environmentId !== primaryEnvironmentId
 }
 
 /** Names the machine in a panel header when it is not this one; renders nothing for the primary. */
