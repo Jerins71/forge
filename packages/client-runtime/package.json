@@ -3,9 +3,27 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
-  "exports": { ".": { "types": "./src/index.ts", "default": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "types": "./src/index.ts",
-  "scripts": { "build": "tsc -p tsconfig.build.json", "typecheck": "tsc -p tsconfig.test.json", "test": "vitest run" },
-  "dependencies": { "@forge/protocol": "workspace:*", "@sinclair/typebox": "^0.34.41" },
-  "devDependencies": { "typescript": "^5.9.2", "vitest": "^3.2.4", "ws": "^8.18.0", "@types/ws": "^8.5.13", "@types/node": "^22.10.2" }
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@forge/protocol": "workspace:*",
+    "@sinclair/typebox": "^0.34.41"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4",
+    "ws": "^8.18.0",
+    "@types/ws": "^8.5.13",
+    "@types/node": "^22.10.2"
+  }
 }
