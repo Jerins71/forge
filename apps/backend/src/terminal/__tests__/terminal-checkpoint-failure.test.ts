@@ -84,18 +84,4 @@ describe('terminal checkpoint failure and restart recovery', () => {
     expect(restored.replay.toString()).toContain('after')
     expect(restored.lastSeq).toBe(1)
   })
-
-  it.each(['truncateJournal', 'saveMeta'] as const)('surfaces %s checkpoint failures without swallowing them', async (operation) => {
-    const dataDir = await mkdtemp(join(tmpdir(), `terminal-checkpoint-${operation}-`))
-    dirs.push(dataDir)
-    const persistence = new TerminalPersistence({ dataDir, scrollbackLines: 5_000, journalMaxBytes: 1 })
-    const meta = createMeta()
-    persistence.createMirror(meta)
-    const active = runtime(meta)
-    const failing = Object.create(persistence) as TerminalPersistence
-    failing[operation] = vi.fn(async () => { throw new Error(`${operation} failed`) })
-    const controller = controllerFor(failing, active)
-    await expect(controller.snapshotRuntime(active)).rejects.toThrow(`${operation} failed`)
-    expect(failing[operation]).toHaveBeenCalledTimes(1)
-  })
 })

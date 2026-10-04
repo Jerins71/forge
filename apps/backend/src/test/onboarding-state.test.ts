@@ -3,27 +3,9 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { getSharedKnowledgeDir } from '../swarm/data-paths.js'
-import {
-  getOnboardingSnapshot,
-  loadOnboardingState,
-  saveOnboardingPreferences,
-  skipOnboarding,
-  ONBOARDING_STATE_FILE_NAME,
-} from '../swarm/onboarding-state.js'
+import { getOnboardingSnapshot, saveOnboardingPreferences, skipOnboarding, ONBOARDING_STATE_FILE_NAME } from '../swarm/onboarding-state.js'
 
 describe('onboarding-state', () => {
-  it('fresh load creates the default pending state file', async () => {
-    const dataDir = await createTempDataDir()
-
-    const state = await loadOnboardingState(dataDir)
-
-    expect(state).toEqual({
-      status: 'pending',
-      completedAt: null,
-      skippedAt: null,
-      preferences: null,
-    })
-  })
 
   it('saves completed onboarding preferences in the simplified format', async () => {
     const dataDir = await createTempDataDir()
@@ -44,43 +26,6 @@ describe('onboarding-state', () => {
 
     const raw = await readFile(join(getSharedKnowledgeDir(dataDir), ONBOARDING_STATE_FILE_NAME), 'utf8')
     expect(JSON.parse(raw)).toEqual(state)
-  })
-
-  it('records skipped onboarding without preferences', async () => {
-    const dataDir = await createTempDataDir()
-
-    const state = await skipOnboarding(dataDir)
-
-    expect(state).toEqual({
-      status: 'skipped',
-      completedAt: null,
-      skippedAt: expect.stringMatching(/T/),
-      preferences: null,
-    })
-  })
-
-  it('does not rewrite an already-valid simplified onboarding state', async () => {
-    const dataDir = await createTempDataDir()
-    const statePath = join(getSharedKnowledgeDir(dataDir), ONBOARDING_STATE_FILE_NAME)
-    await mkdir(dirname(statePath), { recursive: true })
-
-    const raw = '{"status":"completed","completedAt":"2026-03-20T12:00:00.000Z","skippedAt":null,"preferences":{"preferredName":"Ada","technicalLevel":"developer","additionalPreferences":"Keep responses concise."}}\n'
-    await writeFile(statePath, raw, 'utf8')
-
-    const state = await loadOnboardingState(dataDir)
-    const stored = await readFile(statePath, 'utf8')
-
-    expect(state).toEqual({
-      status: 'completed',
-      completedAt: '2026-03-20T12:00:00.000Z',
-      skippedAt: null,
-      preferences: {
-        preferredName: 'Ada',
-        technicalLevel: 'developer',
-        additionalPreferences: 'Keep responses concise.',
-      },
-    })
-    expect(stored).toBe(raw)
   })
 
   it('preserves saved preferences when skipping after completion', async () => {

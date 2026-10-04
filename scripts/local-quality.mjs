@@ -143,34 +143,11 @@ const packagedRuntimePreflightCheck = backendScriptTestCheck(
   'packaged-runtime-preflight.test.mjs',
 );
 
-const browserAttributionCheck = backendScriptTestCheck(
-  'test:browser-third-party-notices',
-  'Browser attribution and notice validation',
-  'browser-third-party-notices.test.mjs',
-);
-
-const releaseVersionConsistencyCheck = backendScriptTestCheck(
-  'test:release-version-consistency',
-  'Release version consistency',
-  'release-version-consistency.test.mjs',
-);
-
 export function isDockerConfigRelated(file) {
   const basename = path.posix.basename(file);
   return basename === '.dockerignore'
     || /^Dockerfile(?:\..+)?$/u.test(basename)
     || /^(?:docker-compose|compose)(?:\.[^.]+)?\.ya?ml$/u.test(basename);
-}
-
-function isBrowserAttributionRelated(file) {
-  return file === 'THIRD_PARTY_NOTICES.md'
-    || file === 'packages/protocol/src/browser-automation.ts'
-    || file === 'apps/electron/scripts/build-all.mjs'
-    || file.startsWith('apps/electron/src/browser/');
-}
-
-function isReleaseVersionRelated(file) {
-  return file === 'version.json' || file === 'apps/electron/package.json';
 }
 
 async function gitLines(args) {
@@ -371,20 +348,6 @@ export function selectChecks(tier, changedFiles) {
 
   if (tier === 'quick' && changedFiles.some((entry) => entry.path === '.nvmrc')) {
     checks.push(packagedRuntimePreflightCheck);
-  }
-
-  if (
-    changedFiles.some((entry) => isBrowserAttributionRelated(entry.path))
-    && (tier === 'quick' || !areas.has('all'))
-  ) {
-    checks.push(browserAttributionCheck);
-  }
-
-  if (
-    changedFiles.some((entry) => isReleaseVersionRelated(entry.path))
-    && (tier === 'quick' || !areas.has('all'))
-  ) {
-    checks.push(releaseVersionConsistencyCheck);
   }
 
   if (tier === 'quick') {

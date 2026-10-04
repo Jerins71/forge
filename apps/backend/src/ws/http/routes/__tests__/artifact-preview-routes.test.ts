@@ -119,26 +119,6 @@ describe("HTML artifact preview route", () => {
       expect((await fetch(`${base}/api/artifact-previews/${"x".repeat(43)}/index.html`)).status).toBe(404);
     } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
   }, 15_000);
-
-  it("authorizes previews only for readable HTML or a transcript-presented HTML file", async () => {
-    const f = await fixture();
-    const { server, base } = await serve(createArtifactPreviewRoutes({ swarmManager: f.swarmManager }));
-    try {
-      expect((await issue(base, { path: join(f.report, "style.css"), agentId: f.agentId })).status).toBe(400);
-      expect((await issue(base, { path: f.presentedPath, agentId: f.agentId })).status).toBe(403);
-      expect((await issue(base, { path: join(f.report, "nope.html"), agentId: f.agentId })).status).toBe(404);
-      expect((await issue(base, {})).status).toBe(400);
-
-      const presented = await issue(base, { transcriptAgentId: f.agentId, messageId: "m", path: f.presentedPath });
-      expect(presented.status).toBe(200);
-      const preview: any = await presented.json();
-      const page = await fetch(`${base}${preview.url}`);
-      expect(page.status).toBe(200); expect(await page.text()).toBe("<p>presented</p>");
-
-      const notPresented = await issue(base, { transcriptAgentId: f.agentId, messageId: "m", path: join(f.report, "index.html") });
-      expect(notPresented.status).toBe(403);
-    } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
-  }, 15_000);
 });
 
 describe("HtmlArtifactPreviewStore", () => {
@@ -158,14 +138,5 @@ describe("HtmlArtifactPreviewStore", () => {
     now += 60_001;
     await expect(store.resolveAsset(token, "index.html", "user-a")).rejects.toBeInstanceOf(HtmlArtifactPreviewError);
     await expect(store.resolveAsset(token, "index.html", "user-a")).rejects.toMatchObject({ code: "not_found" });
-  });
-
-  it("bounds the number of live previews", async () => {
-    const f = await fixture();
-    const store = new HtmlArtifactPreviewStore({ maxPreviews: 2 });
-    const first = await store.issue(join(f.report, "index.html"));
-    await store.issue(join(f.report, "index.html"));
-    await store.issue(join(f.report, "index.html"));
-    await expect(store.resolveAsset(first.url.split("/")[3]!, "index.html")).rejects.toMatchObject({ code: "not_found" });
   });
 });

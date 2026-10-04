@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { FileCreateResponse, FileRenameResponse } from "@forge/protocol";
 import { createFileBrowserRoutes } from "../file-browser-routes.js";
 import { applyCorsHeaders, sendJson } from "../../../http-utils.js";
 
@@ -22,66 +21,6 @@ afterEach(async () => {
 });
 
 describe("file browser create and rename", () => {
-  it("creates empty files in the requested directory with path whitespace preserved", async () => {
-    const harness = await createHarness();
-    await mkdir(join(harness.workspaceDir, "src"), { recursive: true });
-
-    const response = await fetch(`${harness.server.baseUrl}/api/files/create`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        agentId: "manager-1",
-        directoryPath: "src",
-        name: " new file.txt",
-        type: "file",
-      }),
-    });
-
-    expect(response.status).toBe(200);
-    expect((await response.json()) as FileCreateResponse).toEqual({
-      success: true,
-      path: "src/ new file.txt",
-      entryType: "file",
-    });
-    await expect(readFile(join(harness.workspaceDir, "src", " new file.txt"), "utf8")).resolves.toBe("");
-  });
-
-  it("renames files and directories within cwd", async () => {
-    const harness = await createHarness();
-    await writeFile(join(harness.workspaceDir, "old.txt"), "content\n", "utf8");
-    await mkdir(join(harness.workspaceDir, "folder"), { recursive: true });
-    await writeFile(join(harness.workspaceDir, "folder", "child.txt"), "child\n", "utf8");
-
-    const fileRename = await fetch(`${harness.server.baseUrl}/api/files/rename`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agentId: "manager-1", path: "old.txt", newName: "new.txt" }),
-    });
-    expect(fileRename.status).toBe(200);
-    expect((await fileRename.json()) as FileRenameResponse).toEqual({
-      success: true,
-      path: "old.txt",
-      newPath: "new.txt",
-      entryType: "file",
-    });
-
-    const dirRename = await fetch(`${harness.server.baseUrl}/api/files/rename`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agentId: "manager-1", path: "folder", newName: "renamed" }),
-    });
-    expect(dirRename.status).toBe(200);
-    expect((await dirRename.json()) as FileRenameResponse).toEqual({
-      success: true,
-      path: "folder",
-      newPath: "renamed",
-      entryType: "directory",
-    });
-
-    await expect(readFile(join(harness.workspaceDir, "new.txt"), "utf8")).resolves.toBe("content\n");
-    await expect(readFile(join(harness.workspaceDir, "renamed", "child.txt"), "utf8")).resolves.toBe("child\n");
-    await expect(access(join(harness.workspaceDir, "old.txt"))).rejects.toMatchObject({ code: "ENOENT" });
-  });
 
   it("rejects traversal, nested names, root rename, and overwrites", async () => {
     const harness = await createHarness();

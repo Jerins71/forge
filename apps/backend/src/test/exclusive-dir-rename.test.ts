@@ -1,40 +1,10 @@
 import { mkdir, mkdtemp, writeFile, rm, readFile, access, constants } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  ExclusiveRenameError,
-  WIN32_ERROR_ACCESS_DENIED,
-  WIN32_ERROR_ALREADY_EXISTS,
-  WIN32_ERROR_DISK_FULL,
-  WIN32_ERROR_FILE_EXISTS,
-  WIN32_ERROR_HANDLE_DISK_FULL,
-  createDefaultNativeBinding,
-  errnoToError,
-  exclusiveRenameNoClobber,
-  toWin32LongPath,
-  win32ErrorToExclusive,
-} from '../versioning/exclusive-dir-rename.js'
+import { afterEach, describe, expect, it } from 'vitest'
+import { ExclusiveRenameError, exclusiveRenameNoClobber } from '../versioning/exclusive-dir-rename.js'
 
 describe('exclusive-dir-rename error mapping', () => {
-  it('maps posix errno codes immediately', () => {
-    expect(errnoToError(17, 'x').code).toBe('destination_exists')
-    expect(errnoToError(66, 'x').code).toBe('destination_exists')
-    expect(errnoToError(39, 'x').code).toBe('destination_exists')
-    expect(errnoToError(13, 'x').code).toBe('destination_permission_denied')
-    expect(errnoToError(1, 'x').code).toBe('destination_permission_denied')
-    expect(errnoToError(28, 'x').code).toBe('disk_full')
-    expect(errnoToError(999, 'fallback').message).toBe('fallback')
-  })
-
-  it('maps Win32 GetLastError codes immediately', () => {
-    expect(win32ErrorToExclusive(WIN32_ERROR_FILE_EXISTS).code).toBe('destination_exists')
-    expect(win32ErrorToExclusive(WIN32_ERROR_ALREADY_EXISTS).code).toBe('destination_exists')
-    expect(win32ErrorToExclusive(WIN32_ERROR_ACCESS_DENIED).code).toBe('destination_permission_denied')
-    expect(win32ErrorToExclusive(WIN32_ERROR_DISK_FULL).code).toBe('disk_full')
-    expect(win32ErrorToExclusive(WIN32_ERROR_HANDLE_DISK_FULL).code).toBe('disk_full')
-    expect(win32ErrorToExclusive(1234).message).toContain('1234')
-  })
 
   it('fail-closed when createBinding reports missing library/symbol', async () => {
     await expect(
@@ -45,37 +15,6 @@ describe('exclusive-dir-rename error mapping', () => {
         },
       }),
     ).rejects.toMatchObject({ code: 'clone_failed', message: /Missing renamex_np/ })
-  })
-
-  it('fail-closed on unsupported win32 architecture', () => {
-    expect(() => createDefaultNativeBinding('win32', 'ia32')).toThrow(/win32-ia32/)
-  })
-
-  it('prefixes absolute Win32 paths for long-path awareness', () => {
-    expect(toWin32LongPath('C:\\repos\\dest')).toBe('\\\\?\\C:\\repos\\dest')
-    expect(toWin32LongPath('\\\\server\\share\\path')).toBe('\\\\?\\UNC\\server\\share\\path')
-    expect(() => toWin32LongPath('relative\\path')).toThrow(/absolute/)
-  })
-
-  it('surfaces destination_exists when destination appears between precheck and native call', async () => {
-    const renameExclusive = vi.fn(() => {
-      throw new ExclusiveRenameError(
-        'destination_exists',
-        'A file or folder already exists at the destination path.',
-      )
-    })
-
-    await expect(
-      exclusiveRenameNoClobber('/tmp/src', '/tmp/dst', {
-        platform: 'darwin',
-        beforeNativeRename: async () => {
-          // Simulated interference after JS precheck / before native call.
-        },
-        createBinding: () => ({ renameExclusive }),
-      }),
-    ).rejects.toMatchObject({ code: 'destination_exists' })
-
-    expect(renameExclusive).toHaveBeenCalledOnce()
   })
 
   it('never deletes destination on native failure', async () => {

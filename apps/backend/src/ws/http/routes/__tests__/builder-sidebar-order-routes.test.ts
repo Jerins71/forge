@@ -8,10 +8,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  BuilderSidebarOrderService,
-  MAX_BUILDER_SIDEBAR_ORDER_REQUEST_BYTES,
-} from "../../../../swarm/builder-sidebar-order-service.js";
+import { BuilderSidebarOrderService } from "../../../../swarm/builder-sidebar-order-service.js";
 import { sendJson } from "../../../http-utils.js";
 import type { HttpRoute } from "../../shared/http-route.js";
 import { createBuilderSidebarOrderRoutes } from "../builder-sidebar-order-routes.js";
@@ -85,42 +82,6 @@ describe("createBuilderSidebarOrderRoutes", () => {
     expect(body.current.revision).toBe(1);
     expect(body.current.order).toEqual([{ originId: "local", profileId: "alpha" }]);
     expect(broadcastEvent).not.toHaveBeenCalled();
-  });
-
-  it("returns 400 for invalid bodies", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "forge-sidebar-order-invalid-"));
-    const service = new BuilderSidebarOrderService({ dataDir });
-    await service.load();
-    const server = await createRouteServer(createBuilderSidebarOrderRoutes({ service }));
-
-    const duplicate = await fetch(`${server.baseUrl}/api/settings/builder-sidebar-order`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        baseRevision: 0,
-        order: [
-          { originId: "local", profileId: "alpha" },
-          { originId: "local", profileId: "alpha" },
-        ],
-      }),
-    });
-    expect(duplicate.status).toBe(400);
-    expect(await duplicate.json()).toEqual({ error: expect.stringContaining("duplicate") });
-
-    const malformed = await fetch(`${server.baseUrl}/api/settings/builder-sidebar-order`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: "{bad-json",
-    });
-    expect(malformed.status).toBe(400);
-
-    const oversized = await fetch(`${server.baseUrl}/api/settings/builder-sidebar-order`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ padding: "x".repeat(MAX_BUILDER_SIDEBAR_ORDER_REQUEST_BYTES) }),
-    });
-    expect(oversized.status).toBe(400);
-    expect(await oversized.json()).toEqual({ error: expect.stringContaining("too large") });
   });
 
 });

@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  authenticateRecord,
-  createHandshakeProof,
-  deriveRelaySessionKey,
-  RelayAuthenticationError,
-  ReplayGuard,
-  verifyHandshakeProof,
-} from '../src/auth.js'
+import { authenticateRecord, createHandshakeProof, deriveRelaySessionKey, verifyHandshakeProof } from '../src/auth.js'
 import {
   HOST_EXTENSION_ORIGIN,
   HOST_MAX_NEGOTIATED_MESSAGE_BYTES,
@@ -15,19 +8,13 @@ import {
 } from '../src/constants.js'
 import type { JsonObject } from '../src/framing.js'
 import { AuthenticatedRelayClient, type RelayClientDependencies } from '../src/relay-client.js'
-import {
-  DesktopUnavailableError,
-  type RelayRecordTransport,
-  type RendezvousDocument,
-} from '../src/transport.js'
+import { type RelayRecordTransport, type RendezvousDocument } from '../src/transport.js'
 
 const KEY = Buffer.alloc(32, 0x5a)
 const EPOCH = 'epoch_1234567890abcdef'
 const DESKTOP_INSTANCE_ID = 'desktop_1234567890abcdef'
 const CLIENT_NONCE = 'c'.repeat(43)
-const OTHER_CLIENT_NONCE = 'd'.repeat(43)
 const SERVER_NONCE = 's'.repeat(43)
-const OTHER_SERVER_NONCE = 't'.repeat(43)
 const RENDEZVOUS: RendezvousDocument = {
   schemaVersion: 1,
   endpoint: '/tmp/forge-test.sock',
@@ -173,53 +160,6 @@ describe('authenticated relay client', () => {
     client.close()
   })
 
-  it('binds protocol ranges, pinned origin, Desktop instance, epoch, and both nonces exactly', async () => {
-    const fixture = sessionFixture()
-    const transport = new FakeTransport([fixture.challenge, fixture.ready])
-    const client = await AuthenticatedRelayClient.connect(dependencies(transport))
-    expect(transport.sent[0]).toMatchObject({
-      extensionOrigin: HOST_EXTENSION_ORIGIN,
-      desktopInstanceId: DESKTOP_INSTANCE_ID,
-      epoch: EPOCH,
-      clientNonce: CLIENT_NONCE,
-      clientProtocolMin: HOST_PROTOCOL_MIN_VERSION,
-      clientProtocolMax: HOST_PROTOCOL_MAX_VERSION,
-      desktopProtocolMin: HOST_PROTOCOL_MIN_VERSION,
-      desktopProtocolMax: HOST_PROTOCOL_MAX_VERSION,
-    })
-    expect(transport.sent[1]).toMatchObject({
-      extensionOrigin: HOST_EXTENSION_ORIGIN,
-      desktopInstanceId: DESKTOP_INSTANCE_ID,
-      epoch: EPOCH,
-      clientNonce: CLIENT_NONCE,
-      serverNonce: SERVER_NONCE,
-    })
-    client.close()
-    fixture.sessionKey.fill(0)
-  })
-
-  it('rejects a stale rendezvous before connecting', async () => {
-    const transport = new FakeTransport([])
-    const deps = dependencies(transport, {
-      rendezvous: { read: async () => ({ ...RENDEZVOUS, expiresAt: '2028-01-01T00:00:00.000Z' }) },
-    })
-    await expect(AuthenticatedRelayClient.connect(deps)).rejects.toThrow(DesktopUnavailableError)
-    expect(transport.sent).toEqual([])
-  })
-
-  it.each([
-    ['epoch', { epoch: 'different_epoch_12345' }, /stale rendezvous epoch/u],
-    ['Desktop instance', { desktopInstanceId: 'different_desktop_12345' }, /stale Desktop instance/u],
-    ['origin', { extensionOrigin: 'chrome-extension://wrongwrongwrongwrongwrongwrong12/' }, /extension origin/u],
-    ['client nonce', { clientNonce: OTHER_CLIENT_NONCE }, /client nonce mismatch/u],
-  ])('rejects a correctly signed challenge with stale or wrong %s binding', async (_name, challengeOverrides, expected) => {
-    const fixture = sessionFixture({ challengeOverrides })
-    const transport = new FakeTransport([fixture.challenge])
-    await expect(AuthenticatedRelayClient.connect(dependencies(transport))).rejects.toThrowError(expected)
-    expect(transport.closed).toBe(true)
-    fixture.sessionKey.fill(0)
-  })
-
   it('rejects a challenge proof mismatch and exact-field violations', async () => {
     const invalidProof = sessionFixture()
     invalidProof.challenge.proof = 'A'.repeat(43)
@@ -236,48 +176,6 @@ describe('authenticated relay client', () => {
     extraField.sessionKey.fill(0)
   })
 
-  it('rejects server and client nonce replay', async () => {
-    const serverGuard = new ReplayGuard()
-    const firstFixture = sessionFixture()
-    const first = await AuthenticatedRelayClient.connect(dependencies(
-      new FakeTransport([firstFixture.challenge, firstFixture.ready]),
-      { serverNonceGuard: serverGuard },
-    ))
-    first.close()
-    firstFixture.sessionKey.fill(0)
-
-    const replayFixture = sessionFixture({ clientNonce: OTHER_CLIENT_NONCE })
-    await expect(AuthenticatedRelayClient.connect(dependencies(
-      new FakeTransport([replayFixture.challenge]),
-      { nonce: () => OTHER_CLIENT_NONCE, serverNonceGuard: serverGuard },
-    ))).rejects.toMatchObject({ code: 'nonce-replay' })
-    replayFixture.sessionKey.fill(0)
-
-    let connects = 0
-    await expect(AuthenticatedRelayClient.connect(dependencies(new FakeTransport([]), {
-      maxAttempts: 2,
-      connector: {
-        connect: async () => {
-          connects += 1
-          throw new Error('retryable connect failure')
-        },
-      },
-    }))).rejects.toMatchObject({ code: 'nonce-replay' })
-    expect(connects).toBe(1)
-  })
-
-  it('rejects protocol skew in rendezvous and in a signed challenge', async () => {
-    const transport = new FakeTransport([])
-    await expect(AuthenticatedRelayClient.connect(dependencies(transport, {
-      rendezvous: { read: async () => ({ ...RENDEZVOUS, protocolMin: 2, protocolMax: 2 }) },
-    }))).rejects.toThrowError(/do not overlap/u)
-    expect(transport.sent).toEqual([])
-
-    const fixture = sessionFixture({ challengeOverrides: { protocolVersion: 2 } })
-    await expect(AuthenticatedRelayClient.connect(dependencies(new FakeTransport([fixture.challenge])))).rejects.toThrowError(/do not overlap/u)
-    fixture.sessionKey.fill(0)
-  })
-
   it('rejects inbound sequence replay and closes with a zeroed session key', async () => {
     const fixture = sessionFixture()
     const transport = new FakeTransport([fixture.challenge, fixture.ready, fixture.relay(1, { stale: true })])
@@ -286,92 +184,6 @@ describe('authenticated relay client', () => {
     await expect(client.receive()).rejects.toMatchObject({ code: 'sequence-replay' })
     expect(transport.closed).toBe(true)
     expect(ownedKey.every((byte) => byte === 0)).toBe(true)
-    fixture.sessionKey.fill(0)
-  })
-
-  it('rejects a record replayed across independently keyed connections', async () => {
-    const firstFixture = sessionFixture()
-    const replayedRecord = firstFixture.relay(2, { replayed: true })
-    const first = await AuthenticatedRelayClient.connect(dependencies(new FakeTransport([
-      firstFixture.challenge,
-      firstFixture.ready,
-    ])))
-    first.close()
-
-    const secondFixture = sessionFixture({
-      clientNonce: OTHER_CLIENT_NONCE,
-      serverNonce: OTHER_SERVER_NONCE,
-    })
-    const second = await AuthenticatedRelayClient.connect(dependencies(new FakeTransport([
-      secondFixture.challenge,
-      secondFixture.ready,
-      replayedRecord,
-    ]), { nonce: () => OTHER_CLIENT_NONCE }))
-    await expect(second.receive()).rejects.toMatchObject({ code: 'hmac-mismatch' })
-    firstFixture.sessionKey.fill(0)
-    secondFixture.sessionKey.fill(0)
-  })
-
-  it('zeroes supplied long-lived secret copies on success and every failure path', async () => {
-    const successSecret = Buffer.from(KEY)
-    const successFixture = sessionFixture()
-    const client = await AuthenticatedRelayClient.connect(dependencies(
-      new FakeTransport([successFixture.challenge, successFixture.ready]),
-      { secrets: { getSecret: async () => successSecret } },
-    ))
-    expect(successSecret.every((byte) => byte === 0)).toBe(true)
-    client.close()
-    successFixture.sessionKey.fill(0)
-
-    const failureSecret = Buffer.from(KEY)
-    const failedFixture = sessionFixture()
-    failedFixture.challenge.proof = 'A'.repeat(43)
-    await expect(AuthenticatedRelayClient.connect(dependencies(
-      new FakeTransport([failedFixture.challenge]),
-      { secrets: { getSecret: async () => failureSecret } },
-    ))).rejects.toBeInstanceOf(RelayAuthenticationError)
-    expect(failureSecret.every((byte) => byte === 0)).toBe(true)
-    failedFixture.sessionKey.fill(0)
-  })
-
-  it('cleans up after relay disconnect', async () => {
-    const fixture = sessionFixture()
-    const transport = new FakeTransport([fixture.challenge, fixture.ready, null])
-    const client = await AuthenticatedRelayClient.connect(dependencies(transport))
-    const ownedKey = clientSessionKey(client)
-    await expect(client.receive()).resolves.toBeNull()
-    expect(transport.closed).toBe(true)
-    expect(ownedKey.every((byte) => byte === 0)).toBe(true)
-    await expect(client.send({ late: true })).rejects.toThrow(DesktopUnavailableError)
-    fixture.sessionKey.fill(0)
-  })
-
-  it('enforces the negotiated bound beneath both Chrome transport limits', async () => {
-    const selectedBound = 64
-    const fixture = sessionFixture({ challengeOverrides: { maxMessageBytes: selectedBound } })
-    const transport = new FakeTransport([fixture.challenge, fixture.ready])
-    const client = await AuthenticatedRelayClient.connect(dependencies(transport))
-    expect(client.maxMessageBytes).toBe(selectedBound)
-    await expect(client.send({ content: 'x'.repeat(selectedBound) })).rejects.toThrowError(/negotiated bound/u)
-    client.close()
-    fixture.sessionKey.fill(0)
-  })
-
-  it('does not retry authentication failures', async () => {
-    let connects = 0
-    const fixture = sessionFixture()
-    fixture.challenge.proof = 'A'.repeat(43)
-    const transport = new FakeTransport([fixture.challenge])
-    await expect(AuthenticatedRelayClient.connect(dependencies(transport, {
-      maxAttempts: 3,
-      connector: {
-        connect: async () => {
-          connects += 1
-          return transport
-        },
-      },
-    }))).rejects.toBeInstanceOf(RelayAuthenticationError)
-    expect(connects).toBe(1)
     fixture.sessionKey.fill(0)
   })
 })

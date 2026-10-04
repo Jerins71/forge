@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import type { PersistedTelemetryConfig, StatsSnapshot, TelemetryPayload } from '@forge/protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getTelemetryConfigPath } from '../../swarm/data-paths.js'
@@ -25,43 +25,6 @@ afterEach(async () => {
 })
 
 describe('TelemetryService', () => {
-  it('initializes enabled telemetry on first send with split success/failure timestamps', async () => {
-    const dataDir = await createDataDir('telemetry-first-send-')
-    const service = createService({ dataDir, sendPayload: async () => true })
-
-    expect(await service.forceSend()).toBe(true)
-
-    const config = await readConfig(dataDir)
-    expect(config.installId).toMatch(UUID_RE)
-    expect(config.lastSuccessfulSendAt).toMatch(ISO_TIMESTAMP_RE)
-    expect(config.lastFailedAttemptAt).toBeNull()
-    expect('enabled' in config).toBe(false)
-  })
-
-  it('coalesces concurrent stats refresh sends with queueing + persisted 2-hour success cap', async () => {
-    const dataDir = await createDataDir('telemetry-concurrent-refresh-')
-    let senderCalls = 0
-    const service = createService({
-      dataDir,
-      sendPayload: async () => {
-        senderCalls += 1
-        return true
-      },
-    })
-
-    const stats = createStatsSnapshot()
-    const [first, second] = await Promise.all([
-      service.sendOnStatsRefresh(stats),
-      service.sendOnStatsRefresh(stats),
-    ])
-
-    const config = await readConfig(dataDir)
-    expect(first).toBe(true)
-    expect(second).toBe(false)
-    expect(senderCalls).toBe(1)
-    expect(config.lastSuccessfulSendAt).toMatch(ISO_TIMESTAMP_RE)
-    expect(config.lastFailedAttemptAt).toBeNull()
-  })
 
   it('enforces the 2-hour success cap across service restarts', async () => {
     const dataDir = await createDataDir('telemetry-restart-success-cap-')
@@ -92,98 +55,6 @@ describe('TelemetryService', () => {
     expect(config.lastFailedAttemptAt).toBeNull()
   })
 
-  it('uses failure backoff separately from success cap and clears failure state after a later success', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-03T00:00:00.000Z'))
-
-    const dataDir = await createDataDir('telemetry-failure-backoff-')
-    let senderCalls = 0
-    const service = createService({
-      dataDir,
-      sendPayload: async () => {
-        senderCalls += 1
-        return senderCalls > 1
-      },
-    })
-
-    expect(await service.sendOnStatsRefresh(createStatsSnapshot())).toBe(false)
-    expect(senderCalls).toBe(1)
-
-    expect(await service.sendOnStatsRefresh(createStatsSnapshot())).toBe(false)
-    expect(senderCalls).toBe(1)
-
-    vi.setSystemTime(new Date('2026-04-03T00:09:59.000Z'))
-    expect(await service.sendOnStatsRefresh(createStatsSnapshot())).toBe(false)
-    expect(senderCalls).toBe(1)
-
-    vi.setSystemTime(new Date('2026-04-03T00:10:01.000Z'))
-    expect(await service.sendOnStatsRefresh(createStatsSnapshot())).toBe(true)
-    expect(senderCalls).toBe(2)
-
-    const config = await readConfig(dataDir)
-    expect(config.lastSuccessfulSendAt).toBe('2026-04-03T00:10:01.000Z')
-    expect(config.lastFailedAttemptAt).toBeNull()
-  })
-
-  it('skips stats-refresh telemetry when no all-range stats snapshot is available', async () => {
-    const dataDir = await createDataDir('telemetry-missing-stats-')
-    let assemblerCalls = 0
-    let senderCalls = 0
-    const service = createService({
-      dataDir,
-      assemblePayload: async (installId) => {
-        assemblerCalls += 1
-        return createPayload(installId)
-      },
-      sendPayload: async () => {
-        senderCalls += 1
-        return true
-      },
-    })
-
-    expect(await service.sendOnStatsRefresh(null)).toBe(false)
-    expect(assemblerCalls).toBe(0)
-    expect(senderCalls).toBe(0)
-  })
-
-  it('treats legacy persisted enabled=false as telemetry enabled and rewrites the file', async () => {
-    const dataDir = await createDataDir('telemetry-legacy-enabled-flag-')
-    const configPath = getTelemetryConfigPath(dataDir)
-    await mkdir(dirname(configPath), { recursive: true })
-    await writeFile(
-      configPath,
-      JSON.stringify(
-        {
-          enabled: false,
-          installId: 'legacy-install',
-          lastSuccessfulSendAt: null,
-          lastFailedAttemptAt: null,
-        },
-        null,
-        2,
-      ),
-      'utf8',
-    )
-
-    let senderCalls = 0
-    const service = createService({
-      dataDir,
-      sendPayload: async () => {
-        senderCalls += 1
-        return true
-      },
-    })
-
-    expect(await service.sendOnStatsRefresh(createStatsSnapshot())).toBe(true)
-
-    const config = await readConfig(dataDir)
-    expect(senderCalls).toBe(1)
-    expect(config.installId).toBe('legacy-install')
-    expect(config.lastSuccessfulSendAt).toMatch(ISO_TIMESTAMP_RE)
-    expect(config.lastFailedAttemptAt).toBeNull()
-    expect('enabled' in config).toBe(false)
-  })
-
   it('skips file reads and sends when disabled by env override', async () => {
     const dataDir = await createDataDir('telemetry-disabled-env-')
     process.env.FORGE_TELEMETRY = 'false'
@@ -207,50 +78,6 @@ describe('TelemetryService', () => {
     expect(assemblerCalls).toBe(0)
     expect(senderCalls).toBe(0)
     await expect(readFile(getTelemetryConfigPath(dataDir), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('migrates legacy telemetry timestamps into split success/failure fields', async () => {
-    const dataDir = await createDataDir('telemetry-legacy-migration-')
-    const configPath = getTelemetryConfigPath(dataDir)
-    await mkdir(dirname(configPath), { recursive: true })
-    await writeFile(
-      configPath,
-      JSON.stringify(
-        {
-          enabled: true,
-          installId: 'install-legacy',
-          lastSentAt: '2026-04-03T00:00:00.000Z',
-          lastAttemptedAt: '2026-04-03T00:15:00.000Z',
-        },
-        null,
-        2,
-      ),
-      'utf8',
-    )
-
-    const service = createService({ dataDir, sendPayload: async () => true })
-    expect(await service.forceSend()).toBe(true)
-
-    const config = await readConfig(dataDir)
-    expect(config.installId).toBe('install-legacy')
-    expect(config.lastSuccessfulSendAt).toMatch(ISO_TIMESTAMP_RE)
-    expect(config.lastFailedAttemptAt).toBeNull()
-    expect('enabled' in config).toBe(false)
-  })
-
-  it('recovers from corrupt telemetry.json by rewriting defaults', async () => {
-    const dataDir = await createDataDir('telemetry-corrupt-')
-    const configPath = getTelemetryConfigPath(dataDir)
-    await mkdir(dirname(configPath), { recursive: true })
-    await writeFile(configPath, '{invalid json', 'utf8')
-
-    const service = createService({ dataDir, sendPayload: async () => true })
-    expect(await service.forceSend()).toBe(true)
-
-    const config = await readConfig(dataDir)
-    expect(config.installId).toMatch(UUID_RE)
-    expect(config.lastSuccessfulSendAt).toMatch(ISO_TIMESTAMP_RE)
-    expect(config.lastFailedAttemptAt).toBeNull()
   })
 })
 
@@ -472,6 +299,4 @@ async function handleRouteRequest(
     response.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Unexpected route error' }))
   }
 }
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/

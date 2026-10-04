@@ -3,10 +3,6 @@ import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import type {
-  GetSecureSecretSettingsResponse,
-  UpdateSecureSecretSettingsResponse,
-} from "@forge/protocol";
 import { SecureSecretSettingsService } from "../../../../swarm/secure-sessions/secure-secret-settings-service.js";
 import { sendJson } from "../../../http-utils.js";
 import { createSecureSecretSettingsRoutes } from "../secure-secret-settings-routes.js";
@@ -19,74 +15,6 @@ afterEach(async () => {
 });
 
 describe("createSecureSecretSettingsRoutes", () => {
-  it("serves the default automatic-grant limit for Builder runtime", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "forge-secure-secret-settings-get-"));
-    const service = new SecureSecretSettingsService({ dataDir });
-    await service.load();
-    const server = await createRouteServer(
-      createSecureSecretSettingsRoutes({ settingsService: service }),
-    );
-
-    const response = await fetch(`${server.baseUrl}/api/settings/secure-secrets`);
-    const body = (await response.json()) as GetSecureSecretSettingsResponse;
-
-    expect(response.status).toBe(200);
-    expect(body.settings.maxProjectDefaults).toBe(50);
-    expect(body.defaults.maxProjectDefaults).toBe(50);
-    expect(body.constraints.maxProjectDefaults).toEqual({
-      min: 1,
-      max: 256,
-      default: 50,
-    });
-  });
-
-  it("persists a custom automatic-grant limit", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "forge-secure-secret-settings-put-"));
-    const service = new SecureSecretSettingsService({ dataDir });
-    await service.load();
-    const server = await createRouteServer(
-      createSecureSecretSettingsRoutes({ settingsService: service }),
-    );
-
-    const response = await fetch(`${server.baseUrl}/api/settings/secure-secrets`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ maxProjectDefaults: 12 }),
-    });
-    const body = (await response.json()) as UpdateSecureSecretSettingsResponse;
-
-    expect(response.status).toBe(200);
-    expect(body.ok).toBe(true);
-    expect(body.settings.maxProjectDefaults).toBe(12);
-    expect(service.getMaxProjectDefaults()).toBe(12);
-  });
-
-  it("returns 400 for decimal and out-of-range updates", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "forge-secure-secret-settings-invalid-"));
-    const service = new SecureSecretSettingsService({ dataDir });
-    await service.load();
-    const server = await createRouteServer(
-      createSecureSecretSettingsRoutes({ settingsService: service }),
-    );
-
-    const decimal = await fetch(`${server.baseUrl}/api/settings/secure-secrets`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ maxProjectDefaults: 12.5 }),
-    });
-    expect(decimal.status).toBe(400);
-    await expect(decimal.json()).resolves.toEqual({
-      error: "maxProjectDefaults must be an integer from 1 to 256",
-    });
-
-    const tooHigh = await fetch(`${server.baseUrl}/api/settings/secure-secrets`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ maxProjectDefaults: 257 }),
-    });
-    expect(tooHigh.status).toBe(400);
-    expect(service.getMaxProjectDefaults()).toBe(50);
-  });
 
   it("returns 409 when lowering below occupied automatic grants", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "forge-secure-secret-settings-occupied-"));

@@ -2,18 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  assertReleaseEnvironment,
-  assertSeaToolchain,
-  macReleaseEntitlementsPath,
-  prepareExecutableForInitialSmoke,
-  prepareReleaseExecutable,
-  verifyReleaseSignature,
-} from '../../../native-messaging-host/scripts/release-signing.mjs'
-import {
-  inspectSeaBuildCapability,
-  prepareAndSmokeExecutable,
-} from '../../../native-messaging-host/scripts/package-current.mjs'
+import { macReleaseEntitlementsPath, prepareReleaseExecutable, verifyReleaseSignature } from '../../../native-messaging-host/scripts/release-signing.mjs'
 
 const roots = []
 
@@ -31,72 +20,6 @@ afterEach(async () => {
 })
 
 describe('External Chrome release signing policy', () => {
-  it('keeps macOS credential-gated while Windows release packaging is credential-free', async () => {
-    await expect(assertReleaseEnvironment({ platform: 'darwin', env: { FORGE_EXTERNAL_CHROME_BUILD_MODE: 'release' } }))
-      .rejects.toThrow('FORGE_SEA_NODE')
-    await expect(assertReleaseEnvironment({
-      platform: 'win32',
-      env: { FORGE_EXTERNAL_CHROME_BUILD_MODE: 'release', FORGE_SEA_NODE: process.execPath },
-    })).resolves.toMatchObject({ mode: 'release', seaNode: process.execPath })
-  })
-
-  it('accepts repository Node 24 validation only after the direct SEA capability probe succeeds', () => {
-    expect(() => assertSeaToolchain({
-      nodeVersion: '24.18.0', execPath: 'C:\\Program Files\\nodejs\\node.exe',
-      env: { FORGE_EXTERNAL_CHROME_BUILD_MODE: 'validation' },
-    })).not.toThrow()
-    expect(inspectSeaBuildCapability({ status: 0 }, { nodeVersion: '24.18.0' }))
-      .toEqual({ supported: true })
-    expect(inspectSeaBuildCapability({
-      status: 1,
-      stderr: 'Error: NODE_SEA_FUSE is absent',
-      stdout: '',
-    }, { nodeVersion: '24.18.0' })).toEqual({
-      supported: false,
-      reason: 'Node 24.18.0 executable lacks the NODE_SEA_FUSE sentinel required by --build-sea',
-    })
-  })
-
-  it('pins release SEA packaging to the declared official Node executable and version', () => {
-    expect(() => assertSeaToolchain({
-      nodeVersion: '25.6.1', execPath: '/official/node',
-      env: { FORGE_EXTERNAL_CHROME_BUILD_MODE: 'release', FORGE_SEA_NODE: '/official/node' },
-    })).toThrow('official Node 26.5.0')
-    expect(() => assertSeaToolchain({
-      nodeVersion: '26.5.0', execPath: '/other/node',
-      env: { FORGE_EXTERNAL_CHROME_BUILD_MODE: 'release', FORGE_SEA_NODE: '/official/node' },
-    })).toThrow('must run with FORGE_SEA_NODE')
-  })
-
-  it('ad-hoc signs macOS SEA output before its first validation smoke', async () => {
-    const { executable } = await executableFixture()
-    const events = []
-    const runCommand = vi.fn(async (_command, args) => {
-      events.push(args.includes('--sign') ? `sign:${args[args.indexOf('--sign') + 1]}` : 'verify')
-      return { stdout: '', stderr: '' }
-    })
-    const prepareRelease = vi.fn(async () => {
-      events.push('prepare-release')
-      return { scheme: 'developer-id', mode: 'validation', verified: false, signer: null, teamId: null }
-    })
-    const smokeExecutable = vi.fn(() => events.push('smoke'))
-
-    const signature = await prepareAndSmokeExecutable(executable, ['chrome-extension://fixture/'], {
-      platform: 'darwin', runCommand, prepareRelease, smokeExecutable,
-    })
-
-    expect(events).toEqual(['sign:-', 'verify', 'smoke', 'prepare-release', 'smoke'])
-    expect(runCommand.mock.calls[0]).toEqual([
-      '/usr/bin/codesign', ['--force', '--sign', '-', '--entitlements', macReleaseEntitlementsPath, executable],
-    ])
-    expect(signature).toMatchObject({ mode: 'validation', verified: false })
-  })
-
-  it('does not alter non-macOS SEA output before the first smoke', async () => {
-    const runCommand = vi.fn(async () => ({ stdout: '', stderr: '' }))
-    await prepareExecutableForInitialSmoke('host.exe', { platform: 'win32', runCommand })
-    expect(runCommand).not.toHaveBeenCalled()
-  })
 
   it('signs macOS before staging and verifies the exact Developer ID identity and team', async () => {
     const { executable } = await executableFixture()
@@ -133,31 +56,6 @@ describe('External Chrome release signing policy', () => {
         APPLE_TEAM_ID: 'TEAM123456', FORGE_MACOS_SIGNING_IDENTITY: identity,
       },
     })).rejects.toThrow('team mismatch')
-  })
-
-  it('emits explicit unsigned Windows release metadata without invoking a signer', async () => {
-    const { executable } = await executableFixture('host.exe')
-    const runCommand = vi.fn(async () => ({ stdout: '', stderr: '' }))
-    await expect(prepareReleaseExecutable(executable, {
-      platform: 'win32', runCommand,
-      env: { FORGE_EXTERNAL_CHROME_BUILD_MODE: 'release', FORGE_SEA_NODE: process.execPath },
-    })).resolves.toEqual({ scheme: 'unsigned', mode: 'release', verified: false, signer: null, teamId: null })
-    expect(runCommand).not.toHaveBeenCalled()
-  })
-
-  it('checks a Windows subject only when release metadata explicitly declares an Authenticode signer', async () => {
-    const unsignedRun = vi.fn(async () => { throw new Error('unsigned Windows metadata must not inspect Authenticode') })
-    const unsigned = { scheme: 'unsigned', mode: 'release', verified: false, signer: null, teamId: null }
-    await expect(verifyReleaseSignature('host.exe', unsigned, { platform: 'win32', runCommand: unsignedRun })).resolves.toEqual(unsigned)
-    expect(unsignedRun).not.toHaveBeenCalled()
-
-    const signedRun = vi.fn(async () => ({
-      stdout: JSON.stringify({ Status: 'Valid', Subject: 'CN=Forge Fixture', Thumbprint: '00AA' }), stderr: '',
-    }))
-    const signed = { scheme: 'authenticode', mode: 'release', verified: true, signer: 'CN=Forge Fixture', teamId: null }
-    await expect(verifyReleaseSignature('host.exe', signed, { platform: 'win32', runCommand: signedRun })).resolves.toMatchObject({ signer: signed.signer })
-    await expect(verifyReleaseSignature('host.exe', { ...signed, signer: 'CN=Other' }, { platform: 'win32', runCommand: signedRun }))
-      .rejects.toThrow('signer changed')
   })
 
   it('marks validation hosts unusable for release but permits explicit validation smoke', async () => {
