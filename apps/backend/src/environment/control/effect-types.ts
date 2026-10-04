@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3'
-import type { ProjectSummary, RpcInput, WorkspaceStrategy } from '@forge/protocol/environment-v2'
+import type { ProjectSummary, RpcError, RpcInput, WorkspaceStrategy } from '@forge/protocol/environment-v2'
 import type { Principal, SwarmControlPort } from './control-types.js'
 
 export interface WorkspaceReservation {
@@ -44,6 +44,12 @@ export interface ArtifactPort {
   /** Called synchronously inside the same acceptance transaction after inserting control_inputs. */
   pinInput(inputId: string, rows: readonly InputArtifact[]): void
 }
+/** Routing eligibility is resolved before accepting an input into the durable queue. */
+export interface InputRoutePort {
+  preflight(input: ({ sessionId: string; projectId?: never } | { projectId: string; sessionId?: never }) & {
+    message: RpcInput<'session.send'>['message']
+  }): Promise<{ ok: true } | { ok: false; error: RpcError & { code: 'UNAVAILABLE' } }>
+}
 export type ControlEffect =
   | { kind: 'workspace.ensure'; reservation: WorkspaceReservation }
   | { kind: 'session.ensure'; input: Parameters<SwarmControlPort['ensureSession']>[0] }
@@ -65,6 +71,8 @@ export interface ControlCoreOptions {
   swarm: SwarmControlPort
   workspace: WorkspacePort
   artifacts: ArtifactPort
+  /** Omission allows input routes; adapters reject routes without a durable dispatch boundary. */
+  inputRoute?: InputRoutePort
   /** Must be synchronous so acceptance/claim/dispatch checks stay inside BEGIN IMMEDIATE. */
   isDeviceRevoked: (deviceSessionId: Principal['deviceSessionId']) => boolean
 }

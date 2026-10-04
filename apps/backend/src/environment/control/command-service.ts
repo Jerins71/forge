@@ -7,7 +7,7 @@ import {
 } from '@forge/protocol/environment-v2'
 import type { Static } from '@sinclair/typebox'
 import type { ControlMethod, ControlService, Principal } from './control-types.js'
-import type { ControlCoreOptions, ControlEffect, PreparedLaunch } from './effect-types.js'
+import type { ControlCoreOptions, ControlEffect, InputRoutePort, PreparedLaunch } from './effect-types.js'
 import type { ControlTransaction, EventSink } from './event-sink.js'
 
 export class ControlError extends Error implements RpcError {
@@ -77,6 +77,12 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
   const database = sink.database
   const launches = new Map<string, Promise<unknown>>()
   let closed = false
+  const preflightRoute = async (input: Parameters<InputRoutePort['preflight']>[0]): Promise<void> => {
+    const result = await options.inputRoute?.preflight(input)
+    if (result && !result.ok) {
+      throw Object.assign(new ControlError(result.error.code, result.error.message, result.error.retryable), result.error)
+    }
+  }
   const prior = (principal: Principal, method: ControlMethod, commandId: string, hash: string): CommandReceipt | undefined => {
     const command = database.prepare('SELECT device_session_id, method, request_hash FROM commands WHERE command_id = ?').get(commandId) as {
       device_session_id: string; method: ControlMethod; request_hash: string
@@ -206,13 +212,22 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       const normalized: RpcInput<ControlMethod> = JSON.parse(request.normalized)
       const duplicate = sink.transaction(() => prior(principal, method, normalized.commandId, request.hash))
       if (duplicate) return duplicate
-      if (method !== 'session.launch') return accept(principal, method, normalized)
+      if (method !== 'session.launch') {
+        if (method === 'session.send') {
+          if (options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError('FORBIDDEN', 'Device session was revoked')
+          const send = normalized as RpcInput<'session.send'>
+          readSession(sink, send.sessionId)
+          await preflightRoute({ sessionId: send.sessionId, message: send.message })
+        }
+        return accept(principal, method, normalized)
+      }
       const launch = normalized as RpcInput<'session.launch'>
       const previous = launches.get(launch.projectId) ?? Promise.resolve()
       const work = previous.catch(() => {}).then(async () => {
         const duplicate = sink.transaction(() => prior(principal, method, normalized.commandId, request.hash))
         if (duplicate) return duplicate
         if (options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError('FORBIDDEN', 'Device session was revoked')
+        if (launch.initialMessage) await preflightRoute({ projectId: launch.projectId, message: launch.initialMessage })
         for (let attempt = 0; attempt < 3; attempt++) {
           const prepared = await options.workspace.prepareLaunch(launch)
           try { return accept(principal, method, normalized, prepared) } catch (error) {
