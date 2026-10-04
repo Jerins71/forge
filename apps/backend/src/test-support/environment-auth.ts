@@ -38,6 +38,30 @@ export async function pairTestAccess(access: ReturnType<typeof createEnvironment
     },
   };
 }
+/** Pair through the public exchange after a private parent-owned bootstrap grant. */
+export async function pairTestServer(server: import('../server.js').StartedServer) {
+  const baseUrl = `http://${server.host}:${server.port}`;
+  const grant = await server.createBootstrapGrant();
+  const challenge = await (await fetch(`${baseUrl}/api/v2/access/challenge`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json() as { challengeId: string; nonce: string };
+  const fragment = new URLSearchParams(new URL(grant.pairingUrl!).hash.slice(1));
+  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const jwk = publicKey.export({ format: 'jwk' });
+  const input = { environmentId: grant.environmentId, challengeId: challenge.challengeId, nonce: challenge.nonce,
+    credential: { kind: 'link', grantId: grant.grantId, secret: fragment.get('secret')! },
+    deviceKind: 'cli', delivery: 'bearer', deviceName: 'paired server fixture', requestedScopes: environmentTestScopes,
+    proofKey: { kty: 'EC', crv: 'P-256', x: jwk.x!, y: jwk.y! } } as Omit<PairingExchange, 'proof'>;
+  const digest = createHash('sha256').update(canonicalPairingFields(input)).digest('hex');
+  const exchanged = await fetch(`${baseUrl}/api/v2/access/exchange`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...input, proof: sign('sha256', Buffer.from(pairingProofMessage(input, digest)), { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url') }) });
+  if (!exchanged.ok) throw new Error('Server fixture pairing denied');
+  const result = await exchanged.json() as import('@forge/protocol/environment-v2').PairingExchangeResult;
+  const headers = { Authorization: `Bearer ${result.bearerToken!}` };
+  return { headers, protocols: async (audience: 'legacy' | 'rpc' = 'legacy') => {
+    const response = await fetch(`${baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ audience, protocolVersion: 1 }) });
+    if (!response.ok) throw new Error('Server fixture ticket denied');
+    return ['forge.v2', `ticket.${(await response.json() as { ticket: string }).ticket}`];
+  } };
+}
 export async function createPairedTestAccess() {
   const root = await mkdtemp(join(tmpdir(), 'forge-paired-test-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

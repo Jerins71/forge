@@ -3,6 +3,7 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { pairTestServer } from "../test-support/environment-auth.js";
 import { startServer, type StartedServer } from "../server.js";
 import { DockerSecureExecutionBackend } from "../swarm/secure-sessions/execution/docker-secure-execution-backend.js";
 import { NonoSecureExecutionBackend } from "../swarm/secure-sessions/execution/nono-secure-execution-backend.js";
@@ -62,6 +63,7 @@ describe("Secure Sessions server lifecycle", () => {
 
     activeServer = await startServer({
       config: tempConfig.config,
+      environmentIdentity: { installationStateDir: join(tempConfig.config.paths.dataDir, ".test-installation") },
       logger: {
         info: () => undefined,
         warn: () => undefined,
@@ -111,6 +113,7 @@ describe("Secure Sessions server lifecycle", () => {
 
     activeServer = await startServer({
       config: tempConfig.config,
+      environmentIdentity: { installationStateDir: join(tempConfig.config.paths.dataDir, ".test-installation") },
       logger: {
         info: () => undefined,
         warn: () => undefined,
@@ -147,6 +150,7 @@ describe("Secure Sessions server lifecycle", () => {
 
     activeServer = await startServer({
       config: tempConfig.config,
+      environmentIdentity: { installationStateDir: join(tempConfig.config.paths.dataDir, ".test-installation") },
       logger: {
         info: () => undefined,
         warn: () => undefined,
@@ -154,7 +158,8 @@ describe("Secure Sessions server lifecycle", () => {
       },
     });
 
-    const client = new WebSocket(`ws://${activeServer.host}:${activeServer.port}`);
+    const paired = await pairTestServer(activeServer);
+    const client = new WebSocket(`ws://${activeServer.host}:${activeServer.port}`, await paired.protocols());
     const shutdownOrder: string[] = [];
     const originalTerminate = WebSocket.prototype.terminate;
     vi.spyOn(WebSocket.prototype, "terminate").mockImplementation(function terminateForOrderTest(this: WebSocket) {
