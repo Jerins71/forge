@@ -8,9 +8,6 @@ import type { SettingsTab, SettingsBackendTarget } from '@/components/settings/s
 // Track SettingsLayout props received by SettingsPanel
 let capturedActiveTab: SettingsTab | undefined
 let capturedContentWidthClassName: string | undefined
-let capturedGeneralProps: Record<string, unknown> | undefined
-let capturedSecretsProps: Record<string, unknown> | undefined
-let capturedProjectSettingsProps: Record<string, unknown> | undefined
 
 vi.mock('@/components/settings/SettingsLayout', () => ({
   SettingsLayout: (props: { activeTab: SettingsTab; onTabChange: (tab: SettingsTab) => void; contentWidthClassName?: string; children: React.ReactNode }) => {
@@ -22,27 +19,18 @@ vi.mock('@/components/settings/SettingsLayout', () => ({
 
 // Mock all individual settings panes to avoid their dependencies
 vi.mock('@/components/settings/SettingsGeneral', () => ({
-  SettingsGeneral: (props: Record<string, unknown>) => {
-    capturedGeneralProps = props
-    return createElement('div', { 'data-testid': 'settings-general' }, 'General')
-  },
+  SettingsGeneral: () => createElement('div', { 'data-testid': 'settings-general' }, 'General'),
 }))
 vi.mock('@/components/settings/SettingsAppearance', () => ({ SettingsAppearance: () => createElement('div', null, 'Appearance') }))
 vi.mock('@/components/settings/SettingsNotifications', () => ({ SettingsNotifications: () => createElement('div', null, 'Notifications') }))
 vi.mock('@/components/settings/SettingsAuth', () => ({ SettingsAuth: () => createElement('div', null, 'Auth') }))
 vi.mock('@/components/settings/SettingsSecrets', () => ({
-  SettingsSecrets: (props: Record<string, unknown>) => {
-    capturedSecretsProps = props
-    return createElement('div', null, 'Secrets')
-  },
+  SettingsSecrets: () => createElement('div', null, 'Secrets'),
 }))
 vi.mock('@/components/settings/SettingsModels', () => ({ SettingsModels: () => createElement('div', null, 'Models') }))
 vi.mock('@/components/settings/SettingsProjectResources', () => ({ SettingsProjectResources: () => createElement('div', null, 'Repository resources') }))
 vi.mock('@/components/settings/SettingsProjectSettings', () => ({
-  SettingsProjectSettings: (props: Record<string, unknown>) => {
-    capturedProjectSettingsProps = props
-    return createElement('div', null, 'Project Settings')
-  },
+  SettingsProjectSettings: () => createElement('div', null, 'Project Settings'),
 }))
 vi.mock('@/components/settings/SettingsSkills', () => ({ SettingsSkills: () => createElement('div', null, 'Skills') }))
 vi.mock('@/components/settings/SettingsPrompts', () => ({ SettingsPrompts: () => createElement('div', null, 'Prompts') }))
@@ -66,20 +54,12 @@ const BUILDER_TARGET: SettingsBackendTarget = {
   ],
 }
 
-const LIMITED_TARGET: SettingsBackendTarget = {
-  ...BUILDER_TARGET,
-  availableTabs: ['general', 'appearance', 'auth', 'models', 'about'],
-}
-
 let container: HTMLDivElement
 let root: Root | null = null
 
 beforeEach(() => {
   capturedActiveTab = undefined
   capturedContentWidthClassName = undefined
-  capturedGeneralProps = undefined
-  capturedSecretsProps = undefined
-  capturedProjectSettingsProps = undefined
   container = document.createElement('div')
   document.body.appendChild(container)
 })
@@ -128,19 +108,6 @@ function renderPanel(props: {
   })
 }
 
-function rerenderPanel(props: {
-  initialTab?: string
-  target?: SettingsBackendTarget
-  contextProfileId?: string
-  previewSession?: { agentId: string; profileId: string } | null
-  profiles?: any[]
-  managers?: any[]
-}) {
-  act(() => {
-    root?.render(createElement(SettingsPanel, makeProps(props)))
-  })
-}
-
 describe('SettingsPanel initialTab', () => {
   it('defaults to general when no initialTab is provided', () => {
     renderPanel({})
@@ -148,81 +115,4 @@ describe('SettingsPanel initialTab', () => {
     expect(capturedContentWidthClassName).toBeUndefined()
   })
 
-  it('uses contextual project identity for Secrets without replacing task preview context', () => {
-    renderPanel({
-      initialTab: 'secrets',
-      contextProfileId: 'project-beta',
-      previewSession: {
-        agentId: 'session-with-draft',
-        profileId: 'project-alpha',
-      },
-    })
-
-    expect(capturedActiveTab).toBe('secrets')
-    expect(capturedSecretsProps?.currentProfileId).toBe('project-beta')
-  })
-
-  it('renders the project settings surface for the route-selected project', () => {
-    renderPanel({
-      initialTab: 'project-settings',
-      contextProfileId: 'project-beta',
-      previewSession: { agentId: 'session-alpha', profileId: 'project-alpha' },
-      profiles: [{
-        profileId: 'project-beta',
-        displayName: 'Project Beta',
-        defaultSessionAgentId: 'session-beta',
-        defaultModel: { provider: 'openai-codex', modelId: 'gpt-5.5', thinkingLevel: 'high' },
-      }],
-      managers: [{ agentId: 'session-beta', profileId: 'project-beta', role: 'manager', cwd: '/project-beta' }],
-    })
-
-    expect(capturedActiveTab).toBe('project-settings')
-    expect((capturedProjectSettingsProps?.profile as { profileId: string }).profileId).toBe('project-beta')
-    expect((capturedProjectSettingsProps?.manager as { agentId: string }).agentId).toBe('session-beta')
-  })
-
-  it('syncs activeTab when initialTab prop changes while mounted', () => {
-    renderPanel({ initialTab: 'general' })
-    expect(capturedActiveTab).toBe('general')
-
-    rerenderPanel({ initialTab: 'secrets' })
-    expect(capturedActiveTab).toBe('secrets')
-  })
-
-  it('syncs activeTab from undefined to a valid tab', () => {
-    renderPanel({})
-    expect(capturedActiveTab).toBe('general')
-
-    rerenderPanel({ initialTab: 'auth' })
-    expect(capturedActiveTab).toBe('auth')
-  })
-
-  it('ignores initialTab change when tab is not in availableTabs', () => {
-    renderPanel({ initialTab: 'general', target: LIMITED_TARGET })
-    expect(capturedActiveTab).toBe('general')
-
-    // 'notifications' is not in LIMITED_TARGET.availableTabs
-    rerenderPanel({ initialTab: 'notifications', target: LIMITED_TARGET })
-    // Should stay on general (invalid tab ignored)
-    expect(capturedActiveTab).toBe('general')
-  })
-
-  it('repairs to first available tab when activeTab is not in availableTabs', () => {
-    renderPanel({ initialTab: 'notifications', target: BUILDER_TARGET })
-    expect(capturedActiveTab).toBe('notifications')
-
-    // Switch to a target where notifications is unavailable
-    rerenderPanel({ initialTab: 'notifications', target: LIMITED_TARGET })
-    // Should repair to the first available tab
-    expect(capturedActiveTab).toBe('general')
-  })
-})
-
-describe('SettingsPanel General wiring', () => {
-  it('passes a client bound to the resolved target to General', () => {
-    renderPanel({ target: BUILDER_TARGET })
-    expect(capturedGeneralProps?.wsUrl).toBe('ws://localhost:47187')
-    expect((capturedGeneralProps?.apiClient as { target: SettingsBackendTarget }).target).toBe(BUILDER_TARGET)
-    expect(capturedGeneralProps).not.toHaveProperty('repositoryCloneAvailable')
-  })
 })

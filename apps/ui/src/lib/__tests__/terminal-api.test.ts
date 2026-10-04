@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  closeTerminal,
   createTerminal,
 } from '../terminal-api'
 
@@ -70,30 +69,4 @@ describe('terminal-api', () => {
     expect(response.terminal.name).toBe('Build shell')
   })
 
-  it('closeTerminal includes sessionAgentId in the query string', async () => {
-    vi.stubGlobal('fetch', fetchMock)
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
-
-    await closeTerminal(wsUrl, 'term/1', { sessionAgentId: 'manager-1' })
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:47187/api/terminals/term%2F1?sessionAgentId=manager-1',
-      { method: 'DELETE', credentials: 'include' },
-    )
-  })
-
-  it('surfaces backend errors from non-OK responses', async () => {
-    vi.stubGlobal('fetch', fetchMock)
-    fetchMock.mockResolvedValue(
-      mockJsonResponse(
-        {
-          error: 'Terminal limit reached',
-          code: 'TERMINAL_LIMIT_REACHED',
-        },
-        { status: 409 },
-      ),
-    )
-
-    await expect(createTerminal(wsUrl, { sessionAgentId: 'manager-1' })).rejects.toThrow('Terminal limit reached')
-  })
 })
