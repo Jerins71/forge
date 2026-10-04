@@ -1,8 +1,12 @@
-import type {
-  AgentDescriptor,
-  ConversationMessageEvent,
-  ManagerProfile,
+import {
+  ACTIVITY_SUMMARY_SCHEMA_VERSION,
+  type AgentDescriptor,
+  type ConversationAttachmentMetadata,
+  type ConversationMessageEvent,
+  type ManagerProfile,
 } from '@forge/protocol'
+import type { ArtifactRef } from '@forge/protocol/environment-v2'
+import type { EnvironmentActivityEntry } from '../ws-state'
 import type { SessionSummary } from '@forge/protocol/environment-v2'
 import type { ShellState, DetailState } from '@forge/client-runtime'
 const pendingModel = { provider: '', modelId: '', thinkingLevel: '' }
@@ -82,7 +86,55 @@ export function projectItems(
       timestamp: i.timestamp,
       source: i.kind === 'user' ? 'user_input' : 'assistant',
       ...(i.commandId ? { clientRequestId: i.commandId } : {}),
+      ...(i.artifacts.length ? { attachments: i.artifacts.map(artifactAttachment) } : {}),
     })) as ConversationMessageEvent[]
+}
+
+/** Tool and activity items render collapsed; their full content is fetched by `contentRef` on expansion. */
+export function projectActivityItems(
+  items: NonNullable<DetailState['projection']>['items'],
+  sessionId: string,
+): EnvironmentActivityEntry[] {
+  return items
+    .filter((i) => i.kind === 'tool' || i.kind === 'activity')
+    .map((i) => ({
+      type: 'activity_summary',
+      schemaVersion: ACTIVITY_SUMMARY_SCHEMA_VERSION,
+      itemId: i.itemId,
+      agentId: sessionId,
+      actorAgentId: i.actorId,
+      turnId: i.userTurnId,
+      timestamp: i.timestamp,
+      kind: 'tool_activity',
+      status: 'completed',
+      displaySummary: i.text,
+      contentRef: i.contentRef,
+    }))
+}
+
+export function projectDetailActivity(state: DetailState): EnvironmentActivityEntry[] {
+  return projectActivityItems(
+    state.projection?.items ?? [],
+    state.projection?.session.sessionId ?? '',
+  )
+}
+
+const ARTIFACT_FILE_REF_PREFIX = 'artifact:'
+
+/** V2 artifacts travel as attachment metadata whose file reference names the environment artifact. */
+function artifactAttachment(artifact: ArtifactRef): ConversationAttachmentMetadata {
+  return {
+    type: artifact.mimeType.startsWith('image/') ? 'image' : artifact.mimeType.startsWith('text/') ? 'text' : 'binary',
+    mimeType: artifact.mimeType,
+    fileName: artifact.fileName,
+    fileRef: `${ARTIFACT_FILE_REF_PREFIX}${artifact.artifactId}`,
+    sizeBytes: artifact.sizeBytes,
+  }
+}
+
+/** The environment artifact ID behind an attachment file reference, or null for stored attachments. */
+export function artifactIdFromFileRef(fileRef: string): string | null {
+  return fileRef.startsWith(ARTIFACT_FILE_REF_PREFIX) ? fileRef.slice(ARTIFACT_FILE_REF_PREFIX.length) : null
 }
 
 export function projectDetailMessages(

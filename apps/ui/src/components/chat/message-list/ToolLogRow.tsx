@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import {
   AlertCircle,
   Check,
@@ -339,13 +339,34 @@ function ToolPayloadBlock({
   )
 }
 
+export type ToolContentLoader = (contentRef: string) => Promise<{ text: string; truncated: boolean }>
+
+/** Full content of a referenced tool/activity item, loaded the first time the row is expanded. */
+function useReferencedContent(contentRef: string | undefined, load: ToolContentLoader | undefined, isExpanded: boolean) {
+  const [state, setState] = useState<{ text: string; truncated: boolean } | { error: string } | 'loading' | null>(null)
+  const requestedRef = useRef(false)
+  useEffect(() => {
+    if (!isExpanded || !contentRef || !load || requestedRef.current) return
+    requestedRef.current = true
+    setState('loading')
+    load(contentRef).then(setState, (error: unknown) => {
+      // Collapsing and expanding again retries.
+      requestedRef.current = false
+      setState({ error: error instanceof Error ? error.message : 'Could not load details' })
+    })
+  }, [contentRef, isExpanded, load])
+  return state
+}
+
 function ToolExecutionLogRow({
   entry,
   isActive,
   nowMs,
   actorDisplay,
+  loadContent,
 }: {
   entry: ToolExecutionDisplayEntry
+  loadContent?: ToolContentLoader
   isActive: boolean
   /** Optional shared clock (epoch ms) from parent; avoids per-row timers. */
   nowMs?: number
@@ -354,6 +375,7 @@ function ToolExecutionLogRow({
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const contentId = useId()
+  const referenced = useReferencedContent(entry.contentRef, loadContent, isExpanded)
 
   const displayStatus = mapToolStatus(entry)
   const inputRecord = parseJsonRecord(entry.inputPayload ?? entry.latestPayload)
@@ -486,6 +508,21 @@ function ToolExecutionLogRow({
               />
             ) : null}
 
+            {referenced === 'loading' ? (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                Loading details…
+              </div>
+            ) : referenced && 'error' in referenced ? (
+              <p className="text-xs text-destructive">{referenced.error}</p>
+            ) : referenced ? (
+              <ToolPayloadBlock
+                label={referenced.truncated ? 'Details (truncated)' : 'Details'}
+                value={referenced.text}
+                tone={displayStatus === 'pending' ? 'neutral' : displayStatus}
+              />
+            ) : null}
+
             <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
               <span>{formatTimestamp(entry.timestamp)}</span>
               {rawActorId ? <span>• {rawActorId}</span> : null}
@@ -514,12 +551,15 @@ function RuntimeErrorLog({ entry }: { entry: ConversationLogEntry }) {
 export function ToolLogRow({
   type,
   entry,
+  loadContent,
   isActive = false,
   nowMs,
   actorDisplay,
 }: {
   type: 'tool_execution' | 'runtime_error_log'
   entry: ToolExecutionDisplayEntry | ConversationLogEntry
+  /** Fetches full content for entries that carry a `contentRef`. */
+  loadContent?: ToolContentLoader
   isActive?: boolean
   /** Optional shared clock (epoch ms) from parent; avoids per-row timers. */
   nowMs?: number
@@ -533,6 +573,7 @@ export function ToolLogRow({
   return (
     <ToolExecutionLogRow
       entry={entry as ToolExecutionDisplayEntry}
+      loadContent={loadContent}
       isActive={isActive}
       nowMs={nowMs}
       actorDisplay={actorDisplay}

@@ -214,6 +214,13 @@ export function BuilderSurface({
   const selectedEnvironmentId = routedEnvironmentId ?? primaryEnvironmentId
   const { client: localClient, clientRef, httpClientRef, state, setState } = useEnvironmentConnection(selectedEnvironmentId)
   const isPrimarySelected = selectedEnvironmentId === primaryEnvironmentId
+  // Stable so delivery-state rows stay memoized; Retry keeps the command, Resend creates a new one.
+  const handleRetryEnvironmentMessage = useCallback((commandId: string) => {
+    clientRef.current?.retryEnvironmentMessage(commandId)
+  }, [clientRef])
+  const handleResendEnvironmentMessage = useCallback((commandId: string) => {
+    clientRef.current?.resendEnvironmentMessage(commandId)
+  }, [clientRef])
   // The primary feeds only the sidebar's project actions. Its handles do not subscribe, and while
   // another environment is selected only its session and project lists are read, so primary
   // conversation traffic never re-renders the remote chat workspace.
@@ -2404,6 +2411,9 @@ export function BuilderSurface({
                   hasStalePresentation: transcript.hasStaleConversationPresentation,
                   bootstrapErrorMessage: transcript.conversationBootstrap?.errorMessage,
                   onRetryBootstrap: () => clientRef.current?.retryConversationBootstrap(),
+                  commandStatuses: state.commandStatuses,
+                  onRetryCommand: handleRetryEnvironmentMessage,
+                  onResendCommand: handleResendEnvironmentMessage,
                   streamingStartedAt:
                     activeAgentStatus === 'streaming'
                       ? state.statuses[activeAgentId ?? '']?.streamingStartedAt

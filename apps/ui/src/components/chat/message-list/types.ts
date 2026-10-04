@@ -40,6 +40,8 @@ export interface ToolExecutionDisplayEntry {
   toolCallId?: string
   /** Provider-neutral collapsed copy from a canonical activity summary. */
   displaySummary?: string
+  /** V2 environment items: full content fetched by reference when expanded. */
+  contentRef?: string
   inputPayload?: string
   latestPayload?: string
   outputPayload?: string

@@ -1,11 +1,14 @@
-import type { EnvironmentClient, DetailState } from '@forge/client-runtime'
+import { EnvironmentRuntimeError, isInterruptedReceipt, type EnvironmentClient, type DetailState } from '@forge/client-runtime'
 import {
   projectShell,
   projectDetailMessages,
+  projectDetailActivity,
   projectItems,
+  projectActivityItems,
   projectWorker,
 } from './ws-client/environment-projection'
-import { sendEnvironmentCommand } from './ws-client/environment-command-transport'
+import { environmentCommandIntentKey, sendEnvironmentCommand } from './ws-client/environment-command-transport'
+import { EnvironmentOutbox } from './ws-client/environment-outbox'
 import { BROWSER_HOST_REGISTER_PROTOCOL_INCOMPATIBLE_ERROR } from '@forge/protocol'
 import type { CodexElicitationDecision, CodexElicitationPersistScope, SessionGoalControlAction, SessionProjectAgentInput, WorkModeId } from '@forge/protocol'
 import type { ConversationSnapshotCache } from './ws-client/conversation-snapshot-cache'
@@ -227,6 +230,13 @@ export class ManagerWsClient {
   private detailLease: ReturnType<EnvironmentClient['acquireDetail']> | null =
     null
   private detailDetach: (() => void) | null = null
+  /** User-message submits on the environment path; null for legacy transports. */
+  private readonly outbox: EnvironmentOutbox | null = null
+  /** Command ID per receipt-backed intent (launch/stop/choice) until the server returns its receipt. */
+  private readonly intentCommandIds = new Map<string, string>()
+  /** Command IDs currently echoed locally in `messages` before the projection shows them. */
+  private outboxEchoIds = new Set<string>()
+  private environmentProjection: DetailState['projection'] = null
   private desiredAgentId: string | null
   private conversationView: BuilderTimelineChannelView = 'web'
   private readonly originId: string
@@ -339,6 +349,13 @@ export class ManagerWsClient {
     })
     if (this.environmentClient) {
       const client = this.environmentClient
+      this.outbox = new EnvironmentOutbox(client, () => this.refreshEnvironmentCommands())
+      this.environmentDetach.push(
+        client.receipts.subscribe((receipts) => receipts, () => {
+          this.outbox?.settle()
+          this.refreshEnvironmentCommands()
+        }),
+      )
       const updateShell = () =>
         this.updateState(
           projectShell(client.shell.getSnapshot(), this.state.agents),
@@ -796,46 +813,13 @@ export class ManagerWsClient {
       sessionReferenceAgentIds?: string[]
     },
   ): void {
-    if (this.environmentClient) {
-      const client = this.environmentClient,
-        sessionId = options?.agentId ?? this.state.targetAgentId
+    if (this.outbox) {
+      const sessionId = options?.agentId ?? this.state.targetAgentId
       if (!sessionId) {
-      this.updateState({
-        lastError: 'No session selected' })
-      return
+        this.updateState({ lastError: 'No session selected' })
+        return
       }
-      const commandId = crypto.randomUUID()
-      void (async () => {
-        const artifactIds = [...(options?.artifactIds ?? [])]
-        const projectId = client.shell
-          .getSnapshot()
-          .sessions.get(sessionId)?.projectId
-        if (options?.attachments?.length && !projectId)
-          throw new Error('Session project is unavailable')
-        for (const a of options?.attachments ?? []) {
-          const bytes =
-            a.type === 'text'
-              ? new TextEncoder().encode(a.text ?? '')
-              : Uint8Array.from(atob(a.data ?? ''), (c) => c.charCodeAt(0))
-          const artifact = await client.uploadArtifact({
-            projectId: projectId!,
-            uploadId: crypto.randomUUID(),
-            fileName: a.fileName ?? 'attachment',
-            mimeType: a.mimeType,
-            body: bytes,
-          })
-          artifactIds.push(artifact.artifactId)
-        }
-        await client.request('session.send', {
-          commandId,
-          sessionId,
-          message: { text, artifactIds },
-        })
-      })().catch((error) =>
-      this.updateState({
-        lastError: error instanceof Error ? error.message : String(error),
-        }),
-      )
+      this.outbox.submit(sessionId, text, options?.attachments ?? [], options?.artifactIds ?? [])
       return
     }
     const trimmed = text.trim()
@@ -935,6 +919,20 @@ export class ManagerWsClient {
       })
     }, OPTIMISTIC_SEND_EXPIRY_MS)
     this.optimisticSendExpiryTimers.add(timer)
+  }
+
+  /** Retries an unacknowledged environment message with its original command ID. */
+  retryEnvironmentMessage(commandId: string): boolean {
+    return this.outbox?.retry(commandId) ?? false
+  }
+
+  /** Sends an interrupted or failed environment message again as a new command. */
+  resendEnvironmentMessage(commandId: string): boolean {
+    if (!this.outbox) return false
+    const projected = this.environmentProjection?.items.find((item) => item.commandId === commandId && item.kind === 'user')
+    return this.outbox.resend(commandId, projected
+      ? { sessionId: this.environmentProjection!.session.sessionId, text: projected.text, artifactIds: projected.artifacts.map((a) => a.artifactId) }
+      : undefined) !== null
   }
 
   sendChoiceResponse(agentId: string, choiceId: string, answers: ChoiceAnswer[]): void {
@@ -1428,7 +1426,7 @@ export class ManagerWsClient {
         const page=await this.environmentClient.request('session.history',{sessionId:agentId,before:cursor,turns:Math.min(20,Math.max(1,limit??20))})
         const messages=projectItems(page.items,agentId)
         const result:ConversationPageResult={agentId,messages,page:{hasOlder:!!page.nextCursor,...(page.nextCursor?{nextCursor:page.nextCursor}:{}),completeness:'complete',source:'canonical'}}
-        if(this.state.targetAgentId===agentId)this.updateState({messages:[...messages,...this.state.messages],conversationPage:result.page,conversationPageLoading:false,conversationHistoryMutation:{revision:(this.state.conversationHistoryMutation?.revision??0)+1,kind:'prepend'}})
+        if(this.state.targetAgentId===agentId)this.updateState({messages:[...messages,...this.state.messages],activityMessages:[...projectActivityItems(page.items,agentId),...this.state.activityMessages],conversationPage:result.page,conversationPageLoading:false,conversationHistoryMutation:{revision:(this.state.conversationHistoryMutation?.revision??0)+1,kind:'prepend'}})
         return result
       }
       return await this.requestDispatcher.enqueueRequest(
@@ -2371,15 +2369,24 @@ export class ManagerWsClient {
     if (this.environmentClient) {
       if (!this.environmentClient.connection.getSnapshot().transportHealthy)
         return false
+      // A repeated intent before its receipt is a retry of the same command, never a new one.
+      const intentKey = environmentCommandIntentKey(command)
+      const commandId = (intentKey && this.intentCommandIds.get(intentKey)) || crypto.randomUUID()
+      if (intentKey) this.intentCommandIds.set(intentKey, commandId)
       void sendEnvironmentCommand(
         this.environmentClient,
         command,
+        commandId,
         this.state.targetAgentId ?? this.desiredAgentId ?? undefined,
       )
-        .then((events) => {
+        .then(({ events, receipt }) => {
+          if (intentKey) this.intentCommandIds.delete(intentKey)
+          if (receipt && isInterruptedReceipt(receipt))
+            this.updateState({ lastError: interruptedCommandMessage(receipt.method) })
           for (const event of events) this.handleServerEvent(event)
         })
         .catch((error) => {
+          if (intentKey && !isRetryableEnvironmentError(error)) this.intentCommandIds.delete(intentKey)
           this.updateState({
             lastError: error instanceof Error ? error.message : String(error),
           })
@@ -2390,6 +2397,25 @@ export class ManagerWsClient {
       return true
     }
     return this.transport?.send(command) ?? false
+  }
+
+  /** Re-derives local message echoes and delivery states after a submit or receipt changes. */
+  private refreshEnvironmentCommands(): void {
+    if (!this.outbox) return
+    const sessionId = this.state.targetAgentId
+    const echoes = sessionId && this.environmentProjection?.session.sessionId === sessionId
+      ? this.outbox.pendingMessages(sessionId, projectedCommandIds(this.environmentProjection))
+      : []
+    const previousEchoIds = this.outboxEchoIds
+    this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))
+    const kept = this.state.messages.filter((message) =>
+      !(message.type === 'conversation_message' && !message.id && message.clientRequestId && previousEchoIds.has(message.clientRequestId)))
+    const firstChoice = kept.findIndex((message) => message.type === 'choice_request')
+    const at = firstChoice < 0 ? kept.length : firstChoice
+    this.updateState({
+      messages: previousEchoIds.size || echoes.length ? [...kept.slice(0, at), ...echoes, ...kept.slice(at)] : this.state.messages,
+      commandStatuses: this.outbox.statuses(),
+    })
   }
 
   private mountEnvironmentDetail(sessionId: string): void {
@@ -2405,13 +2431,18 @@ export class ManagerWsClient {
       const detail = store.getSnapshot()
       if (detail.projection !== projection) {
         projection = detail.projection
+        this.environmentProjection = projection
+        const projectedMessages = projectDetailMessages(detail)
+        const echoes = this.outbox?.pendingMessages(sessionId, projectedCommandIds(projection)) ?? []
+        this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))
         this.updateState({
-          messages: [...projectDetailMessages(detail),...(projection?.choices??[]).filter(c=>c.status==='pending').map(c=>({type:'choice_request' as const,agentId:c.agentId,choiceId:c.choiceId,status:'pending' as const,questions:c.questions,timestamp:projection!.session.updatedAt}))],
+          messages: [...projectedMessages,...echoes,...(projection?.choices??[]).filter(c=>c.status==='pending').map(c=>({type:'choice_request' as const,agentId:c.agentId,choiceId:c.choiceId,status:'pending' as const,questions:c.questions,timestamp:projection!.session.updatedAt}))],
+          commandStatuses: this.outbox?.statuses(),
           pendingChoiceIds:new Set((projection?.choices??[]).filter(c=>c.status==='pending').map(c=>c.choiceId)),
           agents:[...this.state.agents.filter(a=>a.role!=='worker'||a.managerId!==sessionId),...(projection?.workers??[]).map(w=>projectWorker(w,sessionId,this.environmentClient!.shell.getSnapshot()))],
           conversationPage:projection?{hasOlder:!!projection.historyCursor,...(projection.historyCursor?{nextCursor:projection.historyCursor}:{}),completeness:'complete',source:'canonical'}:null,
           conversationPageLoading:false,
-          activityMessages: [],
+          activityMessages: projectDetailActivity(detail),
           conversationPresentation: null,
           conversationHistoryMutation: {
             revision:
@@ -2446,4 +2477,20 @@ export class ManagerWsClient {
       listener(this.state)
     }
   }
+}
+
+function projectedCommandIds(projection: DetailState['projection']): ReadonlySet<string> {
+  const ids = new Set<string>()
+  for (const item of projection?.items ?? []) if (item.commandId) ids.add(item.commandId)
+  return ids
+}
+
+/** Only a transport failure leaves an intent unacknowledged; anything after a receipt settles it. */
+function isRetryableEnvironmentError(error: unknown): boolean {
+  return error instanceof EnvironmentRuntimeError && (error.retryable || error.code === 'UNAVAILABLE')
+}
+
+function interruptedCommandMessage(method: string): string {
+  const action = method === 'session.choose' ? 'Choice response' : method === 'session.stop' ? 'Stop request' : 'Session launch'
+  return `${action} was interrupted; delivery is unknown. Submit it again to resend.`
 }
