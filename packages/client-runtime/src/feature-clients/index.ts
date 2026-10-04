@@ -453,7 +453,7 @@ export function createFeatureClients(
   }
   const checkSetting = (path: string) => {
     if (
-      !/^\/api\/(settings|stats|auth|skills|specialists|prompts|extensions|slash-commands|secure-sessions|secure-secrets|onboarding|observability|credentials|model-catalog)(\/|\?|$)/.test(
+      !/^\/api\/(settings|stats|auth|skills|specialists|prompts|extensions|slash-commands|secure-sessions|secure-secrets|onboarding|observability|credentials|model-catalog|git\/remote-update-awareness)(\/|\?|$)/.test(
         path,
       )
     )
