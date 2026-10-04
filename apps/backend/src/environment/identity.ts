@@ -3,7 +3,8 @@ import { mkdir, open, readFile, realpath, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import type Database from 'better-sqlite3';
 import type { EnvironmentCapabilities, EnvironmentDescriptor } from '@forge/protocol/environment-v2';
-import { ENVIRONMENT_PROTOCOL_VERSION } from '@forge/protocol/environment-v2';
+import { TypeCompiler } from '@sinclair/typebox/compiler';
+import { EnvironmentDescriptorSchema, ENVIRONMENT_PROTOCOL_VERSION } from '@forge/protocol/environment-v2';
 import { writeJsonFileAtomic } from '../utils/atomic-files.js';
 import { getEnvironmentIdentityPath, getHostInstallationStateDir } from '../swarm/storage/data-paths.js';
 
@@ -32,10 +33,13 @@ export class EnvironmentIdentityMismatch extends Error {
   readonly code = 'IDENTITY_MISMATCH';
   constructor() { super('Environment installation binding changed. Use local forge environment rekey or adopt recovery.'); }
 }
+const descriptorValidator = TypeCompiler.Compile(EnvironmentDescriptorSchema);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const capabilities: EnvironmentCapabilities = { shellResume: true, sessionDetail: true, durableCommands: true, newWorktree: true, artifactUpload: true, terminal: true, legacyAdapter: true };
 function describe(file: EnvironmentIdentityFile, options: IdentityOptions): EnvironmentIdentity {
-  return { file, environmentId: file.environmentId, descriptor: () => ({ environmentId: file.environmentId, label: options.label ?? 'Forge', platform: { os: ['darwin', 'linux', 'win32'].includes(process.platform) ? process.platform as 'darwin' | 'linux' | 'win32' : 'unknown', arch: process.arch }, forgeVersion: options.forgeVersion ?? '0.9.0', protocolVersion: ENVIRONMENT_PROTOCOL_VERSION, streamEpoch: file.streamEpoch, capabilities: options.capabilities ?? capabilities }) };
+  const descriptor: EnvironmentDescriptor = { environmentId: file.environmentId, label: options.label ?? 'Forge', platform: { os: ['darwin', 'linux', 'win32'].includes(process.platform) ? process.platform as 'darwin' | 'linux' | 'win32' : 'unknown', arch: process.arch }, forgeVersion: options.forgeVersion ?? '0.9.0', protocolVersion: ENVIRONMENT_PROTOCOL_VERSION, streamEpoch: file.streamEpoch, capabilities: options.capabilities ?? capabilities };
+  if (!descriptorValidator.Check(descriptor)) throw new Error('Invalid environment descriptor configuration');
+  return { file, environmentId: file.environmentId, descriptor: () => ({...descriptor,platform:{...descriptor.platform},capabilities:{...descriptor.capabilities}}) };
 }
 async function readJson(path: string): Promise<unknown | null> {
   try { return JSON.parse(await readFile(path, 'utf8')); }
@@ -93,9 +97,10 @@ export async function loadEnvironmentIdentity(options: IdentityOptions): Promise
     }
     if (Object.hasOwn(registry.instances, canonicalPath)) throw new EnvironmentIdentityMismatch();
     const file: EnvironmentIdentityFile = { formatVersion: 1, environmentId: randomUUID(), installationNonce: registry.installationNonce, instanceNonce: randomUUID(), streamEpoch: randomUUID(), createdAt: new Date().toISOString() };
+    const identity = describe(file, options);
     registry.instances[canonicalPath] = file.instanceNonce;
     await atomicJson(path, file);
-    return describe(file, options);
+    return identity;
   });
 }
 /** Local-only recovery under the runtime lock. Commit revocation before publishing a new identity. */
@@ -111,6 +116,7 @@ export async function recoverEnvironmentIdentity(options: IdentityOptions & { da
       return describe(old, options);
     }
     const file = { ...old, environmentId: options.action === 'rekey' ? randomUUID() : old.environmentId, installationNonce: registry.installationNonce, instanceNonce: randomUUID(), streamEpoch: randomUUID() };
+    const identity = describe(file, options);
     options.database.transaction(() => {
       const now = Date.now();
       options.database.prepare('UPDATE device_sessions SET revoked_at = COALESCE(revoked_at, ?)').run(now);
@@ -120,6 +126,6 @@ export async function recoverEnvironmentIdentity(options: IdentityOptions & { da
     })();
     await atomicJson(getEnvironmentIdentityPath(options.dataDir), file);
     registry.instances[canonicalPath] = file.instanceNonce;
-    return describe(file, options);
+    return identity;
   });
 }
