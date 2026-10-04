@@ -8,6 +8,7 @@ import { Dialog, DialogOverlay, DialogPortal, DialogTitle } from '@/components/u
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { ArtifactReference } from '@/lib/artifacts'
 import { toEditorHref } from '@/lib/artifacts'
+import { useIsRemoteEnvironment } from '@/components/chat/agent-sidebar/EnvironmentStatusChip'
 import {
   EDITOR_LABELS,
   EDITOR_URL_SCHEMES,
@@ -266,7 +267,9 @@ export function ArtifactPanel({ artifact, environmentClient, activeAgentId, onCl
     [artifact?.fileName, displayPath],
   )
   const localFilePath = displayPath || artifact?.path || ''
-  const isLocalAbsolutePath = localFilePath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(localFilePath)
+  // Another machine's artifact path is never opened, revealed or launched locally.
+  const isRemote = useIsRemoteEnvironment(environmentClient?.environmentId)
+  const isLocalAbsolutePath = !isRemote && (localFilePath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(localFilePath))
   const canRevealInFolder = isElectron() && Boolean(window.electronBridge?.revealInFolder) && isLocalAbsolutePath
   const canOpenInBrowser = isHtml && isElectron() && isLocalAbsolutePath
 
@@ -434,7 +437,7 @@ export function ArtifactPanel({ artifact, environmentClient, activeAgentId, onCl
                 </button>
               )}
 
-              {!isHtml && (
+              {!isHtml && !isRemote && (
                 <a
                   href={toEditorHref(localFilePath, editorScheme)}
                   target="_blank"

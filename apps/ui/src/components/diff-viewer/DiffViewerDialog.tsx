@@ -202,6 +202,7 @@ export function DiffViewerContent({
     <>
       {/* Header */}
       <DiffDialogHeader
+        environmentId={panel?.session.environmentId ?? null}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         repoName={statusQuery.data?.repoName ?? null}

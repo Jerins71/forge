@@ -18,6 +18,7 @@ import {
   EDITOR_LABELS,
 } from '@/lib/editor-preference'
 import { toEditorHref } from '@/lib/artifacts'
+import { useIsRemoteEnvironment } from '@/components/chat/agent-sidebar/EnvironmentStatusChip'
 import {
   Tooltip,
   TooltipContent,
@@ -27,6 +28,8 @@ import {
 import { isElectron } from '@/lib/electron-bridge'
 
 interface FileContentHeaderProps {
+  /** Editor and reveal actions open local paths, so they are hidden for another machine's files. */
+  environmentId?: string | null
   filePath: string
   cwd: string
   wordWrap: boolean
@@ -46,6 +49,7 @@ interface FileContentHeaderProps {
 }
 
 export function FileContentHeader({
+  environmentId,
   filePath,
   cwd,
   wordWrap,
@@ -61,6 +65,7 @@ export function FileContentHeader({
   onRevert,
 }: FileContentHeaderProps) {
   const [copied, setCopied] = useState(false)
+  const isRemote = useIsRemoteEnvironment(environmentId)
 
   const segments = filePath.split('/')
   // Join cwd + relative path, normalizing any trailing/double slashes
@@ -277,29 +282,31 @@ export function FileContentHeader({
           </Tooltip>
 
           {/* Open in editor */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <a
-                href={toEditorHref(absolutePath, editorScheme)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={cn(
-                  'inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors',
-                  'hover:bg-muted hover:text-foreground',
-                )}
-                aria-label={`Open in ${editorLabel}`}
-              >
-                <ExternalLink className="size-3" />
-                <span className="hidden lg:inline">{editorLabel}</span>
-              </a>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={4}>
-              Open in {editorLabel}
-            </TooltipContent>
-          </Tooltip>
+          {isRemote ? null : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <a
+                  href={toEditorHref(absolutePath, editorScheme)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn(
+                    'inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors',
+                    'hover:bg-muted hover:text-foreground',
+                  )}
+                  aria-label={`Open in ${editorLabel}`}
+                >
+                  <ExternalLink className="size-3" />
+                  <span className="hidden lg:inline">{editorLabel}</span>
+                </a>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={4}>
+                Open in {editorLabel}
+              </TooltipContent>
+            </Tooltip>
+          )}
 
           {/* Reveal in file manager (Electron only) */}
-          {isElectron() && window.electronBridge?.revealInFolder && (
+          {!isRemote && isElectron() && window.electronBridge?.revealInFolder && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button

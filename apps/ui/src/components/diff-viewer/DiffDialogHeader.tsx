@@ -4,6 +4,7 @@ import { GitBranch, GitPullRequest, HardDrive, RefreshCw, X } from 'lucide-react
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { RemoteMachineBadge } from '@/components/chat/agent-sidebar/EnvironmentStatusChip'
 
 export type DiffTab = 'changes' | 'history' | 'incoming' | 'worktrees' | 'pull-requests'
 
@@ -14,6 +15,8 @@ function formatPathLabel(path: string): string {
 }
 
 interface DiffDialogHeaderProps {
+  /** The panel's environment; a remote machine is named next to the title. */
+  environmentId?: string | null
   activeTab: DiffTab
   onTabChange: (tab: DiffTab) => void
   repoName: string | null
@@ -31,6 +34,7 @@ interface DiffDialogHeaderProps {
 }
 
 export function DiffDialogHeader({
+  environmentId,
   activeTab,
   onTabChange,
   repoName,
@@ -58,6 +62,7 @@ export function DiffDialogHeader({
       <div className="hidden items-center gap-2 text-xs font-semibold text-foreground sm:flex">
         <GitBranch className="size-3.5 text-primary" />
         Source Control
+        <RemoteMachineBadge environmentId={environmentId} className="font-normal" />
       </div>
 
       {activeTab === 'worktrees' || activeTab === 'pull-requests' || activeTab === 'incoming' ? (
