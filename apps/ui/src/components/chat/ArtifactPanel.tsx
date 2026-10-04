@@ -658,4 +658,3 @@ function toSafeImageDataUrl(file: ReadFileResult): string {
   }
   return `data:${contentType};base64,${base64}`
 }
-
