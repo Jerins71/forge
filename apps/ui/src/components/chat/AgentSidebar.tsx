@@ -135,7 +135,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   onCreateAgentCreator,
   environmentNavigation,
 }: AgentSidebarProps) {
-  const selectTreeRows = useMemo(createProfileTreeSelector, [])
+  const selectTreeRows = useMemo(() => createProfileTreeSelector(), [])
   const builtTreeRows = useMemo(() => selectTreeRows(agents, profiles), [agents, profiles, selectTreeRows])
   const treeRows = providedTreeRows ?? builtTreeRows
   const hasArchivedItems = useMemo(() => (

@@ -2472,6 +2472,7 @@ export class ManagerWsClient {
   }
 
   private updateState(patch: Partial<ManagerWsState>): void {
+    if (Object.keys(patch).every(key => Object.is(patch[key as keyof ManagerWsState], this.state[key as keyof ManagerWsState]))) return
     this.state = { ...this.state, ...patch }
     for (const listener of this.listeners) {
       listener(this.state)
