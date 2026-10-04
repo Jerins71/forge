@@ -35,6 +35,16 @@ export type AgentActivityEntry = Extract<
   ConversationEntry,
   { type: 'agent_message' | 'agent_tool_call' | 'activity_summary' }
 >
+/** V2 environment tool/activity items carry a reference to their full content, fetched on expansion. */
+export type EnvironmentActivityEntry = AgentActivityEntry & { contentRef?: string | null }
+
+/** Delivery state of a user message submitted to a V2 environment, keyed by its command ID. */
+export interface MessageCommandStatus {
+  state: 'sending' | 'accepted' | 'not_confirmed' | 'failed' | 'interrupted'
+  detail: string | null
+  /** `retry` reuses the same command; `resend` creates a new one. */
+  action: 'retry' | 'resend' | null
+}
 
 export interface ConversationHistoryMutation {
   revision: number
@@ -77,6 +87,8 @@ export interface ManagerWsState {
   conversationPresentation: ConversationPresentationSnapshot | null
   messages: ConversationHistoryEntry[]
   activityMessages: AgentActivityEntry[]
+  /** V2 environments only; absent for legacy transports. */
+  commandStatuses?: Record<string, MessageCommandStatus>
   conversationPage: ConversationHistoryPageMetadata | null
   conversationPageLoading: boolean
   /** Request id for the one older-page response allowed to mutate the active timeline. */

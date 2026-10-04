@@ -215,6 +215,7 @@ export function TerminalPanel({
       ) : null}
 
       <TerminalTabBar
+        environmentId={environmentClient.environmentId}
         terminals={terminals}
         activeTerminalId={activeTerminal?.terminalId ?? null}
         panelMode={panelMode}

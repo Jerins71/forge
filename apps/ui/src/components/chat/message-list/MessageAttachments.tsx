@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { EnvironmentClient } from '@forge/client-runtime'
+import { artifactIdFromFileRef } from '@/lib/ws-client/environment-projection'
 import { ChevronDown, ChevronRight, File, FileText, ImageIcon, TerminalSquare, ZoomIn } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { usePeekPreview } from '@/hooks/use-peek-preview'
@@ -72,7 +73,12 @@ function useStoredAttachmentUrls(
     const controller = new AbortController()
     const releases: Array<() => void> = []
     for (const fileRef of fileRefs) {
-      void environmentClient.features.sessions.attachmentUrl(fileRef, controller.signal).then(
+      // Environment artifacts use the binary-capable artifact transport; stored attachments use their route.
+      const artifactId = artifactIdFromFileRef(fileRef)
+      void (artifactId
+        ? environmentClient.artifactUrl(artifactId, controller.signal)
+        : environmentClient.features.sessions.attachmentUrl(fileRef, controller.signal)
+      ).then(
         (asset) => {
           if (controller.signal.aborted) return asset.release()
           releases.push(asset.release)
@@ -307,12 +313,25 @@ function TerminalAttachmentCard({
   )
 }
 
+/** Downloads an environment artifact through the authenticated artifact transport. */
+async function downloadArtifact(environmentClient: EnvironmentClient, artifactId: string, fileName: string) {
+  const asset = await environmentClient.artifactUrl(artifactId)
+  const link = document.createElement('a')
+  link.href = asset.url
+  link.download = fileName
+  link.click()
+  // Give the browser the URL long enough to start the download before revoking it.
+  setTimeout(asset.release, 60_000)
+}
+
 function MessageFileAttachments({
   attachments,
   isUser,
+  environmentClient,
 }: {
   attachments: ConversationMessageAttachment[]
   isUser: boolean
+  environmentClient: EnvironmentClient | null
 }) {
   if (attachments.length === 0) {
     return null
@@ -334,12 +353,26 @@ function MessageFileAttachments({
 
         const fileName = attachment.fileName || `Attachment ${index + 1}`
         const subtitle = fileAttachmentSubtitle(attachment)
+        const artifactId = hasAttachmentFileRef(attachment) ? artifactIdFromFileRef(attachment.fileRef) : null
+        const download = artifactId && environmentClient
+          ? () => void downloadArtifact(environmentClient, artifactId, fileName).catch(() => {})
+          : undefined
 
         return (
           <div
             key={`${attachment.mimeType}-${fileName}-${index}`}
+            role={download ? 'button' : undefined}
+            tabIndex={download ? 0 : undefined}
+            title={download ? `Download ${fileName}` : undefined}
+            onClick={download}
+            onKeyDown={download ? (event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return
+              event.preventDefault()
+              download()
+            } : undefined}
             className={cn(
               'flex items-center gap-2 rounded-md border px-2 py-1.5',
+              download && 'cursor-pointer hover:bg-muted/60',
               isUser
                 ? 'border-primary-foreground/25 bg-primary-foreground/10 text-primary-foreground'
                 : 'border-border bg-muted/35 text-foreground',
@@ -394,7 +427,7 @@ export function MessageAttachments({
   return (
     <>
       <MessageImageAttachments attachments={imageAttachments} isUser={isUser} environmentClient={environmentClient} />
-      <MessageFileAttachments attachments={fileAttachments} isUser={isUser} />
+      <MessageFileAttachments attachments={fileAttachments} isUser={isUser} environmentClient={environmentClient} />
     </>
   )
 }

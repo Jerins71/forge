@@ -36,13 +36,17 @@ export function normalizeBaseUrl(value: string): string {
 }
 export class AuthenticatedHttp {
   onUnauthorized?: (error: EnvironmentRuntimeError) => void
+  /** The Desktop platform request carries UTF-8 text bodies only; binary bytes would be corrupted. */
+  readonly textOnly: boolean
   descriptor: EnvironmentDescriptor | null = null
   credential: Credential | null = null
   deviceSession: DeviceSession | null = null
   constructor(
     readonly entry: EnvironmentCatalogEntry,
     readonly ports: RuntimePorts,
-  ) {}
+  ) {
+    this.textOnly = !!ports.platform
+  }
   async publicDescriptor(signal?: AbortSignal): Promise<EnvironmentDescriptor> {
     if (
       this.ports.clientOrigin?.startsWith('https:') &&

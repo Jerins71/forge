@@ -3,6 +3,7 @@ import type { ConversationAttachment } from '@forge/protocol'
 import type { CommandReceipt, ProjectRef, WorkspaceStrategy } from '@forge/protocol/environment-v2'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 import { describeEnvironmentStatus } from '@/components/settings/environments/environment-status'
+import { isInterruptedReceipt } from '@forge/client-runtime'
 
 interface PendingLaunch {
   fingerprint: string
@@ -83,6 +84,13 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
         initialMessage: { text, artifactIds },
       })
       pendingRef.current = null
+      if (isInterruptedReceipt(receipt) || receipt.state === 'failed') {
+        // Terminal without a session: never resubmitted automatically; sending again is a new launch.
+        setError(isInterruptedReceipt(receipt)
+          ? 'The launch was interrupted and its delivery is unknown. The draft is kept; send again to start a new session.'
+          : `${receipt.error?.message ?? 'The session could not start'}. The draft is kept.`)
+        return false
+      }
       onLaunched(target, receipt)
       return true
     } catch (err) {

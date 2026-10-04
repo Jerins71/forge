@@ -113,7 +113,9 @@ import type { ManagerWsClient } from '@/lib/ws-client'
 import { buildModelCacheHeaderSummary } from '@/components/chat/model-cache'
 import { isPiGenerationThroughputEligible } from '@/lib/generation-throughput-eligibility'
 import { deriveMissingPendingChoiceIds } from '@/lib/ws-client/utils'
-import { useEnvironmentConnection } from '@/hooks/index-page/use-environment-connection'
+import { useEnvironmentConnection, useEnvironmentHandles } from '@/hooks/index-page/use-environment-connection'
+import { useOriginSlice } from '@/lib/origin-store'
+import type { ManagerWsState } from '@/lib/ws-state'
 import { useManagerActions } from '@/hooks/index-page/use-manager-actions'
 import { useActiveAgent } from '@/hooks/index-page/use-active-agent'
 import { useWorkspacePanels } from '@/hooks/index-page/use-workspace-panels'
@@ -211,10 +213,26 @@ export function BuilderSurface({
   const routedEnvironmentId = routeState.view === 'chat' ? routeState.environmentId : undefined
   const selectedEnvironmentId = routedEnvironmentId ?? primaryEnvironmentId
   const { client: localClient, clientRef, httpClientRef, state, setState } = useEnvironmentConnection(selectedEnvironmentId)
-  const primary = useEnvironmentConnection(primaryEnvironmentId)
+  const isPrimarySelected = selectedEnvironmentId === primaryEnvironmentId
+  // Stable so delivery-state rows stay memoized; Retry keeps the command, Resend creates a new one.
+  const handleRetryEnvironmentMessage = useCallback((commandId: string) => {
+    clientRef.current?.retryEnvironmentMessage(commandId)
+  }, [clientRef])
+  const handleResendEnvironmentMessage = useCallback((commandId: string) => {
+    clientRef.current?.resendEnvironmentMessage(commandId)
+  }, [clientRef])
+  // The primary feeds only the sidebar's project actions. Its handles do not subscribe, and while
+  // another environment is selected only its session and project lists are read, so primary
+  // conversation traffic never re-renders the remote chat workspace.
+  const primary = useEnvironmentHandles(primaryEnvironmentId)
+  const primarySidebarSlice = useOriginSlice(
+    isPrimarySelected ? UNSELECTED_ORIGIN : primaryEnvironmentId ?? UNSELECTED_ORIGIN,
+    selectPrimarySidebarState,
+    { selectorKey: 'builder-primary-sidebar', equalityFn: samePrimarySidebarState },
+  )
   const environmentClient = localClient.getEnvironmentClient() ?? null
   useRevokedDraftPurge()
-  const isPrimarySelected = selectedEnvironmentId === primaryEnvironmentId
+  const primaryState = isPrimarySelected ? state : primarySidebarSlice
   const builderSidebarOrderApi = useMemo(
     () => withPrimaryOrderOrigin(createLocalBuilderSidebarOrderApi(wsUrl), primaryEnvironmentId),
     [primaryEnvironmentId, wsUrl],
@@ -896,7 +914,7 @@ export function BuilderSurface({
   // Sidebar actions act on the primary environment's own sessions.
   const localActiveAgentId = isPrimarySelected ? activeAgentId : null
   const localActiveAgent = localActiveAgentId
-    ? primary.state.agents.find((agent) => agent.agentId === localActiveAgentId) ?? null
+    ? primaryState.agents.find((agent) => agent.agentId === localActiveAgentId) ?? null
     : null
   const localIsActiveManager = Boolean(localActiveAgent && localActiveAgent.role === 'manager')
 
@@ -917,7 +935,7 @@ export function BuilderSurface({
     wsUrl,
     environmentClient: primary.client.getEnvironmentClient() ?? null,
     clientRef: primary.clientRef,
-    agents: primary.state.agents,
+    agents: primaryState.agents,
     activeAgent: localActiveAgent,
     activeAgentId: localActiveAgentId,
     isActiveManager: localIsActiveManager,
@@ -1843,7 +1861,7 @@ export function BuilderSurface({
   const localSidebarSession = useSessionActions({
     clientRef: primary.clientRef,
     fileEditorCoordinator: panels.fileEditorCoordinator,
-    state: primary.state,
+    state: primaryState,
     activeAgent: localActiveAgent,
     activeAgentId: localActiveAgentId,
     isActiveManager: localIsActiveManager,
@@ -2393,6 +2411,9 @@ export function BuilderSurface({
                   hasStalePresentation: transcript.hasStaleConversationPresentation,
                   bootstrapErrorMessage: transcript.conversationBootstrap?.errorMessage,
                   onRetryBootstrap: () => clientRef.current?.retryConversationBootstrap(),
+                  commandStatuses: state.commandStatuses,
+                  onRetryCommand: handleRetryEnvironmentMessage,
+                  onResendCommand: handleResendEnvironmentMessage,
                   streamingStartedAt:
                     activeAgentStatus === 'streaming'
                       ? state.statuses[activeAgentId ?? '']?.streamingStartedAt
@@ -2665,6 +2686,21 @@ export function BuilderSurface({
       ) : null}
     </WorkGraphWorkerHighlightProvider>
   )
+}
+
+const UNSELECTED_ORIGIN = 'unregistered'
+const NO_MESSAGES: ManagerWsState['messages'] = []
+
+/** Primary sidebar actions read sessions and projects only; the primary transcript is not theirs. */
+function selectPrimarySidebarState(state: ManagerWsState): Pick<ManagerWsState, 'messages' | 'agents' | 'profiles'> {
+  return { messages: NO_MESSAGES, agents: state.agents, profiles: state.profiles }
+}
+
+function samePrimarySidebarState(
+  a: Pick<ManagerWsState, 'agents' | 'profiles'>,
+  b: Pick<ManagerWsState, 'agents' | 'profiles'>,
+): boolean {
+  return a.agents === b.agents && a.profiles === b.profiles
 }
 
 /** Orders saved before environment identity used the reserved `local` origin; read them as the primary. */

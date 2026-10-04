@@ -64,7 +64,8 @@ interface BuilderNavigationState {
 export interface UseSessionActionsOptions {
   clientRef: MutableRefObject<ManagerWsClient | null>
   fileEditorCoordinator: FileEditorCoordinator
-  state: ManagerWsState
+  /** Only these lists are read, so callers may pass a narrowed slice. */
+  state: Pick<ManagerWsState, 'messages' | 'agents' | 'profiles'>
   activeAgent: AgentDescriptor | null
   activeAgentId: string | null
   isActiveManager: boolean

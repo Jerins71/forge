@@ -257,6 +257,7 @@ export function FileContentViewer({
     return (
       <div className="flex flex-1 flex-col" role="region" aria-label={`File content: ${fileName}`}>
         <FileContentHeader
+          environmentId={panel?.session.environmentId}
           filePath={filePath}
           cwd={cwd}
           wordWrap={wordWrap}
@@ -279,6 +280,7 @@ export function FileContentViewer({
     return (
       <div className="flex min-h-0 flex-1 flex-col" role="region" aria-label={`File content: ${fileName}`}>
         <FileContentHeader
+          environmentId={panel?.session.environmentId}
           filePath={filePath}
           cwd={cwd}
           wordWrap={wordWrap}
@@ -304,6 +306,7 @@ export function FileContentViewer({
     return (
       <div className="flex flex-1 flex-col" role="region" aria-label={`File content: ${fileName}`}>
         <FileContentHeader
+          environmentId={panel?.session.environmentId}
           filePath={filePath}
           cwd={cwd}
           wordWrap={wordWrap}
@@ -326,6 +329,7 @@ export function FileContentViewer({
     return (
       <div className="flex flex-1 flex-col" role="region" aria-label={`File content: ${fileName}`}>
         <FileContentHeader
+          environmentId={panel?.session.environmentId}
           filePath={filePath}
           cwd={cwd}
           wordWrap={wordWrap}
@@ -356,6 +360,7 @@ export function FileContentViewer({
     return (
       <div className="flex flex-1 flex-col" role="region" aria-label={`File content: ${fileName}`}>
         <FileContentHeader
+          environmentId={panel?.session.environmentId}
           filePath={filePath}
           cwd={cwd}
           wordWrap={wordWrap}
@@ -382,6 +387,7 @@ export function FileContentViewer({
     return (
       <div className="flex flex-1 flex-col overflow-hidden" role="region" aria-label={`File content: ${fileName}`}>
         <FileContentHeader
+          environmentId={panel?.session.environmentId}
           filePath={filePath}
           cwd={cwd}
           wordWrap={wordWrap}
@@ -415,6 +421,7 @@ export function FileContentViewer({
   return (
     <div className="flex flex-1 flex-col overflow-hidden" role="region" aria-label={`File content: ${fileName}`}>
       <FileContentHeader
+        environmentId={panel?.session.environmentId}
         filePath={filePath}
         cwd={cwd}
         wordWrap={wordWrap}

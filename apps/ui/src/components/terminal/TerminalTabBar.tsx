@@ -13,8 +13,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { HelpTrigger } from '@/components/help/HelpTrigger'
 import type { TerminalPanelMode } from '@/hooks/useTerminalPanel'
 import { cn } from '@/lib/utils'
+import { RemoteMachineBadge } from '@/components/chat/agent-sidebar/EnvironmentStatusChip'
 
 interface TerminalTabBarProps {
+  /** The terminals' environment; a remote machine is named before the actions. */
+  environmentId?: string | null
   terminals: TerminalDescriptor[]
   activeTerminalId: string | null
   panelMode: TerminalPanelMode
@@ -55,6 +58,7 @@ function getTerminalIndicatorVariant(
 }
 
 export function TerminalTabBar({
+  environmentId,
   terminals,
   activeTerminalId,
   panelMode,
@@ -217,6 +221,8 @@ export function TerminalTabBar({
           })}
         </div>
       )}
+
+      <RemoteMachineBadge environmentId={environmentId} className="shrink-0" />
 
       <div className="flex shrink-0 items-center gap-0.5">
         {isMobile && activeTerminal ? (

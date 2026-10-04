@@ -188,7 +188,9 @@ export function highlightCode(source: string, language: string | undefined): str
 
   try {
     const result = hljs.highlight(source, { language, ignoreIllegals: true })
-    return result.value
+    // highlight.js escapes `'` as `&#x27;`; react-diff-viewer's word-diff entity decoder only
+    // knows `&#39;` and otherwise overruns the line, appending "undefined" per extra character.
+    return result.value.replaceAll('&#x27;', '&#39;')
   } catch {
     // Fallback to plain text on any error
     return escapeHtml(source)

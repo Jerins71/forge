@@ -8,6 +8,8 @@ import type { ArtifactReference } from '@/lib/artifacts'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import { cn } from '@/lib/utils'
 import { MessageAttachments } from './MessageAttachments'
+import { MessageDeliveryStatus } from './MessageDeliveryStatus'
+import type { MessageCommandStatus } from '@/lib/ws-state'
 import { MessageFeedback } from './MessageFeedback'
 import { SourceBadge, formatTimestamp } from './message-row-utils'
 import { ExternalThreadContextCard } from './ExternalThreadContextCard'
@@ -109,6 +111,10 @@ function PinButton({ pinned, onClick }: { pinned: boolean; onClick: () => void }
 
 interface ConversationMessageRowProps {
   message: ConversationMessageEntry
+  /** Delivery state of a user message sent to a V2 environment. */
+  commandStatus?: MessageCommandStatus
+  onRetryCommand?: (commandId: string) => void
+  onResendCommand?: (commandId: string) => void
   environmentClient?: EnvironmentClient | null
   activeAgentDisplayName?: string
   transcriptAgentId?: string | null
@@ -148,6 +154,9 @@ interface ConversationMessageRowProps {
 
 export const ConversationMessageRow = memo(function ConversationMessageRow({
   message,
+  commandStatus,
+  onRetryCommand,
+  onResendCommand,
   environmentClient,
   activeAgentDisplayName,
   transcriptAgentId,
@@ -350,8 +359,9 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
     const forkMessageId = message.id?.trim() || message.timestamp
     const canPin = onPinMessage && message.id?.trim()
     const isCliMessage = sourceContext?.channel === 'cli'
+    const commandId = message.clientRequestId
     return (
-      <div className="flex justify-end">
+      <div className="flex flex-col items-end">
         <div
           className={cn(
             'max-w-[85%] rounded-lg rounded-tr-sm px-3 py-2',
@@ -448,6 +458,13 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
             </div>
           ) : null}
         </div>
+        {commandStatus && commandId ? (
+          <MessageDeliveryStatus
+            status={commandStatus}
+            onRetry={onRetryCommand ? () => onRetryCommand(commandId) : undefined}
+            onResend={onResendCommand ? () => onResendCommand(commandId) : undefined}
+          />
+        ) : null}
       </div>
     )
   }

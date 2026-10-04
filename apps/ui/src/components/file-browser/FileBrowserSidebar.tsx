@@ -17,6 +17,7 @@ import {
   invalidateFileBrowserCaches,
 } from './use-file-browser-queries'
 import type { FileBrowserWorktreeSelection } from '@/hooks/index-page/use-panel-state'
+import { RemoteMachineBadge } from '@/components/chat/agent-sidebar/EnvironmentStatusChip'
 
 /* Deterministic skeleton widths */
 const SKELETON_WIDTHS = [72, 85, 63, 90, 68, 78, 82, 65, 88, 70, 76, 84]
@@ -288,6 +289,7 @@ export function FileBrowserSidebar({
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
           <span className="text-[11px] font-medium text-foreground">Files</span>
+          <RemoteMachineBadge environmentId={panel?.session.environmentId} />
 
           {repoName ? (
             <>

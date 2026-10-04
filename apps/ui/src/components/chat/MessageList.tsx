@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import type { ArtifactReference } from '@/lib/artifacts'
 import { formatElapsed } from '@/lib/format-utils'
 import { getSidebarPerfRegistry } from '@/lib/perf/sidebar-perf-debug'
-import type { ConversationHistoryMutation } from '@/lib/ws-state'
+import type { ConversationHistoryMutation, EnvironmentActivityEntry, MessageCommandStatus } from '@/lib/ws-state'
 import { cn } from '@/lib/utils'
 import { isProjectAgentExchange, normalizePlanSummaryEntries, type AgentDescriptor, type AgentStatus, type ChoiceAnswer, type CodexElicitationPersistScope, type CodexElicitationRequestEvent, type ConversationEntry, type ConversationReplyTargetInput, type ProjectAgentInfo, type SessionPlanSnapshotEvent } from '@forge/protocol'
 import { type AgentDisplayMeta, buildAgentDisplayMap } from './message-list/agent-display-utils'
@@ -108,6 +108,12 @@ export interface MessageListProps {
   hasStalePresentation?: boolean
   bootstrapErrorMessage?: string
   onRetryBootstrap?: () => void
+  /** Delivery state per command ID for user messages sent to a V2 environment. */
+  commandStatuses?: Record<string, MessageCommandStatus>
+  /** Retries an unacknowledged message with its original command. */
+  onRetryCommand?: (commandId: string) => void
+  /** Sends an interrupted or failed message again as a new command. */
+  onResendCommand?: (commandId: string) => void
 }
 
 export interface MessageListHandle {
@@ -125,6 +131,8 @@ const OVERSCAN = 8
 /** Estimated row height before a row has been measured. Rows self-correct via
  *  `measureElement`, so this only affects the very first paint of each row. */
 const ESTIMATED_ROW_HEIGHT = 96
+/** One page of expanded tool content; larger output reports that it was truncated. */
+const TOOL_CONTENT_MAX_BYTES = 65_536
 
 function buildReplyTargetSnapshot(
   message: Extract<ConversationEntry, { type: 'conversation_message' }>,
@@ -291,6 +299,7 @@ function buildDisplayEntries(messages: ConversationEntry[]): DisplayEntry[] {
           toolName: message.toolName,
           toolCallId: callId,
           displaySummary: message.displaySummary,
+          contentRef: (message as EnvironmentActivityEntry).contentRef ?? undefined,
           timestamp: message.timestamp,
           latestKind: 'tool_execution_end',
           isError: message.isError,
@@ -460,6 +469,9 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
   hasStalePresentation = false,
   bootstrapErrorMessage,
   onRetryBootstrap,
+  commandStatuses,
+  onRetryCommand,
+  onResendCommand,
 }, ref) {
   // useState (not useRef) for the scroll element so that the callback ref's
   // re-render lets the virtualizer pick up the real element via getScrollElement.
@@ -467,6 +479,21 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
   const scrollElRef = useRef<HTMLDivElement | null>(null)
   const previousAgentIdRef = useRef<string | null>(null)
   const previousFirstEntryIdRef = useRef<string | null>(null)
+  // Tool/activity rows from an environment fetch their full content by reference on expansion.
+  const loadToolContent = useMemo(
+    () => environmentClient && activeAgentId
+      ? async (contentRef: string) => {
+          const page = await environmentClient.request('session.content', {
+            sessionId: activeAgentId,
+            contentRef,
+            offset: 0,
+            maxBytes: TOOL_CONTENT_MAX_BYTES,
+          })
+          return { text: page.text, truncated: page.nextOffset !== null }
+        }
+      : undefined,
+    [environmentClient, activeAgentId],
+  )
   const previousEntryCountRef = useRef(0)
   const previousHistoryMutationKeyRef = useRef<string | null>(null)
   const viewportAnchorRef = useRef<{ rowId: string; offsetFromViewportTop: number } | null>(null)
@@ -1199,6 +1226,13 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
         <div data-message-id={feedbackTargetId}>
           <ConversationMessageRow
             message={entry.message}
+            commandStatus={
+              entry.message.role === 'user' && entry.message.clientRequestId
+                ? commandStatuses?.[entry.message.clientRequestId]
+                : undefined
+            }
+            onRetryCommand={onRetryCommand}
+            onResendCommand={onResendCommand}
             environmentClient={environmentClient}
             activeAgentDisplayName={
               activeAgentId ? agentDisplayMap.get(activeAgentId)?.primaryLabel : undefined
@@ -1292,6 +1326,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
       <ToolLogRow
         type={entry.type}
         entry={entry.entry}
+        loadContent={loadToolContent}
         isActive={isLoading}
         actorDisplay={
           entry.type === 'tool_execution' && entry.entry.actorAgentId
