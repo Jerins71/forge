@@ -9,6 +9,7 @@ export interface SelectorStore<S> {
 export interface EnvironmentCatalogEntry { environmentId: string; baseUrl: string; labelOverride: string | null; primary: boolean; enabled: boolean; credentialRef: string | null }
 export interface ConnectionState {
   phase: 'disabled' | 'preparing' | 'connecting' | 'synchronizing' | 'online' | 'backoff' | 'offline' | 'auth-blocked' | 'version-blocked' | 'identity-blocked'
+  blockedCause?: 'revoked'|'needs-pairing'|'expired'|'identity-mismatch'|'protocol-mismatch'|'https-required' | null
   transportHealthy: boolean; shellFresh: boolean; lastSynchronizedAt: string | null; nextRetryAt: string | null; reason: string | null
 }
 export interface ShellState { projects: ReadonlyMap<string, ProjectSummary>; sessions: ReadonlyMap<string, SessionSummary>; sessionIdsByProject: ReadonlyMap<string, readonly string[]>; cursor: StreamCursor | null; complete: boolean; cachedAt: string | null }
