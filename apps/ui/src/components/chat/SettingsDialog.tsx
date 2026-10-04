@@ -25,6 +25,7 @@ import { useNativeRuntimeAttention } from '@/components/settings/native-runtimes
 import { SettingsCliAccess } from '@/components/settings/SettingsCliAccess'
 import { SettingsStreamDeck } from '@/components/settings/SettingsStreamDeck'
 import { SettingsObservability } from '@/components/settings/SettingsObservability'
+import { EnvironmentsSettings } from '@/components/settings/environments/EnvironmentsSettings'
 import type { AgentDescriptor, ManagerProfile } from '@forge/protocol'
 
 function getSettingsContentWidthClassName(activeTab: SettingsTab): string | undefined {
@@ -239,6 +240,7 @@ export function SettingsPanel({
       {activeTab === 'extensions' && <SettingsExtensions wsUrl={wsUrl} apiClient={apiClient} />}
       {activeTab === 'external-chrome' && <SettingsExternalChrome />}
       {activeTab === 'cli-access' && <SettingsCliAccess wsUrl={wsUrl} apiClient={apiClient} />}
+      {activeTab === 'environments' && <EnvironmentsSettings />}
       {activeTab === 'stream-deck' && <SettingsStreamDeck apiClient={apiClient} />}
       {activeTab === 'history' && <SettingsHistory wsUrl={wsUrl} />}
       {activeTab === 'observability' && <SettingsObservability apiClient={apiClient} />}
