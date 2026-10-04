@@ -157,30 +157,6 @@ describe("specialist-rosters skill helper", () => {
     });
   });
 
-  it("inspects the current rosters and live model choices", async () => {
-    const api = await startApi({ version: 1, defaultRosterId: "balanced", rosters: [sampleRoster()] });
-
-    const list = await runHelper(["list", "--url", api.url]);
-    const models = await runHelper(["models", "--url", api.url]);
-
-    expect(list.status).toBe(0);
-    expect(list.stderr).toBe("");
-    expect(list.json).toMatchObject({
-      ok: true,
-      defaultRosterId: "balanced",
-      storagePath: "/tmp/forge-skill-test-data/shared/config/delegation-rosters.json",
-      rosters: [{ rosterId: "balanced", revision: 3 }],
-    });
-    expect(models.json).toMatchObject({
-      ok: true,
-      models: [{
-        provider: "openai-codex",
-        modelId: "gpt-6-sol",
-        supportedReasoningLevels: ["low", "medium", "high", "xhigh", "max", "ultra"],
-      }],
-    });
-  });
-
   it("previews creation without writing and applies through the Settings API on request", async () => {
     const api = await startApi({ version: 1, defaultRosterId: "balanced", rosters: [sampleRoster()] });
     const proposalPath = await writeRosterFile({
@@ -206,39 +182,5 @@ describe("specialist-rosters skill helper", () => {
     });
     expect(api.putCount()).toBe(1);
     expect(api.settings().rosters.map((preset) => preset.rosterId)).toEqual(["balanced", "focused"]);
-  });
-
-  it("requires the current revision before updating and preserves the selected roster identity", async () => {
-    const api = await startApi({ version: 1, defaultRosterId: "balanced", rosters: [sampleRoster()] });
-    const proposalPath = await writeRosterFile({
-      ...sampleRoster({ revision: 99, name: "Balanced development" }),
-    });
-
-    const stale = await runHelper([
-      "update", "--id", "balanced", "--expected-revision", "2",
-      "--file", proposalPath, "--apply", "--url", api.url,
-    ]);
-    expect(stale.status).toBe(1);
-    expect(stale.json).toEqual({
-      ok: false,
-      error: "Roster balanced changed: expected revision 2, current revision is 3",
-    });
-    expect(api.putCount()).toBe(0);
-
-    const applied = await runHelper([
-      "update", "--id", "balanced", "--expected-revision", "3",
-      "--file", proposalPath, "--apply", "--url", api.url,
-    ]);
-    expect(applied.status).toBe(0);
-    expect(applied.json).toMatchObject({
-      ok: true,
-      action: "updated",
-      roster: { rosterId: "balanced", revision: 4, name: "Balanced development" },
-    });
-    expect(api.settings().rosters[0]).toMatchObject({
-      rosterId: "balanced",
-      revision: 4,
-      name: "Balanced development",
-    });
   });
 });

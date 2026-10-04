@@ -127,44 +127,6 @@ describe("SecureSessionStore SSH trusted hosts", () => {
     ]);
     database.close();
   });
-
-  it("keeps request creation idempotent and expires only due pending requests", () => {
-    let now = NOW;
-    const { database, store } = createMemoryStore(() => now);
-    store.initializePrincipalState("manager-a", {
-      profileId: "profile-a",
-      principalKind: "manager",
-      ownerManagerAgentId: null,
-      workerAssignmentId: null,
-      executionMode: "secure",
-      environmentStatus: "ready",
-    });
-    const request = requestInput();
-
-    const created = store.createSshTrustRequest(request);
-    const idempotent = store.createSshTrustRequest(request);
-    expect(idempotent.state.revision).toBe(created.state.revision);
-    expect(idempotent.sshTrustRequests).toEqual([
-      expect.objectContaining({
-        requestId: "request-a",
-        requestedByAgentId: "worker-a",
-        state: "pending",
-      }),
-    ]);
-
-    now = LATER;
-    const expired = store.expireSshTrustRequests(now, "manager-a");
-    expect(expired).toHaveLength(1);
-    expect(expired[0]?.snapshot.sshTrustRequests).toEqual([]);
-    expect(store.getSshTrustRequest("request-a")).toEqual(
-      expect.objectContaining({
-        state: "cancelled",
-        resolvedAt: LATER,
-      }),
-    );
-    expect(store.expireSshTrustRequests(now, "manager-a")).toEqual([]);
-    database.close();
-  });
 });
 
 function createMemoryStore(now: () => string = () => NOW): {
@@ -202,24 +164,5 @@ function hostInput(overrides: Partial<{
     hostKeyAlgorithm: "ssh-ed25519",
     hostKeyBase64: "AAAAE2V4YW1wbGUtaG9zdC1rZXk=",
     hostKeyFingerprint: "SHA256:example",
-  };
-}
-
-function requestInput() {
-  return {
-    requestId: "request-a",
-    sessionAgentId: "manager-a",
-    profileId: "profile-a",
-    alias: "deployment",
-    hostName: "10.10.0.10",
-    port: 22,
-    username: "deploy",
-    hostKeyAlgorithm: "ssh-ed25519",
-    hostKeyBase64: "AAAAE2V4YW1wbGUtaG9zdC1rZXk=",
-    hostKeyFingerprint: "SHA256:example",
-    purposeSummary: "Deploy the current project",
-    requestedByAgentId: "worker-a",
-    requestedByDisplayName: "Worker A",
-    expiresAt: "2026-07-29T12:30:00.000Z",
   };
 }

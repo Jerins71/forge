@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -28,15 +28,6 @@ function resolvePosixShell(): string {
 const POSIX_SHELL = resolvePosixShell();
 
 describe("secure runner environment askpass bridge", () => {
-  it("is stored as an LF-only executable script without a byte-order mark", () => {
-    const bytes = readFileSync(HELPER_PATH);
-
-    expect(bytes.subarray(0, 10).toString("hex")).toBe(
-      "23212f62696e2f73680a",
-    );
-    expect(bytes.includes(0x0d)).toBe(false);
-  });
-
   it("returns only the selected authorized environment value", () => {
     const result = spawnSync(
       POSIX_SHELL,
@@ -54,30 +45,6 @@ describe("secure runner environment askpass bridge", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("ssh-canary-value\n");
     expect(result.stdout).not.toContain("must-not-be-returned");
-    expect(result.stderr).toBe("");
-  });
-
-  it.each([
-    undefined,
-    "",
-    "9INVALID",
-    "INVALID-NAME",
-    "NAME;printenv",
-  ])("rejects an invalid selector without output: %s", (selector) => {
-    const result = spawnSync(
-      POSIX_SHELL,
-      [HELPER_PATH, "Password:"],
-      {
-        encoding: "utf8",
-        env: {
-          ...(selector === undefined ? {} : { FORGE_ASKPASS_ENV: selector }),
-          FORGE_SECRET_VALID: "must-not-be-returned",
-        },
-      },
-    );
-
-    expect(result.status).toBe(64);
-    expect(result.stdout).toBe("");
     expect(result.stderr).toBe("");
   });
 

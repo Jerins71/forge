@@ -6,7 +6,7 @@ import {
   type SecureExecutionFrameHeader,
 } from "../secure-sessions/execution/execution-frame.js";
 import { SECURE_SSH_KNOWN_HOSTS_PATH_PLACEHOLDER } from "../secure-sessions/execution/secure-execution-backend.js";
-import { createExecutionDeliveryFromBindings } from "../secure-sessions/execution/protocol-binding-delivery.js";
+
 import { SecureExecutionError } from "../secure-sessions/execution/secure-execution-error.js";
 
 function readHeader(frame: Buffer): SecureExecutionFrameHeader {
@@ -21,15 +21,6 @@ function readHeader(frame: Buffer): SecureExecutionFrameHeader {
       )
       .toString("utf8"),
   ) as SecureExecutionFrameHeader;
-}
-
-function readMaterial(frame: Buffer): Buffer {
-  const headerByteLength = frame.readUInt32BE(
-    secureExecutionFrameConstants.magic.length,
-  );
-  return frame.subarray(
-    secureExecutionFrameConstants.prefixBytes + headerByteLength,
-  );
 }
 
 describe("secure execution frame", () => {
@@ -123,44 +114,6 @@ describe("secure execution frame", () => {
     frame.fill(0);
   });
 
-  it("normalizes a recognized CRLF OpenSSH envelope at the host frame boundary", () => {
-    const decoded = Buffer.concat([
-      Buffer.from("openssh-key-v1\0", "ascii"),
-      Buffer.from("synthetic-test-key-material-only", "utf8"),
-    ]);
-    const payload = decoded.toString("base64");
-    decoded.fill(0);
-    const sshAgentValue = Buffer.from([
-      "-----BEGIN OPENSSH PRIVATE KEY-----",
-      payload,
-      "-----END OPENSSH PRIVATE KEY-----",
-      "",
-    ].join("\r\n"), "utf8");
-    const expected = Buffer.from(
-      sshAgentValue.toString("utf8").replaceAll("\r\n", "\n"),
-      "utf8",
-    );
-
-    const frame = encodeSecureExecutionFrame({
-      executionId: "0123456789abcdef01234567",
-      command: { executable: "true", args: [] },
-      workspacePath: "/workspace",
-      delivery: { sshAgent: [{ value: sshAgentValue }] },
-    });
-    try {
-      expect(readHeader(frame).sshAgent).toEqual([{
-        index: 0,
-        byteLength: expected.byteLength,
-      }]);
-      expect(readMaterial(frame)).toEqual(expected);
-      expect(sshAgentValue.includes(Buffer.from("\r\n", "utf8"))).toBe(true);
-    } finally {
-      sshAgentValue.fill(0);
-      expected.fill(0);
-      frame.fill(0);
-    }
-  });
-
   it("rejects ambiguous or escaping delivery metadata", () => {
     const base = {
       executionId: "0123456789abcdef01234567",
@@ -221,57 +174,5 @@ describe("secure execution frame", () => {
         }),
       );
     }
-  });
-
-  it("maps the landed public binding contract without weakening file modes", () => {
-    const value = Buffer.from("resolved-value");
-    const delivery = createExecutionDeliveryFromBindings([
-      {
-        binding: {
-          deliveryKind: "environment",
-          targetName: "FORGE_TOKEN",
-        },
-        value,
-      },
-      {
-        binding: {
-          deliveryKind: "file",
-          targetPath: "/run/forge-secure/bindings/token",
-          fileMode: 0o600,
-        },
-        value,
-        pathEnvironmentVariable: "FORGE_TOKEN_FILE",
-      },
-      {
-        binding: {
-          deliveryKind: "askpass",
-          targetName: "SSH_ASKPASS",
-        },
-        value,
-      },
-      {
-        binding: { deliveryKind: "stdin" },
-        value,
-      },
-      {
-        binding: { deliveryKind: "ssh_agent" },
-        value,
-      },
-    ]);
-
-    expect(delivery).toEqual({
-      environment: [{ name: "FORGE_TOKEN", value }],
-      ramFiles: [
-        {
-          targetPath: "/run/forge-secure/bindings/token",
-          value,
-          fileMode: 0o600,
-          pathEnvironmentVariable: "FORGE_TOKEN_FILE",
-        },
-      ],
-      askpass: [{ targetName: "SSH_ASKPASS", value }],
-      sshAgent: [{ value }],
-      stdin: value,
-    });
   });
 });

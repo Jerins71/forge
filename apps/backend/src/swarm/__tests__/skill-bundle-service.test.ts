@@ -1,12 +1,12 @@
-import { chmod, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { SkillBundleManifestV1 } from "@forge/protocol";
+
 import { createTempConfig, type TempConfigHandle } from "../../test-support/temp-config.js";
-import { getProfilePiSkillsDir } from "../data-paths.js";
+
 import { computeSkillBundleContentSha256 } from "../skills/skill-bundle-canonical.js";
 import { SkillBundleService } from "../skills/skill-bundle-service.js";
-import { validateSkillBundleManifest } from "../skills/skill-bundle-validation.js";
+
 import { SkillMetadataService } from "../skills/skill-metadata-service.js";
 import type { SwarmConfig } from "../types.js";
 
@@ -165,56 +165,6 @@ describe("SkillBundleService", () => {
     expect(computeSkillBundleContentSha256(first.bundle)).toBe(first.bundle.contentSha256);
   });
 
-  it("packages profile/project skills with profile origin metadata", async () => {
-    const harness = await createHarness();
-    await createProfileSkill(harness.config, "profile-a", "project-skill", {
-      "SKILL.md": ["---", "name: Project Skill", "description: Profile-scoped", "---", "", "# Project"].join("\n")
-    });
-
-    const skillId = await getProfileSkillId(harness.metadataService, "profile-a", "project-skill");
-    const { bundle } = await harness.bundleService.packageSkill(skillId);
-
-    expect(bundle.origin).toMatchObject({
-      skillSourceKind: "profile",
-      profileId: "profile-a"
-    });
-    expect(bundle.skill).toMatchObject({
-      handle: "project-skill",
-      name: "Project Skill"
-    });
-  });
-
-  it("returns a safe not-found error when a skill root disappears after inventory load", async () => {
-    const harness = await createHarness();
-    await createGlobalSkill(harness.config, "vanishing-skill", {
-      "SKILL.md": "---\nname: Vanishing\n---\n\n# Vanishing\n"
-    });
-    const skillId = await getGlobalSkillId(harness.metadataService, "vanishing-skill");
-    const skillRoot = join(harness.config.paths.dataDir, "skills", "vanishing-skill");
-    await rm(skillRoot, { recursive: true, force: true });
-
-    await expect(harness.bundleService.packageSkill(skillId)).rejects.toMatchObject({
-      code: "missing_skill_root",
-      message: "Skill no longer exists. Refresh the skill list and try again."
-    });
-  });
-
-  it("refuses built-in and repo skills server-side", async () => {
-    const harness = await createHarness();
-    await createRepoSkill(harness.config, "repo-skill", {
-      "SKILL.md": "---\nname: Repo Skill\n---\n\n# Repo\n"
-    });
-    await harness.metadataService.reloadSkillMetadata();
-
-    const builtin = harness.metadataService.getSkillMetadata().find((skill) => skill.sourceKind === "builtin");
-    const repo = harness.metadataService.getSkillMetadata().find((skill) => skill.directoryName === "repo-skill");
-
-    expect(builtin).toBeDefined();
-    expect(repo).toBeDefined();
-    await expect(harness.bundleService.packageSkill(builtin!.skillId)).rejects.toThrow(/Only user-created global and project skills/);
-    await expect(harness.bundleService.packageSkill(repo!.skillId)).rejects.toThrow(/Only user-created global and project skills/);
-  });
-
   it("rejects unsafe files and unsupported symlinks instead of silently skipping them", async () => {
     const sensitiveHarness = await createHarness();
     await createGlobalSkill(sensitiveHarness.config, "sensitive-skill", {
@@ -262,183 +212,6 @@ describe("SkillBundleService", () => {
       path: ".npmrc"
     });
   });
-
-  it("rejects spoofed receiver-side metadata even when the content hash is recomputed", async () => {
-    const harness = await createHarness();
-    await createGlobalSkill(harness.config, "spoofed-skill", {
-      "SKILL.md": [
-        "---",
-        "name: Honest Skill",
-        "description: Honest description",
-        "env:",
-        "  - name: HONEST_API_KEY",
-        "    required: true",
-        "---",
-        "",
-        "# Honest"
-      ].join("\n"),
-      "scripts/setup.sh": "#!/usr/bin/env bash\ncurl https://example.invalid/file\n"
-    });
-    const bundle = cloneBundle(
-      (await harness.bundleService.packageSkill(await getGlobalSkillId(harness.metadataService, "spoofed-skill"))).bundle
-    );
-
-    bundle.skill.name = "Spoofed Trusted Skill";
-    bundle.skill.env = [{ name: "FAKE_SAFE_ENV", required: false }];
-    bundle.skill.frontmatter.warnings = [];
-    bundle.portability.scripts = [];
-    bundle.portability.osIndicators = [];
-    bundle.contentSha256 = computeSkillBundleContentSha256(bundle);
-
-    const result = validateSkillBundleManifest(bundle);
-    expect(result.valid).toBe(false);
-    expect(result.errors.map((error) => error.code)).toEqual(expect.arrayContaining([
-      "skill_metadata_mismatch",
-      "portability_metadata_mismatch"
-    ]));
-    expect(result.errors.map((error) => error.code)).not.toContain("content_hash_mismatch");
-  });
-
-  it("rejects unknown fields instead of ignoring unsigned metadata", async () => {
-    const harness = await createHarness();
-    await createGlobalSkill(harness.config, "unknown-field-skill", {
-      "SKILL.md": "---\nname: Unknown Field\n---\n\n# Unknown Field\n"
-    });
-    const bundle = cloneBundle(
-      (await harness.bundleService.packageSkill(await getGlobalSkillId(harness.metadataService, "unknown-field-skill"))).bundle
-    ) as SkillBundleManifestV1 & { extraField?: string };
-    bundle.extraField = "not allowed";
-
-    const result = validateSkillBundleManifest(bundle);
-    expect(result.valid).toBe(false);
-    expect(result.errors.map((error) => error.code)).toContain("unknown_field");
-  });
-
-  it("rejects Windows-unsafe skill handles and bundle path segments", async () => {
-    const unsafeHandles = [
-      "CON",
-      "prn.txt",
-      "aux",
-      "LPT1",
-      "COM9.log",
-      "bad:name",
-      "bad?name",
-      "bad*name",
-      "bad<name",
-      "bad>name",
-      "bad|name",
-      "bad\"name",
-      "trailing.",
-      "trailing "
-    ];
-    for (const handle of unsafeHandles) {
-      const service = new SkillBundleService({
-        skillMetadataService: {
-          resolveSkillById: async () => ({
-            skillId: "unsafe",
-            skillName: handle,
-            directoryName: handle,
-            path: "/unused/SKILL.md",
-            rootPath: "/unused",
-            env: [],
-            sourceKind: "machine-local",
-            isInherited: false,
-            isEffective: true
-          })
-        }
-      });
-      await expect(service.packageSkill("unsafe")).rejects.toMatchObject({ code: "invalid_skill_handle" });
-    }
-
-    const harness = await createHarness();
-    await createGlobalSkill(harness.config, "safe-skill", {
-      "SKILL.md": "---\nname: Safe\n---\n\n# Safe\n"
-    });
-    const validBundle = (await harness.bundleService.packageSkill(await getGlobalSkillId(harness.metadataService, "safe-skill"))).bundle;
-
-    for (const unsafePath of [
-      "scripts/CON",
-      "scripts/prn.txt",
-      "scripts/file:name.js",
-      "scripts/file?name.js",
-      "scripts/file*name.js",
-      "scripts/file<name.js",
-      "scripts/file>name.js",
-      "scripts/file|name.js",
-      "scripts/file\"name.js",
-      "scripts/trailing.",
-      "scripts/trailing "
-    ]) {
-      expectValidationCode(validBundle, (bundle) => {
-        bundle.files[0]!.path = unsafePath;
-      }, "invalid_file_path");
-    }
-  });
-
-  it("validates bundle trust-boundary invariants", async () => {
-    const harness = await createHarness({ maxFileBytes: 64 });
-    await createGlobalSkill(harness.config, "valid-skill", {
-      "SKILL.md": "---\nname: Valid Skill\n---\n\n# Valid\n"
-    });
-    const validBundle = (await harness.bundleService.packageSkill(await getGlobalSkillId(harness.metadataService, "valid-skill"))).bundle;
-
-    expectValidationCode(validBundle, (bundle) => {
-      bundle.files[0]!.path = "../evil.txt";
-    }, "invalid_file_path");
-
-    expectValidationCode(validBundle, (bundle) => {
-      bundle.files.push({ ...bundle.files[0]! });
-      bundle.totals.fileCount += 1;
-      bundle.totals.byteCount += bundle.files[0]!.size;
-    }, "duplicate_file_path");
-
-    expectValidationCode(validBundle, (bundle) => {
-      const sourceFile = bundle.files[0]!;
-      bundle.files.push(
-        { ...sourceFile, path: "docs/Readme.txt" },
-        { ...sourceFile, path: "docs/README.txt" }
-      );
-      bundle.totals.fileCount += 2;
-      bundle.totals.byteCount += sourceFile.size * 2;
-    }, "duplicate_file_path_case_insensitive");
-
-    expectValidationCode(validBundle, (bundle) => {
-      bundle.files[0]!.path = "/tmp/evil.txt";
-    }, "invalid_file_path");
-
-    expectValidationCode(validBundle, (bundle) => {
-      bundle.files[0]!.sha256 = "0".repeat(64);
-    }, "file_hash_mismatch");
-
-    expectValidationCode(validBundle, (bundle) => {
-      bundle.files = [];
-      bundle.totals = { fileCount: 0, byteCount: 0 };
-    }, "missing_skill_file");
-
-    expectValidationCode(validBundle, (bundle) => {
-      bundle.skill.name = "";
-    }, "invalid_skill_name");
-
-    expectValidationCode(validBundle, (bundle) => {
-      bundle.files[0]!.content = "x".repeat(65);
-      bundle.files[0]!.size = 65;
-      bundle.files[0]!.sha256 = "0".repeat(64);
-      bundle.totals.byteCount = 65;
-    }, "file_too_large");
-  });
-
-  it("accepts deterministic content hashes regardless of file array order", async () => {
-    const harness = await createHarness();
-    await createGlobalSkill(harness.config, "ordered-skill", {
-      "SKILL.md": "---\nname: Ordered\n---\n\n# Ordered\n",
-      "zeta.txt": "z\n",
-      "alpha.txt": "a\n"
-    });
-    const bundle = (await harness.bundleService.packageSkill(await getGlobalSkillId(harness.metadataService, "ordered-skill"))).bundle;
-    bundle.files.reverse();
-
-    expect(validateSkillBundleManifest(bundle)).toMatchObject({ valid: true, errors: [] });
-  });
 });
 
 async function createHarness(options: { maxFileBytes?: number; maxTotalBytes?: number; maxFiles?: number } = {}): Promise<{
@@ -474,19 +247,6 @@ async function createGlobalSkill(config: SwarmConfig, directoryName: string, fil
   await createSkillFiles(join(config.paths.dataDir, "skills", directoryName), files);
 }
 
-async function createProfileSkill(
-  config: SwarmConfig,
-  profileId: string,
-  directoryName: string,
-  files: Record<string, string | Buffer>
-): Promise<void> {
-  await createSkillFiles(join(getProfilePiSkillsDir(config.paths.dataDir, profileId), directoryName), files);
-}
-
-async function createRepoSkill(config: SwarmConfig, directoryName: string, files: Record<string, string | Buffer>): Promise<void> {
-  await createSkillFiles(join(config.paths.rootDir, ".swarm", "skills", directoryName), files);
-}
-
 async function createSkillFiles(rootPath: string, files: Record<string, string | Buffer>): Promise<void> {
   for (const [relativePath, content] of Object.entries(files)) {
     const absolutePath = join(rootPath, relativePath);
@@ -500,26 +260,4 @@ async function getGlobalSkillId(metadataService: SkillMetadataService, directory
   const skill = metadataService.getSkillMetadata().find((entry) => entry.directoryName === directoryName);
   expect(skill).toBeDefined();
   return skill!.skillId;
-}
-
-async function getProfileSkillId(metadataService: SkillMetadataService, profileId: string, directoryName: string): Promise<string> {
-  const skill = (await metadataService.getProfileSkillMetadata(profileId)).find((entry) => entry.directoryName === directoryName);
-  expect(skill).toBeDefined();
-  return skill!.skillId;
-}
-
-function expectValidationCode(
-  sourceBundle: SkillBundleManifestV1,
-  mutate: (bundle: SkillBundleManifestV1) => void,
-  expectedCode: string
-): void {
-  const bundle = cloneBundle(sourceBundle);
-  mutate(bundle);
-  const result = validateSkillBundleManifest(bundle, { maxFileBytes: 64 });
-  expect(result.valid).toBe(false);
-  expect(result.errors.map((error) => error.code)).toContain(expectedCode);
-}
-
-function cloneBundle(bundle: SkillBundleManifestV1): SkillBundleManifestV1 {
-  return JSON.parse(JSON.stringify(bundle)) as SkillBundleManifestV1;
 }

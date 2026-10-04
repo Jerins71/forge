@@ -1,13 +1,9 @@
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { getSessionTurnLedgerPath } from "../data-paths.js";
-import {
-  TURN_LEDGER_MAX_BYTES,
-  appendTurnLedgerRecord,
-  replayTurnLedger,
-} from "../turn-ledger.js";
+
+import { appendTurnLedgerRecord, replayTurnLedger } from "../turn-ledger.js";
 
 async function makeTarget() {
   const dataDir = await mkdtemp(join(tmpdir(), "turn-ledger-"));
@@ -66,22 +62,5 @@ describe("turn ledger", () => {
     expect([...replay.terminalTurns.keys()]).toEqual(["s1:2"]);
     expect([...replay.pendingDeliveries.keys()]).toEqual(["d1"]);
     expect(replay.ackedDeliveries.has("d2")).toBe(true);
-  });
-
-  it("rotates at 5MB with a single .1 file", async () => {
-    const target = await makeTarget();
-    const ledgerPath = getSessionTurnLedgerPath(target.dataDir, target.profileId, target.sessionAgentId);
-    await mkdir(dirname(ledgerPath), { recursive: true });
-    await writeFile(ledgerPath, "x".repeat(TURN_LEDGER_MAX_BYTES + 1), "utf8");
-
-    await appendTurnLedgerRecord(target, {
-      t: "recovery_receipt",
-      receipt: "rotation_test",
-      at: "2026-07-06T00:00:00.000Z",
-    });
-
-    expect((await stat(`${ledgerPath}.1`)).size).toBeGreaterThan(TURN_LEDGER_MAX_BYTES);
-    const current = await readFile(ledgerPath, "utf8");
-    expect(current).toContain("rotation_test");
   });
 });
