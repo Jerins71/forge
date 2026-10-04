@@ -704,7 +704,6 @@ export function assertLaunchEnvironment(
     FORGE_SKILL_SHARE_DISABLED: "true",
     FORGE_REMOTE_PROJECTS_ENABLED: "false",
     FORGE_REMOTE_PROJECTS_TERMINALS_ENABLED: "false",
-    FORGE_VERSIONING_ENABLED: "false",
     FORGE_DEBUG: "false",
   };
   for (const [key, value] of Object.entries(expected)) {

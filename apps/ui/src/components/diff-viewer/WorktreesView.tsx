@@ -210,13 +210,6 @@ export function WorktreesView({
     )
   }
 
-  if (payload?.notInitialized) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        This workspace is not a Git repository.
-      </div>
-    )
-  }
 
   const worktrees = payload?.worktrees ?? []
 

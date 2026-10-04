@@ -15,7 +15,6 @@ const {
   COMMIT_DETAILS,
   WORKTREES_BY_TARGET,
   WORKTREE_ERROR_BY_TARGET,
-  WORKTREE_NOT_INITIALIZED_BY_TARGET,
   BRANCHES_BY_TARGET,
   PULL_REQUESTS_QUERY_STATE,
   remoteApi,
@@ -100,9 +99,6 @@ const {
   },
   WORKTREE_ERROR_BY_TARGET: {
     workspace: null as string | null,
-  },
-  WORKTREE_NOT_INITIALIZED_BY_TARGET: {
-    workspace: false,
   },
   PULL_REQUESTS_QUERY_STATE: {
     data: null as null | {
@@ -220,7 +216,6 @@ vi.mock('./use-diff-queries', () => ({
     }
     const status = STATUS_BY_TARGET[repoTarget]
     const error = WORKTREE_ERROR_BY_TARGET[repoTarget]
-    const notInitialized = WORKTREE_NOT_INITIALIZED_BY_TARGET[repoTarget]
     return {
       data: agentId && !error
         ? {
@@ -229,8 +224,7 @@ vi.mock('./use-diff-queries', () => ({
             repoKind: status.repoKind,
             repoLabel: status.repoLabel,
             context: { repoTarget },
-            worktrees: notInitialized ? [] : WORKTREES_BY_TARGET[repoTarget],
-            notInitialized,
+            worktrees: WORKTREES_BY_TARGET[repoTarget],
           }
         : null,
       isLoading: false,
@@ -355,7 +349,6 @@ beforeEach(() => {
   }
   invalidateGitCachesMock.mockReset()
   WORKTREE_ERROR_BY_TARGET.workspace = null
-  WORKTREE_NOT_INITIALIZED_BY_TARGET.workspace = false
   PULL_REQUESTS_QUERY_STATE.data = null
   PULL_REQUESTS_QUERY_STATE.error = null
   Object.values(remoteApi).forEach((mock) => mock.mockReset())

@@ -22,9 +22,9 @@ import type {
   RemoteUpdateProjectSnapshot as InternalProjectSnapshot,
 } from "../../../swarm/remote-update-awareness/types.js";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
-import { GitCli } from "../../../versioning/git-cli.js";
-import { RemoteUpdateGitError } from "../../../versioning/remote-update-awareness-git.js";
-import { isValidGitRemoteNameShape } from "../../../versioning/git-source-control-helpers.js";
+import { GitCli } from "../../../git/git-cli.js";
+import { RemoteUpdateGitError } from "../../../git/remote-update-awareness-git.js";
+import { isValidGitRemoteNameShape } from "../../../git/git-source-control-helpers.js";
 
 const INCOMING_COMMIT_LIMIT = 20;
 const INCOMING_CHANGED_FILE_LIMIT = 500;

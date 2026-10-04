@@ -3,9 +3,7 @@ import type { RuntimeSessionEvent, SwarmAgentRuntime } from "../runtime-contract
 import type { AgentDescriptor, ConversationMessageEvent, SwarmConfig } from "../types.js";
 import { captureModelCacheObservationFromRuntimeEvent } from "./model-cache-observation.js";
 import {
-  extractVersionedToolPath,
   formatToolExecutionPayload,
-  isVersionedWriteToolName,
   previewForLog,
   safeJson,
   trimToMaxChars,
@@ -19,7 +17,6 @@ import {
   isAbortLikeErrorMessage,
   isLocalRuntimeShutdownErrorMessage
 } from "../session/message-utils.js";
-import type { VersioningMutation } from "../../versioning/versioning-types.js";
 import { MANUAL_MANAGER_STOP_NOTICE } from "../manual-stop-notice.js";
 import type { WorkerActivityStateLike, WorkerStallStateLike } from "./worker-health-types.js";
 import type { RuntimeRecoveryState } from "./runtime-recovery-state.js";
@@ -88,7 +85,6 @@ export interface RuntimeEventProjectorDeps {
   ): boolean;
   cancelPendingTransientWorkerTerminatedError(agentId: string, reason: "runtime_progress" | "clear_state"): void;
   hasPendingTransientWorkerTerminatedError(agentId: string): boolean;
-  queueVersionedToolMutation(descriptor: AgentDescriptor, mutation: VersioningMutation): Promise<void>;
   logDebug(message: string, details?: unknown): void;
   getRuntime(agentId: string): SwarmAgentRuntime | undefined;
   getActiveTurnId(agentId: string, runtimeToken?: number): string | undefined;
@@ -123,7 +119,6 @@ export interface RuntimeEventProjectionInput {
 }
 
 export class RuntimeEventProjector {
-  private readonly trackedToolPathsByAgentId = new Map<string, Map<string, { toolName: string; path: string }>>();
   private readonly managerAssistantOutputTracker: ManagerAssistantOutputTracker;
   private readonly visibleManagerOutputTurnIds = new Set<string>();
   /**
@@ -241,13 +236,7 @@ export class RuntimeEventProjector {
     this.managerAssistantOutputTracker.markExplicitAssistantOutput(agentId);
   }
 
-  getTrackedToolPathsByAgentId(): Map<string, Map<string, { toolName: string; path: string }>> {
-    return this.trackedToolPathsByAgentId;
-  }
 
-  clearTrackedToolPaths(agentId: string): void {
-    this.trackedToolPathsByAgentId.delete(agentId);
-  }
 
   private updateWorkerActivity(agentId: string, event: RuntimeSessionEvent): void {
     if (!this.deps.workerStallState.has(agentId)) {
@@ -462,7 +451,6 @@ export class RuntimeEventProjector {
         source: "system"
       });
     }
-    this.maybeRecordVersionedToolMutation(agentId, effectiveEvent);
 
     if (descriptor?.role === "worker") {
       this.trackWorkerStallProgressEvent(descriptor.agentId, effectiveEvent);
@@ -935,45 +923,6 @@ export class RuntimeEventProjector {
     this.deps.workerStallState.set(agentId, stallState);
   }
 
-  private maybeRecordVersionedToolMutation(agentId: string, event: RuntimeSessionEvent): void {
-    if (event.type === "tool_execution_start") {
-      if (!isVersionedWriteToolName(event.toolName)) {
-        return;
-      }
-
-      const path = extractVersionedToolPath(event.args);
-      if (!path) {
-        return;
-      }
-
-      const byToolCallId = this.trackedToolPathsByAgentId.get(agentId) ?? new Map<string, { toolName: string; path: string }>();
-      byToolCallId.set(event.toolCallId, { toolName: event.toolName, path });
-      this.trackedToolPathsByAgentId.set(agentId, byToolCallId);
-      return;
-    }
-
-    if (event.type !== "tool_execution_end" || event.isError || !isVersionedWriteToolName(event.toolName)) {
-      return;
-    }
-
-    const descriptor = this.deps.descriptors.get(agentId);
-    const tracked = this.trackedToolPathsByAgentId.get(agentId)?.get(event.toolCallId);
-    this.trackedToolPathsByAgentId.get(agentId)?.delete(event.toolCallId);
-
-    const path = tracked?.path ?? extractVersionedToolPath(event.result);
-    if (!descriptor || !path) {
-      return;
-    }
-
-    void this.deps.queueVersionedToolMutation(descriptor, {
-      path,
-      action: "write",
-      source: tracked?.toolName === "edit" ? "agent-edit-tool" : "agent-write-tool",
-      profileId: descriptor.profileId ?? descriptor.agentId,
-      sessionId: descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId,
-      agentId
-    });
-  }
 }
 
 function asManagerFinalMessageEnd(event: RuntimeSessionEvent): RuntimeSessionEvent {

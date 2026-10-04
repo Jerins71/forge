@@ -18,7 +18,6 @@ export FORGE_TERMINAL_ENABLED="false"
 export FORGE_SKILL_SHARE_DISABLED="true"
 export FORGE_REMOTE_PROJECTS_ENABLED="false"
 export FORGE_REMOTE_PROJECTS_TERMINALS_ENABLED="false"
-export FORGE_VERSIONING_ENABLED="false"
 export FORGE_DEBUG="false"
 # Production Forge may already own TanStack's fixed development event-bus
 # port. The isolated validation UI does not need browser devtools, so disable

@@ -1,7 +1,5 @@
-import type { PromptCategory } from './prompts.js'
-
-export type GitRepoTarget = 'workspace' | 'versioning'
-export type GitRepoKind = 'workspace' | 'versioning'
+export type GitRepoTarget = 'workspace'
+export type GitRepoKind = 'workspace'
 
 export interface GitRepoMetadata {
   repoName: string
@@ -24,7 +22,6 @@ export interface GitStatusResult extends GitRepoMetadata {
   summary: { filesChanged: number; insertions: number; deletions: number }
   truncated?: boolean
   totalFiles?: number
-  notInitialized?: boolean
 }
 
 export interface GitDiffResult {
@@ -33,20 +30,6 @@ export interface GitDiffResult {
   binary?: true
   truncated?: true
   reason?: 'file_too_large'
-  notInitialized?: boolean
-}
-
-export interface GitCommitMetadata {
-  reason?: string
-  source?: string
-  sources?: string[]
-  profileId?: string
-  sessionId?: string
-  agentId?: string
-  reviewRunId?: string
-  promptCategory?: PromptCategory
-  promptId?: string
-  paths: string[]
 }
 
 export type GitLogRefKind = 'local' | 'remote' | 'current' | 'tag'
@@ -65,13 +48,11 @@ export interface GitLogEntry {
   filesChanged: number
   parents?: string[]
   refs?: GitLogRef[]
-  metadata?: GitCommitMetadata | null
 }
 
 export interface GitLogResult {
   commits: GitLogEntry[]
   hasMore: boolean
-  notInitialized?: boolean
 }
 
 export interface GitCommitDetail {
@@ -80,13 +61,11 @@ export interface GitCommitDetail {
   author: string
   date: string
   files: GitFileStatus[]
-  metadata?: GitCommitMetadata | null
-  notInitialized?: boolean
 }
 
 // --- Source Control workspace (additive; existing repoTarget=workspace defaults unchanged) ---
 
-export type GitSourceContextKind = 'workspace' | 'versioning' | 'worktree'
+export type GitSourceContextKind = 'workspace' | 'worktree'
 
 export interface GitSourceContextRef {
   repoTarget: GitRepoTarget
@@ -118,7 +97,6 @@ export interface GitWorktreeSummary {
 export interface GitWorktreeListResult extends GitRepoMetadata {
   worktrees: GitWorktreeSummary[]
   context: GitSourceContextRef
-  notInitialized?: boolean
 }
 
 export type GitBranchKind = 'local' | 'remote' | 'current'
@@ -140,7 +118,6 @@ export interface GitBranchListResult extends GitRepoMetadata {
   currentHead: string | null
   statusHash: string | null
   context: GitSourceContextRef
-  notInitialized?: boolean
 }
 
 export interface GitMutationRequestBase {
@@ -254,7 +231,6 @@ export interface GitPullRequestListResult extends GitRepoMetadata {
   openCountTruncated?: boolean
   listError?: GitPullRequestListError | null
   context: GitSourceContextRef
-  notInitialized?: boolean
 }
 
 export type GitPullRequestListErrorCode =
@@ -311,7 +287,6 @@ export type GitPullRequestMergeErrorCode =
   | 'checks_blocked'
   | 'checks_pending'
   | 'method_not_allowed'
-  | 'versioning_blocked'
   | 'auth'
   | 'permission'
   | 'rate_limit'

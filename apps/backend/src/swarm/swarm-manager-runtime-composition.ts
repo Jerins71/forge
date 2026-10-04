@@ -1,5 +1,4 @@
 import type { GenerationMeasurementRecordV1, GenerationThroughputEvent, SessionActiveToolsSnapshotEvent, SessionGoalSnapshotEvent } from "@forge/protocol";
-import type { VersioningMutationSink } from "../versioning/versioning-types.js";
 import { ensureCanonicalAuthFilePath } from "./storage/auth-storage-paths.js";
 import { BootReconciler } from "./agents/descriptor-store/boot-reconciler.js";
 import { ProfileBootReconciler } from "./agents/descriptor-store/profile-boot-reconciler.js";
@@ -91,7 +90,6 @@ export interface RuntimeCompositionEvents {
   clearSessionActiveTools(agentId: string): SessionActiveToolsSnapshotEvent | null;
   activateManagerToolActivity(agentId: string, turnId: string): void; clearManagerToolActivity(agentId: string): void;
   saveStore(): Promise<void>;
-  queueVersionedToolMutation: RuntimeHost["queueVersionedToolMutation"];
   emitModelCacheObservation: RuntimeHost["emitModelCacheObservation"];
   /** Ephemeral count-only telemetry; never conversation projection. */
   emitGenerationThroughput(event: GenerationThroughputEvent): void;
@@ -206,7 +204,6 @@ export interface SwarmManagerRuntimeCompositionOptions {
     sessionPins: SessionPinCoordinator;
     secrets: SecretsEnvService;
     observability: SwarmObservabilityCoordinator;
-    versioningService?: VersioningMutationSink;
   };
   toolHost: SwarmToolHost;
   browserAutomation: BrowserAutomationService;
@@ -469,7 +466,6 @@ export class SwarmManagerRuntimeComposition {
       markSessionActivity: events.markSessionActivity,
       emitStatus: events.emitStatus,
       saveStore: events.saveStore,
-      queueVersionedToolMutation: events.queueVersionedToolMutation,
       logDebug: events.logDebug,
       isModelCacheVisualizationEnabled: () =>
         this.requireServices().configuration.isModelCacheVisualizationEnabled(),
@@ -555,7 +551,6 @@ export class SwarmManagerRuntimeComposition {
       listWorkersForSession: (sessionAgentId) =>
         this.requireServices().directory.listWorkersForSession(sessionAgentId),
       emitSessionWorkersSnapshot: events.emitSessionWorkersSnapshot,
-      clearTrackedToolPaths: (agentId) => this.runtimeController.clearTrackedToolPaths(agentId),
       logDebug: events.logDebug,
     });
   }
@@ -672,7 +667,6 @@ export class SwarmManagerRuntimeComposition {
       emitProfilesSnapshot: events.emitProfilesSnapshot,
       logDebug: events.logDebug,
       clearWorkerHealthState: (agentId) => runtimeLifecycle.clearWorkerHealthState(agentId),
-      clearTrackedToolPaths: (agentId) => this.runtimeController.clearTrackedToolPaths(agentId),
       suppressIntentionalStopRuntimeCallbacks: (agentId, token) =>
         this.runtimeController.suppressIntentionalStopRuntimeCallbacks(agentId, token),
       clearIntentionalStopRuntimeCallbackSuppression: (agentId, token) =>
@@ -716,9 +710,7 @@ export class SwarmManagerRuntimeComposition {
       deleteConversationHistory: sessions.deleteConversationHistory,
       deleteManagerSchedulesFile: runtimeResources.deleteManagerSchedulesFile,
       migrateLegacyProfileKnowledgeToReferenceDoc: async (profileId) => {
-        await migrateLegacyProfileKnowledgeToReferenceDoc(state.config.paths.dataDir, profileId, {
-          versioning: this.options.foundation.versioningService,
-        });
+        await migrateLegacyProfileKnowledgeToReferenceDoc(state.config.paths.dataDir, profileId);
       },
       prepareWorkerDescriptorForSpawn: (input) =>
         services.codexPlugin.prepareWorkerDescriptorForSpawn({

@@ -24,7 +24,6 @@ import { NodePtyRuntime } from "./terminal/terminal-pty-runtime.js";
 import { TerminalSettingsService } from "./terminal/terminal-settings-service.js";
 import type { ResolvedTerminalSession, TerminalSessionResolver } from "./terminal/terminal-session-resolver.js";
 import { TerminalService } from "./terminal/terminal-service.js";
-import { EmbeddedGitVersioningService } from "./versioning/embedded-git-versioning-service.js";
 import { SwarmWebSocketServer } from "./ws/server.js";
 
 export interface ServerLogger {
@@ -88,13 +87,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
     onSessionChanged: (snapshot, reason) => wsServer?.broadcastBrowserSessionChanged(snapshot, reason),
     onHostChanged: (host) => wsServer?.broadcastBrowserHostChanged(host),
   });
-  const versioningService = new EmbeddedGitVersioningService({
-    dataDir: config.paths.dataDir,
-    logger,
-    onCommit: async (event) => {
-      await swarmManager?.dispatchForgeVersioningCommit(event);
-    },
-  });
 
   try {
     await seedBuiltins(config.paths.dataDir);
@@ -102,16 +94,13 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
     await observabilityService.initialize();
 
     swarmManager = new SwarmManager(config, {
-      versioningService,
       observability: observabilityService,
       browserAutomationService,
     });
-    await versioningService.start();
   } catch (error) {
     await Promise.allSettled([
       swarmManager?.closeSecureSessions(),
       observabilityService.shutdown({ timeoutMs: 3000 }),
-      versioningService.stop(),
     ]);
     releaseRuntimeLock();
     throw error;
@@ -367,7 +356,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       config,
       port: wsServer.getPort(),
       swarmManager,
-      versioningService,
       observabilityService,
       wsServer,
       queueSchedulerSync,
@@ -400,7 +388,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
         swarmManager?.closeSecureSessions(),
         terminalService?.shutdown(),
         observabilityService.shutdown({ timeoutMs: 3000 }),
-        versioningService.stop(),
       ]);
       releaseRuntimeLock();
     }
@@ -414,7 +401,6 @@ class BackendServer implements StartedServer {
   readonly config: SwarmConfig;
 
   private readonly swarmManager: SwarmManager;
-  private readonly versioningService: EmbeddedGitVersioningService;
   private readonly observabilityService: ObservabilityFacade;
   private readonly wsServer: SwarmWebSocketServer;
   private readonly queueSchedulerSync: (profileIds: Set<string>) => Promise<void>;
@@ -430,7 +416,6 @@ class BackendServer implements StartedServer {
     config: SwarmConfig;
     port: number;
     swarmManager: SwarmManager;
-    versioningService: EmbeddedGitVersioningService;
     observabilityService: ObservabilityFacade;
     wsServer: SwarmWebSocketServer;
     queueSchedulerSync: (profileIds: Set<string>) => Promise<void>;
@@ -444,7 +429,6 @@ class BackendServer implements StartedServer {
     this.port = options.port;
     this.config = options.config;
     this.swarmManager = options.swarmManager;
-    this.versioningService = options.versioningService;
     this.observabilityService = options.observabilityService;
     this.wsServer = options.wsServer;
     this.queueSchedulerSync = options.queueSchedulerSync;
@@ -478,7 +462,6 @@ class BackendServer implements StartedServer {
         this.swarmManager.disposeHistoryRecall(),
         this.terminalService?.shutdown(),
         this.observabilityService.shutdown({ timeoutMs: 3000 }),
-        this.versioningService.stop(),
       ]);
 
       try {

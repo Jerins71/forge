@@ -31,7 +31,6 @@ import type { TurnContextCoordinator } from "./turn-context-coordinator.js";
 import type { UserMessageCoordinator } from "./user-message-coordinator.js";
 import type { SwarmAgentRuntime } from "./runtime-contracts.js";
 import type { SidebarPerfRecorder } from "../stats/sidebar-perf-types.js";
-import type { VersioningMutationSink } from "../versioning/versioning-types.js";
 import type { SwarmConfig } from "./types.js";
 
 export interface TerminalArchiveHooks {
@@ -71,7 +70,6 @@ export interface SwarmManagerFacadeRuntimeServices {
 
 export interface SwarmManagerFacadeHostServices {
   config: SwarmConfig;
-  versioningService?: VersioningMutationSink;
   setTerminalArchiveHooks(hooks?: TerminalArchiveHooks): void;
   logDebug(message: string, details?: unknown): void;
 }
@@ -127,7 +125,7 @@ export interface SwarmManagerFacadeServices extends SwarmManagerSessionFacadeSer
   persistence: Pick<SwarmSessionMetaService, "flushPendingTurnSeqPersists">;
   extensions: Pick<
     ForgeExtensionHost,
-    "buildSettingsSnapshot" | "dispatchVersioningCommit"
+    "buildSettingsSnapshot"
   >;
   host: SwarmManagerFacadeHostServices;
 }

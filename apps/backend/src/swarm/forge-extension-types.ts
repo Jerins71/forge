@@ -88,31 +88,12 @@ export interface RuntimeErrorObservedEvent {
   readonly details?: Record<string, unknown>;
 }
 
-export interface VersioningMutation {
-  readonly path: string;
-  readonly action: "write" | "delete";
-  readonly source: string;
-  readonly profileId?: string;
-  readonly sessionId?: string;
-  readonly agentId?: string;
-}
-
-export interface VersioningCommitEvent {
-  readonly sha: string;
-  readonly subject: string;
-  readonly body: string;
-  readonly paths: readonly string[];
-  readonly mutations: readonly VersioningMutation[];
-  readonly reason: string;
-  readonly profileIds: readonly string[];
-}
 
 export interface ForgeEventMap {
   "session:lifecycle": [SessionLifecycleEvent, HostContext, void];
   "tool:before": [ToolBeforeEvent, RuntimeContext, ToolBeforeResult | void];
   "tool:after": [ToolAfterEvent, RuntimeContext, void];
   "runtime:error": [RuntimeErrorObservedEvent, RuntimeContext, void];
-  "versioning:commit": [VersioningCommitEvent, HostContext, void];
 }
 
 export type ForgeEventName = keyof ForgeEventMap;
@@ -139,7 +120,6 @@ export interface ForgeBoundHandlerRegistry {
   readonly "tool:before": ForgeEventHandler<"tool:before">[];
   readonly "tool:after": ForgeEventHandler<"tool:after">[];
   readonly "runtime:error": ForgeEventHandler<"runtime:error">[];
-  readonly "versioning:commit": ForgeEventHandler<"versioning:commit">[];
 }
 
 export interface ForgeBoundExtension {

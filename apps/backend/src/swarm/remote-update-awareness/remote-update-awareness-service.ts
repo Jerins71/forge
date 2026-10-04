@@ -2,7 +2,7 @@ import {
   RemoteUpdateGitError,
   RemoteUpdateGitObserver,
   type ResolveRemoteUpdateTargetInput
-} from "../../versioning/remote-update-awareness-git.js";
+} from "../../git/remote-update-awareness-git.js";
 import { RemoteUpdateAwarenessCoordinator } from "./remote-update-awareness-coordinator.js";
 import { RemoteUpdateAwarenessStore } from "./remote-update-awareness-store.js";
 import type {

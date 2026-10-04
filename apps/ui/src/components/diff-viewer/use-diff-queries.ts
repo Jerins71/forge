@@ -123,7 +123,7 @@ function parseGitQueryKey(
     if (typeof scope !== 'string' || typeof agentId !== 'string') {
       return null
     }
-    if (repoTarget !== 'workspace' && repoTarget !== 'versioning') {
+    if (repoTarget !== 'workspace') {
       return null
     }
 

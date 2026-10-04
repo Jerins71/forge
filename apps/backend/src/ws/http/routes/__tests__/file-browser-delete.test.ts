@@ -153,7 +153,6 @@ async function createHarness(): Promise<{
 
       return undefined;
     },
-    getVersioningService: () => undefined,
   };
 
   return {

@@ -122,7 +122,6 @@ export interface SwarmSpecialistFallbackManagerOptions {
   /** Authoritative worker roster refresh; agents_snapshot intentionally excludes workers. */
   listWorkersForSession?(sessionAgentId: string): AgentDescriptor[];
   emitSessionWorkersSnapshot?(sessionAgentId: string, workers: AgentDescriptor[]): void;
-  clearTrackedToolPaths(agentId: string): void;
   logDebug(message: string, details?: unknown): void;
 }
 
@@ -792,9 +791,6 @@ export class SwarmSpecialistFallbackManager {
       this.restoreRuntimeTokenForFallbackRollback(agentId, suppressedRuntimeToken);
     }
 
-    if (handoffState?.receivedAgentEnd) {
-      this.options.clearTrackedToolPaths(agentId);
-    }
     this.options.workerHealthService.reconcileRuntimeStateAfterFallbackRollback(agentId, reconciledStatus);
 
     await this.saveWorkerDescriptorBestEffort(agentId, restoredDescriptor.specialistId);

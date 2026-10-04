@@ -27,7 +27,6 @@ import type {
   SessionLifecycleEvent,
   ToolAfterResultEnvelope,
   ToolBeforeResult,
-  VersioningCommitEvent
 } from "./forge-extension-types.js";
 
 const MAX_RECENT_ERRORS = 50;
@@ -41,7 +40,6 @@ const KNOWN_FORGE_EVENT_NAMES: ForgeEventName[] = [
   "tool:before",
   "tool:after",
   "runtime:error",
-  "versioning:commit"
 ];
 
 interface ForgeExtensionHostOptions {
@@ -365,44 +363,6 @@ export class ForgeExtensionHost {
     }
   }
 
-  async dispatchVersioningCommit(event: VersioningCommitEvent): Promise<void> {
-    const discovered = await this.discoverHostDispatchExtensions({
-      hook: "versioning:commit",
-      scopes: ["global", "profile"],
-      profileIds: event.profileIds
-    });
-    if (discovered.length === 0) {
-      return;
-    }
-
-    const loadedAt = this.now();
-    const { extensions, diagnostics } = await this.loadBoundExtensions({
-      discovered,
-      loadedAt,
-      hook: "versioning:commit"
-    });
-    this.recordDiagnosticErrors(diagnostics);
-
-    const frozenEvent = Object.freeze({
-      sha: event.sha,
-      subject: event.subject,
-      body: event.body,
-      paths: Object.freeze([...event.paths]),
-      mutations: Object.freeze(event.mutations.map((mutation) => Object.freeze({ ...mutation }))),
-      reason: event.reason,
-      profileIds: Object.freeze([...event.profileIds])
-    });
-
-    for (const extension of extensions) {
-      for (const handler of extension.handlers["versioning:commit"]) {
-        try {
-          await handler(frozenEvent, this.buildHostContext("versioning:commit", extension.module.discovered));
-        } catch (error) {
-          this.recordHostHandlerDiagnosticError("versioning:commit", extension.module.discovered, error);
-        }
-      }
-    }
-  }
 
   getVersion(): string {
     return this.version;
@@ -868,7 +828,6 @@ function createEmptyHandlerRegistry(): ForgeBoundHandlerRegistry {
     "tool:before": [],
     "tool:after": [],
     "runtime:error": [],
-    "versioning:commit": []
   };
 }
 

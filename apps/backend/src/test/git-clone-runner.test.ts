@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile, rm, symlink, readFile, access, constants } f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { publishCloneWithoutReplace, safeRemoveOwnedStaging, STAGING_PREFIX } from '../versioning/git-clone-runner.js'
+import { publishCloneWithoutReplace, safeRemoveOwnedStaging, STAGING_PREFIX } from '../git/git-clone-runner.js'
 
 describe('git-clone-runner remediation', () => {
   let root = ''

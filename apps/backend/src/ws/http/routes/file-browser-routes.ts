@@ -303,36 +303,6 @@ async function handlePutFileContent(
       content: saveRequest.content,
       baseVersion: saveRequest.baseVersion,
       overwrite,
-      onSaved: ({ resolvedPath }) => {
-        try {
-          const versioningService = swarmManager.getVersioningService();
-          if (!versioningService) {
-            return;
-          }
-
-          let tracked = false;
-          try {
-            tracked = versioningService.isTrackedPath(resolvedPath);
-          } catch {
-            return;
-          }
-
-          if (!tracked) {
-            return;
-          }
-
-          void versioningService.recordMutation({
-            path: resolvedPath,
-            action: "write",
-            source: "api-write-file",
-            agentId: normalizedAgentId
-          }).catch(() => {
-            // Fail open: editor saves succeed even when versioning cannot record them.
-          });
-        } catch {
-          // Fail open: lookup/isTrackedPath/getVersioningService failures must not fail the save.
-        }
-      }
     });
 
     if (!result.success) {
@@ -360,36 +330,7 @@ async function handleDeleteFileContent(
     const worktreeId = optionalTrimmedQuery(requestUrl.searchParams.get("worktreeId"));
     const { cwd } = await resolveFileBrowserContextByWorktree(swarmManager, agentId, worktreeId);
 
-    const result: FileDeleteResponse = await service.deletePath(cwd, filePath, ({ resolvedPath }) => {
-      try {
-        const versioningService = swarmManager.getVersioningService();
-        if (!versioningService) {
-          return;
-        }
-
-        let tracked = false;
-        try {
-          tracked = versioningService.isTrackedPath(resolvedPath);
-        } catch {
-          return;
-        }
-
-        if (!tracked) {
-          return;
-        }
-
-        void versioningService.recordMutation({
-          path: resolvedPath,
-          action: "delete",
-          source: "api-write-file",
-          agentId,
-        }).catch(() => {
-          // Fail open: editor deletes succeed even when versioning cannot record them.
-        });
-      } catch {
-        // Fail open: lookup/isTrackedPath/getVersioningService failures must not fail the delete.
-      }
-    });
+    const result: FileDeleteResponse = await service.deletePath(cwd, filePath);
 
     sendJson(response, 200, result as unknown as Record<string, unknown>);
   } catch (error) {
@@ -435,7 +376,6 @@ async function handleCreateFile(
       cwd,
       directoryPath: createRequest.directoryPath,
       name: createRequest.name,
-      onCreated: ({ resolvedPath }) => recordFileBrowserMutation(swarmManager, resolvedPath, "write", agentId),
     });
     sendJson(response, 200, result as unknown as Record<string, unknown>);
   } catch (error) {
@@ -477,7 +417,6 @@ async function handleRenamePath(
       cwd,
       relativePath: renameRequest.path,
       newName: renameRequest.newName,
-      onRenamed: ({ newResolvedPath }) => recordFileBrowserMutation(swarmManager, newResolvedPath, "write", agentId),
     });
     sendJson(response, 200, result as unknown as Record<string, unknown>);
   } catch (error) {
@@ -486,32 +425,6 @@ async function handleRenamePath(
   }
 }
 
-function recordFileBrowserMutation(
-  swarmManager: SwarmManager,
-  resolvedPath: string,
-  action: "write" | "delete",
-  agentId: string
-): void {
-  try {
-    const versioningService = swarmManager.getVersioningService();
-    if (!versioningService) return;
-    let tracked = false;
-    try {
-      tracked = versioningService.isTrackedPath(resolvedPath);
-    } catch {
-      return;
-    }
-    if (!tracked) return;
-    void versioningService.recordMutation({
-      path: resolvedPath,
-      action,
-      source: "api-write-file",
-      agentId,
-    }).catch(() => {});
-  } catch {
-    // Fail open: file browser mutations succeed even when versioning cannot record them.
-  }
-}
 
 async function resolveFileBrowserContext(
   swarmManager: SwarmManager,

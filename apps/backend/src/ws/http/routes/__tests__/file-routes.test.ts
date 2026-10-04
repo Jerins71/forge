@@ -128,7 +128,6 @@ async function createFileRouteHarness(): Promise<{
 
       return undefined;
     },
-    getVersioningService: () => undefined,
   };
 
   const routes = [

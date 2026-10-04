@@ -64,5 +64,5 @@ scripts/secure-sessions-data-copy/launch-electron.sh
 ```
 
 The launcher binds both services to loopback, disables telemetry/terminal restore/skill
-sharing/versioning/debug logging, checks the copied data again, refuses occupied
+sharing/debug logging, checks the copied data again, refuses occupied
 ports, and runs the UI and Electron in one foreground lifecycle.

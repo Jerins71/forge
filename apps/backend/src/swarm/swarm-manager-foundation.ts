@@ -5,7 +5,6 @@ import { loadConfiguredSqliteDatabaseConstructor } from "../sqlite-database-load
 import { backendSidebarPerfMetricManifest } from "../stats/sidebar-perf-metrics.js";
 import { createSidebarPerfRegistry } from "../stats/sidebar-perf-registry.js";
 import type { SidebarPerfRecorder } from "../stats/sidebar-perf-types.js";
-import type { VersioningMutationSink } from "../versioning/versioning-types.js";
 import { AgentDescriptorStore } from "./agents/agent-descriptor-store.js";
 import {
   createLiveCompactionRuntimeSettingsProvider,
@@ -68,7 +67,6 @@ export interface SwarmManagerFoundationOptions {
   descriptors: Map<string, AgentDescriptor>;
   profiles: Map<string, ManagerProfile>;
   now: () => string;
-  versioningService?: VersioningMutationSink;
   getConfiguredManagerId: () => string | undefined;
   getRuntimeToken: (agentId: string) => number | undefined;
   sessionPins: SessionPinCoordinatorHost;
@@ -141,7 +139,6 @@ export function createSwarmManagerFoundation(
       "operational",
       "builtins",
     ),
-    versioning: options.versioningService,
   });
   const forgeExtensionHost = new ForgeExtensionHost({
     dataDir: config.paths.dataDir,

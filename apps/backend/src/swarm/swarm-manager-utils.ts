@@ -1432,66 +1432,7 @@ function normalizeOptionalMetadataValue(value: string | undefined): string | und
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-export function isVersionedWriteToolName(toolName: string): boolean {
-  return toolName === "write" || toolName === "edit";
-}
 
-export function extractVersionedToolPath(value: unknown, depth = 0): string | undefined {
-  if (depth > 4 || value === null || value === undefined) {
-    return undefined;
-  }
-
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return undefined;
-    }
-
-    if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
-      try {
-        return extractVersionedToolPath(JSON.parse(trimmed), depth + 1);
-      } catch {
-        return undefined;
-      }
-    }
-
-    return undefined;
-  }
-
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      const candidate = extractVersionedToolPath(entry, depth + 1);
-      if (candidate) {
-        return candidate;
-      }
-    }
-    return undefined;
-  }
-
-  if (typeof value !== "object") {
-    return undefined;
-  }
-
-  const record = value as Record<string, unknown>;
-  for (const key of ["path", "filePath"]) {
-    if (typeof record[key] === "string" && record[key].trim().length > 0) {
-      return record[key].trim();
-    }
-  }
-
-  for (const nestedKey of ["args", "arguments", "result", "payload", "input", "data", "preview", "content"]) {
-    if (!(nestedKey in record)) {
-      continue;
-    }
-
-    const candidate = extractVersionedToolPath(record[nestedKey], depth + 1);
-    if (candidate) {
-      return candidate;
-    }
-  }
-
-  return undefined;
-}
 
 export async function readFileHead(filePath: string, bytes: number): Promise<string> {
   const handle = await open(filePath, "r");

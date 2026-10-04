@@ -7,7 +7,6 @@ import type {
   SessionMemoryMergeStrategy,
   SessionMeta
 } from "@forge/protocol";
-import type { VersioningMutation } from "../versioning/versioning-types.js";
 import { ensureCanonicalAuthFilePath } from "./storage/auth-storage-paths.js";
 import { getProfileMemoryPath, getProfileMergeAuditLogPath } from "./data-paths.js";
 import { executeLLMMerge, MEMORY_MERGE_SYSTEM_PROMPT } from "./prompts/memory-merge.js";
@@ -148,7 +147,6 @@ export interface SwarmMemoryMergeServiceOptions {
   ) => Promise<void>;
   appendSessionMemoryMergeAuditEntry: (entry: SessionMemoryMergeAuditEntry) => Promise<void>;
   refreshSessionMetaStatsBySessionId: (sessionAgentId: string) => Promise<void>;
-  queueVersioningMutation: (mutation: VersioningMutation) => void;
   saveStore: () => Promise<void>;
   runSessionMemoryLLMMerge: (
     descriptor: AgentDescriptor,
@@ -416,13 +414,6 @@ export class SwarmMemoryMergeService {
         failureContext.stage = "write_profile_memory";
         await writeFile(profileMemoryPath, mergedProfileMemory, "utf8");
         failureContext.appliedChange = true;
-        this.options.queueVersioningMutation({
-          path: profileMemoryPath,
-          action: "write",
-          source: "profile-memory-merge",
-          profileId,
-          sessionId: descriptor.agentId
-        });
       }
       failureContext.stage = "refresh_session_meta_stats";
       await this.options.refreshSessionMetaStatsBySessionId(profileId);

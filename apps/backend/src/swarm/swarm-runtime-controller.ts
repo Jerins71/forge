@@ -53,7 +53,6 @@ import type {
   ConversationMessageEvent,
   SwarmConfig
 } from "./types.js";
-import type { VersioningMutation } from "../versioning/versioning-types.js";
 import type { SwarmSpecialistFallbackManager } from "./swarm-specialist-fallback-manager.js";
 import type { ObservabilityFacade } from "../observability/observability-types.js";
 import type { MessageRoutingReceiptRecord } from "./session/message-routing-receipts.js";
@@ -219,7 +218,6 @@ export interface SwarmRuntimeControllerHost extends SwarmToolHost {
     contextUsage?: AgentContextUsage
   ): void;
   saveStore(): Promise<void>;
-  queueVersionedToolMutation(descriptor: AgentDescriptor, mutation: VersioningMutation): Promise<void>;
   logDebug(message: string, details?: unknown): void;
   isModelCacheVisualizationEnabled(): boolean;
   emitModelCacheObservation(event: ModelCacheObservationEvent): void;
@@ -384,13 +382,7 @@ export class SwarmRuntimeController {
     this.runtimeBinding.attachRuntime(agentId, runtime);
   }
 
-  get trackedToolPathsByAgentId(): Map<string, Map<string, { toolName: string; path: string }>> {
-    return this.getRuntimeEventProjector().getTrackedToolPathsByAgentId();
-  }
 
-  clearTrackedToolPaths(agentId: string): void {
-    this.getRuntimeEventProjector().clearTrackedToolPaths(agentId);
-  }
 
   activateManagerAssistantOutputTurn(
     agentId: string,
@@ -863,7 +855,6 @@ export class SwarmRuntimeController {
           this.host.cancelPendingTransientWorkerTerminatedError(agentId, reason),
         hasPendingTransientWorkerTerminatedError: (agentId) =>
           this.host.hasPendingTransientWorkerTerminatedError(agentId),
-        queueVersionedToolMutation: (descriptor, mutation) => this.host.queueVersionedToolMutation(descriptor, mutation),
         logDebug: (message, details) => this.logDebug(message, details),
         getRuntime: (agentId) => this.getRuntime(agentId),
         isModelCacheVisualizationEnabled: () => this.host.isModelCacheVisualizationEnabled(),
@@ -1149,7 +1140,6 @@ export class SwarmRuntimeController {
     if (this.shouldIgnoreRuntimeCallback(agentId, runtimeToken)) {
       return;
     }
-    this.clearTrackedToolPaths(agentId);
     const descriptor = this.descriptors.get(agentId);
     if (descriptor?.role === "manager") {
       this.flushManagerAssistantOutputTurn(agentId);

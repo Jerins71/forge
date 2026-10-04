@@ -621,8 +621,6 @@ function resolveMergeHttpStatus(payload: {
       return 503;
     case "provider_unavailable":
       return 503;
-    case "versioning_blocked":
-      return 409;
     default:
       return 409;
   }

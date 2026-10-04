@@ -1,7 +1,6 @@
 import type { HistorySearchService } from "./history-recall/index.js";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { VersioningMutation, VersioningMutationSink } from "../versioning/versioning-types.js";
 import type { PromptRegistry } from "./prompts/prompt-registry.js";
 import type { ConversationProjector } from "./session/conversation-projector.js";
 import type { SidebarPerfRecorder } from "../stats/sidebar-perf-types.js";
@@ -185,7 +184,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private readonly codexDirectSidecarCoordinator: CodexDirectSidecarCoordinator;
   private readonly codexPluginDelegationCoordinator: CodexPluginDelegationCoordinator;
   private terminalArchiveHooks: TerminalArchiveHooks | undefined;
-  private readonly versioningService: VersioningMutationSink | undefined;
   private readonly observabilityCoordinator: SwarmObservabilityCoordinator;
   private readonly historySearchService: HistorySearchService;
   private readonly browserAutomationService: BrowserAutomationService;
@@ -193,13 +191,11 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   constructor(config: SwarmConfig, options?: SwarmManagerOptions) {
     super();
     this.now = options?.now ?? nowIso;
-    this.versioningService = options?.versioningService;
     const foundation = createSwarmManagerFoundation({
       config,
       descriptors: this.descriptors,
       profiles: this.profiles,
       now: this.now,
-      versioningService: this.versioningService,
       getConfiguredManagerId: () => normalizeOptionalAgentId(config.managerId),
       getRuntimeToken: (agentId) => this.runtimeController.getRuntimeToken(agentId),
       sessionPins: {
@@ -347,9 +343,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         this.memoryCoordinator.appendSessionMemoryMergeAuditEntry(entry),
       refreshSessionMetaStatsBySessionId: (sessionAgentId) =>
         this.memoryCoordinator.refreshSessionMetaStatsBySessionId(sessionAgentId),
-      queueVersioningMutation: (mutation) => {
-        this.queueVersioningMutation(mutation);
-      },
       saveStore: async () => {
         await this.descriptorStoreAdapter.saveStore();
       },
@@ -455,7 +448,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       extensions: this.forgeExtensionHost,
       host: {
         config: this.config,
-        versioningService: this.versioningService,
         setTerminalArchiveHooks: (hooks) => {
           this.terminalArchiveHooks = hooks;
         },
@@ -558,7 +550,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         sessionPins: this.sessionPinCoordinator,
         secrets: this.secretsEnvService,
         observability: this.observabilityCoordinator,
-        versioningService: this.versioningService,
       },
       toolHost: this,
       browserAutomation: this.browserAutomationService,
@@ -599,8 +590,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         clearSessionActiveTools: (agentId) => this.sessionActiveTools.clearSession(agentId),
         activateManagerToolActivity: (agentId, turnId) => this.eventCoordinator.activateManagerToolActivity(agentId, turnId),
         clearManagerToolActivity: (agentId) => this.eventCoordinator.clearManagerToolActivity(agentId), saveStore: () => this.descriptorStoreAdapter.saveStore(),
-        queueVersionedToolMutation: (agentId, event) =>
-          this.queueVersionedToolMutation(agentId, event),
         emitModelCacheObservation: (event) =>
           this.eventCoordinator.emitModelCacheObservation(event),
         // Deliberately direct: count-only throughput must not enter the
@@ -878,7 +867,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       sortedProfiles: () => this.agentDirectory.sortedProfiles(),
       resolvePromptWithFallback: (category, promptId, profileId, fallback) =>
         this.managerBootstrapCoordinator.resolvePromptWithFallback(category, promptId, profileId, fallback),
-      versioning: this.versioningService,
       now: this.now,
     });
   }
@@ -1281,15 +1269,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
     sessionDescriptor?: AgentDescriptor;
   }): Promise<ProjectExecutableTrustPlan> {
     return this.projectExecutableTrustCoordinator.resolvePlanForRuntime(options);
-  }
-  private queueVersioningMutation(mutation: VersioningMutation): void {
-    void this.versioningService?.recordMutation(mutation).catch((error) => {
-      this.logDebug("versioning:record_error", {
-        path: mutation.path,
-        source: mutation.source,
-        message: error instanceof Error ? error.message : String(error)
-      });
-    });
   }
   protected async executeSessionMemoryLLMMerge(
     descriptor: AgentDescriptor,

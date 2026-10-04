@@ -16,7 +16,7 @@ import type {
   FileVersionToken,
 } from "@forge/protocol";
 import { isPathWithinRoots } from "../../../swarm/cwd-policy.js";
-import { GitCli } from "../../../versioning/git-cli.js";
+import { GitCli } from "../../../git/git-cli.js";
 
 const BINARY_SNIFF_BYTES = 8 * 1024;
 export const MAX_FILE_CONTENT_BYTES = 2 * 1024 * 1024;
@@ -288,7 +288,6 @@ export class FileBrowserService {
     content: string;
     baseVersion: FileVersionToken;
     overwrite: boolean;
-    onSaved?: (saved: { resolvedPath: string }) => Promise<void> | void;
   }): Promise<FileSaveResponse> {
     const normalizedCwd = resolve(options.cwd);
     const normalizedRelativePath = normalizeRelativePath(options.relativePath);
@@ -359,12 +358,6 @@ export class FileBrowserService {
       const savedVersion = computeFileVersion(savedBuffer, toFileStatNumbers(savedStats));
       const lines = options.content.length === 0 ? 0 : options.content.split(/\r?\n/).length;
 
-      try {
-        await options.onSaved?.({ resolvedPath });
-      } catch {
-        // Side-effect failures after a successful write must not fail the save response.
-      }
-
       return {
         success: true,
         version: savedVersion,
@@ -378,7 +371,6 @@ export class FileBrowserService {
   async deletePath(
     cwd: string,
     relativePath: string,
-    onDeleted?: (deleted: { resolvedPath: string; entryType: "file" | "directory" }) => Promise<void> | void
   ): Promise<FileDeleteResponse> {
     const normalizedRelativePath = normalizeRelativePath(relativePath);
     if (!normalizedRelativePath) {
@@ -429,12 +421,6 @@ export class FileBrowserService {
       rethrowPermissionDenied(error, "write");
     }
 
-    try {
-      await onDeleted?.({ resolvedPath: targetPath, entryType });
-    } catch {
-      // Fail open: editor deletes succeed even when versioning cannot record them.
-    }
-
     return {
       success: true,
       path: normalizedRelativePath,
@@ -446,7 +432,6 @@ export class FileBrowserService {
     cwd: string;
     directoryPath: string;
     name: string;
-    onCreated?: (created: { resolvedPath: string }) => Promise<void> | void;
   }): Promise<FileCreateResponse> {
     const normalizedDirectoryPath = normalizeRelativePath(options.directoryPath);
     const fileName = validateNewEntryName(options.name);
@@ -492,12 +477,6 @@ export class FileBrowserService {
       await handle?.close();
     }
 
-    try {
-      await options.onCreated?.({ resolvedPath: targetPath });
-    } catch {
-      // Fail open: editor creates succeed even when versioning cannot record them.
-    }
-
     const path = normalizedDirectoryPath ? `${normalizedDirectoryPath}/${fileName}` : fileName;
     return { success: true, path, entryType: "file" };
   }
@@ -506,7 +485,6 @@ export class FileBrowserService {
     cwd: string;
     relativePath: string;
     newName: string;
-    onRenamed?: (renamed: { resolvedPath: string; newResolvedPath: string; entryType: "file" | "directory" }) => Promise<void> | void;
   }): Promise<FileRenameResponse> {
     const normalizedRelativePath = normalizeRelativePath(options.relativePath);
     if (!normalizedRelativePath) {
@@ -564,12 +542,6 @@ export class FileBrowserService {
       await renamePathOnDisk(sourcePath, targetPath);
     } catch (error) {
       rethrowPermissionDenied(error, "write");
-    }
-
-    try {
-      await options.onRenamed?.({ resolvedPath: sourcePath, newResolvedPath: targetPath, entryType });
-    } catch {
-      // Fail open: editor renames succeed even when versioning cannot record them.
     }
 
     const newPath = normalizedRelativePath.includes("/")

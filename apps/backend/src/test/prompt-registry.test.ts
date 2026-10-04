@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { FileBackedPromptRegistry } from "../swarm/prompts/prompt-registry.js";
 
 const SWARM_DIR = fileURLToPath(new URL("../swarm", import.meta.url));
@@ -62,45 +62,4 @@ Custom project routing instruction must survive.
     );
   });
 
-  it("records versioning mutations for prompt save and delete", async () => {
-    const recordMutation = vi.fn(async () => true);
-    const root = await mkdtemp(join(tmpdir(), "prompt-registry-test-"));
-    const dataDir = join(root, "data");
-    const repoDir = join(root, "repo");
-    await mkdir(dataDir, { recursive: true });
-    await mkdir(repoDir, { recursive: true });
-
-    const registry = new FileBackedPromptRegistry({
-      dataDir,
-      repoDir,
-      builtinArchetypesDir: BUILTIN_ARCHETYPES_DIR,
-      builtinOperationalDir: BUILTIN_OPERATIONAL_DIR,
-      versioning: {
-        isTrackedPath: () => true,
-        recordMutation,
-        flushPending: async () => {},
-        reconcileNow: async () => {}
-      }
-    });
-
-    await registry.save("archetype", "manager", "override\n", "profile-a");
-    await registry.deleteOverride("archetype", "manager", "profile-a");
-
-    expect(recordMutation).toHaveBeenNthCalledWith(1, {
-      path: join(dataDir, "profiles", "profile-a", "prompts", "archetypes", "manager.md"),
-      action: "write",
-      source: "prompt-save",
-      profileId: "profile-a",
-      promptCategory: "archetype",
-      promptId: "manager"
-    });
-    expect(recordMutation).toHaveBeenNthCalledWith(2, {
-      path: join(dataDir, "profiles", "profile-a", "prompts", "archetypes", "manager.md"),
-      action: "delete",
-      source: "prompt-delete",
-      profileId: "profile-a",
-      promptCategory: "archetype",
-      promptId: "manager"
-    });
-  });
 });

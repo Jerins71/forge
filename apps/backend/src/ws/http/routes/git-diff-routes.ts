@@ -1,4 +1,4 @@
-import type { GitCommitDetail, GitDiffResult, GitLogResult, GitRepoTarget } from "@forge/protocol";
+import type { GitRepoTarget } from "@forge/protocol";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
 import { applyCorsHeaders, sendJson } from "../../http-utils.js";
 import { GitDiffService } from "../services/git-diff-service.js";
@@ -61,9 +61,6 @@ export function createGitDiffRoutes(options: { swarmManager: SwarmManager }): Ht
       const repoTarget = parseRepoTarget(requestUrl.searchParams.get("repoTarget"));
       const worktreeId = optionalTrimmedQuery(requestUrl.searchParams.get("worktreeId"));
       const repoContext = await resolveReadOnlyGitContext(swarmManager, agentId, repoTarget, worktreeId);
-      if (repoContext.notInitialized) {
-        return createNotInitializedDiffResult();
-      }
 
       return service.getFileDiff(repoContext.cwd, file);
     }),
@@ -74,9 +71,6 @@ export function createGitDiffRoutes(options: { swarmManager: SwarmManager }): Ht
       const repoTarget = parseRepoTarget(requestUrl.searchParams.get("repoTarget"));
       const worktreeId = optionalTrimmedQuery(requestUrl.searchParams.get("worktreeId"));
       const repoContext = await resolveReadOnlyGitContext(swarmManager, agentId, repoTarget, worktreeId);
-      if (repoContext.notInitialized) {
-        return createNotInitializedLogResult();
-      }
 
       return service.getLog(repoContext.cwd, limit, offset);
     }),
@@ -86,9 +80,6 @@ export function createGitDiffRoutes(options: { swarmManager: SwarmManager }): Ht
       const repoTarget = parseRepoTarget(requestUrl.searchParams.get("repoTarget"));
       const worktreeId = optionalTrimmedQuery(requestUrl.searchParams.get("worktreeId"));
       const repoContext = await resolveReadOnlyGitContext(swarmManager, agentId, repoTarget, worktreeId);
-      if (repoContext.notInitialized) {
-        return createNotInitializedCommitDetail(sha);
-      }
 
       return service.getCommitDetail(repoContext.cwd, sha);
     }),
@@ -99,9 +90,6 @@ export function createGitDiffRoutes(options: { swarmManager: SwarmManager }): Ht
       const repoTarget = parseRepoTarget(requestUrl.searchParams.get("repoTarget"));
       const worktreeId = optionalTrimmedQuery(requestUrl.searchParams.get("worktreeId"));
       const repoContext = await resolveReadOnlyGitContext(swarmManager, agentId, repoTarget, worktreeId);
-      if (repoContext.notInitialized) {
-        return createNotInitializedDiffResult();
-      }
 
       return service.getCommitFileDiff(repoContext.cwd, sha, file);
     })
@@ -171,32 +159,8 @@ function parseRepoTarget(rawValue: string | null): GitRepoTarget {
   return repoTarget;
 }
 
-function createNotInitializedDiffResult(): GitDiffResult {
-  return {
-    oldContent: "",
-    newContent: "",
-    notInitialized: true
-  };
-}
 
-function createNotInitializedLogResult(): GitLogResult {
-  return {
-    commits: [],
-    hasMore: false,
-    notInitialized: true
-  };
-}
 
-function createNotInitializedCommitDetail(sha: string): GitCommitDetail {
-  return {
-    sha,
-    message: "",
-    author: "",
-    date: "",
-    files: [],
-    notInitialized: true
-  };
-}
 
 function resolveHttpStatusCode(message: string): number {
   const normalized = message.toLowerCase();

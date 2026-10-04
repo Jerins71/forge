@@ -1,7 +1,6 @@
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { SessionMemoryMergeResult, SessionMeta } from "@forge/protocol";
-import type { VersioningMutationSink } from "../versioning/versioning-types.js";
 import type {
   CompactionRuntimeSettingsProvider,
   LiveCompactionRuntimeSettingsProvider,
@@ -91,7 +90,6 @@ export interface MemoryCoordinatorOptions {
     profileId: string | undefined,
     fallback: string,
   ) => Promise<string>;
-  versioning?: VersioningMutationSink;
   now: () => string;
 }
 
@@ -244,7 +242,6 @@ export class MemoryCoordinator {
     await migrateLegacyProfileKnowledgeToReferenceDoc(
       this.options.config.paths.dataDir,
       profileId,
-      { versioning: this.options.versioning },
     );
   }
 

@@ -39,7 +39,6 @@ import type {
   SidebarPerfSlowEvent,
   SidebarPerfSummary,
 } from "../stats/sidebar-perf-types.js";
-import type { VersioningMutation, VersioningMutationSink } from "../versioning/versioning-types.js";
 import type { AgentMessageSendOptions } from "./agent-message-dispatcher.js";
 import type { AssistantOutputRouter } from "./assistant-output-router.js";
 import type { ArchiveLastUsedHydrationResult } from "./archive/archive-last-used-hydrator.js";
@@ -58,7 +57,6 @@ import type { CredentialPoolService } from "./credential-pool.js";
 import { getSessionDir } from "./data-paths.js";
 import type { DirectoryListingResult, DirectoryValidationResult } from "./cwd-policy.js";
 import type { ForgeExtensionHost } from "./forge-extension-host.js";
-import type { VersioningCommitEvent as ForgeVersioningCommitEvent } from "./forge-extension-types.js";
 import type { UpdatePlanInput, UpdatePlanResult } from "./planning/update-plan-tool.js";
 import type {
   AcceptWorkGraphNodeInput,
@@ -1188,9 +1186,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
     this.services.runtime.turns.afterRuntimeEventProjection(agentId, runtimeToken, event);
   }
 
-  getVersioningService(): VersioningMutationSink | undefined {
-    return this.services.host.versioningService;
-  }
 
   getActiveTurnId(agentId: string, runtimeToken?: number): string | undefined {
     return this.services.runtime.turns.getActiveTurnId(agentId, runtimeToken);
@@ -1229,9 +1224,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
     });
   }
 
-  dispatchForgeVersioningCommit(event: ForgeVersioningCommitEvent): Promise<void> {
-    return this.services.extensions.dispatchVersioningCommit(event);
-  }
 
   setTerminalArchiveHooks(hooks?: TerminalArchiveHooks): void {
     this.services.host.setTerminalArchiveHooks(hooks);
@@ -1267,22 +1259,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerSessionAttentionFac
       agentIdOrError,
       maybeError,
     );
-  }
-  async queueVersionedToolMutation(
-    descriptor: AgentDescriptor,
-    mutation: VersioningMutation,
-  ): Promise<void> {
-    void descriptor;
-    this.queueFacadeVersioningMutation(mutation);
-  }
-  private queueFacadeVersioningMutation(mutation: VersioningMutation): void {
-    void this.services.host.versioningService?.recordMutation(mutation).catch((error) => {
-      this.services.host.logDebug("versioning:record_error", {
-        path: mutation.path,
-        source: mutation.source,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    });
   }
 
   private get services(): SwarmManagerFacadeServices {

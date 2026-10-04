@@ -1,6 +1,6 @@
 import type { GitRepoKind, GitRepoTarget } from "@forge/protocol";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
-import { resolveWorktreeContextPath } from "../../../versioning/git-source-control-helpers.js";
+import { resolveWorktreeContextPath } from "../../../git/git-source-control-helpers.js";
 import { resolveEffectiveAgentWorkspaceCwd } from "../../ws-file-access.js";
 
 export interface GitRepoContext {
@@ -8,7 +8,6 @@ export interface GitRepoContext {
   repoTarget: GitRepoTarget;
   repoKind: GitRepoKind;
   repoLabel: string;
-  notInitialized?: boolean;
 }
 
 export interface GitSourceControlContext extends GitRepoContext {
@@ -51,9 +50,6 @@ export async function resolveGitSourceControlContext(
     };
   }
 
-  if (baseContext.notInitialized) {
-    throw new Error("Cannot resolve worktree context before the repository is initialized.");
-  }
 
   const normalizedWorktreeId = worktreeId.trim();
   const worktreePath = await resolveWorktreeContextPath(baseContext.cwd, normalizedWorktreeId);

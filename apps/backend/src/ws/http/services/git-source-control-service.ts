@@ -24,7 +24,7 @@ import type {
   GitWorktreeSummary
 } from "@forge/protocol";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
-import { GitCli } from "../../../versioning/git-cli.js";
+import { GitCli } from "../../../git/git-cli.js";
 import {
   collectBranchesCheckedOutInOtherWorktrees,
   computeStatusHash,
@@ -46,7 +46,7 @@ import {
   tryNormalizePathForComparison,
   validateBranchName,
   verifyResolvableGitRef
-} from "../../../versioning/git-source-control-helpers.js";
+} from "../../../git/git-source-control-helpers.js";
 import type { GitSourceControlContext } from "../shared/route-helpers.js";
 import { GitDiffService } from "./git-diff-service.js";
 import {
@@ -99,17 +99,6 @@ export class GitSourceControlService {
     number: number,
     request: Omit<GitPullRequestMergeRequest, "agentId" | "repoTarget" | "worktreeId">
   ): Promise<GitPullRequestMergeResult> {
-    if (context.repoKind !== "workspace") {
-      return {
-        success: false,
-        number,
-        method: request.method,
-        errors: ["Pull request merge is only available for workspace repositories."],
-        warnings: [],
-        errorCode: "versioning_blocked",
-        invalidateCaches: false
-      };
-    }
 
     return this.hostedProvider.mergePullRequest(context, number, request);
   }
@@ -118,17 +107,6 @@ export class GitSourceControlService {
     swarmManager: SwarmManager,
     context: GitSourceControlContext
   ): Promise<GitWorktreeListResult> {
-    if (context.notInitialized) {
-      return {
-        worktrees: [],
-        context: toContextRef(context),
-        repoName: basename(context.cwd),
-        repoRoot: context.cwd,
-        repoKind: context.repoKind,
-        repoLabel: context.repoLabel,
-        notInitialized: true
-      };
-    }
 
     const baseGit = new GitCli({ cwd: context.baseCwd });
     const listResult = await baseGit.run(["worktree", "list", "--porcelain", "-z"], {
@@ -215,21 +193,6 @@ export class GitSourceControlService {
     _swarmManager: SwarmManager,
     context: GitSourceControlContext
   ): Promise<GitBranchListResult> {
-    if (context.notInitialized) {
-      return {
-        branches: [],
-        remotes: [],
-        currentBranch: null,
-        currentHead: null,
-        statusHash: null,
-        context: toContextRef(context),
-        repoName: basename(context.cwd),
-        repoRoot: context.cwd,
-        repoKind: context.repoKind,
-        repoLabel: context.repoLabel,
-        notInitialized: true
-      };
-    }
 
     const git = new GitCli({ cwd: context.cwd });
     const baseGit = new GitCli({ cwd: context.baseCwd });
@@ -340,21 +303,6 @@ export class GitSourceControlService {
   ): Promise<GitMutationPreflight> {
     const issues: GitPreflightIssue[] = [];
 
-    if (context.notInitialized) {
-      return {
-        allowed: false,
-        issues: [
-          {
-            code: "not_initialized",
-            message: "Initialize the repository before running git actions.",
-            severity: "block"
-          }
-        ],
-        currentBranch: null,
-        currentHead: null,
-        statusHash: null
-      };
-    }
 
     const git = new GitCli({ cwd: context.cwd });
     const baseGit = new GitCli({ cwd: context.baseCwd });

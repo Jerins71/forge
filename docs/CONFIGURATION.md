@@ -184,16 +184,6 @@ Settings → General → **Repositories** (Builder/local only) stores clone defa
 
 `GET /api/history/index` returns diagnostics; `PATCH /api/history/index` accepts only a boolean `paused`. This page does not delete conversations or rebuild the cache, and does not change Summary/Context v2 policy or history eligibility/security boundaries.
 
-### Embedded data versioning
-
-The embedded Git service versions Forge's allowlisted knowledge, profile-memory, reference, and prompt files inside the data directory. The matching legacy `MIDDLEMAN_VERSIONING_*` aliases are also accepted.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `FORGE_VERSIONING_ENABLED` | `true` | Enable embedded Git versioning for its allowlisted Forge data paths. |
-| `FORGE_VERSIONING_TRACK_SESSION_MEMORY` | `false` | Include per-session `profiles/<profileId>/sessions/<sessionId>/memory.md` files in the versioned path set. Profile memory remains part of the normal allowlist. |
-| `FORGE_VERSIONING_RECONCILE_INTERVAL_MS` | `300000` | Interval for reconciling tracked files with embedded Git. Set to `0` to disable periodic reconciliation; startup reconciliation still runs. Invalid or negative values use the default. |
-
 ### Compaction
 
 Settings → General → Compaction controls the model, reasoning level, and timeout used for automatic compaction and manual Smart compact on supported Pi-backed manager compaction runtimes. Eligible providers are OpenAI/Codex and Anthropic. Cursor SDK, xAI/Grok, and user-added OpenRouter manager models are not controlled by these settings; OpenRouter manager eligibility is a separate policy and OpenRouter models are not compaction choices. These controls do not choose Summary vs Context v2; that policy lives in Project Settings, not Settings → General.

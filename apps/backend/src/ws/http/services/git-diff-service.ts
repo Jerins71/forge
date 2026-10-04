@@ -10,8 +10,7 @@ import type {
   GitRepoKind,
   GitStatusResult
 } from "@forge/protocol";
-import { GitCli } from "../../../versioning/git-cli.js";
-import { parseVersioningCommitMetadata } from "../../../versioning/versioning-commit-metadata.js";
+import { GitCli } from "../../../git/git-cli.js";
 import { isEnoentError } from "../../../utils/fs-errors.js";
 
 const MAX_DIFF_FILE_BYTES = 1 * 1024 * 1024;
@@ -24,7 +23,6 @@ const RECORD_SEPARATOR = "\x1e";
 interface GitStatusContext {
   repoKind: GitRepoKind;
   repoLabel: string;
-  notInitialized?: boolean;
 }
 
 export class GitDiffService {
@@ -32,9 +30,6 @@ export class GitDiffService {
     const repoKind = context?.repoKind ?? "workspace";
     const repoLabel = context?.repoLabel ?? "Workspace";
 
-    if (context?.notInitialized) {
-      return createEmptyStatusResult(cwd, repoKind, repoLabel);
-    }
 
     const git = this.createGit(cwd);
     const [branchResult, statusResult, numstatResult, repoRoot, repoName] = await Promise.all([
@@ -167,7 +162,7 @@ export class GitDiffService {
 
   async getCommitDetail(cwd: string, sha: string): Promise<GitCommitDetail> {
     const git = this.createGit(cwd);
-    const format = `%H${FIELD_SEPARATOR}%an${FIELD_SEPARATOR}%aI${FIELD_SEPARATOR}%s${FIELD_SEPARATOR}%b${RECORD_SEPARATOR}`;
+    const format = `%H${FIELD_SEPARATOR}%an${FIELD_SEPARATOR}%aI${FIELD_SEPARATOR}%s${RECORD_SEPARATOR}`;
     const [detailResult, numstatResult] = await Promise.all([
       git.run([
         "show",
@@ -185,8 +180,7 @@ export class GitDiffService {
 
     const headerRecord = detailResult.stdout.slice(0, recordSeparatorIndex);
     const fileSection = detailResult.stdout.slice(recordSeparatorIndex + RECORD_SEPARATOR.length);
-    const [resolvedSha, author, date, message = "", ...bodyParts] = headerRecord.split(FIELD_SEPARATOR);
-    const body = bodyParts.join(FIELD_SEPARATOR);
+    const [resolvedSha, author, date, message = ""] = headerRecord.split(FIELD_SEPARATOR);
 
     if (!resolvedSha?.trim()) {
       throw new Error(`Commit not found: ${sha}`);
@@ -207,8 +201,7 @@ export class GitDiffService {
       message: message.trim(),
       author: author ?? "",
       date: date ?? "",
-      files,
-      metadata: parseVersioningCommitMetadata(body)
+      files
     };
   }
 
@@ -294,7 +287,7 @@ export class GitDiffService {
 
   private async readGitLogEntries(cwd: string, limit: number, offset: number): Promise<GitLogEntry[]> {
     const git = this.createGit(cwd);
-    const format = `%H${FIELD_SEPARATOR}%h${FIELD_SEPARATOR}%P${FIELD_SEPARATOR}%an${FIELD_SEPARATOR}%aI${FIELD_SEPARATOR}%s${FIELD_SEPARATOR}%b${RECORD_SEPARATOR}`;
+    const format = `%H${FIELD_SEPARATOR}%h${FIELD_SEPARATOR}%P${FIELD_SEPARATOR}%an${FIELD_SEPARATOR}%aI${FIELD_SEPARATOR}%s${RECORD_SEPARATOR}`;
     const args = ["log", `--format=${format}`];
 
     if (offset > 0) {
@@ -306,16 +299,14 @@ export class GitDiffService {
     const result = await git.run(args);
     const records = parseGitFormatRecords(result.stdout);
     const parsedBase = records.map((record) => {
-      const [sha, shortSha, parentsRaw, author, date, message = "", ...bodyParts] = record.split(FIELD_SEPARATOR);
-      const body = bodyParts.join(FIELD_SEPARATOR);
+      const [sha, shortSha, parentsRaw, author, date, message = ""] = record.split(FIELD_SEPARATOR);
       return {
         sha: sha ?? "",
         shortSha: shortSha ?? "",
         parents: parseParentShas(parentsRaw),
         author: author ?? "",
         date: date ?? "",
-        message: message.trim(),
-        metadata: parseVersioningCommitMetadata(body)
+        message: message.trim()
       };
     });
 
@@ -466,19 +457,6 @@ function parseCommitFiles(output: string): GitFileStatus[] {
   return files;
 }
 
-function createEmptyStatusResult(cwd: string, repoKind: GitRepoKind, repoLabel: string): GitStatusResult {
-  const repoRoot = resolve(cwd);
-  return {
-    files: [],
-    branch: "HEAD",
-    summary: { filesChanged: 0, insertions: 0, deletions: 0 },
-    repoName: basename(repoRoot) || repoRoot,
-    repoRoot,
-    repoKind,
-    repoLabel,
-    notInitialized: true
-  };
-}
 
 function parsePorcelainStatus(output: string): GitFileStatus[] {
   const statuses: GitFileStatus[] = [];

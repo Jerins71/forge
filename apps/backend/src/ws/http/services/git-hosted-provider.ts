@@ -14,8 +14,8 @@ import type {
   GitPullRequestSummary,
   GitSourceContextRef
 } from "@forge/protocol";
-import { GitCli } from "../../../versioning/git-cli.js";
-import { resolveCurrentBranch } from "../../../versioning/git-source-control-helpers.js";
+import { GitCli } from "../../../git/git-cli.js";
+import { resolveCurrentBranch } from "../../../git/git-source-control-helpers.js";
 import type { GitSourceControlContext } from "../shared/route-helpers.js";
 
 const execFileAsync = promisify(execFile);
@@ -195,12 +195,6 @@ export class GitHostedProviderService {
     const providerStatus = await this.buildProviderStatus(context);
     const baseResult = this.buildListResultShell(context, providerStatus);
 
-    if (context.notInitialized) {
-      return {
-        ...baseResult,
-        notInitialized: true
-      };
-    }
 
     if (!providerStatus.available || !providerStatus.authenticated || !providerStatus.remoteUrl) {
       return baseResult;
@@ -290,7 +284,6 @@ export class GitHostedProviderService {
   ): Promise<GitPullRequestDetail | null> {
     const providerStatus = await this.buildProviderStatus(context);
     if (
-      context.notInitialized ||
       !providerStatus.available ||
       !providerStatus.authenticated ||
       !providerStatus.remoteUrl
@@ -356,7 +349,6 @@ export class GitHostedProviderService {
   ): Promise<GitPullRequestMergeResult> {
     const providerStatus = await this.buildProviderStatus(context);
     if (
-      context.notInitialized ||
       !providerStatus.available ||
       !providerStatus.authenticated ||
       !providerStatus.remoteUrl
@@ -495,15 +487,6 @@ export class GitHostedProviderService {
   }
 
   private async buildProviderStatus(context: GitSourceControlContext): Promise<GitHostedProviderStatus> {
-    if (context.notInitialized) {
-      return {
-        provider: "none",
-        available: false,
-        authenticated: false,
-        remoteUrl: null,
-        message: "Repository is not initialized."
-      };
-    }
 
     const remoteUrl = await resolveOriginRemoteUrl(context.cwd);
     if (!remoteUrl) {

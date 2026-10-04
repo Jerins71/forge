@@ -3,7 +3,7 @@
 Forge Extensions are a small Forge-native hook system for local automation, policy enforcement, and repository-specific integrations.
 
 They are separate from [Pi Extensions & Packages](PI_EXTENSIONS.md):
-- **Forge Extensions** observe Forge concepts like session lifecycle, runtime errors, embedded versioning commits, and tool execution across runtimes.
+- **Forge Extensions** observe Forge concepts like session lifecycle, runtime errors and tool execution across runtimes.
 - **Pi extensions/packages** extend the Pi runtime directly with Pi's event model, custom tools, packages, skills, prompts, and themes.
 
 Use Forge Extensions when you want to react to Forge behavior. Use Pi extensions/packages when you want Pi-native extensibility.
@@ -94,7 +94,6 @@ That is the whole authoring model. No manifests, no classes, no middleware chain
 | `tool:before` | Observe, block, or rewrite tool input before execution | `{ block, reason }` or `{ input }` |
 | `tool:after` | Observe final tool execution result | none |
 | `runtime:error` | Observe normalized runtime errors before Forge decides whether fallback recovery should handle them | none |
-| `versioning:commit` | Observe successful embedded Git commits in the Forge data dir | none |
 
 Behavior rules:
 - `tool:before` can block or replace the entire input object.
@@ -110,7 +109,6 @@ Payload semantics:
 - Hook payloads and `ctx` snapshots are immutable read-only views.
 - Mutating `event.input` does not change the live tool call.
 - To rewrite tool input, return `{ input }` from `tool:before` with a replacement plain object.
-- `versioning:commit` handlers must not blindly write back to Forge-versioned tracked paths. Doing so can trigger follow-on commits and create commit loops.
 
 ## Failure model
 
@@ -192,32 +190,6 @@ export default (forge) => {
 }
 ```
 
-### versioning-webhook
-
-```ts
-export default (forge) => {
-  const webhookUrl = process.env.FORGE_VERSIONING_WEBHOOK_URL
-  if (!webhookUrl) return
-
-  forge.on("versioning:commit", async (event, ctx) => {
-    try {
-      await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sha: event.sha,
-          subject: event.subject,
-          paths: event.paths,
-          profileIds: event.profileIds,
-        }),
-        signal: AbortSignal.timeout(5000),
-      })
-    } catch (error) {
-      ctx.log.warn("versioning webhook failed", { error: String(error) })
-    }
-  })
-}
-```
 
 ### git-attribution
 

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile, rm, readFile, access, constants } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ExclusiveRenameError, exclusiveRenameNoClobber } from '../versioning/exclusive-dir-rename.js'
+import { ExclusiveRenameError, exclusiveRenameNoClobber } from '../git/exclusive-dir-rename.js'
 
 describe('exclusive-dir-rename error mapping', () => {
 

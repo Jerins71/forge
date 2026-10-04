@@ -1,5 +1,4 @@
 import type { ObservabilityFacade } from "../observability/observability-types.js";
-import type { VersioningMutationSink } from "../versioning/versioning-types.js";
 import type { BrowserAutomationService } from "./browser-automation/browser-automation-service.js";
 import type { CodexAppServerService } from "./codex-app-server/codex-app-server-service.js";
 import type { CodexAppServerServiceOptions } from "./codex-app-server/types.js";
@@ -12,7 +11,6 @@ import type {
 /** Optional composition seams for the SwarmManager application root. */
 export interface SwarmManagerOptions {
   now?: () => string;
-  versioningService?: VersioningMutationSink;
   observability?: ObservabilityFacade;
   codexAppServerService?: CodexAppServerService;
   codexAppServerServiceOptions?: CodexAppServerServiceOptions;

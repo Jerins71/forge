@@ -11,7 +11,7 @@ import {
   GitCloneRunner,
   parseAndValidateRepositoryUrl,
   validateRepositoryFolder,
-} from '../versioning/git-clone-runner.js'
+} from '../git/git-clone-runner.js'
 import {
   RepositorySettingsService,
   RepositorySettingsValidationError,
