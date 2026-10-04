@@ -18,6 +18,7 @@ import { useEnvironmentRegistry, usePrimaryEnvironmentId } from '@/lib/origin-st
 import { cn } from '@/lib/utils'
 import { EnvironmentBadge, EnvironmentStatusChip } from './EnvironmentStatusChip'
 import { useEnvironmentLabel } from './hooks/useEnvironmentStatus'
+import { otherEnvironmentGroupKeys } from './hooks/useOtherEnvironmentProjects'
 
 const MEMBER_SESSION_LIMIT = 5
 const EMPTY_IDS: readonly string[] = []
@@ -295,13 +296,7 @@ export function OtherEnvironmentSessions({ projectId, navigation }: { projectId:
 export function OtherEnvironmentProjects({ navigation }: { navigation: EnvironmentSessionNavigation }) {
   const primaryEnvironmentId = usePrimaryEnvironmentId()
   const groups = useLogicalProjects()
-  const keys = useMemo(
-    () => [...groups.values()]
-      .filter((group) => !group.members.some((member) => member.environmentId === primaryEnvironmentId))
-      .sort((a, b) => a.title.localeCompare(b.title))
-      .map((group) => group.key),
-    [groups, primaryEnvironmentId],
-  )
+  const keys = useMemo(() => otherEnvironmentGroupKeys(groups, primaryEnvironmentId), [groups, primaryEnvironmentId])
   if (keys.length === 0) return null
   return (
     <ul className="mt-2 space-y-1" data-testid="other-environment-projects">

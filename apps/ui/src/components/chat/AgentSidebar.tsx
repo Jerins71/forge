@@ -44,6 +44,7 @@ import { ProjectViewSwitcher, type SidebarProjectViewOption } from './agent-side
 import { SidebarFooter } from './agent-sidebar/SidebarFooter'
 import { ProfileGroup } from './agent-sidebar/ProfileGroup'
 import { OtherEnvironmentProjects } from './agent-sidebar/LogicalProjectGroup'
+import { useHasOtherEnvironmentProjects } from './agent-sidebar/hooks/useOtherEnvironmentProjects'
 import { RoomsInboxLive } from './agent-sidebar/RoomsInboxLive'
 import { RoomsProjectsTree, type RoomsProjectTreeRow } from './agent-sidebar/RoomsProjectsTree'
 import type { RoomsInboxOriginInput } from './agent-sidebar/rooms-inbox-selectors'
@@ -776,33 +777,39 @@ export const AgentSidebar = React.memo(function AgentSidebar({
 
   // Inbox and Projects use the same reorder path. The two modes stay mutually
   // exclusive inside one sidebar; desktop and mobile each keep their own tree.
+  // Remote-only projects (no primary checkout) follow the primary tree in both Rooms modes.
+  const hasOtherEnvironmentProjects = useHasOtherEnvironmentProjects()
+  const showOtherEnvironmentProjects = Boolean(environmentNavigation) && !isSearchActive && hasOtherEnvironmentProjects
   const renderRoomsProjectTree = () => (
-    <RoomsProjectsTree
-      rows={mixedProjectRows}
-      activeView={Boolean(activeView)}
-      isSearchActive={isSearchActive}
-      onMoveBuilderProject={onMoveBuilderProject}
-      renderRow={mixedProjectContent}
-      emptyState={
-        isSearchActive && mixedProjectRows.length === 0 ? (
-          <p className="rounded-md px-3 py-4 text-center text-xs text-muted-foreground">
-            No matches found.
-          </p>
-        ) : mixedProjectRows.length === 0 && !isSearchActive ? (
-          <p className="rounded-md bg-sidebar-accent/50 px-3 py-4 text-center text-xs text-muted-foreground">
-            {activeView
-              ? `No projects are currently available in “${activeView.name}”.`
-              : 'No active agents.'}
-          </p>
-        ) : null
-      }
-    />
+    <>
+      <RoomsProjectsTree
+        rows={mixedProjectRows}
+        activeView={Boolean(activeView)}
+        isSearchActive={isSearchActive}
+        onMoveBuilderProject={onMoveBuilderProject}
+        renderRow={mixedProjectContent}
+        emptyState={
+          isSearchActive && mixedProjectRows.length === 0 ? (
+            <p className="rounded-md px-3 py-4 text-center text-xs text-muted-foreground">
+              No matches found.
+            </p>
+          ) : mixedProjectRows.length === 0 && !isSearchActive && !showOtherEnvironmentProjects ? (
+            <p className="rounded-md bg-sidebar-accent/50 px-3 py-4 text-center text-xs text-muted-foreground">
+              {activeView
+                ? `No projects are currently available in “${activeView.name}”.`
+                : 'No active agents.'}
+            </p>
+          ) : null
+        }
+      />
+      {showOtherEnvironmentProjects && environmentNavigation ? <OtherEnvironmentProjects navigation={environmentNavigation} /> : null}
+    </>
   )
   const roomsProjectTree = renderRoomsProjectTree()
   const roomsInboxProjectTree = renderRoomsProjectTree()
   // The shared tree element is always composed, including when it only has an
   // empty-state placeholder. Inbox must instead gate on rows the tree renders.
-  const hasRoomsInboxProjectContent = mixedProjectRows.length > 0
+  const hasRoomsInboxProjectContent = mixedProjectRows.length > 0 || showOtherEnvironmentProjects
 
   const sidebarContent = (
     <aside
