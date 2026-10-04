@@ -128,6 +128,10 @@ import { useOnboardingState } from '@/hooks/use-onboarding-state'
 import { useConversationThroughputDisplayPreference } from '@/hooks/use-conversation-throughput-display-preference'
 import { useDynamicFavicon } from '@/hooks/use-dynamic-favicon'
 import { useTerminalPanel } from '@/hooks/useTerminalPanel'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
+import { useEnvironmentNavigation } from '@/components/chat/agent-sidebar/hooks/useEnvironmentNavigation'
+import { EnvironmentSessionView, LaunchSessionWorkspace } from '@/components/index-page/EnvironmentSessionWorkspace'
+import type { SessionRef } from '@forge/protocol/environment-v2'
 import {
   type AgentDescriptor,
   type ProjectAgentExternalDirectoryEntry,
@@ -249,6 +253,40 @@ export function BuilderSurface({
   const [acknowledgedSecureOutputQuarantineKey, setAcknowledgedSecureOutputQuarantineKey] =
     useState<string | null>(null)
 
+  // ── Environment-qualified routes ──
+  // A session on another environment, or a launch draft, is rendered from the environment runtime.
+  // The local route→subscription sync must not see its session ID, so it is never opened locally.
+  const environmentContext = useOptionalEnvironmentContext()
+  const primaryEnvironmentId = environmentContext?.primaryEnvironmentId ?? null
+  const routedEnvironmentId = routeState.view === 'chat' ? routeState.environmentId : undefined
+  const routedSessionId = routeState.view === 'chat' ? routeState.agentId : undefined
+  const environmentSession = useMemo<SessionRef | null>(
+    () => routedEnvironmentId && routedSessionId && routedEnvironmentId !== primaryEnvironmentId
+      ? { environmentId: routedEnvironmentId, sessionId: routedSessionId }
+      : null,
+    [primaryEnvironmentId, routedEnvironmentId, routedSessionId],
+  )
+  const launchGroupKey = routeState.view === 'chat' && environmentContext ? routeState.launch ?? null : null
+  const isEnvironmentView = environmentSession !== null || launchGroupKey !== null
+  const localRouteState = useMemo<AppRouteState>(
+    // Any non-chat view leaves the current local subscription untouched.
+    () => (isEnvironmentView ? { view: 'archive' } : routeState),
+    [isEnvironmentView, routeState],
+  )
+  const handleSelectEnvironmentSession = useCallback((session: SessionRef) => {
+    navigateToRoute(session.environmentId === primaryEnvironmentId
+      ? { view: 'chat', agentId: session.sessionId }
+      : { view: 'chat', agentId: session.sessionId, environmentId: session.environmentId })
+  }, [navigateToRoute, primaryEnvironmentId])
+  const handleNewEnvironmentSession = useCallback((groupKey: string) => {
+    navigateToRoute({ view: 'chat', agentId: DEFAULT_MANAGER_AGENT_ID, launch: groupKey })
+  }, [navigateToRoute])
+  const environmentNavigation = useEnvironmentNavigation({
+    selectedSession: environmentSession,
+    onSelectSession: handleSelectEnvironmentSession,
+    onNewSession: handleNewEnvironmentSession,
+  })
+
   // ── Active-agent derivation + route→subscription sync ──
   const {
     activeAgentId,
@@ -263,7 +301,7 @@ export function BuilderSurface({
     activeAgentLabel,
   } = useActiveAgent({
     state,
-    routeState,
+    routeState: localRouteState,
     navigateToRoute,
     clientRef,
     fileEditorCoordinatorRef,
@@ -1930,7 +1968,8 @@ export function BuilderSurface({
         connectionEpoch={state.connectionEpoch}
         builderSidebarOrderApi={builderSidebarOrderApi}
         activityRailItems={showActivityRail ? panels.activityRailItems : undefined}
-        selectedAgentId={activeAgentId}
+        selectedAgentId={isEnvironmentView ? null : activeAgentId}
+        environmentNavigation={environmentNavigation}
         isSettingsActive={activeView === 'settings'}
         isStatsActive={activeView === 'stats'}
         isArchiveActive={activeView === 'archive'}
@@ -2150,6 +2189,19 @@ export function BuilderSurface({
                 mode={browserWorkspaceMode}
                 popoutAvailable={Boolean(window.electronBridge?.browserWorkspace?.capability.popoutAvailable)}
               />
+            ) : launchGroupKey ? (
+              <LaunchSessionWorkspace key={launchGroupKey} groupKey={launchGroupKey} onLaunched={handleSelectEnvironmentSession} />
+            ) : environmentSession ? (
+              environmentContext ? (
+                <EnvironmentSessionView
+                  session={environmentSession}
+                  onOpenEnvironmentSettings={() => navigateToRoute({ view: 'settings', settingsTab: 'environments' })}
+                />
+              ) : (
+                <p className="m-auto p-6 text-sm text-muted-foreground" data-testid="environment-empty-state">
+                  This link points to a session on another environment, which this client cannot open.
+                </p>
+              )
             ) : (
               <ChatWorkspace
                 pendingInputCount={state.connected && activeAgent?.model.provider === 'claude-native'

@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { SessionContextMenu } from './SessionContextMenu'
 import { SessionStatusDot, HighlightedText, SidebarCompactionBadge, SidebarStreamingWorkerBadge } from './shared'
 import { WorkerRow } from './WorkerRow'
+import { EnvironmentBadge } from './EnvironmentStatusChip'
 import { getAgentLiveStatus, isSessionCompactionInProgress } from './utils'
 import { MAX_VISIBLE_WORKERS } from './constants'
 import type { SessionRowItemProps } from './types'
@@ -63,6 +64,7 @@ const SESSION_ROW_REF_EQUAL_KEYS: (keyof SessionRowItemProps)[] = [
   'getCreatorAttribution',
   'hideCliSessions',
   'onToggleHideCliSessions',
+  'environmentLabel',
 ]
 
 /**
@@ -116,6 +118,7 @@ export const SessionRowItem = React.memo(function SessionRowItem({
   getCreatorAttribution,
   hideCliSessions,
   onToggleHideCliSessions,
+  environmentLabel,
 }: SessionRowItemProps) {
   const { sessionAgent, workers, isDefault } = session
   const running = isSessionRunning(sessionAgent)
@@ -262,6 +265,7 @@ export const SessionRowItem = React.memo(function SessionRowItem({
                         </span>
                       ) : null}
                     </span>
+                    {environmentLabel ? <EnvironmentBadge label={environmentLabel} /> : null}
                     {isPinned && !isProjectAgent && sessionAgent.profileId ? (
                       <Pin className="size-3 shrink-0 text-muted-foreground/60" aria-label="Pinned" />
                     ) : null}

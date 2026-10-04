@@ -11,6 +11,7 @@ import { resolveApiEndpoint } from '@/lib/api-endpoint'
 export type SettingsTab =
   | 'project-settings'
   | 'general'
+  | 'environments'
   | 'git-monitoring'
   | 'history'
   | 'appearance'
@@ -45,6 +46,7 @@ export interface SettingsBackendTarget {
 
 const BUILDER_TABS: SettingsTab[] = [
   'general',
+  'environments',
   'git-monitoring',
   'history',
   'appearance',
