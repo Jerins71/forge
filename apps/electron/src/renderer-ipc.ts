@@ -58,3 +58,6 @@ export function sendToRendererWindow(
     throw error
   }
 }
+
+/** Renderer receives only target metadata and one-use tickets through this narrow service. */
+export type { EnvironmentCredentialsBridge, EnvironmentCredentialResult, EnvironmentCredentialError, DesktopEnvironmentTarget } from './environment-credentials-ipc.js'

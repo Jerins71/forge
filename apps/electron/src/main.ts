@@ -18,6 +18,8 @@ import {
 } from './main-renderer-recovery.js'
 import { loadWindowState, trackWindowState } from './window-state.js'
 import { consumePostUpdateInfo } from './whats-new.js'
+import { createEnvironmentCredentialService, installEnvironmentCredentialsIpc, ENVIRONMENT_ARTIFACT_SCHEME } from './environment-credentials-ipc.js'
+import { ensurePrimaryEnvironmentSession, writeEnvironmentInstallationManifest } from './environment-bootstrap-ipc.js'
 import { createBackendForkOptions } from './backend-fork-options.js'
 import { resolveDevBetterSqlite3Binding } from './dev-native-binding.js'
 import { PackagedRemoteUiServer, resolvePackagedRemoteUiHost, startOptionalPackagedRemoteUi } from './packaged-remote-ui-server.js'
@@ -135,6 +137,7 @@ const secureVaultController = createSecureVaultController({
   safeStorage,
   platform: process.platform,
 })
+const environmentCredentials = createEnvironmentCredentialService({ storePath: path.join(app.getPath('userData'), 'environment-credentials.json'), safeStorage })
 const handledTerminationSignals = new Set<NodeJS.Signals>()
 const externalChromeUpdateQuiesceHook: UpdateQuiesceHook = {
   quiesce: async () => externalChromeCoordinator?.quiesce('desktop-update'),
@@ -143,6 +146,7 @@ const externalChromeUpdateQuiesceHook: UpdateQuiesceHook = {
 app.commandLine.appendSwitch('disable-background-timer-throttling')
 
 protocol.registerSchemesAsPrivileged([
+  { scheme: ENVIRONMENT_ARTIFACT_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
   {
     scheme: APP_PROTOCOL_SCHEME,
     privileges: {
@@ -315,6 +319,7 @@ class BackendSupervisor {
       devBetterSqlite3Binding,
     })
 
+    await writeEnvironmentInstallationManifest(backendEntry)
     this.initializeLaunchLogging()
 
     return await new Promise<number>((resolve, reject) => {
@@ -375,8 +380,10 @@ class BackendSupervisor {
         this.currentPort = message.port
         this.currentDataDir = message.dataDir && path.isAbsolute(message.dataDir) ? path.normalize(message.dataDir) : null
         lifecycleLog.record('backend_ready', { isRestart, pid: child.pid ?? null, port: message.port })
-        this.onReady(message.port, isRestart)
-        finalizeResolve(message.port)
+        void ensurePrimaryEnvironmentSession({ child, baseUrl: process.env.FORGE_PUBLIC_URL ?? `http://127.0.0.1:${message.port}`, credentials: environmentCredentials }).then(() => {
+          this.onReady(message.port, isRestart)
+          finalizeResolve(message.port)
+        }).catch(() => finalizeReject(new Error('Primary environment pairing could not be initialized')))
       }
 
       const handleError = (error: Error): void => {
@@ -700,6 +707,8 @@ if (!hasSingleInstanceLock) {
         }
   })
 
+  installEnvironmentCredentialsIpc({ ipcMain, service: environmentCredentials, isTrustedSender: isTrustedMainRenderer })
+
   ipcMain.on(MAIN_RENDERER_READY_CHANNEL, (event) => {
     if (!isTrustedMainRenderer(event)) return
     mainRendererRecovery?.markReady(event.sender)
@@ -829,6 +838,7 @@ if (!hasSingleInstanceLock) {
   })
 
   app.whenReady().then(async () => {
+    protocol.handle(ENVIRONMENT_ARTIFACT_SCHEME, request => environmentCredentials.artifactProtocolResponse(request.url, request.headers.get('range') ?? undefined))
     lifecycleLog.record('electron_started', {
       isPackaged: app.isPackaged,
       version: app.getVersion(),
