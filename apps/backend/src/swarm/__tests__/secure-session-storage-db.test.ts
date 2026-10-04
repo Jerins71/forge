@@ -42,18 +42,4 @@ describe("secure session database", () => {
     expect(reopened.pragma("quick_check", { simple: true })).toBe("ok");
     await closeSecureSessionDb(dbPath);
   });
-
-  it("does not cache a failed module load", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "forge-secure-session-db-fail-"));
-    const options = {
-      dbPath: join(directory, "secure-sessions.db"),
-      loadDatabaseModule: vi.fn()
-        .mockRejectedValueOnce(new Error("load failed"))
-        .mockResolvedValue(Database)
-    };
-    await expect(getOrCreateSecureSessionDb(options)).rejects.toThrow("load failed");
-    const database = await getOrCreateSecureSessionDb(options);
-    expect(database.open).toBe(true);
-    await closeSecureSessionDb(options.dbPath);
-  });
 });

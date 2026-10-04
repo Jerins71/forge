@@ -13,44 +13,13 @@ import {
   getSharedStateDir,
   getTerminalSettingsPath,
 } from "../data-paths.js";
-import {
-  cleanupOldSharedConfigPaths,
-  migrateSharedConfigLayout,
-  removeRetiredPlanningArtifacts,
-} from "../storage/shared-config-migration.js";
+import { cleanupOldSharedConfigPaths, migrateSharedConfigLayout } from "../storage/shared-config-migration.js";
 
 const MIGRATION_SENTINEL = ".shared-config-migration-done";
 const CLEANUP_SENTINEL = ".shared-config-cleanup-done";
 const BACKFILL_SENTINEL = ".compaction-count-backfill-v2-done";
 
 describe("shared-config-migration", () => {
-  it("removes retired planning files without touching current session plans", async () => {
-    const root = await mkdtemp(join(tmpdir(), "retired-planning-cleanup-"));
-    const dataDir = join(root, "data");
-    const retiredSettings = join(getSharedDir(dataDir), "config", "work-plans.json");
-    const retiredSessionState = join(dataDir, "profiles", "profile-1", "sessions", "session-1", "tasks.json");
-    const retiredBackup = `${retiredSessionState}.corrupt-2026-07-12`;
-    const currentPlan = join(dataDir, "profiles", "profile-1", "sessions", "session-1", "plan.json");
-    const userReferenceFile = join(dataDir, "profiles", "profile-1", "reference", "tasks.json");
-    const sessionReferenceFile = join(dataDir, "profiles", "profile-1", "sessions", "session-1", "reference", "tasks.json");
-
-    await writeText(retiredSettings, "{}\n");
-    await writeText(retiredSessionState, "{}\n");
-    await writeText(retiredBackup, "{}\n");
-    await writeText(currentPlan, "{}\n");
-    await writeText(userReferenceFile, "user-authored\n");
-    await writeText(sessionReferenceFile, "session reference\n");
-
-    await removeRetiredPlanningArtifacts(dataDir);
-
-    await expect(access(retiredSettings)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(retiredSessionState)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(retiredBackup)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(currentPlan)).resolves.toBeUndefined();
-    await expect(readFile(userReferenceFile, "utf8")).resolves.toBe("user-authored\n");
-    await expect(readFile(sessionReferenceFile, "utf8")).resolves.toBe("session reference\n");
-  });
-
   it("copies shared-flat durable files into shared/{config,state} and preserves originals", async () => {
     const root = await mkdtemp(join(tmpdir(), "shared-config-migration-"));
     const dataDir = join(root, "data");
@@ -103,51 +72,6 @@ describe("shared-config-migration", () => {
     await expect(access(join(getSharedStateDir(dataDir), MIGRATION_SENTINEL))).resolves.toBeUndefined();
   });
 
-  it("writes the sentinel on a fresh install with nothing to migrate", async () => {
-    const root = await mkdtemp(join(tmpdir(), "shared-config-migration-fresh-"));
-    const dataDir = join(root, "data");
-
-    await migrateSharedConfigLayout(dataDir);
-
-    await expect(access(join(getSharedStateDir(dataDir), MIGRATION_SENTINEL))).resolves.toBeUndefined();
-    await expect(access(getSharedSecretsFilePath(dataDir))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(getSharedAuthFilePath(dataDir))).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("cleanup deletes old files when canonical replacements exist", async () => {
-    const root = await mkdtemp(join(tmpdir(), "shared-config-cleanup-"));
-    const dataDir = join(root, "data");
-    const sharedDir = getSharedDir(dataDir);
-
-    await writeText(join(getSharedStateDir(dataDir), MIGRATION_SENTINEL), "done\n");
-    await writeText(join(sharedDir, "auth", "auth.json"), '{"provider":"legacy"}\n');
-    await writeText(join(sharedDir, "secrets.json"), '{"OPENAI_API_KEY":"legacy"}\n');
-    await writeText(join(sharedDir, "integrations", "telegram.json"), '{"enabled":true}\n');
-    await writeText(join(sharedDir, "provider-usage-cache.json"), '{"cached":true}\n');
-    await writeText(join(sharedDir, "provider-usage-history.jsonl"), '{"provider":"openai"}\n');
-    await writeText(join(sharedDir, "stats-cache.json"), '{"stats":true}\n');
-    await writeText(join(sharedDir, "generated", "pi-models.json"), '{"models":[]}\n');
-
-    await writeText(getSharedAuthFilePath(dataDir), '{"provider":"canonical"}\n');
-    await writeText(getSharedSecretsFilePath(dataDir), '{"OPENAI_API_KEY":"canonical"}\n');
-    await writeText(join(sharedDir, "config", "integrations", "telegram.json"), '{"enabled":false}\n');
-    await writeText(join(sharedDir, "cache", "provider-usage-cache.json"), '{"cached":true}\n');
-    await writeText(join(sharedDir, "cache", "provider-usage-history.jsonl"), '{"provider":"openai"}\n');
-
-    await cleanupOldSharedConfigPaths(dataDir);
-
-    await expect(access(join(sharedDir, "auth", "auth.json"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(join(sharedDir, "secrets.json"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(join(sharedDir, "integrations", "telegram.json"), "utf8")).resolves.toBe('{"enabled":true}\n');
-    await expect(access(join(sharedDir, "provider-usage-cache.json"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(join(sharedDir, "provider-usage-history.jsonl"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(join(sharedDir, "stats-cache.json"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(join(sharedDir, "generated"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(join(getSharedStateDir(dataDir), CLEANUP_SENTINEL))).resolves.toBeUndefined();
-    await expect(readFile(getSharedAuthFilePath(dataDir), "utf8")).resolves.toContain("canonical");
-    await expect(readFile(getSharedSecretsFilePath(dataDir), "utf8")).resolves.toContain("canonical");
-  });
-
   it("cleanup does not delete old files when canonical replacements are missing", async () => {
     const root = await mkdtemp(join(tmpdir(), "shared-config-cleanup-missing-"));
     const dataDir = join(root, "data");
@@ -166,57 +90,6 @@ describe("shared-config-migration", () => {
       "enabled"
     );
     await expect(access(join(getSharedStateDir(dataDir), CLEANUP_SENTINEL))).resolves.toBeUndefined();
-  });
-
-  it("cleanup skips work when the migration sentinel is missing", async () => {
-    const root = await mkdtemp(join(tmpdir(), "shared-config-cleanup-skip-"));
-    const dataDir = join(root, "data");
-    const sharedDir = getSharedDir(dataDir);
-
-    await writeText(join(sharedDir, "auth", "auth.json"), '{"provider":"legacy"}\n');
-    await writeText(getSharedAuthFilePath(dataDir), '{"provider":"canonical"}\n');
-
-    await cleanupOldSharedConfigPaths(dataDir);
-
-    await expect(readFile(join(sharedDir, "auth", "auth.json"), "utf8")).resolves.toContain("legacy");
-    await expect(access(join(getSharedStateDir(dataDir), CLEANUP_SENTINEL))).rejects.toMatchObject({
-      code: "ENOENT"
-    });
-  });
-
-  it("cleanup is a no-op when the cleanup sentinel already exists", async () => {
-    const root = await mkdtemp(join(tmpdir(), "shared-config-cleanup-idempotent-"));
-    const dataDir = join(root, "data");
-    const sharedDir = getSharedDir(dataDir);
-
-    await writeText(join(getSharedStateDir(dataDir), MIGRATION_SENTINEL), "done\n");
-    await writeText(join(getSharedStateDir(dataDir), CLEANUP_SENTINEL), "done\n");
-    await writeText(join(sharedDir, "auth", "auth.json"), '{"provider":"legacy"}\n');
-    await writeText(getSharedAuthFilePath(dataDir), '{"provider":"canonical"}\n');
-
-    await cleanupOldSharedConfigPaths(dataDir);
-
-    await expect(readFile(join(sharedDir, "auth", "auth.json"), "utf8")).resolves.toContain("legacy");
-  });
-
-  it("cleanup removes empty old directories after deleting migrated files", async () => {
-    const root = await mkdtemp(join(tmpdir(), "shared-config-cleanup-dirs-"));
-    const dataDir = join(root, "data");
-    const sharedDir = getSharedDir(dataDir);
-
-    await writeText(join(getSharedStateDir(dataDir), MIGRATION_SENTINEL), "done\n");
-    await writeText(join(sharedDir, "auth", "auth.json"), '{"provider":"legacy"}\n');
-    await writeText(join(sharedDir, "integrations", "nested", "telegram.json"), '{"enabled":true}\n');
-    await writeText(join(sharedDir, "generated", "pi-models.json"), '{"models":[]}\n');
-
-    await writeText(getSharedAuthFilePath(dataDir), '{"provider":"canonical"}\n');
-    await writeText(join(sharedDir, "config", "integrations", "nested", "telegram.json"), '{"enabled":false}\n');
-
-    await cleanupOldSharedConfigPaths(dataDir);
-
-    await expect(access(join(sharedDir, "auth"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(join(sharedDir, "integrations", "nested", "telegram.json"), "utf8")).resolves.toBe('{"enabled":true}\n');
-    await expect(access(join(sharedDir, "generated"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
 

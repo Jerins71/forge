@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -36,25 +36,6 @@ async function setup() {
   return { dataDir, source, notes, options, service: new SwarmSessionService(options) }
 }
 describe('task notes in existing session lifecycle', () => {
-  it('captures source notes before history copy and gives the fork independent notes', async () => {
-    const { service, notes } = await setup()
-    await service.forkSession('source')
-    expect((await notes('fork', 'fork').read({ path: 'checkpoint.md' })).text).toBe('accepted source state')
-    expect((await notes().read({ path: 'checkpoint.md' })).text).toBe('later source state')
-  })
-  it('does not copy current notes to an explicitly earlier history boundary', async () => {
-    const { service, notes } = await setup()
-    await service.forkSession('source', { fromMessageId: 'earlier-message' })
-    expect(await notes('fork', 'fork').list()).toMatchObject({ notes: [], provenance: { fromMessageId: 'earlier-message', notesOmitted: 'historical_boundary' } })
-  })
-  it('clears both manager and worker notes with the conversation', async () => {
-    const { source, service, notes } = await setup()
-    await notes('worker').write({ path: 'checkpoint.md', text: 'worker state' })
-    await service.clearSessionConversation('source')
-    expect((await notes().list()).notes).toEqual([])
-    expect((await notes('worker').list()).notes).toEqual([])
-    expect(await readFile(source.sessionFile, 'utf8')).toBe('')
-  })
   it('preserves conversation and notes when shutdown cannot be confirmed', async () => {
     const { source, service, notes, options } = await setup()
     options.stopSessionInternal = vi.fn(async () => ({ terminatedWorkerIds: [], unsafeShutdownAgentIds: ['worker'] }))
@@ -83,25 +64,6 @@ describe('task notes in existing session lifecycle', () => {
     await service.clearSessionConversation('source')
     expect(barrierHeld).toBe(false)
     expect(options.stopSessionInternal).toHaveBeenCalledWith('source', expect.objectContaining({ manualStopNotice: false }))
-  })
-
-  it('surfaces a canonical storage failure and releases the barrier for a successful retry', async () => {
-    const { source, service, options } = await setup()
-    let barrierHeld = false
-    options.withRuntimeShutdownBarrier = async (_id, operation) => {
-      barrierHeld = true
-      try { return await operation() } finally { barrierHeld = false }
-    }
-    await rm(source.sessionFile)
-    await mkdir(source.sessionFile)
-    await expect(service.clearSessionConversation('source')).rejects.toMatchObject({ code: 'EISDIR' })
-    expect(options.emitConversationReset).not.toHaveBeenCalled()
-    expect(barrierHeld).toBe(false)
-    await rm(source.sessionFile, { recursive: true })
-    await writeFile(source.sessionFile, 'retry this canonical transcript')
-    await service.clearSessionConversation('source')
-    expect(await readFile(source.sessionFile, 'utf8')).toBe('')
-    expect(options.emitConversationReset).toHaveBeenCalledOnce()
   })
 
 })

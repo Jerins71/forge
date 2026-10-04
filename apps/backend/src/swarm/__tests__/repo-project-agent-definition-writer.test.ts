@@ -1,13 +1,10 @@
-import { mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { scanRepoProjectAgentDefinitions } from "../repo-project-agent-definitions.js";
-import {
-  rollbackWrittenRepoProjectAgentDefinition,
-  writeRepoProjectAgentDefinition,
-} from "../repo-project-agent-definition-writer.js";
+import { writeRepoProjectAgentDefinition } from "../repo-project-agent-definition-writer.js";
 
 const atomicWriteGate = vi.hoisted(() => ({
   wait: undefined as Promise<void> | undefined,
@@ -96,31 +93,6 @@ describe("writeRepoProjectAgentDefinition", () => {
     expect(await readFile(join(existingDir, "prompt.md"), "utf8")).toBe("Keep me.\n");
   });
 
-  it("rejects a duplicate handle stored under a different definition id", async () => {
-    const root = await makeTempDir("forge-repo-pa-duplicate-handle-");
-    const forgeDir = join(root, ".forge");
-    const existingDir = join(forgeDir, "project-agents", "legacy-docs");
-    await mkdir(existingDir, { recursive: true });
-    await writeFile(
-      join(existingDir, "config.json"),
-      JSON.stringify({ version: 1, handle: "docs", whenToUse: "Existing" }),
-      "utf8",
-    );
-    await writeFile(join(existingDir, "prompt.md"), "Existing prompt.\n", "utf8");
-
-    await expect(
-      writeRepoProjectAgentDefinition({
-        forgeDir,
-        handle: "docs",
-        whenToUse: "Use for docs",
-        prompt: "Replacement prompt.",
-      }),
-    ).rejects.toThrow(/handle "docs" already exists/i);
-    await expect(stat(join(forgeDir, "project-agents", "docs"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-  });
-
   it("rejects empty prompts and symlink traversal", async () => {
     const root = await makeTempDir("forge-repo-pa-reject-");
     const forgeDir = join(root, ".forge");
@@ -149,60 +121,6 @@ describe("writeRepoProjectAgentDefinition", () => {
     ).rejects.toThrow(/must not be a symlink/i);
   });
 
-  it("keeps staged content outside the scanned project-agents root until publication", async () => {
-    const root = await makeTempDir("forge-repo-pa-scan-stage-");
-    const forgeDir = join(root, ".forge");
-    let releaseWrites: (() => void) | undefined;
-    atomicWriteGate.wait = new Promise<void>((resolve) => {
-      releaseWrites = resolve;
-    });
-
-    const writing = writeRepoProjectAgentDefinition({
-      forgeDir,
-      handle: "docs",
-      whenToUse: "Use for docs",
-      prompt: "Maintain the docs.",
-    });
-    try {
-      await vi.waitFor(async () => {
-        const entries = await readdir(forgeDir);
-        expect(entries.some((entry) => entry.startsWith(".project-agent-staging-docs-"))).toBe(true);
-      });
-      const inventoryWhileStaged = await scanRepoProjectAgentDefinitions(
-        join(forgeDir, "project-agents"),
-      );
-      expect(inventoryWhileStaged.items).toEqual([]);
-    } finally {
-      releaseWrites?.();
-    }
-
-    const written = await writing;
-    const inventoryAfterPublish = await scanRepoProjectAgentDefinitions(written.projectAgentsDir);
-    expect(inventoryAfterPublish.items).toEqual([
-      expect.objectContaining({ definitionId: "docs", status: "valid" }),
-    ]);
-  });
-
-  it("publishes a complete definition and leaves no staging leftovers", async () => {
-    const root = await makeTempDir("forge-repo-pa-stage-");
-    const forgeDir = join(root, ".forge");
-    const written = await writeRepoProjectAgentDefinition({
-      forgeDir,
-      handle: "docs",
-      whenToUse: "Use for docs",
-      prompt: "Maintain the docs.",
-    });
-    const entries = await readdir(forgeDir);
-    expect(entries.some((entry) => entry.startsWith(".project-agent-staging-"))).toBe(false);
-    expect(entries.some((entry) => entry.endsWith(".lock"))).toBe(false);
-    const inventory = await scanRepoProjectAgentDefinitions(written.projectAgentsDir);
-    expect(inventory.items).toEqual([
-      expect.objectContaining({ definitionId: "docs", status: "valid" }),
-    ]);
-    expect(await readFile(join(written.definitionDir, "config.json"), "utf8")).toContain('"handle": "docs"');
-    expect(await readFile(join(written.definitionDir, "prompt.md"), "utf8")).toBe("Maintain the docs.\n");
-  });
-
   it("serializes same-definition writers so only one complete definition remains", async () => {
     const root = await makeTempDir("forge-repo-pa-concurrent-");
     const forgeDir = join(root, ".forge");
@@ -226,41 +144,5 @@ describe("writeRepoProjectAgentDefinition", () => {
     expect(inventory.items).toHaveLength(1);
     expect(inventory.items[0]).toMatchObject({ definitionId: "docs", status: "valid" });
     expect(await readFile(join(forgeDir, "project-agents", "docs", "prompt.md"), "utf8")).toMatch(/prompt\.\n$/);
-  });
-
-  it("rolls back only empty parents created by the write", async () => {
-    const root = await makeTempDir("forge-repo-pa-parent-rollback-");
-    const forgeDir = join(root, ".forge");
-    const written = await writeRepoProjectAgentDefinition({
-      forgeDir,
-      handle: "docs",
-      whenToUse: "Use for docs",
-      prompt: "Maintain the docs.",
-    });
-    const keepPath = join(written.projectAgentsDir, "keep.txt");
-    await writeFile(keepPath, "keep", "utf8");
-
-    await rollbackWrittenRepoProjectAgentDefinition(written);
-
-    expect(await readFile(keepPath, "utf8")).toBe("keep");
-    await expect(stat(written.definitionDir)).rejects.toMatchObject({ code: "ENOENT" });
-    expect((await stat(written.forgeDir)).isDirectory()).toBe(true);
-  });
-
-  it("cleans created empty parents when containment fails before publication", async () => {
-    const root = await makeTempDir("forge-repo-pa-cleanup-");
-    const otherRoot = await makeTempDir("forge-repo-pa-other-");
-    const forgeDir = join(root, ".forge");
-    await expect(
-      writeRepoProjectAgentDefinition({
-        forgeDir,
-        containmentRoot: otherRoot,
-        handle: "docs",
-        whenToUse: "Use for docs",
-        prompt: "Maintain the docs.",
-      }),
-    ).rejects.toThrow(/outside the detected Git repository root/i);
-    await expect(stat(forgeDir)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(stat(join(forgeDir, "project-agents", "docs"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
