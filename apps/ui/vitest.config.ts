@@ -8,10 +8,11 @@ const protocolSourceEntry = resolve(uiRootDir, '../../packages/protocol/src/inde
 
 export default defineConfig({
   resolve: {
-    alias: {
-      '@': uiSourceDir,
-      '@forge/protocol': protocolSourceEntry,
-    },
+    alias: [
+      { find: /^@\//, replacement: `${uiSourceDir}/` },
+      { find: /^@forge\/protocol\/environment-v2$/, replacement: resolve(uiRootDir, '../../packages/protocol/src/environment-v2.ts') },
+      { find: /^@forge\/protocol$/, replacement: protocolSourceEntry },
+    ],
   },
   test: {
     environment: 'node',
