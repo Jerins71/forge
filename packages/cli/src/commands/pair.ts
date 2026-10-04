@@ -1,9 +1,10 @@
 import { generateKeyPairSync, createHash, sign } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { open, readFile, stat } from 'node:fs/promises';
+import { open, readFile, stat, rm } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import type { PairingExchange, PairingExchangeResult, Scope } from '../../../protocol/src/environment-v2.js';
 import type { CommandContext } from './types.js';
+import { protectCliOutput } from './serve.js';
 import { writeHuman } from '../output.js';
 
 export interface CliEnvironmentCredential { environmentId: string; baseUrl: string; bearerToken: string; deviceSessionId: string }
@@ -24,7 +25,12 @@ export function parsePairTarget(target: string): { baseUrl: string; environmentI
 async function request(base: string, path: string, input?: unknown): Promise<unknown> {
   const result = await fetch(base + path, { method: input === undefined ? 'GET' : 'POST', ...(input === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }), signal: AbortSignal.timeout(10_000), redirect: 'error' });
   if (!result.ok) throw new Error('Environment pairing request was rejected');
-  return result.json();
+  if (Number(result.headers.get('content-length') ?? 0) > 1_048_576) { await result.body?.cancel(); throw new Error('Environment pairing response exceeds its limit'); }
+  const reader = result.body?.getReader(); const parts: Uint8Array[] = []; let length = 0;
+  try {
+    if (reader) for (;;) { const chunk = await reader.read(); if(chunk.done)break; length += chunk.value.byteLength; if(length>1_048_576){await reader.cancel();throw new Error('Environment pairing response exceeds its limit');} parts.push(chunk.value); }
+  } finally { reader?.releaseLock(); }
+  try { return JSON.parse(Buffer.concat(parts).toString('utf8')); } catch { throw new Error('Invalid environment pairing response'); }
 }
 export async function exchangePairing(options: { baseUrl: string; environmentId: string; credential: PairingExchange['credential']; deviceName: string; deviceKind: 'cli' | 'desktop'; scopes: Scope[] }): Promise<PairingExchangeResult> {
   const challenge = await request(options.baseUrl, '/api/v2/access/challenge', {}) as { challengeId: string; nonce: string };
@@ -46,32 +52,39 @@ async function storeOsCredential(credential: CliEnvironmentCredential): Promise<
     await runWithPrivateInput('secret-tool', ['store', '--label=Forge environment', 'application', 'Forge', 'environment', credential.environmentId], credential.bearerToken);
     return;
   }
-  // Windows fallback is explicit rather than assuming a globally available vault implementation.
+  if (process.platform === 'win32') {
+    const service = `forge.environment.${credential.environmentId}`;
+    const script = `$ErrorActionPreference='Stop'; [void][Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]; [void][Windows.Security.Credentials.PasswordCredential,Windows.Security.Credentials,ContentType=WindowsRuntime]; $vault=New-Object Windows.Security.Credentials.PasswordVault; $item=New-Object Windows.Security.Credentials.PasswordCredential -ArgumentList ${JSON.stringify(service)},${JSON.stringify(credential.deviceSessionId)},${JSON.stringify(credential.bearerToken)}; $vault.Add($item);`;
+    await runWithPrivateInput('powershell.exe',['-NoProfile','-NonInteractive','-Command','-'],script); return;
+  }
   throw new Error('OS credential storage is unavailable; explicitly supply --credential-file <absolute-file> for owner-only fallback storage');
 }
 async function runWithPrivateInput(command: string, args: string[], input: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => { const child = spawn(command, args, { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true }); child.on('error', () => reject(new Error('OS credential storage is unavailable; explicitly supply --credential-file <absolute-file>'))); child.on('exit', code => code === 0 ? resolve() : reject(new Error('OS credential storage failed; explicitly supply --credential-file <absolute-file>'))); child.stdin.end(input); });
+  await new Promise<void>((resolve, reject) => { const child = spawn(command, args, { cwd: process.cwd(), stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true }); child.on('error', () => reject(new Error('OS credential storage is unavailable; explicitly supply --credential-file <absolute-file>'))); child.on('exit', code => code === 0 ? resolve() : reject(new Error('OS credential storage failed; explicitly supply --credential-file <absolute-file>'))); child.stdin.on('error',()=>reject(new Error('OS credential storage input failed'))); child.stdin.end(input); });
 }
 export async function pairEnvironment(options: { target: string; code?: string; credentialFile?: string; credentialStore?: CliCredentialStore; expectedEnvironmentId?: string; deviceName?: string; scopes?: Scope[] }) {
   if (options.credentialFile && !isAbsolute(options.credentialFile)) throw new Error('Credential fallback file must be absolute');
-  if (!options.credentialFile && !options.credentialStore && process.platform === 'win32') throw new Error('Explicit --credential-file fallback is required when OS credential storage is unavailable');
   const parsed = parsePairTarget(options.target);
   const credential = parsed.credential ?? (options.code ? { kind: 'code' as const, code: options.code } : undefined);
   if (!credential) throw new Error('A hidden pairing link or code is required');
   const environment = await request(parsed.baseUrl, '/api/v2/environment') as { environmentId: string; protocolVersion: number };
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(environment.environmentId)) throw new Error('Invalid environment identity');
   const expected = options.expectedEnvironmentId ?? parsed.environmentId;
   if (expected && expected !== environment.environmentId) throw new Error('Environment identity mismatch; explicitly pair the new environment');
   if (environment.protocolVersion !== 1) throw new Error('Environment protocol version does not match');
   // Reserve fallback destination before consuming a one-use grant. Refuse symlinks/overwrite.
   const file = options.credentialFile ? await open(options.credentialFile, 'wx', 0o600) : null;
+  let savedCredential = false;
   try {
+    if (options.credentialFile) await protectCliOutput(options.credentialFile);
     const result = await exchangePairing({ baseUrl: parsed.baseUrl, environmentId: environment.environmentId, credential, deviceName: options.deviceName ?? 'Forge CLI', deviceKind: 'cli', scopes: options.scopes ?? ['session:read', 'session:operate', 'workspace:read', 'workspace:write', 'terminal:operate', 'settings:admin', 'access:admin'] });
-    if (!result.bearerToken || !/^[A-Za-z0-9_-]{43}$/.test(result.bearerToken) || result.environment.environmentId !== environment.environmentId) throw new Error('Environment pairing returned an invalid session');
+    if (!result.bearerToken || !/^[0-9a-f-]{36}$/.test(result.deviceSession.deviceSessionId) || !/^[A-Za-z0-9_-]{43}$/.test(result.bearerToken) || result.environment.environmentId !== environment.environmentId) throw new Error('Environment pairing returned an invalid session');
     const saved = { environmentId: environment.environmentId, baseUrl: parsed.baseUrl, bearerToken: result.bearerToken, deviceSessionId: result.deviceSession.deviceSessionId };
     if (file) { await file.writeFile(JSON.stringify(saved) + '\n'); await file.sync(); }
     else await (options.credentialStore?.store(saved) ?? storeOsCredential(saved));
+    savedCredential = true;
     return { environment: result.environment, deviceSession: result.deviceSession };
-  } finally { await file?.close(); }
+  } finally { await file?.close(); if (options.credentialFile && !savedCredential) await rm(options.credentialFile,{force:true}); }
 }
 export async function loadCliCredential(path: string): Promise<CliEnvironmentCredential> {
   if (!isAbsolute(path)) throw new Error('Credential file must be absolute');
@@ -96,7 +109,8 @@ export async function readHiddenPairingInput(): Promise<string> {
 export async function handlePairCommand(context: CommandContext): Promise<number> {
   const target = context.args.positionals[1]; if (!target) throw new Error('Usage: forge pair <url-or-host> [--credential-file <absolute-file>]');
   const parsed = parsePairTarget(target.includes('://') ? target : `https://${target}`);
-  const secret = parsed.credential ? target : await readHiddenPairingInput();
+  if (parsed.credential) throw new Error('Supply the host URL as an argument; enter the pairing link or code at the hidden prompt');
+  const secret = await readHiddenPairingInput();
   const result = await pairEnvironment({ target: secret.includes('://') ? secret : parsed.baseUrl, code: secret.includes('://') ? undefined : secret, expectedEnvironmentId: context.args.options.environmentId ?? parsed.environmentId, credentialFile: context.args.options.credentialFile, deviceName: context.args.options.name, scopes: context.args.options.scopes?.split(',') as Scope[] | undefined });
   writeHuman(context.io, context.args.options, `Paired with ${result.environment.label} (${result.environment.environmentId}).`); return 0;
 }

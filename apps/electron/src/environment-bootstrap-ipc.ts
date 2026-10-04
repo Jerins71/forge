@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, rename, rm } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { getHostInstallationStateDir } from '../../backend/src/swarm/storage/data-paths.js';
 import { dirname, join } from 'node:path';
 import type { RpcOutput, Scope } from '@forge/protocol/environment-v2';
 import type { EnvironmentCredentialService, DesktopEnvironmentTarget } from './environment-credentials-ipc.js';
@@ -47,7 +47,7 @@ export async function ensurePrimaryEnvironmentSession(options: { child: Pick<Chi
 }
 /** Install metadata contains executable locations only, outside all environment roots. */
 export async function writeEnvironmentInstallationManifest(backendEntry: string): Promise<void> {
-  const dir = process.platform === 'win32' ? join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Forge', 'installation') : process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support', 'Forge', 'installation') : join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'forge', 'installation');
+  const dir = getHostInstallationStateDir();
   const path = join(dir, 'manifest.json'); await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temp = `${path}.${randomUUID()}.tmp`; const file = await open(temp, 'wx', 0o600);
   try { await file.writeFile(JSON.stringify({ formatVersion: 1, backendEntry }) + '\n'); await file.sync(); } finally { await file.close(); }

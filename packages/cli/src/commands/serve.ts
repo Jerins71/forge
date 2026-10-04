@@ -1,11 +1,13 @@
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { open, readFile, stat, rm } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { userInfo } from 'node:os';
+import { getHostInstallationStateDir } from '../../../../apps/backend/src/swarm/storage/data-paths.js';
+import { promisify } from 'node:util';
 import { isAbsolute, join } from 'node:path';
 import type { CommandContext } from './types.js';
 
 export interface ServeOptions {
-  backendEntry?: string; manifestPath?: string; host?: string; port?: number; dataDir?: string;
+  backendEntry?: string; manifestPath?: string; cwd?: string; host?: string; port?: number; dataDir?: string;
   publicUrl?: string; tlsCert?: string; tlsKey?: string; tailscaleServe?: boolean;
   pair?: boolean; pairOutput?: string; interactive?: boolean; env?: NodeJS.ProcessEnv;
   recovery?: 'rekey' | 'adopt' | 'restore'; previousDataDir?: string;
@@ -24,7 +26,7 @@ export function validateServeOptions(options: ServeOptions): void {
 }
 export function installationManifestPath(env: NodeJS.ProcessEnv = process.env): string {
   if (env.FORGE_INSTALLATION_MANIFEST) return env.FORGE_INSTALLATION_MANIFEST;
-  const dir = process.platform === 'win32' ? join(env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Forge', 'installation') : process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support', 'Forge', 'installation') : join(env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'forge', 'installation');
+  const dir = getHostInstallationStateDir(process.platform, env);
   return join(dir, 'manifest.json');
 }
 export async function resolveBackendEntry(options: Pick<ServeOptions, 'backendEntry' | 'manifestPath' | 'env'>): Promise<string> {
@@ -39,16 +41,26 @@ export async function resolveBackendEntry(options: Pick<ServeOptions, 'backendEn
   if (!(await stat(entry).catch(() => null))?.isFile()) throw new Error('Forge backend entry does not exist. Build/install the backend or supply --backend-entry <absolute-file>.');
   return entry;
 }
+export async function protectCliOutput(path: string): Promise<void> {
+  if (process.platform !== 'win32') return;
+  const user = process.env.USERDOMAIN ? `${process.env.USERDOMAIN}\\${userInfo().username}` : userInfo().username;
+  await promisify(execFile)('icacls', [path, '/inheritance:r', '/grant:r', `${user}:(F)`], {windowsHide:true});
+}
 export async function serveBackend(options: ServeOptions): Promise<number> {
+  if (options.tailscaleServe && !options.publicUrl) {
+    try { const status = JSON.parse((await promisify(execFile)('tailscale', ['status','--json'], {windowsHide:true})).stdout) as {Self?:{DNSName?:string}}; const host = status.Self?.DNSName?.replace(/\.$/,''); if (!host || !/^[a-zA-Z0-9.-]+$/.test(host)) throw new Error(); options = {...options,publicUrl:`https://${host}`}; }
+    catch { throw new Error('Tailscale must be installed and connected; supply --public-url <tailnet-https-origin> or configure Tailscale first'); }
+  }
   validateServeOptions(options);
   const entry = await resolveBackendEntry(options);
   const pairFile = options.pairOutput ? await open(options.pairOutput, 'wx', 0o600) : null;
+  if (options.pairOutput) { try { await protectCliOutput(options.pairOutput); } catch { await pairFile?.close(); await rm(options.pairOutput,{force:true}); throw new Error('Could not restrict pairing output to the current user'); } }
   let wrotePair = false;
   const env = { ...(options.env ?? process.env), FORGE_HOST: options.host ?? '127.0.0.1', FORGE_PORT: String(options.port ?? 47187), FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: options.pair ? '1' : '0', ...(options.dataDir ? { FORGE_DATA_DIR: options.dataDir } : {}), ...(options.publicUrl ? { FORGE_PUBLIC_URL: options.publicUrl } : {}), ...(options.tlsCert ? { FORGE_TLS_CERT: options.tlsCert, FORGE_TLS_KEY: options.tlsKey } : {}), ...(options.tailscaleServe ? { FORGE_EXPOSURE_MODE: 'tailscale' } : {}), ...(options.recovery ? { FORGE_ENVIRONMENT_RECOVERY: options.recovery } : {}), ...(options.previousDataDir ? { FORGE_ENVIRONMENT_ADOPT_FROM: options.previousDataDir } : {}) };
   try {
     return await new Promise<number>((resolve, reject) => {
-      const child = spawn(process.execPath, [entry], { env, stdio: ['inherit', 'inherit', 'inherit', 'ipc'], windowsHide: true });
-      let requested = false; let settled = false; let pendingWrite: Promise<void> | null = null;
+      const child = spawn(process.execPath, [entry], { env, cwd: options.cwd ?? process.cwd(), stdio: ['inherit', 'inherit', 'inherit', 'ipc'], windowsHide: true });
+      let requested = false; let bootstrapReceived = false; let settled = false; let pendingWrite: Promise<void> | null = null;
       const requestId = `serve-${process.pid}-${Date.now()}`;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const signals = ['SIGINT', 'SIGTERM'] as const;
@@ -65,6 +77,8 @@ export async function serveBackend(options: ServeOptions): Promise<number> {
           child.send?.({ type: 'forge:environment-bootstrap:request', requestId }, e => { if (e) fail(new Error('Private backend pairing channel failed')); });
         }
         if (m.type === 'forge:environment-bootstrap:result' && m.requestId === requestId) {
+          if (!requested || bootstrapReceived || !options.pair) return;
+          bootstrapReceived = true;
           if (timer) clearTimeout(timer);
           if (!m.grant?.pairingUrl || m.error) { fail(new Error('Private backend pairing bootstrap was rejected')); return; }
           pendingWrite = (async () => { if (pairFile) { await pairFile.writeFile(m.grant!.pairingUrl! + '\n'); await pairFile.sync(); } else process.stderr.write(`Pair with this environment (expires in 60 seconds):\n${m.grant!.pairingUrl}\n`); wrotePair = true; })();
@@ -82,5 +96,5 @@ export async function serveBackend(options: ServeOptions): Promise<number> {
 }
 export async function handleServeCommand(context: CommandContext): Promise<number> {
   const o = context.args.options;
-  return serveBackend({ backendEntry: o.backendEntry, host: o.host ?? context.env.FORGE_HOST, port: o.port === undefined ? undefined : Number(o.port), dataDir: o.dataDir, publicUrl: o.publicUrl, tlsCert: o.tlsCert, tlsKey: o.tlsKey, tailscaleServe: o.tailscaleServe, pair: o.pair, pairOutput: o.pairOutput, env: context.env });
+  return serveBackend({ backendEntry: o.backendEntry, cwd: context.cwd, host: o.host ?? context.env.FORGE_HOST, port: o.port === undefined && context.env.FORGE_PORT === undefined ? undefined : Number(o.port ?? context.env.FORGE_PORT), dataDir: o.dataDir ?? context.env.FORGE_DATA_DIR, publicUrl: o.publicUrl ?? context.env.FORGE_PUBLIC_URL, tlsCert: o.tlsCert ?? context.env.FORGE_TLS_CERT, tlsKey: o.tlsKey ?? context.env.FORGE_TLS_KEY, tailscaleServe: o.tailscaleServe ?? context.env.FORGE_EXPOSURE_MODE === 'tailscale', pair: o.pair, pairOutput: o.pairOutput, env: context.env });
 }
