@@ -12,9 +12,11 @@ import { ConversationTimeline } from '../../../apps/backend/src/swarm/session/co
 import { RpcSendQueue } from '../../../apps/backend/src/ws/rpc/rpc-send-queue.js';
 import { StreamQueue } from '../../../apps/backend/src/environment/streams/stream-budget.js';
 import { TerminalService } from '../../../apps/backend/src/terminal/terminal-service.js';
+import { SwarmWebSocketServer } from '../../../apps/backend/src/ws/server.js';
 import { WebSocket } from './ws.js';
 import type NativeSocket from 'ws';
 import type { AgentDescriptor } from '../../../apps/backend/src/swarm/types.js';
+import { validateLegacySessionEvent } from '../../../packages/protocol/src/legacy-feature-events.js';
 
 export const crashBoundaries = ['pre-commit', 'post-commit', 'post-Git', 'post-meta', 'post-JSONL', 'post-dispatch-marker', 'post-provider-accept'] as const;
 export type CrashBoundary = typeof crashBoundaries[number];
@@ -27,9 +29,18 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
   let armed: { commandId: string; boundary: CrashBoundary } | null = null;
   let manager: SwarmManager | undefined;
   let terminalService: TerminalService | undefined;
+  let webServer: SwarmWebSocketServer | undefined;
+  const startWebServer = SwarmWebSocketServer.prototype.start;
+  SwarmWebSocketServer.prototype.start = function () { webServer = this; return startWebServer.call(this); };
   let held: { commandId: string; reached: boolean; release: () => void; wait: Promise<void> } | undefined;
   const createTerminal = TerminalService.prototype.create;
   TerminalService.prototype.create = function (...args) { terminalService = this; return createTerminal.apply(this, args); };
+  const terminalEvents: unknown[] = [];
+  const terminalEmit = TerminalService.prototype.emit;
+  TerminalService.prototype.emit = function (name, ...args) {
+    if (name === 'terminal_created') { const event = args[0]; terminalEvents.push({ type: name, sessionAgentId: event.sessionAgentId, terminalSessionAgentId: event.terminal.sessionAgentId, listeners: this.listenerCount(name), valid: validateLegacySessionEvent(event, event.sessionAgentId) }); }
+    return terminalEmit.call(this, name, ...args);
+  };
   let tick = 0;
   const timeline = new ConversationTimeline({ now: () => new Date().toISOString() });
   const overlay = new Map<string, AgentDescriptor>();
@@ -154,6 +165,8 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       armed = input; return { armed: true, pid: process.pid };
     },
     async operate(input: { operation: string; commandId?: string; sessionId?: string; count?: number; hz?: number; durationMs?: number; textBytes?: number; status?: AgentDescriptor['status']; gc?: boolean }) {
+      if (input.operation === 'route-inventory') return webServer!.listRegisteredHttpRoutes().map((route, index) => ({ index, methods: route.methods, access: (route as unknown as { access?: unknown }).access ?? null }));
+      if (input.operation === 'terminal-evidence') return terminalEvents;
       if (input.operation === 'hold-dispatch') {
         if (!input.commandId || held) throw new Error('Invalid fixture hold');
         let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; });
@@ -168,7 +181,7 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       if (input.operation === 'metrics') {
         if (input.gc) (globalThis as unknown as { gc?: () => void }).gc?.();
         const active = [...sockets].map(ref => ref.deref()).filter((socket): socket is NativeSocket => !!socket && socket.readyState === WebSocket.OPEN);
-        return { ...counters, pid: process.pid, memory: process.memoryUsage(), sockets: active.length, subscriptions: active.flatMap(socket => [...(subscriptions.get(socket)?.values() ?? [])]), tcpRxBytes: active.reduce((n, socket) => n + ((socket as any)._socket?.bytesRead ?? 0), 0), tcpTxBytes: active.reduce((n, socket) => n + ((socket as any)._socket?.bytesWritten ?? 0), 0), gcAvailable: typeof (globalThis as any).gc === 'function' };
+        return { ...counters, pid: process.pid, memory: process.memoryUsage(), sockets: active.length, subscriptions: active.flatMap(socket => [...(subscriptions.get(socket)?.entries() ?? [])].map(([subscriptionId, value]) => ({ subscriptionId, ...value }))), tcpRxBytes: active.reduce((n, socket) => n + ((socket as any)._socket?.bytesRead ?? 0), 0), tcpTxBytes: active.reduce((n, socket) => n + ((socket as any)._socket?.bytesWritten ?? 0), 0), gcAvailable: typeof (globalThis as any).gc === 'function' };
       }
       if (input.operation === 'stream-stop') { for (const timer of streams) clearInterval(timer); streams.clear(); return { stopped: true }; }
       if (!manager || !input.sessionId) throw new Error('Fixture session missing');

@@ -7,7 +7,7 @@ import { WebSocket, WebSocketServer } from './fixtures/ws.js';
 export type ResponseFault = { transport: 'http'; path: string } | { transport: 'ws'; rpcId: string | number; closeAfterDrop?: boolean } | { transport: 'ws'; method: 'session.launch' | 'session.send' | 'session.choose'; closeAfterDrop?: boolean };
 export interface WireMetrics {
   http: { requestBytes: number; responseBytes: number };
-  ws: { requestBytes: number; responseBytes: number; requestFrames: number; responseFrames: number };
+  ws: { requestBytes: number; responseBytes: number; requestFrames: number; responseFrames: number; shellSnapshots: number };
   droppedResponses: number;
   commandAttempts: Array<{ method: string; commandId: string }>;
 }
@@ -20,7 +20,7 @@ export async function startFaultProxy(options: { upstream: string; port?: number
   }
   const counts: WireMetrics = {
     http: { requestBytes: 0, responseBytes: 0 },
-    ws: { requestBytes: 0, responseBytes: 0, requestFrames: 0, responseFrames: 0 },
+    ws: { requestBytes: 0, responseBytes: 0, requestFrames: 0, responseFrames: 0, shellSnapshots: 0 },
     droppedResponses: 0,
     commandAttempts: [],
   };
@@ -82,6 +82,7 @@ export async function startFaultProxy(options: { upstream: string; port?: number
       const size = byteLength(data);
       counts.ws.responseBytes += size;
       counts.ws.responseFrames++;
+      if (!binary) { try { const frame = JSON.parse(data.toString()); if (frame.type === 'stream' && frame.item?.kind === 'snapshot' && Array.isArray(frame.item?.snapshot?.sessions)) counts.ws.shellSnapshots++; } catch { /* Count only validated JSON shapes, and forward everything unchanged. */ } }
       if (!binary && fault?.transport === 'ws') {
         try {
           const frame = JSON.parse(data.toString()) as { id?: unknown; requestId?: unknown; type?: unknown; result?: unknown; error?: unknown };

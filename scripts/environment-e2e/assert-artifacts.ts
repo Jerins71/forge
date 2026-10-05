@@ -72,7 +72,7 @@ export async function writeInfrastructureArtifacts(manifest: FleetManifest, mani
   await writeFile(archivedManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   const index: ArtifactIndex = {
     formatVersion: 1, runId: manifest.runId, suite: 'infrastructure', status: manifest.status === 'failed' ? 'failed' : 'passed', manifestPath: archivedManifestPath,
-    commit: commit.trim(), runtime: { node: process.version, playwright: playwright.version, platform: process.platform, arch: process.arch },
+    commit: manifest.testedCommit ?? commit.trim(), runtime: { node: process.version, playwright: playwright.version, platform: process.platform, arch: process.arch },
     rerunCommand: `pnpm e2e:env --environments ${manifest.environments.length} --provider fixture ${smoke ? '--legacy-smoke' : '--smoke'} --out ${JSON.stringify(manifestPath)}`,
     artifacts: [{ kind: 'assertions', path: 'assertions.json', sha256: createHash('sha256').update(bytes).digest('hex'), sizeBytes: bytes.length }],
     deferred: assertions.deferred,
@@ -80,6 +80,9 @@ export async function writeInfrastructureArtifacts(manifest: FleetManifest, mani
   for (const [report, kind] of [
     ['slice-assertions.json', 'assertions'], ['ui/ui-assertions.json', 'assertions'],
     ['playwright-results.json', 'assertions'], ['wire-metrics.json', 'wire-metrics'],
+    ['performance.json', 'performance'], ['browser-performance-trace.json', 'performance'], ['reconnect-bytes.svg', 'performance'],
+    ['heap-shell.heapsnapshot', 'performance'], ['heap-details.heapsnapshot', 'performance'], ['heap-expired.heapsnapshot', 'performance'],
+    ['load-trace.zip', 'trace'], ['ui/ui-trace.zip', 'trace'], ['electron-smoke.json', 'assertions'],
   ] as const) {
     const content = await readFile(join(root, report)).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; });
     if (!content) continue;
@@ -92,7 +95,17 @@ export async function writeInfrastructureArtifacts(manifest: FleetManifest, mani
     index.artifacts.push({ kind: 'screenshot', path: `ui/${file}`, sha256: createHash('sha256').update(content).digest('hex'), sizeBytes: content.length });
   }
   if (index.artifacts.some(artifact => artifact.path === 'slice-assertions.json' || artifact.path === 'ui/ui-assertions.json')) {
-    index.rerunCommand = 'pnpm exec playwright test scripts/environment-e2e/slice.spec.ts scripts/environment-e2e/ui.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium';
+    const files = ['slice-assertions.json', 'ui/ui-assertions.json'].filter(path => index.artifacts.some(artifact => artifact.path === path)).map(path => path.startsWith('ui/') ? 'scripts/environment-e2e/ui.spec.ts' : 'scripts/environment-e2e/slice.spec.ts');
+    index.rerunCommand = `VITE_FORGE_E2E_PLATFORM=1 VITE_FORGE_E2E_PROFILE=1 pnpm --filter @forge/ui build && pnpm exec playwright test ${files.join(' ')} --config scripts/environment-e2e/playwright.config.ts --project=chromium`;
+  }
+  if (index.artifacts.some(artifact => artifact.path === 'performance.json')) {
+    const performance = JSON.parse(await readFile(join(root, 'performance.json'), 'utf8')) as { status: string; budgets?: Record<string, { pass?: boolean; releasedPass?: boolean; highWaterPass?: boolean }> };
+    index.rerunCommand = 'VITE_FORGE_E2E_PLATFORM=1 VITE_FORGE_E2E_PROFILE=1 pnpm --filter @forge/ui build && pnpm exec playwright test scripts/environment-e2e/load.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium';
+    const failedBudgets = Object.entries(performance.budgets ?? {}).filter(([, budget]) => budget.pass === false || budget.releasedPass === false || budget.highWaterPass === false).map(([name]) => name);
+    index.deferred = performance.status === 'passed' && !failedBudgets.length ? [] : [`Load gate ${performance.status}; failed budgets: ${failedBudgets.join(', ') || 'measurement interrupted; inspect performance.json'}`];
+    if (['trace', 'screenshot', 'assertions', 'wire-metrics', 'performance'].every(kind => index.artifacts.some(artifact => artifact.kind === kind))) {
+      index.suite = 'load'; index.status = manifest.status === 'failed' || performance.status === 'failed' ? 'failed' : performance.status === 'passed' ? 'passed' : 'incomplete';
+    }
   }
   const path = join(root, 'artifact-index.json');
   await writeFile(path, `${JSON.stringify(index, null, 2)}\n`);

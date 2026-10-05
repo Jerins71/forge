@@ -170,11 +170,11 @@ async function bootstrap(): Promise<EnvironmentContextValue> {
     }
   }
   originRegistry.attach(registry)
-  await registry.start()
   if (import.meta.env.VITE_FORGE_E2E_PLATFORM === '1') {
     const { installEnvironmentE2EFixture } = await import('./environment-e2e-fixture')
     installEnvironmentE2EFixture(registry)
   }
+  await registry.start()
   window.addEventListener('pagehide', () => {
     for (const e of registry.catalog.getSnapshot().values()) {
       const c = registry.get(e.environmentId)

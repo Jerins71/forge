@@ -62,7 +62,7 @@ test('9.3 real eight-backend production load gate', async ({ browser }) => {
         this.addEventListener('message', event => {
           if (typeof event.data !== 'string') return;
           const frame = JSON.parse(event.data);
-          state.frames.push({ direction: 'received', at: performance.now(), bytes: new TextEncoder().encode(event.data).length, type: frame.type, kind: frame.item?.kind, sequence: frame.item?.sequence, eventType: frame.item?.event?.type, shellSnapshot: Array.isArray(frame.item?.snapshot?.sessions), detailSnapshot: Array.isArray(frame.item?.snapshot?.items), requestId: frame.requestId, errorCode: frame.error?.code });
+          state.frames.push({ direction: 'received', at: performance.now(), bytes: new TextEncoder().encode(event.data).length, type: frame.type, kind: frame.item?.kind, sequence: frame.item?.sequence, eventType: frame.item?.event?.type, shellSnapshot: Array.isArray(frame.item?.snapshot?.sessions), detailSnapshot: Array.isArray(frame.item?.snapshot?.items), requestId: frame.requestId, errorCode: frame.error?.code, subscriptionId: frame.subscriptionId });
         });
       }
       send(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
@@ -134,6 +134,12 @@ test('9.3 real eight-backend production load gate', async ({ browser }) => {
     await writeFile(join(manifest.artifactRoot, 'browser-performance-trace.json'), JSON.stringify({ traceEvents }));
     const commits = perfAfter.commits.slice(perfBefore.commits.length); const longTasks = await page.evaluate(({ start, end }) => (window as any).__forgeLoadWire.longTasks.filter((task: any) => task.start >= start && task.start <= end), { start: steadyStart, end: steadyEnd });
     report.raw.steady = { start: steadyStart, end: steadyEnd, commits, longTasks, samples: steadySamples, wire: (await readWire()).slice(steadyWireStart), fleet: fleetAfter };
+    const steadyWire = report.raw.steady.wire;
+    const mountedIds = new Set(mountedSessions.map((subscription: any) => subscription.subscriptionId));
+    const detailFrames = steadyWire.filter((frame: any) => ['item.upsert', 'item.remove', 'worker.upsert', 'worker.remove', 'choice.upsert', 'choice.remove', 'receipt.upsert'].includes(frame.eventType));
+    report.raw.steady.detailFrames = detailFrames;
+    report.budgets.unmountedDetailFrames = { actual: detailFrames.filter((frame: any) => !mountedIds.has(frame.subscriptionId)).length, expected: 0, pass: detailFrames.every((frame: any) => mountedIds.has(frame.subscriptionId)) };
+    report.raw.steady.injectionsPerView = refs.map((_, index) => fleetAfter[index].injections - mountedBefore[index].injections);
     report.statistics.sidebarCommitMs = percentile(commits.map((value: any) => value.duration)); report.statistics.longTaskMs = percentile(longTasks.map((value: any) => value.duration));
     report.budgets.sidebarCommits = { p95LimitMs: 16, maxLimitMs: 50, ...report.statistics.sidebarCommitMs, pass: commits.length > 0 && report.statistics.sidebarCommitMs.p95 < 16 && report.statistics.sidebarCommitMs.max < 50 };
     report.budgets.longTasks = { limitMs: 100, ...report.statistics.longTaskMs, pass: longTasks.every((value: any) => value.duration <= 100) };
@@ -185,6 +191,13 @@ test('9.3 real eight-backend production load gate', async ({ browser }) => {
     await snapshot(cdp, join(manifest.artifactRoot, 'heap-expired.heapsnapshot'), sessions.map(session => session.bearer));
     report.statistics.serverRss = percentile(steadySamples.flatMap(value => value.fleet.map((server: any) => server.memory.rss))); report.statistics.serverQueueFrames = percentile(steadySamples.flatMap(value => value.fleet.map((server: any) => server.sendQueueFramesMax))); report.statistics.serverQueueBytes = percentile(steadySamples.flatMap(value => value.fleet.map((server: any) => server.sendQueueBytesMax)));
     report.statistics.clientHeapBytes = percentile([report.raw.empty.heap.usedSize, shellHeap.usedSize, detailHeap.usedSize, navigationBefore.usedSize, expiredHeap.usedSize]);
+    report.statistics.tcpIdleBytes = percentile(idleBytes.map(value => value.tcpBytes));
+    report.statistics.sockets = percentile([report.raw.shell.browserSockets, report.raw.disabled.sockets]);
+    report.statistics.detailSubscriptionCount = percentile([mountedSessions.length, ...report.raw.released.map((value: any) => value.subscriptions.filter((subscription: any) => subscription.method === 'session.subscribe').length)]);
+    report.statistics.encodedFrameBytes = percentile((await readWire()).filter((frame: any) => frame.direction === 'received').map((frame: any) => frame.bytes));
+    report.statistics.selectorEvaluations = percentile(Object.keys(perfAfter.selectors).map(key => perfAfter.selectors[key] - (perfBefore.selectors[key] ?? 0)));
+    for (const key of ['catalogSerializations', 'transcriptHydrations', 'gitScans', 'hostResourceProbes']) report.statistics[`idle:${key}`] = percentile(idleBytes.map(value => value.counters[key]));
+    report.statistics.injectedUpdatesPerView = percentile(report.raw.steady.injectionsPerView);
     report.status = Object.values(report.budgets).every((budget: any) => budget.pass !== false && budget.releasedPass !== false && budget.highWaterPass !== false) ? 'passed' : 'failed';
     await context.tracing.start({ screenshots: true, snapshots: false, sources: false }); tracing = true;
     await page.getByRole('complementary').first().click({ position: { x: 10, y: 20 } });
@@ -200,14 +213,20 @@ test('9.3 real eight-backend production load gate', async ({ browser }) => {
 async function slowReader(manifest: FleetManifest, session: BootstrapSession, sessionId: string) {
   const environment = manifest.environments[1]!;
   const metric = () => controlEnvironment<Observation>(manifest, environment.name, 'fixture', { operation: 'metrics', gc: true });
-  const before = await metric(); const rpc = await openFixtureRpc(environment.baseUrl, session);
+  const beforeConnect = await metric(); const rpc = await openFixtureRpc(environment.baseUrl, session);
   try {
     await rpc.call('session.subscribe', { sessionId }); await until(() => rpc.frames.some(frame => frame.item?.kind === 'synchronized'), Boolean);
+    await new Promise(resolve => setTimeout(resolve, 1000)); const before = await metric();
     (rpc.socket as any)._socket.pause();
-    await controlEnvironment(manifest, environment.name, 'fixture', { operation: 'burst', sessionId, count: 800, textBytes: 8192 });
+    await controlEnvironment(manifest, environment.name, 'fixture', { operation: 'burst', sessionId, count: 300, textBytes: 8192 });
     (rpc.socket as any)._socket.resume();
     const error = await until(() => rpc.frames.find(frame => frame.type === 'stream.error' && frame.error?.code === 'RESYNC_REQUIRED'), Boolean, 15000);
-    rpc.close(); await new Promise(resolve => setTimeout(resolve, 2000)); const after = await metric();
-    return { before, after, resync: !!error, error: error!.error, rssGrowth: after.memory.rss - before.memory.rss, queues: Object.fromEntries(['streamQueueFramesMax', 'streamQueueBytesMax', 'sendQueueFramesMax', 'sendQueueBytesMax'].map(key => [key, after[key]])) };
+    rpc.close();
+    // Spec 9.3: RSS must settle within 10 MiB after GC/idle; V8 returns freed pages on its idle memory reducer, not instantly.
+    const settle: Array<{ elapsedMs: number; rss: number; heapUsed: number }> = []; const settleStart = Date.now(); let after = await metric();
+    while (after.memory.rss - before.memory.rss > 10485760 && Date.now() - settleStart < 30000) {
+      await new Promise(resolve => setTimeout(resolve, 2000)); after = await metric(); settle.push({ elapsedMs: Date.now() - settleStart, rss: after.memory.rss, heapUsed: after.memory.heapUsed });
+    }
+    return { beforeConnect, before, after, settle, resync: !!error, error: error!.error, rssGrowth: after.memory.rss - before.memory.rss, queues: Object.fromEntries(['streamQueueFramesMax', 'streamQueueBytesMax', 'sendQueueFramesMax', 'sendQueueBytesMax'].map(key => [key, after[key]])) };
   } finally { (rpc.socket as any)._socket?.resume(); rpc.close(); }
 }

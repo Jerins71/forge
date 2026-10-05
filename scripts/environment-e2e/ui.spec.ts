@@ -10,7 +10,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test as base, type BrowserContext, type Page, type Request } from '@playwright/test'
-import { readManifest } from './launch.js'
+import { readManifest, controlEnvironment } from './launch.js'
 import { startFaultProxy } from './fault-proxy.js'
 
 interface UiEnvironment { environmentId: string; label: string; baseUrl: string; projectTitle: string; sessionId: string }
@@ -34,6 +34,8 @@ let fleet: UiFleet | null = null
 let skipReason: string | null = null
 const secrets: string[] = []
 const leaks: string[] = []
+const featureRequests: Array<{ environmentId: string; path: string; method: string }> = []
+const featureResponses: Array<{ environmentId: string; path: string; status: number; error?: string; cwd?: string }> = []
 let sharedContext: BrowserContext
 let sharedPage: Page
 let proxy: Awaited<ReturnType<typeof startFaultProxy>>
@@ -44,7 +46,7 @@ const test = base.extend({
 })
 
 test.describe.configure({ mode: 'serial' })
-test.use({ screenshot: 'off' })
+test.use({ screenshot: 'off', actionTimeout: 10000 })
 
 test.beforeAll(async ({ browser }) => {
   sharedContext = await browser.newContext()
@@ -65,6 +67,20 @@ test.beforeAll(async ({ browser }) => {
   sharedPage.on('request', (request: Request) => {
     const exposed = [request.url(), request.headers().referer ?? '']
     if (secrets.some((secret) => exposed.some((value) => value.includes(secret)))) leaks.push(new URL(request.url()).pathname)
+    if (new URL(request.url()).pathname === '/__forge_e2e_platform' && request.method() === 'POST') {
+      const message = request.postDataJSON()
+      if (['request', 'requestBinary'].includes(message.operation) && !message.input.path.startsWith('/api/v2/access')) featureRequests.push({ environmentId: message.input.environmentId, path: message.input.path, method: message.input.method })
+    }
+  })
+  sharedPage.on('response', async response => {
+    const request = response.request()
+    if (new URL(request.url()).pathname !== '/__forge_e2e_platform' || request.method() !== 'POST') return
+    const message = request.postDataJSON()
+    if (message.operation !== 'request' || !message.input.path.startsWith('/api/terminals')) return
+    const result = await response.json().catch(() => null)
+    if (!result?.ok) return
+    const body = JSON.parse(result.value.body || '{}')
+    featureResponses.push({ environmentId: message.input.environmentId, path: message.input.path, status: result.value.status, error: body.error?.message, cwd: body.terminal?.cwd })
   })
   const manifestPath = process.env.FORGE_E2E_MANIFEST
   if (!manifestPath) { skipReason = 'FORGE_E2E_MANIFEST is not set'; return }
@@ -94,6 +110,7 @@ test.beforeEach(() => {
 test.afterEach(() => {
   expect(leaks, 'pairing secret reached a request URL or Referer').toEqual([])
   assertions.secretLeaks = 0
+  assertions.featureResponses = featureResponses
 })
 
 async function shot(page: Page, name: string) {
@@ -235,6 +252,73 @@ test('9.2.3 Run on B with a new worktree and an attachment uploaded to B; enviro
   assertions.browserLostAck = { droppedResults: proxy.metrics().droppedResponses, attempts, sameCommandId: true, ...evidence }
 })
 
+test('9.2.5/6 explicitly mounted three views share sockets, release streams, and browser reload resumes cached shell', async ({ page }) => {
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  const { a, b, c } = fleet!
+  const featureStart = featureRequests.length
+  const sessionId = (assertions.launch as { sessionId: string }).sessionId
+  await page.goto(`${fleet!.uiUrl}/?agent=${sessionId}&env=${b.environmentId}`)
+  await page.waitForFunction(() => !!(window as any).__forgeE2ERuntime)
+  await expect(page.getByTestId('environment-session')).toHaveAttribute('data-environment-id', b.environmentId)
+  await page.getByRole('button', { name: /Browse Files/ }).filter({ visible: true }).click()
+  await expect(page.getByLabel('File browser', { exact: true }).filter({ visible: true })).toContainText('environment-marker.txt')
+  await page.getByLabel('File browser', { exact: true }).filter({ visible: true }).getByText('environment-marker.txt', { exact: true }).click()
+  await expect(page.getByText('env-b', { exact: true }).filter({ visible: true }).first()).toBeVisible()
+  await page.getByRole('button', { name: 'Close file viewer', exact: true }).filter({ visible: true }).click()
+  await page.getByRole('button', { name: /Source Control/ }).filter({ visible: true }).click()
+  await expect.poll(() => featureRequests.slice(featureStart).some(request => request.environmentId === b.environmentId && request.path.startsWith('/api/git/'))).toBe(true)
+  await page.getByRole('option', { name: /^Mark env-b,/ }).click()
+  await expect.poll(() => featureRequests.slice(featureStart).some(request => request.environmentId === b.environmentId && /diff/.test(request.path))).toBe(true)
+  await page.getByRole('button', { name: 'Close Source Control', exact: true }).click()
+  await page.getByRole('button', { name: 'More actions', exact: true }).filter({ visible: true }).click()
+  await page.getByRole('menuitem', { name: 'Session Audit Log', exact: true }).click()
+  await expect(page.getByRole('dialog')).toContainText('Session Audit')
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: /Session model:/ }).click()
+  await expect(page.getByRole('menu')).toContainText('Session model')
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: /^Terminal \(/ }).filter({ visible: true }).click()
+  await expect.poll(() => featureResponses.some(response => response.environmentId === b.environmentId && response.path === '/api/terminals' && response.status === 201)).toBe(true)
+  await page.waitForTimeout(250)
+  assertions.terminalDetail = await page.evaluate(ref => (window as any).__forgeE2ERuntime.detailEvidence(ref), { environmentId: b.environmentId, sessionId })
+  assertions.terminalNative = await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'terminal-evidence' })
+  await expect(page.locator('.xterm-helper-textarea')).toHaveCount(1)
+  const requests = featureRequests.slice(featureStart)
+  for (const path of ['/api/files/', '/api/git/', `/api/sessions/${sessionId}/audit`, '/api/settings/manager-selection-catalog', '/api/terminals']) expect(requests.some(request => request.environmentId === b.environmentId && request.path.startsWith(path)), `B panel request ${path}`).toBe(true)
+  assertions.mountedFeaturePanels = { requests, targetEnvironment: b.environmentId, sessionId, filesMarker: 'env-b', auditMounted: true, modelPickerMounted: true, terminalMounted: true }
+  await shot(page, 'b-mounted-feature-panels')
+  // The product's B transcript stays mounted while independent A/C detail consumers stream.
+  const refs = [a, c].map(environment => ({ environmentId: environment.environmentId, sessionId: environment.sessionId }))
+  await page.evaluate(refs => (window as any).__forgeE2ERuntime.mountDetails(refs), refs)
+  await expect(page.locator('[data-e2e-detail][data-freshness="live"]')).toHaveCount(2)
+  await Promise.all([0, 2].map(index => controlEnvironment(manifest, manifest.environments[index]!.name, 'fixture', { operation: 'burst', sessionId: [a, b, c][index]!.sessionId, count: 3 })))
+  await expect(page.locator('[data-e2e-detail]')).toContainText(['Synthetic provider update', 'Synthetic provider update'])
+  const metrics = await Promise.all(manifest.environments.map(environment => controlEnvironment<any>(manifest, environment.name, 'fixture', { operation: 'metrics' })))
+  expect(metrics.map(value => value.sockets)).toEqual([1, 1, 1])
+  expect(metrics.flatMap(value => value.subscriptions).filter(value => value.method === 'session.subscribe')).toHaveLength(3)
+  await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'shell-burst', sessionId: b.sessionId, count: 1 })
+  await expect(page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${b.sessionId}"] [aria-label="running"]`)).toHaveCount(1)
+  const freshness = await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())
+  expect(freshness.every((environment: any) => environment.fresh && environment.complete)).toBe(true)
+  await shot(page, 'three-mounted-details')
+  await page.evaluate(() => (window as any).__forgeE2ERuntime.mountDetails([]))
+  await page.goto(`${fleet!.uiUrl}/?view=archive`)
+  await page.waitForFunction(() => !!(window as any).__forgeE2ERuntime)
+  await expect.poll(async () => (await Promise.all(manifest.environments.map(environment => controlEnvironment<any>(manifest, environment.name, 'fixture', { operation: 'metrics' })))).flatMap(value => value.subscriptions).filter(value => value.method === 'session.subscribe').length).toBe(0)
+  await page.evaluate(() => (window as any).__forgeE2ERuntime.flush())
+  const proxyBefore = proxy.metrics()
+  await page.reload()
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__forgeE2ERuntime?.snapshot() ?? [])).find((environment: any) => environment.environmentId === b.environmentId)?.fresh).toBe(true)
+  const proxyAfter = proxy.metrics()
+  expect(proxyAfter.ws.shellSnapshots - proxyBefore.ws.shellSnapshots).toBe(0)
+  const cacheHistory = await page.evaluate(() => (window as any).__forgeE2ERuntime.freshnessHistory())
+  const cachedB = cacheHistory.filter((value: any) => value.environmentId === b.environmentId)
+  expect(cachedB.some((value: any) => value.complete && value.sessions > 0 && !value.fresh)).toBe(true)
+  expect(cachedB.at(-1).fresh).toBe(true)
+  assertions.cacheHydration = { environmentId: b.environmentId, staleCompleteThenFresh: cachedB }
+  assertions.mountedViews = { sockets: metrics.map(value => value.sockets), explicitDetails: 3, releasedDetails: 0, shellFreshness: freshness, browserReloadCachedResume: { requestBytes: proxyAfter.ws.requestBytes - proxyBefore.ws.requestBytes, responseBytes: proxyAfter.ws.responseBytes - proxyBefore.ws.responseBytes } }
+})
+
 test('offline environment shows age, disables Run on, and never falls back to another machine', async ({ page }) => {
   const { a, b } = fleet!
   await fleet!.stop(b)
@@ -248,13 +332,13 @@ test('offline environment shows age, disables Run on, and never falls back to an
 
     await page.goto(`${fleet!.uiUrl}/?launch=${encodeURIComponent(await logicalGroupKey(page, a))}`)
     await page.getByTestId('run-on-picker').click()
-    await expect(page.getByRole('option').filter({ hasText: b.label })).toHaveAttribute('data-disabled', '')
+    await expect(page.getByRole('option').filter({ hasText: 'Offline' })).toHaveAttribute('data-disabled', '')
     await page.keyboard.press('Escape')
 
     await page.goto(`${fleet!.uiUrl}/?agent=${encodeURIComponent(b.sessionId)}&env=${b.environmentId}`)
     const session = page.getByTestId('environment-session')
     await expect(session).toHaveAttribute('data-environment-id', b.environmentId)
-    await expect(session.getByRole('textbox')).toBeDisabled()
+    await expect(session.getByRole('combobox')).toBeDisabled()
     assertions.offline = { environmentId: b.environmentId, launchDisabled: true, sendDisabled: true }
   } finally {
     await fleet!.start(b)
@@ -295,6 +379,12 @@ test('narrow layout keeps Run on and Workspace reachable', async ({ page }) => {
   await expect(page.getByTestId('workspace-picker')).toBeInViewport()
   await shot(page, 'narrow-launch-composer')
   assertions.narrow = { width: 390, pickersVisible: true }
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())).filter((value: any) => value.fresh).length).toBe(2)
+  // Credential exchange and ticket network activity have finished before recording UI interaction.
+  await sharedContext.tracing.start({ screenshots: true, snapshots: false, sources: false })
+  await page.getByTestId('run-on-picker').click()
+  await page.keyboard.press('Escape')
+  await sharedContext.tracing.stop({ path: join(fleet!.artifactRoot, 'ui/ui-trace.zip') })
 })
 
 async function logicalGroupKey(page: Page, _environment: UiEnvironment): Promise<string> {

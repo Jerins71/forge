@@ -19,6 +19,10 @@ import { WebSocket } from './fixtures/ws.js';
 import { proxySelfTest } from './fixtures/proxy-self-test.js';
 import { startFaultProxy } from './fault-proxy.js';
 import { crashBoundaries } from './fixtures/hardening-hooks.js';
+import { pairEnvironment } from '../../packages/client-runtime/src/pairing.js';
+import type { RuntimePorts } from '../../packages/client-runtime/src/ports.js';
+import { legacyCommandScopes } from '../../apps/backend/src/ws/rpc/legacy-builder-adapter.js';
+import { parseClientCommand } from '../../apps/backend/src/ws/ws-command-parser.js';
 
 let manifest: FleetManifest;
 const sessions: BootstrapSession[] = [];
@@ -228,6 +232,11 @@ test('9.2.10 real HTTP/RPC negative auth, scope, ticket, payload and command-bod
   const headers = { Authorization: `Bearer ${sessions[0]!.bearer}`, 'Content-Type': 'application/json' };
   expect((await fetch(`${environment.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers, body: JSON.stringify({ audience: 'rpc', protocolVersion: 2 }) })).status).toBe(409);
   expect((await fetch(`${environment.baseUrl}/api/not-classified`, { headers })).status).toBe(403);
+  for (const method of ['HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']) expect((await fetch(`${environment.baseUrl}/api/not-classified`, { method, headers })).status).toBe(403);
+  const routeInventory = await controlEnvironment<any[]>(manifest, environment.name, 'fixture', { operation: 'route-inventory' });
+  expect(routeInventory.length).toBeGreaterThan(50);
+  expect(routeInventory.every(route => route.methods && route.access && (route.access.scopes || route.access.authenticated || route.access.public || route.access.integration))).toBe(true);
+  evidence.routeInventory = { allRegisteredRoutes: routeInventory, unclassifiedRegistered: 0, unknownApiVerbsRejected: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] };
   expect((await fetch(`${environment.baseUrl}/api/v2/access/session`)).status).toBe(401);
   expect((await fetch(`${environment.baseUrl}/api/v2/artifacts/unknown`, { method: 'POST', headers })).status).toBe(403);
   const forged = new WebSocket(`${environment.baseUrl.replace('http:', 'ws:')}/api/v2/rpc`, ['forge.v2', `ticket.${'A'.repeat(43)}`]);
@@ -240,9 +249,23 @@ test('9.2.10 real HTTP/RPC negative auth, scope, ticket, payload and command-bod
     await expect(rpc.call('session.choose', { commandId: randomUUID(), sessionId: launchedSessionId, choiceId: randomUUID(), answers: [] })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     await expect(rpc.call('session.launch', { commandId: launchCommandId, projectId: projects[1]!.sessionId, title: 'changed retry body', workspaceStrategy: { kind: 'current_checkout' } })).rejects.toMatchObject({ code: 'CONFLICT' });
     await expect(rpc.call('legacy.session.read', { sessionId: launchedSessionId, command: { type: 'api_proxy', method: 'GET', path: '/api/health', requestId: 'forbidden-api-proxy' } })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const unsupported = Object.entries(legacyCommandScopes).filter(([, scope]) => scope === 'unsupported').map(([type]) => type);
+    const rejectedLegacy: Array<{ type: string; code: string }> = [];
+    for (const type of unsupported) {
+      const command = type === 'subscribe_inventory' ? { type, requestId: 'negative-inventory' } : { type, agentId: launchedSessionId, profileId: projects[1]!.sessionId, sessionAgentId: launchedSessionId, text: 'negative fixture', choiceId: randomUUID(), answers: [], method: 'GET', path: '/api/health', requestId: 'negative-legacy' };
+      const code = parseClientCommand(Buffer.from(JSON.stringify(command))).ok ? 'FORBIDDEN' : 'INVALID_INPUT';
+      await expect(rpc.call('legacy.session.read', { sessionId: launchedSessionId, command })).rejects.toMatchObject({ code });
+      rejectedLegacy.push({ type, code });
+    }
+    evidence.unsupportedLegacy = { classifiedCommandCount: Object.keys(legacyCommandScopes).length, rejected: rejectedLegacy };
   } finally { rpc.close(); }
   const grant = await fixtureRpcOnce(environment.baseUrl, sessions[0]!, 'access.grant.create', { kind: 'link', label: 'read only fixture', scopes: ['session:read'], expiresInSeconds: 300, reachableBaseUrl: environment.baseUrl });
   const readOnly = await redeemFixtureGrant(environment, grant, 'link', ['session:read']);
+  const pinRequests: string[] = [];
+  await expect(pairEnvironment({ fetch: async (url, init) => { pinRequests.push(new URL(String(url)).pathname); return fetch(url, init); } } as RuntimePorts,
+    { baseUrl: environment.baseUrl, expectedEnvironmentId: sessions[1]!.environmentId, credential: { kind: 'code', code: 'AAAA-BBBB' }, deviceName: 'pin negative fixture', deviceKind: 'desktop', delivery: 'bearer', requestedScopes: ['session:read'] })).rejects.toMatchObject({ code: 'IDENTITY_MISMATCH' });
+  expect(pinRequests).toEqual(['/api/v2/environment']);
+  evidence.identityPin = { actualUrlEnvironment: sessions[0]!.environmentId, expectedEnvironment: sessions[1]!.environmentId, rejected: 'IDENTITY_MISMATCH', requests: pinRequests, noChallengeExchangeOrSocket: true };
   await expect(fixtureRpcOnce(environment.baseUrl, readOnly, 'session.send', { commandId: randomUUID(), sessionId: projects[0]!.sessionId, message: { text: 'denied', artifactIds: [] } })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   const narrowGrant = await fixtureRpcOnce(environment.baseUrl, sessions[0]!, 'access.grant.create', { kind: 'link', label: 'no escalation fixture', scopes: ['session:read'], expiresInSeconds: 300, reachableBaseUrl: environment.baseUrl });
   await expect(redeemFixtureGrant(environment, narrowGrant, 'link', ['session:operate'])).rejects.toThrow('Fixture pairing failed');

@@ -27,7 +27,7 @@ export interface EnvironmentFixture {
 }
 export interface FleetManifest {
   formatVersion: 1; runId: string; root: string; repositoryRoot: string;
-  artifactRoot: string; uiPort?: number; controlSocket: string; createdAt: string; status: 'running' | 'stopped' | 'failed';
+  artifactRoot: string; uiPort?: number; testedCommit?: string; controlSocket: string; createdAt: string; status: 'running' | 'stopped' | 'failed';
   provider: 'fixture'; teardown?: { ownedChildrenExited: number; rootRemoved: boolean }; environments: EnvironmentFixture[];
 }
 // Fill this port once A's named private IPC and normal exchange land. Sessions
@@ -102,7 +102,8 @@ export async function launchFleet(options: { environments?: number; out?: string
   await new Promise<void>(resolvePort => portReservation.listen(0, '127.0.0.1', resolvePort));
   const uiPort = (portReservation.address() as { port: number }).port;
   await new Promise<void>(resolvePort => portReservation.close(() => resolvePort()));
-  const manifest: FleetManifest = { formatVersion: 1, runId, root, repositoryRoot, artifactRoot, uiPort,
+  const testedCommit = await command(['rev-parse', 'HEAD'], repositoryRoot, sanitizedEnvironment());
+  const manifest: FleetManifest = { formatVersion: 1, runId, root, repositoryRoot, artifactRoot, uiPort, testedCommit,
     controlSocket: join(root, 'fleet-control.sock'), createdAt: new Date().toISOString(), status: 'running', provider: 'fixture', environments: [] };
   const children: ChildProcess[] = [];
   const paused = new Set<string>();

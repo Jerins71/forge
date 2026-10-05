@@ -18,6 +18,8 @@ declare global {
       setEnabled(id: string, enabled: boolean): Promise<void>
       retryNow(id: string): void
       flush(): Promise<void>
+      freshnessHistory(): Array<{ environmentId: string; phase: string; fresh: boolean; complete: boolean; sessions: number }>
+      detailEvidence(ref: SessionRef): unknown
     }
   }
 }
@@ -64,7 +66,37 @@ export function installEnvironmentE2EFixture(registry: EnvironmentRegistry) {
   Object.assign(host.style, { position: 'fixed', right: '8px', bottom: '8px', width: '460px', zIndex: '50', background: '#111', color: '#fff' })
   document.body.append(host)
   const root = createRoot(host)
+  const history: Array<{ environmentId: string; phase: string; fresh: boolean; complete: boolean; sessions: number }> = []
+  const observed = new Set<string>()
+  const previous = new Map<string, string>()
+  const attach = () => {
+    for (const environmentId of registry.catalog.getSnapshot().keys()) {
+      if (observed.has(environmentId)) continue
+      observed.add(environmentId)
+      const client = registry.get(environmentId)
+      const record = () => {
+        const shell = client.shell.getSnapshot(), connection = client.connection.getSnapshot()
+        const value = { environmentId, phase: connection.phase, fresh: connection.shellFresh, complete: shell.complete, sessions: shell.sessions.size }
+        const serialized = JSON.stringify(value)
+        if (previous.get(environmentId) === serialized) return
+        previous.set(environmentId, serialized); history.push(value)
+      }
+      client.shell.subscribe(state => state, record)
+      client.connection.subscribe(state => state, record)
+      record()
+    }
+  }
+  registry.catalog.subscribe(state => state, attach)
+  attach()
   window.__forgeE2ERuntime = {
+    detailEvidence: ref => {
+      const lease = registry.get(ref.environmentId).acquireDetail(ref.sessionId)
+      try {
+        const state = lease.store.getSnapshot()
+        return { freshness: state.freshness, sessionId: state.projection?.session.sessionId, transient: [...state.transient.values()].map(value => { const event = value as any; return { type: event.type, sessionAgentId: event.sessionAgentId, terminalCount: event.terminals?.length, terminalId: event.terminal?.terminalId } }) }
+      } finally { lease.release() }
+    },
+    freshnessHistory: () => [...history],
     snapshot: () => [...registry.catalog.getSnapshot().keys()].map(environmentId => {
       const client = registry.get(environmentId), shell = client.shell.getSnapshot(), connection = client.connection.getSnapshot()
       return { environmentId, phase: connection.phase, fresh: connection.shellFresh, complete: shell.complete, sessions: shell.sessions.size, cursor: shell.cursor }
