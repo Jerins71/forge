@@ -102,6 +102,9 @@ export const SessionSummarySchema = O({
   workspace: O({ kind: E('current_checkout', 'new_worktree'),
     cwd: Type.Union([Type.String({ maxLength: 4096 }), Type.Null()]),
     branch: Type.Union([ShortText, Type.Null()]) }),
+  // Optional so shells cached by older clients still decode; producers always send it.
+  model: Type.Optional(O({ provider: ShortText, modelId: ShortText, thinkingLevel: ShortText,
+    origin: E('profile_default', 'session_override') })),
 })
 export type SessionSummary = Static<typeof SessionSummarySchema>
 

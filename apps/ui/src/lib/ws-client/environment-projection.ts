@@ -37,7 +37,13 @@ export function projectSession(
     updatedAt: session.updatedAt,
     cwd:
       session.workspace.cwd ?? shell.projects.get(session.projectId)?.cwd ?? '',
-    model: previous?.model ?? pendingModel,
+    model: session.model
+      ? (previous?.model.provider === session.model.provider && previous.model.modelId === session.model.modelId
+          && previous.model.thinkingLevel === session.model.thinkingLevel
+          ? previous.model
+          : { provider: session.model.provider, modelId: session.model.modelId, thinkingLevel: session.model.thinkingLevel })
+      : previous?.model ?? pendingModel,
+    modelOrigin: session.model?.origin ?? previous?.modelOrigin,
     sessionFile: previous?.sessionFile ?? '',
     workerCount: session.workerCount,
     ...(session.archived
