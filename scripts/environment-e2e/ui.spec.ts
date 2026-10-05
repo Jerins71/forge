@@ -319,6 +319,54 @@ test('9.2.5/6 explicitly mounted three views share sockets, release streams, and
   assertions.mountedViews = { sockets: metrics.map(value => value.sockets), explicitDetails: 3, releasedDetails: 0, shellFreshness: freshness, browserReloadCachedResume: { requestBytes: proxyAfter.ws.requestBytes - proxyBefore.ws.requestBytes, responseBytes: proxyAfter.ws.responseBytes - proxyBefore.ws.responseBytes } }
 })
 
+test('Settings and Stats edit the picked environment only, with no secret material in URLs', async ({ page }) => {
+  const { a, b } = fleet!
+  const viewPaths = ['/api/settings/compaction', '/api/terminals/available-shells', '/api/settings/repositories', '/api/stats?']
+  const isViewRequest = (request: { path: string }) => viewPaths.some(path => request.path.startsWith(path))
+  const switchTo = async (label: string, environment: UiEnvironment) => {
+    const picker = page.getByRole('combobox', { name: label })
+    await picker.click()
+    const switched = featureRequests.length
+    await page.getByRole('option').filter({ hasText: environment.label }).click()
+    await expect(page).toHaveURL(new RegExp(`env=${environment.environmentId}`))
+    await expect(picker).toHaveAttribute('data-environment-id', environment.environmentId)
+    return switched
+  }
+
+  const settingsStart = featureRequests.length
+  await page.goto(`${fleet!.uiUrl}/?view=settings&settingsTab=general`)
+  const settingsPicker = page.getByRole('combobox', { name: 'Settings environment' })
+  // Defaults to this machine and names the environment being edited.
+  await expect(settingsPicker).toHaveAttribute('data-environment-id', a.environmentId)
+  await expect(settingsPicker).toContainText('This machine')
+  await expect.poll(() => featureRequests.slice(settingsStart).some(r => r.environmentId === a.environmentId && r.path === '/api/terminals/available-shells')).toBe(true)
+  await settingsPicker.click()
+  const options = page.getByRole('option')
+  assertions.settingsPickerOptions = await options.allTextContents()
+  await expect(options.filter({ hasText: b.label })).toContainText('Online')
+  await page.keyboard.press('Escape')
+  const settingsSwitched = await switchTo('Settings environment', b)
+  await expect(page.getByRole('combobox', { name: 'Settings environment' })).toContainText(b.label)
+  await expect.poll(() => featureRequests.slice(settingsSwitched).filter(isViewRequest).map(r => r.path)).toEqual(expect.arrayContaining(['/api/settings/compaction', '/api/terminals/available-shells', '/api/settings/repositories']))
+  await shot(page, 'settings-environment-b')
+
+  const statsStart = featureRequests.length
+  await page.goto(`${fleet!.uiUrl}/?view=stats`)
+  await expect(page.getByRole('combobox', { name: 'Stats environment' })).toHaveAttribute('data-environment-id', a.environmentId)
+  await expect.poll(() => featureRequests.slice(statsStart).some(r => r.environmentId === a.environmentId && r.path.startsWith('/api/stats?'))).toBe(true)
+  const statsSwitched = await switchTo('Stats environment', b)
+  await expect.poll(() => featureRequests.slice(statsSwitched).some(r => r.environmentId === b.environmentId && r.path.startsWith('/api/stats?'))).toBe(true)
+  await shot(page, 'stats-environment-b')
+
+  // After each switch every Settings/Stats view request targets B; nothing is aggregated from A.
+  const afterSwitch = [...featureRequests.slice(settingsSwitched, statsStart), ...featureRequests.slice(statsSwitched)].filter(isViewRequest)
+  expect(afterSwitch.length).toBeGreaterThan(0)
+  expect(afterSwitch.filter(r => r.environmentId !== b.environmentId)).toEqual([])
+  const urls = [...featureRequests.slice(settingsStart).map(r => r.path), page.url()]
+  expect(urls.filter(url => /(token|secret|bearer|api[-_]?key|authorization|credential)=/i.test(url))).toEqual([])
+  assertions.settingsStatsTarget = { environmentId: b.environmentId, requests: afterSwitch, secretUrls: 0 }
+})
+
 test('offline environment shows age, disables Run on, and never falls back to another machine', async ({ page }) => {
   const { a, b } = fleet!
   await fleet!.stop(b)
