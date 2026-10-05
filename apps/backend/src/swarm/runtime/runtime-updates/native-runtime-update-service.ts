@@ -89,7 +89,7 @@ export class NativeRuntimeUpdateService {
     const settle = (state: Omit<NativeRuntimeUpdateState, "startedAt" | "finishedAt">) => {
       this.updates.set(runtime, { ...state, startedAt, finishedAt: new Date().toISOString() });
     };
-    this.updates.set(runtime, { status: "running", startedAt, finishedAt: null, message: `Updating ${LABEL[runtime]}.` });
+    this.updates.set(runtime, { status: "running", startedAt, finishedAt: null, message: `${inspection.status.currentVersion ? "Updating" : "Installing"} ${LABEL[runtime]}.` });
     const previous = inspection.status.currentVersion;
     const target = inspection.status.latestVersion;
     const run = inspection.run;
@@ -99,7 +99,7 @@ export class NativeRuntimeUpdateService {
         const after = (await this.inspect(runtime)).status;
         const reached = Boolean(after.currentVersion && target && compareVersions(after.currentVersion, target) >= 0);
         settle(reached
-          ? { status: "succeeded", message: `${LABEL[runtime]} updated to ${after.currentVersion}. New sessions use it; running sessions keep ${previous ?? "their version"} until they restart.`, ...withOutput(output) }
+          ? { status: "succeeded", message: previous ? `${LABEL[runtime]} updated to ${after.currentVersion}. New sessions use it; running sessions keep ${previous} until they restart.` : `${LABEL[runtime]} ${after.currentVersion} installed. New sessions use it.`, ...withOutput(output) }
           : { status: "unchanged", message: `The update finished, but Forge still detects ${LABEL[runtime]} ${after.currentVersion ?? "without a readable version"}.`, ...withOutput(output) });
       } catch (error) {
         settle({
