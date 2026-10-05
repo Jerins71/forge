@@ -64,7 +64,7 @@ export function projectShell(shell: ShellState, previous: AgentDescriptor[], pre
     displayName: p.title,
     defaultSessionAgentId:
       shell.sessionIdsByProject.get(p.projectId)?.[0] ?? '',
-    defaultModel: pendingModel,
+    defaultModel: p.defaultModel ?? pendingModel,
     createdAt: p.updatedAt,
     updatedAt: p.updatedAt,
     ...(p.archived ? { archivedAt: p.updatedAt } : {}),

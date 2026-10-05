@@ -84,6 +84,8 @@ export const ProjectSummarySchema = O({
   updatedAt: V2Time,
   sortKey: ShortText,
   archived: Type.Boolean(),
+  // Model new threads start on unless the launch names one.
+  defaultModel: Type.Optional(O({ provider: ShortText, modelId: ShortText, thinkingLevel: ShortText })),
 })
 export type ProjectSummary = Static<typeof ProjectSummarySchema>
 export const WorkspaceStrategySchema = Type.Union([

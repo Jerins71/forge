@@ -146,7 +146,9 @@ function LaunchModelPicker({ target, model, onChange }: {
     (state: ManagerWsState) => state.profiles.find((profile) => profile.profileId === target.projectId)?.defaultModel,
     [target.projectId],
   )
-  const projectDefault = useOriginSlice(target.environmentId, selectDefault)
+  const reportedDefault = useOriginSlice(target.environmentId, selectDefault)
+  // Older machines report no default; the picker then shows only explicit choices.
+  const projectDefault = reportedDefault?.provider ? reportedDefault : undefined
   const currentModel = model ?? projectDefault ?? { provider: '', modelId: '', thinkingLevel: '' }
   return (
     <SessionModelPicker config={{

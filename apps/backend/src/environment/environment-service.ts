@@ -151,6 +151,7 @@ export async function createEnvironmentService(options: {
             updatedAt: profile.updatedAt,
             sortKey: String(profile.sortOrder ?? profile.createdAt),
             archived: Boolean(profile.archivedAt),
+            defaultModel: { provider: profile.defaultModel.provider, modelId: profile.defaultModel.modelId, thinkingLevel: profile.defaultModel.thinkingLevel },
           };
         },
         unread: (sessionId, projectId) => unreadTracker.getCount(projectId, sessionId),
