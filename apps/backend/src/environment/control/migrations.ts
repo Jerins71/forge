@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3'
+import type { Database } from "better-sqlite3";
 
 const INITIAL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS environment_meta (
@@ -180,16 +180,21 @@ CREATE TABLE IF NOT EXISTS device_sessions (
   expires_at INTEGER NOT NULL,
   revoked_at INTEGER
 );
-`
+`;
 
 /** Additive initial migration: no file-backed content or existing identity is rewritten. */
 export function migrateControlDatabase(database: Database, identity: { environmentId: string; streamEpoch: string }): void {
-  database.transaction(() => {
-    database.exec(INITIAL_SCHEMA)
-    database.prepare(`INSERT OR IGNORE INTO environment_meta
-      (singleton, schema_version, environment_id, stream_epoch) VALUES (1, 1, ?, ?)`)
-      .run(identity.environmentId, identity.streamEpoch)
-    const meta = database.prepare('SELECT schema_version FROM environment_meta WHERE singleton = 1').get() as { schema_version: number }
-    if (meta.schema_version !== 1) throw new Error('Unsupported environment control schema version')
-  }).immediate()
+  database
+    .transaction(() => {
+      database.exec(INITIAL_SCHEMA);
+      database
+        .prepare(
+          `INSERT OR IGNORE INTO environment_meta
+      (singleton, schema_version, environment_id, stream_epoch) VALUES (1, 1, ?, ?)`,
+        )
+        .run(identity.environmentId, identity.streamEpoch);
+      const meta = database.prepare("SELECT schema_version FROM environment_meta WHERE singleton = 1").get() as { schema_version: number };
+      if (meta.schema_version !== 1) throw new Error("Unsupported environment control schema version");
+    })
+    .immediate();
 }

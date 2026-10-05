@@ -1,61 +1,90 @@
-import { mkdtemp, cp, readFile, writeFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { afterEach, expect, it } from 'vitest';
-import { loadEnvironmentIdentity, recoverEnvironmentIdentity } from './identity.js';
-import { createExposurePolicy, enableTailscaleServe, disableOwnedTailscaleServe } from './exposure-policy.js';
-import { applyAccessMigrations } from './access/access-migrations.js';
-import { loadConfiguredSqliteDatabaseConstructor } from '../sqlite-database-loader.js';
+import { mkdtemp, cp, readFile, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { afterEach, expect, it } from "vitest";
+import { loadEnvironmentIdentity, recoverEnvironmentIdentity } from "./identity.js";
+import { createExposurePolicy, enableTailscaleServe, disableOwnedTailscaleServe } from "./exposure-policy.js";
+import { applyAccessMigrations } from "./access/access-migrations.js";
+import { loadConfiguredSqliteDatabaseConstructor } from "../sqlite-database-loader.js";
 let root: string;
-afterEach(async () => { if (root) await rm(root, { recursive: true, force: true }); });
-it('persists identity across restart, blocks a copied root, rekeys without rewriting content, and adopts an intentional move', async () => {
-  root = await mkdtemp(join(tmpdir(), 'forge-identity-'));
-  const dataDir = join(root, 'data');
-  const installationStateDir = join(root, 'host');
-  await expect(loadEnvironmentIdentity({dataDir,installationStateDir,label:'x'.repeat(81)})).rejects.toThrow(/descriptor/);
+afterEach(async () => {
+  if (root) await rm(root, { recursive: true, force: true });
+});
+it("persists identity across restart, blocks a copied root, rekeys without rewriting content, and adopts an intentional move", async () => {
+  root = await mkdtemp(join(tmpdir(), "forge-identity-"));
+  const dataDir = join(root, "data");
+  const installationStateDir = join(root, "host");
+  await expect(loadEnvironmentIdentity({ dataDir, installationStateDir, label: "x".repeat(81) })).rejects.toThrow(/descriptor/);
   const first = await loadEnvironmentIdentity({ dataDir, installationStateDir });
   expect((await loadEnvironmentIdentity({ dataDir, installationStateDir })).file).toEqual(first.file);
-  await writeFile(join(dataDir, 'user.md'), 'retain me');
-  const copy = join(root, 'copy');
+  await writeFile(join(dataDir, "user.md"), "retain me");
+  const copy = join(root, "copy");
   await cp(dataDir, copy, { recursive: true });
-  await expect(loadEnvironmentIdentity({ dataDir: copy, installationStateDir })).rejects.toMatchObject({ code: 'IDENTITY_MISMATCH' });
+  await expect(loadEnvironmentIdentity({ dataDir: copy, installationStateDir })).rejects.toMatchObject({ code: "IDENTITY_MISMATCH" });
   const Database = await loadConfiguredSqliteDatabaseConstructor();
-  const db = new Database(join(root, 'control.sqlite'));
+  const db = new Database(join(root, "control.sqlite"));
   applyAccessMigrations(db);
   db.exec("CREATE TABLE environment_meta(singleton INTEGER PRIMARY KEY, environment_id TEXT, stream_epoch TEXT)");
-  db.prepare('INSERT INTO environment_meta VALUES(1,?,?)').run(first.environmentId, first.file.streamEpoch);
-  const changed = await recoverEnvironmentIdentity({ dataDir: copy, installationStateDir, database: db, action: 'rekey' });
+  db.prepare("INSERT INTO environment_meta VALUES(1,?,?)").run(first.environmentId, first.file.streamEpoch);
+  const changed = await recoverEnvironmentIdentity({ dataDir: copy, installationStateDir, database: db, action: "rekey" });
   expect(changed.environmentId).not.toBe(first.environmentId);
   expect(changed.file.streamEpoch).not.toBe(first.file.streamEpoch);
-  expect(await readFile(join(copy, 'user.md'), 'utf8')).toBe('retain me');
+  expect(await readFile(join(copy, "user.md"), "utf8")).toBe("retain me");
   expect((await loadEnvironmentIdentity({ dataDir: copy, installationStateDir })).environmentId).toBe(changed.environmentId);
-  const moved = join(root, 'moved');
+  const moved = join(root, "moved");
   await cp(dataDir, moved, { recursive: true });
-  const adopted = await recoverEnvironmentIdentity({ dataDir: moved, installationStateDir, database: db, action: 'adopt', previousDataDir: dataDir });
+  const adopted = await recoverEnvironmentIdentity({
+    dataDir: moved,
+    installationStateDir,
+    database: db,
+    action: "adopt",
+    previousDataDir: dataDir,
+  });
   expect(adopted.environmentId).toBe(first.environmentId);
-  await expect(loadEnvironmentIdentity({ dataDir, installationStateDir })).rejects.toMatchObject({ code: 'IDENTITY_MISMATCH' });
+  await expect(loadEnvironmentIdentity({ dataDir, installationStateDir })).rejects.toMatchObject({ code: "IDENTITY_MISMATCH" });
   db.close();
 });
-it('requires an explicit remote HTTPS plan and trusts forwarded metadata only from the configured loopback peer', () => {
-  expect(() => createExposurePolicy({ host: '0.0.0.0', port: 47187 })).toThrow();
-  expect(() => createExposurePolicy({ host: '0.0.0.0', port: 47187, publicBaseUrl: 'http://dev1.test' })).toThrow();
-  const policy = createExposurePolicy({ host: '0.0.0.0', port: 47187, publicBaseUrl: 'https://dev1.test', trustedProxy: { peer: '127.0.0.1', host: 'dev1.test', proto: 'https' } });
-  expect(policy.publicBaseUrl).toBe('https://dev1.test');
-  expect(() => policy.validateForwarding({ headers: { 'x-forwarded-host': 'evil.test', 'x-forwarded-proto': 'https' }, socket: { remoteAddress: '127.0.0.1' } } as never)).toThrow();
+it("requires an explicit remote HTTPS plan and trusts forwarded metadata only from the configured loopback peer", () => {
+  expect(() => createExposurePolicy({ host: "0.0.0.0", port: 47187 })).toThrow();
+  expect(() => createExposurePolicy({ host: "0.0.0.0", port: 47187, publicBaseUrl: "http://dev1.test" })).toThrow();
+  const policy = createExposurePolicy({
+    host: "0.0.0.0",
+    port: 47187,
+    publicBaseUrl: "https://dev1.test",
+    trustedProxy: { peer: "127.0.0.1", host: "dev1.test", proto: "https" },
+  });
+  expect(policy.publicBaseUrl).toBe("https://dev1.test");
+  expect(() =>
+    policy.validateForwarding({
+      headers: { "x-forwarded-host": "evil.test", "x-forwarded-proto": "https" },
+      socket: { remoteAddress: "127.0.0.1" },
+    } as never),
+  ).toThrow();
 });
 
-it('tracks only an absent Tailscale root rule and disables that exact owned path while preserving other routes', async () => {
-  root = await mkdtemp(join(tmpdir(),'forge-tailscale-'));
-  const ownershipFile = join(root,'owned.json'); const calls: string[][] = [];
-  const status = {Web:{'dev1.test:443':{Handlers:{'/other':{Proxy:'http://127.0.0.1:9999'}} as Record<string,{Proxy:string}>}}};
-  const run = async(args:string[])=>{calls.push(args); if(args.includes('status'))return JSON.stringify(status); if(args.includes('off'))delete status.Web['dev1.test:443'].Handlers['/']; else status.Web['dev1.test:443'].Handlers['/']={Proxy:'http://127.0.0.1:47187'}; return '';};
-  await enableTailscaleServe({backendPort:47187,publicBaseUrl:'https://dev1.test',ownershipFile,run,probe:async()=>{}});
-  expect(await readFile(ownershipFile,'utf8')).toContain('127.0.0.1:47187');
-  await disableOwnedTailscaleServe({ownershipFile,run});
-  expect(status.Web['dev1.test:443'].Handlers['/other']).toEqual({Proxy:'http://127.0.0.1:9999'});
-  expect(calls.at(-1)).toEqual(['serve','--https=443','--set-path=/','off']);
-  status.Web['dev1.test:443'].Handlers['/']={Proxy:'http://127.0.0.1:47187'};
-  await enableTailscaleServe({backendPort:47187,publicBaseUrl:'https://dev1.test',ownershipFile,run,probe:async()=>{}});
-  await expect(readFile(ownershipFile,'utf8')).rejects.toMatchObject({code:'ENOENT'});
-  const before = calls.length; await disableOwnedTailscaleServe({ownershipFile,run}); expect(calls).toHaveLength(before);
+it("tracks only an absent Tailscale root rule and disables that exact owned path while preserving other routes", async () => {
+  root = await mkdtemp(join(tmpdir(), "forge-tailscale-"));
+  const ownershipFile = join(root, "owned.json");
+  const calls: string[][] = [];
+  const status = {
+    Web: { "dev1.test:443": { Handlers: { "/other": { Proxy: "http://127.0.0.1:9999" } } as Record<string, { Proxy: string }> } },
+  };
+  const run = async (args: string[]) => {
+    calls.push(args);
+    if (args.includes("status")) return JSON.stringify(status);
+    if (args.includes("off")) delete status.Web["dev1.test:443"].Handlers["/"];
+    else status.Web["dev1.test:443"].Handlers["/"] = { Proxy: "http://127.0.0.1:47187" };
+    return "";
+  };
+  await enableTailscaleServe({ backendPort: 47187, publicBaseUrl: "https://dev1.test", ownershipFile, run, probe: async () => {} });
+  expect(await readFile(ownershipFile, "utf8")).toContain("127.0.0.1:47187");
+  await disableOwnedTailscaleServe({ ownershipFile, run });
+  expect(status.Web["dev1.test:443"].Handlers["/other"]).toEqual({ Proxy: "http://127.0.0.1:9999" });
+  expect(calls.at(-1)).toEqual(["serve", "--https=443", "--set-path=/", "off"]);
+  status.Web["dev1.test:443"].Handlers["/"] = { Proxy: "http://127.0.0.1:47187" };
+  await enableTailscaleServe({ backendPort: 47187, publicBaseUrl: "https://dev1.test", ownershipFile, run, probe: async () => {} });
+  await expect(readFile(ownershipFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  const before = calls.length;
+  await disableOwnedTailscaleServe({ ownershipFile, run });
+  expect(calls).toHaveLength(before);
 });

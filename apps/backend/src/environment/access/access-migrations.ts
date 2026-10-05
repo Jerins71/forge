@@ -1,8 +1,9 @@
-import type Database from 'better-sqlite3';
+import type Database from "better-sqlite3";
 
 /** Additive, idempotent access migration in the shared control DB. Tickets are memory-only. */
 export function applyAccessMigrations(db: Database.Database): void {
-  db.transaction(() => db.exec(`
+  db.transaction(() =>
+    db.exec(`
     CREATE TABLE IF NOT EXISTS pairing_grants (
       grant_id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('link','code','bootstrap')),
       credential_hash TEXT NOT NULL UNIQUE, label TEXT NOT NULL, scopes_json TEXT NOT NULL,
@@ -26,5 +27,6 @@ export function applyAccessMigrations(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS access_grants_expiry ON pairing_grants(expires_at);
     CREATE INDEX IF NOT EXISTS access_sessions_expiry ON device_sessions(expires_at);
-  `))();
+  `),
+  )();
 }
