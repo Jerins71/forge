@@ -46,8 +46,10 @@ export async function handleManagerCommand<Connection>(context: ManagerCommandRo
   } = context;
 
   if (command.type === "create_manager") {
-    const managerContextId = resolveManagerContextAgentId(subscribedAgentId);
-    if (!managerContextId) {
+    // An empty context is a direct request from an authenticated user (authorized by workspace:write),
+    // not a manager agent acting on someone's behalf.
+    const managerContextId = subscribedAgentId ? resolveManagerContextAgentId(subscribedAgentId) : "";
+    if (managerContextId === undefined) {
       send(socket, {
         type: "error",
         code: "UNKNOWN_AGENT",
@@ -85,8 +87,10 @@ export async function handleManagerCommand<Connection>(context: ManagerCommandRo
   }
 
   if (command.type === "create_repository_project") {
-    const managerContextId = resolveManagerContextAgentId(subscribedAgentId);
-    if (!managerContextId) {
+    // An empty context is a direct request from an authenticated user (authorized by workspace:write),
+    // not a manager agent acting on someone's behalf.
+    const managerContextId = subscribedAgentId ? resolveManagerContextAgentId(subscribedAgentId) : "";
+    if (managerContextId === undefined) {
       send(socket, {
         type: "error",
         code: "UNKNOWN_AGENT",

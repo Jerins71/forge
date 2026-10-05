@@ -1469,8 +1469,10 @@ export class SwarmAgentLifecycleService {
     callerAgentId: string,
     input: { name: string; cwd: string; model?: SwarmModelPreset; modelSelection?: ManagerExactModelSelection; reasoningLevel?: SwarmReasoningLevel; secureSessionsEnabled?: boolean }
   ): Promise<AgentDescriptor> {
-    const callerDescriptor = this.options.descriptors.get(callerAgentId);
-    if (!callerDescriptor || callerDescriptor.role !== "manager") {
+    const callerDescriptor = callerAgentId ? this.options.descriptors.get(callerAgentId) : undefined;
+    if (callerAgentId === "") {
+      // Direct user request through an authenticated environment client; the route already required workspace:write.
+    } else if (!callerDescriptor || callerDescriptor.role !== "manager") {
       const canBootstrap = !this.options.hasRunningManagers();
       if (!canBootstrap) {
         throw new Error("Only manager can create managers");
