@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ProviderAccountUsage, ProviderUsageStats } from '@forge/protocol'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
-import { resolveBackendWsUrl } from '@/lib/backend-url'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
+import { useEnvironmentSettingsClient } from './use-environment-settings-client'
 import { useForegroundPoll } from './use-foreground-poll'
 
 const PROVIDER_USAGE_POLL_MS = 180_000
@@ -12,17 +12,18 @@ export interface ProviderUsageResult {
   refetch: () => void
 }
 
+/** Provider usage of this machine (the primary environment). */
 export function useProviderUsage(enabled: boolean): ProviderUsageResult {
   const [providers, setProviders] = useState<ProviderUsageStats | null>(null)
   const [loading, setLoading] = useState(false)
-  const wsUrl = useMemo(() => resolveBackendWsUrl(), [])
+  const client = useEnvironmentSettingsClient(useOptionalEnvironmentContext()?.primaryEnvironmentId)
 
   const poll = useCallback(
     async (signal: AbortSignal) => {
+      if (!client) return
       setLoading(true)
       try {
-        const endpoint = resolveApiEndpoint(wsUrl, '/api/provider-usage')
-        const response = await fetch(endpoint, { signal })
+        const response = await client.fetch('/api/provider-usage', { signal })
         if (!response.ok) {
           throw new Error(`Failed to fetch provider usage: ${response.status}`)
         }
@@ -51,7 +52,7 @@ export function useProviderUsage(enabled: boolean): ProviderUsageResult {
         if (!signal.aborted) setLoading(false)
       }
     },
-    [wsUrl],
+    [client],
   )
 
   const { refetch } = useForegroundPoll(poll, {

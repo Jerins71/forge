@@ -180,12 +180,11 @@ function CommandForm({
 /* ------------------------------------------------------------------ */
 
 interface SettingsSlashCommandsProps {
-  wsUrl: string
-  apiClient?: SettingsApiClient
+  apiClient: SettingsApiClient
 }
 
-export function SettingsSlashCommands({ wsUrl, apiClient }: SettingsSlashCommandsProps) {
-  const clientOrWsUrl: SettingsApiClient | string = apiClient ?? wsUrl
+export function SettingsSlashCommands({ apiClient }: SettingsSlashCommandsProps) {
+  const clientOrWsUrl = apiClient
   const [commands, setCommands] = useState<SlashCommand[]>([])
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)

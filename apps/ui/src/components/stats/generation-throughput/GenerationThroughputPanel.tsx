@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { AlertCircle, BarChart3, ChevronRight, RefreshCw } from 'lucide-react'
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type {
@@ -17,16 +17,19 @@ import { cn } from '@/lib/utils'
 import { GenerationThroughputApiError, fetchGenerationCalls } from './generation-throughput-api'
 import { GenerationThroughputFilters, type GenerationThroughputFilterState } from './GenerationThroughputFilters'
 import { useGenerationThroughput } from './use-generation-throughput'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
 type TrendMetric = 'weighted' | 'p50' | 'ttft'
 
 export function GenerationThroughputPanel({
-  wsUrl,
+  client,
+  headerAccessory,
   onBack,
   activeTab,
   onTabChange,
 }: {
-  wsUrl: string
+  client: SettingsApiClient
+  headerAccessory?: ReactNode
   onBack: () => void
   activeTab?: StatsTab
   onTabChange?: (tab: StatsTab) => void
@@ -34,11 +37,12 @@ export function GenerationThroughputPanel({
   const [filters, setFilters] = useState<GenerationThroughputFilterState>({ rangePreset: '7d', quality: 'all_measured' })
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('weighted')
   const query = useMemo<GenerationThroughputQuery>(() => ({ ...filters }), [filters])
-  const { snapshot, isLoading, isRefreshing, isSwitchingQuery, error, refresh } = useGenerationThroughput(wsUrl, query)
+  const { snapshot, isLoading, isRefreshing, isSwitchingQuery, error, refresh } = useGenerationThroughput(client, query)
   const back = useCallback(() => onTabChange ? onTabChange('overview') : onBack(), [onBack, onTabChange])
 
   return (
     <StatsLayout
+      headerAccessory={headerAccessory}
       onBack={back}
       computedAt={snapshot?.computedAt}
       isRefreshing={isRefreshing}
@@ -61,7 +65,7 @@ export function GenerationThroughputPanel({
               <RoleSummary snapshot={snapshot} />
               <TrendChart snapshot={snapshot} metric={trendMetric} onMetricChange={setTrendMetric} />
               <ModelTable snapshot={snapshot} />
-              <RecentCalls wsUrl={wsUrl} query={query} />
+              <RecentCalls client={client} query={query} />
             </>
           )}
         </div>
@@ -119,11 +123,11 @@ function ModelTable({ snapshot }: { snapshot: GenerationThroughputSnapshot }) {
   return <Card className="overflow-hidden border-border/50 bg-card/80"><div className="border-b border-border/50 px-4 py-3"><h2 className="text-sm font-semibold">Model performance</h2><p className="text-xs text-muted-foreground">Response throughput uses final provider output across the complete request duration.</p></div><div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="bg-muted/30 text-muted-foreground"><tr><th className="px-4 py-2 font-medium">Model</th><th className="px-3 py-2 font-medium">Calls</th><th className="px-3 py-2 font-medium">Output</th><th className="px-3 py-2 font-medium">Weighted</th><th className="px-3 py-2 font-medium">p50 / p90</th><th className="px-3 py-2 font-medium">TTFT</th><th className="px-3 py-2 font-medium">Coverage</th></tr></thead><tbody>{snapshot.models.map((model) => <tr key={`${model.provider}/${model.modelId}`} className="border-t border-border/40"><td className="px-4 py-2"><div className="font-medium text-foreground">{model.displayName}</div><div className="text-muted-foreground">{model.provider}</div></td><td className="px-3 py-2">{model.measuredCallCount}</td><td className="px-3 py-2">{formatTokens(model.outputTokens)}</td><td className="px-3 py-2 font-mono">{formatRate(model.weightedResponseTokensPerSecond ?? null)}</td><td className="px-3 py-2">{formatRate(model.p50ResponseTokensPerSecond ?? null)} / {formatRate(model.p90ResponseTokensPerSecond ?? null)}</td><td className="px-3 py-2">{formatDuration(model.p50TimeToFirstOutputMs)}</td><td className="px-3 py-2">{formatPercent(model.coverage)}</td></tr>)}</tbody></table></div>{snapshot.modelTableTruncated ? <p className="border-t border-border/50 px-4 py-2 text-xs text-muted-foreground">Showing the top 100 models by measured output.</p> : null}</Card>
 }
 
-function RecentCalls({ wsUrl, query }: { wsUrl: string; query: GenerationThroughputQuery }) {
+function RecentCalls({ client, query }: { client: SettingsApiClient; query: GenerationThroughputQuery }) {
   const [page, setPage] = useState<GenerationThroughputCallsPage | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const requestKey = useMemo(() => `${wsUrl}\u0000${JSON.stringify(query)}`, [query, wsUrl])
+  const requestKey = useMemo(() => JSON.stringify(query), [query])
   const [pagination, setPagination] = useState(() => ({ requestKey, cursor: undefined as string | undefined }))
 
   useEffect(() => {
@@ -140,11 +144,11 @@ function RecentCalls({ wsUrl, query }: { wsUrl: string; query: GenerationThrough
     const { cursor } = pagination
     setLoading(true)
     setError(null)
-    fetchGenerationCalls(wsUrl, { ...query, cursor, limit: 25 }).then((next) => {
+    fetchGenerationCalls(client, { ...query, cursor, limit: 25 }).then((next) => {
       if (!cancelled) setPage((current) => cursor ? appendCallsPage(current, next) : next)
     }).catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : 'Failed to load calls') }).finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [pagination, query, requestKey, wsUrl])
+  }, [pagination, query, requestKey, client])
 
   return <Card className="overflow-hidden border-border/50 bg-card/80"><div className="flex items-center justify-between border-b border-border/50 px-4 py-3"><div><h2 className="text-sm font-semibold">Recent responses</h2><p className="text-xs text-muted-foreground">Per model call; the full request duration is the response-throughput denominator.</p></div>{loading ? <RefreshCw className="size-4 animate-spin text-muted-foreground" /> : null}</div>{error ? <p className="p-4 text-xs text-destructive">{error}</p> : <CallsTable calls={page?.items ?? []} />}{page?.nextCursor ? <div className="border-t border-border/50 p-2 text-right"><Button variant="ghost" size="sm" className="gap-1 text-xs" disabled={loading || pagination.requestKey !== requestKey} onClick={() => setPagination({ requestKey, cursor: page.nextCursor ?? undefined })}>Load more <ChevronRight className="size-3" /></Button></div> : null}</Card>
 }

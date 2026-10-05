@@ -20,6 +20,7 @@ import type {
   TokenAnalyticsQuery,
 } from '@forge/protocol'
 import { fetchTokenWorkers } from './token-analytics-api'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
 function formatTimestamp(iso: string): string {
   try {
@@ -68,11 +69,11 @@ function SortableHeader({ label, field, currentSort, currentDir, onSort, classNa
 }
 
 interface WorkerRunsTableProps {
-  wsUrl: string
+  client: SettingsApiClient
   query: TokenAnalyticsQuery
 }
 
-export function WorkerRunsTable({ wsUrl, query }: WorkerRunsTableProps) {
+export function WorkerRunsTable({ client, query }: WorkerRunsTableProps) {
   const [items, setItems] = useState<TokenAnalyticsWorkerRunSummary[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -122,7 +123,7 @@ export function WorkerRunsTable({ wsUrl, query }: WorkerRunsTableProps) {
     }
     setError(null)
     try {
-      const page = await fetchTokenWorkers(wsUrl, {
+      const page = await fetchTokenWorkers(client, {
         ...query,
         limit: 20,
         cursor,
@@ -143,7 +144,7 @@ export function WorkerRunsTable({ wsUrl, query }: WorkerRunsTableProps) {
       setIsLoading(false)
       setIsLoadingMore(false)
     }
-  }, [wsUrl, query, sort, direction])
+  }, [client, query, sort, direction])
 
   const handleSort = (field: TokenAnalyticsWorkerSort) => {
     let newDir: TokenAnalyticsSortDirection = 'desc'
@@ -233,7 +234,7 @@ export function WorkerRunsTable({ wsUrl, query }: WorkerRunsTableProps) {
                       primaryModel={primaryModel}
                       isExpanded={isExpanded}
                       onToggle={() => toggleExpand(worker.workerId)}
-                      wsUrl={wsUrl}
+                      client={client}
                     />
                   )
                 })}
@@ -273,10 +274,10 @@ interface WorkerRowProps {
   primaryModel: { modelId: string; provider: string; totalTokens: number } | undefined
   isExpanded: boolean
   onToggle: () => void
-  wsUrl: string
+  client: SettingsApiClient
 }
 
-function WorkerRow({ worker, primaryModel, isExpanded, onToggle, wsUrl }: WorkerRowProps) {
+function WorkerRow({ worker, primaryModel, isExpanded, onToggle, client }: WorkerRowProps) {
   const specialistLabel = worker.specialistDisplayName
     ?? (worker.attributionKind === 'ad_hoc' ? 'Ad-hoc' : worker.attributionKind === 'unknown' ? 'Legacy' : '—')
 
@@ -339,7 +340,7 @@ function WorkerRow({ worker, primaryModel, isExpanded, onToggle, wsUrl }: Worker
         <TableRow className="hover:bg-transparent">
           <TableCell colSpan={9} className="bg-muted/10 p-0">
             <WorkerRunEventsPanel
-              wsUrl={wsUrl}
+              client={client}
               profileId={worker.profileId}
               sessionId={worker.sessionId}
               workerId={worker.workerId}

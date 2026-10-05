@@ -114,6 +114,7 @@ import { buildModelCacheHeaderSummary } from '@/components/chat/model-cache'
 import { isPiGenerationThroughputEligible } from '@/lib/generation-throughput-eligibility'
 import { deriveMissingPendingChoiceIds } from '@/lib/ws-client/utils'
 import { useEnvironmentConnection, useEnvironmentHandles } from '@/hooks/index-page/use-environment-connection'
+import { useEnvironmentSettingsClient } from '@/hooks/use-environment-settings-client'
 import { useOriginSlice } from '@/lib/origin-store'
 import type { ManagerWsState } from '@/lib/ws-state'
 import { useManagerActions } from '@/hooks/index-page/use-manager-actions'
@@ -206,14 +207,17 @@ export function BuilderSurface({
 
   // ── Environment addressing ──
   // The chat workspace and every project panel address the routed session's own environment. The
-  // sidebar tree, project actions and app-wide views stay on the primary environment. An unknown
-  // environment is never opened against another host.
+  // sidebar tree, project actions and app-wide views stay on the primary environment unless Settings
+  // or Stats explicitly target another one. An unknown environment is never opened against another host.
   const environmentContext = useOptionalEnvironmentContext()
   const primaryEnvironmentId = environmentContext?.primaryEnvironmentId || null
-  const routedEnvironmentId = routeState.view === 'chat' ? routeState.environmentId : undefined
+  const routedEnvironmentId = routeState.view === 'chat' || routeState.view === 'settings' ? routeState.environmentId : undefined
   const selectedEnvironmentId = routedEnvironmentId ?? primaryEnvironmentId
   const { client: localClient, clientRef, httpClientRef, state, setState } = useEnvironmentConnection(selectedEnvironmentId)
   const isPrimarySelected = selectedEnvironmentId === primaryEnvironmentId
+  // App-level calls (onboarding, provider usage) address this machine.
+  const primarySettingsClient = useEnvironmentSettingsClient(primaryEnvironmentId)
+  const selectedSettingsClient = useEnvironmentSettingsClient(selectedEnvironmentId)
   // Stable so delivery-state rows stay memoized; Retry keeps the command, Resend creates a new one.
   const handleRetryEnvironmentMessage = useCallback((commandId: string) => {
     clientRef.current?.retryEnvironmentMessage(commandId)
@@ -280,7 +284,7 @@ export function BuilderSurface({
     error: onboardingError,
     savePreferences: saveOnboardingPreferences,
     skip: skipOnboarding,
-  } = useOnboardingState(wsUrl)
+  } = useOnboardingState(primarySettingsClient)
 
   const [messageSourceView, setMessageSourceView] = useState<MessageSourceView>('web')
   const [planExpanded, setPlanExpanded] = useState(false)
@@ -891,6 +895,7 @@ export function BuilderSurface({
     activeAgentStatus,
     messageSourceView,
     messageListRef,
+    settingsClient: selectedSettingsClient,
   })
   const { feedback } = transcript
   const isLoading = transcript.isLoading
@@ -1877,7 +1882,6 @@ export function BuilderSurface({
   })
   const { replyTarget, setReplyTarget, messageForkTarget, setMessageForkTarget } = session
   const sideChatPanelProps = {
-    wsUrl,
     environmentId: selectedEnvironmentId ?? '',
     sideChatAgentId: sideChat.sideChatAgentId,
     sourceLabel: activeAgentLabel,
@@ -2164,7 +2168,14 @@ export function BuilderSurface({
               </div>
             ) : activeView === 'settings' ? (
               <SettingsPanel
-                wsUrl={wsUrl}
+                environmentId={selectedEnvironmentId ?? ''}
+                onEnvironmentChange={(environmentId) =>
+                  navigateToRoute({
+                    view: 'settings',
+                    settingsTab: routeState.view === 'settings' ? routeState.settingsTab : undefined,
+                    ...(environmentId !== primaryEnvironmentId ? { environmentId } : {}),
+                  })
+                }
                 managers={settingsManagers}
                 profiles={state.profiles}
                 promptChangeKey={state.promptChangeKey}
@@ -2190,7 +2201,7 @@ export function BuilderSurface({
               />
             ) : activeView === 'stats' ? (
               <StatsPage
-                wsUrl={wsUrl}
+                environmentId={(routeState.view === 'stats' ? routeState.environmentId : undefined) ?? primaryEnvironmentId ?? ''}
                 routeState={routeState as { view: 'stats'; statsTab?: StatsTab }}
                 onBack={() =>
                   navigateToRoute({
@@ -2199,7 +2210,14 @@ export function BuilderSurface({
                   })
                 }
                 onTabChange={(tab) =>
-                  navigateToRoute({ view: 'stats', statsTab: tab })
+                  navigateToRoute({ view: 'stats', statsTab: tab, ...(routeState.view === 'stats' && routeState.environmentId ? { environmentId: routeState.environmentId } : {}) })
+                }
+                onEnvironmentChange={(environmentId) =>
+                  navigateToRoute({
+                    view: 'stats',
+                    statsTab: routeState.view === 'stats' ? routeState.statsTab : undefined,
+                    ...(environmentId !== primaryEnvironmentId ? { environmentId } : {}),
+                  })
                 }
               />
             ) : activeView === 'archive' ? (
@@ -2491,7 +2509,6 @@ export function BuilderSurface({
                     : undefined,
                   allowWhileLoading: true,
                   agentLabel: activeAgentLabel,
-                  wsUrl,
                   environmentClient,
                   agentId: activeAgentId ?? undefined,
                   draftKey: activeAgentId && selectedEnvironmentId ? qualifiedKey(selectedEnvironmentId, activeAgentId) : undefined,

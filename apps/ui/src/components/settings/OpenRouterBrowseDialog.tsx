@@ -24,8 +24,7 @@ interface ProviderGroupData {
 interface OpenRouterBrowseDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  wsUrl: string | undefined
-  apiClient?: SettingsApiClient
+  apiClient: SettingsApiClient
   addedModelIds: Set<string>
   onModelAdded: () => void
 }
@@ -33,12 +32,11 @@ interface OpenRouterBrowseDialogProps {
 export function OpenRouterBrowseDialog({
   open,
   onOpenChange,
-  wsUrl,
   apiClient,
   addedModelIds,
   onModelAdded,
 }: OpenRouterBrowseDialogProps) {
-  const clientOrWsUrl: SettingsApiClient | string | undefined = apiClient ?? wsUrl
+  const clientOrWsUrl = apiClient
   const [allModels, setAllModels] = useState<AvailableOpenRouterModel[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

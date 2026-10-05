@@ -1,5 +1,4 @@
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
-import { readApiError } from './settings-api-client'
+import type { SettingsApiClient } from './settings-api-client'
 
 export interface ShellOption {
   path: string
@@ -19,12 +18,9 @@ export interface AvailableShellsResponse {
 }
 
 export async function fetchAvailableShells(
-  wsUrl: string,
+  client: SettingsApiClient,
 ): Promise<AvailableShellsResponse> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/terminals/available-shells')
-  const response = await fetch(endpoint)
-  if (!response.ok) throw new Error(await readApiError(response))
-  const payload = (await response.json()) as AvailableShellsResponse
+  const payload = await client.fetchJson<AvailableShellsResponse>('/api/terminals/available-shells')
   if (!payload?.shells || !payload?.settings) {
     throw new Error('Invalid terminal shells response from backend.')
   }
@@ -32,17 +28,14 @@ export async function fetchAvailableShells(
 }
 
 export async function updateTerminalShellSettings(
-  wsUrl: string,
+  client: SettingsApiClient,
   defaultShell: string | null,
 ): Promise<TerminalShellSettings> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/terminals/settings')
-  const response = await fetch(endpoint, {
+  const payload = await client.fetchJson<{ ok?: boolean; settings?: TerminalShellSettings }>('/api/terminals/settings', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ defaultShell }),
   })
-  if (!response.ok) throw new Error(await readApiError(response))
-  const payload = (await response.json()) as { ok?: boolean; settings?: TerminalShellSettings }
   if (!payload?.settings) {
     throw new Error('Invalid terminal settings update response from backend.')
   }

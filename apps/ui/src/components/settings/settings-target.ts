@@ -1,8 +1,6 @@
 /**
- * Settings backend target: the backend whose settings a Settings view edits.
+ * Settings tabs. The environment a Settings view edits is chosen by its environment picker.
  */
-
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -31,20 +29,12 @@ export type SettingsTab =
   | 'observability'
   | 'about'
 
-export interface SettingsBackendTarget {
-  label: string
-  description: string
-  wsUrl: string
-  apiBaseUrl: string
-  fetchCredentials: RequestCredentials
-  availableTabs: SettingsTab[]
-}
-
 /* ------------------------------------------------------------------ */
 /*  Tab lists                                                          */
 /* ------------------------------------------------------------------ */
 
-const BUILDER_TABS: SettingsTab[] = [
+/** Tabs every environment's Settings view offers. */
+export const SETTINGS_TABS: SettingsTab[] = [
   'general',
   'environments',
   'git-monitoring',
@@ -66,18 +56,3 @@ const BUILDER_TABS: SettingsTab[] = [
   'observability',
   'about',
 ]
-
-/* ------------------------------------------------------------------ */
-/*  Factory functions                                                  */
-/* ------------------------------------------------------------------ */
-
-export function createBuilderSettingsTarget(localWsUrl: string): SettingsBackendTarget {
-  return {
-    label: 'Builder backend',
-    description: 'Local Forge Builder backend on this machine.',
-    wsUrl: localWsUrl,
-    apiBaseUrl: resolveApiEndpoint(localWsUrl, '/'),
-    fetchCredentials: 'same-origin',
-    availableTabs: BUILDER_TABS,
-  }
-}

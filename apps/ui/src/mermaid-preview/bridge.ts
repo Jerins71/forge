@@ -1,6 +1,3 @@
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
-import { resolveBackendWsUrl } from '@/lib/backend-url'
-
 export type MermaidThemeMode = 'light' | 'dark'
 
 export interface MermaidPreviewSize {
@@ -117,7 +114,9 @@ export function isMermaidPreviewChildMessage(value: unknown): value is MermaidPr
   }
 }
 
+/** `baseUrl` is the owning environment's catalog origin; the renderer page carries no credentials. */
 export function resolveMermaidPreviewIframeUrl(
+  baseUrl: string | undefined,
   instanceId: string,
   themeMode?: MermaidThemeMode,
 ): string {
@@ -126,8 +125,6 @@ export function resolveMermaidPreviewIframeUrl(
     query.set('theme', themeMode)
   }
 
-  return resolveApiEndpoint(
-    resolveBackendWsUrl(),
-    `/mermaid-preview/embed?${query.toString()}`,
-  )
+  const path = `/mermaid-preview/embed?${query.toString()}`
+  return baseUrl ? new URL(path, baseUrl).toString() : path
 }

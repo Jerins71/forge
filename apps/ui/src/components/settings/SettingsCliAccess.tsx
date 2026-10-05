@@ -236,24 +236,12 @@ function KeyRow({
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
-/** Derive the backend HTTP base URL from the wsUrl prop, respecting the Electron bridge. */
-function resolveBackendBaseUrl(wsUrl: string): string {
-  // In Electron, the ws URL points to the real backend — use it.
-  // On web, the ws URL also resolves correctly via protocol swap.
-  try {
-    const parsed = new URL(wsUrl)
-    parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:'
-    return parsed.origin
-  } catch {
-    return 'http://127.0.0.1:47187'
-  }
-}
-
 export function SettingsCliAccess({
-  wsUrl,
+  backendUrl,
   apiClient,
 }: {
-  wsUrl: string
+  /** Base URL of the environment whose CLI keys are shown. */
+  backendUrl: string
   apiClient: SettingsApiClient
 }) {
   const [keys, setKeys] = useState<CliAccessKeyDescriptor[]>([])
@@ -452,7 +440,7 @@ export function SettingsCliAccess({
         )}
       </SettingsSection>
 
-      <CliInstallSection wsUrl={wsUrl} />
+      <CliInstallSection backendUrl={backendUrl} />
     </div>
   )
 }
@@ -461,12 +449,11 @@ export function SettingsCliAccess({
 /*  CLI Installation section                                           */
 /* ------------------------------------------------------------------ */
 
-function CliInstallSection({ wsUrl }: { wsUrl: string }) {
+function CliInstallSection({ backendUrl }: { backendUrl: string }) {
   const [installing, setInstalling] = useState(false)
   const [installResult, setInstallResult] = useState<CliInstallResult | null>(null)
   const [verifyResult, setVerifyResult] = useState<{ ok: boolean; output: string } | null>(null)
   const isDesktop = useMemo(() => isElectron(), [])
-  const backendUrl = useMemo(() => resolveBackendBaseUrl(wsUrl), [wsUrl])
 
   const handleDesktopInstall = useCallback(async () => {
     const bridge = window.electronBridge

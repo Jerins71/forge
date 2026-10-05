@@ -22,7 +22,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { SettingsSection } from './settings-row'
 import { fetchSettingsExtensions, toErrorMessage } from './settings-api'
-import { createBuilderSettingsApiClient, type SettingsApiClient } from './settings-api-client'
+import type { SettingsApiClient } from './settings-api-client'
 
 const PI_DOCS_URL = 'https://github.com/a-mart/forge/blob/main/docs/PI_EXTENSIONS.md'
 const FORGE_DOCS_URL = 'https://github.com/a-mart/forge/blob/main/docs/FORGE_EXTENSIONS.md'
@@ -100,8 +100,7 @@ interface RuntimeOverlay {
 }
 
 interface SettingsExtensionsProps {
-  wsUrl: string
-  apiClient?: SettingsApiClient
+  apiClient: SettingsApiClient
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -683,13 +682,9 @@ function PiExtensionsSection({ data }: { data: SettingsExtensionsResponse | null
   )
 }
 
-export function SettingsExtensions({ wsUrl, apiClient }: SettingsExtensionsProps) {
+export function SettingsExtensions({ apiClient }: SettingsExtensionsProps) {
   useHelpContext('settings.extensions')
-  // Resolve a target-aware client at the boundary (settings-api takes a client).
-  const clientOrWsUrl = useMemo<SettingsApiClient>(
-    () => apiClient ?? createBuilderSettingsApiClient(wsUrl),
-    [apiClient, wsUrl],
-  )
+  const clientOrWsUrl = apiClient
 
   const [data, setData] = useState<SettingsExtensionsResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)

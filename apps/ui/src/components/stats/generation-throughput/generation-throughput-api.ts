@@ -1,4 +1,4 @@
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import type {
   GenerationThroughputCallsPage,
   GenerationThroughputCallsQuery,
@@ -38,25 +38,25 @@ function paramsFor(query: GenerationThroughputQuery): URLSearchParams {
   return params
 }
 
-async function request<T>(endpoint: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(endpoint, init)
+async function request<T>(client: SettingsApiClient, path: string, init?: RequestInit): Promise<T> {
+  const response = await client.fetch(path, init)
   if (!response.ok) {
     throw new GenerationThroughputApiError(response.status, `Throughput request failed: ${response.status}`)
   }
   return response.json() as Promise<T>
 }
 
-export function fetchGenerationThroughput(wsUrl: string, query: GenerationThroughputQuery): Promise<GenerationThroughputSnapshot> {
-  return request(resolveApiEndpoint(wsUrl, `/api/stats/throughput?${paramsFor(query).toString()}`))
+export function fetchGenerationThroughput(client: SettingsApiClient, query: GenerationThroughputQuery): Promise<GenerationThroughputSnapshot> {
+  return request(client, `/api/stats/throughput?${paramsFor(query).toString()}`)
 }
 
-export function refreshGenerationThroughput(wsUrl: string, query: GenerationThroughputQuery): Promise<GenerationThroughputSnapshot> {
-  return request(resolveApiEndpoint(wsUrl, `/api/stats/throughput/refresh?${paramsFor(query).toString()}`), { method: 'POST' })
+export function refreshGenerationThroughput(client: SettingsApiClient, query: GenerationThroughputQuery): Promise<GenerationThroughputSnapshot> {
+  return request(client, `/api/stats/throughput/refresh?${paramsFor(query).toString()}`, { method: 'POST' })
 }
 
-export function fetchGenerationCalls(wsUrl: string, query: GenerationThroughputCallsQuery): Promise<GenerationThroughputCallsPage> {
+export function fetchGenerationCalls(client: SettingsApiClient, query: GenerationThroughputCallsQuery): Promise<GenerationThroughputCallsPage> {
   const params = paramsFor(query)
   if (query.limit) params.set('limit', String(query.limit))
   if (query.cursor) params.set('cursor', query.cursor)
-  return request(resolveApiEndpoint(wsUrl, `/api/stats/throughput/calls?${params.toString()}`))
+  return request(client, `/api/stats/throughput/calls?${params.toString()}`)
 }

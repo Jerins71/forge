@@ -18,15 +18,6 @@ function makeClient(
   fetchImpl: SettingsApiClient['fetch'],
 ): SettingsApiClient {
   return {
-    target: {
-      label: 'Builder',
-      description: 'Builder',
-      wsUrl: 'ws://127.0.0.1:47187',
-      apiBaseUrl: 'http://127.0.0.1:47187/',
-      fetchCredentials: 'same-origin',
-      availableTabs: [],
-    },
-    endpoint: (path) => path,
     fetch: fetchImpl,
     fetchJson: vi.fn(),
     readApiError: vi.fn(),

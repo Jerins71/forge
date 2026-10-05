@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GenerationThroughputQuery, GenerationThroughputSnapshot } from '@forge/protocol'
 import { fetchGenerationThroughput, refreshGenerationThroughput } from './generation-throughput-api'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
-export function useGenerationThroughput(wsUrl: string, query: GenerationThroughputQuery) {
+export function useGenerationThroughput(client: SettingsApiClient, query: GenerationThroughputQuery) {
   const [snapshot, setSnapshot] = useState<GenerationThroughputSnapshot | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -30,7 +31,7 @@ export function useGenerationThroughput(wsUrl: string, query: GenerationThroughp
     else setIsLoading(true)
     setError(null)
 
-    fetchGenerationThroughput(wsUrl, query)
+    fetchGenerationThroughput(client, query)
       .then((next) => {
         if (!cancelled && sequence === requestSequence.current) {
           snapshotRef.current = next
@@ -47,13 +48,13 @@ export function useGenerationThroughput(wsUrl: string, query: GenerationThroughp
         }
       })
     return () => { cancelled = true; requestSequence.current += 1 }
-  }, [customIncomplete, query, wsUrl]) // query is intentionally the request identity
+  }, [customIncomplete, query, client]) // query is intentionally the request identity
 
   const refresh = useCallback(async () => {
     const sequence = ++requestSequence.current
     setIsRefreshing(true)
     try {
-      const next = await refreshGenerationThroughput(wsUrl, query)
+      const next = await refreshGenerationThroughput(client, query)
       if (sequence !== requestSequence.current) return
       snapshotRef.current = next
       setSnapshot(next)
@@ -68,7 +69,7 @@ export function useGenerationThroughput(wsUrl: string, query: GenerationThroughp
         setIsSwitchingQuery(false)
       }
     }
-  }, [query, wsUrl])
+  }, [query, client])
 
   return { snapshot, isLoading, isRefreshing, isSwitchingQuery, error, refresh }
 }

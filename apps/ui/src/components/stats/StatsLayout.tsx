@@ -29,6 +29,8 @@ interface StatsLayoutProps {
   onTabChange?: (tab: StatsTab) => void
   /** When true, the range selector row is hidden (token analytics manages its own filters) */
   hideRangeSelector?: boolean
+  /** Header control naming the environment whose stats are shown. */
+  headerAccessory?: React.ReactNode
   children: React.ReactNode
 }
 
@@ -43,6 +45,7 @@ export function StatsLayout({
   activeTab = 'overview',
   onTabChange,
   hideRangeSelector,
+  headerAccessory,
   children,
 }: StatsLayoutProps) {
   return (
@@ -65,6 +68,7 @@ export function StatsLayout({
           <h1 className="truncate text-sm font-semibold text-foreground">
             Stats
           </h1>
+          {headerAccessory}
         </div>
         <div className="flex items-center gap-2">
           {computedAt ? (

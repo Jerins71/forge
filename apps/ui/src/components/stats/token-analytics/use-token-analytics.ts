@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { fetchTokenAnalytics, refreshTokenAnalytics } from './token-analytics-api'
 import type { TokenAnalyticsSnapshot, TokenAnalyticsQuery } from '@forge/protocol'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
-export function useTokenAnalytics(wsUrl: string, query: TokenAnalyticsQuery) {
+export function useTokenAnalytics(client: SettingsApiClient, query: TokenAnalyticsQuery) {
   const [snapshot, setSnapshot] = useState<TokenAnalyticsSnapshot | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -38,7 +39,7 @@ export function useTokenAnalytics(wsUrl: string, query: TokenAnalyticsQuery) {
     }
     setError(null)
 
-    fetchTokenAnalytics(wsUrl, query)
+    fetchTokenAnalytics(client, query)
       .then((data) => {
         if (!cancelled && sequence === requestSequence.current) {
           setSnapshot(data)
@@ -61,13 +62,13 @@ export function useTokenAnalytics(wsUrl: string, query: TokenAnalyticsQuery) {
       cancelled = true
       requestSequence.current += 1
     }
-  }, [wsUrl, query, isCustomIncomplete]) // eslint-disable-line react-hooks/exhaustive-deps -- intentionally using snapshot ref
+  }, [client, query, isCustomIncomplete]) // eslint-disable-line react-hooks/exhaustive-deps -- intentionally using snapshot ref
 
   const refresh = useCallback(async () => {
     const sequence = ++requestSequence.current
     setIsRefreshing(true)
     try {
-      const data = await refreshTokenAnalytics(wsUrl, query)
+      const data = await refreshTokenAnalytics(client, query)
       if (sequence !== requestSequence.current) return
       setSnapshot(data)
       setError(null)
@@ -81,7 +82,7 @@ export function useTokenAnalytics(wsUrl: string, query: TokenAnalyticsQuery) {
         setIsSwitchingQuery(false)
       }
     }
-  }, [wsUrl, query])
+  }, [client, query])
 
   return { snapshot, isLoading, error, isRefreshing, isSwitchingQuery, refresh }
 }

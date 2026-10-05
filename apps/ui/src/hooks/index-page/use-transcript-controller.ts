@@ -27,6 +27,7 @@ import { useVisibleMessages } from '@/hooks/index-page/use-visible-messages'
 import { useContextWindow } from '@/hooks/index-page/use-context-window'
 import { usePendingResponse } from '@/hooks/index-page/use-pending-response'
 import { shouldIgnoreGlobalShortcutTarget } from '@/hooks/index-page/global-shortcut-target'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
 export interface UseTranscriptControllerOptions {
   state: ManagerWsState
@@ -36,6 +37,8 @@ export interface UseTranscriptControllerOptions {
   activeAgentStatus: AgentStatus | null
   messageSourceView: MessageSourceView
   messageListRef: MutableRefObject<MessageListHandle | null>
+  /** Authenticated client of the environment that owns `state`. */
+  settingsClient: SettingsApiClient | null
 }
 
 export function useTranscriptController({
@@ -46,6 +49,7 @@ export function useTranscriptController({
   activeAgentStatus,
   messageSourceView,
   messageListRef,
+  settingsClient,
 }: UseTranscriptControllerOptions) {
   const { contextWindowUsage } = useContextWindow({
     activeAgent,
@@ -183,7 +187,7 @@ export function useTranscriptController({
   }, [feedbackSessionId, state.agents])
 
   const feedbackProfileId = feedbackSessionAgent?.profileId ?? null
-  const feedback = useFeedback(feedbackProfileId, feedbackSessionId)
+  const feedback = useFeedback(settingsClient, feedbackProfileId, feedbackSessionId)
 
   return {
     contextWindowUsage,

@@ -383,11 +383,10 @@ function AuthProviderRow({
 /* ------------------------------------------------------------------ */
 
 interface SettingsAuthProps {
-  wsUrl: string
   apiClient: SettingsApiClient
 }
 
-export function SettingsAuth({ wsUrl: _wsUrl, apiClient }: SettingsAuthProps) {
+export function SettingsAuth({ apiClient }: SettingsAuthProps) {
   useHelpContext('settings.auth')
 
   const [authProviders, setAuthProviders] = useState<SettingsAuthProvider[]>([])

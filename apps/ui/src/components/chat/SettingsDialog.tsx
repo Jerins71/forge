@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { SettingsLayout } from '@/components/settings/SettingsLayout'
-import type { SettingsTab } from '@/components/settings/settings-target'
-import type { SettingsBackendTarget } from '@/components/settings/settings-target'
-import { createBuilderSettingsTarget } from '@/components/settings/settings-target'
-import { createSettingsApiClient, type SettingsApiClient } from '@/components/settings/settings-api-client'
+import { SETTINGS_TABS, type SettingsTab } from '@/components/settings/settings-target'
+import { EnvironmentTargetPicker } from '@/components/settings/EnvironmentTargetPicker'
+import { useEnvironmentSettingsClient } from '@/hooks/use-environment-settings-client'
+import { useEnvironmentCatalog } from '@/hooks/use-environment-selector'
 import { SettingsGeneral } from '@/components/settings/SettingsGeneral'
 import { SettingsHistory } from '@/components/settings/SettingsHistory'
 import { SettingsGitMonitoring } from '@/components/settings/SettingsGitMonitoring'
@@ -36,7 +36,9 @@ function getSettingsContentWidthClassName(activeTab: SettingsTab): string | unde
 }
 
 interface SettingsPanelProps {
-  wsUrl: string
+  /** Environment whose settings are edited. Every request goes to it alone. */
+  environmentId: string
+  onEnvironmentChange: (environmentId: string) => void
   managers: AgentDescriptor[]
   profiles: ManagerProfile[]
   promptChangeKey: number
@@ -53,12 +55,9 @@ interface SettingsPanelProps {
   contextProfileId?: string
   /** Builder-only handlers used by the project-scoped settings surface. */
   projectSettingsActions?: ProjectSettingsActions
-  /** Optional target for target-aware Settings shell. When omitted, Builder target is created from wsUrl. */
-  target?: SettingsBackendTarget
   /**
    * Optional initial tab to select when the panel mounts.
-   * Must be a valid {@link SettingsTab} string; ignored if not in the target's
-   * `availableTabs`.
+   * Must be a valid {@link SettingsTab} string; ignored if unavailable.
    */
   initialTab?: string
   /** Optional Forge skill-share URL to open in the Skills import dialog. */
@@ -68,7 +67,8 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({
-  wsUrl,
+  environmentId,
+  onEnvironmentChange,
   managers,
   profiles,
   promptChangeKey,
@@ -79,7 +79,6 @@ export function SettingsPanel({
   previewSession,
   contextProfileId,
   projectSettingsActions,
-  target: externalTarget,
   initialTab,
   initialSkillImportUrl,
   onSkillImportUrlConsumed,
@@ -93,20 +92,10 @@ export function SettingsPanel({
     return 'general'
   })
 
-  // Resolve target: external or auto-create Builder target from wsUrl
-  const target = useMemo<SettingsBackendTarget>(
-    () => externalTarget ?? createBuilderSettingsTarget(wsUrl),
-    [externalTarget, wsUrl],
-  )
-
-  // Create API client from resolved target
-  const apiClient = useMemo<SettingsApiClient>(
-    () => createSettingsApiClient(target),
-    [target],
-  )
-
-  const availableTabs = target.availableTabs
-  const runtimeUpdateAttention = useNativeRuntimeAttention(wsUrl)
+  const apiClient = useEnvironmentSettingsClient(environmentId)
+  const backendUrl = useEnvironmentCatalog().get(environmentId)?.baseUrl ?? ''
+  const availableTabs = SETTINGS_TABS
+  const runtimeUpdateAttention = useNativeRuntimeAttention(apiClient)
   const selectedProject = useMemo(
     () => profiles.find((profile) => profile.profileId === contextProfileId),
     [contextProfileId, profiles],
@@ -129,7 +118,7 @@ export function SettingsPanel({
   const layoutAvailableTabs = isProjectSettings ? ['project-settings'] as SettingsTab[] : availableTabs
   const targetLabel = isProjectSettings
     ? `Project: ${selectedProject?.displayName ?? contextProfileId}`
-    : target.label
+    : undefined
 
   const isAvailableTab = useCallback((tab: SettingsTab) =>
     tab === 'project-settings'
@@ -161,19 +150,23 @@ export function SettingsPanel({
       targetLabel={targetLabel}
       title={isProjectSettings ? 'Project Settings' : 'Settings'}
       attentionTabs={runtimeUpdateAttention ? ['about'] : undefined}
+      headerAccessory={
+        <EnvironmentTargetPicker environmentId={environmentId} onChange={onEnvironmentChange} label="Settings environment" />
+      }
     >
-      {activeTab === 'general' && (
-        <SettingsGeneral
-          wsUrl={wsUrl}
-          apiClient={apiClient}
-        />
-      )}
+      {!apiClient ? (
+        <div role="status" className="rounded-md border border-border bg-card/40 p-4 text-sm text-muted-foreground">
+          This environment is not available. Choose another environment.
+        </div>
+      ) : (
+      <Fragment key={environmentId}>
+      {activeTab === 'general' && <SettingsGeneral apiClient={apiClient} />}
       {activeTab === 'git-monitoring' && (
         <SettingsGitMonitoring apiClient={apiClient} profiles={profiles} />
       )}
       {activeTab === 'appearance' && <SettingsAppearance />}
       {activeTab === 'notifications' && <SettingsNotifications managers={managers} apiClient={apiClient} />}
-      {activeTab === 'auth' && <SettingsAuth wsUrl={wsUrl} apiClient={apiClient} />}
+      {activeTab === 'auth' && <SettingsAuth apiClient={apiClient} />}
       {activeTab === 'secrets' && (
         <SettingsSecrets
           apiClient={apiClient}
@@ -181,10 +174,9 @@ export function SettingsPanel({
           currentProfileId={contextProfileId ?? previewSession?.profileId}
         />
       )}
-      {activeTab === 'models' && <SettingsModels wsUrl={wsUrl} apiClient={apiClient} modelConfigChangeKey={modelConfigChangeKey} />}
+      {activeTab === 'models' && <SettingsModels apiClient={apiClient} modelConfigChangeKey={modelConfigChangeKey} />}
       {activeTab === 'skills' && (
         <SettingsSkills
-          wsUrl={wsUrl}
           apiClient={apiClient}
           profiles={profiles}
           managers={managers}
@@ -195,7 +187,6 @@ export function SettingsPanel({
       )}
       {activeTab === 'prompts' && (
         <SettingsPrompts
-          wsUrl={wsUrl}
           apiClient={apiClient}
           profiles={profiles}
           promptChangeKey={promptChangeKey}
@@ -204,7 +195,6 @@ export function SettingsPanel({
       )}
       {activeTab === 'specialists' && (
         <SettingsSpecialists
-          wsUrl={wsUrl}
           apiClient={apiClient}
           profiles={profiles}
           previewSession={previewSession}
@@ -232,18 +222,19 @@ export function SettingsPanel({
       )}
       {activeTab === 'slash-commands' && (
         <SettingsSlashCommands
-          wsUrl={wsUrl}
           apiClient={apiClient}
         />
       )}
-      {activeTab === 'extensions' && <SettingsExtensions wsUrl={wsUrl} apiClient={apiClient} />}
+      {activeTab === 'extensions' && <SettingsExtensions apiClient={apiClient} />}
       {activeTab === 'external-chrome' && <SettingsExternalChrome />}
-      {activeTab === 'cli-access' && <SettingsCliAccess wsUrl={wsUrl} apiClient={apiClient} />}
+      {activeTab === 'cli-access' && <SettingsCliAccess backendUrl={backendUrl} apiClient={apiClient} />}
       {activeTab === 'environments' && <EnvironmentsSettings />}
       {activeTab === 'stream-deck' && <SettingsStreamDeck apiClient={apiClient} />}
-      {activeTab === 'history' && <SettingsHistory wsUrl={wsUrl} />}
+      {activeTab === 'history' && <SettingsHistory apiClient={apiClient} />}
       {activeTab === 'observability' && <SettingsObservability apiClient={apiClient} />}
-      {activeTab === 'about' && <SettingsAbout wsUrl={wsUrl} apiClient={apiClient} showNativeRuntimes />}
+      {activeTab === 'about' && <SettingsAbout apiClient={apiClient} showNativeRuntimes />}
+      </Fragment>
+      )}
     </SettingsLayout>
   )
 }

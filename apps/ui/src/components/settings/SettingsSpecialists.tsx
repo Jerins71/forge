@@ -19,7 +19,6 @@ import {
 } from '@/lib/model-preset'
 import type { SettingsSpecialistsProps } from './specialists/types'
 import { SCOPE_GLOBAL } from './specialists/types'
-import { createBuilderSettingsApiClient } from './settings-api-client'
 import { useSpecialistsData } from './specialists/hooks/useSpecialistsData'
 import { useCardEditing } from './specialists/hooks/useCardEditing'
 import { useRosterPrompt } from './specialists/hooks/useRosterPrompt'
@@ -43,7 +42,6 @@ export { type SettingsSpecialistsProps } from './specialists/types'
 /* ================================================================== */
 
 export function SettingsSpecialists({
-  wsUrl,
   apiClient,
   profiles,
   previewSession,
@@ -51,13 +49,8 @@ export function SettingsSpecialists({
   modelConfigChangeKey,
 }: SettingsSpecialistsProps) {
   useHelpContext('settings.specialists')
-  const clientOrWsUrl: import('./settings-api-client').SettingsApiClient | string = apiClient ?? wsUrl
-  // model-preset now takes a target-aware client (never a raw wsUrl); resolve
-  // one at the boundary while the other specialists-api calls keep the string.
-  const presetsApiClient = useMemo(
-    () => apiClient ?? createBuilderSettingsApiClient(wsUrl),
-    [apiClient, wsUrl],
-  )
+  const clientOrWsUrl = apiClient
+  const presetsApiClient = apiClient
   const [selectedScope, setSelectedScope] = useState<string>(SCOPE_GLOBAL)
   const [delegationTab, setDelegationTab] = useState<'presets' | 'instructions' | 'compatibility'>('presets')
   const isGlobal = selectedScope === SCOPE_GLOBAL

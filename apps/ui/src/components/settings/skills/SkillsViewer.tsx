@@ -28,7 +28,7 @@ import {
   deleteSettingsEnvVariable,
   toErrorMessage,
 } from '../settings-api'
-import { createBuilderSettingsApiClient, type SettingsApiClient } from '../settings-api-client'
+import type { SettingsApiClient } from '../settings-api-client'
 import { SkillEnvVariables } from './SkillEnvVariables'
 
 
@@ -50,8 +50,7 @@ const RICH_CONFIG_SKILLS: Record<
 /* ------------------------------------------------------------------ */
 
 interface SkillsViewerProps {
-  wsUrl: string
-  apiClient?: SettingsApiClient
+  apiClient: SettingsApiClient
   profiles: ManagerProfile[]
   managers?: AgentDescriptor[]
   previewSession?: SettingsSessionContext | null
@@ -64,7 +63,6 @@ interface SkillsViewerProps {
 }
 
 export function SkillsViewer({
-  wsUrl,
   apiClient,
   profiles,
   managers = EMPTY_MANAGERS,
@@ -74,11 +72,7 @@ export function SkillsViewer({
   onInitialImportUrlConsumed,
 }: SkillsViewerProps) {
   useHelpContext('settings.skills')
-  // Resolve a target-aware client at the boundary.
-  const clientOrWsUrl = useMemo<SettingsApiClient>(
-    () => apiClient ?? createBuilderSettingsApiClient(wsUrl),
-    [apiClient, wsUrl],
-  )
+  const clientOrWsUrl = apiClient
   /* ---------- Scope ---------- */
   const [selectedScope, setSelectedScope] = useState<string>(initialScope ?? SCOPE_GLOBAL)
   const skillLoadScope = selectedScope

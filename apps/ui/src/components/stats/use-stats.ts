@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { fetchStats, refreshStats } from './stats-api'
 import type { StatsSnapshot, StatsRange } from '@forge/protocol'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
-export function useStats(wsUrl: string, range: StatsRange = '7d') {
+export function useStats(client: SettingsApiClient, range: StatsRange = '7d') {
   const [stats, setStats] = useState<StatsSnapshot | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -28,7 +29,7 @@ export function useStats(wsUrl: string, range: StatsRange = '7d') {
     }
     setError(null)
 
-    fetchStats(wsUrl, range)
+    fetchStats(client, range)
       .then((data) => {
         if (!cancelled && sequence === requestSequence.current) {
           setStats(data)
@@ -51,13 +52,13 @@ export function useStats(wsUrl: string, range: StatsRange = '7d') {
       cancelled = true
       requestSequence.current += 1
     }
-  }, [wsUrl, range]) // eslint-disable-line react-hooks/exhaustive-deps -- intentionally using stats ref
+  }, [client, range]) // eslint-disable-line react-hooks/exhaustive-deps -- intentionally using stats ref
 
   const refresh = useCallback(async () => {
     const sequence = ++requestSequence.current
     setIsRefreshing(true)
     try {
-      const data = await refreshStats(wsUrl, range)
+      const data = await refreshStats(client, range)
       if (sequence !== requestSequence.current) return
       setStats(data)
       setError(null)
@@ -71,7 +72,7 @@ export function useStats(wsUrl: string, range: StatsRange = '7d') {
         setIsSwitchingRange(false)
       }
     }
-  }, [wsUrl, range])
+  }, [client, range])
 
   return { stats, isLoading, error, isRefreshing, isSwitchingRange, refresh }
 }

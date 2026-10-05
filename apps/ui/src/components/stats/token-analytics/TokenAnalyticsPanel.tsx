@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, type ReactNode } from 'react'
 import { AlertCircle, BarChart3, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -13,9 +13,12 @@ import { useTokenAnalytics } from './use-token-analytics'
 import { cn } from '@/lib/utils'
 import type { StatsTab } from '@/hooks/index-page/use-route-state'
 import type { TokenAnalyticsQuery } from '@forge/protocol'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
 interface TokenAnalyticsPanelProps {
-  wsUrl: string
+  client: SettingsApiClient
+  /** Environment picker shown in the header. */
+  headerAccessory?: ReactNode
   onBack: () => void
   activeTab?: StatsTab
   onTabChange?: (tab: StatsTab) => void
@@ -119,7 +122,8 @@ function ErrorState({
 }
 
 export function TokenAnalyticsPanel({
-  wsUrl,
+  client,
+  headerAccessory,
   onBack,
   activeTab,
   onTabChange,
@@ -142,7 +146,7 @@ export function TokenAnalyticsPanel({
     [filters],
   )
 
-  const { snapshot, isLoading, error, isRefreshing, isSwitchingQuery, refresh } = useTokenAnalytics(wsUrl, query)
+  const { snapshot, isLoading, error, isRefreshing, isSwitchingQuery, refresh } = useTokenAnalytics(client, query)
 
   const handleSpecialistClick = useCallback(
     (specialistId: string | null) => {
@@ -188,6 +192,7 @@ export function TokenAnalyticsPanel({
 
   return (
     <StatsLayout
+      headerAccessory={headerAccessory}
       onBack={handleBack}
       computedAt={snapshot?.computedAt}
       isRefreshing={isRefreshing}
@@ -229,7 +234,7 @@ export function TokenAnalyticsPanel({
               />
 
               {/* Worker runs */}
-              <WorkerRunsTable wsUrl={wsUrl} query={query} />
+              <WorkerRunsTable client={client} query={query} />
             </>
           )}
         </div>

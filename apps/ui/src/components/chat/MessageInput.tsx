@@ -44,7 +44,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     placeholderOverride,
     agentLabel = 'agent',
     allowWhileLoading = false,
-    wsUrl,
     environmentClient,
     agentId,
     draftKey,
@@ -96,7 +95,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   )
 
   const voice = useVoiceInput({
-    wsUrl,
     disabled,
     blockedByLoading,
     onTranscription: appendTranscription,

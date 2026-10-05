@@ -17,8 +17,15 @@ export type AppRouteState =
       /** Logical project key whose launch composer is open; `agentId` is ignored while set. */
       launch?: string
     }
-  | { view: 'settings'; settingsTab?: string; settingsProfileId?: string; skillImportUrl?: string }
-  | { view: 'stats'; statsTab?: StatsTab }
+  | {
+      view: 'settings'
+      settingsTab?: string
+      settingsProfileId?: string
+      skillImportUrl?: string
+      /** Environment whose settings are edited; omitted for this machine. */
+      environmentId?: string
+    }
+  | { view: 'stats'; statsTab?: StatsTab; /** Environment whose stats are shown; omitted for this machine. */ environmentId?: string }
   | { view: 'archive' }
 
 type AppRouteSearch = {
@@ -77,6 +84,8 @@ export function parseRouteStateFromLocation(pathname: string, search: unknown): 
     ? (routeSearch.deckPanel as DeckPanel)
     : undefined
 
+  const environmentId = typeof routeSearch.env === 'string' && routeSearch.env.trim() ? routeSearch.env.trim() : undefined
+
   if (view === 'settings') {
     const skillImportUrl = typeof routeSearch.skillImportUrl === 'string' ? routeSearch.skillImportUrl : undefined
     const settingsTab = skillImportUrl ? 'skills' : typeof routeSearch.settingsTab === 'string' ? routeSearch.settingsTab : undefined
@@ -88,6 +97,7 @@ export function parseRouteStateFromLocation(pathname: string, search: unknown): 
       settingsTab,
       settingsProfileId,
       skillImportUrl,
+      ...(environmentId ? { environmentId } : {}),
     }
   }
 
@@ -95,14 +105,13 @@ export function parseRouteStateFromLocation(pathname: string, search: unknown): 
     const statsTab = typeof routeSearch.statsTab === 'string' && ['overview', 'tokens', 'throughput'].includes(routeSearch.statsTab)
       ? (routeSearch.statsTab as StatsTab)
       : undefined
-    return { view: 'stats', statsTab }
+    return { view: 'stats', statsTab, ...(environmentId ? { environmentId } : {}) }
   }
 
   if (view === 'archive') {
     return { view: 'archive' }
   }
 
-  const environmentId = typeof routeSearch.env === 'string' && routeSearch.env.trim() ? routeSearch.env.trim() : undefined
   const launch = typeof routeSearch.launch === 'string' && routeSearch.launch ? routeSearch.launch : undefined
   if (view === 'chat' || agentId !== undefined || environmentId !== undefined || launch !== undefined) {
     return {
@@ -128,11 +137,12 @@ function normalizeRouteState(routeState: AppRouteState): AppRouteState {
       settingsTab: routeState.settingsTab,
       settingsProfileId: routeState.settingsProfileId?.trim() || undefined,
       skillImportUrl: routeState.skillImportUrl,
+      ...(routeState.environmentId ? { environmentId: routeState.environmentId } : {}),
     }
   }
 
   if (routeState.view === 'stats') {
-    return { view: 'stats', statsTab: routeState.statsTab }
+    return { view: 'stats', statsTab: routeState.statsTab, ...(routeState.environmentId ? { environmentId: routeState.environmentId } : {}) }
   }
 
   if (routeState.view === 'archive') {
@@ -162,6 +172,7 @@ export function toRouteSearch(
     if (routeState.settingsTab) search.settingsTab = routeState.settingsTab
     if (routeState.settingsProfileId) search.settingsProfileId = routeState.settingsProfileId
     if (routeState.skillImportUrl) search.skillImportUrl = routeState.skillImportUrl
+    if (routeState.environmentId) search.env = routeState.environmentId
     if (stickyAgent) search.agent = stickyAgent
     return search
   }
@@ -169,6 +180,7 @@ export function toRouteSearch(
   if (routeState.view === 'stats') {
     const search: AppRouteSearch = { view: 'stats' }
     if (routeState.statsTab && routeState.statsTab !== 'overview') search.statsTab = routeState.statsTab
+    if (routeState.environmentId) search.env = routeState.environmentId
     if (stickyAgent) search.agent = stickyAgent
     return search
   }
@@ -198,10 +210,12 @@ function routeStatesEqual(left: AppRouteState, right: AppRouteState): boolean {
     return left.settingsTab === right.settingsTab
       && left.settingsProfileId === right.settingsProfileId
       && left.skillImportUrl === right.skillImportUrl
+      && left.environmentId === right.environmentId
   }
 
   if (left.view === 'stats' && right.view === 'stats') {
     return (left.statsTab ?? 'overview') === (right.statsTab ?? 'overview')
+      && left.environmentId === right.environmentId
   }
 
   if (left.view === 'archive' && right.view === 'archive') {
@@ -256,7 +270,7 @@ export function useRouteState({
       // Keep the current agent as a fallback when navigating to non-chat views
       // so it survives the round-trip.
       const currentSearch = (typeof search === 'object' && search !== null ? search : {}) as AppRouteSearch
-      const effectiveStickyAgent = normalizedRouteState.view === 'chat' || currentSearch.env
+      const effectiveStickyAgent = normalizedRouteState.view === 'chat' || (routeState.view === 'chat' && routeState.environmentId)
         ? undefined
         : stickyAgent ?? currentSearch.agent
 

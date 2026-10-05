@@ -6,7 +6,6 @@ import {
 import { ManagerWsClient } from '@/lib/ws-client'
 import type { ManagerWsState } from '@/lib/ws-state'
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
-import { createBuilderSettingsTarget } from '@/components/settings/settings-target'
 import { handleConversationEvent } from '@/lib/ws-client/event-handlers/conversation-event-handlers'
 import {
   createInitialOriginMetaState,
@@ -63,19 +62,7 @@ export class OriginStore {
       (s) => s,
       updateConnection,
     )
-    const features = environment.features.settings
-    const target = createBuilderSettingsTarget('')
-    target.label = environment.descriptor()?.label ?? environment.environmentId
-    target.description = 'Settings on this environment'
-    this.httpClient = options.httpClient ?? {
-      target,
-      endpoint: () => {
-        throw new Error('Use the environment authenticated HTTP client')
-      },
-      fetch: (p, i) => features.fetch(p, i),
-      fetchJson: (p, i) => features.fetchJson(p, i),
-      readApiError: (r) => features.readApiError(r),
-    }
+    this.httpClient = options.httpClient ?? environment.features.settings
   }
   getSnapshot() {
     return this.state.getSnapshot()

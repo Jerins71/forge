@@ -29,6 +29,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { copyTextToClipboard } from '@/lib/clipboard'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import { highlightCode } from '@/lib/syntax-highlight'
 import { cn } from '@/lib/utils'
 import {
@@ -166,9 +167,12 @@ const MermaidPreviewEmbed = forwardRef<
 ) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [initialThemeMode] = useState(themeMode)
+  // The renderer is app-level and served by this machine (the primary environment).
+  const environment = useOptionalEnvironmentContext()
+  const baseUrl = environment?.registry.catalog.getSnapshot().get(environment.primaryEnvironmentId)?.baseUrl
   const iframeSrc = useMemo(
-    () => resolveMermaidPreviewIframeUrl(instanceId, initialThemeMode),
-    [instanceId, initialThemeMode],
+    () => resolveMermaidPreviewIframeUrl(baseUrl, instanceId, initialThemeMode),
+    [baseUrl, instanceId, initialThemeMode],
   )
   const [iframeLoaded, setIframeLoaded] = useState(false)
   const [ready, setReady] = useState(false)

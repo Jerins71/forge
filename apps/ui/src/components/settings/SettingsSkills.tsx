@@ -8,8 +8,7 @@ import type { SettingsApiClient } from './settings-api-client'
 /* ------------------------------------------------------------------ */
 
 interface SettingsSkillsProps {
-  wsUrl: string
-  apiClient?: SettingsApiClient
+  apiClient: SettingsApiClient
   profiles: ManagerProfile[]
   managers?: AgentDescriptor[]
   previewSession?: SettingsSessionContext | null
@@ -18,7 +17,6 @@ interface SettingsSkillsProps {
 }
 
 export function SettingsSkills({
-  wsUrl,
   apiClient,
   profiles,
   managers,
@@ -28,7 +26,6 @@ export function SettingsSkills({
 }: SettingsSkillsProps) {
   return (
     <SkillsViewer
-      wsUrl={wsUrl}
       apiClient={apiClient}
       profiles={profiles}
       managers={managers}

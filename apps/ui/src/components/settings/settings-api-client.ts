@@ -1,71 +1,23 @@
 /**
  * Settings API client abstraction.
  *
- * All settings HTTP requests go through this client so that the correct
- * backend base URL and credentials policy are applied consistently.
+ * Settings and Stats requests go through an environment's authenticated client
+ * (`environmentClient.features.settings`), which structurally satisfies this interface.
  */
-
-import type { SettingsBackendTarget } from './settings-target'
-import { createBuilderSettingsTarget } from './settings-target'
 
 /* ------------------------------------------------------------------ */
 /*  Interface                                                          */
 /* ------------------------------------------------------------------ */
 
 export interface SettingsApiClient {
-  readonly target: SettingsBackendTarget
-
-  /** Resolve an API path to a fully qualified URL against the target backend. */
-  endpoint(path: string): string
-
-  /** Fetch with automatic credentials policy from the target. */
+  /** Fetch an API path on the client's environment. */
   fetch(path: string, init?: RequestInit): Promise<Response>
 
-  /** Fetch + parse JSON with automatic credentials policy. */
+  /** Fetch + parse JSON, throwing the server's error message on failure. */
   fetchJson<T>(path: string, init?: RequestInit): Promise<T>
 
   /** Read an error message from a failed response. */
   readApiError(response: Response): Promise<string>
-}
-
-/* ------------------------------------------------------------------ */
-/*  Implementation                                                     */
-/* ------------------------------------------------------------------ */
-
-class SettingsApiClientImpl implements SettingsApiClient {
-  constructor(readonly target: SettingsBackendTarget) {}
-
-  endpoint(path: string): string {
-    try {
-      return new URL(path, this.target.apiBaseUrl).toString()
-    } catch {
-      return path
-    }
-  }
-
-  async fetch(path: string, init?: RequestInit): Promise<Response> {
-    const url = this.endpoint(path)
-
-    // Apply target credentials unless caller explicitly overrides
-    const mergedInit: RequestInit = {
-      ...init,
-      credentials: init?.credentials ?? this.target.fetchCredentials,
-    }
-
-    return globalThis.fetch(url, mergedInit)
-  }
-
-  async fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await this.fetch(path, init)
-    if (!response.ok) {
-      throw new Error(await this.readApiError(response))
-    }
-    return (await response.json()) as T
-  }
-
-  readApiError(response: Response): Promise<string> {
-    return readApiError(response)
-  }
 }
 
 /** Read an error message from a failed response. */
@@ -83,22 +35,37 @@ export async function readApiError(response: Response): Promise<string> {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Factory                                                            */
+/*  Legacy Builder adapter                                             */
 /* ------------------------------------------------------------------ */
 
-/** Create a settings API client for the given target. */
-export function createSettingsApiClient(target: SettingsBackendTarget): SettingsApiClient {
-  return new SettingsApiClientImpl(target)
-}
-
 /**
- * Create a Builder-mode settings API client from a raw wsUrl.
+ * Create an unauthenticated Builder client from a raw wsUrl.
  *
- * Convenience adapter for call sites that haven't been migrated to full
- * target-aware plumbing yet. Settings paths should use target-aware clients.
+ * Compatibility adapter for call sites outside Settings and Stats that have not
+ * moved to an environment client yet.
  */
 export function createBuilderSettingsApiClient(wsUrl: string): SettingsApiClient {
-  return new SettingsApiClientImpl(createBuilderSettingsTarget(wsUrl))
+  let base: string | undefined
+  try {
+    const parsed = new URL(wsUrl)
+    base = `${parsed.protocol === 'wss:' ? 'https:' : 'http:'}//${parsed.host}`
+  } catch {
+    base = undefined
+  }
+  const client: SettingsApiClient = {
+    fetch: (path, init) =>
+      globalThis.fetch(base ? new URL(path, base).toString() : path, {
+        ...init,
+        credentials: init?.credentials ?? 'same-origin',
+      }),
+    async fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+      const response = await client.fetch(path, init)
+      if (!response.ok) throw new Error(await readApiError(response))
+      return (await response.json()) as T
+    },
+    readApiError,
+  }
+  return client
 }
 
 /** Accept either a settings client or a legacy Builder wsUrl. */

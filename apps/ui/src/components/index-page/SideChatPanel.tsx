@@ -33,8 +33,6 @@ const MAX_SIDE_CHAT_WIDTH = 1200
 const MAIN_CHAT_MIN_REM = 28
 
 export interface SideChatPanelProps {
-  /** Primary-bound voice transcription endpoint. */
-  wsUrl: string
   /** The side chat lives on its source session's environment. */
   environmentId: string
   /** Null while the fork is being created. */
@@ -49,7 +47,6 @@ export interface SideChatPanelProps {
 }
 
 export function SideChatPanel({
-  wsUrl,
   environmentId,
   sideChatAgentId,
   sourceLabel,
@@ -267,7 +264,6 @@ export function SideChatPanel({
         disabled={!canSend}
         allowWhileLoading
         agentLabel="side chat"
-        wsUrl={wsUrl}
         environmentClient={environmentClient}
         agentId={sideChatAgentId ?? undefined}
         draftKey={sideChatAgentId ? qualifiedKey(environmentId, sideChatAgentId) : undefined}

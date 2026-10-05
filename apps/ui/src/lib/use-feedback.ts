@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FeedbackState } from '@/lib/feedback-types'
 import { fetchFeedbackStates, submitFeedback } from '@/lib/feedback-client'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
 type FeedbackKind = 'vote' | 'comment'
 
@@ -68,30 +69,31 @@ export function resolveFeedbackTargetIdForKind(
   return normalizedTargetId
 }
 
-export function useFeedback(profileId: string | null, sessionId: string | null) {
+/** `client` addresses the environment that owns the session; null disables feedback. */
+export function useFeedback(client: SettingsApiClient | null, profileId: string | null, sessionId: string | null) {
   const [feedbackStates, setFeedbackStates] = useState<Map<string, FeedbackState>>(new Map())
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const fetchedKeyRef = useRef<string | null>(null)
+  const fetchedKeyRef = useRef<{ client: SettingsApiClient; key: string } | null>(null)
   const feedbackStatesRef = useRef(feedbackStates)
   feedbackStatesRef.current = feedbackStates
 
   // Fetch initial states when profileId/sessionId become available
   useEffect(() => {
-    if (!profileId || !sessionId) {
+    if (!client || !profileId || !sessionId) {
       setFeedbackStates(new Map())
       fetchedKeyRef.current = null
       return
     }
 
     const key = `${profileId}:${sessionId}`
-    if (fetchedKeyRef.current === key) return
-    fetchedKeyRef.current = key
+    if (fetchedKeyRef.current?.client === client && fetchedKeyRef.current.key === key) return
+    fetchedKeyRef.current = { client, key }
 
     let cancelled = false
 
     void (async () => {
       try {
-        const states = await fetchFeedbackStates(profileId, sessionId)
+        const states = await fetchFeedbackStates(client, profileId, sessionId)
         if (cancelled) return
         const map = new Map<string, FeedbackState>()
         for (const state of states) {
@@ -107,7 +109,7 @@ export function useFeedback(profileId: string | null, sessionId: string | null) 
     return () => {
       cancelled = true
     }
-  }, [profileId, sessionId])
+  }, [client, profileId, sessionId])
 
   const getVote = useCallback(
     (targetId: string, fallbackTargetId?: string): 'up' | 'down' | null => {
@@ -146,7 +148,7 @@ export function useFeedback(profileId: string | null, sessionId: string | null) 
       comment?: string,
       fallbackTargetId?: string,
     ) => {
-      if (!profileId || !sessionId) return
+      if (!client || !profileId || !sessionId) return
 
       const resolvedTargetId = resolveFeedbackTargetIdForKind(
         feedbackStatesRef.current,
@@ -192,7 +194,7 @@ export function useFeedback(profileId: string | null, sessionId: string | null) 
 
       setIsSubmitting(true)
       try {
-        const event = await submitFeedback({
+        const event = await submitFeedback(client, {
           profileId,
           sessionId,
           scope,
@@ -232,7 +234,7 @@ export function useFeedback(profileId: string | null, sessionId: string | null) 
         setIsSubmitting(false)
       }
     },
-    [profileId, sessionId],
+    [client, profileId, sessionId],
   )
 
   const submitComment = useCallback(
@@ -242,7 +244,7 @@ export function useFeedback(profileId: string | null, sessionId: string | null) 
       commentText: string,
       fallbackTargetId?: string,
     ) => {
-      if (!profileId || !sessionId) return
+      if (!client || !profileId || !sessionId) return
 
       const resolvedTargetId = resolveFeedbackTargetIdForKind(
         feedbackStatesRef.current,
@@ -270,7 +272,7 @@ export function useFeedback(profileId: string | null, sessionId: string | null) 
 
       setIsSubmitting(true)
       try {
-        const event = await submitFeedback({
+        const event = await submitFeedback(client, {
           profileId,
           sessionId,
           scope,
@@ -305,12 +307,12 @@ export function useFeedback(profileId: string | null, sessionId: string | null) 
         setIsSubmitting(false)
       }
     },
-    [profileId, sessionId],
+    [client, profileId, sessionId],
   )
 
   const clearComment = useCallback(
     async (scope: 'message' | 'session', targetId: string, fallbackTargetId?: string) => {
-      if (!profileId || !sessionId) return
+      if (!client || !profileId || !sessionId) return
 
       const resolvedTargetId = resolveFeedbackTargetIdForKind(
         feedbackStatesRef.current,
@@ -331,7 +333,7 @@ export function useFeedback(profileId: string | null, sessionId: string | null) 
 
       setIsSubmitting(true)
       try {
-        await submitFeedback({
+        await submitFeedback(client, {
           profileId,
           sessionId,
           scope,
@@ -354,7 +356,7 @@ export function useFeedback(profileId: string | null, sessionId: string | null) 
         setIsSubmitting(false)
       }
     },
-    [profileId, sessionId],
+    [client, profileId, sessionId],
   )
 
   return {

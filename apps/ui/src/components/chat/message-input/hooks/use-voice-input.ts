@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { MAX_VOICE_RECORDING_DURATION_MS, useVoiceRecorder } from '@/hooks/use-voice-recorder'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
+import { useEnvironmentSettingsClient } from '@/hooks/use-environment-settings-client'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import { transcribeVoice } from '@/lib/voice-transcription-client'
 import { OPENAI_KEY_REQUIRED_MESSAGE } from '../types'
 
-async function hasConfiguredOpenAiKey(endpoint: string): Promise<boolean> {
+async function hasConfiguredOpenAiKey(client: SettingsApiClient): Promise<boolean> {
   try {
-    const response = await fetch(endpoint)
+    const response = await client.fetch('/api/settings/auth')
     if (!response.ok) return false
 
     const payload = (await response.json()) as {
@@ -31,7 +33,6 @@ async function hasConfiguredOpenAiKey(endpoint: string): Promise<boolean> {
 }
 
 interface UseVoiceInputOptions {
-  wsUrl?: string
   disabled: boolean
   blockedByLoading: boolean
   /** Called with transcribed text to append to the input. Return true if text was appended. */
@@ -50,8 +51,8 @@ interface UseVoiceInputReturn {
   stopAndTranscribeRecording: () => Promise<void>
 }
 
+/** Voice transcription is app-level: it uses this machine's (the primary environment's) OpenAI key. */
 export function useVoiceInput({
-  wsUrl,
   disabled,
   blockedByLoading,
   onTranscription,
@@ -68,11 +69,7 @@ export function useVoiceInput({
     stopRecording,
   } = useVoiceRecorder()
 
-  const transcribeEndpoint = useMemo(() => resolveApiEndpoint(wsUrl, '/api/transcribe'), [wsUrl])
-  const settingsAuthEndpoint = useMemo(
-    () => resolveApiEndpoint(wsUrl, '/api/settings/auth'),
-    [wsUrl],
-  )
+  const client = useEnvironmentSettingsClient(useOptionalEnvironmentContext()?.primaryEnvironmentId)
 
   // Keep a stable ref to onTranscription to avoid re-creating callbacks
   const onTranscriptionRef = useRef(onTranscription)
@@ -85,11 +82,16 @@ export function useVoiceInput({
       return
     }
 
+    if (!client) {
+      setVoiceError('Voice transcription is unavailable: this machine is not connected.')
+      return
+    }
+
     setIsTranscribingVoice(true)
     setVoiceError(null)
 
     try {
-      const result = await transcribeVoice(recording.blob, transcribeEndpoint)
+      const result = await transcribeVoice(client, recording.blob)
       const appended = onTranscriptionRef.current(result.text)
       if (!appended) {
         setVoiceError('No speech detected. Try speaking a little louder.')
@@ -100,7 +102,7 @@ export function useVoiceInput({
     } finally {
       setIsTranscribingVoice(false)
     }
-  }, [stopRecording, transcribeEndpoint])
+  }, [client, stopRecording])
 
   useEffect(() => {
     if (!isRecording || isTranscribingVoice) return
@@ -109,7 +111,7 @@ export function useVoiceInput({
   }, [isRecording, isTranscribingVoice, stopAndTranscribeRecording, voiceRecordingDurationMs])
 
   const startInlineRecording = useCallback(async () => {
-    const hasOpenAiKey = await hasConfiguredOpenAiKey(settingsAuthEndpoint)
+    const hasOpenAiKey = client ? await hasConfiguredOpenAiKey(client) : false
     if (!hasOpenAiKey) {
       setVoiceError(OPENAI_KEY_REQUIRED_MESSAGE)
       return
@@ -121,7 +123,7 @@ export function useVoiceInput({
       const message = error instanceof Error ? error.message : 'Could not access your microphone.'
       setVoiceError(message)
     }
-  }, [settingsAuthEndpoint, startRecording])
+  }, [client, startRecording])
 
   const handleVoiceButtonClick = useCallback(() => {
     if (disabled || blockedByLoading || isRequestingMicrophone || isTranscribingVoice) return

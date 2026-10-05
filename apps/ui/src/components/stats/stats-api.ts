@@ -1,4 +1,4 @@
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import type { StatsSnapshot, StatsRange } from '@forge/protocol'
 
 function getBrowserTimezone(): string | null {
@@ -19,18 +19,16 @@ function buildStatsQuery(range: StatsRange): string {
   return params.toString()
 }
 
-export async function fetchStats(wsUrl: string, range: StatsRange = '7d'): Promise<StatsSnapshot> {
-  const endpoint = resolveApiEndpoint(wsUrl, `/api/stats?${buildStatsQuery(range)}`)
-  const response = await fetch(endpoint)
+export async function fetchStats(client: SettingsApiClient, range: StatsRange = '7d'): Promise<StatsSnapshot> {
+  const response = await client.fetch(`/api/stats?${buildStatsQuery(range)}`)
   if (!response.ok) {
     throw new Error(`Failed to fetch stats: ${response.status}`)
   }
   return response.json() as Promise<StatsSnapshot>
 }
 
-export async function refreshStats(wsUrl: string, range: StatsRange = '7d'): Promise<StatsSnapshot> {
-  const endpoint = resolveApiEndpoint(wsUrl, `/api/stats/refresh?${buildStatsQuery(range)}`)
-  const response = await fetch(endpoint, { method: 'POST' })
+export async function refreshStats(client: SettingsApiClient, range: StatsRange = '7d'): Promise<StatsSnapshot> {
+  const response = await client.fetch(`/api/stats/refresh?${buildStatsQuery(range)}`, { method: 'POST' })
   if (!response.ok) {
     throw new Error(`Failed to refresh stats: ${response.status}`)
   }

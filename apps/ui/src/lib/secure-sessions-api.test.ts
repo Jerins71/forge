@@ -9,15 +9,6 @@ import {
 
 function makeClient(fetchImpl: SettingsApiClient['fetch']): SettingsApiClient {
   return {
-    target: {
-      label: 'Builder',
-      description: 'Local',
-      wsUrl: 'ws://localhost:47188/ws',
-      apiBaseUrl: 'http://localhost:47188',
-      fetchCredentials: 'same-origin',
-      availableTabs: [],
-    },
-    endpoint: (path) => path,
     fetch: fetchImpl,
     fetchJson: vi.fn(),
     readApiError: vi.fn(),

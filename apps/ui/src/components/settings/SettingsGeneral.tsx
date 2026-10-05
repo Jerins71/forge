@@ -56,17 +56,15 @@ import {
   type ManagerReasoningLevel,
   type ModelPresetInfo,
 } from '@forge/protocol'
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
 import { fetchModelPresets } from '@/lib/model-preset'
 import { fetchCompactionSettings, updateCompactionSettings } from '@/components/settings/compaction-settings-api'
 import { PROVIDER_LABELS } from '@/components/settings/specialists/types'
 import { formatReasoningLevel } from '@/lib/reasoning-level-labels'
-import { createBuilderSettingsApiClient, type SettingsApiClient } from './settings-api-client'
+import type { SettingsApiClient } from './settings-api-client'
 
 interface SettingsGeneralProps {
-  wsUrl: string
-  /** When provided, used for all backend requests instead of raw wsUrl. */
-  apiClient?: SettingsApiClient
+  /** Authenticated client of the environment being edited. */
+  apiClient: SettingsApiClient
 }
 
 interface CompactionModelOption {
@@ -167,14 +165,12 @@ function buildCompactionAvailabilityWarning(view: GetCompactionSettingsResponse 
 }
 
 export function SettingsGeneral({
-  wsUrl,
   apiClient,
 }: SettingsGeneralProps) {
   useHelpContext('settings.general')
 
 
-  // Use apiClient for onboarding when available, fall back to wsUrl
-  const onboardingSource = apiClient ?? wsUrl
+  const onboardingSource = apiClient
   const {
     onboardingState,
     isMutating: isSavingOnboarding,
@@ -271,7 +267,7 @@ export function SettingsGeneral({
   // Fetch terminal shell settings on mount — Builder-only
   useEffect(() => {
     setTerminalLoadFailed(false)
-    void fetchAvailableShells(wsUrl)
+    void fetchAvailableShells(apiClient)
       .then((data) => {
         setTerminalShells(data)
         setTerminalSettings(data.settings)
@@ -281,7 +277,7 @@ export function SettingsGeneral({
         setTerminalLoadFailed(true)
         setTerminalError(err instanceof Error ? err.message : 'Could not load terminal settings')
       })
-  }, [wsUrl])
+  }, [apiClient])
 
   const handleTerminalShellChange = useCallback(
     (value: string) => {
@@ -291,7 +287,7 @@ export function SettingsGeneral({
       setTerminalError(null)
       setTerminalSuccess(false)
 
-      void updateTerminalShellSettings(wsUrl, shellPath)
+      void updateTerminalShellSettings(apiClient, shellPath)
         .then((settings) => {
           setTerminalSettings(settings)
           setTerminalSuccess(true)
@@ -304,16 +300,11 @@ export function SettingsGeneral({
           setTerminalUpdating(false)
         })
     },
-    [wsUrl, terminalUpdating],
+    [apiClient, terminalUpdating],
   )
 
-  const compactionSource = apiClient ?? wsUrl
-  // model-preset now takes a target-aware client (never a raw wsUrl); resolve
-  // one at the boundary from the same source used for the other settings calls.
-  const presetsApiClient = useMemo(
-    () => apiClient ?? createBuilderSettingsApiClient(wsUrl),
-    [apiClient, wsUrl],
-  )
+  const compactionSource = apiClient
+  const presetsApiClient = apiClient
 
   const loadCompactionSettings = useCallback(async () => {
     setCompactionLoadFailed(false)
@@ -485,7 +476,7 @@ export function SettingsGeneral({
       })
   }, [compactionDraft, compactionSource])
 
-  const modelCacheVisualizationSource = apiClient ?? wsUrl
+  const modelCacheVisualizationSource = apiClient
 
   useEffect(() => {
     let cancelled = false
@@ -510,7 +501,7 @@ export function SettingsGeneral({
     }
   }, [modelCacheVisualizationSource])
 
-  const repositorySettingsSource = apiClient ?? wsUrl
+  const repositorySettingsSource = apiClient
 
   useEffect(() => {
     let cancelled = false
@@ -610,15 +601,9 @@ export function SettingsGeneral({
     }
   }, [savePreferences])
 
-  // Reboot handler — uses apiClient for target-aware routing
   const handleReboot = useCallback(() => {
-    if (apiClient) {
-      void apiClient.fetch('/api/reboot', { method: 'POST' }).catch(() => {})
-    } else {
-      const endpoint = resolveApiEndpoint(wsUrl, '/api/reboot')
-      void fetch(endpoint, { method: 'POST' }).catch(() => {})
-    }
-  }, [apiClient, wsUrl])
+    void apiClient.fetch('/api/reboot', { method: 'POST' }).catch(() => {})
+  }, [apiClient])
 
   return (
     <div className="flex flex-col gap-8">
@@ -1122,7 +1107,7 @@ export function SettingsGeneral({
                     onClick={() => {
                       setTerminalError(null)
                       setTerminalLoadFailed(false)
-                      void fetchAvailableShells(wsUrl)
+                      void fetchAvailableShells(apiClient)
                         .then((data) => {
                           setTerminalShells(data)
                           setTerminalSettings(data.settings)

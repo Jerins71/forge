@@ -39,8 +39,7 @@ import { SettingsOpenRouter } from './SettingsOpenRouter'
 const numberFormatter = new Intl.NumberFormat()
 
 interface SettingsModelsProps {
-  wsUrl: string
-  apiClient?: SettingsApiClient
+  apiClient: SettingsApiClient
   modelConfigChangeKey: number
 }
 
@@ -540,8 +539,8 @@ function ModelCard({
   )
 }
 
-export function SettingsModels({ wsUrl, apiClient, modelConfigChangeKey }: SettingsModelsProps) {
-  const clientOrWsUrl: SettingsApiClient | string = apiClient ?? wsUrl
+export function SettingsModels({ apiClient, modelConfigChangeKey }: SettingsModelsProps) {
+  const clientOrWsUrl = apiClient
   const [overrides, setOverrides] = useState<Record<string, ModelOverrideEntry>>({})
   const [providerAvailability, setProviderAvailability] = useState<Record<string, boolean>>({})
   const [providerCredentials, setProviderCredentials] = useState<Record<string, ForgeProviderCredentialSummary>>({})
@@ -756,7 +755,6 @@ export function SettingsModels({ wsUrl, apiClient, modelConfigChangeKey }: Setti
       ) : null}
 
       <SettingsOpenRouter
-        wsUrl={wsUrl}
         apiClient={apiClient}
         modelConfigChangeKey={modelConfigChangeKey}
         overrides={overrides}

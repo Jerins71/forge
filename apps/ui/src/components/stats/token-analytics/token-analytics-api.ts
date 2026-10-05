@@ -1,4 +1,4 @@
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import type {
   TokenAnalyticsQuery,
   TokenAnalyticsSnapshot,
@@ -33,12 +33,11 @@ function buildQueryParams(query: TokenAnalyticsQuery): URLSearchParams {
 }
 
 export async function fetchTokenAnalytics(
-  wsUrl: string,
+  client: SettingsApiClient,
   query: TokenAnalyticsQuery,
 ): Promise<TokenAnalyticsSnapshot> {
   const params = buildQueryParams(query)
-  const endpoint = resolveApiEndpoint(wsUrl, `/api/stats/tokens?${params.toString()}`)
-  const response = await fetch(endpoint)
+  const response = await client.fetch(`/api/stats/tokens?${params.toString()}`)
   if (!response.ok) {
     throw new Error(`Failed to fetch token analytics: ${response.status}`)
   }
@@ -46,12 +45,11 @@ export async function fetchTokenAnalytics(
 }
 
 export async function refreshTokenAnalytics(
-  wsUrl: string,
+  client: SettingsApiClient,
   query: TokenAnalyticsQuery,
 ): Promise<TokenAnalyticsSnapshot> {
   const params = buildQueryParams(query)
-  const endpoint = resolveApiEndpoint(wsUrl, `/api/stats/tokens/refresh?${params.toString()}`)
-  const response = await fetch(endpoint, { method: 'POST' })
+  const response = await client.fetch(`/api/stats/tokens/refresh?${params.toString()}`, { method: 'POST' })
   if (!response.ok) {
     throw new Error(`Failed to refresh token analytics: ${response.status}`)
   }
@@ -59,7 +57,7 @@ export async function refreshTokenAnalytics(
 }
 
 export async function fetchTokenWorkers(
-  wsUrl: string,
+  client: SettingsApiClient,
   query: TokenAnalyticsWorkerPageQuery,
 ): Promise<TokenAnalyticsWorkerPage> {
   const params = buildQueryParams(query)
@@ -67,8 +65,7 @@ export async function fetchTokenWorkers(
   if (query.cursor) params.set('cursor', query.cursor)
   if (query.sort) params.set('sort', query.sort)
   if (query.direction) params.set('direction', query.direction)
-  const endpoint = resolveApiEndpoint(wsUrl, `/api/stats/tokens/workers?${params.toString()}`)
-  const response = await fetch(endpoint)
+  const response = await client.fetch(`/api/stats/tokens/workers?${params.toString()}`)
   if (!response.ok) {
     throw new Error(`Failed to fetch worker runs: ${response.status}`)
   }
@@ -76,7 +73,7 @@ export async function fetchTokenWorkers(
 }
 
 export async function fetchTokenWorkerEvents(
-  wsUrl: string,
+  client: SettingsApiClient,
   query: TokenAnalyticsWorkerEventsQuery,
 ): Promise<TokenAnalyticsWorkerEventsResponse> {
   const params = new URLSearchParams({
@@ -84,8 +81,7 @@ export async function fetchTokenWorkerEvents(
     sessionId: query.sessionId,
     workerId: query.workerId,
   })
-  const endpoint = resolveApiEndpoint(wsUrl, `/api/stats/tokens/worker-events?${params.toString()}`)
-  const response = await fetch(endpoint)
+  const response = await client.fetch(`/api/stats/tokens/worker-events?${params.toString()}`)
   if (!response.ok) {
     throw new Error(`Failed to fetch worker events: ${response.status}`)
   }

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { HistoryIndexStatus } from '@forge/protocol'
 import { fetchHistoryIndex, setHistoryIndexPaused } from './history-index-api'
+import type { SettingsApiClient } from './settings-api-client'
 
-/** Mounted per backend origin by SettingsHistory. No polling while hidden. */
-export function useHistoryIndex(wsUrl: string) {
+/** Mounted per environment by SettingsHistory. No polling while hidden. */
+export function useHistoryIndex(client: SettingsApiClient) {
   const [status, setStatus] = useState<HistoryIndexStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [updating, setUpdating] = useState(false)
@@ -24,7 +25,7 @@ export function useHistoryIndex(wsUrl: string) {
       const controller = new AbortController()
       request.current = controller
       try {
-        const next = await fetchHistoryIndex(wsUrl, controller.signal)
+        const next = await fetchHistoryIndex(client, controller.signal)
         if (!cancelled && id === sequence.current) { setStatus(next); setError(null) }
       } catch (cause) {
         if (!cancelled && id === sequence.current && !controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Unable to refresh history status.')
@@ -37,7 +38,7 @@ export function useHistoryIndex(wsUrl: string) {
     refreshRef.current = () => { void load() }
     void poll()
     return () => { cancelled = true; alive.current = false; request.current?.abort(); clearTimeout(timer) }
-  }, [wsUrl])
+  }, [client])
 
   async function togglePaused() {
     if (!status || busy.current) return
@@ -46,7 +47,7 @@ export function useHistoryIndex(wsUrl: string) {
     const id = ++sequence.current
     request.current?.abort()
     try {
-      const next = await setHistoryIndexPaused(wsUrl, !status.paused)
+      const next = await setHistoryIndexPaused(client, !status.paused)
       if (alive.current && id === sequence.current) { setStatus(next); setError(null) }
     } catch (cause) {
       if (alive.current && id === sequence.current) setError(cause instanceof Error ? cause.message : 'Unable to save indexing preference.')

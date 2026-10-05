@@ -3,15 +3,12 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { SettingsSection } from './settings-row'
 import { useHistoryIndex } from './use-history-index'
-
-export function SettingsHistory({ wsUrl }: { wsUrl: string }) {
-  return <HistoryPanel key={wsUrl} wsUrl={wsUrl} />
-}
+import type { SettingsApiClient } from './settings-api-client'
 
 const ACTIVITY = { starting: 'Starting', indexing: 'Indexing', idle: 'Indexing complete', paused: 'Paused', unavailable: 'Unavailable' }
 
-function HistoryPanel({ wsUrl }: { wsUrl: string }) {
-  const { status, error, updating, refresh, togglePaused } = useHistoryIndex(wsUrl)
+export function SettingsHistory({ apiClient }: { apiClient: SettingsApiClient }) {
+  const { status, error, updating, refresh, togglePaused } = useHistoryIndex(apiClient)
   const stats = status?.statistics
   const hasSearchLimitations = !!stats && (stats.unreadableSources > 0 || stats.omittedSources > 0)
   return (

@@ -1,22 +1,12 @@
-import { resolveApiEndpoint } from '@/lib/api-endpoint'
-import { resolveBackendWsUrl } from '@/lib/backend-url'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import type { FeedbackEvent, FeedbackState } from '@/lib/feedback-types'
 
-function apiUrl(path: string): string {
-  return resolveApiEndpoint(resolveBackendWsUrl(), path)
+function feedbackPath(profileId: string, sessionId: string): string {
+  return `/api/v1/profiles/${encodeURIComponent(profileId)}/sessions/${encodeURIComponent(sessionId)}/feedback`
 }
 
-async function readApiError(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { error?: string } | null
-    if (body?.error) return body.error
-  } catch {
-    // ignore
-  }
-  return `Request failed (${response.status})`
-}
-
-export async function submitFeedback(params: {
+/** Feedback belongs to a session; `client` is the authenticated client of the session's environment. */
+export async function submitFeedback(client: SettingsApiClient, params: {
   profileId: string
   sessionId: string
   scope: 'message' | 'session'
@@ -28,11 +18,7 @@ export async function submitFeedback(params: {
   clearKind?: 'vote' | 'comment'
 }): Promise<FeedbackEvent> {
   const { profileId, sessionId, ...body } = params
-  const endpoint = apiUrl(
-    `/api/v1/profiles/${encodeURIComponent(profileId)}/sessions/${encodeURIComponent(sessionId)}/feedback`,
-  )
-
-  const response = await fetch(endpoint, {
+  const payload = await client.fetchJson<{ feedback: FeedbackEvent }>(feedbackPath(profileId, sessionId), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -45,29 +31,14 @@ export async function submitFeedback(params: {
       ...(body.clearKind ? { clearKind: body.clearKind } : {}),
     }),
   })
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response))
-  }
-
-  const payload = (await response.json()) as { feedback: FeedbackEvent }
   return payload.feedback
 }
 
 export async function fetchFeedbackStates(
+  client: SettingsApiClient,
   profileId: string,
   sessionId: string,
 ): Promise<FeedbackState[]> {
-  const endpoint = apiUrl(
-    `/api/v1/profiles/${encodeURIComponent(profileId)}/sessions/${encodeURIComponent(sessionId)}/feedback/state`,
-  )
-
-  const response = await fetch(endpoint, { credentials: 'include' })
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response))
-  }
-
-  const payload = (await response.json()) as { states?: FeedbackState[] }
+  const payload = await client.fetchJson<{ states?: FeedbackState[] }>(`${feedbackPath(profileId, sessionId)}/state`)
   return payload.states ?? []
 }

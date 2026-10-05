@@ -127,7 +127,7 @@ export function SettingsProjectSettings({
         </Card>
 
         <ProjectSecureSessionsSettings
-          key={`${apiClient.target.apiBaseUrl}:${profile.profileId}`}
+          key={profile.profileId}
           profile={profile}
           apiClient={apiClient}
           onManage={actions?.onOpenProjectSecrets ? () => actions.onOpenProjectSecrets?.(profile.profileId) : undefined}

@@ -3,7 +3,7 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SettingsTab, SettingsBackendTarget } from '@/components/settings/settings-target'
+import type { SettingsTab } from '@/components/settings/settings-target'
 
 // Track SettingsLayout props received by SettingsPanel
 let capturedActiveTab: SettingsTab | undefined
@@ -39,20 +39,17 @@ vi.mock('@/components/settings/SettingsSlashCommands', () => ({ SettingsSlashCom
 vi.mock('@/components/settings/SettingsExtensions', () => ({ SettingsExtensions: () => createElement('div', null, 'Extensions') }))
 vi.mock('@/components/settings/SettingsAbout', () => ({ SettingsAbout: () => createElement('div', null, 'About') }))
 
-const { SettingsPanel } = await import('./SettingsDialog')
+vi.mock('@/components/settings/EnvironmentTargetPicker', () => ({ EnvironmentTargetPicker: () => null }))
+vi.mock('@/hooks/use-environment-selector', () => ({ useEnvironmentCatalog: () => new Map() }))
+vi.mock('@/hooks/use-environment-settings-client', () => ({
+  useEnvironmentSettingsClient: () => ({
+    fetch: () => Promise.reject(new Error('offline')),
+    fetchJson: () => Promise.reject(new Error('offline')),
+    readApiError: async () => 'offline',
+  }),
+}))
 
-const BUILDER_TARGET: SettingsBackendTarget = {
-  label: 'Builder backend',
-  description: 'Local Forge Builder backend.',
-  wsUrl: 'ws://localhost:47187',
-  apiBaseUrl: 'http://localhost:47187',
-  fetchCredentials: 'same-origin',
-  availableTabs: [
-    'general', 'appearance', 'notifications', 'auth', 'secrets', 'models',
-    'skills', 'prompts', 'specialists', 'slash-commands', 'extensions',
-    'about',
-  ],
-}
+const { SettingsPanel } = await import('./SettingsDialog')
 
 let container: HTMLDivElement
 let root: Root | null = null
@@ -74,20 +71,19 @@ afterEach(() => {
 
 function makeProps(overrides: {
   initialTab?: string
-  target?: SettingsBackendTarget
   contextProfileId?: string
   previewSession?: { agentId: string; profileId: string } | null
   profiles?: any[]
   managers?: any[]
 }) {
   return {
-    wsUrl: 'ws://localhost:47187',
+    environmentId: 'env-a',
+    onEnvironmentChange: () => {},
     managers: overrides.managers ?? [],
     profiles: overrides.profiles ?? [],
     promptChangeKey: 0,
     specialistChangeKey: 0,
     modelConfigChangeKey: 0,
-    target: overrides.target ?? BUILDER_TARGET,
     initialTab: overrides.initialTab,
     contextProfileId: overrides.contextProfileId,
     previewSession: overrides.previewSession,
@@ -96,7 +92,6 @@ function makeProps(overrides: {
 
 function renderPanel(props: {
   initialTab?: string
-  target?: SettingsBackendTarget
   contextProfileId?: string
   previewSession?: { agentId: string; profileId: string } | null
   profiles?: any[]

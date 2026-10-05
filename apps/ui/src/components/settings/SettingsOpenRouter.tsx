@@ -12,8 +12,7 @@ import type { SettingsApiClient } from './settings-api-client'
 import { fetchOpenRouterModels, removeOpenRouterModel, type OpenRouterModelsResponse } from './openrouter-api'
 
 interface SettingsOpenRouterProps {
-  wsUrl: string | undefined
-  apiClient?: SettingsApiClient
+  apiClient: SettingsApiClient
   modelConfigChangeKey: number
   overrides?: Record<string, ModelOverrideEntry>
   onOverridesRefresh?: () => Promise<void>
@@ -21,12 +20,7 @@ interface SettingsOpenRouterProps {
   onCardSaveEnd?: (modelKey: string) => void
 }
 
-export function SettingsOpenRouter(props: SettingsOpenRouterProps) {
-  return <SettingsOpenRouterContent key={props.apiClient?.endpoint('/') ?? props.wsUrl ?? 'local'} {...props} />
-}
-
-function SettingsOpenRouterContent({
-  wsUrl,
+export function SettingsOpenRouter({
   apiClient,
   modelConfigChangeKey,
   overrides = {},
@@ -34,7 +28,7 @@ function SettingsOpenRouterContent({
   onCardSaveStart,
   onCardSaveEnd,
 }: SettingsOpenRouterProps) {
-  const clientOrWsUrl: SettingsApiClient | string | undefined = apiClient ?? wsUrl
+  const clientOrWsUrl = apiClient
   const [routingScope, setRoutingScope] = useState<string | null | undefined>(undefined)
   const [defaults, setDefaults] = useState<OpenRouterRoutingConfig | null>(null)
   const [routingError, setRoutingError] = useState('')
@@ -255,7 +249,6 @@ function SettingsOpenRouterContent({
       <OpenRouterBrowseDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        wsUrl={wsUrl}
         apiClient={apiClient}
         addedModelIds={addedModelIds}
         onModelAdded={() => void loadModels()}

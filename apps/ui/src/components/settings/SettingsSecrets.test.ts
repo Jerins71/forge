@@ -294,15 +294,6 @@ afterEach(() => {
 
 function makeClient(): SettingsApiClient {
   return {
-    target: {
-      label: 'builder',
-      description: 'builder',
-      wsUrl: 'ws://127.0.0.1:47187',
-      apiBaseUrl: 'http://127.0.0.1:47187/',
-      fetchCredentials: 'same-origin',
-      availableTabs: [],
-    },
-    endpoint: (path) => path,
     fetch: vi.fn(),
     fetchJson: vi.fn(),
     readApiError: vi.fn(),

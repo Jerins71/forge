@@ -45,8 +45,7 @@ const CATEGORY_OPTIONS: Array<{ value: PromptCategory; label: string }> = [
 ]
 
 interface SettingsPromptsProps {
-  wsUrl: string
-  apiClient?: SettingsApiClient
+  apiClient: SettingsApiClient
   profiles: ManagerProfile[]
   /** Bumped when a prompt_changed WS event fires */
   promptChangeKey: number
@@ -57,9 +56,9 @@ interface SettingsPromptsProps {
   } | null
 }
 
-export function SettingsPrompts({ wsUrl, apiClient, profiles, promptChangeKey, previewSession }: SettingsPromptsProps) {
+export function SettingsPrompts({ apiClient, profiles, promptChangeKey, previewSession }: SettingsPromptsProps) {
   useHelpContext('settings.prompts')
-  const clientOrWsUrl: SettingsApiClient | string = apiClient ?? wsUrl
+  const clientOrWsUrl = apiClient
 
   const defaultProfileId = profiles.length > 0 ? profiles[0].profileId : ''
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId)

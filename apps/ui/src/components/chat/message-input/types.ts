@@ -96,8 +96,6 @@ export interface MessageInputProps {
   placeholderOverride?: string
   agentLabel?: string
   allowWhileLoading?: boolean
-  /** Primary-bound voice transcription endpoint. */
-  wsUrl?: string
   /** The session's environment for mentions/catalog reads. */
   environmentClient?: EnvironmentClient | null
   agentId?: string

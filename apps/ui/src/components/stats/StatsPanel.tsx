@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { AlertCircle, BarChart3 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -16,9 +16,12 @@ import { ModelDistribution } from './sections/ModelDistribution'
 import type { StatsRange } from '@forge/protocol'
 import type { StatsTab } from '@/hooks/index-page/use-route-state'
 import { cn } from '@/lib/utils'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
 interface StatsPanelProps {
-  wsUrl: string
+  client: SettingsApiClient
+  /** Environment picker shown in the header. */
+  headerAccessory?: ReactNode
   onBack: () => void
   activeTab?: StatsTab
   onTabChange?: (tab: StatsTab) => void
@@ -114,14 +117,15 @@ function isEmptyStats(stats: {
   return !hasTokenUsage && !hasCodeUsage
 }
 
-export function StatsPanel({ wsUrl, onBack, activeTab, onTabChange }: StatsPanelProps) {
+export function StatsPanel({ client, headerAccessory, onBack, activeTab, onTabChange }: StatsPanelProps) {
   const [range, setRange] = useState<StatsRange>('7d')
   const fuckMeter = useFuckMeterReveal(!activeTab || activeTab === 'overview')
-  const { stats, isLoading, error, isRefreshing, isSwitchingRange, refresh } = useStats(wsUrl, range)
+  const { stats, isLoading, error, isRefreshing, isSwitchingRange, refresh } = useStats(client, range)
   const isUpdating = isRefreshing || isSwitchingRange
 
   return (
     <StatsLayout
+      headerAccessory={headerAccessory}
       onBack={onBack}
       computedAt={stats?.computedAt}
       isRefreshing={isRefreshing}

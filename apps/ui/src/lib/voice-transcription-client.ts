@@ -1,3 +1,5 @@
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
+
 export const MAX_VOICE_UPLOAD_BYTES = 4_000_000
 
 function resolveFileExtension(mimeType: string): string {
@@ -19,7 +21,8 @@ function getErrorMessage(status: number, fallback?: string): string {
   return 'Voice transcription failed. Please try again.'
 }
 
-export async function transcribeVoice(blob: Blob, endpoint = '/api/transcribe'): Promise<{ text: string }> {
+/** Transcribes through the given environment's authenticated client. */
+export async function transcribeVoice(client: SettingsApiClient, blob: Blob): Promise<{ text: string }> {
   if (blob.size === 0) {
     throw new Error('Recording is empty. Try again.')
   }
@@ -34,11 +37,13 @@ export async function transcribeVoice(blob: Blob, endpoint = '/api/transcribe'):
 
   const payload = new FormData()
   payload.set('file', file)
+  // Encode the multipart body up front so its boundary survives byte transports.
+  const encoded = new Response(payload)
 
-  const response = await fetch(endpoint, {
+  const response = await client.fetch('/api/transcribe', {
     method: 'POST',
-    credentials: 'include',
-    body: payload,
+    headers: { 'content-type': encoded.headers.get('content-type') ?? 'multipart/form-data' },
+    body: await encoded.blob(),
   })
 
   const body = (await response.json().catch(() => null)) as { error?: unknown; text?: unknown } | null

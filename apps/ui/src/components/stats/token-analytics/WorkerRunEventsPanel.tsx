@@ -14,6 +14,7 @@ import type {
   TokenAnalyticsWorkerEvent,
   TokenAnalyticsWorkerRunSummary,
 } from '@forge/protocol'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
 function formatTimestamp(iso: string): string {
   try {
@@ -29,7 +30,7 @@ function formatTimestamp(iso: string): string {
 }
 
 interface WorkerRunEventsPanelProps {
-  wsUrl: string
+  client: SettingsApiClient
   profileId: string
   sessionId: string
   workerId: string
@@ -37,7 +38,7 @@ interface WorkerRunEventsPanelProps {
 }
 
 export function WorkerRunEventsPanel({
-  wsUrl,
+  client,
   profileId,
   sessionId,
   workerId,
@@ -52,7 +53,7 @@ export function WorkerRunEventsPanel({
     setIsLoading(true)
     setError(null)
 
-    fetchTokenWorkerEvents(wsUrl, { profileId, sessionId, workerId })
+    fetchTokenWorkerEvents(client, { profileId, sessionId, workerId })
       .then((response) => {
         if (!cancelled) {
           setEvents(response.events)
@@ -72,7 +73,7 @@ export function WorkerRunEventsPanel({
     return () => {
       cancelled = true
     }
-  }, [wsUrl, profileId, sessionId, workerId])
+  }, [client, profileId, sessionId, workerId])
 
   return (
     <div className="px-4 py-3">

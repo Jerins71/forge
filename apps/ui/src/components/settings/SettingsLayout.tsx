@@ -46,8 +46,10 @@ interface SettingsLayoutProps {
   contentWidthClassName?: string
   /** Filter nav items to only these tabs. When omitted, all tabs are shown. */
   availableTabs?: SettingsTab[]
-  /** Non-interactive target badge label (e.g. "Builder backend" or "Collab backend"). */
+  /** Non-interactive target badge label (e.g. "Project: Forge"). */
   targetLabel?: string
+  /** Header control naming the environment the view edits. */
+  headerAccessory?: React.ReactNode
   /** Header label. Defaults to the global Settings surface. */
   title?: string
   /**
@@ -60,7 +62,7 @@ interface SettingsLayoutProps {
   attentionTabs?: SettingsTab[]
 }
 
-export function SettingsLayout({ activeTab, onTabChange, onBack, children, contentWidthClassName, availableTabs, targetLabel, title = 'Settings', fillHeight, attentionTabs }: SettingsLayoutProps) {
+export function SettingsLayout({ activeTab, onTabChange, onBack, children, contentWidthClassName, availableTabs, targetLabel, headerAccessory, title = 'Settings', fillHeight, attentionTabs }: SettingsLayoutProps) {
   const visibleItems = availableTabs
     ? NAV_ITEMS.filter((item) => availableTabs.includes(item.id))
     : NAV_ITEMS
@@ -87,6 +89,7 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
               {targetLabel}
             </Badge>
           ) : null}
+          {headerAccessory}
         </div>
         <HelpTrigger contextKey={`settings.${activeTab}`} size="sm" variant="ghost" />
       </header>

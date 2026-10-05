@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { NativeRuntimeId, NativeRuntimeStatus, NativeRuntimeStatusResponse } from '@forge/protocol'
-import { createBuilderSettingsApiClient, type SettingsApiClient } from './settings-api-client'
+import { resolveSettingsApiClient, type SettingsApiClient } from './settings-api-client'
 
 const ENDPOINT = '/api/settings/native-runtimes'
 const SEEN_KEY = 'forge.nativeRuntimeUpdates.seen'
@@ -58,16 +58,16 @@ export function markRuntimeUpdatesSeen(runtimes: NativeRuntimeStatus[]): void {
 }
 
 /**
- * Whether the local Builder has a runtime update the user has not seen. Checks on mount
+ * Whether the addressed environment has a runtime update the user has not seen. Checks on mount
  * and hourly; a backend without the route (Collab, older servers) never asks for attention.
  */
-export function useNativeRuntimeAttention(localWsUrl: string | undefined): boolean {
+export function useNativeRuntimeAttention(clientOrWsUrl: SettingsApiClient | string | undefined | null): boolean {
   const [runtimes, setRuntimes] = useState<NativeRuntimeStatus[]>([])
   const [, setSeenVersion] = useState(0)
 
   useEffect(() => {
-    if (localWsUrl === undefined) return
-    const client = createBuilderSettingsApiClient(localWsUrl)
+    if (clientOrWsUrl == null) return
+    const client = resolveSettingsApiClient(clientOrWsUrl)
     let cancelled = false
     const load = () => {
       fetchNativeRuntimes(client)
@@ -83,7 +83,7 @@ export function useNativeRuntimeAttention(localWsUrl: string | undefined): boole
       window.clearInterval(timer)
       window.removeEventListener(SEEN_EVENT, onSeen)
     }
-  }, [localWsUrl])
+  }, [clientOrWsUrl])
 
   return hasUnseenRuntimeUpdate(runtimes)
 }

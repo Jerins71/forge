@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   fetchOnboardingState,
-  fetchOnboardingStateViaClient,
   type OnboardingStateSummary,
   saveOnboardingPreferences,
-  saveOnboardingPreferencesViaClient,
   skipOnboarding,
-  skipOnboardingViaClient,
   type SaveOnboardingPreferencesInput,
 } from '@/lib/onboarding-api'
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
@@ -22,32 +19,23 @@ interface UseOnboardingStateResult {
   skip: () => Promise<OnboardingStateSummary | null>
 }
 
+const UNAVAILABLE = 'Environment is unavailable.'
+
 /**
- * Hook for managing onboarding state.
- *
- * Accepts either a SettingsApiClient (target-aware, used from Settings panels)
- * or a raw wsUrl string (legacy, used from non-Settings callers).
+ * Onboarding state of one environment, read through its authenticated client.
+ * A null client (environment not registered) never falls back to another host.
  */
-export function useOnboardingState(clientOrWsUrl: SettingsApiClient | string): UseOnboardingStateResult {
+export function useOnboardingState(client: SettingsApiClient | null): UseOnboardingStateResult {
   const [onboardingState, setOnboardingState] = useState<OnboardingStateSummary | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [hasLoaded, setHasLoaded] = useState(false)
   const [isMutating, setIsMutating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Stable identity key for the dependency — use the apiBaseUrl for clients, raw string for wsUrl
-  const depKey = typeof clientOrWsUrl === 'string' ? clientOrWsUrl : clientOrWsUrl.target.apiBaseUrl
-
-  const doFetch = useCallback(async (signal?: AbortSignal): Promise<OnboardingStateSummary> => {
-    if (typeof clientOrWsUrl === 'string') {
-      return fetchOnboardingState(clientOrWsUrl, signal)
-    }
-    return fetchOnboardingStateViaClient(clientOrWsUrl, signal)
-  }, [clientOrWsUrl, depKey]) // eslint-disable-line react-hooks/exhaustive-deps
-
   const refresh = useCallback(async (): Promise<OnboardingStateSummary | null> => {
+    if (!client) return null
     try {
-      const nextState = await doFetch()
+      const nextState = await fetchOnboardingState(client)
       setOnboardingState(nextState)
       setError(null)
       return nextState
@@ -58,15 +46,16 @@ export function useOnboardingState(clientOrWsUrl: SettingsApiClient | string): U
       setHasLoaded(true)
       setIsLoading(false)
     }
-  }, [doFetch])
+  }, [client])
 
   useEffect(() => {
+    if (!client) return
     const abortController = new AbortController()
     setIsLoading(true)
 
     void (async () => {
       try {
-        const nextState = await doFetch(abortController.signal)
+        const nextState = await fetchOnboardingState(client, abortController.signal)
         if (abortController.signal.aborted) {
           return
         }
@@ -88,16 +77,15 @@ export function useOnboardingState(clientOrWsUrl: SettingsApiClient | string): U
     return () => {
       abortController.abort()
     }
-  }, [doFetch])
+  }, [client])
 
   const savePreferencesAction = useCallback(async (
     input: SaveOnboardingPreferencesInput,
   ): Promise<OnboardingStateSummary | null> => {
     setIsMutating(true)
     try {
-      const nextState = typeof clientOrWsUrl === 'string'
-        ? await saveOnboardingPreferences(clientOrWsUrl, input)
-        : await saveOnboardingPreferencesViaClient(clientOrWsUrl, input)
+      if (!client) throw new Error(UNAVAILABLE)
+      const nextState = await saveOnboardingPreferences(client, input)
       setOnboardingState(nextState)
       setError(null)
       return nextState
@@ -107,14 +95,13 @@ export function useOnboardingState(clientOrWsUrl: SettingsApiClient | string): U
     } finally {
       setIsMutating(false)
     }
-  }, [clientOrWsUrl, depKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [client])
 
   const skipAction = useCallback(async (): Promise<OnboardingStateSummary | null> => {
     setIsMutating(true)
     try {
-      const nextState = typeof clientOrWsUrl === 'string'
-        ? await skipOnboarding(clientOrWsUrl)
-        : await skipOnboardingViaClient(clientOrWsUrl)
+      if (!client) throw new Error(UNAVAILABLE)
+      const nextState = await skipOnboarding(client)
       setOnboardingState(nextState)
       setError(null)
       return nextState
@@ -124,7 +111,7 @@ export function useOnboardingState(clientOrWsUrl: SettingsApiClient | string): U
     } finally {
       setIsMutating(false)
     }
-  }, [clientOrWsUrl, depKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [client])
 
   return {
     onboardingState,
