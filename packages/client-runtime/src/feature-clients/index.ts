@@ -494,8 +494,6 @@ export function createFeatureClients(
         'create_session',
         'stop_session',
         'choice_response',
-        'resume_session',
-        'fork_session',
         'get_session_workers',
         'get_conversation_page',
         'pick_directory',

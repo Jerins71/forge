@@ -324,6 +324,12 @@ export class ManagerWsClient {
       updateState: (patch) => this.updateState(patch),
       onWorkersRemoved: (agentIds) => this.clearGenerationThroughputForAgents(agentIds),
       requestSessionWorkers: (sessionAgentId) => {
+        // Environment sessions receive workers on their detail stream; there is no separate fetch.
+        if (this.environmentClient)
+          return Promise.resolve({
+            sessionAgentId,
+            workers: this.state.agents.filter((agent) => agent.role === 'worker' && agent.managerId === sessionAgentId),
+          })
         assertConnectedSocket(this.socket)
         // Short timeout: a lost response must not hold the cache's in-flight
         // dedupe for the full default request timeout — the cache retries with
@@ -500,6 +506,8 @@ export class ManagerWsClient {
   }
 
   private scheduleBrowserHandshake(epoch: number, delayMs: number): void {
+    // The embedded browser host is a local platform service V2 does not route yet.
+    if (this.environmentClient) return
     if (epoch !== this.browserHandshakeEpoch || this.browserHandshakeTimer || this.browserHandshakeProtocolError) return
     this.browserHandshakeTimer = setTimeout(() => {
       this.browserHandshakeTimer = null
