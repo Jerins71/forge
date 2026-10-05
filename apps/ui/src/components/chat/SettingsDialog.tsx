@@ -232,7 +232,7 @@ export function SettingsPanel({
       {activeTab === 'stream-deck' && <SettingsStreamDeck apiClient={apiClient} />}
       {activeTab === 'history' && <SettingsHistory apiClient={apiClient} />}
       {activeTab === 'observability' && <SettingsObservability apiClient={apiClient} />}
-      {activeTab === 'about' && <SettingsAbout apiClient={apiClient} showNativeRuntimes />}
+      {activeTab === 'about' && <SettingsAbout apiClient={apiClient} />}
       </Fragment>
       )}
     </SettingsLayout>

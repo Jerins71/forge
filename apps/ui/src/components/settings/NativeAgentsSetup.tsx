@@ -6,13 +6,19 @@ import { Button } from '@/components/ui/button'
 import { SettingsSection } from './settings-row'
 import type { SettingsApiClient } from './settings-api-client'
 import { fetchNativeRuntimes, markRuntimeUpdatesSeen, startNativeRuntimeUpdate } from './native-runtimes-api'
+import { ClaudeNativeAuth } from './ClaudeNativeAuth'
+import { CodexNativeAuth } from './CodexNativeAuth'
 
 const POLL_MS = 2_000
-const LABEL = { codex: 'Codex', claude: 'Claude Code' } as const
+const LABEL = { codex: 'Codex CLI', claude: 'Claude Code' } as const
+const NAME = { claude: 'Claude native', codex: 'Codex native' } as const
 const SOURCE_LABEL = { bundled: 'Bundled with Forge', managed: 'Downloaded by Forge', external: 'Your installation' } as const
 
-/** Versions of the native Codex and Claude runtimes this Builder launches, with one-click updates. */
-export function NativeRuntimes({ apiClient }: { apiClient: SettingsApiClient }) {
+/**
+ * Claude native and Codex native for one environment: runtime install/update and sign-in in one place.
+ * Every request goes to the environment selected in Settings, so the same flow sets up a remote machine.
+ */
+export function NativeAgentsSetup({ apiClient }: { apiClient: SettingsApiClient }) {
   const [runtimes, setRuntimes] = useState<NativeRuntimeStatus[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -34,7 +40,10 @@ export function NativeRuntimes({ apiClient }: { apiClient: SettingsApiClient }) 
     }
   }, [apiClient, apply])
 
-  useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => {
+    setRuntimes(null)
+    void refresh()
+  }, [refresh])
 
   const running = runtimes?.some((runtime) => runtime.update?.status === 'running') ?? false
   useEffect(() => {
@@ -50,15 +59,16 @@ export function NativeRuntimes({ apiClient }: { apiClient: SettingsApiClient }) 
     try {
       apply(await startNativeRuntimeUpdate(apiClient, runtime.runtime, runtime.updateCommand))
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not start the update.')
+      setError(cause instanceof Error ? cause.message : 'Could not start the install.')
       void refresh()
     }
   }
 
+  const runtimeFor = (id: NativeRuntimeStatus['runtime']) => runtimes?.find((runtime) => runtime.runtime === id)
   return (
     <SettingsSection
-      label="Agent runtimes"
-      description="The native Codex and Claude Code runtimes this computer runs. Updates apply to new sessions."
+      label="Claude & Codex"
+      description="Install and sign in to the native Claude and Codex runtimes on this environment. Each environment has its own installation and sign-in."
       cta={(
         <Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={loading || running} aria-label="Check runtime versions">
           <RefreshCw className={loading ? 'size-3.5 animate-spin' : 'size-3.5'} />
@@ -71,15 +81,23 @@ export function NativeRuntimes({ apiClient }: { apiClient: SettingsApiClient }) 
           <p className="text-xs text-destructive">{error}</p>
         </div>
       ) : null}
-      {runtimes === null ? (
-        loading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null
-      ) : (
-        <div className="flex flex-col gap-3">
-          {runtimes.map((runtime) => (
-            <RuntimeRow key={runtime.runtime} runtime={runtime} busy={running} onUpdate={() => void update(runtime)} />
-          ))}
-        </div>
-      )}
+      <div className="flex flex-col gap-3">
+        {(['claude', 'codex'] as const).map((id) => (
+          <section key={id} aria-label={`${NAME[id]} setup`} className="flex flex-col gap-3 rounded-lg border border-border p-4" data-testid={`native-agent-${id}`}>
+            <h3 className="text-sm font-medium">{NAME[id]}</h3>
+            {runtimeFor(id) ? (
+              <RuntimeRow runtime={runtimeFor(id)!} busy={running} onUpdate={() => void update(runtimeFor(id)!)} />
+            ) : (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                {loading ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null} Checking runtime…
+              </p>
+            )}
+            <div className="border-t border-border pt-3">
+              {id === 'claude' ? <ClaudeNativeAuth apiClient={apiClient} embedded /> : <CodexNativeAuth apiClient={apiClient} />}
+            </div>
+          </section>
+        ))}
+      </div>
     </SettingsSection>
   )
 }
@@ -88,7 +106,7 @@ function RuntimeRow({ runtime, busy, onUpdate }: { runtime: NativeRuntimeStatus;
   const update = runtime.update
   const updating = update?.status === 'running'
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border px-4 py-3" data-testid={`native-runtime-${runtime.runtime}`}>
+    <div className="flex flex-col gap-2" data-testid={`native-runtime-${runtime.runtime}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -103,7 +121,7 @@ function RuntimeRow({ runtime, busy, onUpdate }: { runtime: NativeRuntimeStatus;
         {runtime.canUpdate || updating ? (
           <Button variant="outline" size="sm" onClick={onUpdate} disabled={busy}>
             {updating ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Download className="mr-1.5 size-3.5" />}
-            {updating ? 'Updating…' : `Update to v${runtime.latestVersion}`}
+            {updating ? (runtime.status === 'missing' ? 'Installing…' : 'Updating…') : `${runtime.status === 'missing' ? 'Install' : 'Update to'} v${runtime.latestVersion}`}
           </Button>
         ) : null}
       </div>

@@ -1,4 +1,4 @@
-import { ClaudeNativeAuth } from './ClaudeNativeAuth'
+import { NativeAgentsSetup } from './NativeAgentsSetup'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useHelpContext } from '@/components/help/help-hooks'
 import {
@@ -714,6 +714,7 @@ export function SettingsAuth({ apiClient }: SettingsAuthProps) {
 
   return (
     <div className="flex flex-col gap-8">
+      <NativeAgentsSetup apiClient={apiClient} />
       <SettingsSection
         label="Authentication"
         description="Stored on this Builder backend."
@@ -738,7 +739,6 @@ export function SettingsAuth({ apiClient }: SettingsAuthProps) {
           </div>
         ) : (
           <div className="space-y-3">
-            <ClaudeNativeAuth apiClient={apiClient} />
             {SETTINGS_AUTH_PROVIDER_ORDER.map((provider) => {
               // OpenAI and Anthropic use the credential pool panel
               if (provider === 'openai-codex') {

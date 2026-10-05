@@ -7,9 +7,11 @@ import type { SettingsApiClient } from './settings-api-client'
 
 const endpoint = '/api/settings/claude-native'
 
-export function ClaudeNativeAuth({ apiClient, inConversation = false }: {
+export function ClaudeNativeAuth({ apiClient, inConversation = false, embedded = false }: {
   apiClient: SettingsApiClient
   inConversation?: boolean
+  /** Rendered inside the Claude & Codex setup card, which supplies the frame and title. */
+  embedded?: boolean
 }) {
   const [status, setStatus] = useState<ClaudeAuthStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -74,14 +76,14 @@ export function ClaudeNativeAuth({ apiClient, inConversation = false }: {
   }
 
   return (
-    <section aria-label="Claude native connection" className={inConversation
+    <section aria-label="Claude native connection" className={embedded ? '' : inConversation
       ? 'border-b border-border bg-muted/30 px-4 py-3'
       : 'rounded-lg border border-border p-4'}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <h3 className="flex items-center gap-2 text-sm font-medium">
             {status?.connected ? <Check className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" /> : null}
-            {status?.connected ? 'Claude connected' : inConversation ? 'Connect Claude to continue' : 'Claude native'}
+            {status?.connected ? (embedded ? 'Signed in' : 'Claude connected') : inConversation ? 'Connect Claude to continue' : embedded ? (status ? 'Not signed in' : 'Checking…') : 'Claude native'}
           </h3>
           <p className="max-w-prose text-xs text-muted-foreground">
             {status?.connected
