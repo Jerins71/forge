@@ -96,7 +96,8 @@ export async function writeInfrastructureArtifacts(manifest: FleetManifest, mani
   }
   if (index.artifacts.some(artifact => artifact.path === 'slice-assertions.json' || artifact.path === 'ui/ui-assertions.json')) {
     const files = ['slice-assertions.json', 'ui/ui-assertions.json'].filter(path => index.artifacts.some(artifact => artifact.path === path)).map(path => path.startsWith('ui/') ? 'scripts/environment-e2e/ui.spec.ts' : 'scripts/environment-e2e/slice.spec.ts');
-    index.rerunCommand = `VITE_FORGE_E2E_PLATFORM=1 VITE_FORGE_E2E_PROFILE=1 pnpm --filter @forge/ui build && pnpm exec playwright test ${files.join(' ')} --config scripts/environment-e2e/playwright.config.ts --project=chromium`;
+    // Each suite owns a fresh fleet: slice revokes and re-keys devices that the UI suite pairs.
+    index.rerunCommand = `VITE_FORGE_E2E_PLATFORM=1 VITE_FORGE_E2E_PROFILE=1 pnpm --filter @forge/ui build && ${files.map(file => `pnpm exec playwright test ${file} --config scripts/environment-e2e/playwright.config.ts --project=chromium`).join(' && ')}`;
   }
   if (index.artifacts.some(artifact => artifact.path === 'performance.json')) {
     const performance = JSON.parse(await readFile(join(root, 'performance.json'), 'utf8')) as { status: string; budgets?: Record<string, { pass?: boolean; releasedPass?: boolean; highWaterPass?: boolean }> };
