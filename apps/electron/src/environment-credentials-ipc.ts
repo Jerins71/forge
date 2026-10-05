@@ -63,8 +63,10 @@ async function boundedBytes(response: Response, maximum = MAX_ARTIFACT_BYTES): P
   const result = new Uint8Array(bytes); let offset = 0; for (const part of parts) { result.set(part, offset); offset += part.length; } return result;
 }
 function publicTarget(value: StoredTarget): DesktopEnvironmentTarget { return { environmentId: value.environmentId, baseUrl: value.baseUrl, label: value.label, primary: value.primary, deviceSessionId:value.deviceSessionId,deviceName:value.deviceName,scopes:[...value.scopes],pairedAt:value.pairedAt,expiresAt:value.expiresAt }; }
-export function createEnvironmentCredentialService(options: { storePath: string; safeStorage: EnvironmentSafeStorage; fetch?: typeof fetch }) {
+export function createEnvironmentCredentialService(options: { storePath: string; safeStorage: EnvironmentSafeStorage; fetch?: typeof fetch; clientOrigin?: string }) {
   const fetcher = options.fetch ?? fetch;
+  // Socket tickets are bound to the requesting origin, so it must be the renderer's real origin (dev servers are not app://forge).
+  const clientOrigin = options.clientOrigin ?? 'app://forge';
   let targets: StoredTarget[] | null = null;
   let writes = Promise.resolve();
   let mutations = Promise.resolve();
@@ -109,7 +111,7 @@ export function createEnvironmentCredentialService(options: { storePath: string;
   }
   async function target(id: string): Promise<StoredTarget> { if (!UUID.test(id)) return fail('INVALID_INPUT', 'Invalid environment identity'); const t = (await load()).find(t => t.environmentId === id); if (!t) return fail('UNAUTHENTICATED', 'Environment needs pairing'); return t; }
   async function http(t: StoredTarget, path: string, init: RequestInit = {}) {
-    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', 'app://forge'); headers.set('x-forge-environment-protocol', '1');
+    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', clientOrigin); headers.set('x-forge-environment-protocol', '1');
     try { const response = await fetcher(t.baseUrl + path, { ...init, headers, redirect: 'error', signal: init.signal ?? AbortSignal.timeout(30_000) }); if (response.status === 401) await clearRuntime(t.environmentId); return response; } catch { return fail('UNAVAILABLE', 'Environment request could not connect'); }
   }
   async function checkedJson(response: Response): Promise<unknown> {
@@ -142,7 +144,7 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     if (!UUID.test(input.environmentId) || typeof input.deviceName !== 'string' || input.deviceName.length < 1 || input.deviceName.length > 80 || !Array.isArray(input.requestedScopes)) fail('INVALID_INPUT', 'Invalid pairing input');
     const temporary: StoredTarget = { environmentId: input.environmentId, baseUrl, label: '', primary, bearerToken: '', deviceSessionId: '',deviceName:input.deviceName,scopes:input.requestedScopes,pairedAt:'',expiresAt:'' };
     await pinned(temporary);
-    const post = async (path: string, value: unknown) => checkedJson(await fetcher(baseUrl + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'app://forge' }, body: JSON.stringify(value), redirect: 'error', signal: AbortSignal.timeout(10_000) }));
+    const post = async (path: string, value: unknown) => checkedJson(await fetcher(baseUrl + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: clientOrigin }, body: JSON.stringify(value), redirect: 'error', signal: AbortSignal.timeout(10_000) }));
     const challenge = await post('/api/v2/access/challenge', {}) as { challengeId: string; nonce: string };
     const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }); const jwk = publicKey.export({ format: 'jwk' });
     const fields: Omit<PairingExchange, 'proof'> = { credential: input.credential, environmentId: input.environmentId, challengeId: challenge.challengeId, nonce: challenge.nonce, deviceName: input.deviceName, deviceKind: 'desktop', delivery: 'bearer', requestedScopes: input.requestedScopes, proofKey: { kty: 'EC', crv: 'P-256', x: jwk.x!, y: jwk.y! } };
