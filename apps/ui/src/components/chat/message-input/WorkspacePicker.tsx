@@ -39,7 +39,7 @@ export function WorkspacePicker({ target, value, onChange }: {
           {value.kind === 'new_worktree' ? <FolderGit2 className="size-3 shrink-0" /> : <FolderOpen className="size-3 shrink-0" />}
           <span>{value.kind === 'new_worktree' ? 'New worktree' : 'Current checkout'}</span>
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent position="popper" side="top" align="start">
           <SelectItem value="current_checkout" className="text-xs">
             <span className="flex flex-col">
               <span>Current checkout</span>

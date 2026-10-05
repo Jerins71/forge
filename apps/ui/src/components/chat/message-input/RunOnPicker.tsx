@@ -70,7 +70,7 @@ export function RunOnPicker({ groupKey, value, onChange, canSetUp, locked = fals
         {value ? <TriggerLabel choice={value} showProject={value.kind === 'checkout' && duplicateEnvironments.has(value.target.environmentId)} />
           : <><Server className="size-3 shrink-0" /><span>Choose a machine</span></>}
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent position="popper" side="top" align="start">
         <SelectGroup>
           <SelectLabel className="text-xs">Run on</SelectLabel>
           {withCheckout.flatMap((environmentId) => members.filter((member) => member.environmentId === environmentId)).map((member) => (

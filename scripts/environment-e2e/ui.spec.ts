@@ -191,7 +191,7 @@ test('9.2.2 A/B group by repository into one project row, manual split/merge wor
   const groupedRow = projectRows.filter({ has: hasB })
   await expect(groupedRow).toHaveCount(1)
   await expect(remoteOnlyRows.filter({ has: hasB })).toHaveCount(0)
-  await expect(groupedRow.getByTestId('project-machines')).toContainText(a.label)
+  await expect(groupedRow.getByTestId('project-machines')).toContainText('This machine')
   await expect(groupedRow.getByTestId('project-machines')).toContainText(b.label)
   await expect(sidebar.getByText('Other environments')).toHaveCount(0)
   const keys = await projectRows.evaluateAll(rows => rows.map(row => row.getAttribute('data-logical-project')))

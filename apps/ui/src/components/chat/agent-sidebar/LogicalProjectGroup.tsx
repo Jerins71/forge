@@ -55,7 +55,9 @@ export const ProjectMachineChips = memo(function ProjectMachineChips({ members }
 
 function MachineLabel({ environmentId }: { environmentId: string }) {
   const label = useEnvironmentLabel(environmentId)
-  return <span className="truncate" data-machine={environmentId}>{label}</span>
+  // Matches the Run on picker's name for the primary environment.
+  const primary = usePrimaryEnvironmentId() === environmentId
+  return <span className="truncate" data-machine={environmentId}>{primary ? 'This machine' : label}</span>
 }
 
 /** Split and merge a logical project's checkouts across machines. */

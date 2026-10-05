@@ -20,8 +20,8 @@ import { SessionModelPicker } from '@/components/chat/message-input/SessionModel
 
 const LAST_MACHINE_KEY = (groupKey: string) => `forge.runOn.lastEnvironment.${groupKey}`
 const SETUP_PHASE_LABEL: Record<string, string> = {
-  validating: 'Checking the destination…', cloning: 'Cloning', publishing: 'Finishing the checkout…',
-  creating_project: 'Registering the project…',
+  validating: 'Checking the destination', cloning: 'Cloning', publishing: 'Finishing the checkout',
+  creating_project: 'Registering the project',
 }
 
 /**
@@ -111,7 +111,7 @@ function SetupCheckoutRow({ environmentId, projectTitle, checkout, onStart }: {
   const label = useEnvironmentLabel(environmentId)
   const { status, error, busy } = checkout
   const failed = error ?? (status?.phase === 'error' ? status.message ?? 'Setup failed.' : null)
-  const progress = status && busy ? `${SETUP_PHASE_LABEL[status.phase] ?? 'Setting up…'}${status.phase === 'cloning' && status.percent !== undefined ? ` ${Math.round(status.percent)}%` : '…'}` : null
+  const progress = status && busy ? `${SETUP_PHASE_LABEL[status.phase] ?? 'Setting up'}${status.phase === 'cloning' && status.percent !== undefined ? ` ${Math.round(status.percent)}%` : '…'}` : null
   return (
     <div className="mx-3 mb-2 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm" data-testid="run-on-setup">
       <span className="min-w-0 flex-1">
