@@ -66,3 +66,35 @@ export type RepositoryProjectCreationErrorCode =
   | 'manager_creation_failed_after_clone'
   | 'clone_failed'
   | 'duplicate_operation'
+
+/** POST /api/repository-checkouts: set up a repository on this environment (clone or adopt, then register a project). */
+export interface RepositoryCheckoutRequest {
+  repositoryUrl: string
+  /** Folder name under this environment's repositories base path; defaults to the repository name. */
+  folder?: string
+  /** Project name; defaults to the repository name. */
+  name?: string
+}
+
+export type RepositoryCheckoutPhase =
+  | 'validating'
+  | 'cloning'
+  | 'publishing'
+  | 'creating_project'
+  | 'done'
+  | 'error'
+  | 'cancelled'
+
+/** GET /api/repository-checkouts/:checkoutId. */
+export interface RepositoryCheckoutStatus {
+  checkoutId: string
+  phase: RepositoryCheckoutPhase
+  percent?: number
+  projectId?: string
+  sessionId?: string
+  repositoryPath?: string
+  /** True when an existing matching checkout or project was adopted instead of cloned. */
+  adopted?: boolean
+  message?: string
+  code?: RepositoryProjectCreationErrorCode
+}

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import type { ConversationAttachment } from '@forge/protocol'
+import type { AgentModelDescriptor, ConversationAttachment } from '@forge/protocol'
 import type { CommandReceipt, ProjectRef, WorkspaceStrategy } from '@forge/protocol/environment-v2'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 import { describeEnvironmentStatus } from '@/components/settings/environments/environment-status'
@@ -22,17 +22,24 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
   const registry = useEnvironmentRegistry()
   const [target, setTargetState] = useState<ProjectRef | null>(initialTarget)
   const [workspace, setWorkspace] = useState<WorkspaceStrategy>({ kind: 'current_checkout' })
+  /** Null launches on the project's default model. */
+  const [model, setModel] = useState<AgentModelDescriptor | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const pendingRef = useRef<PendingLaunch | null>(null)
 
-  const setTarget = (next: ProjectRef) => {
-    if (target?.environmentId === next.environmentId && target.projectId === next.projectId) return
-    pendingRef.current = null
-    setTargetState(next)
-    setWorkspace({ kind: 'current_checkout' })
-    setError(null)
-  }
+  // Stable, and a no-op for the current target, so callers can use it from effects.
+  const setTarget = useCallback((next: ProjectRef | null) => {
+    setTargetState((current) => {
+      if (current?.environmentId === next?.environmentId && current?.projectId === next?.projectId) return current
+      pendingRef.current = null
+      setWorkspace({ kind: 'current_checkout' })
+      // Each machine has its own model catalog.
+      if (current?.environmentId !== next?.environmentId) setModel(null)
+      setError(null)
+      return next
+    })
+  }, [])
 
   const launch = useCallback(async (text: string, attachments: readonly ConversationAttachment[] = []): Promise<boolean> => {
     if (!target) {
@@ -51,7 +58,7 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
       return false
     }
     const attachmentKeys = attachments.map(attachmentFingerprint)
-    const fingerprint = JSON.stringify([target, workspace, text, attachmentKeys])
+    const fingerprint = JSON.stringify([target, workspace, model, text, attachmentKeys])
     if (pendingRef.current?.fingerprint !== fingerprint) {
       pendingRef.current = { fingerprint, commandId: crypto.randomUUID(), artifactIds: new Map() }
     }
@@ -81,6 +88,7 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
         projectId: target.projectId,
         title: titleFromText(text),
         workspaceStrategy: workspace,
+        ...(model ? { model: { provider: model.provider, modelId: model.modelId, ...(model.thinkingLevel ? { thinkingLevel: model.thinkingLevel } : {}) } } : {}),
         initialMessage: { text, artifactIds },
       })
       pendingRef.current = null
@@ -99,9 +107,9 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
     } finally {
       setSubmitting(false)
     }
-  }, [onLaunched, registry, target, workspace])
+  }, [model, onLaunched, registry, target, workspace])
 
-  return { target, setTarget, workspace, setWorkspace, error, submitting, launch }
+  return { target, setTarget, workspace, setWorkspace, model, setModel, error, submitting, launch }
 }
 
 function titleFromText(text: string): string {

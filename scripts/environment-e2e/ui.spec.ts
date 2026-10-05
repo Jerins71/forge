@@ -229,12 +229,13 @@ test('9.2.3 Run on B with a new worktree and an attachment uploaded to B; enviro
   const { a, b } = fleet!
   await page.goto(`${fleet!.uiUrl}/?launch=${encodeURIComponent(await logicalGroupKey(page, a))}`)
   const runOn = page.getByTestId('run-on-picker')
-  await expect(runOn).toContainText(a.label)
+  // A is the primary environment, labelled "This machine".
+  await expect(runOn).toContainText('This machine')
 
-  // Keyboard selection of the B checkout.
+  // Keyboard selection of the B checkout. Machines without a checkout follow under "Not set up yet".
   await runOn.focus()
   await page.keyboard.press('Enter')
-  const options = page.getByRole('option')
+  const options = page.getByRole('option').filter({ hasNotText: /Set up in one click|Not a Git repository|Set up the repository root/ })
   await expect(options).toHaveCount(2)
   assertions.runOnMembers = await options.allTextContents()
   await options.filter({ hasText: b.label }).focus()
