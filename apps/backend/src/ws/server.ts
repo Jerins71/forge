@@ -1,5 +1,7 @@
 import { ClaudeAuthService } from "../swarm/runtime/claude/claude-auth-service.js";
 import { createClaudeAuthRoutes } from "./http/routes/claude-auth-routes.js";
+import { RepositoryCheckoutService } from "../swarm/repository-checkout-service.js";
+import { createRepositoryCheckoutRoutes } from "./http/routes/repository-checkout-routes.js";
 import { createCodexAuthRoutes } from "./http/routes/codex-auth-routes.js";
 import { CodexAuthService } from "../swarm/runtime/codex/codex-auth-service.js";
 import { createNativeRuntimeRoutes } from "./http/routes/native-runtime-routes.js";
@@ -169,6 +171,7 @@ export class SwarmWebSocketServer {
   private readonly secureSecretSettingsService: SecureSecretSettingsService | null;
   private readonly repositorySettingsService: RepositorySettingsService | null;
   private readonly repositoryProjectCreationService: RepositoryProjectCreationService | null;
+  private readonly repositoryCheckoutService: RepositoryCheckoutService;
   private readonly terminalService: TerminalService | null;
   private readonly terminalRuntimeConfig: TerminalRuntimeConfig | null;
   private readonly terminalSettingsService: TerminalSettingsService;
@@ -610,10 +613,10 @@ export class SwarmWebSocketServer {
       ? new RepositoryProjectCreationService({
           swarmManager: this.swarmManager,
           settingsService: this.repositorySettingsService,
-          sendToSocket: (socket, event) => this.wsHandler.sendToSocket(socket, event),
         })
       : null;
     this.wsHandler.setRepositoryProjectCreationService(this.repositoryProjectCreationService);
+    this.repositoryCheckoutService = new RepositoryCheckoutService({ creationService: this.repositoryProjectCreationService!, settingsService: this.repositorySettingsService!, swarmManager: this.swarmManager, machineName: this.environment?.descriptor().label });
 
     this.telemetryService = options.telemetryService ?? null;
     this.statsService = options.statsService ?? new StatsService(this.swarmManager, {
@@ -730,6 +733,7 @@ export class SwarmWebSocketServer {
       ...(this.terminalService ? createTerminalRoutes({ terminalService: this.terminalService, settingsService: this.terminalSettingsService, terminalTransport: this.environmentTransport?.terminalTransport }) : []),
       ...(this.claudeAuthService ? createClaudeAuthRoutes(this.claudeAuthService) : []),
       ...createCodexAuthRoutes(this.codexAuthService),
+      ...createRepositoryCheckoutRoutes(this.repositoryCheckoutService),
       ...(this.nativeRuntimeUpdateService ? createNativeRuntimeRoutes(this.nativeRuntimeUpdateService) : []),
       ...this.settingsRoutes.routes,
       ...createSpecialistRoutes({
@@ -1005,6 +1009,7 @@ export class SwarmWebSocketServer {
     // Stop local Git observations before closing feature storage.
     await this.remoteUpdateAwarenessService?.stop();
     // Abort in-flight clones and await termination/cleanup before persistence drains.
+    await this.repositoryCheckoutService.shutdown();
     await this.repositoryProjectCreationService?.shutdown();
 
     this.wsHandler.reset();

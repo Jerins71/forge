@@ -6,6 +6,11 @@ import type {
   RepositoryProjectCreationStage,
 } from '@forge/protocol'
 import type { WebSocket } from 'ws'
+import { execFile } from 'node:child_process'
+import { lstat, realpath } from 'node:fs/promises'
+import { resolve } from 'node:path'
+import { promisify } from 'node:util'
+import { normalizeRepositoryRemote } from '../environment/control/workspace-service.js'
 import {
   GitCloneError,
   GitCloneRunner,
@@ -45,16 +50,21 @@ export interface CreateRepositoryProjectInput {
   repositoryUrl: string
   repositoryBasePath: string
   repositoryFolder: string
-  modelSelection: ManagerExactModelSelection
+  modelSelection?: ManagerExactModelSelection
+  resolveModelSelection?: () => Promise<{ modelSelection: ManagerExactModelSelection; reasoningLevel?: ManagerReasoningLevel }>
   reasoningLevel?: ManagerReasoningLevel
   secureSessionsEnabled?: boolean
   managerContextId: string
-  socket: WebSocket
+  socket?: WebSocket
+  onProgress?: (progress: { stage: RepositoryProjectCreationStage; percent?: number }) => void
+  signal?: AbortSignal
+  adoptExisting?: boolean
 }
 
 export interface CreateRepositoryProjectResult {
   manager: AgentDescriptor
   repositoryPath: string
+  adopted?: boolean
 }
 
 export interface CancelRepositoryProjectResult {
@@ -76,7 +86,7 @@ type ServiceLifecycle = 'open' | 'closing' | 'closed'
 
 interface OperationState {
   requestId: string
-  socket: WebSocket
+  socket?: WebSocket
   destinationKey: string
   phase: OperationPhase
   abortController: AbortController
@@ -84,17 +94,15 @@ interface OperationState {
 }
 
 export interface RepositoryProjectCreationServiceOptions {
-  swarmManager: SwarmManager
+  swarmManager: Pick<SwarmManager, 'createManager' | 'listProfiles' | 'getAgentForInternalUse'>
   settingsService: RepositorySettingsService
   cloneRunner?: GitCloneRunner
-  sendToSocket: (socket: WebSocket, event: import('@forge/protocol').ServerEvent) => void
 }
 
 export class RepositoryProjectCreationService {
-  private readonly swarmManager: SwarmManager
+  private readonly swarmManager: RepositoryProjectCreationServiceOptions['swarmManager']
   private readonly settingsService: RepositorySettingsService
   private readonly cloneRunner: GitCloneRunner
-  private readonly sendToSocket: RepositoryProjectCreationServiceOptions['sendToSocket']
   private readonly operations = new Map<string, OperationState>()
   private readonly destinations = new Map<string, string>()
   /** In-flight create() settlement promises — including preflight — awaited by shutdown(). */
@@ -107,11 +115,10 @@ export class RepositoryProjectCreationService {
     this.swarmManager = options.swarmManager
     this.settingsService = options.settingsService
     this.cloneRunner = options.cloneRunner ?? new GitCloneRunner()
-    this.sendToSocket = options.sendToSocket
   }
 
   async create(input: CreateRepositoryProjectInput): Promise<CreateRepositoryProjectResult> {
-    this.assertAcceptingCreates()
+    this.assertAcceptingCreates(input.signal)
 
     const tracking = this.beginTrackedCall(input.requestId.trim() || `preflight-${++this.settlementSeq}`)
     try {
@@ -123,7 +130,7 @@ export class RepositoryProjectCreationService {
         )
       }
 
-      if (!input.modelSelection?.provider?.trim() || !input.modelSelection?.modelId?.trim()) {
+      if (!input.resolveModelSelection && (!input.modelSelection?.provider?.trim() || !input.modelSelection?.modelId?.trim())) {
         throw new RepositoryProjectCreationError(
           'CREATE_REPOSITORY_PROJECT_FAILED',
           'A model must be selected.',
@@ -137,7 +144,7 @@ export class RepositoryProjectCreationService {
         )
       }
 
-      this.assertAcceptingCreates()
+      this.assertAcceptingCreates(input.signal)
 
       try {
         parseAndValidateRepositoryUrl(input.repositoryUrl)
@@ -158,7 +165,7 @@ export class RepositoryProjectCreationService {
         throw error
       }
 
-      this.assertAcceptingCreates()
+      this.assertAcceptingCreates(input.signal)
 
       let canonicalBase: string
       try {
@@ -171,7 +178,7 @@ export class RepositoryProjectCreationService {
       }
 
       // Recheck after every pre-registration await — never register/start clone after shutdown.
-      this.assertAcceptingCreates()
+      this.assertAcceptingCreates(input.signal)
 
       const destinationKey = normalizeDestinationKey(canonicalBase, folder)
 
@@ -203,58 +210,89 @@ export class RepositoryProjectCreationService {
       this.destinations.set(destinationKey, input.requestId)
 
       const onSocketClose = () => {
-        this.handleSocketDisconnect(input.socket)
+        if (input.socket) this.handleSocketDisconnect(input.socket)
       }
-      input.socket.once('close', onSocketClose)
+      const onAbort = () => { this.cancel(input.requestId) }
+      input.socket?.once('close', onSocketClose)
+      input.signal?.addEventListener('abort', onAbort, { once: true })
 
       try {
-        this.emitProgress(input.socket, input.requestId, 'validating')
+        this.emitProgress(input, 'validating')
 
         if (abortController.signal.aborted || operation.phase === 'cancelled' || this.lifecycle !== 'open') {
           throw new RepositoryProjectCreationError('clone_cancelled', 'Clone was cancelled.')
         }
 
-        operation.phase = 'cloning'
-        this.emitProgress(input.socket, input.requestId, 'cloning', 0)
+        // The destination reservation covers adoption and project creation as well as cloning.
+        let repositoryPath = resolve(canonicalBase, folder)
+        const adopted = input.adoptExisting
+          ? await matchingExistingCheckout(repositoryPath, input.repositoryUrl)
+          : false
+        this.assertAcceptingCreates(input.signal)
+        if (abortController.signal.aborted) throw new RepositoryProjectCreationError('clone_cancelled', 'Clone was cancelled.')
+        if (adopted) {
+          repositoryPath = await realpath(repositoryPath)
+          const manager = await this.findExistingManager(repositoryPath)
+          this.assertAcceptingCreates(input.signal)
+          if (abortController.signal.aborted) throw new RepositoryProjectCreationError('clone_cancelled', 'Clone was cancelled.')
+          if (manager) {
+            operation.phase = 'completed'
+            return { manager, repositoryPath, adopted: true }
+          }
+        }
 
-        let repositoryPath: string
-        try {
-          const result = await this.cloneRunner.clone({
-            repositoryUrl: input.repositoryUrl,
-            basePath: canonicalBase,
-            folder,
-            canonicalBasePath: canonicalBase,
-            signal: abortController.signal,
-            onProgress: (progress) => {
-              this.emitProgress(input.socket, input.requestId, 'cloning', progress.percent)
-            },
-            beforePublish: () => this.tryBeginPublish(operation),
-          })
-          repositoryPath = result.repositoryPath
-        } catch (error) {
-          const phaseAfterClone = operation.phase as OperationPhase
-          if (
-            abortController.signal.aborted ||
-            phaseAfterClone === 'cancelled' ||
-            this.lifecycle !== 'open' ||
-            (error instanceof GitCloneError && error.code === 'clone_cancelled')
-          ) {
-            operation.phase = 'cancelled'
-            throw new RepositoryProjectCreationError('clone_cancelled', 'Clone was cancelled.')
-          }
-          if (error instanceof GitCloneError) {
+        const selection = input.resolveModelSelection
+          ? await input.resolveModelSelection()
+          : { modelSelection: input.modelSelection!, reasoningLevel: input.reasoningLevel }
+        this.assertAcceptingCreates(input.signal)
+        if (abortController.signal.aborted) throw new RepositoryProjectCreationError('clone_cancelled', 'Clone was cancelled.')
+        if (!selection.modelSelection?.provider?.trim() || !selection.modelSelection?.modelId?.trim()) {
+          throw new RepositoryProjectCreationError('CREATE_REPOSITORY_PROJECT_FAILED', 'A model must be selected.')
+        }
+
+        if (!adopted) {
+          operation.phase = 'cloning'
+          this.emitProgress(input, 'cloning', 0)
+          try {
+            const result = await this.cloneRunner.clone({
+              repositoryUrl: input.repositoryUrl,
+              basePath: canonicalBase,
+              folder,
+              canonicalBasePath: canonicalBase,
+              signal: abortController.signal,
+              onProgress: (progress) => {
+                this.emitProgress(input, 'cloning', progress.percent)
+              },
+              beforePublish: () => this.tryBeginPublish(operation),
+            })
+            repositoryPath = result.repositoryPath
+          } catch (error) {
+            const phaseAfterClone = operation.phase as OperationPhase
+            if (
+              abortController.signal.aborted ||
+              phaseAfterClone === 'cancelled' ||
+              this.lifecycle !== 'open' ||
+              (error instanceof GitCloneError && error.code === 'clone_cancelled')
+            ) {
+              operation.phase = 'cancelled'
+              throw new RepositoryProjectCreationError('clone_cancelled', 'Clone was cancelled.')
+            }
+            if (error instanceof GitCloneError) {
+              operation.phase = 'failed'
+              throw new RepositoryProjectCreationError(error.code, error.message)
+            }
             operation.phase = 'failed'
-            throw new RepositoryProjectCreationError(error.code, error.message)
+            throw new RepositoryProjectCreationError(
+              'clone_failed',
+              error instanceof Error ? error.message : 'Clone failed.',
+            )
           }
-          operation.phase = 'failed'
-          throw new RepositoryProjectCreationError(
-            'clone_failed',
-            error instanceof Error ? error.message : 'Clone failed.',
-          )
+        } else if (!this.tryBeginPublish(operation)) {
+          throw new RepositoryProjectCreationError('clone_cancelled', 'Clone was cancelled.')
         }
 
         operation.publishedPath = repositoryPath
-        this.emitProgress(input.socket, input.requestId, 'publishing')
+        this.emitProgress(input, 'publishing')
 
         try {
           await this.settingsService.recordLastUsedBasePath(canonicalBase)
@@ -267,19 +305,19 @@ export class RepositoryProjectCreationService {
         }
 
         operation.phase = 'creating_manager'
-        this.emitProgress(input.socket, input.requestId, 'creating_manager')
+        this.emitProgress(input, 'creating_manager')
 
         try {
           const manager = await this.swarmManager.createManager(input.managerContextId, {
             name,
             cwd: repositoryPath,
-            modelSelection: input.modelSelection,
+            modelSelection: selection.modelSelection,
             secureSessionsEnabled: input.secureSessionsEnabled,
-            ...(input.reasoningLevel !== undefined ? { reasoningLevel: input.reasoningLevel } : {}),
+            ...(selection.reasoningLevel !== undefined ? { reasoningLevel: selection.reasoningLevel } : {}),
           })
 
           operation.phase = 'completed'
-          return { manager, repositoryPath }
+          return { manager, repositoryPath, ...(adopted ? { adopted: true } : {}) }
         } catch (error) {
           operation.phase = 'failed_after_clone'
           const message = error instanceof Error ? error.message : String(error)
@@ -290,7 +328,8 @@ export class RepositoryProjectCreationService {
           )
         }
       } finally {
-        input.socket.off('close', onSocketClose)
+        input.socket?.off('close', onSocketClose)
+        input.signal?.removeEventListener('abort', onAbort)
         this.operations.delete(input.requestId)
         if (this.destinations.get(destinationKey) === input.requestId) {
           this.destinations.delete(destinationKey)
@@ -393,7 +432,8 @@ export class RepositoryProjectCreationService {
     return this.lifecycle
   }
 
-  private assertAcceptingCreates(): void {
+  private assertAcceptingCreates(signal?: AbortSignal): void {
+    if (signal?.aborted) throw new RepositoryProjectCreationError('clone_cancelled', 'Clone was cancelled.')
     if (this.lifecycle !== 'open') {
       throw new RepositoryProjectCreationError(
         'clone_cancelled',
@@ -421,22 +461,52 @@ export class RepositoryProjectCreationService {
     }
   }
 
-  private emitProgress(
-    socket: WebSocket,
-    requestId: string,
-    stage: RepositoryProjectCreationStage,
-    percent?: number,
-  ): void {
-    this.sendToSocket(socket, {
-      type: 'repository_project_creation_progress',
-      requestId,
-      stage,
-      ...(percent !== undefined ? { percent } : {}),
-    })
+  private async findExistingManager(repositoryPath: string): Promise<AgentDescriptor | undefined> {
+    for (const profile of this.swarmManager.listProfiles()) {
+      if (profile.profileType === 'system') continue
+      const manager = this.swarmManager.getAgentForInternalUse(profile.defaultSessionAgentId)
+      if (!manager) continue
+      const cwd = await realpath(manager.cwd).catch(() => null)
+      if (cwd && samePath(cwd, repositoryPath)) return manager
+    }
+    return undefined
+  }
+
+  private emitProgress(input: CreateRepositoryProjectInput, stage: RepositoryProjectCreationStage, percent?: number): void {
+    input.onProgress?.({ stage, ...(percent !== undefined ? { percent } : {}) })
   }
 }
 
 function normalizeDestinationKey(basePath: string, folder: string): string {
   const normalizedBase = basePath.replace(/[/\\]+$/, '').toLowerCase()
   return `${normalizedBase}::${folder.toLowerCase()}`
+}
+
+const exec = promisify(execFile)
+function samePath(a: string, b: string): boolean {
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
+}
+
+/** Never adopt a parent checkout, non-Git folder, or different origin; never echo Git stderr. */
+async function matchingExistingCheckout(destination: string, repositoryUrl: string): Promise<boolean> {
+  try { await lstat(destination) } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw new RepositoryProjectCreationError('destination_permission_denied', 'Unable to access the destination folder.')
+  }
+  try {
+    const canonicalDestination = await realpath(destination)
+    const options = { cwd: canonicalDestination, timeout: 10_000, maxBuffer: 64 * 1024, windowsHide: true }
+    const root = (await exec('git', ['rev-parse', '--show-toplevel'], options)).stdout.trim()
+    const origin = (await exec('git', ['remote', 'get-url', 'origin'], options)).stdout.trim()
+    const requested = normalizeRepositoryRemote(repositoryUrl)
+    if (requested && normalizeRepositoryRemote(origin) === requested && samePath(await realpath(root), await realpath(destination))) return true
+  } catch (error) {
+    if (['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+      throw new RepositoryProjectCreationError('destination_permission_denied', 'Unable to access the destination folder.')
+    }
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && (error as NodeJS.ErrnoException).syscall?.startsWith('spawn')) {
+      throw new RepositoryProjectCreationError('git_unavailable', 'Git is unavailable.')
+    }
+  }
+  throw new RepositoryProjectCreationError('destination_exists', 'The destination folder already exists and is not a checkout of the requested repository.')
 }

@@ -131,6 +131,7 @@ export async function handleManagerCommand<Connection>(context: ManagerCommandRo
         ...(command.reasoningLevel !== undefined ? { reasoningLevel: command.reasoningLevel } : {}),
         managerContextId,
         socket,
+        onProgress: (progress) => send(socket, { type: "repository_project_creation_progress", requestId: command.requestId!, ...progress }),
       });
 
       broadcastToSubscribed({
