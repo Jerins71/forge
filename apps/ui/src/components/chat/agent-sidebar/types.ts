@@ -33,8 +33,6 @@ export interface AgentSidebarProps {
   connectionEpoch?: number
   agents: AgentDescriptor[]
   profiles: ManagerProfile[]
-  /** Prebuilt structural rows supplied by AgentSidebarConnected. */
-  treeRows?: ProfileTreeRow[]
   statuses: StatusMap
   unreadCounts: Record<string, number>
   terminalScopeId?: string | null

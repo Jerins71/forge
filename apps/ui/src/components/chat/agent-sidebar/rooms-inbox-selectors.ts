@@ -100,24 +100,37 @@ export function getRoomsInboxIdentityKey(originId: string, sessionAgentId: strin
   return `${originId}::${sessionAgentId}`
 }
 
+// Sorting thousands of sessions re-reads the same ISO strings many times; parse each once.
+const parsedTimestamps = new Map<string, number>()
 function timestampMs(value: string | undefined): number {
   if (!value) return 0
-  const parsed = Date.parse(value)
-  return Number.isFinite(parsed) ? parsed : 0
+  let parsed = parsedTimestamps.get(value)
+  if (parsed === undefined) {
+    parsed = Date.parse(value)
+    if (!Number.isFinite(parsed)) parsed = 0
+    if (parsedTimestamps.size >= 50_000) parsedTimestamps.clear()
+    parsedTimestamps.set(value, parsed)
+  }
+  return parsed
 }
 
 function sessionTimestamp(session: RoomsInboxSessionInput): string {
   return session.updatedAt || session.createdAt
 }
 
-function projectTimestamp(project: RoomsInboxProjectInput, sessions: readonly RoomsInboxSessionInput[]): string {
-  const sessionTimestampValue = sessions
-    .filter((session) => session.identity.originId === project.originId && session.identity.profileId === project.profileId)
-    .reduce((latest, session) => {
-      const candidate = session.updatedAt || session.lastUserMessageAt || session.createdAt
-      return timestampMs(candidate) > timestampMs(latest) ? candidate : latest
-    }, '')
-  return sessionTimestampValue || project.updatedAt || project.createdAt
+/** Latest session activity per project, indexed in one pass over the visible sessions. */
+function latestSessionTimestampByProject(sessions: readonly RoomsInboxSessionInput[]): Map<string, string> {
+  const latest = new Map<string, string>()
+  for (const session of sessions) {
+    const key = getRoomsInboxIdentityKey(session.identity.originId, session.identity.profileId)
+    const candidate = session.updatedAt || session.lastUserMessageAt || session.createdAt
+    if (timestampMs(candidate) > timestampMs(latest.get(key))) latest.set(key, candidate)
+  }
+  return latest
+}
+
+function projectTimestamp(project: RoomsInboxProjectInput, latestByProject: ReadonlyMap<string, string>): string {
+  return latestByProject.get(getRoomsInboxIdentityKey(project.originId, project.profileId)) || project.updatedAt || project.createdAt
 }
 
 function isSelected(
@@ -248,7 +261,7 @@ export function selectRoomsInboxSections(
   const searchQuery = options.searchQuery ?? ''
   const sessions = getRoomsInboxVisibleSessions(origins, options)
   const attentionBySession = getVisibleAttentionBySession(origins)
-  const attentionSessionKeys = new Set<string>()
+  const attentionSessions = new Set<RoomsInboxSessionInput>()
   const needsYouCandidates: Array<{
     session: RoomsInboxSessionInput
     attention: SessionAttention
@@ -262,7 +275,7 @@ export function selectRoomsInboxSections(
     // Mute is a local display preference. It must not dismiss server attention,
     // but it also must not claim the user's attention.
     if (isLocallyMuted(session, options.mutedSessionIds, options.primaryOriginId)) continue
-    attentionSessionKeys.add(key)
+    attentionSessions.add(session)
     needsYouCandidates.push({
       session,
       attention,
@@ -281,18 +294,16 @@ export function selectRoomsInboxSections(
       raisedAt,
     }))
 
-  const activeCandidates = sessions
-    .filter((session) => !attentionSessionKeys.has(getRoomsInboxIdentityKey(
-      session.identity.originId,
-      session.identity.sessionAgentId,
-    )))
-    .filter((session) => isRoomsInboxSessionActive(session))
-    .filter((session) => matchesSearch(session, searchQuery))
-    .sort(compareActive(options.selected))
-  const activeIds = new Set(activeCandidates.map((session) => getRoomsInboxIdentityKey(
-    session.identity.originId,
-    session.identity.sessionAgentId,
-  )))
+  // One pass partitions the remaining sessions: active ones never also appear as recent.
+  const activeCandidates: RoomsInboxSessionInput[] = []
+  const recentCandidates: RoomsInboxSessionInput[] = []
+  const recentSince = nowMs - RECENT_WINDOW_MS
+  for (const session of sessions) {
+    if (attentionSessions.has(session) || !matchesSearch(session, searchQuery)) continue
+    if (isRoomsInboxSessionActive(session)) activeCandidates.push(session)
+    else if (timestampMs(sessionTimestamp(session)) >= recentSince) recentCandidates.push(session)
+  }
+  activeCandidates.sort(compareActive(options.selected))
   const activeWorkerCount = activeCandidates.reduce((total, session) => total + session.activeWorkerCount, 0)
   const active = activeCandidates.slice(0, MAX_SECTION_ITEMS).map((session) => ({
     ...session,
@@ -300,17 +311,7 @@ export function selectRoomsInboxSections(
     timestamp: sessionTimestamp(session),
   }))
 
-  const recent = sessions
-    .filter((session) => !attentionSessionKeys.has(getRoomsInboxIdentityKey(
-      session.identity.originId,
-      session.identity.sessionAgentId,
-    )))
-    .filter((session) => !activeIds.has(getRoomsInboxIdentityKey(
-      session.identity.originId,
-      session.identity.sessionAgentId,
-    )))
-    .filter((session) => timestampMs(sessionTimestamp(session)) >= nowMs - RECENT_WINDOW_MS)
-    .filter((session) => matchesSearch(session, searchQuery))
+  const recent = recentCandidates
     .sort(compareRecent)
     .map((session) => ({
       ...session,
@@ -318,12 +319,13 @@ export function selectRoomsInboxSections(
       timestamp: sessionTimestamp(session),
     }))
 
+  const latestByProject = latestSessionTimestampByProject(sessions)
   const projects = origins
     .flatMap((origin) => origin.projects)
     .filter((project) => !project.archived)
     .map((project) => ({
       ...project,
-      timestamp: projectTimestamp(project, sessions),
+      timestamp: projectTimestamp(project, latestByProject),
     }))
     .filter((project) => matchesSearch({
       identity: { originId: project.originId, profileId: project.profileId, sessionAgentId: project.profileId },

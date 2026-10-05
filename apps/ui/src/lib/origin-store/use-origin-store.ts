@@ -208,8 +208,12 @@ export function useAllOrigins<T>(
     ) {
       return prev
     }
-    cacheRef.current = next
-    return next
+    // Keep unchanged origins' previous values so per-origin downstream memoization survives one origin's change.
+    const merged = next.map((entry, index) =>
+      prev[index]?.originId === entry.originId && equalityFn(prev[index]!.value, entry.value) ? prev[index]! : entry,
+    )
+    cacheRef.current = merged
+    return merged
   }, [selector, equalityFn])
 
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)

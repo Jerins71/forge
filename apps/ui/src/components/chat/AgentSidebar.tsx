@@ -28,6 +28,7 @@ import type { ProfileTreeRow } from '@/lib/agent-hierarchy'
 import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import { profileSidebar } from '@/lib/origin-store/environment-e2e-fixture'
 import { useProviderUsage } from '@/hooks/use-provider-usage'
+import { useLatestRef } from '@/hooks/useLatestRef'
 import { toggleMute, getMutedAgents, setMutedAgents, MUTE_CHANGE_EVENT } from '@/lib/notification-service'
 import { cn } from '@/lib/utils'
 import type {
@@ -85,7 +86,6 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   connectionEpoch,
   agents,
   profiles,
-  treeRows: providedTreeRows,
   statuses,
   unreadCounts,
   selectedAgentId,
@@ -136,8 +136,8 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   environmentNavigation,
 }: AgentSidebarProps) {
   const selectTreeRows = useMemo(() => createProfileTreeSelector(), [])
-  const builtTreeRows = useMemo(() => selectTreeRows(agents, profiles), [agents, profiles, selectTreeRows])
-  const treeRows = providedTreeRows ?? builtTreeRows
+  // The selector reuses unchanged session rows so memoized rows skip status-only updates.
+  const treeRows = useMemo(() => selectTreeRows(agents, profiles), [agents, profiles, selectTreeRows])
   const hasArchivedItems = useMemo(() => (
     getArchivedProfileRows(agents, profiles).length > 0
     || getDirectlyArchivedSessionRows(agents, profiles).length > 0
@@ -383,12 +383,17 @@ export const AgentSidebar = React.memo(function AgentSidebar({
 
   const handleForkSetTarget = useCallback((sourceAgentId: string) => setForkTarget({ sourceAgentId }), [])
 
+  // Row handlers read the latest lists through refs so session rows keep stable props across updates.
+  const agentsRef = useLatestRef(agents)
+  const profilesRef = useLatestRef(profiles)
+  const displayedRegularRowsRef = useLatestRef(displayedRegularRows)
+
   const getCreatorAttribution = useCallback((creatorAgentId: string): string | null => {
-    const creator = agents.find((a) => a.agentId === creatorAgentId)
+    const creator = agentsRef.current.find((a) => a.agentId === creatorAgentId)
     if (!creator) return null
     if (creator.projectAgent?.handle) return creator.projectAgent.handle
     return creator.sessionLabel || creator.displayName || null
-  }, [agents])
+  }, [agentsRef])
 
   const handleSelectAgent = useCallback((agentId: string) => {
     setSelectedInactiveRepoEntryKey(null)
@@ -453,18 +458,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     } else if (!isSettingsActive) {
       handleOpenSettings()
     }
-  }, [
-    activeView,
-    handleOpenSettings,
-    handleSelectAgent,
-    isArchiveActive,
-    isSettingsActive,
-    isStatsActive,
-    roomsMode,
-    roomsV2,
-    selectedAgentId,
-    viewNavigationRows,
-  ])
+  }, [activeView, handleOpenSettings, handleSelectAgent, isArchiveActive, isSettingsActive, isStatsActive, roomsMode, roomsV2, selectedAgentId, viewNavigationRows])
 
   const handleOpenStats = useCallback(() => {
     onOpenStats?.()
@@ -472,12 +466,12 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   }, [onOpenStats, onMobileClose])
 
   const handleRequestCreateSession = useCallback((profileId: string) => {
-    const profile = profiles.find((entry) => entry.profileId === profileId)
+    const profile = profilesRef.current.find((entry) => entry.profileId === profileId)
     setCreateTarget({
       profileId,
       profileLabel: profile?.displayName || profileId,
     })
-  }, [profiles])
+  }, [profilesRef])
 
   const handleConfirmCreateSession = useCallback((profileId: string, name?: string) => {
     onCreateSession?.(profileId, name)
@@ -485,13 +479,13 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   }, [onCreateSession])
 
   const handleRequestRename = useCallback((agentId: string) => {
-    const agent = agents.find((a) => a.agentId === agentId)
+    const agent = agentsRef.current.find((a) => a.agentId === agentId)
     if (!agent) return
     setRenameTarget({
       agentId,
       label: agent.sessionLabel || agent.displayName || agent.agentId,
     })
-  }, [agents])
+  }, [agentsRef])
 
   const handleConfirmRename = useCallback((agentId: string, label: string) => {
     onRenameSession?.(agentId, label)
@@ -499,13 +493,13 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   }, [onRenameSession])
 
   const handleRequestRenameProfile = useCallback((profileId: string) => {
-    const profile = profiles.find((p) => p.profileId === profileId)
+    const profile = profilesRef.current.find((p) => p.profileId === profileId)
     if (!profile) return
     setRenameProfileTarget({
       profileId,
       displayName: profile.displayName,
     })
-  }, [profiles])
+  }, [profilesRef])
 
   const handleConfirmRenameProfile = useCallback((profileId: string, displayName: string) => {
     onRenameProfile?.(profileId, displayName)
@@ -513,13 +507,13 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   }, [onRenameProfile])
 
   const handleRequestDelete = useCallback((agentId: string) => {
-    const agent = agents.find((a) => a.agentId === agentId)
+    const agent = agentsRef.current.find((a) => a.agentId === agentId)
     if (!agent) return
     setDeleteTarget({
       agentId,
       label: agent.sessionLabel || agent.displayName || agent.agentId,
     })
-  }, [agents])
+  }, [agentsRef])
 
   const handleConfirmDelete = useCallback((agentId: string) => {
     onDeleteSession?.(agentId)
@@ -527,7 +521,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   }, [onDeleteSession])
 
   const handleRequestChangeModel = useCallback((profileId: string) => {
-    const profile = profiles.find((p) => p.profileId === profileId)
+    const profile = profilesRef.current.find((p) => p.profileId === profileId)
     if (!profile) return
     const defaultModel = profile.defaultModel
     const currentReasoningLevel = defaultModel?.thinkingLevel as ManagerReasoningLevel | undefined
@@ -537,7 +531,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       currentModel: defaultModel,
       currentReasoningLevel,
     })
-  }, [profiles])
+  }, [profilesRef])
 
   const handleConfirmChangeModel = useCallback((profileId: string, modelSelection: ManagerExactModelSelection, reasoningLevel?: ManagerReasoningLevel) => {
     onUpdateManagerModel?.(profileId, modelSelection, reasoningLevel)
@@ -545,9 +539,9 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   }, [onUpdateManagerModel])
 
   const handleRequestSessionModelChange = useCallback((sessionAgentId: string) => {
-    const agent = agents.find((a) => a.agentId === sessionAgentId)
+    const agent = agentsRef.current.find((a) => a.agentId === sessionAgentId)
     if (!agent) return
-    const profile = profiles.find((p) => p.profileId === agent.profileId)
+    const profile = profilesRef.current.find((p) => p.profileId === agent.profileId)
     const currentReasoningLevel = agent.model.thinkingLevel as ManagerReasoningLevel | undefined
     setSessionModelTarget({
       sessionAgentId,
@@ -557,7 +551,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       modelOrigin: agent.modelOrigin,
       profileDefaultModel: profile?.defaultModel,
     })
-  }, [agents, profiles])
+  }, [agentsRef, profilesRef])
 
   const handleConfirmSessionModelChange = useCallback((
     sessionAgentId: string,
@@ -574,8 +568,8 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   }, [onUpdateSessionModel])
 
   const handleRequestChangeCwd = useCallback((profileId: string) => {
-    const profile = profiles.find((p) => p.profileId === profileId)
-    const defaultSession = agents.find(
+    const profile = profilesRef.current.find((p) => p.profileId === profileId)
+    const defaultSession = agentsRef.current.find(
       (a) => a.role === 'manager' && (a.profileId === profileId || a.agentId === profileId),
     )
     setChangeCwdTarget({
@@ -583,7 +577,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       profileLabel: profile?.displayName || profileId,
       currentCwd: defaultSession?.cwd || '',
     })
-  }, [agents, profiles])
+  }, [agentsRef, profilesRef])
 
   const handleConfirmChangeCwd = useCallback(async (profileId: string, cwd: string) => {
     if (!onUpdateManagerCwd) return
@@ -597,34 +591,34 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   }, [onValidateDirectory])
 
   const handlePromoteToProjectAgent = useCallback((agentId: string) => {
-    const agent = agents.find((a) => a.agentId === agentId)
+    const agent = agentsRef.current.find((a) => a.agentId === agentId)
     if (!agent) return
     setProjectAgentTarget({
       agentId,
       sessionLabel: agent.sessionLabel || agent.displayName || agent.agentId,
       currentProjectAgent: null,
     })
-  }, [agents])
+  }, [agentsRef])
 
   const handleOpenProjectAgentSettings = useCallback((agentId: string) => {
-    const agent = agents.find((a) => a.agentId === agentId)
+    const agent = agentsRef.current.find((a) => a.agentId === agentId)
     if (!agent) return
     setProjectAgentTarget({
       agentId,
       sessionLabel: agent.sessionLabel || agent.displayName || agent.agentId,
       currentProjectAgent: agent.projectAgent ?? null,
     })
-  }, [agents])
+  }, [agentsRef])
 
   const handleOpenProjectAgentSharing = useCallback((agentId: string) => {
-    const agent = agents.find((a) => a.agentId === agentId)
+    const agent = agentsRef.current.find((a) => a.agentId === agentId)
     if (!agent?.projectAgent) return
     setProjectAgentSharingTarget({
       agentId,
       sessionLabel: agent.sessionLabel || agent.displayName || agent.agentId,
       currentProjectAgent: agent.projectAgent,
     })
-  }, [agents])
+  }, [agentsRef])
 
   const handleDemoteProjectAgent = useCallback(async (agentId: string) => {
     await onSetSessionProjectAgent?.(agentId, null)
@@ -645,7 +639,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   // displayed rows rather than raw treeRows.
   const handleToggleHideCliSessions = useCallback(() => {
     if (!hideCliSessions && selectedAgentId && !isSettingsActive) {
-      const targetId = findCliHideNavigationTarget(selectedAgentId, agents, displayedRegularRows)
+      const targetId = findCliHideNavigationTarget(selectedAgentId, agentsRef.current, displayedRegularRowsRef.current)
       if (targetId) {
         onSelectAgent(targetId)
       }
@@ -653,7 +647,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       // existing isSelectedSessionOrWorker exception in ProfileGroup.
     }
     toggleHideCliSessions()
-  }, [hideCliSessions, selectedAgentId, isSettingsActive, agents, displayedRegularRows, onSelectAgent, toggleHideCliSessions])
+  }, [hideCliSessions, selectedAgentId, isSettingsActive, onSelectAgent, toggleHideCliSessions, agentsRef, displayedRegularRowsRef])
 
   const handleMuteAllSessions = useCallback((sessionAgentIds: string[], mute: boolean) => {
     const current = getMutedAgents()

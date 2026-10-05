@@ -28,7 +28,7 @@ import { InactiveRepoProjectAgentRow } from './InactiveRepoProjectAgentRow'
 import { MAX_VISIBLE_SESSIONS } from './constants'
 import { buildSessionContextMenuActions, getProjectRoomSummary } from './utils'
 import { getInactiveRepoProjectAgentEntryKey, matchesRepoProjectAgentSearch } from '@/components/settings/repo-project-agent-ui-utils'
-import type { ProfileGroupProps } from './types'
+import type { ProfileGroupProps, SessionContextMenuActionSource, StatusMap } from './types'
 import { OtherEnvironmentSessions } from './LogicalProjectGroup'
 
 export const ProfileGroup = React.memo(function ProfileGroup({
@@ -90,6 +90,17 @@ export const ProfileGroup = React.memo(function ProfileGroup({
   environmentNavigation,
 }: ProfileGroupProps) {
   const { profile, sessions } = treeRow
+  const actionSource = React.useMemo<SessionContextMenuActionSource>(() => ({
+    onStopSession, onResumeSession, onDeleteSession, onArchiveSession, onRequestRenameSession, onForkSession,
+    onMarkUnread, onPinSession, onPromoteToProjectAgent, onOpenProjectAgentSharing, onOpenProjectAgentSettings,
+    onDemoteProjectAgent, onChangeSessionModel, onUseProjectDefault, mutedAgents, onToggleMute, hideCliSessions,
+    onToggleHideCliSessions,
+  }), [
+    onStopSession, onResumeSession, onDeleteSession, onArchiveSession, onRequestRenameSession, onForkSession,
+    onMarkUnread, onPinSession, onPromoteToProjectAgent, onOpenProjectAgentSharing, onOpenProjectAgentSettings,
+    onDemoteProjectAgent, onChangeSessionModel, onUseProjectDefault, mutedAgents, onToggleMute, hideCliSessions,
+    onToggleHideCliSessions,
+  ])
   const hasAnySessions = sessions.length > 0 || inactiveRepoProjectAgents.length > 0
   const defaultSession = sessions.find((s) => s.isDefault)
   const roomSummary = roomsV2
@@ -411,36 +422,9 @@ export const ProfileGroup = React.memo(function ProfileGroup({
 
             const renderSession = (session: SessionRow) => {
               const sid = session.sessionAgent.agentId
-              const sessionCollapsed = !collapsedSessionIds.has(sid)
-              const menuActions = buildSessionContextMenuActions(session, {
-                onStopSession,
-                onResumeSession,
-                onDeleteSession,
-                onArchiveSession,
-                onRequestRenameSession,
-                onForkSession,
-                onMarkUnread,
-                onPinSession,
-                onPromoteToProjectAgent,
-                onOpenProjectAgentSharing,
-                onOpenProjectAgentSettings,
-                onDemoteProjectAgent,
-                onChangeSessionModel,
-                onUseProjectDefault,
-                mutedAgents,
-                onToggleMute,
-                hideCliSessions,
-                onToggleHideCliSessions,
-              }, {
-                onViewCreationHistory:
-                  Boolean(session.sessionAgent.projectAgent?.creatorSessionId) &&
-                  sessionAgentIds.has(session.sessionAgent.projectAgent!.creatorSessionId!)
-                    ? () => onSelect(session.sessionAgent.projectAgent!.creatorSessionId!)
-                    : undefined,
-              })
-
+              const creatorSessionId = session.sessionAgent.projectAgent?.creatorSessionId
               return (
-                <SessionRowItem
+                <ProfileSessionRow
                   key={sid}
                   session={session}
                   statuses={statuses}
@@ -448,36 +432,16 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                   unreadCount={unreadCounts[sid] ?? 0}
                   selectedAgentId={selectedAgentId}
                   isSettingsActive={isSettingsActive}
-                  isCollapsed={sessionCollapsed}
+                  isCollapsed={!collapsedSessionIds.has(sid)}
                   isWorkerListExpanded={expandedWorkerListSessionIds.has(sid)}
-                  onToggleCollapse={() => onToggleSessionCollapsed(sid)}
-                  onToggleWorkerListExpanded={() => onToggleWorkerListExpanded(sid)}
+                  hasCreatorHistory={Boolean(creatorSessionId) && sessionAgentIds.has(creatorSessionId!)}
+                  actionSource={actionSource}
+                  onToggleSessionCollapsed={onToggleSessionCollapsed}
+                  onToggleWorkerListExpanded={onToggleWorkerListExpanded}
                   onSelect={onSelect}
                   onDeleteAgent={onDeleteAgent}
-                  onStop={menuActions.onStop}
-                  onResume={menuActions.onResume}
-                  onDelete={menuActions.onDelete}
-                  onArchive={menuActions.onArchive}
-                  archiveDisabledReason={menuActions.archiveDisabledReason}
-                  onRename={menuActions.onRename}
-                  onFork={menuActions.onFork}
-                  onMarkUnread={menuActions.onMarkUnread}
-                  onStopWorker={onStopSession}
-                  onResumeWorker={onResumeSession}
                   highlightQuery={highlightQuery}
-                  onPinSession={menuActions.onPinSession}
-                  onPromoteToProjectAgent={menuActions.onPromoteToProjectAgent}
-                  onOpenProjectAgentSharing={menuActions.onOpenProjectAgentSharing}
-                  onOpenProjectAgentSettings={menuActions.onOpenProjectAgentSettings}
-                  onDemoteProjectAgent={menuActions.onDemoteProjectAgent}
-                  onViewCreationHistory={menuActions.onViewCreationHistory}
-                  onChangeSessionModel={menuActions.onChangeSessionModel}
-                  onUseProjectDefault={menuActions.onUseProjectDefault}
-                  isMutedSession={menuActions.isMutedSession}
-                  onToggleMute={menuActions.onToggleMute}
                   getCreatorAttribution={getCreatorAttribution}
-                  hideCliSessions={menuActions.hideCliSessions}
-                  onToggleHideCliSessions={menuActions.onToggleHideCliSessions}
                   environmentLabel={environmentNavigation?.primaryBadgeLabel}
                 />
               )
@@ -544,4 +508,111 @@ export const ProfileGroup = React.memo(function ProfileGroup({
       ) : null}
     </div>
   )
+}, (prev, next) => {
+  for (const key of Object.keys(next) as (keyof ProfileGroupProps)[]) {
+    if (key !== 'statuses' && prev[key] !== next[key]) return false
+  }
+  return sameSessionStatuses(prev.statuses, next.statuses, next.treeRow.sessions)
 })
+
+/**
+ * One local session row. Builds its per-session callbacks from stable sources so SessionRowItem's memo
+ * holds across sidebar updates that do not touch this session.
+ */
+const ProfileSessionRow = React.memo(function ProfileSessionRow({
+  session,
+  statuses,
+  roomsV2,
+  unreadCount,
+  selectedAgentId,
+  isSettingsActive,
+  isCollapsed,
+  isWorkerListExpanded,
+  hasCreatorHistory,
+  actionSource,
+  onToggleSessionCollapsed,
+  onToggleWorkerListExpanded,
+  onSelect,
+  onDeleteAgent,
+  highlightQuery,
+  getCreatorAttribution,
+  environmentLabel,
+}: {
+  session: SessionRow
+  statuses: StatusMap
+  roomsV2: boolean
+  unreadCount: number
+  selectedAgentId: string | null
+  isSettingsActive: boolean
+  isCollapsed: boolean
+  isWorkerListExpanded: boolean
+  hasCreatorHistory: boolean
+  actionSource: SessionContextMenuActionSource
+  onToggleSessionCollapsed: ProfileGroupProps['onToggleSessionCollapsed']
+  onToggleWorkerListExpanded: ProfileGroupProps['onToggleWorkerListExpanded']
+  onSelect: ProfileGroupProps['onSelect']
+  onDeleteAgent: ProfileGroupProps['onDeleteAgent']
+  highlightQuery: ProfileGroupProps['highlightQuery']
+  getCreatorAttribution: ProfileGroupProps['getCreatorAttribution']
+  environmentLabel: string | null | undefined
+}) {
+  const sid = session.sessionAgent.agentId
+  const creatorSessionId = session.sessionAgent.projectAgent?.creatorSessionId
+  const menuActions = buildSessionContextMenuActions(session, actionSource, {
+    onViewCreationHistory: hasCreatorHistory && creatorSessionId ? () => onSelect(creatorSessionId) : undefined,
+  })
+  return (
+    <SessionRowItem
+      session={session}
+      statuses={statuses}
+      roomsV2={roomsV2}
+      unreadCount={unreadCount}
+      selectedAgentId={selectedAgentId}
+      isSettingsActive={isSettingsActive}
+      isCollapsed={isCollapsed}
+      isWorkerListExpanded={isWorkerListExpanded}
+      onToggleCollapse={() => onToggleSessionCollapsed(sid)}
+      onToggleWorkerListExpanded={() => onToggleWorkerListExpanded(sid)}
+      onSelect={onSelect}
+      onDeleteAgent={onDeleteAgent}
+      onStop={menuActions.onStop}
+      onResume={menuActions.onResume}
+      onDelete={menuActions.onDelete}
+      onArchive={menuActions.onArchive}
+      archiveDisabledReason={menuActions.archiveDisabledReason}
+      onRename={menuActions.onRename}
+      onFork={menuActions.onFork}
+      onMarkUnread={menuActions.onMarkUnread}
+      onStopWorker={actionSource.onStopSession}
+      onResumeWorker={actionSource.onResumeSession}
+      highlightQuery={highlightQuery}
+      onPinSession={menuActions.onPinSession}
+      onPromoteToProjectAgent={menuActions.onPromoteToProjectAgent}
+      onOpenProjectAgentSharing={menuActions.onOpenProjectAgentSharing}
+      onOpenProjectAgentSettings={menuActions.onOpenProjectAgentSettings}
+      onDemoteProjectAgent={menuActions.onDemoteProjectAgent}
+      onViewCreationHistory={menuActions.onViewCreationHistory}
+      onChangeSessionModel={menuActions.onChangeSessionModel}
+      onUseProjectDefault={menuActions.onUseProjectDefault}
+      isMutedSession={menuActions.isMutedSession}
+      onToggleMute={menuActions.onToggleMute}
+      getCreatorAttribution={getCreatorAttribution}
+      hideCliSessions={menuActions.hideCliSessions}
+      onToggleHideCliSessions={menuActions.onToggleHideCliSessions}
+      environmentLabel={environmentLabel}
+    />
+  )
+}, (prev, next) => {
+  for (const key of Object.keys(next) as (keyof typeof next)[]) {
+    if (key !== 'statuses' && prev[key] !== next[key]) return false
+  }
+  return sameSessionStatuses(prev.statuses, next.statuses, [next.session])
+})
+
+/** The statuses map changes on every agent update; a project or row only reads its own sessions and workers. */
+function sameSessionStatuses(prev: StatusMap, next: StatusMap, sessions: readonly SessionRow[]): boolean {
+  if (prev === next) return true
+  return sessions.every(({ sessionAgent, workers }) =>
+    prev[sessionAgent.agentId] === next[sessionAgent.agentId]
+    && workers.every((worker) => prev[worker.agentId] === next[worker.agentId]))
+}

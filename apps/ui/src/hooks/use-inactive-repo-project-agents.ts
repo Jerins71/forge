@@ -28,6 +28,9 @@ function getProfileResourceContext(treeRow: ProfileTreeRow): { profileId: string
   }
 }
 
+// Shared so project groups without entries keep a stable prop.
+const NO_ENTRIES: never[] = []
+
 export function useInactiveRepoProjectAgents(options: {
   connected: boolean
   wsUrl?: string
@@ -94,7 +97,7 @@ export function useInactiveRepoProjectAgents(options: {
   }, [refresh, refreshKey])
 
   const getEntriesForProfile = useCallback((profileId: string) => {
-    return entriesByProfileId.get(profileId) ?? []
+    return entriesByProfileId.get(profileId) ?? NO_ENTRIES
   }, [entriesByProfileId])
 
   return {

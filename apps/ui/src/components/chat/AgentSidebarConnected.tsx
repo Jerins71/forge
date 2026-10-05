@@ -228,12 +228,6 @@ export const AgentSidebarConnected = memo(function AgentSidebarConnected({
   const structuralLocalTreeRows = originTreeModels.find(
     (entry) => entry.originId === primaryOriginId,
   )?.treeRows ?? EMPTY_TREE_ROWS
-  // Overlay local volatile descriptor changes for local badges/status fallbacks
-  // without feeding those identities back into structural discovery.
-  const localTreeRows = useMemo(
-    () => buildProfileTreeRows(agents, profiles),
-    [agents, profiles],
-  )
   const discoveredOrder = useMemo<BuilderSidebarOrderRef[]>(() => (
     structuralLocalTreeRows
       .filter(isOrderableLocalRow)
@@ -348,7 +342,6 @@ export const AgentSidebarConnected = memo(function AgentSidebarConnected({
         connected={connected}
         agents={agents}
         profiles={profiles}
-        treeRows={localTreeRows}
         statuses={statuses}
         unreadCounts={unreadCounts}
         terminalScopeId={terminalScopeId}

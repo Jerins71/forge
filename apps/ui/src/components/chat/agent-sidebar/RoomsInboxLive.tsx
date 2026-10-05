@@ -4,6 +4,7 @@ import { SESSION_ATTENTION_MAX_DISMISS_IDS } from '@forge/protocol'
 import { originRegistry, useAllOrigins } from '@/lib/origin-store'
 import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import { isSideChatAgent, type ProfileTreeRow } from '@/lib/agent-hierarchy'
+import type { AgentDescriptor, ManagerProfile } from '@forge/protocol'
 import type { ManagerWsState } from '@/lib/ws-state'
 import { RoomsInbox } from './RoomsInbox'
 import { RoomsModeSwitch, type RoomsMode } from './RoomsModeSwitch'
@@ -26,19 +27,24 @@ interface InboxOriginSnapshot {
   attentions: RoomsInboxOriginInput['attentions']
   sessions: RoomsInboxSessionInput[]
   projects: RoomsInboxProjectInput[]
-  signature: string
 }
 
+// Every origin runs this selector on each store read, so results are cached by state and per agent/profile;
+// unchanged sessions keep their identity and equality is a cheap identity walk.
+const snapshotByState = new WeakMap<ManagerWsState, InboxOriginSnapshot>()
+const sessionByAgent = new WeakMap<AgentDescriptor, { live: unknown; unread: number; profile: ManagerProfile; value: RoomsInboxSessionInput }>()
+const projectByProfile = new WeakMap<ManagerProfile, RoomsInboxProjectInput>()
+
 function selectInboxOriginSnapshot(state: ManagerWsState): InboxOriginSnapshot {
+  const cached = snapshotByState.get(state)
+  if (cached) return cached
   const profiles = state.profiles.filter((profile) => !profile.archivedAt && profile.profileType !== 'system')
   const profilesById = new Map(profiles.map((profile) => [profile.profileId, profile]))
-  const visibleProfileIds = new Set(profiles.map((profile) => profile.profileId))
   const sessions = state.agents.flatMap((agent): RoomsInboxSessionInput[] => {
     const profileId = agent.profileId
     if (
       agent.role !== 'manager'
       || !profileId
-      || !visibleProfileIds.has(profileId)
       || agent.archivedAt
       || agent.agentCreatorResult
       || isSideChatAgent(agent)
@@ -46,7 +52,10 @@ function selectInboxOriginSnapshot(state: ManagerWsState): InboxOriginSnapshot {
     const profile = profilesById.get(profileId)
     if (!profile) return []
     const live = state.statuses[agent.agentId]
-    return [{
+    const unread = state.unreadCounts[agent.agentId] ?? 0
+    const previous = sessionByAgent.get(agent)
+    if (previous && previous.live === live && previous.unread === unread && previous.profile === profile) return [previous.value]
+    const value: RoomsInboxSessionInput = {
       // The owning environment ID is applied when origins are combined below.
       identity: { originId: '', profileId, sessionAgentId: agent.agentId },
       label: agent.sessionLabel || agent.displayName || agent.agentId,
@@ -54,7 +63,7 @@ function selectInboxOriginSnapshot(state: ManagerWsState): InboxOriginSnapshot {
       agentStatus: live?.status ?? agent.status,
       activeWorkerCount: agent.activeWorkerCount ?? 0,
       pendingChoiceCount: agent.pendingChoiceCount ?? 0,
-      unreadCount: state.unreadCounts[agent.agentId] ?? 0,
+      unreadCount: unread,
       contextRecoveryInProgress: live?.contextRecoveryInProgress === true,
       streamingStartedAt: agent.streamingStartedAt,
       updatedAt: agent.updatedAt,
@@ -62,36 +71,71 @@ function selectInboxOriginSnapshot(state: ManagerWsState): InboxOriginSnapshot {
       createdAt: agent.createdAt,
       pinnedAt: agent.pinnedAt,
       cli: Boolean(agent.cli),
-    }]
+    }
+    sessionByAgent.set(agent, { live, unread, profile, value })
+    return [value]
   })
-  const projects = profiles.map((profile) => ({
-    originId: '',
-    profileId: profile.profileId,
-    profileName: profile.displayName,
-    updatedAt: profile.updatedAt,
-    createdAt: profile.createdAt,
-  }))
-  // This is intentionally a compact selector result. Worker-only status and
-  // unread updates do not change it, so neither the project tree nor unrelated
-  // origin Inbox rows rerender for them.
+  const projects = profiles.map((profile) => {
+    let project = projectByProfile.get(profile)
+    if (!project) {
+      project = {
+        originId: '',
+        profileId: profile.profileId,
+        profileName: profile.displayName,
+        updatedAt: profile.updatedAt,
+        createdAt: profile.createdAt,
+      }
+      projectByProfile.set(profile, project)
+    }
+    return project
+  })
+  // Worker-only status and unread updates do not change any session input, so neither the
+  // project tree nor unrelated origin Inbox rows rerender for them.
   const inventoryReady = state.connected
     && state.hasReceivedAgentsSnapshot
     && state.hasReceivedProfilesSnapshot
-  const attentionAvailable = state.sessionAttentionAvailable
-  const attentions = Object.values(state.sessionAttentions)
-  const signature = JSON.stringify({
+  const snapshot = {
     connected: state.connected,
     inventoryReady,
-    attentionAvailable,
-    attentions,
+    attentionAvailable: state.sessionAttentionAvailable,
+    attentions: Object.values(state.sessionAttentions),
     sessions,
     projects,
-  })
-  return { connected: state.connected, inventoryReady, attentionAvailable, attentions, sessions, projects, signature }
+  }
+  snapshotByState.set(state, snapshot)
+  return snapshot
 }
 
+const sameItems = <T,>(left: readonly T[], right: readonly T[]) =>
+  left.length === right.length && left.every((item, index) => item === right[index])
+
 function equalInboxOriginSnapshot(left: InboxOriginSnapshot, right: InboxOriginSnapshot): boolean {
-  return left.signature === right.signature
+  return left === right || (
+    left.connected === right.connected
+    && left.inventoryReady === right.inventoryReady
+    && left.attentionAvailable === right.attentionAvailable
+    && sameItems(left.attentions ?? [], right.attentions ?? [])
+    && sameItems(left.sessions, right.sessions)
+    && sameItems(left.projects, right.projects)
+  )
+}
+
+const originInputBySnapshot = new WeakMap<InboxOriginSnapshot, RoomsInboxOriginInput>()
+
+function originInput(originId: string, value: InboxOriginSnapshot): RoomsInboxOriginInput {
+  const cached = originInputBySnapshot.get(value)
+  if (cached?.originId === originId) return cached
+  const input = {
+    originId,
+    connected: value.connected,
+    inventoryReady: value.inventoryReady,
+    attentionAvailable: value.attentionAvailable,
+    attentions: value.attentions,
+    sessions: value.sessions.map((session) => ({ ...session, identity: { ...session.identity, originId } })),
+    projects: value.projects.map((project) => ({ ...project, originId })),
+  }
+  originInputBySnapshot.set(value, input)
+  return input
 }
 
 export function RoomsInboxLive({
@@ -140,18 +184,7 @@ export function RoomsInboxLive({
   const dismissalAttemptRef = useRef(0)
   const [dismissError, setDismissError] = useState<string | null>(null)
   const origins = useMemo<RoomsInboxOriginInput[]>(() => {
-    const liveOrigins = originSnapshots.map(({ originId, value }) => ({
-      originId,
-      connected: value.connected,
-      inventoryReady: value.inventoryReady,
-      attentionAvailable: value.attentionAvailable,
-      attentions: value.attentions,
-      sessions: value.sessions.map((session) => ({
-        ...session,
-        identity: { ...session.identity, originId },
-      })),
-      projects: value.projects.map((project) => ({ ...project, originId })),
-    }))
+    const liveOrigins = originSnapshots.map(({ originId, value }) => originInput(originId, value))
     const liveOriginIds = new Set(liveOrigins.map((origin) => origin.originId))
     return [...liveOrigins, ...fallbackOrigins.filter((origin) => !liveOriginIds.has(origin.originId))]
   }, [fallbackOrigins, originSnapshots])
@@ -167,12 +200,12 @@ export function RoomsInboxLive({
   // The Inbox badge is a global attention claim, so it must ignore the search
   // filter. Filtering it would let an unrelated query report that nothing needs
   // the user while eager global Needs You sessions still exist.
-  const needsYouTotal = useMemo(() => selectRoomsInboxSections(origins, {
+  const needsYouTotal = useMemo(() => searchQuery.trim() ? selectRoomsInboxSections(origins, {
     selected,
     hideCliSessions,
     mutedSessionIds,
     primaryOriginId,
-  }).needsYou.length, [hideCliSessions, mutedSessionIds, origins, primaryOriginId, selected])
+  }).needsYou.length : sections.needsYou.length, [hideCliSessions, mutedSessionIds, origins, primaryOriginId, searchQuery, sections, selected])
 
   const handleSelectSession = (identity: RoomsInboxIdentity) => {
     if (identity.originId === primaryOriginId) {
