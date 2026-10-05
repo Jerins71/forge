@@ -1,5 +1,5 @@
-import { memo, useCallback, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, MoreHorizontal, SquarePen } from 'lucide-react'
+import { Fragment, memo, useCallback, useMemo } from 'react'
+import { ChevronDown, ChevronRight, ChevronUp, MoreHorizontal, Plus } from 'lucide-react'
 import type { ProjectRef, SessionRef, SessionSummary } from '@forge/protocol/environment-v2'
 import type { LogicalProjectGroup as LogicalProjectGroupModel, ShellState } from '@forge/client-runtime'
 import {
@@ -13,107 +13,55 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useEnvironmentSelector, useLogicalProjects, useSelectorStore } from '@/hooks/use-environment-selector'
+import { useEnvironmentSelector, useSelectorStore } from '@/hooks/use-environment-selector'
 import { useEnvironmentRegistry, usePrimaryEnvironmentId } from '@/lib/origin-store/environment-provider'
 import { cn } from '@/lib/utils'
-import { EnvironmentBadge, EnvironmentStatusChip } from './EnvironmentStatusChip'
+import { EnvironmentBadge } from './EnvironmentStatusChip'
 import { useEnvironmentLabel } from './hooks/useEnvironmentStatus'
-import { otherEnvironmentGroupKeys } from './hooks/useOtherEnvironmentProjects'
+import { MAX_VISIBLE_SESSIONS } from './constants'
+import { SidebarRoomAvatar } from './shared'
 import { recordEnvironmentRow } from '@/lib/origin-store/environment-e2e-fixture'
-
-const MEMBER_SESSION_LIMIT = 5
-const EMPTY_IDS: readonly string[] = []
+import { isSelectedRemoteSession, limitVisibleSessions, useLogicalProject, useRemoteSessions } from './hooks/useLogicalProjects'
 
 export interface EnvironmentSessionNavigation {
   selectedSession: SessionRef | null
   onSelectSession: (session: SessionRef) => void
   /** Opens the launch composer for this logical project; Run on chooses the member. */
   onNewSession?: (groupKey: string) => void
-  /** This machine's label for badges on its own session rows; null with a single environment. */
-  primaryBadgeLabel: string | null
 }
 
-/**
- * One logical project across environments. `standalone` renders its own header; `members` renders
- * only the sessions on other environments beneath an existing project row (the primary checkout keeps
- * its full-featured row, so a project never appears twice at the top level).
- */
-export const LogicalProjectGroup = memo(function LogicalProjectGroup({
-  groupKey,
-  mode,
-  excludeEnvironmentId,
-  navigation,
-}: {
-  groupKey: string
-  mode: 'standalone' | 'members'
-  excludeEnvironmentId?: string
-  navigation: EnvironmentSessionNavigation
-}) {
-  const groups = useLogicalProjects()
-  const group = groups.get(groupKey)
-  const [collapsed, setCollapsed] = useState(false)
-  if (!group) return null
-  const members = excludeEnvironmentId
-    ? group.members.filter((member) => member.environmentId !== excludeEnvironmentId)
-    : group.members
-  if (members.length === 0) return null
-
-  const memberList = (
-    <ul className="space-y-0.5" data-logical-project={groupKey}>
-      {members.map((member) => (
-        <EnvironmentMemberSessions
-          key={`${member.environmentId}:${member.projectId}`}
-          member={member}
-          showProjectTitle={group.members.filter((m) => m.environmentId === member.environmentId).length > 1}
-          navigation={navigation}
-        />
-      ))}
-    </ul>
-  )
-
-  if (mode === 'members') {
-    return (
-      <div className="mt-0.5">
-        <div className="flex items-center gap-1 pl-5 pr-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/60">
-          <span className="flex-1 truncate">Other environments</span>
-          <GroupMenu group={group} groups={groups} />
-        </div>
-        {memberList}
-      </div>
-    )
-  }
-
+/** Where a project is checked out, e.g. "Mac · dev1". Renders nothing when it is only on this machine. */
+export const ProjectMachineChips = memo(function ProjectMachineChips({ members }: { members: readonly ProjectRef[] }) {
+  const primaryEnvironmentId = usePrimaryEnvironmentId()
+  const environmentIds = useMemo(() => {
+    const ids = [...new Set(members.map((member) => member.environmentId))]
+    return ids.sort((a, b) => Number(b === primaryEnvironmentId) - Number(a === primaryEnvironmentId))
+  }, [members, primaryEnvironmentId])
+  if (environmentIds.every((id) => id === primaryEnvironmentId)) return null
   return (
-    <div className="rounded-md" data-testid="logical-project-group">
-      <div className="group/header flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-sidebar-accent/50">
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-1 text-left text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
-          aria-expanded={!collapsed}
-          onClick={() => setCollapsed((value) => !value)}
-        >
-          {collapsed ? <ChevronRight className="size-3.5 shrink-0" /> : <ChevronDown className="size-3.5 shrink-0" />}
-          <span className="truncate">{group.title}</span>
-        </button>
-        {navigation.onNewSession ? (
-          <button
-            type="button"
-            aria-label={`New session in ${group.title}`}
-            className="rounded p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
-            onClick={() => navigation.onNewSession?.(group.key)}
-          >
-            <SquarePen className="size-3.5" />
-          </button>
-        ) : null}
-        <GroupMenu group={group} groups={groups} />
-      </div>
-      {collapsed ? null : memberList}
-    </div>
+    <span
+      className="inline-flex min-w-0 max-w-[45%] shrink items-center truncate rounded border border-sidebar-border px-1 text-[10px] font-normal leading-4 text-muted-foreground"
+      data-testid="project-machines"
+    >
+      {environmentIds.map((environmentId, index) => (
+        <Fragment key={environmentId}>
+          {index > 0 ? <span aria-hidden="true">&nbsp;·&nbsp;</span> : null}
+          <MachineLabel environmentId={environmentId} />
+        </Fragment>
+      ))}
+    </span>
   )
 })
 
-function GroupMenu({ group, groups }: { group: LogicalProjectGroupModel; groups: ReadonlyMap<string, LogicalProjectGroupModel> }) {
+function MachineLabel({ environmentId }: { environmentId: string }) {
+  const label = useEnvironmentLabel(environmentId)
+  return <span className="truncate" data-machine={environmentId}>{label}</span>
+}
+
+/** Split and merge a logical project's checkouts across machines. */
+export function ProjectGroupMenu({ group }: { group: LogicalProjectGroupModel }) {
   const registry = useEnvironmentRegistry()
+  const groups = useSelectorStore(registry.logicalProjects, identity)
   const others = useMemo(() => [...groups.values()].filter((other) => other.key !== group.key), [groups, group.key])
   return (
     <DropdownMenu>
@@ -121,13 +69,17 @@ function GroupMenu({ group, groups }: { group: LogicalProjectGroupModel; groups:
         <button
           type="button"
           aria-label={`Grouping options for ${group.title}`}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+          className={cn(
+            'mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition',
+            'hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+          )}
         >
           <MoreHorizontal className="size-3.5" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="text-xs">Group across environments</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs">Group across machines</DropdownMenuLabel>
         {group.members.length > 1 ? group.members.map((member) => (
           <SplitMenuItem key={`${member.environmentId}:${member.projectId}`} member={member} />
         )) : null}
@@ -157,6 +109,10 @@ function GroupMenu({ group, groups }: { group: LogicalProjectGroupModel; groups:
   )
 }
 
+function identity<T>(value: T): T {
+  return value
+}
+
 function SplitMenuItem({ member }: { member: ProjectRef }) {
   const registry = useEnvironmentRegistry()
   const label = useEnvironmentLabel(member.environmentId)
@@ -167,61 +123,146 @@ function SplitMenuItem({ member }: { member: ProjectRef }) {
   )
 }
 
-const EnvironmentMemberSessions = memo(function EnvironmentMemberSessions({
-  member,
-  showProjectTitle,
+/**
+ * A project with no checkout on this machine. It looks like a local project row; its sessions from
+ * every machine are one list, newest first.
+ */
+export const RemoteProjectGroup = memo(function RemoteProjectGroup({
+  groupKey,
+  roomsV2,
+  isCollapsed,
+  visibleSessionLimit,
+  showAllSessions,
+  onToggleCollapsed,
+  onShowMoreSessions,
+  onShowLessSessions,
   navigation,
 }: {
-  member: ProjectRef
-  showProjectTitle: boolean
+  groupKey: string
+  roomsV2: boolean
+  isCollapsed: boolean
+  visibleSessionLimit: number
+  /** Search matched the project title; list all of its sessions. */
+  showAllSessions?: boolean
+  onToggleCollapsed: (key: string) => void
+  onShowMoreSessions: (key: string) => void
+  onShowLessSessions: (key: string) => void
   navigation: EnvironmentSessionNavigation
 }) {
-  const { environmentId, projectId } = member
-  const label = useEnvironmentLabel(environmentId)
-  const projectKeys = useMemo(() => [`project:${projectId}`], [projectId])
-  const selectIds = useCallback((shell: ShellState) => shell.sessionIdsByProject.get(projectId) ?? EMPTY_IDS, [projectId])
-  const selectTitle = useCallback((shell: ShellState) => shell.projects.get(projectId)?.title ?? projectId, [projectId])
-  const sessionIds = useEnvironmentSelector(environmentId, 'shell', selectIds, projectKeys)
-  const projectTitle = useEnvironmentSelector(environmentId, 'shell', selectTitle, projectKeys)
-  const [expanded, setExpanded] = useState(false)
-  const visible = expanded ? sessionIds : sessionIds.slice(0, MEMBER_SESSION_LIMIT)
-  const selectedId = navigation.selectedSession?.environmentId === environmentId ? navigation.selectedSession.sessionId : null
-
+  const group = useLogicalProject(groupKey)
+  const sessions = useRemoteSessions(group?.members)
+  if (!group) return null
+  const { visible, hiddenCount } = limitVisibleSessions(
+    sessions,
+    showAllSessions ? Infinity : visibleSessionLimit,
+    (entry) => isSelectedRemoteSession(entry, navigation.selectedSession),
+  )
   return (
-    <li data-environment-id={environmentId}>
-      <div className="flex items-center gap-1.5 pl-5 pr-1.5 pt-0.5 text-[11px] text-muted-foreground">
-        <span className="truncate font-medium">{label}</span>
-        {showProjectTitle ? <span className="truncate">· {projectTitle}</span> : null}
-        <EnvironmentStatusChip environmentId={environmentId} compact className="ml-auto" />
-      </div>
-      {sessionIds.length === 0 ? (
-        <p className="pl-7 text-[11px] text-muted-foreground/60">No sessions</p>
-      ) : (
-        <ul className="space-y-0.5">
-          {visible.map((sessionId) => (
-            <EnvironmentSessionRow
-              key={sessionId}
-              environmentId={environmentId}
-              sessionId={sessionId}
-              environmentLabel={label}
-              selected={selectedId === sessionId}
-              onSelect={navigation.onSelectSession}
-            />
-          ))}
-        </ul>
-      )}
-      {sessionIds.length > MEMBER_SESSION_LIMIT ? (
+    <div
+      data-room-card={roomsV2 ? 'remote' : undefined}
+      className={roomsV2 ? 'sidebar-room-card' : undefined}
+      data-logical-project={group.key}
+      data-testid="remote-project-group"
+    >
+      <div className={cn(
+        'group relative flex items-center',
+        roomsV2 ? 'sidebar-room-header' : 'rounded-lg border border-white/[0.04] bg-white/[0.03]',
+      )}>
         <button
           type="button"
-          className="pl-7 text-[11px] text-muted-foreground/70 hover:text-muted-foreground"
-          onClick={() => setExpanded((value) => !value)}
+          aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} project ${group.title}`}
+          aria-expanded={!isCollapsed}
+          onClick={() => onToggleCollapsed(group.key)}
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-left transition-colors',
+            roomsV2 ? 'py-1.5 pl-2 pr-1' : 'py-1.5 pl-2.5 pr-1.5',
+            'hover:bg-sidebar-accent/50',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+          )}
         >
-          {expanded ? 'Show less' : `Show ${sessionIds.length - MEMBER_SESSION_LIMIT} more`}
+          {roomsV2 ? (
+            isCollapsed
+              ? <ChevronRight className="size-3 shrink-0 text-[var(--sidebar-room-muted)]" aria-hidden="true" />
+              : <ChevronDown className="size-3 shrink-0 text-[var(--sidebar-room-muted)]" aria-hidden="true" />
+          ) : null}
+          {roomsV2 ? <SidebarRoomAvatar label={group.title} toneKey={group.key} className="sidebar-room-project-avatar" /> : null}
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-5">{group.title}</span>
+          <ProjectMachineChips members={group.members} />
         </button>
+        <ProjectGroupMenu group={group} />
+        {navigation.onNewSession ? (
+          <button
+            type="button"
+            onClick={() => navigation.onNewSession?.(group.key)}
+            className={cn(
+              roomsV2
+                ? 'sidebar-room-new-session'
+                : 'mr-1 inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition',
+              'hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+            )}
+            aria-label={`New session for ${group.title}`}
+          >
+            <Plus className="size-3" aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
+      {!isCollapsed && sessions.length > 0 ? (
+        <div className={roomsV2 ? 'relative mt-0.5' : 'relative mt-1'}>
+          <ul className={roomsV2 ? 'space-y-px' : 'space-y-0.5'}>
+            {visible.map((entry) => (
+              <EnvironmentSessionRow
+                key={`${entry.environmentId}:${entry.sessionId}`}
+                environmentId={entry.environmentId}
+                sessionId={entry.sessionId}
+                roomsV2={roomsV2}
+                selected={isSelectedRemoteSession(entry, navigation.selectedSession)}
+                onSelect={navigation.onSelectSession}
+              />
+            ))}
+          </ul>
+          <ShowMoreSessions
+            hiddenCount={hiddenCount}
+            isExpanded={visibleSessionLimit > MAX_VISIBLE_SESSIONS}
+            onShowMore={() => onShowMoreSessions(group.key)}
+            onShowLess={() => onShowLessSessions(group.key)}
+          />
+        </div>
       ) : null}
-    </li>
+    </div>
   )
 })
+
+/** The single "Show N more" / "Show less" control under a project's session list. */
+export function ShowMoreSessions({ hiddenCount, isExpanded, onShowMore, onShowLess }: {
+  hiddenCount: number
+  isExpanded: boolean
+  onShowMore: () => void
+  onShowLess: () => void
+}) {
+  if (hiddenCount === 0 && !isExpanded) return null
+  const buttonClass = cn(
+    'flex items-center gap-1 rounded-md py-1 text-left text-[11px] text-muted-foreground/70 transition-colors',
+    'hover:text-muted-foreground',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+  )
+  return (
+    <div className="relative z-10 mt-0.5 flex items-center gap-2 pl-5 pr-1.5">
+      {hiddenCount > 0 ? (
+        <button type="button" onClick={onShowMore} className={buttonClass}>
+          <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
+          <span>Show {hiddenCount} more</span>
+        </button>
+      ) : null}
+      {isExpanded ? (
+        <button type="button" onClick={onShowLess} className={buttonClass}>
+          <ChevronUp className="size-3 shrink-0" aria-hidden="true" />
+          <span>Show less</span>
+        </button>
+      ) : null}
+    </div>
+  )
+}
 
 const STATUS_TONE: Partial<Record<SessionSummary['status'], string>> = {
   running: 'bg-emerald-500 animate-pulse',
@@ -231,21 +272,22 @@ const STATUS_TONE: Partial<Record<SessionSummary['status'], string>> = {
   interrupted: 'bg-amber-500',
 }
 
-/** Subscribes only to its own `(environmentId, sessionId)` record. */
+/** A session on another machine. Subscribes only to its own `(environmentId, sessionId)` record. */
 export const EnvironmentSessionRow = memo(function EnvironmentSessionRow({
   environmentId,
   sessionId,
-  environmentLabel: label,
+  roomsV2 = false,
   selected,
   onSelect,
 }: {
   environmentId: string
   sessionId: string
-  environmentLabel: string
+  roomsV2?: boolean
   selected: boolean
   onSelect: (session: SessionRef) => void
 }) {
   recordEnvironmentRow(environmentId, sessionId)
+  const label = useEnvironmentLabel(environmentId)
   const sessionKeys = useMemo(() => [`session:${sessionId}`], [sessionId])
   const selectSession = useCallback((shell: ShellState) => shell.sessions.get(sessionId), [sessionId])
   const session = useEnvironmentSelector(environmentId, 'shell', selectSession, sessionKeys)
@@ -253,69 +295,39 @@ export const EnvironmentSessionRow = memo(function EnvironmentSessionRow({
   const needsAttention = session.attention !== 'none' && session.attention !== 'result'
   return (
     <li>
-      <button
-        type="button"
-        data-session-ref={`${environmentId}:${sessionId}`}
-        aria-current={selected ? 'true' : undefined}
-        onClick={() => onSelect({ environmentId, sessionId })}
-        className={cn(
-          'flex w-full min-w-0 items-center gap-1.5 rounded-md py-1.5 pl-7 pr-1.5 text-left text-sm',
-          'hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-          selected && 'bg-sidebar-accent text-sidebar-accent-foreground',
-        )}
-      >
-        <span
+      <div className={cn(
+        roomsV2 ? 'sidebar-room-row' : 'relative flex items-center rounded-md transition-colors',
+        roomsV2
+          ? selected ? 'sidebar-room-row-selected' : undefined
+          : selected
+            ? 'bg-white/[0.04] text-sidebar-foreground ring-1 ring-sidebar-ring/30'
+            : 'text-sidebar-foreground/90 hover:bg-sidebar-accent/50',
+      )}>
+        <button
+          type="button"
+          data-session-ref={`${environmentId}:${sessionId}`}
+          aria-current={selected ? 'true' : undefined}
+          onClick={() => onSelect({ environmentId, sessionId })}
           className={cn(
-            'size-1.5 shrink-0 rounded-full',
-            needsAttention ? 'bg-amber-500' : STATUS_TONE[session.status] ?? 'bg-muted-foreground/30',
+            'flex min-w-0 flex-1 items-center gap-1.5 text-left',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+            roomsV2 ? 'py-1 pl-3 pr-1.5 text-xs leading-4' : 'py-1.5 pl-5 pr-1.5 text-sm',
           )}
-          aria-label={session.status}
-        />
-        <span className="min-w-0 flex-1 truncate">{session.title}</span>
-        {session.unread > 0 ? (
-          <span className="shrink-0 rounded-full bg-primary/15 px-1.5 text-[10px] text-primary">{session.unread}</span>
-        ) : null}
-        <EnvironmentBadge label={label} className="hidden sm:inline-flex" />
-      </button>
+        >
+          <span
+            className={cn(
+              'size-1.5 shrink-0 rounded-full',
+              needsAttention ? 'bg-amber-500' : STATUS_TONE[session.status] ?? 'bg-muted-foreground/30',
+            )}
+            aria-label={session.status}
+          />
+          <span className="min-w-0 flex-1 truncate">{session.title}</span>
+          {session.unread > 0 ? (
+            <span className="shrink-0 rounded-full bg-primary/15 px-1.5 text-[10px] text-primary">{session.unread}</span>
+          ) : null}
+          <EnvironmentBadge label={label} />
+        </button>
+      </div>
     </li>
   )
 })
-
-/** Sessions of this machine's project that live on other environments, beneath its existing row. */
-export function OtherEnvironmentSessions({ projectId, navigation }: { projectId: string; navigation: EnvironmentSessionNavigation }) {
-  const registry = useEnvironmentRegistry()
-  const primaryEnvironmentId = usePrimaryEnvironmentId()
-  const selectGroupKey = useCallback(
-    (groups: ReadonlyMap<string, LogicalProjectGroupModel>) => findGroupKey(groups, primaryEnvironmentId, projectId),
-    [primaryEnvironmentId, projectId],
-  )
-  const groupKey = useSelectorStore(registry.logicalProjects, selectGroupKey)
-  if (!groupKey) return null
-  return <LogicalProjectGroup groupKey={groupKey} mode="members" excludeEnvironmentId={primaryEnvironmentId} navigation={navigation} />
-}
-
-/** Logical projects with no checkout on this machine; projects here keep their own top-level row. */
-export function OtherEnvironmentProjects({ navigation }: { navigation: EnvironmentSessionNavigation }) {
-  const primaryEnvironmentId = usePrimaryEnvironmentId()
-  const groups = useLogicalProjects()
-  const keys = useMemo(() => otherEnvironmentGroupKeys(groups, primaryEnvironmentId), [groups, primaryEnvironmentId])
-  if (keys.length === 0) return null
-  return (
-    <ul className="mt-2 space-y-1" data-testid="other-environment-projects">
-      {keys.map((key) => (
-        <li key={key}>
-          <LogicalProjectGroup groupKey={key} mode="standalone" navigation={navigation} />
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-function findGroupKey(groups: ReadonlyMap<string, LogicalProjectGroupModel>, environmentId: string, projectId: string): string | undefined {
-  for (const group of groups.values()) {
-    // One remote member list belongs to one primary row, even when several profiles share a checkout.
-    const primaryProjects = group.members.filter(member => member.environmentId === environmentId).map(member => member.projectId).sort()
-    if (primaryProjects[0] === projectId) return group.key
-  }
-  return undefined
-}

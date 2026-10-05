@@ -4,7 +4,6 @@ import {
   CheckCheck,
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   Edit3,
   Ellipsis,
   FolderOpen,
@@ -29,7 +28,18 @@ import { MAX_VISIBLE_SESSIONS } from './constants'
 import { buildSessionContextMenuActions, getProjectRoomSummary } from './utils'
 import { getInactiveRepoProjectAgentEntryKey, matchesRepoProjectAgentSearch } from '@/components/settings/repo-project-agent-ui-utils'
 import type { ProfileGroupProps, SessionContextMenuActionSource, StatusMap } from './types'
-import { OtherEnvironmentSessions } from './LogicalProjectGroup'
+import { EnvironmentSessionRow, ProjectGroupMenu, ProjectMachineChips, ShowMoreSessions } from './LogicalProjectGroup'
+import {
+  isSelectedRemoteSession,
+  limitVisibleSessions,
+  useLocalProjectGroup,
+  useRemoteSessions,
+  type RemoteSessionEntry,
+} from './hooks/useLogicalProjects'
+
+type ProjectListItem =
+  | { kind: 'local'; session: SessionRow; at: string }
+  | { kind: 'remote'; entry: RemoteSessionEntry; at: string }
 
 export const ProfileGroup = React.memo(function ProfileGroup({
   treeRow,
@@ -90,6 +100,9 @@ export const ProfileGroup = React.memo(function ProfileGroup({
   environmentNavigation,
 }: ProfileGroupProps) {
   const { profile, sessions } = treeRow
+  // Other machines' sessions of the same logical project join this row's list.
+  const logicalGroup = useLocalProjectGroup(profile.profileId)
+  const remoteSessions = useRemoteSessions(environmentNavigation ? logicalGroup?.members : undefined, highlightQuery)
   const actionSource = React.useMemo<SessionContextMenuActionSource>(() => ({
     onStopSession, onResumeSession, onDeleteSession, onArchiveSession, onRequestRenameSession, onForkSession,
     onMarkUnread, onPinSession, onPromoteToProjectAgent, onOpenProjectAgentSharing, onOpenProjectAgentSettings,
@@ -101,7 +114,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
     onDemoteProjectAgent, onChangeSessionModel, onUseProjectDefault, mutedAgents, onToggleMute, hideCliSessions,
     onToggleHideCliSessions,
   ])
-  const hasAnySessions = sessions.length > 0 || inactiveRepoProjectAgents.length > 0
+  const hasAnySessions = sessions.length > 0 || inactiveRepoProjectAgents.length > 0 || remoteSessions.length > 0
   const defaultSession = sessions.find((s) => s.isDefault)
   const roomSummary = roomsV2
     ? getProjectRoomSummary(sessions, statuses, unreadCounts, {
@@ -134,6 +147,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
     <div
       data-room-card={roomsV2 ? 'local' : undefined}
       className={roomsV2 ? 'sidebar-room-card' : undefined}
+      data-logical-project={environmentNavigation ? logicalGroup?.key : undefined}
     >
       {/* Profile header — row click expands/collapses; no dedicated chevron in Classic. */}
       <ContextMenu>
@@ -179,6 +193,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-5">
                       {profile.displayName}
                     </span>
+                    {environmentNavigation && logicalGroup ? <ProjectMachineChips members={logicalGroup.members} /> : null}
                     {showModelIcons && representativeAgent ? (
                       <span className="ml-1 shrink-0">
                         <SidebarModelIcon agent={representativeAgent} />
@@ -204,6 +219,8 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                 {roomSummary.unreadCount > 99 ? '99+' : roomSummary.unreadCount}
               </span>
             ) : null}
+
+            {environmentNavigation && logicalGroup && logicalGroup.members.length > 1 ? <ProjectGroupMenu group={logicalGroup} /> : null}
 
             {/* Project actions came from main; it must stay available in Rooms too. */}
             {onOpenProjectSettings ? (
@@ -383,38 +400,22 @@ export const ProfileGroup = React.memo(function ProfileGroup({
               !isHiddenCli(s)
             )
 
-            const hasMore = regularSessions.length > visibleSessionLimit
-            const isExpanded = visibleSessionLimit > MAX_VISIBLE_SESSIONS
-            let visibleRegularSessions: SessionRow[]
-            let hiddenCount = 0
-
-            if (!hasMore) {
-              visibleRegularSessions = regularSessions
-            } else {
-              // Take the top visibleSessionLimit, but guarantee the selected session is visible
-              const topSessions = regularSessions.slice(0, visibleSessionLimit)
-              const selectedSessionInTop = !selectedAgentId || isSettingsActive || topSessions.some(
-                (s) =>
-                  s.sessionAgent.agentId === selectedAgentId ||
-                  s.workers.some((w) => w.agentId === selectedAgentId),
-              )
-
-              if (selectedSessionInTop) {
-                visibleRegularSessions = topSessions
-              } else {
-                const selectedSession = regularSessions.find(
-                  (s) =>
-                    s.sessionAgent.agentId === selectedAgentId ||
-                    s.workers.some((w) => w.agentId === selectedAgentId),
-                )
-                if (selectedSession) {
-                  visibleRegularSessions = [...topSessions.slice(0, visibleSessionLimit - 1), selectedSession]
-                } else {
-                  visibleRegularSessions = topSessions
-                }
-              }
-              hiddenCount = regularSessions.length - visibleRegularSessions.length
+            // One list across machines, newest first; local sessions use the tree's own recency.
+            const listItems: ProjectListItem[] = regularSessions.map((session): ProjectListItem => ({
+              kind: 'local',
+              session,
+              at: session.sessionAgent.updatedAt || session.sessionAgent.createdAt,
+            }))
+            if (remoteSessions.length > 0) {
+              listItems.push(...remoteSessions.map((entry): ProjectListItem => ({ kind: 'remote', entry, at: entry.updatedAt })))
+              listItems.sort((a, b) => b.at.localeCompare(a.at))
             }
+            const { visible: visibleItems, hiddenCount } = limitVisibleSessions(listItems, visibleSessionLimit, (item) => (
+              item.kind === 'local'
+                ? Boolean(selectedAgentId) && !isSettingsActive && isSelectedSessionOrWorker(item.session)
+                : isSelectedRemoteSession(item.entry, environmentNavigation?.selectedSession)
+            ))
+            const isExpanded = visibleSessionLimit > MAX_VISIBLE_SESSIONS
 
             const visibleInactiveRepoProjectAgents = inactiveRepoProjectAgents.filter((entry) =>
               matchesRepoProjectAgentSearch(entry.item, highlightQuery),
@@ -442,7 +443,6 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                   onDeleteAgent={onDeleteAgent}
                   highlightQuery={highlightQuery}
                   getCreatorAttribution={getCreatorAttribution}
-                  environmentLabel={environmentNavigation?.primaryBadgeLabel}
                 />
               )
             }
@@ -463,48 +463,28 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                   ))}
                   {/* Pinned sessions always visible, sorted by pin time */}
                   {pinnedSessions.map(renderSession)}
-                  {/* Regular sessions below */}
-                  {visibleRegularSessions.map(renderSession)}
+                  {/* Regular sessions from every machine below */}
+                  {visibleItems.map((item) => item.kind === 'local' ? renderSession(item.session) : (
+                    <EnvironmentSessionRow
+                      key={`${item.entry.environmentId}:${item.entry.sessionId}`}
+                      environmentId={item.entry.environmentId}
+                      sessionId={item.entry.sessionId}
+                      roomsV2={roomsV2}
+                      selected={isSelectedRemoteSession(item.entry, environmentNavigation?.selectedSession)}
+                      onSelect={environmentNavigation!.onSelectSession}
+                    />
+                  ))}
                 </ul>
-                {hasMore || isExpanded ? (
-                  <div className="relative z-10 mt-0.5 flex items-center gap-2 pl-5 pr-1.5">
-                    {hasMore ? (
-                      <button
-                        type="button"
-                        onClick={() => onShowMoreSessions(profile.profileId)}
-                        className={cn(
-                          'flex items-center gap-1 rounded-md py-1 text-left text-[11px] text-muted-foreground/70 transition-colors',
-                          'hover:text-muted-foreground',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-                        )}
-                      >
-                        <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
-                        <span>Show {hiddenCount} more</span>
-                      </button>
-                    ) : null}
-                    {isExpanded ? (
-                      <button
-                        type="button"
-                        onClick={() => onShowLessSessions(profile.profileId)}
-                        className={cn(
-                          'flex items-center gap-1 rounded-md py-1 text-left text-[11px] text-muted-foreground/70 transition-colors',
-                          'hover:text-muted-foreground',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-                        )}
-                      >
-                        <ChevronUp className="size-3 shrink-0" aria-hidden="true" />
-                        <span>Show less</span>
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
+                <ShowMoreSessions
+                  hiddenCount={hiddenCount}
+                  isExpanded={isExpanded}
+                  onShowMore={() => onShowMoreSessions(profile.profileId)}
+                  onShowLess={() => onShowLessSessions(profile.profileId)}
+                />
               </>
             )
           })()}
         </div>
-      ) : null}
-      {!isCollapsed && environmentNavigation ? (
-        <OtherEnvironmentSessions projectId={profile.profileId} navigation={environmentNavigation} />
       ) : null}
     </div>
   )
@@ -536,7 +516,6 @@ const ProfileSessionRow = React.memo(function ProfileSessionRow({
   onDeleteAgent,
   highlightQuery,
   getCreatorAttribution,
-  environmentLabel,
 }: {
   session: SessionRow
   statuses: StatusMap
@@ -554,7 +533,6 @@ const ProfileSessionRow = React.memo(function ProfileSessionRow({
   onDeleteAgent: ProfileGroupProps['onDeleteAgent']
   highlightQuery: ProfileGroupProps['highlightQuery']
   getCreatorAttribution: ProfileGroupProps['getCreatorAttribution']
-  environmentLabel: string | null | undefined
 }) {
   const sid = session.sessionAgent.agentId
   const creatorSessionId = session.sessionAgent.projectAgent?.creatorSessionId
@@ -599,7 +577,6 @@ const ProfileSessionRow = React.memo(function ProfileSessionRow({
       getCreatorAttribution={getCreatorAttribution}
       hideCliSessions={menuActions.hideCliSessions}
       onToggleHideCliSessions={menuActions.onToggleHideCliSessions}
-      environmentLabel={environmentLabel}
     />
   )
 }, (prev, next) => {

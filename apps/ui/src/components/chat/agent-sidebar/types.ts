@@ -159,8 +159,6 @@ export interface SessionRowItemProps {
   getCreatorAttribution?: (creatorAgentId: string) => string | null
   hideCliSessions?: boolean
   onToggleHideCliSessions?: () => void
-  /** Machine badge shown when more than one environment is paired. */
-  environmentLabel?: string | null
 }
 
 export interface ProfileGroupProps {

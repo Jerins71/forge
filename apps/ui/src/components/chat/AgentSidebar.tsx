@@ -2,23 +2,7 @@ import { Archive, SquarePen, X } from 'lucide-react'
 import { ChangeCwdDialog } from './ChangeCwdDialog'
 import { ForkSessionDialog } from './ForkSessionDialog'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DraggableAttributes,
-  type DraggableSyntheticListeners,
-  DragOverlay,
-} from '@dnd-kit/core'
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  sortableKeyboardCoordinates,
-} from '@dnd-kit/sortable'
+import type { DraggableAttributes, DraggableSyntheticListeners } from '@dnd-kit/core'
 import {
   createProfileTreeSelector,
   getArchivedProfileRows,
@@ -45,12 +29,11 @@ import { SidebarSearch } from './agent-sidebar/SidebarSearch'
 import { ProjectViewSwitcher, type SidebarProjectViewOption } from './agent-sidebar/ProjectViewSwitcher'
 import { SidebarFooter } from './agent-sidebar/SidebarFooter'
 import { ProfileGroup } from './agent-sidebar/ProfileGroup'
-import { OtherEnvironmentProjects } from './agent-sidebar/LogicalProjectGroup'
-import { useHasOtherEnvironmentProjects } from './agent-sidebar/hooks/useOtherEnvironmentProjects'
+import { RemoteProjectGroup } from './agent-sidebar/LogicalProjectGroup'
+import { useRemoteOnlyProjectKeys } from './agent-sidebar/hooks/useLogicalProjects'
 import { RoomsInboxLive } from './agent-sidebar/RoomsInboxLive'
 import { RoomsProjectsTree, type RoomsProjectTreeRow } from './agent-sidebar/RoomsProjectsTree'
 import type { RoomsInboxOriginInput } from './agent-sidebar/rooms-inbox-selectors'
-import { SortableProfileGroup } from './agent-sidebar/SortableProfileGroup'
 import {
   CreateSessionDialog,
   RenameSessionDialog,
@@ -71,7 +54,6 @@ import { useNativeRuntimeAttention } from '@/components/settings/native-runtimes
 import {
   builderSidebarOrderKey,
   reconcileBuilderSidebarOrder,
-  resolveBuilderSidebarDragMove,
 } from '@/lib/builder-sidebar-order'
 
 type MixedProjectRow = RoomsProjectTreeRow
@@ -143,11 +125,6 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     || getDirectlyArchivedSessionRows(agents, profiles).length > 0
   ), [agents, profiles])
 
-  // DnD sensors
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  )
   const {
     collapsedProfileIds,
     toggleProfileCollapsed,
@@ -163,7 +140,8 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     setRoomsMode,
   } = useSidebarPrefs()
   const roomsV2 = sidebarLayout === 'rooms-v2'
-  // The project tree shows the primary environment; other environments render as logical groups.
+  // Local projects come from the primary environment's descriptors; other machines' sessions join
+  // their logical project's row, and projects only on other machines get rows of their own.
   const environmentContext = useOptionalEnvironmentContext()
   const primaryOriginId = environmentContext?.primaryEnvironmentId ?? ''
   const environmentContextRef = useLatestRef(environmentContext)
@@ -243,8 +221,6 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     })))
   }, [activeProjectKeys, primaryOriginId, treeRows])
   const {
-    activeDragId,
-    setActiveDragId,
     expandedSessionIds,
     expandedWorkerListSessionIds,
     regularRows,
@@ -469,13 +445,13 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   }, [onOpenStats, onMobileClose])
 
   const handleRequestCreateSession = useCallback((profileId: string) => {
-    // A project checked out on more than one machine starts in the launch composer, which asks where to run.
+    // New threads start in the launch composer, which asks where to run; the name dialog remains
+    // only for surfaces without the environment runtime.
     const context = environmentContextRef.current
     const onNewSession = environmentNavigationRef.current?.onNewSession
     if (context && onNewSession) {
       for (const group of context.registry.logicalProjects.getSnapshot().values()) {
-        const local = group.members.some((member) => member.environmentId === context.primaryEnvironmentId && member.projectId === profileId)
-        if (local && group.members.some((member) => member.environmentId !== context.primaryEnvironmentId)) {
+        if (group.members.some((member) => member.environmentId === context.primaryEnvironmentId && member.projectId === profileId)) {
           onNewSession(group.key)
           return
         }
@@ -676,20 +652,6 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     setMutedAgents(current)
   }, [])
 
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    setActiveDragId(null)
-    const { active, over } = event
-    if (!over || active.id === over.id || !onMoveBuilderProject) return
-
-    const move = resolveBuilderSidebarDragMove(
-      String(active.id),
-      String(over.id),
-      mixedProjectRows.map((row) => row.ref),
-    )
-    if (!move) return
-    onMoveBuilderProject(move.active, move.over)
-  }, [mixedProjectRows, onMoveBuilderProject, setActiveDragId])
-
   const profileGroupContent = useCallback((
     treeRow: ProfileTreeRow,
     dragHandleRef?: (element: HTMLElement | null) => void,
@@ -786,41 +748,64 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     dragHandleAttributes?: DraggableAttributes,
   ) => profileGroupContent(row.treeRow, dragHandleRef, dragHandleListeners, dragHandleAttributes), [profileGroupContent])
 
+  // Projects only on other machines follow the reorderable local rows in the same list. They are hidden
+  // inside a project view (views hold local projects) and, while searching, unless their title matches.
+  const remoteOnlyProjectKeys = useRemoteOnlyProjectKeys()
+  const remoteProjectRows = useMemo(() => {
+    if (!environmentNavigation || activeView) return []
+    const term = parsedSearch.term.toLowerCase()
+    const registry = environmentContext?.registry
+    return remoteOnlyProjectKeys
+      .filter((key) => !isSearchActive || Boolean(registry?.logicalProjects.getSnapshot().get(key)?.title.toLowerCase().includes(term)))
+      .map((key) => (
+        <li key={`logical:${key}`}>
+          <RemoteProjectGroup
+            groupKey={key}
+            roomsV2={roomsV2}
+            isCollapsed={isSearchActive ? false : collapsedProfileIds.has(key)}
+            visibleSessionLimit={getVisibleSessionLimit(key)}
+            showAllSessions={isSearchActive}
+            onToggleCollapsed={toggleProfileCollapsed}
+            onShowMoreSessions={showMoreSessions}
+            onShowLessSessions={showLessSessions}
+            navigation={environmentNavigation}
+          />
+        </li>
+      ))
+  }, [
+    activeView, collapsedProfileIds, environmentContext, environmentNavigation, getVisibleSessionLimit, isSearchActive,
+    parsedSearch.term, remoteOnlyProjectKeys, roomsV2, showLessSessions, showMoreSessions, toggleProfileCollapsed,
+  ])
+
   // Inbox and Projects use the same reorder path. The two modes stay mutually
   // exclusive inside one sidebar; desktop and mobile each keep their own tree.
-  // Remote-only projects (no primary checkout) follow the primary tree in both Rooms modes.
-  const hasOtherEnvironmentProjects = useHasOtherEnvironmentProjects()
-  const showOtherEnvironmentProjects = Boolean(environmentNavigation) && !isSearchActive && hasOtherEnvironmentProjects
-  const renderRoomsProjectTree = () => (
-    <>
-      <RoomsProjectsTree
-        rows={mixedProjectRows}
-        activeView={Boolean(activeView)}
-        isSearchActive={isSearchActive}
-        onMoveBuilderProject={onMoveBuilderProject}
-        renderRow={mixedProjectContent}
-        emptyState={
-          isSearchActive && mixedProjectRows.length === 0 ? (
-            <p className="rounded-md px-3 py-4 text-center text-xs text-muted-foreground">
-              No matches found.
-            </p>
-          ) : mixedProjectRows.length === 0 && !isSearchActive && !showOtherEnvironmentProjects ? (
-            <p className="rounded-md bg-sidebar-accent/50 px-3 py-4 text-center text-xs text-muted-foreground">
-              {activeView
-                ? `No projects are currently available in “${activeView.name}”.`
-                : 'No active agents.'}
-            </p>
-          ) : null
-        }
-      />
-      {showOtherEnvironmentProjects && environmentNavigation ? <OtherEnvironmentProjects navigation={environmentNavigation} /> : null}
-    </>
+  const hasProjectRows = mixedProjectRows.length > 0 || remoteProjectRows.length > 0
+  const renderProjectTree = () => (
+    <RoomsProjectsTree
+      rows={mixedProjectRows}
+      trailingRows={remoteProjectRows}
+      roomsV2={roomsV2}
+      activeView={Boolean(activeView)}
+      isSearchActive={isSearchActive}
+      onMoveBuilderProject={onMoveBuilderProject}
+      renderRow={mixedProjectContent}
+      emptyState={
+        isSearchActive ? (
+          <p className="rounded-md px-3 py-4 text-center text-xs text-muted-foreground">
+            No matches found.
+          </p>
+        ) : (
+          <p className="rounded-md bg-sidebar-accent/50 px-3 py-4 text-center text-xs text-muted-foreground">
+            {activeView
+              ? `No projects are currently available in “${activeView.name}”.`
+              : 'No active agents.'}
+          </p>
+        )
+      }
+    />
   )
-  const roomsProjectTree = renderRoomsProjectTree()
-  const roomsInboxProjectTree = renderRoomsProjectTree()
-  // The shared tree element is always composed, including when it only has an
-  // empty-state placeholder. Inbox must instead gate on rows the tree renders.
-  const hasRoomsInboxProjectContent = mixedProjectRows.length > 0 || showOtherEnvironmentProjects
+  const projectTree = showProjectsBody ? renderProjectTree() : null
+  const roomsInboxProjectTree = roomsV2 ? renderProjectTree() : null
 
   const sidebarContent = (
     <aside
@@ -922,7 +907,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
             onSelectLocal={handleSelectAgent}
             onNewProject={onAddManager}
             projectTree={roomsInboxProjectTree}
-            hasInlineProjectContent={hasRoomsInboxProjectContent}
+            hasInlineProjectContent={hasProjectRows}
             mutedSessionIds={mutedAgentsState}
             fallbackOrigins={inboxFallbackOrigins}
             localTreeRows={treeRows}
@@ -993,85 +978,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
           </div>
         ) : null}
 
-        {showProjectsBody && !roomsV2 ? (
-          <>
-        {isSearchActive && mixedProjectRows.length === 0 ? (
-          <p className="rounded-md px-3 py-4 text-center text-xs text-muted-foreground">
-            No matches found.
-          </p>
-        ) : mixedProjectRows.length === 0 && !isSearchActive ? (
-          <p className="rounded-md bg-sidebar-accent/50 px-3 py-4 text-center text-xs text-muted-foreground">
-            {activeView
-              ? `No projects are currently available in “${activeView.name}”.`
-              : 'No active agents.'}
-          </p>
-        ) : (() => {
-          const dndEnabled = !activeView && !isSearchActive && Boolean(onMoveBuilderProject) && mixedProjectRows.length > 1
-          const sortableIds = mixedProjectRows.map((row) => builderSidebarOrderKey(row.ref))
-          const activeDragRow = activeDragId
-            ? mixedProjectRows.find((row) => builderSidebarOrderKey(row.ref) === activeDragId)
-            : null
-
-          if (dndEnabled) {
-            return (
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragStart={(event) => setActiveDragId(String(event.active.id))}
-                onDragCancel={() => setActiveDragId(null)}
-                onDragEnd={handleDragEnd}
-              >
-                <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-                  <ul className={roomsV2 ? 'mt-2 space-y-2' : 'mt-2 space-y-1'} data-testid="unified-project-list">
-                    {mixedProjectRows.map((row) => {
-                      const sortableId = builderSidebarOrderKey(row.ref)
-                      return (
-                        <SortableProfileGroup
-                          key={sortableId}
-                          sortableId={sortableId}
-                          roomsV2={roomsV2}
-                        >
-                          {(dragHandleRef, dragHandleListeners, dragHandleAttributes) => (
-                            mixedProjectContent(
-                              row,
-                              dragHandleRef,
-                              dragHandleListeners,
-                              dragHandleAttributes,
-                            )
-                          )}
-                        </SortableProfileGroup>
-                      )
-                    })}
-                  </ul>
-                </SortableContext>
-                <DragOverlay>
-                  {activeDragRow ? (
-                    <div className="rounded-md border border-sidebar-border bg-sidebar shadow-lg">
-                      <div className="flex items-center gap-1.5 px-3 py-2">
-                        <span className="text-sm font-semibold">{activeDragRow.treeRow.profile.displayName}</span>
-                      </div>
-                    </div>
-                  ) : null}
-                </DragOverlay>
-              </DndContext>
-            )
-          }
-
-          return (
-            <ul className={roomsV2 ? 'mt-2 space-y-2' : 'mt-2 space-y-1'} data-testid="unified-project-list">
-              {mixedProjectRows.map((row) => (
-                <li key={builderSidebarOrderKey(row.ref)}>
-                  {mixedProjectContent(row)}
-                </li>
-              ))}
-            </ul>
-          )
-        })()}
-        {environmentNavigation && !isSearchActive ? <OtherEnvironmentProjects navigation={environmentNavigation} /> : null}
-          </>
-        ) : null}
-
-        {showProjectsBody && roomsV2 ? roomsProjectTree : null}
+        {projectTree}
 
         {/* Archive button pinned to the bottom; outer pad creates gap above the divider */}
         {onOpenArchive && hasArchivedItems && (!activeView || roomsV2) ? (

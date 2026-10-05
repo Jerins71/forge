@@ -10,8 +10,6 @@ interface UseSidebarTreeStateOptions {
 }
 
 interface UseSidebarTreeStateReturn {
-  activeDragId: string | null
-  setActiveDragId: (value: string | null) => void
   expandedSessionIds: Set<string>
   expandedWorkerListSessionIds: Set<string>
   regularRows: ProfileTreeRow[]
@@ -31,7 +29,6 @@ export function useSidebarTreeState({
   searchQuery,
   onRequestSessionWorkers,
 }: UseSidebarTreeStateOptions): UseSidebarTreeStateReturn {
-  const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [expandedSessionIds, setExpandedSessionIds] = useState<Set<string>>(() => new Set())
   const [sessionListLimits, setSessionListLimits] = useState<Record<string, number>>({})
   const [expandedWorkerListSessionIds, setExpandedWorkerListSessionIds] = useState<Set<string>>(() => new Set())
@@ -99,8 +96,6 @@ export function useSidebarTreeState({
   }, [isSearchActive, sessionListLimits])
 
   return {
-    activeDragId,
-    setActiveDragId,
     expandedSessionIds,
     expandedWorkerListSessionIds,
     regularRows,

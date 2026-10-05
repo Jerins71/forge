@@ -174,19 +174,35 @@ test('9.2.1 B pairs by link, C pairs by code, and consumed grants cannot be repl
   assertions.pairing = { linkPaired: b.environmentId, codePaired: c.environmentId, replayRejected: true }
 })
 
-test('9.2.2 A/B group by repository, manual split/merge works, C stays independent, sessions stay environment-qualified', async ({ page }) => {
+test('9.2.2 A/B group by repository into one project row, manual split/merge works, C stays independent, sessions stay environment-qualified', async ({ page }) => {
   const { a, b, c } = fleet!
   await page.goto(fleet!.uiUrl)
   const sidebar = page.getByRole('complementary')
+  const projectList = sidebar.getByTestId('unified-project-list')
+  const projectRows = projectList.locator('[data-logical-project]')
+  const remoteOnlyRows = projectList.getByTestId('remote-project-group')
   const bRows = sidebar.locator(`[data-session-ref="${b.environmentId}:${b.sessionId}"]`)
-  // B's session is under A's project row (no duplicate top-level project) and carries B's badge.
-  await expect(sidebar.getByText('Other environments')).toBeVisible()
+  // `has` locators resolve inside each candidate row, so they start from the page.
+  const hasB = page.locator(`[data-session-ref="${b.environmentId}:${b.sessionId}"]`)
+  // One row per logical project: B's session sits in A's project row, in the same list as A's sessions,
+  // with B's machine badge, and the header names both machines.
   await expect(bRows).toHaveCount(1)
   await expect(bRows).toContainText(b.label)
-  const standalone = sidebar.getByTestId('other-environment-projects').getByTestId('logical-project-group')
-  await shot(page, 'grouping-observed')
-  assertions.observedGroups = await standalone.allTextContents()
-  await expect(standalone.filter({ hasText: c.projectTitle })).toHaveCount(1)
+  const groupedRow = projectRows.filter({ has: hasB })
+  await expect(groupedRow).toHaveCount(1)
+  await expect(remoteOnlyRows.filter({ has: hasB })).toHaveCount(0)
+  await expect(groupedRow.getByTestId('project-machines')).toContainText(a.label)
+  await expect(groupedRow.getByTestId('project-machines')).toContainText(b.label)
+  await expect(sidebar.getByText('Other environments')).toHaveCount(0)
+  const keys = await projectRows.evaluateAll(rows => rows.map(row => row.getAttribute('data-logical-project')))
+  expect(new Set(keys).size).toBe(keys.length)
+  // C only exists on another machine: an ordinary row in the same list, badged with its machine.
+  await expect(remoteOnlyRows).toHaveCount(1)
+  await expect(remoteOnlyRows.filter({ hasText: c.projectTitle })).toHaveCount(1)
+  await expect(remoteOnlyRows.getByTestId('project-machines')).toContainText(c.label)
+  await expect(remoteOnlyRows.locator(`[data-session-ref="${c.environmentId}:${c.sessionId}"]`)).toHaveCount(1)
+  await shot(page, 'sidebar-unified')
+  assertions.unifiedSidebar = { projectRows: keys.length, groupedWithB: await groupedRow.getAttribute('data-logical-project'), remoteOnly: await remoteOnlyRows.allTextContents() }
 
   // Same session ID on two environments is two rows with two routes.
   if (a.sessionId === b.sessionId) {
@@ -195,13 +211,16 @@ test('9.2.2 A/B group by repository, manual split/merge works, C stays independe
     await expect(page.getByTestId('environment-session')).toHaveAttribute('data-environment-id', b.environmentId)
   }
 
-  await sidebar.getByRole('button', { name: /Grouping options/ }).first().click()
+  await groupedRow.getByRole('button', { name: /Grouping options/ }).click()
   await page.getByRole('menuitem', { name: `Split ${b.label} checkout` }).click()
-  await expect(standalone).toHaveCount(2)
-  await standalone.filter({ hasText: b.projectTitle }).getByRole('button', { name: /Grouping options/ }).click()
+  await expect(remoteOnlyRows).toHaveCount(2)
+  await expect(remoteOnlyRows.filter({ has: hasB })).toHaveCount(1)
+  await remoteOnlyRows.filter({ hasText: b.projectTitle }).getByRole('button', { name: /Grouping options/ }).click()
   await page.getByRole('menuitem', { name: 'Merge with…' }).click()
   await page.getByRole('menuitem', { name: a.projectTitle }).click()
-  await expect(standalone).toHaveCount(1)
+  await expect(remoteOnlyRows).toHaveCount(1)
+  await expect(remoteOnlyRows.filter({ has: hasB })).toHaveCount(0)
+  await expect(projectRows.filter({ has: hasB })).toHaveCount(1)
   await shot(page, 'sidebar-grouping')
   assertions.grouping = { mergedUnderPrimary: true, splitAndMerged: true, independent: c.environmentId }
 })
@@ -437,7 +456,7 @@ test('narrow layout keeps Run on and Workspace reachable', async ({ page }) => {
 
 async function logicalGroupKey(page: Page, _environment: UiEnvironment): Promise<string> {
   await page.goto(fleet!.uiUrl)
-  // A's project is rendered by its own row; the group key is on the "Other environments" member list.
-  const memberList = page.getByRole('complementary').locator('ul[data-logical-project]').first()
-  return (await memberList.getAttribute('data-logical-project'))!
+  // A's project row carries its logical group key.
+  const projectRow = page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first()
+  return (await projectRow.getAttribute('data-logical-project'))!
 }

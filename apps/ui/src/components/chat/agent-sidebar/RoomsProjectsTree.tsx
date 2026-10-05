@@ -27,6 +27,8 @@ export interface RoomsProjectTreeRow {
 
 export function RoomsProjectsTree({
   rows,
+  trailingRows,
+  roomsV2 = true,
   activeView,
   isSearchActive,
   dndEnabled: allowDnd = true,
@@ -35,6 +37,9 @@ export function RoomsProjectsTree({
   emptyState,
 }: {
   rows: readonly RoomsProjectTreeRow[]
+  /** Projects with no checkout on this machine: same list, after the reorderable rows, not draggable. */
+  trailingRows?: ReactNode[]
+  roomsV2?: boolean
   activeView: boolean
   isSearchActive: boolean
   /** When false, the tree stays a static list. Inbox and Projects share the same reorder path. */
@@ -59,7 +64,8 @@ export function RoomsProjectsTree({
     ? rows.find((row) => builderSidebarOrderKey(row.ref) === activeDragId)
     : null
 
-  const projectList = rows.length === 0
+  const listClassName = roomsV2 ? 'mt-2 space-y-2' : 'mt-2 space-y-1'
+  const projectList = rows.length === 0 && !trailingRows?.length
     ? emptyState ?? null
     : dndEnabled ? (
       <DndContext
@@ -80,14 +86,14 @@ export function RoomsProjectsTree({
         }}
       >
         <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-          <ul className="mt-2 space-y-2" data-testid="unified-project-list">
+          <ul className={listClassName} data-testid="unified-project-list">
             {rows.map((row) => {
               const sortableId = builderSidebarOrderKey(row.ref)
               return (
                 <SortableProfileGroup
                   key={sortableId}
                   sortableId={sortableId}
-                  roomsV2
+                  roomsV2={roomsV2}
                 >
                   {(dragHandleRef, dragHandleListeners, dragHandleAttributes) => (
                     renderRow(row, dragHandleRef, dragHandleListeners, dragHandleAttributes)
@@ -95,6 +101,7 @@ export function RoomsProjectsTree({
                 </SortableProfileGroup>
               )
             })}
+            {trailingRows}
           </ul>
         </SortableContext>
         <DragOverlay>
@@ -108,10 +115,11 @@ export function RoomsProjectsTree({
         </DragOverlay>
       </DndContext>
     ) : (
-      <ul className="mt-2 space-y-2" data-testid="unified-project-list">
+      <ul className={listClassName} data-testid="unified-project-list">
         {rows.map((row) => (
           <li key={builderSidebarOrderKey(row.ref)}>{renderRow(row)}</li>
         ))}
+        {trailingRows}
       </ul>
     )
 
