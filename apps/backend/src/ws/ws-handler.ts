@@ -123,7 +123,7 @@ export class WsHandler {
     return {
       executeCommand: async ({ principal, sessionId, command, signal, send }) => {
         if (signal.aborted) return;
-        if (!this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session.");
+        if (sessionId && !this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session.");
         // Handler identity is a token, never a socket. Handlers touch it only through send.
         const socket = Symbol("legacy-command");
         const context = { command, socket, subscribedAgentId: sessionId, swarmManager: this.swarmManager,

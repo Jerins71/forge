@@ -164,7 +164,10 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   } = useSidebarPrefs()
   const roomsV2 = sidebarLayout === 'rooms-v2'
   // The project tree shows the primary environment; other environments render as logical groups.
-  const primaryOriginId = useOptionalEnvironmentContext()?.primaryEnvironmentId ?? ''
+  const environmentContext = useOptionalEnvironmentContext()
+  const primaryOriginId = environmentContext?.primaryEnvironmentId ?? ''
+  const environmentContextRef = useLatestRef(environmentContext)
+  const environmentNavigationRef = useLatestRef(environmentNavigation)
   const showProjectsBody = !roomsV2 || roomsMode === 'projects'
   const inboxFallbackOrigins = useMemo<RoomsInboxOriginInput[]>(() => {
     const toOriginInput = (
@@ -466,12 +469,24 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   }, [onOpenStats, onMobileClose])
 
   const handleRequestCreateSession = useCallback((profileId: string) => {
+    // A project checked out on more than one machine starts in the launch composer, which asks where to run.
+    const context = environmentContextRef.current
+    const onNewSession = environmentNavigationRef.current?.onNewSession
+    if (context && onNewSession) {
+      for (const group of context.registry.logicalProjects.getSnapshot().values()) {
+        const local = group.members.some((member) => member.environmentId === context.primaryEnvironmentId && member.projectId === profileId)
+        if (local && group.members.some((member) => member.environmentId !== context.primaryEnvironmentId)) {
+          onNewSession(group.key)
+          return
+        }
+      }
+    }
     const profile = profilesRef.current.find((entry) => entry.profileId === profileId)
     setCreateTarget({
       profileId,
       profileLabel: profile?.displayName || profileId,
     })
-  }, [profilesRef])
+  }, [environmentContextRef, environmentNavigationRef, profilesRef])
 
   const handleConfirmCreateSession = useCallback((profileId: string, name?: string) => {
     onCreateSession?.(profileId, name)

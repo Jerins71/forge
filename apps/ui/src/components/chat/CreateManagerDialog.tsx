@@ -37,6 +37,7 @@ import {
   resolveCreateManagerDefault,
 } from '@/lib/manager-selection-catalog'
 import { useManagerSelectionCatalog } from '@/lib/use-manager-selection-catalog'
+import { EnvironmentTargetPicker } from '@/components/settings/EnvironmentTargetPicker'
 import { useEnvironmentSettingsClient } from '@/hooks/use-environment-settings-client'
 import {
   ServerDirectoryBrowserDialog,
@@ -100,6 +101,8 @@ interface CreateManagerDialogProps {
     client: ServerDirectoryBrowserClient
     canCreateDirectory?: boolean
   }
+  /** Where the project is created; shows a "Create on" picker when set. */
+  environmentPicker?: { environmentId: string; onChange: (environmentId: string) => void }
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }
 
@@ -144,6 +147,7 @@ export function CreateManagerDialog({
   onScaffoldForgeResourcesChange,
   onBrowseDirectory,
   serverDirectoryBrowser,
+  environmentPicker,
   onSubmit,
 }: CreateManagerDialogProps) {
   const [serverBrowserOpen, setServerBrowserOpen] = useState(false)
@@ -272,6 +276,16 @@ export function CreateManagerDialog({
         </DialogHeader>
 
         <form className="space-y-4" onSubmit={onSubmit}>
+          {environmentPicker ? (
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-muted-foreground">Create on</Label>
+              <EnvironmentTargetPicker
+                environmentId={environmentPicker.environmentId}
+                onChange={environmentPicker.onChange}
+                label="Create project on"
+              />
+            </div>
+          ) : null}
           {cloneRepositoryEnabled ? (
             <div className="space-y-2" aria-label="Project source">
               <Label className="text-xs font-medium text-muted-foreground">Source</Label>

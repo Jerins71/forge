@@ -53,13 +53,15 @@ export function createLegacyBuilderAdapter({ access, ports }: { access: Environm
     if (!parsed.ok) throw new StreamFault("INVALID_INPUT", "Invalid legacy command.");
     const scope = legacyCommandScopes[parsed.command.type];
     if (scope === "unsupported" || scope !== rpcScopes[method]) throw new StreamFault("FORBIDDEN", "Legacy command is not allowed in this scope.");
-    if (!input.sessionId) throw new StreamFault("INVALID_INPUT", "Legacy commands require an addressed session.");
+    // Session commands are addressed to one session; workspace and settings commands (folders, new projects) need none.
+    const sessionScoped = method === "legacy.session.read" || method === "legacy.session.operate";
+    if (sessionScoped && !input.sessionId) throw new StreamFault("INVALID_INPUT", "Legacy commands require an addressed session.");
     const command = parsed.command as ClientCommand & Record<string, unknown>;
-    for (const field of ["agentId", "sessionAgentId", "managerId", "sourceAgentId"] as const) if (command[field] !== undefined && command[field] !== input.sessionId) throw new StreamFault("FORBIDDEN", "Legacy command targets another session.");
+    if (input.sessionId) for (const field of ["agentId", "sessionAgentId", "managerId", "sourceAgentId"] as const) if (command[field] !== undefined && command[field] !== input.sessionId) throw new StreamFault("FORBIDDEN", "Legacy command targets another session.");
     access.authorize(principal, [scope]);
     const events: Record<string, unknown>[] = [];
     let bytes = 0;
-    await ports.executeCommand({ principal, sessionId: input.sessionId, command: parsed.command, signal, send(event) {
+    await ports.executeCommand({ principal, sessionId: input.sessionId ?? "", command: parsed.command, signal, send(event) {
       bytes += encodedBytes(event);
       if (events.length >= 64 || bytes > 512 * 1024 || !bounded(event)) throw new StreamFault("PAYLOAD_TOO_LARGE", "Legacy response exceeds budget.");
       events.push(event as unknown as Record<string, unknown>);

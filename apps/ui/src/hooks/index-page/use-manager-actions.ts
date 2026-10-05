@@ -12,6 +12,7 @@ import { fetchRepositorySettings } from '@/components/settings/repository-settin
 import type { CreateProjectSourceMode } from '@/components/chat/CreateManagerDialog'
 import { deriveRepositoryFolderFromUrl } from '@/lib/repository-project-helpers'
 import { ManagerWsClient } from '@/lib/ws-client'
+import { originRegistry } from '@/lib/origin-store'
 import type { ManagerWsState } from '@/lib/ws-state'
 import type {
   AgentDescriptor,
@@ -68,6 +69,11 @@ export function useManagerActions({
   handleNewManagerReasoningLevelChange: (value: ManagerReasoningLevel) => void
   handleScaffoldForgeResourcesChange: (checked: boolean) => void
   handleOpenCreateManagerDialog: () => void
+  /** Environment the new project is created on; null means this machine. */
+  projectEnvironmentId: string | null
+  handleProjectEnvironmentChange: (environmentId: string | null) => void
+  /** The client the new-project dialog validates, browses and creates through. */
+  getProjectTargetClient: () => ManagerWsClient | null
   handleCreateManagerDialogOpenChange: (open: boolean) => void
   handleBrowseDirectory: () => Promise<void>
   handleCreateManager: (event: FormEvent<HTMLFormElement>) => Promise<void>
@@ -99,6 +105,21 @@ export function useManagerActions({
   handleStopAllAgents: () => Promise<void>
 } {
   const [isCreateManagerDialogOpen, setIsCreateManagerDialogOpen] = useState(false)
+  const [projectEnvironmentId, setProjectEnvironmentId] = useState<string | null>(null)
+  const getProjectTargetClient = useCallback(
+    () => (projectEnvironmentId ? originRegistry.getOrigin(projectEnvironmentId)?.getClient() ?? null : clientRef.current),
+    [clientRef, projectEnvironmentId],
+  )
+  const handleProjectEnvironmentChange = useCallback((environmentId: string | null) => {
+    setProjectEnvironmentId(environmentId)
+    setNewManagerModelSelection(undefined)
+    setNewManagerReasoningLevel(undefined)
+    setCreateManagerError(null)
+    setBrowseError(null)
+    // Paths and cloning belong to the machine that runs the project.
+    setNewManagerCwd('')
+    setCreateProjectSourceMode('local_folder')
+  }, [])
   const [newManagerName, setNewManagerName] = useState('')
   const [newManagerCwd, setNewManagerCwd] = useState('')
   const [newManagerModelSelection, setNewManagerModelSelection] = useState<ManagerExactModelSelection | undefined>(undefined)
@@ -288,6 +309,7 @@ export function useManagerActions({
       agents.find((agent) => agent.role === 'manager')?.cwd ??
       ''
 
+    setProjectEnvironmentId(null)
     setNewManagerName('')
     setNewManagerCwd(defaultCwd)
     setNewManagerModelSelection(undefined)
@@ -400,10 +422,12 @@ export function useManagerActions({
   const handleCreateManager = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
-    const client = clientRef.current
+    const client = getProjectTargetClient()
     if (!client) {
+      setCreateManagerError('That environment is not connected.')
       return
     }
+    const targetEnvironmentClient = projectEnvironmentId ? client.getEnvironmentClient() ?? null : environmentClient
 
     const name = newManagerName.trim()
 
@@ -418,6 +442,10 @@ export function useManagerActions({
     }
 
     if (createProjectSourceMode === 'clone_repository') {
+      if (projectEnvironmentId) {
+        setCreateManagerError('Cloning runs on this machine only for now. Choose an existing folder on the other machine.')
+        return
+      }
       const url = repositoryUrl.trim()
       const folder = repositoryFolder.trim()
       const basePath = repositoryBasePath.trim()
@@ -534,13 +562,13 @@ export function useManagerActions({
         secureSessionsEnabled: newManagerSecureSessionsEnabled,
       })
 
-      navigateToRoute({ view: 'chat', agentId: manager.agentId })
+      navigateToRoute({ view: 'chat', agentId: manager.agentId, ...(projectEnvironmentId ? { environmentId: projectEnvironmentId } : {}) })
       client.subscribeToAgent(manager.agentId, { reason: 'create' })
 
       // Seed .forge project resources if the user opted in (non-blocking)
       if (scaffoldForgeResources) {
         const profileId = manager.profileId ?? manager.agentId
-        environmentClient?.features.files.seedResources({ profileId, sessionAgentId: manager.agentId }).catch((err: unknown) => {
+        targetEnvironmentClient?.features.files.seedResources({ profileId, sessionAgentId: manager.agentId }).catch((err: unknown) => {
           console.warn('Failed to seed .forge project resources:', err)
         })
       }
@@ -562,7 +590,8 @@ export function useManagerActions({
       setIsCreatingManager(false)
     }
   }, [
-    clientRef,
+    getProjectTargetClient,
+    projectEnvironmentId,
     createProjectSourceMode,
     environmentClient,
     navigateToRoute,
@@ -638,6 +667,9 @@ export function useManagerActions({
 
   return {
     isCreateManagerDialogOpen,
+    projectEnvironmentId,
+    handleProjectEnvironmentChange,
+    getProjectTargetClient,
     newManagerName,
     newManagerCwd,
     newManagerModelSelection,

@@ -543,7 +543,7 @@ export function createFeatureClients(
         : sessionRead.has(type)
           ? 'legacy.session.read'
           : 'legacy.session.operate'
-    if (!sessionId)
+    if (!sessionId && method.startsWith('legacy.session.'))
       throw new Error('Legacy feature requests require an addressed session')
     const result = await rpc.request(method, {
       ...(sessionId ? { sessionId } : {}),

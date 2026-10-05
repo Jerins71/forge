@@ -968,6 +968,9 @@ export function BuilderSurface({
     handleNewManagerReasoningLevelChange,
     handleScaffoldForgeResourcesChange,
     handleOpenCreateManagerDialog,
+    projectEnvironmentId,
+    handleProjectEnvironmentChange,
+    getProjectTargetClient,
     handleCreateManagerDialogOpenChange,
     handleBrowseDirectory,
     handleCreateManager,
@@ -2609,7 +2612,15 @@ export function BuilderSurface({
         }}
         createManagerDialogProps={{
           open: isCreateManagerDialogOpen,
-          originId: primaryEnvironmentId ?? '',
+          originId: projectEnvironmentId ?? primaryEnvironmentId ?? '',
+          environmentPicker: primaryEnvironmentId ? {
+            environmentId: projectEnvironmentId ?? primaryEnvironmentId,
+            onChange: (environmentId) => handleProjectEnvironmentChange(environmentId === primaryEnvironmentId ? null : environmentId),
+          } : undefined,
+          // Folders on another machine are browsed on that machine; local dialogs only see this one.
+          serverDirectoryBrowser: projectEnvironmentId && getProjectTargetClient()
+            ? { client: getProjectTargetClient()!, canCreateDirectory: true }
+            : undefined,
           modelConfigChangeKey: state.modelConfigChangeKey,
           connectionEpoch: state.connectionEpoch,
           isCreatingManager,
@@ -2624,7 +2635,7 @@ export function BuilderSurface({
           scaffoldForgeResources,
           createManagerError,
           browseError,
-          cloneRepositoryEnabled: true,
+          cloneRepositoryEnabled: !projectEnvironmentId,
           sourceMode: createProjectSourceMode,
           repositoryUrl,
           repositoryFolder,
@@ -2649,7 +2660,7 @@ export function BuilderSurface({
           onModelSelectionChange: handleNewManagerModelSelectionChange,
           onReasoningLevelChange: handleNewManagerReasoningLevelChange,
           onScaffoldForgeResourcesChange: handleScaffoldForgeResourcesChange,
-          onBrowseDirectory: () => {
+          onBrowseDirectory: projectEnvironmentId ? undefined : () => {
             void handleBrowseDirectory()
           },
           onSubmit: (event) => {
