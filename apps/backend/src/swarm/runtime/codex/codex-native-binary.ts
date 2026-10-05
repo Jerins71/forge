@@ -1,18 +1,25 @@
 import { execFile } from "node:child_process";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join, win32 } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { promisify } from "node:util";
+import { getManagedCodexRuntimeDir } from "../../storage/data-paths.js";
+import { compareVersions, isPlainVersion } from "../runtime-updates/versions.js";
 
 /** Resolve an executable, never a Windows command shim: both version and RPC use direct spawn. */
 export function resolveNativeCodexBinary(options: {
-  platform?: NodeJS.Platform; arch?: string; env?: NodeJS.ProcessEnv; home?: string;
+  platform?: NodeJS.Platform; arch?: string; env?: NodeJS.ProcessEnv; home?: string; dataDir?: string;
 } = {}): string {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
+  const arch = options.arch ?? process.arch;
   const explicit = env.CODEX_BIN?.trim().replace(/^"(.*)"$/, "$1");
-  if (platform === "win32") return resolveWindowsBinary(explicit, env, options.arch ?? process.arch);
+  if (platform === "win32") {
+    const external = resolveWindowsBinary(explicit, env, arch);
+    if (explicit || isFile(external)) return external;
+    return selectManagedCodexRuntime(options.dataDir, platform, arch)?.executable ?? external;
+  }
   if (explicit) return explicit;
   if (platform === "darwin") {
     for (const root of ["/Applications", join(options.home ?? homedir(), "Applications")]) {
@@ -22,7 +29,25 @@ export function resolveNativeCodexBinary(options: {
       }
     }
   }
-  return "codex";
+  if ((env.PATH ?? "").split(":").some(directory => isFile(join(directory || ".", "codex")))) return "codex";
+  return selectManagedCodexRuntime(options.dataDir, platform, arch)?.executable ?? "codex";
+}
+
+/** Only complete version directories are eligible; an existing user install always wins. */
+export function selectManagedCodexRuntime(dataDir: string | undefined, platform: NodeJS.Platform = process.platform, arch: string = process.arch): {
+  executable: string; version: string; source: "managed";
+} | null {
+  if (!dataDir) return null;
+  const dir = getManagedCodexRuntimeDir(dataDir);
+  let versions: string[];
+  try { versions = readdirSync(dir).filter(isPlainVersion).sort((a, b) => compareVersions(b, a)); }
+  catch { return null; }
+  const path = platform === "win32" ? win32 : posix;
+  for (const version of versions) {
+    const executable = resolveCodexNpmBinary(path.join(dir, version, "node_modules", "@openai", "codex"), platform, arch);
+    if (executable) return { executable, version, source: "managed" };
+  }
+  return null;
 }
 
 function isFile(candidate: string): boolean {
@@ -57,24 +82,41 @@ function resolveWindowsBinary(explicit: string | undefined, env: NodeJS.ProcessE
 }
 
 function resolveWindowsNpmBinary(directory: string, arch: string): string | undefined {
-  const target = arch === "x64" ? "x86_64-pc-windows-msvc" : arch === "arm64" ? "aarch64-pc-windows-msvc" : undefined;
-  if (!target) return undefined;
   // Global npm prefix and local node_modules/.bin installs. Resolving from the
   // real package root also follows pnpm's symlinked optional dependencies.
   for (const root of [win32.join(directory, "node_modules", "@openai", "codex"), win32.join(directory, "..", "@openai", "codex")]) {
     if (!isFile(win32.join(root, "package.json"))) continue;
-    const packageRoot = realpathSync(root);
-    let vendor = win32.join(packageRoot, "vendor");
-    try {
-      const require = createRequire(win32.join(packageRoot, "package.json"));
-      vendor = win32.join(win32.dirname(require.resolve(`@openai/codex-win32-${arch}/package.json`)), "vendor");
-    } catch { /* Older CLI packages carry vendor directly. */ }
-    for (const subdirectory of ["bin", "codex"]) {
-      const binary = win32.join(vendor, target, subdirectory, "codex.exe");
-      if (isFile(binary)) return binary;
-    }
+    const binary = resolveCodexNpmBinary(root, "win32", arch);
+    if (binary) return binary;
   }
   return undefined;
+}
+
+/** Locate the native executable in an official npm install without running its JS/shims. */
+export function resolveCodexNpmBinary(root: string, platform: NodeJS.Platform = process.platform, arch: string = process.arch): string | undefined {
+  const cpu = arch === "x64" ? "x86_64" : arch === "arm64" ? "aarch64" : undefined;
+  const os = platform === "darwin" ? "apple-darwin" : platform === "linux" ? "unknown-linux-musl" : platform === "win32" ? "pc-windows-msvc" : undefined;
+  if (!cpu || !os) return undefined;
+  const path = platform === "win32" ? win32 : posix;
+  let packageRoot = root;
+  try { packageRoot = realpathSync(root); } catch { /* Missing/partial package; candidates below must exist. */ }
+  let vendor = path.join(packageRoot, "vendor");
+  try {
+    const require = createRequire(path.join(packageRoot, "package.json"));
+    vendor = path.join(path.dirname(require.resolve(`@openai/codex-${platform}-${arch}/package.json`)), "vendor");
+  } catch { /* Older CLI packages carry vendor directly. */ }
+  for (const subdirectory of ["bin", "codex"]) {
+    const binary = path.join(vendor, `${cpu}-${os}`, subdirectory, platform === "win32" ? "codex.exe" : "codex");
+    if (isFile(binary)) return binary;
+  }
+  return undefined;
+}
+
+export async function codexVersion(executable: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+  try {
+    const { stdout } = await promisify(execFile)(executable, ["--version"], { env, timeout: 10_000, windowsHide: true });
+    return /codex-cli\s+(\d+\.\d+\.\d+)/u.exec(stdout)?.[1] ?? null;
+  } catch { return null; }
 }
 
 function codexInstallHelp(platform: NodeJS.Platform, action: "Install" | "Update" | "Reinstall"): string {

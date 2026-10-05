@@ -3,7 +3,7 @@ import { realpathSync, statSync } from "node:fs";
 import { posix, win32 } from "node:path";
 import { promisify } from "node:util";
 import type { NativeRuntimeId, NativeRuntimeStatus, NativeRuntimeUpdateState } from "@forge/protocol";
-import { resolveNativeCodexBinary } from "../codex/codex-native-binary.js";
+import { codexVersion, resolveNativeCodexBinary, selectManagedCodexRuntime } from "../codex/codex-native-binary.js";
 import {
   bundledClaudeRuntime,
   claudeVersion,
@@ -18,11 +18,13 @@ import {
   CODEX_INSTALL,
   detectInstallOwnership,
   findOnPath,
+  installManagedCodexRuntime,
+  pruneManagedCodexRuntimes,
   type InstallOwnership,
   type InstallProbe,
   type RuntimeInstallDefinition,
 } from "./runtime-installation.js";
-import { compareVersions, parseVersion } from "./versions.js";
+import { compareVersions, isPlainVersion, parseVersion } from "./versions.js";
 
 const LATEST_CACHE_MS = 60 * 60_000;
 const LATEST_FAILURE_CACHE_MS = 5 * 60_000;
@@ -49,7 +51,7 @@ export interface NativeRuntimeUpdateServiceOptions {
 /**
  * Checks the Codex and Claude runtimes Forge launches against their latest releases and
  * updates them through whoever owns the install: the runtime's own updater, npm,
- * Homebrew, or, for Forge's bundled Claude, a verified download into the data directory.
+ * Homebrew, or a verified managed install into the data directory.
  */
 export class NativeRuntimeUpdateService {
   private readonly env: NodeJS.ProcessEnv;
@@ -119,7 +121,7 @@ export class NativeRuntimeUpdateService {
 
   private async inspect(runtime: NativeRuntimeId): Promise<Inspection> {
     const inspection = runtime === "codex"
-      ? await this.inspectExternal("codex", CODEX_INSTALL, this.codexExecutable(), async path => codexVersion(path, this.env))
+      ? await this.inspectCodex()
       : this.env.CLAUDE_BIN?.trim()
         ? await this.inspectExternal("claude", CLAUDE_INSTALL, this.env.CLAUDE_BIN.trim(), path => claudeVersion(path, this.env))
         : await this.inspectBundledClaude();
@@ -129,9 +131,40 @@ export class NativeRuntimeUpdateService {
   }
 
   private codexExecutable(): string | null {
-    const binary = resolveNativeCodexBinary({ env: this.env, platform: this.platform, arch: this.arch });
+    const binary = resolveNativeCodexBinary({ env: this.env, platform: this.platform, arch: this.arch, dataDir: this.options.dataDir });
     const pathApi = this.platform === "win32" ? win32 : posix;
     return pathApi.isAbsolute(binary) ? binary : findOnPath([binary], this.env, this.platform, { isFile });
+  }
+
+  private async inspectCodex(): Promise<Inspection> {
+    const executable = this.codexExecutable();
+    const managed = selectManagedCodexRuntime(this.options.dataDir, this.platform, this.arch);
+    const missing = !executable || !isFile(executable);
+    if ((!missing && executable !== managed?.executable) || (missing && this.env.CODEX_BIN?.trim())) {
+      const inspection = await this.inspectExternal("codex", CODEX_INSTALL, executable, path => codexVersion(path, this.env));
+      if (missing) inspection.status.note = "CODEX_BIN points to a missing Codex installation. Correct or remove CODEX_BIN, then retry.";
+      return inspection;
+    }
+    const [currentVersion, latestVersion] = await Promise.all([
+      executable && !missing ? codexVersion(executable, this.env) : Promise.resolve(null),
+      this.npmLatest(CODEX_INSTALL.npmPackage),
+    ]);
+    const status = missing ? "missing" : advisory(currentVersion, latestVersion);
+    const supported = ["darwin", "linux", "win32"].includes(this.platform) && ["x64", "arm64"].includes(this.arch);
+    const canUpdate = supported && Boolean(latestVersion && isPlainVersion(latestVersion)) && (missing || status === "outdated");
+    return {
+      status: { runtime: "codex", checkedAt: new Date().toISOString(), update: null, executablePath: executable,
+        source: missing ? null : "managed", currentVersion, latestVersion, status, updateCommand: null, canUpdate,
+        note: !supported ? `A managed Codex install is unavailable for ${this.platform}/${this.arch}.`
+          : !latestVersion || !isPlainVersion(latestVersion) ? "Could not resolve the latest Codex release from the npm registry. Check network access and retry."
+          : canUpdate ? "Installs the official Codex CLI from npm into Forge's data folder." : null },
+      ...(canUpdate && latestVersion ? { run: async () => {
+        const installed = await installManagedCodexRuntime({ dataDir: this.options.dataDir, version: latestVersion,
+          platform: this.platform, arch: this.arch, env: this.env });
+        await pruneManagedCodexRuntimes(this.options.dataDir, installed.version);
+        return { output: installed.output };
+      } } : {}),
+    };
   }
 
   private async inspectExternal(
@@ -251,13 +284,6 @@ function isFile(path: string): boolean {
 
 function withOutput(output: string | undefined) {
   return output ? { output } : {};
-}
-
-async function codexVersion(executable: string, env: NodeJS.ProcessEnv): Promise<string | null> {
-  try {
-    const { stdout } = await promisify(execFile)(executable, ["--version"], { env, timeout: 10_000, windowsHide: true });
-    return /codex-cli\s+(\d+\.\d+\.\d+)/u.exec(stdout)?.[1] ?? null;
-  } catch { return null; }
 }
 
 class UpdateCommandError extends Error {

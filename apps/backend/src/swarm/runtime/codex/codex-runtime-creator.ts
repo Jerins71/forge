@@ -80,7 +80,7 @@ export class CodexRuntimeCreator {
     try {
       await auth.initialize();
       const runtime = await CodexAgentRuntime.create({ descriptor: structuredClone(descriptor),
-        callbacks: options.callbacks, systemPrompt, codexHome, projectTrusted: trust.trusted,
+        callbacks: options.callbacks, systemPrompt, codexHome, dataDir: this.deps.config.paths.dataDir, projectTrusted: trust.trusted,
         auth, tools, host: this.deps.host, creationOptions: options.creationOptions });
       if (prepared) this.deps.forgeExtensionHost.activateRuntimeBindings(prepared);
       recordRuntimePromptAndCreation({ observability: this.deps.observability, descriptor,

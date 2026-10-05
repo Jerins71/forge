@@ -44,6 +44,7 @@ interface Options {
   callbacks: SwarmRuntimeCallbacks;
   systemPrompt: string;
   codexHome: string;
+  dataDir?: string;
   projectTrusted: boolean;
   auth: Pick<CodexRuntimeAuth, "login" | "refresh" | "release">;
   tools: ConstructorParameters<typeof CodexRuntimeTools>[0]["tools"];
@@ -88,7 +89,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     this.bridge = new CodexRuntimeTools({ tools: options.tools, agentId: this.descriptor.agentId,
       host: options.host, emit: event => this.emit(event) });
     this.client = (options.createClient ?? (handlers => createCodexAppServerClient(handlers, {
-      command: resolveNativeCodexBinary(),
+      command: resolveNativeCodexBinary({ dataDir: options.dataDir }),
       args: ["app-server", "--listen", "stdio://", "-c", 'cli_auth_credentials_store="ephemeral"'],
       spawnOptions: { cwd: this.descriptor.cwd, env: nativeCodexEnvironment(options.codexHome) },
     })))({
@@ -102,7 +103,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
   }
 
   static async create(options: Options): Promise<CodexAgentRuntime> {
-    if (!options.createClient) await assertNativeCodexVersion(resolveNativeCodexBinary(), nativeCodexEnvironment(options.codexHome));
+    if (!options.createClient) await assertNativeCodexVersion(resolveNativeCodexBinary({ dataDir: options.dataDir }), nativeCodexEnvironment(options.codexHome));
     const runtime = new CodexAgentRuntime(options);
     try {
       await runtime.client.connect();

@@ -67,13 +67,17 @@ export function getBitwardenCliExecutablePath(
   );
 }
 
-/** Runtimes Forge downloads itself, newer than the copies bundled with the app. */
+/** Runtimes Forge installs into its data directory. */
 export function getManagedRuntimesDir(dataDir: string): string {
   return join(dataDir, "runtimes");
 }
 
 export function getManagedClaudeRuntimeDir(dataDir: string): string {
   return join(getManagedRuntimesDir(dataDir), "claude");
+}
+
+export function getManagedCodexRuntimeDir(dataDir: string): string {
+  return join(getManagedRuntimesDir(dataDir), "codex");
 }
 
 // ── Profile-level paths ────────────────────────────────────────────────────────
