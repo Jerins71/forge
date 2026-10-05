@@ -1858,7 +1858,8 @@ export class ManagerWsClient {
 
     // Gate terminal snapshots at the facade so handlers stay pure: reject late
     // prior-scope frames after A→B when the selected target's resolved scope differs.
-    if (event.type === 'terminals_snapshot') {
+    // Environment detail leases are already session-scoped and server-routed.
+    if (event.type === 'terminals_snapshot' && !this.environmentClient) {
       const expectedTerminalScopeId = this.resolveTerminalScopeAgentId(this.state.targetAgentId)
       if (event.sessionAgentId !== expectedTerminalScopeId) {
         return

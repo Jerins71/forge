@@ -47,6 +47,7 @@ export class WsHandler {
   private environmentControl: { access: EnvironmentAccessPort; control: ControlService & Partial<Pick<import("../environment/control/command-service.js").EnvironmentControlService, "resumeSession">> } | null = null;
   private readonly principals = new WeakMap<WebSocket, Principal>();
   private readonly featureListeners = new Map<string, Set<(event: ServerEvent) => void>>();
+  private readonly listTerminalsForSession: (sessionId: string) => TerminalDescriptor[];
 
   private wss: WebSocketServer | null = null;
 
@@ -75,6 +76,7 @@ export class WsHandler {
 
     const feedbackService = options.feedbackService ?? new FeedbackService(this.swarmManager.getConfig().paths.dataDir);
     const terminalService = options.terminalService ?? null;
+    this.listTerminalsForSession = options.listTerminalsForSession ?? (sessionId => terminalService?.listTerminals(sessionId) ?? []);
     const perf = options.perf;
 
     this.subscriptionManager = new WsSubscriptions({
@@ -188,6 +190,9 @@ export class WsHandler {
       featureState: async (sessionId, signal) => {
         if (!this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session.");
         const events: ServerEvent[] = [await this.swarmManager.getSessionPlanSnapshot(sessionId), await this.swarmManager.getSessionGoalSnapshot(sessionId)];
+        // Terminals are owned by the session's terminal scope (its profile); events keep that scope ID.
+        const terminalScopeId = this.subscriptionManager.resolveTerminalScopeAgentId(sessionId) ?? sessionId;
+        events.push({ type: "terminals_snapshot", sessionAgentId: terminalScopeId, terminals: this.listTerminalsForSession(terminalScopeId) });
         if (signal.aborted) return [];
         const activity = this.swarmManager.getManagerToolActivitySnapshot(sessionId);
         if (activity) events.push(activity);
@@ -214,6 +219,13 @@ export class WsHandler {
 
   private publishFeatures(sessionId: string, event: ServerEvent): void {
     if (!legacySessionEventAllowlist.includes(event.type as typeof legacySessionEventAllowlist[number])) return;
+    if (event.type === "terminal_created" || event.type === "terminal_updated" || event.type === "terminal_closed") {
+      // `sessionId` is a terminal scope here; deliver to every mounted session that resolves to it.
+      for (const [mountedId, listeners] of this.featureListeners) {
+        if ((this.subscriptionManager.resolveTerminalScopeAgentId(mountedId) ?? mountedId) === sessionId) for (const listener of listeners) listener(event);
+      }
+      return;
+    }
     for (const listener of this.featureListeners.get(sessionId) ?? []) listener(event);
   }
 

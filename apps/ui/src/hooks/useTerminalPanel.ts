@@ -134,6 +134,7 @@ export function useTerminalPanel({
   const [activeTerminalId, setActiveTerminalIdState] = useState<string | null>(null)
   const [editingTerminalId, setEditingTerminalId] = useState<string | null>(null)
   const [renameDraft, setRenameDraftState] = useState('')
+  const createdTerminalIdRef = useRef<string | null>(null)
   const autoHiddenRef = useRef(false)
   const previousSessionIdRef = useRef<string | null>(sessionAgentId)
 
@@ -208,6 +209,8 @@ export function useTerminalPanel({
         sessionAgentId,
         cwd: sessionCwd ?? undefined,
       })
+      // Environment streams can deliver terminal_created after this response; keep the panel open until it lands.
+      createdTerminalIdRef.current = response.terminal.terminalId
       setActiveTerminalIdState(response.terminal.terminalId)
       setPanelMode('open')
       return response
@@ -323,6 +326,7 @@ export function useTerminalPanel({
   useEffect(() => {
     if (previousSessionIdRef.current !== sessionAgentId) {
       previousSessionIdRef.current = sessionAgentId
+      createdTerminalIdRef.current = null
       setEditingTerminalId(null)
       setRenameDraftState('')
     }
@@ -330,7 +334,12 @@ export function useTerminalPanel({
 
   // Auto-show/hide based on terminal list
   useEffect(() => {
+    const createdTerminalId = createdTerminalIdRef.current
+    if (createdTerminalId && terminals.some((terminal) => terminal.terminalId === createdTerminalId)) {
+      createdTerminalIdRef.current = null
+    }
     if (terminals.length === 0) {
+      if (createdTerminalIdRef.current) return
       autoHiddenRef.current = true
       setActiveTerminalIdState(null)
       setPanelMode('hidden')

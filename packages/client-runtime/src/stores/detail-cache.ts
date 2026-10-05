@@ -288,7 +288,7 @@ export class DetailCache {
               payload.agentId ??
               payload.sessionAgentId ??
               sessionId,
-            payload.toolCallId ?? payload.requestId ?? '',
+            (payload.terminal as { terminalId?: string } | undefined)?.terminalId ?? payload.terminalId ?? payload.toolCallId ?? payload.requestId ?? '',
           ])
           transientBatch.set(key, { ...payload, type: item.type })
           if (!entry.cancelBatch)

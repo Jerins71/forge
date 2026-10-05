@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { ClientCommand, ServerEvent } from "@forge/protocol";
+import { legacySessionEventAllowlist, validateLegacySessionEvent, isBoundedLegacyValue as bounded, type ClientCommand, type ServerEvent } from "@forge/protocol";
+export { legacySessionEventAllowlist, validateLegacySessionEvent } from "@forge/protocol";
 import { rpcScopes, type Scope, type RpcInput, type RpcOutput, type RpcStreamItem, type CommandReceipt } from "@forge/protocol/environment-v2";
 import type { ControlService, EnvironmentAccessPort, Principal } from "../../environment/control/control-types.js";
-import { StreamFault, StreamQueue, encodedBytes, EVENT_BYTES } from "../../environment/streams/stream-budget.js";
+import { StreamFault, StreamQueue, encodedBytes } from "../../environment/streams/stream-budget.js";
 import { parseClientCommand } from "../ws-command-parser.js";
 
 export const legacyCommandScopes = {
@@ -31,12 +32,6 @@ export const legacyCommandScopes = {
 } as const satisfies Record<ClientCommand["type"], Scope | "unsupported">;
 
 /** Remove a literal when its authoritative feature projection migrates to V2. */
-export const legacySessionEventAllowlist = [
-  "session_plan_snapshot", "session_goal_snapshot", "manager_tool_activity",
-  "browser_session_snapshot", "browser_session_changed", "secure_session_snapshot",
-  "secure_secret_catalog_changed", "codex_elicitation_request", "codex_elicitation_dismissed",
-  "generation_throughput", "generation_throughput_snapshot",
-] as const satisfies readonly ServerEvent["type"][];
 type LegacyType = typeof legacySessionEventAllowlist[number];
 type LegacyMethod = "legacy.session.read" | "legacy.session.operate" | "legacy.workspace.read" | "legacy.workspace.write" | "legacy.settings.admin";
 
@@ -51,35 +46,6 @@ export interface LegacyBuilderAdapter {
   subscribe(principal: Principal, input: RpcInput<"legacy.session.subscribe">, signal: AbortSignal): AsyncIterable<RpcStreamItem<"legacy.session.subscribe">>;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
-const id = (value: unknown) => typeof value === "string" && value.length > 0 && value.length <= 128;
-const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0;
-function bounded(value: unknown, depth = 0): boolean {
-  if (depth > 12) return false;
-  if (value === null || typeof value === "boolean") return true;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value === "string") return value.length <= 32_768;
-  if (Array.isArray(value)) return value.length <= 256 && value.every(v => bounded(v, depth + 1));
-  return isRecord(value) && Object.keys(value).length <= 128 && Object.entries(value).every(([key, v]) => key.length <= 128 && (v === undefined || bounded(v, depth + 1)));
-}
-
-/** Explicit event-specific requirements plus recursive byte/depth/string/array caps. */
-export function validateLegacySessionEvent(value: unknown, sessionId: string): value is Extract<ServerEvent, { type: LegacyType }> {
-  if (!isRecord(value) || !legacySessionEventAllowlist.includes(value.type as LegacyType) || !bounded(value) || encodedBytes(value) > EVENT_BYTES) return false;
-  if ("sessionAgentId" in value && value.sessionAgentId !== sessionId || "agentId" in value && value.agentId !== sessionId) return false;
-  switch (value.type as LegacyType) {
-    case "manager_tool_activity": return value.sessionAgentId === sessionId && number(value.revision) && number(value.toolCount) && (value.backgroundCount === undefined || number(value.backgroundCount));
-    case "session_plan_snapshot": return value.sessionAgentId === sessionId && id(value.profileId) && number(value.revision) && (typeof value.updatedAt === "string" || value.updatedAt === null) && Array.isArray(value.plan) && value.plan.every(step => isRecord(step) && typeof step.step === "string" && ["pending", "in_progress", "completed"].includes(String(step.status)));
-    case "session_goal_snapshot": return value.sessionAgentId === sessionId && id(value.profileId) && number(value.revision) && typeof value.measuredAt === "string" && (value.goal === null || isRecord(value.goal) && id(value.goal.id) && typeof value.goal.objective === "string" && ["active", "paused", "blocked", "completed", "cancelled"].includes(String(value.goal.status)) && number(value.goal.activeElapsedMs) && number(value.goal.turnCount) && isRecord(value.goal.usage));
-    case "secure_secret_catalog_changed": return number(value.revision);
-    case "secure_session_snapshot": return value.sessionAgentId === sessionId && id(value.profileId) && number(value.revision) && typeof value.updatedAt === "string" && ["manager", "worker"].includes(String(value.principalKind)) && typeof value.executionMode === "string" && typeof value.environmentStatus === "string" && Array.isArray(value.leases) && value.leases.every(isRecord) && Array.isArray(value.pendingRequests) && value.pendingRequests.every(isRecord);
-    case "browser_session_snapshot": case "browser_session_changed": return isRecord(value.snapshot) && value.snapshot.sessionAgentId === sessionId && id(value.snapshot.profileId) && Array.isArray(value.snapshot.tabs) && value.snapshot.tabs.every(tab => isRecord(tab) && id(tab.tabId)) && (value.type === "browser_session_snapshot" || ["host-report", "automation", "human-command", "lifecycle", "recovery"].includes(String(value.reason)));
-    case "codex_elicitation_dismissed": return value.agentId === sessionId && id(value.elicitationId);
-    case "codex_elicitation_request": return value.agentId === sessionId && id(value.elicitationId) && id(value.sidecarAgentId) && ["form", "url"].includes(String(value.mode)) && typeof value.message === "string" && Array.isArray(value.persistScopes) && value.persistScopes.every(s => s === "session" || s === "always") && (value.fields === undefined || Array.isArray(value.fields) && value.fields.every(f => isRecord(f) && id(f.key) && typeof f.label === "string" && ["string", "boolean", "number", "enum"].includes(String(f.type)) && typeof f.required === "boolean"));
-    case "generation_throughput": return isRecord(value.measurement) && value.measurement.sessionId === sessionId && id(value.measurement.measurementId) && number(value.measurement.sequence) && ["starting", "generating", "completed", "aborted"].includes(String(value.measurement.phase));
-    case "generation_throughput_snapshot": return value.sessionAgentId === sessionId && Array.isArray(value.measurements) && value.measurements.every(m => isRecord(m) && m.sessionId === sessionId && id(m.measurementId) && number(m.sequence)) && isRecord(value.sessionSummary);
-  }
-}
 
 export function createLegacyBuilderAdapter({ access, ports }: { access: EnvironmentAccessPort; ports: LegacyHandlerPorts }): LegacyBuilderAdapter {
   async function execute(principal: Principal, method: LegacyMethod, input: RpcInput<LegacyMethod>, signal: AbortSignal): Promise<RpcOutput<LegacyMethod>> {
