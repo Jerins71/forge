@@ -172,11 +172,6 @@ function compareActive(
   }
 }
 
-function compareRecent(left: RoomsInboxSessionInput, right: RoomsInboxSessionInput): number {
-  const timestampOrder = timestampMs(sessionTimestamp(right)) - timestampMs(sessionTimestamp(left))
-  return timestampOrder || compareIdentity(left, right)
-}
-
 function isLocallyMuted(
   session: RoomsInboxSessionInput,
   mutedSessionIds: ReadonlySet<string> | undefined,
@@ -311,9 +306,11 @@ export function selectRoomsInboxSections(
     timestamp: sessionTimestamp(session),
   }))
 
+  // Decorate once: comparing thousands of sessions must not re-read each timestamp per comparison.
   const recent = recentCandidates
-    .sort(compareRecent)
-    .map((session) => ({
+    .map((session) => ({ session, at: timestampMs(sessionTimestamp(session)) }))
+    .sort((left, right) => right.at - left.at || compareIdentity(left.session, right.session))
+    .map(({ session }) => ({
       ...session,
       reason: 'recently_updated' as const,
       timestamp: sessionTimestamp(session),
