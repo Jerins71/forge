@@ -1,5 +1,5 @@
 import type { AgentDescriptor, NotificationSettings, UpdateNotificationSettingsRequest } from "@forge/protocol";
-import { readFile } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import { getNotificationSettingsPath } from "./data-paths.js";
 import { isEnoentError } from "../utils/fs-errors.js";
 import { writeJsonFileAtomic } from "../utils/atomic-files.js";
@@ -109,36 +109,90 @@ export async function shouldMuteCliOriginatedNotifications(options: {
   return isCliOriginatedSession(options.descriptor);
 }
 
-async function readLatestUserInputChannel(sessionFile: string): Promise<string | null> {
-  try {
-    const raw = await readFile(sessionFile, "utf8");
-    const lines = raw.split(/\r?\n/);
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      const line = lines[index]?.trim();
-      if (!line) {
-        continue;
-      }
+interface UserInputChannelScan {
+  ino: number;
+  /** Byte offset just past the last complete line already scanned. */
+  offset: number;
+  channel: string | null;
+}
 
-      const parsed = safeParseJsonObject(line);
-      if (
-        parsed?.type === "conversation_message" &&
-        parsed.source === "user_input" &&
-        parsed.sourceContext &&
-        typeof parsed.sourceContext === "object" &&
-        !Array.isArray(parsed.sourceContext)
-      ) {
-        const channel = (parsed.sourceContext as { channel?: unknown }).channel;
-        return typeof channel === "string" ? channel : "web";
+// Checked on every assistant message, so rereading the whole transcript would be quadratic in session length.
+// Each file is scanned once, then only appended complete lines; a replaced or truncated file is rescanned.
+const userInputChannelScans = new Map<string, UserInputChannelScan>();
+const MAX_TRACKED_SESSION_FILES = 2048;
+
+const pendingUserInputChannelScans = new Map<string, Promise<string | null>>();
+
+/** Scans of one file run in order so concurrent callers each read only what the previous scan left. */
+function readLatestUserInputChannel(sessionFile: string): Promise<string | null> {
+  const previous = pendingUserInputChannelScans.get(sessionFile);
+  const next = (previous ?? Promise.resolve(null)).then(() => scanLatestUserInputChannel(sessionFile));
+  pendingUserInputChannelScans.set(sessionFile, next);
+  void next.finally(() => {
+    if (pendingUserInputChannelScans.get(sessionFile) === next) pendingUserInputChannelScans.delete(sessionFile);
+  });
+  return next;
+}
+
+async function scanLatestUserInputChannel(sessionFile: string): Promise<string | null> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(sessionFile, "r");
+    const stats = await handle.stat();
+    const prior = userInputChannelScans.get(sessionFile);
+    const scan = prior && prior.ino === stats.ino && prior.offset <= stats.size ? prior : { ino: stats.ino, offset: 0, channel: null };
+    if (stats.size > scan.offset) {
+      const appended = Buffer.alloc(stats.size - scan.offset);
+      const { bytesRead } = await handle.read(appended, 0, appended.length, scan.offset);
+      const lastNewline = appended.subarray(0, bytesRead).lastIndexOf(10);
+      if (lastNewline >= 0) {
+        const lines = appended.subarray(0, lastNewline).toString("utf8").split(/\r?\n/);
+        for (let index = lines.length - 1; index >= 0; index -= 1) {
+          const channel = userInputChannel(lines[index]!);
+          if (channel !== undefined) {
+            scan.channel = channel;
+            break;
+          }
+        }
+        scan.offset += lastNewline + 1;
       }
     }
+    userInputChannelScans.delete(sessionFile);
+    if (userInputChannelScans.size >= MAX_TRACKED_SESSION_FILES) {
+      userInputChannelScans.delete(userInputChannelScans.keys().next().value!);
+    }
+    userInputChannelScans.set(sessionFile, scan);
+    return scan.channel;
   } catch (error) {
+    userInputChannelScans.delete(sessionFile);
     if (!isEnoentError(error)) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[notification-settings] Failed to inspect CLI origin from ${sessionFile}: ${message}`);
     }
+    return null;
+  } finally {
+    await handle?.close();
   }
+}
 
-  return null;
+/** The channel of a user-input conversation line, or undefined when the line is anything else. */
+function userInputChannel(line: string): string | undefined {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = safeParseJsonObject(trimmed);
+  if (
+    parsed?.type === "conversation_message" &&
+    parsed.source === "user_input" &&
+    parsed.sourceContext &&
+    typeof parsed.sourceContext === "object" &&
+    !Array.isArray(parsed.sourceContext)
+  ) {
+    const channel = (parsed.sourceContext as { channel?: unknown }).channel;
+    return typeof channel === "string" ? channel : "web";
+  }
+  return undefined;
 }
 
 function createDefaultNotificationSettings(): NotificationSettings {
