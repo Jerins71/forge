@@ -396,6 +396,7 @@ async function requestError(response: Response): Promise<FeatureRequestError> {
 async function errorMessage(response: Response): Promise<string> {
   return (await requestError(response)).message
 }
+const SETTINGS_BINARY_RESPONSE_MAX_BYTES = 1_048_576
 const CHAT_ARTIFACT_TICKET_PATH =
   /^\/api\/chat-artifacts\/tickets\/[A-Za-z0-9_-]{16,128}$/
 export function createFeatureClients(
@@ -554,7 +555,7 @@ export function createFeatureClients(
   }
   const checkSetting = (path: string) => {
     if (
-      !/^\/api\/(settings|stats|auth|skills|specialists|prompts|extensions|slash-commands|secure-sessions|secure-secrets|onboarding|observability|credentials|model-catalog|git\/remote-update-awareness)(\/|\?|$)/.test(
+      !/^\/api\/(settings|stats|auth|skills|specialists|prompts|extensions|slash-commands|secure-sessions|secure-secrets|onboarding|observability|credentials|model-catalog|git\/remote-update-awareness|history\/index|reboot|terminals\/(?:available-shells|settings)|transcribe|provider-usage|v1\/profiles\/[^/?]+\/sessions\/[^/?]+\/feedback)(\/|\?|$)/.test(
         path,
       )
     )
@@ -562,7 +563,10 @@ export function createFeatureClients(
   }
   const settingsFetch = (path: string, init?: RequestInit) => {
     checkSetting(path)
-    return http.fetch(path, init)
+    // Byte bodies (voice uploads) need the binary transport; JSON bodies stay on the text path.
+    return init?.body != null && typeof init.body !== 'string' && http.fetchBinary
+      ? http.fetchBinary(path, SETTINGS_BINARY_RESPONSE_MAX_BYTES, init)
+      : http.fetch(path, init)
   }
   const readApiError = errorMessage
   return {
