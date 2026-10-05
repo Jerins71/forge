@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react'
 import type { CodexAuthStatus } from '@forge/protocol'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import type { SettingsApiClient } from './settings-api-client'
 
 const endpoint = '/api/settings/codex-native'
@@ -11,7 +12,7 @@ export function CodexNativeAuth({ apiClient }: { apiClient: SettingsApiClient })
   const [status, setStatus] = useState<CodexAuthStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<'code' | 'link' | null>(null)
   const generation = useRef(0)
   const invalidate = useCallback(() => { generation.current++ }, [])
   const active = status && ['starting', 'waiting', 'verifying'].includes(status.phase)
@@ -36,7 +37,7 @@ export function CodexNativeAuth({ apiClient }: { apiClient: SettingsApiClient })
     return invalidate
   }, [request, invalidate])
 
-  useEffect(() => { setCopied(false) }, [status?.userCode])
+  useEffect(() => { setCopied(null) }, [status?.userCode])
 
   // Poll only while a device-code sign-in is in progress, without overlapping requests.
   useEffect(() => {
@@ -51,13 +52,14 @@ export function CodexNativeAuth({ apiClient }: { apiClient: SettingsApiClient })
     body: JSON.stringify(action === 'cancel' ? { flowId: status?.flowId } : { action }),
   })
 
-  const copyCode = async () => {
-    if (!status?.userCode) return
+  const copy = async (kind: 'code' | 'link') => {
+    const value = kind === 'code' ? status?.userCode : status?.verificationUri
+    if (!value) return
     try {
-      await navigator.clipboard.writeText(status.userCode)
-      setCopied(true)
+      await navigator.clipboard.writeText(value)
+      setCopied(kind)
     } catch {
-      setError('Could not copy the code. Type it on the OpenAI page instead.')
+      setError(kind === 'code' ? 'Could not copy the code. Type it on the OpenAI page instead.' : 'Could not copy the link. Select and copy the link below.')
     }
   }
 
@@ -87,14 +89,22 @@ export function CodexNativeAuth({ apiClient }: { apiClient: SettingsApiClient })
       {active && status?.userCode && status.verificationUri ? (
         <div className="flex flex-wrap items-center gap-2">
           <code className="rounded-md border border-border bg-muted px-3 py-1.5 font-mono text-base tracking-widest" aria-label="Sign-in code">{status.userCode}</code>
-          <Button size="sm" variant="outline" onClick={() => void copyCode()}>
-            {copied ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
-            {copied ? 'Copied' : 'Copy code'}
+          <Button size="sm" variant="outline" onClick={() => void copy('code')}>
+            {copied === 'code' ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
+            {copied === 'code' ? 'Code copied' : 'Copy code'}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => void copy('link')}>
+            {copied === 'link' ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
+            {copied === 'link' ? 'Link copied' : 'Copy link'}
           </Button>
           <a className={buttonVariants({ size: 'sm' })} href={status.verificationUri} target="_blank" rel="noreferrer">
             Open OpenAI <ExternalLink className="size-3.5" aria-hidden="true" />
           </a>
         </div>
+      ) : null}
+      {active && status?.verificationUri ? (
+        <Input aria-label="OpenAI sign-in link" readOnly value={status.verificationUri}
+          onFocus={event => event.currentTarget.select()} className="max-w-lg text-xs" />
       ) : null}
       {active && !status?.userCode ? (
         <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
