@@ -22,7 +22,8 @@ async function createFakeBws(source: string, executableName = "fake-bws") {
   const root = await mkdtemp(join(tmpdir(), "forge-bws-source-test-"));
   temporaryRoots.push(root);
   const executable = join(root, executableName);
-  await writeFile(executable, `#!/usr/bin/env node\n${source}\n`, {
+  // Pin the running Node binary: PATH-resolved shims can exceed the client timeout under a fresh HOME.
+  await writeFile(executable, `#!${process.execPath}\n${source}\n`, {
     mode: 0o700,
   });
   await chmod(executable, 0o700);
