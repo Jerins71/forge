@@ -4,21 +4,22 @@ import type { EnvironmentStatus, EnvironmentStatusKind } from '@/components/sett
 import { Server } from 'lucide-react'
 import { useEnvironmentLabel, useEnvironmentStatus, useIsRemoteEnvironment } from './hooks/useEnvironmentStatus'
 
+/** Same signal palette as session status: green healthy, accent working, amber needs you, red broken. */
 const TONE: Record<EnvironmentStatusKind, string> = {
-  online: 'bg-emerald-500',
-  connecting: 'bg-sky-500 animate-pulse',
-  offline: 'bg-muted-foreground/50',
-  'needs-pairing': 'bg-amber-500',
-  revoked: 'bg-destructive',
-  'update-required': 'bg-amber-500',
-  'identity-changed': 'bg-destructive',
-  disabled: 'bg-muted-foreground/30',
+  online: 'bg-success',
+  connecting: 'bg-primary animate-pulse',
+  offline: 'bg-foreground/25',
+  'needs-pairing': 'bg-attention',
+  revoked: 'bg-danger',
+  'update-required': 'bg-attention',
+  'identity-changed': 'bg-danger',
+  disabled: 'bg-foreground/15',
 }
 
 export function EnvironmentStatusDot({ status, className }: { status: EnvironmentStatus; className?: string }) {
   return (
     <span
-      className={cn('inline-block size-1.5 shrink-0 rounded-full', TONE[status.kind], className)}
+      className={cn('inline-block size-[7px] shrink-0 rounded-full', TONE[status.kind], className)}
       aria-hidden="true"
     />
   )
@@ -38,7 +39,7 @@ export const EnvironmentStatusChip = memo(function EnvironmentStatusChip({
   if (compact && status.kind === 'online') return null
   return (
     <span
-      className={cn('inline-flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground', className)}
+      className={cn('inline-flex min-w-0 items-center gap-1.5 text-[11px] text-subtle-foreground', className)}
       data-environment-status={status.kind}
       title={status.detail ?? status.label}
     >
@@ -53,7 +54,7 @@ export function EnvironmentBadge({ label, className }: { label: string; classNam
   return (
     <span
       className={cn(
-        'inline-flex max-w-24 shrink-0 items-center rounded border border-sidebar-border px-1 text-[10px] leading-4 text-muted-foreground',
+        'inline-flex h-4 max-w-24 shrink-0 items-center rounded-[5px] bg-foreground/[0.06] px-1.5 font-mono text-[10px] leading-4 text-subtle-foreground',
         className,
       )}
       data-environment-badge={label}
@@ -73,7 +74,7 @@ function RemoteMachineLabel({ environmentId, className }: { environmentId: strin
   const label = useEnvironmentLabel(environmentId)
   return (
     <span
-      className={cn('inline-flex min-w-0 shrink items-center gap-1 text-[11px] text-muted-foreground', className)}
+      className={cn('inline-flex min-w-0 shrink items-center gap-1.5 text-[11px] text-subtle-foreground', className)}
       data-testid="panel-machine"
       title={`Files and commands run on ${label}`}
     >

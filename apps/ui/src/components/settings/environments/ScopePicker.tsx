@@ -10,11 +10,11 @@ export function ScopePicker({ value, onChange, legend, allowed = ALL_SCOPES }: {
   allowed?: readonly Scope[]
 }) {
   return (
-    <fieldset className="space-y-1.5">
-      <legend className="text-sm font-medium">{legend}</legend>
-      <div className="grid gap-1.5 sm:grid-cols-2">
+    <fieldset className="space-y-2">
+      <legend className="mb-2 text-sm font-medium text-foreground">{legend}</legend>
+      <div className="glass-inset grid gap-x-4 gap-y-2 rounded-xl p-3 sm:grid-cols-2">
         {ALL_SCOPES.filter((scope) => allowed.includes(scope)).map((scope) => (
-          <label key={scope} className="flex items-center gap-2 text-sm">
+          <label key={scope} className="flex cursor-pointer items-center gap-2 text-[13px] text-foreground/90">
             <Checkbox
               checked={value.includes(scope)}
               onCheckedChange={(checked) => onChange(

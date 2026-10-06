@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useMemo } from 'react'
-import { ChevronDown, ChevronRight, ChevronUp, MoreHorizontal, Plus } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronUp, Monitor, MoreHorizontal, Plus, Server } from 'lucide-react'
 import type { ProjectRef, SessionRef, SessionSummary } from '@forge/protocol/environment-v2'
 import type { LogicalProjectGroup as LogicalProjectGroupModel, ShellState } from '@forge/client-runtime'
 import {
@@ -17,7 +17,7 @@ import { useEnvironmentSelector, useSelectorStore } from '@/hooks/use-environmen
 import { useEnvironmentRegistry, usePrimaryEnvironmentId } from '@/lib/origin-store/environment-provider'
 import { cn } from '@/lib/utils'
 import { EnvironmentBadge } from './EnvironmentStatusChip'
-import { useEnvironmentLabel } from './hooks/useEnvironmentStatus'
+import { useEnvironmentLabel, useEnvironmentStatus } from './hooks/useEnvironmentStatus'
 import { MAX_VISIBLE_SESSIONS } from './constants'
 import { SidebarRoomAvatar } from './shared'
 import { recordEnvironmentRow } from '@/lib/origin-store/environment-e2e-fixture'
@@ -30,7 +30,14 @@ export interface EnvironmentSessionNavigation {
   onNewSession?: (groupKey: string) => void
 }
 
-/** Where a project is checked out, e.g. "Mac · dev1". Renders nothing when it is only on this machine. */
+/** Machines beyond this many collapse into a "+N" count. */
+const MAX_MACHINE_GLYPHS = 3
+
+/**
+ * Where a project is checked out, as a compact pill of machine glyphs (this machine first) so the
+ * project name keeps the row. Names stay in the DOM for assistive tech and tests, and each glyph
+ * carries its name and status as a tooltip. Renders nothing when it is only on this machine.
+ */
 export const ProjectMachineChips = memo(function ProjectMachineChips({ members }: { members: readonly ProjectRef[] }) {
   const primaryEnvironmentId = usePrimaryEnvironmentId()
   const environmentIds = useMemo(() => {
@@ -38,26 +45,40 @@ export const ProjectMachineChips = memo(function ProjectMachineChips({ members }
     return ids.sort((a, b) => Number(b === primaryEnvironmentId) - Number(a === primaryEnvironmentId))
   }, [members, primaryEnvironmentId])
   if (environmentIds.every((id) => id === primaryEnvironmentId)) return null
+  const overflow = environmentIds.length - MAX_MACHINE_GLYPHS
   return (
     <span
-      className="inline-flex min-w-0 max-w-[45%] shrink items-center truncate rounded border border-sidebar-border px-1 text-[10px] font-normal leading-4 text-muted-foreground"
+      className="inline-flex h-[18px] shrink-0 items-center gap-1 rounded-[5px] bg-foreground/[0.06] px-1 text-subtle-foreground"
       data-testid="project-machines"
     >
       {environmentIds.map((environmentId, index) => (
         <Fragment key={environmentId}>
-          {index > 0 ? <span aria-hidden="true">&nbsp;·&nbsp;</span> : null}
-          <MachineLabel environmentId={environmentId} />
+          {index > 0 ? <span className="sr-only"> · </span> : null}
+          <MachineLabel environmentId={environmentId} hidden={index >= MAX_MACHINE_GLYPHS} />
         </Fragment>
       ))}
+      {overflow > 0 ? <span className="font-mono text-[10px] leading-none" aria-hidden="true">+{overflow}</span> : null}
     </span>
   )
 })
 
-function MachineLabel({ environmentId }: { environmentId: string }) {
+function MachineLabel({ environmentId, hidden }: { environmentId: string; hidden: boolean }) {
   const label = useEnvironmentLabel(environmentId)
+  const status = useEnvironmentStatus(environmentId)
   // Matches the Run on picker's name for the primary environment.
   const primary = usePrimaryEnvironmentId() === environmentId
-  return <span className="truncate" data-machine={environmentId}>{primary ? 'This machine' : label}</span>
+  const name = primary ? 'This machine' : label
+  const Icon = primary ? Monitor : Server
+  return (
+    <span
+      className={cn('inline-flex items-center', status.kind !== 'online' && 'opacity-45')}
+      data-machine={environmentId}
+      title={status.kind === 'online' ? name : `${name} · ${status.label}`}
+    >
+      {hidden ? null : <Icon className="size-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />}
+      <span className="sr-only">{name}</span>
+    </span>
+  )
 }
 
 /** Split and merge a logical project's checkouts across machines. */
@@ -72,16 +93,17 @@ export function ProjectGroupMenu({ group }: { group: LogicalProjectGroupModel })
           type="button"
           aria-label={`Grouping options for ${group.title}`}
           className={cn(
-            'mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition',
-            'hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
+            'mr-0.5 inline-flex size-[22px] shrink-0 items-center justify-center rounded-md text-subtle-foreground transition',
+            'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100',
+            'hover:bg-foreground/[0.08] hover:text-sidebar-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
           )}
         >
-          <MoreHorizontal className="size-3.5" />
+          <MoreHorizontal className="size-3.5" strokeWidth={1.75} />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="text-xs">Group across machines</DropdownMenuLabel>
+        <DropdownMenuLabel className="eyebrow">Group across machines</DropdownMenuLabel>
         {group.members.length > 1 ? group.members.map((member) => (
           <SplitMenuItem key={`${member.environmentId}:${member.projectId}`} member={member} />
         )) : null}
@@ -103,7 +125,7 @@ export function ProjectGroupMenu({ group }: { group: LogicalProjectGroupModel })
         {group.members.length <= 1 && others.length === 0 ? (
           <>
             <DropdownMenuSeparator />
-            <p className="px-2 py-1.5 text-xs text-muted-foreground">No other projects to group with.</p>
+            <p className="px-2 py-1.5 text-xs text-subtle-foreground">No other projects to group with.</p>
           </>
         ) : null}
       </DropdownMenuContent>
@@ -178,7 +200,7 @@ export const RemoteProjectGroup = memo(function RemoteProjectGroup({
           className={cn(
             'flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-left transition-colors',
             roomsV2 ? 'py-1.5 pl-2 pr-1' : 'py-1.5 pl-2.5 pr-1.5',
-            'hover:bg-sidebar-accent/50',
+            roomsV2 ? 'hover:bg-foreground/[0.04]' : 'hover:bg-sidebar-accent/50',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
           )}
         >
@@ -188,7 +210,7 @@ export const RemoteProjectGroup = memo(function RemoteProjectGroup({
               : <ChevronDown className="size-3 shrink-0 text-[var(--sidebar-room-muted)]" aria-hidden="true" />
           ) : null}
           {roomsV2 ? <SidebarRoomAvatar label={group.title} toneKey={group.key} className="sidebar-room-project-avatar" /> : null}
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-5">{group.title}</span>
+          <span className={cn('min-w-0 flex-1 truncate leading-5', roomsV2 ? 'text-[13px] font-medium' : 'text-sm font-semibold')}>{group.title}</span>
           <ProjectMachineChips members={group.members} />
         </button>
         <ProjectGroupMenu group={group} />
@@ -244,8 +266,8 @@ export function ShowMoreSessions({ hiddenCount, isExpanded, onShowMore, onShowLe
 }) {
   if (hiddenCount === 0 && !isExpanded) return null
   const buttonClass = cn(
-    'flex items-center gap-1 rounded-md py-1 text-left text-[11px] text-muted-foreground/70 transition-colors',
-    'hover:text-muted-foreground',
+    'flex items-center gap-1 rounded-md py-1 text-left text-[11px] text-subtle-foreground transition-colors',
+    'hover:text-foreground',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
   )
   return (
@@ -266,12 +288,13 @@ export function ShowMoreSessions({ hiddenCount, isExpanded, onShowMore, onShowLe
   )
 }
 
+/** Matches local session rows: accent while working, amber when it needs you, red when it failed. */
 const STATUS_TONE: Partial<Record<SessionSummary['status'], string>> = {
-  running: 'bg-emerald-500 animate-pulse',
-  preparing: 'bg-sky-500 animate-pulse',
-  stopping: 'bg-amber-500',
-  error: 'bg-destructive',
-  interrupted: 'bg-amber-500',
+  running: 'bg-primary shadow-[0_0_0_3px_color-mix(in_srgb,var(--primary)_18%,transparent)] live-dot-animated',
+  preparing: 'bg-primary/60 animate-pulse',
+  stopping: 'bg-attention',
+  error: 'bg-danger',
+  interrupted: 'bg-attention',
 }
 
 /** A session on another machine. Subscribes only to its own `(environmentId, sessionId)` record. */
@@ -302,8 +325,8 @@ export const EnvironmentSessionRow = memo(function EnvironmentSessionRow({
         roomsV2
           ? selected ? 'sidebar-room-row-selected' : undefined
           : selected
-            ? 'bg-white/[0.04] text-sidebar-foreground ring-1 ring-sidebar-ring/30'
-            : 'text-sidebar-foreground/90 hover:bg-sidebar-accent/50',
+            ? 'bg-foreground/[0.07] text-sidebar-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+            : 'text-sidebar-foreground/90 hover:bg-foreground/[0.04]',
       )}>
         <button
           type="button"
@@ -313,19 +336,19 @@ export const EnvironmentSessionRow = memo(function EnvironmentSessionRow({
           className={cn(
             'flex min-w-0 flex-1 items-center gap-1.5 text-left',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-            roomsV2 ? 'py-1 pl-3 pr-1.5 text-xs leading-4' : 'py-1.5 pl-5 pr-1.5 text-sm',
+            roomsV2 ? 'gap-2 py-1.5 pl-3 pr-1.5 text-[13px] leading-[18px]' : 'py-1.5 pl-5 pr-1.5 text-sm',
           )}
         >
           <span
             className={cn(
-              'size-1.5 shrink-0 rounded-full',
-              needsAttention ? 'bg-amber-500' : STATUS_TONE[session.status] ?? 'bg-muted-foreground/30',
+              'size-[7px] shrink-0 rounded-full',
+              needsAttention ? 'bg-attention' : STATUS_TONE[session.status] ?? 'bg-foreground/20',
             )}
             aria-label={session.status}
           />
           <span className="min-w-0 flex-1 truncate">{session.title}</span>
           {session.unread > 0 ? (
-            <span className="shrink-0 rounded-full bg-primary/15 px-1.5 text-[10px] text-primary">{session.unread}</span>
+            <span className="shrink-0 rounded-full bg-foreground/[0.08] px-1.5 font-mono text-[10px] leading-4 tabular-nums text-foreground/80">{session.unread}</span>
           ) : null}
           <EnvironmentBadge label={label} />
         </button>

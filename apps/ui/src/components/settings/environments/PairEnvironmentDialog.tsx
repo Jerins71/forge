@@ -103,14 +103,16 @@ export function PairEnvironmentDialog({ open, onOpenChange }: { open: boolean; o
 
         {paired ? (
           <div className="space-y-3" data-testid="pairing-success">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <CheckCircle2 className="size-4 text-emerald-500" />
+            <div className="flex items-center gap-2.5 text-[14px] font-medium text-foreground">
+              <span className="grid size-7 place-items-center rounded-full bg-success/15">
+                <CheckCircle2 className="size-4 text-success" />
+              </span>
               Paired with {paired.environment.label}
             </div>
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              <dt>Platform</dt><dd>{paired.environment.platform.os} · Forge {paired.environment.forgeVersion}</dd>
-              <dt>Identity</dt><dd className="truncate font-mono">{paired.environment.environmentId}</dd>
-              <dt>Permissions</dt><dd>{paired.deviceSession.scopes.map((scope) => SCOPE_LABELS[scope]).join(', ')}</dd>
+            <dl className="glass-inset grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-xl p-3 text-[12px]">
+              <dt className="text-subtle-foreground">Platform</dt><dd className="font-mono text-[11.5px] text-foreground/90">{paired.environment.platform.os} · Forge {paired.environment.forgeVersion}</dd>
+              <dt className="text-subtle-foreground">Identity</dt><dd className="truncate font-mono text-[11.5px] text-foreground/90">{paired.environment.environmentId}</dd>
+              <dt className="text-subtle-foreground">Permissions</dt><dd className="text-foreground/90">{paired.deviceSession.scopes.map((scope) => SCOPE_LABELS[scope]).join(', ')}</dd>
             </dl>
             {!desktop ? <BrowserMemoryNotice /> : null}
             <DialogFooter>
@@ -159,7 +161,7 @@ export function PairEnvironmentDialog({ open, onOpenChange }: { open: boolean; o
                     spellCheck={false}
                     maxLength={16}
                     placeholder="XXXX-XXXX-XXXX"
-                    className="font-mono uppercase tracking-widest"
+                    className="font-mono uppercase tracking-[0.2em]"
                     onChange={(event) => setCode(event.target.value)}
                   />
                 </div>
@@ -180,7 +182,7 @@ export function PairEnvironmentDialog({ open, onOpenChange }: { open: boolean; o
 
             {!desktop ? <BrowserMemoryNotice /> : null}
 
-            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+            {error ? <p role="alert" className="rounded-lg border border-danger/25 bg-danger/[0.08] px-3 py-2 text-[13px] text-danger">{error}</p> : null}
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => close(false)}>Cancel</Button>
@@ -198,7 +200,7 @@ export function PairEnvironmentDialog({ open, onOpenChange }: { open: boolean; o
 
 function BrowserMemoryNotice() {
   return (
-    <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
+    <p className="rounded-lg border border-attention/25 bg-attention-surface px-3 py-2 text-[12px] text-muted-foreground">
       In a browser, access to another machine lasts until this page reloads; then it shows Needs pairing.
       Forge Desktop keeps environments paired.
     </p>

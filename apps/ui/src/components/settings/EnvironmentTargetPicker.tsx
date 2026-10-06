@@ -49,10 +49,10 @@ function EnvironmentOption({ environmentId }: { environmentId: string }) {
     <span className="flex min-w-0 items-center gap-1.5" data-environment-status={status.kind}>
       <span
         aria-hidden="true"
-        className={cn('size-1.5 shrink-0 rounded-full', status.kind === 'online' ? 'bg-emerald-500' : 'bg-muted-foreground/50')}
+        className={cn('size-[7px] shrink-0 rounded-full', status.kind === 'online' ? 'bg-success' : 'bg-foreground/25')}
       />
       <span className="truncate">{primary ? `This machine · ${name}` : name}</span>
-      <span className="shrink-0 text-muted-foreground">{status.label}</span>
+      <span className="shrink-0 text-subtle-foreground">{status.label}</span>
     </span>
   )
 }

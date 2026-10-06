@@ -54,7 +54,7 @@ export function RunOnPicker({ groupKey, value, onChange, canSetUp, locked = fals
 
   if (locked && value?.kind === 'checkout') {
     return (
-      <span className="inline-flex h-7 min-w-0 items-center gap-1.5 px-2 text-xs text-muted-foreground" data-testid="run-on-locked">
+      <span className="inline-flex h-[30px] min-w-0 items-center gap-1.5 px-2.5 text-[12.5px] font-medium text-muted-foreground" data-testid="run-on-locked">
         <MachineIcon environmentId={value.target.environmentId} />
         <CheckoutLabel target={value.target} showProject={duplicateEnvironments.has(value.target.environmentId)} />
       </span>
@@ -65,14 +65,14 @@ export function RunOnPicker({ groupKey, value, onChange, canSetUp, locked = fals
       <SelectTrigger
         aria-label="Run on"
         data-testid="run-on-picker"
-        className="h-7 w-auto min-w-0 max-w-72 gap-1.5 border-transparent bg-transparent px-2 text-xs shadow-none hover:bg-accent/60"
+        className="h-[30px] w-auto min-w-0 gap-1.5 rounded-lg border-transparent bg-transparent px-2.5 text-[12.5px] font-medium text-muted-foreground shadow-none hover:bg-foreground/[0.05] hover:text-foreground data-[size=default]:h-[30px] data-[state=open]:bg-foreground/[0.06] data-[state=open]:text-foreground max-w-72"
       >
         {value ? <TriggerLabel choice={value} showProject={value.kind === 'checkout' && duplicateEnvironments.has(value.target.environmentId)} />
           : <><Server className="size-3 shrink-0" /><span>Choose a machine</span></>}
       </SelectTrigger>
-      <SelectContent position="popper" side="top" align="start">
+      <SelectContent position="popper" side="top" align="start" sideOffset={6} collisionPadding={12} className="min-w-60">
         <SelectGroup>
-          <SelectLabel className="text-xs">Run on</SelectLabel>
+          <SelectLabel className="eyebrow px-2 pb-1 pt-1.5">Run on</SelectLabel>
           {withCheckout.flatMap((environmentId) => members.filter((member) => member.environmentId === environmentId)).map((member) => (
             <CheckoutOption key={checkoutKey(member)} member={member} showProject={duplicateEnvironments.has(member.environmentId)} />
           ))}
@@ -81,7 +81,7 @@ export function RunOnPicker({ groupKey, value, onChange, canSetUp, locked = fals
           <>
             <SelectSeparator />
             <SelectGroup>
-              <SelectLabel className="text-xs">Not set up yet</SelectLabel>
+              <SelectLabel className="eyebrow px-2 pb-1 pt-1.5">Not set up yet</SelectLabel>
               {withoutCheckout.map((environmentId) => (
                 <SetupOption key={setupKey(environmentId)} environmentId={environmentId} unavailable={canSetUp} />
               ))}
@@ -100,8 +100,8 @@ function TriggerLabel({ choice, showProject }: { choice: RunOnChoice; showProjec
     <span className="flex min-w-0 items-center gap-1.5">
       <MachineIcon environmentId={environmentId} />
       {choice.kind === 'checkout' ? <CheckoutLabel target={choice.target} showProject={showProject} /> : <MachineName environmentId={environmentId} />}
-      {status.kind !== 'online' ? <span className="shrink-0 text-muted-foreground">· {status.label}</span> : null}
-      {choice.kind === 'setup' ? <span className="shrink-0 text-amber-600 dark:text-amber-400">· Set up</span> : null}
+      {status.kind !== 'online' ? <span className="shrink-0 font-normal text-subtle-foreground">· {status.label}</span> : null}
+      {choice.kind === 'setup' ? <span className="shrink-0 text-attention">· Set up</span> : null}
     </span>
   )
 }
@@ -113,11 +113,11 @@ function CheckoutOption({ member, showProject }: { member: ProjectRef; showProje
     ? status.label
     : descriptor && !descriptor.capabilities.durableCommands ? 'Update required' : null
   return (
-    <SelectItem value={checkoutKey(member)} disabled={reason !== null} className="text-xs">
-      <span className="flex min-w-0 items-center gap-1.5">
+    <SelectItem value={checkoutKey(member)} disabled={reason !== null} className="py-2 text-[13px]">
+      <span className="flex min-w-0 items-center gap-2">
         <EnvironmentStatusDot status={status} />
         <CheckoutLabel target={member} showProject={showProject} />
-        {reason ? <span className="text-muted-foreground">· {reason}</span> : null}
+        {reason ? <span className="text-subtle-foreground">· {reason}</span> : null}
       </span>
     </SelectItem>
   )
@@ -127,11 +127,11 @@ function SetupOption({ environmentId, unavailable }: { environmentId: string; un
   const status = useEnvironmentStatus(environmentId)
   const reason = unavailable ?? (status.blocksLaunch ? status.label : null)
   return (
-    <SelectItem value={setupKey(environmentId)} disabled={reason !== null} className="text-xs">
-      <span className="flex min-w-0 items-center gap-1.5">
+    <SelectItem value={setupKey(environmentId)} disabled={reason !== null} className="py-2 text-[13px]">
+      <span className="flex min-w-0 items-center gap-2">
         <EnvironmentStatusDot status={status} />
         <MachineName environmentId={environmentId} />
-        <span className="flex items-center gap-1 text-muted-foreground">
+        <span className={cn('flex shrink-0 items-center gap-1 text-[12px]', reason ? 'text-subtle-foreground' : 'text-attention')}>
           · {reason ?? <><Sparkles className="size-3" aria-hidden="true" />Set up in one click</>}
         </span>
       </span>
@@ -147,7 +147,7 @@ function MachineIcon({ environmentId }: { environmentId: string }) {
 function MachineName({ environmentId }: { environmentId: string }) {
   const label = useEnvironmentLabel(environmentId)
   const primary = usePrimaryEnvironmentId() === environmentId
-  return <span className="min-w-0 truncate font-medium">{primary ? 'This machine' : label}</span>
+  return <span className="min-w-0 truncate font-medium text-foreground/90">{primary ? 'This machine' : label}</span>
 }
 
 function CheckoutLabel({ target, showProject, className }: { target: ProjectRef; showProject: boolean; className?: string }) {
@@ -158,7 +158,7 @@ function CheckoutLabel({ target, showProject, className }: { target: ProjectRef;
   return (
     <span className={cn('min-w-0 truncate', className)} title={cwd ?? undefined}>
       <MachineName environmentId={target.environmentId} />
-      {showProject ? <span className="text-muted-foreground"> · {title}</span> : null}
+      {showProject ? <span className="font-normal text-subtle-foreground"> · {title}</span> : null}
     </span>
   )
 }

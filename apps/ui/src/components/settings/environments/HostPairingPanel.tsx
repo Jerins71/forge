@@ -77,7 +77,7 @@ export function HostPairingPanel({ environments, targetEnvironmentId, onTargetCh
       description="Create a one-time link or code that lets another device use this environment. It expires quickly and works once."
       cta={environments.length > 1 ? (
         <Select value={targetEnvironmentId} onValueChange={onTargetChange}>
-          <SelectTrigger className="h-8 w-48" aria-label="Environment to pair">
+          <SelectTrigger className="h-8 w-48 text-[13px]" aria-label="Environment to pair">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -93,7 +93,7 @@ export function HostPairingPanel({ environments, targetEnvironmentId, onTargetCh
       {grant ? (
         <GrantResult grant={grant} environmentLabel={targetLabel} onDone={() => setGrant(null)} />
       ) : (
-        <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void create() }}>
+        <form className="space-y-5" onSubmit={(event) => { event.preventDefault(); void create() }}>
           <Tabs value={kind} onValueChange={(value) => setKind(value as GrantKind)}>
             <TabsList>
               <TabsTrigger value="link" className="gap-1.5"><Link2 className="size-3.5" /> Link</TabsTrigger>
@@ -122,7 +122,7 @@ export function HostPairingPanel({ environments, targetEnvironmentId, onTargetCh
             <Input id="grant-url" value={reachableUrl} spellCheck={false} onChange={(event) => setReachableUrl(event.target.value)} />
           </div>
           <ScopePicker value={scopes} onChange={setScopes} legend="Permissions" />
-          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+          {error ? <p role="alert" className="text-[13px] text-danger">{error}</p> : null}
           <Button type="submit" disabled={busy}>
             {busy ? <Loader2 className="size-4 animate-spin" /> : null}
             Create {kind === 'link' ? 'link' : 'code'}
@@ -147,7 +147,7 @@ function GrantResult({ grant, environmentLabel, onDone }: { grant: CreatedGrant;
   const secret = grant.pairingUrl ?? (grant.code ? formatPairingCode(grant.code) : '')
   if (remaining === 0) {
     return (
-      <div className="space-y-3 rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+      <div className="space-y-3 rounded-xl border border-dashed border-hairline p-4 text-[13px] text-subtle-foreground">
         <p>This {grant.pairingUrl ? 'link' : 'code'} expired.</p>
         <Button variant="outline" size="sm" onClick={onDone}>Create another</Button>
       </div>
@@ -155,20 +155,20 @@ function GrantResult({ grant, environmentLabel, onDone }: { grant: CreatedGrant;
   }
 
   return (
-    <div className="space-y-3 rounded-xl border bg-card/50 p-4" data-testid="pairing-grant">
-      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+    <div className="glass-inset space-y-3 rounded-xl p-4" data-testid="pairing-grant">
+      <div className="flex items-center justify-between gap-2 text-[12px] text-subtle-foreground">
         <span>For {environmentLabel} · shown once</span>
-        <span aria-live="polite" data-testid="pairing-countdown">
+        <span aria-live="polite" className="font-mono tabular-nums" data-testid="pairing-countdown">
           Expires in {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, '0')}
         </span>
       </div>
       {grant.code ? (
-        <div className="font-mono text-2xl font-bold tracking-[0.2em]" data-testid="pairing-code">{secret}</div>
+        <div className="font-mono text-[28px] font-medium tracking-[0.22em] text-foreground" data-testid="pairing-code">{secret}</div>
       ) : (
-        <div className="break-all rounded-md bg-muted px-3 py-2 font-mono text-xs" data-testid="pairing-link">{secret}</div>
+        <div className="break-all rounded-lg border border-hairline bg-foreground/[0.04] px-3 py-2 font-mono text-[12px] text-foreground/90" data-testid="pairing-link">{secret}</div>
       )}
       {grant.code ? (
-        <p className="text-xs text-muted-foreground">On the other device, enter this environment's address and the code.</p>
+        <p className="text-[12px] text-subtle-foreground">On the other device, enter this environment's address and the code.</p>
       ) : null}
       <div className="flex gap-2">
         <Button

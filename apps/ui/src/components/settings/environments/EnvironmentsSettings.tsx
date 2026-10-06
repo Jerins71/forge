@@ -13,7 +13,7 @@ import { PairedDevices } from './PairedDevices'
 export function EnvironmentsSettings() {
   if (!useOptionalEnvironmentContext()) {
     return (
-      <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+      <div className="rounded-xl border border-dashed border-hairline px-6 py-8 text-center text-[13px] text-subtle-foreground">
         Environments are not available in this client.
       </div>
     )
@@ -41,11 +41,11 @@ function EnvironmentsSettingsContent() {
         }
       >
         {entries.length === 0 ? (
-          <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+          <div className="rounded-xl border border-dashed border-hairline px-6 py-8 text-center text-[13px] text-subtle-foreground">
             No environments yet.
           </div>
         ) : (
-          <ul className="space-y-2" aria-label="Environments">
+          <ul className="-mx-5 -my-3.5 divide-y divide-hairline" aria-label="Environments">
             {entries.map((entry) => (
               <EnvironmentRow key={entry.environmentId} entry={entry} />
             ))}

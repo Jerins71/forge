@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Check, Loader2, Pencil, RotateCw, Server, Trash2, X } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { Check, Loader2, Monitor, Pencil, RotateCw, Server, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -59,13 +59,14 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
 
   return (
     <li
-      className="rounded-xl border bg-card/50 p-3"
+      className={cn('px-5 py-3.5 transition-colors hover:bg-foreground/[0.02]', !entry.enabled && 'opacity-70')}
       data-environment-id={entry.environmentId}
       data-environment-status={status.kind}
     >
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-          <Server className="size-4" />
+      <div className="group/env flex flex-wrap items-center gap-3">
+        <div className="relative grid size-9 shrink-0 place-items-center rounded-[10px] border border-hairline bg-foreground/[0.05] text-muted-foreground">
+          {entry.primary ? <Monitor className="size-4" strokeWidth={1.75} /> : <Server className="size-4" strokeWidth={1.75} />}
+          <EnvironmentStatusDot status={status} className="absolute -bottom-0.5 -right-0.5 ring-2 ring-[var(--card)]" />
         </div>
         <div className="min-w-0 flex-1">
           {editing ? (
@@ -80,7 +81,7 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
                 maxLength={80}
                 onChange={(event) => setDraftLabel(event.target.value)}
                 onKeyDown={(event) => { if (event.key === 'Escape') setEditing(false) }}
-                className="h-7 max-w-64 text-sm"
+                className="h-8 max-w-64 text-sm"
               />
               <Button type="submit" size="icon" variant="ghost" className="size-7" aria-label="Save name" disabled={busy === 'rename'}>
                 <Check className="size-3.5" />
@@ -91,13 +92,13 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
             </form>
           ) : (
             <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate font-medium">{label}</span>
-              {entry.primary ? <Badge variant="outline" className="shrink-0 text-[10px]">This machine</Badge> : null}
+              <span className="truncate text-[14px] font-medium text-foreground">{label}</span>
+              {entry.primary ? <span className="shrink-0 rounded-md bg-primary/12 px-1.5 text-[10.5px] font-medium leading-[18px] text-primary">This machine</span> : null}
               <Button
                 type="button"
                 size="icon"
                 variant="ghost"
-                className="size-6 shrink-0 text-muted-foreground"
+                className="size-6 shrink-0 text-subtle-foreground opacity-0 transition-opacity group-hover/env:opacity-100 focus-visible:opacity-100"
                 aria-label={`Rename ${label}`}
                 onClick={() => { setDraftLabel(label); setEditing(true) }}
               >
@@ -105,15 +106,14 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
               </Button>
             </div>
           )}
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1" title={status.detail ?? undefined}>
-              <EnvironmentStatusDot status={status} />
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] text-subtle-foreground">
+            <span className={cn('inline-flex items-center gap-1.5 font-medium', status.kind === 'online' ? 'text-muted-foreground' : 'text-foreground/80')} title={status.detail ?? undefined}>
               {status.label}
             </span>
-            <span className="truncate">{hostOf(entry.baseUrl)}</span>
-            {descriptor ? <span>{descriptor.platform.os} · Forge {descriptor.forgeVersion}</span> : null}
+            <span className="truncate font-mono text-[11.5px]">{hostOf(entry.baseUrl)}</span>
+            {descriptor ? <span className="font-mono text-[11.5px]">{descriptor.platform.os} · Forge {descriptor.forgeVersion}</span> : null}
             {entry.enabled ? (
-              <span>
+              <span className="tabular-nums">
                 {projectCount} projects · {sessionCount} sessions
                 {stale ? ` · cached ${formatAge(Date.now() - Date.parse(cachedAt!))} ago` : ''}
               </span>
@@ -141,7 +141,7 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
             <Button
               size="icon"
               variant="ghost"
-              className="size-8 text-destructive"
+              className="size-8 text-subtle-foreground hover:bg-danger/10 hover:text-danger"
               aria-label={`Remove ${label}`}
               onClick={() => setConfirmRemove(true)}
             >
@@ -150,7 +150,7 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
           ) : null}
         </div>
       </div>
-      {error ? <p role="alert" className="mt-2 text-xs text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="mt-2 pl-12 text-xs text-danger">{error}</p> : null}
 
       <AlertDialog open={confirmRemove} onOpenChange={setConfirmRemove}>
         <AlertDialogContent>

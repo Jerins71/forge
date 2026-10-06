@@ -188,7 +188,7 @@ export function SessionModelPicker({ config }: { config: SessionModelPickerConfi
         </button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="end" className="w-60">
+      <DropdownMenuContent align="end" collisionPadding={12} className="w-60">
         <DropdownMenuLabel className="flex items-center gap-2 text-xs text-muted-foreground">
           Session model
           {(loading || saving) && <Loader2 className="ml-auto size-3 animate-spin" />}

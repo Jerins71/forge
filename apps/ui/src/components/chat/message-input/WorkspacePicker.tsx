@@ -26,7 +26,7 @@ export function WorkspacePicker({ target, value, onChange }: {
   const defaultBase = project?.defaultBranch ?? 'HEAD'
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1">
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
       <Select
         value={value.kind}
         onValueChange={(kind) => onChange(kind === 'new_worktree' ? { kind: 'new_worktree', baseRef: defaultBase } : { kind: 'current_checkout' })}
@@ -34,22 +34,22 @@ export function WorkspacePicker({ target, value, onChange }: {
         <SelectTrigger
           aria-label="Workspace"
           data-testid="workspace-picker"
-          className="h-7 w-auto min-w-0 gap-1.5 border-transparent bg-transparent px-2 text-xs shadow-none hover:bg-accent/60"
+          className="h-[30px] w-auto min-w-0 gap-1.5 rounded-lg border-transparent bg-transparent px-2.5 text-[12.5px] font-medium text-muted-foreground shadow-none hover:bg-foreground/[0.05] hover:text-foreground data-[size=default]:h-[30px] data-[state=open]:bg-foreground/[0.06] data-[state=open]:text-foreground"
         >
           {value.kind === 'new_worktree' ? <FolderGit2 className="size-3 shrink-0" /> : <FolderOpen className="size-3 shrink-0" />}
           <span>{value.kind === 'new_worktree' ? 'New worktree' : 'Current checkout'}</span>
         </SelectTrigger>
-        <SelectContent position="popper" side="top" align="start">
-          <SelectItem value="current_checkout" className="text-xs">
-            <span className="flex flex-col">
-              <span>Current checkout</span>
-              <span className="max-w-72 truncate text-muted-foreground">{project?.cwd ?? 'Project folder'}, including uncommitted changes</span>
+        <SelectContent position="popper" side="top" align="start" sideOffset={6} collisionPadding={12} className="max-w-[min(22rem,calc(100vw-24px))]">
+          <SelectItem value="current_checkout" className="py-2">
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-[13px] text-foreground">Current checkout</span>
+              <span className="max-w-72 truncate text-[11.5px] text-subtle-foreground">{project?.cwd ?? 'Project folder'}, including uncommitted changes</span>
             </span>
           </SelectItem>
-          <SelectItem value="new_worktree" disabled={worktreeUnavailable !== null} className="text-xs">
-            <span className="flex flex-col">
-              <span>New worktree</span>
-              <span className="text-muted-foreground">{worktreeUnavailable ?? 'Starts from a branch; uncommitted changes are not included'}</span>
+          <SelectItem value="new_worktree" disabled={worktreeUnavailable !== null} className="py-2">
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-[13px] text-foreground">New worktree</span>
+              <span className="text-[11.5px] text-subtle-foreground">{worktreeUnavailable ?? 'Starts from a branch; uncommitted changes are not included'}</span>
             </span>
           </SelectItem>
         </SelectContent>
@@ -60,7 +60,7 @@ export function WorkspacePicker({ target, value, onChange }: {
             aria-label="Base branch"
             value={value.baseRef}
             maxLength={256}
-            className="h-7 w-28 text-xs"
+            className="h-[30px] w-28 rounded-lg font-mono text-[11.5px]"
             onChange={(event) => onChange({ ...value, baseRef: event.target.value })}
           />
           <Input
@@ -68,7 +68,7 @@ export function WorkspacePicker({ target, value, onChange }: {
             placeholder="new branch (optional)"
             value={value.branch ?? ''}
             maxLength={256}
-            className="h-7 w-40 text-xs"
+            className="h-[30px] w-40 rounded-lg font-mono text-[11.5px]"
             onChange={(event) => {
               const branch = event.target.value
               onChange(branch ? { ...value, branch } : { kind: 'new_worktree', baseRef: value.baseRef })
