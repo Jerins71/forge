@@ -24,17 +24,17 @@ export function SlashCommandMenu({
     return (
       <div
         ref={menuRef}
-        className="mb-1 max-h-52 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg"
+        className="glass-strong mb-2 max-h-52 overflow-y-auto rounded-xl p-1"
       >
         {commands.map((cmd, idx) => (
           <button
             key={cmd.id}
             type="button"
             className={cn(
-              'flex w-full items-start gap-3 px-3 py-2 text-left text-sm transition-colors',
+              'flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-150',
               idx === selectedIndex
-                ? 'bg-accent text-accent-foreground'
-                : 'text-popover-foreground hover:bg-accent/50',
+                ? 'bg-foreground/[0.07] text-foreground'
+                : 'text-popover-foreground hover:bg-foreground/[0.05]',
             )}
             onMouseEnter={() => onHover(idx)}
             onMouseDown={(e) => {
@@ -42,7 +42,7 @@ export function SlashCommandMenu({
               onSelect(cmd)
             }}
           >
-            <code className="shrink-0 text-xs font-semibold text-foreground">/{cmd.name}</code>
+            <code className="shrink-0 font-mono text-[12px] font-medium text-foreground">/{cmd.name}</code>
             <span className="line-clamp-1 text-xs text-muted-foreground">{cmd.description ?? cmd.prompt}</span>
           </button>
         ))}
@@ -54,7 +54,7 @@ export function SlashCommandMenu({
     return (
       <div
         ref={menuRef}
-        className="mb-1 rounded-lg border border-border bg-popover px-3 py-2 shadow-lg"
+        className="glass-strong mb-2 rounded-xl px-3 py-2"
       >
         <p className="text-xs text-muted-foreground">No matching commands</p>
       </div>

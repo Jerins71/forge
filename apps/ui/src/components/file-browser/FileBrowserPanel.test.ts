@@ -130,8 +130,8 @@ describe('FileBrowserPanel resize handle placement', () => {
 
     const panel = container.querySelector('[data-testid="file-content-viewer"]')?.closest('.flex.h-full')
     expect(panel).not.toBeNull()
-    expect(panel?.className).toContain('border-r')
-    expect(panel?.className).not.toContain('border-l')
+    expect(panel?.className).toContain('ml-2')
+    expect(panel?.className).not.toContain('mr-2')
 
     const firstChild = container.firstElementChild
     const secondChild = firstChild?.nextElementSibling
@@ -145,7 +145,7 @@ describe('FileBrowserPanel resize handle placement', () => {
     const firstChild = container.firstElementChild
     const secondChild = firstChild?.nextElementSibling
     expect(firstChild?.className).toContain('cursor-col-resize')
-    expect(secondChild?.className).toContain('border-l')
+    expect(secondChild?.className).toContain('mr-2')
   })
 
   it('shows a compact unsaved indicator in the panel header for dirty edits', () => {

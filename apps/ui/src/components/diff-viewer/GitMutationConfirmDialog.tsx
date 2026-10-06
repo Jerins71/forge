@@ -50,7 +50,7 @@ export function GitMutationConfirmDialog({
             <p className="break-words">{description}</p>
             {extraContent}
             {warnings.length > 0 ? (
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-900 dark:text-amber-100">
+              <div className="rounded-md border border-attention/30 bg-attention/10 px-3 py-2 text-foreground">
                 <p className="font-medium">Warnings</p>
                 <ul className="mt-1 list-disc space-y-1 pl-4">
                   {warnings.map((warning) => (
@@ -60,7 +60,7 @@ export function GitMutationConfirmDialog({
               </div>
             ) : null}
             {blockedReasons.length > 0 ? (
-              <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-red-900 dark:text-red-100">
+              <div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-foreground">
                 <p className="font-medium">Blocked</p>
                 <ul className="mt-1 list-disc space-y-1 pl-4">
                   {blockedReasons.map((reason) => (

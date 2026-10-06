@@ -42,7 +42,7 @@ export function OpenRouterBrowseRow({ model, isAdded, isAdding, onAdd }: OpenRou
       </div>
       <div className="shrink-0 pt-0.5">
         {isAdded ? (
-          <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-success">
             <Check className="size-3.5" />
             Added
           </span>

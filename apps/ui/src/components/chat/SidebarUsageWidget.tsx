@@ -33,15 +33,15 @@ interface UsageMetrics {
 
 function getTextTone(percent: number | null | undefined): string {
   if (typeof percent !== 'number') return 'text-muted-foreground/50'
-  if (percent >= 90) return 'text-blue-300'
-  if (percent >= 70) return 'text-blue-400/80'
+  if (percent >= 90) return 'text-primary'
+  if (percent >= 70) return 'text-primary/80'
   return 'text-muted-foreground'
 }
 
 function getDeltaTone(deltaPercent: number): string {
   const absDelta = Math.abs(deltaPercent)
   if (absDelta <= 2) return 'text-muted-foreground'
-  return deltaPercent > 0 ? 'text-orange-400' : 'text-emerald-400'
+  return deltaPercent > 0 ? 'text-attention' : 'text-success'
 }
 
 function stripResetPrefix(resetInfo: string): string {
@@ -235,7 +235,7 @@ export function MiniVerticalGauge({ sessionPercent, weeklyPercent, weeklyDeltaPe
         <div className="flex flex-col items-center" style={{ gap: 2 }}>
           {/* Vertical bar track — fills from bottom */}
           <div
-            className={cn('relative overflow-hidden rounded-sm', weeklyWarn ? 'bg-red-400/15' : 'bg-blue-400/15')}
+            className={cn('relative overflow-hidden rounded-sm', weeklyWarn ? 'bg-danger/15' : 'bg-primary/15')}
             style={{ width: VBAR_WIDTH, height: roomsV2 ? 15 : VBAR_HEIGHT }}
             {...(weeklyUnknown ? { 'aria-label': `${label} weekly usage unknown` } : {})}
           >
@@ -249,7 +249,7 @@ export function MiniVerticalGauge({ sessionPercent, weeklyPercent, weeklyDeltaPe
               <div
                 className={cn(
                   'absolute bottom-0 left-0 right-0 rounded-sm transition-all duration-700',
-                  weeklyWarn ? 'bg-red-400/70' : 'bg-blue-400/60',
+                  weeklyWarn ? 'bg-danger/70' : 'bg-primary/70',
                 )}
                 style={{ height: `${wp}%` }}
               />
@@ -262,7 +262,7 @@ export function MiniVerticalGauge({ sessionPercent, weeklyPercent, weeklyDeltaPe
           />
         </div>
       </TooltipTrigger>
-      <TooltipContent side="top" sideOffset={6} className="bg-popover text-popover-foreground border border-border shadow-md text-[10px]">
+      <TooltipContent side="top" sideOffset={6} className="text-[10px]">
         <p className="font-medium">{label}</p>
         <p className="text-muted-foreground">
           {sessionPercent === undefined
@@ -296,7 +296,7 @@ export function SidebarUsageRings({ providers, onToggle, roomsV2 = false }: { pr
     <button
       type="button"
       onClick={(e) => { e.stopPropagation(); onToggle() }}
-      className={cn('inline-flex items-center rounded-md px-1.5 py-1 transition-colors hover:bg-sidebar-accent/50', roomsV2 && 'px-1 py-0.5')}
+      className={cn('inline-flex items-center rounded-md px-1.5 py-1 transition-colors hover:bg-foreground/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50', roomsV2 && 'px-1 py-0.5')}
       style={{ gap: roomsV2 ? 9 : VBAR_GROUP_GAP }}
       aria-label="Provider usage"
     >
@@ -331,7 +331,7 @@ function DetailRow({ label, usageWindow, showPace = true, nowMs }: { label: stri
   const metrics = getUsageMetrics(usageWindow, nowMs)
 
   return (
-    <div className="rounded-md border border-border/50 bg-muted/20 p-2 space-y-1.5">
+    <div className="glass-inset rounded-lg p-2 space-y-1.5">
       <div className="flex items-center justify-between gap-3">
         <span className="text-[11px] text-muted-foreground">{label}</span>
         <span className={cn('text-[11px] font-mono tabular-nums', getTextTone(p))}>
@@ -339,9 +339,9 @@ function DetailRow({ label, usageWindow, showPace = true, nowMs }: { label: stri
         </span>
       </div>
 
-      <div className="h-1.5 overflow-hidden rounded-full bg-blue-400/10">
+      <div className="h-1 overflow-hidden rounded-full bg-foreground/[0.08]">
         <div
-          className="h-full rounded-full bg-blue-400/60 transition-all duration-700"
+          className="h-full rounded-full bg-primary transition-all duration-700"
           style={{ width: `${clampedWidth}%` }}
         />
       </div>
@@ -357,7 +357,7 @@ function DetailRow({ label, usageWindow, showPace = true, nowMs }: { label: stri
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
+      <div className="flex items-center justify-between gap-2 font-mono text-[10px] text-subtle-foreground">
         <span>{metrics?.runoutLabel ?? 'Runout unavailable'}</span>
         <span className="tabular-nums">{resetTime ? `Resets in ${resetTime}` : 'Reset unavailable'}</span>
       </div>
@@ -417,7 +417,7 @@ export function SidebarUsagePanel({ providers, open, onClose, loading, onRefresh
   const availableRows = rows.filter((row) => row.usage?.available)
 
   return (
-    <div ref={panelRef} className="shrink-0 border-t border-sidebar-border bg-sidebar p-3">
+    <div ref={panelRef} className="shrink-0 border-t border-sidebar-border bg-sidebar px-2.5 py-3">
       <div className="space-y-3">
         {onRefresh && (
           <div className="flex justify-end">

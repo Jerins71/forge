@@ -191,11 +191,11 @@ function StatusDot({ status }: { status: AgentStatus }) {
   return (
     <span
       className={cn(
-        'inline-block size-2 rounded-full',
-        status === 'streaming' && 'bg-emerald-500',
-        status === 'idle' && 'bg-slate-400',
+        'inline-block size-[7px] rounded-full',
+        status === 'streaming' && 'live-dot live-dot-animated',
+        status === 'idle' && 'bg-muted-foreground/50',
         (status === 'terminated' || status === 'stopped' || status === 'error') &&
-          'bg-rose-400',
+          'bg-danger',
       )}
     />
   )
@@ -302,17 +302,17 @@ export const WorkerQuickLook = memo(function WorkerQuickLook({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
       {/* Header */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-3 py-2">
+      <div className="flex shrink-0 items-center gap-2 border-b border-hairline px-3 py-2">
         <StatusDot status={status} />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">
           {worker.displayName ?? worker.agentId}
         </span>
         {modelWithThinking ? (
-          <span className="shrink-0 rounded border border-border/60 bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          <span className="shrink-0 glass-inset rounded-md px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
             {modelWithThinking}
           </span>
         ) : null}
-        <span className="shrink-0 text-[10px] text-muted-foreground">
+        <span className="shrink-0 font-mono text-[10.5px] text-subtle-foreground">
           {statusText}
           {elapsedLabel ? <span className="tabular-nums"> · {elapsedLabel}</span> : null}
         </span>
@@ -320,7 +320,7 @@ export const WorkerQuickLook = memo(function WorkerQuickLook({
       {throughputEligible ? (
         <div
           data-worker-throughput-row
-          className="flex h-7 shrink-0 items-center justify-between border-b border-border/50 px-3 text-[11px] text-muted-foreground"
+          className="flex h-7 shrink-0 items-center justify-between border-b border-hairline px-3 font-mono text-[11px] text-muted-foreground"
         >
           <span>Latest final response throughput</span>
           <span className="w-[72px] truncate whitespace-nowrap text-right tabular-nums text-foreground">
@@ -363,7 +363,7 @@ export const WorkerQuickLook = memo(function WorkerQuickLook({
       </div>
 
       {/* Footer */}
-      <div className="shrink-0 border-t border-border/50 px-3 py-1.5">
+      <div className="shrink-0 border-t border-hairline px-3 py-1.5">
         <Button
           variant="ghost"
           size="sm"

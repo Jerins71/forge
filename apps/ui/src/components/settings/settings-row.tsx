@@ -13,18 +13,18 @@ export function SettingsSection({
   cta?: React.ReactNode
 }) {
   return (
-    <div className="space-y-4 pb-4">
-      <div className="border-b pb-2 flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <h3 className="text-base font-semibold">{label}</h3>
+    <section className="glass mb-5 rounded-2xl">
+      <div className="flex items-start justify-between gap-4 border-b border-hairline px-5 py-3.5">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[13.5px] font-medium text-foreground">{label}</h3>
           {description && (
-            <p className="text-sm text-muted-foreground">{description}</p>
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">{description}</p>
           )}
         </div>
         {cta && <div className="flex-shrink-0">{cta}</div>}
       </div>
-      <div className="space-y-4">{children}</div>
-    </div>
+      <div className="divide-y divide-hairline px-5 [&>*]:py-3.5">{children}</div>
+    </section>
   )
 }
 
@@ -42,17 +42,17 @@ export function SettingsWithCTA({
   return (
     <div
       className={cn(
-        'flex items-start justify-between gap-4 rounded-md px-2 -mx-2',
+        'flex items-start justify-between gap-4',
         {
           'flex-col gap-2': direction === 'col',
-          'flex-col sm:flex-row gap-4': direction === 'row',
+          'flex-col sm:flex-row sm:items-center gap-3 sm:gap-6': direction === 'row',
         },
       )}
     >
-      <div className="flex flex-col gap-1 flex-1">
-        <Label className="text-sm font-semibold">{label}</Label>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <Label className="text-sm font-medium text-foreground">{label}</Label>
         {description && (
-          <span className="text-xs text-muted-foreground">{description}</span>
+          <span className="text-[12.5px] leading-snug text-muted-foreground">{description}</span>
         )}
       </div>
       {children}

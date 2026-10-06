@@ -48,8 +48,8 @@ export function ComposerTextarea({
           ref={overlayRef}
           aria-hidden
           className={cn(
-            'pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-sm leading-normal text-foreground',
-            'px-4 pt-3 pb-2',
+            'pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-[14px] leading-normal text-foreground',
+            'px-[18px] pt-4 pb-2',
           )}
         >
           {renderMentionOverlay(value)}
@@ -73,17 +73,17 @@ export function ComposerTextarea({
         disabled={disabled}
         rows={1}
         className={cn(
-          'relative w-full resize-none border-0 bg-transparent text-sm leading-normal shadow-none focus:outline-none',
+          'relative w-full resize-none border-0 bg-transparent text-[14px] leading-normal shadow-none focus:outline-none',
           hasMentionTokens
             ? 'text-transparent placeholder:text-muted-foreground'
             : 'text-foreground',
-          formatMode ? 'min-h-[120px]' : 'min-h-[44px]',
-          'px-4 pt-3 pb-2',
+          formatMode ? 'min-h-[120px]' : 'min-h-[52px]',
+          'px-[18px] pt-4 pb-2',
           '[&::-webkit-scrollbar]:w-1.5',
           '[&::-webkit-scrollbar-track]:bg-transparent',
           '[&::-webkit-scrollbar-thumb]:bg-transparent',
           '[&::-webkit-scrollbar-thumb]:rounded-full',
-          'group-hover:[&::-webkit-scrollbar-thumb]:bg-border',
+          'group-hover:[&::-webkit-scrollbar-thumb]:bg-foreground/15',
         )}
         style={hasMentionTokens ? { caretColor: 'var(--foreground)' } : undefined}
       />

@@ -156,7 +156,7 @@ export function SettingsObservability({ apiClient }: SettingsObservabilityProps)
         </div>
       ) : null}
       {saved ? (
-        <div className="flex gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-300">
+        <div className="flex gap-2 rounded-md border border-success/30 bg-success/5 p-3 text-sm text-success">
           <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
           <span>Settings saved.</span>
         </div>
@@ -316,9 +316,9 @@ function StatusBadge({ status }: { status: PhoenixObservabilityStatus | null }) 
     return <Badge variant="outline" className="gap-1 text-muted-foreground"><Activity className="size-3" />Disabled</Badge>
   }
   if (status.exporter.lastErrorMessage) {
-    return <Badge variant="outline" className="gap-1 border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400"><XCircle className="size-3" />Error</Badge>
+    return <Badge variant="outline" className="gap-1 border-danger/30 bg-danger/10 text-danger"><XCircle className="size-3" />Error</Badge>
   }
-  return <Badge variant="outline" className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="size-3" />Active</Badge>
+  return <Badge variant="outline" className="gap-1 border-success/30 bg-success/10 text-success"><CheckCircle2 className="size-3" />Active</Badge>
 }
 
 function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {

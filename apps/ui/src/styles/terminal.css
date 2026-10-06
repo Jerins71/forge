@@ -1,7 +1,7 @@
 @import "@xterm/xterm/css/xterm.css";
 
 .forge-terminal-panel {
-  --forge-terminal-bg: #141726;
+  --forge-terminal-bg: #0B0B0E;
 }
 
 .forge-terminal-surface {
@@ -22,7 +22,7 @@
 .forge-terminal-host .xterm-viewport {
   background: var(--forge-terminal-bg) !important;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
 }
 
 .forge-terminal-host .xterm-viewport::-webkit-scrollbar {
@@ -36,7 +36,7 @@
 
 .forge-terminal-host .xterm-viewport::-webkit-scrollbar-thumb {
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .forge-terminal-host .xterm-helpers,

@@ -1,7 +1,7 @@
 import { isClaudeSignInRequired } from '@forge/protocol'
 import { memo, useState, useCallback } from 'react'
 import { isUserVisibleAssistantConversationMessage } from '@forge/protocol'
-import { Copy, Check, GitFork, Pin, Reply, Layers, CircleCheck } from 'lucide-react'
+import { Copy, Check, GitFork, Pin, Reply, Layers, CircleCheck, Sparkles } from 'lucide-react'
 import { MarkdownMessage } from '@/components/chat/MarkdownMessage'
 import type { ArtifactReference } from '@/lib/artifacts'
 import { copyTextToClipboard } from '@/lib/clipboard'
@@ -42,10 +42,10 @@ function CopyButton({ text }: { text: string }) {
       type="button"
       onClick={handleCopy}
       className={cn(
-        'inline-flex size-5 items-center justify-center rounded-sm transition-colors',
+        'inline-flex size-5 items-center justify-center rounded-md transition-colors duration-150',
         copied
-          ? 'text-emerald-600 dark:text-emerald-400'
-          : 'text-muted-foreground/50 hover:text-muted-foreground',
+          ? 'text-success'
+          : 'text-subtle-foreground hover:text-foreground',
       )}
       aria-label={copied ? 'Copied' : 'Copy message'}
       title={copied ? 'Copied' : 'Copy message'}
@@ -60,7 +60,7 @@ function ForkButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+      className="inline-flex size-5 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:text-foreground"
       aria-label="Fork from this message"
       title="Fork from this message"
     >
@@ -75,10 +75,10 @@ function ReplyButton({ onClick, userTone = false }: { onClick: () => void; userT
       type="button"
       onClick={onClick}
       className={cn(
-        'inline-flex size-6 items-center justify-center rounded-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'inline-flex size-6 items-center justify-center rounded-md transition-colors duration-150 hover:bg-foreground/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
         userTone
-          ? 'text-primary-foreground/70 hover:bg-primary-foreground/10 hover:text-primary-foreground'
-          : 'text-muted-foreground/70 hover:text-foreground',
+          ? 'text-muted-foreground hover:text-foreground'
+          : 'text-subtle-foreground hover:text-foreground',
       )}
       aria-label="Reply to this message"
       title="Reply"
@@ -94,10 +94,10 @@ function PinButton({ pinned, onClick }: { pinned: boolean; onClick: () => void }
       type="button"
       onClick={onClick}
       className={cn(
-        'inline-flex size-5 items-center justify-center rounded-sm transition-colors',
+        'inline-flex size-5 items-center justify-center rounded-md transition-colors duration-150',
         pinned
-          ? 'text-amber-500 dark:text-amber-400'
-          : 'text-muted-foreground/50 hover:text-muted-foreground',
+          ? 'text-attention'
+          : 'text-subtle-foreground hover:text-foreground',
       )}
       aria-label={pinned ? 'Unpin message' : 'Pin message (preserve through compaction)'}
       title={pinned ? 'Unpin message' : 'Pin message (preserve through compaction)'}
@@ -237,10 +237,10 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
 
       return (
         <div
-          className="rounded-lg border border-indigo-300/70 bg-indigo-50/70 px-3 py-2 text-sm text-indigo-950 dark:border-indigo-400/30 dark:bg-indigo-500/10 dark:text-indigo-100"
+          className="glass-inset rise-in rounded-xl px-3.5 py-2.5 text-sm text-foreground/90"
           data-worker-result-source={sourceWorkerId || undefined}
         >
-          <div className="break-words text-[11px] font-medium uppercase tracking-wide text-indigo-700 dark:text-indigo-300/90">
+          <div className="eyebrow break-words !text-primary">
             {workerLabel}
           </div>
           <div className="mt-1 space-y-2">
@@ -252,7 +252,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
             <MessageAttachments attachments={attachments} isUser={false} wsUrl={wsUrl} />
           </div>
           {timestampLabel ? (
-            <div className="mt-1 text-[11px] text-indigo-700/80 dark:text-indigo-300/80">
+            <div className="mt-1 font-mono text-[11px] text-subtle-foreground">
               <span>{timestampLabel}</span>
             </div>
           ) : null}
@@ -266,8 +266,8 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
     const isWorkerOutcomeNotice = message.systemNoticeKind === 'worker_outcome_backstop'
     if (isWorkerOutcomeNotice) {
       return (
-        <div className="rounded-lg border border-sky-300/60 bg-sky-50/60 px-3 py-2 text-sm text-sky-950 dark:border-sky-400/25 dark:bg-sky-500/10 dark:text-sky-100">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-sky-700 dark:text-sky-300/90">
+        <div className="glass-inset rise-in rounded-xl px-3.5 py-2.5 text-sm text-foreground/90">
+          <div className="eyebrow">
             Worker outcome · auto-surfaced
           </div>
           <div className="mt-1 space-y-2">
@@ -278,7 +278,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
             ) : null}
           </div>
           {timestampLabel ? (
-            <div className="mt-1 text-[11px] text-sky-700/80 dark:text-sky-300/80">
+            <div className="mt-1 font-mono text-[11px] text-subtle-foreground">
               <span>{timestampLabel}</span>
             </div>
           ) : null}
@@ -289,8 +289,8 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
     const isModelChangeNotice = message.systemNoticeKind === 'model_change'
     if (isModelChangeNotice) {
       return (
-        <div className="rounded-lg border border-slate-300/70 bg-slate-50/70 px-3 py-2 text-sm text-slate-800 dark:border-slate-400/25 dark:bg-slate-500/10 dark:text-slate-200">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-slate-600 dark:text-slate-300/90">
+        <div className="glass-inset rise-in rounded-xl px-3.5 py-2.5 text-sm text-foreground/90">
+          <div className="eyebrow">
             Model change
           </div>
           {hasText ? (
@@ -299,7 +299,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
             </p>
           ) : null}
           {timestampLabel ? (
-            <div className="mt-1 text-[11px] text-slate-600/80 dark:text-slate-300/80">
+            <div className="mt-1 font-mono text-[11px] text-subtle-foreground">
               <span>{timestampLabel}</span>
             </div>
           ) : null}
@@ -313,7 +313,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
     if (contextTransition) {
       const Icon = contextTransition === 'completed' ? CircleCheck : Layers
       return (
-        <div data-context-transition={contextTransition} className="flex items-start gap-2.5 rounded-md border-l-2 border-border/70 px-3 py-2 text-muted-foreground">
+        <div data-context-transition={contextTransition} className="flex items-start gap-2.5 rounded-lg px-3 py-2 text-subtle-foreground">
           <Icon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px]">
@@ -329,8 +329,8 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
     }
 
     return (
-      <div className="rounded-lg border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-sm text-amber-950 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100">
-        <div className="text-[11px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300/90">
+      <div className="rise-in rounded-xl border border-attention/25 bg-attention-surface px-3.5 py-2.5 text-sm text-foreground/90">
+        <div className="eyebrow !text-attention">
           System
         </div>
         <div className="mt-1 space-y-2">
@@ -342,7 +342,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
           <MessageAttachments attachments={attachments} isUser={false} wsUrl={wsUrl} />
         </div>
         {timestampLabel || sourceContext ? (
-          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-700/80 dark:text-amber-300/80">
+          <div className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-subtle-foreground">
             <SourceBadge sourceContext={sourceContext} />
             {timestampLabel ? <span>{timestampLabel}</span> : null}
           </div>
@@ -378,17 +378,16 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
       <div className="flex justify-end">
         <div
           className={cn(
-            'max-w-[85%] rounded-lg rounded-tr-sm px-3 py-2',
+            'max-w-[82%] rounded-2xl rounded-br-md border px-4 py-3 text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]',
             isCliMessage
-              ? 'bg-violet-600 text-white dark:bg-violet-600'
-              : 'bg-primary text-primary-foreground',
-            message.pinned && 'ring-2 ring-amber-400/60 dark:ring-amber-500/50',
+              ? 'border-compacting/30 bg-compacting/10'
+              : 'border-hairline bg-foreground/[0.06]',
+            message.pinned && 'ring-1 ring-attention/40',
           )}
         >
           {message.pinned ? (
             <div className={cn(
-              'mb-1 flex items-center gap-1 text-[10px]',
-              isCliMessage ? 'text-white/70' : 'text-primary-foreground/70',
+              'mb-1 flex items-center gap-1 text-[10px] text-attention',
             )}>
               <Pin className="size-2.5 fill-current" />
               <span>Pinned</span>
@@ -413,7 +412,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
             ) : null}
             <MessageAttachments attachments={attachments} isUser wsUrl={wsUrl} />
             {hasText ? (
-              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+              <p className="whitespace-pre-wrap break-words text-[14.5px] leading-relaxed">
                 {normalizedText}
               </p>
             ) : null}
@@ -422,10 +421,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
             <div className="mt-1 flex items-center justify-end gap-1.5">
               <SourceBadge sourceContext={sourceContext} isUser />
               {timestampLabel ? (
-                <p className={cn(
-                  'text-right text-[10px] leading-none',
-                  isCliMessage ? 'text-white/70' : 'text-primary-foreground/70',
-                )}>
+                <p className="text-right font-mono text-[10.5px] leading-none text-subtle-foreground">
                   {timestampLabel}
                 </p>
               ) : null}
@@ -440,12 +436,10 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
                   type="button"
                   onClick={() => onPinMessage(message.id!, !message.pinned)}
                   className={cn(
-                    'inline-flex size-5 items-center justify-center rounded-sm transition-colors',
+                    'inline-flex size-5 items-center justify-center rounded-md transition-colors duration-150',
                     message.pinned
-                      ? 'text-amber-300 dark:text-amber-300'
-                      : isCliMessage
-                        ? 'text-white/50 hover:text-white'
-                        : 'text-primary-foreground/50 hover:text-primary-foreground',
+                      ? 'text-attention'
+                      : 'text-subtle-foreground hover:text-foreground',
                   )}
                   aria-label={message.pinned ? 'Unpin message' : 'Pin message (preserve through compaction)'}
                   title={message.pinned ? 'Unpin message' : 'Pin message (preserve through compaction)'}
@@ -458,10 +452,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
                   type="button"
                   onClick={() => onForkFromMessage(forkMessageId)}
                   className={cn(
-                    'inline-flex size-5 items-center justify-center rounded-sm transition-colors',
-                    isCliMessage
-                      ? 'text-white/50 hover:text-white'
-                      : 'text-primary-foreground/50 hover:text-primary-foreground',
+                    'inline-flex size-5 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:text-foreground',
                   )}
                   aria-label="Fork from this message"
                   title="Fork from this message"
@@ -488,15 +479,30 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
       ? transcriptAgentId.trim()
       : undefined
 
+  const assistantName = activeAgentDisplayName?.trim() || 'Assistant'
+
   return (
+    <div className="flex min-w-0 gap-3.5">
+    <span
+      aria-hidden="true"
+      className="mt-px flex size-[26px] shrink-0 items-center justify-center rounded-lg border border-hairline bg-primary/15 text-primary"
+    >
+      <Sparkles className="size-3.5" strokeWidth={1.75} />
+    </span>
     <div
       className={cn(
-        'min-w-0 space-y-2 text-foreground',
-        message.pinned && 'rounded-lg border-l-2 border-amber-400/60 pl-3 dark:border-amber-500/50',
+        'min-w-0 flex-1 space-y-2 text-foreground/90',
+        message.pinned && 'rounded-lg ring-1 ring-attention/30',
       )}
     >
+      <div className="flex items-baseline gap-2">
+        <span className="truncate text-[13px] font-medium text-foreground">{assistantName}</span>
+        {timestampLabel ? (
+          <span className="font-mono text-[11px] text-subtle-foreground">{timestampLabel}</span>
+        ) : null}
+      </div>
       {message.pinned ? (
-        <div className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+        <div className="flex items-center gap-1 text-[10px] text-attention">
           <Pin className="size-2.5 fill-current" />
           <span>Pinned</span>
         </div>
@@ -527,9 +533,8 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
       ) : null}
       <MessageAttachments attachments={attachments} isUser={false} wsUrl={wsUrl} />
       {timestampLabel || sourceContext || showFeedback || onForkFromMessage || canPinAssistant || onReplyToMessage ? (
-        <div className="flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/70">
+        <div className="flex items-center gap-1.5 text-[11px] leading-none text-subtle-foreground">
           <SourceBadge sourceContext={sourceContext} />
-          {timestampLabel ? <span>{timestampLabel}</span> : null}
           {hasText ? <CopyButton text={normalizedText} /> : null}
           {onReplyToMessage && message.id?.trim() ? (
             <ReplyButton onClick={() => onReplyToMessage(message)} />
@@ -563,6 +568,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
           ) : null}
         </div>
       ) : null}
+    </div>
     </div>
   )
 })
@@ -606,7 +612,7 @@ function CollabRemoteUserRow({
           {authorName}
         </div>
 
-        <div className="rounded-2xl rounded-tl-md border border-border/60 bg-card/80 px-4 py-2.5 text-sm text-foreground shadow-sm">
+        <div className="glass-inset rounded-2xl rounded-tl-md px-4 py-2.5 text-[14.5px] text-foreground">
           {attachments.length > 0 ? (
             <div className={cn(hasText && 'mb-2')}>
               <MessageAttachments attachments={attachments} isUser={false} wsUrl={wsUrl} />
@@ -620,7 +626,7 @@ function CollabRemoteUserRow({
         </div>
 
         {timestampLabel ? (
-          <div className="mt-1 px-1 text-[11px] text-muted-foreground">{timestampLabel}</div>
+          <div className="mt-1 px-1 font-mono text-[11px] text-subtle-foreground">{timestampLabel}</div>
         ) : null}
       </div>
     </div>

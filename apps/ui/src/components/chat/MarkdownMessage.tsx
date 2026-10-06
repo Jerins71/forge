@@ -11,6 +11,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import { cn } from '@/lib/utils'
+import { highlightCode } from '@/lib/syntax-highlight'
+import '@/styles/syntax-highlight.css'
 import { MermaidBlock } from './message-list/MermaidBlock'
 import { ContentZoomDialog } from './ContentZoomDialog'
 import { isArtifactPdfPath } from './artifact-pdf'
@@ -91,7 +93,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
         return (
           <div className={cn('group/code relative', isDocument ? 'my-5' : 'my-2')}>
             {language ? (
-              <div className="flex items-center justify-between rounded-t-lg border border-b-0 border-border/50 bg-muted/40 px-3 py-1.5">
+              <div className="flex items-center justify-between rounded-t-xl border border-b-0 border-hairline bg-foreground/[0.04] px-3 py-1.5">
                 <span className="font-mono text-[11px] font-medium text-muted-foreground">{language}</span>
                 <CodeBlockCopyButton code={normalizedCode} />
               </div>
@@ -102,14 +104,16 @@ export const MarkdownMessage = memo(function MarkdownMessage({
             )}
             <div
               className={cn(
-                'w-full border border-border/50 bg-muted/25',
-                language ? 'rounded-b-lg' : 'rounded-lg',
+                'glass-inset w-full',
+                language ? 'rounded-b-xl rounded-t-none' : 'rounded-xl',
               )}
             >
               <pre className="overflow-x-auto p-4">
-                <code className={cn('font-mono text-foreground/90', isDocument ? 'text-[13px] leading-6' : 'text-xs leading-5')}>
-                  {normalizedCode}
-                </code>
+                <HighlightedCode
+                  code={normalizedCode}
+                  language={language}
+                  className={cn('font-mono text-foreground/90', isDocument ? 'text-[13px] leading-6' : 'text-[12.5px] leading-5')}
+                />
               </pre>
             </div>
           </div>
@@ -119,10 +123,8 @@ export const MarkdownMessage = memo(function MarkdownMessage({
       return (
         <code
           className={cn(
-            'rounded bg-muted/70 font-mono text-foreground',
-            isDocument
-              ? 'px-1.5 py-0.5 text-[13px]'
-              : 'px-1 py-0.5 text-xs',
+            'rounded-md bg-foreground/[0.06] px-1.5 py-0.5 font-mono text-foreground',
+            isDocument ? 'text-[13px]' : 'text-[12.5px]',
           )}
         >
           {children}
@@ -136,7 +138,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
 
   return (
     <>
-      <div className={cn('min-w-0 overflow-hidden', isDocument ? 'text-[15px] leading-[1.8]' : 'text-sm leading-relaxed')}>
+      <div className={cn('min-w-0 overflow-hidden', isDocument ? 'text-[15px] leading-[1.8]' : 'text-[14.5px] leading-[1.65] text-foreground/90')}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           urlTransform={urlTransform}
@@ -148,7 +150,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
                     'break-words whitespace-pre-wrap',
                     isDocument
                       ? 'mb-5 text-foreground/90 last:mb-0'
-                      : 'mb-2 last:mb-0',
+                      : 'mb-3 last:mb-0',
                   )}
                 >
                   {children}
@@ -251,7 +253,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
               return (
                 <blockquote
                   className={cn(
-                    'my-4 border-l-2 pl-4 italic text-muted-foreground',
+                    'my-4 border-l-2 pl-4 text-muted-foreground',
                     isDocument ? 'border-primary/30 text-[15px]' : 'border-border text-sm',
                   )}
                 >
@@ -260,7 +262,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
               )
             },
             hr() {
-              return <hr className={cn('my-6 border-border/50', isDocument && 'my-8')} />
+              return <hr className={cn('my-6 border-hairline', isDocument && 'my-8')} />
             },
             a({ children, href }) {
               const artifact = parseArtifactReference(href, {
@@ -344,14 +346,14 @@ export const MarkdownMessage = memo(function MarkdownMessage({
             },
             th({ children }) {
               return (
-                <th className="border border-border/50 bg-muted/40 px-3 py-2 text-left text-xs font-semibold text-foreground">
+                <th className="border border-hairline bg-foreground/[0.04] px-3 py-2 text-left text-xs font-medium text-foreground">
                   {children}
                 </th>
               )
             },
             td({ children }) {
               return (
-                <td className="border border-border/50 px-3 py-2 text-foreground/90">
+                <td className="border border-hairline px-3 py-2 text-foreground/90">
                   {children}
                 </td>
               )
@@ -408,6 +410,13 @@ function normalizeHeadingText(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
+/** Highlight fenced blocks with the shared --syn-* palette; unknown languages stay plain. */
+function HighlightedCode({ code, language, className }: { code: string; language: string | null; className: string }) {
+  const html = useMemo(() => (language ? highlightCode(code, language) : null), [code, language])
+  if (html === null) return <code className={className}>{code}</code>
+  return <code className={cn('syntax-highlight', className)} dangerouslySetInnerHTML={{ __html: html }} />
+}
+
 function CodeBlockCopyButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false)
 
@@ -426,8 +435,8 @@ function CodeBlockCopyButton({ code }: { code: string }) {
       className={cn(
         'inline-flex size-6 items-center justify-center rounded-md transition-colors',
         copied
-          ? 'text-emerald-600 dark:text-emerald-400'
-          : 'text-muted-foreground/50 hover:text-muted-foreground',
+          ? 'text-success'
+          : 'text-subtle-foreground hover:text-foreground',
       )}
       aria-label={copied ? 'Copied' : 'Copy code'}
       title={copied ? 'Copied' : 'Copy code'}
@@ -467,20 +476,18 @@ function ArtifactReferenceCard({
       variant="ghost"
       onClick={() => onClick(artifact)}
       className={cn(
-        'group/card my-2.5 h-auto w-full justify-start gap-3 rounded-lg border px-3 py-2.5 text-left text-sm font-normal',
-        'border-primary/20 bg-primary/[0.04] transition-all duration-150',
-        'hover:border-primary/35 hover:bg-primary/[0.07] hover:shadow-sm',
-        'active:scale-[0.995]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
+        'group/card glass-inset my-2.5 h-auto w-full justify-start gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-normal',
+        'transition-colors duration-150 hover:bg-foreground/[0.06] hover:text-foreground',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
       )}
       data-artifact-card="true"
     >
-      <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover/card:bg-primary/15">
+      <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary transition-colors group-hover/card:bg-primary/15">
         <CardIcon className="size-4" aria-hidden="true" />
       </span>
 
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] font-semibold text-foreground">
+        <span className="block truncate text-[13px] font-medium text-foreground">
           {artifact.title ?? artifact.fileName}
         </span>
         <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">{artifact.path}</span>
@@ -502,8 +509,8 @@ function ArtifactReferenceCard({
               'inline-flex size-6 shrink-0 items-center justify-center rounded-md transition-colors',
               'opacity-0 group-hover/card:opacity-100',
               pathCopied
-                ? 'text-emerald-600 dark:text-emerald-400'
-                : 'text-muted-foreground/50 hover:text-muted-foreground',
+                ? 'text-success'
+                : 'text-subtle-foreground hover:text-foreground',
             )}
             aria-label={pathCopied ? 'Copied' : 'Copy path'}
           >
@@ -513,7 +520,7 @@ function ArtifactReferenceCard({
         <TooltipContent side="top">{pathCopied ? 'Copied!' : 'Copy path'}</TooltipContent>
       </Tooltip>
 
-      <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-all group-hover/card:text-primary">
+      <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-subtle-foreground transition-all group-hover/card:text-primary">
         <ChevronRight className="size-4" aria-hidden="true" />
       </span>
     </Button>

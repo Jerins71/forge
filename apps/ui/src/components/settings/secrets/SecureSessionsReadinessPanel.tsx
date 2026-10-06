@@ -87,8 +87,8 @@ function StatusBadge({
     <Badge
       variant="outline"
       className={ready
-        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-        : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'}
+        ? 'border-success/30 bg-success/10 text-success'
+        : 'border-attention/30 bg-attention/10 text-attention'}
     >
       {children}
     </Badge>
@@ -252,9 +252,9 @@ export function SecureSessionsReadinessPanel({
       </div>
 
       {actions.length > 0 ? (
-        <div className="space-y-1.5 rounded-md border border-amber-500/25 bg-amber-500/5 p-2.5 text-xs">
+        <div className="space-y-1.5 rounded-md border border-attention/25 bg-attention/5 p-2.5 text-xs">
           <p className="flex items-center gap-1.5 font-medium text-foreground">
-            <AlertTriangle className="size-3.5 text-amber-500" />
+            <AlertTriangle className="size-3.5 text-attention" />
             Next actions
           </p>
           <ul className="space-y-1 text-muted-foreground">
@@ -279,7 +279,7 @@ export function SecureSessionsReadinessPanel({
           ) : null}
         </div>
       ) : !loading && readiness?.available && privateEntryAvailable ? (
-        <p className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300">
+        <p className="flex items-center gap-1.5 text-xs text-success">
           <CheckCircle2 className="size-3.5" />
           Secure Sessions are ready for configured local sources.
         </p>
@@ -289,7 +289,7 @@ export function SecureSessionsReadinessPanel({
         <p
           role="status"
           className={readiness?.available
-            ? 'text-xs text-emerald-700 dark:text-emerald-300'
+            ? 'text-xs text-success'
             : 'text-xs text-destructive'}
         >
           {runnerInstallMessage}
@@ -300,7 +300,7 @@ export function SecureSessionsReadinessPanel({
         <p
           role="status"
           className={copyState === 'copied'
-            ? 'text-xs text-emerald-700 dark:text-emerald-300'
+            ? 'text-xs text-success'
             : 'text-xs text-destructive'}
         >
           {copyState === 'copied'
@@ -312,8 +312,8 @@ export function SecureSessionsReadinessPanel({
         <p
           role="status"
           className={privateEntryAvailable
-            ? 'text-xs text-emerald-700 dark:text-emerald-300'
-            : 'text-xs text-amber-700 dark:text-amber-300'}
+            ? 'text-xs text-success'
+            : 'text-xs text-attention'}
         >
           {privateEntryUnlockMessage}
         </p>

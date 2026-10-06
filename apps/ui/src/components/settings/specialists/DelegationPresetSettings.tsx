@@ -541,13 +541,13 @@ export function DelegationPresetSettingsView({
         <div className={cn(
           'sticky bottom-0 z-20 -mx-1 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 shadow-lg backdrop-blur',
           dirty
-            ? 'border-amber-400/25 bg-background/95'
+            ? 'border-attention/25 bg-background/95'
             : 'border-border/70 bg-background/90',
         )}>
           <div className="flex items-center gap-2">
             <span className={cn(
               'flex size-5 items-center justify-center rounded-full',
-              dirty ? 'bg-amber-400/10 text-amber-300' : 'bg-emerald-500/10 text-emerald-400',
+              dirty ? 'bg-attention/10 text-attention' : 'bg-success/10 text-success',
             )}>
               {dirty ? <span className="size-1.5 rounded-full bg-current" /> : <Check className="size-3" />}
             </span>

@@ -286,7 +286,7 @@ export function SecretSourcesPanel({
             <SourceStatusBadge status={localStatus} />
           </div>
           {!materialEntryAvailable ? (
-            <p className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs text-amber-700 dark:text-amber-300">
+            <p className="mt-3 rounded-md border border-attention/30 bg-attention/5 p-2.5 text-xs text-attention">
               {materialEntrySupported
                 ? 'Private storage is locked. Unlock it above to add, rotate, or test local values without restarting Forge.'
                 : 'Secure operating-system storage is unavailable in this desktop session. Existing metadata remains readable, but private material cannot be added or rotated.'}
@@ -310,7 +310,7 @@ export function SecretSourcesPanel({
             </div>
           ) : null}
           {recovery && recovery.providerId === localProvider?.providerId ? (
-            <div className="mt-3 space-y-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+            <div className="mt-3 space-y-3 rounded-md border border-attention/30 bg-attention/5 p-3">
               <div>
                 <p className="text-sm font-medium">Saved local values need attention</p>
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -474,7 +474,7 @@ export function SecretSourcesPanel({
             </div>
             {reconnectProviderId === provider.providerId ? (
               <form
-                className="mt-3 space-y-3 rounded-md border border-amber-500/25 bg-amber-500/5 p-3"
+                className="mt-3 space-y-3 rounded-md border border-attention/25 bg-attention/5 p-3"
                 onSubmit={reconnectProvider}
               >
                 <Field

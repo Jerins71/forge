@@ -14,15 +14,15 @@ export function CollabSettingsBanner({ apiClient }: CollabSettingsBannerProps) {
 
   return (
     <div
-      className="mb-4 flex items-start gap-3 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-3"
+      className="mb-4 flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/10 px-4 py-3"
       data-testid="collab-settings-banner"
     >
-      <Globe className="mt-0.5 size-4 shrink-0 text-blue-400" />
+      <Globe className="mt-0.5 size-4 shrink-0 text-primary" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-blue-300">
+        <p className="text-sm font-medium text-primary">
           Editing remote collaboration server settings
         </p>
-        <p className="mt-0.5 truncate text-xs text-blue-400/80">
+        <p className="mt-0.5 truncate text-xs text-primary/80">
           {serverUrl}
         </p>
       </div>

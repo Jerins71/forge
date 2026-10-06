@@ -171,13 +171,13 @@ export function SettingsStreamDeck({ apiClient }: { apiClient: SettingsApiClient
             : 'Open Stream Deck after installing the plugin. New pairing requests appear here automatically.'}
           />
         ) : snapshot.pendingRequests.map((request) => (
-          <div key={request.requestId} className="flex flex-col gap-4 rounded-xl border border-amber-400/30 bg-amber-400/5 p-4 sm:flex-row sm:items-center">
+          <div key={request.requestId} className="flex flex-col gap-4 rounded-xl border border-attention/30 bg-attention/5 p-4 sm:flex-row sm:items-center">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-semibold">{request.deviceName}</span>
                 <Badge variant="outline">Plugin {request.pluginVersion}</Badge>
               </div>
-              <div className="mt-2 font-mono text-2xl font-black tracking-[0.25em] text-amber-500">
+              <div className="mt-2 font-mono text-2xl font-black tracking-[0.25em] text-attention">
                 {request.verificationCode.slice(0, 3)} {request.verificationCode.slice(3)}
               </div>
             </div>
@@ -199,7 +199,7 @@ export function SettingsStreamDeck({ apiClient }: { apiClient: SettingsApiClient
       >
         {activeDevices.length === 0 ? <EmptyState text="No Stream Deck devices are paired yet." /> : activeDevices.map((device) => (
           <div key={device.id} className="flex items-center gap-3 rounded-xl border bg-card/50 p-4">
-            <div className="grid size-10 place-items-center rounded-lg bg-emerald-500/10 text-emerald-500"><Grid3X3 className="size-5" /></div>
+            <div className="grid size-10 place-items-center rounded-lg bg-success/10 text-success"><Grid3X3 className="size-5" /></div>
             <div className="min-w-0 flex-1">
               <div className="font-medium">{device.deviceName}</div>
               <div className="text-xs text-muted-foreground">Plugin {device.pluginVersion} · paired {new Date(device.createdAt).toLocaleDateString()}</div>
@@ -219,7 +219,7 @@ function Feature({ icon, label }: { icon: React.ReactNode; label: string }) {
 }
 
 function StatusTile({ label, ok, detail }: { label: string; ok: boolean; detail: string }) {
-  return <div className="rounded-xl border bg-card/40 p-4"><div className="flex items-center gap-2 text-sm font-semibold"><span className={`size-2 rounded-full ${ok ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,.6)]' : 'bg-muted-foreground/40'}`} />{label}</div><div className="mt-1 text-xs text-muted-foreground">{detail}</div></div>
+  return <div className="rounded-xl border bg-card/40 p-4"><div className="flex items-center gap-2 text-sm font-semibold"><span className={`size-2 rounded-full ${ok ? 'bg-success shadow-[0_0_8px_rgba(16,185,129,.6)]' : 'bg-muted-foreground/40'}`} />{label}</div><div className="mt-1 text-xs text-muted-foreground">{detail}</div></div>
 }
 
 function EmptyState({ text }: { text: string }) {

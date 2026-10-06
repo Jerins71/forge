@@ -178,7 +178,7 @@ export function PromptEditor({
         <div className="flex flex-wrap items-center gap-2">
           {entry && <PromptSourceIndicator sourceLayer={entry.sourceLayer} />}
           {isDirty && (
-            <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+            <span className="text-xs font-medium text-attention">
               Unsaved changes
             </span>
           )}
@@ -197,8 +197,8 @@ export function PromptEditor({
         </div>
       )}
       {successMessage && (
-        <div className="flex items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-3 py-2">
-          <p className="text-xs text-emerald-600 dark:text-emerald-400">{successMessage}</p>
+        <div className="flex items-center gap-2 rounded-md border border-success/20 bg-success/10 px-3 py-2">
+          <p className="text-xs text-success">{successMessage}</p>
         </div>
       )}
 

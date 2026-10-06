@@ -126,7 +126,8 @@ describe('MarkdownMessage', () => {
     expect((html.match(/data-artifact-card="true"/g) ?? [])).toHaveLength(1)
     expect(html).toContain('/tmp/allowed.png')
     expect(html).toContain('[artifact:/tmp/inline.png]')
-    expect(html).toContain('[artifact:/tmp/fenced.png]')
+    // Fenced blocks are syntax-highlighted, so compare the visible text.
+    expect(html.replace(/<[^>]+>/g, '')).toContain('[artifact:/tmp/fenced.png]')
   })
 
   it('renders PDF artifact links as clickable artifact cards', () => {

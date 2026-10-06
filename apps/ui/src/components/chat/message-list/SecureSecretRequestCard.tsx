@@ -148,12 +148,12 @@ export function SecureSecretRequestCard({
   return (
     <>
       <div
-        className="max-w-2xl space-y-3 rounded-lg border border-amber-500/40 bg-card p-4"
+        className="glass rise-in max-w-2xl space-y-3 rounded-xl border-attention/25 bg-attention-surface p-4"
         role="alert"
         data-secure-secret-request={request.requestId}
       >
         <div className="flex items-start gap-2">
-          <KeyRound className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+          <KeyRound className="mt-0.5 size-4 shrink-0 text-attention" aria-hidden="true" />
           <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground">Secret access requested</p>
             <p className="text-xs text-muted-foreground">
@@ -163,7 +163,7 @@ export function SecureSecretRequestCard({
           </div>
         </div>
 
-        <div className="space-y-2 rounded-md bg-muted/45 p-3 text-xs">
+        <div className="glass-inset space-y-2 rounded-lg p-3 text-xs">
           <div>
             <span className="font-medium text-foreground">Purpose</span>
             <p className="mt-0.5 text-muted-foreground">{request.purpose}</p>
@@ -191,8 +191,8 @@ export function SecureSecretRequestCard({
         </div>
 
         {unavailableReason ? (
-          <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs">
-            <ShieldAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+          <div className="flex gap-2 rounded-lg border border-attention/25 bg-attention/10 p-2.5 text-xs">
+            <ShieldAlert className="mt-0.5 size-3.5 shrink-0 text-attention" aria-hidden="true" />
             <p>
               <span className="font-medium text-foreground">
                 {availability.state === 'source_unavailable'
@@ -211,7 +211,7 @@ export function SecureSecretRequestCard({
               value={effectiveSecretId}
               onChange={(event) => setSecretId(event.target.value)}
               disabled={disabled}
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm font-normal"
+              className="h-9 w-full rounded-lg border border-input bg-foreground/[0.03] px-3 text-sm font-normal"
             >
               {compatibleSecrets.map((secret) => (
                 <option key={secret.secretId} value={secret.secretId}>

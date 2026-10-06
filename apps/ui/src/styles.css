@@ -1,188 +1,226 @@
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 @import "./styles/terminal.css";
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #f8f5f0;
-  --foreground: #3e2723;
-  --card: #f8f5f0;
-  --card-foreground: #3e2723;
-  --popover: #f8f5f0;
-  --popover-foreground: #3e2723;
-  --primary: #2e7d32;
+  /* Forge Glass — light. Cool, crisp paper with a periwinkle signal. */
+  --background: #f5f5f7;
+  --foreground: #121216;
+  --card: #ffffff;
+  --card-foreground: #121216;
+  --popover: #ffffff;
+  --popover-foreground: #121216;
+  --primary: #4b55d6;
   --primary-foreground: #ffffff;
-  --secondary: #b6d3b8;
-  --secondary-foreground: #1b5e20;
-  --muted: #f0e9e0;
-  --muted-foreground: #6d4c41;
-  --accent: #8aba8e;
-  --accent-foreground: #1b5e20;
-  --destructive: #c62828;
+  --secondary: #ececf1;
+  --secondary-foreground: #1d1d24;
+  --muted: #efeff3;
+  --muted-foreground: #5d5d6b;
+  --accent: #e9e9f0;
+  --accent-foreground: #121216;
+  --destructive: #d23b41;
   --destructive-foreground: #ffffff;
-  --border: #e0d6c9;
-  --input: #e0d6c9;
-  --ring: #2e7d32;
-  --chart-1: #4caf50;
-  --chart-2: #388e3c;
-  --chart-3: #2e7d32;
-  --chart-4: #1b5e20;
-  --chart-5: #0a1f0c;
-  --sidebar: #fcfaf8;
-  --sidebar-foreground: #3e2723;
-  --sidebar-primary: #2e7d32;
+  --border: rgb(18 18 28 / 0.1);
+  --input: rgb(18 18 28 / 0.13);
+  --ring: #4b55d6;
+  --chart-1: #4b55d6;
+  --chart-2: #2a9d8f;
+  --chart-3: #c27c1a;
+  --chart-4: #8e5bd8;
+  --chart-5: #d23b41;
+  --sidebar: #efeff3;
+  --sidebar-foreground: #121216;
+  --sidebar-primary: #4b55d6;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f5f2ed;
-  --sidebar-accent-foreground: #3e2723;
-  --sidebar-border: #e8e0d6;
-  --sidebar-ring: #2e7d32;
-  /* Rooms v2 stays sidebar-local: these are not application palette tokens. */
-  --sidebar-room-card: #fffdfb;
-  --sidebar-room-card-border: #e4dbd0;
-  --sidebar-room-card-hover: #f8f3ed;
-  --sidebar-room-row-selected: #eef8ef;
-  --sidebar-room-inbox-row-selected: rgb(109 98 91 / 0.08);
-  --sidebar-room-muted: #6d625b;
-  --sidebar-room-unread: #c62828;
+  --sidebar-accent: rgb(18 18 28 / 0.06);
+  --sidebar-accent-foreground: #121216;
+  --sidebar-border: rgb(18 18 28 / 0.08);
+  --sidebar-ring: #4b55d6;
+
+  /* Glass surfaces: floating panels, composer, menus, dialogs. */
+  --glass: rgb(255 255 255 / 0.72);
+  --glass-strong: rgb(255 255 255 / 0.86);
+  --glass-border: rgb(18 18 28 / 0.09);
+  --glass-highlight: rgb(255 255 255 / 0.9);
+  --glass-shadow: 0 1px 2px rgb(18 18 28 / 0.05), 0 18px 48px -24px rgb(18 18 28 / 0.28);
+  --glass-blur: 22px;
+  --app-glow: rgb(75 85 214 / 0.07);
+  --hairline: rgb(18 18 28 / 0.07);
+  --subtle-foreground: #6c6c7a;
+
+  /* Status signals. Live = primary; attention is the only warm hue. */
+  --status-attention: #b86e0a;
+  --status-attention-surface: rgb(184 110 10 / 0.1);
+  --status-success: #1f8a5b;
+  --status-danger: #c73d43;
+  --status-compacting: #7a52c7;
+
+  /* Rooms v2 sidebar tokens. */
+  --sidebar-room-card: transparent;
+  --sidebar-room-card-border: transparent;
+  --sidebar-room-card-hover: rgb(18 18 28 / 0.05);
+  --sidebar-room-row-selected: #ffffff;
+  --sidebar-room-inbox-row-selected: #ffffff;
+  --sidebar-room-muted: #6c6c7a;
+  --sidebar-room-unread: #d23b41;
   --sidebar-room-unread-foreground: #ffffff;
-  --sidebar-room-remote-surface: #eff6ff;
-  --sidebar-room-remote-border: #bfdbfe;
-  --sidebar-room-remote-foreground: #1d4ed8;
-  --sidebar-room-cortex-surface: #eff6ff;
-  --sidebar-room-cortex-hover-surface: #dbeafe;
-  --sidebar-room-cortex-active-surface: #bfdbfe;
-  --sidebar-room-cortex-border: #93c5fd;
-  --sidebar-room-cortex-foreground: #2563eb;
-  --sidebar-room-cortex-hover-foreground: #1d4ed8;
-  --sidebar-room-glow-shadow: rgb(217 119 6 / 0.48);
-  --sidebar-room-compaction-glow-shadow: rgb(124 58 237 / 0.45);
-  --sidebar-room-section-surface: #fffdfb;
-  --sidebar-room-section-border: #e4dbd0;
-  --sidebar-room-section-label: #625950;
-  --sidebar-room-needs-surface: #eff6ff;
-  --sidebar-room-needs-border: #93c5fd;
-  --sidebar-room-needs-label: #1d4ed8;
-  --sidebar-room-reason-default: #6d625b;
-  --sidebar-room-reason-awaiting: #1d4ed8;
-  --sidebar-room-reason-error: #b91c1c;
-  --sidebar-room-reason-active: #92400e;
-  --sidebar-room-reason-compacting: #6d28d9;
-  --sidebar-room-status-awaiting: #2563eb;
+  --sidebar-room-remote-surface: rgb(75 85 214 / 0.06);
+  --sidebar-room-remote-border: rgb(75 85 214 / 0.2);
+  --sidebar-room-remote-foreground: #3b44b8;
+  --sidebar-room-cortex-surface: rgb(75 85 214 / 0.07);
+  --sidebar-room-cortex-hover-surface: rgb(75 85 214 / 0.12);
+  --sidebar-room-cortex-active-surface: rgb(75 85 214 / 0.18);
+  --sidebar-room-cortex-border: rgb(75 85 214 / 0.24);
+  --sidebar-room-cortex-foreground: #3b44b8;
+  --sidebar-room-cortex-hover-foreground: #2c3499;
+  --sidebar-room-glow-shadow: rgb(184 110 10 / 0.35);
+  --sidebar-room-compaction-glow-shadow: rgb(122 82 199 / 0.35);
+  --sidebar-room-section-surface: transparent;
+  --sidebar-room-section-border: transparent;
+  --sidebar-room-section-label: #6c6c7a;
+  --sidebar-room-needs-surface: rgb(184 110 10 / 0.07);
+  --sidebar-room-needs-border: rgb(184 110 10 / 0.22);
+  --sidebar-room-needs-label: #9a5b06;
+  --sidebar-room-reason-default: #6c6c7a;
+  --sidebar-room-reason-awaiting: #9a5b06;
+  --sidebar-room-reason-error: #c73d43;
+  --sidebar-room-reason-active: #4b55d6;
+  --sidebar-room-reason-compacting: #7a52c7;
+  --sidebar-room-status-awaiting: #b86e0a;
   --sidebar-room-status-awaiting-foreground: #ffffff;
-  --sidebar-room-status-active: #92400e;
-  --sidebar-room-status-running: #15803d;
-  --sidebar-room-status-idle: #a39a92;
-  --sidebar-room-status-cli-running: #7c3aed;
-  --sidebar-room-status-cli-idle: #a78bfa;
-  --sidebar-room-project-agent: #2563eb;
-  --sidebar-room-project-action-surface: #dcfce7;
-  --sidebar-room-project-action-foreground: #166534;
-  --sidebar-room-avatar-neutral-surface: #f0e9e0;
-  --sidebar-room-avatar-neutral-foreground: #5f5149;
-  --sidebar-room-avatar-blue-surface: #dbeafe;
-  --sidebar-room-avatar-blue-foreground: #1d4ed8;
-  --sidebar-room-avatar-amber-surface: #fef3c7;
-  --sidebar-room-avatar-amber-foreground: #92400e;
-  --sidebar-room-avatar-green-surface: #dcfce7;
-  --sidebar-room-avatar-green-foreground: #166534;
-  --sidebar-room-avatar-red-surface: #fee2e2;
-  --sidebar-room-avatar-red-foreground: #b91c1c;
-  --sidebar-room-avatar-violet-surface: #ede9fe;
-  --sidebar-room-avatar-violet-foreground: #6d28d9;
-  --app-font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --app-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --radius: 0.5rem;
+  --sidebar-room-status-active: #4b55d6;
+  --sidebar-room-status-running: #1f8a5b;
+  --sidebar-room-status-idle: #a6a6b2;
+  --sidebar-room-status-cli-running: #7a52c7;
+  --sidebar-room-status-cli-idle: #a993d9;
+  --sidebar-room-project-agent: #4b55d6;
+  --sidebar-room-project-action-surface: rgb(18 18 28 / 0.06);
+  --sidebar-room-project-action-foreground: #121216;
+  --sidebar-room-avatar-neutral-surface: rgb(18 18 28 / 0.07);
+  --sidebar-room-avatar-neutral-foreground: #3c3c48;
+  --sidebar-room-avatar-blue-surface: rgb(75 85 214 / 0.12);
+  --sidebar-room-avatar-blue-foreground: #3b44b8;
+  --sidebar-room-avatar-amber-surface: rgb(184 110 10 / 0.12);
+  --sidebar-room-avatar-amber-foreground: #8a5106;
+  --sidebar-room-avatar-green-surface: rgb(31 138 91 / 0.12);
+  --sidebar-room-avatar-green-foreground: #17704a;
+  --sidebar-room-avatar-red-surface: rgb(199 61 67 / 0.12);
+  --sidebar-room-avatar-red-foreground: #a8323a;
+  --sidebar-room-avatar-violet-surface: rgb(122 82 199 / 0.12);
+  --sidebar-room-avatar-violet-foreground: #6441a8;
+  --app-font-sans: "Geist Variable", "Geist", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --app-font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --radius: 0.625rem;
   /* Native Chromium/Electron/Firefox chrome follows Forge's class theme, not OS. */
   color-scheme: light;
 }
 
 .dark {
   color-scheme: dark;
-  --background: #1a1a1a;
-  --foreground: #f0ebe5;
-  --card: #242424;
-  --card-foreground: #f0ebe5;
-  --popover: #242424;
-  --popover-foreground: #f0ebe5;
-  --primary: #4caf50;
-  --primary-foreground: #0a1f0c;
-  --secondary: #333333;
-  --secondary-foreground: #d7e0d6;
-  --muted: #2a2a2a;
-  --muted-foreground: #d7cfc4;
-  --accent: #2e7d32;
-  --accent-foreground: #ffffff;
-  --destructive: #dc2626;
+  /* Forge Glass — dark. Near-black ground, frosted panels, hairline light. */
+  --background: #08080a;
+  --foreground: #ececee;
+  --card: #111114;
+  --card-foreground: #ececee;
+  --popover: #141418;
+  --popover-foreground: #ececee;
+  --primary: #8e9bff;
+  --primary-foreground: #0b0b12;
+  --secondary: #1a1a1f;
+  --secondary-foreground: #e4e4e7;
+  --muted: #16161a;
+  --muted-foreground: #a1a1aa;
+  --accent: rgb(255 255 255 / 0.07);
+  --accent-foreground: #f4f4f5;
+  --destructive: #dc3d43;
   --destructive-foreground: #ffffff;
-  --border: #4a4a4a;
-  --input: #4a4a4a;
-  --ring: #4caf50;
-  --chart-1: #81c784;
-  --chart-2: #66bb6a;
-  --chart-3: #4caf50;
-  --chart-4: #43a047;
-  --chart-5: #388e3c;
-  --sidebar: #161616;
-  --sidebar-foreground: #f0ebe5;
-  --sidebar-primary: #4caf50;
-  --sidebar-primary-foreground: #0a1f0c;
-  --sidebar-accent: #202020;
+  --border: rgb(255 255 255 / 0.08);
+  --input: rgb(255 255 255 / 0.1);
+  --ring: #8e9bff;
+  --chart-1: #8e9bff;
+  --chart-2: #5fd4a0;
+  --chart-3: #f5b454;
+  --chart-4: #c4a3ff;
+  --chart-5: #ff8a8a;
+  --sidebar: #0b0b0e;
+  --sidebar-foreground: #ececee;
+  --sidebar-primary: #8e9bff;
+  --sidebar-primary-foreground: #0b0b12;
+  --sidebar-accent: rgb(255 255 255 / 0.06);
   --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #4a4a4a;
-  --sidebar-ring: #4caf50;
-  /* Rooms v2 stays sidebar-local: dark equivalents of the light tokens above. */
-  --sidebar-room-card: #1b1b1b;
-  --sidebar-room-card-border: #343434;
-  --sidebar-room-card-hover: #242424;
-  --sidebar-room-row-selected: #202a20;
-  --sidebar-room-inbox-row-selected: rgb(240 235 229 / 0.08);
-  --sidebar-room-muted: #a59d94;
-  /* Darkened from the mock's #ef4444 so 9px white count text reaches AA. */
-  --sidebar-room-unread: #dc2626;
+  --sidebar-border: rgb(255 255 255 / 0.06);
+  --sidebar-ring: #8e9bff;
+
+  --glass: rgb(20 20 25 / 0.62);
+  --glass-strong: rgb(24 24 30 / 0.82);
+  --glass-border: rgb(255 255 255 / 0.08);
+  --glass-highlight: rgb(255 255 255 / 0.05);
+  --glass-shadow: 0 1px 0 rgb(255 255 255 / 0.03), 0 28px 64px -28px rgb(0 0 0 / 0.85);
+  --glass-blur: 22px;
+  --app-glow: rgb(142 155 255 / 0.075);
+  --hairline: rgb(255 255 255 / 0.06);
+  --subtle-foreground: #8b8b94;
+
+  --status-attention: #f5b454;
+  --status-attention-surface: rgb(245 180 84 / 0.08);
+  --status-success: #5fd4a0;
+  --status-danger: #ff8a8a;
+  --status-compacting: #c4a3ff;
+
+  --sidebar-room-card: transparent;
+  --sidebar-room-card-border: transparent;
+  --sidebar-room-card-hover: rgb(255 255 255 / 0.04);
+  --sidebar-room-row-selected: rgb(255 255 255 / 0.07);
+  --sidebar-room-inbox-row-selected: rgb(255 255 255 / 0.07);
+  --sidebar-room-muted: #8b8b94;
+  --sidebar-room-unread: #dc3d43;
   --sidebar-room-unread-foreground: #ffffff;
-  --sidebar-room-remote-surface: #162331;
-  --sidebar-room-remote-border: #315678;
-  --sidebar-room-remote-foreground: #93c5fd;
-  --sidebar-room-cortex-surface: #162331;
-  --sidebar-room-cortex-hover-surface: #1e3a5f;
-  --sidebar-room-cortex-active-surface: #274c77;
-  --sidebar-room-cortex-border: #315678;
-  --sidebar-room-cortex-foreground: #93c5fd;
-  --sidebar-room-cortex-hover-foreground: #bfdbfe;
-  --sidebar-room-glow-shadow: rgb(245 158 11 / 0.5);
-  --sidebar-room-compaction-glow-shadow: rgb(167 139 250 / 0.45);
-  --sidebar-room-section-surface: #1b1b1b;
-  --sidebar-room-section-border: #343434;
-  --sidebar-room-section-label: #a59d94;
-  --sidebar-room-needs-surface: #172235;
-  --sidebar-room-needs-border: #315678;
-  --sidebar-room-needs-label: #bfdbfe;
-  --sidebar-room-reason-default: #a59d94;
-  --sidebar-room-reason-awaiting: #bfdbfe;
-  --sidebar-room-reason-error: #fca5a5;
-  --sidebar-room-reason-active: #fbbf24;
-  --sidebar-room-reason-compacting: #c4b5fd;
-  --sidebar-room-status-awaiting: #60a5fa;
-  --sidebar-room-status-awaiting-foreground: #0f172a;
-  --sidebar-room-status-active: #fbbf24;
-  --sidebar-room-status-running: #4ade80;
-  --sidebar-room-status-idle: #77716c;
-  --sidebar-room-status-cli-running: #a78bfa;
-  --sidebar-room-status-cli-idle: #7c3aed;
-  --sidebar-room-project-agent: #93c5fd;
-  --sidebar-room-project-action-surface: #173b27;
-  --sidebar-room-project-action-foreground: #a7f3d0;
-  --sidebar-room-avatar-neutral-surface: #2b2a29;
-  --sidebar-room-avatar-neutral-foreground: #d7cfc4;
-  --sidebar-room-avatar-blue-surface: #1e3a5f;
-  --sidebar-room-avatar-blue-foreground: #bfdbfe;
-  --sidebar-room-avatar-amber-surface: #4a3512;
-  --sidebar-room-avatar-amber-foreground: #fbbf24;
-  --sidebar-room-avatar-green-surface: #173b27;
-  --sidebar-room-avatar-green-foreground: #a7f3d0;
-  --sidebar-room-avatar-red-surface: #4a2020;
-  --sidebar-room-avatar-red-foreground: #fca5a5;
-  --sidebar-room-avatar-violet-surface: #34244f;
-  --sidebar-room-avatar-violet-foreground: #c4b5fd;
+  --sidebar-room-remote-surface: rgb(142 155 255 / 0.06);
+  --sidebar-room-remote-border: rgb(142 155 255 / 0.2);
+  --sidebar-room-remote-foreground: #b9c1ff;
+  --sidebar-room-cortex-surface: rgb(142 155 255 / 0.08);
+  --sidebar-room-cortex-hover-surface: rgb(142 155 255 / 0.14);
+  --sidebar-room-cortex-active-surface: rgb(142 155 255 / 0.2);
+  --sidebar-room-cortex-border: rgb(142 155 255 / 0.24);
+  --sidebar-room-cortex-foreground: #b9c1ff;
+  --sidebar-room-cortex-hover-foreground: #d6dbff;
+  --sidebar-room-glow-shadow: rgb(245 180 84 / 0.4);
+  --sidebar-room-compaction-glow-shadow: rgb(196 163 255 / 0.4);
+  --sidebar-room-section-surface: transparent;
+  --sidebar-room-section-border: transparent;
+  --sidebar-room-section-label: #8b8b94;
+  --sidebar-room-needs-surface: rgb(245 180 84 / 0.06);
+  --sidebar-room-needs-border: rgb(245 180 84 / 0.18);
+  --sidebar-room-needs-label: #f5b454;
+  --sidebar-room-reason-default: #8b8b94;
+  --sidebar-room-reason-awaiting: #f5c27a;
+  --sidebar-room-reason-error: #ff8a8a;
+  --sidebar-room-reason-active: #b9c1ff;
+  --sidebar-room-reason-compacting: #c4a3ff;
+  --sidebar-room-status-awaiting: #f5b454;
+  --sidebar-room-status-awaiting-foreground: #14100a;
+  --sidebar-room-status-active: #8e9bff;
+  --sidebar-room-status-running: #5fd4a0;
+  --sidebar-room-status-idle: #5c5c66;
+  --sidebar-room-status-cli-running: #c4a3ff;
+  --sidebar-room-status-cli-idle: #7d67b0;
+  --sidebar-room-project-agent: #b9c1ff;
+  --sidebar-room-project-action-surface: rgb(255 255 255 / 0.06);
+  --sidebar-room-project-action-foreground: #ececee;
+  --sidebar-room-avatar-neutral-surface: rgb(255 255 255 / 0.07);
+  --sidebar-room-avatar-neutral-foreground: #c4c4cc;
+  --sidebar-room-avatar-blue-surface: rgb(142 155 255 / 0.16);
+  --sidebar-room-avatar-blue-foreground: #c9cfff;
+  --sidebar-room-avatar-amber-surface: rgb(245 180 84 / 0.15);
+  --sidebar-room-avatar-amber-foreground: #f5c27a;
+  --sidebar-room-avatar-green-surface: rgb(95 212 160 / 0.14);
+  --sidebar-room-avatar-green-foreground: #8de3bc;
+  --sidebar-room-avatar-red-surface: rgb(255 138 138 / 0.14);
+  --sidebar-room-avatar-red-foreground: #ffb0b0;
+  --sidebar-room-avatar-violet-surface: rgb(196 163 255 / 0.15);
+  --sidebar-room-avatar-violet-foreground: #d7c2ff;
 }
 
 @theme inline {
@@ -216,6 +254,18 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-glass: var(--glass);
+  --color-glass-strong: var(--glass-strong);
+  --color-glass-border: var(--glass-border);
+  --color-hairline: var(--hairline);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-attention: var(--status-attention);
+  --color-attention-surface: var(--status-attention-surface);
+  --color-success: var(--status-success);
+  --color-danger: var(--status-danger);
+  --color-compacting: var(--status-compacting);
+
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -238,6 +288,99 @@ body {
 
 body {
   @apply m-0 bg-background text-foreground antialiased;
+  font-feature-settings: "ss01", "cv11";
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--primary) 32%, transparent);
+}
+
+:focus-visible {
+  outline-color: color-mix(in srgb, var(--ring) 70%, transparent);
+}
+
+/* Forge Glass surfaces. One recipe for every floating layer so blur,
+   hairline and highlight stay consistent across panes, menus and dialogs. */
+@utility glass {
+  background-color: var(--glass);
+  border: 1px solid var(--glass-border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+}
+
+@utility glass-strong {
+  background-color: var(--glass-strong);
+  border: 1px solid var(--glass-border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 6px)) saturate(160%);
+  backdrop-filter: blur(calc(var(--glass-blur) + 6px)) saturate(160%);
+}
+
+/* Quiet inset surface for rows/cards that sit inside a glass panel. */
+@utility glass-inset {
+  background-color: color-mix(in srgb, var(--foreground) 3.5%, transparent);
+  border: 1px solid var(--hairline);
+}
+
+/* App canvas: a single faint cool glow so glass has something to refract. */
+@utility app-canvas {
+  background:
+    radial-gradient(1200px 560px at 55% -12%, var(--app-glow), transparent 70%),
+    var(--background);
+}
+
+@utility eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle-foreground);
+}
+
+@utility live-dot {
+  display: inline-block;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  flex: none;
+  border-radius: 9999px;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+@keyframes forge-live-breathe {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--primary) 6%, transparent); }
+}
+
+.live-dot-animated {
+  animation: forge-live-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes forge-rise-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.rise-in {
+  animation: forge-rise-in 220ms var(--ease-out-soft) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot-animated,
+  .rise-in {
+    animation: none;
+  }
+}
+
+/* Honors macOS "Reduce transparency": solid surfaces, no blur. */
+@media (prefers-reduced-transparency: reduce) {
+  :root, .dark {
+    --glass-blur: 0px;
+    --glass: var(--card);
+    --glass-strong: var(--popover);
+  }
 }
 
 /* Firefox-only native scrollbar colors. Chromium/Electron/Safari follow
@@ -274,7 +417,10 @@ body {
 }
 
 /* Rooms v2 presentation. These semantic classes are mounted only in the
-   Rooms layout so the classic sidebar retains its existing treatment. */
+   Rooms layout so the classic sidebar retains its existing treatment.
+   Forge Glass: sections float on the sidebar ground (no boxed cards); rows are
+   quiet, mono meta, 7px status dots. Selected = foreground wash + inset
+   highlight + hairline. */
 .sidebar-room-sortable {
   min-width: 0;
 }
@@ -282,12 +428,13 @@ body {
   border: 1px solid var(--sidebar-room-card-border);
   border-radius: 0.75rem;
   background: var(--sidebar-room-card);
-  padding: 0.25rem;
+  padding: 0;
   color: var(--sidebar-foreground);
 }
 .sidebar-room-remote-card {
   border-color: var(--sidebar-room-remote-border);
   background: var(--sidebar-room-remote-surface);
+  padding: 0.25rem;
 }
 .sidebar-room-remote-status-card {
   border: 1px solid var(--sidebar-room-remote-border);
@@ -315,7 +462,7 @@ body {
 }
 .sidebar-room-header {
   display: flex;
-  min-height: 1.75rem;
+  min-height: 2rem;
   align-items: center;
   border-radius: 0.5rem;
 }
@@ -329,60 +476,65 @@ body {
   width: 100%;
   align-items: center;
   gap: 0.375rem;
+  border: 1px solid transparent;
   border-radius: 0.5rem;
-  color: color-mix(in srgb, var(--sidebar-foreground) 92%, transparent);
-  transition: background-color 150ms ease, box-shadow 150ms ease;
+  color: color-mix(in srgb, var(--sidebar-foreground) 88%, transparent);
+  transition: background-color 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+/* Nested sessions are quieter than their project. */
+.sidebar-room-row {
+  min-height: 1.875rem;
+  font-size: 0.8125rem;
+}
+.sidebar-room-worker-row {
+  min-height: 1.625rem;
+  color: var(--sidebar-room-muted);
 }
 .sidebar-room-row:hover,
 .sidebar-room-worker-row:hover {
-  background: var(--sidebar-room-card-hover);
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
 }
-.sidebar-room-row-selected {
-  background: var(--sidebar-room-row-selected);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sidebar-ring) 35%, transparent);
+.sidebar-room-row-selected,
+.sidebar-room-row-selected:hover {
+  border-color: var(--hairline);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  color: var(--sidebar-foreground);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
 }
 .sidebar-room-avatar {
   display: inline-flex;
-  width: 1.625rem;
-  height: 1.625rem;
+  width: 1.375rem;
+  height: 1.375rem;
   flex: none;
   align-items: center;
   justify-content: center;
-  border-radius: 0.5rem;
-  font-size: 0.6875rem;
-  font-weight: 700;
+  border-radius: 0.375rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.625rem;
+  font-weight: 500;
   line-height: 1;
 }
 .sidebar-room-project-avatar {
-  width: 1.375rem;
-  height: 1.375rem;
-  border-radius: 0.4375rem;
-  font-size: 0.625rem;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 0.3125rem;
+  font-size: 0.59375rem;
 }
-.sidebar-room-avatar--neutral {
-  background: var(--sidebar-room-avatar-neutral-surface);
-  color: var(--sidebar-room-avatar-neutral-foreground);
-}
-.sidebar-room-avatar--blue {
-  background: var(--sidebar-room-avatar-blue-surface);
-  color: var(--sidebar-room-avatar-blue-foreground);
-}
-.sidebar-room-avatar--amber {
-  background: var(--sidebar-room-avatar-amber-surface);
-  color: var(--sidebar-room-avatar-amber-foreground);
-}
-.sidebar-room-avatar--green {
-  background: var(--sidebar-room-avatar-green-surface);
-  color: var(--sidebar-room-avatar-green-foreground);
-}
-.sidebar-room-avatar--red {
-  background: var(--sidebar-room-avatar-red-surface);
-  color: var(--sidebar-room-avatar-red-foreground);
-}
+/* Monograms are quiet neutral chips; hue only whispers through the text. */
+.sidebar-room-avatar--neutral,
+.sidebar-room-avatar--blue,
+.sidebar-room-avatar--amber,
+.sidebar-room-avatar--green,
+.sidebar-room-avatar--red,
 .sidebar-room-avatar--violet {
-  background: var(--sidebar-room-avatar-violet-surface);
-  color: var(--sidebar-room-avatar-violet-foreground);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
 }
+.sidebar-room-avatar--neutral { color: var(--sidebar-room-avatar-neutral-foreground); }
+.sidebar-room-avatar--blue { color: var(--sidebar-room-avatar-blue-foreground); }
+.sidebar-room-avatar--amber { color: var(--sidebar-room-avatar-amber-foreground); }
+.sidebar-room-avatar--green { color: var(--sidebar-room-avatar-green-foreground); }
+.sidebar-room-avatar--red { color: var(--sidebar-room-avatar-red-foreground); }
+.sidebar-room-avatar--violet { color: var(--sidebar-room-avatar-violet-foreground); }
 .sidebar-room-unread-badge {
   display: inline-flex;
   min-width: 1rem;
@@ -391,11 +543,12 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
-  padding-inline: 0.25rem;
-  background: var(--sidebar-room-unread);
-  color: var(--sidebar-room-unread-foreground);
-  font-size: 0.5625rem;
-  font-weight: 600;
+  padding-inline: 0.3125rem;
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  color: var(--sidebar-foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.59375rem;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 .sidebar-room-connection {
@@ -412,27 +565,37 @@ body {
   justify-content: center;
   margin-right: 0.125rem;
   border-radius: 0.375rem;
-  background: var(--sidebar-room-project-action-surface);
-  color: var(--sidebar-room-project-action-foreground);
+  background: transparent;
+  color: var(--sidebar-room-muted);
   transition: color 150ms ease, background-color 150ms ease;
 }
 .sidebar-room-new-session:hover {
-  background: color-mix(in srgb, var(--sidebar-room-project-action-surface) 78%, var(--sidebar-room-project-action-foreground));
-  color: var(--sidebar-room-project-action-foreground);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  color: var(--sidebar-foreground);
 }
+/* Status = 7px dots. */
 .sidebar-room-status-glyph {
-  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 20%, transparent);
+  width: 0.4375rem;
+  height: 0.4375rem;
 }
 .sidebar-room-status-running { background: var(--sidebar-room-status-running); }
-.sidebar-room-status-idle { background: var(--sidebar-room-status-idle); }
+.sidebar-room-status-idle { background: color-mix(in srgb, var(--foreground) 22%, transparent); }
 .sidebar-room-status-cli-running { background: var(--sidebar-room-status-cli-running); }
 .sidebar-room-status-cli-idle { background: var(--sidebar-room-status-cli-idle); }
 .sidebar-room-status-choice {
-  border-color: var(--sidebar-room-status-awaiting);
+  display: inline-block;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 9999px;
+  background: var(--sidebar-room-status-awaiting);
   color: var(--sidebar-room-status-awaiting);
 }
 .sidebar-room-status-streaming {
-  border-color: var(--sidebar-room-status-active);
+  display: inline-block;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 9999px;
+  background: var(--sidebar-room-status-active);
   color: var(--sidebar-room-status-active);
 }
 .sidebar-room-status-error-dot { background: var(--sidebar-room-reason-error); }
@@ -440,55 +603,62 @@ body {
 .sidebar-room-connection-status--reconnecting { background: var(--sidebar-room-status-active); }
 .sidebar-room-project-agent-icon { color: var(--sidebar-room-project-agent); }
 .sidebar-room-project-agent-icon--subtle { opacity: 0.7; }
+/* Attention is a quiet amber halo on the dot, never a glow wash. */
 .sidebar-room-attention {
-  box-shadow: 0 0 6px color-mix(in srgb, var(--sidebar-room-status-awaiting) 48%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sidebar-room-status-awaiting) 18%, transparent);
 }
+/* Status pills: tiny tinted marks. Count/glyph variants stay legible; bare
+   variants collapse to a 7px dot. */
 .sidebar-room-status-pill {
   display: inline-flex;
-  width: 1.0625rem;
-  height: 1.0625rem;
+  min-width: 0.9375rem;
+  height: 0.9375rem;
   flex: none;
   align-items: center;
   justify-content: center;
-  border: 2px solid var(--sidebar-room-status-active);
+  border: 0;
   border-radius: 9999px;
-  background: transparent;
+  padding-inline: 0.25rem;
+  background: color-mix(in srgb, var(--sidebar-room-status-active) 16%, transparent);
   color: var(--sidebar-room-status-active);
-  font-size: 0.5rem;
-  font-weight: 700;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.5625rem;
+  font-weight: 500;
   line-height: 1;
 }
 .sidebar-room-status-pill-text {
-  font-size: 0.5rem;
-  font-weight: 700;
+  font-size: 0.5625rem;
+  font-weight: 500;
   line-height: 1;
 }
 .sidebar-room-status-pill--awaiting {
-  border-color: var(--sidebar-room-status-awaiting);
-  background: var(--sidebar-room-status-awaiting);
-  color: var(--sidebar-room-status-awaiting-foreground);
+  background: color-mix(in srgb, var(--sidebar-room-status-awaiting) 22%, transparent);
+  color: var(--sidebar-room-status-awaiting);
 }
 .sidebar-room-status-pill--review {
-  width: 0.8125rem;
-  height: 0.8125rem;
-  border-color: var(--sidebar-room-status-awaiting);
-  background: transparent;
+  width: 0.4375rem;
+  min-width: 0.4375rem;
+  height: 0.4375rem;
+  padding: 0;
+  background: var(--sidebar-room-status-awaiting);
 }
-.sidebar-room-status-pill--workers,
-.sidebar-room-status-pill--streaming {
-  border-color: var(--sidebar-room-status-active);
+.sidebar-room-status-pill--workers {
+  background: color-mix(in srgb, var(--sidebar-room-status-active) 16%, transparent);
   color: var(--sidebar-room-status-active);
 }
 .sidebar-room-status-pill--streaming {
-  width: 0.8125rem;
-  height: 0.8125rem;
+  width: 0.4375rem;
+  min-width: 0.4375rem;
+  height: 0.4375rem;
+  padding: 0;
+  background: var(--sidebar-room-status-active);
+  color: var(--sidebar-room-status-active);
 }
 .sidebar-room-status-pill--compacting {
-  border-color: var(--sidebar-room-reason-compacting);
+  background: color-mix(in srgb, var(--sidebar-room-reason-compacting) 18%, transparent);
   color: var(--sidebar-room-reason-compacting);
 }
 .sidebar-room-status-pill--error {
-  border-color: var(--sidebar-room-reason-error);
   background: color-mix(in srgb, var(--sidebar-room-reason-error) 15%, transparent);
   color: var(--sidebar-room-reason-error);
 }
@@ -505,37 +675,42 @@ body {
 .sidebar-room-inbox {
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
-  margin-top: 0.5rem;
+  gap: 1rem;
+  margin-top: 0.75rem;
   padding-bottom: 0.5rem;
 }
 .sidebar-room-inbox-section {
   /* Keep raised tree controls below the sticky Needs you section. */
   isolation: isolate;
-  border: 1px solid var(--sidebar-room-section-border);
-  border-radius: 0.75rem;
-  background: var(--sidebar-room-section-surface);
-  padding: 0.25rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
 }
 .sidebar-room-inbox-section--needs-you {
   position: sticky;
   top: 0;
   z-index: 1;
-  border-color: var(--sidebar-room-needs-border);
-  background: var(--sidebar-room-needs-surface);
+  /* One quiet amber group instead of an amber card per row. Layered over the
+     opaque sidebar ground so rows scrolling underneath never show through. */
+  border: 1px solid color-mix(in srgb, var(--status-attention) 16%, transparent);
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(var(--status-attention-surface), var(--status-attention-surface)),
+    var(--sidebar);
+  padding: 0.125rem 0.25rem 0.25rem;
 }
 .sidebar-room-inbox-section-header {
   display: flex;
-  min-height: 1.75rem;
+  min-height: 1.5rem;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.125rem 0.5rem;
+  padding: 0.125rem 0.375rem;
 }
 .sidebar-room-inbox-section-label {
-  color: var(--sidebar-room-section-label);
-  font-size: 0.65625rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
+  color: var(--subtle-foreground);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
   line-height: 1;
   text-transform: uppercase;
 }
@@ -544,31 +719,34 @@ body {
 }
 .sidebar-room-inbox-section-count,
 .sidebar-room-inbox-section-detail {
-  color: var(--sidebar-room-muted);
-  font-size: 0.625rem;
+  margin-left: auto;
+  color: var(--subtle-foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
 }
 .sidebar-room-inbox-section-detail--active {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  color: var(--sidebar-room-status-active);
+  gap: 0.375rem;
+  color: var(--subtle-foreground);
 }
 .sidebar-room-active-dot {
-  width: 0.3125rem;
-  height: 0.3125rem;
+  width: 0.4375rem;
+  height: 0.4375rem;
   border-radius: 9999px;
   background: var(--sidebar-room-status-active);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sidebar-room-status-active) 18%, transparent);
 }
 .sidebar-room-clear-needs-you {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  border-radius: 0.25rem;
-  padding: 0.125rem 0.25rem;
+  border-radius: 0.375rem;
+  padding: 0.125rem 0.375rem;
   background: transparent;
-  color: var(--sidebar-room-muted);
-  font-size: 0.625rem;
+  color: var(--subtle-foreground);
+  font-size: 0.6875rem;
   font-weight: 500;
 }
 .sidebar-room-clear-needs-you:hover {
@@ -580,45 +758,53 @@ body {
   flex-direction: column;
   gap: 0.125rem;
 }
+.sidebar-room-inbox-section--needs-you .sidebar-room-inbox-section-rows {
+  gap: 0.125rem;
+}
 .sidebar-room-inbox-row {
   display: flex;
   min-height: 2.5rem;
   align-items: center;
   gap: 0.25rem;
-  border-radius: 0.5625rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
   color: var(--sidebar-foreground);
-  transition: background-color 150ms ease, box-shadow 150ms ease;
+  transition: background-color 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
 }
 .sidebar-room-inbox-row:hover {
-  background: var(--sidebar-room-card-hover);
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
 }
-.sidebar-room-inbox-row-selected-neutral {
-  background: var(--sidebar-room-inbox-row-selected);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--sidebar-foreground) 14%, transparent);
+.sidebar-room-inbox-row-selected-neutral,
+.sidebar-room-inbox-row-selected-neutral:hover {
+  border-color: var(--hairline);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
 }
+/* Needs you rows are the only carded rows: amber surface + hairline. */
 .sidebar-room-inbox-section--needs-you .sidebar-room-inbox-row:hover {
-  background: color-mix(in srgb, var(--sidebar-room-needs-label) 8%, transparent);
+  background: color-mix(in srgb, var(--status-attention) 8%, transparent);
 }
 .sidebar-room-inbox-title {
   display: block;
   overflow: hidden;
   color: var(--sidebar-foreground);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  line-height: 1.0625rem;
+  font-size: 0.84375rem;
+  font-weight: 500;
+  line-height: 1.125rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .sidebar-room-inbox-section--recent .sidebar-room-inbox-title {
-  font-size: 0.78125rem;
   font-weight: 400;
+  color: color-mix(in srgb, var(--sidebar-foreground) 86%, transparent);
 }
 .sidebar-room-inbox-reason {
   display: block;
   overflow: hidden;
-  color: var(--sidebar-room-reason-default);
-  font-size: 0.6875rem;
-  line-height: 0.9375rem;
+  color: var(--subtle-foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.71875rem;
+  line-height: 1rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -638,29 +824,30 @@ body {
   width: 0.6875rem;
   height: 0.6875rem;
   flex: none;
-  color: var(--sidebar-room-muted);
+  color: var(--subtle-foreground);
 }
 .sidebar-room-inbox-relative-time {
   min-width: 1.5rem;
-  color: var(--sidebar-room-muted);
-  font-size: 0.625rem;
+  color: var(--subtle-foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 .sidebar-room-inbox-done {
   flex: none;
   margin-right: 0.25rem;
-  border-radius: 0.25rem;
+  border-radius: 0.375rem;
   padding: 0.25rem 0.375rem;
   background: transparent;
-  color: var(--sidebar-room-muted);
+  color: var(--subtle-foreground);
   font-size: 0.6875rem;
   font-weight: 500;
   opacity: 0;
   transition: color 150ms ease, background-color 150ms ease, opacity 150ms ease;
 }
 .sidebar-room-inbox-done:hover {
-  background: var(--sidebar-room-card-hover);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
   color: var(--sidebar-foreground);
 }
 .sidebar-room-inbox-row:hover .sidebar-room-inbox-done,
@@ -671,13 +858,14 @@ body {
   width: 100%;
   border-radius: 0.375rem;
   padding: 0.25rem 0.5rem;
-  color: var(--sidebar-room-needs-label);
+  color: var(--subtle-foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.6875rem;
-  font-weight: 500;
   text-align: left;
 }
 .sidebar-room-inbox-more:hover {
-  background: var(--sidebar-room-card-hover);
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  color: var(--sidebar-foreground);
 }
 .sidebar-room-inbox-project-list > [data-testid="unified-project-list"] {
   margin-top: 0;
@@ -688,16 +876,17 @@ body {
   background: transparent;
   padding: 0;
 }
+/* Breathing halo on the status dot only; never a glow around rows. */
 @keyframes sidebar-room-glow-pulse {
-  0%, 100% { box-shadow: 0 0 6px var(--sidebar-room-glow-shadow); }
-  50% { box-shadow: 0 0 10px var(--sidebar-room-glow-shadow); }
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 6%, transparent); }
 }
 @keyframes sidebar-room-compaction-glow-pulse {
-  0%, 100% { box-shadow: 0 0 6px var(--sidebar-room-compaction-glow-shadow); }
-  50% { box-shadow: 0 0 10px var(--sidebar-room-compaction-glow-shadow); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sidebar-room-reason-compacting) 0%, transparent); }
+  50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--sidebar-room-reason-compacting) 14%, transparent); }
 }
 .sidebar-room-glow {
-  animation: sidebar-room-glow-pulse 2s ease-in-out infinite;
+  animation: sidebar-room-glow-pulse 2.4s ease-in-out infinite;
 }
 .sidebar-room-compaction-glow {
   animation-name: sidebar-room-compaction-glow-pulse;

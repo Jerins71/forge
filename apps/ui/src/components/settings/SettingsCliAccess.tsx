@@ -46,7 +46,7 @@ function KeyStatusBadge({ descriptor }: { descriptor: CliAccessKeyDescriptor }) 
     return (
       <Badge
         variant="outline"
-        className="gap-1 border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400"
+        className="gap-1 border-danger/30 bg-danger/10 text-danger"
       >
         Revoked
       </Badge>
@@ -55,7 +55,7 @@ function KeyStatusBadge({ descriptor }: { descriptor: CliAccessKeyDescriptor }) 
   return (
     <Badge
       variant="outline"
-      className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+      className="gap-1 border-success/30 bg-success/10 text-success"
     >
       <Check className="size-3" />
       Active
@@ -109,9 +109,9 @@ function OneTimeKeyBanner({
   }, [secret.plaintextKey])
 
   return (
-    <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
+    <div className="rounded-md border border-attention/30 bg-attention/5 p-4 space-y-3">
       <div className="flex items-start gap-2">
-        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-attention" />
         <div className="space-y-1">
           <p className="text-sm font-medium text-foreground">
             Copy your API key now
@@ -349,8 +349,8 @@ export function SettingsCliAccess({
         description="Manage API keys for the Forge CLI. Keys authenticate headless CLI connections to this backend."
       >
         {/* LAN warning */}
-        <div className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 p-3">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
+        <div className="flex items-start gap-2 rounded-md border border-attention/20 bg-attention/5 p-3">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-attention" />
           <p className="text-xs text-muted-foreground">
             This backend may be reachable over your local network. CLI keys authorize
             full session access to any device that can reach this server.
@@ -359,8 +359,8 @@ export function SettingsCliAccess({
 
         {/* Error banner */}
         {error && (
-          <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3">
-            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          <div className="rounded-md border border-danger/30 bg-danger/5 p-3">
+            <p className="text-sm text-danger">{error}</p>
           </div>
         )}
 
@@ -532,14 +532,14 @@ function CliInstallSection({ wsUrl }: { wsUrl: string }) {
             <div
               className={`rounded-md border p-3 space-y-2 ${
                 installResult.success
-                  ? 'border-emerald-500/30 bg-emerald-500/5'
-                  : 'border-red-500/30 bg-red-500/5'
+                  ? 'border-success/30 bg-success/5'
+                  : 'border-danger/30 bg-danger/5'
               }`}
             >
               {installResult.success ? (
                 <>
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
+                    <CheckCircle2 className="size-4 shrink-0 text-success" />
                     <span className="text-sm font-medium text-foreground">CLI installed</span>
                   </div>
                   <div className="space-y-1 pl-6">
@@ -550,13 +550,13 @@ function CliInstallSection({ wsUrl }: { wsUrl: string }) {
                       </code>
                     </p>
                     {installResult.pathIncluded ? (
-                      <p className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                      <p className="flex items-center gap-1 text-xs text-success">
                         <Check className="size-3" />
                         Already on PATH — run <code className="rounded bg-muted/60 px-1 py-0.5 font-mono text-[11px]">forge --version</code> to verify.
                       </p>
                     ) : (
                       <div className="space-y-1.5">
-                        <p className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                        <p className="flex items-center gap-1 text-xs text-attention">
                           <AlertTriangle className="size-3" />
                           Not on PATH yet. Add the directory to use <code className="font-mono">forge</code> from any terminal:
                         </p>
@@ -571,12 +571,12 @@ function CliInstallSection({ wsUrl }: { wsUrl: string }) {
                   {verifyResult && (
                     <div className="pl-6">
                       {verifyResult.ok ? (
-                        <p className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                        <p className="flex items-center gap-1 text-xs text-success">
                           <Terminal className="size-3" />
                           Verified: forge {verifyResult.output}
                         </p>
                       ) : (
-                        <p className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                        <p className="flex items-center gap-1 text-xs text-attention">
                           <XCircle className="size-3" />
                           Verification issue: {verifyResult.output}
                         </p>
@@ -586,8 +586,8 @@ function CliInstallSection({ wsUrl }: { wsUrl: string }) {
                 </>
               ) : (
                 <div className="flex items-center gap-2">
-                  <XCircle className="size-4 shrink-0 text-red-500" />
-                  <span className="text-sm text-red-600 dark:text-red-400">
+                  <XCircle className="size-4 shrink-0 text-danger" />
+                  <span className="text-sm text-danger">
                     {installResult.error ?? 'Installation failed'}
                   </span>
                 </div>

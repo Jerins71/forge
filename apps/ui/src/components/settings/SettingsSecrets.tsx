@@ -46,7 +46,7 @@ export function SettingsSecrets({ apiClient, profiles, currentProfileId }: Setti
     return (
       <div className="rounded-md border border-border bg-card/40 p-4">
         <div className="flex items-start gap-2">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-attention" />
           <div className="space-y-1">
             <h2 className="text-sm font-semibold">Local Builder only</h2>
             <p className="text-sm text-muted-foreground">
@@ -356,7 +356,7 @@ function BuilderSecretsSettings({
       {notice ? (
         <div
           role="status"
-          className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-300"
+          className="rounded-md border border-success/30 bg-success/5 p-3 text-sm text-success"
         >
           {notice}
         </div>

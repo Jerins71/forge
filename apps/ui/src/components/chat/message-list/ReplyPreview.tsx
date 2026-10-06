@@ -56,7 +56,7 @@ export function ReplyPreview(props: ReplyPreviewProps) {
         className={cn(
           'mt-0.5 border-l-2 pl-2',
           tone === 'user-message'
-            ? 'border-primary-foreground/35'
+            ? 'border-foreground/25'
             : 'border-primary/35',
         )}
       >
@@ -73,7 +73,7 @@ export function ReplyPreview(props: ReplyPreviewProps) {
         <button
           type="button"
           onClick={props.onClear}
-          className="ml-2 inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="ml-2 inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           aria-label="Clear reply target"
           title="Clear reply target"
         >
@@ -86,13 +86,13 @@ export function ReplyPreview(props: ReplyPreviewProps) {
   const baseClassName = cn(
     'flex min-w-0 items-start rounded-lg px-2.5 py-2',
     tone === 'user-message'
-      ? 'bg-primary-foreground/10 text-primary-foreground/90'
-      : 'bg-muted/60 text-muted-foreground',
+      ? 'bg-foreground/[0.05] text-muted-foreground'
+      : 'glass-inset text-muted-foreground',
     disabled && 'cursor-not-allowed opacity-70',
     className,
   )
 
-  const interactiveHoverClass = tone === 'user-message' ? 'hover:bg-primary-foreground/15' : 'hover:bg-muted'
+  const interactiveHoverClass = tone === 'user-message' ? 'hover:bg-foreground/[0.08]' : 'hover:bg-foreground/[0.06]'
 
   if (interactive) {
     return (

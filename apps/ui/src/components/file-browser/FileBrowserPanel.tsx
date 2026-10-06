@@ -131,8 +131,10 @@ export function FileBrowserPanel({
         ref={panelRef}
         onPointerDown={onSelectionPointerDown}
         className={cn(
-          'flex h-full shrink-0 flex-col bg-background',
-          resizeHandlePlacement === 'left' ? 'border-l border-border/80' : 'border-r border-border/80',
+          // Shrinks (down to 300px) instead of pushing the chat column off-screen.
+          'glass my-2 flex h-full max-h-[calc(100%-1rem)] min-w-[300px] shrink flex-col overflow-hidden rounded-2xl',
+          resizeHandlePlacement === 'left' ? 'mr-2' : 'ml-2',
+          'max-md:m-0 max-md:max-h-none max-md:rounded-none',
           desktopOnly && 'max-md:hidden',
           mobileOnly && 'md:hidden',
         )}
@@ -149,21 +151,21 @@ export function FileBrowserPanel({
         />
 
         {/* Header */}
-        <header className="flex h-[62px] shrink-0 items-center justify-between gap-3 border-b border-border/80 bg-card/80 px-5">
+        <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-hairline px-4">
           <div className="flex min-w-0 flex-1 items-center gap-3">
-            <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.05] text-muted-foreground">
               <FileIcon className="size-3.5" aria-hidden="true" />
             </span>
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
-                <h2 className="truncate text-sm font-bold text-foreground">{fileName}</h2>
+                <h2 className="truncate text-[13px] font-medium text-foreground">{fileName}</h2>
                 {editSession?.state.dirty ? (
-                  <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                  <span className="shrink-0 rounded-full border border-attention/25 bg-attention-surface px-1.5 py-0.5 text-[10px] font-medium text-attention">
                     Unsaved
                   </span>
                 ) : null}
               </div>
-              <p className="truncate font-mono text-[11px] text-muted-foreground">{filePath}</p>
+              <p className="truncate font-mono text-[11px] text-subtle-foreground">{filePath}</p>
             </div>
           </div>
 
@@ -172,9 +174,9 @@ export function FileBrowserPanel({
             variant="ghost"
             size="icon"
             className={cn(
-              'size-8 rounded-md shrink-0',
+              'size-8 rounded-lg shrink-0',
               'text-muted-foreground transition-colors',
-              'hover:bg-muted hover:text-foreground',
+              'hover:bg-foreground/[0.05] hover:text-foreground',
             )}
             onClick={onClose}
             aria-label="Close file viewer"

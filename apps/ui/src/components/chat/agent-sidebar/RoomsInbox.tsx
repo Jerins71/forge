@@ -74,7 +74,7 @@ export function RoomsInbox({
   if (isEmpty) {
     return (
       <section className="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-10 text-center" data-testid="rooms-inbox-empty">
-        <Inbox className="size-5 text-muted-foreground" aria-hidden="true" />
+        <Inbox className="size-5 text-subtle-foreground" strokeWidth={1.75} aria-hidden="true" />
         <div>
           <p className="text-sm font-medium text-sidebar-foreground">Your Inbox is clear</p>
           <p className="mt-1 text-xs text-muted-foreground">Start a project to begin working.</p>
@@ -82,7 +82,7 @@ export function RoomsInbox({
         <button
           type="button"
           onClick={onNewProject}
-          className="min-h-9 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+          className="min-h-9 rounded-lg bg-primary px-3.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           New Project
         </button>
@@ -110,7 +110,7 @@ export function RoomsInbox({
           {dismissError ? (
             <p
               role="alert"
-              className="mx-2 mb-1 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive"
+              className="mx-1 mb-1 rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive"
             >
               {dismissError}
             </p>
@@ -179,8 +179,8 @@ export function RoomsInbox({
                   type="button"
                   onClick={() => setRecentExpanded(true)}
                   className={cn(
-                    'flex items-center gap-1 rounded-md py-1 text-left text-[11px] text-muted-foreground/70 transition-colors',
-                    'hover:text-muted-foreground',
+                    'flex items-center gap-1 rounded-md py-1 text-left font-mono text-[11px] text-subtle-foreground transition-colors',
+                    'hover:text-foreground',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
                   )}
                 >
@@ -193,8 +193,8 @@ export function RoomsInbox({
                   type="button"
                   onClick={() => setRecentExpanded(false)}
                   className={cn(
-                    'flex items-center gap-1 rounded-md py-1 text-left text-[11px] text-muted-foreground/70 transition-colors',
-                    'hover:text-muted-foreground',
+                    'flex items-center gap-1 rounded-md py-1 text-left font-mono text-[11px] text-subtle-foreground transition-colors',
+                    'hover:text-foreground',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
                   )}
                 >
@@ -327,7 +327,7 @@ function InboxSessionRow({
   const row = (
     <div
       className={cn(
-        'sidebar-room-inbox-row group focus-within:ring-2 focus-within:ring-sidebar-ring/60',
+        'sidebar-room-inbox-row group focus-within:ring-2 focus-within:ring-ring/50',
         isSelected
           ? section === 'active'
             ? 'sidebar-room-row-selected'
@@ -340,7 +340,7 @@ function InboxSessionRow({
         data-inbox-row={`${session.identity.originId}::${session.identity.sessionAgentId}`}
         aria-current={isSelected ? 'true' : undefined}
         onClick={() => onSelectSession(session.identity)}
-        className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left focus-visible:outline-none"
+        className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
         <SidebarRoomAvatar
           label={session.profileName}

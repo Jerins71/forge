@@ -261,7 +261,7 @@ describe('AgentSidebar', () => {
 
     const sidebar = getDesktopSidebar()
     expect(sidebar.querySelector('[data-testid="sidebar-command-row"]')).toBeNull()
-    expect(sidebar.querySelector('input[placeholder="Search sessions… ⌘K"]')).not.toBeNull()
+    expect(sidebar.querySelector('input[placeholder="Filter sessions"]')).not.toBeNull()
     expect(sidebar.querySelector('[aria-label="Project view: All projects"]')).not.toBeNull()
   })
 
@@ -276,10 +276,10 @@ describe('AgentSidebar', () => {
     const sidebar = getDesktopSidebar()
     const commandRow = sidebar.querySelector('[data-testid="sidebar-command-row"]')
     expect(commandRow).not.toBeNull()
-    expect(commandRow?.querySelector('input[placeholder="Search…"]')).not.toBeNull()
+    expect(commandRow?.querySelector('input[placeholder="Filter sessions"]')).not.toBeNull()
     expect(commandRow?.querySelector('[aria-label="Project view: All projects"]')).not.toBeNull()
     expect(sidebar.querySelectorAll('[aria-label="Project view: All projects"]')).toHaveLength(1)
-    expect(sidebar.querySelector('[data-testid="rooms-sidebar-header"] button[aria-label="Add project"]')?.className).toContain('size-7')
+    expect(sidebar.querySelector('[data-testid="rooms-sidebar-header"] button[aria-label="Add project"]')?.className).toContain('size-8')
     expect(getByRole(sidebar, 'button', { name: /builder/i })).toBeTruthy()
     expect(getByRole(sidebar, 'button', { name: /collab/i })).toBeTruthy()
   })
@@ -565,7 +565,7 @@ describe('AgentSidebar', () => {
 
     const sidebar = getDesktopSidebar()
     const projects = sidebar.querySelector('[data-inbox-section="projects"]') as HTMLElement
-    const searchInput = sidebar.querySelector('input[placeholder^="Search"]') as HTMLInputElement
+    const searchInput = sidebar.querySelector('input[placeholder^="Filter"]') as HTMLInputElement
     fireEvent.change(searchInput, { target: { value: 'Needle Session' } })
     await waitFor(() => {
       expect(queryByText(projects, 'Plain Project')).toBeTruthy()
@@ -617,7 +617,7 @@ describe('AgentSidebar', () => {
 
     const sidebar = getDesktopSidebar()
     const projects = sidebar.querySelector('[data-inbox-section="projects"]') as HTMLElement
-    const searchInput = sidebar.querySelector('input[placeholder^="Search"]') as HTMLInputElement
+    const searchInput = sidebar.querySelector('input[placeholder^="Filter"]') as HTMLInputElement
     fireEvent.change(searchInput, { target: { value: 'repo-docs' } })
     await waitFor(() => {
       expect(queryByText(projects, 'Project A')).toBeTruthy()
@@ -1749,7 +1749,7 @@ describe('AgentSidebar', () => {
 
     const sidebar = getDesktopSidebar()
     expect(sidebar.querySelector('[data-testid="remote-origin-section-remote-empty"]')).not.toBeNull()
-    const searchInput = sidebar.querySelector('input[placeholder^="Search"]') as HTMLInputElement
+    const searchInput = sidebar.querySelector('input[placeholder^="Filter"]') as HTMLInputElement
 
     fireEvent.change(searchInput, { target: { value: 'Needle' } })
     await waitFor(() => {
@@ -1883,7 +1883,7 @@ describe('AgentSidebar', () => {
     await flushEffects()
 
     const sidebar = getDesktopSidebar()
-    const searchInput = sidebar.querySelector('input[placeholder^="Search"]') as HTMLInputElement
+    const searchInput = sidebar.querySelector('input[placeholder^="Filter"]') as HTMLInputElement
     expect(searchInput).toBeTruthy()
 
     for (const query of ['repo-docs', 'Repository Docs', 'handbook maintenance']) {

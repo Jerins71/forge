@@ -32,7 +32,7 @@ function BrokerStatusBadge({ settings }: { settings: OpenAIBrokerSettingsState }
   const status = settings.broker.status
   if (settings.effectiveMode === 'central_broker' && settings.broker.configured && status?.ok) {
     return (
-      <Badge variant="outline" className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+      <Badge variant="outline" className="gap-1 border-success/30 bg-success/10 text-success">
         <Check className="size-3" />
         Forge Auth broker active
       </Badge>
@@ -41,7 +41,7 @@ function BrokerStatusBadge({ settings }: { settings: OpenAIBrokerSettingsState }
 
   if (settings.effectiveMode === 'central_broker' && settings.broker.configured) {
     return (
-      <Badge variant="outline" className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400">
+      <Badge variant="outline" className="gap-1 border-attention/30 bg-attention/10 text-attention">
         <AlertTriangle className="size-3" />
         Forge Auth broker degraded
       </Badge>
@@ -295,7 +295,7 @@ export function OpenAIBrokerAuthPanel({
       </div>
 
       {envLocked ? (
-        <div className="mt-3 rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
+        <div className="mt-3 rounded-md border border-attention/20 bg-attention/10 px-3 py-2 text-[11px] text-attention">
           OpenAI/Codex auth is controlled by environment variables. Remove `FORGE_OPENAI_CODEX_AUTH_MODE` to edit Forge Auth broker settings here.
           If `FORGE_OPENAI_CODEX_AUTH_MODE=central_broker` is set, Forge uses only `FORGE_OPENAI_AUTH_BROKER_URL` and `FORGE_OPENAI_AUTH_BROKER_TOKEN` from the environment; saved Forge Auth broker URL/token values are ignored.
         </div>

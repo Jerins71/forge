@@ -107,7 +107,7 @@ export function SettingsProjectResources({ managers, previewSession, projectCont
         {snapshot && (
           <CardContent className="space-y-3 text-sm">
             {snapshot.warning && (
-              <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-300">
+              <div className="flex items-start gap-2 rounded-md border border-attention/30 bg-attention/10 p-3 text-attention">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <div><div className="font-medium">Repository unavailable</div><div className="text-xs">{snapshot.warning}</div></div>
               </div>
@@ -117,7 +117,7 @@ export function SettingsProjectResources({ managers, previewSession, projectCont
             <KeyValue label="Source" value={snapshot.source} />
             <KeyValue label="Signature" value={snapshot.signature.slice(0, 12)} />
             {snapshot.override && !snapshot.override.valid && (
-              <div className="flex items-center gap-2 text-amber-600"><AlertTriangle className="h-4 w-4" />Override invalid: {snapshot.override.error}</div>
+              <div className="flex items-center gap-2 text-attention"><AlertTriangle className="h-4 w-4" />Override invalid: {snapshot.override.error}</div>
             )}
             <Separator />
             <div className="space-y-2">
@@ -166,7 +166,7 @@ export function SettingsProjectResources({ managers, previewSession, projectCont
                   <div key={`${surface.kind}:${surface.path}`} className="rounded-md border p-2">
                     <div className="flex items-center justify-between gap-2"><span className="font-medium">{formatSurfaceKind(surface.kind)}</span><Badge variant={surface.exists ? 'default' : 'secondary'}>{surface.exists ? 'found' : 'missing'}</Badge></div>
                     <div className="mt-1 break-all text-xs text-muted-foreground">{surface.path}</div>
-                    {surface.compatibilityPolicy && <div className="mt-1 text-xs text-amber-600">Compatibility surface. It is active only when it is inside the selected trusted .forge directory; use repo-root .forge paths for new resources.</div>}
+                    {surface.compatibilityPolicy && <div className="mt-1 text-xs text-attention">Compatibility surface. It is active only when it is inside the selected trusted .forge directory; use repo-root .forge paths for new resources.</div>}
                   </div>
                 ))}
               </div>
@@ -247,7 +247,7 @@ function ProjectAgentInventory({
       </CardHeader>
       <CardContent className="space-y-3">
         {section.problems?.map((problem, index) => (
-          <div key={index} className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
+          <div key={index} className="flex items-start gap-2 rounded-md border border-attention/30 bg-attention/10 p-2 text-xs text-attention">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>{problem.message}</span>
           </div>

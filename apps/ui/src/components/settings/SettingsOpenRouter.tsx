@@ -128,7 +128,7 @@ function SettingsOpenRouterContent({
         <div className="flex items-center gap-3">
           {!loading ? (
             isConfigured ? (
-              <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+              <Badge variant="outline" className="border-success/30 bg-success/10 text-success">
                 Configured
               </Badge>
             ) : (

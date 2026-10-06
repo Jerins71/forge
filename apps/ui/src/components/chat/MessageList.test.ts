@@ -217,7 +217,7 @@ describe('MessageList choice requests', () => {
     flushSync(() => submit?.click())
 
     expect(onChoiceSubmit).toHaveBeenCalled()
-    expect(container.textContent).toContain('Input requested')
+    expect(container.textContent).toContain('Decision needed')
     expect(container.textContent).toContain('Pick one')
   })
 })

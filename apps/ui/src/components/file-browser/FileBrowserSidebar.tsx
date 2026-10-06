@@ -269,13 +269,14 @@ export function FileBrowserSidebar({
 
       <div
         className={cn(
-          'flex h-full shrink-0 flex-col bg-card/50',
-          desktopPlacement === 'left' ? 'md:border-r md:border-border/80' : 'md:border-l md:border-border/80',
+          'glass flex h-full shrink-0 flex-col overflow-hidden',
+          isOpen && 'md:my-2 md:max-h-[calc(100%-1rem)] md:rounded-2xl',
+          isOpen && (desktopPlacement === 'left' ? 'md:ml-2' : 'md:mr-2'),
           'transition-opacity duration-200 ease-out',
           desktopOnly && 'max-md:hidden',
           mobileOnly && 'md:hidden',
           isOpen
-            ? 'max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-full max-md:border-l-0 md:opacity-100'
+            ? 'max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-full max-md:rounded-none md:opacity-100'
             : 'w-0 opacity-0 overflow-hidden max-md:hidden',
           isOpen && 'opacity-100',
         )}
@@ -284,20 +285,20 @@ export function FileBrowserSidebar({
         aria-hidden={!isOpen}
       >
       {/* Header */}
-      <div className="flex h-[62px] shrink-0 items-center gap-2 border-b border-border/80 px-3">
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline px-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
-          <span className="text-[11px] font-medium text-foreground">Files</span>
+          <span className="text-[13px] font-medium text-foreground">Files</span>
 
           {repoName ? (
             <>
               <span className="text-muted-foreground/30" aria-hidden>·</span>
-              <span className="truncate text-[11px] text-muted-foreground">{repoName}</span>
+              <span className="truncate font-mono text-[11px] text-subtle-foreground">{repoName}</span>
             </>
           ) : null}
 
           {branch ? (
-            <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/70">
+            <span className="inline-flex items-center gap-0.5 font-mono text-[11px] text-subtle-foreground">
               <GitBranch className="size-2.5" />
               <span className="truncate max-w-[60px]">{branch}</span>
             </span>
@@ -311,7 +312,7 @@ export function FileBrowserSidebar({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="size-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                  className="size-7 shrink-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                   onClick={handleSeedProjectForge}
                   disabled={seedStatus === 'saving'}
                   aria-label="Create .forge project resources"
@@ -331,7 +332,7 @@ export function FileBrowserSidebar({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="size-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                  className="size-7 shrink-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                   onClick={() => handleRequestCreateFile('')}
                   aria-label="New file"
                 >
@@ -349,7 +350,7 @@ export function FileBrowserSidebar({
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                className="size-7 shrink-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                 onClick={() => handleRefresh()}
                 disabled={isRefreshing}
                 aria-label="Refresh"
@@ -366,7 +367,7 @@ export function FileBrowserSidebar({
         <Button
           variant="ghost"
           size="icon"
-          className="size-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+          className="size-7 shrink-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
           onClick={onClose}
           aria-label="Close file browser"
         >
@@ -375,7 +376,7 @@ export function FileBrowserSidebar({
       </div>
 
       {mutationError ? (
-        <div className="border-b border-border/80 px-3 py-2 text-[11px] text-destructive">
+        <div className="border-b border-hairline px-3 py-2 text-[11px] text-danger">
           {mutationError}
         </div>
       ) : null}
@@ -390,17 +391,17 @@ export function FileBrowserSidebar({
       ) : null}
 
       {worktreeContext ? (
-        <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-900 dark:text-amber-200">
+        <div className="border-b border-attention/25 bg-attention-surface px-3 py-2 text-[11px] text-attention">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 space-y-1">
               <div className="flex items-center gap-1.5 font-medium">
                 <HardDrive className="size-3 shrink-0" />
                 <span>Browsing linked worktree</span>
               </div>
-              <p className="truncate text-amber-900/80 dark:text-amber-100/80" title={worktreeContext.worktreePath}>
+              <p className="truncate text-attention/80" title={worktreeContext.worktreePath}>
                 {worktreeContext.worktreePath}
               </p>
-              <p className="text-amber-900/70 dark:text-amber-100/70">
+              <p className="text-attention/70">
                 {worktreeContext.branch ?? 'detached HEAD'} · Chat session CWD unchanged
               </p>
             </div>
@@ -409,7 +410,7 @@ export function FileBrowserSidebar({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-6 shrink-0 px-2 text-[10px] text-amber-900 hover:bg-amber-500/20 dark:text-amber-100"
+                className="h-6 shrink-0 px-2 text-[10px] text-attention hover:bg-attention/15"
                 onClick={onClearWorktreeContext}
               >
                 Use session
@@ -437,7 +438,7 @@ export function FileBrowserSidebar({
             {Array.from({ length: 12 }).map((_, i) => (
               <div
                 key={i}
-                className="h-7 animate-pulse rounded bg-muted/40"
+                className="h-7 animate-pulse rounded-md bg-foreground/[0.04]"
                 style={{ width: `${SKELETON_WIDTHS[i]}%` }}
               />
             ))}

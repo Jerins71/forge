@@ -228,14 +228,14 @@ function UpdateStatusDisplay({
 
         {type === 'not-available' && (
           <>
-            <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
+            <CheckCircle2 className="size-4 shrink-0 text-success" />
             <span className="text-sm text-muted-foreground">You&apos;re up to date</span>
           </>
         )}
 
         {type === 'available' && status?.type === 'available' && (
           <>
-            <Download className="size-4 shrink-0 text-blue-500" />
+            <Download className="size-4 shrink-0 text-primary" />
             <span className="text-sm">
               Update available: <span className="font-mono font-medium">v{status.version}</span>
             </span>
@@ -244,7 +244,7 @@ function UpdateStatusDisplay({
 
         {type === 'downloading' && status?.type === 'downloading' && (
           <>
-            <Loader2 className="size-4 shrink-0 animate-spin text-blue-500" />
+            <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
             <span className="text-sm text-muted-foreground">
               Downloading update… {status.percent != null ? `${status.percent}%` : ''}
             </span>
@@ -253,7 +253,7 @@ function UpdateStatusDisplay({
 
         {type === 'downloaded' && status?.type === 'downloaded' && (
           <>
-            <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
+            <CheckCircle2 className="size-4 shrink-0 text-success" />
             <span className="text-sm">
               Update ready — <span className="font-mono font-medium">v{status.version}</span>
             </span>
@@ -278,7 +278,7 @@ function UpdateStatusDisplay({
       {type === 'downloading' && status?.type === 'downloading' && status.percent != null && (
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <div
-            className="h-full rounded-full bg-blue-500 transition-all duration-300"
+            className="h-full rounded-full bg-primary transition-all duration-300"
             style={{ width: `${Math.min(status.percent, 100)}%` }}
           />
         </div>

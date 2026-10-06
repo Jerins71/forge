@@ -231,11 +231,11 @@ export function HistoryView({
 
   return (
     <div className="flex h-full">
-      <div className="shrink-0 border-r border-border/60" style={{ width: commitListWidth }}>
+      <div className="shrink-0 border-r border-hairline" style={{ width: commitListWidth }}>
         <div className="flex h-full flex-col">
           <SourceControlActivityTabs activeTab="history" onTabChange={onActivityTabChange} />
           {isKnowledgeMode && !historyEmptyState ? (
-            <div className="border-b border-border/60 p-2">
+            <div className="border-b border-hairline p-2">
               <div className="flex flex-wrap gap-1">
                 {KNOWLEDGE_QUICK_FILTERS.map((option) => {
                   const active = option.id === quickFilter
@@ -248,7 +248,7 @@ export function HistoryView({
                         'inline-flex h-6 items-center rounded-full border px-2 text-[10px] font-medium transition-colors',
                         active
                           ? 'border-primary/40 bg-primary/10 text-primary'
-                          : 'border-border/60 bg-muted/30 text-muted-foreground hover:border-border hover:text-foreground',
+                          : 'border-hairline bg-foreground/[0.03] text-muted-foreground hover:border-border hover:text-foreground',
                       )}
                       aria-pressed={active}
                       onClick={() => setQuickFilter(option.id)}
@@ -289,7 +289,7 @@ export function HistoryView({
       </div>
 
       {!historyEmptyState ? (
-        <div className="shrink-0 border-r border-border/60" style={{ width: fileListWidth }}>
+        <div className="shrink-0 border-r border-hairline" style={{ width: fileListWidth }}>
           {selectedSha ? (
             <FileList
               files={commitFiles}

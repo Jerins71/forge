@@ -138,9 +138,9 @@ function ChannelToggleButton({
     <button
       type="button"
       className={cn(
-        'h-[22px] min-w-10 rounded-[4px] px-2 text-[11px] font-medium transition-colors',
+        'h-[20px] min-w-10 rounded-md px-2 text-[11px] font-medium transition-colors',
         active
-          ? 'bg-background text-foreground shadow-sm'
+          ? 'bg-foreground/[0.08] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
           : 'text-muted-foreground hover:text-foreground',
       )}
       onClick={onClick}
@@ -237,10 +237,10 @@ export function ChatHeader({
   return (
     <header
       className={cn(
-        'sticky top-0 z-10 flex h-[62px] w-full shrink-0 items-center justify-between gap-2 overflow-hidden border-b bg-card/80 px-2 backdrop-blur md:px-4',
+        'sticky top-0 z-10 flex h-[62px] w-full shrink-0 items-center justify-between gap-2 overflow-hidden border-b bg-transparent px-3 md:px-6',
         isAgentCreator
           ? 'border-b-2 border-violet-500/40'
-          : 'border-border/80',
+          : 'border-hairline',
       )}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2 md:gap-3">
@@ -269,29 +269,22 @@ export function ChatHeader({
           className="relative inline-flex size-5 shrink-0 items-center justify-center"
           aria-label={`Agent status: ${statusLabel.toLowerCase()}`}
         >
-          <span
-            className={cn(
-              'absolute inline-flex size-4 rounded-full',
-              isStreaming
-                ? isAgentCreator ? 'animate-ping bg-violet-500/45' : 'animate-ping bg-emerald-500/45'
-                : 'bg-transparent',
-            )}
-            aria-hidden="true"
-          />
-          <span
-            className={cn(
-              'relative inline-flex size-2.5 rounded-full',
-              isStreaming
-                ? isAgentCreator ? 'bg-violet-500' : 'bg-emerald-500'
-                : 'bg-muted-foreground/45',
-            )}
-            aria-hidden="true"
-          />
+          {isStreaming && !isAgentCreator ? (
+            <span className="live-dot live-dot-animated" aria-hidden="true" />
+          ) : (
+            <span
+              className={cn(
+                'relative inline-flex size-[7px] rounded-full',
+                isStreaming ? 'bg-violet-500' : 'bg-muted-foreground/45',
+              )}
+              aria-hidden="true"
+            />
+          )}
         </div>
 
         <div className="flex min-w-0 items-center gap-1.5">
           <h1
-            className="min-w-0 truncate text-sm font-bold text-foreground"
+            className="min-w-0 truncate text-[15px] font-medium tracking-[-0.01em] text-foreground"
             title={activeAgentId ?? activeAgentLabel}
           >
             {/* Mobile: show only session label if available, Desktop: full breadcrumb */}
@@ -346,7 +339,7 @@ export function ChatHeader({
           <span aria-hidden="true" className="hidden shrink-0 text-muted-foreground md:inline">
             ·
           </span>
-          <span className="hidden shrink-0 whitespace-nowrap text-xs font-mono text-muted-foreground md:inline">
+          <span className="hidden shrink-0 whitespace-nowrap font-mono text-[11.5px] text-subtle-foreground md:inline">
             {statusLabel}
             {durationLabel ? <span className="tabular-nums"> · {durationLabel}</span> : null}
           </span>
@@ -385,7 +378,7 @@ export function ChatHeader({
 
       <div
         className={cn(
-          'flex shrink-0 items-center gap-1.5',
+          'glass flex shrink-0 items-center gap-1 rounded-xl p-1',
           isFramelessDesktop && '[-webkit-app-region:no-drag]',
         )}
       >
@@ -398,7 +391,7 @@ export function ChatHeader({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="size-7 shrink-0 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+                    className="size-[30px] shrink-0 rounded-lg text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
                     onClick={() => setPromptOpen(true)}
                     aria-label="View initial model input"
                   >
@@ -412,7 +405,7 @@ export function ChatHeader({
             </TooltipProvider>
           ) : null}
 
-          <div className="inline-flex h-7 items-center rounded-md border border-border/60 bg-muted/30 p-0.5">
+          <div className="glass-inset inline-flex h-[26px] items-center rounded-lg p-0.5">
             <ChannelToggleButton
               label="Web"
               active={channelView === 'web'}
@@ -432,7 +425,7 @@ export function ChatHeader({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="size-7 shrink-0 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+                    className="size-[30px] shrink-0 rounded-lg text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
                     onClick={onOpenSessionAudit}
                     aria-label="Open session audit log"
                   >
@@ -464,7 +457,7 @@ export function ChatHeader({
         {/* ── Pinned message navigator ── */}
         {pinnedCount > 0 && pinnedMessageIds && onScrollToMessage && onClearAllPins ? (
           <>
-            <Separator orientation="vertical" className="hidden sm:block mx-0.5 h-4 bg-border/60" />
+            <Separator orientation="vertical" className="hidden sm:block mx-0.5 h-[18px] bg-hairline" />
             <PinNavigator
               pinnedMessageIds={pinnedMessageIds}
               onScrollToMessage={onScrollToMessage}
@@ -476,14 +469,14 @@ export function ChatHeader({
         {/* ── Three-dots dropdown: secondary actions ── */}
         {(showCompact || showSmartCompact || showNewChat || showStopAll || (showSessionAudit && onOpenSessionAudit)) ? (
           <>
-            <Separator orientation="vertical" className="hidden sm:block mx-0.5 h-4 bg-border/60" />
+            <Separator orientation="vertical" className="hidden sm:block mx-0.5 h-[18px] bg-hairline" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
                   className={cn(
-                    "size-9 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground md:size-7",
+                    "size-9 shrink-0 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground md:size-[30px]",
                     anyCompactionInProgress && "relative"
                   )}
                   aria-label={anyCompactionInProgress ? "Compaction in progress" : "More actions"}
@@ -580,10 +573,10 @@ export function ChatHeader({
                     variant="ghost"
                     size="icon"
                     className={cn(
-                      'relative size-7 shrink-0 transition-colors',
+                      'relative size-[30px] shrink-0 rounded-lg transition-colors',
                       isTerminalPanelOpen
-                        ? 'bg-accent text-foreground'
-                        : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
+                        ? 'bg-foreground/[0.07] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+                        : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
                     )}
                     onClick={onToggleTerminalPanel}
                     aria-label={isTerminalPanelOpen ? 'Hide terminal panel' : 'Open terminal panel'}
@@ -611,10 +604,10 @@ export function ChatHeader({
                     variant="ghost"
                     size="icon"
                     className={cn(
-                      'size-7 shrink-0 transition-colors',
+                      'size-[30px] shrink-0 rounded-lg transition-colors',
                       isFileBrowserOpen
-                        ? 'bg-accent text-foreground'
-                        : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
+                        ? 'bg-foreground/[0.07] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+                        : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
                     )}
                     onClick={onToggleFileBrowser}
                     aria-label={isFileBrowserOpen ? 'Close file browser' : 'Browse Files'}
@@ -636,7 +629,7 @@ export function ChatHeader({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="relative size-7 shrink-0 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+                    className="relative size-[30px] shrink-0 rounded-lg text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
                     onClick={onOpenDiffViewer}
                     aria-label="Source Control (⌘⇧D)"
                   >
@@ -657,10 +650,10 @@ export function ChatHeader({
                   variant="ghost"
                   size="icon"
                   className={cn(
-                    'size-7 shrink-0 transition-colors',
+                    'size-[30px] shrink-0 rounded-lg transition-colors',
                     isArtifactsPanelOpen
-                      ? 'bg-accent text-foreground'
-                      : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
+                      ? 'bg-foreground/[0.07] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+                      : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
                   )}
                   onClick={onToggleArtifactsPanel}
                   aria-label={isArtifactsPanelOpen ? `Close ${panelLabel.toLowerCase()}` : panelLabel}

@@ -48,8 +48,8 @@ describe('AgentMessageRow project-agent exchanges', () => {
 
     const outgoing = container.querySelector('[data-project-agent-direction="outgoing"]')
     expect(outgoing?.getAttribute('data-project-agent-tone')).toBe('blue')
-    expect(outgoing?.firstElementChild?.className).toContain('bg-blue-600')
-    expect(outgoing?.firstElementChild?.className).not.toContain('bg-sky-50')
+    expect(outgoing?.firstElementChild?.className).toContain('bg-foreground/[0.06]')
+    expect(outgoing?.firstElementChild?.className).not.toContain('glass-inset')
     expect(outgoing?.textContent).toContain('Manager → Documentation')
 
     renderMessage({
@@ -65,8 +65,8 @@ describe('AgentMessageRow project-agent exchanges', () => {
 
     const incoming = container.querySelector('[data-project-agent-direction="incoming"]')
     expect(incoming?.getAttribute('data-project-agent-tone')).toBe('sky')
-    expect(incoming?.firstElementChild?.className).toContain('bg-sky-50')
-    expect(incoming?.firstElementChild?.className).not.toContain('bg-blue-600')
+    expect(incoming?.firstElementChild?.className).toContain('glass-inset')
+    expect(incoming?.firstElementChild?.className).not.toContain('bg-foreground/[0.06]')
     expect(incoming?.textContent).toContain('Documentation → Manager')
   })
 })

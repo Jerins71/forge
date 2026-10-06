@@ -141,7 +141,7 @@ export function ChatWorkspace({
       ) : null}
 
       {lastSuccess ? (
-        <div className="border-b border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400">
+        <div className="border-b border-success/20 bg-success/10 px-3 py-2 text-xs text-success">
           {lastSuccess}
         </div>
       ) : null}
@@ -201,7 +201,7 @@ function RestartRecoveryBanner({
   const workerCount = snapshot.interruptedWorkers.length
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+    <div className="flex flex-wrap items-center gap-2 border-b border-attention/25 bg-attention-surface px-3 py-2 text-xs text-foreground">
       <span className="font-medium">
         Restart interrupted {sessionIds.size} {sessionIds.size === 1 ? 'session' : 'sessions'} / {workerCount}{' '}
         {workerCount === 1 ? 'worker' : 'workers'}
@@ -209,14 +209,14 @@ function RestartRecoveryBanner({
       <div className="ml-auto flex items-center gap-2">
         <button
           type="button"
-          className="rounded border border-amber-300/40 px-2 py-1 text-amber-50 hover:bg-amber-300/15"
+          className="rounded-lg border border-attention/30 px-2 py-1 text-foreground hover:bg-attention/10"
           onClick={onResume}
         >
           Resume all
         </button>
         <button
           type="button"
-          className="rounded border border-transparent px-2 py-1 text-amber-100/80 hover:bg-amber-300/10"
+          className="rounded-lg border border-transparent px-2 py-1 text-muted-foreground hover:bg-foreground/[0.05]"
           onClick={onDismiss}
         >
           Dismiss

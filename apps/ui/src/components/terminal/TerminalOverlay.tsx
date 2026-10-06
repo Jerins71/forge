@@ -41,10 +41,10 @@ export function TerminalOverlay({
         <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 flex justify-center">
           <div
             className={cn(
-              'rounded-md border px-3 py-1 text-xs backdrop-blur-sm',
+              'rounded-lg border px-3 py-1 font-mono text-[11px] backdrop-blur-sm',
               terminal.state === 'restore_failed' || (exitCode ?? 0) !== 0
-                ? 'border-red-500/30 bg-red-500/10 text-red-100'
-                : 'border-border/50 bg-black/30 text-zinc-200',
+                ? 'border-danger/25 bg-danger/10 text-foreground'
+                : 'border-hairline bg-foreground/[0.04] text-muted-foreground',
             )}
           >
             {exitLabel}
@@ -53,12 +53,12 @@ export function TerminalOverlay({
       ) : null}
 
       {connectionState === 'connected' ? null : (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0f1220]/55 backdrop-blur-[2px]">
-          <div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border border-white/10 bg-black/35 px-5 py-4 text-center text-zinc-100 shadow-lg">
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0B0B0E]/60 backdrop-blur-[2px]">
+          <div className="glass-strong flex max-w-sm flex-col items-center gap-3 rounded-xl px-5 py-4 text-center text-foreground">
             {connectionState === 'failed' ? (
-              <AlertCircle className="size-5 text-red-300" />
+              <AlertCircle className="size-5 text-danger" />
             ) : (
-              <Loader2 className="size-5 animate-spin text-zinc-200" />
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
             )}
 
             <div className="space-y-1">
@@ -72,9 +72,9 @@ export function TerminalOverlay({
                       : 'Connection lost'}
               </p>
               {errorMessage ? (
-                <p className="text-xs text-zinc-300/80">{errorMessage}</p>
+                <p className="text-xs text-muted-foreground">{errorMessage}</p>
               ) : connectionState === 'disconnected' ? (
-                <p className="text-xs text-zinc-300/80">Trying to restore the terminal connection.</p>
+                <p className="text-xs text-muted-foreground">Trying to restore the terminal connection.</p>
               ) : null}
             </div>
 
@@ -83,7 +83,7 @@ export function TerminalOverlay({
                 type="button"
                 size="sm"
                 variant="secondary"
-                className="h-8 gap-2 bg-white/10 text-zinc-100 hover:bg-white/20"
+                className="h-8 gap-2 bg-foreground/[0.08] text-foreground hover:bg-foreground/[0.14]"
                 onClick={onRetry}
               >
                 <RotateCcw className="size-3.5" />

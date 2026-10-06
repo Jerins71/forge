@@ -38,10 +38,10 @@ export function ContextWindowIndicator({
   const progressColorClass = isUpdating
     ? 'stroke-muted-foreground/50'
     : fillRatio >= 0.95
-      ? 'stroke-red-500'
+      ? 'stroke-danger'
       : fillRatio >= 0.8
-        ? 'stroke-amber-500'
-        : 'stroke-emerald-500'
+        ? 'stroke-attention'
+        : 'stroke-primary'
 
   const ariaLabel = isUpdating
     ? 'Context window usage updating'
@@ -54,7 +54,7 @@ export function ContextWindowIndicator({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+          className="h-[30px] w-auto shrink-0 gap-1.5 rounded-lg px-2 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
           aria-label={ariaLabel}
         >
           <svg
@@ -83,6 +83,11 @@ export function ContextWindowIndicator({
               strokeDashoffset={isUpdating ? RING_CIRCUMFERENCE : progressOffset}
             />
           </svg>
+          {percentFull != null ? (
+            <span className="font-mono text-[11.5px] tabular-nums" aria-hidden="true">
+              {percentFull}%
+            </span>
+          ) : null}
         </Button>
       </TooltipTrigger>
       <TooltipContent side="bottom" align="end" sideOffset={6} className="px-3 py-2 text-xs">

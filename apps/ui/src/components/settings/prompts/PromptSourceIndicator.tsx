@@ -9,8 +9,8 @@ const LAYER_LABELS: Record<PromptSourceLayer, string> = {
 }
 
 const LAYER_CLASSES: Record<PromptSourceLayer, string> = {
-  profile: 'border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400',
-  repo: 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  profile: 'border-primary/30 bg-primary/10 text-primary',
+  repo: 'border-attention/30 bg-attention/10 text-attention',
   builtin: 'border-border/50 bg-muted/50 text-muted-foreground',
 }
 

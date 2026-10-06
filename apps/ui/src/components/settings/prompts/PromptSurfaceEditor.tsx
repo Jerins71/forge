@@ -32,8 +32,8 @@ const RUNTIME_EFFECT_LABELS: Record<CortexPromptSurfaceListEntry['runtimeEffect'
 
 const GROUP_BADGE_CLASSES: Record<CortexPromptSurfaceListEntry['group'], string> = {
   system: 'border-violet-500/30 bg-violet-500/10 text-violet-600 dark:text-violet-400',
-  seed: 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400',
-  live: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+  seed: 'border-attention/30 bg-attention/10 text-attention',
+  live: 'border-success/30 bg-success/10 text-success',
   scratch: 'border-slate-500/30 bg-slate-500/10 text-slate-600 dark:text-slate-300',
 }
 
@@ -107,7 +107,7 @@ function SurfaceHeader({ surface }: { surface: CortexPromptSurfaceListEntry }) {
           </p>
         ) : null}
         {surface.warning ? (
-          <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-300">
+          <div className="rounded-md border border-attention/20 bg-attention/10 px-3 py-2 text-attention">
             {surface.warning}
           </div>
         ) : null}
@@ -281,7 +281,7 @@ function FilePromptSurfaceEditor({
           <Badge variant="outline">Updated {lastModifiedLabel}</Badge>
         ) : null}
         {isDirty ? (
-          <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+          <span className="text-xs font-medium text-attention">
             Unsaved changes
           </span>
         ) : null}
@@ -323,7 +323,7 @@ function FilePromptSurfaceEditor({
       </div>
 
       {pendingRemoteEntry ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-attention/20 bg-attention/10 px-3 py-2 text-xs text-attention">
           <span>New file content is available. Reload to replace your local edits.</span>
           <Button variant="outline" size="sm" className="h-7" onClick={reloadRemoteChanges}>
             Reload latest
@@ -337,8 +337,8 @@ function FilePromptSurfaceEditor({
         </div>
       ) : null}
       {successMessage ? (
-        <div className="flex items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-3 py-2">
-          <p className="text-xs text-emerald-600 dark:text-emerald-400">{successMessage}</p>
+        <div className="flex items-center gap-2 rounded-md border border-success/20 bg-success/10 px-3 py-2">
+          <p className="text-xs text-success">{successMessage}</p>
         </div>
       ) : null}
 

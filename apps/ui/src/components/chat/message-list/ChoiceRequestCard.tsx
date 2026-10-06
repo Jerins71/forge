@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { CheckSquare, MessageSquare, Square } from 'lucide-react'
+import { CheckSquare, CircleAlert, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
@@ -115,18 +115,18 @@ export function ChoiceRequestCard({
   }, [isSubmitting, isValid, agentId, choiceId, onSubmit, answers])
 
   return (
-    <div className="max-w-2xl space-y-4 rounded-lg border border-primary/20 bg-card p-4">
-      <div className="flex items-center gap-2 text-foreground">
-        <MessageSquare className="h-4 w-4 text-primary" aria-hidden="true" />
-        <span className="text-sm font-medium">Input requested</span>
+    <div className="glass rise-in max-w-2xl space-y-4 rounded-xl border-attention/25 bg-attention-surface p-4">
+      <div className="flex items-center gap-2 text-attention">
+        <CircleAlert className="size-[13px]" strokeWidth={2} aria-hidden="true" />
+        <span className="eyebrow !text-attention">Decision needed</span>
       </div>
 
       {questions.map((question) => (
         <div key={question.id} className="space-y-2">
           {question.header ? (
-            <h4 className="text-sm font-semibold text-foreground">{question.header}</h4>
+            <h4 className="text-sm font-medium text-foreground">{question.header}</h4>
           ) : null}
-          <p className="text-sm text-foreground">{question.question}</p>
+          <p className="text-[14.5px] text-foreground">{question.question}</p>
 
           {question.multiSelect && (
             <span className="text-xs text-muted-foreground">
@@ -137,7 +137,7 @@ export function ChoiceRequestCard({
 
           {question.options && !question.isOther ? (
             <div className="flex flex-col gap-1.5">
-              {question.options.map((option) => {
+              {question.options.map((option, optionIndex) => {
                 const isSelected =
                   selections[question.id]?.selectedOptionIds.includes(option.id) ?? false
 
@@ -150,23 +150,28 @@ export function ChoiceRequestCard({
                       toggleOption(question.id, option.id, question.multiSelect ?? false)
                     }
                     className={cn(
-                      'w-full rounded-md border px-3 py-2 text-left text-sm transition-colors',
+                      'w-full rounded-[10px] border px-3 py-2.5 text-left text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                       isSelected
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border bg-transparent hover:border-primary/40 hover:bg-muted/30',
+                        ? 'border-foreground/15 bg-foreground/[0.07] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+                        : 'border-hairline bg-transparent hover:bg-foreground/[0.05]',
                     )}
                   >
-                    <span className="flex items-center gap-2">
-                      {question.multiSelect &&
-                        (isSelected ? (
-                          <CheckSquare className="h-4 w-4 shrink-0" />
+                    <span className="flex items-center gap-3">
+                      {question.multiSelect ? (
+                        isSelected ? (
+                          <CheckSquare className="size-4 shrink-0 text-primary" strokeWidth={1.75} />
                         ) : (
-                          <Square className="h-4 w-4 shrink-0" />
-                        ))}
-                      <span className="font-medium">{option.label}</span>
+                          <Square className="size-4 shrink-0 text-subtle-foreground" strokeWidth={1.75} />
+                        )
+                      ) : (
+                        <span aria-hidden="true" className="w-3.5 shrink-0 font-mono text-[11px] text-subtle-foreground">
+                          {optionIndex + 1}
+                        </span>
+                      )}
+                      <span className="font-medium text-foreground">{option.label}</span>
                       {option.recommended && (
-                        <span className="text-xs text-muted-foreground font-normal">
-                          (Recommended)
+                        <span className="ml-auto rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-normal text-primary">
+                          Recommended
                         </span>
                       )}
                     </span>
@@ -174,7 +179,7 @@ export function ChoiceRequestCard({
                       <span
                         className={cn(
                           'mt-0.5 block text-xs text-muted-foreground',
-                          question.multiSelect ? 'ml-6' : undefined,
+                          question.multiSelect ? 'ml-7' : 'ml-[26px]',
                         )}
                       >
                         {option.description}

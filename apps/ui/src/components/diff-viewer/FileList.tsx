@@ -78,7 +78,7 @@ export function FileList({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-border/60 p-2">
+      <div className="border-b border-hairline p-2">
         <div className="relative">
           <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -86,7 +86,7 @@ export function FileList({
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter files…"
-            className="h-7 w-full rounded border border-border/60 bg-muted/30 pl-7 pr-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none"
+            className="glass-inset h-8 w-full rounded-lg pl-7 pr-2 text-xs text-foreground placeholder:text-subtle-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           />
         </div>
         {isKnowledgeMode ? (
@@ -99,10 +99,10 @@ export function FileList({
                   type="button"
                   title={option.pathLabel}
                   className={cn(
-                    'inline-flex h-6 items-center rounded-full border px-2 text-[10px] font-medium transition-colors',
+                    'inline-flex h-6 items-center rounded-full border px-2 text-[10.5px] font-medium transition-colors duration-150',
                     active
-                      ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-border/60 bg-muted/30 text-muted-foreground hover:border-border hover:text-foreground',
+                      ? 'border-primary/30 bg-primary/10 text-primary'
+                      : 'border-hairline text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
                   )}
                   aria-pressed={active}
                   onClick={() => onQuickFilterChange(option.id)}
@@ -127,7 +127,7 @@ export function FileList({
               <div key={group.surface.id} className="mb-2 last:mb-0">
                 <button
                   type="button"
-                  className="flex w-full items-center gap-1 rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:bg-accent/30 hover:text-foreground"
+                  className="eyebrow flex w-full items-center gap-1 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-foreground/[0.05] hover:text-foreground"
                   onClick={() =>
                     setCollapsedGroups((previous) => ({
                       ...previous,
@@ -140,7 +140,7 @@ export function FileList({
                     className={cn('size-3 shrink-0 transition-transform', isCollapsed && '-rotate-90')}
                   />
                   <span className="truncate">{group.surface.label}</span>
-                  <span className="ml-auto shrink-0 text-[10px] normal-case text-muted-foreground/70">
+                  <span className="ml-auto shrink-0 font-mono text-[11px] font-normal normal-case tabular-nums text-subtle-foreground">
                     {group.files.length}
                   </span>
                 </button>
@@ -154,13 +154,13 @@ export function FileList({
       </div>
 
       {summary ? (
-        <div className="border-t border-border/60 px-3 py-1.5 text-[10px] text-muted-foreground">
+        <div className="border-t border-hairline px-3 py-1.5 font-mono text-[11px] tabular-nums text-subtle-foreground">
           <span>{summary.filesChanged} changed</span>
           {summary.insertions > 0 ? (
-            <span className="ml-1.5 text-emerald-500">+{summary.insertions}</span>
+            <span className="ml-1.5 text-success">+{summary.insertions}</span>
           ) : null}
           {summary.deletions > 0 ? (
-            <span className="ml-1 text-red-500">-{summary.deletions}</span>
+            <span className="ml-1 text-danger">−{summary.deletions}</span>
           ) : null}
         </div>
       ) : null}
@@ -184,26 +184,28 @@ function renderFileRow(
       aria-selected={isSelected}
       aria-label={`${fileName}, ${file.status}${file.additions != null ? `, ${file.additions} additions` : ''}${file.deletions != null ? `, ${file.deletions} deletions` : ''}`}
       className={cn(
-        'flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors',
+        'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
         isSelected
-          ? 'bg-accent/80 text-foreground'
-          : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+          ? 'bg-foreground/[0.08] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+          : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
       )}
       onClick={() => onSelectFile(file.path)}
       title={file.path}
     >
       <FileStatusBadge status={file.status} />
-      <span className="min-w-0 flex-1 truncate">
-        <span className="text-foreground">{fileName}</span>
-        {dirPath ? <span className="ml-1 text-muted-foreground/60">{dirPath}/</span> : null}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-[13px] leading-tight text-foreground">{fileName}</span>
+        {dirPath ? (
+          <span className="truncate font-mono text-[10.5px] leading-tight text-subtle-foreground">{dirPath}/</span>
+        ) : null}
       </span>
       {file.additions != null || file.deletions != null ? (
-        <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+        <span className="shrink-0 font-mono text-[11px] tabular-nums">
           {file.additions != null && file.additions > 0 ? (
-            <span className="text-emerald-500">+{file.additions}</span>
+            <span className="text-success">+{file.additions}</span>
           ) : null}
           {file.deletions != null && file.deletions > 0 ? (
-            <span className="ml-0.5 text-red-500">-{file.deletions}</span>
+            <span className="ml-1 text-danger">−{file.deletions}</span>
           ) : null}
         </span>
       ) : null}

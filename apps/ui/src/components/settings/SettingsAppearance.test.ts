@@ -98,30 +98,30 @@ function findPreviewShell(): HTMLElement {
 
 describe('SettingsAppearance', () => {
   it('keeps legacy mode-only preferences as mode-only and not applyable custom appearance', () => {
-    window.localStorage.setItem(STORAGE_KEY, 'dark')
+    window.localStorage.setItem(STORAGE_KEY, 'light')
 
     renderAppearance()
 
     const applyButton = findButton('Apply appearance')
     expect(applyButton.disabled).toBe(true)
-    expect(container.textContent).toContain('Forge default colors; dark mode is active.')
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('dark')
+    expect(container.textContent).toContain('Forge default colors; light mode is active.')
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('light')
     expect(document.documentElement.style.getPropertyValue('--primary')).toBe('')
   })
 
   it('applies mode-only changes without generating a custom palette', () => {
     renderAppearance()
 
-    clickButton('Dark')
+    clickButton('Light')
     expect(container.textContent).toContain('You have unapplied draft changes.')
 
     clickButton('Apply appearance')
 
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('dark')
-    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('light')
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
     expect(document.documentElement.style.getPropertyValue('--primary')).toBe('')
     expect(document.documentElement.style.getPropertyValue('--app-font-sans')).toBe('')
-    expect(container.textContent).toContain('Forge default colors; dark mode is active.')
+    expect(container.textContent).toContain('Forge default colors; light mode is active.')
     expect(container.textContent).not.toContain('Custom appearance is applied.')
     expect(findButton('Apply appearance').disabled).toBe(true)
   })
@@ -199,14 +199,16 @@ describe('SettingsAppearance', () => {
     expect(getContrastRatio(appliedVars['--primary-foreground'], appliedVars['--primary'])).toBeGreaterThanOrEqual(4.5)
   })
 
-  it('previews Original Forge system mode with matchMedia instead of stale applied DOM dark class', () => {
+  it('previews Forge Glass system mode with matchMedia instead of stale applied DOM dark class', () => {
     stubPrefersDark(false)
     renderAppearance()
     clickButton('Terminal Lime')
     clickButton('Apply appearance')
     expect(document.documentElement.classList.contains('dark')).toBe(true)
 
-    clickButton('Original Forge')
+    clickButton('Forge Glass')
+    // The default skin prefers dark; switch the draft to System so matchMedia (light) drives the preview.
+    clickButton('System')
 
     const lightDefaultBackground = resolveAppearanceCssVariables(
       { ...normalizeAppearanceConfig({}), customApplied: true },
@@ -215,35 +217,36 @@ describe('SettingsAppearance', () => {
     expect(findPreviewShell().style.backgroundColor).toBe(rgbString(lightDefaultBackground))
   })
 
-  it('applying Original Forge after a custom dark template restores true defaults', () => {
+  it('applying Forge Glass after a custom dark template restores true defaults', () => {
     renderAppearance()
     clickButton('Terminal Lime')
     clickButton('Apply appearance')
     expect(document.documentElement.classList.contains('dark')).toBe(true)
     expect(document.documentElement.style.getPropertyValue('--primary')).not.toBe('')
 
-    clickButton('Original Forge')
+    clickButton('Forge Glass')
     expect(document.documentElement.classList.contains('dark')).toBe(true)
     expect(document.documentElement.style.getPropertyValue('--primary')).not.toBe('')
 
     clickButton('Apply appearance')
 
+    // Defaults are stored as nothing; the default mode is dark.
     expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull()
-    expect(document.documentElement.classList.contains('dark')).toBe(false)
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
     expect(document.documentElement.style.getPropertyValue('--primary')).toBe('')
   })
 
-  it('reset defaults clears custom app variables, persisted custom state, and stale dark mode', () => {
+  it('reset defaults clears custom app variables, persisted custom state, and stale light mode', () => {
     renderAppearance()
-    clickButton('Terminal Lime')
+    clickButton('Sakura Dawn')
     clickButton('Apply appearance')
-    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
     expect(document.documentElement.style.getPropertyValue('--primary')).not.toBe('')
 
     clickButton('Reset defaults')
 
     expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull()
-    expect(document.documentElement.classList.contains('dark')).toBe(false)
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
     expect(document.documentElement.style.getPropertyValue('--primary')).toBe('')
   })
 })

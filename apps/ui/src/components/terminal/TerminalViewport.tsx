@@ -27,27 +27,27 @@ interface TerminalViewportProps {
 
 const TERMINAL_FONT_FAMILY = 'Geist Mono, SFMono-Regular, SF Mono, Menlo, Monaco, Cascadia Code, Fira Code, JetBrains Mono, Consolas, monospace'
 const TERMINAL_THEME = {
-  background: '#141726',
-  foreground: '#edf2ff',
-  cursor: '#ffffff',
-  cursorAccent: '#141726',
-  selectionBackground: 'rgba(96, 165, 250, 0.28)',
-  black: '#111827',
-  red: '#f87171',
-  green: '#4ade80',
-  yellow: '#facc15',
-  blue: '#60a5fa',
-  magenta: '#c084fc',
-  cyan: '#22d3ee',
-  white: '#e5e7eb',
-  brightBlack: '#6b7280',
-  brightRed: '#fb7185',
-  brightGreen: '#86efac',
-  brightYellow: '#fde047',
-  brightBlue: '#93c5fd',
-  brightMagenta: '#d8b4fe',
-  brightCyan: '#67e8f9',
-  brightWhite: '#f9fafb',
+  background: '#0B0B0E',
+  foreground: '#ECECEE',
+  cursor: '#8E9BFF',
+  cursorAccent: '#0B0B0E',
+  selectionBackground: 'rgba(142, 155, 255, 0.25)',
+  black: '#1A1A20',
+  red: '#FF8A8A',
+  green: '#5FD4A0',
+  yellow: '#F5B454',
+  blue: '#8E9BFF',
+  magenta: '#C4A3FF',
+  cyan: '#7DD3E8',
+  white: '#D4D4DA',
+  brightBlack: '#6C6C7A',
+  brightRed: '#FFA8A8',
+  brightGreen: '#82E3BA',
+  brightYellow: '#F9C97D',
+  brightBlue: '#AAB4FF',
+  brightMagenta: '#D6BEFF',
+  brightCyan: '#A3E3F2',
+  brightWhite: '#F7F7F9',
 } as const
 
 /** Measure a single character's dimensions using the terminal font. */
@@ -398,7 +398,7 @@ export function TerminalViewport({
   }, [initialTicket, issueTicket, onFocusChatInput, sessionAgentId, terminal.sessionAgentId, terminal.terminalId, wsUrl, updateSelectionButton, computeSelectionButtonPosition])
 
   return (
-    <div ref={surfaceRef} className="forge-terminal-surface relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#141726] p-1">
+    <div ref={surfaceRef} className="forge-terminal-surface relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0B0B0E] p-1">
       <div
         ref={hostRef}
         className="forge-terminal-host min-h-0 flex-1 overflow-hidden"

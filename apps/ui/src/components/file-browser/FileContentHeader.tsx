@@ -81,10 +81,10 @@ export function FileContentHeader({
   }, [absolutePath])
 
   return (
-    <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/40 bg-card/50 px-3">
+    <div className="flex h-9 shrink-0 items-center gap-2 border-b border-hairline px-3">
       {/* Breadcrumb navigation */}
       <nav
-        className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden text-xs"
+        className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden font-mono text-[11px]"
         aria-label="File path"
       >
         {segments.map((segment, i) => {
@@ -94,16 +94,16 @@ export function FileContentHeader({
           return (
             <Fragment key={dirPath}>
               {i > 0 && (
-                <ChevronRight className="size-3 shrink-0 text-muted-foreground/40" />
+                <ChevronRight className="size-3 shrink-0 text-subtle-foreground/60" />
               )}
               {isLast ? (
-                <span className="truncate font-medium text-foreground">
+                <span className="truncate text-foreground">
                   {segment}
                 </span>
               ) : (
                 <button
                   type="button"
-                  className="shrink-0 truncate text-muted-foreground transition-colors hover:text-foreground"
+                  className="shrink-0 truncate text-subtle-foreground transition-colors hover:text-foreground"
                   onClick={() => onNavigateToDirectory(dirPath)}
                 >
                   {segment}

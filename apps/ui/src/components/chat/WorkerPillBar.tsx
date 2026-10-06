@@ -203,10 +203,9 @@ const WorkerPill = memo(function WorkerPill({
               type="button"
               data-worker-pill={worker.agentId}
               className={cn(
-                'group relative inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors duration-200',
-                'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
-                'hover:bg-emerald-500/20 dark:hover:bg-emerald-500/25',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                'group glass-inset relative inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-1 text-[11.5px] font-medium text-foreground/90 transition-colors duration-150',
+                'hover:bg-foreground/[0.06]',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                 exiting && 'opacity-0',
               )}
             >
@@ -214,19 +213,19 @@ const WorkerPill = memo(function WorkerPill({
                 <WorkerHighlightOutline workerId={worker.agentId} className="rounded-full" />
               ) : null}
               {/* Fix #4: Subtle pulse instead of aggressive ping */}
-              <span className="relative inline-flex size-2 rounded-full bg-emerald-500 motion-safe:animate-pulse motion-reduce:animate-none" />
+              <span className="live-dot live-dot-animated" aria-hidden="true" />
 
               {/* Worker name */}
               <span className="truncate">{truncatedName}</span>
 
               {/* Elapsed timer */}
-              <span className="tabular-nums text-emerald-600/60 dark:text-emerald-400/60">
+              <span className="font-mono text-[11px] tabular-nums text-subtle-foreground">
                 {elapsedLabel}
               </span>
               {throughputEligible ? (
                 <span
                   data-worker-throughput
-                  className="w-[42px] shrink-0 truncate whitespace-nowrap text-right tabular-nums text-emerald-700/80 dark:text-emerald-200/80"
+                  className="w-[42px] shrink-0 truncate whitespace-nowrap text-right font-mono text-[11px] tabular-nums text-muted-foreground"
                   aria-label={displayedRate === null ? 'Final response throughput unavailable' : `Final response throughput ${formatThroughputRate(displayedRate)} tokens per second`}
                 >
                   {formatThroughputRate(displayedRate)} t/s
@@ -457,7 +456,7 @@ export const WorkerPillBar = memo(function WorkerPillBar({
       <div className="overflow-hidden">
         {/* Fix #15: Single TooltipProvider for all pills */}
         <TooltipProvider delayDuration={400}>
-          <div className="flex items-center gap-1.5 overflow-x-auto border-t border-border/40 bg-background px-2 py-1.5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <div className="flex items-center gap-1.5 overflow-x-auto border-t border-hairline bg-transparent px-4 py-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             {pillEntries.map((entry) => {
               // The pill entry intentionally survives reconnects for UI continuity, but its
               // descriptor is stale until this socket delivers the authoritative roster.

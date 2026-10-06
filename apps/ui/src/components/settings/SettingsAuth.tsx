@@ -49,7 +49,7 @@ function AuthStatusBadge({ configured }: { configured: boolean }) {
     return (
       <Badge
         variant="outline"
-        className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+        className="gap-1 border-success/30 bg-success/10 text-success"
       >
         <Check className="size-3" />
         Configured
@@ -60,7 +60,7 @@ function AuthStatusBadge({ configured }: { configured: boolean }) {
   return (
     <Badge
       variant="outline"
-      className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+      className="gap-1 border-attention/30 bg-attention/10 text-attention"
     >
       <AlertTriangle className="size-3" />
       Not configured
@@ -249,7 +249,7 @@ function AuthProviderRow({
                 {oauthFlow.status === 'complete' ? (
                   <Badge
                     variant="outline"
-                    className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    className="gap-1 border-success/30 bg-success/10 text-success"
                   >
                     <Check className="size-3" />
                     Connected
@@ -733,9 +733,9 @@ export function SettingsAuth({ wsUrl: _wsUrl, target, apiClient }: SettingsAuthP
         ) : null}
 
         {authSuccess ? (
-          <div className="flex items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-3 py-2">
-            <Check className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            <p className="text-xs text-emerald-600 dark:text-emerald-400">{authSuccess}</p>
+          <div className="flex items-center gap-2 rounded-md border border-success/20 bg-success/10 px-3 py-2">
+            <Check className="size-3.5 shrink-0 text-success" />
+            <p className="text-xs text-success">{authSuccess}</p>
           </div>
         ) : null}
 

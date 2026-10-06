@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import { Search, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
-import { cn } from '@/lib/utils'
 
 interface SidebarSearchProps {
   searchQuery: string
@@ -25,17 +24,17 @@ export function SidebarSearch({
 }: SidebarSearchProps) {
   if (roomsV2) {
     return (
-      <div className="px-2 py-2" data-testid="sidebar-command-row">
-        <div className="flex h-8 items-center gap-1.5 rounded-[9px] bg-sidebar-accent/50 px-2">
-          <Search className="pointer-events-none size-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+      <div className="py-2" data-testid="sidebar-command-row">
+        <div className="glass-inset flex h-9 items-center gap-1.5 rounded-[10px] px-2.5 transition-colors focus-within:border-ring/50">
+          <Search className="pointer-events-none size-3.5 shrink-0 text-subtle-foreground" strokeWidth={1.75} aria-hidden="true" />
           {commandAction}
           <div className="relative min-w-0 flex-1">
             <Input
               ref={searchInputRef}
               value={searchQuery}
               onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="Search…"
-              className="h-7 border-0 bg-transparent px-0 pr-11 text-xs shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
+              placeholder="Filter sessions"
+              className="h-7 rounded-none border-0 bg-transparent px-0 pr-5 text-[13px] shadow-none placeholder:text-subtle-foreground focus-visible:ring-0 dark:bg-transparent"
             />
             {searchQuery.length > 0 ? (
               <button
@@ -44,18 +43,12 @@ export function SidebarSearch({
                   onSearchChange('')
                   searchInputRef.current?.focus()
                 }}
-                className="absolute right-6 top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground/60 transition-colors hover:text-muted-foreground"
+                className="absolute right-0 top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground/60 transition-colors hover:text-muted-foreground"
                 aria-label="Clear search"
               >
                 <X className="size-3" />
               </button>
             ) : null}
-            <kbd className={cn(
-              'pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[10px] font-normal text-muted-foreground/55',
-              searchQuery.length > 0 && 'opacity-0',
-            )}>
-              ⌘K
-            </kbd>
           </div>
           {rightAction}
         </div>
@@ -71,7 +64,7 @@ export function SidebarSearch({
           ref={searchInputRef}
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search sessions… ⌘K"
+          placeholder="Filter sessions"
           className="h-7 pl-7 pr-7 text-xs placeholder:text-muted-foreground/50"
         />
         {searchQuery.length > 0 ? (

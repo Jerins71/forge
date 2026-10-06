@@ -10,43 +10,43 @@ interface CommitMetadataBadgesProps {
 const SOURCE_STYLES: Record<string, { label: string; className: string }> = {
   'agent-edit-tool': {
     label: 'Edit tool',
-    className: 'border-blue-500/30 bg-blue-500/10 text-blue-500',
+    className: 'border-primary/25 bg-primary/10 text-primary',
   },
   'agent-write-tool': {
     label: 'Write tool',
-    className: 'border-blue-500/30 bg-blue-500/10 text-blue-500',
+    className: 'border-primary/25 bg-primary/10 text-primary',
   },
   'api-write-file': {
     label: 'API write',
-    className: 'border-sky-500/30 bg-sky-500/10 text-sky-500',
+    className: 'border-primary/25 bg-primary/10 text-primary',
   },
   'api-write-file-restore': {
     label: 'Restore',
-    className: 'border-amber-500/30 bg-amber-500/10 text-amber-500',
+    className: 'border-attention/30 bg-attention/10 text-attention',
   },
   'profile-memory-merge': {
     label: 'Memory merge',
-    className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500',
+    className: 'border-success/30 bg-success/10 text-success',
   },
   'prompt-save': {
     label: 'Prompt save',
-    className: 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-500',
+    className: 'border-compacting/30 bg-compacting/10 text-compacting',
   },
   'prompt-delete': {
     label: 'Prompt delete',
-    className: 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-500',
+    className: 'border-compacting/30 bg-compacting/10 text-compacting',
   },
   'reference-doc': {
     label: 'Reference doc',
-    className: 'border-violet-500/30 bg-violet-500/10 text-violet-500',
+    className: 'border-compacting/30 bg-compacting/10 text-compacting',
   },
   'reference-index': {
     label: 'Reference index',
-    className: 'border-violet-500/30 bg-violet-500/10 text-violet-500',
+    className: 'border-compacting/30 bg-compacting/10 text-compacting',
   },
   'legacy-knowledge-migration': {
     label: 'Migration',
-    className: 'border-amber-500/30 bg-amber-500/10 text-amber-500',
+    className: 'border-attention/30 bg-attention/10 text-attention',
   },
   bootstrap: {
     label: 'Bootstrap',
@@ -54,7 +54,7 @@ const SOURCE_STYLES: Record<string, { label: string; className: string }> = {
   },
   reconcile: {
     label: 'Reconcile',
-    className: 'border-amber-500/30 bg-amber-500/10 text-amber-500',
+    className: 'border-attention/30 bg-attention/10 text-attention',
   },
 }
 
@@ -81,7 +81,7 @@ export function CommitMetadataBadges({ metadata, className }: CommitMetadataBadg
       {metadata.profileId ? (
         <Badge
           variant="outline"
-          className="h-5 border-cyan-500/25 bg-cyan-500/10 px-1.5 py-0 text-[10px] font-medium text-cyan-500"
+          className="h-5 border-primary/25 bg-primary/10 px-1.5 py-0 text-[10px] font-medium text-primary"
         >
           {`Profile ${metadata.profileId}`}
         </Badge>

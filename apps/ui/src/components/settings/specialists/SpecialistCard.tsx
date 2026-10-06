@@ -113,7 +113,7 @@ export function SpecialistCard({
                 </span>
               )}
               {specialist.sourceKind === 'channel' && (
-                <span className="inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
+                <span className="inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
                   Channel
                 </span>
               )}
@@ -123,7 +123,7 @@ export function SpecialistCard({
                 </span>
               )}
               {specialist.targetSpace.includes('builder') && specialist.targetSpace.includes('collaboration') && (
-                <span className="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+                <span className="inline-flex items-center rounded-full border border-success/30 bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">
                   Both
                 </span>
               )}
@@ -133,7 +133,7 @@ export function SpecialistCard({
                 </span>
               )}
               {!specialist.available && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+                <span className="inline-flex items-center gap-1 text-[10px] text-attention">
                   <AlertTriangle className="size-3" />
                   {specialist.availabilityMessage || 'Unavailable'}
                 </span>
@@ -255,7 +255,7 @@ export function SpecialistCard({
             </span>
           )}
           {!specialist.available && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+            <span className="inline-flex items-center gap-1 text-[10px] text-attention">
               <AlertTriangle className="size-3" />
               {specialist.availabilityMessage || 'Unavailable'}
             </span>

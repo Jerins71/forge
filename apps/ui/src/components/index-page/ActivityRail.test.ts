@@ -64,8 +64,8 @@ describe('ActivityRail', () => {
     expect(badgeButton?.className).not.toContain('shadow')
     const badge = badgeButton?.querySelector('span[aria-hidden="true"]')
     expect(badge?.textContent).toBe('2')
-    expect(badge?.className).toContain('bg-blue-600')
-    expect(badge?.className).toContain('text-white')
+    expect(badge?.className).toContain('bg-primary')
+    expect(badge?.className).toContain('text-primary-foreground')
     expect(badge?.className).toContain('ring-sidebar')
   })
 
@@ -83,7 +83,7 @@ describe('ActivityRail', () => {
 
     const nav = container.querySelector('nav[aria-label="Activity rail"]')
     expect(nav?.className).toContain('border-x')
-    expect(nav?.querySelector('button[aria-label="Chat"]')?.className).toContain('size-[34px]')
+    expect(nav?.querySelector('button[aria-label="Chat"]')?.className).toContain('size-9')
     expect(nav?.querySelector('[data-testid="cortex-rail-slot"] button[aria-label="Cortex"]')).not.toBeNull()
   })
 

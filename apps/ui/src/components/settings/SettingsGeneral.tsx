@@ -955,7 +955,7 @@ export function SettingsGeneral({
                 <div className="flex flex-col items-end gap-1.5">
                   <div className="flex items-center gap-2">
                     {compactionSuccess ? (
-                      <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                      <span className="flex items-center gap-1 text-xs text-success">
                         <Check className="size-3" />
                         Saved
                       </span>
@@ -1035,7 +1035,7 @@ export function SettingsGeneral({
               </SettingsWithCTA>
 
               {compactionWarning ? (
-                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+                <div className="rounded-md border border-attention/30 bg-attention/10 px-3 py-2 text-sm text-attention">
                   {compactionWarning}
                 </div>
               ) : null}
@@ -1122,7 +1122,7 @@ export function SettingsGeneral({
 
           {sleepBlockerStatus?.blocking && (
             <div className="flex items-center gap-2 rounded-md border border-border px-4 py-2.5">
-              <div className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+              <div className="size-2 rounded-full bg-success animate-pulse" />
               <span className="text-xs text-muted-foreground">
                 {sleepBlockerStatus.reason}
               </span>
@@ -1207,7 +1207,7 @@ export function SettingsGeneral({
                   }
                 />
                 {knowledgeV2Settings && !knowledgeV2Settings.enabled && !knowledgeV2CanEnable ? (
-                  <span className="max-w-72 text-right text-[10px] text-amber-700 dark:text-amber-300">
+                  <span className="max-w-72 text-right text-[10px] text-attention">
                     {CORTEX_V2_COPY.settings.migrationRequired}
                   </span>
                 ) : null}
@@ -1296,7 +1296,7 @@ export function SettingsGeneral({
                 <>
                   <span>Shell used when opening new terminals.</span>
                   <br />
-                  <span className="text-amber-600 dark:text-amber-400">
+                  <span className="text-attention">
                     Currently set via <code className="text-[10px]">FORGE_TERMINAL_DEFAULT_SHELL</code> environment variable.
                   </span>
                 </>
@@ -1308,7 +1308,7 @@ export function SettingsGeneral({
             <div className="flex flex-col items-end gap-1.5">
               <div className="flex items-center gap-2">
                 {terminalSuccess && (
-                  <span className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                  <span className="text-xs text-success flex items-center gap-1">
                     <Check className="size-3" />
                     Saved
                   </span>

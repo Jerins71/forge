@@ -524,7 +524,7 @@ export function SettingsCollaboration({ wsUrl: _wsUrl, initialApiBaseUrl }: Sett
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   <span
                     className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${
-                      isSelected ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                      isSelected ? 'bg-success' : 'bg-muted-foreground/40'
                     }`}
                   />
                   {isEditing ? (
@@ -701,7 +701,7 @@ export function SettingsCollaboration({ wsUrl: _wsUrl, initialApiBaseUrl }: Sett
               </div>
 
               {addTestStatus === 'success' && (
-                <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                <p className="text-xs text-success">
                   Connection successful
                 </p>
               )}
@@ -777,7 +777,7 @@ export function SettingsCollaboration({ wsUrl: _wsUrl, initialApiBaseUrl }: Sett
                   label="Status"
                   description="Collaboration mode is active with auth-gated access."
                 >
-                  <Badge className="border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
+                  <Badge className="border-transparent bg-success/15 text-success">
                     Enabled
                   </Badge>
                 </SettingsWithCTA>

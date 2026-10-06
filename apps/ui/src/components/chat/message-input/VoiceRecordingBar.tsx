@@ -33,27 +33,27 @@ export function VoiceRecordingBar({ durationMs, waveformBars, onStop, disabled }
   )
 
   return (
-    <div className="flex min-h-[48px] items-center gap-2 border-b border-border/60 bg-red-500/[0.05] px-3 py-2">
+    <div className="flex min-h-[48px] items-center gap-2 border-b border-hairline bg-danger/[0.05] px-3 py-2">
       <div className="flex h-7 flex-1 items-center gap-px py-1" aria-hidden>
         {activeWaveformBars.map((bar, index) => {
           const barHeight = Math.max(2, Math.round(bar * 18))
           return (
             <span
               key={index}
-              className="flex-1 rounded-[1px] bg-red-500/60 transition-[height] duration-150 ease-out"
+              className="flex-1 rounded-[1px] bg-danger/60 transition-[height] duration-150 ease-out"
               style={{ height: `${barHeight}px` }}
             />
           )
         })}
       </div>
 
-      <span className="shrink-0 text-[11px] font-medium tabular-nums text-muted-foreground">
+      <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
         {formatElapsed(durationMs)}
       </span>
 
       <button
         type="button"
-        className="flex size-5 shrink-0 items-center justify-center rounded-full bg-red-500 text-white transition-colors hover:bg-red-600 disabled:opacity-50"
+        className="flex size-5 shrink-0 items-center justify-center rounded-full bg-danger text-white transition-colors hover:bg-danger/90 disabled:opacity-50"
         onClick={onStop}
         disabled={disabled}
         aria-label="Stop recording"

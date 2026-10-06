@@ -202,10 +202,10 @@ export function CollaborationInvites({ apiBaseUrl, onAuthError }: CollaborationI
         {/* Freshly created invite link */}
         {createdInvite && (
           <div
-            className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-3 flex flex-col gap-2"
+            className="rounded-md border border-success/30 bg-success/10 px-3 py-3 flex flex-col gap-2"
             data-testid="created-invite-banner"
           >
-            <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+            <span className="text-sm font-medium text-success">
               Invite created
             </span>
             {createdInvite.email && (

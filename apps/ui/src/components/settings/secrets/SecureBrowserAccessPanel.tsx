@@ -135,13 +135,13 @@ export function SecureBrowserAccessPanel({
           ) : remoteStatus?.available === true
             && remoteStatus.privateEntryTransport === 'trusted_http' ? (
             <div className="space-y-2">
-              <p className="text-xs text-amber-600 dark:text-amber-400">
+              <p className="text-xs text-attention">
                 Trusted network mode: this browser is connected over HTTP. Private
                 values pass through Forge only to the paired Desktop vault and never
                 enter chat or the model. Use this only over your trusted VPN.
               </p>
               {remoteStatus.authorized ? (
-                <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+                <div className="flex items-center gap-2 text-sm text-success">
                   <Check className="size-4" aria-hidden="true" />
                   Paired as {remoteStatus.device?.deviceName ?? 'this browser'}
                 </div>
@@ -154,7 +154,7 @@ export function SecureBrowserAccessPanel({
                   Pair this browser
                 </Button>
               ) : (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
+                <p className="text-xs text-attention">
                   Pairing is unavailable from the backend this browser reached.
                   Keep Forge Desktop running and connect this browser to that
                   Desktop-owned Forge instance, then refresh.
@@ -163,7 +163,7 @@ export function SecureBrowserAccessPanel({
             </div>
           ) : remoteStatus?.authorized ? (
             <div className="space-y-1">
-              <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+              <div className="flex items-center gap-2 text-sm text-success">
                 <Check className="size-4" aria-hidden="true" />
                 Paired as {remoteStatus.device?.deviceName ?? 'this browser'}
               </div>
@@ -173,13 +173,13 @@ export function SecureBrowserAccessPanel({
               </p>
             </div>
           ) : remoteStatus?.available !== true ? (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
+            <p className="text-xs text-attention">
               Pairing is unavailable from the backend this browser reached.
               Keep Forge Desktop running and connect this browser to that
               Desktop-owned Forge instance, then refresh.
             </p>
           ) : remoteStatus?.secureContextRequired ? (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
+            <p className="text-xs text-attention">
               This browser is connected, but remote pairing requires HTTPS.
               Reopen this same Forge instance through its HTTPS address.
             </p>
@@ -247,7 +247,7 @@ export function SecureBrowserAccessPanel({
           {snapshot.pendingRequests.map((request) => (
             <div
               key={request.requestId}
-              className="flex flex-col gap-3 rounded-md border border-amber-500/35 bg-amber-500/5 p-3 sm:flex-row sm:items-center sm:justify-between"
+              className="flex flex-col gap-3 rounded-md border border-attention/35 bg-attention/5 p-3 sm:flex-row sm:items-center sm:justify-between"
             >
               <div>
                 <p className="text-sm font-medium">{request.deviceName}</p>

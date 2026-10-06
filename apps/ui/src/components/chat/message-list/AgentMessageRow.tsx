@@ -48,13 +48,13 @@ export const AgentMessageRow = memo(function AgentMessageRow({
       : null
 
   return (
-    <div className="rounded-lg border border-slate-300/70 bg-slate-50/75 px-3 py-2 text-sm text-slate-800 dark:border-slate-500/30 dark:bg-slate-500/10 dark:text-slate-200">
-      <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-700/80 dark:text-slate-300/90">
+    <div className="glass-inset rise-in rounded-xl px-3.5 py-2.5 text-sm text-foreground/90">
+      <div className="flex flex-wrap items-center gap-1.5 eyebrow">
         <span>{fromLabel}</span>
         <span>→</span>
         <span>{toLabel}</span>
         {deliveryLabel ? (
-          <span className="normal-case tracking-normal text-slate-700/70 dark:text-slate-300/75">
+          <span className="normal-case tracking-normal text-subtle-foreground">
             • {deliveryLabel}
           </span>
         ) : null}
@@ -68,20 +68,20 @@ export const AgentMessageRow = memo(function AgentMessageRow({
         ) : null}
 
         {attachmentCount > 0 ? (
-          <p className="text-[11px] text-slate-700/80 dark:text-slate-300/80">
+          <p className="text-[11px] text-muted-foreground">
             Sent {attachmentCount} attachment{attachmentCount === 1 ? '' : 's'}
           </p>
         ) : null}
 
         {!normalizedText && attachmentCount === 0 ? (
-          <p className="text-[11px] italic text-slate-700/70 dark:text-slate-300/70">
+          <p className="text-[11px] italic text-subtle-foreground">
             (empty message)
           </p>
         ) : null}
       </div>
 
       {timestampLabel || sourceContext ? (
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-700/75 dark:text-slate-300/75">
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-subtle-foreground">
           <SourceBadge sourceContext={sourceContext} />
           {timestampLabel ? <span>{timestampLabel}</span> : null}
         </div>

@@ -97,7 +97,7 @@ describe('SecureSessionPicker', () => {
       projectDefaults: [{ secretId: 'secret-1', displayAlias: 'deploy-token', state: 'configured', statusCode: 'ok' }] }
     renderPicker(config)
     const trigger = getByRole(container, 'button', { name: /Bitwarden vault locked/i })
-    expect(trigger.className).toContain('text-amber-700')
+    expect(trigger.className).toContain('text-attention')
     expect(trigger.querySelector('.lucide-triangle-alert')).not.toBeNull()
     openPicker(/Bitwarden vault locked/i)
     expect(document.body.textContent).toContain('cannot use its Bitwarden secrets until you unlock the vault')
@@ -106,9 +106,9 @@ describe('SecureSessionPicker', () => {
     await Promise.resolve()
     expect(onRecoverAccess).toHaveBeenCalledOnce()
     // Cancelling does not claim that the vault is unlocked; the catalog remains authoritative.
-    expect(getByRole(container, 'button', { name: /Bitwarden vault locked/i }).className).toContain('text-amber-700')
+    expect(getByRole(container, 'button', { name: /Bitwarden vault locked/i }).className).toContain('text-attention')
     renderPicker({ ...config, lockedBitwardenProviderName: undefined })
-    expect(getByRole(container, 'button', { name: /project secret access/i }).className).toContain('text-emerald-700')
+    expect(getByRole(container, 'button', { name: /project secret access/i }).className).toContain('text-success')
   })
 
   it('keeps the lock warning visible when another secret already has an active lease', () => {

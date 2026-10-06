@@ -1,6 +1,7 @@
-import { useMemo, type ReactElement } from 'react'
+import { useMemo, useState, type ReactElement } from 'react'
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued'
-import { FileText, AlertTriangle, Loader2 } from 'lucide-react'
+import { FileText, AlertTriangle, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { detectLanguage, highlightCode } from '@/lib/syntax-highlight'
 import { MarkdownDiffPane } from './MarkdownDiffPane'
 import { useDiffTheme } from './diff-viewer-theme'
@@ -16,6 +17,8 @@ interface DiffPaneProps {
   truncated?: boolean
   truncatedReason?: string
   markdownLayoutMode?: 'full' | 'sidebar'
+  onPrevFile?: () => void
+  onNextFile?: () => void
 }
 
 export function DiffPane({
@@ -27,7 +30,10 @@ export function DiffPane({
   truncated,
   truncatedReason,
   markdownLayoutMode = 'full',
+  onPrevFile,
+  onNextFile,
 }: DiffPaneProps) {
+  const [splitView, setSplitView] = useState(false)
   const { styles, useDarkTheme } = useDiffTheme()
 
   // Detect language for syntax highlighting based on file extension
@@ -58,9 +64,7 @@ export function DiffPane({
   if (isLoading) {
     return (
       <div className="flex h-full flex-col">
-        <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border/60 bg-card px-3 py-1.5">
-          <span className="font-mono text-xs text-muted-foreground">{fileName}</span>
-        </div>
+        <DiffFileHeader fileName={fileName} />
         <div className="flex flex-1 items-center justify-center">
           <Loader2 className="size-5 animate-spin text-muted-foreground" />
         </div>
@@ -72,9 +76,7 @@ export function DiffPane({
   if (error) {
     return (
       <div className="flex h-full flex-col">
-        <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border/60 bg-card px-3 py-1.5">
-          <span className="font-mono text-xs text-muted-foreground">{fileName}</span>
-        </div>
+        <DiffFileHeader fileName={fileName} />
         <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground">
           <AlertTriangle className="mb-2 size-8 text-destructive/60" />
           <span className="text-sm">Failed to load diff</span>
@@ -88,9 +90,7 @@ export function DiffPane({
   if (truncated) {
     return (
       <div className="flex h-full flex-col">
-        <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border/60 bg-card px-3 py-1.5">
-          <span className="font-mono text-xs text-muted-foreground">{fileName}</span>
-        </div>
+        <DiffFileHeader fileName={fileName} />
         <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground">
           <FileText className="mb-2 size-8 opacity-40" />
           <span className="text-sm">File too large to display</span>
@@ -110,9 +110,7 @@ export function DiffPane({
   if (isBinary) {
     return (
       <div className="flex h-full flex-col">
-        <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border/60 bg-card px-3 py-1.5">
-          <span className="font-mono text-xs text-muted-foreground">{fileName}</span>
-        </div>
+        <DiffFileHeader fileName={fileName} />
         <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground">
           <FileText className="mb-2 size-8 opacity-40" />
           <span className="text-sm">Binary file — cannot display diff</span>
@@ -134,14 +132,18 @@ export function DiffPane({
 
   return (
     <div className="syntax-highlight flex h-full flex-col overflow-hidden">
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border/60 bg-card px-3 py-1.5">
-        <span className="font-mono text-xs text-muted-foreground">{fileName}</span>
-      </div>
+      <DiffFileHeader
+        fileName={fileName}
+        splitView={splitView}
+        onSplitViewChange={setSplitView}
+        onPrevFile={onPrevFile}
+        onNextFile={onNextFile}
+      />
       <div className="flex-1 overflow-auto">
         <ReactDiffViewer
           oldValue={oldContent ?? ''}
           newValue={newContent ?? ''}
-          splitView={false}
+          splitView={splitView}
           useDarkTheme={useDarkTheme}
           styles={styles}
           compareMethod={DiffMethod.WORDS}
@@ -149,7 +151,7 @@ export function DiffPane({
           showDiffOnly={true}
           renderContent={renderContent}
           codeFoldMessageRenderer={(totalLines: number) => (
-            <span className="text-xs text-muted-foreground">
+            <span className="font-mono text-[11.5px] text-subtle-foreground">
               Expand {totalLines} unchanged lines
             </span>
           )}
@@ -166,4 +168,79 @@ function containsNullBytes(str: string): boolean {
 
 function isMarkdownDiffFile(fileName: string | null): boolean {
   return fileName != null && /\.md$/iu.test(fileName)
+}
+
+function DiffFileHeader({
+  fileName,
+  splitView,
+  onSplitViewChange,
+  onPrevFile,
+  onNextFile,
+}: {
+  fileName: string
+  splitView?: boolean
+  onSplitViewChange?: (split: boolean) => void
+  onPrevFile?: () => void
+  onNextFile?: () => void
+}) {
+  const slash = fileName.lastIndexOf('/')
+  const dir = slash >= 0 ? fileName.slice(0, slash + 1) : ''
+  const base = slash >= 0 ? fileName.slice(slash + 1) : fileName
+
+  return (
+    <div className="sticky top-0 z-10 flex h-10 shrink-0 items-center gap-2 border-b border-hairline bg-foreground/[0.02] px-3">
+      <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={fileName}>
+        {dir ? <span className="text-subtle-foreground">{dir}</span> : null}
+        <span className="text-foreground">{base}</span>
+      </span>
+      {onSplitViewChange ? (
+        <div
+          role="group"
+          aria-label="Diff layout"
+          className="glass-inset inline-flex h-7 shrink-0 items-center gap-0.5 rounded-lg p-0.5"
+        >
+          {([['Unified', false], ['Split', true]] as const).map(([label, value]) => (
+            <button
+              key={label}
+              type="button"
+              aria-pressed={splitView === value}
+              onClick={() => onSplitViewChange(value)}
+              className={cn(
+                'h-6 rounded-md px-2.5 text-[11px] font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                splitView === value
+                  ? 'bg-foreground/[0.1] text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {onPrevFile || onNextFile ? (
+        <div className="inline-flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            aria-label="Previous file"
+            title="Previous file"
+            disabled={!onPrevFile}
+            onClick={onPrevFile}
+            className="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-40"
+          >
+            <ChevronUp className="size-4" strokeWidth={1.75} />
+          </button>
+          <button
+            type="button"
+            aria-label="Next file"
+            title="Next file"
+            disabled={!onNextFile}
+            onClick={onNextFile}
+            className="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-40"
+          >
+            <ChevronDown className="size-4" strokeWidth={1.75} />
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
 }

@@ -144,6 +144,9 @@ import { useOnboardingState } from '@/hooks/use-onboarding-state'
 import { useConversationThroughputDisplayPreference } from '@/hooks/use-conversation-throughput-display-preference'
 import { useDynamicFavicon } from '@/hooks/use-dynamic-favicon'
 import { useTerminalPanel } from '@/hooks/useTerminalPanel'
+import { Archive, BarChart3, FolderPlus, MessageSquarePlus, Settings2, SunMoon } from 'lucide-react'
+import { applyAppearanceConfig, applyThemePreference, readStoredAppearanceConfig } from '@/lib/theme'
+import { CommandPalette, type CommandPaletteCommand, type CommandPaletteSession } from './CommandPalette'
 import {
   type AgentDescriptor,
   type ProjectAgentExternalDirectoryEntry,
@@ -2153,6 +2156,105 @@ export function BuilderSurface({
     forgeOriginManager.retryOrigin(originId)
   }, [])
 
+  const openSettingsView = useCallback(() => {
+    panels.fileEditorCoordinator.requestFileEditorTransition({ type: 'navigate-route', nextView: 'settings' }, () => {
+      navigateToRoute({ view: 'settings', surface: 'builder' })
+    })
+  }, [navigateToRoute, panels.fileEditorCoordinator])
+
+  const openStatsView = useCallback(() => {
+    panels.fileEditorCoordinator.requestFileEditorTransition({ type: 'navigate-route', nextView: 'stats' }, () => {
+      navigateToRoute({ view: 'stats' })
+    })
+  }, [navigateToRoute, panels.fileEditorCoordinator])
+
+  const openArchiveView = useCallback(() => {
+    panels.fileEditorCoordinator.requestFileEditorTransition({ type: 'navigate-route', nextView: 'archive' }, () => {
+      navigateToRoute({ view: 'archive', surface: 'builder' })
+    })
+  }, [navigateToRoute, panels.fileEditorCoordinator])
+
+  // ⌘K command palette: one keyboard entry point for jumping between sessions
+  // and running workspace commands without hunting through the chrome.
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setIsCommandPaletteOpen((open) => !open)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  const commandPaletteSessions = useMemo<CommandPaletteSession[]>(() => {
+    if (!isCommandPaletteOpen) return []
+    const projectNames = new Map(localState.profiles.map((profile) => [profile.profileId, profile.displayName]))
+    return localState.agents
+      .filter((agent) =>
+        agent.role === 'manager' &&
+        !agent.archivedAt &&
+        agent.sessionPurpose !== 'side_chat' &&
+        agent.sessionSurface !== 'collab',
+      )
+      .map((agent) => ({
+        id: agent.agentId,
+        title: agent.sessionLabel || agent.displayName || agent.agentId,
+        projectName: projectNames.get(agent.profileId ?? '') ?? agent.profileId ?? '',
+        status: (agent.pendingChoiceCount ?? 0) > 0
+          ? 'attention'
+          : agent.status === 'error'
+            ? 'error'
+            : agent.status === 'streaming' || (agent.activeWorkerCount ?? 0) > 0
+              ? 'live'
+              : 'idle',
+        updatedAt: agent.lastUserMessageAt ?? agent.updatedAt,
+      }))
+  }, [isCommandPaletteOpen, localState.agents, localState.profiles])
+
+  const commandPaletteCommands = useMemo<CommandPaletteCommand[]>(() => {
+    const commands: CommandPaletteCommand[] = []
+    if (activeAgentProfileId && activeOriginId === LOCAL_ORIGIN_ID) {
+      commands.push({
+        id: 'new-session',
+        label: 'New session in this project',
+        icon: MessageSquarePlus,
+        run: () => localSidebarSession.handleCreateSession(activeAgentProfileId),
+      })
+    }
+    commands.push({ id: 'new-project', label: 'New project…', icon: FolderPlus, run: handleOpenCreateManagerDialog })
+    for (const item of panels.activityRailItems ?? []) {
+      if (item.id === 'chat') continue
+      commands.push({
+        id: `rail-${item.id}`,
+        label: item.label,
+        icon: item.icon,
+        shortcut: item.shortcutLabel,
+        disabled: item.disabled,
+        run: item.onClick,
+      })
+    }
+    commands.push(
+      {
+        id: 'toggle-theme',
+        label: 'Toggle light / dark theme',
+        icon: SunMoon,
+        run: () => {
+          const nextMode = document.documentElement.classList.contains('dark') ? 'light' : 'dark'
+          const stored = readStoredAppearanceConfig()
+          // Keep an applied custom palette; only flip its mode.
+          if (stored.customApplied) applyAppearanceConfig({ ...stored, mode: nextMode })
+          else applyThemePreference(nextMode)
+        },
+      },
+      { id: 'settings', label: 'Open settings', icon: Settings2, run: openSettingsView },
+      { id: 'stats', label: 'Open stats', icon: BarChart3, run: openStatsView },
+      { id: 'archive', label: 'Open archive', icon: Archive, run: openArchiveView },
+    )
+    return commands
+  }, [activeAgentProfileId, activeOriginId, handleOpenCreateManagerDialog, localSidebarSession, openArchiveView, openSettingsView, openStatsView, panels.activityRailItems])
+
   const feedbackProfileId = transcript.feedbackProfileId
 
   return (
@@ -2196,17 +2298,11 @@ export function BuilderSurface({
         onSelectAgent={handleSelectSidebarAgent}
         onDeleteAgent={localSidebarSession.handleDeleteAgent}
         onDeleteManager={localSidebarManager.handleRequestDeleteManager}
-        onOpenSettings={() => panels.fileEditorCoordinator.requestFileEditorTransition({ type: 'navigate-route', nextView: 'settings' }, () => {
-          navigateToRoute({ view: 'settings', surface: 'builder' })
-        })}
+        onOpenSettings={openSettingsView}
         onOpenProjectSettings={handleOpenProjectSettings}
         onOpenProjectSecrets={handleOpenProjectSecrets}
-        onOpenStats={() => panels.fileEditorCoordinator.requestFileEditorTransition({ type: 'navigate-route', nextView: 'stats' }, () => {
-          navigateToRoute({ view: 'stats' })
-        })}
-        onOpenArchive={() => panels.fileEditorCoordinator.requestFileEditorTransition({ type: 'navigate-route', nextView: 'archive' }, () => {
-          navigateToRoute({ view: 'archive', surface: 'builder' })
-        })}
+        onOpenStats={openStatsView}
+        onOpenArchive={openArchiveView}
         onCreateSession={localSidebarSession.handleCreateSession}
         onStopSession={localSidebarSession.handleStopSession}
         onResumeSession={localSidebarSession.handleResumeSession}
@@ -2238,6 +2334,15 @@ export function BuilderSurface({
         onCreateAgentCreator={localSidebarSession.handleCreateAgentCreator}
       />
 
+      <CommandPalette
+        open={isCommandPaletteOpen}
+        onOpenChange={setIsCommandPaletteOpen}
+        sessions={commandPaletteSessions}
+        commands={commandPaletteCommands}
+        activeSessionId={activeAgentId}
+        onSelectSession={handleSelectSidebarAgent}
+      />
+
       <div
           className="relative flex min-w-0 flex-1"
           onDragEnter={handleDragEnter}
@@ -2246,7 +2351,7 @@ export function BuilderSurface({
           onDrop={handleDrop}
         >
           {activeView === 'chat' && isDraggingFiles ? (
-            <div className="pointer-events-none absolute inset-2 z-50 rounded-lg border-2 border-dashed border-primary bg-primary/10" />
+            <div className="pointer-events-none absolute inset-3 z-50 rounded-2xl border border-dashed border-primary/60 bg-primary/[0.06] backdrop-blur-[2px]" />
           ) : null}
 
           {activeView === 'chat' && !panels.isInlineDiffViewerOpen && panels.isArtifactsPanelOpen ? (
@@ -2316,9 +2421,9 @@ export function BuilderSurface({
             />
           ) : null}
 
-          <div className="relative flex min-w-0 flex-1 flex-col">
+          <div className="relative flex min-w-0 flex-1 flex-col md:min-w-[min(420px,40%)]">
             {panels.isInlineDiffViewerOpen ? (
-              <div className="diff-viewer flex min-h-0 flex-1 flex-col overflow-hidden bg-background" aria-label="Source Control workspace">
+              <div className="diff-viewer m-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl glass" aria-label="Source Control workspace">
                 <DiffViewerContent
                   active={panels.isInlineDiffViewerOpen}
                   wsUrl={wsUrl}
@@ -2396,7 +2501,7 @@ export function BuilderSurface({
               />
             ) : activeView === 'chat' && panels.isBrowserOpen && browserSessionAgentId && browserProfileId ? (
               browserWorkspaceMode === 'popped-out' || browserWorkspaceMode === 'opening' ? (
-                <section className="relative flex min-h-0 flex-1 items-center justify-center bg-background" aria-label="Managed Browser workspace">
+                <section className="relative flex min-h-0 flex-1 items-center justify-center" aria-label="Managed Browser workspace">
                   <div data-browser-automation-viewport className="pointer-events-none absolute inset-0" aria-hidden="true" />
                   <div className="relative z-10 max-w-md text-center">
                     <h2 className="font-medium">Browser is open in a separate window</h2>
@@ -2534,6 +2639,7 @@ export function BuilderSurface({
                 messageListRef={messageListRef}
                 messageListProps={{
                   messages: transcript.visibleMessages,
+                  projectName: activeAgentProfileName,
                   agents: state.agents,
                   isLoading,
                   wsUrl,

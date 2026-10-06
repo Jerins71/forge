@@ -153,9 +153,9 @@ export function SessionContextModePicker({
           type="button"
           disabled={config.disabled}
           className={cn(
-            'flex h-7 min-w-0 max-w-[42vw] items-center gap-1 rounded-full border border-border/60 bg-muted/55 px-2 text-[11px] font-medium text-muted-foreground transition-colors',
-            'hover:border-border hover:bg-muted hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+            'flex h-[30px] min-w-0 max-w-[42vw] items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-[12.5px] font-medium text-muted-foreground transition-colors duration-150',
+            'hover:bg-foreground/[0.05] hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
             'disabled:pointer-events-none disabled:opacity-50 sm:max-w-52',
           )}
           aria-label={`Context management: ${triggerLabel}. ${originLabel}.`}

@@ -16,10 +16,10 @@ export const WorkerBackBar = memo(function WorkerBackBar({
   secureStatus,
 }: WorkerBackBarProps) {
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-border/40 bg-background px-2 py-1.5">
+    <div className="flex items-center justify-between gap-2 border-b border-hairline bg-transparent px-3 py-2">
       <button
         type="button"
-        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        className="inline-flex items-center gap-1.5 glass-inset rounded-full px-3 py-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         onClick={onNavigateBack}
       >
         <ArrowLeft className="size-3" />
@@ -31,7 +31,7 @@ export const WorkerBackBar = memo(function WorkerBackBar({
           aria-label={`Team Secure Bash: ${secureStatus.label}`}
         >
           {secureStatus.active ? (
-            <ShieldCheck className="size-3 shrink-0 text-emerald-500" aria-hidden="true" />
+            <ShieldCheck className="size-3 shrink-0 text-success" aria-hidden="true" />
           ) : (
             <ShieldOff className="size-3 shrink-0" aria-hidden="true" />
           )}

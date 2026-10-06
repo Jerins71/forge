@@ -76,7 +76,7 @@ export function SettingsExternalChrome() {
         <div className="space-y-4">
           <div className="rounded-md border p-4">
             <div className="flex flex-wrap items-center gap-3">
-              <CheckCircle2 className={`size-5 ${connected ? 'text-emerald-600' : 'text-muted-foreground'}`} />
+              <CheckCircle2 className={`size-5 ${connected ? 'text-success' : 'text-muted-foreground'}`} />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">
                   {connected ? 'Chrome is ready for Forge' : firstTimeSetupAvailable ? 'Set up Chrome' : repairable ? 'Repair Chrome setup' : unavailable ? 'Chrome setup is unavailable' : 'Finish connecting Chrome'}

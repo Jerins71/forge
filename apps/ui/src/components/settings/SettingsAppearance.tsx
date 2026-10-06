@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, Monitor, Moon, RotateCcw, Shuffle, Sun } from 'lucide-react'
+import { Check, RotateCcw, Shuffle } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,11 +32,42 @@ import {
 } from '@/lib/theme'
 import { SettingsSection, SettingsWithCTA } from './settings-row'
 
-const MODE_OPTIONS: Array<{ value: ThemePreference; label: string; icon: React.ReactNode }> = [
-  { value: 'light', label: 'Light', icon: <Sun className="size-3.5" /> },
-  { value: 'dark', label: 'Dark', icon: <Moon className="size-3.5" /> },
-  { value: 'auto', label: 'System', icon: <Monitor className="size-3.5" /> },
+const MODE_OPTIONS: Array<{ value: ThemePreference; label: string; hint: string }> = [
+  { value: 'auto', label: 'System', hint: 'Match OS' },
+  { value: 'dark', label: 'Dark', hint: 'Default' },
+  { value: 'light', label: 'Light', hint: '' },
 ]
+
+const MODE_PREVIEW_PALETTES = {
+  dark: { bg: '#08080a', side: '#121216', line: 'rgba(255,255,255,0.18)', card: '#1c1c22' },
+  light: { bg: '#f5f5f7', side: '#e9e9ee', line: 'rgba(18,18,22,0.2)', card: '#ffffff' },
+} as const
+
+const ACCENT_SWATCHES: Array<{ name: string; value: string }> = [
+  { name: 'Periwinkle', value: '#8e9bff' },
+  { name: 'Mint', value: '#14b8a6' },
+  { name: 'Cobalt', value: '#3b82f6' },
+  { name: 'Lime', value: '#84cc16' },
+  { name: 'Rose', value: '#e879a8' },
+  { name: 'Copper', value: '#d97757' },
+]
+
+function ModePreview({ palette, accent }: { palette: (typeof MODE_PREVIEW_PALETTES)[keyof typeof MODE_PREVIEW_PALETTES]; accent: string }) {
+  return (
+    <span className="flex size-full" style={{ backgroundColor: palette.bg }} aria-hidden="true">
+      <span className="flex w-[30%] flex-col gap-[5px] px-[7px] py-2.5" style={{ backgroundColor: palette.side }}>
+        <span className="h-1 w-4/5 rounded-sm" style={{ backgroundColor: palette.line }} />
+        <span className="h-1 w-3/5 rounded-sm" style={{ backgroundColor: palette.line }} />
+        <span className="h-1 w-[70%] rounded-sm" style={{ backgroundColor: palette.line }} />
+      </span>
+      <span className="flex flex-1 flex-col justify-end p-2">
+        <span className="flex h-[18px] items-center justify-end rounded-md px-1" style={{ backgroundColor: palette.card }}>
+          <span className="size-[9px] rounded-[3px]" style={{ backgroundColor: accent }} />
+        </span>
+      </span>
+    </span>
+  )
+}
 
 export function SettingsAppearance() {
   const [appliedAppearance, setAppliedAppearance] = useState<AppearanceConfig>(() => readStoredAppearanceConfig())
@@ -104,40 +135,74 @@ export function SettingsAppearance() {
   }, [])
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(17rem,20rem)] xl:items-start xl:gap-5 2xl:grid-cols-[minmax(0,1fr)_minmax(18rem,21rem)] 2xl:gap-6">
-      <div className="flex min-w-0 flex-col gap-8">
-        <SettingsSection
-          label="Appearance"
-          description="Draft a device-local appearance, preview it here, then apply it when ready."
-        >
-        <SettingsWithCTA
-          label="Theme mode"
-          description="Draft light, dark, or system mode. The app changes only after Apply."
-        >
-          <div className="grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-muted/30 p-1 sm:w-80">
-            {MODE_OPTIONS.map((option) => {
-              const active = draftAppearance.mode === option.value
+    <div className="flex min-w-0 flex-col">
+      <SettingsSection
+        label="Theme"
+        description="Draft light, dark, or system mode. The app changes only after Apply."
+      >
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
+          {MODE_OPTIONS.map((option) => {
+            const active = draftAppearance.mode === option.value
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => patchDraft({ mode: option.value })}
+                className={cn(
+                  'flex flex-col gap-2.5 rounded-[14px] border bg-foreground/[0.02] p-2 pb-2.5 text-left transition-colors duration-150 hover:bg-foreground/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                  active ? 'border-primary ring-2 ring-primary/40' : 'border-hairline',
+                )}
+                aria-pressed={active}
+              >
+                <span className="relative block h-[92px] overflow-hidden rounded-[9px] border border-hairline">
+                  {option.value === 'auto' ? (
+                    <>
+                      <ModePreview palette={MODE_PREVIEW_PALETTES.dark} accent={draftAppearance.accentColor} />
+                      <span className="absolute inset-0" style={{ clipPath: 'polygon(50% 0, 100% 0, 100% 100%, 50% 100%)' }}>
+                        <ModePreview palette={MODE_PREVIEW_PALETTES.light} accent={draftAppearance.accentColor} />
+                      </span>
+                    </>
+                  ) : (
+                    <ModePreview palette={MODE_PREVIEW_PALETTES[option.value]} accent={draftAppearance.accentColor} />
+                  )}
+                </span>
+                <span className="flex items-center justify-between px-1 text-[13px] text-foreground">
+                  {option.label}
+                  {active ? <Check className="size-3.5 text-primary" strokeWidth={1.75} /> : null}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        label="Colors"
+        description="Pick an accent, or set exact values. Contrast is checked when you apply."
+      >
+        <SettingsWithCTA label="Accent" description="Used for live activity, focus and primary actions.">
+          <div role="radiogroup" aria-label="Accent swatches" className="flex flex-wrap items-center gap-2">
+            {ACCENT_SWATCHES.map((swatch) => {
+              const active = draftAppearance.accentColor.toLowerCase() === swatch.value
               return (
                 <button
-                  key={option.value}
+                  key={swatch.value}
                   type="button"
-                  onClick={() => patchDraft({ mode: option.value })}
+                  role="radio"
+                  aria-checked={active}
+                  aria-label={`${swatch.name} accent`}
+                  title={swatch.name}
+                  onClick={() => patchDraft({ accentColor: swatch.value })}
                   className={cn(
-                    'inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md px-2 text-sm transition-colors',
-                    active
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:bg-background/60 hover:text-foreground',
+                    'size-7 rounded-full border border-hairline transition-shadow duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                    active && 'ring-2 ring-foreground/80 ring-offset-2 ring-offset-background',
                   )}
-                  aria-pressed={active}
-                >
-                  {option.icon}
-                  {option.label}
-                </button>
+                  style={{ backgroundColor: swatch.value }}
+                />
               )
             })}
           </div>
         </SettingsWithCTA>
-
         <div className="grid gap-3 sm:grid-cols-3">
           <ColorControl
             label="Accent"
@@ -155,7 +220,9 @@ export function SettingsAppearance() {
             onChange={(foregroundColor) => patchDraft({ foregroundColor })}
           />
         </div>
+      </SettingsSection>
 
+      <SettingsSection label="Typography">
         <SettingsWithCTA
           label="UI font"
           description="Choose from safe local font stacks. Forge does not load remote fonts for this setting."
@@ -193,13 +260,13 @@ export function SettingsAppearance() {
             </SelectContent>
           </Select>
         </SettingsWithCTA>
-        </SettingsSection>
+      </SettingsSection>
 
-        <SettingsSection
-          label="Template themes"
-          description="Forge-native presets. Selecting one updates the draft and preview only."
-        >
-        <div className="grid gap-3 lg:grid-cols-2">
+      <SettingsSection
+        label="Template themes"
+        description="Forge-native presets. Selecting one updates the draft and preview only."
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
           {APPEARANCE_TEMPLATES.map((template) => {
             const active = isTemplateDraftActive(draftAppearance, template)
             return (
@@ -208,20 +275,13 @@ export function SettingsAppearance() {
                 type="button"
                 onClick={() => handleTemplateSelect(template)}
                 className={cn(
-                  'rounded-xl border bg-card p-3 text-left shadow-sm transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  active ? 'border-primary' : 'border-border',
+                  'rounded-[14px] border bg-foreground/[0.02] p-2 pb-3 text-left transition-colors duration-150 hover:bg-foreground/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                  active ? 'border-primary ring-2 ring-primary/40' : 'border-hairline',
                 )}
                 aria-pressed={active}
               >
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <span className="size-4 rounded-full border border-border" style={{ backgroundColor: template.accentColor }} />
-                    <span className="font-medium text-foreground">{template.name}</span>
-                  </div>
-                  {active ? <Check className="size-4 text-primary" /> : null}
-                </div>
                 <div
-                  className="mb-2 h-16 rounded-lg border p-2"
+                  className="mb-2.5 h-16 rounded-[9px] border p-2"
                   style={{
                     backgroundColor: template.backgroundColor,
                     borderColor: template.accentColor,
@@ -233,73 +293,82 @@ export function SettingsAppearance() {
                   <div className="h-2 w-full rounded-full opacity-35" style={{ backgroundColor: template.foregroundColor }} />
                   <div className="mt-1 h-2 w-2/3 rounded-full opacity-25" style={{ backgroundColor: template.foregroundColor }} />
                 </div>
-                <p className="text-xs text-muted-foreground">{template.description}</p>
+                <div className="flex items-center justify-between gap-2 px-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="size-3 rounded-full border border-hairline" style={{ backgroundColor: template.accentColor }} />
+                    <span className="text-[13px] font-medium text-foreground">{template.name}</span>
+                    {template.id === getDefaultAppearanceConfig().templateId ? (
+                      <span className="font-mono text-[11px] text-subtle-foreground">default</span>
+                    ) : null}
+                  </div>
+                  {active ? <Check className="size-3.5 text-primary" strokeWidth={1.75} /> : null}
+                </div>
+                <p className="mt-1 px-1 text-[12.5px] leading-snug text-muted-foreground">{template.description}</p>
               </button>
             )
           })}
         </div>
-        </SettingsSection>
-      </div>
+      </SettingsSection>
 
-      <div className="flex min-w-0 flex-col gap-6 xl:sticky xl:top-4">
-        <SettingsSection
-          label="Draft preview"
-          description="This card previews the draft only. The rest of Forge will not change until you click Apply."
-        >
-        <div className="mb-3 flex justify-stretch sm:justify-end xl:justify-stretch">
-          <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto xl:w-full" onClick={handleRandomize}>
-            <Shuffle className="mr-1.5 size-3.5" />
+      <SettingsSection
+        label="Draft preview"
+        description="This card previews the draft only. The rest of Forge will not change until you click Apply."
+        cta={
+          <Button type="button" variant="outline" size="sm" onClick={handleRandomize}>
+            <Shuffle className="mr-1.5 size-3.5" strokeWidth={1.75} />
             Randomize draft
           </Button>
-        </div>
-        <div
-          className="rounded-xl border p-4 shadow-sm"
-          style={previewShellStyle(previewVariables)}
-        >
-          <div className="mb-3 flex flex-col items-start justify-between gap-3 rounded-lg border p-3 sm:flex-row sm:items-center xl:flex-col xl:items-start" style={previewCardStyle(previewVariables)}>
-            <div>
-              <div className="text-sm font-semibold" style={{ color: previewVariables['--foreground'] }}>Forge workspace</div>
-              <div className="text-xs" style={{ color: previewVariables['--muted-foreground'] }}>Draft-only appearance preview</div>
+        }
+      >
+        <div>
+          <div
+            className="rounded-xl border p-4"
+            style={previewShellStyle(previewVariables)}
+          >
+            <div className="mb-3 flex flex-col items-start justify-between gap-3 rounded-lg border p-3 sm:flex-row sm:items-center" style={previewCardStyle(previewVariables)}>
+              <div>
+                <div className="text-sm font-semibold" style={{ color: previewVariables['--foreground'] }}>Forge workspace</div>
+                <div className="text-xs" style={{ color: previewVariables['--muted-foreground'] }}>Draft-only appearance preview</div>
+              </div>
+              <div
+                className="rounded-md px-3 py-1.5 text-xs font-medium"
+                style={{ backgroundColor: previewVariables['--primary'], color: previewVariables['--primary-foreground'] }}
+              >
+                Primary
+              </div>
             </div>
-            <div
-              className="rounded-md px-3 py-1.5 text-xs font-medium"
-              style={{ backgroundColor: previewVariables['--primary'], color: previewVariables['--primary-foreground'] }}
-            >
-              Primary
+            <div className="grid gap-3">
+              <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: previewVariables['--muted'], color: previewVariables['--foreground'] }}>
+                Draft changes stay inside this preview until you apply them.
+              </div>
+              <code
+                className="min-w-0 rounded-lg border p-3 text-xs"
+                style={{
+                  backgroundColor: previewVariables['--card'],
+                  borderColor: previewVariables['--border'],
+                  color: previewVariables['--foreground'],
+                  fontFamily: previewVariables['--app-font-mono'],
+                }}
+              >
+                --accent: {draftAppearance.accentColor}
+              </code>
             </div>
           </div>
-          <div className="grid gap-3">
-            <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: previewVariables['--muted'], color: previewVariables['--foreground'] }}>
-              Draft changes stay inside this preview until you apply them.
-            </div>
-            <code
-              className="min-w-0 rounded-lg border p-3 text-xs"
-              style={{
-                backgroundColor: previewVariables['--card'],
-                borderColor: previewVariables['--border'],
-                color: previewVariables['--foreground'],
-                fontFamily: previewVariables['--app-font-mono'],
-              }}
-            >
-              --accent: {draftAppearance.accentColor}
-            </code>
-          </div>
         </div>
-        </SettingsSection>
+      </SettingsSection>
 
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between xl:flex-col xl:items-stretch">
-          <p className="text-xs text-muted-foreground">
-            {draftIsDirty ? 'You have unapplied draft changes.' : appliedAppearance.customApplied ? 'Custom appearance is applied.' : getDefaultStatusLabel(appliedAppearance.mode)}
-          </p>
-          <div className="flex justify-end gap-2 xl:flex-col">
-            <Button type="button" variant="outline" size="sm" onClick={handleReset}>
-              <RotateCcw className="mr-1.5 size-3.5" />
-              Reset defaults
-            </Button>
-            <Button type="button" size="sm" onClick={handleApply} disabled={!draftIsDirty}>
-              Apply appearance
-            </Button>
-          </div>
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-[12.5px] text-muted-foreground">
+          {draftIsDirty ? 'You have unapplied draft changes.' : appliedAppearance.customApplied ? 'Custom appearance is applied.' : getDefaultStatusLabel(appliedAppearance.mode)}
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={handleReset}>
+            <RotateCcw className="mr-1.5 size-3.5" strokeWidth={1.75} />
+            Reset defaults
+          </Button>
+          <Button type="button" size="sm" onClick={handleApply} disabled={!draftIsDirty}>
+            Apply appearance
+          </Button>
         </div>
       </div>
     </div>
@@ -325,7 +394,7 @@ function ColorControl({ label, value, onChange }: { label: string; value: string
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card p-3">
+    <div className="glass-inset rounded-xl p-3">
       <Label className="mb-2 block text-xs font-medium text-muted-foreground" htmlFor={inputId}>{label}</Label>
       <div className="flex items-center gap-2">
         <Input
@@ -352,7 +421,7 @@ function ColorControl({ label, value, onChange }: { label: string; value: string
         />
       </div>
       {!isValid ? (
-        <p className="mt-1 text-xs text-destructive" role="status">Enter a 6-digit hex color.</p>
+        <p className="mt-1 text-xs text-danger" role="status">Enter a 6-digit hex color.</p>
       ) : null}
     </div>
   )

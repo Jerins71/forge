@@ -112,11 +112,11 @@ export function TerminalTabBar({
   )
 
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-card/80 px-2 backdrop-blur-sm">
+    <div className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-2">
       {isMobile ? (
         <div className="min-w-0 flex-1">
           <Select value={activeTerminal?.terminalId} onValueChange={onSelectTerminal}>
-            <SelectTrigger className="h-7 w-full border-white/10 bg-black/20 text-xs text-zinc-100 hover:bg-black/25">
+            <SelectTrigger className="h-7 w-full glass-inset border-0 font-mono text-xs text-foreground">
               <SelectValue placeholder="Select terminal" />
             </SelectTrigger>
             <SelectContent>
@@ -150,12 +150,12 @@ export function TerminalTabBar({
                 aria-selected={isActive}
                 tabIndex={0}
                 className={cn(
-                  'group flex h-6 min-w-0 max-w-[180px] shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[11px] transition-colors cursor-pointer',
+                  'group flex h-6 min-w-0 max-w-[180px] shrink-0 items-center gap-1.5 rounded-full px-2.5 font-mono text-[11px] transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                   isActive && isViewportOpen
-                    ? 'border-blue-500/50 bg-blue-500/10 text-foreground'
+                    ? 'bg-foreground/[0.1] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
                     : isActive
-                      ? 'border-blue-500/30 bg-blue-500/5 text-foreground'
-                      : 'border-transparent text-muted-foreground hover:bg-blue-500/10 hover:text-foreground',
+                      ? 'bg-foreground/[0.07] text-foreground'
+                      : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
                 )}
                 onClick={() => onSelectTerminal(terminal.terminalId)}
                 onDoubleClick={() => onStartRenameTerminal(terminal.terminalId)}
@@ -201,7 +201,7 @@ export function TerminalTabBar({
                 <button
                   type="button"
                   className={cn(
-                    'inline-flex size-3.5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+                    'inline-flex size-3.5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/[0.1] hover:text-foreground',
                     isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                   )}
                   onClick={(event) => {
@@ -227,7 +227,7 @@ export function TerminalTabBar({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="size-6 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                  className="size-6 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                   onClick={() => onCloseTerminal(activeTerminal.terminalId)}
                   aria-label={`Close ${activeTerminal.name}`}
                 >
@@ -248,7 +248,7 @@ export function TerminalTabBar({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-6 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                className="size-6 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                 onClick={onCreateTerminal}
                 disabled={createDisabled}
                 aria-label="New terminal"
@@ -273,7 +273,7 @@ export function TerminalTabBar({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="size-6 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                    className="size-6 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                     onClick={onCollapsePanel}
                     aria-label="Collapse to tab strip"
                   >
@@ -293,7 +293,7 @@ export function TerminalTabBar({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="size-6 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                    className="size-6 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                     onClick={panelMode === 'maximized' ? onRestorePanel : onMaximizePanel}
                     aria-label={panelMode === 'maximized' ? 'Restore terminal size' : 'Maximize terminal panel'}
                   >
@@ -318,7 +318,7 @@ export function TerminalTabBar({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="size-6 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                  className="size-6 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                   onClick={onRestorePanel}
                   aria-label="Expand terminal panel"
                 >
@@ -341,7 +341,7 @@ export function TerminalTabBar({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-6 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                className="size-6 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                 onClick={onHidePanel}
                 aria-label="Hide terminal panel"
               >

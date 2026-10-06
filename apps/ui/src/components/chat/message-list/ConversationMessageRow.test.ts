@@ -88,7 +88,7 @@ describe('ConversationMessageRow', () => {
     }
     flushSync(() => root.render(createElement(ConversationMessageRow, { message })))
     expect(container.querySelector('[data-context-transition]')).toBeNull()
-    expect(container.innerHTML).toContain('border-amber-300')
+    expect(container.innerHTML).toContain('border-attention/25')
   })
 
   it('renders model-change notices with neutral informational styling', () => {
@@ -110,8 +110,8 @@ describe('ConversationMessageRow', () => {
 
     expect(container.textContent).toContain('Model change')
     expect(container.textContent).toContain(message.text)
-    expect(container.querySelector('.border-slate-300\\/70')).toBeTruthy()
-    expect(container.querySelector('.border-amber-300\\/70')).toBeNull()
+    expect(container.querySelector('.glass-inset')).toBeTruthy()
+    expect(container.querySelector('.border-attention\\/25')).toBeNull()
   })
 
   it('renders external-thread card even when system message text is empty', () => {
@@ -327,7 +327,7 @@ describe('ConversationMessageRow', () => {
     expect(result).toBeTruthy()
     expect(result?.textContent).toContain('Worker result · dataflow-pr17-remediation-gpt55')
     expect(result?.textContent).toContain('summary: Validation passed.')
-    expect(result?.className).toContain('border-indigo-300/70')
+    expect(result?.className).toContain('glass-inset')
     expect(result?.textContent).not.toContain('System')
   })
 })

@@ -109,7 +109,7 @@ describe('ArtifactsSidebar controlled tab', () => {
 
     const pane = container.querySelector('[aria-label="Artifacts panel"]')
     const resizeHandle = pane?.nextElementSibling
-    expect(pane?.className).toContain('md:border-r')
+    expect(pane?.className).toContain('md:ml-2')
     expect(pane?.className).toContain('max-md:hidden')
     expect(resizeHandle?.className).toContain('cursor-col-resize')
   })

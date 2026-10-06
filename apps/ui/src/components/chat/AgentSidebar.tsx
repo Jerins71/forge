@@ -1027,7 +1027,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       )}
     >
       {roomsV2 ? (
-        <div className="flex shrink-0 items-center gap-2 border-b border-sidebar-border px-3 py-2" data-testid="rooms-sidebar-header">
+        <div className="flex shrink-0 items-center gap-2 px-2.5 pb-1 pt-2.5" data-testid="rooms-sidebar-header">
           {collaborationModeSwitch ? (
             <ModeSwitch
               activeSurface={collaborationModeSwitch.activeSurface}
@@ -1053,11 +1053,11 @@ export const AgentSidebar = React.memo(function AgentSidebar({
           <button
             type="button"
             onClick={onAddManager}
-            className="inline-flex size-7 shrink-0 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+            className="glass-inset inline-flex size-8 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             title="Create project"
             aria-label="Add project"
           >
-            <SquarePen aria-hidden="true" className="size-3.5" />
+            <SquarePen aria-hidden="true" className="size-[15px]" strokeWidth={1.75} />
           </button>
           {onMobileClose ? (
             <button
@@ -1118,7 +1118,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       )}
 
       <div
-        className="flex flex-1 flex-col overflow-y-auto px-2 pb-2 [color-scheme:light] dark:[color-scheme:dark] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-sidebar-border [&::-webkit-scrollbar-thumb:hover]:bg-sidebar-border/80"
+        className="flex flex-1 flex-col overflow-y-auto px-2.5 pb-2 [color-scheme:light] dark:[color-scheme:dark] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-sidebar-border [&::-webkit-scrollbar-thumb:hover]:bg-sidebar-border/80"
         style={{
           scrollbarWidth: 'thin',
           scrollbarColor: 'var(--sidebar-border) transparent',

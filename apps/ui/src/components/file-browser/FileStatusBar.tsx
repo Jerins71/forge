@@ -36,12 +36,12 @@ export function FileStatusBar({
 
   return (
     <div
-      className="flex h-7 shrink-0 items-center border-t border-border/60 bg-card/80 px-3 text-xs text-muted-foreground"
+      className="flex h-7 shrink-0 items-center border-t border-hairline px-3 font-mono text-[11px] tabular-nums text-subtle-foreground"
       aria-live="polite"
     >
       {hasFileInfo ? (
         <div className="flex items-center gap-2 text-[11px]">
-          {saveState && saveState !== 'idle' ? <span className="text-muted-foreground/60">{formatSaveState(saveState)}</span> : null}
+          {saveState && saveState !== 'idle' ? <span className="text-subtle-foreground">{formatSaveState(saveState)}</span> : null}
           {isDirty ? <StatusBarPart withSeparator={!!saveState && saveState !== 'idle'}>Unsaved</StatusBarPart> : null}
           {statusLabel ? <StatusBarPart withSeparator={Boolean((saveState && saveState !== 'idle') || isDirty)}>{statusLabel}</StatusBarPart> : null}
           {editability?.editable === false && editability.reason ? (
@@ -64,7 +64,7 @@ export function FileStatusBar({
       ) : selectedFile ? (
         <span className="truncate font-mono text-[11px]">{selectedFile}</span>
       ) : (
-        <span className="text-[11px] text-muted-foreground/60">
+        <span className="text-[11px] text-subtle-foreground">
           {fileCount !== null && fileCountMethod !== 'none'
             ? `${fileCount.toLocaleString()} files in repository`
             : 'No file selected'}
@@ -77,7 +77,7 @@ export function FileStatusBar({
 function StatusBarPart({ children, withSeparator }: { children: ReactNode; withSeparator: boolean }) {
   return (
     <>
-      {withSeparator ? <span className="text-muted-foreground/30">·</span> : null}
+      {withSeparator ? <span className="text-subtle-foreground/50">·</span> : null}
       <span>{children}</span>
     </>
   )

@@ -195,7 +195,7 @@ describe('PullRequestsTab', () => {
     const resizeHandle = getByRole(container, 'separator', { name: /resize pull request list/i })
     expect(resizeHandle.previousElementSibling).toBeInstanceOf(HTMLElement)
     expect((resizeHandle.previousElementSibling as HTMLElement).style.width).toBe('460px')
-    expect(getByRole(container, 'button', { name: /Pull request #428/i }).className).toContain('border-b')
+    expect(getByRole(container, 'button', { name: /Pull request #428/i }).className).toContain('rounded-lg')
   })
 
   it('uses the new pull request list storage key so old narrow persisted widths do not override the wider default', () => {

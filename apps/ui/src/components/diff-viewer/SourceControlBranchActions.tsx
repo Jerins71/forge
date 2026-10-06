@@ -542,22 +542,22 @@ export function SourceControlBranchActions({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 gap-1 px-2 text-xs"
+              className="glass-inset h-8 gap-1.5 rounded-lg border-0 px-2.5 font-mono text-[11.5px]"
               disabled={branchesQuery.isLoading}
             >
               <GitBranch className="size-3.5" />
               <span className="max-w-28 truncate">{currentBranch ?? 'Branch'}</span>
               {aheadBehind.ahead > 0 ? (
-                <span className="text-emerald-500">+{aheadBehind.ahead}</span>
+                <span className="text-[11px] tabular-nums text-subtle-foreground">{aheadBehind.ahead}↑</span>
               ) : null}
               {aheadBehind.behind > 0 ? (
-                <span className="text-amber-500">-{aheadBehind.behind}</span>
+                <span className="text-[11px] tabular-nums text-subtle-foreground">{aheadBehind.behind}↓</span>
               ) : null}
               <ChevronDown className="size-3 opacity-60" />
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="w-80 p-0">
-            <div className="border-b border-border/60 px-3 py-2 text-xs font-medium text-foreground">
+            <div className="eyebrow border-b border-hairline px-3 py-2">
               Switch branch
             </div>
             <div className="max-h-48 overflow-auto p-1">
@@ -566,8 +566,8 @@ export function SourceControlBranchActions({
                   key={branch.name}
                   type="button"
                   className={cn(
-                    'flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted/60',
-                    branch.kind === 'current' && 'bg-muted/50 font-medium',
+                    'flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left font-mono text-xs hover:bg-foreground/[0.05]',
+                    branch.kind === 'current' && 'bg-foreground/[0.07] font-medium',
                   )}
                   onClick={() => openSwitchConfirmation(branch)}
                   disabled={branch.kind === 'current' || branch.isCheckedOutInAnotherWorktree}
@@ -579,7 +579,7 @@ export function SourceControlBranchActions({
                 </button>
               ))}
             </div>
-            <div className="space-y-2 border-t border-border/60 p-3">
+            <div className="space-y-2 border-t border-hairline p-3">
               <p className="text-[11px] font-medium text-foreground">Create branch</p>
               <Input
                 value={newBranchName}
@@ -589,7 +589,7 @@ export function SourceControlBranchActions({
               />
               {remoteBranches.length > 0 ? (
                 <select
-                  className="h-8 w-full rounded-md border border-border/60 bg-background px-2 text-xs"
+                  className="glass-inset h-8 w-full rounded-lg px-2 text-xs"
                   value={createFromRemote ?? ''}
                   onChange={(event) => setCreateFromRemote(event.target.value || null)}
                 >
@@ -622,7 +622,7 @@ export function SourceControlBranchActions({
         <Button
           variant="outline"
           size="sm"
-          className="h-7 px-2 text-xs"
+          className="h-8 rounded-lg px-2.5 text-xs"
           onClick={() => void handleFetch({ source: 'manual' })}
           disabled={fetchState === 'loading'}
         >
@@ -633,7 +633,7 @@ export function SourceControlBranchActions({
         <Button
           variant={!hasUpstream || aheadBehind.ahead > 0 ? 'default' : 'outline'}
           size="sm"
-          className="h-7 px-2 text-xs"
+          className="h-8 rounded-lg px-2.5 text-xs"
           onClick={() => {
             requestMutationGuard('push', () => {
               setActionError(null)
@@ -658,7 +658,7 @@ export function SourceControlBranchActions({
         <Button
           variant="outline"
           size="sm"
-          className="h-7 px-2 text-xs"
+          className="h-8 rounded-lg px-2.5 text-xs"
           onClick={() => {
             requestMutationGuard('pull-ff-only', () => {
               setActionError(null)
@@ -675,15 +675,15 @@ export function SourceControlBranchActions({
       </div>
 
       {actionError ? (
-        <span className="hidden max-w-48 truncate text-[11px] text-red-500 lg:inline" title={actionError}>
+        <span className="hidden max-w-48 truncate text-[11px] text-danger lg:inline" title={actionError}>
           {actionError}
         </span>
       ) : actionWarning ? (
-        <span className="hidden max-w-48 truncate text-[11px] text-amber-600 lg:inline" title={actionWarning}>
+        <span className="hidden max-w-48 truncate text-[11px] text-attention lg:inline" title={actionWarning}>
           {actionWarning}
         </span>
       ) : fetchState === 'success' ? (
-        <span className="hidden text-[11px] text-emerald-500 lg:inline">Fetched origin</span>
+        <span className="hidden text-[11px] text-success lg:inline">Fetched origin</span>
       ) : null}
 
       {pendingDialog ? (

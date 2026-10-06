@@ -269,6 +269,19 @@ export function SourceControlActivityView({
       maxWidth: 420,
     })
 
+  const stepFile = (
+    paths: string[],
+    current: string | null,
+    delta: number,
+    select: (path: string) => void,
+  ): (() => void) | undefined => {
+    const index = current ? paths.indexOf(current) : -1
+    const next = index >= 0 ? paths[index + delta] : undefined
+    return next !== undefined ? () => select(next) : undefined
+  }
+  const workingPaths = visibleWorkingFiles.map((file) => file.path)
+  const commitPaths = filteredCommitFiles.map((file) => file.path)
+
   const visibleWorkingSummary = {
     filesChanged: visibleWorkingFiles.length,
     insertions: visibleWorkingFiles.reduce((total, file) => total + (file.additions ?? 0), 0),
@@ -289,7 +302,7 @@ export function SourceControlActivityView({
 
   return (
     <div className="flex h-full">
-      <div className="shrink-0 border-r border-border/60" style={{ width: sidebarWidth }}>
+      <div className="shrink-0 border-r border-hairline" style={{ width: sidebarWidth }}>
         <SourceControlExplorer
           changesCount={visibleWorkingSummary.filesChanged}
           focusSection={focusSection}
@@ -319,7 +332,7 @@ export function SourceControlActivityView({
             ) : (
               <div className="flex h-full min-h-0 flex-col">
                 {isKnowledgeMode ? (
-                  <div className="border-b border-border/60 p-2">
+                  <div className="border-b border-hairline p-2">
                     <div className="flex flex-wrap gap-1">
                       {KNOWLEDGE_QUICK_FILTERS.map((option) => {
                         const active = option.id === historyQuickFilter
@@ -332,7 +345,7 @@ export function SourceControlActivityView({
                               'inline-flex h-6 items-center rounded-full border px-2 text-[10px] font-medium transition-colors',
                               active
                                 ? 'border-primary/40 bg-primary/10 text-primary'
-                                : 'border-border/60 bg-muted/30 text-muted-foreground hover:border-border hover:text-foreground',
+                                : 'border-hairline bg-muted/30 text-muted-foreground hover:border-border hover:text-foreground',
                             )}
                             aria-pressed={active}
                             onClick={() => setHistoryQuickFilter(option.id)}
@@ -374,7 +387,7 @@ export function SourceControlActivityView({
       </div>
 
       {showingCommitDetail ? (
-        <div className="shrink-0 border-r border-border/60" style={{ width: commitFileListWidth }}>
+        <div className="shrink-0 border-r border-hairline" style={{ width: commitFileListWidth }}>
           {selectedSha ? (
             <FileList
               files={commitFiles}
@@ -417,6 +430,8 @@ export function SourceControlActivityView({
             error={commitDiffQuery.error}
             truncated={commitDiffQuery.data?.truncated}
             truncatedReason={commitDiffQuery.data?.reason}
+            onPrevFile={stepFile(commitPaths, selectedCommitFile, -1, setSelectedCommitFile)}
+            onNextFile={stepFile(commitPaths, selectedCommitFile, 1, setSelectedCommitFile)}
           />
         ) : statusError ? (
           <FullEmptyState icon="changes" title="Unable to read repository" description={statusError} />
@@ -431,6 +446,8 @@ export function SourceControlActivityView({
             error={workingDiffQuery.error}
             truncated={workingDiffQuery.data?.truncated}
             truncatedReason={workingDiffQuery.data?.reason}
+            onPrevFile={stepFile(workingPaths, selectedWorkingFile, -1, setSelectedWorkingFile)}
+            onNextFile={stepFile(workingPaths, selectedWorkingFile, 1, setSelectedWorkingFile)}
           />
         )}
       </div>
