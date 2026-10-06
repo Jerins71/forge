@@ -452,8 +452,8 @@ export function BitwardenPasswordManagerPanel({
       ) : null}
 
       {provider.status === 'auth_required' ? (
-        <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
-          <p className="font-medium text-amber-700 dark:text-amber-300">
+        <div className="mt-3 rounded-md border border-attention/30 bg-attention/5 p-3 text-xs">
+          <p className="font-medium text-attention">
             Bitwarden CLI is not logged in.
           </p>
           <p className="mt-1 text-muted-foreground">
@@ -466,8 +466,8 @@ export function BitwardenPasswordManagerPanel({
       ) : null}
 
       {provider.status === 'unreachable' ? (
-        <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
-          <p className="font-medium text-amber-700 dark:text-amber-300">
+        <div className="mt-3 rounded-md border border-attention/30 bg-attention/5 p-3 text-xs">
+          <p className="font-medium text-attention">
             Bitwarden CLI is unavailable.
           </p>
           <p className="mt-1 text-muted-foreground">
@@ -612,7 +612,7 @@ export function BitwardenPasswordManagerPanel({
             </Button>
           </div>
           <p className={collectionsDirty
-            ? 'text-xs text-amber-700 dark:text-amber-300'
+            ? 'text-xs text-attention'
             : 'text-xs text-muted-foreground'}
           >
             {collectionsDirty

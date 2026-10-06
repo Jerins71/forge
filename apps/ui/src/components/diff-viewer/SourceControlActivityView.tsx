@@ -224,6 +224,19 @@ export function SourceControlActivityView({
       maxWidth: 420,
     })
 
+  const stepFile = (
+    paths: string[],
+    current: string | null,
+    delta: number,
+    select: (path: string) => void,
+  ): (() => void) | undefined => {
+    const index = current ? paths.indexOf(current) : -1
+    const next = index >= 0 ? paths[index + delta] : undefined
+    return next !== undefined ? () => select(next) : undefined
+  }
+  const workingPaths = files.map((file) => file.path)
+  const commitPaths = commitFiles.map((file) => file.path)
+
   const visibleWorkingSummary = {
     filesChanged: files.length,
     insertions: files.reduce((total, file) => total + (file.additions ?? 0), 0),
@@ -244,7 +257,7 @@ export function SourceControlActivityView({
 
   return (
     <div className="flex h-full">
-      <div className="shrink-0 border-r border-border/60" style={{ width: sidebarWidth }}>
+      <div className="shrink-0 border-r border-hairline" style={{ width: sidebarWidth }}>
         <SourceControlExplorer
           changesCount={visibleWorkingSummary.filesChanged}
           focusSection={focusSection}
@@ -299,7 +312,7 @@ export function SourceControlActivityView({
       </div>
 
       {showingCommitDetail ? (
-        <div className="shrink-0 border-r border-border/60" style={{ width: commitFileListWidth }}>
+        <div className="shrink-0 border-r border-hairline" style={{ width: commitFileListWidth }}>
           {selectedSha ? (
             <FileList
               files={commitFiles}
@@ -339,6 +352,8 @@ export function SourceControlActivityView({
             error={commitDiffQuery.error}
             truncated={commitDiffQuery.data?.truncated}
             truncatedReason={commitDiffQuery.data?.reason}
+            onPrevFile={stepFile(commitPaths, selectedCommitFile, -1, setSelectedCommitFile)}
+            onNextFile={stepFile(commitPaths, selectedCommitFile, 1, setSelectedCommitFile)}
           />
         ) : statusError ? (
           <FullEmptyState icon="changes" title="Unable to read repository" description={statusError} />
@@ -353,6 +368,8 @@ export function SourceControlActivityView({
             error={workingDiffQuery.error}
             truncated={workingDiffQuery.data?.truncated}
             truncatedReason={workingDiffQuery.data?.reason}
+            onPrevFile={stepFile(workingPaths, selectedWorkingFile, -1, setSelectedWorkingFile)}
+            onNextFile={stepFile(workingPaths, selectedWorkingFile, 1, setSelectedWorkingFile)}
           />
         )}
       </div>

@@ -133,7 +133,7 @@ function ExplorerSection({
     <section className={cn('flex min-h-0 flex-col', className)} style={style} aria-label={label}>
       <button
         type="button"
-        className="flex h-7 shrink-0 items-center gap-1 border-b border-border/60 bg-card/80 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+        className="eyebrow flex h-8 shrink-0 items-center gap-1 border-b border-hairline px-2 transition-colors duration-150 hover:bg-foreground/[0.04] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
         onClick={onToggle}
         aria-label={toggleName}
         aria-expanded={!collapsed}
@@ -141,7 +141,7 @@ function ExplorerSection({
         <ChevronDown className={cn('size-3.5 shrink-0 transition-transform', collapsed && '-rotate-90')} />
         <span aria-hidden="true">{label}</span>
         {typeof count === 'number' ? (
-          <span className="ml-auto inline-flex min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-medium normal-case text-muted-foreground" aria-hidden="true">
+          <span className="ml-auto inline-flex min-w-4 items-center justify-center font-mono text-[11px] font-normal normal-case tabular-nums text-subtle-foreground" aria-hidden="true">
             {count}
           </span>
         ) : null}

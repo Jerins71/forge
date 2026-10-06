@@ -5,94 +5,81 @@ import { useEffect, useState } from 'react'
 /*  Colors harmonize with Forge's CSS custom properties               */
 /* ------------------------------------------------------------------ */
 
-export const forgeDiffDarkStyles = {
-  variables: {
-    dark: {
-      diffViewerBackground: '#1a1a1a',
-      addedBackground: 'hsl(140 30% 12%)',
-      removedBackground: 'hsl(0 30% 14%)',
-      wordAddedBackground: 'hsl(140 40% 18%)',
-      wordRemovedBackground: 'hsl(0 40% 20%)',
-      addedGutterBackground: 'hsl(140 25% 10%)',
-      removedGutterBackground: 'hsl(0 25% 12%)',
-      gutterBackground: '#242424',
-      gutterColor: 'hsl(0 0% 40%)',
-      codeFoldBackground: 'hsl(220 20% 14%)',
-      codeFoldGutterBackground: 'hsl(220 15% 12%)',
-      codeFoldContentColor: 'hsl(220 20% 55%)',
-      addedColor: 'hsl(140 60% 75%)',
-      removedColor: 'hsl(0 60% 75%)',
-      emptyLineBackground: '#242424',
-    },
-  },
+const SUCCESS = 'var(--status-success)'
+const DANGER = 'var(--status-danger)'
+const MONO = 'var(--font-mono, "Geist Mono", ui-monospace, monospace)'
+
+/** Token-derived so light, dark, and custom palettes all follow the app theme. */
+const mix = (color: string, pct: number) => `color-mix(in srgb, ${color} ${pct}%, transparent)`
+
+const palette = {
+  diffViewerBackground: 'transparent',
+  diffViewerColor: 'var(--foreground)',
+  addedBackground: mix(SUCCESS, 9),
+  removedBackground: mix(DANGER, 9),
+  wordAddedBackground: mix(SUCCESS, 22),
+  wordRemovedBackground: mix(DANGER, 22),
+  addedGutterBackground: mix(SUCCESS, 9),
+  removedGutterBackground: mix(DANGER, 9),
+  addedGutterColor: 'var(--subtle-foreground)',
+  removedGutterColor: 'var(--subtle-foreground)',
+  gutterBackground: 'transparent',
+  gutterBackgroundDark: 'transparent',
+  gutterColor: 'var(--subtle-foreground)',
+  codeFoldBackground: 'color-mix(in srgb, var(--foreground) 3%, transparent)',
+  codeFoldGutterBackground: 'color-mix(in srgb, var(--foreground) 3%, transparent)',
+  codeFoldContentColor: 'var(--subtle-foreground)',
+  addedColor: 'var(--foreground)',
+  removedColor: 'var(--foreground)',
+  emptyLineBackground: 'transparent',
+}
+
+const sharedStyles = {
   codeFold: {
-    fontSize: '12px',
+    fontSize: '11.5px',
+    fontWeight: 400,
+    fontFamily: MONO,
+  },
+  codeFoldContent: {
+    fontFamily: MONO,
+    fontSize: '11.5px',
   },
   line: {
-    fontSize: '13px',
-    fontFamily: 'var(--font-mono, "Geist Mono", ui-monospace, monospace)',
+    fontSize: '12.5px',
+    fontFamily: MONO,
   },
   gutter: {
-    fontSize: '12px',
-    minWidth: '40px',
-    padding: '0 8px',
+    fontSize: '11.5px',
+    fontFamily: MONO,
+    minWidth: '44px',
+    padding: '0 10px',
+  },
+  marker: {
+    '&[class*="diff-added"] pre': { color: SUCCESS },
+    '&[class*="diff-removed"] pre': { color: DANGER },
   },
   contentText: {
-    fontFamily: 'var(--font-mono, "Geist Mono", ui-monospace, monospace)',
-    fontSize: '13px',
-    lineHeight: '1.5',
+    fontFamily: MONO,
+    fontSize: '12.5px',
+    lineHeight: '1.75',
   },
   content: {
     width: 'auto',
   },
   diffContainer: {
     borderRadius: '0',
+    pre: { lineHeight: '1.75' },
   },
 }
 
+export const forgeDiffDarkStyles = {
+  variables: { dark: palette },
+  ...sharedStyles,
+}
+
 export const forgeDiffLightStyles = {
-  variables: {
-    light: {
-      diffViewerBackground: '#f8f5f0',
-      addedBackground: 'hsl(140 40% 92%)',
-      removedBackground: 'hsl(0 40% 94%)',
-      wordAddedBackground: 'hsl(140 50% 85%)',
-      wordRemovedBackground: 'hsl(0 50% 88%)',
-      addedGutterBackground: 'hsl(140 35% 88%)',
-      removedGutterBackground: 'hsl(0 35% 90%)',
-      gutterBackground: '#f0e9e0',
-      gutterColor: 'hsl(0 0% 55%)',
-      codeFoldBackground: 'hsl(220 20% 94%)',
-      codeFoldGutterBackground: 'hsl(220 15% 92%)',
-      codeFoldContentColor: 'hsl(220 20% 45%)',
-      addedColor: 'hsl(140 60% 25%)',
-      removedColor: 'hsl(0 60% 30%)',
-      emptyLineBackground: '#f0e9e0',
-    },
-  },
-  codeFold: {
-    fontSize: '12px',
-  },
-  line: {
-    fontSize: '13px',
-    fontFamily: 'var(--font-mono, "Geist Mono", ui-monospace, monospace)',
-  },
-  gutter: {
-    fontSize: '12px',
-    minWidth: '40px',
-    padding: '0 8px',
-  },
-  contentText: {
-    fontFamily: 'var(--font-mono, "Geist Mono", ui-monospace, monospace)',
-    fontSize: '13px',
-    lineHeight: '1.5',
-  },
-  content: {
-    width: 'auto',
-  },
-  diffContainer: {
-    borderRadius: '0',
-  },
+  variables: { light: palette },
+  ...sharedStyles,
 }
 
 /**

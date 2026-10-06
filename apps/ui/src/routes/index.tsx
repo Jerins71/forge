@@ -44,8 +44,8 @@ function MainIndexPage() {
   })
 
   return (
-    <main className="h-dvh bg-background text-foreground">
-      <div className="flex h-dvh w-full min-w-0 overflow-hidden bg-background">
+    <main className="h-dvh app-canvas text-foreground">
+      <div className="flex h-dvh w-full min-w-0 overflow-hidden">
         <BuilderSurface
           wsUrl={wsUrl}
           routeState={routeState}

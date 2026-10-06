@@ -127,7 +127,7 @@ export function MergePullRequestDialog({
             </label>
             <select
               id="merge-method"
-              className="h-8 w-full rounded-md border border-border/60 bg-background px-2 text-xs"
+              className="h-8 w-full rounded-md border border-hairline bg-background px-2 text-xs"
               value={method}
               onChange={(event) => setMethod(event.target.value as GitPullRequestMergeMethod)}
             >

@@ -15,7 +15,7 @@ export function ManagerToolActivityIndicator({ activity, pendingCount = 0 }: Man
   const scheduledWakeupCount = activity?.scheduledWakeupCount ?? 0
   if (backgroundCount > 0 || scheduledWakeupCount > 0) {
     return (
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-y border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground"
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-y border-hairline bg-foreground/[0.02] px-4 py-1.5 font-mono text-[11.5px] text-subtle-foreground"
         data-testid="manager-background-activity" role="status" aria-live="polite">
         {backgroundCount > 0 ? <span className="flex items-center gap-1.5">
           <LoaderCircle className="size-3.5 shrink-0 motion-safe:animate-spin" aria-hidden="true" />
@@ -38,7 +38,7 @@ export function ManagerToolActivityIndicator({ activity, pendingCount = 0 }: Man
   }
   if (pendingCount > 0) {
     return (
-      <div className="flex shrink-0 items-center gap-1.5 border-y border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground" role="status" aria-live="polite"
+      <div className="flex shrink-0 items-center gap-1.5 border-y border-hairline bg-foreground/[0.02] px-4 py-1.5 font-mono text-[11.5px] text-subtle-foreground" role="status" aria-live="polite"
         title="Accepted by Forge. The agent has not picked this input up yet; it may be waiting for the current operation to yield.">
         <Clock3 className="size-3.5 shrink-0" aria-hidden="true" />
         <span>{pendingCount === 1 ? '1 message waiting for agent' : `${pendingCount} messages waiting for agent`}</span>
@@ -52,7 +52,7 @@ export function ManagerToolActivityIndicator({ activity, pendingCount = 0 }: Man
 
   return (
     <div
-      className="flex shrink-0 items-center gap-1.5 border-y border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground"
+      className="flex shrink-0 items-center gap-1.5 border-y border-hairline bg-foreground/[0.02] px-4 py-1.5 font-mono text-[11.5px] text-subtle-foreground"
       data-testid="manager-tool-activity"
       role="status"
       aria-live="polite"

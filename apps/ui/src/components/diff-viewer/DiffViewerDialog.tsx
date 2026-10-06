@@ -262,7 +262,7 @@ export function DiffViewerContent({
               </p>
               <button
                 type="button"
-                className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-muted"
+                className="rounded-md border border-hairline px-3 py-1.5 text-xs transition-colors hover:bg-foreground/[0.05]"
                 onClick={() => setActiveTab('changes')}
               >
                 Return to Changes
@@ -316,7 +316,7 @@ export function DiffViewerContent({
         />
       ) : activeTab === 'worktrees' ? (
         <div
-          className="flex h-7 shrink-0 items-center border-t border-border/60 bg-card/80 px-3 text-xs text-muted-foreground"
+          className="flex h-7 shrink-0 items-center border-t border-hairline bg-foreground/[0.02] px-3 font-mono text-[11px] tabular-nums text-subtle-foreground"
           aria-live="polite"
         >
           <span>{worktreeCount ?? 0} {(worktreeCount ?? 0) === 1 ? 'worktree' : 'worktrees'}</span>
@@ -329,11 +329,11 @@ export function DiffViewerContent({
         </div>
       ) : activeTab === 'pull-requests' ? (
         <div
-          className="flex h-7 shrink-0 items-center border-t border-border/60 bg-card/80 px-3 text-xs text-muted-foreground"
+          className="flex h-7 shrink-0 items-center border-t border-hairline bg-foreground/[0.02] px-3 font-mono text-[11px] tabular-nums text-subtle-foreground"
           aria-live="polite"
         >
           {pullRequestsQuery.data?.listError ? (
-            <span className="truncate text-destructive">Pull request list unavailable</span>
+            <span className="truncate text-danger">Pull request list unavailable</span>
           ) : (
             <>
               <span>{pullRequestsQuery.data?.open.length ?? 0} open</span>
@@ -352,10 +352,10 @@ export function DiffViewerContent({
         </div>
       ) : activeTab === 'history' && historyStatus ? (
         <div
-          className="flex h-7 shrink-0 items-center border-t border-border/60 bg-card/80 px-3 text-xs text-muted-foreground"
+          className="flex h-7 shrink-0 items-center border-t border-hairline bg-foreground/[0.02] px-3 font-mono text-[11px] tabular-nums text-subtle-foreground"
           aria-live="polite"
         >
-          <span className="font-mono text-[10px] text-muted-foreground/70">{historyStatus.shortSha}</span>
+          <span>{historyStatus.shortSha}</span>
           <span className="mx-1.5 opacity-40">·</span>
           <span>{historyStatus.author}</span>
           <span className="mx-1.5 opacity-40">·</span>
@@ -363,10 +363,10 @@ export function DiffViewerContent({
             {historyStatus.filesChanged} {historyStatus.filesChanged === 1 ? 'file' : 'files'}
           </span>
           {historyStatus.insertions > 0 ? (
-            <span className="ml-1.5 text-emerald-500">+{historyStatus.insertions}</span>
+            <span className="ml-1.5 text-success">+{historyStatus.insertions}</span>
           ) : null}
           {historyStatus.deletions > 0 ? (
-            <span className="ml-1 text-red-500">-{historyStatus.deletions}</span>
+            <span className="ml-1 text-danger">-{historyStatus.deletions}</span>
           ) : null}
         </div>
       ) : activeTab === 'history' ? (
@@ -399,7 +399,7 @@ export function DiffViewerDialog({
       <DialogPortal>
         <DialogOverlay
           className={cn(
-            'fixed inset-0 z-[100] bg-black/70 backdrop-blur-[2px]',
+            'fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
           )}
         />
@@ -408,8 +408,7 @@ export function DiffViewerDialog({
           className={cn(
             'diff-viewer',
             'fixed left-1/2 top-1/2 z-[101] flex h-[92vh] w-[95vw] max-w-[1800px]',
-            '-translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border',
-            'bg-background shadow-[0_16px_80px_rgba(0,0,0,0.5)] outline-none',
+            'glass-strong -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl outline-none',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
           )}
           aria-label="Source Control"

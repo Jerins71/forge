@@ -90,7 +90,7 @@ export function MarkdownDiffPane({
 
   return (
     <div className="syntax-highlight flex h-full flex-col overflow-hidden" data-layout={layoutMode}>
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border/60 bg-card px-3 py-1.5">
+      <div className="sticky top-0 z-10 flex h-10 items-center gap-2 border-b border-hairline bg-foreground/[0.02] px-3 font-mono text-[12px]">
         <span className="font-mono text-xs text-muted-foreground">{fileName}</span>
         <div className="ml-auto flex items-center gap-1">
           {selectedSection != null ? (
@@ -124,10 +124,10 @@ export function MarkdownDiffPane({
       </div>
 
       {isSidebarLayout ? (
-        <div className="border-b border-border/60 bg-muted/10 px-3 py-2">
+        <div className="border-b border-hairline bg-foreground/[0.02] px-3 py-2">
           <button
             type="button"
-            className="flex w-full items-center justify-between gap-2 rounded-md border border-border/60 bg-background/70 px-2.5 py-1.5 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="flex w-full items-center justify-between gap-2 rounded-md border border-hairline bg-background/70 px-2.5 py-1.5 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
             aria-expanded={showOutline}
             aria-controls="markdown-diff-inline-outline"
             onClick={() => setShowOutline((current) => !current)}
@@ -164,8 +164,8 @@ export function MarkdownDiffPane({
       <div className="min-h-0 flex-1">
         <div className={cn('flex h-full', showPreview && !isSidebarLayout && 'min-w-0')}>
           {!isSidebarLayout ? (
-            <aside className="hidden w-60 shrink-0 border-r border-border/60 xl:flex xl:flex-col">
-              <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <aside className="hidden w-60 shrink-0 border-r border-hairline xl:flex xl:flex-col">
+              <div className="flex items-center gap-2 border-b border-hairline px-3 py-2 eyebrow">
                 <ListTree className="size-3.5" />
                 Outline
               </div>
@@ -198,11 +198,11 @@ export function MarkdownDiffPane({
           >
             <div className="min-h-0 overflow-auto">
               {selectedSection != null ? (
-                <div className="border-b border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                <div className="border-b border-hairline bg-foreground/[0.03] px-3 py-2 text-xs text-muted-foreground">
                   Showing section <span className="font-medium text-foreground">{selectedSection.title}</span>
                 </div>
               ) : !expandAll && hiddenSectionCount > 0 ? (
-                <div className="border-b border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                <div className="border-b border-hairline bg-foreground/[0.03] px-3 py-2 text-xs text-muted-foreground">
                   Hiding {hiddenSectionCount} unchanged {hiddenSectionCount === 1 ? 'section' : 'sections'}
                 </div>
               ) : null}
@@ -232,11 +232,11 @@ export function MarkdownDiffPane({
             </div>
 
             {showPreview ? (
-              <div className={cn('min-h-0 overflow-hidden bg-muted/10', isSidebarLayout ? 'border-t border-border/60' : 'border-l border-border/60')}>
-                <div className="flex items-center justify-between border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">
+              <div className={cn('min-h-0 overflow-hidden bg-foreground/[0.02]', isSidebarLayout ? 'border-t border-hairline' : 'border-l border-hairline')}>
+                <div className="flex items-center justify-between border-b border-hairline px-3 py-2 text-xs text-muted-foreground">
                   <span>Rendered preview</span>
                   {hasPreviewSwitch ? (
-                    <div className="inline-flex h-7 items-center rounded-md border border-border/60 bg-background/80 p-0.5">
+                    <div className="inline-flex h-7 items-center rounded-md border border-hairline bg-background/80 p-0.5">
                       <ToolbarToggle
                         active={previewSource === 'new'}
                         label="Preview current markdown"
@@ -290,8 +290,8 @@ function OutlineButton({
       className={cn(
         'mb-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors last:mb-0',
         isSelected
-          ? 'bg-accent/80 text-foreground'
-          : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+          ? 'bg-foreground/[0.07] text-foreground'
+          : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
       )}
       style={{ paddingLeft: `${Math.max(level - 1, 0) * 12 + 8}px` }}
     >
@@ -318,8 +318,8 @@ function MarkdownSectionCard({
   expandAll: boolean
 }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-border/60 bg-card shadow-sm">
-      <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
+    <section className="overflow-hidden rounded-lg border border-hairline glass-inset">
+      <div className="flex items-center gap-2 border-b border-hairline px-3 py-2">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-medium text-foreground">{section.title}</h2>
           <p className="text-[11px] text-muted-foreground">
@@ -348,10 +348,10 @@ function MarkdownSectionCard({
 
 function ChangeBadge({ section }: { section: MarkdownDiffSection }) {
   const classes = {
-    added: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
+    added: 'border-success/25 bg-success/10 text-success',
     modified: 'border-primary/25 bg-primary/10 text-primary',
-    removed: 'border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-300',
-    unchanged: 'border-border/70 bg-muted/40 text-muted-foreground',
+    removed: 'border-danger/25 bg-danger/10 text-danger',
+    unchanged: 'border-hairline bg-muted/40 text-muted-foreground',
   } as const
 
   return (
@@ -380,7 +380,7 @@ function ToolbarButton({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className="inline-flex h-7 items-center gap-1 rounded-md border border-border/60 bg-muted/30 px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      className="inline-flex h-7 items-center gap-1 rounded-md border border-hairline bg-foreground/[0.03] px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
     >
       {children}
     </button>

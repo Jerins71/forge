@@ -22,7 +22,7 @@ export function AttachedFiles({ attachments, onRemove }: AttachedFilesProps) {
   }
 
   return (
-    <div className="flex flex-wrap gap-2 border-b border-border px-4 py-2">
+    <div className="flex flex-wrap gap-2 border-b border-hairline px-4 py-2">
       {attachments.map((attachment) => {
         const isImage = isPendingImageAttachment(attachment)
 
@@ -41,7 +41,7 @@ export function AttachedFiles({ attachments, onRemove }: AttachedFilesProps) {
                 <img
                   src={attachment.dataUrl}
                   alt={attachment.fileName || 'Attached image'}
-                  className="size-16 rounded border border-border object-cover"
+                  className="size-16 rounded-lg border border-hairline object-cover"
                 />
                 <span
                   className="pointer-events-none absolute inset-0 flex items-center justify-center rounded bg-black/40 text-white/90 opacity-0 transition-opacity duration-150 group-hover/zoom:opacity-100 group-focus-visible/zoom:opacity-100"
@@ -60,7 +60,7 @@ export function AttachedFiles({ attachments, onRemove }: AttachedFilesProps) {
                 </div>
               </div>
             ) : (
-              <div className="flex h-16 w-52 items-center gap-2 rounded border border-border bg-muted/40 px-2 py-1.5">
+              <div className="flex glass-inset h-16 w-52 items-center gap-2 rounded-lg px-2 py-1.5">
                 <div className="rounded bg-muted p-1.5 text-muted-foreground">
                   {isPendingTextAttachment(attachment) ? <FileText className="size-3.5" /> : <File className="size-3.5" />}
                 </div>

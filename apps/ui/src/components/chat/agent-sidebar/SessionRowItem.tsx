@@ -148,25 +148,33 @@ export const SessionRowItem = React.memo(function SessionRowItem({
       {compactionInProgress ? <SidebarCompactionBadge roomsV2={roomsV2} /> : null}
     </span>
   ) : hasPendingChoice ? (
-    <span
-      className={cn(
-        'inline-flex size-3.5 shrink-0 items-center justify-center rounded-full border-2 bg-transparent',
-        roomsV2 ? 'sidebar-room-status-choice sidebar-room-attention' : 'border-blue-400',
-      )}
-      style={roomsV2 ? undefined : { boxShadow: '0 0 6px rgba(96,165,250,0.5)' }}
-      aria-label="Awaiting your response"
-    >
-      <span className={roomsV2 ? 'text-[8px] font-bold leading-none' : 'text-[8px] font-bold leading-none text-blue-400'}>?</span>
-    </span>
+    roomsV2 ? (
+      <span
+        className="sidebar-room-status-choice sidebar-room-attention shrink-0"
+        aria-label="Awaiting your response"
+      />
+    ) : (
+      <span
+        className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-full border-2 bg-transparent border-blue-400"
+        style={{ boxShadow: '0 0 6px rgba(96,165,250,0.5)' }}
+        aria-label="Awaiting your response"
+      >
+        <span className="text-[8px] font-bold leading-none text-blue-400">?</span>
+      </span>
+    )
   ) : managerStreaming ? (
-    <span
-      className={cn(
-        'inline-flex size-3 shrink-0 rounded-full border-2 bg-transparent',
-        roomsV2 ? 'sidebar-room-status-streaming sidebar-room-glow' : 'border-amber-500',
-      )}
-      style={roomsV2 ? undefined : { animation: 'subtle-glow-pulse 2s ease-in-out infinite' }}
-      aria-label="Manager streaming"
-    />
+    roomsV2 ? (
+      <span
+        className="sidebar-room-status-streaming sidebar-room-glow shrink-0"
+        aria-label="Manager streaming"
+      />
+    ) : (
+      <span
+        className="inline-flex size-3 shrink-0 rounded-full border-2 bg-transparent border-amber-500"
+        style={{ animation: 'subtle-glow-pulse 2s ease-in-out infinite' }}
+        aria-label="Manager streaming"
+      />
+    )
   ) : isAgentCreator ? (
     <Sparkles className={cn('size-3 shrink-0', roomsV2 ? 'sidebar-room-project-agent-icon' : 'text-violet-400')} aria-label="Agent Creator" />
   ) : (
@@ -245,7 +253,7 @@ export const SessionRowItem = React.memo(function SessionRowItem({
                     className={cn(
                       'flex min-w-0 flex-1 items-center gap-1.5 text-left',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-                      roomsV2 ? 'py-1 pr-1.5 text-xs leading-4' : 'py-1.5 pr-1.5',
+                      roomsV2 ? 'py-1.5 pr-2 text-[13px] leading-4' : 'py-1.5 pr-1.5',
                       hasWorkers
                         ? roomsV2 ? 'pl-6' : 'pl-7'
                         : roomsV2 ? 'pl-3' : 'pl-5',
@@ -253,11 +261,11 @@ export const SessionRowItem = React.memo(function SessionRowItem({
                   >
                     {sessionStatusIndicator}
                     <span className="min-w-0 flex-1 truncate">
-                      <span className={cn('block truncate text-sm leading-5', roomsV2 ? 'text-xs leading-4' : undefined)}>
+                      <span className={cn('block truncate text-sm leading-5', roomsV2 ? 'text-[13px] leading-[18px]' : undefined)}>
                         {highlightQuery ? <HighlightedText text={label} query={highlightQuery} /> : label}
                       </span>
                       {creatorLabel ? (
-                        <span className="block truncate text-[10px] leading-tight text-muted-foreground/50">
+                        <span className={cn('block truncate leading-tight text-muted-foreground/50', roomsV2 ? 'font-mono text-[11px] text-subtle-foreground' : 'text-[10px]')}>
                           @{creatorLabel}
                         </span>
                       ) : null}

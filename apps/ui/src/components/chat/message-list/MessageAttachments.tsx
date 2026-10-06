@@ -132,11 +132,10 @@ function attachmentIcon(attachment: ConversationMessageAttachment) {
 
 function MessageImageAttachments({
   attachments,
-  isUser,
   environmentClient,
 }: {
   attachments: PreviewableMessageImageAttachment[]
-  isUser: boolean
+  isUser?: boolean
   environmentClient: EnvironmentClient | null
 }) {
   const { target: zoomTarget, clearTarget, bind } = usePeekPreview<{ src: string; alt: string }>()
@@ -175,9 +174,7 @@ function MessageImageAttachments({
                 alt={altText}
                 className={cn(
                   'max-h-56 w-full rounded-lg object-cover transition-transform duration-150 group-hover/zoom:scale-[1.02]',
-                  isUser
-                    ? 'border border-primary-foreground/25'
-                    : 'border border-border',
+                  'border border-hairline',
                 )}
                 loading="lazy"
               />
@@ -244,10 +241,9 @@ function extractTerminalContent(text: string): { label: string; code: string } {
 
 function TerminalAttachmentCard({
   attachment,
-  isUser,
 }: {
   attachment: ConversationTextAttachment
-  isUser: boolean
+  isUser?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const { label, code } = extractTerminalContent(attachment.text)
@@ -256,52 +252,38 @@ function TerminalAttachmentCard({
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-md border',
-        isUser
-          ? 'border-blue-300/30 bg-blue-500/10'
-          : 'border-blue-500/20 bg-blue-500/5',
+        'glass-inset overflow-hidden rounded-xl',
       )}
     >
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
         className={cn(
-          'flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors',
-          isUser ? 'hover:bg-blue-400/10' : 'hover:bg-blue-500/10',
+          'flex w-full items-center gap-2 px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/[0.04]',
         )}
         aria-expanded={expanded}
         aria-label={`${expanded ? 'Collapse' : 'Expand'} terminal output: ${displayName}`}
       >
         <TerminalSquare
-          className={cn(
-            'size-3.5 shrink-0',
-            isUser ? 'text-blue-200' : 'text-blue-400',
-          )}
+          className="size-3.5 shrink-0 text-primary"
         />
         <span className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium">{displayName}</p>
         </span>
         {expanded ? (
           <ChevronDown
-            className={cn(
-              'size-3 shrink-0',
-              isUser ? 'text-primary-foreground/60' : 'text-muted-foreground',
-            )}
+            className="size-3 shrink-0 text-subtle-foreground"
           />
         ) : (
           <ChevronRight
-            className={cn(
-              'size-3 shrink-0',
-              isUser ? 'text-primary-foreground/60' : 'text-muted-foreground',
-            )}
+            className="size-3 shrink-0 text-subtle-foreground"
           />
         )}
       </button>
       {expanded ? (
         <div
           className={cn(
-            'max-h-60 overflow-auto border-t px-3 py-2',
-            isUser ? 'border-blue-300/20' : 'border-blue-500/15',
+            'max-h-60 overflow-auto border-t border-hairline px-3 py-2',
           )}
         >
           <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">
@@ -371,19 +353,12 @@ function MessageFileAttachments({
               download()
             } : undefined}
             className={cn(
-              'flex items-center gap-2 rounded-md border px-2 py-1.5',
-              download && 'cursor-pointer hover:bg-muted/60',
-              isUser
-                ? 'border-primary-foreground/25 bg-primary-foreground/10 text-primary-foreground'
-                : 'border-border bg-muted/35 text-foreground',
+              'glass-inset flex items-center gap-2 rounded-xl px-2.5 py-2 text-foreground',
             )}
           >
             <span
               className={cn(
-                'inline-flex size-6 items-center justify-center rounded',
-                isUser
-                  ? 'bg-primary-foreground/15 text-primary-foreground'
-                  : 'bg-muted text-muted-foreground',
+                'inline-flex size-6 items-center justify-center rounded-md bg-foreground/[0.06] text-muted-foreground',
               )}
             >
               {attachmentIcon(attachment)}
@@ -392,10 +367,7 @@ function MessageFileAttachments({
               <p className="truncate text-xs font-medium">{fileName}</p>
               <p
                 className={cn(
-                  'truncate text-[11px]',
-                  isUser
-                    ? 'text-primary-foreground/80'
-                    : 'text-muted-foreground',
+                  'truncate font-mono text-[11px] text-subtle-foreground',
                 )}
               >
                 {subtitle} • {attachment.mimeType}

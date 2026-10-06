@@ -45,7 +45,7 @@ export function ProjectAgentDefinitionRow({
     <div className="space-y-1.5 rounded-md border p-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <Zap className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+          <Zap className="h-3.5 w-3.5 shrink-0 text-primary" />
           <code className="truncate text-sm font-semibold">@{item.handle}</code>
           {item.displayName ? (
             <span className="truncate text-sm text-muted-foreground">{item.displayName}</span>
@@ -98,7 +98,7 @@ export function ProjectAgentDefinitionRow({
       {item.problems.length > 0 ? (
         <div className="space-y-1">
           {item.problems.map((problem, index) => (
-            <div key={index} className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+            <div key={index} className="flex items-start gap-1.5 text-xs text-attention">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               <span>{problem.message}{problem.path ? ` (${problem.path})` : ''}</span>
             </div>

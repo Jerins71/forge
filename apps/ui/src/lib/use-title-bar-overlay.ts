@@ -15,7 +15,7 @@ export function useTitleBarOverlay() {
       const style = getComputedStyle(document.documentElement)
 
       // Read the actual CSS variable values for card (header background) and foreground
-      const cardColor = style.getPropertyValue('--card').trim()
+      const cardColor = style.getPropertyValue('--background').trim()
       const foregroundColor = style.getPropertyValue('--foreground').trim()
 
       // Convert to hex for Electron API (may already be hex, or HSL)

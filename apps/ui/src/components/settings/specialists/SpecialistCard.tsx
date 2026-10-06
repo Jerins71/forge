@@ -118,7 +118,7 @@ export function SpecialistCard({
                 </span>
               )}
               {!specialist.available && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+                <span className="inline-flex items-center gap-1 text-[10px] text-attention">
                   <AlertTriangle className="size-3" />
                   {specialist.availabilityMessage || 'Unavailable'}
                 </span>
@@ -240,7 +240,7 @@ export function SpecialistCard({
             </span>
           )}
           {!specialist.available && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+            <span className="inline-flex items-center gap-1 text-[10px] text-attention">
               <AlertTriangle className="size-3" />
               {specialist.availabilityMessage || 'Unavailable'}
             </span>

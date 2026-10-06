@@ -320,17 +320,17 @@ function ToolPayloadBlock({
 }) {
   return (
     <div>
-      <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <p className="eyebrow mb-1">
         {label}
       </p>
       <pre
         className={cn(
-          'max-h-64 w-full overflow-auto rounded-md border p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words',
+          'max-h-64 w-full overflow-auto rounded-xl border p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap break-words',
           tone === 'error'
-            ? 'border-destructive/30 bg-destructive/10 text-destructive'
+            ? 'border-danger/30 bg-danger/10 text-danger'
             : tone === 'cancelled'
-              ? 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300'
-              : 'border-border/70 bg-muted/45 text-foreground',
+              ? 'border-danger/30 bg-danger/10 text-danger'
+              : 'glass-inset text-foreground/90',
         )}
       >
         {formatPayload(value)}
@@ -414,45 +414,53 @@ function ToolExecutionLogRow({
           : 'Result'
 
   return (
-    <div className="rounded-md">
+    <div className="rounded-lg">
       <Button
         type="button"
         variant="ghost"
         className={cn(
-          'group h-auto w-full items-start justify-start gap-1.5 rounded-md px-1 py-1 text-left text-sm font-normal text-foreground/70 italic transition-colors',
-          'hover:text-foreground',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+          'group h-auto w-full items-start justify-start gap-2 rounded-lg px-1 py-1 text-left font-mono text-[12px] font-normal text-subtle-foreground transition-colors duration-150',
+          'hover:bg-transparent hover:text-foreground',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
         )}
         aria-expanded={isExpanded}
         aria-controls={contentId}
         onClick={() => setIsExpanded((previous) => !previous)}
       >
+        <ChevronRight
+          className={cn(
+            'mt-[3px] size-3 shrink-0 text-subtle-foreground transition-transform duration-150',
+            isExpanded && 'rotate-90',
+          )}
+          strokeWidth={2}
+          aria-hidden="true"
+        />
         <span className="mt-0.5 inline-flex size-4 shrink-0 items-center justify-center">
           {displayStatus === 'completed' ? (
             ToolIcon ? (
               <ToolIcon
-                className="size-3.5 text-emerald-600 dark:text-emerald-400"
+                className="size-3.5 text-success"
                 aria-hidden="true"
               />
             ) : (
               <Check
-                className="size-3.5 text-emerald-600 dark:text-emerald-400"
+                className="size-3.5 text-success"
                 aria-hidden="true"
               />
             )
           ) : displayStatus === 'cancelled' ? (
-            <X className="size-3.5 text-rose-500 dark:text-rose-400" aria-hidden="true" />
+            <X className="size-3.5 text-danger" aria-hidden="true" />
           ) : displayStatus === 'error' ? (
-            <AlertCircle className="size-3.5 text-destructive" aria-hidden="true" />
+            <AlertCircle className="size-3.5 text-danger" aria-hidden="true" />
           ) : (
-            <Loader2 className="size-3.5 animate-spin text-foreground/50" aria-hidden="true" />
+            <Loader2 className="size-3.5 animate-spin text-primary" aria-hidden="true" />
           )}
         </span>
 
         <span className="min-w-0 flex-1 break-words">
           {actorLabel ? (
             <span
-              className="mr-1.5 inline-flex items-center gap-1 rounded-sm border border-border/70 bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium not-italic text-muted-foreground"
+              className="mr-1.5 inline-flex items-center gap-1 glass-inset rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground"
               title={actorDisplay?.title ?? rawActorId}
             >
               {actorDisplay?.specialistColor ? (
@@ -467,24 +475,17 @@ function ToolExecutionLogRow({
           ) : null}
           {friendlyMessage}
           {elapsedLabel ? (
-            <span className="ml-1.5 text-xs tabular-nums not-italic text-muted-foreground/60">
+            <span className="ml-1.5 text-[11px] tabular-nums text-subtle-foreground">
               {elapsedLabel}
             </span>
           ) : null}
           {staticDuration ? (
-            <span className="ml-1.5 text-[11px] tabular-nums not-italic text-muted-foreground/40">
+            <span className="ml-1.5 text-[11px] tabular-nums text-subtle-foreground/70">
               · {staticDuration}
             </span>
           ) : null}
         </span>
 
-        <ChevronRight
-          className={cn(
-            'mt-0.5 size-3.5 shrink-0 text-muted-foreground/80 opacity-0 transition-all group-hover:opacity-100',
-            isExpanded && 'rotate-90',
-          )}
-          aria-hidden="true"
-        />
       </Button>
 
       <div
@@ -495,7 +496,7 @@ function ToolExecutionLogRow({
         )}
       >
         <div className="overflow-hidden">
-          <div className="ml-6 mt-1 space-y-2 pb-1">
+          <div className="ml-6 mt-1.5 space-y-2 pb-1">
             {entry.inputPayload ? (
               <ToolPayloadBlock label="Input" value={entry.inputPayload} tone="neutral" />
             ) : null}
@@ -523,7 +524,7 @@ function ToolExecutionLogRow({
               />
             ) : null}
 
-            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-subtle-foreground">
               <span>{formatTimestamp(entry.timestamp)}</span>
               {rawActorId ? <span>• {rawActorId}</span> : null}
               {actorDisplay?.secondaryLabel ? <span>• {actorDisplay.secondaryLabel}</span> : null}
@@ -539,8 +540,8 @@ function ToolExecutionLogRow({
 
 function RuntimeErrorLog({ entry }: { entry: ConversationLogEntry }) {
   return (
-    <div className="rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-      <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-destructive/80">
+    <div className="rounded-xl border border-danger/25 bg-danger/10 px-3 py-2 text-sm text-danger">
+      <div className="eyebrow mb-1 !text-danger/80">
         Runtime error
       </div>
       <p className="whitespace-pre-wrap break-words leading-relaxed">{entry.text}</p>

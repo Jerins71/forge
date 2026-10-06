@@ -704,9 +704,9 @@ function CodeView({
       <table className="w-full border-collapse">
         <tbody>
           {highlightedLines.map((html, i) => (
-            <tr key={i} className="hover:bg-muted/30">
+            <tr key={i} className="hover:bg-foreground/[0.04]">
               <td
-                className="sticky left-0 z-[1] select-none border-r border-border/30 bg-card/80 pr-3 text-right align-top text-muted-foreground/40"
+                className="sticky left-0 z-[1] select-none border-r border-hairline bg-transparent pr-3 text-right align-top text-subtle-foreground/70"
                 style={{ width: gutterWidth, minWidth: gutterWidth }}
               >
                 <span className="leading-[21px]">{i + 1}</span>

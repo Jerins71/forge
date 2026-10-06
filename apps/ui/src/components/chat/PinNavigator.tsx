@@ -96,7 +96,7 @@ export function PinNavigator({ pinnedMessageIds, onScrollToMessage, onClearAllPi
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className="hidden sm:inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-amber-600 hover:bg-amber-500/10 dark:text-amber-400 dark:hover:bg-amber-500/10 transition-colors cursor-pointer"
+                className="hidden sm:inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[11px] font-medium text-attention hover:bg-attention/10 dark:hover:bg-attention/10 transition-colors cursor-pointer"
               >
                 <Pin className="size-3 fill-current" />
                 <span>{count}</span>

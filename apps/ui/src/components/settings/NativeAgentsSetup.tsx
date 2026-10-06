@@ -150,14 +150,14 @@ function StatusLine({ runtime }: { runtime: NativeRuntimeStatus }) {
   if (runtime.status === 'current') {
     return (
       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <CheckCircle2 className="size-3.5 text-emerald-500" /> Up to date
+        <CheckCircle2 className="size-3.5 text-success" /> Up to date
       </span>
     )
   }
   if (runtime.status === 'outdated') {
     return (
       <span className="flex items-center gap-1.5 text-xs">
-        <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+        <span className="size-1.5 rounded-full bg-attention" aria-hidden="true" />
         <span>Latest is <span className="font-mono">v{runtime.latestVersion}</span></span>
       </span>
     )

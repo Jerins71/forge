@@ -4,190 +4,88 @@
  * Scoped to .syntax-highlight (shared scope for diff viewer, file browser, etc.)
  */
 
-/* ── Dark theme (default) ─────────────────────────────── */
-.dark .syntax-highlight .hljs-keyword,
-.dark .syntax-highlight .hljs-selector-tag,
-.dark .syntax-highlight .hljs-built_in,
-.dark .syntax-highlight .hljs-type {
-  color: #c678dd;
+/* Palette (shared with the CodeMirror theme). */
+:root {
+  --syn-keyword: #3d4bc4;
+  --syn-string: #2a7a4b;
+  --syn-type: #9a6410;
+  --syn-comment: #7a7a86;
+  --syn-number: #7a4bd0;
+  --syn-function: #3d4bc4;
+  --syn-attr: #9a6410;
+  --syn-punct: #5a5a66;
 }
 
-.dark .syntax-highlight .hljs-literal,
-.dark .syntax-highlight .hljs-number {
-  color: #d19a66;
+.dark {
+  --syn-keyword: #a9b4ff;
+  --syn-string: #9fd9b5;
+  --syn-type: #e8c38a;
+  --syn-comment: #7c7c86;
+  --syn-number: #c4a3ff;
+  --syn-function: #a9b4ff;
+  --syn-attr: #e8c38a;
+  --syn-punct: #9a9aa6;
 }
 
-.dark .syntax-highlight .hljs-string,
-.dark .syntax-highlight .hljs-template-tag,
-.dark .syntax-highlight .hljs-addition {
-  color: #98c379;
+.syntax-highlight .hljs-keyword,
+.syntax-highlight .hljs-selector-tag,
+.syntax-highlight .hljs-built_in,
+.syntax-highlight .hljs-meta,
+.syntax-highlight .hljs-meta .hljs-keyword {
+  color: var(--syn-keyword);
 }
 
-.dark .syntax-highlight .hljs-subst,
-.dark .syntax-highlight .hljs-template-variable {
-  color: #e06c75;
+.syntax-highlight .hljs-string,
+.syntax-highlight .hljs-template-tag,
+.syntax-highlight .hljs-addition,
+.syntax-highlight .hljs-regexp {
+  color: var(--syn-string);
 }
 
-.dark .syntax-highlight .hljs-comment,
-.dark .syntax-highlight .hljs-quote {
-  color: #7f848e;
+.syntax-highlight .hljs-type,
+.syntax-highlight .hljs-tag,
+.syntax-highlight .hljs-name,
+.syntax-highlight .hljs-section,
+.syntax-highlight .hljs-title.class_,
+.syntax-highlight .hljs-selector-id,
+.syntax-highlight .hljs-selector-class,
+.syntax-highlight .hljs-attr,
+.syntax-highlight .hljs-attribute,
+.syntax-highlight .hljs-property {
+  color: var(--syn-type);
+}
+
+.syntax-highlight .hljs-literal,
+.syntax-highlight .hljs-number,
+.syntax-highlight .hljs-symbol,
+.syntax-highlight .hljs-bullet {
+  color: var(--syn-number);
+}
+
+.syntax-highlight .hljs-comment,
+.syntax-highlight .hljs-quote {
+  color: var(--syn-comment);
   font-style: italic;
 }
 
-.dark .syntax-highlight .hljs-meta,
-.dark .syntax-highlight .hljs-meta .hljs-keyword {
-  color: #61afef;
+.syntax-highlight .hljs-function,
+.syntax-highlight .hljs-title,
+.syntax-highlight .hljs-title.function_ {
+  color: var(--syn-function);
 }
 
-.dark .syntax-highlight .hljs-function,
-.dark .syntax-highlight .hljs-title,
-.dark .syntax-highlight .hljs-title.function_ {
-  color: #61afef;
+.syntax-highlight .hljs-variable,
+.syntax-highlight .hljs-params,
+.syntax-highlight .hljs-subst,
+.syntax-highlight .hljs-template-variable {
+  color: inherit;
 }
 
-.dark .syntax-highlight .hljs-attr,
-.dark .syntax-highlight .hljs-attribute {
-  color: #d19a66;
+.syntax-highlight .hljs-operator,
+.syntax-highlight .hljs-punctuation {
+  color: var(--syn-punct);
 }
 
-.dark .syntax-highlight .hljs-variable,
-.dark .syntax-highlight .hljs-params {
-  color: #e06c75;
-}
-
-.dark .syntax-highlight .hljs-regexp {
-  color: #56b6c2;
-}
-
-.dark .syntax-highlight .hljs-tag {
-  color: #e06c75;
-}
-
-.dark .syntax-highlight .hljs-name {
-  color: #e06c75;
-}
-
-.dark .syntax-highlight .hljs-selector-id,
-.dark .syntax-highlight .hljs-selector-class {
-  color: #d19a66;
-}
-
-.dark .syntax-highlight .hljs-section,
-.dark .syntax-highlight .hljs-title.class_ {
-  color: #e5c07b;
-}
-
-.dark .syntax-highlight .hljs-deletion {
-  color: #e06c75;
-}
-
-.dark .syntax-highlight .hljs-symbol,
-.dark .syntax-highlight .hljs-bullet {
-  color: #56b6c2;
-}
-
-.dark .syntax-highlight .hljs-property {
-  color: #e06c75;
-}
-
-.dark .syntax-highlight .hljs-operator {
-  color: #56b6c2;
-}
-
-.dark .syntax-highlight .hljs-punctuation {
-  color: #abb2bf;
-}
-
-/* ── Light theme ─────────────────────────────────────── */
-:root:not(.dark) .syntax-highlight .hljs-keyword,
-:root:not(.dark) .syntax-highlight .hljs-selector-tag,
-:root:not(.dark) .syntax-highlight .hljs-built_in,
-:root:not(.dark) .syntax-highlight .hljs-type {
-  color: #a626a4;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-literal,
-:root:not(.dark) .syntax-highlight .hljs-number {
-  color: #986801;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-string,
-:root:not(.dark) .syntax-highlight .hljs-template-tag,
-:root:not(.dark) .syntax-highlight .hljs-addition {
-  color: #50a14f;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-subst,
-:root:not(.dark) .syntax-highlight .hljs-template-variable {
-  color: #e45649;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-comment,
-:root:not(.dark) .syntax-highlight .hljs-quote {
-  color: #a0a1a7;
-  font-style: italic;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-meta,
-:root:not(.dark) .syntax-highlight .hljs-meta .hljs-keyword {
-  color: #4078f2;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-function,
-:root:not(.dark) .syntax-highlight .hljs-title,
-:root:not(.dark) .syntax-highlight .hljs-title.function_ {
-  color: #4078f2;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-attr,
-:root:not(.dark) .syntax-highlight .hljs-attribute {
-  color: #986801;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-variable,
-:root:not(.dark) .syntax-highlight .hljs-params {
-  color: #e45649;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-regexp {
-  color: #0184bc;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-tag {
-  color: #e45649;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-name {
-  color: #e45649;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-selector-id,
-:root:not(.dark) .syntax-highlight .hljs-selector-class {
-  color: #986801;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-section,
-:root:not(.dark) .syntax-highlight .hljs-title.class_ {
-  color: #c18401;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-deletion {
-  color: #e45649;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-symbol,
-:root:not(.dark) .syntax-highlight .hljs-bullet {
-  color: #0184bc;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-property {
-  color: #e45649;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-operator {
-  color: #0184bc;
-}
-
-:root:not(.dark) .syntax-highlight .hljs-punctuation {
-  color: #383a42;
+.syntax-highlight .hljs-deletion {
+  color: var(--status-danger);
 }

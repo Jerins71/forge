@@ -1,4 +1,4 @@
-import { GitBranch, GitCommit, HardDrive, Lock, RefreshCw, ShieldAlert, Users } from 'lucide-react'
+import { GitBranch, GitCommit, Lock, RefreshCw, ShieldAlert, Users } from 'lucide-react'
 import type { GitWorktreeListResult, GitWorktreeSummary } from '@forge/protocol'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -45,11 +45,11 @@ function WorktreeAgentStatsBadges({ worktree }: { worktree: GitWorktreeSummary }
 
   return (
     <>
-      <Badge variant="outline" className="h-5 gap-1 rounded-sm border-emerald-500/40 px-1.5 text-[10px] text-emerald-600 dark:text-emerald-400">
+      <Badge variant="outline" className="h-5 gap-1 rounded-sm border-success/40 px-1.5 text-[10px] text-success">
         <Users className="size-2.5" /> {stats.attached} attached
       </Badge>
       {stats.running > 0 ? (
-        <Badge variant="outline" className="h-5 rounded-sm border-sky-500/40 px-1.5 text-[10px] text-sky-600 dark:text-sky-400">
+        <Badge variant="outline" className="h-5 rounded-sm border-primary/40 px-1.5 text-[10px] text-primary">
           {stats.running} running
         </Badge>
       ) : null}
@@ -82,7 +82,7 @@ function WorktreeStateBadges({ worktree }: { worktree: GitWorktreeSummary }) {
         </Badge>
       ) : null}
       {worktree.prunable ? (
-        <Badge variant="outline" className="h-5 gap-1 rounded-sm border-amber-500/40 px-1.5 text-[10px] text-amber-600 dark:text-amber-400">
+        <Badge variant="outline" className="h-5 gap-1 rounded-sm border-attention/40 px-1.5 text-[10px] text-attention">
           <ShieldAlert className="size-2.5" /> Prunable
         </Badge>
       ) : null}
@@ -108,14 +108,18 @@ function WorktreeCard({
   return (
     <article
       className={cn(
-        'rounded-lg border border-border/70 bg-card/60 p-3 transition-colors',
-        (worktree.isCurrentContext || isSelectedContext) && 'border-primary/40 bg-primary/5',
+        'glass-inset rounded-xl p-3 transition-colors duration-150',
+        (worktree.isCurrentContext || isSelectedContext) && 'border-primary/40',
       )}
     >
       <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 space-y-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <HardDrive className="size-4 shrink-0 text-muted-foreground" />
+            {worktree.isCurrentContext || isSelectedContext ? (
+              <span className="live-dot shrink-0" aria-hidden="true" />
+            ) : (
+              <span className="inline-block size-[7px] shrink-0 rounded-full border border-subtle-foreground/70" aria-hidden="true" />
+            )}
             <h3 className="truncate text-sm font-medium text-foreground" title={worktree.path}>
               {formatPathLabel(worktree.path)}
             </h3>
@@ -215,7 +219,7 @@ export function WorktreesView({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="shrink-0 border-b border-border/60 bg-card/50 px-4 py-3">
+      <div className="shrink-0 border-b  px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-foreground">Worktrees</h2>
@@ -233,7 +237,7 @@ export function WorktreesView({
       <ScrollArea className="min-h-0 flex-1 overflow-hidden">
         <div className="space-y-3 p-4">
           {worktrees.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border/70 p-8 text-center text-sm text-muted-foreground">
+            <div className="rounded-lg border border-dashed border-hairline p-8 text-center text-sm text-muted-foreground">
               No worktrees were reported for this repository.
             </div>
           ) : (

@@ -68,14 +68,14 @@ const CUSTOM_APPEARANCE_VARIABLES = [
 export const APPEARANCE_TEMPLATES: AppearanceTemplate[] = [
   {
     id: 'forge',
-    name: 'Original Forge',
-    description: 'Restores the true system-driven default Forge skin.',
-    accentColor: '#2e7d32',
-    backgroundColor: '#f8f5f0',
-    foregroundColor: '#3e2723',
-    preferredMode: 'auto',
-    uiFont: 'system',
-    codeFont: 'system-mono',
+    name: 'Forge Glass',
+    description: 'Near-black glass with a periwinkle signal. The default Forge skin.',
+    accentColor: '#8e9bff',
+    backgroundColor: '#f5f5f7',
+    foregroundColor: '#121216',
+    preferredMode: 'dark',
+    uiFont: 'geist',
+    codeFont: 'geist-mono',
   },
   {
     id: 'aurora',
@@ -129,27 +129,27 @@ export const APPEARANCE_TEMPLATES: AppearanceTemplate[] = [
 
 export const APPEARANCE_UI_FONTS: Record<AppearanceFont, string> = {
   system: 'System UI',
-  geist: 'Geist (if installed)',
+  geist: 'Geist',
   inter: 'Inter/System',
   serif: 'Serif',
 }
 
 export const APPEARANCE_CODE_FONTS: Record<AppearanceCodeFont, string> = {
   'system-mono': 'System Mono',
-  'geist-mono': 'Geist Mono (if installed)',
+  'geist-mono': 'Geist Mono',
   jetbrains: 'JetBrains/System',
   'sf-mono': 'SF Mono/System',
 }
 
 const UI_FONT_STACKS: Record<AppearanceFont, string> = {
-  geist: '"Geist", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  geist: '"Geist Variable", "Geist", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   system: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   inter: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   serif: 'Georgia, Cambria, "Times New Roman", serif',
 }
 
 const CODE_FONT_STACKS: Record<AppearanceCodeFont, string> = {
-  'geist-mono': '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+  'geist-mono': '"Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
   'system-mono': 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
   jetbrains: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
   'sf-mono': 'SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace',
@@ -157,12 +157,12 @@ const CODE_FONT_STACKS: Record<AppearanceCodeFont, string> = {
 
 const DEFAULT_APPEARANCE: AppearanceConfig = {
   version: 1,
-  mode: 'auto',
-  accentColor: '#2e7d32',
-  backgroundColor: '#f8f5f0',
-  foregroundColor: '#3e2723',
-  uiFont: 'system',
-  codeFont: 'system-mono',
+  mode: 'dark',
+  accentColor: '#8e9bff',
+  backgroundColor: '#f5f5f7',
+  foregroundColor: '#121216',
+  uiFont: 'geist',
+  codeFont: 'geist-mono',
   templateId: 'forge',
   customApplied: false,
 }
@@ -278,8 +278,8 @@ export const THEME_INIT_SCRIPT = `(() => {
         '--sidebar-accent-foreground': secondaryForeground,
         '--sidebar-border': border,
         '--sidebar-ring': accent,
-        '--app-font-sans': ${JSON.stringify(UI_FONT_STACKS)}[config.uiFont] || ${JSON.stringify(UI_FONT_STACKS.system)},
-        '--app-font-mono': ${JSON.stringify(CODE_FONT_STACKS)}[config.codeFont] || ${JSON.stringify(CODE_FONT_STACKS['system-mono'])},
+        '--app-font-sans': ${JSON.stringify(UI_FONT_STACKS)}[config.uiFont] || ${JSON.stringify(UI_FONT_STACKS[DEFAULT_APPEARANCE.uiFont])},
+        '--app-font-mono': ${JSON.stringify(CODE_FONT_STACKS)}[config.codeFont] || ${JSON.stringify(CODE_FONT_STACKS[DEFAULT_APPEARANCE.codeFont])},
       };
     })();
     Object.entries(vars).forEach(([key, value]) => style.setProperty(key, value));

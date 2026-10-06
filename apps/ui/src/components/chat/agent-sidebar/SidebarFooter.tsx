@@ -5,6 +5,9 @@ import { useHelp } from '@/components/help/help-hooks'
 import { cn } from '@/lib/utils'
 import type { ProviderUsageStats } from '@forge/protocol'
 
+const ACTIVE_ROOMS = 'bg-foreground/[0.08] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+const QUIET_ROOMS = 'text-subtle-foreground hover:bg-foreground/[0.05] hover:text-foreground'
+
 function HelpButton({ roomsV2 = false }: { roomsV2?: boolean }) {
   const { isDrawerOpen, openDrawer } = useHelp()
 
@@ -16,11 +19,11 @@ function HelpButton({ roomsV2 = false }: { roomsV2?: boolean }) {
           onClick={() => openDrawer('chat.main')}
           className={cn(
             roomsV2
-              ? 'inline-flex size-7 items-center justify-center rounded-[8px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60'
+              ? 'inline-flex size-8 items-center justify-center rounded-[9px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
               : 'inline-flex size-8 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
             isDrawerOpen
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-              : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
+              ? roomsV2 ? ACTIVE_ROOMS : 'bg-sidebar-accent text-sidebar-accent-foreground'
+              : roomsV2 ? QUIET_ROOMS : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
           )}
           aria-label="Help"
           aria-pressed={isDrawerOpen}
@@ -69,7 +72,7 @@ export function SidebarFooter({
 }: SidebarFooterProps) {
   const usageSplit = roomsV2 ? '52%' : '38%'
   const controlClass = roomsV2
-    ? 'inline-flex size-7 items-center justify-center rounded-[8px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60'
+    ? 'inline-flex size-8 items-center justify-center rounded-[9px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
     : 'inline-flex size-8 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60'
 
   return (
@@ -89,7 +92,7 @@ export function SidebarFooter({
             </>
           ) : null}
           <div
-            className={cn('flex items-center px-2 py-1.5', roomsV2 && 'py-1')}
+            className={cn('flex items-center px-2 py-1.5', roomsV2 && 'px-2.5 py-2')}
             style={showProviderUsage
               ? { paddingLeft: `calc(${usageSplit} + 8px)`, justifyContent: 'space-evenly' }
               : { justifyContent: 'center', gap: '4px' }}
@@ -102,8 +105,8 @@ export function SidebarFooter({
                   className={cn(
                     controlClass,
                     isStatsActive
-                      ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                      : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
+                      ? roomsV2 ? ACTIVE_ROOMS : 'bg-sidebar-accent text-sidebar-accent-foreground'
+                      : roomsV2 ? QUIET_ROOMS : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
                   )}
                   aria-label="Stats"
                   aria-pressed={isStatsActive}
@@ -122,15 +125,15 @@ export function SidebarFooter({
                     controlClass,
                     'relative',
                     isSettingsActive
-                      ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                      : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
+                      ? roomsV2 ? ACTIVE_ROOMS : 'bg-sidebar-accent text-sidebar-accent-foreground'
+                      : roomsV2 ? QUIET_ROOMS : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
                   )}
                   aria-label="Settings"
                   aria-pressed={isSettingsActive}
                   data-tour="settings"
                 >
                   <Settings aria-hidden="true" className="size-4" />
-                  {settingsAttention ? <span className="absolute right-1 top-1 size-1.5 rounded-full bg-amber-500 ring-2 ring-sidebar" aria-label="Runtime update available" /> : null}
+                  {settingsAttention ? <span className="absolute right-1 top-1 size-1.5 rounded-full bg-attention ring-2 ring-sidebar" aria-label="Runtime update available" /> : null}
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top" sideOffset={6}>{settingsAttention ? 'Settings · runtime update available' : 'Settings'}</TooltipContent>

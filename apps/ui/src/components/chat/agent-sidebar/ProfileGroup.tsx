@@ -172,7 +172,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                     className={cn(
                       'flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-left transition-colors',
                       roomsV2 ? 'py-1.5 pl-2 pr-1' : 'py-1.5 pl-2.5 pr-1.5',
-                      'hover:bg-sidebar-accent/50',
+                      roomsV2 ? 'hover:bg-foreground/[0.04]' : 'hover:bg-sidebar-accent/50',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
                       dragHandleListeners ? 'cursor-grab active:cursor-grabbing' : '',
                     )}
@@ -190,7 +190,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                         className="sidebar-room-project-avatar"
                       />
                     ) : null}
-                    <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-5">
+                    <span className={cn('min-w-0 flex-1 truncate leading-5', roomsV2 ? 'text-[13px] font-medium' : 'text-sm font-semibold')}>
                       {profile.displayName}
                     </span>
                     {environmentNavigation && logicalGroup ? <ProjectMachineChips members={logicalGroup.members} /> : null}
@@ -361,7 +361,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
 
       {/* Sessions list */}
       {!isCollapsed && hasAnySessions ? (
-        <div className={roomsV2 ? 'relative mt-0.5' : 'relative mt-1'}>
+        <div className={roomsV2 ? 'relative mt-0.5 pl-2.5' : 'relative mt-1'}>
           {(() => {
             // Build a set of all session agentIds in this profile for existence checks
             const sessionAgentIds = new Set(sessions.map((s) => s.sessionAgent.agentId))

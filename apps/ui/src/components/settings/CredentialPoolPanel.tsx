@@ -75,9 +75,9 @@ function HealthBadge({ credential, nowMs }: { credential: PooledCredentialInfo; 
     return (
       <Badge
         variant="outline"
-        className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+        className="gap-1 border-success/30 bg-success/10 text-success"
       >
-        <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
+        <span className="inline-block size-1.5 rounded-full bg-success" />
         Healthy
       </Badge>
     )
@@ -90,9 +90,9 @@ function HealthBadge({ credential, nowMs }: { credential: PooledCredentialInfo; 
     return (
       <Badge
         variant="outline"
-        className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+        className="gap-1 border-attention/30 bg-attention/10 text-attention"
       >
-        <span className="inline-block size-1.5 rounded-full bg-amber-500" />
+        <span className="inline-block size-1.5 rounded-full bg-attention" />
         Cooldown: {remaining}m remaining
       </Badge>
     )
@@ -101,7 +101,7 @@ function HealthBadge({ credential, nowMs }: { credential: PooledCredentialInfo; 
   return (
     <Badge
       variant="outline"
-      className="gap-1 border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400"
+      className="gap-1 border-danger/30 bg-danger/10 text-danger"
     >
       <CircleAlert className="size-3" />
       Auth Error
@@ -160,10 +160,10 @@ function CredentialRow({
                 onClick={onSetPrimary}
                 disabled={isBusy || credential.isPrimary}
                 aria-label={credential.isPrimary ? 'Primary account' : 'Set as primary'}
-                className="shrink-0 text-muted-foreground/50 transition-colors hover:text-amber-500 disabled:cursor-default disabled:opacity-100"
+                className="shrink-0 text-muted-foreground/50 transition-colors hover:text-attention disabled:cursor-default disabled:opacity-100"
               >
                 <Star
-                  className={`size-4 ${credential.isPrimary ? 'fill-amber-500 text-amber-500' : ''}`}
+                  className={`size-4 ${credential.isPrimary ? 'fill-attention text-attention' : ''}`}
                 />
               </button>
             </TooltipTrigger>
@@ -731,7 +731,7 @@ export function CredentialPoolPanel({
             {pool && pool.credentials.length > 0 ? (
               <Badge
                 variant="outline"
-                className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                className="gap-1 border-success/30 bg-success/10 text-success"
               >
                 <Check className="size-3" />
                 {pool.credentials.length} account{pool.credentials.length !== 1 ? 's' : ''}
@@ -739,7 +739,7 @@ export function CredentialPoolPanel({
             ) : (
               <Badge
                 variant="outline"
-                className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                className="gap-1 border-attention/30 bg-attention/10 text-attention"
               >
                 <AlertTriangle className="size-3" />
                 Not configured
@@ -916,7 +916,7 @@ export function CredentialPoolPanel({
             {oauthFlow.status === 'complete' && (
               <Badge
                 variant="outline"
-                className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                className="gap-1 border-success/30 bg-success/10 text-success"
               >
                 <Check className="size-3" />
                 Connected

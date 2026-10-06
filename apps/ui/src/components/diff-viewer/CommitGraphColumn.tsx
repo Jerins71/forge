@@ -10,11 +10,11 @@ const STROKE_WIDTH = 1.5
 
 const LANE_COLORS = [
   'var(--primary)',
-  'rgb(245 158 11)',
-  'rgb(168 85 247)',
-  'rgb(20 184 166)',
-  'rgb(244 63 94)',
-  'rgb(59 130 246)',
+  'var(--status-success)',
+  'var(--status-compacting)',
+  'var(--status-attention)',
+  'var(--status-danger)',
+  'color-mix(in srgb, var(--primary) 55%, var(--foreground))',
 ]
 
 export interface CommitGraphRowMetrics {

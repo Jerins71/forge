@@ -18,7 +18,7 @@ export function SourceStatusBadge({ status }: { status: SecureSecretSourceStatus
     return (
       <Badge
         variant="outline"
-        className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+        className="gap-1 border-success/30 bg-success/10 text-success"
       >
         <Check className="size-3" />
         {STATUS_LABELS[status]}
@@ -29,7 +29,7 @@ export function SourceStatusBadge({ status }: { status: SecureSecretSourceStatus
     return (
       <Badge
         variant="outline"
-        className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+        className="gap-1 border-attention/30 bg-attention/10 text-attention"
       >
         <LockKeyhole className="size-3" />
         {STATUS_LABELS[status]}

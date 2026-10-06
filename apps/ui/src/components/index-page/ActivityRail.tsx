@@ -43,14 +43,11 @@ function ActivityRailButton({ item, roomsV2 = false }: { item: ActivityRailItem;
         <button
           type="button"
           className={cn(
-            roomsV2
-              ? 'relative inline-flex size-[34px] items-center justify-center rounded-[11px] bg-sidebar-accent/40 text-muted-foreground transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60 focus-visible:ring-offset-0'
-              : 'relative inline-flex size-10 items-center justify-center rounded-xl bg-transparent text-muted-foreground transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60 focus-visible:ring-offset-0',
+            'relative inline-flex items-center justify-center text-muted-foreground transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+            roomsV2 ? 'size-9 rounded-[11px] bg-transparent' : 'size-10 rounded-xl bg-transparent',
             active
-              ? roomsV2
-                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                : 'text-primary hover:bg-sidebar-accent/70 bg-sidebar-accent/70'
-              : 'hover:bg-sidebar-accent/40 hover:text-sidebar-foreground',
+              ? 'bg-foreground/[0.08] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+              : 'hover:bg-foreground/[0.05] hover:text-foreground',
           )}
           onClick={onClick}
           disabled={disabled}
@@ -58,17 +55,11 @@ function ActivityRailButton({ item, roomsV2 = false }: { item: ActivityRailItem;
           aria-pressed={active}
           aria-current={active ? 'true' : undefined}
         >
-          {active && !roomsV2 ? (
-            <span
-              aria-hidden="true"
-              className="absolute left-1 top-2 bottom-2 w-0.5 rounded-full bg-primary"
-            />
-          ) : null}
           <Icon className="size-[18px]" strokeWidth={1.75} />
           {badge && badge > 0 ? (
             <span
               aria-hidden="true"
-              className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-bold leading-none tabular-nums text-white shadow-sm ring-2 ring-sidebar"
+              className="absolute -right-0.5 -top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-primary px-1 font-mono text-[9.5px] font-medium leading-none tabular-nums text-primary-foreground ring-2 ring-sidebar"
             >
               {badge > 9 ? '9+' : badge}
             </span>
@@ -87,7 +78,7 @@ export function ActivityRail({ items, roomsV2 = false }: ActivityRailProps) {
     <TooltipProvider delayDuration={200}>
       <nav
         className={cn(
-          'hidden h-full w-12 shrink-0 flex-col items-center gap-1.5 bg-sidebar py-2 md:flex',
+          'hidden h-full w-[52px] shrink-0 flex-col items-center gap-1.5 bg-sidebar py-2.5 md:flex',
           roomsV2 ? 'border-x border-sidebar-border' : 'border-r border-sidebar-border',
         )}
         aria-label="Activity rail"

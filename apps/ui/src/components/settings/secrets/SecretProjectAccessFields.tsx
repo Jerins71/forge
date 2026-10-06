@@ -235,7 +235,7 @@ export function AutomaticGrantFields({
       </div>
 
       {everyProjectBlocked ? (
-        <p className="text-xs text-amber-700 dark:text-amber-300">
+        <p className="text-xs text-attention">
           Every project is unavailable because one or more projects already have the maximum of{' '}
           {maxProjectDefaults} automatic grants. Remove one there first.
         </p>

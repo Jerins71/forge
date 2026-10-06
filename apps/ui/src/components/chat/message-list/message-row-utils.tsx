@@ -67,12 +67,12 @@ export function SourceBadge({
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none',
+        'inline-flex items-center rounded-full border px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none',
         isUser
-          ? 'border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground/90'
+          ? 'border-hairline bg-foreground/[0.05] text-muted-foreground'
           : sourceContext.channel === 'cli'
-            ? 'border-violet-500/35 bg-violet-500/10 text-violet-700 dark:text-violet-300'
-            : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+            ? 'border-compacting/35 bg-compacting/10 text-compacting'
+            : 'border-hairline bg-foreground/[0.05] text-muted-foreground',
       )}
     >
       [{label}]

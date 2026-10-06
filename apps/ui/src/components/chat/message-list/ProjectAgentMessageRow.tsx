@@ -26,16 +26,15 @@ export const ProjectAgentMessageRow = memo(function ProjectAgentMessageRow({
     >
       <div
         className={cn(
-          'max-w-[85%] rounded-lg px-3 py-2 text-sm',
+          'max-w-[82%] rounded-2xl border border-hairline px-4 py-3 text-sm text-foreground',
           outgoing
-            ? 'rounded-tr-sm bg-blue-600 text-white dark:bg-blue-600'
-            : 'rounded-tl-sm border border-sky-300/70 bg-sky-50 text-sky-950 dark:border-sky-400/30 dark:bg-sky-500/15 dark:text-sky-100',
+            ? 'rounded-br-md bg-foreground/[0.06] shadow-[inset_0_1px_0_var(--glass-highlight)]'
+            : 'glass-inset rounded-bl-md',
         )}
       >
         <div
           className={cn(
-            'text-[10px] font-medium uppercase tracking-wide',
-            outgoing ? 'text-white/75' : 'text-sky-700/85 dark:text-sky-300/90',
+            'eyebrow',
           )}
         >
           {fromLabel} → {toLabel}
@@ -48,8 +47,7 @@ export const ProjectAgentMessageRow = memo(function ProjectAgentMessageRow({
         ) : (
           <p
             className={cn(
-              'mt-1 text-[11px] italic',
-              outgoing ? 'text-white/65' : 'text-sky-700/70 dark:text-sky-300/70',
+              'mt-1 text-[11px] italic text-subtle-foreground',
             )}
           >
             (empty message)
@@ -59,8 +57,8 @@ export const ProjectAgentMessageRow = memo(function ProjectAgentMessageRow({
         {timestampLabel ? (
           <div
             className={cn(
-              'mt-1 text-[10px]',
-              outgoing ? 'text-right text-white/65' : 'text-sky-700/70 dark:text-sky-300/70',
+              'mt-1 font-mono text-[10.5px] text-subtle-foreground',
+              outgoing && 'text-right',
             )}
           >
             {timestampLabel}

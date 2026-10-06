@@ -57,6 +57,8 @@ export interface MessageListProps {
   environmentClient?: EnvironmentClient | null
   activeAgentId?: string | null
   projectAgent?: ProjectAgentInfo | null
+  /** Project name shown in the empty-session headline. */
+  projectName?: string | null
   onSuggestionClick?: (suggestion: string) => void
   onArtifactClick?: (artifact: ArtifactReference) => void
   onForkFromMessage?: (messageId: string) => void
@@ -409,19 +411,15 @@ function LoadingIndicator({ streamingStartedAt }: { streamingStartedAt?: number 
 
   return (
     <div
-      className="mt-3 flex justify-start"
+      className="mx-auto mt-3 flex w-full max-w-[760px] items-center gap-3.5"
       role="status"
       aria-live="polite"
       aria-label="Assistant is working"
     >
-      <div className="flex items-center gap-1.5">
-        <div className="flex items-center gap-0.5">
-          <div className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-duration:900ms]" />
-          <div className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:150ms] [animation-duration:900ms]" />
-          <div className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:300ms] [animation-duration:900ms]" />
-        </div>
+      <div className="flex items-center gap-2 pl-[40px]">
+        <span className="live-dot live-dot-animated" aria-hidden="true" />
         {elapsedLabel ? (
-          <span className="text-xs tabular-nums text-muted-foreground">{elapsedLabel}</span>
+          <span className="font-mono text-[11.5px] tabular-nums text-subtle-foreground">{elapsedLabel}</span>
         ) : null}
       </div>
     </div>
@@ -435,6 +433,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
   environmentClient,
   activeAgentId,
   projectAgent,
+  projectName,
   onSuggestionClick,
   onArtifactClick,
   onForkFromMessage,
@@ -1120,6 +1119,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
       <EmptyState
         activeAgentId={activeAgentId}
         projectAgent={projectAgent}
+        projectName={projectName}
         onSuggestionClick={onSuggestionClick}
       />
     )
@@ -1158,7 +1158,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
               Timeline changed — refresh
             </Button>
           ) : isLoadingOlder ? (
-            <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
+            <span role="status" aria-live="polite" className="font-mono text-[11px] text-subtle-foreground">
               Loading older items…
             </span>
           ) : olderHistoryLoader.loadFailed ? (
@@ -1380,7 +1380,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
     >
       {hasSecureSessionAttention && secureSessionRequests ? (
         <section
-          className="max-h-[45%] shrink-0 space-y-2 overflow-y-auto border-b border-border/60 p-2 md:p-3"
+          className="max-h-[45%] shrink-0 space-y-2 overflow-y-auto border-b border-hairline p-2 md:p-3"
           aria-label="Secure Session attention"
           data-testid="secure-session-attention"
         >
@@ -1450,7 +1450,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
       ) : null}
       {bootstrapBlocksActions && hasStalePresentation ? (
         <div
-          className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:delay-300"
+          className="flex shrink-0 items-center gap-2 border-b border-hairline bg-foreground/[0.02] px-3 py-2 text-xs text-muted-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:delay-300"
           role={conversationBootstrapPhase === 'error' ? 'alert' : 'status'}
           aria-live="polite"
         >
@@ -1474,14 +1474,14 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
         }}
         onScroll={handleScroll}
         className={cn(
-          'min-h-0 flex-1 overflow-y-auto p-2 md:p-3',
+          'min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-6 md:px-6',
           '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent',
           '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent',
           '[scrollbar-width:thin] [scrollbar-color:transparent_transparent]',
-          'hover:[&::-webkit-scrollbar-thumb]:bg-border hover:[scrollbar-color:var(--color-border)_transparent]',
+          'hover:[&::-webkit-scrollbar-thumb]:bg-foreground/15 hover:[scrollbar-color:var(--glass-border)_transparent]',
         )}
       >
-        <div style={{ height: totalSize, position: 'relative', width: '100%' }}>
+        <div className="mx-auto w-full max-w-[760px]" style={{ height: totalSize, position: 'relative', width: '100%' }}>
           {renderIndexes.map((index) => {
             const row = rows[index]
             if (!row) return null
@@ -1492,7 +1492,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
                 data-index={index}
                 data-row-id={row.id}
                 ref={measureMountedRow}
-                className="pb-2"
+                className="pb-3.5"
                 style={{
                   position: 'absolute',
                   top: 0,
@@ -1517,7 +1517,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
           aria-label="Scroll to latest message"
           onClick={handleScrollToBottom}
           className={cn(
-            'size-9 rounded-full bg-background/80 text-foreground shadow-md ring-1 ring-border backdrop-blur-sm',
+            'glass-strong size-9 rounded-full text-foreground',
             'transition-opacity transition-transform duration-200',
             showScrollButton
               ? 'pointer-events-auto translate-y-0 opacity-100'

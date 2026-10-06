@@ -131,7 +131,7 @@ export function SideChatPanel({
       <Button
         variant="outline"
         size="sm"
-        className="absolute right-3 top-[70px] z-20 gap-1.5 shadow-sm"
+        className="absolute right-3 top-[70px] z-20 gap-1.5 glass"
         onClick={onExpand}
         aria-label="Open side chat"
       >
@@ -149,7 +149,7 @@ export function SideChatPanel({
       ref={asideRef}
       className={cn(
         // Drags stop at MAIN_CHAT_MIN_REM; the CSS cap also holds when the window later shrinks.
-        'relative flex h-full shrink-0 flex-col bg-card/50 md:w-[var(--side-chat-width)] md:max-w-[calc(100%-28rem)] md:border-l md:border-border/80',
+        'relative flex h-full shrink-0 flex-col bg-card/50 md:w-[var(--side-chat-width)] md:max-w-[calc(100%-28rem)] md:border-l md:border-hairline',
         'max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-full max-md:bg-card',
       )}
       style={{ '--side-chat-width': `${width}px` } as CSSProperties}
@@ -170,16 +170,16 @@ export function SideChatPanel({
         aria-valuemax={MAX_SIDE_CHAT_WIDTH}
         title="Drag to resize"
       />
-      <div className="flex h-[62px] shrink-0 items-center gap-2 border-b border-border/80 px-3">
+      <div className="flex h-[62px] shrink-0 items-center gap-2 border-b border-hairline px-3">
         <MessageSquareDashed className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-semibold text-foreground">Side chat</h2>
-          <p className="truncate text-[11px] text-muted-foreground">Forked from {sourceLabel}</p>
+          <h2 className="truncate text-[15px] font-medium text-foreground">Side chat</h2>
+          <p className="truncate font-mono text-[11px] text-subtle-foreground">Forked from {sourceLabel}</p>
         </div>
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+          className="h-[30px] w-[30px] shrink-0 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
           onClick={onCollapse}
           disabled={isCreating}
           aria-label="Hide side chat"
@@ -190,7 +190,7 @@ export function SideChatPanel({
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 shrink-0 gap-1.5 px-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          className="h-7 shrink-0 gap-1.5 px-2 text-muted-foreground rounded-lg hover:bg-destructive/10 hover:text-destructive"
           onClick={() => setIsConfirmingDiscard(true)}
           aria-label="Discard side chat"
         >

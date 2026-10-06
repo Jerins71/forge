@@ -8,12 +8,12 @@ interface FileStatusBadgeProps {
 }
 
 const STATUS_CONFIG: Record<FileStatusType, { label: string; className: string }> = {
-  modified:  { label: 'M', className: 'bg-amber-500/20 text-amber-400 dark:text-amber-300' },
-  added:     { label: 'A', className: 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' },
-  deleted:   { label: 'D', className: 'bg-red-500/20 text-red-600 dark:text-red-400' },
-  renamed:   { label: 'R', className: 'bg-blue-500/20 text-blue-600 dark:text-blue-400' },
-  copied:    { label: 'C', className: 'bg-purple-500/20 text-purple-600 dark:text-purple-400' },
-  untracked: { label: 'U', className: 'bg-muted text-muted-foreground' },
+  modified:  { label: 'M', className: 'bg-foreground/[0.07] text-muted-foreground' },
+  added:     { label: 'A', className: 'bg-success/15 text-success' },
+  deleted:   { label: 'D', className: 'bg-danger/15 text-danger' },
+  renamed:   { label: 'R', className: 'bg-primary/15 text-primary' },
+  copied:    { label: 'C', className: 'bg-compacting/15 text-compacting' },
+  untracked: { label: 'U', className: 'bg-foreground/[0.05] text-subtle-foreground' },
 }
 
 export function FileStatusBadge({ status, className }: FileStatusBadgeProps) {
@@ -22,7 +22,7 @@ export function FileStatusBadge({ status, className }: FileStatusBadgeProps) {
   return (
     <span
       className={cn(
-        'inline-flex size-[18px] shrink-0 items-center justify-center rounded text-[10px] font-bold leading-none',
+        'inline-flex size-[18px] shrink-0 items-center justify-center rounded-md font-mono text-[10px] font-semibold leading-none',
         config.className,
         className,
       )}

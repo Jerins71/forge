@@ -173,11 +173,11 @@ export function TerminalPanel({
       className={cn(
         'forge-terminal-panel flex min-h-0 flex-col overflow-hidden',
         // Tabs-only: minimal rounded strip with subtle padding
-        panelMode === 'tabs-only' && !isMobile && 'shrink-0 rounded-lg px-2',
+        panelMode === 'tabs-only' && !isMobile && 'shrink-0 rounded-xl px-2',
         // Open: viewport with subtle border and rounded corners
-        panelMode === 'open' && !isMobile && 'shrink-0 rounded-lg border border-border/40 bg-card/40 shadow-lg',
+        panelMode === 'open' && !isMobile && 'glass-inset shrink-0 rounded-xl',
         // Maximized: full height
-        panelMode === 'maximized' && !isMobile && 'min-h-0 flex-1 border-t bg-card/40 shadow-2xl',
+        panelMode === 'maximized' && !isMobile && 'glass-inset min-h-0 flex-1 rounded-xl',
         // Mobile
         isMobileTabsOnly && 'h-9 rounded-t-2xl border',
         isMobile && !isMobileTabsOnly && 'h-[60vh] rounded-t-2xl border border-b-0',
@@ -252,7 +252,7 @@ export function TerminalPanel({
             />
           </div>
         ) : (
-          <div className="flex min-h-0 flex-1 items-center justify-center bg-[#141726] p-6 text-center text-sm text-zinc-300">
+          <div className="flex min-h-0 flex-1 items-center justify-center bg-[#0B0B0E] p-6 text-center text-sm text-muted-foreground">
             <div className="space-y-3">
               <p>No terminals open. Press + to create one.</p>
               <Button type="button" size="sm" onClick={onCreateTerminal}>

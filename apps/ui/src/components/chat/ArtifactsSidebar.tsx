@@ -147,14 +147,15 @@ export function ArtifactsSidebar({
 
       <div
         className={cn(
-          'flex h-full shrink-0 flex-col bg-card/50 max-md:bg-card',
-          desktopPlacement === 'left' ? 'md:border-r md:border-border/80' : 'md:border-l md:border-border/80',
+          'glass flex h-full shrink-0 flex-col overflow-hidden max-md:bg-card',
+          isOpen && 'md:my-2 md:max-h-[calc(100%-1rem)] md:rounded-2xl',
+          isOpen && (desktopPlacement === 'left' ? 'md:ml-2' : 'md:mr-2'),
           'transition-[width,opacity] duration-200 ease-out',
           desktopOnly && 'max-md:hidden',
           mobileOnly && 'md:hidden',
           // Mobile: full screen overlay when open
           isOpen
-            ? 'max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-full max-md:border-l-0 md:opacity-100'
+            ? 'max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-full max-md:rounded-none md:opacity-100'
             : 'w-0 opacity-0 overflow-hidden max-md:hidden',
           isOpen && 'opacity-100',
         )}
@@ -171,9 +172,9 @@ export function ArtifactsSidebar({
         }}
         className="h-full min-h-0 gap-0"
       >
-        <div className="flex h-[62px] shrink-0 items-center gap-2 px-3">
+        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline px-3">
           {showTabs ? (
-            <TabsList className="h-7 w-full bg-muted/60 p-0.5">
+            <TabsList className="h-7 w-full bg-foreground/[0.05] p-0.5">
               <TabsTrigger
                 value="artifacts"
                 className="h-6 rounded-sm px-2.5 text-[11px] font-medium data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
@@ -196,7 +197,7 @@ export function ArtifactsSidebar({
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+            className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
             onClick={onClose}
             aria-label="Close artifacts panel"
           >
@@ -217,7 +218,7 @@ export function ArtifactsSidebar({
               && (!desktopOnly || isDesktopViewport) && (!mobileOnly || !isDesktopViewport) && <ContextArtifactsSection
               key={`${environmentClient.environmentId}:${managerId}`} environmentClient={environmentClient} managerId={managerId}
             />}
-            <h3 className="px-3 pt-3 text-xs font-semibold">Conversation artifacts</h3>
+            <h3 className="eyebrow px-3 pt-3">Conversation artifacts</h3>
             {artifacts.length === 0 ? (
               <div className="flex flex-col items-center justify-center px-4 py-12 text-center">
                 <FileText className="mb-2 size-8 text-muted-foreground/40" aria-hidden="true" />
@@ -229,7 +230,7 @@ export function ArtifactsSidebar({
                 </p>
               </div>
             ) : (
-              <div className="space-y-0.5 p-2">
+              <div className="space-y-1.5 p-2">
                 {artifacts.map((artifact) => (
                   <ArtifactRow
                     key={artifact.path}
@@ -301,22 +302,22 @@ function ArtifactRow({
     <button
       type="button"
       className={cn(
-        'group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left',
+        'group glass-inset flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left',
         'transition-colors duration-100',
-        'hover:bg-accent/70',
-        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60',
+        'hover:bg-foreground/[0.05]',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
       )}
       onClick={() => onClick(artifact)}
       title={artifact.path}
     >
-      <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+      <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.05] text-muted-foreground transition-colors group-hover:text-foreground">
         {createElement(fileIcon, { className: 'size-3.5', 'aria-hidden': 'true' })}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs font-medium text-foreground">
           {artifact.fileName}
         </span>
-        <span className="block truncate font-mono text-[10px] text-muted-foreground/70">
+        <span className="block truncate font-mono text-[11px] text-subtle-foreground">
           {truncatedPath}
         </span>
       </span>

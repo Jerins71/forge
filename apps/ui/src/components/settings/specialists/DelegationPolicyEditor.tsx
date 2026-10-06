@@ -540,12 +540,12 @@ function AttemptCard({
       dashed && 'border-dashed',
       muted && 'opacity-60',
       warm
-        ? 'border-amber-500/30 bg-amber-500/[0.04]'
+        ? 'border-attention/30 bg-attention/[0.04]'
         : 'border-border/70 bg-muted/20',
     )}>
       <div className={cn(
         'flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide',
-        warm ? 'text-amber-300/80' : 'text-muted-foreground',
+        warm ? 'text-attention/80' : 'text-muted-foreground',
       )}>
         {icon}
         {eyebrow}
@@ -560,7 +560,7 @@ function AttemptConnector({ label, warm }: { label: string; warm?: boolean }) {
   return (
     <div className={cn(
       'flex items-center justify-center gap-1 text-center text-[10px] leading-tight min-[1700px]:w-24',
-      warm ? 'text-amber-300/75' : 'text-muted-foreground',
+      warm ? 'text-attention/75' : 'text-muted-foreground',
     )}>
       <span>{label}</span>
       <ArrowRight className="hidden size-3 shrink-0 min-[1700px]:block" />

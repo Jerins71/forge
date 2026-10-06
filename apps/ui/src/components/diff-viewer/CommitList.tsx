@@ -192,20 +192,21 @@ export function CommitList({
               aria-selected={isSelected}
               aria-label={`${summary}, by ${commit.author}, ${formatRelativeTime(commit.date)}`}
               className={cn(
-                'relative z-[1] flex w-full items-stretch gap-1 rounded px-1.5 py-1 text-left transition-colors',
+                'relative z-[1] flex min-h-[46px] w-full items-stretch gap-1 rounded-lg px-2 py-1 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                 isSelected
-                  ? 'bg-accent/80 text-foreground'
-                  : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+                  ? 'bg-foreground/[0.07] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+                  : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
               )}
               onClick={() => onSelectCommit(commit.sha)}
             >
               {showGraph ? <span aria-hidden="true" className="shrink-0" style={{ width: graphWidth }} /> : null}
-              <span className="min-w-0 flex-1 flex flex-col gap-0.5 py-0.5">
+              <span className="min-w-0 flex-1 flex flex-col justify-center gap-0.5 py-0.5">
                 <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium leading-tight text-foreground">{summary}</span>
+                  <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium leading-tight text-foreground">{summary}</span>
                   <CommitRefBadges refs={commit.refs} />
+                  <span className="shrink-0 font-mono text-[11px] tabular-nums text-subtle-foreground">{commit.shortSha}</span>
                 </span>
-                <span className="flex items-center gap-1.5 text-[10px] leading-tight text-muted-foreground">
+                <span className="flex items-center gap-1.5 text-[11.5px] leading-tight text-subtle-foreground">
                   <span className="truncate">{commit.author}</span>
                   <span className="shrink-0 opacity-60">·</span>
                   <span className="shrink-0">{formatRelativeTime(commit.date)}</span>
@@ -244,7 +245,7 @@ function CommitRefBadges({ refs }: { refs?: GitLogRef[] }) {
         <span
           key={`${ref.kind}:${ref.name}`}
           className={cn(
-            'inline-flex max-w-full items-center truncate rounded-full border px-1.5 py-0 text-[9px] font-medium leading-4',
+            'inline-flex max-w-full items-center truncate rounded-full border px-1.5 py-0 font-mono text-[10px] leading-4',
             refClassName(ref.kind),
           )}
         >
@@ -258,13 +259,13 @@ function CommitRefBadges({ refs }: { refs?: GitLogRef[] }) {
 function refClassName(kind: GitLogRef['kind']): string {
   switch (kind) {
     case 'current':
-      return 'border-sky-500/40 bg-sky-500/15 text-sky-300'
+      return 'border-primary/30 bg-primary/10 text-primary'
     case 'remote':
-      return 'border-fuchsia-500/40 bg-fuchsia-500/15 text-fuchsia-300'
+      return 'border-hairline text-subtle-foreground'
     case 'tag':
-      return 'border-amber-500/35 bg-amber-500/10 text-amber-300'
+      return 'border-attention/25 text-attention'
     default:
-      return 'border-border/70 bg-muted/50 text-muted-foreground'
+      return 'border-hairline text-muted-foreground'
   }
 }
 

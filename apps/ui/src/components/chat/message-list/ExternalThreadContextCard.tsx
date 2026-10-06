@@ -12,11 +12,11 @@ const STATUS_LABELS: Record<ExternalThreadMessageContext['status'], string> = {
 }
 
 const STATUS_STYLES: Record<ExternalThreadMessageContext['status'], string> = {
-  sent: 'border-sky-500/30 bg-sky-500/10 text-sky-800 dark:text-sky-200',
-  running: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
-  completed: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
-  stopped: 'border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-100',
-  error: 'border-red-500/30 bg-red-500/10 text-red-800 dark:text-red-200',
+  sent: 'glass-inset text-foreground/90',
+  running: 'glass-inset text-foreground/90',
+  completed: 'glass-inset text-foreground/90',
+  stopped: 'border-attention/25 bg-attention-surface text-foreground/90',
+  error: 'border-danger/30 bg-danger/10 text-foreground/90',
 }
 
 export interface ExternalThreadContextCardProps {
@@ -48,7 +48,7 @@ export function ExternalThreadContextCard({
   return (
     <div
       className={cn(
-        'rounded-lg border px-3 py-2 text-sm shadow-sm',
+        'rise-in rounded-xl border px-3.5 py-2.5 text-sm',
         STATUS_STYLES[context.status],
       )}
       data-external-thread-status={context.status}

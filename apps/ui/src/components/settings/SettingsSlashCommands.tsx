@@ -310,9 +310,9 @@ export function SettingsSlashCommands({ apiClient }: SettingsSlashCommandsProps)
         ) : null}
 
         {success ? (
-          <div className="flex items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-3 py-2">
-            <Check className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            <p className="text-xs text-emerald-600 dark:text-emerald-400">{success}</p>
+          <div className="flex items-center gap-2 rounded-md border border-success/20 bg-success/10 px-3 py-2">
+            <Check className="size-3.5 shrink-0 text-success" />
+            <p className="text-xs text-success">{success}</p>
           </div>
         ) : null}
 

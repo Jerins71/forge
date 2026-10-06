@@ -39,7 +39,7 @@ type SourceBadgeValue = RuntimeExtensionSource | DiscoveredExtensionSource
 const SOURCE_STYLES: Record<SourceBadgeValue, { label: string; className: string }> = {
   'global-worker': {
     label: 'Global Worker',
-    className: 'border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400',
+    className: 'border-primary/30 bg-primary/10 text-primary',
   },
   'global-manager': {
     label: 'Global Manager',
@@ -51,11 +51,11 @@ const SOURCE_STYLES: Record<SourceBadgeValue, { label: string; className: string
   },
   'project-local': {
     label: 'Project',
-    className: 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+    className: 'border-attention/30 bg-attention/10 text-attention',
   },
   package: {
     label: 'Package',
-    className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    className: 'border-success/30 bg-success/10 text-success',
   },
   unknown: {
     label: 'Unknown',
@@ -66,7 +66,7 @@ const SOURCE_STYLES: Record<SourceBadgeValue, { label: string; className: string
 const FORGE_SCOPE_STYLES: Record<ForgeDiscoveredExtensionMetadata['scope'], { label: string; className: string }> = {
   global: {
     label: 'Global',
-    className: 'border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400',
+    className: 'border-primary/30 bg-primary/10 text-primary',
   },
   profile: {
     label: 'Profile',
@@ -74,7 +74,7 @@ const FORGE_SCOPE_STYLES: Record<ForgeDiscoveredExtensionMetadata['scope'], { la
   },
   'project-local': {
     label: 'Project',
-    className: 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+    className: 'border-attention/30 bg-attention/10 text-attention',
   },
 }
 
@@ -192,8 +192,8 @@ function DirectoryRow({ label, path }: { label: string; path: string }) {
 
 function ForgeErrorItem({ error }: { error: ForgeExtensionDiagnosticError }) {
   return (
-    <div className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
-      <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
+    <div className="flex items-start gap-2 rounded-md border border-attention/20 bg-attention/5 px-3 py-2">
+      <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-attention" />
       <div className="min-w-0 space-y-0.5">
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
           <span className="font-semibold text-foreground">{error.phase}</span>
@@ -219,11 +219,11 @@ function ForgeErrorItem({ error }: { error: ForgeExtensionDiagnosticError }) {
 
 function PiRuntimeErrorItem({ error }: { error: RuntimeOverlayError }) {
   return (
-    <div className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
-      <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
+    <div className="flex items-start gap-2 rounded-md border border-attention/20 bg-attention/5 px-3 py-2">
+      <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-attention" />
       <div className="min-w-0 space-y-0.5">
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className="font-mono text-amber-600 dark:text-amber-400">{error.agentId}</span>
+          <span className="font-mono text-attention">{error.agentId}</span>
           <RoleBadge role={error.role} />
         </div>
         <p className="text-xs text-muted-foreground">{error.error}</p>
@@ -380,7 +380,7 @@ function PiDiscoveredExtensionCard({
 
       {runtimeErrors.length > 0 && (
         <div className="space-y-2">
-          <h4 className="text-xs font-semibold text-amber-600 dark:text-amber-400">Runtime Load Errors</h4>
+          <h4 className="text-xs font-semibold text-attention">Runtime Load Errors</h4>
           {runtimeErrors.map((error) => (
             <PiRuntimeErrorItem key={`${error.agentId}:${error.path}:${error.error}`} error={error} />
           ))}

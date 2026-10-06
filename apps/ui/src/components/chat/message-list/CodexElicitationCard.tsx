@@ -59,7 +59,7 @@ export function CodexElicitationCard({
 
   return (
     <div
-      className="max-w-2xl space-y-3 rounded-lg border border-amber-500/40 bg-card p-4"
+      className="glass rise-in max-w-2xl space-y-3 rounded-xl border-attention/25 bg-attention-surface p-4"
       role="alert"
     >
       <div>
@@ -109,7 +109,7 @@ export function CodexElicitationCard({
             />
           ) : field.type === 'enum' ? (
             <select
-              className="w-full rounded border bg-background p-2"
+              className="w-full rounded-lg border border-input bg-foreground/[0.03] p-2"
               value={String(values[field.key] ?? '')}
               onChange={(event) => setFieldValue(field.key, event.target.value)}
             >
@@ -139,7 +139,7 @@ export function CodexElicitationCard({
         <label className="block text-xs text-muted-foreground">
           Remember only if Codex offered it
           <select
-            className="ml-2 rounded border bg-background p-1"
+            className="ml-2 rounded-md border border-input bg-foreground/[0.03] p-1"
             value={persistScope ?? ''}
             onChange={(event) =>
               setPersistScope(

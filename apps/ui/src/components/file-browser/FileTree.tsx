@@ -545,9 +545,9 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     return (
       <div className="flex h-full flex-col">
         {/* Search/filter input */}
-        <div className="shrink-0 border-b border-border/40 px-2 py-1.5">
+        <div className="shrink-0 border-b border-hairline px-2 py-2">
           <div className="relative">
-            <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/50" />
+            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-subtle-foreground" />
             <input
               ref={filterInputRef}
               type="text"
@@ -563,9 +563,9 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
               }}
               placeholder={searchMode ? 'Search files…' : 'Filter files… (Enter to search)'}
               className={cn(
-                'h-7 w-full rounded-md border border-border/50 bg-muted/30 pl-7 text-xs',
+                'glass-inset h-8 w-full rounded-lg pl-8 text-xs',
                 searchMode || filterText ? 'pr-7' : 'pr-2',
-                'placeholder:text-muted-foreground/50 focus:border-ring focus:outline-none',
+                'placeholder:text-subtle-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
               )}
               aria-label="Filter files"
               autoFocus
@@ -595,7 +595,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
             {(searchMode || filterText) && (
               <button
                 type="button"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-subtle-foreground hover:text-foreground transition-colors"
                 onClick={() => {
                   setSearchMode(false)
                   setSearchQuery('')
@@ -654,7 +654,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
 
             {/* Search result count footer */}
             {searchResult.data && !searchResult.data.unavailable && searchResult.data.results.length > 0 ? (
-              <div className="flex h-7 shrink-0 items-center border-t border-border/40 px-3 text-[11px] text-muted-foreground/70">
+              <div className="flex h-7 shrink-0 items-center border-t border-hairline px-3 font-mono text-[11px] text-subtle-foreground">
                 Showing {searchResult.data.results.length} of{' '}
                 {searchResult.data.totalMatches.toLocaleString()} results
               </div>
@@ -667,7 +667,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
 
             {/* File count footer */}
             {fileCount !== null && fileCountMethod !== 'none' ? (
-              <div className="flex h-7 shrink-0 items-center border-t border-border/40 px-3 text-[11px] text-muted-foreground/70">
+              <div className="flex h-7 shrink-0 items-center border-t border-hairline px-3 font-mono text-[11px] text-subtle-foreground">
                 {fileCount.toLocaleString()} files
               </div>
             ) : null}
@@ -705,9 +705,9 @@ function SearchResultItem({
     <button
       type="button"
       className={cn(
-        'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors',
-        'hover:bg-accent/50',
-        isSelected && 'bg-accent text-accent-foreground',
+        'mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-150',
+        'hover:bg-foreground/[0.05]',
+        isSelected && 'bg-foreground/[0.08] text-foreground',
       )}
       onClick={onClick}
       title={filePath}
@@ -716,7 +716,7 @@ function SearchResultItem({
       <div className="min-w-0 flex-1">
         <div className="truncate" dangerouslySetInnerHTML={{ __html: highlighted }} />
         {dirPath && (
-          <div className="truncate text-[11px] text-muted-foreground/70">
+          <div className="truncate font-mono text-[11px] text-subtle-foreground">
             {dirPath}
           </div>
         )}

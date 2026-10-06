@@ -15,7 +15,7 @@ const STATUS_CONFIG: Record<
   Exclude<ChoiceRequestStatus, 'pending'>,
   { icon: typeof Check; label: string; className: string }
 > = {
-  answered: { icon: Check, label: 'Answered', className: 'text-green-500' },
+  answered: { icon: Check, label: 'Answered', className: 'text-success' },
   cancelled: { icon: XCircle, label: 'Cancelled', className: 'text-muted-foreground' },
   expired: { icon: Clock, label: 'Expired', className: 'text-muted-foreground' },
 }
@@ -82,7 +82,7 @@ export function ChoiceAnsweredRow({
   }, [answers, config.label, questions, resolvedStatus])
 
   return (
-    <div className="group py-1 text-sm text-muted-foreground" data-choice-id={choiceId}>
+    <div className="group py-1 text-[13px] text-subtle-foreground" data-choice-id={choiceId}>
       <button
         type="button"
         aria-expanded={expanded}
@@ -99,12 +99,12 @@ export function ChoiceAnsweredRow({
           {resolvedStatus === 'answered' ? `Choice: ${summary}` : `Choice ${config.label.toLowerCase()}`}
         </span>
         {formattedTimestamp ? (
-          <span className="shrink-0 text-xs text-muted-foreground/80">{formattedTimestamp}</span>
+          <span className="shrink-0 font-mono text-[11px] text-subtle-foreground">{formattedTimestamp}</span>
         ) : null}
       </button>
 
       {expanded ? (
-        <div id={contentId} className="ml-6 mt-2 space-y-3 text-sm">
+        <div id={contentId} className="glass-inset ml-6 mt-2 space-y-3 rounded-xl p-3 text-sm">
           {questions.map((question) => {
             const answer = answers.find((entry) => entry.questionId === question.id)
             return (

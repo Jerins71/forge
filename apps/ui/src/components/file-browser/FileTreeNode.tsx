@@ -51,9 +51,9 @@ export function FileTreeNode({
       <ContextMenuTrigger asChild>
         <div
           className={cn(
-            'flex h-7 cursor-pointer items-center gap-1 pr-2 text-[13px] leading-7 select-none',
-            'hover:bg-accent/50 transition-colors',
-            isSelected && 'bg-accent text-accent-foreground',
+            'mx-1.5 flex h-7 cursor-pointer items-center gap-1 rounded-md pr-2 text-[13px] leading-7 select-none text-muted-foreground',
+            'hover:bg-foreground/[0.05] hover:text-foreground transition-colors duration-150',
+            isSelected && 'bg-foreground/[0.08] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]',
             isFocused && !isSelected && 'outline outline-1 outline-ring/50 -outline-offset-1',
           )}
           style={{ paddingLeft: `${depth * 16 + 4}px` }}
@@ -66,7 +66,7 @@ export function FileTreeNode({
       {type === 'directory' ? (
         <ChevronRight
           className={cn(
-            'size-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-150',
+            'size-3.5 shrink-0 text-subtle-foreground/70 transition-transform duration-150',
             isExpanded && 'rotate-90',
             isLoading && 'animate-spin',
           )}

@@ -25,7 +25,7 @@ export interface CodeMirrorFileEditorProps {
 const editorTheme = EditorView.theme({
   '&': {
     height: '100%',
-    backgroundColor: 'var(--card)',
+    backgroundColor: 'transparent',
     color: 'var(--foreground)',
     fontSize: '13px',
   },
@@ -41,16 +41,17 @@ const editorTheme = EditorView.theme({
     padding: '0 12px',
   },
   '.cm-gutters': {
-    backgroundColor: 'color-mix(in srgb, var(--muted) 35%, transparent)',
-    color: 'var(--muted-foreground)',
-    borderRight: '1px solid var(--border)',
+    backgroundColor: 'transparent',
+    color: 'var(--subtle-foreground)',
+    border: 'none',
+    opacity: '0.85',
   },
   '.cm-activeLineGutter': {
-    backgroundColor: 'color-mix(in srgb, var(--accent) 18%, transparent)',
+    backgroundColor: 'color-mix(in srgb, var(--foreground) 4%, transparent)',
     color: 'var(--foreground)',
   },
   '.cm-activeLine': {
-    backgroundColor: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+    backgroundColor: 'color-mix(in srgb, var(--foreground) 4%, transparent)',
   },
   '&.cm-focused': {
     outline: 'none',
@@ -59,7 +60,7 @@ const editorTheme = EditorView.theme({
     borderLeftColor: 'var(--primary)',
   },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
-    backgroundColor: 'color-mix(in srgb, var(--primary) 28%, transparent)',
+    backgroundColor: 'color-mix(in srgb, var(--primary) 25%, transparent)',
   },
   '.cm-searchMatch': {
     backgroundColor: 'rgb(250 204 21 / 0.35)',

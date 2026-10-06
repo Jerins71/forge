@@ -96,7 +96,7 @@ export function SkillShareDialog({ open, onOpenChange, clientOrWsUrl, skill }: S
 
         <div className="flex flex-col gap-4 py-2">
           {!shareable && (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+            <div className="rounded-md border border-attention/30 bg-attention/10 p-3 text-xs text-attention">
               Built-in and repository skills are not shareable in v1. Share a global skill or project skill you created.
             </div>
           )}
@@ -199,12 +199,12 @@ function CopyableLink({
 
 function IssueList({ issues }: { issues: SkillBundleIssue[] }) {
   return (
-    <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-amber-200">
+    <div className="rounded-md border border-attention/30 bg-attention/10 p-3">
+      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-attention">
         <AlertTriangle className="size-4" />
         Export warnings
       </div>
-      <ul className="space-y-1 text-xs text-amber-100/90">
+      <ul className="space-y-1 text-xs text-attention/90">
         {issues.map((issue, index) => (
           <li key={`${issue.code}-${issue.path ?? ''}-${index}`}>
             <span className="font-medium">{issue.code}</span>{issue.path ? ` (${issue.path})` : ''}: {issue.message}

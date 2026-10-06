@@ -50,6 +50,7 @@ export function DiffDialogHeader({
   branchActions,
   remoteUpdateSnapshot,
 }: DiffDialogHeaderProps) {
+
   const worktreeLabel = currentWorktreePath ? formatPathLabel(currentWorktreePath) : null
   const worktreeChipTitle = currentWorktreePath
     ? selectedWorktreeId
@@ -58,17 +59,54 @@ export function DiffDialogHeader({
     : undefined
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border/60 bg-card px-3">
-      <div className="hidden items-center gap-2 text-xs font-semibold text-foreground sm:flex">
-        <GitBranch className="size-3.5 text-primary" />
+    <div className="flex h-12 shrink-0 items-center gap-3 border-b border-hairline px-3">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+      <div className="hidden shrink-0 items-center gap-2 whitespace-nowrap text-[13px] font-semibold text-foreground 2xl:flex">
+        <GitBranch className="size-[15px] text-primary" strokeWidth={1.75} />
         Source Control
         <RemoteMachineBadge environmentId={environmentId} className="font-normal" />
       </div>
 
+
+      {(repoName || (branch && !branchActions)) ? (
+        <span className="hidden text-subtle-foreground/60 xl:inline" aria-hidden>·</span>
+      ) : null}
+
+      {/* Repo info */}
+      {repoName ? (
+        <span className="hidden max-w-40 truncate whitespace-nowrap text-[13px] font-medium text-foreground xl:inline">{repoName}</span>
+      ) : null}
+
+      {worktreeLabel ? (
+        <span className={cn(
+          'hidden max-w-44 items-center gap-1 truncate rounded-lg border px-2 py-1 font-mono text-[11px] lg:inline-flex',
+          selectedWorktreeId
+            ? 'border-attention/25 bg-attention-surface text-foreground'
+            : 'border-hairline text-muted-foreground',
+        )} title={worktreeChipTitle}>
+          <HardDrive className="size-3 shrink-0" />
+          <span className="truncate">{selectedWorktreeId ? `Selected · ${worktreeLabel}` : worktreeLabel}</span>
+          {typeof worktreeCount === 'number' && worktreeCount > 1 ? (
+            <span className="text-[10.5px] text-subtle-foreground">+{worktreeCount - 1}</span>
+          ) : null}
+        </span>
+      ) : null}
+
+      {/* Branch actions carry their own branch picker; don't repeat the branch. */}
+      {branch && !branchActions ? (
+        <span className="glass-inset inline-flex h-7 min-w-0 max-w-[240px] items-center gap-1.5 rounded-lg px-2.5 font-mono text-[11.5px] text-muted-foreground" title={branch}>
+          <GitBranch className="size-3 shrink-0" strokeWidth={1.75} />
+          <span className="truncate whitespace-nowrap">{branch}</span>
+        </span>
+      ) : null}
+
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2">
       {activeTab === 'worktrees' || activeTab === 'pull-requests' || activeTab === 'incoming' ? (
         <>
           <div
-            className="inline-flex h-7 shrink-0 items-center rounded-md border border-border/60 bg-muted/30 p-0.5"
+            className="glass-inset inline-flex h-8 shrink-0 items-center rounded-lg p-0.5"
             role="group"
             aria-label="Repository activity shortcuts"
           >
@@ -83,12 +121,12 @@ export function DiffDialogHeader({
               onClick={() => onTabChange('history')}
             />
           </div>
-          <span className="text-muted-foreground/30" aria-hidden>·</span>
+
         </>
       ) : null}
 
       <nav
-        className="inline-flex h-7 shrink-0 items-center gap-1"
+        className="glass-inset inline-flex h-8 shrink-0 items-center gap-0.5 rounded-lg p-0.5"
         aria-label="Source Control shortcuts"
       >
         {remoteUpdateSnapshot?.state === 'update_available' ? (
@@ -116,41 +154,10 @@ export function DiffDialogHeader({
         />
       </nav>
 
-      {(repoName || branch) ? (
-        <span className="text-muted-foreground/30" aria-hidden>·</span>
-      ) : null}
+      </div>
 
-      {/* Repo info */}
-      {repoName ? (
-        <span className="hidden text-xs font-medium text-foreground md:inline">{repoName}</span>
-      ) : null}
-
-      {worktreeLabel ? (
-        <span className={cn(
-          'hidden max-w-44 items-center gap-1 truncate rounded-md border px-1.5 py-1 text-xs lg:inline-flex',
-          selectedWorktreeId
-            ? 'border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200'
-            : 'border-border/60 bg-muted/25 text-muted-foreground',
-        )} title={worktreeChipTitle}>
-          <HardDrive className="size-3 shrink-0" />
-          <span className="truncate">{selectedWorktreeId ? `Selected · ${worktreeLabel}` : worktreeLabel}</span>
-          {typeof worktreeCount === 'number' && worktreeCount > 1 ? (
-            <span className="text-[10px] text-muted-foreground/70">+{worktreeCount - 1}</span>
-          ) : null}
-        </span>
-      ) : null}
-
-      {branch ? (
-        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-          <GitBranch className="size-3" />
-          {branch}
-        </span>
-      ) : null}
-
+      <div className="flex shrink-0 items-center justify-end gap-1.5">
       {branchActions}
-
-      {/* Spacer */}
-      <div className="flex-1" />
 
       {/* Refresh button */}
       <TooltipProvider delayDuration={200}>
@@ -159,7 +166,7 @@ export function DiffDialogHeader({
             <Button
               variant="ghost"
               size="icon"
-              className="size-7 text-muted-foreground hover:text-foreground"
+              className="size-8 text-muted-foreground hover:text-foreground"
               onClick={onRefresh}
               disabled={isRefreshing}
               aria-label="Refresh"
@@ -177,12 +184,13 @@ export function DiffDialogHeader({
       <Button
         variant="ghost"
         size="icon"
-        className="size-7 text-muted-foreground hover:text-foreground"
+        className="size-8 text-muted-foreground hover:text-foreground"
         onClick={onClose}
         aria-label="Close Source Control"
       >
-        <X className="size-4" />
+        <X className="size-4" strokeWidth={1.75} />
       </Button>
+      </div>
     </div>
   )
 }
@@ -206,11 +214,11 @@ function SourceControlShortcutButton({
     <button
       type="button"
       className={cn(
-        'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+        'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium transition-colors duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
         active
-          ? 'border-primary/35 bg-primary/10 text-foreground shadow-sm'
-          : 'border-border/60 bg-background/70 text-muted-foreground hover:border-border hover:bg-muted/40 hover:text-foreground',
+          ? 'bg-foreground/[0.1] text-foreground'
+          : 'text-muted-foreground hover:text-foreground',
       )}
       onClick={onClick}
       aria-pressed={active}
@@ -221,10 +229,8 @@ function SourceControlShortcutButton({
       {typeof count === 'number' ? (
         <span
           className={cn(
-            'ml-0.5 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-4',
-            count > 0
-              ? 'bg-primary/15 text-primary'
-              : 'bg-muted text-muted-foreground',
+            'ml-0.5 inline-flex min-w-4 items-center justify-center font-mono text-[11px] tabular-nums leading-4',
+            count > 0 ? 'text-primary' : 'text-subtle-foreground',
           )}
           aria-hidden="true"
         >
@@ -250,9 +256,9 @@ function TabButton({
     <button
       type="button"
       className={cn(
-        'h-[22px] min-w-14 shrink-0 rounded-[4px] px-2 text-[11px] font-medium transition-colors',
+        'h-7 min-w-14 shrink-0 rounded-md px-2.5 text-[12px] font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
         active
-          ? 'bg-background text-foreground shadow-sm'
+          ? 'bg-foreground/[0.1] text-foreground'
           : 'text-muted-foreground hover:text-foreground',
         disabled && !active && 'cursor-not-allowed opacity-40',
       )}

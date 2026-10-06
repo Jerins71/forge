@@ -248,7 +248,7 @@ export function SkillImportDialog({
               )}
 
               {success && (
-                <div className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-200">
+                <div className="flex items-start gap-2 rounded-md border border-success/30 bg-success/10 p-3 text-xs text-success">
                   <CheckCircle2 className="mt-0.5 size-4" />
                   <span>{success}</span>
                 </div>
@@ -441,7 +441,7 @@ function WarningSection({
   return (
     <div className="rounded-md border border-border bg-card/20 p-3">
       <div className="mb-2 flex items-center gap-2 text-xs font-medium">
-        <AlertTriangle className="size-4 text-amber-300" />
+        <AlertTriangle className="size-4 text-attention" />
         {title}
       </div>
       {issues.length === 0 ? (

@@ -1,7 +1,8 @@
-import { Activity, ArrowLeft, Bell, Settings, KeyRound, Wrench, FileText, Terminal, TerminalSquare, Puzzle, UserCog, Info, Cpu, Palette, GitBranch, Grid3X3, MonitorCog, ShieldCheck, Server } from 'lucide-react'
+import { Activity, ArrowLeft, ChevronLeft, Search, Bell, Settings, KeyRound, Wrench, FileText, Terminal, TerminalSquare, Puzzle, UserCog, Info, Cpu, Palette, GitBranch, Grid3X3, MonitorCog, Server, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { HelpTrigger } from '@/components/help/HelpTrigger'
+import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { SettingsTab } from './settings-target'
 
@@ -12,30 +13,60 @@ interface NavItem {
   id: SettingsTab
   label: string
   icon: React.ReactNode
+  description: string
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { id: 'project-settings', label: 'Project Settings', icon: <Settings className="size-4" /> },
-  { id: 'general', label: 'General', icon: <Settings className="size-4" /> },
-  { id: 'environments', label: 'Environments', icon: <Server className="size-4" /> },
-  { id: 'history', label: 'History', icon: <Activity className="size-4" /> },
-  { id: 'git-monitoring', label: 'Git monitoring', icon: <GitBranch className="size-4" /> },
-  { id: 'appearance', label: 'Appearance', icon: <Palette className="size-4" /> },
-  { id: 'notifications', label: 'Notifications', icon: <Bell className="size-4" /> },
-  { id: 'auth', label: 'Authentication', icon: <KeyRound className="size-4" /> },
-  { id: 'secrets', label: 'Secrets', icon: <ShieldCheck className="size-4" /> },
-  { id: 'models', label: 'Models', icon: <Cpu className="size-4" /> },
-  { id: 'skills', label: 'Skills', icon: <Wrench className="size-4" /> },
-  { id: 'prompts', label: 'Prompts', icon: <FileText className="size-4" /> },
-  { id: 'specialists', label: 'Delegation', icon: <UserCog className="size-4" /> },
-  { id: 'slash-commands', label: 'Slash Commands', icon: <Terminal className="size-4" /> },
-  { id: 'extensions', label: 'Extensions', icon: <Puzzle className="size-4" /> },
-  { id: 'external-chrome', label: 'Chrome', icon: <MonitorCog className="size-4" /> },
-  { id: 'cli-access', label: 'CLI Access', icon: <TerminalSquare className="size-4" /> },
-  { id: 'stream-deck', label: 'Stream Deck', icon: <Grid3X3 className="size-4" /> },
-  { id: 'observability', label: 'Observability', icon: <Activity className="size-4" /> },
-  { id: 'about', label: 'About', icon: <Info className="size-4" /> },
+const ICON_PROPS = { className: 'size-4', strokeWidth: 1.75 } as const
+
+interface NavGroup {
+  label: string
+  items: NavItem[]
+}
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'App',
+    items: [
+      { id: 'general', label: 'General', icon: <Settings {...ICON_PROPS} />, description: 'Core behavior for this Forge installation.' },
+      { id: 'environments', label: 'Environments', icon: <Server {...ICON_PROPS} />, description: 'Machines this app can run projects on.' },
+      { id: 'appearance', label: 'Appearance', icon: <Palette {...ICON_PROPS} />, description: 'Theme, accent and fonts. Saved to this device.' },
+      { id: 'notifications', label: 'Notifications', icon: <Bell {...ICON_PROPS} />, description: 'Choose when Forge should get your attention.' },
+    ],
+  },
+  {
+    label: 'Agents',
+    items: [
+      { id: 'models', label: 'Models', icon: <Cpu {...ICON_PROPS} />, description: 'Providers, models and runtimes available to agents.' },
+      { id: 'auth', label: 'Authentication', icon: <KeyRound {...ICON_PROPS} />, description: 'Sign in to providers and manage credentials.' },
+      { id: 'specialists', label: 'Delegation', icon: <UserCog {...ICON_PROPS} />, description: 'Specialists agents can delegate work to.' },
+      { id: 'prompts', label: 'Prompts', icon: <FileText {...ICON_PROPS} />, description: 'System prompts and instructions.' },
+      { id: 'skills', label: 'Skills', icon: <Wrench {...ICON_PROPS} />, description: 'Reusable skills available to agents.' },
+      { id: 'slash-commands', label: 'Slash Commands', icon: <Terminal {...ICON_PROPS} />, description: 'Custom commands for the composer.' },
+    ],
+  },
+  {
+    label: 'Workspace',
+    items: [
+      { id: 'project-settings', label: 'Project Settings', icon: <Settings {...ICON_PROPS} />, description: 'Settings that apply to this project only.' },
+      { id: 'git-monitoring', label: 'Git monitoring', icon: <GitBranch {...ICON_PROPS} />, description: 'Repositories Forge watches for changes.' },
+      { id: 'secrets', label: 'Secrets', icon: <ShieldCheck {...ICON_PROPS} />, description: 'Secrets available to agents and tools.' },
+      { id: 'extensions', label: 'Extensions', icon: <Puzzle {...ICON_PROPS} />, description: 'Extend Forge with additional capabilities.' },
+      { id: 'external-chrome', label: 'Chrome', icon: <MonitorCog {...ICON_PROPS} />, description: 'Let agents use your Chrome browser.' },
+      { id: 'cli-access', label: 'CLI Access', icon: <TerminalSquare {...ICON_PROPS} />, description: 'Use the Forge command line tool.' },
+      { id: 'stream-deck', label: 'Stream Deck', icon: <Grid3X3 {...ICON_PROPS} />, description: 'Control Forge from an Elgato Stream Deck.' },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { id: 'history', label: 'History', icon: <Activity {...ICON_PROPS} />, description: 'Conversation history and retention.' },
+      { id: 'observability', label: 'Observability', icon: <Activity {...ICON_PROPS} />, description: 'Tracing and diagnostics.' },
+      { id: 'about', label: 'About', icon: <Info {...ICON_PROPS} />, description: 'Version, updates and runtimes.' },
+    ],
+  },
 ]
+
+const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((group) => group.items)
 
 interface SettingsLayoutProps {
   activeTab: SettingsTab
@@ -63,39 +94,60 @@ interface SettingsLayoutProps {
 }
 
 export function SettingsLayout({ activeTab, onTabChange, onBack, children, contentWidthClassName, availableTabs, targetLabel, headerAccessory, title = 'Settings', fillHeight, attentionTabs }: SettingsLayoutProps) {
+  const [query, setQuery] = useState('')
   const visibleItems = availableTabs
     ? NAV_ITEMS.filter((item) => availableTabs.includes(item.id))
     : NAV_ITEMS
+  const normalizedQuery = query.trim().toLowerCase()
+  const filteredIds = new Set(
+    visibleItems
+      .filter((item) => !normalizedQuery || item.label.toLowerCase().includes(normalizedQuery))
+      .map((item) => item.id),
+  )
+  const visibleGroups = NAV_GROUPS
+    .map((group) => ({ ...group, items: group.items.filter((item) => filteredIds.has(item.id)) }))
+    .filter((group) => group.items.length > 0)
+  const activeItem = NAV_ITEMS.find((item) => item.id === activeTab)
+
+  // Esc returns to sessions, unless something else (an open dialog, menu or
+  // text field) already claimed the keypress.
+  useEffect(() => {
+    if (!onBack) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]')) return
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) return
+      onBack()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onBack])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-      <header className="flex h-[62px] shrink-0 items-center border-b border-border/80 bg-card/80 px-2 backdrop-blur md:px-4">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          {onBack ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
-              onClick={onBack}
-              aria-label="Back to chat"
-            >
-              <ArrowLeft className="size-4" />
-            </Button>
-          ) : null}
-          <h1 className="truncate text-sm font-semibold text-foreground">{title}</h1>
-          {targetLabel ? (
-            <Badge variant="outline" className="shrink-0 text-[10px] font-normal text-muted-foreground">
-              {targetLabel}
-            </Badge>
-          ) : null}
-          {headerAccessory}
-        </div>
+    <div className="app-canvas flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      {/* Mobile: compact header + horizontal scrolling tab bar */}
+      <header className="flex h-12 shrink-0 items-center gap-1 px-2 md:hidden">
+        {onBack ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-9 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={onBack}
+            aria-label="Back to chat"
+          >
+            <ArrowLeft className="size-4" strokeWidth={1.75} />
+          </Button>
+        ) : null}
+        <h1 className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{title}</h1>
+        {targetLabel ? (
+          <span className="shrink-0 font-mono text-[11px] text-subtle-foreground">{targetLabel}</span>
+        ) : null}
+        {headerAccessory}
         <HelpTrigger contextKey={`settings.${activeTab}`} size="sm" variant="ghost" />
       </header>
-
-      {/* Mobile: horizontal scrolling tab bar */}
-      <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/60 bg-card/30 px-2 py-1.5 md:hidden">
+      <nav aria-label="Settings sections" className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline px-2 pb-1.5 md:hidden">
         {visibleItems.map((item) => {
           const isActive = activeTab === item.id
           return (
@@ -104,11 +156,11 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
               type="button"
               onClick={() => onTabChange(item.id)}
               className={cn(
-                'flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors',
-                'hover:bg-muted/50',
+                'flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors duration-150',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                 isActive
-                  ? 'bg-muted text-foreground font-medium'
-                  : 'text-muted-foreground hover:text-foreground',
+                  ? 'bg-foreground/[0.07] font-medium text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+                  : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
               )}
             >
               <span className="flex shrink-0">{item.icon}</span>
@@ -119,32 +171,68 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
         })}
       </nav>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Desktop: left nav */}
-        <nav className="hidden w-48 shrink-0 overflow-y-auto border-r border-border/60 bg-card/30 md:block">
-          <div className="flex flex-col gap-0.5 p-2 pt-3">
-            {visibleItems.map((item) => {
-              const isActive = activeTab === item.id
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => onTabChange(item.id)}
-                  className={cn(
-                    'flex items-center gap-2 px-3 h-8 text-sm rounded-md transition-colors w-full text-left',
-                    'hover:bg-muted/50',
-                    isActive
-                      ? 'bg-muted text-foreground font-medium'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  <span className="flex shrink-0">{item.icon}</span>
-                  <span className="truncate">{item.label}</span>
-                  {attentionTabs?.includes(item.id) ? <AttentionDot /> : null}
-                </button>
-              )
-            })}
+      <div className="flex min-h-0 flex-1 gap-3 overflow-hidden md:p-3">
+        {/* Desktop: glass nav column */}
+        <nav
+          aria-label="Settings sections"
+          className="glass hidden w-[248px] shrink-0 flex-col gap-0.5 overflow-y-auto rounded-2xl px-2.5 py-3 md:flex"
+        >
+          {onBack ? (
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label="Back to chat"
+              className="mb-2 flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              <ChevronLeft className="size-3.5" strokeWidth={1.75} />
+              Back to sessions
+              <kbd className="ml-auto rounded-[5px] border border-hairline px-1.5 py-px font-mono text-[10.5px] text-subtle-foreground">esc</kbd>
+            </button>
+          ) : null}
+          <div className="mb-2 flex h-[34px] items-center gap-2 rounded-[10px] border border-hairline bg-foreground/[0.04] px-2.5 focus-within:ring-2 focus-within:ring-ring/50">
+            <Search className="size-3.5 shrink-0 text-subtle-foreground" strokeWidth={1.75} aria-hidden="true" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search settings"
+              aria-label="Search settings"
+              className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-subtle-foreground"
+            />
           </div>
+          {visibleGroups.map((group, index) => (
+            <div key={group.label} className={cn('flex flex-col gap-0.5', index > 0 && 'mt-3')}>
+              <span className="eyebrow px-2.5 pb-1 pt-1">{group.label}</span>
+              {group.items.map((item) => {
+                const isActive = activeTab === item.id
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onTabChange(item.id)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13.5px] transition-colors duration-150',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                      isActive
+                        ? 'bg-foreground/[0.07] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+                        : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
+                    )}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={cn('h-3.5 w-[3px] shrink-0 rounded-sm', isActive ? 'bg-primary' : 'bg-transparent')}
+                    />
+                    <span className="truncate">{item.label}</span>
+                    {attentionTabs?.includes(item.id) ? <AttentionDot /> : null}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+          {visibleGroups.length === 0 ? (
+            <p className="px-2.5 py-3 text-[13px] text-subtle-foreground">No matching settings.</p>
+          ) : null}
         </nav>
 
         {/* Content area */}
@@ -162,12 +250,33 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
                 ),
           )}
         >
-          <div className={cn(
-            fillHeight
-              ? 'flex min-h-0 flex-1 flex-col px-4 py-4 md:px-6 md:py-5'
-              : cn('mx-auto px-4 py-4 md:px-6 md:py-5', contentWidthClassName || 'max-w-3xl'),
-          )}>
-            {children}
+          <div
+            className={cn(
+              'mx-auto w-full px-4 pb-10 pt-5 md:px-4 md:pt-7',
+              fillHeight ? 'flex min-h-0 flex-1 flex-col' : null,
+              contentWidthClassName || 'max-w-[760px]',
+            )}
+          >
+            <div className="mb-5 flex shrink-0 items-start justify-between gap-3">
+              <div className="flex min-w-0 flex-col gap-1">
+                <h2 className="truncate text-[26px] font-medium leading-tight tracking-[-0.02em] text-foreground">
+                  {activeItem?.label ?? title}
+                </h2>
+                {activeItem?.description ? (
+                  <p className="text-[13.5px] text-muted-foreground">{activeItem.description}</p>
+                ) : null}
+              </div>
+              <div className="hidden shrink-0 items-center gap-2 pt-1.5 md:flex">
+                {targetLabel ? (
+                  <Badge variant="outline" className="font-mono text-[11px] font-normal text-subtle-foreground">
+                    {targetLabel}
+                  </Badge>
+                ) : null}
+                {headerAccessory}
+                <HelpTrigger contextKey={`settings.${activeTab}`} size="sm" variant="ghost" />
+              </div>
+            </div>
+            {fillHeight ? <div className="flex min-h-0 flex-1 flex-col">{children}</div> : children}
           </div>
         </div>
       </div>
@@ -176,5 +285,5 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
 }
 
 function AttentionDot() {
-  return <span className="ml-auto size-1.5 shrink-0 rounded-full bg-amber-500" aria-label="Update available" />
+  return <span className="ml-auto size-1.5 shrink-0 rounded-full bg-attention" aria-label="Update available" />
 }

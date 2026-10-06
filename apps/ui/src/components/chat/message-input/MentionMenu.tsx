@@ -79,7 +79,7 @@ export function MentionMenu({
         role="listbox"
         aria-label="Mentions"
         className={cn(
-          'mb-1 max-h-52 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg',
+          'glass-strong mb-2 max-h-52 overflow-y-auto rounded-xl p-1',
           '[color-scheme:light] dark:[color-scheme:dark]',
           '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent',
           '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border',
@@ -114,10 +114,10 @@ export function MentionMenu({
               role="option"
               aria-selected={idx === selectedIndex}
               className={cn(
-                'flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm transition-colors',
+                'flex w-full flex-col gap-0.5 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-150',
                 idx === selectedIndex
-                  ? 'bg-accent text-accent-foreground'
-                  : 'text-popover-foreground hover:bg-accent/50',
+                  ? 'bg-foreground/[0.07] text-foreground'
+                  : 'text-popover-foreground hover:bg-foreground/[0.05]',
               )}
               onMouseEnter={() => onHover(idx)}
               onMouseDown={(e) => {
@@ -146,7 +146,7 @@ export function MentionMenu({
                 </code>
                 <span className="text-xs text-muted-foreground">{suggestion.displayName}</span>
                 {isCodex || isCodexPlugin ? (
-                  <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                  <span className="rounded-full border border-success/30 bg-success/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success">
                     Codex
                   </span>
                 ) : null}
@@ -169,7 +169,7 @@ export function MentionMenu({
         role="listbox"
         aria-label="Mentions"
         aria-busy={status === 'loading'}
-        className="mb-1 rounded-lg border border-border bg-popover px-3 py-2 shadow-lg"
+        className="glass-strong mb-2 rounded-xl px-3 py-2"
       >
         <p className="text-xs text-muted-foreground" role="status">
           {emptyMessage(status, enableCodexMention, codexToolPicker, codexCatalogErrorMessage)}

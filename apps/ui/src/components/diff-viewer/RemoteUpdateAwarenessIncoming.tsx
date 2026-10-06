@@ -159,8 +159,8 @@ export function RemoteUpdateAwarenessBanner({
 
   const isUpdate = snapshot.state === 'update_available'
   return (
-    <div className="mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs" role="status">
-      <AlertCircle className="size-3.5 shrink-0 text-amber-600" />
+    <div className="mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-md border border-attention/30 bg-attention/10 px-3 py-2 text-xs" role="status">
+      <AlertCircle className="size-3.5 shrink-0 text-attention" />
       <span className="min-w-0 flex-1 text-foreground">{copy}</span>
       {isUpdate ? (
         <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onInspect}>
@@ -241,9 +241,9 @@ export function RemoteUpdateAwarenessIncoming({
   return (
     <div className="space-y-4 overflow-auto p-4" aria-label="Incoming remote changes">
       <div><h2 className="text-sm font-semibold">Incoming</h2><p className="mt-1 text-xs text-muted-foreground">Inspection only for {branch}; no changes are applied.</p></div>
-      {incoming.state !== 'update_available' ? <p className="rounded-md border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">Remote state: {incoming.state.replaceAll('_', ' ')}.</p> : null}
-      <section className="rounded-md border border-border/60"><div className="border-b border-border/60 px-3 py-2 text-xs font-medium">Commits represented ({incoming.commits.commitCount}{incoming.commits.hasMore ? '+' : ''})</div>
-        {incoming.commits.commits.length ? incoming.commits.commits.map((commit, index) => <div key={`${commit.subject}-${index}`} className="border-b border-border/40 px-3 py-2 last:border-0"><p className="text-sm">{commit.subject}</p>{commit.committedAt ? <p className="mt-0.5 text-xs text-muted-foreground">{new Date(commit.committedAt).toLocaleString()}</p> : null}</div>) : <p className="px-3 py-3 text-sm text-muted-foreground">No bounded commit details are available.</p>}
+      {incoming.state !== 'update_available' ? <p className="rounded-md border border-hairline bg-foreground/[0.03] p-3 text-sm text-muted-foreground">Remote state: {incoming.state.replaceAll('_', ' ')}.</p> : null}
+      <section className="rounded-md border border-hairline"><div className="border-b border-hairline px-3 py-2 text-xs font-medium">Commits represented ({incoming.commits.commitCount}{incoming.commits.hasMore ? '+' : ''})</div>
+        {incoming.commits.commits.length ? incoming.commits.commits.map((commit, index) => <div key={`${commit.subject}-${index}`} className="border-b border-hairline px-3 py-2 last:border-0"><p className="text-sm">{commit.subject}</p>{commit.committedAt ? <p className="mt-0.5 text-xs text-muted-foreground">{new Date(commit.committedAt).toLocaleString()}</p> : null}</div>) : <p className="px-3 py-3 text-sm text-muted-foreground">No bounded commit details are available.</p>}
       </section>
       {incoming.fileChanges ? <p className="text-xs text-muted-foreground">{incoming.fileChanges.changedFileCount === null ? 'File-change summary is unavailable.' : `${incoming.fileChanges.changedFileCount}${incoming.fileChanges.hasMore ? '+' : ''} changed files in this inspection.`}</p> : null}
     </div>

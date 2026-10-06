@@ -137,7 +137,7 @@ export function VaultTransferPanel({
             Export transfer file
           </Button>
           {exportedCode ? (
-            <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+            <div className="space-y-2 rounded-md border border-attention/30 bg-attention/5 p-3">
               <p className="text-xs text-muted-foreground">
                 The file contains {exportedItemCount} encrypted vault
                 {' '}

@@ -136,18 +136,6 @@ export function useSidebarPrefs(): UseSidebarPrefsReturn {
   }, [])
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
-        event.preventDefault()
-        searchInputRef.current?.focus()
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [])
-
-  useEffect(() => {
     try {
       localStorage.setItem(COLLAPSED_PROFILES_KEY, JSON.stringify([...collapsedProfileIds]))
     } catch {

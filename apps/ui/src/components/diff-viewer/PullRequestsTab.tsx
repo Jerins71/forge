@@ -119,15 +119,15 @@ function recentlyClosedSortTime(pullRequest: GitPullRequestSummary): number {
 
 function CheckStatusIcon({ status }: { status: GitPullRequestSummary['checkStatus'] }) {
   if (status === 'success') {
-    return <CheckCircle2 className="size-3.5 text-emerald-500" />
+    return <CheckCircle2 className="size-3.5 text-success" />
   }
 
   if (status === 'failure') {
-    return <XCircle className="size-3.5 text-red-500" />
+    return <XCircle className="size-3.5 text-danger" />
   }
 
   if (status === 'pending') {
-    return <Clock3 className="size-3.5 text-amber-500" />
+    return <Clock3 className="size-3.5 text-attention" />
   }
 
   return <AlertCircle className="size-3.5 text-muted-foreground" />
@@ -150,9 +150,9 @@ function PullRequestRow({
       onClick={onClick}
       aria-label={`Pull request #${pullRequest.number}: ${pullRequest.title}`}
       className={cn(
-        'flex w-full min-w-0 items-start gap-2 overflow-hidden border-b border-l-2 border-b-border/50 border-l-transparent px-2.5 py-2 text-left transition-colors hover:bg-accent/35',
-        active && 'border-l-primary bg-accent/45',
-        pullRequest.isCurrentBranch && !active && 'border-l-emerald-500 bg-emerald-500/5',
+        'flex w-full min-w-0 items-start gap-2 overflow-hidden rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+        active && 'bg-foreground/[0.07] shadow-[inset_0_1px_0_var(--glass-highlight)] hover:bg-foreground/[0.07]',
+        pullRequest.isCurrentBranch && !active && 'bg-success/5',
       )}
     >
       <GitPullRequest className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
@@ -174,10 +174,10 @@ function PullRequestRow({
             {pullRequest.author}
           </span>
           {pullRequest.isDraft ? (
-            <span className="shrink-0 rounded-sm border border-border/70 px-1 text-[10px] leading-4">Draft</span>
+            <span className="shrink-0 rounded-sm border border-hairline px-1 text-[10px] leading-4">Draft</span>
           ) : null}
           {pullRequest.isCurrentBranch ? (
-            <span className="shrink-0 rounded-sm border border-emerald-500/40 px-1 text-[10px] leading-4 text-emerald-600 dark:text-emerald-400">
+            <span className="shrink-0 rounded-sm border border-success/40 px-1 text-[10px] leading-4 text-success">
               Current
             </span>
           ) : null}
@@ -250,7 +250,7 @@ function PullRequestDetailPane({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b border-border/60 p-4">
+      <div className="border-b border-hairline p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1 space-y-1">
             <h2 className="break-words text-base font-semibold text-foreground">
@@ -267,7 +267,7 @@ function PullRequestDetailPane({
                 : null}
             </p>
             {currentBranch && pullRequest.isCurrentBranch ? (
-              <p className="text-xs text-emerald-600 dark:text-emerald-400">
+              <p className="text-xs text-success">
                 This pull request matches the current branch ({currentBranch}).
               </p>
             ) : null}
@@ -291,7 +291,7 @@ function PullRequestDetailPane({
                   href={pullRequest.providerUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium hover:bg-accent hover:text-accent-foreground"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium hover:bg-foreground/[0.05] hover:text-accent-foreground"
                 >
                   <ExternalLink className="size-3.5" />
                   Open in browser
@@ -308,7 +308,7 @@ function PullRequestDetailPane({
       <ScrollArea className="min-h-0 flex-1 overflow-hidden">
         <div className="space-y-4 p-4 text-sm">
           {mergeSuccessMessage ? (
-            <section className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-900 dark:text-emerald-100">
+            <section className="rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs text-foreground">
               {mergeSuccessMessage}
             </section>
           ) : null}
@@ -339,7 +339,7 @@ function PullRequestDetailPane({
                 </Badge>
               ) : null}
               {detail?.mergeable === false ? (
-                <Badge variant="outline" className="border-red-500/40 text-red-600 dark:text-red-400">
+                <Badge variant="outline" className="border-danger/40 text-danger">
                   Not mergeable
                 </Badge>
               ) : null}
@@ -355,7 +355,7 @@ function PullRequestDetailPane({
                 {detail.checks.map((check) => (
                   <li
                     key={check.name}
-                    className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5 text-xs"
+                    className="flex items-center justify-between gap-2 rounded-md border border-hairline px-2 py-1.5 text-xs"
                   >
                     <span className="flex min-w-0 items-center gap-1.5 break-words">
                       <CheckStatusIcon status={check.status} />
@@ -597,9 +597,9 @@ export function PullRequestsTab({
   if (!providerReady) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <div className="max-w-md space-y-3 rounded-lg border border-border/70 bg-card/60 p-4 text-sm">
+        <div className="max-w-md space-y-3 rounded-lg border glass-inset p-4 text-sm">
           <div className="flex items-center gap-2 font-medium text-foreground">
-            <AlertCircle className="size-4 text-amber-500" />
+            <AlertCircle className="size-4 text-attention" />
             GitHub pull requests unavailable
           </div>
           <p className="text-muted-foreground">
@@ -637,23 +637,23 @@ export function PullRequestsTab({
     <>
       <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden lg:flex-row">
         <div
-          className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-border/60 lg:shrink-0 lg:border-b-0 lg:border-r"
+          className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-hairline lg:shrink-0 lg:border-b-0 lg:border-r"
           style={isLargeLayout ? { width: pullRequestListWidth } : undefined}
         >
-          <div className="min-w-0 border-b border-border/60 px-3 py-2">
+          <div className="min-w-0 border-b border-hairline px-3 py-2">
             <h3 className="text-sm font-medium leading-5 text-foreground">Pull Requests</h3>
             <p className="truncate text-[11px] text-muted-foreground">Open and recently closed</p>
           </div>
           <ScrollArea className="min-h-0 min-w-0 flex-1 overflow-hidden">
             <div className="min-w-0">
               {!hasAnyPullRequests ? (
-                <div className="m-2.5 rounded-lg border border-dashed border-border/70 p-4 text-center text-sm text-muted-foreground">
+                <div className="m-2.5 rounded-lg border border-dashed border-hairline p-4 text-center text-sm text-muted-foreground">
                   No pull requests found for this repository.
                 </div>
               ) : null}
               {(data?.open.length ?? 0) > 0 ? (
                 <section className="min-w-0" aria-label="Open pull requests">
-                  <p className="border-b border-border/50 bg-muted/30 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <p className="border-b border-hairline bg-foreground/[0.03] px-2.5 py-1 eyebrow">
                     Open
                   </p>
                   <div role="list" className="min-w-0">
@@ -671,7 +671,7 @@ export function PullRequestsTab({
               ) : null}
               {recentlyClosedPullRequests.length > 0 ? (
                 <section className="min-w-0" aria-label="Recently closed pull requests">
-                  <p className="border-b border-border/50 bg-muted/30 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <p className="border-b border-hairline bg-foreground/[0.03] px-2.5 py-1 eyebrow">
                     Recently closed
                   </p>
                   <div role="list" className="min-w-0">

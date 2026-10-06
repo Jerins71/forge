@@ -351,7 +351,8 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   )
 
   return (
-    <form onSubmit={handleSubmit} className="sticky bottom-0 shrink-0 bg-background p-2 md:p-3" data-tour="chat-input">
+    <form onSubmit={handleSubmit} className="sticky bottom-0 shrink-0 bg-transparent px-3 pb-3 pt-2 md:px-6 md:pb-4" data-tour="chat-input">
+      <div className="mx-auto w-full max-w-[760px]">
       {/* Slash command autocomplete dropdown */}
       {slash.isSlashMenuOpen ? (
         <SlashCommandMenu
@@ -380,9 +381,9 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
         />
       ) : null}
 
-      <div className="overflow-hidden rounded-2xl border border-border">
+      <div className="glass-strong overflow-hidden rounded-[18px]">
         {replyTarget ? (
-          <div className="border-b border-border/50 p-2 pb-1.5">
+          <div className="border-b border-hairline p-2 pb-1.5">
             <ReplyPreview target={replyTarget} onClear={onClearReplyTarget} />
           </div>
         ) : null}
@@ -390,12 +391,12 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
 
         <div className="group flex flex-col">
           {formatMode && !isRecording ? (
-            <div className="flex items-center gap-0.5 border-b border-border/40 px-2 py-1">
+            <div className="flex items-center gap-0.5 border-b border-hairline px-2 py-1">
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-7 rounded-md text-muted-foreground hover:text-foreground"
+                className="size-[30px] rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                 onClick={() => applyListFormatting(toggleBulletList)}
                 disabled={disabled}
                 aria-label="Bullet list"
@@ -406,7 +407,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-7 rounded-md text-muted-foreground hover:text-foreground"
+                className="size-[30px] rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                 onClick={() => applyListFormatting(toggleNumberedList)}
                 disabled={disabled}
                 aria-label="Numbered list"
@@ -452,69 +453,8 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
             aria-label="Attach files"
           />
 
-          <div className="flex items-center justify-between gap-1.5 px-1.5 pb-1.5 pt-1">
-            <div className="flex min-w-0 items-center gap-0.5">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  'size-7 rounded-full transition-colors',
-                  formatMode
-                    ? 'bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary'
-                    : 'text-muted-foreground/60 hover:text-foreground',
-                )}
-                onClick={toggleFormatMode}
-                disabled={disabled || isRecording}
-                aria-label={formatMode ? 'Switch to quick-send mode' : 'Switch to format mode'}
-                title={formatMode ? 'Quick-send mode (Enter to send)' : 'Format mode (Enter for new line)'}
-              >
-                <ALargeSmall className="size-3.5" />
-              </Button>
-
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-7 rounded-full text-muted-foreground/60 hover:text-foreground"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={disabled || isRecording}
-                aria-label="Attach files"
-              >
-                <Paperclip className="size-3.5" />
-              </Button>
-
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  'size-7 rounded-full transition-colors',
-                  isRecording
-                    ? 'text-red-500 hover:bg-red-500/10 hover:text-red-600'
-                    : 'text-muted-foreground/60 hover:text-foreground',
-                )}
-                onClick={voice.handleVoiceButtonClick}
-                disabled={voice.voiceButtonDisabled}
-                aria-label={isRecording ? 'Stop recording and transcribe' : 'Record voice input'}
-              >
-                {voice.isRequestingMicrophone || isTranscribingVoice ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : isRecording ? (
-                  <Square className="size-3 fill-current" />
-                ) : (
-                  <Mic className="size-3.5" />
-                )}
-              </Button>
-
-              {formatMode ? (
-                <span className="ml-1 hidden select-none text-[11px] text-muted-foreground/50 sm:inline">
-                  {navigator.platform?.toLowerCase().includes('mac') ? '⌘' : 'Ctrl'}+Enter to send
-                </span>
-              ) : null}
-            </div>
-
-            <div className="flex min-w-0 items-center gap-1">
+          <div className="flex flex-wrap items-center justify-between gap-1.5 px-2.5 pb-2.5 pt-1.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-0.5">
               {secureSessionPicker ? <SecureSessionPicker config={secureSessionPicker} /> : null}
               {sessionCoordinationPicker
                 ? <SessionCoordinationPicker config={sessionCoordinationPicker} />
@@ -523,26 +463,94 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
                 ? <SessionContextModePicker config={sessionContextModePicker} />
                 : null}
               {sessionModelPicker ? <SessionModelPicker config={sessionModelPicker} /> : null}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-0.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  'size-8 rounded-[9px] transition-colors duration-150',
+                  formatMode
+                    ? 'bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary'
+                    : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
+                )}
+                onClick={toggleFormatMode}
+                disabled={disabled || isRecording}
+                aria-label={formatMode ? 'Switch to quick-send mode' : 'Switch to format mode'}
+                title={formatMode ? 'Quick-send mode (Enter to send)' : 'Format mode (Enter for new line)'}
+              >
+                <ALargeSmall className="size-4" strokeWidth={1.75} />
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8 rounded-[9px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || isRecording}
+                aria-label="Attach files"
+              >
+                <Paperclip className="size-4" strokeWidth={1.75} />
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  'size-8 rounded-[9px] transition-colors duration-150',
+                  isRecording
+                    ? 'text-danger hover:bg-danger/10 hover:text-danger'
+                    : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
+                )}
+                onClick={voice.handleVoiceButtonClick}
+                disabled={voice.voiceButtonDisabled}
+                aria-label={isRecording ? 'Stop recording and transcribe' : 'Record voice input'}
+              >
+                {voice.isRequestingMicrophone || isTranscribingVoice ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : isRecording ? (
+                  <Square className="size-3.5 fill-current" />
+                ) : (
+                  <Mic className="size-4" strokeWidth={1.75} />
+                )}
+              </Button>
 
               <Button
                 type="submit"
                 disabled={!canSubmit}
                 size="icon"
                 className={cn(
-                  'size-7 shrink-0 rounded-full transition-all',
+                  'ml-1 size-[34px] shrink-0 rounded-[10px] transition-all duration-150',
                   canSubmit
-                    ? 'bg-primary text-primary-foreground hover:bg-primary/90 active:scale-95'
-                    : 'cursor-default bg-muted text-muted-foreground/40',
+                    ? 'bg-primary text-primary-foreground shadow-[inset_0_0_0_1px_rgb(255_255_255/0.12),0_8px_24px_-8px_var(--primary)] hover:bg-primary/90 active:scale-95'
+                    : 'cursor-default bg-foreground/[0.06] text-subtle-foreground',
                 )}
                 aria-label="Send message"
               >
-                <ArrowUp className="size-3.5" strokeWidth={2.5} />
+                <ArrowUp className="size-4" strokeWidth={2.2} />
               </Button>
             </div>
           </div>
 
-          {voice.voiceError ? <p className="px-3 pb-2 text-xs text-destructive">{voice.voiceError}</p> : null}
+          {voice.voiceError ? <p className="px-4 pb-2 text-xs text-danger">{voice.voiceError}</p> : null}
         </div>
+      </div>
+
+      <div
+        className="mt-2 hidden justify-center px-1.5 font-mono text-[11px] text-subtle-foreground sm:flex"
+        aria-hidden="true"
+      >
+        <span>
+          {formatMode
+            ? `${navigator.platform?.toLowerCase().includes('mac') ? '⌘' : 'Ctrl'}⏎ send · ⏎ newline`
+            : '⏎ send · ⇧⏎ newline'}{' '}
+          · / commands · @ mention
+        </span>
+      </div>
       </div>
     </form>
   )

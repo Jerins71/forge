@@ -299,7 +299,7 @@ export function SkillFileViewer({
                   aria-label="Copy file content"
                 >
                   {copied ? (
-                    <Check className="size-3.5 text-green-500" />
+                    <Check className="size-3.5 text-success" />
                   ) : (
                     <Copy className="size-3.5" />
                   )}
@@ -456,7 +456,7 @@ function ViewerHeader({
                 aria-label="Copy file path"
               >
                 {copied ? (
-                  <Check className="size-3.5 text-green-500" />
+                  <Check className="size-3.5 text-success" />
                 ) : (
                   <Copy className="size-3.5" />
                 )}

@@ -806,7 +806,7 @@ export function SecretCatalogPanel({
                           {secret.available ? (
                             <Badge
                               variant="outline"
-                              className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              className="gap-1 border-success/30 bg-success/10 text-success"
                             >
                               <CheckCircle2 className="size-3" />
                               Available

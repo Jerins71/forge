@@ -44,13 +44,13 @@ export function SecureSshTrustRequestCard({
 
   return (
     <div
-      className="max-w-2xl space-y-3 rounded-lg border border-amber-500/40 bg-card p-4"
+      className="glass rise-in max-w-2xl space-y-3 rounded-xl border-attention/25 bg-attention-surface p-4"
       role="alert"
       data-secure-ssh-trust-request={request.requestId}
     >
       <div className="flex items-start gap-2">
         <ShieldCheck
-          className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400"
+          className="mt-0.5 size-4 shrink-0 text-attention"
           aria-hidden="true"
         />
         <div className="min-w-0">
@@ -63,7 +63,7 @@ export function SecureSshTrustRequestCard({
         </div>
       </div>
 
-      <div className="space-y-2 rounded-md bg-muted/45 p-3 text-xs">
+      <div className="glass-inset space-y-2 rounded-lg p-3 text-xs">
         <div>
           <span className="font-medium text-foreground">Purpose</span>
           <p className="mt-0.5 text-muted-foreground">{request.purposeSummary}</p>

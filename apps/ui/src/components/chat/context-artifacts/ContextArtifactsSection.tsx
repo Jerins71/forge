@@ -72,9 +72,9 @@ export function ContextArtifactsSection({ environmentClient, managerId }: { envi
     { title: 'Window recovery', files: data?.files.filter(file => file.kind === 'recovery') ?? [] },
   ]
   return (
-    <section className="border-b border-border/60 p-3" aria-label="Context v2 files">
+    <section className="border-b border-hairline p-3" aria-label="Context v2 files">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold">Context v2</h3>
+        <h3 className="eyebrow">Context v2</h3>
         <Button ref={refreshButton} variant="ghost" size="icon" className="size-7" onClick={refresh} disabled={loading} aria-label="Refresh context files">
           <RefreshCw className="size-3.5" />
         </Button>
@@ -89,15 +89,15 @@ export function ContextArtifactsSection({ environmentClient, managerId }: { envi
       {loading && !data && <p role="status" className="mt-3 text-xs text-muted-foreground">Loading context files…</p>}
       {data && !data.files.length && <p className="mt-3 text-xs text-muted-foreground">No context files saved yet. They appear when the agent writes notes or prepares a context transition.</p>}
       {groups.map(group => group.files.length > 0 && <div key={group.title} className="mt-3">
-        <h4 className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{group.title}</h4>
+        <h4 className="eyebrow mb-1">{group.title}</h4>
         {group.files.map(file => <button key={file.path} type="button"
-          className="flex w-full min-w-0 items-start gap-2 rounded-md p-2 text-left hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="flex w-full min-w-0 items-start gap-2 glass-inset mt-1 rounded-xl p-2.5 text-left hover:bg-foreground/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           onClick={event => { opener.current = event.currentTarget; setSelectedPath(file.path); setRaw(false) }}>
           <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0">
             <span className="block break-all text-xs font-medium">{file.path}</span>
-            <span className="block text-[10px] text-muted-foreground">Revision {file.revision} · {file.bytes.toLocaleString()} bytes</span>
-            <time className="block text-[10px] text-muted-foreground" dateTime={file.updatedAt}>{timestamp(file.updatedAt)}</time>
+            <span className="block font-mono text-[11px] text-subtle-foreground">Revision {file.revision} · {file.bytes.toLocaleString()} bytes</span>
+            <time className="block font-mono text-[11px] text-subtle-foreground" dateTime={file.updatedAt}>{timestamp(file.updatedAt)}</time>
           </span>
         </button>)}
       </div>)}

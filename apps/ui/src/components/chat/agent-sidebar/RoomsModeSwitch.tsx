@@ -1,5 +1,7 @@
 import { cn } from '@/lib/utils'
 
+const SELECTED = 'bg-foreground/[0.08] text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+
 export type RoomsMode = 'inbox' | 'projects'
 
 export function RoomsModeSwitch({
@@ -13,7 +15,7 @@ export function RoomsModeSwitch({
 }) {
   return (
     <div
-      className="mt-2 inline-flex w-full rounded-lg border border-sidebar-border bg-sidebar-accent/30 p-0.5"
+      className="glass-inset mt-1 inline-flex w-full gap-0.5 rounded-[10px] p-0.5"
       aria-label="New project view sidebar mode"
       data-testid="rooms-mode-switch"
     >
@@ -22,8 +24,8 @@ export function RoomsModeSwitch({
         aria-pressed={mode === 'inbox'}
         onClick={() => onChange('inbox')}
         className={cn(
-          'flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-          mode === 'inbox' ? 'bg-sidebar text-sidebar-foreground shadow-sm' : 'text-muted-foreground hover:text-sidebar-foreground',
+          'flex min-h-7 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+          mode === 'inbox' ? SELECTED : 'text-subtle-foreground hover:text-foreground',
         )}
       >
         Inbox
@@ -38,8 +40,8 @@ export function RoomsModeSwitch({
         aria-pressed={mode === 'projects'}
         onClick={() => onChange('projects')}
         className={cn(
-          'min-h-8 flex-1 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-          mode === 'projects' ? 'bg-sidebar text-sidebar-foreground shadow-sm' : 'text-muted-foreground hover:text-sidebar-foreground',
+          'min-h-7 flex-1 rounded-lg px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+          mode === 'projects' ? SELECTED : 'text-subtle-foreground hover:text-foreground',
         )}
       >
         Projects

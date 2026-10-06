@@ -340,7 +340,7 @@ function BuilderSecretsSettings({
       {notice ? (
         <div
           role="status"
-          className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-300"
+          className="rounded-md border border-success/30 bg-success/5 p-3 text-sm text-success"
         >
           {notice}
         </div>

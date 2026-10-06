@@ -368,16 +368,16 @@ export function SecureSessionPicker({
             type="button"
             disabled={config.disabled}
             className={cn(
-              'flex h-7 min-w-0 max-w-[42vw] items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition-colors sm:max-w-40',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+              'flex h-[30px] min-w-0 max-w-[42vw] items-center gap-1.5 rounded-lg border px-2.5 text-[12.5px] font-medium transition-colors duration-150 sm:max-w-40',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
               'disabled:pointer-events-none disabled:opacity-50',
               state.tone === 'active'
-                ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300'
+                ? 'border-success/30 bg-success/10 text-success hover:bg-success/15'
                 : state.tone === 'locked'
-                  ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:text-amber-300'
+                  ? 'border-attention/30 bg-attention/10 text-attention hover:bg-attention/15'
                 : state.tone === 'warning'
-                  ? 'border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15'
-                  : 'border-border/60 bg-muted/55 text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground',
+                  ? 'border-danger/30 bg-danger/10 text-danger hover:bg-danger/15'
+                  : 'border-transparent text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
             )}
             aria-label={state.ariaLabel}
             aria-haspopup="dialog"

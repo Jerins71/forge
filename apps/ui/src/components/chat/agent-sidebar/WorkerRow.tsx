@@ -37,7 +37,7 @@ export const WorkerRow = React.memo(function WorkerRow({
           data-worker-row
           className={cn(
             roomsV2
-              ? 'sidebar-room-worker-row pl-8'
+              ? 'sidebar-room-worker-row pl-9'
               : 'relative flex w-full items-center gap-1 rounded-md py-1.5 pl-12 pr-1.5 transition-colors',
             roomsV2
               ? isSelected ? 'sidebar-room-row-selected' : undefined
@@ -55,7 +55,7 @@ export const WorkerRow = React.memo(function WorkerRow({
                   onClick={() => onSelect()}
                   className={cn(
                     'flex min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-                    roomsV2 ? 'text-xs leading-4' : undefined,
+                    roomsV2 ? 'py-1 pr-2 text-xs leading-4' : undefined,
                   )}
                 >
                   <span
