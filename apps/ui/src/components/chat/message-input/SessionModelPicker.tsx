@@ -321,7 +321,7 @@ function ModelPickerPanel({ rows, currentKey, initialTab, loading, error, onRetr
             role="tab"
             aria-selected={!searching && tab === candidate}
             aria-label={candidate === 'favorites' ? 'Favorites' : candidate === 'codex' ? 'Codex' : candidate === 'claude' ? 'Claude' : 'Other providers'}
-            onClick={() => { setTab(candidate); setQuery('') }}
+            onClick={() => { setTab(candidate); setQuery(''); setLegacyOpen(false) }}
             className={cn(
               'relative inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground',
               !searching && tab === candidate && 'text-foreground before:absolute before:-left-1.5 before:top-1.5 before:h-5 before:w-0.5 before:rounded-full before:bg-primary',
