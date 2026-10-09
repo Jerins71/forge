@@ -625,6 +625,44 @@ export const FORGE_MODEL_CATALOG: ForgeModelCatalog = {
       intentionalDivergenceNotes:
         'Native Codex app-server runtime only; no Pi projection. Context is the published model limit; the Codex client controls its effective context window. Ultra is a Codex orchestration mode.',
     },
+    // Native-only Claude additions; IDs and efforts match the Claude Code runtime
+    // (Sonnet 5.5 needs Claude Code 2.1.284+, Haiku 5.5 needs 2.1.293+).
+    'claude-native/claude-sonnet-5-5': {
+      catalogId: 'claude-native/claude-sonnet-5-5',
+      modelId: 'claude-sonnet-5-5',
+      provider: 'claude-native',
+      familyId: 'claude-native',
+      displayName: 'Claude Sonnet 5.5 (Claude native)',
+      isFamilyDefault: false,
+      supportsReasoning: true,
+      supportedReasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      defaultReasoningLevel: 'high',
+      contextWindow: 1_000_000,
+      maxOutputTokens: 128_000,
+      inputModes: ['text', 'image'],
+      webSearchCapability: 'native',
+      enabledByDefault: true,
+      piUpstreamId: null,
+      intentionalDivergenceNotes: 'Native Claude Agent SDK only; no Pi projection.',
+    },
+    'claude-native/claude-haiku-5-5': {
+      catalogId: 'claude-native/claude-haiku-5-5',
+      modelId: 'claude-haiku-5-5',
+      provider: 'claude-native',
+      familyId: 'claude-native',
+      displayName: 'Claude Haiku 5.5 (Claude native)',
+      isFamilyDefault: false,
+      supportsReasoning: true,
+      supportedReasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      defaultReasoningLevel: 'medium',
+      contextWindow: 1_000_000,
+      maxOutputTokens: 128_000,
+      inputModes: ['text', 'image'],
+      webSearchCapability: 'native',
+      enabledByDefault: true,
+      piUpstreamId: null,
+      intentionalDivergenceNotes: 'Native Claude Agent SDK only; no Pi projection.',
+    },
     ...Object.fromEntries(Object.values(BASE_MODEL_CATALOG.models)
       .filter(model => model.provider === 'anthropic')
       .map(model => [`claude-native/${model.modelId}`, {
