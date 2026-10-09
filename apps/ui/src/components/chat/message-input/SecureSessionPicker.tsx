@@ -380,11 +380,12 @@ export function SecureSessionPicker({
                   : 'border-transparent text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
             )}
             aria-label={state.ariaLabel}
+            title={state.label}
             aria-haspopup="dialog"
             aria-expanded={open}
           >
             <PickerIcon icon={state.icon} />
-            <span className="truncate">{state.label}</span>
+            <span className="hidden truncate @[50rem]/composer:inline">{state.label}</span>
             <ChevronDown className="size-3 shrink-0 opacity-60" aria-hidden="true" />
           </button>
         </PopoverTrigger>

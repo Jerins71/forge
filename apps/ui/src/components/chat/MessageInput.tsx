@@ -453,8 +453,9 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
             aria-label="Attach files"
           />
 
-          <div className="flex flex-wrap items-center justify-between gap-1.5 px-2.5 pb-2.5 pt-1.5">
-            <div className="flex min-w-0 flex-wrap items-center gap-0.5">
+          <div className="@container/composer flex items-center justify-between gap-1.5 px-2.5 pb-2.5 pt-1.5">
+            {/* One row. Secondary controls drop to icons below 50rem; send actions stay pinned right. */}
+            <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {secureSessionPicker ? <SecureSessionPicker config={secureSessionPicker} /> : null}
               {sessionCoordinationPicker
                 ? <SessionCoordinationPicker config={sessionCoordinationPicker} />

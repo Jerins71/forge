@@ -190,7 +190,7 @@ export function SessionCoordinationPicker({
           title={`${currentPostureLabel} · ${currentRosterLabel}`}
         >
           <GitBranch className="size-3 shrink-0" aria-hidden="true" />
-          <span className="truncate">{currentPostureLabel}</span>
+          <span className="hidden truncate @[50rem]/composer:inline">{currentPostureLabel}</span>
           <ChevronDown className="size-3 shrink-0 opacity-60" aria-hidden="true" />
         </button>
       </PopoverTrigger>

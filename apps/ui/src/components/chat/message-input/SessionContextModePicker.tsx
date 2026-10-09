@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Loader2 } from 'lucide-react'
+import { ChevronDown, Loader2, Layers } from 'lucide-react'
 import {
   DEFAULT_CONTEXT_MODE,
   type ContextMode,
@@ -161,7 +161,8 @@ export function SessionContextModePicker({
           aria-label={`Context management: ${triggerLabel}. ${originLabel}.`}
           title={`${triggerLabel} (${originLabel})`}
         >
-          <span className="truncate">{triggerLabel}</span>
+          <Layers className="size-3 shrink-0" aria-hidden="true" />
+          <span className="hidden truncate @[50rem]/composer:inline">{triggerLabel}</span>
           <ChevronDown className="size-3 shrink-0 opacity-60" aria-hidden="true" />
         </button>
       </PopoverTrigger>
