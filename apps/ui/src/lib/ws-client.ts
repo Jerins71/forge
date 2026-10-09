@@ -751,6 +751,9 @@ export class ManagerWsClient {
     const trimmed = agentId.trim()
     if (!trimmed) return
     if (this.environmentClient) {
+      // Re-subscribing to the mounted session must not remount it: a remount republishes state,
+      // and route effects that re-subscribe on state change would otherwise never settle.
+      if (this.detailLease && this.desiredAgentId === trimmed) return
       this.mountEnvironmentDetail(trimmed)
       return
     }
