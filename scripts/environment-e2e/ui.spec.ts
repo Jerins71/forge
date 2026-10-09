@@ -295,7 +295,7 @@ test('9.2.5/6 explicitly mounted three views share sockets, release streams, and
   await expect(page.getByRole('dialog')).toContainText('Session Audit')
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: /Session model:/ }).click()
-  await expect(page.getByRole('menu')).toContainText('Session model')
+  await expect(page.getByRole('listbox', { name: 'Models' }).getByRole('option').first()).toBeVisible()
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: /^Terminal \(/ }).filter({ visible: true }).click()
   await expect.poll(() => featureResponses.some(response => response.environmentId === b.environmentId && response.path === '/api/terminals' && response.status === 201)).toBe(true)
