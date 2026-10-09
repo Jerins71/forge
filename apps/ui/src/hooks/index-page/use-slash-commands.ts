@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchSlashCommands, type SlashCommand } from '@/components/settings/slash-commands-api'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
 interface UseSlashCommandsOptions {
-  wsUrl: string
+  settingsClient: SettingsApiClient | string
   activeView: string
 }
 
-export function useSlashCommands({ wsUrl, activeView }: UseSlashCommandsOptions) {
+export function useSlashCommands({ settingsClient, activeView }: UseSlashCommandsOptions) {
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([])
   const slashCommandsFetchKeyRef = useRef(0)
 
@@ -14,7 +15,7 @@ export function useSlashCommands({ wsUrl, activeView }: UseSlashCommandsOptions)
     const fetchKey = ++slashCommandsFetchKeyRef.current
     void (async () => {
       try {
-        const cmds = await fetchSlashCommands(wsUrl)
+        const cmds = await fetchSlashCommands(settingsClient)
         if (fetchKey === slashCommandsFetchKeyRef.current) {
           setSlashCommands(cmds)
         }
@@ -25,7 +26,7 @@ export function useSlashCommands({ wsUrl, activeView }: UseSlashCommandsOptions)
         }
       }
     })()
-  }, [activeView, wsUrl])
+  }, [activeView, settingsClient])
 
   return { slashCommands }
 }

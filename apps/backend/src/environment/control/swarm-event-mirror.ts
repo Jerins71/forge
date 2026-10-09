@@ -89,7 +89,8 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       updatedAt: descriptor.updatedAt, sortKey: descriptor.updatedAt, archived: Boolean(descriptor.archivedAt),
       workspace: prior?.workspace ?? { kind: "current_checkout", cwd: descriptor.cwd, branch: null },
       model: { provider: descriptor.model.provider, modelId: descriptor.model.modelId, thinkingLevel: descriptor.model.thinkingLevel,
-        origin: descriptor.modelOrigin === "session_override" ? "session_override" : "profile_default" } };
+        origin: descriptor.modelOrigin === "session_override" ? "session_override" : "profile_default" },
+      ...(attention ? { attentionOccurrence: { attentionId: attention.attentionId, reason: attention.reason, raisedAt: attention.raisedAt } } : {}) };
   }
   function upsertSession(tx: ControlTransaction, sessionId: string) {
     const descriptor = swarmManager.getAgentForInternalUse(sessionId);

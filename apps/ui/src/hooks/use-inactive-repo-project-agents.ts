@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { RepoProjectAgentInventoryItem } from '@forge/protocol'
 import type { ProfileTreeRow } from '@/lib/agent-hierarchy'
-import { createBuilderSettingsApiClient } from '@/components/settings/settings-api-client'
+import { resolveSettingsApiClient, type SettingsApiClient } from '@/components/settings/settings-api-client'
 import {
   fetchProjectResourcesSnapshot,
 } from '@/components/settings/project-resources-api'
@@ -33,11 +33,11 @@ const NO_ENTRIES: never[] = []
 
 export function useInactiveRepoProjectAgents(options: {
   connected: boolean
-  wsUrl?: string
+  settingsClient?: SettingsApiClient | string | null
   treeRows: ProfileTreeRow[]
   refreshKey?: string | number
 }) {
-  const { connected, wsUrl, treeRows, refreshKey = 0 } = options
+  const { connected, settingsClient, treeRows, refreshKey = 0 } = options
   const [entriesByProfileId, setEntriesByProfileId] = useState<Map<string, RepoProjectAgentSidebarEntry[]>>(() => new Map())
   const [loading, setLoading] = useState(false)
 
@@ -53,13 +53,13 @@ export function useInactiveRepoProjectAgents(options: {
   }, [treeRows])
 
   const refresh = useCallback(async () => {
-    if (!connected || !wsUrl || contexts.size === 0) {
+    if (!connected || !settingsClient || contexts.size === 0) {
       setEntriesByProfileId(new Map())
       return
     }
 
     setLoading(true)
-    const apiClient = createBuilderSettingsApiClient(wsUrl)
+    const apiClient = resolveSettingsApiClient(settingsClient)
     const nextEntries = new Map<string, RepoProjectAgentSidebarEntry[]>()
 
     await Promise.all(Array.from(contexts.values()).map(async (context) => {
@@ -90,7 +90,7 @@ export function useInactiveRepoProjectAgents(options: {
 
     setEntriesByProfileId(nextEntries)
     setLoading(false)
-  }, [connected, contexts, wsUrl])
+  }, [connected, contexts, settingsClient])
 
   useEffect(() => {
     void refresh()

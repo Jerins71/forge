@@ -5,6 +5,7 @@
  * implementation spec. Every RPC method declares exactly one scope.
  */
 import { Type, type Static, type TSchema } from '@sinclair/typebox'
+import { SESSION_ATTENTION_REASONS } from './session-attention.js'
 
 export const ENVIRONMENT_PROTOCOL_VERSION = 1 as const
 export const ENVIRONMENT_PROTOCOL_HEADER = 'x-forge-environment-protocol'
@@ -107,6 +108,9 @@ export const SessionSummarySchema = O({
   // Optional so shells cached by older clients still decode; producers always send it.
   model: Type.Optional(O({ provider: ShortText, modelId: ShortText, thinkingLevel: ShortText,
     origin: E('profile_default', 'session_override') })),
+  // The server attention occurrence behind `attention: 'result'`; Inbox › Needs You lists and dismisses it.
+  attentionOccurrence: Type.Optional(O({ attentionId: Type.String({ minLength: 1, maxLength: 256 }),
+    reason: E(...SESSION_ATTENTION_REASONS), raisedAt: V2Time })),
 })
 export type SessionSummary = Static<typeof SessionSummarySchema>
 

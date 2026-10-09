@@ -1,3 +1,4 @@
+import type { SessionAttention } from '@forge/protocol'
 import {
   ACTIVITY_SUMMARY_SCHEMA_VERSION,
   type AgentDescriptor,
@@ -52,7 +53,7 @@ export function projectSession(
   }
   return previous && Object.keys(next).every(key => next[key as keyof AgentDescriptor] === previous[key as keyof AgentDescriptor]) ? previous : next
 }
-export function projectShell(shell: ShellState, previous: AgentDescriptor[], previousProfiles: ManagerProfile[] = [], previousUnread: Record<string, number> = {}) {
+export function projectShell(shell: ShellState, previous: AgentDescriptor[], previousProfiles: ManagerProfile[] = [], previousUnread: Record<string, number> = {}, previousAttentions: Record<string, SessionAttention> = {}) {
   const byId = new Map(previous.map((a) => [a.agentId, a]))
   const agents = [...shell.sessions.values()].map((s) =>
     projectSession(s, shell, byId.get(s.sessionId)),
@@ -74,7 +75,24 @@ export function projectShell(shell: ShellState, previous: AgentDescriptor[], pre
   })
   const unreadCounts: Record<string, number> = {}
   for (const s of shell.sessions.values()) unreadCounts[s.sessionId] = s.unread
-  return { agents, profiles, unreadCounts: Object.keys(previousUnread).length === agents.length && Object.keys(unreadCounts).every(key => unreadCounts[key] === previousUnread[key]) ? previousUnread : unreadCounts }
+  // Needs You lists server attention occurrences; the shell carries the current one per session.
+  const sessionAttentions: Record<string, SessionAttention> = {}
+  for (const s of shell.sessions.values()) {
+    const occurrence = s.attentionOccurrence
+    if (!occurrence || s.archived) continue
+    const previousAttention = previousAttentions[s.sessionId]
+    sessionAttentions[s.sessionId] = previousAttention?.attentionId === occurrence.attentionId && previousAttention.profileId === s.projectId
+      ? previousAttention
+      : { ...occurrence, sessionAgentId: s.sessionId, profileId: s.projectId }
+  }
+  const attentionKeys = Object.keys(sessionAttentions)
+  return {
+    agents,
+    profiles,
+    unreadCounts: Object.keys(previousUnread).length === agents.length && Object.keys(unreadCounts).every(key => unreadCounts[key] === previousUnread[key]) ? previousUnread : unreadCounts,
+    sessionAttentionAvailable: true,
+    sessionAttentions: attentionKeys.length === Object.keys(previousAttentions).length && attentionKeys.every(key => sessionAttentions[key] === previousAttentions[key]) ? previousAttentions : sessionAttentions,
+  }
 }
 export function projectItems(
   items: NonNullable<DetailState['projection']>['items'],

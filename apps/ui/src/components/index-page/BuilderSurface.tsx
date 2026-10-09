@@ -64,6 +64,7 @@ import { activateRemoteUpdateAwarenessProject } from '@/components/settings/remo
 import { getActiveLocalRemoteUpdateSnapshot } from '@/components/index-page/remote-update-awareness'
 import {
   BuilderSidebarOrderApiConflictError,
+  createBuilderSidebarOrderApi,
   createLocalBuilderSidebarOrderApi,
   type BuilderSidebarOrderApi,
 } from '@/lib/builder-sidebar-order-api'
@@ -241,8 +242,8 @@ export function BuilderSurface({
   useRevokedDraftPurge()
   const primaryState = isPrimarySelected ? state : primarySidebarSlice
   const builderSidebarOrderApi = useMemo(
-    () => withPrimaryOrderOrigin(createLocalBuilderSidebarOrderApi(wsUrl), primaryEnvironmentId),
-    [primaryEnvironmentId, wsUrl],
+    () => withPrimaryOrderOrigin(primarySettingsClient ? createBuilderSidebarOrderApi(primarySettingsClient) : createLocalBuilderSidebarOrderApi(wsUrl), primaryEnvironmentId),
+    [primaryEnvironmentId, primarySettingsClient, wsUrl],
   )
   // Primary routes keep their environment-free URLs.
   const navigateToBuilderRoute = useCallback((next: AppRouteState, replace?: boolean) => {
@@ -935,7 +936,7 @@ export function BuilderSurface({
     !hasCreatedProjectManager &&
     Boolean(onboardingState && onboardingState.status !== 'pending')
 
-  const { slashCommands } = useSlashCommands({ wsUrl, activeView })
+  const { slashCommands } = useSlashCommands({ settingsClient: selectedSettingsClient ?? wsUrl, activeView })
   const builderSlashCommands = useMemo(() => [SIDE_SLASH_COMMAND, ...slashCommands], [slashCommands])
 
   // Project creation and sidebar project actions address the primary environment.

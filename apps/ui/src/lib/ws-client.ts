@@ -364,7 +364,7 @@ export class ManagerWsClient {
       )
       const updateShell = () =>
         this.updateState(
-          projectShell(client.shell.getSnapshot(), this.state.agents, this.state.profiles, this.state.unreadCounts),
+          projectShell(client.shell.getSnapshot(), this.state.agents, this.state.profiles, this.state.unreadCounts, this.state.sessionAttentions),
         )
       updateShell()
       this.environmentDetach.push(
@@ -454,6 +454,18 @@ export class ManagerWsClient {
   dismissSessionAttention(attentionIds: string[]): Promise<SessionAttentionUpdateEvent> {
     if (!this.state.sessionAttentionAvailable) {
       return Promise.reject(new Error('Session attention is not supported by this origin.'))
+    }
+    if (this.environmentClient) {
+      // Environment commands are session-addressed; any listed occurrence's session carries the batch.
+      const sessionId = Object.values(this.state.sessionAttentions).find((attention) => attentionIds.includes(attention.attentionId))?.sessionAgentId
+      if (!sessionId) return Promise.reject(new Error('Those attention items are no longer listed.'))
+      const requestId = crypto.randomUUID()
+      return sendEnvironmentCommand(this.environmentClient, buildDismissSessionAttentionCommand(attentionIds, requestId), crypto.randomUUID(), sessionId)
+        .then(({ events }) => {
+          const update = events.find((event): event is SessionAttentionUpdateEvent => (event as { type?: string }).type === 'session_attention_update')
+          if (!update) throw new Error('Could not clear attention.')
+          return update
+        })
     }
     assertConnectedSocket(this.socket)
     return this.requestDispatcher.enqueueRequest(
@@ -1362,6 +1374,8 @@ export class ManagerWsClient {
   }
 
   async getProjectAgentExternalDirectory(): Promise<ProjectAgentExternalDirectoryResult> {
+    // Environment commands are addressed to a session; before one is open there is nothing to ask.
+    if (this.environmentClient && !(this.state.targetAgentId ?? this.desiredAgentId)) return { profileId: '', entries: [] }
     assertReconnectableSocket(this.socket)
     return this.requestDispatcher.enqueueRequest('get_project_agent_external_directory', (requestId) =>
       buildGetProjectAgentExternalDirectoryCommand(requestId),
