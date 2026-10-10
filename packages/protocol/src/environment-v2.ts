@@ -58,6 +58,19 @@ export const V2Time = Type.String({ maxLength: 32, pattern: '^\\d{4}-\\d{2}-\\d{
 export const V2Empty = O({})
 const ShortText = Type.String({ maxLength: 256 })
 const NullableId = Type.Union([V2Id, Type.Null()])
+/** Presentation of one recovery occurrence. Canonical content remains behind
+ * its existing owner; this projection contains identities and decision times. */
+export const RecoverySnapshotSchema = O({
+  recoveryId: V2Id, bootId: V2Id, createdAt: V2Time,
+  interruptedManagers: Type.Array(V2Id, { maxItems: 1000 }),
+  interruptedWorkers: Type.Array(V2Id, { maxItems: 1000 }),
+  undeliveredReports: Type.Array(O({ deliveryId: V2Id, fromAgentId: V2Id,
+    toAgentId: V2Id, turnId: Type.Optional(V2Id), assignmentId: Type.Optional(V2Id) }), { maxItems: 1000 }),
+  dismissedAt: Type.Optional(V2Time), resumedAt: Type.Optional(V2Time),
+})
+export type RecoverySnapshot = Static<typeof RecoverySnapshotSchema>
+export const RecoveryStateSchema = Type.Union([RecoverySnapshotSchema, Type.Null()])
+export const RecoveryDecisionSchema = O({ commandId: V2Uuid, recoveryId: V2Id, action: E('resume', 'dismiss') })
 export const ScopeSchema = E(
   'session:read', 'session:operate', 'workspace:read', 'workspace:write',
   'terminal:operate', 'settings:admin', 'access:admin',
@@ -193,7 +206,7 @@ export const RpcErrorSchema = O({
 export type RpcError = Static<typeof RpcErrorSchema>
 export const CommandReceiptSchema = O({
   commandId: V2Uuid,
-  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create'),
+  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide'),
   projectId: Type.Optional(V2Id),
   result: Type.Optional(O({ projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })), profileIds: Type.Optional(Type.Array(V2Id, { maxItems: 10000 })), rosterId: Type.Optional(V2Id), rosterRevision: Type.Optional(V2Sequence) })),
   sessionId: NullableId,
@@ -210,6 +223,7 @@ export type CommandReceipt = Static<typeof CommandReceiptSchema>
 export const StreamCursorSchema = O({ streamEpoch: V2Uuid, afterSequence: V2Sequence })
 export type StreamCursor = Static<typeof StreamCursorSchema>
 export const ShellSnapshotSchema = O({
+  recovery: Type.Optional(RecoveryStateSchema),
   projects: Type.Array(ProjectSummarySchema, { maxItems: 100 }),
   sessions: Type.Array(SessionSummarySchema, { maxItems: 500 }),
   // Continuation is bound to the same materialized snapshot and high water.
@@ -242,6 +256,7 @@ export const DetailItemSchema = O({
   commandId: Type.Union([V2Uuid, Type.Null()]),
 })
 export const DetailSnapshotSchema = O({
+  recovery: Type.Optional(RecoveryStateSchema),
   session: SessionSummarySchema,
   items: Type.Array(DetailItemSchema, { maxItems: 200 }),
   workers: Type.Array(WorkerSummarySchema, { maxItems: 100 }),
@@ -250,12 +265,14 @@ export const DetailSnapshotSchema = O({
   workersCursor: Type.Union([Type.String({ maxLength: 512 }), Type.Null()]),
 })
 export const ShellEventSchema = Type.Union([
+  O({ type: Type.Literal('recovery.upsert'), recovery: RecoveryStateSchema }),
   O({ type: Type.Literal('project.upsert'), project: ProjectSummarySchema }),
   O({ type: Type.Literal('project.remove'), projectId: V2Id }),
   O({ type: Type.Literal('session.upsert'), session: SessionSummarySchema }),
   O({ type: Type.Literal('session.remove'), sessionId: V2Id }),
 ])
 export const DetailEventSchema = Type.Union([
+  O({ type: Type.Literal('recovery.upsert'), recovery: RecoveryStateSchema }),
   O({ type: Type.Literal('item.upsert'), item: DetailItemSchema }),
   O({ type: Type.Literal('worker.upsert'), worker: WorkerSummarySchema }),
   O({ type: Type.Literal('worker.remove'), agentId: V2Id }),
@@ -366,6 +383,8 @@ const defineRpc = <I extends TSchema, R extends TSchema, S extends TSchema | und
 ) => ({ input, output, error: RpcErrorSchema, stream: options?.stream, receipt: options?.receipt === true })
 
 export const rpcSchemas = {
+  'recovery.get': defineRpc(V2Empty, O({ recovery: RecoveryStateSchema })),
+  'recovery.decide': defineRpc(RecoveryDecisionSchema, CommandReceiptSchema, { receipt: true }),
   'environment.get': defineRpc(V2Empty, EnvironmentDescriptorSchema),
   'shell.subscribe': defineRpc(ShellSubscribeSchema, SubscribeResult, { stream: ShellStreamItemSchema }),
   'shell.page': defineRpc(O({ page: Type.String({ maxLength: 512 }) }),
@@ -425,6 +444,7 @@ export const rpcSchemas = {
 } as const
 export type Method = keyof typeof rpcSchemas
 export const rpcScopes = {
+  'recovery.get': 'session:read', 'recovery.decide': 'session:operate',
   'environment.get': 'session:read', 'shell.subscribe': 'session:read', 'shell.page': 'session:read',
   'session.subscribe': 'session:read', 'session.history': 'session:read',
   'session.workers': 'session:read', 'session.content': 'session:read',
