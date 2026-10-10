@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { BrowserAutomationRequest, BrowserHostRegistration, BrowserTabSnapshot } from '@forge/protocol';
+import type { BrowserAutomationRequest, BrowserHostRegistration, BrowserTabSnapshot, BrowserSessionSnapshot } from '@forge/protocol';
 import type { BrowserHostMessageV2, Method, RpcInput, RpcServerFrame } from '@forge/protocol/environment-v2';
 import { BrowserAutomationService } from '../../swarm/browser-automation/browser-automation-service.js';
 import { createBrowserHostRpc } from './browser-host-rpc.js';
@@ -15,10 +15,10 @@ afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await 
 const local = { ...principal, localBrowserHost: true };
 const registration: BrowserHostRegistration = { hostId: 'forge-browser-desktop', clientInstanceId: 'renderer', registeredAt: '2026-10-09T00:00:00.000Z', capabilities: { protocolVersions: { minimum: 2, maximum: 2 }, supportedOperations: ['status','open','snapshot'], maxResponseBytes: 8388608, features: { resize: true, recording: true, capturePage: true, downloadEvents: false, downloadArtifacts: false, downloadOpen: false, managedOpenRouting: true } } };
 function tab(request: BrowserAutomationRequest): BrowserTabSnapshot { return { targetAffinity: 'managed-electron', tabId: 'logical-1', sessionAgentId: request.sessionAgentId, profileId: request.profileId, url: 'about:blank', title: '', lifecycle: 'ready', loading: false, live: true, canGoBack: false, canGoForward: false, zoomFactor: 1, controller: 'none', agentCursor: null, recording: null, viewportSetting: { mode: 'fill' }, renderedViewport: null, error: null, createdAt: registration.registeredAt, updatedAt: registration.registeredAt }; }
-async function harness() {
+async function harness(hydration?: BrowserSessionSnapshot[]) {
   const root = await mkdtemp(join(tmpdir(), 'forge-browser-host-rpc-')); cleanups.push(() => rm(root, { recursive: true, force: true }));
   const service = new BrowserAutomationService({ dataDir: root });
-  const browserHost = createBrowserHostRpc({ service, resolveSession: id => id === 'manager-1' ? 'profile-1' : undefined, hydrateSessions: async () => [await service.getHostHydrationSnapshot('profile-1','manager-1')] });
+  const browserHost = createBrowserHostRpc({ service, resolveSession: id => id === 'manager-1' ? 'profile-1' : undefined, hydrateSessions: async () => hydration ?? [await service.getHostHydrationSnapshot('profile-1','manager-1')] });
   const f = await socketFixture({ browserHost }); cleanups.push(f.close); return { service, f };
 }
 type Client = Awaited<ReturnType<Awaited<ReturnType<typeof socketFixture>>['connect']>>;
@@ -49,4 +49,25 @@ it('unregisters on unsubscribe/drop and negotiates a new generation', async () =
   await attach(host); expect(await call(host,'browser.host.register',{ registration })).toMatchObject({ output: { hostGeneration: 2 } });
   expect(await call(host,'browser.host.focus',{ hostId: registration.hostId, hostGeneration: 1, focused: true })).toMatchObject({ type: 'error', error: { code: 'CONFLICT' } });
   host.socket.terminate(); await vi.waitFor(() => expect(service.broker.getConnectionSnapshot().connected).toBe(false));
+});
+
+// Failure mode: eagerly enqueuing a multi-session canonical hydration exceeds
+// the live stream queue even though each frame and the whole read are bounded.
+it('streams canonical hydration larger than the live queue without losing the lease', async () => {
+  const now = registration.registeredAt;
+  const large: BrowserSessionSnapshot[] = Array.from({ length: 12 }, (_, index) => ({ schemaVersion: 2, sessionAgentId: `manager-${index}`, profileId: 'profile-1', hostingState: 'hosted', revision: 1, activeTabId: null, defaultTabId: null, panelVisible: false, recentActions: [], createdAt: now, updatedAt: now,
+    tabs: Array.from({ length: 100 }, (_, tabIndex) => ({ targetAffinity: 'managed-electron', tabId: `tab-${index}-${tabIndex}`, sessionAgentId: `manager-${index}`, profileId: 'profile-1', url: 'about:blank', title: 't'.repeat(4096), lifecycle: 'ready', loading: false, live: false, canGoBack: false, canGoForward: false, zoomFactor: 1, controller: 'none', agentCursor: null, recording: null, viewportSetting: { mode: 'fill' }, renderedViewport: null, error: null, createdAt: now, updatedAt: now })) }));
+  const { f, service } = await harness(large); const host = await f.connect(local); const id = await attach(host);
+  await call(host, 'browser.host.register', { registration });
+  await call(host, 'browser.host.hydrate', { requestId: 'large-hydration', hostId: registration.hostId, hostGeneration: 1 });
+  const chunks: Buffer[] = []; let count = 1;
+  while (chunks.length < count) {
+    const frame = await host.next(value => 'subscriptionId' in value && value.subscriptionId === id);
+    expect(frame.type).toBe('stream');
+    const item = (frame as { item: { kind: string; chunkCount: number; payloadBase64: string } }).item;
+    expect(item.kind).toBe('hydration'); count = item.chunkCount; chunks.push(Buffer.from(item.payloadBase64, 'base64'));
+  }
+  expect(Buffer.concat(chunks).length).toBeGreaterThan(2 * 1024 * 1024);
+  expect(JSON.parse(Buffer.concat(chunks).toString())).toHaveLength(12);
+  expect(service.broker.getConnectionSnapshot().connected).toBe(true);
 });

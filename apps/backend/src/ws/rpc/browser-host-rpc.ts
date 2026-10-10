@@ -66,8 +66,14 @@ export function createBrowserHostRpc(deps: { service: BrowserAutomationService; 
         const hydration = input as RpcInput<'browser.host.hydrate'>; assertLease(current, hydration);
         const snapshots = await deps.hydrateSessions(); assertLease(current, hydration);
         const bytes = Buffer.from(JSON.stringify(snapshots)); const chunkBytes = 256 * 1024; const chunkCount = Math.max(1, Math.ceil(bytes.length / chunkBytes));
-        if (chunkCount > 4096) throw new StreamFault('PAYLOAD_TOO_LARGE', 'Browser hydration exceeds its budget');
-        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) current.queue.push({ kind: 'hydration', ...hydration, chunkIndex, chunkCount, payloadBase64: bytes.subarray(chunkIndex * chunkBytes, (chunkIndex + 1) * chunkBytes).toString('base64') });
+        if (snapshots.length > 500 || bytes.length > 32 * 1024 * 1024) throw new StreamFault('PAYLOAD_TOO_LARGE', 'Browser hydration exceeds its budget');
+        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
+          assertLease(current, hydration);
+          current.queue.push({ kind: 'hydration', ...hydration, chunkIndex, chunkCount, payloadBase64: bytes.subarray(chunkIndex * chunkBytes, (chunkIndex + 1) * chunkBytes).toString('base64') });
+          // Let the existing stream pump drain each bounded chunk. Eagerly
+          // filling its live queue makes a valid multi-session read resync.
+          await new Promise<void>(resolve => setImmediate(resolve));
+        }
         result = {}; break;
       }
       case 'browser.host.focus': { const focus = input as RpcInput<'browser.host.focus'>; assertLease(current, focus); deps.service.setHostFocused(current.connectionId, focus.hostId, focus.hostGeneration, focus.focused); result = {}; break; }
