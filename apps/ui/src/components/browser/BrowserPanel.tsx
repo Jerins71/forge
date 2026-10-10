@@ -39,6 +39,19 @@ interface BrowserPanelProps {
   popoutAvailable?: boolean
 }
 
+/** Shown in place of the Browser workspace for a session on another machine. */
+export function BrowserUnavailableOnRemote() {
+  return (
+    <section className="flex min-h-0 flex-1 bg-background" aria-label="Browser workspace">
+      <div className="m-auto max-w-lg p-8 text-center">
+        <Globe2 className="mx-auto mb-3 size-10 text-muted-foreground" />
+        <h2 className="font-medium">Browser is not available on remote machines</h2>
+        <p className="mt-2 text-sm text-muted-foreground">The Browser runs on this computer and works with sessions on this machine.</p>
+      </div>
+    </section>
+  )
+}
+
 export function BrowserPanel({
   snapshot, host, commandPort: commands,
   mode = 'docked', popoutAvailable = Boolean(window.electronBridge?.browserWorkspace?.capability.popoutAvailable),

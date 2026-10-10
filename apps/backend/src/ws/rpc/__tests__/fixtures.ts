@@ -32,6 +32,7 @@ export const control: ControlService = {
   getReceipt: async (_principal, commandId) => receipt("session.send", commandId),
 };
 export const emptyLegacy: RpcDependencies["legacyAdapter"] = { execute: async () => ({ events: [] }), subscribe: async function* () {} };
+export const emptyBrowserHost: RpcDependencies["browserHost"] = { attach: async function* () {}, send: () => ({}) };
 export const emptyTerminal: RpcDependencies["terminalTransport"] = { attach: async function* () {}, input: async () => ({}), resize: async () => ({}), closeDevice: async () => {} };
 
 export async function streamFixture() {
@@ -81,7 +82,7 @@ export async function socketFixture(overrides: Partial<RpcDependencies> = {}) {
     },
   };
   const streams = await streamFixture();
-  const deps: RpcDependencies = { access, control: streams.core.controlService, shellStream: streams.shellStream, detailStream: streams.detailStream, legacyAdapter: emptyLegacy, terminalTransport: emptyTerminal, ...overrides };
+  const deps: RpcDependencies = { access, control: streams.core.controlService, shellStream: streams.shellStream, detailStream: streams.detailStream, legacyAdapter: emptyLegacy, browserHost: emptyBrowserHost, terminalTransport: emptyTerminal, ...overrides };
   const rpc = createEnvironmentRpcServer(deps);
   const sockets = new Set<WebSocket>();
   const server = createServer(async (request, response) => {

@@ -308,6 +308,16 @@ const TerminalFrame = Type.Union([
   O({ kind: Type.Literal('output'), offset: V2Sequence, data: Type.String({ maxLength: 16_384 }) }),
   O({ kind: Type.Literal('closed'), reason: ShortText }),
 ])
+// Desktop's embedded browser host. The subscription is the host connection: ending it unregisters the host.
+const BrowserHostStreamItem = Type.Union([
+  O({ kind: Type.Literal('attached') }),
+  O({ kind: Type.Literal('event'), event: Type.Record(Type.String(), Type.Unknown()) }),
+])
+// One host ClientCommand as JSON text, split so an 8 MiB automation response fits the frame limit.
+const BrowserHostSend = O({
+  transferId: V2Uuid, index: Type.Integer({ minimum: 0, maximum: 63 }),
+  count: Type.Integer({ minimum: 1, maximum: 64 }), data: Type.String({ minLength: 1, maxLength: 262_144 }),
+})
 const defineRpc = <I extends TSchema, R extends TSchema, S extends TSchema | undefined = undefined>(
   input: I, output: R, options?: { stream?: S; receipt?: true },
 ) => ({ input, output, error: RpcErrorSchema, stream: options?.stream, receipt: options?.receipt === true })
@@ -339,6 +349,8 @@ export const rpcSchemas = {
     data: Type.String({ maxLength: 16_384 }) }), V2Empty),
   'terminal.resize': defineRpc(O({ subscriptionId: V2Id,
     cols: Type.Integer({ minimum: 1, maximum: 1000 }), rows: Type.Integer({ minimum: 1, maximum: 1000 }) }), V2Empty),
+  'browser.host.attach': defineRpc(V2Empty, SubscribeResult, { stream: BrowserHostStreamItem }),
+  'browser.host.send': defineRpc(BrowserHostSend, V2Empty),
   // Migration-only methods, each with a compile-time scope and a stricter inner allowlist.
   'legacy.session.subscribe': defineRpc(SessionInput, SubscribeResult, { stream:
     O({ type: Type.String({ minLength: 1, maxLength: 128 }), payload: Type.Unknown() }) }),
@@ -358,6 +370,7 @@ export const rpcScopes = {
   'access.grant.create': 'access:admin', 'access.devices.list': 'access:admin',
   'access.devices.revoke': 'access:admin',
   'terminal.attach': 'terminal:operate', 'terminal.input': 'terminal:operate', 'terminal.resize': 'terminal:operate',
+  'browser.host.attach': 'session:operate', 'browser.host.send': 'session:operate',
   'legacy.session.subscribe': 'session:read',
   'legacy.session.read': 'session:read', 'legacy.session.operate': 'session:operate',
   'legacy.workspace.read': 'workspace:read', 'legacy.workspace.write': 'workspace:write',

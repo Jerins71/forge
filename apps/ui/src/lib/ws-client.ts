@@ -289,6 +289,8 @@ export class ManagerWsClient {
   private browserHandshakeFailures = 0
   /** A negotiated v2 mismatch is actionable but must not retry forever. */
   private browserHandshakeProtocolError: string | null = null
+  /** Releases the environment's browser host channel; the channel is the host connection. */
+  private browserHostDetach: (() => void) | null = null
   private readonly browserHydrationChunks = new Map<string, { chunkCount: number; chunks: Array<Uint8Array | undefined> }>()
   private browserAutomationRequestHandler: ((request: BrowserAutomationRequest) => Promise<BrowserAutomationResponse>) | null = null
   private browserLifecycleRequestHandler: ((request: BrowserHostLifecycleRequest) => Promise<BrowserHostLifecycleResponse>) | null = null
@@ -376,6 +378,8 @@ export class ManagerWsClient {
       const updateConnection = () => {
         const c = client.connection.getSnapshot()
         this.updateState({ connected: c.transportHealthy, lastError: c.reason })
+        // The host connection ends with the socket; the channel reports attached again after reconnect.
+        if (!c.transportHealthy) this.resetEnvironmentBrowserHost()
       }
       updateConnection()
       this.environmentDetach.push(
@@ -491,15 +495,46 @@ export class ManagerWsClient {
     this.browserHostRegistration = registration
     this.browserAutomationRequestHandler = handleRequest
     this.browserLifecycleRequestHandler = handleLifecycle ?? null
-    this.restartBrowserHandshake()
+    if (this.environmentClient) this.attachEnvironmentBrowserHost(this.environmentClient)
+    else this.restartBrowserHandshake()
     return () => {
       if (this.browserHostRegistration?.hostId === registration.hostId) {
         this.browserHostRegistration = null
         this.browserAutomationRequestHandler = null
         this.browserLifecycleRequestHandler = null
+        this.detachEnvironmentBrowserHost()
         this.stopBrowserHandshake()
       }
     }
+  }
+
+  /** Registration and hydration start once the channel reports attached, and again after each reconnect. */
+  private attachEnvironmentBrowserHost(client: EnvironmentClient): void {
+    this.detachEnvironmentBrowserHost()
+    this.browserHostDetach = client.features.browserHost.attach({
+      attached: () => {
+        this.resetEnvironmentBrowserHost()
+        this.restartBrowserHandshake()
+      },
+      event: (event) => this.handleServerEvent(event),
+      error: () => this.resetEnvironmentBrowserHost(),
+    })
+  }
+
+  private detachEnvironmentBrowserHost(): void {
+    this.browserHostDetach?.()
+    this.browserHostDetach = null
+  }
+
+  private resetEnvironmentBrowserHost(): void {
+    this.stopBrowserHandshake()
+    if (!this.state.browserHost.connected && !this.state.browserHostHydrated) return
+    this.updateState({
+      browserHost: { connected: false, hostId: null, hostGeneration: null, focused: false, capabilities: null, connectedAt: null },
+      browserHostHydrated: false,
+      browserPanelRevealRequest: null,
+      browserMetadataStale: Object.keys(this.state.browserSessions).length > 0,
+    })
   }
 
   private restartBrowserHandshake(): void {
@@ -518,8 +553,6 @@ export class ManagerWsClient {
   }
 
   private scheduleBrowserHandshake(epoch: number, delayMs: number): void {
-    // The embedded browser host is a local platform service V2 does not route yet.
-    if (this.environmentClient) return
     if (epoch !== this.browserHandshakeEpoch || this.browserHandshakeTimer || this.browserHandshakeProtocolError) return
     this.browserHandshakeTimer = setTimeout(() => {
       this.browserHandshakeTimer = null
@@ -753,6 +786,7 @@ export class ManagerWsClient {
     }
     this.optimisticSendExpiryTimers.clear()
     this.clearGenerationTerminalCleanupTimers()
+    this.detachEnvironmentBrowserHost()
     this.stopBrowserHandshake()
 
     this.transport?.disconnect()
@@ -2395,6 +2429,13 @@ export class ManagerWsClient {
     if (this.environmentClient) {
       if (!this.environmentClient.connection.getSnapshot().transportHealthy)
         return false
+      if (isBrowserHostCommand(command)) {
+        // A failed host command fails only its own request; the handshake retries on its own.
+        void this.environmentClient.features.browserHost.send(command).catch((error) => {
+          if ('requestId' in command && command.requestId) this.requestDispatcher.tracker.rejectByRequestId(command.requestId, error instanceof Error ? error : new Error(String(error)))
+        })
+        return true
+      }
       // A repeated intent before its receipt is a retry of the same command, never a new one.
       const intentKey = environmentCommandIntentKey(command)
       const commandId = (intentKey && this.intentCommandIds.get(intentKey)) || crypto.randomUUID()
@@ -2520,4 +2561,11 @@ function isRetryableEnvironmentError(error: unknown): boolean {
 function interruptedCommandMessage(method: string): string {
   const action = method === 'session.choose' ? 'Choice response' : method === 'session.stop' ? 'Stop request' : 'Session launch'
   return `${action} was interrupted; delivery is unknown. Submit it again to resend.`
+}
+
+/** Commands the Desktop renderer sends as the embedded browser host, on the environment's host channel. */
+function isBrowserHostCommand(command: ClientCommand): boolean {
+  return command.type === 'browser_host_register' || command.type === 'browser_host_hydrate'
+    || command.type === 'browser_host_focus' || command.type === 'browser_host_response'
+    || command.type === 'browser_host_state_report' || command.type === 'browser_host_lifecycle_response'
 }
