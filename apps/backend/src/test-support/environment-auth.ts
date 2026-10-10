@@ -74,7 +74,7 @@ export async function createPairedTestAccess() {
   cleanup.push(() => { access.dispose(); database.close(); });
   return { access, ...await pairTestAccess(access, exposure.publicBaseUrl) };
 }
-export async function createTestEnvironment(manager: SwarmManager): Promise<{ environment: import('../environment/environment-service.js').EnvironmentService; unreadTracker: UnreadTracker; paired: Awaited<ReturnType<typeof pairTestAccess>> }> {
+export async function createTestEnvironment(manager: SwarmManager, options: { boot?: boolean } = {}): Promise<{ environment: import('../environment/environment-service.js').EnvironmentService; unreadTracker: UnreadTracker; paired: Awaited<ReturnType<typeof pairTestAccess>> }> {
   const config = manager.getConfig();
   const unreadTracker = new UnreadTracker({ dataDir: config.paths.dataDir,
     getProfileIds: () => manager.listProfiles().map(profile => profile.profileId),
@@ -83,6 +83,8 @@ export async function createTestEnvironment(manager: SwarmManager): Promise<{ en
   const environment = await createEnvironmentService({ config, swarmManager: manager, unreadTracker, exposure,
     identityOptions: { installationStateDir: join(config.paths.dataDir, '.test-installation'), label: `test-${randomUUID()}` } });
   cleanup.push(() => environment.stop());
+  // Restart fixtures hydrate through the installed descriptor owner, like server.ts.
+  if (options.boot) await manager.boot();
   await environment.initialize();
   const paired = await pairTestAccess(environment.access, exposure.publicBaseUrl);
   return { environment, unreadTracker, paired };

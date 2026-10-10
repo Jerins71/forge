@@ -44,11 +44,12 @@ async function fixture() {
     listen(); await once(socket, "open");
   };
   const restart = async () => {
-    socket.terminate(); await f.environment.stop();
+    socket.terminate();
     for (const agent of manager.listAgents().filter(a => a.role === "manager")) await manager.stopSession(agent.agentId);
+    await f.environment.stop();
     await manager.disposeHistoryRecall();
-    manager = new TestSwarmManager(config); await bootWithDefaultManager(manager, config);
-    f = await createTestEnvironment(manager);
+    manager = new TestSwarmManager(config);
+    f = await createTestEnvironment(manager, { boot: true });
     const restartedHandler = new WsHandler({ swarmManager: manager, unreadTracker: f.unreadTracker, mobilePushService: {} as never, allowNonManagerSubscriptions: true,
       perf: { recordDuration() {}, increment() {}, readSummary() {}, readRecentSlowEvents() {} } as never });
     rpc = f.environment.composeTransport(restartedHandler, null).rpc;
@@ -58,8 +59,9 @@ async function fixture() {
     return { manager, environment: f.environment };
   };
   cleanups.push(async () => {
-    socket.terminate(); await f.environment.stop(); await new Promise<void>(resolve => server.close(() => resolve()));
+    socket.terminate();
     for (const agent of manager.listAgents().filter(a => a.role === "manager")) await manager.stopSession(agent.agentId);
+    await f.environment.stop(); await new Promise<void>(resolve => server.close(() => resolve()));
     await manager.disposeHistoryRecall(); await rm(config.paths.dataDir, { recursive: true, force: true });
   });
   const request = (method: string, input: unknown) => new Promise<any>(resolve => { const requestId = randomUUID(); pending.set(requestId, resolve); socket.send(JSON.stringify({ type: "request", requestId, method, input })); });
