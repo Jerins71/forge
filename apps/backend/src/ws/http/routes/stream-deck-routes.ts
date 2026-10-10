@@ -45,6 +45,7 @@ interface StreamDeckRouteSwarmManager {
   ): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }>;
   stopSession(agentId: string): Promise<{ terminatedWorkerIds: string[] }>;
   resumeSession(agentId: string): Promise<void>;
+  isSessionShutdownSafe(agentId: string): boolean;
   smartCompactAgentContext(
     agentId: string,
     options?: {
@@ -318,6 +319,25 @@ export async function executeStreamDeckAction(
     };
   }
 
+  if (action.type === "resume_session" || action.type === "toggle_session") {
+    if (!options.environmentControl?.control.admitLifecycle || !principal)
+      throw new StreamFault("UNAVAILABLE", "Stream Deck lifecycle admission is not composed.");
+    const candidate = options.swarmManager.getAgent(action.sessionAgentId);
+    const resume = action.type === "resume_session" || candidate?.status === "stopped" || candidate?.status === "terminated" || candidate?.status === "error";
+    return options.environmentControl.control.admitLifecycle(principal, {
+      commandId: legacyCommandId(principal, `stream_deck.${action.type}`, action.requestId), command: `stream_deck.${action.type}`,
+      sessionIds: [action.sessionAgentId], intent: resume ? "resume" : "stop", request: action,
+    }, async () => {
+      const session = requireSession(options.swarmManager, action.sessionAgentId);
+      if (resume) await options.swarmManager.resumeSession(session.agentId);
+      else {
+        await options.swarmManager.stopSession(session.agentId);
+        if (!options.swarmManager.isSessionShutdownSafe(session.agentId)) throw new StreamFault("UNAVAILABLE", "Session shutdown is not safely complete.");
+      }
+      return success(action, session.agentId, resume ? "Session resumed" : "Session stopped");
+    });
+  }
+
   const session = requireSession(options.swarmManager, action.sessionAgentId);
 
   if (action.type === "send_prompt") {
@@ -331,23 +351,9 @@ export async function executeStreamDeckAction(
     return success(action, session.agentId, "Prompt delivered");
   }
 
-  if (action.type === "toggle_session") {
-    if (session.status === "stopped" || session.status === "terminated" || session.status === "error") {
-      await options.swarmManager.resumeSession(session.agentId);
-      return success(action, session.agentId, "Session resumed");
-    }
-    await controlledStop();
-    return success(action, session.agentId, "Session stopped");
-  }
-
   if (action.type === "stop_session") {
     await controlledStop();
     return success(action, session.agentId, "Session stopped");
-  }
-
-  if (action.type === "resume_session") {
-    await options.swarmManager.resumeSession(session.agentId);
-    return success(action, session.agentId, "Session resumed");
   }
 
   async function controlledStop() {

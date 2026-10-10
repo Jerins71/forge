@@ -129,6 +129,29 @@ describe('passive Builder inventory contract', () => {
     expect(f.owner.getSubscribedAgentId(f.a)).toBeUndefined()
   })
 
+  it('lifecycle routing retains inventory authority and forwards an explicitly addressed fork', async () => {
+    const f = await fixture()
+    const admission = vi.fn(async (_principal: unknown, _input: unknown, operation: () => Promise<unknown>) => operation())
+    ;(f.handler as any).environmentControl.control.admitLifecycle = admission
+    ;(f.manager as any).forkSession = vi.fn(async () => ({ profile: f.profiles[0], sessionAgent: agent('forked') }))
+    await f.command(f.a, { type: 'subscribe_inventory', requestId: 'inventory' })
+    for (const command of [
+      { type: 'choice_cancel', agentId: 'a', choiceId: 'pending' },
+      { type: 'clear_session', agentId: 'a', requestId: 'clear' },
+      { type: 'stop_all_agents', managerId: 'a', requestId: 'stop-all' },
+    ]) {
+      await f.command(f.a, command)
+      expect(events(f.a).at(-1)).toMatchObject({ type: 'error', code: 'NOT_SUBSCRIBED' })
+    }
+    expect(admission).not.toHaveBeenCalled()
+    await f.command(f.a, { type: 'fork_session', sourceAgentId: 'a', requestId: 'fork' })
+    expect(admission).toHaveBeenCalledTimes(1)
+    expect((f.manager as any).forkSession).toHaveBeenCalledWith('a', expect.anything())
+    expect(events(f.a).at(-1)).toMatchObject({ type: 'session_forked', requestId: 'fork' })
+    expect(f.owner.getSubscribedAgentId(f.a)).toBeUndefined()
+    expect(f.unread.markRead).not.toHaveBeenCalled()
+  })
+
   it('allows only filtered inventory fanout, not conversation, sensitive metadata, or request responses', async () => {
     const f = await fixture()
     await f.command(f.a, { type: 'subscribe_inventory', requestId: 'inventory' })

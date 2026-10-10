@@ -70,8 +70,8 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     if (!remaining && ["accepted", "running"].includes(prior.state)) {
       sink.updateReceipt(tx, row.command_id, { state: "succeeded", error: null, ...(delivery ? { delivery } : {}) });
       const session = readSession(sink, row.session_id);
-      if (row.kind === "session.stop") setSessionStatus(sink, tx, row.session_id, "stopped", options.clock);
-      else if (session.desired_state === "running" && prior.method !== "session.choose")
+      if (row.kind === "session.stop" && !(JSON.parse(row.payload_json) as { targetAgentId?: string }).targetAgentId) setSessionStatus(sink, tx, row.session_id, "stopped", options.clock);
+      else if (session.desired_state === "running" && prior.method !== "session.choose" && !(row.kind === "session.stop" && (JSON.parse(row.payload_json) as { targetAgentId?: string }).targetAgentId))
         setSessionStatus(sink, tx, row.session_id, delivery === "dispatched" ? "running" : "idle", options.clock);
     }
   };
@@ -244,7 +244,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
             !!database
               .prepare("SELECT effect_id FROM effects WHERE command_id = ? AND kind = 'session.ensure' AND attempt > 0")
               .get(session.launch_command_id);
-          if (materialized && !(await options.swarm.stopSession({ commandId: row.command_id, sessionId: row.session_id })).stopped) {
+          if (materialized && !(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.targetAgentId ?? row.session_id })).stopped) {
             sink.transaction((tx) =>
               settle(tx, row, "interrupted", { code: "UNAVAILABLE", message: "Session shutdown is not safely complete", retryable: false }),
             );
@@ -331,7 +331,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           if (choice.answer_command_id) cancelCommand(sink, tx, choice.answer_command_id, interrupted, options.clock);
         }
       });
-      const rows = database.prepare("SELECT * FROM effects WHERE state = 'claimed' ORDER BY command_id, ordinal").all() as EffectRow[];
+      const rows = database.prepare("SELECT * FROM effects WHERE state = 'claimed' AND kind != 'lifecycle.admit' ORDER BY command_id, ordinal").all() as EffectRow[];
       for (const row of rows) {
         const effect: ControlEffect = JSON.parse(row.payload_json);
         if (effect.kind === "workspace.ensure") {

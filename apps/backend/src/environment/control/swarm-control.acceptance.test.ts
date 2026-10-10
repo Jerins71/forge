@@ -1,3 +1,8 @@
+import { once } from "node:events";
+import { WebSocket, WebSocketServer } from "ws";
+import { CliWsHandler } from "../../ws/cli-ws-handler.js";
+import { WsHandler } from "../../ws/ws-handler.js";
+import { createLegacyBuilderAdapter } from "../../ws/rpc/legacy-builder-adapter.js";
 import { randomUUID } from "node:crypto";
 import { getSessionDir } from "../../swarm/storage/data-paths.js";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -43,7 +48,7 @@ async function makeCore(f: Awaited<ReturnType<typeof fixture>>, manager = f.mana
   const workspace = createWorkspaceService({ database, dataDir: f.config.paths.dataDir, swarmManager: manager });
   const artifacts = createArtifactService({ database, dataDir: f.config.paths.dataDir, swarmManager: manager });
   const core = await createControlCore({ database, clock: Date.now, random: randomUUID,
-    swarm: { ensureSession: input => adapter.ensureSession(input), applyInput: input => adapter.applyInput(input), applyChoice: input => adapter.applyChoice(input), stopSession: input => adapter.stopSession(input) },
+    swarm: { resolveSession: id => adapter.resolveSession!(id), ensureSession: input => adapter.ensureSession(input), applyInput: input => adapter.applyInput(input), applyChoice: input => adapter.applyChoice(input), stopSession: input => adapter.stopSession(input) },
     workspace, artifacts, isDeviceRevoked: () => false, inputRoute: createControlledInputRoutePreflight({ swarmManager: manager }) });
   const adapter = createSwarmControlAdapter({ swarmManager: manager, database, eventSink: core.eventSink, workspaceService: workspace, artifactService: artifacts });
   return { core, adapter, artifacts };
@@ -262,4 +267,93 @@ describe("controlled swarm canonical/provider boundaries", () => {
     expect(restarted.runtimeByAgentId.get(sessionId)?.sendCalls).toHaveLength(1);
   });
 
+});
+
+
+it("the composed swarm port routes a typed worker stop to the owning manager lane", async () => {
+  const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
+  const { core } = await makeCore(f);
+  try {
+    const worker = await f.manager.spawnAgent(f.sessionId, { agentId: "controlled-worker" });
+    const principal = { deviceSessionId: randomUUID(), scopes: new Set(["session:operate" as const]) };
+    const commandId = randomUUID();
+    await core.controlService.execute(principal, "session.stop", { commandId, sessionId: worker.agentId }); await core.effectWorker.drain();
+    expect(await core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded", sessionId: worker.agentId });
+    expect(f.manager.getAgent(worker.agentId)?.status).toBe("terminated");
+    expect(f.database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(f.sessionId)).toEqual({ desired_state: "running" });
+    expect(f.manager.runtimeByAgentId.has(f.sessionId)).toBe(true);
+  } finally { mirror.dispose(); await core.close(); }
+});
+
+it("real CLI socket resume/fork/clear/delete and cancellation replay one persisted result", async () => {
+  const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
+  const { core } = await makeCore(f); await core.reconcileOnBoot(); core.effectWorker.start();
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  const handler = new CliWsHandler(f.manager);
+  handler.setEnvironmentControl({ control: core.controlService, principalForSocket: () => ({ deviceSessionId: "cli", scopes: new Set(["session:operate", "session:read"]) }) });
+  handler.attach(server); await once(server, "listening");
+  const call = async (command: object) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${(server.address() as { port: number }).port}`);
+    await once(socket, "open");
+    const response = once(socket, "message"); socket.send(JSON.stringify(command));
+    try { return JSON.parse((await response)[0].toString()); } finally { socket.terminate(); }
+  };
+  try {
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const held = core.controlService.admitLifecycle({ deviceSessionId: "cli", scopes: new Set(["session:operate"]) }, {
+      commandId: randomUUID(), command: "fork_session", sessionIds: [f.sessionId], intent: "inspect", request: {},
+    }, async () => { await barrier; return {}; });
+    const blocked = await call({ type: "resume_session", agentId: f.sessionId, requestId: "cli-blocked-resume" });
+    release(); await held;
+    expect(blocked).toMatchObject({ type: "cli_request_error", code: "CONFLICT", status: 409, retryable: true });
+    await call({ type: "stop_session", agentId: f.sessionId, requestId: "cli-stop" });
+    for (const type of ["resume_session", "fork_session", "clear_session", "delete_session"] as const) {
+      const command = { type, ...(type === "fork_session" ? { sourceAgentId: f.sessionId, label: "CLI fork" } : { agentId: f.sessionId }), requestId: `cli-${type}` };
+      if (type === "delete_session") {
+        const choicePromise = f.manager.requestUserChoice(f.sessionId, [{ id: "q", question: "Pick", options: [{ id: "a", label: "A" }] }]); void choicePromise.catch(() => {});
+        const choice = f.manager.getPendingChoiceRequestsForSession(f.sessionId)[0]!;
+        const cancel = { type: "cli_choice_cancel", choiceId: choice.choiceId, requestId: "cli-cancel" };
+        const cancelled = await call(cancel); expect(cancelled.type).toBe("cli_request_success"); expect(await call(cancel)).toEqual(cancelled);
+      }
+      const first = await call(command); expect(first, JSON.stringify(first)).toMatchObject({ type: "cli_request_success" });
+      expect(await call(command)).toEqual(first);
+    }
+    expect(f.manager.listAgents().filter(agent => agent.sessionLabel === "CLI fork")).toHaveLength(1);
+  } finally {
+    handler.reset(); for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve())); mirror.dispose(); await core.close();
+  }
+}, 30_000);
+
+it.each(["archive_profile", "delete_manager"] as const)("V2 %s fences the profile's accepted session input", async type => {
+  const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
+  const { core } = await makeCore(f);
+  const principal = { deviceSessionId: "profile-device", scopes: new Set(["session:operate", "workspace:write"] as const) };
+  f.database.prepare("INSERT INTO device_sessions (device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES ('profile-device','fixture-token','fixture-proof','Fixture','cli','[]',0,0,?)").run(Date.now() + 86_400_000);
+  const handler = new WsHandler({ swarmManager: f.manager, mobilePushService: {} as never, allowNonManagerSubscriptions: true,
+    perf: { recordDuration: () => {}, increment: () => {}, readSummary: () => ({ histograms: {}, counters: {} }), readRecentSlowEvents: () => [] } });
+  const access = { authorize: () => {} } as never; handler.setEnvironmentControl({ access, control: core.controlService });
+  const adapter = createLegacyBuilderAdapter({ access, ports: handler.legacyPorts() });
+  try {
+    const send = await core.controlService.execute(principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "must not dispatch after teardown", artifactIds: [] } });
+    await adapter.execute(principal, "legacy.workspace.write", { sessionId: "manager", command: type === "archive_profile" ? { type, profileId: "manager", requestId: "profile-archive" } : { type, managerId: "manager", requestId: "profile-delete" } }, new AbortController().signal);
+    await core.effectWorker.drain();
+    expect(await core.controlService.getReceipt(principal, send.commandId)).toMatchObject({ state: "interrupted", delivery: "none" });
+  } finally { mirror.dispose(); await core.close(); }
+});
+
+it("restart recovery dismissal cannot alter the work graph across accepted input", async () => {
+  const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady(); const { core } = await makeCore(f);
+  const principal = { deviceSessionId: "dismiss-device", scopes: new Set(["session:operate"] as const) };
+  f.database.prepare("INSERT INTO device_sessions (device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES ('dismiss-device','fixture-token','fixture-proof','Fixture','cli','[]',0,0,?)").run(Date.now() + 86_400_000);
+  const snapshot = vi.spyOn(f.manager, "getRestartRecoverySnapshot").mockReturnValue({ bootId: "boot", createdAt: new Date().toISOString(), interruptedManagers: [f.sessionId], interruptedWorkers: [], undeliveredReports: [] });
+  const handler = new WsHandler({ swarmManager: f.manager, mobilePushService: {} as never, allowNonManagerSubscriptions: true,
+    perf: { recordDuration: () => {}, increment: () => {}, readSummary: () => ({ histograms: {}, counters: {} }), readRecentSlowEvents: () => [] } });
+  const access = { authorize: () => {} } as never; handler.setEnvironmentControl({ access, control: core.controlService });
+  const adapter = createLegacyBuilderAdapter({ access, ports: handler.legacyPorts() });
+  try {
+    await core.controlService.execute(principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "accepted input", artifactIds: [] } });
+    await expect(adapter.execute(principal, "legacy.session.operate", { sessionId: f.sessionId, command: { type: "dismiss_restart_recovery", requestId: "dismiss" } }, new AbortController().signal)).rejects.toMatchObject({ code: "CONFLICT", retryable: true });
+  } finally { snapshot.mockRestore(); mirror.dispose(); await core.close(); }
 });
