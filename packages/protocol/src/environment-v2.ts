@@ -62,12 +62,13 @@ const ShortText = Type.String({ maxLength: 256 })
 const NullableId = Type.Union([V2Id, Type.Null()])
 /** Presentation of one recovery occurrence. Canonical content remains behind
  * its existing owner; this projection contains identities and decision times. */
+const RecoveryComposedId = Type.String({ minLength: 1, maxLength: 256 })
 export const RecoverySnapshotSchema = O({
   recoveryId: V2Id, bootId: V2Id, createdAt: V2Time,
   interruptedManagers: Type.Array(V2Id, { maxItems: 1000 }),
   interruptedWorkers: Type.Array(V2Id, { maxItems: 1000 }),
-  undeliveredReports: Type.Array(O({ deliveryId: V2Id, fromAgentId: V2Id,
-    toAgentId: V2Id, turnId: Type.Optional(V2Id), assignmentId: Type.Optional(V2Id) }), { maxItems: 1000 }),
+  undeliveredReports: Type.Array(O({ deliveryId: RecoveryComposedId, fromAgentId: V2Id,
+    toAgentId: V2Id, turnId: Type.Optional(V2Id), assignmentId: Type.Optional(RecoveryComposedId) }), { maxItems: 1000 }),
   dismissedAt: Type.Optional(V2Time), resumedAt: Type.Optional(V2Time),
 })
 export type RecoverySnapshot = Static<typeof RecoverySnapshotSchema>
