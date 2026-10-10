@@ -2,7 +2,6 @@ import { test as base } from '@playwright/test';
 import { join } from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 import { launchFleet, readManifest, verifyFleetHealth, repositoryRoot } from '../launch.js';
-import { writeInfrastructureArtifacts } from '../assert-artifacts.js';
 
 /** Suite options force separate workers: destructive slice scenarios cannot contaminate UI/load. */
 export const test = base.extend<{ environmentFailure: void }, { environmentSuite: string; environmentManifest: string }>({
@@ -23,7 +22,6 @@ export const test = base.extend<{ environmentFailure: void }, { environmentSuite
       try { await readFile(join(fleet.manifest.artifactRoot, 'test-failure.json')); failed = true; }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       await fleet.stop(failed);
-      await writeInfrastructureArtifacts(fleet.manifest, fleet.manifestPath);
       delete process.env.FORGE_E2E_MANIFEST;
     }
   }, { scope: 'worker', auto: true, timeout: 180_000 }],
