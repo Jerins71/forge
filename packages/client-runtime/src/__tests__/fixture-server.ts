@@ -72,6 +72,7 @@ export async function startFixtureServer(index = 0) {
     pages = false,
     holdPage = false,
     lostBeforeAccept = false,
+    holdReceiptAck = false,
     sequence = 1,
     nextSub = 0,
     connections = 0,
@@ -159,7 +160,7 @@ export async function startFixtureServer(index = 0) {
           socket.close(1013)
           return
         }
-        result(r)
+        if (!holdReceiptAck) result(r)
         return
       }
       if (method === 'shell.page') {
@@ -289,6 +290,9 @@ export async function startFixtureServer(index = 0) {
     },
     releasePage() {
       releasePage()
+    },
+    set holdReceiptAck(v: boolean) {
+      holdReceiptAck = v
     },
     set lostBeforeAccept(v: boolean) {
       lostBeforeAccept = v

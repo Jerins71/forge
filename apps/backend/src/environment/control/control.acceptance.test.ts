@@ -764,3 +764,20 @@ it("rejected lifecycle preflight preserves accepted intent and creates no mutati
   expect(count(f.core, "commands")).toBe(1);
   expect(await f.core.controlService.getReceipt(principal, COMMAND)).toMatchObject({ state: "accepted" });
 });
+
+it("holds the parent project lane against session lifecycle callbacks during project publication", async () => {
+  const f = await fixture();
+  await f.core.controlService.execute(principal, "session.launch", launch);
+  await f.core.effectWorker.drain();
+  const entered = deferred<void>(); const release = deferred<void>();
+  const projectMutation = f.core.controlService.admitLifecycle!(principal, { commandId: STOP, command: "project.update", sessionIds: [], projectIds: ["project"], intent: "inspect", request: {} }, async () => { entered.resolve(); await release.promise; return {}; });
+  await entered.promise;
+  const summary = JSON.parse((f.core.database.prepare("SELECT summary_json FROM control_sessions WHERE session_id=?").get("v2-" + COMMAND) as { summary_json: string }).summary_json);
+  const sessionId = "newly-published";
+  f.core.eventSink.transaction(tx => f.core.eventSink.append(tx, { topic: "shell", sessionId, event: { type: "session.upsert", session: { ...summary, sessionId } } }));
+  let sessionCallback = false;
+  try {
+    await expect(f.core.controlService.admitLifecycle!(principal, { commandId: SEND, command: "rename_session", sessionIds: [sessionId], intent: "inspect", request: {} }, async () => { sessionCallback = true; })).rejects.toMatchObject({ code: "CONFLICT", retryable: true });
+    expect(sessionCallback).toBe(false);
+  } finally { release.resolve(); await projectMutation; }
+});

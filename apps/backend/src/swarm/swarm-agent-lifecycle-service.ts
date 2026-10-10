@@ -1591,7 +1591,7 @@ export class SwarmAgentLifecycleService {
       cwd: descriptor.cwd
     });
 
-    if (!input.controlCommandId) await this.options.sendManagerBootstrapMessage(managerId);
+    await this.options.sendManagerBootstrapMessage(managerId);
 
     return cloneDescriptor(descriptor);
   }
