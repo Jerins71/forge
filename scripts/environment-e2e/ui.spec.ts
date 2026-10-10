@@ -540,6 +540,7 @@ test('Batch 5 displays persisted plans/goals and fresh recovery with native deci
   const held = await fixtureRpcOnce(a.baseUrl, session, 'session.launch', { commandId: heldId, projectId: a.sessionId,
     title: 'Batch 5 UI interrupted', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:hold]', artifactIds: [] } })
   await until(() => fixtureRpcOnce(a.baseUrl, session, 'command.get', { commandId: heldId }), receipt => receipt.state === 'succeeded')
+  await until(() => fleet!.launchEvidence(a, held.sessionId), evidence => evidence.dispatches === 1)
   const crashId = randomUUID()
   const armed = await controlEnvironment<{ pid: number }>(manifest, 'env-a', 'fixture', { operation: 'arm-crash', commandId: crashId, boundary: 'pre-commit' })
   await expect(fixtureRpcOnce(a.baseUrl, session, 'session.launch', { commandId: crashId, projectId: a.sessionId, title: 'Crash probe', workspaceStrategy: { kind: 'current_checkout' } })).rejects.toThrow()
