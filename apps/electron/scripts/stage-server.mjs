@@ -1,8 +1,8 @@
 // Internal Linux builder: called only after a fresh target-platform install.
 import assert from 'node:assert/strict'
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { stageBundledBackend, stageBackendResources, stageCliArtifact } from './build-all.mjs'
+import { BACKEND_BUNDLE_EXTERNAL_PACKAGES, stageBundledBackend, stageBackendResources, stageCliArtifact } from './build-all.mjs'
 import { run, sha256 } from './build-server.mjs'
 
 const config = JSON.parse(await readFile('/input/build.json', 'utf8'))
@@ -15,6 +15,13 @@ await mkdir(stage, { recursive: true })
 await stageBundledBackend({ outputDir: path.join(stage, 'backend'), nativeRuntime: 'node' })
 await stageBackendResources(path.join(stage, 'forge-resources'))
 await stageCliArtifact(path.join(stage, 'cli'))
+for (const pkg of BACKEND_BUNDLE_EXTERNAL_PACKAGES) {
+  const packageDir = path.join(stage, 'backend', 'node_modules', ...pkg.name.split('/'))
+  const exists = await access(packageDir).then(() => true, () => false)
+  if (pkg.optional && !exists) continue
+  assert.ok(exists, `Missing server runtime package: ${pkg.name}`)
+  assert.equal(pkg.validateStagedPackageDir?.(packageDir) ?? null, null, `Invalid server runtime package: ${pkg.name}`)
+}
 await mkdir(path.join(stage, 'node', 'bin'), { recursive: true })
 await cp('/runtime/bin/node', path.join(stage, 'node', 'bin', 'node'))
 await cp('/runtime/LICENSE', path.join(stage, 'node', 'LICENSE'))

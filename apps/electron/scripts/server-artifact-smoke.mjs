@@ -23,7 +23,7 @@ export async function smokeServerArtifact(install, reportPath, port = 47787) {
   // These packages belong to the staged backend's dependency tree, not Electron.
   for (const [packageName, exportName] of [['@anthropic-ai/claude-agent-sdk', 'query'], ['@cursor/sdk', 'Agent']]) {
     const loaded = await import(pathToFileURL(require.resolve(packageName)).href)
-    assert.ok(loaded[exportName], `${packageName} runtime export missing`)
+    assert.ok(loaded[exportName] ?? loaded.default?.[exportName], `${packageName} runtime export missing`)
   }
   for (const asset of [
     'forge-resources/apps/backend/src/swarm/archetypes/builtins',
