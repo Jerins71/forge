@@ -32,6 +32,10 @@ export abstract class SwarmManagerSessionAttentionFacade extends SwarmManagerDel
     return this.getFacadeServices().conversation.history.setIndexPaused(paused);
   }
 
+  getPinnedMessageIds(agentId: string): ReadonlySet<string> | undefined {
+    return this.getFacadeServices().pins.getPinnedMessageIds(agentId);
+  }
+
   getSessionAttentionSnapshot() {
     return this.getFacadeServices().sessionAttention.getSnapshot();
   }

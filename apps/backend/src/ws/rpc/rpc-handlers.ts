@@ -9,6 +9,7 @@ import { StreamFault } from "../../environment/streams/stream-budget.js";
 
 export interface RpcDependencies {
   lifecycle?: ReturnType<typeof import("./session-lifecycle-rpc.js").createSessionLifecycleRpc>;
+  sessionState?: ReturnType<typeof import("./session-state-rpc.js").createSessionStateRpc>;
   detailFeatures?: ReturnType<typeof import("./detail-feature-rpc.js").createDetailFeatureRpc>;
   featureStream?: { subscribe(principal: Principal, input: RpcInput<"session.features.subscribe">, signal: AbortSignal): AsyncIterable<import("@forge/protocol/environment-v2").DetailFeatureStreamItem> };
   projectAgents?: Pick<ProjectAgentRpc, "execute">;
@@ -31,6 +32,9 @@ export function requestHandler(deps: RpcDependencies, principal: Principal, meth
     return deps.projectAgents.execute(principal, method as ProjectAgentMethod, input);
   }
   switch (method) {
+    case "session.update": case "session.message.pin": case "session.pins.clear": case "session.readState.set": case "project.readState.clear": case "session.attention.dismiss":
+      if (!deps.sessionState) throw new StreamFault("UNAVAILABLE", "Session state controls are not composed");
+      return deps.sessionState.execute(principal, method, input);
     case "recovery.get": case "recovery.decide": case "session.goal.control": case "session.compact": case "session.elicitation.respond": case "session.elicitation.url":
       if (!deps.detailFeatures) throw new StreamFault("UNAVAILABLE", "Detail features are not composed");
       return deps.detailFeatures.execute(principal, method, input);

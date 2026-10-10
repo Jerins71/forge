@@ -41,13 +41,6 @@ export interface SessionRestoredEvent {
   openAgentId?: string
 }
 
-export interface ArchiveLastUsedHydratedEvent {
-  type: 'archive_last_used_hydrated'
-  scannedSessionCount: number
-  hydratedSessionCount: number
-  requestId?: string
-}
-
 export interface SessionDeletedEvent {
   type: 'session_deleted'
   agentId: string
@@ -59,21 +52,6 @@ export interface SessionDeletedEvent {
 export interface SessionClearedEvent {
   type: 'session_cleared'
   agentId: string
-  requestId?: string
-}
-
-export interface SessionRenamedEvent {
-  type: 'session_renamed'
-  agentId: string
-  label: string
-  requestId?: string
-}
-
-export interface SessionPinnedEvent {
-  type: 'session_pinned'
-  agentId: string
-  pinned: boolean
-  pinnedAt: string | null
   requestId?: string
 }
 

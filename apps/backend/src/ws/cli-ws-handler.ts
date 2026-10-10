@@ -28,6 +28,7 @@ import { awaitCommandReceipt, controlCommandId } from "./rpc/control-command-hel
 import { ControlError } from "../environment/control/command-service.js";
 import { StreamFault } from "../environment/streams/stream-budget.js";
 
+import { createSessionStateRpc } from "./rpc/session-state-rpc.js";
 import { createDetailFeatureRpc } from "./rpc/detail-feature-rpc.js";
 import type { CommandReceipt } from "@forge/protocol/environment-v2";
 import { admitLifecycleCommand } from "./rpc/lifecycle-command-admission.js";
@@ -280,15 +281,15 @@ export class CliWsHandler {
       }
 
       case "rename_session":
-        this.requireCliSession(command.agentId);
-        await this.swarmManager.renameSession(command.agentId, command.label);
-        this.sendRequestSuccess(socket, command, { agentId: command.agentId, label: command.label });
-        return;
-
       case "pin_session": {
         this.requireCliSession(command.agentId);
-        const result = await this.swarmManager.pinSession(command.agentId, command.pinned);
-        this.sendRequestSuccess(socket, command, { agentId: command.agentId, pinned: command.pinned, ...result });
+        const { control, principal } = this.requireControl(socket);
+        const receipt = await createSessionStateRpc({ swarmManager: this.swarmManager, control }).execute(principal, "session.update", {
+          commandId: legacyCommandId(principal, "session.update", command.requestId), sessionId: command.agentId,
+          ...(command.type === "rename_session" ? { title: command.label } : { pinned: command.pinned }),
+        });
+        await awaitLegacyReceipt(control, principal, receipt);
+        this.sendRequestSuccess(socket, command, { agentId: command.agentId, ...(command.type === "rename_session" ? { label: command.label } : { pinned: command.pinned, pinnedAt: receipt.result?.pinnedAt ?? null }) });
         return;
       }
 

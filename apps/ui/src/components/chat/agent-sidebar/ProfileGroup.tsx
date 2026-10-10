@@ -407,7 +407,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
               at: session.sessionAgent.updatedAt || session.sessionAgent.createdAt,
             }))
             if (remoteSessions.length > 0) {
-              listItems.push(...remoteSessions.map((entry): ProjectListItem => ({ kind: 'remote', entry, at: entry.updatedAt })))
+              listItems.push(...remoteSessions.filter(entry => !entry.pinnedAt).map((entry): ProjectListItem => ({ kind: 'remote', entry, at: entry.updatedAt })))
               listItems.sort((a, b) => b.at.localeCompare(a.at))
             }
             const { visible: visibleItems, hiddenCount } = limitVisibleSessions(listItems, visibleSessionLimit, (item) => (
@@ -463,6 +463,18 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                   ))}
                   {/* Pinned sessions always visible, sorted by pin time */}
                   {pinnedSessions.map(renderSession)}
+                  {/* Pinned remote sessions stay visible above the truncated recent list. */}
+                  {remoteSessions.filter(entry => entry.pinnedAt).map(entry => (
+                    <EnvironmentSessionRow
+                      key={`${entry.environmentId}:${entry.sessionId}`}
+                      environmentId={entry.environmentId}
+                      sessionId={entry.sessionId}
+                      roomsV2={roomsV2}
+                      selected={isSelectedRemoteSession(entry, environmentNavigation?.selectedSession)}
+                      onSelect={environmentNavigation!.onSelectSession}
+                      navigation={environmentNavigation}
+                    />
+                  ))}
                   {/* Regular sessions from every machine below */}
                   {visibleItems.map((item) => item.kind === 'local' ? renderSession(item.session) : (
                     <EnvironmentSessionRow
@@ -472,6 +484,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                       roomsV2={roomsV2}
                       selected={isSelectedRemoteSession(item.entry, environmentNavigation?.selectedSession)}
                       onSelect={environmentNavigation!.onSelectSession}
+                      navigation={environmentNavigation}
                     />
                   ))}
                 </ul>

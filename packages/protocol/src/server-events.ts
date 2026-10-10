@@ -30,14 +30,11 @@ import type {
   SessionProjectAgentUpdatedEvent,
 } from './project-agent-events.js'
 import type {
-  ArchiveLastUsedHydratedEvent,
   SessionArchivedEvent,
   SessionClearedEvent,
   SessionCreatedEvent,
   SessionDeletedEvent,
   SessionForkedEvent,
-  SessionPinnedEvent,
-  SessionRenamedEvent,
   SessionRestoredEvent,
   SessionResumedEvent,
   SessionStoppedEvent,
@@ -137,15 +134,12 @@ export type ServerEvent =
   | UnreadCountsSnapshotEvent
   | UnreadCountUpdateEvent
   | SessionCreatedEvent
-  | ArchiveLastUsedHydratedEvent
   | SessionStoppedEvent
   | SessionResumedEvent
   | SessionArchivedEvent
   | SessionRestoredEvent
   | SessionDeletedEvent
   | SessionClearedEvent
-  | SessionRenamedEvent
-  | SessionPinnedEvent
   | SessionProjectAgentUpdatedEvent
   | SessionForkedEvent
   | StopAllAgentsResultEvent

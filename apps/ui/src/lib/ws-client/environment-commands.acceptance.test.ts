@@ -98,7 +98,7 @@ describe('environment command identity', () => {
     await until(() => commandIds('session.choose').size === 1 && !online(client))
     await until(() => online(client))
     facade.sendChoiceResponse('session-1', 'choice-1', answers)
-    await until(() => server.receipts.size === 1)
+    await until(() => [...server.receipts.values()].filter(r => r.method === 'session.choose').length === 1)
     expect(commandIds('session.choose').size).toBe(1)
 
     // A different answer is a different intent and therefore a different command.
@@ -130,5 +130,33 @@ describe('native environment lifecycle consumers', () => {
     await until(() => server.inputs.some(entry => entry.method === method))
     expect(server.inputs.filter(entry => entry.method.startsWith('legacy.') && entry.method !== 'legacy.session.subscribe')).toEqual([])
     await operation
+  })
+})
+
+// Batch 3 failures: native controls accidentally use selected-session legacy RPC;
+// optimistic counts mask rejection; cached sidebar fields or detail pins disappear.
+describe('native session state controls', () => {
+  it('addresses rename, session/message pins and read controls through native receipts', async () => {
+    const { server, facade } = await environment()
+    const rename = facade.renameSession('session-1', 'Renamed').catch(() => {})
+    facade.markUnread('session-1')
+    facade.pinMessage('session-1', 'item-1', true)
+    facade.clearAllPins('session-1')
+    facade.markAllRead('project-1')
+    await until(() => server.inputs.some(e => e.method === 'session.update'))
+    expect(server.inputs.find(e => e.method === 'session.update')?.input).toMatchObject({ sessionId: 'session-1', title: 'Renamed', commandId: expect.any(String) })
+    await until(() => server.inputs.some(e => e.method === 'project.readState.clear'))
+    expect(server.inputs.find(e => e.method === 'session.message.pin')?.input).toMatchObject({ sessionId: 'session-1', itemId: 'item-1', pinned: true })
+    expect(server.inputs.find(e => e.method === 'session.pins.clear')?.input).toMatchObject({ sessionId: 'session-1' })
+    expect(server.inputs.find(e => e.method === 'session.readState.set' && (e.input as { read: boolean }).read === false)?.input).toMatchObject({ sessionId: 'session-1', read: false })
+    expect(server.inputs.find(e => e.method === 'project.readState.clear')?.input).toMatchObject({ projectId: 'project-1' })
+    expect(server.inputs.some(e => e.method.startsWith('legacy.') && e.method !== 'legacy.session.subscribe')).toBe(false)
+    await rename
+  })
+  it('keeps authoritative unread until the shell acknowledges the requested state', async () => {
+    const { facade } = await environment()
+    const before = facade.getState().unreadCounts['session-1'] ?? 0
+    facade.markUnread('session-1')
+    expect(facade.getState().unreadCounts['session-1'] ?? 0).toBe(before)
   })
 })

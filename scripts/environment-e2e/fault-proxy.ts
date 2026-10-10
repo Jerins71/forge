@@ -113,7 +113,7 @@ export async function startFaultProxy(options: { upstream: string; port?: number
           if (!binary) {
             try {
               const frame = JSON.parse(data.toString());
-              if (['session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'workspace.directories.create', 'settings.recommendedDefaults.apply'].includes(frame.method) && typeof frame.input?.commandId === 'string') counts.commandAttempts.push({ method: frame.method, commandId: frame.input.commandId });
+              if (['session.launch', 'session.send', 'session.choose', 'session.stop', 'session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'workspace.directories.create', 'settings.recommendedDefaults.apply'].includes(frame.method) && typeof frame.input?.commandId === 'string') counts.commandAttempts.push({ method: frame.method, commandId: frame.input.commandId });
               if (fault?.transport === 'ws' && 'method' in fault && frame.method === fault.method) fault = { transport: 'ws', rpcId: frame.requestId, closeAfterDrop: fault.closeAfterDrop };
             } catch { /* binary/non-JSON pass unchanged */ }
           }

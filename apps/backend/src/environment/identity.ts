@@ -43,6 +43,7 @@ const descriptorValidator = TypeCompiler.Compile(EnvironmentDescriptorSchema);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const capabilities: EnvironmentCapabilities = {
   projectAgentMetadata: true,
+  sessionState: true,
   shellResume: true,
   sessionDetail: true,
   durableCommands: true,

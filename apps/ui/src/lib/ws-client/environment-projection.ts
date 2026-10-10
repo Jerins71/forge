@@ -35,7 +35,9 @@ export function projectSession(
             : session.status === 'interrupted'
               ? 'stopped'
               : session.status,
-    createdAt: previous?.createdAt ?? session.updatedAt,
+    createdAt: session.createdAt ?? previous?.createdAt ?? session.updatedAt,
+    pinnedAt: session.pinnedAt ?? undefined,
+    lastUserMessageAt: session.lastUsedAt ?? undefined,
     updatedAt: session.updatedAt,
     cwd:
       session.workspace.cwd ?? shell.projects.get(session.projectId)?.cwd ?? '',
@@ -133,6 +135,7 @@ export function projectItems(
       role: i.kind === 'user' ? 'user' : 'assistant',
       text: i.text,
       timestamp: i.timestamp,
+      pinned: i.pinned ?? false,
       source: i.kind === 'user' ? 'user_input' : 'assistant',
       ...(i.commandId ? { clientRequestId: i.commandId } : {}),
       ...(i.artifacts.length ? { attachments: i.artifacts.map(artifactAttachment) } : {}),

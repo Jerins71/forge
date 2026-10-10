@@ -4,11 +4,12 @@ import type { LogicalProjectGroup, SelectorStore, ShellState } from '@forge/clie
 import { useSelectorStore } from '@/hooks/use-environment-selector'
 import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 
-/** A session of this project on another machine, ordered with local sessions by `updatedAt`. */
+/** A session of this project on another machine, with pinned sessions ordered before recent ones. */
 export interface RemoteSessionEntry {
   environmentId: string
   sessionId: string
   updatedAt: string
+  pinnedAt?: string | null
 }
 
 type Groups = ReadonlyMap<string, LogicalProjectGroup>
@@ -55,8 +56,8 @@ export function useLogicalProject(groupKey: string): LogicalProjectGroup | undef
 }
 
 /**
- * Sessions of `members` on machines other than this one, newest first. The result only changes when
- * the set, order, or recency of those sessions changes, so a status or title update re-renders the
+ * Sessions of `members` on machines other than this one, pins first then newest first. The result only changes when
+ * the set, order, pins, or recency of those sessions changes, so a status or title update re-renders the
  * affected row alone (each row subscribes to its own record).
  */
 export function useRemoteSessions(members: readonly ProjectRef[] | undefined, searchTerm?: string): readonly RemoteSessionEntry[] {
@@ -101,17 +102,18 @@ function collectRemoteSessions(members: readonly ProjectRef[], shells: readonly 
       const session = shell.sessions.get(sessionId)
       if (!session || session.archived) continue
       if (term && !session.title.toLowerCase().includes(term)) continue
-      entries.push({ environmentId, sessionId, updatedAt: session.updatedAt })
+      entries.push({ environmentId, sessionId, updatedAt: session.updatedAt, pinnedAt: session.pinnedAt })
     }
   })
-  return entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)
+  return entries.sort((a, b) => Number(Boolean(b.pinnedAt)) - Number(Boolean(a.pinnedAt))
+    || (a.pinnedAt && b.pinnedAt ? a.pinnedAt.localeCompare(b.pinnedAt) : b.updatedAt.localeCompare(a.updatedAt))
     || a.environmentId.localeCompare(b.environmentId) || a.sessionId.localeCompare(b.sessionId))
 }
 
 function sameEntries(a: readonly RemoteSessionEntry[], b: readonly RemoteSessionEntry[]): boolean {
   return a.length === b.length && a.every((entry, index) => {
     const other = b[index]!
-    return entry.environmentId === other.environmentId && entry.sessionId === other.sessionId && entry.updatedAt === other.updatedAt
+    return entry.environmentId === other.environmentId && entry.sessionId === other.sessionId && entry.updatedAt === other.updatedAt && entry.pinnedAt === other.pinnedAt
   })
 }
 

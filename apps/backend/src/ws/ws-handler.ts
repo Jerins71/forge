@@ -18,7 +18,6 @@ import { isInventoryCommandAllowed } from "./inventory-command-access.js";
 import { handleAgentCommand } from "./commands/agent-command-handler.js";
 import { handleBrowserCommand } from "./commands/browser-command-handler.js";
 import { handleConversationCommand } from "./commands/conversation-command-handler.js";
-import { handleManagerCommand } from "./commands/manager-command-handler.js";
 import { handleSessionCommand } from "./commands/session-command-handler.js";
 import { extractRequestId, parseClientCommand } from "./ws-command-parser.js";
 import { WsApiProxy } from "./ws-api-proxy.js";
@@ -152,30 +151,6 @@ export class WsHandler {
         handleDeletedAgentSubscriptions: (ids: Set<string>) => this.handleDeletedAgentSubscriptions(ids),
         unreadTracker: this.unreadTracker ?? undefined,
       };
-      if (command.type === "pin_message") {
-        const result = await this.swarmManager.pinMessage(sessionId, command.messageId, command.pinned);
-        send({ type: "message_pinned", agentId: sessionId, messageId: command.messageId, pinned: result.pinned, timestamp: result.timestamp });
-        return;
-      }
-      if (command.type === "clear_all_pins") { await this.swarmManager.clearAllPins(sessionId); return; }
-      if (command.type === "dismiss_session_attention") {
-        const result = await this.swarmManager.dismissSessionAttention(command.attentionIds);
-        send({ type: "session_attention_update", revision: result.revision, changes: result.changes, requestId: command.requestId });
-        return;
-      }
-      if (command.type === "mark_unread" || command.type === "mark_all_read") {
-        if (!this.unreadTracker) return;
-        const agents = command.type === "mark_unread" ? [this.swarmManager.getAgent(sessionId)] : this.swarmManager.listAgents();
-        for (const agent of agents) {
-          if (!agent || agent.role !== "manager") continue;
-          const profileId = this.subscriptionManager.resolveProfileIdForAgent(agent.agentId) ?? agent.agentId;
-          if (command.type === "mark_all_read" && command.profileId !== profileId) continue;
-          if (command.type === "mark_unread") this.unreadTracker.markUnread(profileId, agent.agentId);
-          else this.unreadTracker.markRead(profileId, agent.agentId);
-          this.broadcastUnreadCountUpdate(agent.agentId, this.unreadTracker.getCount(profileId, agent.agentId));
-        }
-        return;
-      }
       if (command.type === "ping") { send({ type: "ready", subscribedAgentId: sessionId, serverTime: new Date().toISOString() }); return; }
       if (isBrowserClientCommand(command)) {
         await handleBrowserCommand({ ...context, command, connectionId: this.browserHost.connectionId(principal) ?? `rpc:${sessionId}`,
@@ -190,7 +165,6 @@ export class WsHandler {
         });
         return;
       }
-      if (await handleManagerCommand({ ...context, broadcastToSubscribed: event => { send(event); this.broadcastToSubscribed(event); } })) return;
       if (await handleSessionCommand({ ...context, broadcastUnreadCountUpdate: (id, count) => this.broadcastUnreadCountUpdate(id, count) })) return;
       if (await handleAgentCommand(context)) return;
       if (await handleConversationCommand({ ...context, allowNonManagerSubscriptions: this.allowNonManagerSubscriptions, logDebug: () => {}, resolveConfiguredManagerId: () => this.resolveConfiguredManagerId() })) return;
@@ -532,73 +506,6 @@ export class WsHandler {
       return;
     }
 
-    if (command.type === "mark_unread") {
-      if (!this.unreadTracker) {
-        return;
-      }
-
-      const descriptor = this.swarmManager.getAgent(command.agentId);
-      if (!descriptor || descriptor.role !== "manager") {
-        return;
-      }
-
-      const profileId = this.subscriptionManager.resolveProfileIdForAgent(descriptor.agentId) ?? descriptor.agentId;
-      this.unreadTracker.markUnread(profileId, descriptor.agentId);
-      this.broadcastUnreadCountUpdate(
-        descriptor.agentId,
-        this.unreadTracker.getCount(profileId, descriptor.agentId),
-      );
-      return;
-    }
-
-    if (command.type === "mark_all_read") {
-      if (!this.unreadTracker) {
-        return;
-      }
-
-      const { profileId } = command;
-      for (const agent of this.swarmManager.listAgents()) {
-        if (agent.role !== "manager") {
-          continue;
-        }
-
-        const agentProfileId = this.subscriptionManager.resolveProfileIdForAgent(agent.agentId) ?? agent.agentId;
-        if (agentProfileId !== profileId) {
-          continue;
-        }
-
-        const count = this.unreadTracker.getCount(profileId, agent.agentId);
-        if (count > 0) {
-          this.unreadTracker.markRead(profileId, agent.agentId);
-          this.broadcastUnreadCountUpdate(agent.agentId, 0);
-        }
-      }
-      return;
-    }
-
-    // Global origin state does not depend on a selected conversation. Handle
-    // before the subscription requirement so a reconnecting Inbox can dismiss
-    // exact instances without opening a room first.
-    if (command.type === "dismiss_session_attention") {
-      try {
-        const result = await this.swarmManager.dismissSessionAttention(command.attentionIds);
-        this.send(socket, {
-          type: "session_attention_update",
-          revision: result.revision,
-          changes: result.changes,
-          requestId: command.requestId,
-        });
-      } catch (error) {
-        this.send(socket, {
-          type: "error",
-          code: "SESSION_ATTENTION_DISMISS_FAILED",
-          message: error instanceof Error ? error.message : "Failed to dismiss session attention.",
-          requestId: command.requestId,
-        });
-      }
-      return;
-    }
-
     // An inventoried socket may invoke the bounded origin-safe command set above.
     // This is caller authority only: never record the actor as subscribed/viewing.
     const subscribedAgentId = this.resolveSubscribedAgentId(socket)
@@ -618,72 +525,6 @@ export class WsHandler {
 
     if (command.type === "api_proxy") {
       await this.handleApiProxyCommand(socket, command, subscribedAgentId);
-      return;
-    }
-
-    if (command.type === "pin_message") {
-      if (subscribedAgentId !== command.agentId) {
-        this.send(socket, {
-          type: "error",
-          code: "PIN_MESSAGE_SUBSCRIPTION_MISMATCH",
-          message: `Pin message rejected: not subscribed to agent ${command.agentId}`,
-        });
-        return;
-      }
-
-      try {
-        const result = await this.swarmManager.pinMessage(command.agentId, command.messageId, command.pinned);
-        this.broadcastToSubscribed({
-          type: "message_pinned",
-          agentId: command.agentId,
-          messageId: command.messageId,
-          pinned: result.pinned,
-          timestamp: result.timestamp,
-        });
-      } catch (error) {
-        this.send(socket, {
-          type: "error",
-          code: "PIN_MESSAGE_FAILED",
-          message: error instanceof Error ? error.message : String(error),
-        });
-      }
-      return;
-    }
-
-    if (command.type === "clear_all_pins") {
-      if (subscribedAgentId !== command.agentId) {
-        this.send(socket, {
-          type: "error",
-          code: "CLEAR_ALL_PINS_SUBSCRIPTION_MISMATCH",
-          message: `Clear all pins rejected: not subscribed to agent ${command.agentId}`,
-        });
-        return;
-      }
-
-      try {
-        await this.swarmManager.clearAllPins(command.agentId);
-      } catch (error) {
-        this.send(socket, {
-          type: "error",
-          code: "CLEAR_ALL_PINS_FAILED",
-          message: error instanceof Error ? error.message : String(error),
-        });
-      }
-      return;
-    }
-
-    const managerHandled = await handleManagerCommand({
-      command,
-      socket,
-      subscribedAgentId,
-      swarmManager: this.swarmManager,
-      resolveManagerContextAgentId: (agentId) => this.resolveManagerContextAgentId(agentId),
-      send: sendForCommand,
-      broadcastToSubscribed: (event) => this.broadcastToSubscribed(event),
-      handleDeletedAgentSubscriptions: (deletedAgentIds) => this.handleDeletedAgentSubscriptions(deletedAgentIds),
-      unreadTracker: this.unreadTracker ?? undefined,
-    });
-    if (managerHandled) {
       return;
     }
 

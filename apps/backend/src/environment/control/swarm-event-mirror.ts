@@ -48,7 +48,7 @@ function source(file: string): Source {
   } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { generation: "missing", size: 0 }; throw error; }
 }
 export function createSwarmEventMirror({ swarmManager, database, eventSink, wireProjection }: {
-  swarmManager: Pick<SwarmManager, "getRestartRecoverySnapshot" | "getSessionPlanSnapshot" | "getSessionGoalSnapshot" | "on" | "off" | "listAgentsForInternalUse" | "getAgentForInternalUse" | "listProfiles" | "listWorkersForSession" | "getConversationHistoryPage" | "getPendingChoiceRequestsForSession" | "getSessionAttentionSnapshot" | "observeCatalogDirty" | "isSessionShutdownSafe">;
+  swarmManager: Pick<SwarmManager, "getRestartRecoverySnapshot" | "getSessionPlanSnapshot" | "getSessionGoalSnapshot" | "on" | "off" | "listAgentsForInternalUse" | "getAgentForInternalUse" | "listProfiles" | "listWorkersForSession" | "getConversationHistoryPage" | "getPendingChoiceRequestsForSession" | "getSessionAttentionSnapshot" | "getPinnedMessageIds" | "observeCatalogDirty" | "isSessionShutdownSafe">;
   database: Database; eventSink: EventSink; wireProjection: MirrorWireProjection;
 }): SwarmEventMirror {
   if (eventSink.database !== database) throw new Error("Mirror requires the shared environment database.");
@@ -90,7 +90,8 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       unread: wireProjection.unread(descriptor.agentId, descriptor.profileId ?? descriptor.agentId),
       pendingCount: prior?.pendingCount ?? 0,
       workerCount: descriptor.workerCount ?? swarmManager.listWorkersForSession(descriptor.agentId).length,
-      updatedAt: descriptor.updatedAt, sortKey: descriptor.updatedAt, archived: Boolean(descriptor.archivedAt),
+      createdAt: descriptor.createdAt, pinnedAt: descriptor.pinnedAt ?? null, lastUsedAt: descriptor.lastUserMessageAt ?? null,
+      updatedAt: descriptor.updatedAt, sortKey: descriptor.createdAt, archived: Boolean(descriptor.archivedAt),
       workspace: { ...(prior?.workspace ?? { kind: "current_checkout", branch: null }), cwd: descriptor.cwd },
       ...(descriptor.managerPosture ? { delegation: { managerPosture: descriptor.managerPosture, managerPostureOrigin: descriptor.managerPostureOrigin ?? "product_default", rosterId: descriptor.delegationRosterId, rosterOrigin: descriptor.delegationRosterOrigin } } : {}),
       contextMode: { effective: descriptor.contextModeOverride ?? swarmManager.listProfiles().find(p => p.profileId === descriptor.profileId)?.defaultContextMode ?? "summary", ...(descriptor.contextModeOverride ? { override: descriptor.contextModeOverride } : {}) },
@@ -121,6 +122,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     return { itemId: id, userTurnId: user ? entry.id ?? id : userTurns.get(sessionId) ?? ("turnId" in entry ? entry.turnId : undefined) ?? id,
       actorId: "actorAgentId" in entry ? entry.actorAgentId : entry.agentId,
       kind: entry.type === "conversation_message" ? user ? "user" : "assistant" : entry.type === "agent_message" ? "worker_result" : entry.type === "agent_tool_call" ? "tool" : "activity",
+      pinned: swarmManager.getPinnedMessageIds(sessionId)?.has(entry.type === "conversation_message" ? entry.id ?? id : id) ?? false,
       timestamp: entry.timestamp, ...(entry.type === "conversation_message" ? { source: entry.source } : {}), text: text.slice(0, 8192), contentRef: text.length > 8192 ? id : null,
       artifacts: (wireProjection.artifacts?.(entry, sessionId) ?? []).slice(0, 20),
       commandId: entry.type === "conversation_message" ? entry.controlCommandId ?? null : null };
@@ -314,6 +316,17 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       });
       listen("session_lifecycle", (event: { action: string; sessionAgentId?: string }) => { if (event.action === "deleted" && event.sessionAgentId) { eventSink.transaction(tx => eventSink.append(tx, { topic: "shell", sessionId: event.sessionAgentId!, event: { type: "session.remove", sessionId: event.sessionAgentId! } })); sessions.delete(event.sessionAgentId); } else queueCatalog(event.sessionAgentId ? [event.sessionAgentId] : undefined); });
       listen("conversation_reset", (event: { agentId: string }) => { const descriptor = swarmManager.getAgentForInternalUse(event.agentId); if (!descriptor) return; eventSink.transaction(tx => { resetDetail(tx, descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId); recordSource(`source:${descriptor.agentId}`, source(descriptor.sessionFile)); }); });
+      listen("message_pinned", (event: { agentId: string; messageId: string; pinned: boolean }) => {
+        const rows = database.prepare("SELECT item_json FROM detail_items WHERE session_id=?").all(event.agentId) as { item_json: string }[];
+        eventSink.transaction(tx => { for (const row of rows) {
+          const value = JSON.parse(row.item_json) as DetailItem;
+          // Clear-all emits legacy message IDs after the pin owner empties its registry.
+          // Canonical item IDs may differ, so clear every projected pin in that case.
+          if (value.itemId !== event.messageId && (event.pinned || swarmManager.getPinnedMessageIds(event.agentId)?.size)) continue;
+          if ((value.pinned ?? false) === event.pinned) continue;
+          eventSink.append(tx, { topic: "detail", sessionId: event.agentId, event: { type: "item.upsert", item: { ...value, pinned: event.pinned } } });
+        } });
+      });
       listen("session_attention_snapshot", () => { queueCatalog([...sessions.keys()]); });
       removers.push(swarmManager.observeCatalogDirty(change => queueCatalog(change.agentIds, change.profiles)));
       if (wireProjection.observeUnread) removers.push(wireProjection.observeUnread(sessionId => { if (!ready) return; eventSink.transaction(tx => upsertSession(tx, sessionId)); }));

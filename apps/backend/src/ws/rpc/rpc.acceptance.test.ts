@@ -141,9 +141,9 @@ describe("environment RPC real socket boundary", () => {
     } });
     const signal = new AbortController().signal;
     await expect(adapter.execute(principal, "legacy.session.operate", { sessionId: "session", command: { type: "user_message", text: "hello" } }, signal)).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(adapter.execute(principal, "legacy.workspace.read", { sessionId: "session", command: { type: "rename_session", agentId: "session", label: "new" } }, signal)).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(adapter.execute(principal, "legacy.session.operate", { sessionId: "session", command: { type: "rename_session", agentId: "other", label: "new" } }, signal)).rejects.toMatchObject({ code: "FORBIDDEN" });
-    expect(await adapter.execute(principal, "legacy.session.operate", { sessionId: "session", command: { type: "rename_session", agentId: "session", label: "new" } }, signal)).toMatchObject({ events: [{ type: "error" }] });
+    await expect(adapter.execute(principal, "legacy.workspace.read", { sessionId: "session", command: { type: "resume_session", agentId: "session" } }, signal)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(adapter.execute(principal, "legacy.session.operate", { sessionId: "session", command: { type: "resume_session", agentId: "other" } }, signal)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await adapter.execute(principal, "legacy.session.operate", { sessionId: "session", command: { type: "resume_session", agentId: "session" } }, signal)).toMatchObject({ events: [{ type: "error" }] });
   });
 
   it("bounds pending requests, detail mounts and terminal mounts per socket", async () => {

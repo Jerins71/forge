@@ -546,7 +546,6 @@ export function createFeatureClients(
     ])
     const sessionRead = new Set([
       'ping',
-      'hydrate_archive_last_used',
     ])
     const method: Extract<Method, `legacy.${string}`> = workspaceRead.has(type)
       ? 'legacy.workspace.read'

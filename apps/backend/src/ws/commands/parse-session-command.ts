@@ -152,51 +152,7 @@ export function parseSessionCommand(maybe: ClientCommandCandidate): ParsedClient
     });
   }
 
-  if (maybe.type === "rename_session") {
-    const agentId = (maybe as { agentId?: unknown }).agentId;
-    const label = (maybe as { label?: unknown }).label;
-    const requestId = (maybe as { requestId?: unknown }).requestId;
 
-    if (typeof agentId !== "string" || agentId.trim().length === 0) {
-      return fail("rename_session.agentId must be a non-empty string");
-    }
-    if (typeof label !== "string" || label.trim().length === 0) {
-      return fail("rename_session.label must be a non-empty string");
-    }
-    if (requestId !== undefined && typeof requestId !== "string") {
-      return fail("rename_session.requestId must be a string when provided");
-    }
-
-    return ok({
-      type: "rename_session",
-      agentId: agentId.trim(),
-      label: label.trim(),
-      requestId
-    });
-  }
-
-  if (maybe.type === "pin_session") {
-    const agentId = (maybe as { agentId?: unknown }).agentId;
-    const pinned = (maybe as { pinned?: unknown }).pinned;
-    const requestId = (maybe as { requestId?: unknown }).requestId;
-
-    if (typeof agentId !== "string" || agentId.trim().length === 0) {
-      return fail("pin_session.agentId must be a non-empty string");
-    }
-    if (typeof pinned !== "boolean") {
-      return fail("pin_session.pinned must be a boolean");
-    }
-    if (requestId !== undefined && typeof requestId !== "string") {
-      return fail("pin_session.requestId must be a string when provided");
-    }
-
-    return ok({
-      type: "pin_session",
-      agentId: agentId.trim(),
-      pinned,
-      requestId
-    });
-  }
 
   if (maybe.type === "fork_session") {
     const sourceAgentId = (maybe as { sourceAgentId?: unknown }).sourceAgentId;
