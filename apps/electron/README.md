@@ -38,6 +38,40 @@ The optional Chrome adapter has no Electron view or recording authority. Its coo
 
 At runtime the packaged app spawns the staged backend bundle from `backend/dist/index.mjs`, waits for backend readiness, then opens the renderer from the staged `ui/` directory.
 
+### Standalone Linux server archive
+
+From a clean, committed worktree, build the server without publishing anything:
+
+```bash
+node apps/electron/scripts/build-server.mjs --target linux-x64
+# Optional: --output-dir /absolute/artifact-directory
+```
+
+The macOS/Linux driver requires Docker, Git, curl, tar, and the repository Node/pnpm toolchain. It snapshots tracked `HEAD` into a fresh Linux/amd64 Debian 12 container, performs a frozen-lockfile install, and reuses the Desktop backend bundle, production dependency closure, CLI, and resource staging. Native SQLite/PTY modules build for the pinned **Node 26.5.0**, with that distribution's headers; platform-native packages and N-API modules install for Linux/x64. macOS `node_modules` and Electron bindings never enter the container. Apple Silicon uses Docker's amd64 emulation. The builder image and official Node download SHA-256 are pinned in `scripts/build-server.mjs`; changing `.nvmrc` requires updating and requalifying that pin.
+
+Output goes to `apps/electron/release/server/`: `forge-server-<Desktop-version>-linux-x64.tar.gz`, its `.tar.gz.sha256` sidecar, and `.smoke.json` evidence. Existing versioned outputs are never overwritten. The archive contains one enclosing `forge-server-<version>-linux-x64/` directory:
+
+```text
+bin/forge                         # installation-relative foreground CLI launcher
+cli/{cli.js,package.json}         # self-contained CLI bundle
+backend/{dist/index.mjs,node_modules/,package.json}
+forge-resources/                  # skills, prompts, archetypes, specialists, static assets, secure runner
+node/{bin/node,LICENSE}           # official pinned Node; no host install needed
+manifest.json                    # Desktop version, source commit, target/libc, Node version and hashes
+LICENSE, THIRD_PARTY_NOTICES.md
+```
+
+Extract and run `<install>/bin/forge serve --port 47787 --data-dir /absolute/data-directory`. The launcher locates its backend/resources/runtime independently of cwd, forwards CLI arguments, and stays in the foreground with signal forwarding for a future service owner. Installation remains separate from environment data; existing CLI/data-path owners retain data and installation identity policy. The host needs Linux x86_64 with glibc **2.36 or newer**; Git is needed for repository operations. Provider credentials and optional feature prerequisites (for example Docker for Secure Sessions) remain host-managed. No checkout, package installation, or system Node change occurs on the target.
+
+Every build extracts the completed archive at a different path and runs native module operations, CLI serve, `/api/health`, `/api/v2/environment`, graceful stop, and restart with preserved identity, using disposable HOME/XDG/data directories. Repeat against an extracted install with its own Node:
+
+```bash
+<install>/node/bin/node apps/electron/scripts/server-artifact-smoke.mjs \
+  <install> /absolute/smoke-report.json 47787
+```
+
+The smoke script and adjacent `staged-native-runtime-smoke.mjs` are build/test tools, so copy them separately when validating another host. Only Linux/x64/glibc is qualified here; adding Linux/arm64 requires another pinned target and the same native/archive checks. This server artifact is separate from experimental Linux Desktop packaging and does not add an asset to the Desktop release/publishing flow.
+
 ## Key Files
 
 | File | Purpose |

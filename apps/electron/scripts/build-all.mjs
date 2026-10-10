@@ -230,7 +230,10 @@ async function stageStreamDeckArtifact() {
   console.log(`[electron/build-all] Staged Stream Deck plugin installer`)
 }
 
-export async function stageBundledBackend() {
+export async function stageBundledBackend({ outputDir = backendStageDir, nativeRuntime = 'electron' } = {}) {
+  if (!['electron', 'node'].includes(nativeRuntime)) throw new Error(`Unsupported native runtime: ${nativeRuntime}`)
+  const backendStageBundlePath = path.join(outputDir, 'dist', 'index.mjs')
+  const backendStageMetafilePath = path.join(outputDir, 'dist', 'index.meta.json')
   await mkdir(path.dirname(backendStageBundlePath), { recursive: true })
 
   const metafile = await esbuild({
@@ -256,16 +259,16 @@ export async function stageBundledBackend() {
   // Stage backend package.json — needed at runtime by bundled dependencies
   // that walk up the directory tree looking for package.json (e.g. pi-coding-agent
   // reads version and piConfig from it).
-  await cp(backendWorkspaceManifestPath, path.join(backendStageDir, 'package.json'))
-  await stageBundledDependencyRuntimeAssets()
+  await cp(backendWorkspaceManifestPath, path.join(outputDir, 'package.json'))
+  await stageBundledDependencyRuntimeAssets(outputDir)
 
   const runtimePackages = await collectRuntimePackageClosure(
     BACKEND_BUNDLE_EXTERNAL_PACKAGES.map((pkg) => ({ packageName: pkg.name, optional: pkg.optional }))
   )
-  await stageRuntimePackages(runtimePackages)
-  await stageElectronBetterSqlite3Binding()
+  await stageRuntimePackages(runtimePackages, path.join(outputDir, 'node_modules'))
+  if (nativeRuntime === 'electron') await stageElectronBetterSqlite3Binding(outputDir)
 
-  const fileCount = await countFiles(backendStageDir)
+  const fileCount = await countFiles(outputDir)
   const stagedCount = runtimePackages.hoisted.length + runtimePackages.nested.length
   const nestedNote =
     runtimePackages.nested.length > 0
@@ -376,8 +379,8 @@ export function validateStagedBetterSqlite3PackageDir(stagedPackageDir) {
   return null
 }
 
-async function stageElectronBetterSqlite3Binding() {
-  const stagedPackageDir = path.join(backendStageNodeModulesDir, 'better-sqlite3')
+async function stageElectronBetterSqlite3Binding(outputDir = backendStageDir) {
+  const stagedPackageDir = path.join(outputDir, 'node_modules', 'better-sqlite3')
   if (!existsSync(stagedPackageDir)) {
     throw new Error(`Unable to stage Electron better-sqlite3 binding: package is missing at ${stagedPackageDir}`)
   }
@@ -453,15 +456,15 @@ export async function stageBrowserRuntime() {
   console.log(`[electron/build-all] Staged playwright-core ${playwright.manifest.version} and browser notices`)
 }
 
-async function stageCliArtifact() {
+export async function stageCliArtifact(outputDir = cliStageDir) {
   if (!existsSync(cliBuiltEntry)) {
     throw new Error(
       `CLI build artifact not found at ${cliBuiltEntry}. Ensure @forge/cli was built before staging.`,
     )
   }
 
-  await mkdir(cliStageDir, { recursive: true })
-  await cp(cliBuiltEntry, cliStagedEntry)
+  await mkdir(outputDir, { recursive: true })
+  await cp(cliBuiltEntry, path.join(outputDir, 'cli.js'))
 
   // The CLI bundle uses ESM syntax (import/import.meta), but the nearest
   // ancestor package.json (apps/electron/package.json) declares "type": "commonjs".
@@ -469,12 +472,12 @@ async function stageCliArtifact() {
   // Drop a minimal package.json so both the build-time preflight and the
   // packaged Electron app (resources/cli/) resolve the correct module type.
   await writeFile(
-    path.join(cliStageDir, 'package.json'),
+    path.join(outputDir, 'package.json'),
     JSON.stringify({ type: 'module' }) + '\n',
     'utf8',
   )
 
-  console.log(`[electron/build-all] Staged CLI artifact at ${path.relative(electronDir, cliStagedEntry)}`)
+  console.log(`[electron/build-all] Staged CLI artifact at ${path.relative(electronDir, outputDir)}`)
 }
 
 async function validateStagedCliPreflight() {
@@ -657,7 +660,7 @@ function assertPathIsWithinDirectory(targetPath, parentDirectory, failurePrefix)
   throw new Error(`${failurePrefix}: ${resolvedTargetPath}`)
 }
 
-async function stageBundledDependencyRuntimeAssets() {
+async function stageBundledDependencyRuntimeAssets(outputDir = backendStageDir) {
   // Theme + export-html resolve package-relative via pi-coding-agent getThemesDir /
   // getExportTemplateDir (dist/modes/interactive/theme, dist/core/export-html under the
   // staged package). Do not stage redundant bundle-relative copies under backend/dist.
@@ -666,7 +669,7 @@ async function stageBundledDependencyRuntimeAssets() {
   if (photonNode) {
     await copyRuntimeAsset(
       path.join(photonNode.packageRoot, 'photon_rs_bg.wasm'),
-      path.join(backendStageDir, 'dist', 'photon_rs_bg.wasm'),
+      path.join(outputDir, 'dist', 'photon_rs_bg.wasm'),
     )
   }
 }
@@ -1745,7 +1748,9 @@ export async function stageBraveSearchDependencies(
   await stageRuntimePackages(runtimePackages, path.join(stagedSkillDir, 'node_modules'))
 }
 
-async function stageBackendResources() {
+export async function stageBackendResources(outputDir = forgeResourcesDir) {
+  const forgeResourcesDir = outputDir
+  const stagedSecureRunnerDir = path.join(outputDir, 'apps', 'backend', 'src', 'swarm', 'secure-sessions', 'execution')
   await mkdir(forgeResourcesDir, { recursive: true })
 
   await writeFile(
@@ -1766,7 +1771,7 @@ async function stageBackendResources() {
     path.join(repoRoot, 'apps', 'backend', 'src', 'swarm', 'skills', 'builtins'),
     path.join(forgeResourcesDir, 'apps', 'backend', 'src', 'swarm', 'skills', 'builtins'),
   )
-  await stageBraveSearchDependencies()
+  await stageBraveSearchDependencies(path.join(outputDir, 'apps', 'backend', 'src', 'swarm', 'skills', 'builtins', 'brave-search'))
   await copyDirectory(
     path.join(repoRoot, 'apps', 'backend', 'src', 'swarm', 'specialists', 'builtins'),
     path.join(forgeResourcesDir, 'apps', 'backend', 'src', 'swarm', 'specialists', 'builtins'),
