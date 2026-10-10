@@ -1,3 +1,4 @@
+import { projectFeatureEvent } from './ws-client/environment-feature-projection'
 import type { RpcInput, RpcOutput } from '@forge/protocol/environment-v2'
 import { EnvironmentRuntimeError, isInterruptedReceipt, type EnvironmentClient, type DetailState } from '@forge/client-runtime'
 import {
@@ -40,7 +41,6 @@ import {
   buildBrowserTabResizeCommand,
   buildChoiceCancelCommand,
   buildChoiceResponseCommand,
-  buildCodexElicitationResponseCommand,
   buildClearAllPinsCommand,
   buildCreateSessionCommand,
   buildDismissSessionAttentionCommand,
@@ -54,9 +54,7 @@ import {
   buildPinMessageCommand,
   buildPinSessionCommand,
   buildRenameSessionCommand,
-  buildRestartRecoveryActionCommand,
   buildSessionActionCommand,
-  buildSessionGoalControlCommand,
   buildStopAllAgentsCommand,
   buildSubscribeCommand,
   buildUserMessageCommand,
@@ -344,7 +342,7 @@ export class ManagerWsClient {
             for (const agent of this.state.agents) if (agent.profileId === profile.profileId) this.invalidateConversationSnapshotAgent(agent.agentId);
           }
         }
-        this.updateState(projectShell(shell, this.state.agents, this.state.profiles, this.state.unreadCounts, this.state.sessionAttentions));
+        this.updateState({ ...projectShell(shell, this.state.agents, this.state.profiles, this.state.unreadCounts, this.state.sessionAttentions), restartRecovery: shell.recovery ?? null });
       }
       updateShell()
       this.environmentDetach.push(
@@ -352,6 +350,7 @@ export class ManagerWsClient {
         client.shell.subscribe((s) => s, updateShell, Object.is, [
           'sessions',
           'projects',
+          'recovery',
         ]),
       )
       const updateConnection = () => {
@@ -458,11 +457,22 @@ export class ManagerWsClient {
   }
 
   resumeRestartRecovery(): void {
-    this.send(buildRestartRecoveryActionCommand('resume_restart_recovery'))
+    this.decideRecovery('resume')
   }
 
   dismissRestartRecovery(): void {
-    this.send(buildRestartRecoveryActionCommand('dismiss_restart_recovery'))
+    this.decideRecovery('dismiss')
+  }
+
+  private decideRecovery(action: 'resume' | 'dismiss'): void {
+    const recovery = this.environmentClient?.shell.getSnapshot().recovery
+    if (!this.environmentClient || !recovery) return
+    const key = `recovery:${recovery.recoveryId}:${action}`
+    const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
+    this.intentCommandIds.set(key, commandId)
+    void this.environmentClient.request('recovery.decide', { commandId, recoveryId: recovery.recoveryId, action })
+      .then(receipt => { if (receipt.error) this.updateState({ lastError: receipt.error.message }); else this.intentCommandIds.delete(key) })
+      .catch(error => this.updateState({ lastError: error instanceof Error ? error.message : 'Recovery decision failed' }))
   }
 
   registerBrowserAutomationHost(
@@ -979,6 +989,12 @@ export class ManagerWsClient {
     this.send(buildChoiceCancelCommand(agentId, choiceId))
   }
 
+  async readCodexElicitationUrl(agentId: string, elicitationId: string): Promise<string> {
+    if (!this.environmentClient) throw new Error('Elicitation is unavailable')
+    const response = await this.environmentClient.request('session.elicitation.url', { sessionId: agentId, elicitationId, generation: elicitationId })
+    return response.url
+  }
+
   sendCodexElicitationResponse(
     agentId: string,
     elicitationId: string,
@@ -986,7 +1002,10 @@ export class ManagerWsClient {
     values?: Record<string, unknown>,
     persistScope?: CodexElicitationPersistScope,
   ): void {
-    this.send(buildCodexElicitationResponseCommand(agentId, elicitationId, decision, values, persistScope))
+    if (!this.environmentClient) return
+    const scalarValues = values as Record<string, string | number | boolean> | undefined
+    void this.environmentClient.request('session.elicitation.respond', { sessionId: agentId, elicitationId, generation: elicitationId, decision, values: scalarValues, persistScope })
+      .catch(error => this.updateState({ lastError: error instanceof Error ? error.message : 'Elicitation response failed' }))
   }
 
   pinMessage(agentId: string, messageId: string, pinned: boolean): void {
@@ -1228,11 +1247,13 @@ export class ManagerWsClient {
   }
 
   controlSessionGoal(agentId: string, action: SessionGoalControlAction): void {
-    if (!isSocketOpen(this.socket)) {
-      this.updateState({ lastError: RECONNECTING_SOCKET_ERROR })
-      return
-    }
-    this.send(buildSessionGoalControlCommand(agentId, action))
+    if (!this.environmentClient) return
+    const key = JSON.stringify(['goal', agentId, action])
+    const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
+    this.intentCommandIds.set(key, commandId)
+    void this.environmentClient.request('session.goal.control', { commandId, sessionId: agentId, ...action })
+      .then(receipt => { if (receipt.error) this.updateState({ lastError: receipt.error.message }); else this.intentCommandIds.delete(key) })
+      .catch(error => this.updateState({ lastError: error instanceof Error ? error.message : 'Goal control failed' }))
   }
 
   async renameSession(agentId: string, label: string): Promise<SessionActionResult> {
@@ -2333,6 +2354,9 @@ export class ManagerWsClient {
       if (detail.projection !== projection) {
         projection = detail.projection
         this.environmentProjection = projection
+        if (projection?.plan) this.handleServerEvent({ type: 'session_plan_snapshot', sessionAgentId: sessionId, profileId: projection.session.projectId, ...projection.plan })
+        if (projection?.goal) this.handleServerEvent({ type: 'session_goal_snapshot', sessionAgentId: sessionId, profileId: projection.session.projectId, ...projection.goal })
+        if (projection?.recovery !== undefined) this.updateState({ restartRecovery: projection.recovery })
         const projectedMessages = projectDetailMessages(detail)
         const echoes = this.outbox?.pendingMessages(sessionId, projectedCommandIds(projection)) ?? []
         this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))
@@ -2353,7 +2377,7 @@ export class ManagerWsClient {
         })
       }
       for (const [key, event] of detail.transient)
-        if (transient.get(key) !== event) this.handleServerEvent(event)
+        if (transient.get(key) !== event) this.handleServerEvent(event.type === 'browser_session_snapshot' || event.type === 'browser_session_changed' ? event : projectFeatureEvent(event))
       transient = detail.transient
       const bootstrap = this.state.conversationBootstrap
       const phase = detail.freshness === 'live' ? 'ready' : 'pending'

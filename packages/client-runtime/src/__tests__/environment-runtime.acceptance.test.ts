@@ -419,7 +419,7 @@ describe('environment runtime acceptance', () => {
       () =>
         [...s.subscriptions.values()].filter(
           (x) => x.method !== 'shell.subscribe',
-        ).length === 2,
+        ).length === 3,
     )
     const oldDurable = [...s.subscriptions].find(
       ([, x]) => x.method === 'session.subscribe',

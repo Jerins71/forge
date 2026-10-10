@@ -6,13 +6,10 @@ import {
   type BrowserViewportSetting,
   type BuilderTimelineChannelView,
   type ChoiceAnswer,
-  type CodexElicitationDecision,
-  type CodexElicitationPersistScope,
   type ClientCommand,
   type ConversationAttachment,
   type ConversationReplyTargetInput,
   type DeliveryMode,
-  type SessionGoalControlAction,
 } from '@forge/protocol'
 
 export const RECONNECTING_SOCKET_ERROR = 'WebSocket is disconnected. Reconnecting...'
@@ -132,19 +129,6 @@ export function buildBrowserRecordingStopCommand(sessionAgentId: string, tabId: 
   return { type: 'browser_recording_stop', requestId, sessionAgentId, tabId, recordingId }
 }
 
-export function buildRestartRecoveryActionCommand(
-  type: 'resume_restart_recovery' | 'dismiss_restart_recovery',
-): ClientCommand {
-  return { type }
-}
-
-export function buildSessionGoalControlCommand(
-  agentId: string,
-  action: SessionGoalControlAction,
-): ClientCommand {
-  return { type: 'session_goal_control', agentId, ...action }
-}
-
 export function buildMarkUnreadCommand(agentId: string): ClientCommand {
   return {
     type: 'mark_unread',
@@ -210,16 +194,6 @@ export function buildChoiceCancelCommand(agentId: string, choiceId: string): Cli
     agentId,
     choiceId,
   }
-}
-
-export function buildCodexElicitationResponseCommand(
-  agentId: string,
-  elicitationId: string,
-  decision: CodexElicitationDecision,
-  values?: Record<string, unknown>,
-  persistScope?: CodexElicitationPersistScope,
-): ClientCommand {
-  return { type: 'codex_elicitation_response', agentId, elicitationId, decision, values, persistScope }
 }
 
 export function buildPinMessageCommand(

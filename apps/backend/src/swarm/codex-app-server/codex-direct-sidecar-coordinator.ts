@@ -114,6 +114,10 @@ export class CodexDirectSidecarCoordinator {
     return this.appServerService.respondToElicitation(input);
   }
 
+  getElicitationUrl(input: { managerAgentId: string; elicitationId: string; generation: string }): string | undefined {
+    return this.appServerService.getElicitationUrl(input);
+  }
+
   getPendingElicitationsForManager(managerAgentId: string) {
     return this.appServerService.getPendingElicitationsForManager(managerAgentId);
   }

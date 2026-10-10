@@ -2,7 +2,7 @@ import { once } from "node:events";
 import { WebSocket, WebSocketServer } from "ws";
 import { CliWsHandler } from "../../ws/cli-ws-handler.js";
 import { WsHandler } from "../../ws/ws-handler.js";
-import { createLegacyBuilderAdapter } from "../../ws/rpc/legacy-builder-adapter.js";
+import { createDetailFeatureRpc } from "../../ws/rpc/detail-feature-rpc.js";
 import { randomUUID } from "node:crypto";
 import { getSessionDir } from "../../swarm/storage/data-paths.js";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -351,11 +351,61 @@ it("restart recovery dismissal cannot alter the work graph across accepted input
   const handler = new WsHandler({ swarmManager: f.manager, mobilePushService: {} as never, allowNonManagerSubscriptions: true,
     perf: { recordDuration: () => {}, increment: () => {}, readSummary: () => ({ histograms: {}, counters: {} }), readRecentSlowEvents: () => [] } });
   const access = { authorize: () => {} } as never; handler.setEnvironmentControl({ access, control: core.controlService });
-  const adapter = createLegacyBuilderAdapter({ access, ports: handler.legacyPorts() });
   try {
     await core.controlService.execute(principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "accepted input", artifactIds: [] } });
-    await expect(adapter.execute(principal, "legacy.session.operate", { sessionId: f.sessionId, command: { type: "dismiss_restart_recovery", requestId: "dismiss" } }, new AbortController().signal)).rejects.toMatchObject({ code: "CONFLICT", retryable: true });
+    await expect(createDetailFeatureRpc({ swarmManager: f.manager, control: core.controlService }).execute(principal, "recovery.decide", { commandId: randomUUID(), recoveryId: "boot", action: "dismiss" })).rejects.toMatchObject({ code: "CONFLICT", retryable: true });
   } finally { snapshot.mockRestore(); mirror.dispose(); await core.close(); }
+});
+
+it("typed terminal catalog fans out to shared mounted scopes and stops after release", async () => {
+  const f = await fixture();
+  const mounted = ["manager", f.sessionId];
+  const principal = { deviceSessionId: "catalog-device", scopes: new Set(["session:read"] as const) };
+  const handler = new WsHandler({ swarmManager: f.manager, mobilePushService: {} as never, allowNonManagerSubscriptions: true,
+    listTerminalsForSession: () => [],
+    perf: { recordDuration: () => {}, increment: () => {}, readSummary: () => ({ histograms: {}, counters: {} }), readRecentSlowEvents: () => [] } });
+  handler.setEnvironmentControl({ access: { authorize: () => {} } as never, control: {} as never });
+  const controllers = mounted.map(() => new AbortController());
+  const streams = mounted.map((sessionId, i) => handler.detailFeatures(principal, { sessionId }, controllers[i]!.signal)[Symbol.asyncIterator]());
+  try {
+    for (const stream of streams) expect((await stream.next()).value).toMatchObject({ event: { type: "terminals.snapshot", scopeId: "manager" } });
+    const terminal = { terminalId: "catalog-terminal", sessionAgentId: "manager", profileId: "manager", name: "Shell", shell: "/bin/sh", cwd: "/fixture", cols: 80, rows: 24,
+      state: "running" as const, pid: null, exitCode: null, exitSignal: null, recoveredFromPersistence: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    handler.broadcastToSubscribed({ type: "terminal_created", sessionAgentId: "manager", terminal });
+    for (const stream of streams) {
+      let item;
+      do { item = (await stream.next()).value; } while (item?.event.type !== "terminal.upsert");
+      expect(item).toMatchObject({ event: { type: "terminal.upsert", scopeId: "manager", terminal } });
+    }
+    controllers[0]!.abort(); await streams[0]!.return?.();
+    handler.broadcastToSubscribed({ type: "terminal_closed", sessionAgentId: "unmounted-profile", terminalId: terminal.terminalId, reason: "user_closed" });
+    handler.broadcastToSubscribed({ type: "terminal_closed", sessionAgentId: "manager", terminalId: terminal.terminalId, reason: "user_closed" });
+    expect((await streams[1]!.next()).value).toMatchObject({ event: { type: "terminal.closed", scopeId: "manager" } });
+    expect(await streams[0]!.next()).toMatchObject({ done: true });
+  } finally { for (const controller of controllers) controller.abort(); for (const stream of streams) await stream.return?.(); }
+});
+
+it("typed secure presentation sends worker metadata to its owning manager", async () => {
+  const f = await fixture();
+  const worker = await f.manager.spawnAgent("manager", { agentId: "secure-detail-worker" });
+  const principal = { deviceSessionId: "secure-detail-device", scopes: new Set(["session:read"] as const) };
+  const handler = new WsHandler({ swarmManager: f.manager, mobilePushService: {} as never, allowNonManagerSubscriptions: true,
+    listTerminalsForSession: () => [],
+    perf: { recordDuration: () => {}, increment: () => {}, readSummary: () => ({ histograms: {}, counters: {} }), readRecentSlowEvents: () => [] } });
+  handler.setEnvironmentControl({ access: { authorize: () => {} } as never, control: {} as never });
+  const controllers = [new AbortController()];
+  const deadline = setTimeout(() => { for (const controller of controllers) controller.abort(); }, 1000);
+  const streams = ["manager"].map((sessionId, i) => handler.detailFeatures(principal, { sessionId }, controllers[i]!.signal)[Symbol.asyncIterator]());
+  try {
+    for (const stream of streams) await stream.next();
+    const snapshot = await f.manager.getSecureSessionSnapshot(worker.agentId);
+    handler.broadcastSecureSessionSnapshot({ type: "secure_session_snapshot", ...snapshot, revision: 100, sessionAgentId: worker.agentId, principalKind: "worker", ownerManagerAgentId: "manager", workerAssignmentId: "assignment-test" });
+    for (const stream of streams) {
+      let item;
+      do { item = (await stream.next()).value; if (!item) throw new Error("Missing typed secure fanout"); } while (item.event.type !== "secure.upsert" || item.event.snapshot.revision !== 100);
+      expect(item.event.snapshot).toMatchObject({ sessionAgentId: worker.agentId, ownerManagerAgentId: "manager" });
+    }
+  } finally { clearTimeout(deadline); for (const controller of controllers) controller.abort(); for (const stream of streams) await stream.return?.(); }
 });
 
 

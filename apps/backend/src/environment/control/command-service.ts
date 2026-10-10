@@ -153,7 +153,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         database.prepare("UPDATE effects SET state='done' WHERE command_id=?").run(command.command_id);
         database.prepare("UPDATE effects SET payload_json=? WHERE command_id=? AND ordinal=0").run(JSON.stringify({ ...payload, result }), command.command_id);
         sink.updateReceipt(tx, command.command_id, { state: "succeeded", result });
-      } else sink.updateReceipt(tx, command.command_id, { state: "interrupted", error: { code: "CONFLICT", message: "Policy command was interrupted by restart; inspect its resulting configuration", retryable: false } });
+      } else sink.updateReceipt(tx, command.command_id, { state: "interrupted", ...(payload.ambiguousDelivery ? { delivery: "unknown" as const } : {}), error: { code: "CONFLICT", message: "Policy command was interrupted by restart; inspect its resulting configuration", retryable: false } });
     }
     database.prepare("UPDATE effects SET state='interrupted' WHERE kind='lifecycle.admit' AND state='claimed'").run();
   });
@@ -179,6 +179,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       if (prior.device_session_id !== principal.deviceSessionId || prior.method !== method || prior.request_hash !== request.hash)
         throw new ControlError("CONFLICT", "Command identity conflicts with an accepted request");
       const row = database.prepare("SELECT state,payload_json FROM effects WHERE command_id=? ORDER BY ordinal LIMIT 1").get(input.commandId) as { state: string; payload_json: string };
+      if (input.receiptReplay && row.state === "interrupted") return { value: undefined as T };
       if (row.state === "done") return { value: JSON.parse(row.payload_json).result as T };
       const active = lifecycleOperations.get(input.commandId);
       if (active) return { active };
@@ -206,7 +207,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         .run(input.commandId, principal.deviceSessionId, method, request.hash, request.normalized, sessionIds[0] ?? null, options.clock());
       if (input.receipt) {
         const now = new Date(options.clock()).toISOString();
-        const receipt: CommandReceipt = { commandId: input.commandId, ...input.receipt, sessionId: null, state: "running", acceptedSequence: 0, updatedSequence: 0, acceptedAt: now, updatedAt: now, inputId: null, delivery: "none", error: null };
+        const receipt: CommandReceipt = { commandId: input.commandId, ...input.receipt, sessionId: input.receipt.sessionId ?? null, state: "running", acceptedSequence: 0, updatedSequence: 0, acceptedAt: now, updatedAt: now, inputId: null, delivery: "none", error: null };
         database.prepare("INSERT INTO command_receipts VALUES (?, 'running', 0, 0, ?)").run(input.commandId, JSON.stringify(receipt));
         sink.updateReceipt(tx, input.commandId, {});
       }
@@ -229,7 +230,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           }
         }
         database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,'lifecycle.admit',?,?,'claimed')")
-          .run(input.commandId + ":" + ordinal, input.commandId, lane, ordinal, JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, ...(ordinal === 0 && input.frozenRequest !== undefined ? { frozenRequest: input.frozenRequest } : {}) }));
+          .run(input.commandId + ":" + ordinal, input.commandId, lane, ordinal, JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, ambiguousDelivery: input.ambiguousDelivery, ...(ordinal === 0 && input.frozenRequest !== undefined ? { frozenRequest: input.frozenRequest } : {}) }));
       }
     });
     const work = (async () => {
@@ -255,14 +256,15 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       } catch (error) {
         sink.transaction(tx => {
           database.prepare("UPDATE effects SET state='interrupted' WHERE command_id=?").run(input.commandId);
-          if (input.receipt) sink.updateReceipt(tx, input.commandId, { state: "interrupted", error: { code: "CONFLICT", message: "Policy command interrupted; inspect the resulting configuration before issuing a fresh request", retryable: false } });
+          if (input.receipt) sink.updateReceipt(tx, input.commandId, { state: "interrupted", ...(input.ambiguousDelivery ? { delivery: "unknown" as const } : {}), error: { code: "CONFLICT", message: "Policy command interrupted; inspect the resulting configuration before issuing a fresh request", retryable: false } });
           if (input.intent === "resume") for (const sessionId of sessionIds) {
             if (!database.prepare("SELECT 1 FROM control_sessions WHERE session_id=? AND deleted=0").get(sessionId)) continue;
             database.prepare("UPDATE control_sessions SET desired_state='stopped',run_generation=run_generation+1 WHERE session_id=?").run(sessionId);
             setSessionStatus(sink, tx, sessionId, "stopping", options.clock);
           }
         });
-        throw error;
+        if (!input.receiptReplay) throw error;
+        return undefined as T;
       } finally { lifecycleOperations.delete(input.commandId); }
     })();
     lifecycleOperations.set(input.commandId, work);

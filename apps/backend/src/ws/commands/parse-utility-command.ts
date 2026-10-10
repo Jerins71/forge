@@ -38,14 +38,6 @@ export function parseUtilityCommand(maybe: ClientCommandCandidate): ParsedClient
     return ok({ type: "ping" });
   }
 
-  if (maybe.type === "resume_restart_recovery" || maybe.type === "dismiss_restart_recovery") {
-    const requestId = (maybe as { requestId?: unknown }).requestId;
-    if (requestId !== undefined && typeof requestId !== "string") {
-      return fail(`${maybe.type}.requestId must be a string when provided`);
-    }
-    return ok({ type: maybe.type, requestId });
-  }
-
   if (maybe.type === "dismiss_session_attention") {
     // Wire-required: dismissal is a command whose success/failure must be
     // correlated back to the exact caller, so an anonymous one is rejected.

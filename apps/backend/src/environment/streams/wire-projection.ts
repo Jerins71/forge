@@ -1,3 +1,6 @@
+import { Value } from '@sinclair/typebox/value';
+import { RecoverySnapshotSchema, type RecoverySnapshot } from '@forge/protocol/environment-v2';
+import type { SwarmManager } from '../../swarm/swarm-manager.js';
 import { TypeCompiler } from "@sinclair/typebox/compiler";
 import {
   DetailItemSchema, DetailStreamItemSchema, ShellStreamItemSchema, StreamCursorSchema,
@@ -10,8 +13,8 @@ const detailCheck = TypeCompiler.Compile(DetailStreamItemSchema);
 const shellCheck = TypeCompiler.Compile(ShellStreamItemSchema);
 const itemCheck = TypeCompiler.Compile(DetailItemSchema);
 const cursorCheck = TypeCompiler.Compile(StreamCursorSchema);
-const shellTypes = new Set(["project.upsert", "project.remove", "session.upsert", "session.remove"]);
-const detailTypes = new Set(["item.upsert", "worker.upsert", "worker.remove", "choice.upsert", "receipt.upsert", "session.upsert", "detail.reset"]);
+const shellTypes = new Set(["recovery.upsert", "project.upsert", "project.remove", "session.upsert", "session.remove"]);
+const detailTypes = new Set(["plan.upsert", "goal.upsert", "recovery.upsert", "item.upsert", "worker.upsert", "worker.remove", "choice.upsert", "receipt.upsert", "session.upsert", "detail.reset"]);
 
 /** Pure client-copyable decoder: an invalid known event must never become unknown. */
 export function decodeStreamItem(topic: "shell", value: unknown): ShellStreamItem | UnknownStreamItem;
@@ -45,4 +48,12 @@ export function projectDetailItem(item: DetailItem, maxBytes = EVENT_BYTES - 204
     throw new StreamFault("PAYLOAD_TOO_LARGE", "Detail metadata exceeds the wire budget.");
   }
   return projected;
+}
+
+export function recoveryProjection(swarm: Pick<SwarmManager, 'getRestartRecoverySnapshot'>): RecoverySnapshot | null {
+  const snapshot = swarm.getRestartRecoverySnapshot();
+  if (!snapshot) return null;
+  const result = { ...snapshot, recoveryId: snapshot.bootId };
+  if (!Value.Check(RecoverySnapshotSchema, result)) throw new StreamFault('PAYLOAD_TOO_LARGE', 'Recovery presentation exceeds its bounds');
+  return result;
 }

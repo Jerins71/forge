@@ -8,7 +8,6 @@ import type {
   ProjectAgentInfo,
   ProjectAgentShareEligibleTarget,
   ProjectAgentShareGrantInfo,
-  SessionGoalSnapshot,
   ConversationEntry,
   ConversationHistoryPageMetadata,
   SessionAttentionUpdateEvent,
@@ -105,7 +104,6 @@ export type WsRequestResultMap = {
   clear_session: SessionActionResult
   dismiss_session_attention: SessionAttentionUpdateEvent
   subscribe_inventory: InventorySnapshotEvent
-  session_goal_control: SessionGoalSnapshot
   rename_session: SessionActionResult
   pin_session: { pinnedAt: string | null }
 

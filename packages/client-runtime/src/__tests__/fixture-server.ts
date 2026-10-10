@@ -196,6 +196,7 @@ export async function startFixtureServer(index = 0) {
         method === 'shell.subscribe' ||
         method === 'session.subscribe' ||
         method === 'legacy.session.subscribe' ||
+        method === 'session.features.subscribe' ||
         method === 'browser.host.attach'
       ) {
         const subscriptionId = `s${++nextSub}`
@@ -205,7 +206,7 @@ export async function startFixtureServer(index = 0) {
           sessionId: (input as { sessionId?: string }).sessionId,
         })
         result({ subscriptionId })
-        if (method === 'legacy.session.subscribe') return
+        if (method === 'legacy.session.subscribe' || method === 'session.features.subscribe') return
         if (method === 'browser.host.attach') {
           send(socket, { type: 'stream', subscriptionId, item: { kind: 'attached' } })
           return

@@ -703,11 +703,13 @@ export function createFeatureClients(
       },
     },
     sessions: {
-      compact: async (agentId, input = {}, signal) => {
-        await send('POST', agentPath(agentId, 'compact'), input, signal)
+      compact: async (agentId, input = {}, _signal) => {
+        const receipt = await rpc.request('session.compact', { commandId: crypto.randomUUID(), sessionId: id(agentId), mode: 'manual', ...input })
+        if (receipt.state !== 'succeeded') throw new Error(receipt.error?.message ?? 'Compaction outcome is unknown')
       },
-      smartCompact: async (agentId, signal) => {
-        await send('POST', agentPath(agentId, 'smart-compact'), {}, signal)
+      smartCompact: async (agentId, _signal) => {
+        const receipt = await rpc.request('session.compact', { commandId: crypto.randomUUID(), sessionId: id(agentId), mode: 'smart' })
+        if (receipt.state !== 'succeeded') throw new Error(receipt.error?.message ?? 'Compaction outcome is unknown')
       },
       systemPrompt: (agentId, signal) =>
         json(agentPath(agentId, 'system-prompt'), { signal }),

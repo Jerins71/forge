@@ -23,17 +23,16 @@ export interface CodexPendingElicitation {
   title?: string;
   message: string;
   fields?: CodexElicitationField[];
-  /** Safe normalized origin shown when a live URL is no longer available. */
+  /** Safe normalized origin; the full URL stays in the private pending owner. */
   urlOrigin?: string;
   persistScopes: CodexElicitationPersistScope[];
 }
 
-/** Full URL is only carried on the initial live event; never bootstrap it. */
-export interface CodexLiveElicitation extends CodexPendingElicitation {
-  url?: string;
-}
+/** Live events and reconnect inventories share the same public metadata. */
+export type CodexLiveElicitation = CodexPendingElicitation;
 
-interface Pending extends CodexLiveElicitation {
+interface Pending extends CodexPendingElicitation {
+  url?: string;
   resolve: (response: Record<string, unknown>) => void;
   timeout: ReturnType<typeof setTimeout>;
 }
@@ -78,7 +77,7 @@ export class CodexElicitationBroker {
       const timeout = setTimeout(() => this.finish(elicitationId, { action: "cancel" }), this.timeoutMs);
       const pending: Pending = { ...parsed, elicitationId, managerAgentId: active.managerAgentId, sidecarAgentId: active.sidecarAgentId, resolve, timeout };
       this.pending.set(elicitationId, pending);
-      this.options.emit(liveRequest(pending));
+      this.options.emit(publicRequest(pending));
     });
   }
 
@@ -114,6 +113,14 @@ export class CodexElicitationBroker {
     for (const pending of [...this.pending.values()]) this.finish(pending.elicitationId, { action: "cancel" });
   }
 
+  /** Private, nonpersistent value read. Pending occurrence identity is the
+   * generation fence; resolved or recycled continuations cannot disclose it. */
+  readUrl(input: { managerAgentId: string; elicitationId: string; generation: string }): string | undefined {
+    const pending = this.pending.get(input.elicitationId);
+    if (!pending || pending.managerAgentId !== input.managerAgentId || pending.elicitationId !== input.generation || pending.mode !== "url") return;
+    return pending.url;
+  }
+
   getPendingForManager(managerAgentId: string): CodexPendingElicitation[] {
     return [...this.pending.values()].filter((item) => item.managerAgentId === managerAgentId).map(publicRequest);
   }
@@ -128,7 +135,7 @@ export class CodexElicitationBroker {
   }
 }
 
-function parseElicitation(params: unknown): Omit<CodexLiveElicitation, "elicitationId" | "managerAgentId" | "sidecarAgentId"> | undefined {
+function parseElicitation(params: unknown): Omit<Pending, "elicitationId" | "managerAgentId" | "sidecarAgentId" | "resolve" | "timeout"> | undefined {
   if (!isRecord(params) || typeof params.threadId !== "string" || typeof params.turnId !== "string" || typeof params.message !== "string") return undefined;
   const mode = params.mode === "url" || typeof params.url === "string" ? "url" : "form";
   const url = mode === "url" ? parseUrl(params.url) : undefined;
@@ -181,10 +188,6 @@ function parsePersistScopes(meta: unknown): CodexElicitationPersistScope[] {
   const value = meta.persist;
   const values = Array.isArray(value) ? value : [value];
   return values.filter((item): item is CodexElicitationPersistScope => item === "session" || item === "always");
-}
-function liveRequest(pending: Pending): CodexLiveElicitation {
-  const { elicitationId, managerAgentId, sidecarAgentId, threadId, turnId, mode, title, message, fields, url, urlOrigin, persistScopes } = pending;
-  return { elicitationId, managerAgentId, sidecarAgentId, threadId, turnId, mode, ...(title ? { title } : {}), message, ...(fields ? { fields } : {}), ...(url ? { url } : {}), ...(urlOrigin ? { urlOrigin } : {}), persistScopes };
 }
 function publicRequest(pending: Pending | CodexPendingElicitation): CodexPendingElicitation {
   const { elicitationId, managerAgentId, sidecarAgentId, threadId, turnId, mode, title, message, fields, urlOrigin, persistScopes } = pending;

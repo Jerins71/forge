@@ -22,7 +22,6 @@ export interface SessionCommandRouteContext<Connection = WebSocket> {
   handleDeletedAgentSubscriptions: (deletedAgentIds: Set<string>) => void;
   unreadTracker?: UnreadTracker;
   broadcastUnreadCountUpdate?: (sessionAgentId: string, count: number) => void;
-  supportsGoalControlRequestId?: boolean;
 }
 
 export async function handleSessionCommand<Connection>(context: SessionCommandRouteContext<Connection>): Promise<boolean> {
@@ -36,7 +35,6 @@ export async function handleSessionCommand<Connection>(context: SessionCommandRo
     handleDeletedAgentSubscriptions,
     unreadTracker,
     broadcastUnreadCountUpdate,
-    supportsGoalControlRequestId = false,
   } = context;
 
   if (
@@ -47,7 +45,6 @@ export async function handleSessionCommand<Connection>(context: SessionCommandRo
     command.type !== "restore_session" &&
     command.type !== "delete_session" &&
     command.type !== "clear_session" &&
-    command.type !== "session_goal_control" &&
     command.type !== "rename_session" &&
     command.type !== "pin_session" &&
     command.type !== "fork_session"
@@ -61,9 +58,7 @@ export async function handleSessionCommand<Connection>(context: SessionCommandRo
       type: "error",
       code: "UNKNOWN_AGENT",
       message: `Agent ${subscribedAgentId} does not exist.`,
-      requestId: command.type === "session_goal_control" && !supportsGoalControlRequestId
-        ? undefined
-        : "requestId" in command ? command.requestId : undefined
+      requestId: "requestId" in command ? command.requestId : undefined
     });
     return true;
   }
@@ -276,45 +271,6 @@ export async function handleSessionCommand<Connection>(context: SessionCommandRo
       });
     }
 
-    return true;
-  }
-
-  if (command.type === "session_goal_control") {
-    const responseRequestId = supportsGoalControlRequestId ? command.requestId : undefined;
-    try {
-      requireNonSystemSessionProfile(
-        command.agentId,
-        swarmManager.listProfiles(),
-        (agentId) => swarmManager.getAgent(agentId),
-      );
-      // Capture the origin-scoped response context before control yields. Subscription and
-      // capability state may change on this socket while the domain operation is in flight.
-      const responseContext = responseRequestId === undefined
-        ? undefined
-        : {
-            socket,
-            requestId: responseRequestId,
-            sessionAgentId: command.agentId,
-            profileId: resolveSessionProfileId(swarmManager, command.agentId),
-          };
-      const snapshot = await swarmManager.controlSessionGoal(command.agentId, command);
-      if (responseContext) {
-        send(responseContext.socket, {
-          type: "session_goal_snapshot",
-          sessionAgentId: responseContext.sessionAgentId,
-          profileId: responseContext.profileId,
-          ...snapshot,
-          requestId: responseContext.requestId,
-        });
-      }
-    } catch (error) {
-      send(socket, {
-        type: "error",
-        code: "SESSION_GOAL_CONTROL_FAILED",
-        message: error instanceof Error ? error.message : String(error),
-        ...(responseRequestId === undefined ? {} : { requestId: responseRequestId }),
-      });
-    }
     return true;
   }
 

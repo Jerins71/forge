@@ -28,6 +28,8 @@ import { awaitLegacyReceipt, legacyCommandId } from "./rpc/legacy-builder-adapte
 import { ControlError } from "../environment/control/command-service.js";
 import { StreamFault } from "../environment/streams/stream-budget.js";
 
+import { createDetailFeatureRpc } from "./rpc/detail-feature-rpc.js";
+import type { CommandReceipt } from "@forge/protocol/environment-v2";
 import { admitLifecycleCommand } from "./rpc/lifecycle-command-admission.js";
 
 export class CliWsHandler {
@@ -293,15 +295,11 @@ export class CliWsHandler {
       case "compact_session": {
         const session = this.requireCliSession(command.agentId);
         const customInstructions = normalizeCliCustomInstructions(command.customInstructions);
-        try {
-          await this.swarmManager.compactAgentContext(command.agentId, {
-            customInstructions,
-            sourceContext: { channel: "cli", messageId: command.requestId },
-            trigger: "cli",
-          });
-        } catch (error) {
-          throw mapCliCompactionError(error, "compact", "agentId");
-        }
+        const { control, principal } = this.requireControl(socket);
+        const receipt = await createDetailFeatureRpc({ swarmManager: this.swarmManager, control, compactionSource: "cli" }).execute(principal, "session.compact", {
+          commandId: legacyCommandId(principal, "session.compact", command.requestId), sessionId: command.agentId, mode: "manual", customInstructions,
+        }) as CommandReceipt;
+        if (receipt.state !== "succeeded") throw new ControlError("CONFLICT", "Compaction outcome is unknown; inspect the command receipt before a new request");
         this.sendRequestSuccess(socket, command, buildCliSessionCompactionResult({
           action: "compact",
           session,
@@ -314,16 +312,12 @@ export class CliWsHandler {
       case "smart_compact_session": {
         const session = this.requireCliSession(command.agentId);
         const customInstructions = normalizeCliCustomInstructions(command.customInstructions);
-        let smartResult: SmartCompactResult;
-        try {
-          smartResult = await this.swarmManager.smartCompactAgentContext(command.agentId, {
-            customInstructions,
-            sourceContext: { channel: "cli", messageId: command.requestId },
-            trigger: "cli",
-          });
-        } catch (error) {
-          throw mapCliCompactionError(error, "smart_compact", "agentId");
-        }
+        const { control, principal } = this.requireControl(socket);
+        const receipt = await createDetailFeatureRpc({ swarmManager: this.swarmManager, control, compactionSource: "cli" }).execute(principal, "session.compact", {
+          commandId: legacyCommandId(principal, "session.compact", command.requestId), sessionId: command.agentId, mode: "smart", customInstructions,
+        }) as CommandReceipt;
+        if (receipt.state !== "succeeded") throw new ControlError("CONFLICT", "Compaction outcome is unknown; inspect the command receipt before a new request");
+        const smartResult = receipt.result as SmartCompactResult;
         const blockerError = mapCliSmartCompactionResultBlocker(smartResult, "agentId");
         if (blockerError) {
           throw blockerError;
@@ -924,16 +918,6 @@ function mapCliSmartCompactionResultBlocker(result: SmartCompactResult, field: s
   }
 
   return undefined;
-}
-
-function mapCliCompactionError(error: unknown, action: "compact" | "smart_compact", field: string): CliCommandError {
-  const message = error instanceof Error ? error.message : String(error);
-  const classified = classifyCompactionErrorMessage(message);
-  if (classified.status !== 500) {
-    return buildCliCompactionError(classified.code, message, classified.status, field);
-  }
-
-  return new CliCommandError(`${action}_failed`, message, 500);
 }
 
 function buildCliCompactionError(code: string, message: string, status: number, field: string): CliCommandError {
