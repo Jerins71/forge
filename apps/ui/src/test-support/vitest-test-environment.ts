@@ -1,3 +1,4 @@
+import '../../../../scripts/test-installation-state.mjs'
 /**
  * Vitest's builtin jsdom environment copies window keys onto globalThis only
  * when they are absent (or listed in its allowlist). Node 26 experimental Web

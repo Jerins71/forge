@@ -59,7 +59,7 @@ await saveSharedSpecialist(config.paths.dataDir, 'fixture-worker', {
   provider: 'codex-native', modelId: 'gpt-6-sol', reasoningLevel: 'high',
   promptBody: 'Return the synthetic fixture worker result.',
 });
-lifecycle.server = await startServer({ config, environmentIdentity: { installationStateDir: process.env.FORGE_E2E_INSTALLATION_STATE, label: fixture.instanceId }, onReady: ({ port, environment }) => {
+lifecycle.server = await startServer({ config, environmentIdentity: { label: fixture.instanceId }, onReady: ({ port, environment }) => {
   if (process.connected) process.send?.({ type: 'ready', port, dataDir: config.paths.dataDir, environment }, () => {});
 } });
 installEnvironmentParentBootstrap({ authorizedPhysicalParent, createGrant: () => lifecycle.server!.createBootstrapGrant() });

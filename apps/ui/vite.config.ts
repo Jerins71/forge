@@ -59,7 +59,7 @@ const config = defineConfig(({ mode }) => {
     },
     resolve: {
       alias: [
-        ...(process.env.VITE_FORGE_E2E_PROFILE === '1' ? [{ find: /^react-dom\/client$/, replacement: 'react-dom/profiling' }] : []),
+        ...((process.env.VITE_FORGE_E2E_PROFILE === '1' || process.env.VITE_FORGE_E2E_PLATFORM === '1') ? [{ find: /^react-dom\/client$/, replacement: 'react-dom/profiling' }] : []),
         { find: /^@\//, replacement: `${uiSourceDir}/` },
         { find: /^@forge\/protocol\/environment-v2$/, replacement: resolve(uiRootDir, '../../packages/protocol/src/environment-v2.ts') },
         { find: /^@forge\/protocol$/, replacement: protocolSourceEntry },

@@ -178,7 +178,7 @@ export async function launchFleet(options: { environments?: number; out?: string
       await command(['add', '.'], checkout, env);
       await command(['-c', 'user.name=Forge Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', `Mark ${name}`], checkout, env);
       const childEnv = { ...env, FORGE_DATA_DIR: dataDir, FORGE_HOST: '127.0.0.1', FORGE_PORT: '0',
-        FORGE_E2E_CHECKOUT: checkout, FORGE_E2E_INSTALLATION_STATE: installationStateDir, FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: '1', FORGE_ALLOWED_CLIENT_ORIGINS: `app://forge,http://127.0.0.1:${uiPort}`, CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs') };
+        FORGE_E2E_CHECKOUT: checkout, FORGE_INSTALLATION_STATE_DIR: installationStateDir, FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: '1', FORGE_ALLOWED_CLIENT_ORIGINS: `app://forge,http://127.0.0.1:${uiPort}`, CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs') };
       const entry = join(repositoryRoot, 'scripts/environment-e2e/fixtures/backend-process.ts');
       const args = entry.endsWith('.ts') ? ['--expose-gc', '--import', backendRequire.resolve('tsx'), entry] : ['--expose-gc', entry];
       const startEnvironment = async (): Promise<EnvironmentFixture> => {

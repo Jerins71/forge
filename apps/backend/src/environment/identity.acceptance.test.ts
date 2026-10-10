@@ -1,13 +1,15 @@
-import { mkdtemp, cp, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, cp, readFile, writeFile, rm, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { loadEnvironmentIdentity, recoverEnvironmentIdentity } from "./identity.js";
 import { createExposurePolicy, enableTailscaleServe, disableOwnedTailscaleServe } from "./exposure-policy.js";
 import { applyAccessMigrations } from "./access/access-migrations.js";
 import { loadConfiguredSqliteDatabaseConstructor } from "../sqlite-database-loader.js";
+import { getHostInstallationStateDir } from "../swarm/storage/data-paths.js";
 let root: string;
 afterEach(async () => {
+  vi.unstubAllEnvs();
   if (root) await rm(root, { recursive: true, force: true });
 });
 it("persists identity across restart, blocks a copied root, rekeys without rewriting content, and adopts an intentional move", async () => {
@@ -87,4 +89,17 @@ it("tracks only an absent Tailscale root rule and disables that exact owned path
   const before = calls.length;
   await disableOwnedTailscaleServe({ ownershipFile, run });
   expect(calls).toHaveLength(before);
+});
+
+it("persists and reloads default identity registration only in the explicit isolated installation root", async () => {
+  root = await mkdtemp(join(tmpdir(), "forge-identity-default-"));
+  const installation = join(root, "installation");
+  vi.stubEnv("FORGE_INSTALLATION_STATE_DIR", installation);
+  // Assert isolation before calling the writer, so the red test never touches home.
+  expect(getHostInstallationStateDir()).toBe(installation);
+  const dataDir = join(root, "data");
+  const first = await loadEnvironmentIdentity({ dataDir });
+  expect((await loadEnvironmentIdentity({ dataDir })).file).toEqual(first.file);
+  const registry = JSON.parse(await readFile(join(installation, "registry.json"), "utf8"));
+  expect(registry.instances).toEqual({ [await realpath(dataDir)]: first.file.instanceNonce });
 });
