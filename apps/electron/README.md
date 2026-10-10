@@ -250,7 +250,7 @@ The packaging pipeline:
 
 1. Clears `apps/electron/release/` so stale installers, blockmaps, and unpacked directories do not leak into the next validation/upload pass
 2. Clears `apps/ui/.output/` so the packaged renderer always starts from a fresh UI build output
-3. Builds `@forge/protocol`, `@forge/backend`, `@forge/ui`, and the Electron main process. Stream Deck build, validation, and packaging run only when `FORGE_STREAM_DECK_SETUP_ENABLED=true`
+3. Builds `@forge/protocol`, then `@forge/client-runtime`, then the backend, UI, and Electron main process. Stream Deck build, validation, and packaging run only when `FORGE_STREAM_DECK_SETUP_ENABLED=true`
 4. Stages backend runtime assets into `apps/electron/.stage/backend/`
 5. Stages renderer assets into `apps/electron/.stage/ui/`, then validates that every asset referenced by the staged `index.html` actually exists in the staged `assets/` directory before packaging continues
 6. Builds `@forge/cli` and stages the bundled CLI entrypoint into `apps/electron/.stage/cli/cli.js`
