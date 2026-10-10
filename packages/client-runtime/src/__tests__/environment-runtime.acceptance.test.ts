@@ -631,3 +631,19 @@ describe('environment runtime acceptance', () => {
     expect(await persistence.loadShell(client.environmentId)).toBeNull()
   })
 })
+it('refreshes a verified managed endpoint without replacing its client or deleting pending/cache state', async () => {
+  const purge = {deleteShell:0,deleteCredentials:0}
+  const persistence=createMemoryPersistence(), credentials=createMemoryCredentialStore()
+  persistence.deleteShell=async()=>{purge.deleteShell++}; credentials.delete=async()=>{purge.deleteCredentials++}
+  const {servers:[a],registry}=await fleet(1,{persistence,credentials})
+  await registry.start(); await online(registry,a.seed.entry.environmentId)
+  const client=registry.get(a.seed.entry.environmentId)
+  const b=await startFixtureServer(0); cleanups.push(()=>b.close())
+  await registry.refreshManagedEndpoint(a.seed.entry.environmentId,b.seed.entry.baseUrl)
+  expect(registry.get(a.seed.entry.environmentId)).toBe(client)
+  expect(purge).toEqual({deleteShell:0,deleteCredentials:0})
+  await online(registry,a.seed.entry.environmentId)
+  const alien=await startFixtureServer(1); cleanups.push(()=>alien.close())
+  await expect(registry.refreshManagedEndpoint(a.seed.entry.environmentId,alien.seed.entry.baseUrl)).rejects.toMatchObject({code:'IDENTITY_MISMATCH'})
+  expect(registry.catalog.getSnapshot().get(a.seed.entry.environmentId)?.baseUrl).toBe(b.seed.entry.baseUrl)
+})

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Loader2, Monitor, Pencil, RotateCw, Server, Trash2, X } from 'lucide-react'
+import { ArrowUpCircle, Check, Loader2, Monitor, Pencil, RotateCw, Server, Trash2, Wrench, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
@@ -21,6 +21,7 @@ import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 import { useEnvironmentSelector } from '@/hooks/use-environment-selector'
 import { environmentLabel, hostOf, selectCachedAt, selectProjectCount, selectSessionCount } from './environment-runtime'
 import { formatAge } from './environment-status'
+import { useManagedHosts } from '@/lib/managed-hosts'
 
 export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
   const registry = useEnvironmentRegistry()
@@ -37,6 +38,14 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  const { bridge: managedBridge, statuses: managedStatuses } = useManagedHosts()
+  const managed = managedStatuses.find((candidate) => candidate.environmentId === entry.environmentId) ?? null
+  const managedAction = async (action: 'repair' | 'update') => {
+    if (!managedBridge || !managed) return
+    const result = await managedBridge[action](managed.hostAlias)
+    if (!result.ok) throw new Error(result.error.message)
+  }
+  const updateAvailable = Boolean(managed?.desiredVersion && managed.desiredVersion !== managed.installedVersion)
 
   const run = async (action: string, task: () => Promise<void>) => {
     setBusy(action)
@@ -112,6 +121,11 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
             </span>
             <span className="truncate font-mono text-[11.5px]">{hostOf(entry.baseUrl)}</span>
             {descriptor ? <span className="font-mono text-[11.5px]">{descriptor.platform.os} · Forge {descriptor.forgeVersion}</span> : null}
+            {managed ? (
+              <span title={managed.message ?? undefined}>
+                Managed over SSH · {managed.hostAlias}{managed.phase !== 'ready' ? ` · ${managed.phase.replace('-', ' ')}` : ''}
+              </span>
+            ) : null}
             {entry.enabled ? (
               <span className="tabular-nums">
                 {projectCount} projects · {sessionCount} sessions
@@ -121,6 +135,18 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {managed ? (
+            <>
+              {updateAvailable ? (
+                <Button size="sm" variant="ghost" className="gap-1" disabled={busy !== null} onClick={() => void run('update', () => managedAction('update'))}>
+                  {busy === 'update' ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUpCircle className="size-3.5" />} Update to {managed.desiredVersion}
+                </Button>
+              ) : null}
+              <Button size="sm" variant="ghost" className="gap-1" disabled={busy !== null} onClick={() => void run('repair', () => managedAction('repair'))}>
+                {busy === 'repair' ? <Loader2 className="size-3.5 animate-spin" /> : <Wrench className="size-3.5" />} Repair
+              </Button>
+            </>
+          ) : null}
           {entry.enabled && status.kind !== 'online' && status.kind !== 'connecting' ? (
             <Button
               size="sm"
@@ -165,7 +191,14 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => void run('remove', () => registry.remove(entry.environmentId))}
+              onClick={() => void run('remove', async () => {
+                // A managed host keeps running; only this Desktop's connection and device credentials go.
+                if (managedBridge && managed) {
+                  const result = await managedBridge.removeConnection(managed.hostAlias)
+                  if (!result.ok) throw new Error(result.error.message)
+                }
+                await registry.remove(entry.environmentId)
+              })}
             >
               Remove
             </AlertDialogAction>

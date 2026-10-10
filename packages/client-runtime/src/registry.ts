@@ -9,6 +9,7 @@ import { RuntimeEnvironmentClient } from './environment-client.js'
 import { LogicalProjects } from './logical-projects.js'
 import { normalizeBaseUrl } from './connection/authenticated-http.js'
 import { pairEnvironment } from './pairing.js'
+import { AuthenticatedHttp } from './connection/authenticated-http.js'
 export function createEnvironmentRegistry(
   ports: RuntimePorts,
 ): EnvironmentRegistry {
@@ -117,6 +118,30 @@ export function createEnvironmentRegistry(
         credentialRef: ports.platform ? result.environment.environmentId : null,
       })
       return result
+    },
+    refreshManagedEndpoint: async (id, baseUrl) => {
+      const client = get(id)
+      const candidate = { ...client.entry, baseUrl: normalizeBaseUrl(baseUrl) }
+      if (!candidate.baseUrl.startsWith('http://127.0.0.1:')) throw new Error('Managed endpoint must be loopback')
+      await new AuthenticatedHttp(candidate, ports).publicDescriptor()
+      if (disposed || get(id) !== client) throw new Error('Environment changed during endpoint verification')
+      if (client.entry.baseUrl === candidate.baseUrl) return
+      const previous = client.entry.baseUrl
+      client.supervisor.stop()
+      client.entry.baseUrl = candidate.baseUrl
+      const next = new Map(catalog.getSnapshot())
+      next.set(id, { ...client.entry })
+      catalog.set(next, [id])
+      try {
+        await persist()
+      } catch (error) {
+        client.entry.baseUrl = previous
+        next.set(id, { ...client.entry })
+        catalog.set(next, [id])
+        throw error
+      } finally {
+        if (started && client.entry.enabled) client.supervisor.start()
+      }
     },
     rename: async (id, label) => {
       const entry = get(id).entry

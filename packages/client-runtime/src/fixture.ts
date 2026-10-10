@@ -359,6 +359,13 @@ export function createFixtureEnvironmentRegistry(
       catalog.set(m)
       regroup()
     },
+    refreshManagedEndpoint: async (id, baseUrl) => {
+      const entry = catalog.getSnapshot().get(id)
+      if (!entry) throw new Error('Environment is not registered')
+      const next = new Map(catalog.getSnapshot())
+      next.set(id, { ...entry, baseUrl })
+      catalog.set(next)
+    },
     pair: async (input): Promise<PairingExchangeResult> => {
       const template =
         seeds.find((s) => s.entry.baseUrl === input.baseUrl) ??
