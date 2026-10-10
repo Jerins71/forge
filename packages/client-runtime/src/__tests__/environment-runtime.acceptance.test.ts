@@ -664,3 +664,21 @@ it('refreshes a verified managed endpoint without replacing its client or deleti
   await expect(registry.refreshManagedEndpoint(a.seed.entry.environmentId,alien.seed.entry.baseUrl)).rejects.toMatchObject({code:'IDENTITY_MISMATCH'})
   expect(registry.catalog.getSnapshot().get(a.seed.entry.environmentId)?.baseUrl).toBe(b.seed.entry.baseUrl)
 })
+
+it('gates native session state controls when a paired environment has not advertised them', async () => {
+  const { servers: [server], registry } = await fleet(1)
+  server.descriptor = { ...server.seed.descriptor, capabilities: { ...server.seed.descriptor.capabilities, sessionState: false } }
+  await registry.start(); await online(registry, server.seed.entry.environmentId)
+  const client = registry.get(server.seed.entry.environmentId)
+  await expect(client.request('session.update', { commandId: crypto.randomUUID(), sessionId: 'session-1', pinned: true })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
+  expect(server.inputs.some(i => i.method === 'session.update')).toBe(false)
+})
+
+it('routes project unread clearing under the session state capability independently of project policy', async () => {
+  const { servers: [server], registry } = await fleet(1)
+  server.descriptor = { ...server.seed.descriptor, capabilities: { ...server.seed.descriptor.capabilities, sessionState: true, projectPolicy: false } }
+  await registry.start(); await online(registry, server.seed.entry.environmentId)
+  const client = registry.get(server.seed.entry.environmentId)
+  await expect(client.request('project.readState.clear', { commandId: crypto.randomUUID(), projectId: 'forge' })).resolves.toMatchObject({ state: 'succeeded' })
+  expect(server.inputs.some(i => i.method === 'project.readState.clear')).toBe(true)
+})

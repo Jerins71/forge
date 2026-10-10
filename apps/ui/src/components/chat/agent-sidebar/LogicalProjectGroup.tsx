@@ -1,5 +1,5 @@
-import { Fragment, memo, useCallback, useMemo } from 'react'
-import { ChevronDown, ChevronRight, ChevronUp, Monitor, MoreHorizontal, Plus, Server } from 'lucide-react'
+import { Fragment, memo, useCallback, useMemo, useState } from 'react'
+import { ChevronDown, ChevronRight, ChevronUp, Monitor, MoreHorizontal, Plus, Server, Pin, Edit3, EyeOff } from 'lucide-react'
 import type { ProjectRef, SessionRef, SessionSummary } from '@forge/protocol/environment-v2'
 import type { LogicalProjectGroup as LogicalProjectGroupModel, ShellState } from '@forge/client-runtime'
 import {
@@ -15,6 +15,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useEnvironmentSelector, useSelectorStore } from '@/hooks/use-environment-selector'
 import { useEnvironmentRegistry, usePrimaryEnvironmentId } from '@/lib/origin-store/environment-provider'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { RenameSessionDialog } from './dialogs/RenameSessionDialog'
 import { cn } from '@/lib/utils'
 import { EnvironmentBadge } from './EnvironmentStatusChip'
 import { useEnvironmentLabel, useEnvironmentStatus } from './hooks/useEnvironmentStatus'
@@ -28,6 +30,9 @@ export interface EnvironmentSessionNavigation {
   onSelectSession: (session: SessionRef) => void
   /** Opens the launch composer for this logical project; Run on chooses the member. */
   onNewSession?: (groupKey: string) => void
+  onRenameSession?: (session: SessionRef, title: string) => Promise<void>
+  onPinSession?: (session: SessionRef, pinned: boolean) => Promise<void>
+  onMarkUnread?: (session: SessionRef) => void
 }
 
 /** Machines beyond this many collapse into a "+N" count. */
@@ -178,7 +183,7 @@ export const RemoteProjectGroup = memo(function RemoteProjectGroup({
   if (!group) return null
   const { visible, hiddenCount } = limitVisibleSessions(
     sessions,
-    showAllSessions ? Infinity : visibleSessionLimit,
+    showAllSessions ? Infinity : visibleSessionLimit + sessions.filter(session => session.pinnedAt).length,
     (entry) => isSelectedRemoteSession(entry, navigation.selectedSession),
   )
   return (
@@ -242,6 +247,7 @@ export const RemoteProjectGroup = memo(function RemoteProjectGroup({
                 roomsV2={roomsV2}
                 selected={isSelectedRemoteSession(entry, navigation.selectedSession)}
                 onSelect={navigation.onSelectSession}
+                navigation={navigation}
               />
             ))}
           </ul>
@@ -304,13 +310,21 @@ export const EnvironmentSessionRow = memo(function EnvironmentSessionRow({
   roomsV2 = false,
   selected,
   onSelect,
+  navigation,
 }: {
   environmentId: string
   sessionId: string
   roomsV2?: boolean
   selected: boolean
   onSelect: (session: SessionRef) => void
+  navigation?: EnvironmentSessionNavigation
 }) {
+  const [renaming, setRenaming] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const run = (operation: Promise<void>) => {
+    setError(null)
+    void operation.then(() => setRenaming(false)).catch(e => setError(e instanceof Error ? e.message : 'Session update failed'))
+  }
   recordEnvironmentRow(environmentId, sessionId)
   const label = useEnvironmentLabel(environmentId)
   const sessionKeys = useMemo(() => [`session:${sessionId}`], [sessionId])
@@ -320,39 +334,51 @@ export const EnvironmentSessionRow = memo(function EnvironmentSessionRow({
   const needsAttention = session.attention !== 'none' && session.attention !== 'result'
   return (
     <li>
-      <div className={cn(
-        roomsV2 ? 'sidebar-room-row' : 'relative flex items-center rounded-md transition-colors',
-        roomsV2
-          ? selected ? 'sidebar-room-row-selected' : undefined
-          : selected
-            ? 'bg-foreground/[0.07] text-sidebar-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
-            : 'text-sidebar-foreground/90 hover:bg-foreground/[0.04]',
-      )}>
-        <button
-          type="button"
-          data-session-ref={`${environmentId}:${sessionId}`}
-          aria-current={selected ? 'true' : undefined}
-          onClick={() => onSelect({ environmentId, sessionId })}
-          className={cn(
-            'flex min-w-0 flex-1 items-center gap-1.5 text-left',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-            roomsV2 ? 'gap-2 py-1.5 pl-3 pr-1.5 text-[13px] leading-[18px]' : 'py-1.5 pl-5 pr-1.5 text-sm',
-          )}
-        >
-          <span
-            className={cn(
-              'size-[7px] shrink-0 rounded-full',
-              needsAttention ? 'bg-attention' : STATUS_TONE[session.status] ?? 'bg-foreground/20',
-            )}
-            aria-label={session.status}
-          />
-          <span className="min-w-0 flex-1 truncate">{session.title}</span>
-          {session.unread > 0 ? (
-            <span className="shrink-0 rounded-full bg-foreground/[0.08] px-1.5 font-mono text-[10px] leading-4 tabular-nums text-foreground/80">{session.unread}</span>
-          ) : null}
-          <EnvironmentBadge label={label} />
-        </button>
-      </div>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className={cn(
+            roomsV2 ? 'sidebar-room-row' : 'relative flex items-center rounded-md transition-colors',
+            roomsV2
+              ? selected ? 'sidebar-room-row-selected' : undefined
+              : selected
+                ? 'bg-foreground/[0.07] text-sidebar-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]'
+                : 'text-sidebar-foreground/90 hover:bg-foreground/[0.04]',
+          )}>
+            <button
+              type="button"
+              data-session-ref={`${environmentId}:${sessionId}`}
+              aria-current={selected ? 'true' : undefined}
+              onClick={() => onSelect({ environmentId, sessionId })}
+              className={cn(
+                'flex min-w-0 flex-1 items-center gap-1.5 text-left',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+                roomsV2 ? 'gap-2 py-1.5 pl-3 pr-1.5 text-[13px] leading-[18px]' : 'py-1.5 pl-5 pr-1.5 text-sm',
+              )}
+            >
+              <span
+                className={cn(
+                  'size-[7px] shrink-0 rounded-full',
+                  needsAttention ? 'bg-attention' : STATUS_TONE[session.status] ?? 'bg-foreground/20',
+                )}
+                aria-label={session.status}
+              />
+              <span className="min-w-0 flex-1 truncate">{session.title}</span>
+              {session.unread > 0 ? (
+                <span className="shrink-0 rounded-full bg-foreground/[0.08] px-1.5 font-mono text-[10px] leading-4 tabular-nums text-foreground/80">{session.unread}</span>
+              ) : null}
+              {session.pinnedAt ? <Pin className="size-3 shrink-0 text-muted-foreground" aria-label="Pinned" /> : null}
+              <EnvironmentBadge label={label} />
+            </button>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {navigation?.onRenameSession ? <ContextMenuItem onClick={() => { setError(null); setRenaming(true) }}><Edit3 className="mr-2 size-3.5" />Rename</ContextMenuItem> : null}
+          {navigation?.onPinSession ? <ContextMenuItem onClick={() => run(navigation.onPinSession!({ environmentId, sessionId }, !session.pinnedAt))}><Pin className="mr-2 size-3.5" />{session.pinnedAt ? 'Unpin' : 'Pin'}</ContextMenuItem> : null}
+          {navigation?.onMarkUnread ? <ContextMenuItem onClick={() => navigation.onMarkUnread!({ environmentId, sessionId })}><EyeOff className="mr-2 size-3.5" />Mark as unread</ContextMenuItem> : null}
+        </ContextMenuContent>
+      </ContextMenu>
+      {renaming ? <RenameSessionDialog agentId={sessionId} currentLabel={session.title} onConfirm={(_id, title) => run(navigation!.onRenameSession!({ environmentId, sessionId }, title))} onClose={() => setRenaming(false)} /> : null}
+      {error ? <p role="alert" className="px-3 text-xs text-danger">{error}</p> : null}
     </li>
   )
 })

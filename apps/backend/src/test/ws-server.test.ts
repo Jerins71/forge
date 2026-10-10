@@ -209,49 +209,10 @@ describe('SwarmWebSocketServer', () => {
     expect(resumed.type).toBe('session_resumed')
     expect((environment.database.prepare('SELECT desired_state FROM control_sessions WHERE session_id=?').get(sessionAgentId) as { desired_state: string }).desired_state).toBe('running')
 
-    client.send(
-      JSON.stringify({
-        type: 'rename_session',
-        agentId: sessionAgentId,
-        label: 'Renamed session',
-        requestId: 'rename-1',
-      }),
-    )
-
-    const renamed = await waitForEvent(
-      events,
-      (event) => event.type === 'session_renamed' && event.agentId === sessionAgentId && event.requestId === 'rename-1',
-    )
-    expect(renamed.type).toBe('session_renamed')
-    if (renamed.type === 'session_renamed') {
-      expect(renamed.label).toBe('Renamed session')
+    for (const type of ['rename_session', 'pin_session']) {
+      client.send(JSON.stringify({ type, agentId: sessionAgentId, label: 'Removed', pinned: true }));
+      await waitForEvent(events, event => event.type === 'error' && event.code === 'INVALID_COMMAND');
     }
-
-    client.send(
-      JSON.stringify({
-        type: 'pin_session',
-        agentId: sessionAgentId,
-        pinned: true,
-        requestId: 'pin-1',
-      }),
-    )
-
-    const pinned = await waitForEvent(
-      events,
-      (event) => event.type === 'session_pinned' && event.agentId === sessionAgentId && event.requestId === 'pin-1',
-    )
-    expect(pinned.type).toBe('session_pinned')
-    if (pinned.type === 'session_pinned') {
-      expect(pinned.pinned).toBe(true)
-      expect(typeof pinned.pinnedAt).toBe('string')
-    }
-
-    await waitForEvent(
-      events,
-      (event) =>
-        event.type === 'agents_snapshot' &&
-        event.agents.some((agent) => agent.agentId === sessionAgentId && typeof agent.pinnedAt === 'string'),
-    )
 
     client.send(
       JSON.stringify({

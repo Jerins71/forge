@@ -41,19 +41,11 @@ import {
   buildBrowserTabResizeCommand,
   buildChoiceCancelCommand,
   buildChoiceResponseCommand,
-  buildClearAllPinsCommand,
   buildCreateSessionCommand,
-  buildDismissSessionAttentionCommand,
   buildForkSessionCommand,
   buildGetConversationPageCommand,
   buildGetSessionWorkersCommand,
-  buildHydrateArchiveLastUsedCommand,
   buildKillAgentCommand,
-  buildMarkAllReadCommand,
-  buildMarkUnreadCommand,
-  buildPinMessageCommand,
-  buildPinSessionCommand,
-  buildRenameSessionCommand,
   buildSessionActionCommand,
   buildStopAllAgentsCommand,
   buildSubscribeCommand,
@@ -120,7 +112,6 @@ import type {
   ProjectAgentReferenceSavedResult,
   ProjectAgentSharingResult,
   ProjectAgentSharingUpdatedResult,
-  ArchiveLastUsedHydrationResult,
   ProfileArchiveResult,
   ProfileRestoreResult,
   SessionActionResult,
@@ -409,51 +400,34 @@ export class ManagerWsClient {
   }
 
   markUnread(agentId: string): void {
-    const current = this.state.unreadCounts[agentId] ?? 0
-    if (current === 0) {
-      this.updateState({
-        unreadCounts: { ...this.state.unreadCounts, [agentId]: 1 },
-      })
-    }
-    this.send(buildMarkUnreadCommand(agentId))
+    void this.sessionState('session.readState.set', { sessionId: agentId, read: false }).catch(error => this.reportSessionStateError(error))
   }
 
   markAllRead(profileId: string): void {
-    const nextUnread = { ...this.state.unreadCounts }
-    let changed = false
-    for (const agent of this.state.agents) {
-      if (agent.profileId === profileId && agent.role === 'manager' && nextUnread[agent.agentId]) {
-        delete nextUnread[agent.agentId]
-        changed = true
-      }
-    }
-    if (changed) {
-      this.updateState({ unreadCounts: nextUnread })
-    }
-    this.send(buildMarkAllReadCommand(profileId))
+    void this.sessionState('project.readState.clear', { projectId: profileId }).catch(error => this.reportSessionStateError(error))
   }
 
-  dismissSessionAttention(attentionIds: string[]): Promise<SessionAttentionUpdateEvent> {
-    if (!this.state.sessionAttentionAvailable) {
-      return Promise.reject(new Error('Session attention is not supported by this origin.'))
-    }
-    if (this.environmentClient) {
-      // Environment commands are session-addressed; any listed occurrence's session carries the batch.
-      const sessionId = Object.values(this.state.sessionAttentions).find((attention) => attentionIds.includes(attention.attentionId))?.sessionAgentId
-      if (!sessionId) return Promise.reject(new Error('Those attention items are no longer listed.'))
-      const requestId = crypto.randomUUID()
-      return sendEnvironmentCommand(this.environmentClient, buildDismissSessionAttentionCommand(attentionIds, requestId), crypto.randomUUID(), sessionId)
-        .then(({ events }) => {
-          const update = events.find((event): event is SessionAttentionUpdateEvent => (event as { type?: string }).type === 'session_attention_update')
-          if (!update) throw new Error('Could not clear attention.')
-          return update
-        })
-    }
-    assertConnectedSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest(
-      'dismiss_session_attention',
-      (requestId) => buildDismissSessionAttentionCommand(attentionIds, requestId),
-    )
+  async dismissSessionAttention(attentionIds: string[]): Promise<SessionAttentionUpdateEvent> {
+    await this.sessionState('session.attention.dismiss', { occurrenceIds: attentionIds })
+    // State comes from the authoritative shell. The return is a facade result,
+    // never applied as a competing optimistic attention reducer.
+    return { type: 'session_attention_update', revision: this.state.sessionAttentionRevision, changes: [] }
+  }
+
+  private reportSessionStateError(error: unknown): void {
+    this.updateState({ lastError: error instanceof Error ? error.message : 'Session state update failed' })
+  }
+
+  private async sessionState<M extends 'session.update' | 'session.message.pin' | 'session.pins.clear' | 'session.readState.set' | 'project.readState.clear' | 'session.attention.dismiss'>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<CommandReceipt> {
+    const client = this.environmentClient
+    if (!client?.descriptor()?.capabilities.sessionState) throw new Error('Update this environment to manage pins and read state')
+    const key = JSON.stringify([method, input])
+    const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
+    this.intentCommandIds.set(key, commandId)
+    const receipt = await client.request(method, { ...input, commandId } as RpcInput<M>)
+    this.intentCommandIds.delete(key)
+    if (receipt.state !== 'succeeded') throw new Error(receipt.error?.message ?? 'Session state update did not complete')
+    return receipt
   }
 
   resumeRestartRecovery(): void {
@@ -1009,11 +983,11 @@ export class ManagerWsClient {
   }
 
   pinMessage(agentId: string, messageId: string, pinned: boolean): void {
-    this.send(buildPinMessageCommand(agentId, messageId, pinned))
+    void this.sessionState('session.message.pin', { sessionId: agentId, itemId: messageId, pinned }).catch(error => this.reportSessionStateError(error))
   }
 
   clearAllPins(agentId: string): void {
-    this.send(buildClearAllPinsCommand(agentId))
+    void this.sessionState('session.pins.clear', { sessionId: agentId }).catch(error => this.reportSessionStateError(error))
   }
 
   deleteAgent(agentId: string): void {
@@ -1257,17 +1231,13 @@ export class ManagerWsClient {
   }
 
   async renameSession(agentId: string, label: string): Promise<SessionActionResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('rename_session', (requestId) =>
-      buildRenameSessionCommand(agentId, label, requestId),
-    )
+    await this.sessionState('session.update', { sessionId: agentId, title: label })
+    return { agentId }
   }
 
   async pinSession(agentId: string, pinned: boolean): Promise<{ pinnedAt: string | null }> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('pin_session', (requestId) =>
-      buildPinSessionCommand(agentId, pinned, requestId),
-    )
+    const receipt = await this.sessionState('session.update', { sessionId: agentId, pinned })
+    return { pinnedAt: receipt.result?.pinnedAt ?? null }
   }
 
   async renameProfile(profileId: string, displayName: string): Promise<{ profileId: string }> {
@@ -1287,13 +1257,6 @@ export class ManagerWsClient {
     const receipt = await this.policy('project.restore', { projectId: profileId })
     return { profileId, openAgentId: receipt.result?.sessionId ?? '' }
 
-  }
-
-  async hydrateArchiveLastUsed(): Promise<ArchiveLastUsedHydrationResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('hydrate_archive_last_used', (requestId) =>
-      buildHydrateArchiveLastUsedCommand(requestId),
-    )
   }
 
   async forkSession(
@@ -1767,14 +1730,6 @@ export class ManagerWsClient {
         messages: event.messages,
         page: event.page,
       })
-    }
-
-    if (
-      this.bootstrapBuffer.active
-      && event.type === 'session_attention_update'
-      && event.requestId
-    ) {
-      this.requestDispatcher.tracker.resolve('dismiss_session_attention', event.requestId, event)
     }
 
     if (this.bootstrapBuffer.active) {
@@ -2345,6 +2300,8 @@ export class ManagerWsClient {
     this.detailDetach?.()
     this.detailLease?.release()
     this.desiredAgentId = sessionId
+    if (this.environmentClient.deviceSession()?.scopes.includes('session:operate') && this.environmentClient.descriptor()?.capabilities.sessionState)
+      void this.sessionState('session.readState.set', { sessionId, read: true }).catch(error => this.reportSessionStateError(error))
     this.detailLease = this.environmentClient.acquireDetail(sessionId)
     const store = this.detailLease.store
     let projection: DetailState['projection'] = null

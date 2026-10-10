@@ -38,8 +38,6 @@ function uniqueErrorHints(errorHints: readonly WsRequestErrorHint[]): WsRequestE
   })
 }
 
-const RENAME_SESSION_CONTRACT = getWsRequestContract('rename_session')
-const PIN_SESSION_CONTRACT = getWsRequestContract('pin_session')
 
 const FORK_SESSION_CONTRACT = getWsRequestContract('fork_session')
 
@@ -51,8 +49,6 @@ const STOP_SESSION_CONTRACT = getWsRequestContract('stop_session')
 const RESUME_SESSION_CONTRACT = getWsRequestContract('resume_session')
 const DELETE_SESSION_CONTRACT = getWsRequestContract('delete_session')
 const LEGACY_POSITION_CONTRACT_TYPES = new Set<string>([
-  RENAME_SESSION_CONTRACT.commandType,
-  PIN_SESSION_CONTRACT.commandType,
   FORK_SESSION_CONTRACT.commandType,
   STOP_ALL_AGENTS_CONTRACT.commandType,
   CREATE_SESSION_CONTRACT.commandType,
@@ -65,14 +61,6 @@ const NON_LEGACY_POSITION_CONTRACTS = WS_REQUEST_CONTRACTS.filter(
   (contract) => !LEGACY_POSITION_CONTRACT_TYPES.has(contract.commandType),
 )
 
-const RENAME_SESSION_ERROR_HINTS = RENAME_SESSION_CONTRACT.errorCodeFragments.map((codeFragment) => ({
-  requestType: RENAME_SESSION_CONTRACT.commandType,
-  codeFragment,
-}))
-const PIN_SESSION_ERROR_HINTS = PIN_SESSION_CONTRACT.errorCodeFragments.map((codeFragment) => ({
-  requestType: PIN_SESSION_CONTRACT.commandType,
-  codeFragment,
-}))
 
 const FORK_SESSION_ERROR_HINTS = FORK_SESSION_CONTRACT.errorCodeFragments.map((codeFragment) => ({
   requestType: FORK_SESSION_CONTRACT.commandType,
@@ -112,8 +100,6 @@ export const WS_REQUEST_TYPES: WsRequestType[] = uniqueRequestTypes([
   RESUME_SESSION_CONTRACT.commandType,
   DELETE_SESSION_CONTRACT.commandType,
   CLEAR_SESSION_CONTRACT.commandType,
-  RENAME_SESSION_CONTRACT.commandType,
-  PIN_SESSION_CONTRACT.commandType,
   FORK_SESSION_CONTRACT.commandType,
   ...NON_LEGACY_POSITION_CONTRACTS.map((contract) => contract.commandType),
 ])
@@ -125,8 +111,6 @@ export const WS_REQUEST_ERROR_HINTS: WsRequestErrorHint[] = uniqueErrorHints([
   ...RESUME_SESSION_ERROR_HINTS,
   ...DELETE_SESSION_ERROR_HINTS,
   ...CLEAR_SESSION_ERROR_HINTS,
-  ...RENAME_SESSION_ERROR_HINTS,
-  ...PIN_SESSION_ERROR_HINTS,
   ...FORK_SESSION_ERROR_HINTS,
   ...NON_LEGACY_POSITION_CONTRACTS.flatMap((contract) =>
     contract.errorCodeFragments.map((codeFragment) => ({ requestType: contract.commandType, codeFragment })),

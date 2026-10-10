@@ -10,7 +10,6 @@ import type {
   ProjectAgentShareGrantInfo,
   ConversationEntry,
   ConversationHistoryPageMetadata,
-  SessionAttentionUpdateEvent,
   InventorySnapshotEvent,
 } from '@forge/protocol'
 import type { ManagerWsState } from '../ws-state'
@@ -48,7 +47,6 @@ export type SessionArchiveResult = { agentId: string; profileId: string; archive
 export type SessionRestoreResult = { agentId: string; profileId: string; openAgentId?: string }
 export type ProfileArchiveResult = { profileId: string; archivedAt: string }
 export type ProfileRestoreResult = { profileId: string; openAgentId: string }
-export type ArchiveLastUsedHydrationResult = { scannedSessionCount: number; hydratedSessionCount: number }
 export type SessionForkedResult = { sourceAgentId: string; newSessionAgent: AgentDescriptor }
 export type SessionWorkersResult = { sessionAgentId: string; workers: AgentDescriptor[] }
 export type ConversationPageResult = {
@@ -102,12 +100,8 @@ export type WsRequestResultMap = {
   restore_session: SessionRestoreResult
   delete_session: SessionActionResult
   clear_session: SessionActionResult
-  dismiss_session_attention: SessionAttentionUpdateEvent
   subscribe_inventory: InventorySnapshotEvent
-  rename_session: SessionActionResult
-  pin_session: { pinnedAt: string | null }
 
-  hydrate_archive_last_used: ArchiveLastUsedHydrationResult
   fork_session: SessionForkedResult
   get_session_workers: SessionWorkersResult
   get_conversation_page: ConversationPageResult

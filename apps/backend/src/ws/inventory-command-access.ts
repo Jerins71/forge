@@ -8,13 +8,7 @@ export function isInventoryCommandAllowed(command: ClientCommand): boolean {
   switch (command.type) {
     case "subscribe":
     case "subscribe_inventory":
-    case "dismiss_session_attention":
-    case "mark_unread":
-    case "mark_all_read":
     case "create_session":
-    case "hydrate_archive_last_used":
-    case "rename_session":
-    case "pin_session":
     case "archive_session":
     case "restore_session":
     case "delete_session":
