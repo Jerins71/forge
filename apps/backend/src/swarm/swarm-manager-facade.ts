@@ -118,6 +118,8 @@ import { normalizeOptionalAgentId } from "./swarm-manager-utils.js";
 import { SwarmManagerControlFacade } from "./swarm-manager-control-facade.js";
 
 export interface CreateManagerInput {
+  /** Backend control owner reserves project/default-session identity. */
+  controlCommandId?: string;
   secureSessionsEnabled?: boolean;
   name: string;
   cwd: string;

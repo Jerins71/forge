@@ -354,8 +354,15 @@ test('9.2.5/6 explicitly mounted three views share sockets, release streams, and
   await expect(page.getByRole('dialog')).toContainText('Session Audit')
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: /Session model:/ }).click()
-  await expect(page.getByRole('listbox', { name: 'Models' }).getByRole('option').first()).toBeVisible()
-  await page.keyboard.press('Escape')
+  const selectableModel = page.getByRole('listbox', { name: 'Models' }).locator('[role="option"][aria-disabled="false"]').first()
+  await expect(selectableModel).toBeVisible()
+  const policyStart = proxy.metrics().commandAttempts.length
+  await selectableModel.click()
+  await expect.poll(() => proxy.metrics().commandAttempts.slice(policyStart).filter(attempt => attempt.method === 'session.configure').length).toBe(1)
+  await page.getByRole('button', { name: /Session model:/ }).click()
+  await page.getByText('Use project default', { exact: true }).click()
+  await expect.poll(() => proxy.metrics().commandAttempts.slice(policyStart).filter(attempt => attempt.method === 'session.configure').length).toBe(2)
+  assertions.batch2Model = { environmentId: b.environmentId, sessionId, overrideAndInheritance: true, commands: proxy.metrics().commandAttempts.slice(policyStart) }
   await page.getByRole('button', { name: /^Terminal \(/ }).filter({ visible: true }).click()
   await expect.poll(() => featureResponses.some(response => response.environmentId === b.environmentId && response.path === '/api/terminals' && response.status === 201)).toBe(true)
   await page.waitForTimeout(250)

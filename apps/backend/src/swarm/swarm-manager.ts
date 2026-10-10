@@ -146,6 +146,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private readonly userMessageCoordinator: UserMessageCoordinator;
   private readonly sessionPlanCoordinator: SessionPlanCoordinator;
   private readonly compactionCoordinator: SwarmCompactionCoordinator;
+  installDescriptorPersistence(persistence: import("./agents/agent-descriptor-store.js").AgentDescriptorPersistence): void { this.descriptorStore.setPersistence(persistence); }
   private readonly descriptorStore: AgentDescriptorStore;
   private readonly descriptorStoreAdapter: DescriptorStoreAdapter;
   private readonly persistenceService: PersistenceService;

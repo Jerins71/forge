@@ -125,8 +125,8 @@ export function createShellStream(deps: StreamDependencies) {
           (SELECT COALESCE(SUM(length(CAST(summary_json AS BLOB))),0) FROM control_projects) +
           (SELECT COALESCE(SUM(length(CAST(summary_json AS BLOB))),0) FROM control_sessions) bytes`).get() as { bytes: number };
         if (rawBytes.bytes > LEASE_BYTES) throw new StreamFault("PAYLOAD_TOO_LARGE", "Shell catalog exceeds snapshot budget.");
-        const projects = (deps.database.prepare("SELECT summary_json FROM control_projects ORDER BY project_id").all() as { summary_json: string }[]).map(row => JSON.parse(row.summary_json) as ProjectSummary);
-        const sessions = (deps.database.prepare("SELECT summary_json FROM control_sessions ORDER BY session_id").all() as { summary_json: string }[]).map(row => JSON.parse(row.summary_json) as SessionSummary);
+        const projects = (deps.database.prepare("SELECT summary_json FROM control_projects WHERE deleted=0 AND COALESCE(json_extract(profile_json,'$.profileType'),'user')!='system' ORDER BY project_id").all() as { summary_json: string }[]).map(row => JSON.parse(row.summary_json) as ProjectSummary);
+        const sessions = (deps.database.prepare("SELECT summary_json FROM control_sessions WHERE deleted=0 AND project_id NOT IN (SELECT project_id FROM control_projects WHERE json_extract(profile_json,'$.profileType')='system') ORDER BY session_id").all() as { summary_json: string }[]).map(row => JSON.parse(row.summary_json) as SessionSummary);
         const pages: Lease["pages"] = [];
         let p = 0;
         let s = 0;

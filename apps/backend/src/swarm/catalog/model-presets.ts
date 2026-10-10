@@ -70,10 +70,6 @@ export function describeSwarmReasoningLevels(): string {
   return SWARM_REASONING_LEVELS.join("|");
 }
 
-export function isSwarmModelPreset(value: unknown): value is SwarmModelPreset {
-  return normalizeSwarmModelPresetValue(value) !== undefined;
-}
-
 export function isSwarmReasoningLevel(value: unknown): value is SwarmReasoningLevel {
   return typeof value === "string" && VALID_SWARM_REASONING_LEVEL_VALUES.has(value);
 }

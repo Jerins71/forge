@@ -49,6 +49,7 @@ const capabilities: EnvironmentCapabilities = {
   artifactUpload: true,
   terminal: true,
   legacyAdapter: true,
+  projectPolicy: true,
 };
 function describe(file: EnvironmentIdentityFile, options: IdentityOptions): EnvironmentIdentity {
   const descriptor: EnvironmentDescriptor = {

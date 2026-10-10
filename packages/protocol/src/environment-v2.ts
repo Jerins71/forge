@@ -72,6 +72,7 @@ export const EnvironmentCapabilitiesSchema = O({
   artifactUpload: Type.Boolean(),
   terminal: Type.Boolean(),
   legacyAdapter: Type.Boolean(),
+  projectPolicy: Type.Optional(Type.Boolean()),
 })
 export type EnvironmentCapabilities = Static<typeof EnvironmentCapabilitiesSchema>
 export const EnvironmentDescriptorSchema = O({
@@ -109,6 +110,9 @@ export const ProjectSummarySchema = O({
   archived: Type.Boolean(),
   // Model new threads start on unless the launch names one.
   defaultModel: Type.Optional(O({ provider: ShortText, modelId: ShortText, thinkingLevel: ShortText })),
+  defaultSessionId: Type.Optional(V2Id),
+  delegationDefaults: Type.Optional(O({ managerPosture: Type.Optional(ShortText), rosterId: Type.Optional(V2Id) })),
+  contextMode: Type.Optional(E('summary', 'fresh')),
 })
 export type ProjectSummary = Static<typeof ProjectSummarySchema>
 export const WorkspaceStrategySchema = Type.Union([
@@ -130,6 +134,9 @@ export const SessionSummarySchema = O({
   // Optional so shells cached by older clients still decode; producers always send it.
   model: Type.Optional(O({ provider: ShortText, modelId: ShortText, thinkingLevel: ShortText,
     origin: E('profile_default', 'session_override') })),
+  delegation: Type.Optional(O({ managerPosture: ShortText, managerPostureOrigin: E('project_default', 'session_override', 'product_default'),
+    rosterId: Type.Optional(V2Id), rosterOrigin: Type.Optional(E('project_default', 'session_override', 'global_default')) })),
+  contextMode: Type.Optional(O({ effective: E('summary', 'fresh'), override: Type.Optional(E('summary', 'fresh')) })),
   // The server attention occurrence behind `attention: 'result'`; Inbox › Needs You lists and dismisses it.
   attentionOccurrence: Type.Optional(O({ attentionId: Type.String({ minLength: 1, maxLength: 256 }),
     reason: E(...SESSION_ATTENTION_REASONS), raisedAt: V2Time })),
@@ -164,6 +171,15 @@ export const ChoiceAnswerSchema = O({
 export const ChoiceResponseSchema = O({ commandId: V2Uuid, sessionId: V2Id, choiceId: V2Id,
   answers: Type.Array(ChoiceAnswerSchema, { minItems: 1, maxItems: 20 }) })
 export const StopSessionSchema = O({ commandId: V2Uuid, sessionId: V2Id })
+export const PolicyModelSchema = O({ provider: Type.String({ minLength: 1, maxLength: 256 }), modelId: Type.String({ minLength: 1, maxLength: 256 }), thinkingLevel: Type.Optional(ShortText) })
+const Posture = E('delegation_first', 'adaptive', 'hands_on')
+const ContextMode = E('summary', 'fresh')
+export const ProjectCreateSchema = O({ commandId: V2Uuid, title: Type.String({ minLength: 1, maxLength: 256 }), cwd: Type.String({ minLength: 1, maxLength: 4096 }), model: PolicyModelSchema, secureSessionsEnabled: Type.Optional(Type.Boolean()) })
+export const ProjectUpdateSchema = O({ commandId: V2Uuid, projectId: V2Id, patch: Type.Object({ title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })), modelDefault: Type.Optional(PolicyModelSchema), delegationDefaults: Type.Optional(Type.Object({ managerPosture: Type.Optional(Type.Union([Posture, Type.Null()])), rosterId: Type.Optional(Type.Union([V2Id, Type.Null()])) }, { additionalProperties: false, minProperties: 1 })), contextMode: Type.Optional(ContextMode) }, { additionalProperties: false, minProperties: 1 }) })
+export const SessionConfigureSchema = O({ commandId: V2Uuid, sessionId: V2Id, model: Type.Optional(Type.Union([O({ mode: Type.Literal('inherit') }), O({ mode: Type.Literal('override'), ...PolicyModelSchema.properties })])), delegation: Type.Optional(Type.Object({ managerPosture: Type.Optional(Type.Union([O({ mode: Type.Literal('inherit') }), O({ mode: Type.Literal('override'), value: Posture })])), delegationRoster: Type.Optional(Type.Union([O({ mode: Type.Literal('inherit') }), O({ mode: Type.Literal('override'), rosterId: V2Id })])) }, { additionalProperties: false, minProperties: 1 })), contextMode: Type.Optional(Type.Union([ContextMode, Type.Null()])) })
+const DirectoryPath = Type.String({ minLength: 1, maxLength: 4096 })
+const DirectoryRoot = DirectoryPath
+const DirectoryEntry = O({ name: ShortText, path: DirectoryPath })
 export const RpcErrorSchema = O({
   code: E('INVALID_INPUT', 'UNAUTHENTICATED', 'FORBIDDEN', 'NOT_FOUND', 'CONFLICT',
     'UNAVAILABLE', 'PROTOCOL_MISMATCH', 'IDENTITY_MISMATCH', 'RESYNC_REQUIRED',
@@ -174,7 +190,9 @@ export const RpcErrorSchema = O({
 export type RpcError = Static<typeof RpcErrorSchema>
 export const CommandReceiptSchema = O({
   commandId: V2Uuid,
-  method: E('session.launch', 'session.send', 'session.choose', 'session.stop'),
+  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create'),
+  projectId: Type.Optional(V2Id),
+  result: Type.Optional(O({ projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })), profileIds: Type.Optional(Type.Array(V2Id, { maxItems: 10000 })), rosterId: Type.Optional(V2Id), rosterRevision: Type.Optional(V2Sequence) })),
   sessionId: NullableId,
   state: E('accepted', 'running', 'succeeded', 'failed', 'interrupted'),
   acceptedSequence: V2Sequence, updatedSequence: V2Sequence,
@@ -361,6 +379,17 @@ export const rpcSchemas = {
   'session.send': defineRpc(SendMessageSchema, CommandReceiptSchema, { receipt: true }),
   'session.choose': defineRpc(ChoiceResponseSchema, CommandReceiptSchema, { receipt: true }),
   'session.stop': defineRpc(StopSessionSchema, CommandReceiptSchema, { receipt: true }),
+  'project.create': defineRpc(ProjectCreateSchema, CommandReceiptSchema, { receipt: true }),
+  'project.update': defineRpc(ProjectUpdateSchema, CommandReceiptSchema, { receipt: true }),
+  'project.archive': defineRpc(O({ commandId: V2Uuid, projectId: V2Id }), CommandReceiptSchema, { receipt: true }),
+  'project.restore': defineRpc(O({ commandId: V2Uuid, projectId: V2Id }), CommandReceiptSchema, { receipt: true }),
+  'project.delete': defineRpc(O({ commandId: V2Uuid, projectId: V2Id }), CommandReceiptSchema, { receipt: true }),
+  'project.reorder': defineRpc(O({ commandId: V2Uuid, projectIds: Type.Array(V2Id, { uniqueItems: true, maxItems: 100 }) }), CommandReceiptSchema, { receipt: true }),
+  'session.configure': defineRpc(SessionConfigureSchema, CommandReceiptSchema, { receipt: true }),
+  'settings.recommendedDefaults.apply': defineRpc(O({ commandId: V2Uuid }), CommandReceiptSchema, { receipt: true }),
+  'workspace.directories.list': defineRpc(O({ path: Type.Optional(DirectoryPath) }), O({ requestedPath: Type.Optional(DirectoryPath), resolvedPath: DirectoryPath, parentPath: Type.Union([DirectoryPath, Type.Null()]), roots: Type.Array(DirectoryRoot, { maxItems: 100 }), entries: Type.Array(DirectoryEntry, { maxItems: 10000 }) })),
+  'workspace.directories.validate': defineRpc(O({ path: DirectoryPath }), O({ requestedPath: DirectoryPath, valid: Type.Boolean(), resolvedPath: Type.Optional(DirectoryPath), message: Type.Optional(Type.String({ maxLength: 4096 })), roots: Type.Array(DirectoryRoot, { maxItems: 100 }) })),
+  'workspace.directories.create': defineRpc(O({ commandId: V2Uuid, parentPath: DirectoryPath, name: Type.String({ minLength: 1, maxLength: 256 }) }), CommandReceiptSchema, { receipt: true }),
   'command.get': defineRpc(O({ commandId: V2Uuid }), CommandReceiptSchema),
   'access.grant.create': defineRpc(CreatePairingGrantSchema, PairingGrantCreatedSchema),
   'access.devices.list': defineRpc(V2Empty, Type.Array(DeviceSessionSchema, { maxItems: 256 })),
@@ -388,7 +417,11 @@ export const rpcScopes = {
   'session.subscribe': 'session:read', 'session.history': 'session:read',
   'session.workers': 'session:read', 'session.content': 'session:read',
   'session.launch': 'session:operate', 'session.send': 'session:operate',
-  'session.choose': 'session:operate', 'session.stop': 'session:operate', 'command.get': 'session:operate',
+  'session.choose': 'session:operate', 'session.stop': 'session:operate', 'command.get': 'session:read',
+  'project.create': 'workspace:write', 'project.update': 'workspace:write',
+  'project.archive': 'workspace:write', 'project.restore': 'workspace:write', 'project.delete': 'workspace:write', 'project.reorder': 'workspace:write',
+  'session.configure': 'session:operate', 'settings.recommendedDefaults.apply': 'settings:admin',
+  'workspace.directories.list': 'workspace:read', 'workspace.directories.validate': 'workspace:read', 'workspace.directories.create': 'workspace:write',
   'access.grant.create': 'access:admin', 'access.devices.list': 'access:admin',
   'access.devices.revoke': 'access:admin',
   'terminal.attach': 'terminal:operate', 'terminal.input': 'terminal:operate', 'terminal.resize': 'terminal:operate',

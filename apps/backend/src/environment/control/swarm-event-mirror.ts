@@ -87,21 +87,23 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       unread: wireProjection.unread(descriptor.agentId, descriptor.profileId ?? descriptor.agentId),
       workerCount: descriptor.workerCount ?? swarmManager.listWorkersForSession(descriptor.agentId).length,
       updatedAt: descriptor.updatedAt, sortKey: descriptor.updatedAt, archived: Boolean(descriptor.archivedAt),
-      workspace: prior?.workspace ?? { kind: "current_checkout", cwd: descriptor.cwd, branch: null },
+      workspace: { ...(prior?.workspace ?? { kind: "current_checkout", branch: null }), cwd: descriptor.cwd },
+      ...(descriptor.managerPosture ? { delegation: { managerPosture: descriptor.managerPosture, managerPostureOrigin: descriptor.managerPostureOrigin ?? "product_default", rosterId: descriptor.delegationRosterId, rosterOrigin: descriptor.delegationRosterOrigin } } : {}),
+      contextMode: { effective: descriptor.contextModeOverride ?? swarmManager.listProfiles().find(p => p.profileId === descriptor.profileId)?.defaultContextMode ?? "summary", ...(descriptor.contextModeOverride ? { override: descriptor.contextModeOverride } : {}) },
       model: { provider: descriptor.model.provider, modelId: descriptor.model.modelId, thinkingLevel: descriptor.model.thinkingLevel,
         origin: descriptor.modelOrigin === "session_override" ? "session_override" : "profile_default" },
       ...(attention ? { attentionOccurrence: { attentionId: attention.attentionId, reason: attention.reason, raisedAt: attention.raisedAt } } : {}) };
   }
   function upsertSession(tx: ControlTransaction, sessionId: string) {
     const descriptor = swarmManager.getAgentForInternalUse(sessionId);
-    if (!descriptor || descriptor.role !== "manager") return;
+    if (!descriptor || descriptor.role !== "manager" || swarmManager.listProfiles().some(profile => profile.profileId === descriptor.profileId && profile.profileType === "system")) return;
     indexDescriptor(descriptor); const next = summary(descriptor);
     if (JSON.stringify(next) !== JSON.stringify(storedSummary(sessionId))) eventSink.append(tx, { topic: "shell", sessionId, event: { type: "session.upsert", session: next } });
   }
   function upsertWorker(tx: ControlTransaction, descriptor: AgentDescriptor) {
     indexDescriptor(descriptor);
     const worker = { agentId: descriptor.agentId, title: descriptor.displayName.slice(0, 256), status: descriptor.status };
-    const prior = database.prepare("SELECT worker_json FROM control_workers WHERE session_id=? AND agent_id=?").get(descriptor.managerId, descriptor.agentId) as { worker_json: string } | undefined;
+    const prior = database.prepare("SELECT worker_json FROM control_workers WHERE session_id=? AND agent_id=? AND deleted=0").get(descriptor.managerId, descriptor.agentId) as { worker_json: string } | undefined;
     if (JSON.stringify(worker) !== prior?.worker_json) eventSink.append(tx, { topic: "detail", sessionId: descriptor.managerId, event: { type: "worker.upsert", worker } });
   }
   function item(entry: ConversationEntryEvent, sessionId: string): DetailItem | null {
@@ -286,7 +288,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       listen("agent_status", (event: { agentId: string }) => { const descriptor = swarmManager.getAgentForInternalUse(event.agentId); if (!descriptor) return; eventSink.transaction(tx => { if (descriptor.role === "worker") upsertWorker(tx, descriptor); upsertSession(tx, descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId); }); });
       listen("session_workers_snapshot", (event: { sessionAgentId: string; workers: AgentDescriptor[] }) => {
         eventSink.transaction(tx => { const ids = new Set(event.workers.map(worker => worker.agentId)); for (const worker of event.workers) upsertWorker(tx, worker);
-          const prior = database.prepare("SELECT agent_id FROM control_workers WHERE session_id=?").all(event.sessionAgentId) as { agent_id: string }[];
+          const prior = database.prepare("SELECT agent_id FROM control_workers WHERE session_id=? AND deleted=0").all(event.sessionAgentId) as { agent_id: string }[];
           for (const row of prior) if (!ids.has(row.agent_id)) eventSink.append(tx, { topic: "detail", sessionId: event.sessionAgentId, event: { type: "worker.remove", agentId: row.agent_id } }); upsertSession(tx, event.sessionAgentId); });
       });
       listen("session_lifecycle", (event: { action: string; sessionAgentId?: string }) => { if (event.action === "deleted" && event.sessionAgentId) { eventSink.transaction(tx => eventSink.append(tx, { topic: "shell", sessionId: event.sessionAgentId!, event: { type: "session.remove", sessionId: event.sessionAgentId! } })); sessions.delete(event.sessionAgentId); } else queueCatalog(event.sessionAgentId ? [event.sessionAgentId] : undefined); });

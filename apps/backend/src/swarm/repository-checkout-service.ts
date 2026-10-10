@@ -1,3 +1,4 @@
+import type { Principal } from '../environment/control/control-types.js'
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import type { ManagerExactModelSelection, ManagerReasoningLevel, RepositoryCheckoutRequest, RepositoryCheckoutStatus, RepositoryProjectCreationErrorCode } from '@forge/protocol'
@@ -35,7 +36,7 @@ export class RepositoryCheckoutService {
     this.machineName = options.machineName ?? hostname()
   }
 
-  start(input: RepositoryCheckoutRequest): { checkoutId: string } {
+  start(input: RepositoryCheckoutRequest, principal?: Principal): { checkoutId: string } {
     if (this.disposed) throw new RepositoryProjectCreationError('clone_cancelled', `Project setup is shutting down on ${this.machineName}.`)
     this.prune()
     if (this.records.size >= MAX_CHECKOUTS) {
@@ -46,7 +47,7 @@ export class RepositoryCheckoutService {
     const checkoutId = randomUUID()
     const record: CheckoutRecord = { status: { checkoutId, phase: 'validating' }, abort: new AbortController() }
     this.records.set(checkoutId, record)
-    record.settlement = this.run(record, input)
+    record.settlement = this.run(record, input, principal)
     return { checkoutId }
   }
 
@@ -77,7 +78,7 @@ export class RepositoryCheckoutService {
     await Promise.allSettled([...this.records.values()].map(record => record.settlement))
   }
 
-  private async run(record: CheckoutRecord, input: RepositoryCheckoutRequest): Promise<void> {
+  private async run(record: CheckoutRecord, input: RepositoryCheckoutRequest, principal?: Principal): Promise<void> {
     const checkoutId = record.status.checkoutId
     try {
       const parsed = parseAndValidateRepositoryUrl(input.repositoryUrl)
@@ -85,6 +86,7 @@ export class RepositoryCheckoutService {
       if (record.abort.signal.aborted) return
       const result = await this.options.creationService.create({
         requestId: checkoutId,
+        principal,
         repositoryUrl: parsed.cloneUrl,
         repositoryFolder: input.folder ?? parsed.suggestedFolder,
         repositoryBasePath: settings.effectiveBasePath,

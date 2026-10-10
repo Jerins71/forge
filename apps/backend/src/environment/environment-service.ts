@@ -21,6 +21,8 @@ import { loadEnvironmentIdentity, EnvironmentIdentityMismatch, type IdentityOpti
 import { createEnvironmentAccess, type EnvironmentAccess } from "./access/access-service.js";
 import { applyAccessMigrations } from "./access/access-migrations.js";
 import type { ExposurePolicy } from "./exposure-policy.js";
+import { createProjectPolicy } from "./control/project-policy.js";
+import { createControlDescriptorPersistence } from "./control/descriptor-persistence.js";
 import { createControlCore, type ControlCore } from "./control/database.js";
 import type { SwarmControlPort } from "./control/control-types.js";
 import { createWorkspaceService } from "./control/workspace-service.js";
@@ -76,6 +78,8 @@ export async function createEnvironmentService(options: {
   let rpc: ReturnType<typeof createEnvironmentRpcServer> | undefined;
   let access: EnvironmentAccess | undefined;
   try {
+    if (hadDatabase && !(database.pragma("table_info(control_projects)") as { name: string }[]).some(column => column.name === "profile_json"))
+      await database.backup(`${databasePath}.v2-before-policy-adoption`);
     const workspaceService = createWorkspaceService({ database, dataDir: config.paths.dataDir, swarmManager });
     const artifactService = createArtifactService({ database, dataDir: config.paths.dataDir, swarmManager });
     // The lazy port breaks only the construction cycle; effects start after this const is assigned.
@@ -93,6 +97,7 @@ export async function createEnvironmentService(options: {
       swarm,
       workspace: workspaceService,
       artifacts: artifactService,
+      policy: createProjectPolicy(swarmManager),
       inputRoute: createControlledInputRoutePreflight({ swarmManager }),
       isDeviceRevoked: (id) => {
         const row = database.prepare("SELECT revoked_at,expires_at FROM device_sessions WHERE device_session_id=?").get(id) as
@@ -152,6 +157,9 @@ export async function createEnvironmentService(options: {
             updatedAt: profile.updatedAt,
             sortKey: String(profile.sortOrder ?? profile.createdAt),
             archived: Boolean(profile.archivedAt),
+            defaultSessionId: profile.defaultSessionAgentId,
+            delegationDefaults: { managerPosture: profile.defaultManagerPosture, rosterId: profile.defaultDelegationRosterId },
+            contextMode: profile.defaultContextMode ?? "summary",
             defaultModel: { provider: profile.defaultModel.provider, modelId: profile.defaultModel.modelId, thinkingLevel: profile.defaultModel.thinkingLevel },
           };
         },
@@ -161,6 +169,8 @@ export async function createEnvironmentService(options: {
         prepareArtifacts: (sessionId, entries) => artifactService.prepareHistoricalArtifacts(sessionId, entries),
       },
     });
+    const descriptorPersistence = createControlDescriptorPersistence({ database, eventSink: core.eventSink, dataDir: config.paths.dataDir, storeFilePath: config.paths.agentsStoreFile });
+    swarmManager.installDescriptorPersistence(descriptorPersistence);
     mirror.attach();
     const owner = core;
     const source = mirror;
@@ -177,6 +187,7 @@ export async function createEnvironmentService(options: {
         // Called after hydration, before subscriptions/listening. Preserve the old catalog before adoption.
         if (!hadDatabase && existsSync(config.paths.agentsStoreFile))
           await copyFile(config.paths.agentsStoreFile, `${config.paths.agentsStoreFile}.v2-before-adoption`);
+        await descriptorPersistence.load();
         await unreadTracker.load();
         await owner.reconcileOnBoot();
         await source.reconcileBeforeReady();
@@ -225,11 +236,13 @@ export async function createEnvironmentService(options: {
       async stop() {
         if (stopped) return;
         stopped = true;
-        await owner.close();
+        await owner.controlService.close();
+        await owner.effectWorker.stop();
         source.dispose();
         await rpc?.stop();
         auth.dispose();
         await swarmManager.flushPendingPersistence();
+        await owner.close();
         if (database.open) database.close();
       },
     };

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createFeatureClients } from '../feature-clients/index.js'
 import { WebSocket } from 'ws'
 import { writeFile, mkdir } from 'node:fs/promises'
 import {
@@ -563,3 +564,16 @@ describe('environment runtime acceptance', () => {
     expect(await persistence.loadShell(client.environmentId)).toBeNull()
   })
 })
+
+it.each([
+  ['profiles', 'project.update', { projectId: 'addressed', patch: { contextMode: 'fresh' } }, 'fresh'],
+  ['agents', 'session.configure', { sessionId: 'addressed', contextMode: null }, null],
+] as const)('routes %s context writes through typed control before reading the snapshot', async (resource, method, input, mode) => {
+  const fetch = vi.fn(async () => new Response(JSON.stringify({ mode })))
+  const request = vi.fn(async () => ({ state: 'succeeded' }))
+  const features = createFeatureClients({ entry: { environmentId: 'fixture' }, fetch } as unknown as Parameters<typeof createFeatureClients>[0], { request } as unknown as Parameters<typeof createFeatureClients>[1])
+  const path = `/api/${resource}/addressed/context-mode`
+  await features.settings.fetch(path, { method: 'PUT', body: JSON.stringify({ mode }) })
+  expect(request).toHaveBeenCalledWith(method, expect.objectContaining({ ...input, commandId: expect.any(String) }))
+  expect(fetch).toHaveBeenCalledWith(path, { cache: 'no-store' })
+});

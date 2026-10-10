@@ -613,9 +613,16 @@ export class SwarmWebSocketServer {
       ? new RepositoryProjectCreationService({
           swarmManager: this.swarmManager,
           settingsService: this.repositorySettingsService,
+          publishProject: async (input, manager) => {
+            if (!this.environment || !input.principal || !manager.modelSelection) throw new Error("Project control is unavailable");
+            const receipt = await this.environment.control.execute(input.principal, "project.create", { commandId: input.requestId, title: manager.name, cwd: manager.cwd, model: { ...manager.modelSelection, ...(manager.reasoningLevel ? { thinkingLevel: manager.reasoningLevel } : {}) }, ...(manager.secureSessionsEnabled !== undefined ? { secureSessionsEnabled: manager.secureSessionsEnabled } : {}) });
+            if (receipt.state !== "succeeded" || !receipt.result?.sessionId) throw new Error(receipt.error?.message ?? "Project creation was interrupted");
+            const descriptor = this.swarmManager.getAgentForInternalUse(receipt.result.sessionId);
+            if (!descriptor) throw new Error("Created project default session is missing");
+            return descriptor;
+          },
         })
       : null;
-    this.wsHandler.setRepositoryProjectCreationService(this.repositoryProjectCreationService);
     this.repositoryCheckoutService = new RepositoryCheckoutService({ creationService: this.repositoryProjectCreationService!, settingsService: this.repositorySettingsService!, swarmManager: this.swarmManager, machineName: this.environment?.descriptor().label });
 
     this.telemetryService = options.telemetryService ?? null;
@@ -725,9 +732,9 @@ export class SwarmWebSocketServer {
       ...createSchedulerRoutes({ swarmManager: this.swarmManager }),
       ...createSlashCommandRoutes({ swarmManager: this.swarmManager }),
       ...createMobileRoutes({ mobilePushService: this.mobilePushService }),
-      ...createManagerSelectionCatalogRoutes({ swarmManager: this.swarmManager }),
+      ...createManagerSelectionCatalogRoutes({ swarmManager: this.swarmManager, control: this.environment?.control }),
       ...createAgentHttpRoutes({ swarmManager: this.swarmManager }),
-      ...createContextModeRoutes({ swarmManager: this.swarmManager }),
+      ...createContextModeRoutes({ swarmManager: this.swarmManager, control: this.environment?.control }),
       ...createSessionAuditRoutes({ swarmManager: this.swarmManager }),
       ...createCodexCatalogRoutes({ swarmManager: this.swarmManager }),
       ...(this.terminalService ? createTerminalRoutes({ terminalService: this.terminalService, settingsService: this.terminalSettingsService, terminalTransport: this.environmentTransport?.terminalTransport }) : []),

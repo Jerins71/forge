@@ -12,6 +12,7 @@ import { loadConfiguredSqliteDatabaseConstructor } from "../../sqlite-database-l
 import { migrateControlDatabase } from "./migrations.js";
 import { createEventSink } from "./event-sink.js";
 import { createSwarmEventMirror } from "./swarm-event-mirror.js";
+import { createProjectPolicy } from "./project-policy.js";
 import { createControlCore } from "./database.js";
 import { createWorkspaceService } from "./workspace-service.js";
 import { createArtifactService } from "./artifact-service.js";
@@ -20,8 +21,8 @@ import type { SwarmControlPort } from "./control-types.js";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
-async function fixture() {
-  const config = await makeTempConfig({ prefix: "v2-swarm-", omitSharedAuthFile: true, omitSharedSecretsFile: true });
+async function fixture(auth = false) {
+  const config = await makeTempConfig({ prefix: "v2-swarm-", omitSharedAuthFile: !auth, ...(auth ? { sharedAuthContent: { "openai-codex": { type: "api_key", key: "forge-fixture-inert-not-a-provider-key" } } } : {}), omitSharedSecretsFile: true });
   const manager = new TestSwarmManager(config); await bootWithDefaultManager(manager, config);
   const Database = await loadConfiguredSqliteDatabaseConstructor(); const database = new Database(`${config.paths.dataDir}/control.sqlite`);
   migrateControlDatabase(database, { environmentId: randomUUID(), streamEpoch: randomUUID() });
@@ -49,7 +50,7 @@ async function makeCore(f: Awaited<ReturnType<typeof fixture>>, manager = f.mana
   const artifacts = createArtifactService({ database, dataDir: f.config.paths.dataDir, swarmManager: manager });
   const core = await createControlCore({ database, clock: Date.now, random: randomUUID,
     swarm: { resolveSession: id => adapter.resolveSession!(id), ensureSession: input => adapter.ensureSession(input), applyInput: input => adapter.applyInput(input), applyChoice: input => adapter.applyChoice(input), stopSession: input => adapter.stopSession(input) },
-    workspace, artifacts, isDeviceRevoked: () => false, inputRoute: createControlledInputRoutePreflight({ swarmManager: manager }) });
+    policy: createProjectPolicy(manager), workspace, artifacts, isDeviceRevoked: () => false, inputRoute: createControlledInputRoutePreflight({ swarmManager: manager }) });
   const adapter = createSwarmControlAdapter({ swarmManager: manager, database, eventSink: core.eventSink, workspaceService: workspace, artifactService: artifacts });
   return { core, adapter, artifacts };
 }
@@ -210,7 +211,7 @@ describe("controlled swarm canonical/provider boundaries", () => {
   });
 
   it("uses the real durable core for concurrent launch/send retries, route rejection, choices and safe stop", async () => {
-    const f = await fixture(); const { core } = await makeCore(f);
+    const f = await fixture(true); const { core } = await makeCore(f);
     cleanup.unshift(() => core.close());
     const principal = { deviceSessionId: "fixture-device", scopes: new Set(["session:operate", "session:read", "workspace:write"] as const) };
     f.database.prepare("INSERT INTO device_sessions (device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES ('fixture-device','fixture-token','fixture-proof','Fixture','cli','[]',0,0,?)").run(Date.now() + 86_400_000);
@@ -326,7 +327,7 @@ it("real CLI socket resume/fork/clear/delete and cancellation replay one persist
   }
 }, 30_000);
 
-it.each(["archive_profile", "delete_manager"] as const)("V2 %s fences the profile's accepted session input", async type => {
+it.each(["project.archive", "project.delete"] as const)("V2 %s fences the profile's accepted session input", async type => {
   const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
   const { core } = await makeCore(f);
   const principal = { deviceSessionId: "profile-device", scopes: new Set(["session:operate", "workspace:write"] as const) };
@@ -334,10 +335,9 @@ it.each(["archive_profile", "delete_manager"] as const)("V2 %s fences the profil
   const handler = new WsHandler({ swarmManager: f.manager, mobilePushService: {} as never, allowNonManagerSubscriptions: true,
     perf: { recordDuration: () => {}, increment: () => {}, readSummary: () => ({ histograms: {}, counters: {} }), readRecentSlowEvents: () => [] } });
   const access = { authorize: () => {} } as never; handler.setEnvironmentControl({ access, control: core.controlService });
-  const adapter = createLegacyBuilderAdapter({ access, ports: handler.legacyPorts() });
   try {
     const send = await core.controlService.execute(principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "must not dispatch after teardown", artifactIds: [] } });
-    await adapter.execute(principal, "legacy.workspace.write", { sessionId: "manager", command: type === "archive_profile" ? { type, profileId: "manager", requestId: "profile-archive" } : { type, managerId: "manager", requestId: "profile-delete" } }, new AbortController().signal);
+    await core.controlService.execute(principal, type, { commandId: randomUUID(), projectId: "manager" });
     await core.effectWorker.drain();
     expect(await core.controlService.getReceipt(principal, send.commandId)).toMatchObject({ state: "interrupted", delivery: "none" });
   } finally { mirror.dispose(); await core.close(); }
@@ -356,4 +356,54 @@ it("restart recovery dismissal cannot alter the work graph across accepted input
     await core.controlService.execute(principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "accepted input", artifactIds: [] } });
     await expect(adapter.execute(principal, "legacy.session.operate", { sessionId: f.sessionId, command: { type: "dismiss_restart_recovery", requestId: "dismiss" } }, new AbortController().signal)).rejects.toMatchObject({ code: "CONFLICT", retryable: true });
   } finally { snapshot.mockRestore(); mirror.dispose(); await core.close(); }
+});
+
+
+describe("Phase 2 project/policy commands", () => {
+  const cases: [string, Record<string, unknown>][] = [
+    ["settings.recommendedDefaults.apply", {}],
+    ["workspace.directories.create", { parentPath: ".", name: "typed-dir" }],
+    ["project.create", { title: "Typed project", cwd: ".", model: { provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "high" } }],
+    ["project.update", { projectId: "manager", patch: { title: "Renamed" } }],
+    ["project.update", { projectId: "manager", patch: { cwd: "." } }],
+    ["project.update", { projectId: "manager", patch: { modelDefault: { provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "high" } } }],
+    ["project.update", { projectId: "manager", patch: { delegationDefaults: { managerPosture: "hands_on" } } }],
+    ["project.update", { projectId: "manager", patch: { contextMode: "fresh" } }],
+    ["project.archive", { projectId: "manager" }],
+    ["project.restore", { projectId: "manager" }],
+    ["project.delete", { projectId: "manager" }],
+    ["project.reorder", { projectIds: ["manager"] }],
+    ["session.configure", { sessionId: "manager", model: { mode: "inherit" } }],
+    ["session.configure", { sessionId: "manager", model: { mode: "override", provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "high" } }],
+    ["session.configure", { sessionId: "manager", delegation: { managerPosture: { mode: "override", value: "hands_on" } } }],
+    ["session.configure", { sessionId: "manager", contextMode: "fresh" }],
+  ];
+  it.each(cases)("moves %s %j into receipt-backed control", async (method, fields) => {
+    const f = await fixture(true); const { core } = await makeCore(f);
+    cleanup.unshift(() => core.close());
+    const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady(); cleanup.unshift(async () => mirror.dispose());
+    const principal = { deviceSessionId: "policy-device", scopes: new Set(["workspace:write", "session:operate", "settings:admin"] as const) };
+    if (method === "settings.recommendedDefaults.apply") vi.spyOn(f.manager, "applyRecommendedManagerDefaults").mockResolvedValue({ profileIds: ["manager"], rosterId: "fixture", rosterRevision: 1 });
+    const request = { commandId: randomUUID(), ...fields, ...(fields.cwd ? { cwd: f.config.defaultCwd } : {}), ...(fields.parentPath ? { parentPath: f.config.defaultCwd } : {}), ...(fields.patch && (fields.patch as { cwd?: string }).cwd ? { patch: { ...(fields.patch as object), cwd: f.config.defaultCwd } } : {}) };
+    const receipt = await core.controlService.execute(principal, method as "session.stop", request as never);
+    expect(receipt.state).toBe("succeeded");
+    expect(receipt.method).toBe(method);
+    expect(await core.controlService.execute(principal, method as "session.stop", request as never)).toEqual(receipt);
+    expect(f.database.prepare("SELECT method FROM commands WHERE command_id=?").get(request.commandId)).toEqual({ method });
+  });
+});
+
+it("marks lost policy claims interrupted on restart and never repeats the callback", async () => {
+  const f = await fixture(true); let { core } = await makeCore(f);
+  const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
+  const principal = { deviceSessionId: "policy-device", scopes: new Set(["workspace:write"] as const) };
+  const input = { commandId: randomUUID(), projectId: "manager", patch: { title: "Durable title" } };
+  await core.controlService.execute(principal, "project.update", input);
+  core.database.prepare("UPDATE effects SET state='claimed' WHERE command_id=?").run(input.commandId);
+  core.database.prepare("UPDATE command_receipts SET state='running',receipt_json=json_set(receipt_json,'$.state','running') WHERE command_id=?").run(input.commandId);
+  await core.close(); mirror.dispose(); ({ core } = await makeCore(f)); cleanup.unshift(() => core.close());
+  const apply = vi.spyOn(f.manager, "renameProfile");
+  expect((await core.controlService.getReceipt(principal, input.commandId)).state).toBe("interrupted");
+  expect((await core.controlService.execute(principal, "project.update", input)).state).toBe("interrupted");
+  expect(apply).not.toHaveBeenCalled();
 });

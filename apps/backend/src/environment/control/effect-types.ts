@@ -88,6 +88,7 @@ export interface ControlCoreOptions {
   artifacts: ArtifactPort;
   /** Omission allows input routes; adapters reject routes without a durable dispatch boundary. */
   inputRoute?: InputRoutePort;
+  policy?: import("./project-policy.js").PolicyPort;
   /** Must be synchronous so acceptance/claim/dispatch checks stay inside BEGIN IMMEDIATE. */
   isDeviceRevoked: (deviceSessionId: Principal["deviceSessionId"]) => boolean;
 }

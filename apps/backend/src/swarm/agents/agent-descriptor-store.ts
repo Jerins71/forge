@@ -12,6 +12,10 @@ import {
   cloneProfile
 } from "./descriptor-store/descriptor-clone.js";
 
+export interface AgentDescriptorPersistence {
+  load(): Promise<AgentsStoreFile>;
+  save(store: AgentsStoreFile): Promise<void>;
+}
 export interface AgentDescriptorStoreOptions {
   dataDir: string;
   storeFilePath: string;
@@ -40,9 +44,13 @@ export class AgentDescriptorStore {
   private readonly descriptors = new Map<string, AgentDescriptor>();
   private readonly profiles = new Map<string, ManagerProfile>();
 
+  private persistence?: AgentDescriptorPersistence;
+  setPersistence(persistence: AgentDescriptorPersistence): void { this.persistence = persistence; }
+
   constructor(private readonly options: AgentDescriptorStoreOptions) {}
 
   async load(): Promise<AgentsStoreFile> {
+    if (this.persistence) { this.replace(await this.persistence.load()); return this.snapshotForPersistence(); }
     try {
       const raw = await readFile(this.options.storeFilePath, "utf8");
       const decoded = decodeAgentsStoreFile(raw, {
@@ -87,6 +95,7 @@ export class AgentDescriptorStore {
   }
 
   async save(): Promise<void> {
+    if (this.persistence) return this.persistence.save(this.snapshotForPersistence());
     const target = this.options.storeFilePath;
     await writeFileAtomic(
       target,

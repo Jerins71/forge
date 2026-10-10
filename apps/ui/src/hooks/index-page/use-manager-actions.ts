@@ -147,8 +147,7 @@ export function useManagerActions({
   const [isCancellingClone, setIsCancellingClone] = useState(false)
   const basePathTouchedRef = useRef(false)
   const settingsLoadGenerationRef = useRef(0)
-  const activeCloneRequestIdRef = useRef<string | null>(null)
-  const activeCloneCancelRef = useRef<(() => Promise<{ accepted: boolean; tooLate: boolean }>) | null>(null)
+    const activeCloneCancelRef = useRef<(() => Promise<{ accepted: boolean; tooLate: boolean }>) | null>(null)
 
   const [managerToDelete, setManagerToDelete] = useState<AgentDescriptor | null>(null)
   const [deleteManagerError, setDeleteManagerError] = useState<string | null>(null)
@@ -214,7 +213,6 @@ export function useManagerActions({
     setClonePercent(null)
     setCloneCancellable(false)
     setIsCancellingClone(false)
-    activeCloneRequestIdRef.current = null
     activeCloneCancelRef.current = null
     settingsLoadGenerationRef.current += 1
   }, [])
@@ -444,7 +442,7 @@ export function useManagerActions({
       return
     }
 
-    if (createProjectSourceMode === 'clone_repository' && projectEnvironmentId) {
+    if (createProjectSourceMode === 'clone_repository') {
       // Another machine clones through its own checkout service into its repositories folder.
       const url = repositoryUrl.trim()
       if (!url) {
@@ -478,7 +476,7 @@ export function useManagerActions({
         )
         activeCloneCancelRef.current = operation.cancel
         const result = await operation.promise
-        if (result.sessionId) navigateToRoute({ view: 'chat', agentId: result.sessionId, environmentId: projectEnvironmentId })
+        if (result.sessionId) navigateToRoute({ view: 'chat', agentId: result.sessionId, environmentId: projectEnvironmentId ?? environmentClient?.environmentId })
         setIsCreateManagerDialogOpen(false)
         setNewManagerName('')
         setNewManagerModelSelection(undefined)
@@ -494,95 +492,6 @@ export function useManagerActions({
         setCloneStage(null)
         setClonePercent(null)
         setCloneCancellable(false)
-        activeCloneCancelRef.current = null
-      }
-      return
-    }
-
-    if (createProjectSourceMode === 'clone_repository') {
-      const url = repositoryUrl.trim()
-      const folder = repositoryFolder.trim()
-      const basePath = repositoryBasePath.trim()
-
-      if (!url) {
-        setCreateManagerError('Repository URL is required.')
-        return
-      }
-      if (!folder) {
-        setCreateManagerError('Repository folder is required.')
-        return
-      }
-      if (!basePath) {
-        setCreateManagerError('Destination base path is required.')
-        return
-      }
-
-      setCreateManagerError(null)
-      setIsCreatingManager(true)
-      setCloneStage('validating')
-      setClonePercent(null)
-      setCloneCancellable(true)
-
-      try {
-        const operation = client.createRepositoryProject(
-          {
-            name,
-            repositoryUrl: url,
-            repositoryBasePath: basePath,
-            repositoryFolder: folder,
-            modelSelection: newManagerModelSelection,
-            reasoningLevel: newManagerReasoningLevel,
-            secureSessionsEnabled: newManagerSecureSessionsEnabled,
-          },
-          {
-            onProgress: (progress) => {
-              setCloneStage(progress.stage)
-              setClonePercent(progress.percent ?? null)
-              setCloneCancellable(progress.stage === 'validating' || progress.stage === 'cloning')
-            },
-          },
-        )
-
-        activeCloneRequestIdRef.current = operation.requestId
-        activeCloneCancelRef.current = operation.cancel
-
-        const result = await operation.promise
-        const manager = result.manager
-
-        navigateToRoute({ view: 'chat', agentId: manager.agentId })
-        client.subscribeToAgent(manager.agentId, { reason: 'create' })
-
-        if (scaffoldForgeResources) {
-          const profileId = manager.profileId ?? manager.agentId
-          environmentClient?.features.files.seedResources({ profileId, sessionAgentId: manager.agentId }).catch((err: unknown) => {
-            console.warn('Failed to seed .forge project resources:', err)
-          })
-        }
-
-        setIsCreateManagerDialogOpen(false)
-        setNewManagerName('')
-        setNewManagerCwd('')
-        setNewManagerModelSelection(undefined)
-        setNewManagerReasoningLevel(undefined)
-        setScaffoldForgeResources(true)
-        setNewManagerSecureSessionsEnabled(false)
-        setBrowseError(null)
-        setCreateManagerError(null)
-        resetCloneFields()
-      } catch (error) {
-        const message = toErrorMessage(error)
-        if (/clone_cancelled/i.test(message) || /cancelled/i.test(message)) {
-          setCreateManagerError(null)
-        } else {
-          setCreateManagerError(message.replace(/^[A-Z0-9_]+:\s*/i, ''))
-        }
-      } finally {
-        setIsCreatingManager(false)
-        setIsCancellingClone(false)
-        setCloneStage(null)
-        setClonePercent(null)
-        setCloneCancellable(false)
-        activeCloneRequestIdRef.current = null
         activeCloneCancelRef.current = null
       }
       return
@@ -654,7 +563,6 @@ export function useManagerActions({
     newManagerReasoningLevel,
     newManagerSecureSessionsEnabled,
     newManagerName,
-    repositoryBasePath,
     repositoryFolder,
     repositoryUrl,
     resetCloneFields,

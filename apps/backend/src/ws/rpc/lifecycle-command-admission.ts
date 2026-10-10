@@ -1,5 +1,5 @@
 import type { ClientCommand } from "@forge/protocol";
-import { requireNonSystemProfile, requireNonSystemSessionProfile } from "../../swarm/system-profile-guards.js";
+import { requireNonSystemSessionProfile } from "../../swarm/system-profile-guards.js";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
 import type { ControlService, Principal } from "../../environment/control/control-types.js";
 import { StreamFault } from "../../environment/streams/stream-budget.js";
@@ -7,7 +7,7 @@ import { awaitLegacyReceipt, legacyCommandId } from "./legacy-builder-adapter.js
 
 const lifecycleCommands = new Set<ClientCommand["type"]>([
   "resume_session", "resume_restart_recovery", "dismiss_restart_recovery", "kill_agent", "stop_all_agents",
-  "choice_cancel", "clear_session", "delete_session", "archive_session", "fork_session", "archive_profile", "delete_manager",
+  "choice_cancel", "clear_session", "delete_session", "archive_session", "fork_session",
 ]);
 export function isLifecycleCommand(command: ClientCommand): boolean { return lifecycleCommands.has(command.type); }
 
@@ -32,37 +32,32 @@ export async function admitLifecycleCommand<T>(control: ControlService, principa
   }
   const recovery = command.type === "resume_restart_recovery" || command.type === "dismiss_restart_recovery";
   const snapshot = recovery ? swarm.getRestartRecoverySnapshot() : null;
-  let sessionIds = snapshot ? [...new Set([
+  const sessionIds = snapshot ? [...new Set([
     ...snapshot.interruptedManagers, ...snapshot.interruptedWorkers.map(owner), ...snapshot.undeliveredReports.map(report => owner(report.toAgentId)),
   ])] : recovery ? [] : [owner(targetId)];
-  const projectIds = command.type === "archive_profile" ? [command.profileId] : command.type === "delete_manager" ? [command.managerId] : [];
-  if (projectIds.length) sessionIds = swarm.listAgents().filter(agent => agent.role === "manager" && projectIds.includes(agent.profileId ?? agent.agentId)).map(agent => agent.agentId);
   if (command.type === "delete_session" || command.type === "fork_session" && command.sessionPurpose === "side_chat")
     sessionIds.push(...swarm.listAgents().filter(agent => agent.role === "manager" && agent.sideChatSourceAgentId === targetId).map(agent => agent.agentId));
-  const stop = command.type === "clear_session" || command.type === "delete_session" || command.type === "archive_session" || command.type === "stop_all_agents" || projectIds.length > 0;
+  const stop = command.type === "clear_session" || command.type === "delete_session" || command.type === "archive_session" || command.type === "stop_all_agents";
   const intent = stop ? "stop" : command.type === "resume_session" && target?.role !== "worker" ? "resume" : command.type === "choice_cancel" ? "cancel-choice" : "inspect";
   // Choice cancellation has immutable occurrence identity. Other commands use
   // the existing requestId; old identifier-less calls are distinct requests.
   const requestId = addressed.requestId ?? (command.type === "choice_cancel" ? addressed.choiceId : undefined);
   return control.admitLifecycle(principal, {
     commandId: legacyCommandId(principal, command.type, requestId), command: command.type,
-    sessionIds, projectIds, intent, request: command, ...(command.type === "choice_cancel" ? { choiceId: command.choiceId } : {}),
+    sessionIds, intent, request: command, ...(command.type === "choice_cancel" ? { choiceId: command.choiceId } : {}),
     preflight() {
       if (command.type === "clear_session" || command.type === "delete_session" || command.type === "archive_session" || command.type === "fork_session") {
         if (!target || target.role !== "manager") throw new StreamFault("NOT_FOUND", "Unknown manager session.");
         try { requireNonSystemSessionProfile(targetId, swarm.listProfiles(), id => swarm.getAgent(id)); }
         catch { throw new StreamFault("FORBIDDEN", "Cannot modify sessions in system-managed profiles."); }
       }
-      for (const projectId of projectIds) {
-        try { requireNonSystemProfile(projectId, swarm.listProfiles()); }
-        catch { throw new StreamFault("FORBIDDEN", "Cannot modify system-managed profile."); }
-      }
+
       if (command.type === "stop_all_agents" && owner(sessionId) !== targetId)
         throw new StreamFault("FORBIDDEN", "Only the selected manager can stop its agents.");
     },
   }, async () => {
     const result = await operation();
-    const affected = [...sessionIds, ...swarm.listAgents().filter(agent => agent.role === "manager" && projectIds.includes(agent.profileId ?? agent.agentId)).map(agent => agent.agentId)];
+    const affected = sessionIds;
     if (stop && affected.some(id => !swarm.isSessionShutdownSafe(id)))
       throw new StreamFault("UNAVAILABLE", "Session shutdown is not safely complete; retry cleanup with a new request.");
     return result;

@@ -73,39 +73,6 @@ export function handleSessionEvent(
       })
       return true
 
-    case 'session_model_updated':
-      context.requestTracker.resolve('update_session_model', event.requestId, {
-        sessionAgentId: event.sessionAgentId,
-        mode: event.mode,
-      })
-      return true
-
-    case 'session_delegation_updated':
-      context.requestTracker.resolve('update_session_delegation', event.requestId, {
-        sessionAgentId: event.sessionAgentId,
-      })
-      return true
-
-    case 'profile_renamed':
-      context.requestTracker.resolve('rename_profile', event.requestId, {
-        profileId: event.profileId,
-      })
-      return true
-
-    case 'profile_archived':
-      context.requestTracker.resolve('archive_profile', event.requestId, {
-        profileId: event.profileId,
-        archivedAt: event.archivedAt,
-      })
-      return true
-
-    case 'profile_restored':
-      context.requestTracker.resolve('restore_profile', event.requestId, {
-        profileId: event.profileId,
-        openAgentId: event.openAgentId,
-      })
-      return true
-
     case 'session_forked':
       context.requestTracker.resolve('fork_session', event.requestId, {
         sourceAgentId: event.sourceAgentId,

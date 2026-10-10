@@ -101,18 +101,7 @@ export type ProjectAgentExternalDirectoryResult = {
 }
 
 export type WsRequestResultMap = {
-  create_manager: AgentDescriptor
-  create_repository_project: { manager: AgentDescriptor; repositoryPath: string }
-  cancel_repository_project_creation: {
-    operationRequestId: string
-    accepted: boolean
-    tooLate: boolean
-  }
-  delete_manager: { managerId: string }
-  update_profile_default_model: { profileId: string }
-  update_project_delegation_defaults: { profileId: string }
-  update_manager_model: { managerId: string }
-  update_manager_cwd: { managerId: string; cwd: string }
+
   stop_all_agents: { managerId: string; stoppedWorkerIds: string[]; managerStopped: boolean }
   create_session: SessionCreatedResult
   stop_session: SessionActionResult
@@ -126,11 +115,7 @@ export type WsRequestResultMap = {
   session_goal_control: SessionGoalSnapshot
   rename_session: SessionActionResult
   pin_session: { pinnedAt: string | null }
-  update_session_model: { sessionAgentId: string; mode: 'inherit' | 'override' }
-  update_session_delegation: { sessionAgentId: string }
-  rename_profile: { profileId: string }
-  archive_profile: ProfileArchiveResult
-  restore_profile: ProfileRestoreResult
+
   hydrate_archive_last_used: ArchiveLastUsedHydrationResult
   fork_session: SessionForkedResult
   merge_session_memory: SessionMemoryMergeResult
@@ -146,10 +131,7 @@ export type WsRequestResultMap = {
   get_project_agent_external_directory: ProjectAgentExternalDirectoryResult
   get_session_workers: SessionWorkersResult
   get_conversation_page: ConversationPageResult
-  list_directories: DirectoriesListedResult
-  validate_directory: DirectoryValidationResult
-  create_directory: DirectoryCreatedResult
-  pick_directory: string | null
+
   browser_host_register: import('@forge/protocol').BrowserHostConnectionSnapshot
   browser_host_hydrate: BrowserSessionSnapshot[]
   browser_host_state_report: import('@forge/protocol').BrowserHostStateReportResult
@@ -192,12 +174,8 @@ export interface ManagerWsAgentEventContext {
     workers: AgentDescriptor[],
     requestId?: string,
   ) => void
-  applyManagerCreated: (manager: AgentDescriptor) => void
-  applyManagerDeleted: (managerId: string) => void
   requestTracker: RequestTrackerAdapter
-  onRepositoryProjectCreationProgress?: (
-    event: Extract<import('@forge/protocol').ServerEvent, { type: 'repository_project_creation_progress' }>,
-  ) => void
+
 }
 
 export interface ManagerWsSessionEventContext {
@@ -223,15 +201,10 @@ export interface ManagerWsConfigEventContext {
   requestTracker: RequestTrackerAdapter
 }
 
-export interface ManagerWsDirectoryEventContext {
-  requestTracker: RequestTrackerAdapter
-}
-
 export interface ManagerWsSystemEventContext {
   requestTracker: Pick<RequestTrackerAdapter, 'resolve'>
   updateState: (patch: Partial<ManagerWsState>) => void
   pushSystemMessage: (text: string) => void
   /** Utility browser command errors reject their caller but are not chat events. */
-  isPendingDirectoryRequest: (requestId?: string) => boolean
   rejectPendingFromError: (code: string, message: string, requestId?: string) => void
 }

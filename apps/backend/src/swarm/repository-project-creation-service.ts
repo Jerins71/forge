@@ -21,6 +21,8 @@ import {
   RepositorySettingsService,
   RepositorySettingsValidationError,
 } from './repository-settings-service.js'
+import type { Principal } from '../environment/control/control-types.js'
+import type { CreateManagerInput } from './swarm-manager-facade.js'
 import type { SwarmManager } from './swarm-manager.js'
 
 export type RepositoryProjectCreationErrorCode =
@@ -46,6 +48,7 @@ export class RepositoryProjectCreationError extends Error {
 
 export interface CreateRepositoryProjectInput {
   requestId: string
+  principal?: Principal
   name: string
   repositoryUrl: string
   repositoryBasePath: string
@@ -94,9 +97,10 @@ interface OperationState {
 }
 
 export interface RepositoryProjectCreationServiceOptions {
-  swarmManager: Pick<SwarmManager, 'createManager' | 'listProfiles' | 'getAgentForInternalUse'>
+  swarmManager: Pick<SwarmManager, 'listProfiles' | 'getAgentForInternalUse'>
   settingsService: RepositorySettingsService
   cloneRunner?: GitCloneRunner
+  publishProject(input: CreateRepositoryProjectInput, manager: CreateManagerInput): Promise<AgentDescriptor>
 }
 
 export class RepositoryProjectCreationService {
@@ -111,7 +115,7 @@ export class RepositoryProjectCreationService {
   /** Synchronously flipped to closing at shutdown start so late creates cannot register. */
   private lifecycle: ServiceLifecycle = 'open'
 
-  constructor(options: RepositoryProjectCreationServiceOptions) {
+  constructor(private readonly options: RepositoryProjectCreationServiceOptions) {
     this.swarmManager = options.swarmManager
     this.settingsService = options.settingsService
     this.cloneRunner = options.cloneRunner ?? new GitCloneRunner()
@@ -308,7 +312,7 @@ export class RepositoryProjectCreationService {
         this.emitProgress(input, 'creating_manager')
 
         try {
-          const manager = await this.swarmManager.createManager(input.managerContextId, {
+          const manager = await this.options.publishProject(input, {
             name,
             cwd: repositoryPath,
             modelSelection: selection.modelSelection,

@@ -1,4 +1,4 @@
-import { isChoiceAnswer, type ClientCommand, type ManagerExactModelSelection } from "@forge/protocol";
+import { isChoiceAnswer, type ClientCommand } from "@forge/protocol";
 
 export type ParsedClientCommand =
   | { ok: true; command: ClientCommand }
@@ -35,28 +35,6 @@ export function normalizeMessageCount(value: unknown): number | undefined {
   }
 
   return value;
-}
-
-export function parseManagerExactModelSelection(
-  value: unknown,
-  fieldPrefix: string,
-): ManagerExactModelSelection | string {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return `${fieldPrefix} must be an object`;
-  }
-
-  const maybe = value as { provider?: unknown; modelId?: unknown };
-  if (typeof maybe.provider !== "string" || maybe.provider.trim().length === 0) {
-    return `${fieldPrefix}.provider must be a non-empty string`;
-  }
-  if (typeof maybe.modelId !== "string" || maybe.modelId.trim().length === 0) {
-    return `${fieldPrefix}.modelId must be a non-empty string`;
-  }
-
-  return {
-    provider: maybe.provider.trim(),
-    modelId: maybe.modelId.trim(),
-  };
 }
 
 export const isValidChoiceAnswer = isChoiceAnswer;

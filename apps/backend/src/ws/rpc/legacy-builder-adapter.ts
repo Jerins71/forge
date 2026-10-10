@@ -10,10 +10,8 @@ export const legacyCommandScopes = {
   subscribe: "unsupported", subscribe_inventory: "unsupported", api_proxy: "unsupported", ping: "session:read",
   user_message: "unsupported", create_session: "unsupported", stop_session: "unsupported", choice_response: "unsupported",
   resume_restart_recovery: "session:operate", dismiss_restart_recovery: "session:operate",
-  kill_agent: "session:operate", stop_all_agents: "session:operate", create_manager: "workspace:write",
-  create_repository_project: "workspace:write", cancel_repository_project_creation: "workspace:write", delete_manager: "workspace:write",
-  update_profile_default_model: "session:operate", update_project_delegation_defaults: "session:operate", update_manager_model: "session:operate",
-  update_manager_cwd: "workspace:write", update_session_model: "session:operate", update_session_delegation: "session:operate",
+  kill_agent: "session:operate", stop_all_agents: "session:operate",
+
   resume_session: "session:operate", hydrate_archive_last_used: "session:read", archive_session: "session:operate", restore_session: "session:operate",
   delete_session: "session:operate", rename_session: "session:operate", pin_session: "session:operate", set_session_project_agent: "session:operate",
   get_project_agent_config: "session:read", list_project_agent_references: "session:read", get_project_agent_reference: "session:read",
@@ -21,9 +19,9 @@ export const legacyCommandScopes = {
   get_project_agent_sharing: "session:read", set_project_agent_sharing: "session:operate", get_project_agent_external_directory: "workspace:read",
   fork_session: "session:operate", clear_session: "session:operate", dismiss_session_attention: "session:operate", session_goal_control: "session:operate",
   pin_message: "session:operate", clear_all_pins: "session:operate", merge_session_memory: "session:operate", get_session_workers: "unsupported",
-  get_conversation_page: "unsupported", list_directories: "workspace:read", validate_directory: "workspace:read", create_directory: "workspace:write",
-  pick_directory: "unsupported", rename_profile: "workspace:write", archive_profile: "workspace:write", restore_profile: "workspace:write",
-  reorder_profiles: "workspace:write", choice_cancel: "session:operate", codex_elicitation_response: "session:operate",
+  get_conversation_page: "unsupported",
+
+   choice_cancel: "session:operate", codex_elicitation_response: "session:operate",
   mark_unread: "session:operate", mark_all_read: "session:operate",
   // Host commands use browser.host.send on the socket that holds the browser.host.attach subscription.
   browser_host_register: "unsupported", browser_host_hydrate: "unsupported", browser_host_focus: "unsupported", browser_host_response: "unsupported",
@@ -46,7 +44,6 @@ export interface LegacyBuilderAdapter {
   execute(principal: Principal, method: LegacyMethod, input: RpcInput<LegacyMethod>, signal: AbortSignal): Promise<RpcOutput<LegacyMethod>>;
   subscribe(principal: Principal, input: RpcInput<"legacy.session.subscribe">, signal: AbortSignal): AsyncIterable<RpcStreamItem<"legacy.session.subscribe">>;
 }
-
 
 export function createLegacyBuilderAdapter({ access, ports }: { access: EnvironmentAccessPort; ports: LegacyHandlerPorts }): LegacyBuilderAdapter {
   async function execute(principal: Principal, method: LegacyMethod, input: RpcInput<LegacyMethod>, signal: AbortSignal): Promise<RpcOutput<LegacyMethod>> {

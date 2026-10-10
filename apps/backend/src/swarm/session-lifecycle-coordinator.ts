@@ -534,6 +534,8 @@ export class SessionLifecycleCoordinator {
     callerAgentId: string,
     input: {
       name: string;
+      controlCommandId?: string;
+      secureSessionsEnabled?: boolean;
       cwd: string;
       model?: SwarmModelPreset;
       modelSelection?: ManagerExactModelSelection;

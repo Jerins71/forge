@@ -488,8 +488,8 @@ class BackendServer implements StartedServer {
     this.swarmManager.off("agents_snapshot", this.handleTerminalAgentsSnapshot);
 
     try {
-      await this.environmentService.stop();
       await this.wsServer.stop();
+      await this.environmentService.stop();
     } finally {
       await Promise.allSettled([
         this.queueSchedulerSync(new Set<string>()),

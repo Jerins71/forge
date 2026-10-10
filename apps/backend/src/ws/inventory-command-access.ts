@@ -11,12 +11,7 @@ export function isInventoryCommandAllowed(command: ClientCommand): boolean {
     case "dismiss_session_attention":
     case "mark_unread":
     case "mark_all_read":
-    case "create_manager":
-    case "delete_manager":
     case "create_session":
-    case "rename_profile":
-    case "archive_profile":
-    case "restore_profile":
     case "hydrate_archive_last_used":
     case "rename_session":
     case "pin_session":
@@ -26,10 +21,6 @@ export function isInventoryCommandAllowed(command: ClientCommand): boolean {
     case "stop_session":
     case "resume_session":
     case "fork_session":
-    case "update_manager_model":
-    case "update_manager_cwd":
-    case "validate_directory":
-    case "list_directories":
       return true;
     case "api_proxy": {
       // Exact paths only; never a generic proxy or a subscription-derived target.

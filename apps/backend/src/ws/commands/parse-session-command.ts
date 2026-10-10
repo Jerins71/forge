@@ -1,15 +1,6 @@
-import { isManagerPosture, type ManagerPosture } from "@forge/protocol";
-import {
-  describeSwarmModelPresets,
-  describeSwarmReasoningLevels,
-  isSwarmModelPreset,
-  isSwarmReasoningLevel,
-  parseSwarmModelPreset
-} from "../../swarm/catalog/model-presets.js";
 import {
   fail,
   ok,
-  parseManagerExactModelSelection,
   type ClientCommandCandidate,
   type ParsedClientCommand
 } from "./command-parse-helpers.js";
@@ -17,33 +8,6 @@ import {
 export const MAX_CONVERSATION_PAGE_CURSOR_LENGTH = 4_096;
 
 export function parseSessionCommand(maybe: ClientCommandCandidate): ParsedClientCommand | undefined {
-  if (maybe.type === "update_session_delegation") {
-    const sessionAgentId = (maybe as { sessionAgentId?: unknown }).sessionAgentId;
-    const managerPosture = (maybe as { managerPosture?: unknown }).managerPosture;
-    const delegationRoster = (maybe as { delegationRoster?: unknown }).delegationRoster;
-    const requestId = (maybe as { requestId?: unknown }).requestId;
-    if (typeof sessionAgentId !== "string" || sessionAgentId.trim().length === 0) {
-      return fail("update_session_delegation.sessionAgentId must be a non-empty string");
-    }
-    if (managerPosture === undefined && delegationRoster === undefined) {
-      return fail("update_session_delegation requires managerPosture or delegationRoster");
-    }
-    const parsedPosture = parseManagerPostureUpdate(managerPosture);
-    if (parsedPosture.error) return fail(parsedPosture.error);
-    const parsedRoster = parseDelegationRosterUpdate(delegationRoster);
-    if (parsedRoster.error) return fail(parsedRoster.error);
-    if (requestId !== undefined && typeof requestId !== "string") {
-      return fail("update_session_delegation.requestId must be a string when provided");
-    }
-    return ok({
-      type: "update_session_delegation",
-      sessionAgentId: sessionAgentId.trim(),
-      ...(parsedPosture.value ? { managerPosture: parsedPosture.value } : {}),
-      ...(parsedRoster.value ? { delegationRoster: parsedRoster.value } : {}),
-      requestId,
-    });
-  }
-
   if (maybe.type === "session_goal_control") {
     const agentId = (maybe as { agentId?: unknown }).agentId;
     const action = (maybe as { action?: unknown }).action;
@@ -277,64 +241,6 @@ export function parseSessionCommand(maybe: ClientCommandCandidate): ParsedClient
     });
   }
 
-  if (maybe.type === "update_session_model") {
-    const sessionAgentId = (maybe as { sessionAgentId?: unknown }).sessionAgentId;
-    const mode = (maybe as { mode?: unknown }).mode;
-    const model = (maybe as { model?: unknown }).model;
-    const modelSelection = (maybe as { modelSelection?: unknown }).modelSelection;
-    const reasoningLevel = (maybe as { reasoningLevel?: unknown }).reasoningLevel;
-    const requestId = (maybe as { requestId?: unknown }).requestId;
-
-    if (typeof sessionAgentId !== "string" || sessionAgentId.trim().length === 0) {
-      return fail("update_session_model.sessionAgentId must be a non-empty string");
-    }
-    if (mode !== "inherit" && mode !== "override") {
-      return fail('update_session_model.mode must be "inherit" or "override"');
-    }
-    if (model !== undefined && modelSelection !== undefined) {
-      return fail("update_session_model.model and update_session_model.modelSelection are mutually exclusive");
-    }
-    if (mode === "override" && modelSelection === undefined && !isSwarmModelPreset(model)) {
-      return fail(`update_session_model.model must be one of ${describeSwarmModelPresets()}`);
-    }
-    const parsedModel = mode === "override" && modelSelection === undefined
-      ? parseSwarmModelPreset(model, "update_session_model.model")
-      : undefined;
-    const parsedModelSelection = modelSelection === undefined
-      ? undefined
-      : parseManagerExactModelSelection(modelSelection, "update_session_model.modelSelection");
-    if (typeof parsedModelSelection === "string") {
-      return fail(parsedModelSelection);
-    }
-    if (mode === "inherit" && model !== undefined) {
-      return fail("update_session_model.model must be omitted in inherit mode");
-    }
-    if (mode === "inherit" && parsedModelSelection !== undefined) {
-      return fail("update_session_model.modelSelection must be omitted in inherit mode");
-    }
-    if (reasoningLevel !== undefined && !isSwarmReasoningLevel(reasoningLevel)) {
-      return fail(`update_session_model.reasoningLevel must be one of ${describeSwarmReasoningLevels()}`);
-    }
-    if (mode === "inherit" && reasoningLevel !== undefined) {
-      return fail("update_session_model.reasoningLevel must be omitted in inherit mode");
-    }
-    if (requestId !== undefined && typeof requestId !== "string") {
-      return fail("update_session_model.requestId must be a string when provided");
-    }
-
-    return ok({
-      type: "update_session_model",
-      sessionAgentId: sessionAgentId.trim(),
-      mode,
-      ...(mode === "override"
-        ? parsedModelSelection
-          ? { modelSelection: parsedModelSelection, reasoningLevel }
-          : { model: parsedModel, reasoningLevel }
-        : {}),
-      requestId
-    });
-  }
-
   if (maybe.type === "fork_session") {
     const sourceAgentId = (maybe as { sourceAgentId?: unknown }).sourceAgentId;
     const label = (maybe as { label?: unknown }).label;
@@ -444,61 +350,4 @@ export function parseSessionCommand(maybe: ClientCommandCandidate): ParsedClient
   }
 
   return undefined;
-}
-
-function parseManagerPostureUpdate(value: unknown): {
-  value?: { mode: "inherit" } | {
-    mode: "override";
-    value: ManagerPosture;
-  };
-  error?: string;
-} {
-  if (value === undefined) return {};
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { error: "update_session_delegation.managerPosture must be an object" };
-  }
-  const record = value as Record<string, unknown>;
-  if (record.mode === "inherit") return { value: { mode: "inherit" } };
-  if (record.mode === "override" && isManagerPosture(record.value)) {
-    return {
-      value: {
-        mode: "override",
-        value: record.value,
-      },
-    };
-  }
-  return {
-    error:
-      'update_session_delegation.managerPosture must use mode="inherit" or '
-      + 'mode="override" with a supported value',
-  };
-}
-
-function parseDelegationRosterUpdate(value: unknown): {
-  value?: { mode: "inherit" } | { mode: "override"; rosterId: string };
-  error?: string;
-} {
-  if (value === undefined) return {};
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { error: "update_session_delegation.delegationRoster must be an object" };
-  }
-  const record = value as Record<string, unknown>;
-  if (record.mode === "inherit") return { value: { mode: "inherit" } };
-  if (
-    record.mode === "override"
-    && typeof record.rosterId === "string"
-    && /^[a-z0-9][a-z0-9-]{0,63}$/.test(record.rosterId.trim())
-  ) {
-    return {
-      value: {
-        mode: "override",
-        rosterId: record.rosterId.trim(),
-      },
-    };
-  }
-  return {
-    error:
-      'update_session_delegation.delegationRoster must use mode="inherit" or '
-      + 'mode="override" with a lowercase rosterId',
-  };
 }

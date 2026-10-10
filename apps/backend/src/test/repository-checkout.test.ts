@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once, EventEmitter } from 'node:events'
+import { bindHttpPrincipal } from '../ws/rpc/http-principal.js'
+import type { Scope } from '@forge/protocol/environment-v2'
 import { createServer } from 'node:http'
 import { lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -49,7 +51,7 @@ async function fixture(options: { cloneRunner?: Pick<GitCloneRunner, 'clone'>; c
     const path = join(base, input.folder); await matchingCheckout(path)
     return { repositoryPath: path, stagingPath: '' }
   }) }
-  const creation = new RepositoryProjectCreationService({ swarmManager: manager as never, settingsService: settings, cloneRunner: cloneRunner as GitCloneRunner })
+  const creation = new RepositoryProjectCreationService({ swarmManager: manager as never, publishProject: (_input, requested) => manager.createManager("", requested), settingsService: settings, cloneRunner: cloneRunner as GitCloneRunner })
   const service = new RepositoryCheckoutService({ swarmManager: manager, creationService: creation, settingsService: settings, machineName: 'Fixture Mac', clock: options.clock })
   cleanup.push(async () => { await service.shutdown(); await creation.shutdown() })
   const routes = createRepositoryCheckoutRoutes(service) as EnvironmentHttpRoute[]
@@ -59,6 +61,7 @@ async function fixture(options: { cloneRunner?: Pick<GitCloneRunner, 'clone'>; c
     if (!route) { response.writeHead(404).end(); return }
     const scopes = new Set((request.headers['x-test-scopes'] as string | undefined)?.split(',') ?? [])
     if ('scopes' in route.access && route.access.scopes.some(scope => !scopes.has(scope))) { response.writeHead(403).end(); return }
+    bindHttpPrincipal(request, { deviceSessionId: "checkout-fixture", scopes: scopes as Set<Scope> })
     try { await route.handle(request, response, url) } catch { response.writeHead(500).end() }
   })
   server.listen(0, '127.0.0.1'); await once(server, 'listening')

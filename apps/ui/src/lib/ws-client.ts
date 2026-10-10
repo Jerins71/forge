@@ -1,6 +1,7 @@
 import { EnvironmentRuntimeError, isInterruptedReceipt, type EnvironmentClient, type DetailState } from '@forge/client-runtime'
 import {
   projectShell,
+  projectSession,
   projectDetailMessages,
   projectDetailActivity,
   projectItems,
@@ -8,6 +9,8 @@ import {
   projectWorker,
   projectSessionWorkers,
 } from './ws-client/environment-projection'
+import { getCatalogModelsByFamily } from '@forge/protocol'
+import type { CommandReceipt, RpcInput } from '@forge/protocol/environment-v2'
 import { environmentCommandIntentKey, sendEnvironmentCommand } from './ws-client/environment-command-transport'
 import { EnvironmentOutbox } from './ws-client/environment-outbox'
 import { BROWSER_HOST_REGISTER_PROTOCOL_INCOMPATIBLE_ERROR } from '@forge/protocol'
@@ -17,7 +20,7 @@ import {
   conversationBootstrapMetrics,
   type ConversationSubscriptionReason,
 } from './ws-client/conversation-bootstrap-metrics'
-import { handleManagerIdleTransition, removeMutedAgent, removeMutedAgents } from './notification-service'
+import { handleManagerIdleTransition, removeMutedAgent } from './notification-service'
 import {
   assertConnectedSocket,
   assertReconnectableSocket,
@@ -38,12 +41,7 @@ import {
   buildChoiceResponseCommand,
   buildCodexElicitationResponseCommand,
   buildClearAllPinsCommand,
-  buildCreateManagerCommand,
-  buildCreateDirectoryCommand,
-  buildCreateRepositoryProjectCommand,
-  buildCancelRepositoryProjectCreationCommand,
   buildCreateSessionCommand,
-  buildDeleteManagerCommand,
   buildDeleteProjectAgentReferenceCommand,
   buildDismissSessionAttentionCommand,
   buildForkSessionCommand,
@@ -55,17 +53,12 @@ import {
   buildGetSessionWorkersCommand,
   buildHydrateArchiveLastUsedCommand,
   buildKillAgentCommand,
-  buildListDirectoriesCommand,
   buildListProjectAgentReferencesCommand,
   buildMarkAllReadCommand,
   buildMarkUnreadCommand,
-  buildPickDirectoryCommand,
   buildPinMessageCommand,
-  buildProfileArchiveActionCommand,
   buildPinSessionCommand,
-  buildRenameProfileCommand,
   buildRenameSessionCommand,
-  buildReorderProfilesCommand,
   buildRestartRecoveryActionCommand,
   buildRequestProjectAgentRecommendationsCommand,
   buildSessionActionCommand,
@@ -75,13 +68,7 @@ import {
   buildSetSessionProjectAgentCommand,
   buildStopAllAgentsCommand,
   buildSubscribeCommand,
-  buildUpdateManagerCwdCommand,
-  buildUpdateProfileDefaultModelCommand,
-  buildUpdateProjectDelegationDefaultsCommand,
-  buildUpdateSessionDelegationCommand,
-  buildUpdateSessionModelCommand,
   buildUserMessageCommand,
-  buildValidateDirectoryCommand,
   isSocketOpen,
   RECONNECTING_SOCKET_ERROR,
 } from './ws-client/request-definitions'
@@ -90,7 +77,6 @@ import { BootstrapBuffer } from './ws-client/bootstrap-buffer'
 import { SessionWorkerCache } from './ws-client/session-worker-cache'
 import { applyLoadedModelCacheVisualizationSetting as reduceLoadedModelCacheVisualizationSetting } from './ws-client/model-cache-visualization-state'
 import {
-  CREATE_REPOSITORY_PROJECT_TIMEOUT_MS,
   INITIAL_CONNECT_DELAY_MS,
   RECONNECT_MS,
   SESSION_WORKERS_REQUEST_TIMEOUT_MS,
@@ -123,7 +109,6 @@ function generateClientRequestId(): string {
 import {
   reduceAgentStatus,
   reduceAgentsSnapshot,
-  reduceManagerDeleted,
   reduceSessionDeleted,
 } from './ws-client/snapshot-reducers'
 import {
@@ -175,7 +160,6 @@ import { handleSessionEvent } from './ws-client/event-handlers/session-event-han
 import { handleSessionAttentionEvent } from './ws-client/event-handlers/session-attention-event-handlers'
 import { handleProjectAgentEvent } from './ws-client/event-handlers/project-agent-event-handlers'
 import { handleConfigEvent } from './ws-client/event-handlers/config-event-handlers'
-import { handleDirectoryEvent } from './ws-client/event-handlers/directory-event-handlers'
 import { handleSystemEvent } from './ws-client/event-handlers/system-event-handlers'
 import { handleBrowserEvent } from './ws-client/event-handlers/browser-event-handlers'
 import type {
@@ -295,10 +279,6 @@ export class ManagerWsClient {
   private readonly browserHydrationChunks = new Map<string, { chunkCount: number; chunks: Array<Uint8Array | undefined> }>()
   private browserAutomationRequestHandler: ((request: BrowserAutomationRequest) => Promise<BrowserAutomationResponse>) | null = null
   private browserLifecycleRequestHandler: ((request: BrowserHostLifecycleRequest) => Promise<BrowserHostLifecycleResponse>) | null = null
-  private readonly repositoryProjectProgressListeners = new Map<
-    string,
-    (event: Extract<import('@forge/protocol').ServerEvent, { type: 'repository_project_creation_progress' }>) => void
-  >()
 
   constructor(url: string, initialAgentId?: string | null, options: ManagerWsClientOptions = {},
   ) {
@@ -365,10 +345,17 @@ export class ManagerWsClient {
           this.refreshEnvironmentCommands()
         }),
       )
-      const updateShell = () =>
-        this.updateState(
-          projectShell(client.shell.getSnapshot(), this.state.agents, this.state.profiles, this.state.unreadCounts, this.state.sessionAttentions),
-        )
+      const updateShell = () => {
+        const shell = client.shell.getSnapshot();
+        for (const profile of this.state.profiles) {
+          const current = shell.projects.get(profile.profileId);
+          if (!current || current.archived && !profile.archivedAt) {
+            this.conversationSnapshotCache?.evictProfile(this.originId, profile.profileId);
+            for (const agent of this.state.agents) if (agent.profileId === profile.profileId) this.invalidateConversationSnapshotAgent(agent.agentId);
+          }
+        }
+        this.updateState(projectShell(shell, this.state.agents, this.state.profiles, this.state.unreadCounts, this.state.sessionAttentions));
+      }
       updateShell()
       this.environmentDetach.push(
         // Keyed wake-ups only: a project-only change replaces `projects` but not `sessions`.
@@ -1049,6 +1036,25 @@ export class ManagerWsClient {
     )
   }
 
+  private requirePolicyClient(): void {
+    if (!this.environmentClient?.descriptor()?.capabilities.projectPolicy) throw new Error('Update this environment to configure projects and sessions')
+  }
+  private policyModel(preset?: ManagerModelPreset, exact?: ManagerExactModelSelection, thinkingLevel?: ManagerReasoningLevel): RpcInput<'project.create'>['model'] {
+    const selected = exact ?? (preset ? getCatalogModelsByFamily(preset).find(model => model.isFamilyDefault) : undefined)
+    if (!selected) throw new Error('Select an exact model for this environment')
+    return { provider: selected.provider, modelId: selected.modelId, ...(thinkingLevel ? { thinkingLevel } : {}) }
+  }
+  private async policy<M extends Extract<CommandReceipt['method'], `project.${string}` | 'session.configure' | 'workspace.directories.create'>>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<CommandReceipt> {
+    this.requirePolicyClient()
+    const key = JSON.stringify([method, input])
+    const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
+    this.intentCommandIds.set(key, commandId)
+    const receipt = await this.environmentClient!.request(method, { ...input, commandId } as RpcInput<M>)
+    this.intentCommandIds.delete(key)
+    if (receipt.state !== 'succeeded') throw new Error(receipt.error?.message ?? 'Configuration was interrupted; inspect the current state before retrying')
+    return receipt
+  }
+
   async createManager(input: {
     name: string
     cwd: string
@@ -1057,89 +1063,20 @@ export class ManagerWsClient {
     reasoningLevel?: ManagerReasoningLevel
     secureSessionsEnabled?: boolean
   }): Promise<AgentDescriptor> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('create_manager', (requestId) =>
-      buildCreateManagerCommand(input, requestId),
-    )
-  }
+    const model = this.policyModel(input.model, input.modelSelection, input.reasoningLevel)
+    const receipt = await this.policy('project.create', { title: input.name, cwd: input.cwd, model, ...(input.secureSessionsEnabled !== undefined ? { secureSessionsEnabled: input.secureSessionsEnabled } : {}) })
+    const sessionId = receipt.result?.sessionId ?? receipt.sessionId
+    if (!sessionId) throw new Error('Project creation has no default session')
+    const shell = this.environmentClient!.shell.getSnapshot()
+    return projectSession(shell.sessions.get(sessionId) ?? { sessionId, projectId: receipt.result?.projectId ?? receipt.projectId!, title: input.name, status: 'idle', attention: 'none', unread: 0, workerCount: 0, updatedAt: receipt.updatedAt, sortKey: receipt.updatedAt, archived: false, workspace: { kind: 'current_checkout', cwd: input.cwd, branch: null }, model: { ...model, thinkingLevel: model.thinkingLevel ?? '', origin: 'profile_default' } }, shell)
 
-  /**
-   * Clone a repository then create a manager. Returns an operation handle so
-   * callers can cancel and subscribe to progress without touching RequestTracker.
-   */
-  createRepositoryProject(
-    input: {
-      name: string
-      repositoryUrl: string
-      repositoryBasePath: string
-      repositoryFolder: string
-      modelSelection: ManagerExactModelSelection
-      reasoningLevel?: ManagerReasoningLevel
-      secureSessionsEnabled?: boolean
-    },
-    options?: {
-      onProgress?: (
-        event: Extract<import('@forge/protocol').ServerEvent, { type: 'repository_project_creation_progress' }>,
-      ) => void
-    },
-  ): {
-    requestId: string
-    promise: Promise<{ manager: AgentDescriptor; repositoryPath: string }>
-    cancel: () => Promise<{ accepted: boolean; tooLate: boolean; operationRequestId: string }>
-  } {
-    assertReconnectableSocket(this.socket)
-    const requestId = this.requestDispatcher.nextRequestId('create_repository_project')
-
-    if (options?.onProgress) {
-      this.repositoryProjectProgressListeners.set(requestId, options.onProgress)
-    }
-
-    const promise = new Promise<{ manager: AgentDescriptor; repositoryPath: string }>((resolve, reject) => {
-      this.requestDispatcher.tracker.track(
-        'create_repository_project',
-        requestId,
-        resolve,
-        reject,
-        CREATE_REPOSITORY_PROJECT_TIMEOUT_MS,
-      )
-
-      const sent = this.send(buildCreateRepositoryProjectCommand(input, requestId))
-      if (!sent) {
-        this.requestDispatcher.tracker.reject(
-          'create_repository_project',
-          requestId,
-          new Error(RECONNECTING_SOCKET_ERROR),
-        )
-      }
-    }).finally(() => {
-      this.repositoryProjectProgressListeners.delete(requestId)
-    })
-
-    return {
-      requestId,
-      promise,
-      cancel: () => this.cancelRepositoryProjectCreation(requestId),
-    }
-  }
-
-  async cancelRepositoryProjectCreation(
-    operationRequestId: string,
-  ): Promise<{ accepted: boolean; tooLate: boolean; operationRequestId: string }> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('cancel_repository_project_creation', (requestId) =>
-      buildCancelRepositoryProjectCreationCommand(operationRequestId, requestId),
-    )
   }
 
   async deleteManager(managerId: string): Promise<{ managerId: string }> {
-    assertReconnectableSocket(this.socket)
+    await this.policy('project.delete', { projectId: managerId })
     this.invalidateConversationSnapshotAgent(managerId)
-    for (const agent of this.state.agents) {
-      if (agent.managerId === managerId) this.invalidateConversationSnapshotAgent(agent.agentId)
-    }
-    return this.requestDispatcher.enqueueRequest('delete_manager', (requestId) =>
-      buildDeleteManagerCommand(managerId, requestId),
-    )
+    return { managerId }
+
   }
 
   async updateProfileDefaultModel(
@@ -1148,10 +1085,9 @@ export class ManagerWsClient {
     reasoningLevel?: ManagerReasoningLevel,
     modelSelection?: ManagerExactModelSelection,
   ): Promise<{ profileId: string }> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('update_profile_default_model', (requestId) =>
-      buildUpdateProfileDefaultModelCommand(profileId, model, reasoningLevel, requestId, modelSelection),
-    )
+    await this.policy('project.update', { projectId: profileId, patch: { modelDefault: this.policyModel(model, modelSelection, reasoningLevel) } })
+    return { profileId }
+
   }
 
   async updateProjectDelegationDefaults(
@@ -1161,45 +1097,43 @@ export class ManagerWsClient {
       delegationRosterId?: string | null
     },
   ): Promise<{ profileId: string }> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest(
-      'update_project_delegation_defaults',
-      (requestId) =>
-        buildUpdateProjectDelegationDefaultsCommand(profileId, updates, requestId),
-    )
+    await this.policy('project.update', { projectId: profileId, patch: { delegationDefaults: { ...(updates.managerPosture !== undefined ? { managerPosture: updates.managerPosture as 'delegation_first' | 'adaptive' | 'hands_on' | null } : {}), ...(updates.delegationRosterId !== undefined ? { rosterId: updates.delegationRosterId } : {}) } } })
+    return { profileId }
+
   }
 
   async updateManagerCwd(managerId: string, cwd: string): Promise<{ managerId: string; cwd: string }> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('update_manager_cwd', (requestId) =>
-      buildUpdateManagerCwdCommand(managerId, cwd, requestId),
-    )
+    await this.policy('project.update', { projectId: managerId, patch: { cwd } })
+    return { managerId, cwd: this.environmentClient!.shell.getSnapshot().projects.get(managerId)?.cwd ?? cwd }
+
   }
 
   reorderProfiles(profileIds: string[]): boolean {
-    if (!isSocketOpen(this.socket)) return false
-    return this.send(buildReorderProfilesCommand(profileIds))
+    if (!this.environmentClient?.descriptor()?.capabilities.projectPolicy) return false
+    void this.policy('project.reorder', { projectIds: profileIds }).catch(error => this.updateState({ lastError: error instanceof Error ? error.message : String(error) }))
+    return true
+
   }
 
   async listDirectories(path?: string): Promise<DirectoriesListedResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('list_directories', (requestId) =>
-      buildListDirectoriesCommand(path, requestId),
-    )
+    this.requirePolicyClient()
+    const listed = await this.environmentClient!.request('workspace.directories.list', { ...(path ? { path } : {}) })
+    return { ...listed, path: listed.resolvedPath, directories: listed.entries.map(entry => entry.path) }
+
   }
 
   async validateDirectory(path: string): Promise<DirectoryValidationResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('validate_directory', (requestId) =>
-      buildValidateDirectoryCommand(path, requestId),
-    )
+    this.requirePolicyClient()
+    const result = await this.environmentClient!.request('workspace.directories.validate', { path })
+    return { ...result, path: result.requestedPath, message: result.message ?? null }
+
   }
 
   async createDirectory(parentPath: string, name: string): Promise<DirectoryCreatedResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('create_directory', (requestId) =>
-      buildCreateDirectoryCommand(parentPath, name, requestId),
-    )
+    const receipt = await this.policy('workspace.directories.create', { parentPath, name })
+    if (!receipt.result?.path) throw new Error('Directory creation has no result')
+    return { path: receipt.result.path, parentPath, name }
+
   }
 
   async pickDirectory(defaultPath?: string): Promise<string | null> {
@@ -1213,10 +1147,8 @@ export class ManagerWsClient {
       return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
     }
 
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('pick_directory', (requestId) =>
-      buildPickDirectoryCommand(defaultPath, requestId),
-    )
+    throw new Error('Directory picking requires Forge Desktop; browse the target environment folders instead')
+
   }
 
   async createSession(
@@ -1237,10 +1169,9 @@ export class ManagerWsClient {
     reasoningLevel?: ManagerReasoningLevel,
     modelSelection?: ManagerExactModelSelection,
   ): Promise<{ sessionAgentId: string; mode: 'inherit' | 'override' }> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('update_session_model', (requestId) =>
-      buildUpdateSessionModelCommand(sessionAgentId, mode, model, reasoningLevel, requestId, modelSelection),
-    )
+    await this.policy('session.configure', { sessionId: sessionAgentId, model: mode === 'inherit' ? { mode } : { mode, ...this.policyModel(model, modelSelection, reasoningLevel) } })
+    return { sessionAgentId, mode }
+
   }
 
   async updateSessionDelegation(
@@ -1256,12 +1187,9 @@ export class ManagerWsClient {
       }
     },
   ): Promise<{ sessionAgentId: string }> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest(
-      'update_session_delegation',
-      (requestId) =>
-        buildUpdateSessionDelegationCommand(sessionAgentId, updates, requestId),
-    )
+    await this.policy('session.configure', { sessionId: sessionAgentId, delegation: updates as RpcInput<'session.configure'>['delegation'] })
+    return { sessionAgentId }
+
   }
 
   async stopSession(agentId: string): Promise<SessionActionResult> {
@@ -1332,28 +1260,22 @@ export class ManagerWsClient {
   }
 
   async renameProfile(profileId: string, displayName: string): Promise<{ profileId: string }> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('rename_profile', (requestId) =>
-      buildRenameProfileCommand(profileId, displayName, requestId),
-    )
+    await this.policy('project.update', { projectId: profileId, patch: { title: displayName } })
+    return { profileId }
+
   }
 
   async archiveProfile(profileId: string): Promise<ProfileArchiveResult> {
-    assertReconnectableSocket(this.socket)
+    const receipt = await this.policy('project.archive', { projectId: profileId })
     this.conversationSnapshotCache?.evictProfile(this.originId, profileId)
-    for (const agent of this.state.agents) {
-      if (agent.profileId === profileId) this.nonCapturableConversationAgentIds.add(agent.agentId)
-    }
-    return this.requestDispatcher.enqueueRequest('archive_profile', (requestId) =>
-      buildProfileArchiveActionCommand('archive_profile', profileId, requestId),
-    )
+    return { profileId, archivedAt: receipt.updatedAt }
+
   }
 
   async restoreProfile(profileId: string): Promise<ProfileRestoreResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('restore_profile', (requestId) =>
-      buildProfileArchiveActionCommand('restore_profile', profileId, requestId),
-    )
+    const receipt = await this.policy('project.restore', { projectId: profileId })
+    return { profileId, openAgentId: receipt.result?.sessionId ?? '' }
+
   }
 
   async hydrateArchiveLastUsed(): Promise<ArchiveLastUsedHydrationResult> {
@@ -1821,11 +1743,8 @@ export class ManagerWsClient {
       this.invalidateConversationSnapshotAgent(event.agentId)
     } else if (event.type === 'session_archived' || event.type === 'session_cleared') {
       this.invalidateConversationSnapshotAgent(event.agentId)
-    } else if (event.type === 'profile_archived') {
-      this.conversationSnapshotCache?.evictProfile(this.originId, event.profileId)
-      for (const agent of this.state.agents) {
-        if (agent.profileId === event.profileId) this.nonCapturableConversationAgentIds.add(agent.agentId)
-      }
+
+
     }
 
     if (
@@ -1942,12 +1861,8 @@ export class ManagerWsClient {
         applyAgentsSnapshot: (agents) => this.applyAgentsSnapshot(agents),
         applySessionWorkersSnapshot: (sessionAgentId, workers, requestId) =>
           this.applySessionWorkersSnapshot(sessionAgentId, workers, requestId),
-        applyManagerCreated: (manager) => this.applyManagerCreated(manager),
-        applyManagerDeleted: (managerId) => this.applyManagerDeleted(managerId),
         requestTracker: this.requestDispatcher.tracker,
-        onRepositoryProjectCreationProgress: (progressEvent) => {
-          this.repositoryProjectProgressListeners.get(progressEvent.requestId)?.(progressEvent)
-        },
+
       })
     ) {
       return
@@ -1990,16 +1905,12 @@ export class ManagerWsClient {
       return
     }
 
-    if (handleDirectoryEvent(event, { requestTracker: this.requestDispatcher.tracker })) {
-      return
-    }
+
 
     handleSystemEvent(event, {
       requestTracker: this.requestDispatcher.tracker,
       updateState: (patch) => this.updateState(patch),
       pushSystemMessage: (text) => this.pushSystemMessage(text),
-      isPendingDirectoryRequest: (requestId) =>
-        this.requestDispatcher.isPendingDirectoryRequest(requestId),
       rejectPendingFromError: (code, message, requestId) =>
         this.requestDispatcher.rejectPendingFromError(code, message, requestId),
     })
@@ -2330,50 +2241,6 @@ export class ManagerWsClient {
         sessionAgentId,
         workers,
       })
-    }
-  }
-
-  private applyManagerCreated(manager: AgentDescriptor): void {
-    const nextAgents = [
-      ...this.state.agents.filter((agent) => agent.agentId !== manager.agentId),
-      manager,
-    ]
-    this.applyAgentsSnapshot(nextAgents)
-  }
-
-  private applyManagerDeleted(managerId: string): void {
-    const result = reduceManagerDeleted({
-      state: this.state,
-      managerId,
-      socketOpen: isSocketOpen(this.socket),
-    })
-
-    this.sessionWorkerCache.clearQueuedRefetch(managerId)
-    for (const deletedAgentId of result.deletedAgentIds) {
-      this.invalidateConversationSnapshotAgent(deletedAgentId)
-    }
-    removeMutedAgents(result.deletedAgentIds)
-
-    if (result.nextDesiredAgentId !== undefined) {
-      this.hasExplicitAgentSelection = false
-      this.explicitAgentSelectionAgentId = null
-      this.explicitAgentSelectionPending = false
-      this.desiredAgentId = result.nextDesiredAgentId
-    }
-
-    const throughputCleanup = clearGenerationThroughputForAgents(this.state, result.deletedAgentIds)
-    const patch = { ...result.patch, ...throughputCleanup }
-
-    if (result.subscribeToAgentId) {
-      this.beginConversationSubscription({
-        agentId: result.subscribeToAgentId,
-        requestedView: this.conversationView,
-        reason: 'fallback',
-        patch,
-        captureOutgoingSnapshot: false,
-      })
-    } else {
-      this.updateState(patch)
     }
   }
 

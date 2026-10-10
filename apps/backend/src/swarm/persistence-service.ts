@@ -36,6 +36,7 @@ export const DEFAULT_MEMORY_FILE_CONTENT = `# Swarm Memory
 
 interface PersistenceServiceDependencies {
   config: SwarmConfig;
+  descriptorStore?: AgentDescriptorStore;
   descriptors: Map<string, AgentDescriptor>;
   sortedDescriptors: () => AgentDescriptor[];
   sortedProfiles: () => ManagerProfile[];
@@ -172,7 +173,7 @@ export class PersistenceService {
   }
 
   async loadStore(): Promise<AgentsStoreFile> {
-    const store = new AgentDescriptorStore({
+    const store = this.deps.descriptorStore ?? new AgentDescriptorStore({
       dataDir: this.deps.config.paths.dataDir,
       storeFilePath: this.deps.config.paths.agentsStoreFile,
       configuredManagerId: this.deps.getConfiguredManagerId(),
@@ -183,7 +184,7 @@ export class PersistenceService {
   }
 
   async saveStore(): Promise<void> {
-    const store = new AgentDescriptorStore({
+    const store = this.deps.descriptorStore ?? new AgentDescriptorStore({
       dataDir: this.deps.config.paths.dataDir,
       storeFilePath: this.deps.config.paths.agentsStoreFile,
       configuredManagerId: this.deps.getConfiguredManagerId(),
