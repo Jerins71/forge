@@ -52,9 +52,10 @@ export class RestartRecoveryCoordinator {
   async reconcileForBoot(): Promise<void> {
     const persisted = await readRecoveryOccurrence(this.options.dataDir);
     if (persisted?.dismissedAt) await applyRecoveryDismissal(this.options.dataDir, persisted, workers => this.options.onInterruptedWorkersDismissed?.(workers) ?? Promise.resolve());
-    if (persisted && !persisted.resumedAt && !persisted.dismissedAt) { this.projection = persisted; return; }
-    const interruptedManagers = new Set<string>();
-    const interruptedWorkers = new Set<string>();
+    const pendingOccurrence = persisted && !persisted.resumedAt && !persisted.dismissedAt ? persisted : null;
+    const interruptedManagers = new Set(pendingOccurrence?.interruptedManagers);
+    const interruptedWorkers = new Set(pendingOccurrence?.interruptedWorkers);
+    let hasNewRecoveryItem = false;
     const undeliveredReports = new Map<
       string,
       {
@@ -64,7 +65,7 @@ export class RestartRecoveryCoordinator {
         turnId?: string;
         assignmentId?: string;
       }
-    >();
+    >((pendingOccurrence?.undeliveredReports ?? []).map(report => [report.deliveryId, report]));
 
     for (const descriptor of this.options.descriptors.values()) {
       if (descriptor.role !== "manager") continue;
@@ -75,8 +76,11 @@ export class RestartRecoveryCoordinator {
       const replay = await readRecoveryState(target);
 
       for (const openTurn of replay.openTurns.values()) {
+        // Captured turns stay unresolved until a decision, even after boot normalizes their actor.
+        if (pendingOccurrence && openTurn.recoveryId === pendingOccurrence.recoveryId) continue;
         const actor = this.options.descriptors.get(openTurn.agentId);
         if (actor?.status === "streaming") {
+          hasNewRecoveryItem = true;
           (actor.role === "manager" ? interruptedManagers : interruptedWorkers).add(
             actor.agentId,
           );
@@ -91,8 +95,10 @@ export class RestartRecoveryCoordinator {
         });
       }
 
+      for (const ackedDeliveryId of replay.ackedDeliveries) undeliveredReports.delete(ackedDeliveryId);
       for (const pending of replay.pendingDeliveries.values()) {
         if (replay.ackedDeliveries.has(pending.deliveryId)) continue;
+        if (!undeliveredReports.has(pending.deliveryId)) hasNewRecoveryItem = true;
         undeliveredReports.set(pending.deliveryId, {
           deliveryId: pending.deliveryId,
           fromAgentId: pending.from,
@@ -101,6 +107,11 @@ export class RestartRecoveryCoordinator {
           ...(pending.assignmentId ? { assignmentId: pending.assignmentId } : {}),
         });
       }
+    }
+
+    if (pendingOccurrence && !hasNewRecoveryItem) {
+      this.projection = pendingOccurrence;
+      return;
     }
 
     const bootId = randomUUID();
@@ -119,7 +130,7 @@ export class RestartRecoveryCoordinator {
       snapshot.interruptedWorkers.length > 0 ||
       snapshot.undeliveredReports.length > 0;
     this.projection = hasRecovery ? snapshot : persisted;
-    if (hasRecovery) await saveRecoveryOccurrence(this.options.dataDir, snapshot);
+    if (hasRecovery) await saveRecoveryOccurrence(this.options.dataDir, snapshot, pendingOccurrence?.recoveryId);
     if (hasRecovery) {
       this.options.logDebug("turn_ledger:boot_recovery_snapshot", snapshot);
     }
