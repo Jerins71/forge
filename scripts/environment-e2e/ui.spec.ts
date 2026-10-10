@@ -551,9 +551,10 @@ test('Settings and Stats edit the picked environment only, with no secret materi
   assertions.settingsStatsTarget = { environmentId: b.environmentId, requests: afterSwitch, secretUrls: 0 }
 })
 
-test('embedded Browser: this machine registers as host, opens a tab, survives reload; remote sessions get a disabled state', async ({ page }) => {
+test('embedded Browser: a forged renderer and device grant confer no Desktop authority; remote sessions get a disabled state', async ({ page }) => {
   const { a, b } = fleet!
-  // Stands in for Forge Desktop's trusted browser IPC, only on pages opened with the marker.
+  // A forged renderer bridge supplies no private Desktop ticket capability.
+  // The real positive host/recording/reparent proof lives in browser-smoke.ts.
   await page.addInitScript(() => {
     if (!new URLSearchParams(location.search).has('e2eBrowserHost')) return
     const log: Array<{ operation: string; hostGeneration: number }> = []
@@ -594,26 +595,19 @@ test('embedded Browser: this machine registers as host, opens a tab, survives re
 
   await page.goto(`${fleet!.uiUrl}/?agent=${encodeURIComponent(a.sessionId)}&e2eBrowserHost=1`)
   let workspace = await openBrowser()
-  // The renderer registered with this machine's backend: the host is connected and controls are live.
-  await expect(workspace.getByRole('button', { name: 'New browser tab' })).toBeEnabled()
-  await expect(workspace.getByText('Browser host unavailable')).toHaveCount(0)
-  await workspace.getByRole('button', { name: 'Open a tab' }).click()
-  // The backend routed the open to the renderer host and the resulting tab came back as session state.
-  await expect(workspace.getByRole('tab', { name: 'Fixture tab' })).toHaveCount(1)
-  const firstLoad = await hostLog()
-  expect(firstLoad).toEqual([{ operation: 'open', hostGeneration: expect.any(Number) }])
-  await shot(page, 'browser-host-primary')
+  // Environment scopes and a forged Electron bridge cannot attach this host.
+  await expect(workspace.getByRole('button', { name: 'New browser tab' })).toBeDisabled()
+  await expect(workspace.getByText('Browser host unavailable')).toBeVisible()
+  await expect(workspace.getByRole('tab')).toHaveCount(0)
+  expect(await hostLog()).toEqual([])
+  await shot(page, 'browser-host-denied')
 
-  // Reload: a new renderer registers again (a later host generation) and hydrates the same tab.
+  // Reload never upgrades an ordinary device grant to physical authority.
   await page.goto(`${fleet!.uiUrl}/?agent=${encodeURIComponent(a.sessionId)}&e2eBrowserHost=1`)
   workspace = await openBrowser()
-  await expect(workspace.getByRole('button', { name: 'New browser tab' })).toBeEnabled()
-  await expect(workspace.getByRole('tab', { name: 'Fixture tab' })).toHaveCount(1)
-  await workspace.getByRole('button', { name: 'New browser tab' }).click()
-  await expect(workspace.getByRole('tab', { name: 'Fixture tab' })).toHaveCount(2)
-  const afterReload = await hostLog()
-  expect(afterReload).toHaveLength(1)
-  expect(afterReload[0]!.hostGeneration).toBeGreaterThan(firstLoad[0]!.hostGeneration)
+  await expect(workspace.getByRole('button', { name: 'New browser tab' })).toBeDisabled()
+  await expect(workspace.getByRole('tab')).toHaveCount(0)
+  expect(await hostLog()).toEqual([])
 
   // A session on another machine has no Browser workspace, and nothing was routed to this host for it.
   await page.goto(`${fleet!.uiUrl}/?agent=${encodeURIComponent(b.sessionId)}&env=${b.environmentId}&e2eBrowserHost=1`)
@@ -623,7 +617,7 @@ test('embedded Browser: this machine registers as host, opens a tab, survives re
   await expect(workspace.getByRole('button', { name: 'New browser tab' })).toHaveCount(0)
   expect(await hostLog()).toEqual([])
   await shot(page, 'browser-host-remote')
-  assertions.browserHost = { primaryOpen: firstLoad, reloadHostGeneration: afterReload[0]!.hostGeneration, hydratedTabs: 1, remote: 'unavailable' }
+  assertions.browserHost = { forgedBridgeDenied: true, deviceGrantDidNotConferHost: true, reloadDidNotConferHost: true, remote: 'unavailable', positiveElectronFixture: 'scripts/environment-e2e/browser-smoke.ts' }
 })
 
 async function openInbox(page: Page) {

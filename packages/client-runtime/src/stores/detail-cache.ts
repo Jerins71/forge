@@ -215,10 +215,7 @@ export class DetailCache {
         state = { ...state, transient }
       }
       entry.store.set(state)
-      entry.bytes = new TextEncoder().encode(
-        JSON.stringify([state.projection, [...state.transient]]),
-      ).byteLength
-      this.evict()
+      this.measure(entry)
     }
     const restart = () => {
       entry.release()
@@ -299,6 +296,7 @@ export class DetailCache {
         const state = entry.store.getSnapshot()
         if (state.browser && state.browser.revision > snapshot.revision) return
         entry.store.set({ ...state, browser: snapshot })
+        this.measure(entry)
       }, error: () => {},
     })
     entry.release = () => {
@@ -308,6 +306,13 @@ export class DetailCache {
       pending = []
       transientBatch.clear()
     }
+  }
+  private measure(entry: Entry): void {
+    const state = entry.store.getSnapshot()
+    entry.bytes = new TextEncoder().encode(
+      JSON.stringify([state.projection, state.browser, [...state.transient]]),
+    ).byteLength
+    this.evict()
   }
   private now(): number {
     return this.ports.now?.() ?? Date.now()
