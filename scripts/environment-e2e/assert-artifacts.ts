@@ -78,7 +78,7 @@ export async function writeInfrastructureArtifacts(manifest: FleetManifest, mani
     deferred: assertions.deferred,
   };
   for (const [report, kind] of [
-    ['slice-assertions.json', 'assertions'], ['ui/ui-assertions.json', 'assertions'],
+    ['slice-assertions.json', 'assertions'], ['ui/ui-assertions.json', 'assertions'], ['cli-acceptance.json', 'assertions'],
     ['playwright-results.json', 'assertions'], ['wire-metrics.json', 'wire-metrics'],
     ['performance.json', 'performance'], ['browser-performance-trace.json', 'performance'], ['reconnect-bytes.svg', 'performance'],
     ['heap-shell.heapsnapshot', 'performance'], ['heap-details.heapsnapshot', 'performance'], ['heap-expired.heapsnapshot', 'performance'],

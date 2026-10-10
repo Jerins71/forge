@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { openFixtureRpc, until } from './rpc-client.js';
 import type { BootstrapSession, EnvironmentFixture } from '../launch.js';
 
-export interface NativeSmokeEvidence { sessionId: string; assistantReplies: number; workerResults: number; dispatches: number; choices: number; workerSpawns: number; streamingDeltas: number; }
+export interface NativeSmokeEvidence { sessionId: string; assistantReplies: number; workerResults: number; dispatches: number; choices: number; workerSpawns: number; detailItemUpdates: number; }
 export async function nativeSmoke(environment: EnvironmentFixture, session: BootstrapSession): Promise<NativeSmokeEvidence> {
   const rpc = await openFixtureRpc(environment.baseUrl, session);
   try {
@@ -15,7 +15,7 @@ export async function nativeSmoke(environment: EnvironmentFixture, session: Boot
     await rpc.call('session.subscribe', { sessionId });
     const settled = (commandId: string) => until(() => rpc.call('command.get', { commandId }), r => !['accepted', 'running'].includes(r.state));
     const events = () => rpc.frames.flatMap(frame => frame.item?.event ? [frame.item.event] : []);
-    const itemText = (event: any) => event.type === 'item.append' ? JSON.stringify(event.item) : '';
+    const itemText = (event: any) => event.type === 'item.upsert' ? JSON.stringify(event.item) : '';
     const send = async (text: string) => { const sent = await rpc.call('session.send', { commandId: randomUUID(), sessionId, message: { text, artifactIds: [] } }); assert.equal((await settled(sent.commandId)).state, 'succeeded'); };
     await send('Synthetic smoke hello.');
     await until(() => events().some(e => itemText(e).includes(`fixture:${environment.instanceId}:assistant reply`)), Boolean);
@@ -31,6 +31,6 @@ export async function nativeSmoke(environment: EnvironmentFixture, session: Boot
     const sum = (key: string) => counters.reduce((total, counter) => total + (counter[key] ?? 0), 0);
     assert.equal(sum('choices'), 1); assert.equal(sum('workerSpawns'), 1); assert(sum('turnStarts') >= 4);
     assert.equal(await readFile(join(environment.checkout, 'fixture-provider-marker.txt'), 'utf8').then(text => text.split(':')[0]), environment.instanceId);
-    return { sessionId, assistantReplies: events().filter(e => e.type === 'item.append' && e.item.kind === 'assistant').length, workerResults: 1, dispatches: sum('turnStarts'), choices: sum('choices'), workerSpawns: sum('workerSpawns'), streamingDeltas: events().filter(e => e.type === 'activity.upsert').length };
+    return { sessionId, assistantReplies: events().filter(e => e.type === 'item.upsert' && e.item.kind === 'assistant').length, workerResults: 1, dispatches: sum('turnStarts'), choices: sum('choices'), workerSpawns: sum('workerSpawns'), detailItemUpdates: events().filter(e => e.type === 'item.upsert').length };
   } finally { rpc.close(); }
 }
