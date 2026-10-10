@@ -14,6 +14,7 @@ import type {
   BrowserTabSnapshot,
   BrowserViewportSetting,
   ExternalChromeCoordinatorStatus,
+  ManagedHostsBridge,
 } from '@forge/protocol'
 
 export interface SleepBlockerStatus { enabled: boolean; blocking: boolean; graceRemainingMs: number | null; reason: string }
@@ -130,6 +131,7 @@ export interface BrowserWorkspaceBridge {
 export interface ElectronBridge {
   environmentPersistence?: EnvironmentPersistenceBridge
   environmentCredentials?: EnvironmentCredentialsBridge
+  managedHosts?: ManagedHostsBridge
   windowRole: ElectronWindowRole
   backendUrl?: string
   backendWsUrl?: string

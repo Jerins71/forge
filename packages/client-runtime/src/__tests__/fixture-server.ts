@@ -162,6 +162,12 @@ export async function startFixtureServer(index = 0) {
         result(r)
         return
       }
+      if (method === 'session.workers') {
+        const detail = seed.details![(input as { sessionId: string }).sessionId]
+        if (!detail) return error('NOT_FOUND')
+        result({ workers: detail.workers, nextPage: null })
+        return
+      }
       if (method === 'shell.page') {
         const finish = () => {
           result({

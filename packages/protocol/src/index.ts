@@ -79,3 +79,4 @@ export * from './history-index.js'
 export * from "./openrouter-routing.js";
 
 export * from "./legacy-feature-events.js";
+export type * from './managed-hosts.js'

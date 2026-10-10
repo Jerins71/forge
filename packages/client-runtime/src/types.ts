@@ -138,6 +138,8 @@ export interface EnvironmentRegistry {
   get(environmentId: string): EnvironmentClient
   pair(input: PairingInput): Promise<PairingExchangeResult>
   register(entry: EnvironmentCatalogEntry): Promise<void>
+  /** Verified same-UUID tunnel rebinding; preserves client stores and accepted intent. */
+  refreshManagedEndpoint(environmentId: string, baseUrl: string): Promise<void>
   rename(environmentId: string, label: string | null): Promise<void>
   setEnabled(environmentId: string, enabled: boolean): Promise<void>
   retryNow(environmentId: string): void

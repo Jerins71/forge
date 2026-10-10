@@ -34,7 +34,7 @@ function fixture(quiesce = vi.fn(async () => {})) {
   const backendSupervisor = { stop: vi.fn(() => backend.promise) }
   const disposeBrowserPreviewRuntime = vi.fn()
   const context = vm.createContext({
-    app, backendSupervisor, externalChromeCoordinator: { quiesce }, disposeBrowserPreviewRuntime,
+    app, backendSupervisor, managedHosts: { dispose: vi.fn(async () => {}) }, externalChromeCoordinator: { quiesce }, disposeBrowserPreviewRuntime,
     lifecycleLog: { record: vi.fn() }, console: { warn: vi.fn() },
     stopPackagedRemoteUiServer: vi.fn(async () => {}),
     browserPopoutWindow: null, sleepBlockerService: null, browserWorkspaceIpc: null,

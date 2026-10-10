@@ -202,6 +202,9 @@ importers:
 
   apps/electron:
     dependencies:
+      '@forge/client-runtime':
+        specifier: workspace:*
+        version: link:../../packages/client-runtime
       '@forge/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -211,6 +214,9 @@ importers:
       playwright-core:
         specifier: 1.60.0
         version: 1.60.0
+      ws:
+        specifier: ^8.19.0
+        version: 8.19.0
     devDependencies:
       '@electron/asar':
         specifier: ^3.4.1
@@ -221,6 +227,9 @@ importers:
       '@types/node':
         specifier: ^24.3.0
         version: 24.10.13
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       electron:
         specifier: ^43.2.0
         version: 43.2.0

@@ -1,6 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, safeStorage, shell } from 'electron'
 import { fork, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { createManagedHostService, type ManagedServerArtifact } from './managed-hosts.js'
+import { installManagedHostsIpc, MANAGED_HOSTS_CHANGED_CHANNEL } from './managed-hosts-ipc.js'
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -142,6 +145,25 @@ const secureVaultController = createSecureVaultController({
 })
 const environmentCredentials = createEnvironmentCredentialService({ storePath: path.join(app.getPath('userData'), 'environment-credentials.json'), safeStorage, clientOrigin: app.isPackaged ? 'app://forge' : new URL(electronDevServerUrl).origin,
   desktopSecureControl: () => backendBootstrap ? { baseUrl: backendBootstrap.backendUrl, loopbackUrl: backendBootstrap.loopbackUrl, token: backendBootstrap.secureControlToken } : null,
+})
+// Publication seam: release tooling can place an immutable descriptor in resources/server/.
+// Development can select the same main-only descriptor without exposing artifact paths to the renderer.
+const managedHosts = createManagedHostService({
+  storePath: path.join(app.getPath('userData'), 'managed-hosts.json'),
+  credentials: environmentCredentials,
+  clientOrigin: app.isPackaged ? 'app://forge' : new URL(electronDevServerUrl).origin,
+  artifact: async () => {
+    const descriptorPath = process.env.FORGE_MANAGED_SERVER_MANIFEST ?? path.join(process.resourcesPath, 'server', 'managed-server.json')
+    try {
+      const descriptor = JSON.parse(await readFile(descriptorPath, 'utf8')) as ManagedServerArtifact
+      if (descriptor.version !== app.getVersion()) throw new Error('Server artifact must match this Desktop version')
+      return descriptor
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+  },
+  onChanged: statuses => sendToRendererWindow(mainWindow, MANAGED_HOSTS_CHANGED_CHANNEL, statuses),
 })
 const handledTerminationSignals = new Set<NodeJS.Signals>()
 const externalChromeUpdateQuiesceHook: UpdateQuiesceHook = {
@@ -617,6 +639,7 @@ async function prepareQuitForUpdate(): Promise<void> {
     disposeExternalChromeIpc = null
     disposeOpenPdfIpc?.()
     disposeOpenPdfIpc = null
+    await managedHosts.dispose()
     await externalChromeCoordinator?.quiesce('desktop-update')
     await stopPackagedRemoteUiServer()
     await backendSupervisor.stop()
@@ -719,6 +742,8 @@ if (!hasSingleInstanceLock) {
   })
 
   installEnvironmentCredentialsIpc({ ipcMain, service: environmentCredentials, isTrustedSender: isTrustedMainRenderer })
+  installManagedHostsIpc({ipcMain,service:managedHosts,isTrustedSender:isTrustedMainRenderer,supported:process.platform === 'darwin'})
+  if (process.platform === 'darwin') void managedHosts.start().catch(() => {})
 
   ipcMain.on(MAIN_RENDERER_READY_CHANNEL, (event) => {
     if (!isTrustedMainRenderer(event)) return
@@ -1090,7 +1115,7 @@ if (!hasSingleInstanceLock) {
     disposeOpenPdfIpc?.()
     disposeOpenPdfIpc = null
 
-    void (externalChromeCoordinator?.quiesce('desktop-quit') ?? Promise.resolve()).catch((error) => {
+    void managedHosts.dispose().then(() => externalChromeCoordinator?.quiesce('desktop-quit') ?? Promise.resolve()).catch((error) => {
       console.warn('[external-chrome] Quit quiesce failed', error instanceof Error ? error.message : String(error))
     }).finally(() => stopPackagedRemoteUiServer()).finally(() => backendSupervisor.stop()).finally(() => {
       lifecycleLog.record('electron_exit_requested', { code: 0 })

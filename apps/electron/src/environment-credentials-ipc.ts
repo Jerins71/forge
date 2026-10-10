@@ -253,7 +253,20 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     artifact: input => envelope(async () => { const response = await artifactResponse(input); return { bytes: await boundedBytes(response), mimeType: response.headers.get('content-type') ?? 'application/octet-stream', fileName: response.headers.get('content-disposition')?.match(/filename="([^"]*)"/)?.[1] ?? 'artifact' }; }),
     remove: id => envelope(() => mutate(async () => { await load(); const previous = targets!; targets = previous.filter(t => t.environmentId !== id); try { await save(); await clearRuntime(id); } catch (e) { targets = previous; throw e; } return { removed: targets.length !== previous.length }; })),
   };
-  return { ...bridge, persistence, rebindPrimary: (baseUrl: string) => envelope(async () => {
+  return { ...bridge, persistence,
+    // Main-only: SSH management proves the transport; UUID pinning remains independent.
+    // A rejected candidate must not wipe the old endpoint's drafts or pending journal.
+    refreshManagedEndpoint: (environmentId: string, baseUrl: string) => envelope(() => mutate(async () => {
+      const t = await target(environmentId); const candidate = targetUrl(baseUrl);
+      if (!candidate.startsWith('http://127.0.0.1:')) fail('INVALID_INPUT', 'Managed tunnels require a loopback endpoint');
+      const response = await fetcher(candidate + '/api/v2/environment', {redirect:'error',signal:AbortSignal.timeout(10_000)});
+      const descriptor = await checkedJson(response) as EnvironmentDescriptor;
+      if (descriptor.environmentId !== environmentId) fail('IDENTITY_MISMATCH', 'The managed environment identity changed');
+      if (descriptor.protocolVersion !== 1) fail('UNAVAILABLE', 'Environment protocol version does not match');
+      const previous=t.baseUrl;t.baseUrl=candidate;
+      try { await save(); } catch (e) {t.baseUrl=previous;throw e;}
+      return publicTarget(t);
+    })), rebindPrimary: (baseUrl: string) => envelope(async () => {
     const t = (await load()).find(t => t.primary); if (!t) return null;
     const rebound = { ...t, baseUrl: targetUrl(baseUrl) }; await pinned(rebound);
     if (t.baseUrl !== rebound.baseUrl) { t.baseUrl = rebound.baseUrl; await save(); }

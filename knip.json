@@ -105,6 +105,7 @@
         "src/preload.ts",
         "src/auto-updater.ts",
         "src/environment-fixture-main.ts",
+        "src/managed-hosts-dev1-smoke.ts",
         "src/browser/fixture-smoke-main.ts",
         "src/browser/popout-reparent-fixture-main.ts",
         "src/browser/managed-browser-popout-fixture-main.ts",
