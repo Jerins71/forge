@@ -284,24 +284,9 @@ describe('SwarmWebSocketServer', () => {
       }),
     )
 
-    const mergeStarted = await waitForEvent(
-      events,
-      (event) =>
-        event.type === 'session_memory_merge_started' && event.agentId === sessionAgentId && event.requestId === 'merge-1',
-    )
-    expect(mergeStarted.type).toBe('session_memory_merge_started')
-
-    const merged = await waitForEvent(
-      events,
-      (event) => event.type === 'session_memory_merged' && event.agentId === sessionAgentId && event.requestId === 'merge-1',
-    )
-    expect(merged.type).toBe('session_memory_merged')
-    if (merged.type === 'session_memory_merged') {
-      expect(merged.status).toBe('applied')
-      expect(merged.strategy).toBe('llm')
-      expect(merged.auditPath).toBe('/tmp/merge-audit.log')
-    }
-    expect(mergeCalls).toEqual([sessionAgentId])
+    const rejectedMerge = await waitForEvent(events, event => event.type === 'error' && event.code === 'INVALID_COMMAND')
+    expect(rejectedMerge).toMatchObject({ type: 'error', code: 'INVALID_COMMAND' })
+    expect(mergeCalls).toEqual([])
 
     client.send(
       JSON.stringify({

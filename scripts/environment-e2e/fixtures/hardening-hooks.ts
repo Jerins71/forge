@@ -186,6 +186,14 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       if (input.operation === 'stream-stop') { for (const timer of streams) clearInterval(timer); streams.clear(); return { stopped: true }; }
       if (!manager || !input.sessionId) throw new Error('Fixture session missing');
       const descriptor = manager.getAgentForInternalUse(input.sessionId); if (!descriptor) throw new Error('Unknown fixture session');
+      if (input.operation === 'project-agent-recommendations') {
+        const sessionId = input.sessionId;
+        manager.requestProjectAgentRecommendations = async target => {
+          if (target !== sessionId) throw new Error('Unknown fixture recommendation target');
+          return { whenToUse: 'Synthetic fixture documentation', systemPrompt: 'Use synthetic fixture content' };
+        };
+        return { configured: true };
+      }
       // Attention is raised by a settled working epoch; the fixture reports one without a provider turn.
       if (input.operation === 'attention' || input.operation === 'attention-state') {
         if (input.operation === 'attention') {

@@ -1,5 +1,6 @@
 import type {
   ClientCommand,
+  ProjectAgentReferenceWrite, ProjectAgentReferenceDelete, ProjectAgentReferenceMutationResult,
   ProjectResourcesSnapshotResponse,
   ProjectResourceSeedRequest,
   ProjectResourceMutationResponse,
@@ -61,6 +62,8 @@ import type {
   StreamMethod,
   RpcStreamItem,
 } from '@forge/protocol/environment-v2'
+import { ProjectAgentReferenceMutationResultSchema } from '@forge/protocol'
+import { decodeEnvironmentValue, type EnvironmentDescriptor } from '@forge/protocol/environment-v2'
 import type { StreamObserver } from '../types.js'
 import { assertEnvironment } from '../types.js'
 export interface FeatureRequest {
@@ -124,6 +127,11 @@ export interface TerminalAttachment {
   release(): void
 }
 export interface EnvironmentFeatureClients {
+  projectAgents: {
+    request<M extends Extract<Method, `projectAgent.${string}`>>(method: M, input: RpcInput<M>): Promise<RpcOutput<M>>
+    writeReference(input: ProjectAgentReferenceWrite): Promise<ProjectAgentReferenceMutationResult>
+    deleteReference(input: ProjectAgentReferenceDelete): Promise<ProjectAgentReferenceMutationResult>
+  }
   files: {
     resources(
       input: { profileId: string; sessionAgentId?: string },
@@ -364,6 +372,7 @@ export interface HttpFeatureTransport {
   json<T>(path: string, init?: RequestInit): Promise<T>
 }
 interface RpcFeatureTransport {
+  descriptor?(): EnvironmentDescriptor | null
   attachTerminal?: (
     terminalId: string,
     session: SessionRef,
@@ -419,6 +428,18 @@ export function createFeatureClients(
     return { url, release: () => URL.revokeObjectURL(url) }
   },
 ): EnvironmentFeatureClients {
+  const requireProjectAgents = () => {
+    if (!rpc.descriptor?.()?.capabilities.projectAgentMetadata)
+      throw new Error('Update required: this environment does not support Project Agent metadata.')
+  }
+  const referenceMutation = async (method: string, input: ProjectAgentReferenceWrite | ProjectAgentReferenceDelete) => {
+    requireProjectAgents()
+    const response = await http.fetch('/api/v2/project-agents/reference', { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+    if (!response.ok) throw await requestError(response)
+    const decoded = decodeEnvironmentValue(ProjectAgentReferenceMutationResultSchema, await response.json())
+    if (!decoded) throw new Error('Update required: invalid Project Agent reference response.')
+    return decoded
+  }
   const id = (ref: Target) => {
     if (typeof ref === 'string') return ref
     assertEnvironment(http.entry.environmentId, ref)
@@ -523,7 +544,6 @@ export function createFeatureClients(
     const workspaceRead = new Set([
       'list_directories',
       'validate_directory',
-      'get_project_agent_external_directory',
     ])
     const workspaceWrite = new Set([
       'create_manager',
@@ -531,8 +551,6 @@ export function createFeatureClients(
       'cancel_repository_project_creation',
       'delete_manager',
       'update_manager_cwd',
-      'set_project_agent_reference',
-      'delete_project_agent_reference',
       'create_directory',
       'rename_profile',
       'archive_profile',
@@ -542,10 +560,6 @@ export function createFeatureClients(
     const sessionRead = new Set([
       'ping',
       'hydrate_archive_last_used',
-      'get_project_agent_config',
-      'list_project_agent_references',
-      'get_project_agent_reference',
-      'get_project_agent_sharing',
     ])
     const method: Extract<Method, `legacy.${string}`> = workspaceRead.has(type)
       ? 'legacy.workspace.read'
@@ -579,6 +593,11 @@ export function createFeatureClients(
   }
   const readApiError = errorMessage
   return {
+    projectAgents: {
+      request: async (method, input) => { requireProjectAgents(); return rpc.request(method, input) },
+      writeReference: input => referenceMutation('PUT', input),
+      deleteReference: input => referenceMutation('DELETE', input),
+    },
     files: {
       resources: (input, signal) =>
         get('/api/settings/project-resources', input, signal),

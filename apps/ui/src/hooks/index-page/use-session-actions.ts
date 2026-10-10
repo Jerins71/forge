@@ -684,16 +684,16 @@ export function useSessionActions({
     return client.getProjectAgentReference(agentId, fileName)
   }, [clientRef])
 
-  const handleSetProjectAgentReference = useCallback(async (agentId: string, fileName: string, content: string) => {
+  const handleSetProjectAgentReference = useCallback(async (agentId: string, fileName: string, content: string, expectedRevision: string | null) => {
     const client = clientRef.current
     if (!client) throw new Error('WebSocket is not connected.')
-    return client.setProjectAgentReference(agentId, fileName, content)
+    return client.setProjectAgentReference(agentId, fileName, content, expectedRevision)
   }, [clientRef])
 
-  const handleDeleteProjectAgentReference = useCallback(async (agentId: string, fileName: string) => {
+  const handleDeleteProjectAgentReference = useCallback(async (agentId: string, fileName: string, expectedRevision: string | null) => {
     const client = clientRef.current
     if (!client) throw new Error('WebSocket is not connected.')
-    return client.deleteProjectAgentReference(agentId, fileName)
+    return client.deleteProjectAgentReference(agentId, fileName, expectedRevision)
   }, [clientRef])
 
   const handleRequestProjectAgentRecommendations = useCallback(async (agentId: string) => {

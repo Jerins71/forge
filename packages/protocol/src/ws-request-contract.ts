@@ -35,7 +35,6 @@ type ContractCommandType = Extract<
   | 'update_session_model'
   | 'update_session_delegation'
   | 'fork_session'
-  | 'merge_session_memory'
   | 'update_profile_default_model'
   | 'update_project_delegation_defaults'
   | 'update_manager_model'
@@ -54,16 +53,6 @@ type ContractCommandType = Extract<
   | 'delete_session'
   | 'clear_session'
   | 'session_goal_control'
-  | 'set_session_project_agent'
-  | 'get_project_agent_config'
-  | 'list_project_agent_references'
-  | 'get_project_agent_reference'
-  | 'set_project_agent_reference'
-  | 'delete_project_agent_reference'
-  | 'request_project_agent_recommendations'
-  | 'get_project_agent_sharing'
-  | 'set_project_agent_sharing'
-  | 'get_project_agent_external_directory'
   | 'browser_host_register'
   | 'browser_host_hydrate'
   | 'browser_host_state_report'
@@ -94,7 +83,6 @@ type ContractSuccessEventType = Extract<
   | 'session_model_updated'
   | 'session_delegation_updated'
   | 'session_forked'
-  | 'session_memory_merged'
   | 'profile_default_model_updated'
   | 'project_delegation_defaults_updated'
   | 'manager_model_updated'
@@ -113,16 +101,6 @@ type ContractSuccessEventType = Extract<
   | 'session_deleted'
   | 'session_cleared'
   | 'session_goal_snapshot'
-  | 'session_project_agent_updated'
-  | 'project_agent_config'
-  | 'project_agent_references'
-  | 'project_agent_reference'
-  | 'project_agent_reference_saved'
-  | 'project_agent_reference_deleted'
-  | 'project_agent_recommendations'
-  | 'project_agent_sharing'
-  | 'project_agent_sharing_updated'
-  | 'project_agent_external_directory'
   | 'browser_host_connected'
   | 'browser_host_hydration_chunk'
   | 'browser_host_state_report_result'
@@ -315,13 +293,6 @@ export const WS_REQUEST_CONTRACTS = [
     errorCodeFragments: ['fork_session'],
   },
   {
-    commandType: 'merge_session_memory',
-    resultFamily: 'session_memory_merge',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['session_memory_merged'],
-    errorCodeFragments: ['merge_session_memory'],
-  },
-  {
     commandType: 'update_profile_default_model',
     resultFamily: 'profile_default_model_update',
     requestId: { ui: 'required', wire: 'optional' },
@@ -469,76 +440,6 @@ export const WS_REQUEST_CONTRACTS = [
     requestId: { ui: 'required', wire: 'optional' },
     successEvents: ['session_goal_snapshot'],
     errorCodeFragments: ['session_goal_control'],
-  },
-  {
-    commandType: 'set_session_project_agent',
-    resultFamily: 'session_project_agent_update',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['session_project_agent_updated'],
-    errorCodeFragments: ['set_session_project_agent'],
-  },
-  {
-    commandType: 'get_project_agent_config',
-    resultFamily: 'project_agent_config',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['project_agent_config'],
-    errorCodeFragments: ['project_agent_config'],
-  },
-  {
-    commandType: 'list_project_agent_references',
-    resultFamily: 'project_agent_references',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['project_agent_references'],
-    errorCodeFragments: ['project_agent_references'],
-  },
-  {
-    commandType: 'get_project_agent_reference',
-    resultFamily: 'project_agent_reference',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['project_agent_reference'],
-    errorCodeFragments: ['project_agent_reference'],
-  },
-  {
-    commandType: 'set_project_agent_reference',
-    resultFamily: 'project_agent_reference_save',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['project_agent_reference_saved'],
-    errorCodeFragments: ['set_project_agent_reference'],
-  },
-  {
-    commandType: 'delete_project_agent_reference',
-    resultFamily: 'project_agent_reference_delete',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['project_agent_reference_deleted'],
-    errorCodeFragments: ['delete_project_agent_reference'],
-  },
-  {
-    commandType: 'request_project_agent_recommendations',
-    resultFamily: 'project_agent_recommendations',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['project_agent_recommendations'],
-    errorCodeFragments: ['project_agent_recommendations'],
-  },
-  {
-    commandType: 'get_project_agent_sharing',
-    resultFamily: 'project_agent_sharing',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['project_agent_sharing'],
-    errorCodeFragments: ['project_agent_sharing'],
-  },
-  {
-    commandType: 'set_project_agent_sharing',
-    resultFamily: 'project_agent_sharing_update',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['project_agent_sharing_updated'],
-    errorCodeFragments: ['set_project_agent_sharing'],
-  },
-  {
-    commandType: 'get_project_agent_external_directory',
-    resultFamily: 'project_agent_external_directory',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['project_agent_external_directory'],
-    errorCodeFragments: ['project_agent_external_directory'],
   },
 ] as const satisfies readonly WsRequestContract<ContractCommandType, ContractSuccessEventType>[]
 

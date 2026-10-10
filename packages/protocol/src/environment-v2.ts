@@ -6,6 +6,7 @@
  */
 import { Type, type Static, type TSchema } from '@sinclair/typebox'
 import { Value } from '@sinclair/typebox/value'
+import { ProjectAgentInfoV2Schema, ProjectAgentInputV2Schema, ProjectAgentConfigV2Schema, ProjectAgentSharingFields, ProjectAgentDirectoryV2Schema, ProjectAgentFileNameSchema, ProjectAgentRevisionSchema, ProjectAgentOperationReceiptSchema } from './project-agent-v2.js'
 import { SESSION_ATTENTION_REASONS } from './session-attention.js'
 
 export const ENVIRONMENT_PROTOCOL_VERSION = 1 as const
@@ -72,6 +73,7 @@ export const EnvironmentCapabilitiesSchema = O({
   artifactUpload: Type.Boolean(),
   terminal: Type.Boolean(),
   legacyAdapter: Type.Boolean(),
+  projectAgentMetadata: Type.Optional(Type.Boolean()),
 })
 export type EnvironmentCapabilities = Static<typeof EnvironmentCapabilitiesSchema>
 export const EnvironmentDescriptorSchema = O({
@@ -119,6 +121,7 @@ export const WorkspaceStrategySchema = Type.Union([
 export type WorkspaceStrategy = Static<typeof WorkspaceStrategySchema>
 export const SessionSummarySchema = O({
   sessionId: V2Id, projectId: V2Id, title: ShortText,
+  projectAgent: Type.Optional(Type.Union([ProjectAgentInfoV2Schema, Type.Null()])),
   status: E('preparing', 'idle', 'running', 'waiting', 'stopping', 'stopped', 'error', 'interrupted'),
   attention: E('none', 'choice', 'approval', 'error', 'result'),
   unread: Type.Integer({ minimum: 0 }),
@@ -373,6 +376,15 @@ export const rpcSchemas = {
     cols: Type.Integer({ minimum: 1, maximum: 1000 }), rows: Type.Integer({ minimum: 1, maximum: 1000 }) }), V2Empty),
   'browser.host.attach': defineRpc(V2Empty, SubscribeResult, { stream: BrowserHostStreamItem }),
   'browser.host.send': defineRpc(BrowserHostSend, V2Empty),
+  'projectAgent.get': defineRpc(SessionInput, ProjectAgentConfigV2Schema),
+  'projectAgent.references.list': defineRpc(SessionInput, O({ sessionId: V2Id, references: Type.Array(Type.String({ maxLength: 4096 }), { maxItems: 1000 }) })),
+  'projectAgent.reference.read': defineRpc(O({ sessionId: V2Id, fileName: ProjectAgentFileNameSchema }), O({ sessionId: V2Id, fileName: ProjectAgentFileNameSchema, content: Type.String({ maxLength: 131072 }), revision: ProjectAgentRevisionSchema })),
+  'projectAgent.sharing.get': defineRpc(SessionInput, O(ProjectAgentSharingFields)),
+  'projectAgent.directory': defineRpc(O({ projectId: V2Id }), ProjectAgentDirectoryV2Schema),
+  'projectAgent.set': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, projectAgent: ProjectAgentInputV2Schema }), O({ sessionId: V2Id, projectId: V2Id, projectAgent: Type.Union([ProjectAgentInfoV2Schema, Type.Null()]), receipt: ProjectAgentOperationReceiptSchema })),
+  'projectAgent.sharing.set': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, targetProjectIds: Type.Array(V2Id, { maxItems: 100, uniqueItems: true }) }), O({ ...ProjectAgentSharingFields, addedTargetProfileIds: Type.Array(V2Id), removedTargetProfileIds: Type.Array(V2Id), receipt: ProjectAgentOperationReceiptSchema })),
+  'projectAgent.recommend': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id }), O({ sessionId: V2Id, whenToUse: Type.String({ maxLength: 4096 }), systemPrompt: Type.String({ maxLength: 131072 }), receipt: ProjectAgentOperationReceiptSchema })),
+  'projectAgent.operation.get': defineRpc(O({ commandId: V2Uuid }), ProjectAgentOperationReceiptSchema),
   // Migration-only methods, each with a compile-time scope and a stricter inner allowlist.
   'legacy.session.subscribe': defineRpc(SessionInput, SubscribeResult, { stream:
     O({ type: Type.String({ minLength: 1, maxLength: 128 }), payload: Type.Unknown() }) }),
@@ -393,6 +405,9 @@ export const rpcScopes = {
   'access.devices.revoke': 'access:admin',
   'terminal.attach': 'terminal:operate', 'terminal.input': 'terminal:operate', 'terminal.resize': 'terminal:operate',
   'browser.host.attach': 'session:operate', 'browser.host.send': 'session:operate',
+  'projectAgent.get': 'session:read', 'projectAgent.references.list': 'session:read', 'projectAgent.reference.read': 'session:read',
+  'projectAgent.sharing.get': 'session:read', 'projectAgent.directory': 'workspace:read',
+  'projectAgent.set': 'session:operate', 'projectAgent.sharing.set': 'session:operate', 'projectAgent.recommend': 'session:operate', 'projectAgent.operation.get': 'session:operate',
   'legacy.session.subscribe': 'session:read',
   'legacy.session.read': 'session:read', 'legacy.session.operate': 'session:operate',
   'legacy.workspace.read': 'workspace:read', 'legacy.workspace.write': 'workspace:write',

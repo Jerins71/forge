@@ -1,3 +1,5 @@
+import { ProjectAgentRpc } from "../ws/rpc/project-agent-rpc.js";
+import { createProjectAgentReferenceRoutes } from "../ws/http/routes/project-agent-reference-routes.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
@@ -162,6 +164,7 @@ export async function createEnvironmentService(options: {
       },
     });
     mirror.attach();
+    const projectAgents = new ProjectAgentRpc(swarmManager, core.controlService, database);
     const owner = core;
     const source = mirror;
     const auth = access;
@@ -172,7 +175,7 @@ export async function createEnvironmentService(options: {
       control: core.controlService,
       exposure,
       descriptor: (): EnvironmentDescriptor => identity.descriptor(),
-      routes: [...auth.routes, ...createEnvironmentArtifactRoutes({ access: auth, artifactService })],
+      routes: [...auth.routes, ...createEnvironmentArtifactRoutes({ access: auth, artifactService }), ...createProjectAgentReferenceRoutes(auth, projectAgents)],
       async initialize() {
         // Called after hydration, before subscriptions/listening. Preserve the old catalog before adoption.
         if (!hadDatabase && existsSync(config.paths.agentsStoreFile))
@@ -211,6 +214,7 @@ export async function createEnvironmentService(options: {
         rpc = createEnvironmentRpcServer({
           access: auth,
           control: owner.controlService,
+          projectAgents,
           shellStream,
           detailStream,
           legacyAdapter,

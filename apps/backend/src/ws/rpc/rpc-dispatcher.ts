@@ -17,7 +17,7 @@ export function rpcError(error: unknown): RpcError {
     ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }),
   };
   if (error && typeof error === "object" && "code" in error) {
-    const candidate = { code: error.code, message: error instanceof Error ? error.message.slice(0, 1024) : "Request rejected.", retryable: false };
+    const candidate = { code: error.code, message: error instanceof Error ? error.message.slice(0, 1024) : "Request rejected.", retryable: "retryable" in error && typeof error.retryable === "boolean" ? error.retryable : false };
     if (errorValidator.Check(candidate)) return candidate;
   }
   return { code: "INTERNAL", message: "Unable to complete request.", retryable: false };

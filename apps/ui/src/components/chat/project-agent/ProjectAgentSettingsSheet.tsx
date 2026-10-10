@@ -78,6 +78,7 @@ export function ProjectAgentSettingsSheet({
   const [placementSnapshotError, setPlacementSnapshotError] = useState<string | null>(null)
   const [referenceDocs, setReferenceDocs] = useState<string[]>([])
   const [expandedReferenceFile, setExpandedReferenceFile] = useState<string | null>(null)
+  const [referenceRevisions, setReferenceRevisions] = useState<Record<string, string | null>>({})
   const [referenceContents, setReferenceContents] = useState<Record<string, string>>({})
   const [loadedReferenceFiles, setLoadedReferenceFiles] = useState<Set<string>>(() => new Set())
   const [loadingReferenceFiles, setLoadingReferenceFiles] = useState<Set<string>>(() => new Set())
@@ -316,6 +317,7 @@ export function ProjectAgentSettingsSheet({
     setLoadingReferenceFiles((prev) => new Set(prev).add(fileName))
     try {
       const result = await onGetReference(agentId, fileName)
+      setReferenceRevisions(prev => ({ ...prev, [fileName]: result.revision }))
       setReferenceContents((prev) => ({
         ...prev,
         [fileName]: prev[fileName] ?? result.content,
@@ -359,7 +361,8 @@ export function ProjectAgentSettingsSheet({
     setReferenceError(null)
     setSavingReferenceFiles((prev) => new Set(prev).add(fileName))
     try {
-      await onSetReference(agentId, fileName, referenceContents[fileName] ?? '')
+      const result = await onSetReference(agentId, fileName, referenceContents[fileName] ?? '', referenceRevisions[fileName] ?? null)
+      setReferenceRevisions(prev => ({ ...prev, [fileName]: result.revision }))
       setDirtyReferenceFiles((prev) => {
         const next = new Set(prev)
         next.delete(fileName)
@@ -375,7 +378,7 @@ export function ProjectAgentSettingsSheet({
         return next
       })
     }
-  }, [agentId, onSetReference, referenceContents, refreshReferenceDocs])
+  }, [agentId, onSetReference, referenceContents, referenceRevisions, refreshReferenceDocs])
 
   const handleDeleteReference = useCallback(async (fileName: string) => {
     if (!onDeleteReference) return
@@ -386,7 +389,9 @@ export function ProjectAgentSettingsSheet({
     setReferenceError(null)
     setSavingReferenceFiles((prev) => new Set(prev).add(fileName))
     try {
-      await onDeleteReference(agentId, fileName)
+      const revision = referenceRevisions[fileName] ?? (await onGetReference?.(agentId, fileName))?.revision
+      if (revision === undefined) throw new Error("Reload the reference before deleting it.")
+      await onDeleteReference(agentId, fileName, revision)
       setReferenceDocs((prev) => prev.filter((entry) => entry !== fileName))
       setExpandedReferenceFile((prev) => prev === fileName ? null : prev)
       setReferenceContents((prev) => {
@@ -414,14 +419,15 @@ export function ProjectAgentSettingsSheet({
         return next
       })
     }
-  }, [agentId, onDeleteReference, refreshReferenceDocs])
+  }, [agentId, onDeleteReference, onGetReference, referenceRevisions, refreshReferenceDocs])
 
   const handleAddReference = useCallback(async (fileName: string, content: string) => {
     if (!onSetReference) return
 
     setReferenceError(null)
     try {
-      await onSetReference(agentId, fileName, content)
+      const result = await onSetReference(agentId, fileName, content, null)
+      setReferenceRevisions(prev => ({ ...prev, [fileName]: result.revision }))
       await refreshReferenceDocs()
       setReferenceContents((prev) => ({ ...prev, [fileName]: content }))
       setLoadedReferenceFiles((prev) => new Set(prev).add(fileName))

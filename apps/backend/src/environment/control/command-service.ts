@@ -144,7 +144,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
   };
   const admitLifecycle = async <T>(principal: Principal, input: LifecycleAdmission, operation: () => Promise<T>): Promise<T> => {
     if (closed) throw new ControlError("UNAVAILABLE", "Control service is shutting down", true);
-    if (!principal.scopes.has("session:operate") || options.isDeviceRevoked(principal.deviceSessionId))
+    if (!principal.scopes.has(input.requiredScope ?? "session:operate") || options.isDeviceRevoked(principal.deviceSessionId))
       throw new ControlError("FORBIDDEN", "Session operation is not authorized");
     input = { ...input, sessionIds: [...input.sessionIds], projectIds: [...(input.projectIds ?? [])] };
     const method = "lifecycle." + input.command;

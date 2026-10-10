@@ -28,6 +28,8 @@ export interface Principal {
 export interface LifecycleAdmission {
   commandId: string;
   command: string;
+  /** File mutations authorize workspace writes without elevating session privileges. */
+  requiredScope?: Scope;
   sessionIds: readonly string[];
   /** Profile teardown also fences launches not yet materialized in the swarm. */
   projectIds?: readonly string[];

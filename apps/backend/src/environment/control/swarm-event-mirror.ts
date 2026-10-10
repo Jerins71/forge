@@ -1,3 +1,4 @@
+import { projectAgentMetadata } from "@forge/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, createReadStream, openSync, readSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -81,7 +82,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const status = row?.desired_state === "stopped" ? swarmManager.isSessionShutdownSafe(descriptor.agentId) ? "stopped" : "stopping"
       : descriptor.status === "streaming" ? "running" : descriptor.status === "terminated" ? "stopped"
         : descriptor.status === "idle" && pending ? "waiting" : descriptor.status;
-    return { sessionId: descriptor.agentId, projectId: descriptor.profileId ?? descriptor.agentId,
+    return { projectAgent: descriptor.projectAgent ? projectAgentMetadata(descriptor.projectAgent) : null, sessionId: descriptor.agentId, projectId: descriptor.profileId ?? descriptor.agentId,
       title: (descriptor.sessionLabel ?? descriptor.displayName).slice(0, 256), status,
       attention: pending ? "choice" : descriptor.status === "error" ? "error" : attention ? "result" : "none",
       unread: wireProjection.unread(descriptor.agentId, descriptor.profileId ?? descriptor.agentId),

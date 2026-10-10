@@ -1,3 +1,4 @@
+import type { RpcInput, RpcOutput } from '@forge/protocol/environment-v2'
 import { EnvironmentRuntimeError, isInterruptedReceipt, type EnvironmentClient, type DetailState } from '@forge/client-runtime'
 import {
   projectShell,
@@ -44,19 +45,13 @@ import {
   buildCancelRepositoryProjectCreationCommand,
   buildCreateSessionCommand,
   buildDeleteManagerCommand,
-  buildDeleteProjectAgentReferenceCommand,
   buildDismissSessionAttentionCommand,
   buildForkSessionCommand,
-  buildGetProjectAgentConfigCommand,
-  buildGetProjectAgentExternalDirectoryCommand,
-  buildGetProjectAgentReferenceCommand,
-  buildGetProjectAgentSharingCommand,
   buildGetConversationPageCommand,
   buildGetSessionWorkersCommand,
   buildHydrateArchiveLastUsedCommand,
   buildKillAgentCommand,
   buildListDirectoriesCommand,
-  buildListProjectAgentReferencesCommand,
   buildMarkAllReadCommand,
   buildMarkUnreadCommand,
   buildPickDirectoryCommand,
@@ -67,12 +62,8 @@ import {
   buildRenameSessionCommand,
   buildReorderProfilesCommand,
   buildRestartRecoveryActionCommand,
-  buildRequestProjectAgentRecommendationsCommand,
   buildSessionActionCommand,
   buildSessionGoalControlCommand,
-  buildSetProjectAgentReferenceCommand,
-  buildSetProjectAgentSharingCommand,
-  buildSetSessionProjectAgentCommand,
   buildStopAllAgentsCommand,
   buildSubscribeCommand,
   buildUpdateManagerCwdCommand,
@@ -173,7 +164,6 @@ import { handleAgentEvent } from './ws-client/event-handlers/agent-event-handler
 import { handleGenerationThroughputEvent } from './ws-client/event-handlers/generation-throughput-event-handlers'
 import { handleSessionEvent } from './ws-client/event-handlers/session-event-handlers'
 import { handleSessionAttentionEvent } from './ws-client/event-handlers/session-attention-event-handlers'
-import { handleProjectAgentEvent } from './ws-client/event-handlers/project-agent-event-handlers'
 import { handleConfigEvent } from './ws-client/event-handlers/config-event-handlers'
 import { handleDirectoryEvent } from './ws-client/event-handlers/directory-event-handlers'
 import { handleSystemEvent } from './ws-client/event-handlers/system-event-handlers'
@@ -1375,92 +1365,75 @@ export class ManagerWsClient {
     )
   }
 
-  async setSessionProjectAgent(
-    agentId: string,
-    projectAgent: SessionProjectAgentInput | null,
-  ): Promise<SessionProjectAgentResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('set_session_project_agent', (requestId) =>
-      buildSetSessionProjectAgentCommand(agentId, projectAgent, requestId),
-    )
+  private projectAgentFeatures() {
+    if (!this.environmentClient) throw new Error('A paired environment is required for Project Agents.')
+    return this.environmentClient.features.projectAgents
+  }
+
+  private async projectAgentMutation<M extends 'projectAgent.set' | 'projectAgent.sharing.set' | 'projectAgent.recommend'>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<RpcOutput<M>> {
+    const key = JSON.stringify([method, input])
+    const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
+    this.intentCommandIds.set(key, commandId)
+    try {
+      const result = await this.projectAgentFeatures().request(method, { ...input, commandId } as RpcInput<M>)
+      this.intentCommandIds.delete(key)
+      return result
+    } catch (error) {
+      if (!isRetryableEnvironmentError(error)) this.intentCommandIds.delete(key)
+      throw error
+    }
+  }
+
+  async setSessionProjectAgent(agentId: string, projectAgent: SessionProjectAgentInput | null): Promise<SessionProjectAgentResult> {
+    const result = await this.projectAgentMutation('projectAgent.set', { sessionId: agentId, projectAgent })
+    this.updateState({ promptChangeKey: this.state.promptChangeKey + 1 })
+    return { agentId: result.sessionId, profileId: result.projectId, projectAgent: result.projectAgent }
   }
 
   async getProjectAgentConfig(agentId: string): Promise<ProjectAgentConfigResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('get_project_agent_config', (requestId) =>
-      buildGetProjectAgentConfigCommand(agentId, requestId),
-    )
+    const { sessionId, ...result } = await this.projectAgentFeatures().request('projectAgent.get', { sessionId: agentId })
+    return { agentId: sessionId, ...result }
   }
 
   async getProjectAgentSharing(agentId: string): Promise<ProjectAgentSharingResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('get_project_agent_sharing', (requestId) =>
-      buildGetProjectAgentSharingCommand(agentId, requestId),
-    )
+    const { sessionId, ...result } = await this.projectAgentFeatures().request('projectAgent.sharing.get', { sessionId: agentId })
+    return { agentId: sessionId, ...result }
   }
 
-  async setProjectAgentSharing(
-    agentId: string,
-    targetProfileIds: string[],
-  ): Promise<ProjectAgentSharingUpdatedResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('set_project_agent_sharing', (requestId) =>
-      buildSetProjectAgentSharingCommand(agentId, targetProfileIds, requestId),
-    )
+  async setProjectAgentSharing(agentId: string, targetProfileIds: string[]): Promise<ProjectAgentSharingUpdatedResult> {
+    const { sessionId, receipt: _receipt, ...result } = await this.projectAgentMutation('projectAgent.sharing.set', { sessionId: agentId, targetProjectIds: targetProfileIds })
+    this.updateState({ promptChangeKey: this.state.promptChangeKey + 1 })
+    return { agentId: sessionId, ...result }
   }
 
-  async getProjectAgentExternalDirectory(): Promise<ProjectAgentExternalDirectoryResult> {
-    // Environment commands are addressed to a session; before one is open there is nothing to ask.
-    if (this.environmentClient && !(this.state.targetAgentId ?? this.desiredAgentId)) return { profileId: '', entries: [] }
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('get_project_agent_external_directory', (requestId) =>
-      buildGetProjectAgentExternalDirectoryCommand(requestId),
-    )
+  async getProjectAgentExternalDirectory(projectId: string): Promise<ProjectAgentExternalDirectoryResult> {
+    const result = await this.projectAgentFeatures().request('projectAgent.directory', { projectId })
+    return { profileId: result.projectId, entries: result.entries }
   }
 
   async listProjectAgentReferences(agentId: string): Promise<ProjectAgentReferencesResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('list_project_agent_references', (requestId) =>
-      buildListProjectAgentReferencesCommand(agentId, requestId),
-    )
+    const result = await this.projectAgentFeatures().request('projectAgent.references.list', { sessionId: agentId })
+    return { agentId: result.sessionId, references: result.references }
   }
 
-  async getProjectAgentReference(
-    agentId: string,
-    fileName: string,
-  ): Promise<ProjectAgentReferenceResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('get_project_agent_reference', (requestId) =>
-      buildGetProjectAgentReferenceCommand(agentId, fileName, requestId),
-    )
+  async getProjectAgentReference(agentId: string, fileName: string): Promise<ProjectAgentReferenceResult> {
+    const { sessionId, ...result } = await this.projectAgentFeatures().request('projectAgent.reference.read', { sessionId: agentId, fileName })
+    return { agentId: sessionId, ...result }
   }
 
-  async setProjectAgentReference(
-    agentId: string,
-    fileName: string,
-    content: string,
-  ): Promise<ProjectAgentReferenceSavedResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('set_project_agent_reference', (requestId) =>
-      buildSetProjectAgentReferenceCommand(agentId, fileName, content, requestId),
-    )
+  async setProjectAgentReference(agentId: string, fileName: string, content: string, expectedRevision: string | null): Promise<ProjectAgentReferenceSavedResult> {
+    const { sessionId, ...result } = await this.projectAgentFeatures().writeReference({ sessionId: agentId, fileName, content, expectedRevision })
+    return { agentId: sessionId, ...result }
   }
 
-  async deleteProjectAgentReference(
-    agentId: string,
-    fileName: string,
-  ): Promise<ProjectAgentReferenceDeletedResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('delete_project_agent_reference', (requestId) =>
-      buildDeleteProjectAgentReferenceCommand(agentId, fileName, requestId),
-    )
+  async deleteProjectAgentReference(agentId: string, fileName: string, expectedRevision: string | null): Promise<ProjectAgentReferenceDeletedResult> {
+    const { sessionId, ...result } = await this.projectAgentFeatures().deleteReference({ sessionId: agentId, fileName, expectedRevision })
+    return { agentId: sessionId, ...result }
   }
 
   async requestProjectAgentRecommendations(agentId: string): Promise<{ agentId: string; whenToUse: string; systemPrompt: string }> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('request_project_agent_recommendations', (requestId) =>
-      buildRequestProjectAgentRecommendationsCommand(agentId, requestId),
-    )
+    const { sessionId, receipt: _receipt, ...result } = await this.projectAgentMutation('projectAgent.recommend', { sessionId: agentId })
+    return { agentId: sessionId, ...result }
   }
 
   async getSessionWorkers(sessionAgentId: string): Promise<SessionWorkersResult> {
@@ -1959,14 +1932,6 @@ export class ManagerWsClient {
         requestTracker: this.requestDispatcher.tracker,
       })
     ) {
-      return
-    }
-
-    if (handleProjectAgentEvent(event, {
-      state: this.state,
-      updateState: (patch) => this.updateState(patch),
-      requestTracker: this.requestDispatcher.tracker,
-    })) {
       return
     }
 

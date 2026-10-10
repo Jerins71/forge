@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   isRepoProjectAgentSource,
   type PersistedProjectAgentConfig,
@@ -79,6 +80,7 @@ export interface SwarmProjectAgentServiceOptions {
 }
 
 export class SwarmProjectAgentService {
+  private readonly referenceMutations = new Map<string, Promise<unknown>>();
   private readonly registry: ProjectAgentRegistry;
   private readonly settingsSnapshotReader: ProjectAgentSettingsSnapshotReader;
 
@@ -538,24 +540,37 @@ export class SwarmProjectAgentService {
     return content;
   }
 
-  async setProjectAgentReference(agentId: string, fileName: string, content: string): Promise<ProjectAgentMutationFlags> {
-    const { profileId, handle } = await this.registry.assertOwnedReferenceScope(agentId);
-    const existingContent = await readProjectAgentReferenceDoc(this.options.dataDir, profileId, handle, fileName);
-    const mutation = planProjectAgentReferenceWriteMutation({ fileName, content, existingContent });
-    if (mutation.changed) {
-      await writeProjectAgentReferenceDoc(this.options.dataDir, profileId, handle, mutation.fileName, mutation.content);
-    }
-    return mutation.flags;
+  async setProjectAgentReference(agentId: string, fileName: string, content: string, expectedRevision?: string | null): Promise<ProjectAgentMutationFlags & { revision: string | null }> {
+    return this.mutateReference(agentId, fileName, expectedRevision, content);
   }
 
-  async deleteProjectAgentReference(agentId: string, fileName: string): Promise<ProjectAgentMutationFlags> {
+  async deleteProjectAgentReference(agentId: string, fileName: string, expectedRevision?: string | null): Promise<ProjectAgentMutationFlags & { revision: string | null }> {
+    return this.mutateReference(agentId, fileName, expectedRevision);
+  }
+
+  private async mutateReference(agentId: string, fileName: string, expectedRevision?: string | null, content?: string): Promise<ProjectAgentMutationFlags & { revision: string | null }> {
     const { profileId, handle } = await this.registry.assertOwnedReferenceScope(agentId);
-    const existingContent = await readProjectAgentReferenceDoc(this.options.dataDir, profileId, handle, fileName);
-    const mutation = planProjectAgentReferenceDeleteMutation({ fileName, existingContent });
-    if (mutation.changed) {
-      await deleteProjectAgentReferenceDoc(this.options.dataDir, profileId, handle, mutation.fileName);
-    }
-    return mutation.flags;
+    const key = JSON.stringify([profileId, handle, fileName]);
+    const previous = this.referenceMutations.get(key) ?? Promise.resolve();
+    const operation = previous.catch(() => {}).then(async () => {
+      // Revalidate after queued work: promotion/deletion may have changed this scope.
+      await this.registry.assertOwnedReferenceScope(agentId);
+      const existingContent = await readProjectAgentReferenceDoc(this.options.dataDir, profileId, handle, fileName);
+      const revision = referenceRevision(existingContent);
+      if (expectedRevision !== undefined && expectedRevision !== revision)
+        throw Object.assign(new Error("Reference changed; reload it before saving."), { code: "CONFLICT" });
+      const mutation = content === undefined
+        ? planProjectAgentReferenceDeleteMutation({ fileName, existingContent })
+        : planProjectAgentReferenceWriteMutation({ fileName, content, existingContent });
+      if (mutation.changed) {
+        if (content === undefined) await deleteProjectAgentReferenceDoc(this.options.dataDir, profileId, handle, fileName);
+        else await writeProjectAgentReferenceDoc(this.options.dataDir, profileId, handle, fileName, content);
+      }
+      return { ...mutation.flags, revision: referenceRevision(await readProjectAgentReferenceDoc(this.options.dataDir, profileId, handle, fileName)) };
+    });
+    this.referenceMutations.set(key, operation);
+    try { return await operation; }
+    finally { if (this.referenceMutations.get(key) === operation) this.referenceMutations.delete(key); }
   }
 
   private async assertLinkWorkspaceAllowed(
@@ -628,4 +643,8 @@ function normalizeApprovedCapabilities(
     }
   }
   return Array.from(approvedSet).sort();
+}
+
+export function referenceRevision(content: string | null): string | null {
+  return content === null ? null : createHash("sha256").update(content).digest("hex");
 }

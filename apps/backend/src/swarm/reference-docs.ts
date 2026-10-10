@@ -177,41 +177,6 @@ export async function migrateLegacyProfileKnowledgeToReferenceDoc(
   };
 }
 
-async function ensureProjectAgentReferenceDoc(
-  dataDir: string,
-  profileId: string,
-  handle: string,
-  fileName: string,
-  initialContent = ""
-): Promise<{ path: string; created: boolean }> {
-  const targetPath = getProjectAgentReferencePath(dataDir, profileId, handle, fileName);
-
-  try {
-    await readFile(targetPath, "utf8");
-    return { path: targetPath, created: false };
-  } catch (error) {
-    if (!isEnoentError(error)) {
-      throw error;
-    }
-  }
-
-  await mkdir(dirname(targetPath), { recursive: true });
-
-  try {
-    await writeFile(targetPath, ensureTrailingNewline(initialContent.trimEnd()), {
-      encoding: "utf8",
-      flag: "wx"
-    });
-    return { path: targetPath, created: true };
-  } catch (error) {
-    if (isErrnoCode(error, "EEXIST")) {
-      return { path: targetPath, created: false };
-    }
-
-    throw error;
-  }
-}
-
 export async function listProjectAgentReferenceDocs(
   dataDir: string,
   profileId: string,
@@ -239,24 +204,11 @@ export async function writeProjectAgentReferenceDoc(
   fileName: string,
   content: string
 ): Promise<{ path: string; created: boolean; updated: boolean }> {
-  const ensured = await ensureProjectAgentReferenceDoc(dataDir, profileId, handle, fileName, content);
-  const normalizedContent = ensureTrailingNewline(content.trimEnd());
-  let updated = false;
-
-  if (!ensured.created) {
-    const existingContent = await readFile(ensured.path, "utf8");
-    if (existingContent !== normalizedContent) {
-      const referenceDir = getProjectAgentReferenceDir(dataDir, profileId, handle);
-      await writeReferenceDoc(referenceDir, fileName, content);
-      updated = true;
-    }
-  }
-
-  return {
-    path: ensured.path,
-    created: ensured.created,
-    updated
-  };
+  const referenceDir = getProjectAgentReferenceDir(dataDir, profileId, handle);
+  const existing = await readReferenceDoc(referenceDir, fileName);
+  const normalized = ensureTrailingNewline(content.trimEnd());
+  if (existing !== normalized) await writeReferenceDoc(referenceDir, fileName, content);
+  return { path: getProjectAgentReferencePath(dataDir, profileId, handle, fileName), created: existing === null, updated: existing !== null && existing !== normalized };
 }
 
 export async function deleteProjectAgentReferenceDoc(

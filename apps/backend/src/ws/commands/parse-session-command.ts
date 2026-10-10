@@ -371,24 +371,6 @@ export function parseSessionCommand(maybe: ClientCommandCandidate): ParsedClient
     });
   }
 
-  if (maybe.type === "merge_session_memory") {
-    const agentId = (maybe as { agentId?: unknown }).agentId;
-    const requestId = (maybe as { requestId?: unknown }).requestId;
-
-    if (typeof agentId !== "string" || agentId.trim().length === 0) {
-      return fail("merge_session_memory.agentId must be a non-empty string");
-    }
-    if (requestId !== undefined && typeof requestId !== "string") {
-      return fail("merge_session_memory.requestId must be a string when provided");
-    }
-
-    return ok({
-      type: "merge_session_memory",
-      agentId: agentId.trim(),
-      requestId
-    });
-  }
-
   if (maybe.type === "get_session_workers") {
     const sessionAgentId = (maybe as { sessionAgentId?: unknown }).sessionAgentId;
     const requestId = (maybe as { requestId?: unknown }).requestId;

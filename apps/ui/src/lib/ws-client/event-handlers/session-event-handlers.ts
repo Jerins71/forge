@@ -113,10 +113,6 @@ export function handleSessionEvent(
       })
       return true
 
-    case 'session_memory_merge_started':
-    case 'session_memory_merged':
-    case 'session_memory_merge_failed':
-      return true
 
     default:
       return false

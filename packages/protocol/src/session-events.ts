@@ -3,9 +3,6 @@ import type {
   ManagerModelPreset,
   ManagerProfile,
   ManagerReasoningLevel,
-  SessionMemoryMergeFailureStage,
-  SessionMemoryMergeResult,
-  SessionMemoryMergeStrategy,
   SessionModelUpdateMode,
   DelegationRosterOrigin,
   ManagerPostureOrigin,
@@ -111,27 +108,5 @@ export interface SessionForkedEvent {
   newSessionAgent: AgentDescriptor
   profile: ManagerProfile
   fromMessageId?: string
-  requestId?: string
-}
-
-export interface SessionMemoryMergeStartedEvent {
-  type: 'session_memory_merge_started'
-  agentId: string
-  requestId?: string
-}
-
-export interface SessionMemoryMergedEvent extends SessionMemoryMergeResult {
-  type: 'session_memory_merged'
-  requestId?: string
-}
-
-export interface SessionMemoryMergeFailedEvent {
-  type: 'session_memory_merge_failed'
-  agentId: string
-  message: string
-  status: 'failed'
-  strategy?: SessionMemoryMergeStrategy
-  stage?: SessionMemoryMergeFailureStage
-  auditPath?: string
   requestId?: string
 }
