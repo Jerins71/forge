@@ -393,6 +393,29 @@ describe("Phase 2 project/policy commands", () => {
   });
 });
 
+it("preserves project onboarding under admission and never bootstraps a duplicate creation", async () => {
+  const f = await fixture(true); const { core } = await makeCore(f);
+  cleanup.unshift(() => core.close());
+  const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady(); cleanup.unshift(async () => mirror.dispose());
+  const principal = { deviceSessionId: "policy-device", scopes: new Set(["workspace:write"] as const) };
+  const input = { commandId: randomUUID(), title: "Onboarding", cwd: f.config.defaultCwd, model: { provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "high" } };
+  const original = f.manager.sendMessage.bind(f.manager);
+  const send = vi.spyOn(f.manager, "sendMessage").mockImplementation(async (...args) => {
+    if (args[4]?.internalDeliveryKind === "bootstrap") {
+      expect(core.database.prepare("SELECT state FROM effects WHERE command_id=? AND session_id=?").get(input.commandId, "project:project-" + input.commandId)).toEqual({ state: "claimed" });
+      expect((await core.controlService.getReceipt(principal, input.commandId)).state).toBe("running");
+    }
+    return original(...args);
+  });
+  const receipt = await core.controlService.execute(principal, "project.create", input);
+  expect(receipt.state).toBe("succeeded");
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(send.mock.calls[0]?.[4]).toMatchObject({ origin: "internal", internalDeliveryKind: "bootstrap" });
+  expect(f.manager.runtimeByAgentId.get(receipt.result!.sessionId!)!.sendCalls).toHaveLength(1);
+  expect(await core.controlService.execute(principal, "project.create", input)).toEqual(receipt);
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
 it("marks lost policy claims interrupted on restart and never repeats the callback", async () => {
   const f = await fixture(true); let { core } = await makeCore(f);
   const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();

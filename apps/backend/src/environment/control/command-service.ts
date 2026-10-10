@@ -191,7 +191,8 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       for (const projectId of projectIds) assertAdmissionAvailable("project:" + projectId);
       for (const sessionId of sessionIds) {
         assertAdmissionAvailable(sessionId);
-        readSession(sink, sessionId);
+        const session = readSession(sink, sessionId);
+        assertAdmissionAvailable("project:" + session.project_id);
         if (input.intent !== "stop" && database.prepare("SELECT 1 FROM effects WHERE session_id=? AND state IN ('pending','claimed') LIMIT 1").get(sessionId))
           throw new ControlError("CONFLICT", "Accepted session intent is still settling", true);
       }
