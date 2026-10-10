@@ -9,6 +9,8 @@ import { Value } from '@sinclair/typebox/value'
 import { ProjectAgentInfoV2Schema, ProjectAgentInputV2Schema, ProjectAgentConfigV2Schema, ProjectAgentSharingFields, ProjectAgentDirectoryV2Schema, ProjectAgentFileNameSchema, ProjectAgentRevisionSchema, ProjectAgentOperationReceiptSchema } from './project-agent-v2.js'
 import { PlanSnapshotV2Schema, GoalSnapshotV2Schema, GoalControlV2Schema, ElicitationRespondV2Schema, DetailFeatureStreamItemSchema } from './detail-features-v2.js'
 export * from './detail-features-v2.js'
+import { BrowserViewportV2Schema, BrowserSnapshotV2Schema, BrowserRegistrationV2Schema, BrowserHostV2Schema, BrowserHostLeaseV2Schema, BrowserHostStreamV2Schema, BrowserStreamV2Schema, BrowserRecordingV2Schema } from './browser-v2.js'
+export * from './browser-v2.js'
 import { SESSION_ATTENTION_REASONS } from './session-attention.js'
 
 export const ENVIRONMENT_PROTOCOL_VERSION = 1 as const
@@ -213,9 +215,9 @@ export const RpcErrorSchema = O({
 export type RpcError = Static<typeof RpcErrorSchema>
 export const CommandReceiptSchema = O({
   commandId: V2Uuid,
-  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact', 'session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'),
+  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact', 'browser.tab.open', 'browser.tab.activate', 'browser.tab.close', 'browser.recording.start', 'browser.recording.stop', 'session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'),
   projectId: Type.Optional(V2Id),
-  result: Type.Optional(O({ pinnedAt: Type.Optional(Type.Union([V2Time, Type.Null()])), compacted: Type.Optional(Type.Boolean()), reason: Type.Optional(ShortText), projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })), profileIds: Type.Optional(Type.Array(V2Id, { maxItems: 10000 })), rosterId: Type.Optional(V2Id), rosterRevision: Type.Optional(V2Sequence) })),
+  result: Type.Optional(O({ pinnedAt: Type.Optional(Type.Union([V2Time, Type.Null()])), browserRecording: Type.Optional(BrowserRecordingV2Schema), tabId: Type.Optional(V2Id), compacted: Type.Optional(Type.Boolean()), reason: Type.Optional(ShortText), projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })), profileIds: Type.Optional(Type.Array(V2Id, { maxItems: 10000 })), rosterId: Type.Optional(V2Id), rosterRevision: Type.Optional(V2Sequence) })),
   sessionId: NullableId,
   state: E('accepted', 'running', 'succeeded', 'failed', 'interrupted'),
   acceptedSequence: V2Sequence, updatedSequence: V2Sequence,
@@ -379,12 +381,6 @@ const TerminalFrame = Type.Union([
   O({ kind: Type.Literal('output'), offset: V2Sequence, data: Type.String({ maxLength: 16_384 }) }),
   O({ kind: Type.Literal('closed'), reason: ShortText }),
 ])
-// Desktop's embedded browser host. The subscription is the host connection: ending it unregisters the host.
-const BrowserHostStreamItem = Type.Union([
-  O({ kind: Type.Literal('attached') }),
-  O({ kind: Type.Literal('event'), event: Type.Record(Type.String(), Type.Unknown()) }),
-])
-// One host ClientCommand as JSON text, split so an 8 MiB automation response fits the frame limit.
 const BrowserHostSend = O({
   transferId: V2Uuid, index: Type.Integer({ minimum: 0, maximum: 63 }),
   count: Type.Integer({ minimum: 1, maximum: 64 }), data: Type.String({ minLength: 1, maxLength: 262_144 }),
@@ -444,7 +440,19 @@ export const rpcSchemas = {
     data: Type.String({ maxLength: 16_384 }) }), V2Empty),
   'terminal.resize': defineRpc(O({ subscriptionId: V2Id,
     cols: Type.Integer({ minimum: 1, maximum: 1000 }), rows: Type.Integer({ minimum: 1, maximum: 1000 }) }), V2Empty),
-  'browser.host.attach': defineRpc(V2Empty, SubscribeResult, { stream: BrowserHostStreamItem }),
+  'browser.get': defineRpc(SessionInput, BrowserSnapshotV2Schema),
+  'browser.subscribe': defineRpc(SessionInput, SubscribeResult, { stream: BrowserStreamV2Schema }),
+  'browser.tab.open': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, url: Type.Optional(Type.String({ maxLength: 2048 })), activate: Type.Optional(Type.Boolean()) }), CommandReceiptSchema, { receipt: true }),
+  'browser.tab.activate': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, tabId: V2Id }), CommandReceiptSchema, { receipt: true }),
+  'browser.tab.close': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, tabId: V2Id }), CommandReceiptSchema, { receipt: true }),
+  'browser.tab.resize': defineRpc(O({ sessionId: V2Id, tabId: V2Id, viewport: BrowserViewportV2Schema }), BrowserSnapshotV2Schema),
+  'browser.recording.start': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, tabId: V2Id }), CommandReceiptSchema, { receipt: true }),
+  'browser.recording.stop': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, tabId: V2Id, recordingId: V2Id }), CommandReceiptSchema, { receipt: true }),
+  'browser.host.register': defineRpc(O({ registration: BrowserRegistrationV2Schema }), BrowserHostV2Schema),
+  'browser.host.hydrate': defineRpc(O({ requestId: V2Id, ...BrowserHostLeaseV2Schema.properties }), V2Empty),
+  'browser.host.focus': defineRpc(O({ ...BrowserHostLeaseV2Schema.properties, focused: Type.Boolean() }), V2Empty),
+  'browser.host.reveal': defineRpc(O({ ...BrowserHostLeaseV2Schema.properties, sessionId: V2Id, tabId: V2Id, sequence: V2Sequence }), BrowserSnapshotV2Schema),
+  'browser.host.attach': defineRpc(V2Empty, SubscribeResult, { stream: BrowserHostStreamV2Schema }),
   'browser.host.send': defineRpc(BrowserHostSend, V2Empty),
   'projectAgent.get': defineRpc(SessionInput, ProjectAgentConfigV2Schema),
   'projectAgent.references.list': defineRpc(SessionInput, O({ sessionId: V2Id, references: Type.Array(Type.String({ maxLength: 4096 }), { maxItems: 1000 }) })),
@@ -482,6 +490,10 @@ export const rpcScopes = {
   'access.grant.create': 'access:admin', 'access.devices.list': 'access:admin',
   'access.devices.revoke': 'access:admin',
   'terminal.attach': 'terminal:operate', 'terminal.input': 'terminal:operate', 'terminal.resize': 'terminal:operate',
+  'browser.get': 'session:read', 'browser.subscribe': 'session:read',
+  'browser.tab.open': 'session:operate', 'browser.tab.activate': 'session:operate', 'browser.tab.close': 'session:operate', 'browser.tab.resize': 'session:operate',
+  'browser.recording.start': 'session:operate', 'browser.recording.stop': 'session:operate',
+  'browser.host.register': 'session:operate', 'browser.host.hydrate': 'session:operate', 'browser.host.focus': 'session:operate', 'browser.host.reveal': 'session:operate',
   'browser.host.attach': 'session:operate', 'browser.host.send': 'session:operate',
   'projectAgent.get': 'session:read', 'projectAgent.references.list': 'session:read', 'projectAgent.reference.read': 'session:read',
   'projectAgent.sharing.get': 'session:read', 'projectAgent.directory': 'workspace:read',

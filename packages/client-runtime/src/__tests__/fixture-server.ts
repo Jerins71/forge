@@ -84,6 +84,10 @@ export async function startFixtureServer(index = 0) {
   const httpRequests: string[] = []
   const inputs: Array<{ method: Method; input: unknown }> = []
   const receipts = new Map<string, CommandReceipt>()
+  let browserGeneration = 0
+  let raceBrowserHydration = false
+  const browserSnapshot = { schemaVersion: 2, sessionAgentId: 'session-1', profileId: 'forge', hostingState: 'hosted', revision: 1, tabs: [], activeTabId: null, defaultTabId: null, panelVisible: false, recentActions: [], createdAt: '2026-10-09T00:00:00.000Z', updatedAt: '2026-10-09T00:00:00.000Z' }
+  function resultAlreadyBrowser(socket: WebSocket, subscriptionId: string) { send(socket, { type: 'stream', subscriptionId, item: { snapshot: browserSnapshot } }) }
   // Embedded browser host commands, reassembled from browser.host.send parts.
   const browserHostCommands: Array<Record<string, unknown>> = []
   const browserHostParts = new Map<string, string[]>()
@@ -203,7 +207,7 @@ export async function startFixtureServer(index = 0) {
         method === 'session.subscribe' ||
         method === 'legacy.session.subscribe' ||
         method === 'session.features.subscribe' ||
-        method === 'browser.host.attach'
+        method === 'browser.subscribe' || method === 'browser.host.attach'
       ) {
         const subscriptionId = `s${++nextSub}`
         subscriptions.set(subscriptionId, {
@@ -213,6 +217,7 @@ export async function startFixtureServer(index = 0) {
         })
         result({ subscriptionId })
         if (method === 'legacy.session.subscribe' || method === 'session.features.subscribe') return
+        if (method === 'browser.subscribe') { resultAlreadyBrowser(socket, subscriptionId); return }
         if (method === 'browser.host.attach') {
           send(socket, { type: 'stream', subscriptionId, item: { kind: 'attached' } })
           return
@@ -246,6 +251,18 @@ export async function startFixtureServer(index = 0) {
         })
         return
       }
+      if (method === 'browser.get') { result(browserSnapshot); return }
+      if (method === 'browser.host.register') {
+        const registration = (input as { registration: { hostId: string; capabilities: unknown } }).registration
+        result({ connected: true, hostId: registration.hostId, hostGeneration: ++browserGeneration, focused: false, capabilities: registration.capabilities, connectedAt: '2026-10-09T00:00:00.000Z' }); return
+      }
+      if (method === 'browser.host.hydrate') {
+        result({})
+        if (raceBrowserHydration) for (const [subscriptionId, sub] of subscriptions) if (sub.method === 'browser.host.attach') send(sub.socket, { type: 'stream', subscriptionId, item: { kind: 'session', snapshot: { ...browserSnapshot, revision: 2, panelVisible: true } } })
+        for (const [subscriptionId, sub] of subscriptions) if (sub.method === 'browser.host.attach') send(sub.socket, { type: 'stream', subscriptionId, item: { kind: 'hydration', ...input as object, chunkIndex: 0, chunkCount: 1, payloadBase64: Buffer.from(JSON.stringify([browserSnapshot])).toString('base64') } })
+        return
+      }
+      if (method === 'browser.host.focus') { result({}); return }
       if (method === 'browser.host.send') {
         const part = input as { transferId: string; count: number; data: string }
         const parts = [...(browserHostParts.get(part.transferId) ?? []), part.data]
@@ -276,6 +293,7 @@ export async function startFixtureServer(index = 0) {
     inputs,
     receipts,
     browserHostCommands,
+    raceBrowserHydration: () => { raceBrowserHydration = true },
     subscriptions,
     get connections() {
       return connections

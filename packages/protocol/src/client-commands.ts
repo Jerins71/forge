@@ -1,6 +1,5 @@
 import type { SubscribeInventoryCommand } from './builder-inventory.js'
 import type { ConversationAttachment } from './attachments.js'
-import type { BrowserClientCommand } from './browser-automation.js'
 import type { ConversationReplyTargetInput } from './conversation-events.js'
 import type { BuilderTimelineChannelView } from './builder-timeline-visibility.js'
 import type {
@@ -48,7 +47,6 @@ export type ClientCommand =
       /** Manager sessions referenced in the text (dragged in as [@name]); linked as peers. */
       sessionReferenceAgentIds?: string[]
     }
-  | BrowserClientCommand
   | ApiProxyCommand
   | { type: 'kill_agent'; agentId: string }
   | { type: 'stop_all_agents'; managerId: string; requestId?: string }
