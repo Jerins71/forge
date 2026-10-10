@@ -10,7 +10,17 @@
  * jsdom test gets deterministic, origin-scoped storage regardless of the host
  * Node version. Restore the host descriptors for Node-environment files so a
  * reused worker cannot leak a previous jsdom Storage.
+ *
+ * The same environment keeps Node's `fetch` / `Request` / `Response` but
+ * replaces `AbortController`, `AbortSignal`, `Blob` and `File` with jsdom's.
+ * Node 26's fetch rejects a jsdom `AbortSignal` and `Response.blob()` hands
+ * back a jsdom `Blob` without `arrayBuffer()`, so every signalled request
+ * fails. Rebind those companions to Node's so fetch and the classes it
+ * brand-checks share one realm, as they do in a browser. Vitest restores the
+ * host globals itself when it tears the jsdom environment down.
  */
+import { Blob as NodeBlob, File as NodeFile } from 'node:buffer'
+import { transferableAbortController } from 'node:util'
 import { afterEach, beforeEach } from 'vitest'
 
 const HOST_WEB_STORAGE_CACHE = Symbol.for('forge.ui.vitest.host-web-storage')
@@ -89,6 +99,17 @@ function bindJsdomWebStorage(jsdomWindow: Window): void {
   }
 }
 
+function bindNodeFetchCompanions(): void {
+  // jsdom shadows the globals, so reach Node's classes through its own modules.
+  const controller = transferableAbortController()
+  Object.assign(globalThis, {
+    AbortController: controller.constructor,
+    AbortSignal: controller.signal.constructor,
+    Blob: NodeBlob,
+    File: NodeFile,
+  })
+}
+
 function restoreHostWebStorage(): void {
   const { descriptors } = getHostWebStorageCache()
   for (const key of WEB_STORAGE_KEYS) {
@@ -122,6 +143,7 @@ const jsdomWindow = getJsdomWindow()
 getHostWebStorageCache()
 if (jsdomWindow) {
   bindJsdomWebStorage(jsdomWindow)
+  bindNodeFetchCompanions()
 } else {
   restoreHostWebStorage()
 }
