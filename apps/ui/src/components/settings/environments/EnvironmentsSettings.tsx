@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { SettingsSection } from '../settings-row'
 import type { EnvironmentCatalogEntry } from '@forge/client-runtime'
@@ -9,6 +9,8 @@ import { EnvironmentRow } from './EnvironmentRow'
 import { PairEnvironmentDialog } from './PairEnvironmentDialog'
 import { HostPairingPanel } from './HostPairingPanel'
 import { PairedDevices } from './PairedDevices'
+import { AddSshMachineDialog } from './AddSshMachineDialog'
+import { useManagedHosts } from '@/lib/managed-hosts'
 
 export function EnvironmentsSettings() {
   if (!useOptionalEnvironmentContext()) {
@@ -25,6 +27,8 @@ function EnvironmentsSettingsContent() {
   const catalog = useEnvironmentCatalog()
   const entries = useMemo(() => sortCatalog(catalog), [catalog])
   const [pairOpen, setPairOpen] = useState(false)
+  const [sshOpen, setSshOpen] = useState(false)
+  const { bridge: managedHosts } = useManagedHosts()
   const primaryId = entries.find((entry) => entry.primary)?.environmentId ?? entries[0]?.environmentId ?? null
   const [hostTargetId, setHostTargetId] = useState<string | null>(null)
   const hostTarget = (hostTargetId && catalog.has(hostTargetId) ? hostTargetId : primaryId)
@@ -35,9 +39,16 @@ function EnvironmentsSettingsContent() {
         label="Environments"
         description="Each environment is a Forge backend on a machine you control. Sessions run on the environment you choose and never fall back to another one."
         cta={
-          <Button size="sm" className="gap-1.5" onClick={() => setPairOpen(true)}>
-            <Plus className="size-4" /> Add environment
-          </Button>
+          <div className="flex items-center gap-2">
+            {managedHosts ? (
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setSshOpen(true)}>
+                <Terminal className="size-4" /> Add over SSH
+              </Button>
+            ) : null}
+            <Button size="sm" className="gap-1.5" onClick={() => setPairOpen(true)}>
+              <Plus className="size-4" /> Add environment
+            </Button>
+          </div>
         }
       >
         {entries.length === 0 ? (
@@ -65,6 +76,7 @@ function EnvironmentsSettingsContent() {
       ) : null}
 
       <PairEnvironmentDialog open={pairOpen} onOpenChange={setPairOpen} />
+      {managedHosts ? <AddSshMachineDialog open={sshOpen} onOpenChange={setSshOpen} /> : null}
     </div>
   )
 }
