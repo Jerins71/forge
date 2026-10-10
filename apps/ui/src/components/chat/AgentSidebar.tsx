@@ -47,7 +47,7 @@ import { ProjectAgentSettingsSheet } from './project-agent/ProjectAgentSettingsS
 import { ActivateRepoProjectAgentSheet } from './project-agent/ActivateRepoProjectAgentSheet'
 import { ProjectAgentSharingDialog } from './project-agent/ProjectAgentSharingDialog'
 import { findCliHideNavigationTarget, injectGlowPulseStyle } from './agent-sidebar/utils'
-import { useProjectViews, useSidebarPrefs, useSidebarTreeState } from './agent-sidebar/hooks'
+import { useIsDesktopViewport, useProjectViews, useSidebarPrefs, useSidebarTreeState } from './agent-sidebar/hooks'
 import { useInactiveRepoProjectAgents, type RepoProjectAgentSidebarEntry } from '@/hooks/use-inactive-repo-project-agents'
 import { getInactiveRepoProjectAgentEntryKey, matchesRepoProjectAgentSearch } from '@/components/settings/repo-project-agent-ui-utils'
 import type { AgentSidebarProps } from './agent-sidebar/types'
@@ -140,6 +140,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     setRoomsMode,
   } = useSidebarPrefs()
   const roomsV2 = sidebarLayout === 'rooms-v2'
+  const isDesktopViewport = useIsDesktopViewport()
   // Local projects come from the primary environment's descriptors; other machines' sessions join
   // their logical project's row, and projects only on other machines get rows of their own.
   const environmentContext = useOptionalEnvironmentContext()
@@ -1033,35 +1034,36 @@ export const AgentSidebar = React.memo(function AgentSidebar({
 
   return profileSidebar(
     <>
-      {/* Desktop: render inline */}
-      <div className="hidden md:flex md:shrink-0">
-        {sidebarContent}
-      </div>
-
-      {/* Mobile: render as overlay */}
-      <div
-        className={cn(
-          'fixed inset-0 z-40 md:hidden',
-          isMobileOpen ? 'pointer-events-auto' : 'pointer-events-none',
-        )}
-      >
-        <div
-          className={cn(
-            'absolute inset-0 bg-black/50 transition-opacity duration-200',
-            isMobileOpen ? 'opacity-100' : 'opacity-0',
-          )}
-          onClick={onMobileClose}
-          aria-hidden="true"
-        />
-        <div
-          className={cn(
-            'relative z-10 h-full w-full transition-transform duration-200 ease-out',
-            isMobileOpen ? 'translate-x-0' : '-translate-x-full',
-          )}
-        >
+      {/* The sidebar is mounted once: a hidden second copy would repeat every update's work. */}
+      {isDesktopViewport ? (
+        <div className="hidden md:flex md:shrink-0">
           {sidebarContent}
         </div>
-      </div>
+      ) : (
+        <div
+          className={cn(
+            'fixed inset-0 z-40 md:hidden',
+            isMobileOpen ? 'pointer-events-auto' : 'pointer-events-none',
+          )}
+        >
+          <div
+            className={cn(
+              'absolute inset-0 bg-black/50 transition-opacity duration-200',
+              isMobileOpen ? 'opacity-100' : 'opacity-0',
+            )}
+            onClick={onMobileClose}
+            aria-hidden="true"
+          />
+          <div
+            className={cn(
+              'relative z-10 h-full w-full transition-transform duration-200 ease-out',
+              isMobileOpen ? 'translate-x-0' : '-translate-x-full',
+            )}
+          >
+            {sidebarContent}
+          </div>
+        </div>
+      )}
 
       {/* Create session dialog */}
       {createTarget ? (
