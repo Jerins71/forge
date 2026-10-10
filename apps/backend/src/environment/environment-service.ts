@@ -213,6 +213,7 @@ export async function createEnvironmentService(options: {
           shellStream,
           detailStream,
           legacyAdapter,
+          browserHost: wsHandler.browserHost,
           terminalTransport,
         });
         return { rpc, terminalTransport };

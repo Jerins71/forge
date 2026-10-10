@@ -20,6 +20,7 @@ import type {
 } from '@/lib/electron-bridge'
 import type { ManagerWsClient } from '@/lib/ws-client'
 import type { ManagerWsState } from '@/lib/ws-state'
+import { useEnvironmentConnection } from '@/hooks/index-page/use-environment-connection'
 import { rebaseHostOwnedTabFields } from './browser-runtime-state'
 
 export interface BrowserAutomationHostHandle {
@@ -470,6 +471,18 @@ export const BrowserAutomationHost = forwardRef<BrowserAutomationHostHandle, Bro
     return null
   },
 )
+
+/**
+ * The embedded browser belongs to this machine: the renderer stays registered as the primary
+ * environment's host whichever environment's session is on screen, and never registers with a remote one.
+ */
+export const PrimaryBrowserAutomationHost = forwardRef<
+  BrowserAutomationHostHandle,
+  Omit<BrowserAutomationHostProps, 'client' | 'state'> & { environmentId: string | null }
+>(function PrimaryBrowserAutomationHost({ environmentId, ...props }, ref) {
+  const { client, state } = useEnvironmentConnection(environmentId)
+  return <BrowserAutomationHost ref={ref} client={client} state={state} {...props} />
+})
 
 const MAX_HOST_REPORT_CONFLICT_RETRIES = 3
 

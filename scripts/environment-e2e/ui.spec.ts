@@ -387,6 +387,81 @@ test('Settings and Stats edit the picked environment only, with no secret materi
   assertions.settingsStatsTarget = { environmentId: b.environmentId, requests: afterSwitch, secretUrls: 0 }
 })
 
+test('embedded Browser: this machine registers as host, opens a tab, survives reload; remote sessions get a disabled state', async ({ page }) => {
+  const { a, b } = fleet!
+  // Stands in for Forge Desktop's trusted browser IPC, only on pages opened with the marker.
+  await page.addInitScript(() => {
+    if (!new URLSearchParams(location.search).has('e2eBrowserHost')) return
+    const log: Array<{ operation: string; hostGeneration: number }> = []
+    ;(window as any).__e2eBrowserHost = log
+    const unsupported = async () => { throw new Error('not exercised') }
+    ;(window as any).electronBridge = {
+      ...(window as any).electronBridge,
+      browserAutomation: {
+        capabilities: { supportedOperations: [], playwrightVersion: 'e2e', supportsRecording: false },
+        reconcile: async () => ({ applied: true, tabCount: 0 }),
+        reportViewport: async () => undefined,
+        setTabPresentation: async (request: any) => ({ applied: false, sequence: request.sequence, hostGeneration: request.hostGeneration }),
+        invoke: async (request: any) => {
+          log.push({ operation: request.operation, hostGeneration: request.hostGeneration })
+          const now = new Date().toISOString()
+          const tab = {
+            targetAffinity: 'managed-electron', tabId: crypto.randomUUID(), sessionAgentId: request.sessionAgentId, profileId: request.profileId,
+            url: 'about:blank', title: 'Fixture tab', lifecycle: 'ready', loading: false, live: true, canGoBack: false, canGoForward: false,
+            zoomFactor: 1, controller: 'none', agentCursor: null, recording: null, viewportSetting: { mode: 'fill' }, renderedViewport: null,
+            error: null, createdAt: now, updatedAt: now,
+          }
+          const base = { requestId: request.requestId, sessionAgentId: request.sessionAgentId, profileId: request.profileId, tabId: request.tabId, hostId: request.hostId, hostGeneration: request.hostGeneration, operation: request.operation, elapsedMs: 1 }
+          if (request.operation !== 'open') return { ...base, ok: false, error: { code: 'execution-failed', message: 'not exercised', retryable: false } }
+          return { ...base, ok: true, updatedTab: tab, result: { tab, created: true, panelRevealRequested: false } }
+        },
+        invokeLifecycle: async (request: any) => ({ requestId: request.requestId, sessionAgentId: request.sessionAgentId, profileId: request.profileId, hostId: request.hostId, hostGeneration: request.hostGeneration, kind: request.kind, ok: true }),
+        onStateChanged: () => () => undefined,
+        ensureProvisional: unsupported, commitProvisional: unsupported, abortProvisional: unsupported, captureScreenshot: unsupported,
+        navigate: unsupported, history: unsupported, reload: unsupported, setZoom: unsupported, reveal: unsupported, takeControl: unsupported,
+      },
+    }
+  })
+  const hostLog = () => page.evaluate(() => (window as any).__e2eBrowserHost as Array<{ operation: string; hostGeneration: number }>)
+  const openBrowser = async () => {
+    await page.getByRole('button', { name: /^Browser/ }).click()
+    return page.getByRole('region', { name: 'Browser workspace' })
+  }
+
+  await page.goto(`${fleet!.uiUrl}/?agent=${encodeURIComponent(a.sessionId)}&e2eBrowserHost=1`)
+  let workspace = await openBrowser()
+  // The renderer registered with this machine's backend: the host is connected and controls are live.
+  await expect(workspace.getByRole('button', { name: 'New browser tab' })).toBeEnabled()
+  await expect(workspace.getByText('Browser host unavailable')).toHaveCount(0)
+  await workspace.getByRole('button', { name: 'Open a tab' }).click()
+  // The backend routed the open to the renderer host and the resulting tab came back as session state.
+  await expect(workspace.getByRole('tab', { name: 'Fixture tab' })).toHaveCount(1)
+  const firstLoad = await hostLog()
+  expect(firstLoad).toEqual([{ operation: 'open', hostGeneration: expect.any(Number) }])
+  await shot(page, 'browser-host-primary')
+
+  // Reload: a new renderer registers again (a later host generation) and hydrates the same tab.
+  await page.goto(`${fleet!.uiUrl}/?agent=${encodeURIComponent(a.sessionId)}&e2eBrowserHost=1`)
+  workspace = await openBrowser()
+  await expect(workspace.getByRole('button', { name: 'New browser tab' })).toBeEnabled()
+  await expect(workspace.getByRole('tab', { name: 'Fixture tab' })).toHaveCount(1)
+  await workspace.getByRole('button', { name: 'New browser tab' }).click()
+  await expect(workspace.getByRole('tab', { name: 'Fixture tab' })).toHaveCount(2)
+  const afterReload = await hostLog()
+  expect(afterReload).toHaveLength(1)
+  expect(afterReload[0]!.hostGeneration).toBeGreaterThan(firstLoad[0]!.hostGeneration)
+
+  // A session on another machine has no Browser workspace, and nothing was routed to this host for it.
+  await page.goto(`${fleet!.uiUrl}/?agent=${encodeURIComponent(b.sessionId)}&env=${b.environmentId}&e2eBrowserHost=1`)
+  await expect(page.getByTestId('environment-session')).toHaveAttribute('data-environment-id', b.environmentId)
+  workspace = await openBrowser()
+  await expect(workspace.getByRole('heading', { name: 'Browser is not available on remote machines' })).toBeVisible()
+  await expect(workspace.getByRole('button', { name: 'New browser tab' })).toHaveCount(0)
+  expect(await hostLog()).toEqual([])
+  await shot(page, 'browser-host-remote')
+  assertions.browserHost = { primaryOpen: firstLoad, reloadHostGeneration: afterReload[0]!.hostGeneration, hydratedTabs: 1, remote: 'unavailable' }
+})
+
 test('offline environment shows age, disables Run on, and never falls back to another machine', async ({ page }) => {
   const { a, b } = fleet!
   await fleet!.stop(b)
