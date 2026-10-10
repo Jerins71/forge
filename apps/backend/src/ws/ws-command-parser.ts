@@ -1,14 +1,12 @@
 import type { ClientCommand } from "@forge/protocol";
 import { type RawData } from "ws";
 import type { CommandParser, ParsedClientCommand } from "./commands/command-parse-helpers.js";
-import { parseBrowserCommand } from "./commands/parse-browser-command.js";
 import { parseConversationCommand } from "./commands/parse-conversation-command.js";
 import { parseManagerCommand } from "./commands/parse-manager-command.js";
 import { parseSessionCommand } from "./commands/parse-session-command.js";
 import { parseUtilityCommand } from "./commands/parse-utility-command.js";
 
 const COMMAND_PARSERS: CommandParser[] = [
-  parseBrowserCommand,
   parseUtilityCommand,
   parseManagerCommand,
   parseSessionCommand,
@@ -63,12 +61,6 @@ export function extractRequestId(command: ClientCommand): string | undefined {
     case "mark_unread":
     case "mark_all_read":
     case "dismiss_session_attention":
-    case "browser_tab_open":
-    case "browser_tab_activate":
-    case "browser_tab_close":
-    case "browser_tab_resize":
-    case "browser_recording_start":
-    case "browser_recording_stop":
       return command.requestId;
 
     case "pin_message":
@@ -78,11 +70,6 @@ export function extractRequestId(command: ClientCommand): string | undefined {
     case "kill_agent":
     case "choice_response":
     case "choice_cancel":
-    case "browser_host_register":
-    case "browser_host_focus":
-    case "browser_host_response":
-    case "browser_host_state_report":
-    case "browser_panel_reveal_acknowledge":
     case "ping":
       return undefined;
   }

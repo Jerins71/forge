@@ -63,6 +63,7 @@ export async function createEnvironmentService(options: {
   unreadTracker: UnreadTracker;
   exposure: ExposurePolicy;
   identityOptions?: Pick<IdentityOptions, "installationStateDir" | "label">;
+  localBrowserOrigin?: (request: import("node:http").IncomingMessage) => boolean;
 }): Promise<EnvironmentService> {
   const { config, swarmManager, unreadTracker, exposure } = options;
   const databasePath = getEnvironmentDbPath(config.paths.dataDir);
@@ -120,7 +121,7 @@ export async function createEnvironmentService(options: {
         .prepare("UPDATE environment_meta SET environment_id=?,stream_epoch=? WHERE singleton=1")
         .run(identity.environmentId, identity.file.streamEpoch);
     applyAccessMigrations(database);
-    const hostAccess = createEnvironmentAccess({ database, identity, exposure });
+    const hostAccess = createEnvironmentAccess({ database, identity, exposure, localBrowserOrigin: options.localBrowserOrigin });
     access = {
       ...hostAccess,
       async revokeDevice(principal, input) {
@@ -232,6 +233,7 @@ export async function createEnvironmentService(options: {
           detailStream,
           legacyAdapter,
           browserHost: wsHandler.browserHost,
+          browser: wsHandler.browser,
           terminalTransport,
         });
         return { rpc, terminalTransport };

@@ -15,7 +15,6 @@ import {
 import type {
   BrowserAutomationRequest,
   BrowserAutomationResponse,
-  BrowserHostConnectionSnapshot,
   BrowserHostRegistration,
 } from '@forge/protocol'
 import {
@@ -41,10 +40,6 @@ const registration: BrowserHostRegistration = {
     features: { resize: true, recording: false, capturePage: true, downloadEvents: false, downloadArtifacts: false, downloadOpen: false, managedOpenRouting: true },
   },
 }
-const hostSnapshot = (hostGeneration: number): BrowserHostConnectionSnapshot => ({
-  connected: true, hostId: registration.hostId, hostGeneration, focused: false,
-  capabilities: registration.capabilities, connectedAt: '2026-10-09T00:00:00.000Z',
-})
 
 async function environment() {
   const server = await startFixtureServer(0)
@@ -64,21 +59,12 @@ async function environment() {
   const facade = new ManagerWsClient('', 'session-1', { environmentClient: client })
   cleanups.push(() => facade.destroy())
   await until(() => facade.getState().conversationBootstrap.phase === 'ready')
-  const hostEvent = (event: Record<string, unknown>) => server.emit({ kind: 'event', event }, 'browser.host.attach')
-  const commands = (type: string) => server.browserHostCommands.filter((command) => command.type === type)
-  /** Plays the backend's side of registration and hydration for the latest register command. */
+  const hostEvent = (event: object) => server.emit(event, 'browser.host.attach')
+  const commands = (kind: string) => server.browserHostCommands.filter(command => command.kind === kind)
   const completeHandshake = async (generation: number) => {
-    await until(() => commands('browser_host_register').length === generation)
-    hostEvent({ type: 'browser_host_connected', requestId: commands('browser_host_register').at(-1)!.requestId, host: hostSnapshot(generation) })
-    await until(() => commands('browser_host_hydrate').length === generation)
-    const hydrate = commands('browser_host_hydrate').at(-1)!
-    expect(hydrate).toMatchObject({ hostId: registration.hostId, hostGeneration: generation })
-    hostEvent({
-      type: 'browser_host_hydration_chunk', requestId: hydrate.requestId, hostId: registration.hostId, hostGeneration: generation,
-      chunkIndex: 0, chunkCount: 1,
-      payloadBase64: btoa(JSON.stringify([{ sessionAgentId: 'session-1', profileId: 'forge', revision: generation, tabs: [] }])),
-    })
-    await until(() => facade.getState().browserHostHydrated)
+    await until(() => facade.getState().browserHostHydrated && facade.getState().browserHost.hostGeneration === generation)
+    expect(server.inputs.filter(input => input.method === 'browser.host.register')).toHaveLength(generation)
+    expect(server.inputs.filter(input => input.method === 'browser.host.hydrate')).toHaveLength(generation)
   }
   return { server, facade, hostEvent, commands, completeHandshake }
 }
@@ -89,22 +75,22 @@ describe('embedded browser host on the environment runtime', () => {
     const handled: BrowserAutomationRequest[] = []
     const unregister = facade.registerBrowserAutomationHost(registration, async (request) => {
       handled.push(request)
-      return { requestId: request.requestId, ok: true } as unknown as BrowserAutomationResponse
+      return { requestId: request.requestId, sessionAgentId: request.sessionAgentId, profileId: request.profileId, tabId: request.tabId, hostId: request.hostId, hostGeneration: request.hostGeneration, operation: 'open', ok: true, elapsedMs: 1, result: {} } as unknown as BrowserAutomationResponse
     })
 
     await completeHandshake(1)
-    expect(commands('browser_host_register')[0]).toMatchObject({ registration: { hostId: registration.hostId } })
+    expect(server.inputs.find(input => input.method === 'browser.host.register')).toMatchObject({ input: { registration: { hostId: registration.hostId } } })
     expect(facade.getState().browserHost).toMatchObject({ connected: true, hostGeneration: 1 })
     expect(facade.getState().browserSessions['session-1']).toMatchObject({ revision: 1 })
 
-    hostEvent({ type: 'browser_automation_request', request: { requestId: 'tool-1', hostId: registration.hostId, hostGeneration: 1, operation: 'open', sessionAgentId: 'session-1', profileId: 'forge', tabId: null } })
-    await until(() => commands('browser_host_response').length === 1)
+    hostEvent({ kind: 'automation', request: { requestId: 'tool-1', hostId: registration.hostId, hostGeneration: 1, operation: 'open', sessionAgentId: 'session-1', profileId: 'forge', tabId: null, input: {}, deadlineAt: new Date(Date.now() + 15000).toISOString(), artifactDirectory: null } })
+    await until(() => commands('respond').length === 1)
     expect(handled).toHaveLength(1)
-    expect(commands('browser_host_response')[0]).toMatchObject({ response: { requestId: 'tool-1', ok: true } })
+    expect(commands('respond')[0]).toMatchObject({ response: { requestId: 'tool-1', ok: true } })
 
     facade.setBrowserHostFocused(true)
-    await until(() => commands('browser_host_focus').length === 1)
-    expect(commands('browser_host_focus')[0]).toMatchObject({ hostId: registration.hostId, hostGeneration: 1, focused: true })
+    await until(() => server.inputs.some(input => input.method === 'browser.host.focus'))
+    expect(server.inputs.find(input => input.method === 'browser.host.focus')!.input).toMatchObject({ hostId: registration.hostId, hostGeneration: 1, focused: true })
     // Host commands never ride the legacy session bridge, and nothing surfaced as an error.
     expect(server.inputs.filter((entry) => entry.method.startsWith('legacy.') && JSON.stringify(entry.input).includes('browser_host_'))).toEqual([])
     expect(facade.getState().lastError).toBeNull()
@@ -114,7 +100,7 @@ describe('embedded browser host on the environment runtime', () => {
     await until(() => !facade.getState().browserHost.connected && !facade.getState().browserHostHydrated)
     await completeHandshake(2)
     expect(facade.getState().browserHost).toMatchObject({ connected: true, hostGeneration: 2 })
-    expect(facade.getState().browserSessions['session-1']).toMatchObject({ revision: 2 })
+    expect(facade.getState().browserSessions['session-1']).toMatchObject({ revision: 1 })
 
     unregister()
     await until(() => ![...server.subscriptions.values()].some((subscription) => subscription.method === 'browser.host.attach'))
@@ -125,4 +111,46 @@ describe('embedded browser host on the environment runtime', () => {
     expect([...server.subscriptions.values()].some((subscription) => subscription.method === 'browser.host.attach')).toBe(false)
     expect(server.browserHostCommands).toEqual([])
   })
+})
+
+it('consumes Browser canonical snapshots through typed detail bootstrap and live changes', async () => {
+  const { server, facade } = await environment()
+  await until(() => facade.getState().browserSessions['session-1']?.schemaVersion === 2)
+  const original = facade.getState().browserSessions['session-1']
+  server.emit({ snapshot: { ...original, revision: 2, panelVisible: true } }, 'browser.subscribe')
+  await until(() => facade.getState().browserSessions['session-1']?.revision === 2)
+  expect(facade.getState().browserSessions['session-1'].panelVisible).toBe(true)
+  expect(server.inputs.some(input => input.method === 'legacy.session.subscribe')).toBe(false)
+})
+
+// Failure mode: dropping an old deduplication key at the transfer budget lets a
+// repeated, possibly mutating host action run twice inside the same deadline.
+it('retains mutating request identity while live and rejects overload without executing it', async () => {
+  const { facade, hostEvent, commands, completeHandshake } = await environment()
+  const handled: string[] = []
+  facade.registerBrowserAutomationHost(registration, async request => {
+    handled.push(request.requestId)
+    return { ...request, operation: 'open', ok: true, elapsedMs: 1, result: {} } as unknown as BrowserAutomationResponse
+  })
+  await completeHandshake(1)
+  const request = { hostId: registration.hostId, hostGeneration: 1, operation: 'open', sessionAgentId: 'session-1', profileId: 'forge', tabId: null, input: {}, deadlineAt: new Date(Date.now() + 15000).toISOString(), artifactDirectory: null }
+  for (let index = 0; index < 257; index++) {
+    hostEvent({ kind: 'automation', request: { ...request, requestId: `bounded-${index}` } })
+    await until(() => commands('respond').length === index + 1)
+  }
+  hostEvent({ kind: 'automation', request: { ...request, requestId: 'bounded-0' } })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(handled.filter(id => id === 'bounded-0')).toHaveLength(1)
+  expect(handled).toHaveLength(256)
+  expect(commands('respond').at(-1)).toMatchObject({ response: { requestId: 'bounded-256', ok: false, error: { retryable: false } } })
+})
+
+// Failure mode: a canonical update overtakes a hydration read, then an older
+// bootstrap replaces the live state and resurrects stale tab/recording metadata.
+it('keeps the newer canonical live revision when hydration races an update', async () => {
+  const { server, facade, completeHandshake } = await environment()
+  server.raceBrowserHydration()
+  facade.registerBrowserAutomationHost(registration, async () => { throw new Error('No automation expected') })
+  await completeHandshake(1)
+  expect(facade.getState().browserSessions['session-1']).toMatchObject({ revision: 2, panelVisible: true })
 })

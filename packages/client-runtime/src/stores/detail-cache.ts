@@ -19,6 +19,7 @@ interface Entry {
 }
 const empty = (): DetailState => ({
   projection: null,
+  browser: null,
   cursor: null,
   freshness: 'unavailable',
   transient: new Map(),
@@ -292,34 +293,18 @@ export class DetailCache {
         }, error: () => {},
       },
     )
-    const legacy = this.supervisor.subscribe(
-      'legacy.session.subscribe',
-      () => ({ sessionId }),
-      {
-        next: (item) => {
-          if (!entry.refs) return
-          const payload = item.payload as Record<string, unknown>
-          const key = JSON.stringify([
-            item.type,
-            (payload.measurement as { agentId?: string } | undefined)
-              ?.agentId ??
-              payload.agentId ??
-              payload.sessionAgentId ??
-              sessionId,
-            (payload.terminal as { terminalId?: string } | undefined)?.terminalId ?? payload.terminalId ?? payload.toolCallId ?? payload.requestId ?? '',
-          ])
-          transientBatch.set(key, { ...payload, type: item.type } as DetailTransientEvent)
-          if (!entry.cancelBatch)
-            entry.cancelBatch =
-              this.ports.scheduleBatch?.(flush) ?? schedule(flush)
-        },
-        error: () => {},
-      },
-    )
+    const browser = this.supervisor.subscribe('browser.subscribe', () => ({ sessionId }), {
+      next: ({ snapshot }) => {
+        if (!entry.refs) return
+        const state = entry.store.getSnapshot()
+        if (state.browser && state.browser.revision > snapshot.revision) return
+        entry.store.set({ ...state, browser: snapshot })
+      }, error: () => {},
+    })
     entry.release = () => {
       durable()
       features()
-      legacy()
+      browser()
       pending = []
       transientBatch.clear()
     }

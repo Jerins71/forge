@@ -1,7 +1,6 @@
 import type { WsRequestTracker } from '../ws-request-tracker'
 import type {
   AgentDescriptor,
-  BrowserSessionSnapshot,
   PersistedProjectAgentConfig,
   ProjectAgentConfigSourceSnapshot,
   ProjectAgentExternalDirectoryEntry,
@@ -112,16 +111,6 @@ export type WsRequestResultMap = {
   get_session_workers: SessionWorkersResult
   get_conversation_page: ConversationPageResult
 
-  browser_host_register: import('@forge/protocol').BrowserHostConnectionSnapshot
-  browser_host_hydrate: BrowserSessionSnapshot[]
-  browser_host_state_report: import('@forge/protocol').BrowserHostStateReportResult
-  browser_panel_reveal_acknowledge: BrowserSessionSnapshot
-  browser_tab_open: BrowserSessionSnapshot
-  browser_tab_activate: BrowserSessionSnapshot
-  browser_tab_close: BrowserSessionSnapshot
-  browser_tab_resize: BrowserSessionSnapshot
-  browser_recording_start: import('@forge/protocol').BrowserRecordingStatusResult
-  browser_recording_stop: import('@forge/protocol').BrowserRecordingArtifactResult
 }
 
 export type WsRequestType = Extract<keyof WsRequestResultMap, string>

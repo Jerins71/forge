@@ -17,11 +17,6 @@ export const legacyCommandScopes = {
   get_conversation_page: "unsupported",
   choice_cancel: "session:operate",
   mark_unread: "session:operate", mark_all_read: "session:operate",
-  // Host commands use browser.host.send on the socket that holds the browser.host.attach subscription.
-  browser_host_register: "unsupported", browser_host_hydrate: "unsupported", browser_host_focus: "unsupported", browser_host_response: "unsupported",
-  browser_host_state_report: "unsupported", browser_host_lifecycle_response: "unsupported", browser_panel_reveal_acknowledge: "session:operate",
-  browser_tab_open: "session:operate", browser_tab_activate: "session:operate", browser_tab_close: "session:operate", browser_tab_resize: "session:operate",
-  browser_recording_start: "session:operate", browser_recording_stop: "session:operate",
 } as const satisfies Record<ClientCommand["type"], Scope | "unsupported">;
 
 /** Remove a literal when its authoritative feature projection migrates to V2. */
@@ -69,9 +64,10 @@ export function createLegacyBuilderAdapter({ access, ports }: { access: Environm
     const coalesced = new Map<string, ServerEvent>();
     let timer: NodeJS.Timeout | undefined;
     const send = (event: ServerEvent) => {
+      const type = event.type;
       if (!legacySessionEventAllowlist.includes(event.type as LegacyType)) return;
       if (!validateLegacySessionEvent(event, input.sessionId)) { queue.fail(new StreamFault("RESYNC_REQUIRED", "Invalid legacy feature event.")); return; }
-      (initialized ? queue : buffered).push({ type: event.type, payload: event });
+      (initialized ? queue : buffered).push({ type, payload: event });
     };
     const unsubscribe = ports.subscribeFeatures(input.sessionId, event => {
       if (event.type !== "generation_throughput" && event.type !== "manager_tool_activity") { send(event); return; }

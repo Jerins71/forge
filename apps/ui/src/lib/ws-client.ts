@@ -1,3 +1,4 @@
+import { projectPanelRevealRequest } from './ws-client/browser-state'
 import { projectFeatureEvent } from './ws-client/environment-feature-projection'
 import type { RpcInput, RpcOutput } from '@forge/protocol/environment-v2'
 import { EnvironmentRuntimeError, isInterruptedReceipt, type EnvironmentClient, type DetailState } from '@forge/client-runtime'
@@ -15,7 +16,6 @@ import { getCatalogModelsByFamily } from '@forge/protocol'
 import type { CommandReceipt } from '@forge/protocol/environment-v2'
 import { environmentCommandIntentKey, sendEnvironmentCommand } from './ws-client/environment-command-transport'
 import { EnvironmentOutbox } from './ws-client/environment-outbox'
-import { BROWSER_HOST_REGISTER_PROTOCOL_INCOMPATIBLE_ERROR } from '@forge/protocol'
 import type { CodexElicitationDecision, CodexElicitationPersistScope, SessionGoalControlAction, SessionProjectAgentInput, WorkModeId } from '@forge/protocol'
 import type { ConversationSnapshotCache } from './ws-client/conversation-snapshot-cache'
 import {
@@ -26,19 +26,6 @@ import { handleManagerIdleTransition, removeMutedAgent } from './notification-se
 import {
   assertConnectedSocket,
   assertReconnectableSocket,
-  buildBrowserHostFocusCommand,
-  buildBrowserHostHydrateCommand,
-  buildBrowserHostLifecycleResponseCommand,
-  buildBrowserHostRegisterCommand,
-  buildBrowserHostResponseCommand,
-  buildBrowserHostStateReportCommand,
-  buildBrowserPanelRevealAcknowledgeCommand,
-  buildBrowserRecordingStartCommand,
-  buildBrowserRecordingStopCommand,
-  buildBrowserTabActivateCommand,
-  buildBrowserTabCloseCommand,
-  buildBrowserTabOpenCommand,
-  buildBrowserTabResizeCommand,
   buildChoiceCancelCommand,
   buildChoiceResponseCommand,
   buildClearAllPinsCommand,
@@ -72,9 +59,6 @@ import {
   CONVERSATION_PAGE_REQUEST_TIMEOUT_MS,
 } from './ws-client/runtime-types'
 
-const BROWSER_HANDSHAKE_REQUEST_TIMEOUT_MS = 2_000
-const BROWSER_HANDSHAKE_RETRY_INITIAL_MS = 1_000
-const BROWSER_HANDSHAKE_RETRY_MAX_MS = 30_000
 export const CONVERSATION_BOOTSTRAP_WATCHDOG_MS = 30_000
 const GENERATION_TERMINAL_SETTLE_MS = 5_000
 const MAX_DEFERRED_WORKER_THROUGHPUT_EVENTS = 64
@@ -149,7 +133,6 @@ import { handleSessionEvent } from './ws-client/event-handlers/session-event-han
 import { handleSessionAttentionEvent } from './ws-client/event-handlers/session-attention-event-handlers'
 import { handleConfigEvent } from './ws-client/event-handlers/config-event-handlers'
 import { handleSystemEvent } from './ws-client/event-handlers/system-event-handlers'
-import { handleBrowserEvent } from './ws-client/event-handlers/browser-event-handlers'
 import type {
   AgentDescriptor,
   AgentSessionPurpose,
@@ -255,18 +238,7 @@ export class ManagerWsClient {
   private readonly bootstrapBuffer: BootstrapBuffer
   private readonly sessionWorkerCache: SessionWorkerCache
   private browserHostRegistration: BrowserHostRegistration | null = null
-  private browserHandshakeTimer: ReturnType<typeof setTimeout> | null = null
-  /** Invalidates timers and completions from an older socket or host registration. */
-  private browserHandshakeEpoch = 0
-  private browserHandshakeInFlight = false
-  private browserHandshakeFailures = 0
-  /** A negotiated v2 mismatch is actionable but must not retry forever. */
-  private browserHandshakeProtocolError: string | null = null
-  /** Releases the environment's browser host channel; the channel is the host connection. */
   private browserHostDetach: (() => void) | null = null
-  private readonly browserHydrationChunks = new Map<string, { chunkCount: number; chunks: Array<Uint8Array | undefined> }>()
-  private browserAutomationRequestHandler: ((request: BrowserAutomationRequest) => Promise<BrowserAutomationResponse>) | null = null
-  private browserLifecycleRequestHandler: ((request: BrowserHostLifecycleRequest) => Promise<BrowserHostLifecycleResponse>) | null = null
 
   constructor(url: string, initialAgentId?: string | null, options: ManagerWsClientOptions = {},
   ) {
@@ -480,246 +452,90 @@ export class ManagerWsClient {
     handleRequest: (request: BrowserAutomationRequest) => Promise<BrowserAutomationResponse>,
     handleLifecycle?: (request: BrowserHostLifecycleRequest) => Promise<BrowserHostLifecycleResponse>,
   ): () => void {
-    this.clearBrowserHandshakeProtocolError()
-    this.browserHostRegistration = registration
-    this.browserAutomationRequestHandler = handleRequest
-    this.browserLifecycleRequestHandler = handleLifecycle ?? null
-    if (this.environmentClient) this.attachEnvironmentBrowserHost(this.environmentClient)
-    else this.restartBrowserHandshake()
-    return () => {
-      if (this.browserHostRegistration?.hostId === registration.hostId) {
-        this.browserHostRegistration = null
-        this.browserAutomationRequestHandler = null
-        this.browserLifecycleRequestHandler = null
-        this.detachEnvironmentBrowserHost()
-        this.stopBrowserHandshake()
-      }
-    }
-  }
-
-  /** Registration and hydration start once the channel reports attached, and again after each reconnect. */
-  private attachEnvironmentBrowserHost(client: EnvironmentClient): void {
+    const client = this.requireBrowserEnvironment()
     this.detachEnvironmentBrowserHost()
-    this.browserHostDetach = client.features.browserHost.attach({
-      attached: () => {
-        this.resetEnvironmentBrowserHost()
-        this.restartBrowserHandshake()
+    this.browserHostRegistration = registration
+    this.browserHostDetach = client.features.browserHost.register(registration, {
+      host: browserHost => this.updateState({ browserHost }),
+      hydrated: sessions => {
+        const browserSessions = Object.fromEntries(sessions.map(snapshot => [snapshot.sessionAgentId, snapshot]))
+        this.updateState({ browserSessions, browserHostHydrated: true, browserMetadataStale: false,
+          browserPanelRevealRequest: projectPanelRevealRequest(this.state, browserSessions, this.state.browserHost.hostGeneration) })
       },
-      event: (event) => this.handleServerEvent(event),
-      error: () => this.resetEnvironmentBrowserHost(),
-    })
+      snapshot: snapshot => this.updateBrowserSnapshot(snapshot),
+      disconnected: () => this.resetEnvironmentBrowserHost(),
+      error: error => this.updateState({ lastError: error instanceof Error ? error.message : String(error) }),
+    }, handleRequest, handleLifecycle)
+    return () => { if (this.browserHostRegistration === registration) { this.browserHostRegistration = null; this.detachEnvironmentBrowserHost() } }
   }
 
-  private detachEnvironmentBrowserHost(): void {
-    this.browserHostDetach?.()
-    this.browserHostDetach = null
+  private requireBrowserEnvironment(): EnvironmentClient {
+    if (!this.environmentClient) throw new Error('The Browser workspace requires an environment connection')
+    return this.environmentClient
   }
-
+  private detachEnvironmentBrowserHost(): void { this.browserHostDetach?.(); this.browserHostDetach = null }
   private resetEnvironmentBrowserHost(): void {
-    this.stopBrowserHandshake()
     if (!this.state.browserHost.connected && !this.state.browserHostHydrated) return
-    this.updateState({
-      browserHost: { connected: false, hostId: null, hostGeneration: null, focused: false, capabilities: null, connectedAt: null },
-      browserHostHydrated: false,
-      browserPanelRevealRequest: null,
-      browserMetadataStale: Object.keys(this.state.browserSessions).length > 0,
-    })
+    this.updateState({ browserHost: { connected: false, hostId: null, hostGeneration: null, focused: false, capabilities: null, connectedAt: null },
+      browserHostHydrated: false, browserPanelRevealRequest: null, browserMetadataStale: Object.keys(this.state.browserSessions).length > 0 })
   }
-
-  private restartBrowserHandshake(): void {
-    this.stopBrowserHandshake()
-    if (!this.browserHostRegistration || !isSocketOpen(this.socket) || this.browserHandshakeProtocolError) return
-    this.scheduleBrowserHandshake(this.browserHandshakeEpoch, 0)
+  private updateBrowserSnapshot(snapshot: BrowserSessionSnapshot): void {
+    const previous = this.state.browserSessions[snapshot.sessionAgentId]
+    if (previous && snapshot.revision <= previous.revision) return
+    const browserSessions = { ...this.state.browserSessions }
+    if (snapshot.hostingState === 'removed') delete browserSessions[snapshot.sessionAgentId]
+    else browserSessions[snapshot.sessionAgentId] = snapshot
+    this.updateState({ browserSessions, browserMetadataStale: false, browserPanelRevealRequest: this.state.browserHostHydrated
+      ? projectPanelRevealRequest(this.state, browserSessions, this.state.browserHost.hostGeneration) : null })
   }
-
-  private stopBrowserHandshake(): void {
-    this.browserHandshakeEpoch += 1
-    if (this.browserHandshakeTimer) clearTimeout(this.browserHandshakeTimer)
-    this.browserHandshakeTimer = null
-    this.browserHandshakeInFlight = false
-    this.browserHandshakeFailures = 0
-    this.browserHydrationChunks.clear()
-  }
-
-  private scheduleBrowserHandshake(epoch: number, delayMs: number): void {
-    if (epoch !== this.browserHandshakeEpoch || this.browserHandshakeTimer || this.browserHandshakeProtocolError) return
-    this.browserHandshakeTimer = setTimeout(() => {
-      this.browserHandshakeTimer = null
-      void this.runBrowserHandshake(epoch)
-    }, delayMs)
-  }
-
-  private async runBrowserHandshake(epoch: number): Promise<void> {
-    const registration = this.browserHostRegistration
-    if (epoch !== this.browserHandshakeEpoch || !registration || !isSocketOpen(this.socket)
-      || this.browserHandshakeInFlight || this.browserHandshakeProtocolError) return
-    this.browserHandshakeInFlight = true
-    let completed = false
-    try {
-      let host = this.state.browserHost
-      if (host.hostId !== registration.hostId || host.hostGeneration === null) {
-        host = await this.requestDispatcher.enqueueRequest(
-          'browser_host_register',
-          (requestId) => buildBrowserHostRegisterCommand(requestId, { ...registration, registeredAt: new Date().toISOString() }),
-          { timeoutMs: BROWSER_HANDSHAKE_REQUEST_TIMEOUT_MS },
-        )
-      }
-      if (epoch !== this.browserHandshakeEpoch || this.browserHostRegistration !== registration || host.hostId !== registration.hostId || host.hostGeneration === null) return
-      this.browserHydrationChunks.clear()
-      await this.requestDispatcher.enqueueRequest(
-        'browser_host_hydrate',
-        (requestId) => buildBrowserHostHydrateCommand(requestId, registration.hostId, host.hostGeneration!),
-        { timeoutMs: BROWSER_HANDSHAKE_REQUEST_TIMEOUT_MS },
-      )
-      completed = true
-    } catch {
-      // A transient registration or hydration failure is retried with capped
-      // exponential backoff. The epoch and in-flight gate make the retry both
-      // connection-scoped and single-flight.
-    } finally {
-      if (epoch !== this.browserHandshakeEpoch) return
-      this.browserHandshakeInFlight = false
-      if (completed) {
-        this.browserHandshakeFailures = 0
-        return
-      }
-      if (!this.state.browserHostHydrated && this.browserHostRegistration === registration
-        && isSocketOpen(this.socket) && !this.browserHandshakeProtocolError) {
-        const delay = Math.min(
-          BROWSER_HANDSHAKE_RETRY_INITIAL_MS * 2 ** this.browserHandshakeFailures,
-          BROWSER_HANDSHAKE_RETRY_MAX_MS,
-        )
-        this.browserHandshakeFailures += 1
-        this.scheduleBrowserHandshake(epoch, delay)
-      }
-    }
-  }
-
-  private handleBrowserRegistrationError(error: { code: string; message: string }): void {
-    if (error.code !== BROWSER_HOST_REGISTER_PROTOCOL_INCOMPATIBLE_ERROR) return
-    this.browserHandshakeProtocolError = error.message
-    // Keep the one actionable incompatibility visible in the banner without
-    // appending it to whatever conversation happens to be selected.
-    this.updateState({ lastError: error.message })
-  }
-
-  private clearBrowserHandshakeProtocolError(): void {
-    const previous = this.browserHandshakeProtocolError
-    this.browserHandshakeProtocolError = null
-    if (previous && this.state.lastError === previous) this.updateState({ lastError: null })
-  }
-
-  private acceptBrowserHydrationChunk(
-    event: Extract<ServerEvent, { type: 'browser_host_hydration_chunk' }>,
-  ): BrowserSessionSnapshot[] | null {
-    if (event.chunkCount < 1 || event.chunkIndex < 0 || event.chunkIndex >= event.chunkCount) return null
-    let bytes: Uint8Array
-    try {
-      const binary = atob(event.payloadBase64)
-      bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
-    } catch {
-      return null
-    }
-    const existing = this.browserHydrationChunks.get(event.requestId)
-    const hydration = existing?.chunkCount === event.chunkCount
-      ? existing
-      : { chunkCount: event.chunkCount, chunks: new Array<Uint8Array | undefined>(event.chunkCount) }
-    hydration.chunks[event.chunkIndex] = bytes
-    this.browserHydrationChunks.set(event.requestId, hydration)
-    if (hydration.chunks.some((chunk) => chunk === undefined)) return null
-    this.browserHydrationChunks.delete(event.requestId)
-    try {
-      const total = hydration.chunks.reduce((sum, chunk) => sum + chunk!.byteLength, 0)
-      const joined = new Uint8Array(total)
-      let offset = 0
-      for (const chunk of hydration.chunks) {
-        joined.set(chunk!, offset)
-        offset += chunk!.byteLength
-      }
-      const parsed = JSON.parse(new TextDecoder().decode(joined)) as unknown
-      return Array.isArray(parsed) ? ( parsed as BrowserSessionSnapshot[]) : null
-    } catch {
-      return null
-    }
-  }
-
   reportBrowserHostState(sessions: BrowserHostSessionStateReport[]): Promise<BrowserHostStateReportResult> {
-    const registration = this.browserHostRegistration
-    const generation = this.state.browserHost.hostGeneration
-    if (!registration || generation === null || !isSocketOpen(this.socket)) {
-      return Promise.reject(new Error(RECONNECTING_SOCKET_ERROR))
-    }
-    return this.requestDispatcher.enqueueRequest(
-      'browser_host_state_report',
-      (requestId) => buildBrowserHostStateReportCommand(requestId, registration.hostId, generation, sessions),
-      { timeoutMs: 15_000 },
-    )
+    return this.requireBrowserEnvironment().features.browserHost.report(sessions)
   }
-
   setBrowserHostFocused(focused: boolean): void {
-    const registration = this.browserHostRegistration
-    const generation = this.state.browserHost.hostGeneration
-    if (!registration || generation === null || !isSocketOpen(this.socket)) return
-    this.send(buildBrowserHostFocusCommand(registration.hostId, generation, focused))
+    void this.requireBrowserEnvironment().features.browserHost.focus(focused).catch(error => this.updateState({ lastError: error instanceof Error ? error.message : String(error) }))
   }
-
-  acknowledgeBrowserPanelReveal(options: {
-    sessionAgentId: string
-    profileId: string
-    tabId: string
-    sequence: number
-  }): Promise<BrowserSessionSnapshot> {
-    const registration = this.browserHostRegistration
-    const hostGeneration = this.state.browserHost.hostGeneration
-    if (!registration || hostGeneration === null || !isSocketOpen(this.socket)) {
-      return Promise.reject(new Error(RECONNECTING_SOCKET_ERROR))
+  async acknowledgeBrowserPanelReveal(options: { sessionAgentId: string; profileId: string; tabId: string; sequence: number }): Promise<BrowserSessionSnapshot> {
+    const snapshot = await this.requireBrowserEnvironment().features.browserHost.reveal({ sessionId: options.sessionAgentId, tabId: options.tabId, sequence: options.sequence })
+    this.updateBrowserSnapshot(snapshot); return snapshot
+  }
+  private async browserCommand<M extends 'browser.tab.open' | 'browser.tab.activate' | 'browser.tab.close' | 'browser.recording.start' | 'browser.recording.stop'>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<CommandReceipt> {
+    const client = this.requireBrowserEnvironment()
+    const key = JSON.stringify([method, input])
+    const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID(); this.intentCommandIds.set(key, commandId)
+    let receipt = await client.request(method, { ...input, commandId } as RpcInput<M>)
+    const deadline = Date.now() + 15000
+    while (receipt.state === 'accepted' || receipt.state === 'running') {
+      if (Date.now() >= deadline) throw new Error('Browser action is still settling; inspect its state before retrying')
+      await new Promise(resolve => setTimeout(resolve, 50)); receipt = await client.request('command.get', { commandId })
     }
-    return this.requestDispatcher.enqueueRequest(
-      'browser_panel_reveal_acknowledge',
-      (requestId) => buildBrowserPanelRevealAcknowledgeCommand({
-        requestId,
-        hostId: registration.hostId,
-        hostGeneration,
-        ...options,
-      }),
-      { timeoutMs: 15_000 },
-    )
+    if (receipt.state !== 'succeeded' || receipt.delivery === 'unknown') throw new Error('Browser action delivery is unknown; inspect the tab or recording before issuing another action')
+    this.intentCommandIds.delete(key)
+    return receipt
   }
-
-  openBrowserTab(sessionAgentId: string, profileId: string, options?: { url?: string; activate?: boolean }): Promise<BrowserSessionSnapshot> {
-    assertConnectedSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('browser_tab_open', (requestId) =>
-      buildBrowserTabOpenCommand(sessionAgentId, profileId, requestId, options))
+  async openBrowserTab(sessionAgentId: string, profileId: string, options?: { url?: string; activate?: boolean }): Promise<BrowserSessionSnapshot> {
+    const projectId = this.requireBrowserEnvironment().shell.getSnapshot().sessions.get(sessionAgentId)?.projectId
+    if (projectId && projectId !== profileId) throw new Error('Browser profile does not match this session')
+    await this.browserCommand('browser.tab.open', { sessionId: sessionAgentId, ...options }); return this.readBrowserSnapshot(sessionAgentId)
   }
-
-  activateBrowserTab(sessionAgentId: string, tabId: string): Promise<BrowserSessionSnapshot> {
-    assertConnectedSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('browser_tab_activate', (requestId) =>
-      buildBrowserTabActivateCommand(sessionAgentId, tabId, requestId))
+  async activateBrowserTab(sessionAgentId: string, tabId: string): Promise<BrowserSessionSnapshot> {
+    await this.browserCommand('browser.tab.activate', { sessionId: sessionAgentId, tabId }); return this.readBrowserSnapshot(sessionAgentId)
   }
-
-  closeBrowserTab(sessionAgentId: string, tabId: string): Promise<BrowserSessionSnapshot> {
-    assertConnectedSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('browser_tab_close', (requestId) =>
-      buildBrowserTabCloseCommand(sessionAgentId, tabId, requestId))
+  async closeBrowserTab(sessionAgentId: string, tabId: string): Promise<BrowserSessionSnapshot> {
+    await this.browserCommand('browser.tab.close', { sessionId: sessionAgentId, tabId }); return this.readBrowserSnapshot(sessionAgentId)
   }
-
-  resizeBrowserTab(sessionAgentId: string, tabId: string, viewport: BrowserViewportSetting): Promise<BrowserSessionSnapshot> {
-    assertConnectedSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('browser_tab_resize', (requestId) =>
-      buildBrowserTabResizeCommand(sessionAgentId, tabId, viewport, requestId))
+  async resizeBrowserTab(sessionAgentId: string, tabId: string, viewport: BrowserViewportSetting): Promise<BrowserSessionSnapshot> {
+    const snapshot = await this.requireBrowserEnvironment().request('browser.tab.resize', { sessionId: sessionAgentId, tabId, viewport }); this.updateBrowserSnapshot(snapshot); return snapshot
   }
-
-  startBrowserRecording(sessionAgentId: string, tabId: string) {
-    assertConnectedSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('browser_recording_start', (requestId) =>
-      buildBrowserRecordingStartCommand(sessionAgentId, tabId, requestId))
+  async startBrowserRecording(sessionAgentId: string, tabId: string) {
+    const receipt = await this.browserCommand('browser.recording.start', { sessionId: sessionAgentId, tabId }); await this.readBrowserSnapshot(sessionAgentId)
+    const result = receipt.result?.browserRecording; if (!result || !('recording' in result)) throw new Error('Browser recording result is unavailable'); return result
   }
-
-  stopBrowserRecording(sessionAgentId: string, tabId: string, recordingId: string) {
-    assertConnectedSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('browser_recording_stop', (requestId) =>
-      buildBrowserRecordingStopCommand(sessionAgentId, tabId, recordingId, requestId))
+  async stopBrowserRecording(sessionAgentId: string, tabId: string, recordingId: string) {
+    const receipt = await this.browserCommand('browser.recording.stop', { sessionId: sessionAgentId, tabId, recordingId }); await this.readBrowserSnapshot(sessionAgentId)
+    const result = receipt.result?.browserRecording; if (!result || !('path' in result)) throw new Error('Browser recording artifact is unavailable'); return result
+  }
+  private async readBrowserSnapshot(sessionId: string): Promise<BrowserSessionSnapshot> {
+    const snapshot = await this.requireBrowserEnvironment().request('browser.get', { sessionId }); this.updateBrowserSnapshot(snapshot); return snapshot
   }
 
   hasExplicitSelection(): boolean {
@@ -776,7 +592,6 @@ export class ManagerWsClient {
     this.optimisticSendExpiryTimers.clear()
     this.clearGenerationTerminalCleanupTimers()
     this.detachEnvironmentBrowserHost()
-    this.stopBrowserHandshake()
 
     this.transport?.disconnect()
   }
@@ -1641,7 +1456,7 @@ export class ManagerWsClient {
       },
       conversationPresentation: null,
       ...clearGenerationThroughputState(),
-      lastError: this.browserHandshakeProtocolError,
+      lastError: null,
     })
 
     // Fetch failures accumulated against the old socket don't predict anything
@@ -1654,7 +1469,6 @@ export class ManagerWsClient {
       requestedView: this.conversationView,
       reason: 'reconnect',
     })
-    this.restartBrowserHandshake()
   }
 
   private handleTransportClose(event?: CloseEvent): void {
@@ -1669,7 +1483,6 @@ export class ManagerWsClient {
     if (pendingBootstrap.phase === 'pending' && pendingBootstrap.subscriptionId) {
       this.recordConversationBootstrapTerminal(pendingBootstrap.subscriptionId, 'disconnected')
     }
-    this.stopBrowserHandshake()
     this.clearGenerationTerminalCleanupTimers()
 
     // Keep `loadedSessionIds` — see handleTransportOpen.
@@ -1786,21 +1599,6 @@ export class ManagerWsClient {
       state: this.state,
       updateState: (patch) => this.updateState(patch),
       requestTracker: this.requestDispatcher.tracker,
-    })) {
-      return
-    }
-
-    if (handleBrowserEvent(event, {
-      state: this.state,
-      updateState: (patch) => this.updateState(patch),
-      requestTracker: this.requestDispatcher.tracker,
-      acceptHydrationChunk: (chunk) => this.acceptBrowserHydrationChunk(chunk),
-      registration: this.browserHostRegistration,
-      handleAutomationRequest: this.browserAutomationRequestHandler,
-      handleLifecycleRequest: this.browserLifecycleRequestHandler,
-      sendHostResponse: (response) => this.send(buildBrowserHostResponseCommand(response)),
-      sendLifecycleResponse: (response) => this.send(buildBrowserHostLifecycleResponseCommand(response)),
-      handleRegistrationError: (error) => this.handleBrowserRegistrationError(error),
     })) {
       return
     }
@@ -2284,13 +2082,6 @@ export class ManagerWsClient {
     if (this.environmentClient) {
       if (!this.environmentClient.connection.getSnapshot().transportHealthy)
         return false
-      if (isBrowserHostCommand(command)) {
-        // A failed host command fails only its own request; the handshake retries on its own.
-        void this.environmentClient.features.browserHost.send(command).catch((error) => {
-          if ('requestId' in command && command.requestId) this.requestDispatcher.tracker.rejectByRequestId(command.requestId, error instanceof Error ? error : new Error(String(error)))
-        })
-        return true
-      }
       // A repeated intent before its receipt is a retry of the same command, never a new one.
       const intentKey = environmentCommandIntentKey(command)
       const commandId = (intentKey && this.intentCommandIds.get(intentKey)) || crypto.randomUUID()
@@ -2377,8 +2168,9 @@ export class ManagerWsClient {
         })
       }
       for (const [key, event] of detail.transient)
-        if (transient.get(key) !== event) this.handleServerEvent(event.type === 'browser_session_snapshot' || event.type === 'browser_session_changed' ? event : projectFeatureEvent(event))
+        if (transient.get(key) !== event) this.handleServerEvent(projectFeatureEvent(event))
       transient = detail.transient
+      if (detail.browser) this.updateBrowserSnapshot(detail.browser)
       const bootstrap = this.state.conversationBootstrap
       const phase = detail.freshness === 'live' ? 'ready' : 'pending'
       this.updateState({
@@ -2420,11 +2212,4 @@ function isRetryableEnvironmentError(error: unknown): boolean {
 function interruptedCommandMessage(method: string): string {
   const action = method === 'session.choose' ? 'Choice response' : method === 'session.stop' ? 'Stop request' : 'Session launch'
   return `${action} was interrupted; delivery is unknown. Submit it again to resend.`
-}
-
-/** Commands the Desktop renderer sends as the embedded browser host, on the environment's host channel. */
-function isBrowserHostCommand(command: ClientCommand): boolean {
-  return command.type === 'browser_host_register' || command.type === 'browser_host_hydrate'
-    || command.type === 'browser_host_focus' || command.type === 'browser_host_response'
-    || command.type === 'browser_host_state_report' || command.type === 'browser_host_lifecycle_response'
 }

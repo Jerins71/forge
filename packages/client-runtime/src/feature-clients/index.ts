@@ -1,3 +1,4 @@
+import { createBrowserHostClient } from './browser-host.js'
 import type {
   ClientCommand,
   ProjectAgentReferenceWrite, ProjectAgentReferenceDelete, ProjectAgentReferenceMutationResult,
@@ -346,15 +347,7 @@ export interface EnvironmentFeatureClients {
     ): Promise<TerminalIssueTicketResponse>
   }
   /** Desktop's embedded browser host. Attach only on the primary environment; the subscription is the host connection. */
-  browserHost: {
-    attach(observer: {
-      /** The channel is (re)established; any earlier host registration is gone. */
-      attached(): void
-      event(event: Record<string, unknown>): void
-      error(error: unknown): void
-    }): () => void
-    send(command: ClientCommand): Promise<void>
-  }
+  browserHost: ReturnType<typeof createBrowserHostClient>
   legacy: {
     send(command: ClientCommand, sessionId?: string): Promise<void>
     request(
@@ -364,14 +357,13 @@ export interface EnvironmentFeatureClients {
   }
 }
 // A host command is JSON text split to fit the RPC frame limit; matches the browser.host.send part bound.
-const BROWSER_HOST_PART_CHARS = 262_144
 export interface HttpFeatureTransport {
   entry: { environmentId: string }
   fetch(path: string, init?: RequestInit): Promise<Response>
   fetchBinary?(path: string, maxBytes: number, init?: RequestInit): Promise<Response>
   json<T>(path: string, init?: RequestInit): Promise<T>
 }
-interface RpcFeatureTransport {
+export interface RpcFeatureTransport {
   descriptor?(): EnvironmentDescriptor | null
   attachTerminal?: (
     terminalId: string,
@@ -529,12 +521,6 @@ export function createFeatureClients(
         'choice_response',
         'get_session_workers',
         'get_conversation_page',
-          'browser_host_register',
-        'browser_host_hydrate',
-        'browser_host_focus',
-        'browser_host_response',
-        'browser_host_state_report',
-        'browser_host_lifecycle_response',
       ]).has(type)
     )
       throw new Error(
@@ -768,26 +754,7 @@ export function createFeatureClients(
       ticket: (terminalId, i) =>
         post(`/api/terminals/${encodeURIComponent(terminalId)}/ticket`, i),
     },
-    browserHost: {
-      attach: (observer) =>
-        rpc.subscribe('browser.host.attach', {}, {
-          next: (item) =>
-            item.kind === 'attached' ? observer.attached() : observer.event(item.event),
-          error: (error) => observer.error(error),
-        }),
-      send: async (command) => {
-        const text = JSON.stringify(command)
-        const count = Math.ceil(text.length / BROWSER_HOST_PART_CHARS)
-        const transferId = crypto.randomUUID()
-        for (let index = 0; index < count; index++)
-          await rpc.request('browser.host.send', {
-            transferId,
-            index,
-            count,
-            data: text.slice(index * BROWSER_HOST_PART_CHARS, (index + 1) * BROWSER_HOST_PART_CHARS),
-          })
-      },
-    },
+    browserHost: createBrowserHostClient(rpc),
     legacy: {
       request: legacyRequest,
       send: async (c, s) => {

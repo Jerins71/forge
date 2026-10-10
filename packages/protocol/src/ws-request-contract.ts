@@ -35,16 +35,6 @@ type ContractCommandType = Extract<
   | 'restore_session'
   | 'delete_session'
   | 'clear_session'
-  | 'browser_host_register'
-  | 'browser_host_hydrate'
-  | 'browser_host_state_report'
-  | 'browser_panel_reveal_acknowledge'
-  | 'browser_tab_open'
-  | 'browser_tab_activate'
-  | 'browser_tab_close'
-  | 'browser_tab_resize'
-  | 'browser_recording_start'
-  | 'browser_recording_stop'
 >
 type ContractSuccessEventType = Extract<
   ServerEvent['type'],
@@ -66,12 +56,6 @@ type ContractSuccessEventType = Extract<
   | 'session_deleted'
   | 'session_cleared'
   | 'session_goal_snapshot'
-  | 'browser_host_connected'
-  | 'browser_host_hydration_chunk'
-  | 'browser_host_state_report_result'
-  | 'browser_panel_reveal_acknowledged'
-  | 'browser_tab_command_succeeded'
-  | 'browser_recording_command_succeeded'
 >
 
 export const WS_REQUEST_CONTRACTS = [
@@ -81,76 +65,6 @@ export const WS_REQUEST_CONTRACTS = [
     requestId: { ui: 'required', wire: 'required' },
     successEvents: ['inventory_snapshot'],
     errorCodeFragments: ['inventory'],
-  },
-{
-    commandType: 'browser_host_register',
-    resultFamily: 'browser_host_register',
-    requestId: { ui: 'required', wire: 'required' },
-    successEvents: ['browser_host_connected'],
-    errorCodeFragments: ['browser_host_register'],
-  },
-{
-    commandType: 'browser_host_hydrate',
-    resultFamily: 'browser_host_hydrate',
-    requestId: { ui: 'required', wire: 'required' },
-    successEvents: ['browser_host_hydration_chunk'],
-    errorCodeFragments: ['browser_host_hydrate', 'stale_host_generation'],
-  },
-{
-    commandType: 'browser_panel_reveal_acknowledge',
-    resultFamily: 'browser_panel_reveal_acknowledge',
-    requestId: { ui: 'required', wire: 'required' },
-    successEvents: ['browser_panel_reveal_acknowledged'],
-    errorCodeFragments: ['browser_panel_reveal_acknowledge', 'stale_host_generation', 'intent_mismatch'],
-  },
-{
-    commandType: 'browser_host_state_report',
-    resultFamily: 'browser_host_state_report',
-    requestId: { ui: 'required', wire: 'required' },
-    successEvents: ['browser_host_state_report_result'],
-    errorCodeFragments: ['browser_host_state_report'],
-  },
-{
-    commandType: 'browser_recording_start',
-    resultFamily: 'browser_recording_start',
-    requestId: { ui: 'required', wire: 'required' },
-    successEvents: ['browser_recording_command_succeeded'],
-    errorCodeFragments: ['browser_recording_start', 'browser_unavailable', 'browser_tab_not_found'],
-  },
-{
-    commandType: 'browser_recording_stop',
-    resultFamily: 'browser_recording_stop',
-    requestId: { ui: 'required', wire: 'required' },
-    successEvents: ['browser_recording_command_succeeded'],
-    errorCodeFragments: ['browser_recording_stop', 'browser_unavailable', 'browser_tab_not_found'],
-  },
-{
-    commandType: 'browser_tab_open',
-    resultFamily: 'browser_tab_mutation',
-    requestId: { ui: 'required', wire: 'required' },
-    successEvents: ['browser_tab_command_succeeded'],
-    errorCodeFragments: ['browser_tab_open', 'browser_unavailable', 'browser_invalid_url'],
-  },
-{
-    commandType: 'browser_tab_activate',
-    resultFamily: 'browser_tab_mutation',
-    requestId: { ui: 'required', wire: 'required' },
-    successEvents: ['browser_tab_command_succeeded'],
-    errorCodeFragments: ['browser_tab_activate', 'browser_tab_not_found'],
-  },
-{
-    commandType: 'browser_tab_close',
-    resultFamily: 'browser_tab_mutation',
-    requestId: { ui: 'required', wire: 'required' },
-    successEvents: ['browser_tab_command_succeeded'],
-    errorCodeFragments: ['browser_tab_close', 'browser_tab_not_found'],
-  },
-{
-    commandType: 'browser_tab_resize',
-    resultFamily: 'browser_tab_mutation',
-    requestId: { ui: 'required', wire: 'required' },
-    successEvents: ['browser_tab_command_succeeded'],
-    errorCodeFragments: ['browser_tab_resize', 'browser_tab_not_found', 'browser_invalid_viewport'],
   },
 {
     commandType: 'get_session_workers',
