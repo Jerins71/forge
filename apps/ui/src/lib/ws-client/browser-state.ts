@@ -27,4 +27,3 @@ export function projectPanelRevealRequest(
     sequence: reveal.sequence,
   }
 }
-
