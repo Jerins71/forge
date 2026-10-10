@@ -14,7 +14,7 @@ import {
   getTerminalSnapshotPath,
 } from "../swarm/data-paths.js";
 import { appendJsonl, writeFileAtomic } from "../utils/atomic-files.js";
-import { toErrorMessage } from "./terminal-service-helpers.js";
+import { compareTerminalOrder, toErrorMessage } from "./terminal-service-helpers.js";
 
 const { Terminal } = headlessPkg as typeof HeadlessModule;
 const { SerializeAddon } = serializePkg as typeof SerializeModule;
@@ -249,7 +249,7 @@ export class TerminalPersistence {
       }
     }
 
-    result.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    result.sort(compareTerminalOrder);
     return result;
   }
 
