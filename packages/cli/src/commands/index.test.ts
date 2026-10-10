@@ -1,7 +1,11 @@
 import type { Writable } from 'node:stream'
 
 import type { AgentDescriptor, CliSessionCompactionResult, CliSessionTranscriptResponse, CliStatusResponse, ManagerProfile } from '@forge/protocol'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import * as cliConfig from '../config.js'
 
 import type { ForgeClientLike } from '../forge-client.js'
 import { EXIT_CODES } from '../version.js'
@@ -221,3 +225,21 @@ function agentFixture(agentId: string, role: 'manager' | 'worker'): AgentDescrip
     profileId: 'profile-1',
   }
 }
+
+
+it.each(['flag', 'env', 'config'] as const)('rejects a %s URL override on full paired credentials before any network request', async source => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-cli-url-review-'))
+  const file = join(root, 'credential.json')
+  const baseUrl = 'http://127.0.0.1:40000'
+  await writeFile(file, JSON.stringify({ deviceSessionId: '00000000-0000-4000-8000-000000000002', environmentId: '00000000-0000-4000-8000-000000000001', baseUrl, bearerToken: 'A'.repeat(43), deviceSession: { deviceSessionId: '00000000-0000-4000-8000-000000000002', deviceName: 'Synthetic CLI', kind: 'cli', scopes: ['session:read'], createdAt: '2026-10-10T00:00:00.000Z', expiresAt: '2027-10-10T00:00:00.000Z' } }), { mode: 0o600 })
+  const other = 'http://127.0.0.1:40001'
+  const resolve = source === 'config' ? vi.spyOn(cliConfig, 'resolveCliConfig').mockResolvedValue({ url: other, configPath: join(root, 'config.json'), sources: { url: 'config' } }) : undefined
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Network must never be reached'))
+  const io = makeIo()
+  try {
+    const exit = await runCli(['sessions', 'show', 'synthetic', '--json', '--credential-file', file, ...(source === 'flag' ? ['--url', other] : [])], { cwd: root, env: source === 'env' ? { FORGE_URL: other } : {}, io })
+    expect(exit).toBe(EXIT_CODES.usage)
+    expect(JSON.parse(io.stderr.toString())).toMatchObject({ error: { code: 'credential_url_mismatch', message: expect.stringContaining('paired credential') } })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  } finally { resolve?.mockRestore(); fetchSpy.mockRestore(); await rm(root, { recursive: true, force: true }) }
+})

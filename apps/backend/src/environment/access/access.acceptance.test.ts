@@ -407,3 +407,26 @@ it("integration credentials map to durable listed devices and neither revocation
     }),
   ).toThrow();
 });
+
+
+it("mints CLI provenance from paired/integration identities and retains it through native tickets", async () => {
+  const h = await harness();
+  const grant = await h.access.createBootstrapGrant({ reachableBaseUrl: h.base });
+  const input = await transcript(h, grant);
+  input.deviceKind = "cli";
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const jwk = publicKey.export({ format: "jwk" });
+  input.proofKey = { kty: "EC", crv: "P-256", x: jwk.x!, y: jwk.y! };
+  const fields = { ...input, proof: undefined };
+  const digest = createHash("sha256").update(canonicalPairingFields(fields)).digest("hex");
+  input.proof = sign("sha256", Buffer.from(pairingProofMessage(fields, digest)), { key: privateKey, dsaEncoding: "ieee-p1363" }).toString("base64url");
+  const paired = await h.access.exchange(input, null);
+  const host = { deviceSessionId: paired.deviceSession.deviceSessionId, scopes: new Set(paired.deviceSession.scopes) };
+  const ticket = await h.access.issueWsTicket(host, { audience: "rpc", protocolVersion: 2 }, null);
+  expect(await h.access.consumeWsTicket({ ticket: ticket.ticket, audience: "rpc", protocolVersion: 2, origin: null })).toMatchObject({ integration: "cli" });
+  const deck = h.access.ensureIntegrationPrincipal({ integration: "stream-deck", credentialId: "source-deck", label: "Fixture", scopes: ["session:read"] });
+  expect(deck).toMatchObject({ integration: "stream-deck" });
+  h.restart();
+  const after = await h.access.issueWsTicket(host, { audience: "rpc", protocolVersion: 2 }, null);
+  expect(await h.access.consumeWsTicket({ ticket: after.ticket, audience: "rpc", protocolVersion: 2, origin: null })).toMatchObject({ integration: "cli" });
+});

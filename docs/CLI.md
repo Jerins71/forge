@@ -2,6 +2,8 @@
 
 The Forge CLI is a first-party `forge` command for headless automation against a selected paired Forge environment. It can inspect profiles and sessions, send messages, run one-shot automation, wait for quiescence, and answer pending choices.
 
+Full paired credentials pin both the environment UUID and URL. A different `--url`, `FORGE_URL`, or saved configuration URL is rejected before connecting; pair the new URL explicitly. Older token-only vault entries require an explicit URL and UUID, which are checked before sending their bearer.
+
 ## Install
 
 ### Desktop app

@@ -16,6 +16,15 @@ export function createSessionLifecycleRpc({ swarmManager: swarm, control }: { sw
       if (!control.admitLifecycle) throw new StreamFault('UNAVAILABLE', 'Lifecycle admission is unavailable');
       const input = raw as RpcInput<SessionLifecycleMethod>;
       const target = swarm.getAgent(input.sessionId);
+      if (method === 'worker.kill') {
+        const kill = input as RpcInput<'worker.kill'>;
+        const worker = swarm.getAgent(kill.workerId);
+        if (!target || target.role !== 'manager' || !worker || worker.role !== 'worker' || worker.managerId !== input.sessionId)
+          throw new StreamFault('NOT_FOUND', 'Worker does not belong to this session');
+        // Reuse the durable worker-target stop lane. It fences lifecycle work
+        // without cancelling or rejecting the manager's queued inputs.
+        return control.execute(principal, method, kill);
+      }
       const projectId = target?.profileId ?? input.sessionId;
       const stop = method === 'session.archive' || method === 'session.clear' || method === 'session.delete' || method === 'session.stopAll';
       const sessionIds = [input.sessionId];
@@ -60,7 +69,6 @@ export function createSessionLifecycleRpc({ swarmManager: swarm, control }: { sw
           case 'session.stopAll': result = { ...result, ...await swarm.stopAllAgents(input.sessionId, input.sessionId) }; break;
           case 'worker.stop': await swarm.stopWorker((input as RpcInput<'worker.stop'>).workerId); break;
           case 'worker.resume': await swarm.resumeWorker((input as RpcInput<'worker.resume'>).workerId); break;
-          case 'worker.kill': await swarm.killAgent(input.sessionId, (input as RpcInput<'worker.kill'>).workerId); break;
         }
         if (stop && sessionIds.some(id => !swarm.isSessionShutdownSafe(id))) throw new StreamFault('UNAVAILABLE', 'Session shutdown is still settling');
         // Keep receipts bounded: domain return values can include full descriptors.

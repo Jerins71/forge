@@ -6,7 +6,7 @@ import type { SwarmSessionService } from "./swarm-session-service.js";
 import type { UserMessageCoordinator } from "./user-message-coordinator.js";
 import { SwarmManagerSessionAttentionFacade } from "./swarm-manager-session-attention-facade.js";
 
-/** Stateless internal primitives for the durable control owner; legacy commands retain their existing facade. */
+/** Stateless internal primitives for the durable control owner; domain tools retain their existing facade. */
 export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAttentionFacade {
   ensureControlledSession(input: Parameters<SwarmSessionService["ensureControlledSession"]>[0]): ReturnType<SessionLifecycleCoordinator["ensureControlledSession"]> {
     return this.getFacadeServices().sessions.ensureControlledSession(input);
@@ -16,6 +16,10 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
     const services = this.getFacadeServices();
     const descriptor = services.registry.directory.getAgentForInternalUse(sessionId);
     return Boolean(descriptor) && (!services.runtime.runtimes.has(sessionId) || existsSync(descriptor!.sessionFile));
+  }
+
+  killControlledWorker(managerId: string, workerId: string): Promise<void> {
+    return this.getFacadeServices().agents.killControlledWorker(managerId, workerId);
   }
 
   isSessionShutdownSafe(sessionId: string): boolean {

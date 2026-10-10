@@ -97,6 +97,7 @@ const validators: Partial<Record<ControlMethod, ReturnType<typeof TypeCompiler.C
   "session.send": TypeCompiler.Compile(rpcSchemas["session.send"].input),
   "session.choose": TypeCompiler.Compile(rpcSchemas["session.choose"].input),
   "session.stop": TypeCompiler.Compile(rpcSchemas["session.stop"].input),
+  "worker.kill": TypeCompiler.Compile(rpcSchemas["worker.kill"].input),
 };
 /** JSON key ordering freezes the original request, independently of resolved profile defaults. */
 export function canonicalRequest(method: string, input: unknown): { normalized: string; hash: string } {
@@ -293,8 +294,8 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
   };
   const accept = (
     principal: Principal,
-    method: "session.launch" | "session.send" | "session.choose" | "session.stop",
-    input: RpcInput<"session.launch" | "session.send" | "session.choose" | "session.stop">,
+    method: "session.launch" | "session.send" | "session.choose" | "session.stop" | "worker.kill",
+    input: RpcInput<"session.launch" | "session.send" | "session.choose" | "session.stop" | "worker.kill">,
     prepared?: PreparedLaunch,
   ): CommandReceipt => {
     const request = canonicalRequest(method, input);
@@ -306,7 +307,8 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       const now = options.clock();
       const commandId = input.commandId;
       const targetId = method === "session.launch" ? "v2-" + commandId : (input as RpcInput<"session.send">).sessionId;
-      const target = method === "session.stop" ? options.swarm.resolveSession?.(targetId) : undefined;
+      const target = method === "worker.kill" ? options.swarm.resolveSession?.((input as RpcInput<"worker.kill">).workerId) : method === "session.stop" ? options.swarm.resolveSession?.(targetId) : undefined;
+      if (method === "worker.kill" && (!target?.workerId || target.sessionId !== targetId)) throw new ControlError("NOT_FOUND", "Worker does not belong to this session");
       const sessionId = target?.sessionId ?? targetId;
       assertAdmissionAvailable(sessionId);
       let session: SessionRow | undefined;
@@ -523,9 +525,15 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       ) {
         throw new ControlError("FORBIDDEN", "Missing workspace:write scope");
       }
-      // Copy the validated original request before asynchronous preflight; caller mutation cannot change accepted identity.
-      const request = canonicalRequest(method, input);
-      const normalized: RpcInput<"session.launch" | "session.send" | "session.choose" | "session.stop"> = JSON.parse(request.normalized);
+      // Provenance belongs to the authenticated integration, not the request.
+      // Freeze that effective input before hashing/journaling so retries agree.
+      const effective = method === "session.send" ? (() => {
+        const { source, ...send } = input as RpcInput<"session.send">;
+        return principal.integration === "cli" ? { ...send, source: { channel: "cli" as const, messageId: source?.messageId ?? send.commandId } } : send;
+      })() : input;
+      // Copy before asynchronous preflight; caller mutation cannot change accepted identity.
+      const request = canonicalRequest(method, effective);
+      const normalized: RpcInput<"session.launch" | "session.send" | "session.choose" | "session.stop" | "worker.kill"> = JSON.parse(request.normalized);
       const duplicate = sink.transaction(() => prior(principal, method, normalized.commandId, request.hash));
       if (duplicate) return duplicate;
       if (method !== "session.launch") {
@@ -535,7 +543,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           readSession(sink, send.sessionId);
           await preflightRoute({ sessionId: send.sessionId, message: send.message });
         }
-        return accept(principal, method as "session.send" | "session.choose" | "session.stop", normalized);
+        return accept(principal, method as "session.send" | "session.choose" | "session.stop" | "worker.kill", normalized);
       }
       const launch = normalized as RpcInput<"session.launch">;
       const previous = launches.get(launch.projectId) ?? Promise.resolve();

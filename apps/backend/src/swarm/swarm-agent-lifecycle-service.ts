@@ -1117,8 +1117,14 @@ export class SwarmAgentLifecycleService {
   }
 
   async killAgent(callerAgentId: string, targetAgentId: string): Promise<void> {
-    const manager = this.options.assertManager(callerAgentId, "kill agents");
+    this.options.assertManager(callerAgentId, "kill agents");
+    await this.killControlledWorker(callerAgentId, targetAgentId);
+  }
 
+  /** Durable user control may terminate a child after its manager has stopped. */
+  async killControlledWorker(callerAgentId: string, targetAgentId: string): Promise<void> {
+    const manager = this.options.descriptors.get(callerAgentId);
+    if (!manager || manager.role !== "manager") throw new Error("Worker owner is not a manager");
     const target = this.options.descriptors.get(targetAgentId);
     if (!target) {
       throw new Error(`Unknown agent: ${targetAgentId}`);

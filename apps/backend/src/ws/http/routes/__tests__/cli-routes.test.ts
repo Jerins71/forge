@@ -29,6 +29,20 @@ afterEach(async () => {
 });
 
 describe("CLI routes and bearer auth", () => {
+  it("accepts a 43-character environment API key through the composed CLI HTTP auth policy", async () => {
+    const configHandle = await createTempConfig({ prefix: "cli-token-shape-", port: await getAvailablePort() });
+    activeServers.push({ baseUrl: "cleanup-only", close: configHandle.cleanup });
+    const key = "A".repeat(43);
+    const service = new CliAccessService({ dataDir: configHandle.config.paths.dataDir, envApiKey: key });
+    const manager = Object.assign(new FakeSwarmManager(configHandle.config, [createManagerDescriptor(configHandle.config.paths.rootDir, "manager")]), { listProfiles: () => [] });
+    const { environment } = await createAuthOnlyTestEnvironment(configHandle.config.host, configHandle.config.port);
+    const server = new SwarmWebSocketServer({ environment, swarmManager: manager as unknown as never, host: configHandle.config.host, port: configHandle.config.port, cliAccessService: service });
+    activeSwarmServers.push(server); await server.start();
+    const response = await fetch(`http://${configHandle.config.host}:${server.getPort()}/api/cli/status`, { headers: { authorization: `Bearer ${key}` } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ capabilities: { available: true } });
+  });
+
   it("requires bearer auth for /api/cli/* and returns status capabilities for a valid stored key", async () => {
     const { service } = await makeCliAccessService();
     const generated = await service.generateKey({ name: "Route test" });

@@ -36,7 +36,7 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
       if (stopped || socket.destroyed) return true;
       deps.access.authorize(authenticated, []);
       // Object identity is the stream lease and attachment owner for this socket.
-      const principal: Principal = { deviceSessionId: authenticated.deviceSessionId, scopes: authenticated.scopes, localBrowserHost: authenticated.localBrowserHost };
+      const principal: Principal = { deviceSessionId: authenticated.deviceSessionId, scopes: authenticated.scopes, localBrowserHost: authenticated.localBrowserHost, integration: authenticated.integration };
       server.handleUpgrade(request, socket, head, client => connect(client, principal));
     } catch (error) {
       const wire = rpcError(error);

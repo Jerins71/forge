@@ -87,7 +87,7 @@ export interface SwarmManagerSessionFacadeServices {
   memory: MemoryCoordinator;
   agents: Pick<
     SwarmAgentLifecycleService,
-    "notifySpecialistRosterChanged" | "notifyClaudeNativeAuthChanged" | "resumeWorker" | "stopWorker"
+    "notifySpecialistRosterChanged" | "notifyClaudeNativeAuthChanged" | "resumeWorker" | "stopWorker" | "killControlledWorker"
   >;
   codexPlugin: CodexPluginDelegationCoordinator;
   messages: Pick<AgentMessageDispatcher<unknown>, "sendMessage" | "sendWorkerResult">;

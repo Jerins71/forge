@@ -119,7 +119,9 @@ async function createDefaultClient(args: ParsedArgs, cwd: string, env: NodeJS.Pr
   if (credentialFile || environmentId) {
     const credential = credentialFile ? await loadCliCredential(credentialFile) : await loadOsCliCredential(environmentId!, resolved.url);
     if (environmentId && environmentId !== credential.environmentId) throw new CliError('Credential environment identity mismatch.', { exitCode: EXIT_CODES.auth, code: 'identity_mismatch' });
-    return new ForgeClient({ credential: { ...credential, ...(resolved.url ? { baseUrl: parsePairTarget(resolved.url).baseUrl } : {}) } });
+    if (resolved.url && parsePairTarget(resolved.url).baseUrl !== credential.baseUrl)
+      throw new CliError('The supplied URL differs from the paired credential URL. Pair the new URL explicitly, or omit the URL override.', { exitCode: EXIT_CODES.usage, code: 'credential_url_mismatch' });
+    return new ForgeClient({ credential });
   }
   if (resolved.url && resolved.apiKey) return new ForgeClient({ url: resolved.url, apiKey: resolved.apiKey });
   throw new CliError('Select paired credentials with --credential-file <absolute-file> or --environment-id <UUID>. Run forge pair to pair this environment.', { exitCode: EXIT_CODES.usage, code: 'missing_environment_credential' });

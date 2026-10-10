@@ -213,7 +213,8 @@ export function createEnvironmentAccess({
     return row;
   }
   function principal(row: DeviceRow): Principal {
-    return { deviceSessionId: row.device_session_id, scopes: new Set(JSON.parse(row.scopes_json) as Scope[]) };
+    const mapping = row.kind === "cli" ? database.prepare("SELECT integration FROM integration_device_sessions WHERE device_session_id=?").get(row.device_session_id) as { integration: "cli" | "stream-deck" } | undefined : undefined;
+    return { deviceSessionId: row.device_session_id, scopes: new Set(JSON.parse(row.scopes_json) as Scope[]), ...(row.kind === "cli" ? { integration: mapping?.integration ?? "cli" } : {}) };
   }
   function authorize(p: Principal, scopes: readonly Scope[]): void {
     const live = principal(current(p.deviceSessionId));

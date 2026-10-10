@@ -182,6 +182,7 @@ export const MessageInputSchema = O({
 export const CliInvocationSchema = O({ createdBy: Type.Literal('forge-cli'), runId: V2Uuid,
   command: E('run', 'launch', 'sessions create'), startedAt: V2Time,
   invocationCwd: Type.Optional(Type.String({ maxLength: 4096 })), label: Type.Optional(ShortText) })
+// Optional message identity hint. The server derives CLI provenance from the authenticated integration.
 const CliSourceSchema = O({ channel: Type.Literal('cli'), messageId: V2Uuid })
 export const LaunchSessionSchema = O({
   commandId: V2Uuid,

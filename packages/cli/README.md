@@ -87,8 +87,8 @@ Use `forge pair <url>` to pair a CLI device, then select it with
 `--environment-id <UUID>` (OS credential storage) or
 `--credential-file <absolute-owner-only-file>`. `FORGE_ENVIRONMENT_ID` and
 `FORGE_CREDENTIAL_FILE` provide the same selection. A credential file carries its
-pinned URL and identity; `--url` can select a new tunnel endpoint only if its
-advertised environment UUID matches. Existing OS entries that contain only a
+pinned URL and identity. A different URL from `--url`, `FORGE_URL`, or saved
+configuration is rejected before any request; explicitly pair the new URL. Existing OS entries that contain only a
 bearer token require `--url` as well as the environment UUID. Credentials stay in
 the existing OS vault or explicitly selected owner-only file.
 

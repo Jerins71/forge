@@ -497,3 +497,47 @@ it("marks lost policy claims interrupted on restart and never repeats the callba
   expect((await core.controlService.execute(principal, "project.update", input)).state).toBe("interrupted");
   expect(apply).not.toHaveBeenCalled();
 });
+
+
+it.each(["stopped", "error", "queued"] as const)("native worker.kill under %s manager preserves ownership, input and replay", async state => {
+  const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
+  const { core } = await makeCore(f);
+  const principal = { deviceSessionId: "kill-device", scopes: new Set(["session:operate", "session:read"] as const) };
+  f.database.prepare("INSERT INTO device_sessions (device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES (?,?,?,?,?, ?,0,0,?)").run(principal.deviceSessionId, "synthetic-kill-token", "synthetic-kill-proof", "Review kill", "cli", JSON.stringify([...principal.scopes]), Date.now()+86400000);
+  const lifecycle = createSessionLifecycleRpc({ swarmManager: f.manager, control: core.controlService });
+  try {
+    const worker = await f.manager.spawnAgent(f.sessionId, { agentId: "review-worker" });
+    const queuedId = randomUUID();
+    if (state === "queued") await core.controlService.execute(principal, "session.send", { commandId: queuedId, sessionId: f.sessionId, message: { text: "keep this manager input", artifactIds: [] } });
+    else { (f.manager as unknown as { descriptors: Map<string, { status: typeof state }> }).descriptors.get(f.sessionId)!.status = state; expect(f.manager.getAgent(f.sessionId)?.status).toBe(state); }
+    const input = { commandId: randomUUID(), sessionId: f.sessionId, workerId: worker.agentId };
+    await expect(lifecycle.execute(principal, "worker.kill", { ...input, commandId: randomUUID(), sessionId: "manager" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const receipt = await lifecycle.execute(principal, "worker.kill", input);
+    expect(["accepted", "succeeded"]).toContain(receipt.state);
+    if (state === "queued") expect(await core.controlService.getReceipt(principal, queuedId)).toMatchObject({ state: "accepted", delivery: "pending" });
+    await core.effectWorker.drain();
+    expect(await core.controlService.getReceipt(principal, input.commandId)).toMatchObject({ state: "succeeded", method: "worker.kill" });
+    expect(f.manager.getAgent(worker.agentId)?.status).toBe("terminated");
+    expect(f.database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(f.sessionId)).toEqual({ desired_state: "running" });
+    if (state === "queued") expect(await core.controlService.getReceipt(principal, queuedId)).toMatchObject({ state: "succeeded", delivery: "dispatched" });
+    expect(await lifecycle.execute(principal, "worker.kill", input)).toMatchObject({ state: "succeeded" });
+  } finally { mirror.dispose(); await core.close(); }
+});
+
+it.each([false, true])("durable send provenance derives CLI integration (%s), ignores client source and survives replay", async cli => {
+  const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
+  const { core } = await makeCore(f);
+  const principal = { deviceSessionId: "source-device", scopes: new Set(["session:operate"] as const), ...(cli ? { integration: "cli" as const } : {}) };
+  f.database.prepare("INSERT INTO device_sessions (device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES (?,?,?,?,?, ?,0,0,?)").run(principal.deviceSessionId, "synthetic-source-token", "synthetic-source-proof", "Review source", cli ? "cli" : "browser", JSON.stringify([...principal.scopes]), Date.now()+86400000);
+  const input = { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "provenance acceptance", artifactIds: [] }, ...(!cli ? { source: { channel: "cli" as const, messageId: randomUUID() } } : {}) };
+  try {
+    await core.controlService.execute(principal, "session.send", input); await core.effectWorker.drain();
+    const file = f.manager.getAgent(f.sessionId)!.sessionFile;
+    const messages = (await readFile(file, "utf8")).split("\n").flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+    const message = messages.find(row => row.data?.id === "input-" + input.commandId)?.data;
+    expect(message).toBeTruthy();
+    expect(message.sourceContext?.channel).toBe(cli ? "cli" : "web");
+    expect(await core.controlService.execute(principal, "session.send", input)).toMatchObject({ state: "succeeded" });
+    expect(await countInputs(file, "input-" + input.commandId)).toBe(1);
+  } finally { mirror.dispose(); await core.close(); }
+});

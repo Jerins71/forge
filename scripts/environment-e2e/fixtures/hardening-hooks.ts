@@ -225,6 +225,14 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       if (input.operation === 'stream-stop') { for (const timer of streams) clearInterval(timer); streams.clear(); return { stopped: true }; }
       if (!manager || !input.sessionId) throw new Error('Fixture session missing');
       const descriptor = manager.getAgentForInternalUse(input.sessionId); if (!descriptor) throw new Error('Unknown fixture session');
+      if (input.operation === 'manager-status') {
+        if (descriptor.role !== 'manager' || !['stopped', 'error'].includes(input.status ?? '')) throw new Error('Invalid fixture manager status');
+        const internal = manager as unknown as { descriptors: Map<string, AgentDescriptor>; descriptorStoreAdapter: { saveStore(): Promise<void> } };
+        internal.descriptors.get(descriptor.agentId)!.status = input.status!;
+        await internal.descriptorStoreAdapter.saveStore();
+        manager.emit('agent_status', { agentId: descriptor.agentId, status: input.status!, timestamp: new Date().toISOString() });
+        return { status: input.status };
+      }
       if (input.operation === 'project-agent-recommendations') {
         const sessionId = input.sessionId;
         manager.requestProjectAgentRecommendations = async target => {

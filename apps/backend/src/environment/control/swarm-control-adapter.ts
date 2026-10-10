@@ -9,7 +9,7 @@ import type { EventSink } from "./event-sink.js";
 import type { InputRoutePort, WorkspacePort } from "./effect-types.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, workspaceService, artifactService }: {
-  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "setControlledRecoveryPolicy" | "getAgentForInternalUse" | "listProfiles" | "killAgent">;
+  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "setControlledRecoveryPolicy" | "getAgentForInternalUse" | "listProfiles" | "killControlledWorker">;
   database: Database;
   eventSink: EventSink;
   workspaceService: Pick<WorkspacePort, "ensure">;
@@ -56,7 +56,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, w
     async stopSession(input) {
       const descriptor = swarmManager.getAgentForInternalUse(input.sessionId);
       if (!descriptor) return { stopped: true }; // An unmaterialized launch has no runtime to stop.
-      if (descriptor.role === "worker") await swarmManager.killAgent(descriptor.managerId, descriptor.agentId);
+      if (descriptor.role === "worker") await swarmManager.killControlledWorker(descriptor.managerId, descriptor.agentId);
       else await swarmManager.stopSession(input.sessionId);
       return { stopped: swarmManager.isSessionShutdownSafe(input.sessionId) }; // Legacy stop can return while its writer remains quarantined.
     },
