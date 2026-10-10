@@ -34,28 +34,3 @@ export interface ProjectAgentSharingSnapshot {
   grants: ProjectAgentShareGrantInfo[]
   eligibleTargets: ProjectAgentShareEligibleTarget[]
 }
-
-export interface ProjectAgentSharingUpdatedEvent {
-  type: 'project_agent_sharing_updated'
-  agentId: string
-  grants: ProjectAgentShareGrantInfo[]
-  eligibleTargets: ProjectAgentShareEligibleTarget[]
-  addedTargetProfileIds: string[]
-  removedTargetProfileIds: string[]
-  requestId?: string
-}
-
-export interface ProjectAgentSharingEvent {
-  type: 'project_agent_sharing'
-  agentId: string
-  grants: ProjectAgentShareGrantInfo[]
-  eligibleTargets: ProjectAgentShareEligibleTarget[]
-  requestId?: string
-}
-
-export interface ProjectAgentExternalDirectoryEvent {
-  type: 'project_agent_external_directory'
-  profileId: string
-  entries: ProjectAgentExternalDirectoryEntry[]
-  requestId?: string
-}

@@ -331,6 +331,59 @@ test('9.2.3 Run on B with a new worktree and an attachment uploaded to B; enviro
   assertions.browserLostAck = { droppedResults: proxy.metrics().droppedResponses, attempts, sameCommandId: true, ...evidence }
 })
 
+test('Project Agent config and references use scoped native contracts and survive fresh bootstrap', async ({ page }) => {
+  const { a } = fleet!
+  const featureStart = featureRequests.length
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  await controlEnvironment(manifest, 'env-a', 'fixture', { operation: 'project-agent-recommendations', sessionId: a.sessionId })
+  await page.goto(`${fleet!.uiUrl}/?agent=${encodeURIComponent(a.sessionId)}`)
+  const row = page.getByRole('complementary').locator('button[draggable="true"]').filter({ hasText: a.projectTitle }).first()
+  await expect(row).toBeVisible()
+  await row.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Promote to Project Agent', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'Promote to Project Agent', exact: true })
+  await expect(sheet).toBeVisible()
+  await expect(sheet.getByText('Analyzing session to generate recommendations…', { exact: true })).not.toBeVisible()
+  await sheet.getByLabel('Handle', { exact: true }).fill('e2e-docs')
+  await sheet.getByLabel('When to use', { exact: true }).fill('Write fixture documentation')
+  await sheet.getByLabel(/Role Instructions/).fill('Use only synthetic fixture content')
+  await sheet.getByRole('button', { name: 'Promote', exact: true }).click()
+  await expect(sheet).not.toBeVisible()
+  await expect(row.locator('[aria-label="Project Agent"]')).toBeVisible()
+  await row.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Project Agent Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Project Agent Settings', exact: true })
+  await expect(settings.getByLabel(/Role Instructions/)).toHaveValue('Use only synthetic fixture content')
+  await settings.getByRole('button', { name: 'Add Reference Document', exact: true }).click()
+  const add = page.getByRole('dialog', { name: 'Add reference document', exact: true })
+  await add.getByLabel('Filename', { exact: true }).fill('e2e-guide.md')
+  await add.getByLabel('Initial content', { exact: true }).fill('# File-backed fixture reference')
+  await add.getByRole('button', { name: 'Add document', exact: true }).click()
+  await expect(add).not.toBeVisible()
+  await expect(settings.getByRole('button', { name: /e2e-guide.md/ }).first()).toBeVisible()
+  await settings.getByRole('button', { name: /e2e-guide.md/ }).first().click()
+  await expect(settings.locator('textarea').last()).toHaveValue('# File-backed fixture reference')
+  await settings.locator('textarea').last().fill('# Updated fixture reference')
+  await settings.getByRole('button', { name: 'Save', exact: true }).first().click()
+  await expect(settings.getByRole('button', { name: 'Save', exact: true }).first()).toBeDisabled()
+  await shot(page, 'project-agent-reference')
+  await page.reload()
+  const freshRow = page.getByRole('complementary').locator('button[draggable="true"]').filter({ hasText: a.projectTitle }).first()
+  await expect(freshRow.locator('[aria-label="Project Agent"]')).toBeVisible()
+  await freshRow.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Project Agent Settings', exact: true }).click()
+  await expect(settings.getByLabel('When to use', { exact: true })).toHaveValue('Write fixture documentation')
+  await settings.getByRole('button', { name: /e2e-guide.md/ }).first().click()
+  await expect(settings.locator('textarea').last()).toHaveValue('# Updated fixture reference\n')
+  await shot(page, 'project-agent-fresh-bootstrap')
+  const references = featureRequests.slice(featureStart).filter(request => request.path === '/api/v2/project-agents/reference')
+  expect(references).toHaveLength(2)
+  expect(references.every(request => request.environmentId === a.environmentId && request.method === 'PUT')).toBe(true)
+  expect(renderErrors).toEqual([])
+  assertions.projectAgent = { environmentId: a.environmentId, sessionId: a.sessionId, nativeMetadata: true, fileBackedReferenceMutations: references.length, freshBootstrap: true }
+  await page.keyboard.press('Escape')
+})
+
 test('9.2.5/6 explicitly mounted three views share sockets, release streams, and browser reload resumes cached shell', async ({ page }) => {
   const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
   const { a, b, c } = fleet!
@@ -625,7 +678,8 @@ test('Needs You lists a remote session that was never opened, survives an offlin
   } finally {
     await fleet!.start(c)
   }
-  await expect.poll(async () => (await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())).find((value: any) => value.environmentId === c.environmentId)?.fresh).toBe(true)
+  // Supervisor connect has a 10s budget; allow 5s for the next scheduled reconnect.
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())).find((value: any) => value.environmentId === c.environmentId)?.fresh, { timeout: 15_000 }).toBe(true)
   await expect(row).toHaveCount(1)
   expect(await attention('attention-state')).toHaveLength(1)
 

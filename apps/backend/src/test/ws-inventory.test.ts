@@ -124,7 +124,7 @@ describe('passive Builder inventory contract', () => {
     ]) {
       await f.command(f.a, command)
       await flush()
-      expect(events(f.a).at(-1)).toMatchObject({ type: 'error', code: command.type === 'merge_session_memory' ? 'NOT_SUBSCRIBED' : 'ENVIRONMENT_COMMAND_REJECTED' })
+      expect(events(f.a).at(-1)).toMatchObject({ type: 'error', code: command.type === 'merge_session_memory' ? 'INVALID_COMMAND' : 'ENVIRONMENT_COMMAND_REJECTED' })
     }
     expect(f.owner.getSubscribedAgentId(f.a)).toBeUndefined()
   })

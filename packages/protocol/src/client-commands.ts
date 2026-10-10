@@ -3,7 +3,6 @@ import type { ConversationAttachment } from './attachments.js'
 import type { BrowserClientCommand } from './browser-automation.js'
 import type { ConversationReplyTargetInput } from './conversation-events.js'
 import type { BuilderTimelineChannelView } from './builder-timeline-visibility.js'
-import type { SessionProjectAgentInput } from './agents.js'
 import type { CodexElicitationDecision, CodexElicitationPersistScope } from './codex-elicitation.js'
 import type { SessionGoalControlAction } from './goals.js'
 import type { DismissSessionAttentionCommand } from './session-attention.js'
@@ -119,61 +118,6 @@ export type ClientCommand =
   | { type: 'rename_session'; agentId: string; label: string; requestId?: string }
   | { type: 'pin_session'; agentId: string; pinned: boolean; requestId?: string }
   | {
-      type: 'set_session_project_agent'
-      agentId: string
-      projectAgent: SessionProjectAgentInput | null
-      requestId?: string
-    }
-  | {
-      type: 'get_project_agent_config'
-      agentId: string
-      requestId?: string
-    }
-  | {
-      type: 'list_project_agent_references'
-      agentId: string
-      requestId?: string
-    }
-  | {
-      type: 'get_project_agent_reference'
-      agentId: string
-      fileName: string
-      requestId?: string
-    }
-  | {
-      type: 'set_project_agent_reference'
-      agentId: string
-      fileName: string
-      content: string
-      requestId?: string
-    }
-  | {
-      type: 'delete_project_agent_reference'
-      agentId: string
-      fileName: string
-      requestId?: string
-    }
-  | {
-      type: 'request_project_agent_recommendations'
-      agentId: string
-      requestId?: string
-    }
-  | {
-      type: 'get_project_agent_sharing'
-      agentId: string
-      requestId?: string
-    }
-  | {
-      type: 'set_project_agent_sharing'
-      agentId: string
-      targetProfileIds: string[]
-      requestId?: string
-    }
-  | {
-      type: 'get_project_agent_external_directory'
-      requestId?: string
-    }
-  | {
       type: 'fork_session'
       sourceAgentId: string
       label?: string
@@ -187,7 +131,6 @@ export type ClientCommand =
   | ({ type: 'session_goal_control'; agentId: string; requestId?: string } & SessionGoalControlAction)
   | { type: 'pin_message'; agentId: string; messageId: string; pinned: boolean }
   | { type: 'clear_all_pins'; agentId: string }
-  | { type: 'merge_session_memory'; agentId: string; requestId?: string }
   | { type: 'get_session_workers'; sessionAgentId: string; requestId?: string }
   | {
       type: 'get_conversation_page'

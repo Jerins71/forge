@@ -9,7 +9,6 @@ import type {
   ProjectAgentShareEligibleTarget,
   ProjectAgentShareGrantInfo,
   SessionGoalSnapshot,
-  SessionMemoryMergeResult,
   ConversationEntry,
   ConversationHistoryPageMetadata,
   SessionAttentionUpdateEvent,
@@ -74,15 +73,9 @@ export type ProjectAgentConfigResult = {
 }
 
 export type ProjectAgentReferencesResult = { agentId: string; references: string[] }
-export type ProjectAgentReferenceResult = { agentId: string; fileName: string; content: string }
-export type ProjectAgentReferenceSavedResult = { agentId: string; fileName: string }
-export type ProjectAgentReferenceDeletedResult = { agentId: string; fileName: string }
-
-export type ProjectAgentRecommendationsResult = {
-  agentId: string
-  whenToUse: string
-  systemPrompt: string
-}
+export type ProjectAgentReferenceResult = { agentId: string; fileName: string; content: string; revision: string | null }
+export type ProjectAgentReferenceSavedResult = { agentId: string; fileName: string; revision: string | null }
+export type ProjectAgentReferenceDeletedResult = { agentId: string; fileName: string; revision: string | null }
 
 export type ProjectAgentSharingResult = {
   agentId: string
@@ -133,17 +126,6 @@ export type WsRequestResultMap = {
   restore_profile: ProfileRestoreResult
   hydrate_archive_last_used: ArchiveLastUsedHydrationResult
   fork_session: SessionForkedResult
-  merge_session_memory: SessionMemoryMergeResult
-  set_session_project_agent: SessionProjectAgentResult
-  get_project_agent_config: ProjectAgentConfigResult
-  list_project_agent_references: ProjectAgentReferencesResult
-  get_project_agent_reference: ProjectAgentReferenceResult
-  set_project_agent_reference: ProjectAgentReferenceSavedResult
-  delete_project_agent_reference: ProjectAgentReferenceDeletedResult
-  request_project_agent_recommendations: ProjectAgentRecommendationsResult
-  get_project_agent_sharing: ProjectAgentSharingResult
-  set_project_agent_sharing: ProjectAgentSharingUpdatedResult
-  get_project_agent_external_directory: ProjectAgentExternalDirectoryResult
   get_session_workers: SessionWorkersResult
   get_conversation_page: ConversationPageResult
   list_directories: DirectoriesListedResult
@@ -211,11 +193,7 @@ export interface ManagerWsSessionAttentionEventContext {
   requestTracker: RequestTrackerAdapter
 }
 
-export interface ManagerWsProjectAgentEventContext {
-  state: ManagerWsState
-  updateState: (patch: Partial<ManagerWsState>) => void
-  requestTracker: RequestTrackerAdapter
-}
+
 
 export interface ManagerWsConfigEventContext {
   state: ManagerWsState

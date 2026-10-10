@@ -681,7 +681,7 @@ export function BuilderSurface({
     }
 
     let cancelled = false
-    void client.getProjectAgentExternalDirectory()
+    void client.getProjectAgentExternalDirectory(activeAgentProfileId!)
       .then((result) => {
         if (!cancelled) {
           setExternalProjectAgentEntries(result.entries)

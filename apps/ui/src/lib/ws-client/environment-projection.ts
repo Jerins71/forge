@@ -24,6 +24,7 @@ export function projectSession(
     displayName: session.title,
     sessionLabel: session.title,
     role: 'manager',
+    projectAgent: session.projectAgent === undefined ? previous?.projectAgent : session.projectAgent ?? undefined,
     status:
       session.status === 'running'
         ? 'streaming'

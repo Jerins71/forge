@@ -507,7 +507,7 @@ export class ProjectAgentCoordinator {
     return this.options.projectAgents.getProjectAgentReference(agentId, fileName);
   }
 
-  async setReference(agentId: string, fileName: string, content: string): Promise<void> {
+  async setReference(agentId: string, fileName: string, content: string, expectedRevision?: string | null): Promise<string | null> {
     const descriptor = this.options.access.getRequiredBuilderSession(
       agentId,
       "edit Builder project-agent references",
@@ -517,22 +517,25 @@ export class ProjectAgentCoordinator {
       agentId,
       fileName,
       content,
+      expectedRevision,
     );
     if (flags.referenceChanged) {
       await this.notifyPromptSourceChanged(agentId);
     }
+    return flags.revision;
   }
 
-  async deleteReference(agentId: string, fileName: string): Promise<void> {
+  async deleteReference(agentId: string, fileName: string, expectedRevision?: string | null): Promise<string | null> {
     const descriptor = this.options.access.getRequiredBuilderSession(
       agentId,
       "delete Builder project-agent references",
     );
     this.options.access.assertDescriptorNotEffectivelyArchived(descriptor);
-    const flags = await this.options.projectAgents.deleteProjectAgentReference(agentId, fileName);
+    const flags = await this.options.projectAgents.deleteProjectAgentReference(agentId, fileName, expectedRevision);
     if (flags.referenceChanged) {
       await this.notifyPromptSourceChanged(agentId);
     }
+    return flags.revision;
   }
 
   async reconcileSharing(): Promise<boolean> {

@@ -78,9 +78,9 @@ export interface AgentSidebarProps {
   onGetProjectAgentSharing?: (agentId: string) => Promise<{ agentId: string; grants: ProjectAgentShareGrantInfo[]; eligibleTargets: ProjectAgentShareEligibleTarget[] }>
   onSetProjectAgentSharing?: (agentId: string, targetProfileIds: string[]) => Promise<{ agentId: string; grants: ProjectAgentShareGrantInfo[]; eligibleTargets: ProjectAgentShareEligibleTarget[]; addedTargetProfileIds: string[]; removedTargetProfileIds: string[] }>
   onListProjectAgentReferences?: (agentId: string) => Promise<{ agentId: string; references: string[] }>
-  onGetProjectAgentReference?: (agentId: string, fileName: string) => Promise<{ agentId: string; fileName: string; content: string }>
-  onSetProjectAgentReference?: (agentId: string, fileName: string, content: string) => Promise<{ agentId: string; fileName: string }>
-  onDeleteProjectAgentReference?: (agentId: string, fileName: string) => Promise<{ agentId: string; fileName: string }>
+  onGetProjectAgentReference?: (agentId: string, fileName: string) => Promise<{ agentId: string; fileName: string; content: string; revision: string | null }>
+  onSetProjectAgentReference?: (agentId: string, fileName: string, content: string, expectedRevision: string | null) => Promise<{ agentId: string; fileName: string; revision: string | null }>
+  onDeleteProjectAgentReference?: (agentId: string, fileName: string, expectedRevision: string | null) => Promise<{ agentId: string; fileName: string; revision: string | null }>
   onRequestProjectAgentRecommendations?: (agentId: string) => Promise<{ whenToUse: string; systemPrompt: string }>
   onCreateAgentCreator?: (profileId: string) => void
   /** Present only when the environment runtime is mounted; adds other environments' projects and sessions. */
@@ -236,8 +236,8 @@ export interface ProjectAgentSettingsSheetProps {
   onGetProjectAgentSharing?: (agentId: string) => Promise<{ agentId: string; grants: ProjectAgentShareGrantInfo[]; eligibleTargets: ProjectAgentShareEligibleTarget[] }>
   onSetProjectAgentSharing?: (agentId: string, targetProfileIds: string[]) => Promise<{ agentId: string; grants: ProjectAgentShareGrantInfo[]; eligibleTargets: ProjectAgentShareEligibleTarget[]; addedTargetProfileIds: string[]; removedTargetProfileIds: string[] }>
   onListReferences?: (agentId: string) => Promise<{ agentId: string; references: string[] }>
-  onGetReference?: (agentId: string, fileName: string) => Promise<{ agentId: string; fileName: string; content: string }>
-  onSetReference?: (agentId: string, fileName: string, content: string) => Promise<{ agentId: string; fileName: string }>
-  onDeleteReference?: (agentId: string, fileName: string) => Promise<{ agentId: string; fileName: string }>
+  onGetReference?: (agentId: string, fileName: string) => Promise<{ agentId: string; fileName: string; content: string; revision: string | null }>
+  onSetReference?: (agentId: string, fileName: string, content: string, expectedRevision: string | null) => Promise<{ agentId: string; fileName: string; revision: string | null }>
+  onDeleteReference?: (agentId: string, fileName: string, expectedRevision: string | null) => Promise<{ agentId: string; fileName: string; revision: string | null }>
   onRequestRecommendations?: (agentId: string) => Promise<{ whenToUse: string; systemPrompt: string }>
 }

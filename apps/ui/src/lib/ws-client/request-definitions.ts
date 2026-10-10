@@ -18,7 +18,6 @@ import {
   type ManagerModelPreset,
   type ManagerReasoningLevel,
   type WorkModeId,
-  type SessionProjectAgentInput,
   type SessionModelUpdateMode,
   type SessionGoalControlAction,
 } from '@forge/protocol'
@@ -688,118 +687,6 @@ export function buildForkSessionCommand(
     label: label?.trim() || undefined,
     fromMessageId: fromMessageId?.trim() || undefined,
     ...(sessionPurpose ? { sessionPurpose } : {}),
-    requestId,
-  }
-}
-
-export function buildSetSessionProjectAgentCommand(
-  agentId: string,
-  projectAgent: SessionProjectAgentInput | null,
-  requestId: string,
-): ClientCommand {
-  return {
-    type: 'set_session_project_agent',
-    agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    projectAgent,
-    requestId,
-  }
-}
-
-export function buildGetProjectAgentConfigCommand(agentId: string, requestId: string): ClientCommand {
-  return {
-    type: 'get_project_agent_config',
-    agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    requestId,
-  }
-}
-
-export function buildListProjectAgentReferencesCommand(
-  agentId: string,
-  requestId: string,
-): ClientCommand {
-  return {
-    type: 'list_project_agent_references',
-    agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    requestId,
-  }
-}
-
-export function buildGetProjectAgentReferenceCommand(
-  agentId: string,
-  fileName: string,
-  requestId: string,
-): ClientCommand {
-  return {
-    type: 'get_project_agent_reference',
-    agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    fileName: requireTrimmedValue(fileName, 'File name is required.'),
-    requestId,
-  }
-}
-
-export function buildSetProjectAgentReferenceCommand(
-  agentId: string,
-  fileName: string,
-  content: string,
-  requestId: string,
-): ClientCommand {
-  return {
-    type: 'set_project_agent_reference',
-    agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    fileName: requireTrimmedValue(fileName, 'File name is required.'),
-    content,
-    requestId,
-  }
-}
-
-export function buildDeleteProjectAgentReferenceCommand(
-  agentId: string,
-  fileName: string,
-  requestId: string,
-): ClientCommand {
-  return {
-    type: 'delete_project_agent_reference',
-    agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    fileName: requireTrimmedValue(fileName, 'File name is required.'),
-    requestId,
-  }
-}
-
-export function buildRequestProjectAgentRecommendationsCommand(
-  agentId: string,
-  requestId: string,
-): ClientCommand {
-  return {
-    type: 'request_project_agent_recommendations',
-    agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    requestId,
-  }
-}
-
-export function buildGetProjectAgentSharingCommand(agentId: string, requestId: string): ClientCommand {
-  return {
-    type: 'get_project_agent_sharing',
-    agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    requestId,
-  }
-}
-
-export function buildSetProjectAgentSharingCommand(
-  agentId: string,
-  targetProfileIds: string[],
-  requestId: string,
-): ClientCommand {
-  return {
-    type: 'set_project_agent_sharing',
-    agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    targetProfileIds,
-    requestId,
-  }
-}
-
-export function buildGetProjectAgentExternalDirectoryCommand(requestId: string): ClientCommand {
-  return {
-    type: 'get_project_agent_external_directory',
     requestId,
   }
 }

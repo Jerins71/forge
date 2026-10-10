@@ -800,12 +800,13 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
     agentId: string,
     fileName: string,
     content: string,
-  ): Promise<void> {
-    return this.services.projectAgents.setReference(agentId, fileName, content);
+    expectedRevision?: string | null,
+  ): Promise<string | null> {
+    return this.services.projectAgents.setReference(agentId, fileName, content, expectedRevision);
   }
 
-  deleteProjectAgentReference(agentId: string, fileName: string): Promise<void> {
-    return this.services.projectAgents.deleteReference(agentId, fileName);
+  deleteProjectAgentReference(agentId: string, fileName: string, expectedRevision?: string | null): Promise<string | null> {
+    return this.services.projectAgents.deleteReference(agentId, fileName, expectedRevision);
   }
 
   listDirectories(path?: string): Promise<DirectoryListingResult> {

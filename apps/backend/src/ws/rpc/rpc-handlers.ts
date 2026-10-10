@@ -1,3 +1,4 @@
+import type { ProjectAgentRpc, ProjectAgentMethod } from "./project-agent-rpc.js";
 import type { EnvironmentDescriptor, Method, RpcInput } from "@forge/protocol/environment-v2";
 import type { ControlService, EnvironmentAccessPort, EnvironmentStreamPort, Principal } from "../../environment/control/control-types.js";
 import type { TerminalRpcTransport } from "../../terminal/terminal-rpc-transport.js";
@@ -6,6 +7,7 @@ import type { BrowserHostRpc } from "./browser-host-rpc.js";
 import { StreamFault } from "../../environment/streams/stream-budget.js";
 
 export interface RpcDependencies {
+  projectAgents?: Pick<ProjectAgentRpc, "execute">;
   access: EnvironmentAccessPort;
   control: ControlService;
   shellStream: Pick<EnvironmentStreamPort, "shell" | "shellPage"> & { descriptor(): EnvironmentDescriptor };
@@ -16,6 +18,10 @@ export interface RpcDependencies {
 }
 
 export function requestHandler(deps: RpcDependencies, principal: Principal, method: Method, input: unknown, signal: AbortSignal): Promise<unknown> | unknown {
+  if (method.startsWith("projectAgent.")) {
+    if (!deps.projectAgents) throw new StreamFault("UNAVAILABLE", "Project Agent service is unavailable");
+    return deps.projectAgents.execute(principal, method as ProjectAgentMethod, input);
+  }
   switch (method) {
     case "environment.get": return deps.shellStream.descriptor();
     case "shell.page": return deps.shellStream.shellPage(principal, input as RpcInput<"shell.page">);

@@ -4,7 +4,6 @@ import type { CommandParser, ParsedClientCommand } from "./commands/command-pars
 import { parseBrowserCommand } from "./commands/parse-browser-command.js";
 import { parseConversationCommand } from "./commands/parse-conversation-command.js";
 import { parseManagerCommand } from "./commands/parse-manager-command.js";
-import { parseProjectAgentCommand } from "./commands/parse-project-agent-command.js";
 import { parseSessionCommand } from "./commands/parse-session-command.js";
 import { parseUtilityCommand } from "./commands/parse-utility-command.js";
 
@@ -13,7 +12,6 @@ const COMMAND_PARSERS: CommandParser[] = [
   parseUtilityCommand,
   parseManagerCommand,
   parseSessionCommand,
-  parseProjectAgentCommand,
   parseConversationCommand
 ];
 
@@ -69,18 +67,10 @@ export function extractRequestId(command: ClientCommand): string | undefined {
     case "pin_session":
     case "update_session_model":
     case "update_session_delegation":
-    case "set_session_project_agent":
-    case "get_project_agent_config":
-    case "list_project_agent_references":
-    case "get_project_agent_reference":
-    case "set_project_agent_reference":
-    case "delete_project_agent_reference":
-    case "request_project_agent_recommendations":
     case "rename_profile":
     case "archive_profile":
     case "restore_profile":
     case "fork_session":
-    case "merge_session_memory":
     case "get_session_workers":
     case "get_conversation_page":
     case "stop_all_agents":

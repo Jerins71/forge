@@ -50,16 +50,6 @@ import type {
   ProfilesSnapshotEvent,
 } from './profile-events.js'
 import type {
-  ProjectAgentConfigEvent,
-  ProjectAgentExternalDirectoryEvent,
-  ProjectAgentRecommendationsErrorEvent,
-  ProjectAgentRecommendationsEvent,
-  ProjectAgentReferenceDeletedEvent,
-  ProjectAgentReferenceEvent,
-  ProjectAgentReferencesEvent,
-  ProjectAgentReferenceSavedEvent,
-  ProjectAgentSharingEvent,
-  ProjectAgentSharingUpdatedEvent,
   SessionProjectAgentUpdatedEvent,
 } from './project-agent-events.js'
 import type {
@@ -70,9 +60,6 @@ import type {
   SessionDeletedEvent,
   SessionDelegationUpdatedEvent,
   SessionForkedEvent,
-  SessionMemoryMergeFailedEvent,
-  SessionMemoryMergedEvent,
-  SessionMemoryMergeStartedEvent,
   SessionModelUpdatedEvent,
   SessionPinnedEvent,
   SessionRenamedEvent,
@@ -198,23 +185,10 @@ export type ServerEvent =
   | SessionPinnedEvent
   | SessionModelUpdatedEvent
   | SessionProjectAgentUpdatedEvent
-  | ProjectAgentRecommendationsEvent
-  | ProjectAgentRecommendationsErrorEvent
-  | ProjectAgentConfigEvent
-  | ProjectAgentReferencesEvent
-  | ProjectAgentReferenceEvent
-  | ProjectAgentReferenceSavedEvent
-  | ProjectAgentReferenceDeletedEvent
-  | ProjectAgentSharingEvent
-  | ProjectAgentSharingUpdatedEvent
-  | ProjectAgentExternalDirectoryEvent
   | ProfileRenamedEvent
   | ProfileArchivedEvent
   | ProfileRestoredEvent
   | SessionForkedEvent
-  | SessionMemoryMergeStartedEvent
-  | SessionMemoryMergedEvent
-  | SessionMemoryMergeFailedEvent
   | StopAllAgentsResultEvent
   | DirectoriesListedEvent
   | DirectoryValidatedEvent
