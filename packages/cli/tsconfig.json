@@ -3,18 +3,41 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022", "DOM"],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "@forge/protocol": ["../protocol/src/index.ts"],
-      "@forge/protocol/choices": ["../protocol/src/choices.ts"],
-      "@forge/protocol/cli": ["../protocol/src/cli.ts"]
+      "@forge/protocol": [
+        "../protocol/src/index.ts"
+      ],
+      "@forge/protocol/choices": [
+        "../protocol/src/choices.ts"
+      ],
+      "@forge/protocol/cli": [
+        "../protocol/src/cli.ts"
+      ],
+      "@forge/protocol/environment-v2": [
+        "../protocol/src/environment-v2.ts"
+      ],
+      "@forge/client-runtime": [
+        "../client-runtime/src/index.ts"
+      ]
     },
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.spec.ts"]
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "src/**/__tests__/**",
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts"
+  ]
 }

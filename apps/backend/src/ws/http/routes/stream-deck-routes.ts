@@ -26,7 +26,7 @@ import { CLI_SERVER_VERSION } from "../../cli-capabilities.js";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
 import type { ControlService, Principal } from "../../../environment/control/control-types.js";
-import { awaitLegacyReceipt, legacyCommandId } from "../../rpc/legacy-builder-adapter.js";
+import { awaitCommandReceipt, controlCommandId } from "../../rpc/control-command-helpers.js";
 import { StreamFault } from "../../../environment/streams/stream-budget.js";
 
 export const STREAM_DECK_ROUTE_PREFIX = "/api/stream-deck";
@@ -306,8 +306,8 @@ export async function executeStreamDeckAction(
     }
     if (!options.environmentControl || !principal) throw new StreamFault("UNAVAILABLE", "Stream Deck control is not composed.");
     const control = options.environmentControl.control;
-    const receipt = await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.launch", {
-      commandId: legacyCommandId(principal, "session.launch", action.requestId), projectId: action.profileId,
+    const receipt = await awaitCommandReceipt(control, principal, await control.execute(principal, "session.launch", {
+      commandId: controlCommandId(principal, "session.launch", action.requestId), projectId: action.profileId,
       title: action.label ?? "Stream Deck session", workspaceStrategy: { kind: "current_checkout" },
     }));
     return {
@@ -325,7 +325,7 @@ export async function executeStreamDeckAction(
     const candidate = options.swarmManager.getAgent(action.sessionAgentId);
     const resume = action.type === "resume_session" || candidate?.status === "stopped" || candidate?.status === "terminated" || candidate?.status === "error";
     return options.environmentControl.control.admitLifecycle(principal, {
-      commandId: legacyCommandId(principal, `stream_deck.${action.type}`, action.requestId), command: `stream_deck.${action.type}`,
+      commandId: controlCommandId(principal, `stream_deck.${action.type}`, action.requestId), command: `stream_deck.${action.type}`,
       sessionIds: [action.sessionAgentId], intent: resume ? "resume" : "stop", request: action,
     }, async () => {
       const session = requireSession(options.swarmManager, action.sessionAgentId);
@@ -344,8 +344,8 @@ export async function executeStreamDeckAction(
     if (action.delivery && action.delivery !== "auto") throw new StreamFault("UNAVAILABLE", "Controlled Stream Deck delivery mode is unsupported.");
     if (!options.environmentControl || !principal) throw new StreamFault("UNAVAILABLE", "Stream Deck control is not composed.");
     const control = options.environmentControl.control;
-    await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.send", {
-      commandId: legacyCommandId(principal, "session.send", action.requestId), sessionId: session.agentId,
+    await awaitCommandReceipt(control, principal, await control.execute(principal, "session.send", {
+      commandId: controlCommandId(principal, "session.send", action.requestId), sessionId: session.agentId,
       message: { text: action.text, artifactIds: [] },
     }));
     return success(action, session.agentId, "Prompt delivered");
@@ -359,8 +359,8 @@ export async function executeStreamDeckAction(
   async function controlledStop() {
     if (!options.environmentControl || !principal) throw new StreamFault("UNAVAILABLE", "Stream Deck control is not composed.");
     const control = options.environmentControl.control;
-    await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.stop", {
-      commandId: legacyCommandId(principal, "session.stop", action.requestId), sessionId: session.agentId,
+    await awaitCommandReceipt(control, principal, await control.execute(principal, "session.stop", {
+      commandId: controlCommandId(principal, "session.stop", action.requestId), sessionId: session.agentId,
     }));
   }
 

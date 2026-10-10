@@ -24,7 +24,7 @@ import { CliHeadlessSubscriptions } from "./cli-headless-subscriptions.js";
 import { getCliChoiceOwner } from "./cli-choice-owners.js";
 import { toPublicCliAgentDescriptor } from "./cli-public-descriptors.js";
 import type { ControlService, Principal } from "../environment/control/control-types.js";
-import { awaitLegacyReceipt, legacyCommandId } from "./rpc/legacy-builder-adapter.js";
+import { awaitCommandReceipt, controlCommandId } from "./rpc/control-command-helpers.js";
 import { ControlError } from "../environment/control/command-service.js";
 import { StreamFault } from "../environment/streams/stream-budget.js";
 
@@ -151,8 +151,8 @@ export class CliWsHandler {
     this.requireCliWritableProfile(command.profileId);
 
     const { control, principal } = this.requireControl(socket);
-    const receipt = await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.launch", {
-      commandId: legacyCommandId(principal, "session.launch", command.requestId), projectId: command.profileId,
+    const receipt = await awaitCommandReceipt(control, principal, await control.execute(principal, "session.launch", {
+      commandId: controlCommandId(principal, "session.launch", command.requestId), projectId: command.profileId,
       title: command.label ?? command.name ?? "CLI session", workspaceStrategy: { kind: "current_checkout" },
     }));
     const sessionAgent = this.requireCliSession(receipt.sessionId!);
@@ -200,7 +200,7 @@ export class CliWsHandler {
 
   private async handleChoiceResponse(socket: WebSocket, command: CliChoiceResponseCommand): Promise<void> {
     const { control, principal } = this.requireControl(socket);
-    const commandId = legacyCommandId(principal, "session.choose", command.requestId);
+    const commandId = controlCommandId(principal, "session.choose", command.requestId);
     let sessionAgentId = command.sessionAgentId;
     if (!sessionAgentId) {
       try { sessionAgentId = (await control.getReceipt(principal, commandId)).sessionId ?? undefined; }
@@ -210,7 +210,7 @@ export class CliWsHandler {
     }
     sessionAgentId ??= this.requireCliPendingChoice(command.choiceId).sessionAgentId;
     // The control owner checks the original request before pending-choice state on retry.
-    await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.choose", {
+    await awaitCommandReceipt(control, principal, await control.execute(principal, "session.choose", {
       commandId, sessionId: sessionAgentId, choiceId: command.choiceId, answers: command.answers,
     }));
     this.sendRequestSuccess(socket, command, { choiceId: command.choiceId, sessionAgentId, status: "answered" });
@@ -221,7 +221,7 @@ export class CliWsHandler {
     if (!control.admitLifecycle) throw new StreamFault("UNAVAILABLE", "Lifecycle admission is not composed.");
     const ownerId = command.sessionAgentId ?? getCliChoiceOwner(this.swarmManager, command.choiceId)?.sessionAgentId;
     const result = await control.admitLifecycle(principal, {
-      commandId: legacyCommandId(principal, "choice_cancel", command.requestId), command: "choice_cancel",
+      commandId: controlCommandId(principal, "choice_cancel", command.requestId), command: "choice_cancel",
       sessionIds: ownerId ? [ownerId] : [],
       intent: "cancel-choice", choiceId: command.choiceId, request: command,
     }, async () => {
@@ -237,8 +237,8 @@ export class CliWsHandler {
       case "stop_session": {
         this.requireCliSession(command.agentId);
         const { control, principal } = this.requireControl(socket);
-        await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.stop", {
-          commandId: legacyCommandId(principal, "session.stop", command.requestId), sessionId: command.agentId,
+        await awaitCommandReceipt(control, principal, await control.execute(principal, "session.stop", {
+          commandId: controlCommandId(principal, "session.stop", command.requestId), sessionId: command.agentId,
         }));
         this.sendRequestSuccess(socket, command, { agentId: command.agentId, terminatedWorkerIds: [] });
         return;
@@ -297,7 +297,7 @@ export class CliWsHandler {
         const customInstructions = normalizeCliCustomInstructions(command.customInstructions);
         const { control, principal } = this.requireControl(socket);
         const receipt = await createDetailFeatureRpc({ swarmManager: this.swarmManager, control, compactionSource: "cli" }).execute(principal, "session.compact", {
-          commandId: legacyCommandId(principal, "session.compact", command.requestId), sessionId: command.agentId, mode: "manual", customInstructions,
+          commandId: controlCommandId(principal, "session.compact", command.requestId), sessionId: command.agentId, mode: "manual", customInstructions,
         }) as CommandReceipt;
         if (receipt.state !== "succeeded") throw new ControlError("CONFLICT", "Compaction outcome is unknown; inspect the command receipt before a new request");
         this.sendRequestSuccess(socket, command, buildCliSessionCompactionResult({
@@ -314,7 +314,7 @@ export class CliWsHandler {
         const customInstructions = normalizeCliCustomInstructions(command.customInstructions);
         const { control, principal } = this.requireControl(socket);
         const receipt = await createDetailFeatureRpc({ swarmManager: this.swarmManager, control, compactionSource: "cli" }).execute(principal, "session.compact", {
-          commandId: legacyCommandId(principal, "session.compact", command.requestId), sessionId: command.agentId, mode: "smart", customInstructions,
+          commandId: controlCommandId(principal, "session.compact", command.requestId), sessionId: command.agentId, mode: "smart", customInstructions,
         }) as CommandReceipt;
         if (receipt.state !== "succeeded") throw new ControlError("CONFLICT", "Compaction outcome is unknown; inspect the command receipt before a new request");
         const smartResult = receipt.result as SmartCompactResult;
@@ -354,8 +354,8 @@ export class CliWsHandler {
 
     this.requireCliWritableProfile(command.target.profileId);
     const { control, principal } = this.requireControl(socket);
-    const receipt = await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.launch", {
-      commandId: legacyCommandId(principal, "session.launch", command.requestId), projectId: command.target.profileId,
+    const receipt = await awaitCommandReceipt(control, principal, await control.execute(principal, "session.launch", {
+      commandId: controlCommandId(principal, "session.launch", command.requestId), projectId: command.target.profileId,
       title: command.target.label ?? command.target.name ?? "CLI session", workspaceStrategy: { kind: "current_checkout" },
     }));
     return this.requireCliSession(receipt.sessionId!);
@@ -373,8 +373,8 @@ export class CliWsHandler {
     void sourceContext;
     if (attachments?.length || delivery && delivery !== "auto") throw new StreamFault("UNAVAILABLE", "Use the V2 artifact/message path for this CLI input.");
     const { control, principal } = this.requireControl(socket);
-    await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.send", {
-      commandId: legacyCommandId(principal, "session.send", requestId), sessionId: targetAgentId,
+    await awaitCommandReceipt(control, principal, await control.execute(principal, "session.send", {
+      commandId: controlCommandId(principal, "session.send", requestId), sessionId: targetAgentId,
       message: { text, artifactIds: [] },
     }));
   }

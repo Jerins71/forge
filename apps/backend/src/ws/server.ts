@@ -779,7 +779,13 @@ export class SwarmWebSocketServer {
     ];
     this.httpPolicy = this.environment ? createEnvironmentHttpPolicy({ access: this.environment.access, exposure: this.environment.exposure,
       inventory: createRouteInventory(this.httpRoutes), integrationAuthenticators: {
-        cli: async request => { bindHttpPrincipal(request, await this.authenticateCliPrincipal(request)); },
+        cli: async request => {
+          const bearer = request.headers.authorization?.slice(7).trim();
+          const principal = bearer && /^[A-Za-z0-9_-]{43}$/.test(bearer)
+            ? await this.environment!.access.authenticateHttp(request, 'session:read', false)
+            : await this.authenticateCliPrincipal(request);
+          bindHttpPrincipal(request, principal);
+        },
         "stream-deck": async request => {
           const result = await this.streamDeckAccessService.authenticateAuthorizationHeader(request.headers.authorization);
           const principal = result.ok ? this.environment!.access.ensureIntegrationPrincipal({ integration: "stream-deck", credentialId: result.deviceId, label: "Stream Deck", scopes: ["session:read", "session:operate"] }) : await this.authenticateCliPrincipal(request);

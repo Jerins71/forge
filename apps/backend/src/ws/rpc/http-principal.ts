@@ -6,6 +6,7 @@ const principals = new WeakMap<IncomingMessage, Principal>();
 
 /** HTTP policy binds this only after authenticating the selected route. */
 export function bindHttpPrincipal(request: IncomingMessage, principal: Principal): void { principals.set(request, principal); }
+export function getHttpPrincipal(request: IncomingMessage): Principal | undefined { return principals.get(request); }
 export function requireHttpPrincipal(request: IncomingMessage): Principal {
   const principal = principals.get(request);
   if (!principal) throw new StreamFault("UNAUTHENTICATED", "Device authentication required.");

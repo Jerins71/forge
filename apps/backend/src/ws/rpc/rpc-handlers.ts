@@ -1,3 +1,4 @@
+import { lifecycleMethods, type SessionLifecycleMethod } from "./session-lifecycle-rpc.js";
 import type { ProjectAgentRpc, ProjectAgentMethod } from "./project-agent-rpc.js";
 import type { EnvironmentDescriptor, Method, RpcInput } from "@forge/protocol/environment-v2";
 import type { ControlService, EnvironmentAccessPort, EnvironmentStreamPort, Principal } from "../../environment/control/control-types.js";
@@ -7,6 +8,7 @@ import type { BrowserHostRpc } from "./browser-host-rpc.js";
 import { StreamFault } from "../../environment/streams/stream-budget.js";
 
 export interface RpcDependencies {
+  lifecycle?: ReturnType<typeof import("./session-lifecycle-rpc.js").createSessionLifecycleRpc>;
   detailFeatures?: ReturnType<typeof import("./detail-feature-rpc.js").createDetailFeatureRpc>;
   featureStream?: { subscribe(principal: Principal, input: RpcInput<"session.features.subscribe">, signal: AbortSignal): AsyncIterable<import("@forge/protocol/environment-v2").DetailFeatureStreamItem> };
   projectAgents?: Pick<ProjectAgentRpc, "execute">;
@@ -20,6 +22,10 @@ export interface RpcDependencies {
 }
 
 export function requestHandler(deps: RpcDependencies, principal: Principal, method: Method, input: unknown, signal: AbortSignal): Promise<unknown> | unknown {
+  if ((lifecycleMethods as readonly string[]).includes(method)) {
+    if (!deps.lifecycle) throw new StreamFault("UNAVAILABLE", "Lifecycle service is unavailable");
+    return deps.lifecycle.execute(principal, method as SessionLifecycleMethod, input);
+  }
   if (method.startsWith("projectAgent.")) {
     if (!deps.projectAgents) throw new StreamFault("UNAVAILABLE", "Project Agent service is unavailable");
     return deps.projectAgents.execute(principal, method as ProjectAgentMethod, input);

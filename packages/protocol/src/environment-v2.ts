@@ -91,6 +91,8 @@ export const EnvironmentCapabilitiesSchema = O({
   legacyAdapter: Type.Boolean(),
   projectAgentMetadata: Type.Optional(Type.Boolean()),
   projectPolicy: Type.Optional(Type.Boolean()),
+  cliTransport: Type.Optional(Type.Boolean()),
+  sessionLifecycle: Type.Optional(Type.Boolean()),
 })
 export type EnvironmentCapabilities = Static<typeof EnvironmentCapabilitiesSchema>
 export const EnvironmentDescriptorSchema = O({
@@ -146,6 +148,7 @@ export const SessionSummarySchema = O({
   attention: E('none', 'choice', 'approval', 'error', 'result'),
   unread: Type.Integer({ minimum: 0 }),
   workerCount: Type.Integer({ minimum: 0 }),
+  pendingCount: Type.Optional(Type.Integer({ minimum: 0 })),
   updatedAt: V2Time, sortKey: ShortText, archived: Type.Boolean(),
   workspace: O({ kind: E('current_checkout', 'new_worktree'),
     cwd: Type.Union([Type.String({ maxLength: 4096 }), Type.Null()]),
@@ -171,6 +174,10 @@ export const MessageInputSchema = O({
   text: Type.String({ maxLength: 131_072 }),
   artifactIds: Type.Array(V2Uuid, { maxItems: 20, uniqueItems: true }),
 })
+export const CliInvocationSchema = O({ createdBy: Type.Literal('forge-cli'), runId: V2Uuid,
+  command: E('run', 'launch', 'sessions create'), startedAt: V2Time,
+  invocationCwd: Type.Optional(Type.String({ maxLength: 4096 })), label: Type.Optional(ShortText) })
+const CliSourceSchema = O({ channel: Type.Literal('cli'), messageId: V2Uuid })
 export const LaunchSessionSchema = O({
   commandId: V2Uuid,
   projectId: V2Id,
@@ -180,9 +187,11 @@ export const LaunchSessionSchema = O({
   model: Type.Optional(O({ provider: ShortText, modelId: ShortText,
     thinkingLevel: Type.Optional(ShortText) })),
   initialMessage: Type.Optional(MessageInputSchema),
+  cli: Type.Optional(CliInvocationSchema),
 })
 export type LaunchSession = Static<typeof LaunchSessionSchema>
-export const SendMessageSchema = O({ commandId: V2Uuid, sessionId: V2Id, message: MessageInputSchema })
+export const SendMessageSchema = O({ commandId: V2Uuid, sessionId: V2Id, message: MessageInputSchema,
+  source: Type.Optional(CliSourceSchema), delivery: Type.Optional(E('auto', 'followUp', 'steer')) })
 export const ChoiceAnswerSchema = O({
   questionId: V2Id, selectedOptionIds: Type.Array(V2Id, { uniqueItems: true, maxItems: 50 }),
   text: Type.Optional(Type.String({ maxLength: 32_768 })),
@@ -209,9 +218,9 @@ export const RpcErrorSchema = O({
 export type RpcError = Static<typeof RpcErrorSchema>
 export const CommandReceiptSchema = O({
   commandId: V2Uuid,
-  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact'),
+  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact', 'session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.fork', 'session.choice.cancel', 'worker.stop', 'worker.resume'),
   projectId: Type.Optional(V2Id),
-  result: Type.Optional(O({ compacted: Type.Optional(Type.Boolean()), reason: Type.Optional(ShortText), projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })), profileIds: Type.Optional(Type.Array(V2Id, { maxItems: 10000 })), rosterId: Type.Optional(V2Id), rosterRevision: Type.Optional(V2Sequence) })),
+  result: Type.Optional(O({ terminatedWorkerIds: Type.Optional(Type.Array(V2Id, { maxItems: 1000 })), archivedAt: Type.Optional(V2Time), openAgentId: Type.Optional(V2Id), compacted: Type.Optional(Type.Boolean()), reason: Type.Optional(ShortText), projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })), profileIds: Type.Optional(Type.Array(V2Id, { maxItems: 10000 })), rosterId: Type.Optional(V2Id), rosterRevision: Type.Optional(V2Sequence) })),
   sessionId: NullableId,
   state: E('accepted', 'running', 'succeeded', 'failed', 'interrupted'),
   acceptedSequence: V2Sequence, updatedSequence: V2Sequence,
@@ -253,6 +262,7 @@ export const WorkerSummarySchema = O({
 export const DetailItemSchema = O({
   itemId: V2Id, userTurnId: V2Id, actorId: V2Id,
   kind: E('user', 'assistant', 'worker_result', 'tool', 'activity'),
+  source: Type.Optional(Type.String({ maxLength: 128 })),
   timestamp: V2Time, text: Type.String({ maxLength: 8192 }),
   contentRef: Type.Union([V2Id, Type.Null()]), // fetch full text/tool arguments/output by ID
   artifacts: Type.Array(ArtifactRefSchema, { maxItems: 20 }),
@@ -390,7 +400,7 @@ const defineRpc = <I extends TSchema, R extends TSchema, S extends TSchema | und
 
 export const rpcSchemas = {
   'session.goal.control': defineRpc(Type.Union([O({ commandId: V2Uuid, sessionId: V2Id, ...GoalControlV2Schema.anyOf[0].properties }), O({ commandId: V2Uuid, sessionId: V2Id, ...GoalControlV2Schema.anyOf[1].properties })]), CommandReceiptSchema, { receipt: true }),
-  'session.compact': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, mode: E('manual','smart'), customInstructions: Type.Optional(Type.String({ maxLength: 32768 })) }), CommandReceiptSchema, { receipt: true }),
+  'session.compact': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, mode: E('manual','smart'), source: Type.Optional(Type.Literal('cli')), customInstructions: Type.Optional(Type.String({ maxLength: 32768 })) }), CommandReceiptSchema, { receipt: true }),
   'session.elicitation.url': defineRpc(O({ sessionId: V2Id, elicitationId: V2Id, generation: V2Id }), O({ url: Type.String({ minLength: 1, maxLength: 8192 }) })),
   'session.elicitation.respond': defineRpc(ElicitationRespondV2Schema, V2Empty),
   'session.features.subscribe': defineRpc(O({ sessionId: V2Id }), SubscribeResult, { stream: DetailFeatureStreamItemSchema }),
@@ -408,6 +418,15 @@ export const rpcSchemas = {
   'session.content': defineRpc(O({ sessionId: V2Id, contentRef: V2Id,
     offset: Type.Integer({ minimum: 0 }), maxBytes: Type.Integer({ minimum: 1, maximum: 262_144 }) }),
     O({ text: Type.String({ maxLength: 262_144 }), nextOffset: Type.Union([V2Sequence, Type.Null()]) })),
+  'session.resume': defineRpc(StopSessionSchema, CommandReceiptSchema, { receipt: true }),
+  'session.archive': defineRpc(StopSessionSchema, CommandReceiptSchema, { receipt: true }),
+  'session.restore': defineRpc(StopSessionSchema, CommandReceiptSchema, { receipt: true }),
+  'session.clear': defineRpc(StopSessionSchema, CommandReceiptSchema, { receipt: true }),
+  'session.delete': defineRpc(StopSessionSchema, CommandReceiptSchema, { receipt: true }),
+  'session.fork': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), fromItemId: Type.Optional(V2Id), purpose: Type.Optional(Type.Literal('side_chat')) }), CommandReceiptSchema, { receipt: true }),
+  'session.choice.cancel': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, choiceId: V2Id }), CommandReceiptSchema, { receipt: true }),
+  'worker.stop': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, workerId: V2Id }), CommandReceiptSchema, { receipt: true }),
+  'worker.resume': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, workerId: V2Id }), CommandReceiptSchema, { receipt: true }),
   'session.launch': defineRpc(LaunchSessionSchema, CommandReceiptSchema, { receipt: true }),
   'session.send': defineRpc(SendMessageSchema, CommandReceiptSchema, { receipt: true }),
   'session.choose': defineRpc(ChoiceResponseSchema, CommandReceiptSchema, { receipt: true }),
@@ -460,6 +479,7 @@ export const rpcScopes = {
   'environment.get': 'session:read', 'shell.subscribe': 'session:read', 'shell.page': 'session:read',
   'session.subscribe': 'session:read', 'session.history': 'session:read',
   'session.workers': 'session:read', 'session.content': 'session:read',
+  'session.resume': 'session:operate', 'session.archive': 'session:operate', 'session.restore': 'session:operate', 'session.clear': 'session:operate', 'session.delete': 'session:operate', 'session.fork': 'session:operate', 'session.choice.cancel': 'session:operate', 'worker.stop': 'session:operate', 'worker.resume': 'session:operate',
   'session.launch': 'session:operate', 'session.send': 'session:operate',
   'session.choose': 'session:operate', 'session.stop': 'session:operate', 'command.get': 'session:read',
   'project.create': 'workspace:write', 'project.update': 'workspace:write',

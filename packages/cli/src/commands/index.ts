@@ -3,7 +3,7 @@ import { ForgeClient, type ForgeClientLike } from '../forge-client.js'
 import { CliError, type CliIo, renderError, writeHuman } from '../output.js'
 import { CLI_VERSION, EXIT_CODES } from '../version.js'
 import { handleServeCommand } from './serve.js'
-import { handlePairCommand } from './pair.js'
+import { handlePairCommand, loadCliCredential, loadOsCliCredential, parsePairTarget } from './pair.js'
 import { handleEnvironmentCommand } from './environment.js'
 import { handleConfigCommand } from './config.js'
 import { commandHelp, mainHelp } from './help.js'
@@ -114,20 +114,16 @@ async function createDefaultClient(args: ParsedArgs, cwd: string, env: NodeJS.Pr
     flagUrl: args.options.url,
     flagApiKey: args.options.apiKey,
   })
-  if (!resolved.url) {
-    throw new CliError('Forge URL is required. Set --url, FORGE_URL, or forge config set url <url>.', {
-      exitCode: EXIT_CODES.usage,
-      code: 'missing_url',
-    })
+  const environmentId = args.options.environmentId ?? env.FORGE_ENVIRONMENT_ID;
+  const credentialFile = args.options.credentialFile ?? env.FORGE_CREDENTIAL_FILE;
+  if (credentialFile || environmentId) {
+    const credential = credentialFile ? await loadCliCredential(credentialFile) : await loadOsCliCredential(environmentId!, resolved.url);
+    if (environmentId && environmentId !== credential.environmentId) throw new CliError('Credential environment identity mismatch.', { exitCode: EXIT_CODES.auth, code: 'identity_mismatch' });
+    return new ForgeClient({ credential: { ...credential, ...(resolved.url ? { baseUrl: parsePairTarget(resolved.url).baseUrl } : {}) } });
   }
-  if (!resolved.apiKey) {
-    throw new CliError('Forge CLI API key is required. Set --api-key, FORGE_CLI_API_KEY, or forge config set apiKey <key>.', {
-      exitCode: EXIT_CODES.usage,
-      code: 'missing_api_key',
-    })
-  }
+  if (resolved.url && resolved.apiKey) return new ForgeClient({ url: resolved.url, apiKey: resolved.apiKey });
+  throw new CliError('Select paired credentials with --credential-file <absolute-file> or --environment-id <UUID>. Run forge pair to pair this environment.', { exitCode: EXIT_CODES.usage, code: 'missing_environment_credential' });
 
-  return new ForgeClient({ url: resolved.url, apiKey: resolved.apiKey })
 }
 
 function isSessionMutationAction(action: string | undefined): boolean {

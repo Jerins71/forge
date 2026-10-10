@@ -88,6 +88,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       title: (descriptor.sessionLabel ?? descriptor.displayName).slice(0, 256), status,
       attention: pending ? "choice" : descriptor.status === "error" ? "error" : attention ? "result" : "none",
       unread: wireProjection.unread(descriptor.agentId, descriptor.profileId ?? descriptor.agentId),
+      pendingCount: prior?.pendingCount ?? 0,
       workerCount: descriptor.workerCount ?? swarmManager.listWorkersForSession(descriptor.agentId).length,
       updatedAt: descriptor.updatedAt, sortKey: descriptor.updatedAt, archived: Boolean(descriptor.archivedAt),
       workspace: { ...(prior?.workspace ?? { kind: "current_checkout", branch: null }), cwd: descriptor.cwd },
@@ -97,10 +98,10 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
         origin: descriptor.modelOrigin === "session_override" ? "session_override" : "profile_default" },
       ...(attention ? { attentionOccurrence: { attentionId: attention.attentionId, reason: attention.reason, raisedAt: attention.raisedAt } } : {}) };
   }
-  function upsertSession(tx: ControlTransaction, sessionId: string) {
+  function upsertSession(tx: ControlTransaction, sessionId: string, pendingCount?: number) {
     const descriptor = swarmManager.getAgentForInternalUse(sessionId);
     if (!descriptor || descriptor.role !== "manager" || swarmManager.listProfiles().some(profile => profile.profileId === descriptor.profileId && profile.profileType === "system")) return;
-    indexDescriptor(descriptor); const next = summary(descriptor);
+    indexDescriptor(descriptor); const next = summary(descriptor); if (pendingCount !== undefined) next.pendingCount = pendingCount;
     if (JSON.stringify(next) !== JSON.stringify(storedSummary(sessionId))) eventSink.append(tx, { topic: "shell", sessionId, event: { type: "session.upsert", session: next } });
   }
   function upsertWorker(tx: ControlTransaction, descriptor: AgentDescriptor) {
@@ -120,7 +121,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     return { itemId: id, userTurnId: user ? entry.id ?? id : userTurns.get(sessionId) ?? ("turnId" in entry ? entry.turnId : undefined) ?? id,
       actorId: "actorAgentId" in entry ? entry.actorAgentId : entry.agentId,
       kind: entry.type === "conversation_message" ? user ? "user" : "assistant" : entry.type === "agent_message" ? "worker_result" : entry.type === "agent_tool_call" ? "tool" : "activity",
-      timestamp: entry.timestamp, text: text.slice(0, 8192), contentRef: text.length > 8192 ? id : null,
+      timestamp: entry.timestamp, ...(entry.type === "conversation_message" ? { source: entry.source } : {}), text: text.slice(0, 8192), contentRef: text.length > 8192 ? id : null,
       artifacts: (wireProjection.artifacts?.(entry, sessionId) ?? []).slice(0, 20),
       commandId: entry.type === "conversation_message" ? entry.controlCommandId ?? null : null };
   }
@@ -305,7 +306,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       listen("restart_recovery_snapshot", (event: import("@forge/protocol").RestartRecoverySnapshotEvent) => publishRecovery(event.snapshot));
       for (const name of ["conversation_message", "activity_summary", "agent_message", "agent_tool_call"]) listen(name, observeCanonical);
       listen("choice_request", (event: ChoiceRequestEvent) => { eventSink.transaction(tx => choice(tx, event)); });
-      listen("agent_status", (event: { agentId: string }) => { const descriptor = swarmManager.getAgentForInternalUse(event.agentId); if (!descriptor) return; eventSink.transaction(tx => { if (descriptor.role === "worker") upsertWorker(tx, descriptor); upsertSession(tx, descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId); }); });
+      listen("agent_status", (event: { agentId: string; pendingCount: number }) => { const descriptor = swarmManager.getAgentForInternalUse(event.agentId); if (!descriptor) return; eventSink.transaction(tx => { if (descriptor.role === "worker") upsertWorker(tx, descriptor); upsertSession(tx, descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId, descriptor.role === "manager" ? event.pendingCount : undefined); }); });
       listen("session_workers_snapshot", (event: { sessionAgentId: string; workers: AgentDescriptor[] }) => {
         eventSink.transaction(tx => { const ids = new Set(event.workers.map(worker => worker.agentId)); for (const worker of event.workers) upsertWorker(tx, worker);
           const prior = database.prepare("SELECT agent_id FROM control_workers WHERE session_id=? AND deleted=0").all(event.sessionAgentId) as { agent_id: string }[];

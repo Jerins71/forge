@@ -1,52 +1,14 @@
-import { randomUUID } from 'node:crypto'
-
-import type {
-  ChoiceAnswer,
-  CliAgentShowResponse,
-  CliAgentsListResponse,
-  CliChoiceRouteResult,
-  CliChoiceShowResponse,
-  CliChoicesListResponse,
-  CliHeadlessReadyEvent,
-  CliHttpErrorResponse,
-  CliMessageDispatchResult,
-  CliMessageTarget,
-  CliProfileShowResponse,
-  CliProfilesListResponse,
-  CliProjectAgentShowResponse,
-  CliProjectAgentsListResponse,
-  CliRequestErrorEvent,
-  CliRequestSuccessEvent,
-  CliRunCommand,
-  CliRunResult,
-  CliRunTarget,
-  CliSessionCompactionResult,
-  CliSessionCreatedResult,
-  CliSessionMutationCommand,
-  CliSessionShowResponse,
-  CliSessionsListResponse,
-  CliSessionTranscriptResponse,
-  CliStatusResponse,
-  CliWsCommand,
-  ServerEvent,
-} from '@forge/protocol'
+import { randomUUID, webcrypto } from 'node:crypto'
+import type { ChoiceAnswer, CliAgentShowResponse, CliAgentsListResponse, CliChoiceRouteResult, CliChoiceShowResponse, CliChoicesListResponse, CliHttpErrorResponse, CliMessageDispatchResult, CliProfileShowResponse, CliProfilesListResponse, CliProjectAgentShowResponse, CliProjectAgentsListResponse, CliRunResult, CliSessionCompactionResult, CliSessionCreatedResult, CliSessionShowResponse, CliSessionsListResponse, CliSessionTranscriptResponse, CliStatusResponse } from '@forge/protocol'
+import type { CommandReceipt, RpcInput } from '@forge/protocol/environment-v2'
+import { createEnvironmentRegistry, createMemoryCredentialStore, createMemoryPersistence, EnvironmentRuntimeError, type EnvironmentClient } from '@forge/client-runtime'
 import { WebSocket } from 'ws'
-
 import { CliError } from './output.js'
 import { CLI_PROTOCOL_VERSION, EXIT_CODES } from './version.js'
+import { validateCliCredential, type CliEnvironmentCredential } from './commands/pair.js'
+import { NativeRunWaitTracker } from './run-wait-tracker.js'
 
-const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1000
-const DEFAULT_DEBOUNCE_MS = 750
-const MIN_POST_DISPATCH_MS = 1000
-const TERMINAL_ASSISTANT_MESSAGE_SOURCES = new Set(['speak_to_user', 'assistant_output'])
-
-export interface ForgeClientOptions {
-  url: string
-  apiKey: string
-  fetchImpl?: typeof fetch
-  WebSocketImpl?: typeof WebSocket
-}
-
+export type ForgeClientOptions = ({ credential: CliEnvironmentCredential; url?: never; apiKey?: never } | { url: string; apiKey: string; credential?: never }) & { fetchImpl?: typeof fetch; WebSocketImpl?: typeof WebSocket }
 export interface ChoiceListFilters {
   profileId?: string
   sessionAgentId?: string
@@ -127,17 +89,18 @@ export interface ForgeClientLike {
 
 export class ForgeClient implements ForgeClientLike {
   private readonly baseUrl: URL
-  private readonly apiKey: string
+  private readonly token: string
   private readonly fetchImpl: typeof fetch
   private readonly WebSocketImpl: typeof WebSocket
-
+  private readonly credential?: CliEnvironmentCredential
   constructor(options: ForgeClientOptions) {
-    this.baseUrl = normalizeBaseUrl(options.url)
-    this.apiKey = options.apiKey
+    this.credential = options.credential
+    if (this.credential) validateCliCredential(this.credential)
+    this.baseUrl = normalizeBaseUrl(options.credential?.baseUrl ?? options.url!)
+    this.token = options.credential?.bearerToken ?? options.apiKey!
     this.fetchImpl = options.fetchImpl ?? fetch
     this.WebSocketImpl = options.WebSocketImpl ?? WebSocket
   }
-
   getStatus(): Promise<CliStatusResponse> {
     return this.get('status')
   }
@@ -162,7 +125,6 @@ export class ForgeClient implements ForgeClientLike {
     agentId: string,
     options: ClientSessionTranscriptOptions = {},
   ): Promise<CliSessionTranscriptResponse> {
-    await this.ensureFeatures(['sessionTranscript'])
     const params = new URLSearchParams()
     if (options.includeWorkerUpdates) params.set('includeWorkerUpdates', 'true')
     if (options.limit !== undefined) params.set('limit', String(options.limit))
@@ -202,289 +164,201 @@ export class ForgeClient implements ForgeClientLike {
   }
 
   async createSession(options: ClientCreateSessionOptions): Promise<CliSessionCreatedResult> {
-    await this.ensureFeatures(['headlessWs', 'cliSessionMetadata'])
-    const connection = await this.openWsConnection()
-    try {
-      return await connection.request<CliSessionCreatedResult>({
-        type: 'cli_create_session',
-        requestId: randomUUID(),
-        profileId: options.profileId,
-        ...(options.label ? { label: options.label } : {}),
-        ...(options.name ? { name: options.name } : {}),
-        cli: buildCliMetadata('sessions create', options.invocationCwd, options.label),
-      })
-    } finally {
-      connection.close()
-    }
+    return this.withEnvironment(client => this.create(client, options, 'sessions create'))
   }
-
+  private async create(client: EnvironmentClient, options: ClientCreateSessionOptions, command: 'run' | 'launch' | 'sessions create'): Promise<CliSessionCreatedResult> {
+    const cli = { createdBy: 'forge-cli' as const, runId: randomUUID(), command, startedAt: new Date().toISOString(), ...(options.invocationCwd ? { invocationCwd: options.invocationCwd } : {}), ...(options.label ? { label: options.label } : {}) }
+    const receipt = await this.control(client, 'session.launch', { commandId: randomUUID(), projectId: options.profileId, title: options.label ?? options.name ?? 'CLI session', workspaceStrategy: { kind: 'current_checkout' }, cli })
+    if (!receipt.sessionId) throw new CliError('Session preparation did not return an identity.', { exitCode: EXIT_CODES.connection, code: 'missing_session' })
+    const [session, profile] = await Promise.all([this.showSession(receipt.sessionId), this.showProfile(options.profileId)])
+    return { session: session.session, profile: profile.profile, cli }
+  }
   async sendSessionMessage(agentId: string, options: ClientMessageOptions): Promise<CliMessageDispatchResult> {
-    await this.ensureFeatures(['headlessWs', 'cliSourceContext'])
-    const connection = await this.openWsConnection()
-    try {
-      return await connection.request<CliMessageDispatchResult>({
-        type: 'cli_send_message',
-        requestId: randomUUID(),
-        target: { kind: 'session', agentId },
-        text: options.text,
-        ...(options.delivery ? { delivery: options.delivery } : {}),
-      })
-    } finally {
-      connection.close()
-    }
+    return this.withEnvironment(client => this.send(client, agentId, options))
   }
-
-  async sendProjectAgentMessage(
-    profileId: string,
-    handle: string,
-    options: ClientMessageOptions,
-  ): Promise<CliMessageDispatchResult> {
-    await this.ensureFeatures(['headlessWs', 'cliSourceContext', 'projectAgentRunTarget'])
-    const connection = await this.openWsConnection()
-    try {
-      return await connection.request<CliMessageDispatchResult>({
-        type: 'cli_send_message',
-        requestId: randomUUID(),
-        target: { kind: 'project_agent', profileId, handle },
-        text: options.text,
-        ...(options.delivery ? { delivery: options.delivery } : {}),
-      })
-    } finally {
-      connection.close()
-    }
-  }
-
-  async launch(options: ClientRunOptions): Promise<CliMessageDispatchResult> {
-    await this.ensureFeatures(featuresForTarget(options.target))
-    const connection = await this.openWsConnection()
-    try {
-      return await connection.request<CliMessageDispatchResult>(buildRunCommand(options))
-    } finally {
-      connection.close()
-    }
-  }
-
-  async run(options: ClientRunOptions): Promise<CliRunResult> {
-    await this.ensureFeatures(featuresForTarget(options.target))
-    const connection = await this.openWsConnection()
-    const startedAt = Date.now()
-    let sessionAgentId: string | undefined
-    try {
-      const prepared = await this.prepareRunTarget(connection, options)
-      sessionAgentId = prepared.sessionAgentId
-      const tracker = new RunWaitTracker(prepared.ready, {
-        startedAt,
-        dispatchGateStartedAt: Date.now(),
-        timeoutMs: options.timeoutMs,
-        requirePostDispatch: true,
-        projectAgentHandle: options.target.kind === 'project_agent' ? options.target.handle : null,
-      })
-      tracker.attach(connection)
-      try {
-        await connection.request<CliMessageDispatchResult>(prepared.dispatchCommand)
-        const result = await tracker.wait()
-        if (result.status === 'timeout' && options.stopOnTimeout) {
-          await connection.request({ type: 'stop_session', requestId: randomUUID(), agentId: sessionAgentId })
-        }
-        return result
-      } finally {
-        tracker.detach()
-      }
-    } finally {
-      connection.close()
-    }
-  }
-
-  async waitForSession(agentId: string, options: ClientWaitOptions = {}): Promise<CliRunResult> {
-    await this.ensureFeatures(['headlessWs', 'activeToolSnapshot', 'choiceOwnerLookup'])
-    const connection = await this.openWsConnection()
-    const startedAt = Date.now()
-    try {
-      const ready = await connection.subscribe(agentId)
-      const tracker = new RunWaitTracker(ready, {
-        startedAt,
-        timeoutMs: options.timeoutMs,
-        requirePostDispatch: false,
-      })
-      tracker.attach(connection)
-      try {
-        const result = await tracker.wait()
-        if (result.status === 'timeout' && options.stopOnTimeout) {
-          await connection.request({ type: 'stop_session', requestId: randomUUID(), agentId })
-        }
-        return result
-      } finally {
-        tracker.detach()
-      }
-    } finally {
-      connection.close()
-    }
-  }
-
-  stopSession(agentId: string): Promise<unknown> {
-    return this.sessionMutation({ type: 'stop_session', requestId: randomUUID(), agentId })
-  }
-
-  resumeSession(agentId: string): Promise<unknown> {
-    return this.sessionMutation({ type: 'resume_session', requestId: randomUUID(), agentId })
-  }
-
-  clearSession(agentId: string): Promise<unknown> {
-    return this.sessionMutation({ type: 'clear_session', requestId: randomUUID(), agentId })
-  }
-
-  deleteSession(agentId: string): Promise<unknown> {
-    return this.sessionMutation({ type: 'delete_session', requestId: randomUUID(), agentId })
-  }
-
-  renameSession(agentId: string, label: string): Promise<unknown> {
-    return this.sessionMutation({ type: 'rename_session', requestId: randomUUID(), agentId, label })
-  }
-
-  pinSession(agentId: string, pinned: boolean): Promise<unknown> {
-    return this.sessionMutation({ type: 'pin_session', requestId: randomUUID(), agentId, pinned })
-  }
-
-  forkSession(sourceAgentId: string, options: { label?: string; fromMessageId?: string } = {}): Promise<unknown> {
-    return this.sessionMutation({
-      type: 'fork_session',
-      requestId: randomUUID(),
-      sourceAgentId,
-      ...(options.label ? { label: options.label } : {}),
-      ...(options.fromMessageId ? { fromMessageId: options.fromMessageId } : {}),
+  async sendProjectAgentMessage(profileId: string, handle: string, options: ClientMessageOptions): Promise<CliMessageDispatchResult> {
+    return this.withEnvironment(async client => {
+      const target = await this.resolveTarget(client, { kind: 'project_agent', profileId, handle })
+      return this.send(client, target.sessionId, options)
     })
   }
-
-  compactSession(agentId: string, options: ClientCompactionOptions = {}): Promise<CliSessionCompactionResult> {
-    return this.sessionMutation<CliSessionCompactionResult>({
-      type: 'compact_session',
-      requestId: randomUUID(),
-      agentId,
-      ...(options.customInstructions ? { customInstructions: options.customInstructions } : {}),
-    }, ['headlessWs', 'sessionCompaction'])
+  private async send(client: EnvironmentClient, sessionId: string, options: ClientMessageOptions, messageId: string = randomUUID()): Promise<CliMessageDispatchResult> {
+    const receipt = await this.control(client, 'session.send', { commandId: messageId, sessionId, message: { text: options.text, artifactIds: [] }, source: { channel: 'cli', messageId }, ...(options.delivery ? { delivery: options.delivery } : {}) })
+    return { sessionAgentId: sessionId, profileId: client.shell.getSnapshot().sessions.get(sessionId)?.projectId ?? (await this.showSession(sessionId)).session.profileId, messageId, sourceContext: { channel: 'cli', messageId }, acceptedAt: receipt.acceptedAt }
   }
-
-  smartCompactSession(agentId: string, options: ClientCompactionOptions = {}): Promise<CliSessionCompactionResult> {
-    return this.sessionMutation<CliSessionCompactionResult>({
-      type: 'smart_compact_session',
-      requestId: randomUUID(),
-      agentId,
-      ...(options.customInstructions ? { customInstructions: options.customInstructions } : {}),
-    }, ['headlessWs', 'sessionCompaction'])
+  async launch(options: ClientRunOptions): Promise<CliMessageDispatchResult> {
+    return this.withEnvironment(async client => {
+      const target = await this.resolveRunTarget(client, options)
+      return this.send(client, target.sessionId, options, target.messageId)
+    })
   }
-
+  async run(options: ClientRunOptions): Promise<CliRunResult> {
+    const startedAt = Date.now()
+    return this.withEnvironment(async client => {
+      const target = await this.resolveRunTarget(client, options)
+      const tracker = new NativeRunWaitTracker(client, target.sessionId, { ...options, startedAt, requirePostDispatch: true, projectAgentHandle: options.target.kind === 'project_agent' ? options.target.handle : null })
+      try {
+        await tracker.ready()
+        tracker.dispatched()
+        await this.send(client, target.sessionId, options, target.messageId)
+        const result = await tracker.wait()
+        if (result.status === 'timeout' && options.stopOnTimeout) await this.control(client, 'session.stop', { commandId: randomUUID(), sessionId: target.sessionId })
+        return result
+      } finally { tracker.dispose() }
+    })
+  }
+  async waitForSession(agentId: string, options: ClientWaitOptions = {}): Promise<CliRunResult> {
+    const startedAt = Date.now()
+    return this.withEnvironment(async client => {
+      const tracker = new NativeRunWaitTracker(client, agentId, { ...options, startedAt, requirePostDispatch: false })
+      try {
+        await tracker.ready()
+        const result = await tracker.wait()
+        if (result.status === 'timeout' && options.stopOnTimeout) await this.control(client, 'session.stop', { commandId: randomUUID(), sessionId: agentId })
+        return result
+      } finally { tracker.dispose() }
+    })
+  }
+  private async resolveTarget(client: EnvironmentClient, target: Exclude<ClientRunTarget, { kind: 'new_session' }>) {
+    const sessionId = target.kind === 'session' ? target.agentId : (await this.showProjectAgent(target.profileId, target.handle)).projectAgent.agentId
+    // Resolve only through this selected environment's authenticated read path.
+    const descriptor = (await this.showSession(sessionId)).session
+    if (target.kind === 'project_agent' && descriptor.profileId !== target.profileId && !(await this.listProjectAgents(target.profileId)).projectAgents.some(agent => agent.agentId === sessionId)) throw new CliError('Project Agent is unavailable in this environment project.', { exitCode: EXIT_CODES.usage, code: 'not_found' })
+    return { environmentId: client.environmentId, sessionId }
+  }
+  private async resolveRunTarget(client: EnvironmentClient, options: ClientRunOptions) {
+    if (options.target.kind !== 'new_session') return { ...await this.resolveTarget(client, options.target), messageId: randomUUID() }
+    const created = await this.create(client, { profileId: options.target.profileId, label: options.target.label, name: options.target.name, invocationCwd: options.invocationCwd }, options.command)
+    return { environmentId: client.environmentId, sessionId: created.session.agentId, messageId: created.cli!.runId }
+  }
+  stopSession(agentId: string): Promise<unknown> { return this.action('session.stop', agentId) }
+  resumeSession(agentId: string): Promise<unknown> { return this.action('session.resume', agentId) }
+  clearSession(agentId: string): Promise<unknown> { return this.action('session.clear', agentId) }
+  deleteSession(agentId: string): Promise<unknown> { return this.action('session.delete', agentId) }
+  private async action(method: 'session.stop' | 'session.resume' | 'session.clear' | 'session.delete', agentId: string): Promise<unknown> {
+    return this.withEnvironment(async client => {
+      await this.showSession(agentId)
+      const receipt = await this.control(client, method, { commandId: randomUUID(), sessionId: agentId })
+      if (method === 'session.clear') return { agentId }
+      return { agentId, ...(method === 'session.stop' || method === 'session.delete' ? { terminatedWorkerIds: receipt.result?.terminatedWorkerIds ?? [] } : {}) }
+    })
+  }
+  renameSession(agentId: string, label: string): Promise<unknown> { return this.updateSession(agentId, { title: label }) }
+  pinSession(agentId: string, pinned: boolean): Promise<unknown> { return this.updateSession(agentId, { pinned }) }
+  private async updateSession(agentId: string, patch: { title?: string; pinned?: boolean }): Promise<unknown> {
+    return this.withEnvironment(async client => {
+      // Batch 3 supplies this registry entry before final deletion.
+      await this.control(client, 'session.update' as CommandReceipt['method'], { commandId: randomUUID(), sessionId: agentId, ...patch } as any)
+      const session = (await this.showSession(agentId)).session
+      return { agentId, ...(patch.title !== undefined ? { label: patch.title } : { pinned: patch.pinned, pinnedAt: session.pinnedAt ?? null }) }
+    })
+  }
+  async forkSession(sourceAgentId: string, options: { label?: string; fromMessageId?: string } = {}): Promise<unknown> {
+    return this.withEnvironment(async client => {
+      const receipt = await this.control(client, 'session.fork', { commandId: randomUUID(), sessionId: sourceAgentId, ...(options.label ? { title: options.label } : {}), ...(options.fromMessageId ? { fromItemId: options.fromMessageId } : {}) })
+      const sessionId = receipt.result?.sessionId ?? receipt.sessionId!
+      const created = await this.showSession(sessionId)
+      return { sourceAgentId, session: created.session, profile: (await this.showProfile(created.session.profileId!)).profile, ...(options.fromMessageId ? { fromMessageId: options.fromMessageId } : {}) }
+    })
+  }
+  compactSession(agentId: string, options: ClientCompactionOptions = {}): Promise<CliSessionCompactionResult> { return this.compact(agentId, 'manual', options) }
+  smartCompactSession(agentId: string, options: ClientCompactionOptions = {}): Promise<CliSessionCompactionResult> { return this.compact(agentId, 'smart', options) }
+  private async compact(agentId: string, mode: 'manual' | 'smart', options: ClientCompactionOptions): Promise<CliSessionCompactionResult> {
+    return this.withEnvironment(async client => {
+      const receipt = await this.control(client, 'session.compact', { commandId: randomUUID(), sessionId: agentId, mode, source: 'cli', ...(options.customInstructions ? { customInstructions: options.customInstructions } : {}) })
+      const compacted = receipt.result?.compacted ?? true
+      return { action: mode === 'manual' ? 'compact' : 'smart_compact', sessionAgentId: agentId, profileId: (await this.showSession(agentId)).session.profileId, outcome: compacted ? 'compacted' : 'skipped', compacted, ...(receipt.result?.reason ? { reason: receipt.result.reason } : {}), customInstructionsProvided: !!options.customInstructions, completedAt: receipt.updatedAt }
+    })
+  }
   async answerChoice(choiceId: string, answers: ChoiceAnswer[], sessionAgentId?: string): Promise<CliChoiceRouteResult> {
-    await this.ensureFeatures(['headlessWs', 'choiceOwnerLookup'])
-    const ownerSessionAgentId = sessionAgentId ?? (await this.showChoice(choiceId)).choice.sessionAgentId
-    const connection = await this.openWsConnection()
-    try {
-      return await connection.request<CliChoiceRouteResult>({
-        type: 'cli_choice_response',
-        requestId: randomUUID(),
-        choiceId,
-        sessionAgentId: ownerSessionAgentId,
-        answers,
-      })
-    } finally {
-      connection.close()
-    }
+    return this.withEnvironment(async client => {
+      const owner = (await this.showChoice(choiceId, sessionAgentId)).choice
+      await this.control(client, 'session.choose', { commandId: randomUUID(), sessionId: owner.sessionAgentId, choiceId, answers })
+      return { choiceId, sessionAgentId: owner.sessionAgentId, status: 'answered' }
+    })
   }
-
   async cancelChoice(choiceId: string, sessionAgentId?: string): Promise<CliChoiceRouteResult> {
-    await this.ensureFeatures(['headlessWs', 'choiceOwnerLookup'])
-    const ownerSessionAgentId = sessionAgentId ?? (await this.showChoice(choiceId)).choice.sessionAgentId
-    const connection = await this.openWsConnection()
+    return this.withEnvironment(async client => {
+      const owner = (await this.showChoice(choiceId, sessionAgentId)).choice
+      await this.control(client, 'session.choice.cancel', { commandId: randomUUID(), sessionId: owner.sessionAgentId, choiceId })
+      return { choiceId, sessionAgentId: owner.sessionAgentId, status: 'cancelled' }
+    })
+  }
+  private async withEnvironment<T>(operation: (client: EnvironmentClient) => Promise<T>): Promise<T> {
+    if (!this.credential) throw new CliError('Session controls require paired environment credentials. Run forge pair and select --environment-id or --credential-file. API keys continue to support CLI HTTP reads.', { exitCode: EXIT_CODES.unsupported, code: 'pairing_required' })
+    const credentials = createMemoryCredentialStore()
+    await credentials.store(this.credential.environmentId, this.credential)
+    const registry = createEnvironmentRegistry({ persistence: createMemoryPersistence(), credentials, fetch: (url, init) => this.fetchImpl(url, init), webSocket: (url, protocols) => new this.WebSocketImpl(url, protocols), crypto: webcrypto as unknown as Crypto, random: () => 0.01 })
     try {
-      return await connection.request<CliChoiceRouteResult>({
-        type: 'cli_choice_cancel',
-        requestId: randomUUID(),
-        choiceId,
-        sessionAgentId: ownerSessionAgentId,
-      })
-    } finally {
-      connection.close()
+      await registry.register({ environmentId: this.credential.environmentId, baseUrl: this.baseUrl.origin, primary: true, enabled: true, credentialRef: this.credential.deviceSessionId, labelOverride: null })
+      await registry.start()
+      const client = registry.get(this.credential.environmentId)
+      await this.online(client)
+      if (!client.descriptor()?.capabilities.cliTransport) throw new CliError('Update this environment to use the paired CLI transport.', { exitCode: EXIT_CODES.unsupported, code: 'unsupported_capability' })
+      return await operation(client)
+    } catch (error) { throw this.cliError(error) }
+    finally { await registry.dispose() }
+  }
+  private async online(client: EnvironmentClient): Promise<void> {
+    const deadline = Date.now() + 10_000
+    while (client.connection.getSnapshot().phase !== 'online') {
+      const state = client.connection.getSnapshot()
+      if (state.phase.endsWith('blocked')) throw new CliError(state.reason ?? 'Environment connection blocked.', { exitCode: state.phase === 'auth-blocked' || state.phase === 'identity-blocked' ? EXIT_CODES.auth : EXIT_CODES.unsupported, code: state.blockedCause ?? state.phase })
+      if (Date.now() > deadline) throw new CliError('Could not connect to the paired environment.', { exitCode: EXIT_CODES.connection, code: 'connection_failed' })
+      await new Promise(resolve => setTimeout(resolve, 25))
     }
   }
-
-  private async sessionMutation<T = unknown>(
-    command: CliSessionMutationCommand,
-    features: Array<keyof CliStatusResponse['capabilities']['features']> = ['headlessWs'],
-  ): Promise<T> {
-    await this.ensureFeatures(features)
-    const connection = await this.openWsConnection()
-    try {
-      return await connection.request<T>(command)
-    } finally {
-      connection.close()
-    }
-  }
-
-  private async prepareRunTarget(
-    connection: CliWsConnection,
-    options: ClientRunOptions,
-  ): Promise<{ sessionAgentId: string; ready: CliHeadlessReadyEvent; dispatchCommand: CliWsCommand & { requestId: string } }> {
-    if (options.target.kind === 'new_session') {
-      const cli = buildCliMetadata(options.command, options.invocationCwd, options.label)
-      const created = await connection.request<CliSessionCreatedResult>({
-        type: 'cli_create_session',
-        requestId: randomUUID(),
-        profileId: options.target.profileId,
-        ...(options.target.label ? { label: options.target.label } : {}),
-        ...(options.target.name ? { name: options.target.name } : {}),
-        cli,
-      })
-      const ready = await connection.subscribe(created.session.agentId)
-      return {
-        sessionAgentId: created.session.agentId,
-        ready,
-        dispatchCommand: buildSendMessageCommand({ kind: 'session', agentId: created.session.agentId }, options, cli.runId),
+  private async control<M extends CommandReceipt['method']>(client: EnvironmentClient, method: M, input: RpcInput<M>): Promise<CommandReceipt> {
+    const commandId = (input as { commandId: string }).commandId
+    const deadline = Date.now() + 10_000
+    let receipt: CommandReceipt | undefined
+    try { receipt = await client.request(method, input, { signal: AbortSignal.timeout(10_000) }) }
+    catch (error) {
+      if (!(error instanceof EnvironmentRuntimeError) || !error.retryable) throw error
+      await this.online(client)
+      try { receipt = await client.request('command.get', { commandId }) }
+      catch (lookup) {
+        if (!(lookup instanceof EnvironmentRuntimeError) || lookup.code !== 'NOT_FOUND') throw lookup
+        // Receipt recovery may already be retrying; both producers use the same ID.
+        receipt = await client.request(method, input, { signal: AbortSignal.timeout(10_000) })
       }
     }
-
-    const sessionAgentId = options.target.kind === 'project_agent'
-      ? (await this.showProjectAgent(options.target.profileId, options.target.handle)).projectAgent.agentId
-      : options.target.agentId
-    const ready = await connection.subscribe(sessionAgentId)
-    return {
-      sessionAgentId,
-      ready,
-      dispatchCommand: buildRunCommand(options),
+    while (receipt.state === 'accepted' || receipt.state === 'running') {
+      if (Date.now() >= deadline) throw new CliError(`Command ${commandId} was accepted and is still pending.`, { exitCode: EXIT_CODES.connection, code: 'command_pending', details: { commandId } })
+      await new Promise(resolve => setTimeout(resolve, 25))
+      receipt = await client.request('command.get', { commandId })
     }
+    if (receipt.state !== 'succeeded') throw new EnvironmentRuntimeError(receipt.error?.code ?? 'UNAVAILABLE', receipt.error?.message ?? `Command ${commandId} was interrupted; inspect its receipt before sending a new command.`, false)
+    return receipt
   }
-
-  private async ensureFeatures(features: Array<keyof CliStatusResponse['capabilities']['features']>): Promise<void> {
-    const status = await this.getStatus()
-    assertSupportedCapabilities(status)
-    for (const feature of features) {
-      if (!status.capabilities.features[feature]) {
-        throw new CliError(`Forge server does not support required CLI capability: ${feature}`, {
-          exitCode: EXIT_CODES.unsupported,
-          code: 'unsupported_capability',
-          details: { feature },
-        })
-      }
-    }
+  private cliError(error: unknown): CliError {
+    if (error instanceof CliError) return error
+    const fault = error as { code?: string; message?: string }
+    const code = fault.code ?? 'connection_failed'
+    return new CliError(redactSecret(fault.message ?? 'Environment request failed.', this.token), { code, exitCode: code === 'UNAUTHENTICATED' || code === 'FORBIDDEN' || code === 'IDENTITY_MISMATCH' ? EXIT_CODES.auth : code === 'INVALID_INPUT' || code === 'NOT_FOUND' || code === 'CONFLICT' ? EXIT_CODES.usage : code === 'PROTOCOL_MISMATCH' ? EXIT_CODES.unsupported : EXIT_CODES.connection })
   }
-
-  private async openWsConnection(): Promise<CliWsConnection> {
-    const connection = new CliWsConnection(buildCliWsUrl(this.baseUrl), this.apiKey, this.WebSocketImpl)
-    await connection.open()
-    return connection
+  private async verifyIdentity(): Promise<void> {
+    if (!this.credential) return
+    const response = await this.fetchImpl(new URL('/api/v2/environment', this.baseUrl), { redirect: 'error', signal: AbortSignal.timeout(10_000) })
+    if (!response.ok) throw new CliError('Environment descriptor is unavailable.', { exitCode: EXIT_CODES.connection, code: 'connection_failed' })
+    const descriptor = await response.json() as { environmentId: string; protocolVersion: number }
+    if (descriptor.environmentId !== this.credential.environmentId) throw new CliError('Environment identity mismatch; explicitly pair the new environment.', { exitCode: EXIT_CODES.auth, code: 'identity_mismatch' })
+    if (descriptor.protocolVersion !== 1) throw new CliError('Environment protocol mismatch.', { exitCode: EXIT_CODES.unsupported, code: 'unsupported_protocol' })
   }
-
   private async get<T>(path: string): Promise<T> {
+    await this.verifyIdentity()
     const url = new URL(`/api/cli/${path}`, this.baseUrl)
     let response: Response
     try {
       response = await this.fetchImpl(url, {
-        method: 'GET',
+        method: 'GET', redirect: 'error', signal: AbortSignal.timeout(10_000),
         headers: {
-          Authorization: `Bearer ${this.apiKey}`,
+          Authorization: `Bearer ${this.token}`,
           Accept: 'application/json',
         },
       })
     } catch (error) {
-      throw new CliError(`Could not connect to Forge at ${this.baseUrl.origin}: ${redactSecret(errorMessage(error), this.apiKey)}`, {
+      throw new CliError(`Could not connect to Forge at ${this.baseUrl.origin}: ${redactSecret(errorMessage(error), this.token)}`, {
         exitCode: EXIT_CODES.connection,
         code: 'connection_failed',
       })
@@ -494,7 +368,7 @@ export class ForgeClient implements ForgeClientLike {
       const errorPayload = await readErrorPayload(response)
       const message = errorPayload?.error.message ?? `Forge request failed with HTTP ${response.status}`
       const code = errorPayload?.error.code ?? `http_${response.status}`
-      throw new CliError(redactSecret(message, this.apiKey), {
+      throw new CliError(redactSecret(message, this.token), {
         exitCode: mapHttpErrorExitCode(response.status, code),
         code,
         details: { status: response.status },
@@ -557,470 +431,13 @@ export function normalizeBaseUrl(value: string): URL {
   }
 }
 
-class CliWsConnection {
-  private socket: WebSocket | null = null
-  private manualClosing = false
-  private readonly listeners = new Set<(event: ServerEvent) => void>()
-  private readonly disconnectListeners = new Set<(error: CliError) => void>()
-  private readonly pending = new Map<string, {
-    resolve: (value: unknown) => void
-    reject: (error: Error) => void
-  }>()
-
-  constructor(
-    private readonly url: URL,
-    private readonly apiKey: string,
-    private readonly WebSocketImpl: typeof WebSocket,
-  ) {}
-
-  open(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const socket = new this.WebSocketImpl(this.url, { headers: { authorization: `Bearer ${this.apiKey}` } })
-      this.socket = socket
-      const onError = (error: Error) => {
-        reject(new CliError(`Could not open CLI WebSocket: ${redactSecret(error.message, this.apiKey)}`, {
-          exitCode: EXIT_CODES.connection,
-          code: 'ws_connection_failed',
-        }))
-      }
-      socket.once('open', () => {
-        socket.off('error', onError)
-        socket.on('message', (raw) => this.handleMessage(raw.toString()))
-        socket.on('close', () => this.handleDisconnect('CLI WebSocket closed.'))
-        socket.on('error', (error) => this.handleDisconnect(`CLI WebSocket error: ${redactSecret(error.message, this.apiKey)}`))
-        resolve()
-      })
-      socket.once('error', onError)
-    })
-  }
-
-  close(): void {
-    this.manualClosing = true
-    this.socket?.close()
-    this.socket = null
-  }
-
-  request<T = unknown>(command: CliWsCommand & { requestId: string }): Promise<T> {
-    const socket = this.requireOpenSocket()
-    return new Promise<T>((resolve, reject) => {
-      this.pending.set(command.requestId, {
-        resolve: (value) => resolve(value as T),
-        reject,
-      })
-      socket.send(JSON.stringify(command), (error) => {
-        if (error) {
-          this.pending.delete(command.requestId)
-          reject(new CliError(`Could not send CLI WebSocket command: ${redactSecret(error.message, this.apiKey)}`, {
-            exitCode: EXIT_CODES.connection,
-            code: 'ws_send_failed',
-          }))
-        }
-      })
-    })
-  }
-
-  subscribe(agentId: string): Promise<CliHeadlessReadyEvent> {
-    const requestId = randomUUID()
-    const readyPromise = this.waitForEvent<CliHeadlessReadyEvent>(
-      (event): event is CliHeadlessReadyEvent => event.type === 'headless_ready' && event.requestId === requestId,
-      10_000,
-    )
-    this.requireOpenSocket().send(JSON.stringify({ type: 'subscribe_headless', requestId, agentId }))
-    return readyPromise
-  }
-
-  onEvent(listener: (event: ServerEvent) => void): () => void {
-    this.listeners.add(listener)
-    return () => this.listeners.delete(listener)
-  }
-
-  onDisconnect(listener: (error: CliError) => void): () => void {
-    this.disconnectListeners.add(listener)
-    return () => this.disconnectListeners.delete(listener)
-  }
-
-  private waitForEvent<T extends ServerEvent>(predicate: (event: ServerEvent) => event is T, timeoutMs: number): Promise<T> {
-    return new Promise((resolve, reject) => {
-      let unsubscribeEvent: (() => void) | null = null
-      let unsubscribeDisconnect: (() => void) | null = null
-      const cleanup = () => {
-        clearTimeout(timeout)
-        unsubscribeEvent?.()
-        unsubscribeDisconnect?.()
-        unsubscribeEvent = null
-        unsubscribeDisconnect = null
-      }
-      const timeout = setTimeout(() => {
-        cleanup()
-        reject(new CliError('Timed out waiting for CLI WebSocket subscription.', {
-          exitCode: EXIT_CODES.connection,
-          code: 'ws_subscription_timeout',
-        }))
-      }, timeoutMs)
-      unsubscribeEvent = this.onEvent((event) => {
-        if (predicate(event)) {
-          cleanup()
-          resolve(event)
-        }
-      })
-      unsubscribeDisconnect = this.onDisconnect((error) => {
-        cleanup()
-        reject(error)
-      })
-    })
-  }
-
-  private handleMessage(raw: string): void {
-    let event: ServerEvent
-    try {
-      event = JSON.parse(raw) as ServerEvent
-    } catch {
-      return
-    }
-
-    if (event.type === 'cli_request_success') {
-      this.resolveRequest(event)
-    } else if (event.type === 'cli_request_error') {
-      this.rejectRequest(event)
-    }
-
-    for (const listener of [...this.listeners]) listener(event)
-  }
-
-  private resolveRequest(event: CliRequestSuccessEvent): void {
-    const pending = this.pending.get(event.requestId)
-    if (!pending) return
-    this.pending.delete(event.requestId)
-    pending.resolve(event.result)
-  }
-
-  private rejectRequest(event: CliRequestErrorEvent): void {
-    if (!event.requestId) return
-    const pending = this.pending.get(event.requestId)
-    if (!pending) return
-    this.pending.delete(event.requestId)
-    pending.reject(new CliError(event.message, {
-      exitCode: mapCliRequestErrorExitCode(event),
-      code: event.code,
-      details: { status: event.status, fieldErrors: event.fieldErrors },
-    }))
-  }
-
-  private handleDisconnect(message: string): void {
-    const error = new CliError(message, { exitCode: EXIT_CODES.connection, code: 'ws_closed' })
-    this.rejectPending(error)
-    if (!this.manualClosing) {
-      for (const listener of [...this.disconnectListeners]) listener(error)
-    }
-  }
-
-  private rejectPending(error: CliError): void {
-    for (const [requestId, pending] of this.pending) {
-      this.pending.delete(requestId)
-      pending.reject(error)
-    }
-  }
-
-  private requireOpenSocket(): WebSocket {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      throw new CliError('CLI WebSocket is not open.', { exitCode: EXIT_CODES.connection, code: 'ws_not_open' })
-    }
-    return this.socket
-  }
-}
-
-class RunWaitTracker {
-  private readonly startedAt: number
-  private readonly timeoutMs: number
-  private readonly requirePostDispatch: boolean
-  private readonly dispatchGateStartedAt: number
-  private readonly sessionAgentId: string
-  private readonly projectAgentHandle: string | null
-  private profileId: string | undefined
-  private managerStatus = 'idle'
-  private pendingCount = 0
-  private workers = new Map<string, { status: string }>()
-  private activeTools = 0
-  private pendingChoices: NonNullable<CliHeadlessReadyEvent['pendingChoices']> = []
-  private finalMessage: string | null = null
-  private observedPostDispatchActivity = false
-  private quiescentSince: number | null = null
-  private disconnectedError: CliError | null = null
-  private wakeWaiters = new Set<() => void>()
-  private unsubscribe: (() => void) | null = null
-  private unsubscribeDisconnect: (() => void) | null = null
-
-  constructor(
-    ready: CliHeadlessReadyEvent,
-    options: {
-      startedAt: number
-      dispatchGateStartedAt?: number
-      timeoutMs?: number
-      requirePostDispatch: boolean
-      projectAgentHandle?: string | null
-    },
-  ) {
-    this.startedAt = options.startedAt
-    this.dispatchGateStartedAt = options.dispatchGateStartedAt ?? options.startedAt
-    this.timeoutMs = options.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS
-    this.requirePostDispatch = options.requirePostDispatch
-    this.projectAgentHandle = options.projectAgentHandle ?? null
-    this.sessionAgentId = ready.subscribed.agentId ?? ready.targetAgent?.agentId ?? ''
-    this.profileId = ready.subscribed.profileId ?? ready.profile?.profileId ?? ready.targetAgent?.profileId
-    this.managerStatus = ready.status?.status ?? ready.targetAgent?.status ?? 'idle'
-    this.pendingCount = ready.status?.pendingCount ?? 0
-    this.activeTools = ready.activeTools?.length ?? 0
-    this.pendingChoices = ready.pendingChoices ?? []
-    this.workers = new Map((ready.workers ?? []).map((worker) => [worker.agentId, { status: worker.status }]))
-  }
-
-  async wait(): Promise<CliRunResult> {
-    const start = Date.now()
-    while (true) {
-      if (this.disconnectedError) throw this.disconnectedError
-      const now = Date.now()
-      const blocked = this.pendingChoices.filter((choice) => choice.status === 'pending')
-      if (blocked.length > 0) {
-        return this.result('blocked', now, { reason: 'pending_choice', choices: blocked }, false)
-      }
-      if (this.managerStatus === 'error') return this.result('agent_failure', now, null, false)
-      if (this.managerStatus === 'stopped' || this.managerStatus === 'terminated') return this.result('canceled', now, null, false)
-      if (now - start >= this.timeoutMs) return this.result('timeout', now, null, true)
-
-      if (this.isQuiescent(now)) {
-        const quiescentSince = this.quiescentSince ?? now
-        this.quiescentSince = quiescentSince
-        if (now - quiescentSince >= DEFAULT_DEBOUNCE_MS) {
-          return this.result('success', now, null, false)
-        }
-      } else {
-        this.quiescentSince = null
-      }
-
-      await this.sleepUntilActivity(50)
-    }
-  }
-
-  attach(connection: CliWsConnection): void {
-    this.unsubscribe = connection.onEvent((event) => this.apply(event))
-    this.unsubscribeDisconnect = connection.onDisconnect((error) => {
-      this.disconnectedError = error
-      this.wake()
-    })
-  }
-
-  detach(): void {
-    this.unsubscribe?.()
-    this.unsubscribeDisconnect?.()
-    this.unsubscribe = null
-    this.unsubscribeDisconnect = null
-  }
-
-  private apply(event: ServerEvent): void {
-    switch (event.type) {
-      case 'agent_status':
-        if (event.agentId === this.sessionAgentId) {
-          this.managerStatus = event.status
-          this.pendingCount = event.pendingCount
-        } else if (event.managerId === this.sessionAgentId) {
-          this.workers.set(event.agentId, { status: event.status })
-        }
-        this.markActivity()
-        return
-
-      case 'session_workers_snapshot':
-        if (event.sessionAgentId === this.sessionAgentId) {
-          this.workers = new Map(event.workers.map((worker) => [worker.agentId, { status: worker.status }]))
-          this.markActivity()
-        }
-        return
-
-      case 'session_active_tools_snapshot':
-        if (event.sessionAgentId === this.sessionAgentId) {
-          this.activeTools = event.activeTools.length
-          this.markActivity()
-        }
-        return
-
-      case 'cli_pending_choices_snapshot':
-        if (event.sessionAgentId === this.sessionAgentId) {
-          this.pendingChoices = event.choices
-          this.markActivity()
-        }
-        return
-
-      case 'conversation_message':
-        if (
-          event.agentId === this.sessionAgentId &&
-          event.role === 'assistant' &&
-          TERMINAL_ASSISTANT_MESSAGE_SOURCES.has(event.source)
-        ) {
-          this.finalMessage = event.text
-        }
-        this.markActivity()
-        return
-
-      case 'conversation_log':
-      case 'agent_tool_call':
-      case 'agent_message':
-      case 'choice_request':
-      case 'model_cache_observation':
-        this.markActivity()
-        break
-
-      case 'session_plan_snapshot':
-        break
-    }
-  }
-
-  private isQuiescent(now: number): boolean {
-    const dispatchGateOpen = !this.requirePostDispatch || this.observedPostDispatchActivity || now - this.dispatchGateStartedAt >= MIN_POST_DISPATCH_MS
-    return (
-      dispatchGateOpen &&
-      this.managerStatus === 'idle' &&
-      this.pendingCount === 0 &&
-      this.activeTools === 0 &&
-      this.pendingChoices.filter((choice) => choice.status === 'pending').length === 0 &&
-      [...this.workers.values()].every((worker) => worker.status !== 'streaming')
-    )
-  }
-
-  private markActivity(): void {
-    this.observedPostDispatchActivity = true
-    this.quiescentSince = null
-    this.wake()
-  }
-
-  private sleepUntilActivity(ms: number): Promise<void> {
-    if (this.disconnectedError) return Promise.resolve()
-    return new Promise((resolve) => {
-      const wake = () => {
-        clearTimeout(timeout)
-        this.wakeWaiters.delete(wake)
-        resolve()
-      }
-      const timeout = setTimeout(wake, ms)
-      this.wakeWaiters.add(wake)
-    })
-  }
-
-  private wake(): void {
-    const waiters = [...this.wakeWaiters]
-    this.wakeWaiters.clear()
-    for (const waiter of waiters) waiter()
-  }
-
-  private result(
-    status: CliRunResult['status'],
-    now: number,
-    blocked: CliRunResult['blocked'],
-    timedOut: boolean,
-  ): CliRunResult {
-    return {
-      status,
-      sessionAgentId: this.sessionAgentId,
-      profileId: this.profileId,
-      projectAgentHandle: this.projectAgentHandle,
-      finalMessage: this.finalMessage,
-      blocked,
-      timedOut,
-      durationMs: now - this.startedAt,
-    }
-  }
-}
-
 async function readErrorPayload(response: Response): Promise<CliHttpErrorResponse | null> {
-  try {
-    return (await response.json()) as CliHttpErrorResponse
-  } catch {
-    return null
-  }
+  try { return await response.json() as CliHttpErrorResponse } catch { return null }
 }
-
-function buildCliWsUrl(baseUrl: URL): URL {
-  const wsUrl = new URL('/api/cli/ws', baseUrl)
-  wsUrl.protocol = baseUrl.protocol === 'https:' ? 'wss:' : 'ws:'
-  return wsUrl
-}
-
-function buildRunCommand(options: ClientRunOptions): CliRunCommand {
-  return {
-    type: 'cli_run',
-    requestId: randomUUID(),
-    target: toCliRunTarget(options.target),
-    text: options.text,
-    ...(options.delivery ? { delivery: options.delivery } : {}),
-    cli: buildCliMetadata(options.command, options.invocationCwd, options.label),
-  }
-}
-
-function buildSendMessageCommand(
-  target: CliMessageTarget,
-  options: ClientMessageOptions,
-  requestId = randomUUID(),
-): CliWsCommand & { requestId: string } {
-  return {
-    type: 'cli_send_message',
-    requestId,
-    target,
-    text: options.text,
-    ...(options.delivery ? { delivery: options.delivery } : {}),
-  }
-}
-
-function toCliRunTarget(target: ClientRunTarget): CliRunTarget {
-  if (target.kind === 'new_session') {
-    return {
-      kind: 'new_session',
-      profileId: target.profileId,
-      ...(target.label ? { label: target.label } : {}),
-      ...(target.name ? { name: target.name } : {}),
-    }
-  }
-  if (target.kind === 'project_agent') {
-    return { kind: 'project_agent', profileId: target.profileId, handle: target.handle }
-  }
-  return { kind: 'session', agentId: target.agentId }
-}
-
-function buildCliMetadata(command: 'run' | 'launch' | 'sessions create', invocationCwd?: string, label?: string) {
-  return {
-    createdBy: 'forge-cli' as const,
-    runId: randomUUID(),
-    command,
-    startedAt: new Date().toISOString(),
-    ...(invocationCwd ? { invocationCwd } : {}),
-    ...(label ? { label } : {}),
-  }
-}
-
-function featuresForTarget(target: ClientRunTarget): Array<keyof CliStatusResponse['capabilities']['features']> {
-  const features: Array<keyof CliStatusResponse['capabilities']['features']> = [
-    'headlessWs',
-    'cliSourceContext',
-    'cliSessionMetadata',
-    'activeToolSnapshot',
-    'choiceOwnerLookup',
-  ]
-  if (target.kind === 'project_agent') features.push('projectAgentRunTarget')
-  return features
-}
-
 function mapHttpErrorExitCode(status: number, code: string) {
   if (status === 401 || isAuthErrorCode(code)) return EXIT_CODES.auth
   if (status >= 400 && status < 500) return EXIT_CODES.usage
   return EXIT_CODES.connection
-}
-
-function mapCliRequestErrorExitCode(event: CliRequestErrorEvent) {
-  if (event.status === 401 || isAuthErrorCode(event.code)) return EXIT_CODES.auth
-  if (event.code === 'unsupported_command' || event.code === 'unsupported_target' || event.code === 'compaction_unsupported') return EXIT_CODES.unsupported
-  if (event.status && event.status >= 400 && event.status < 500) return EXIT_CODES.usage
-  return EXIT_CODES.connection
-}
-
-function isAuthErrorCode(code: string): boolean {
-  return code === 'missing_authorization' || code === 'malformed_authorization' || code === 'invalid_token' || code === 'revoked_token'
 }
 
 function redactSecret(message: string, secret: string): string {
@@ -1031,3 +448,5 @@ function redactSecret(message: string, secret: string): string {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
+
+function isAuthErrorCode(code: string): boolean { return ['unauthorized', 'forbidden', 'invalid_api_key', 'missing_api_key', 'revoked_api_key'].includes(code) }

@@ -38,7 +38,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, w
       const sourceKey = `input:${input.inputId}`;
       const locator = database.prepare("SELECT byte_offset FROM mirror_sources WHERE source_key=?").get(sourceKey) as { byte_offset: number } | undefined;
       return swarmManager.applyControlledInput(input.message.text, {
-        targetAgentId: input.sessionId, attachments,
+        targetAgentId: input.sessionId, attachments, sourceContext: input.source, delivery: input.delivery,
         controlledInput: {
           inputId: input.inputId, commandId: input.commandId,
           contentHash: createHash("sha256").update(JSON.stringify({ text: input.message.text, artifactIds: [...input.message.artifactIds].sort() })).digest("hex"),

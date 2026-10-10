@@ -3,7 +3,7 @@ import { requireNonSystemSessionProfile } from "../../swarm/system-profile-guard
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
 import type { ControlService, Principal } from "../../environment/control/control-types.js";
 import { StreamFault } from "../../environment/streams/stream-budget.js";
-import { awaitLegacyReceipt, legacyCommandId } from "./legacy-builder-adapter.js";
+import { awaitCommandReceipt, controlCommandId } from "./control-command-helpers.js";
 
 const lifecycleCommands = new Set<ClientCommand["type"]>([
   "resume_session", "kill_agent", "stop_all_agents",
@@ -25,8 +25,8 @@ export async function admitLifecycleCommand<T>(control: ControlService, principa
     if (target && target.role !== "worker") throw new StreamFault("INVALID_INPUT", "Manager cannot be killed.");
     // The typed UI path already uses session.stop for a worker. Both paths now
     // use the manager's effect lane without stopping the owning manager.
-    await awaitLegacyReceipt(control, principal, await control.execute(principal, "session.stop", {
-      commandId: legacyCommandId(principal, "session.stop"), sessionId: targetId,
+    await awaitCommandReceipt(control, principal, await control.execute(principal, "session.stop", {
+      commandId: controlCommandId(principal, "session.stop"), sessionId: targetId,
     }));
     return undefined as T;
   }
@@ -39,7 +39,7 @@ export async function admitLifecycleCommand<T>(control: ControlService, principa
   // the existing requestId; old identifier-less calls are distinct requests.
   const requestId = addressed.requestId ?? (command.type === "choice_cancel" ? addressed.choiceId : undefined);
   return control.admitLifecycle(principal, {
-    commandId: legacyCommandId(principal, command.type, requestId), command: command.type,
+    commandId: controlCommandId(principal, command.type, requestId), command: command.type,
     sessionIds, intent, request: command, ...(command.type === "choice_cancel" ? { choiceId: command.choiceId } : {}),
     preflight() {
       if (command.type === "clear_session" || command.type === "delete_session" || command.type === "archive_session" || command.type === "fork_session") {

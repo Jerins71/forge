@@ -549,6 +549,9 @@ importers:
         specifier: ^8.18.0
         version: 8.19.0
     devDependencies:
+      '@forge/client-runtime':
+        specifier: workspace:*
+        version: link:../client-runtime
       '@types/node':
         specifier: ^24.3.0
         version: 24.10.13

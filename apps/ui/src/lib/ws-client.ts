@@ -39,23 +39,18 @@ import {
   buildBrowserTabCloseCommand,
   buildBrowserTabOpenCommand,
   buildBrowserTabResizeCommand,
-  buildChoiceCancelCommand,
   buildChoiceResponseCommand,
   buildClearAllPinsCommand,
   buildCreateSessionCommand,
   buildDismissSessionAttentionCommand,
-  buildForkSessionCommand,
   buildGetConversationPageCommand,
   buildGetSessionWorkersCommand,
   buildHydrateArchiveLastUsedCommand,
-  buildKillAgentCommand,
   buildMarkAllReadCommand,
   buildMarkUnreadCommand,
   buildPinMessageCommand,
   buildPinSessionCommand,
   buildRenameSessionCommand,
-  buildSessionActionCommand,
-  buildStopAllAgentsCommand,
   buildSubscribeCommand,
   buildUserMessageCommand,
   isSocketOpen,
@@ -986,7 +981,9 @@ export class ManagerWsClient {
   }
 
   sendChoiceCancel(agentId: string, choiceId: string): void {
-    this.send(buildChoiceCancelCommand(agentId, choiceId))
+    const owner = this.state.agents.find(agent => agent.agentId === agentId)
+    const sessionId = owner?.role === 'worker' ? owner.managerId : agentId
+    void this.lifecycle('session.choice.cancel', { sessionId, choiceId }).catch(error => this.updateState({ lastError: error instanceof Error ? error.message : 'Choice cancellation failed' }))
   }
 
   async readCodexElicitationUrl(agentId: string, elicitationId: string): Promise<string> {
@@ -1017,32 +1014,27 @@ export class ManagerWsClient {
   }
 
   deleteAgent(agentId: string): void {
-    const trimmed = agentId.trim()
-    if (!trimmed) return
-
-    if (!isSocketOpen(this.socket)) {
-      this.updateState({
-        lastError: RECONNECTING_SOCKET_ERROR,
-      })
-      return
-    }
-
-    this.send(buildKillAgentCommand(trimmed))
+    const workerId = agentId.trim()
+    const sessionId = this.state.agents.find(agent => agent.agentId === workerId)?.managerId ?? this.environmentProjection?.session.sessionId ?? this.desiredAgentId
+    if (!workerId || !sessionId) return
+    void this.lifecycle('worker.stop', { sessionId, workerId }).catch(error => this.updateState({ lastError: error instanceof Error ? error.message : 'Worker stop failed' }))
   }
-
-  async stopAllAgents(
-    managerId: string,
-  ): Promise<{ managerId: string; stoppedWorkerIds: string[]; managerStopped: boolean }> {
-    const trimmed = managerId.trim()
-    if (!trimmed) {
-      throw new Error('Manager id is required.')
-    }
-
-    assertReconnectableSocket(this.socket)
-
-    return this.requestDispatcher.enqueueRequest('stop_all_agents', (requestId) =>
-      buildStopAllAgentsCommand(trimmed, requestId),
-    )
+  async stopAllAgents(managerId: string): Promise<{ managerId: string; stoppedWorkerIds: string[]; managerStopped: boolean }> {
+    const stoppedWorkerIds = this.state.agents.filter(agent => agent.role === 'worker' && agent.managerId === managerId && agent.status !== 'terminated').map(agent => agent.agentId)
+    await this.lifecycle('session.stop', { sessionId: managerId })
+    return { managerId, stoppedWorkerIds, managerStopped: true }
+  }
+  private async lifecycle<M extends Extract<CommandReceipt['method'], 'session.stop' | 'session.resume' | 'session.archive' | 'session.restore' | 'session.clear' | 'session.delete' | 'session.fork' | 'session.choice.cancel' | 'worker.stop' | 'worker.resume'>>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<CommandReceipt> {
+    if (!this.environmentClient) throw new Error('A paired environment is required')
+    const key = JSON.stringify([method, input])
+    const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
+    this.intentCommandIds.set(key, commandId)
+    try {
+      const receipt = await this.environmentClient.request(method, { ...input, commandId } as RpcInput<M>)
+      this.intentCommandIds.delete(key)
+      if (receipt.state === 'failed' || receipt.state === 'interrupted') throw new Error(receipt.error?.message ?? 'Session operation was interrupted; inspect the current state')
+      return receipt
+    } catch (error) { if (!isRetryableEnvironmentError(error)) this.intentCommandIds.delete(key); throw error }
   }
 
   private requirePolicyClient(): void {
@@ -1202,48 +1194,33 @@ export class ManagerWsClient {
   }
 
   async stopSession(agentId: string): Promise<SessionActionResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('stop_session', (requestId) =>
-      buildSessionActionCommand('stop_session', agentId, requestId),
-    )
+    const worker = this.state.agents.find(agent => agent.agentId === agentId && agent.role === 'worker')
+    worker ? await this.lifecycle('worker.stop', { sessionId: worker.managerId, workerId: agentId }) : await this.lifecycle('session.stop', { sessionId: agentId })
+    return { agentId }
   }
-
   async resumeSession(agentId: string): Promise<SessionActionResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('resume_session', (requestId) =>
-      buildSessionActionCommand('resume_session', agentId, requestId),
-    )
+    const worker = this.state.agents.find(agent => agent.agentId === agentId && agent.role === 'worker')
+    worker ? await this.lifecycle('worker.resume', { sessionId: worker.managerId, workerId: agentId }) : await this.lifecycle('session.resume', { sessionId: agentId })
+    return { agentId }
   }
-
   async archiveSession(agentId: string): Promise<SessionArchiveResult> {
-    assertReconnectableSocket(this.socket)
+    const receipt = await this.lifecycle('session.archive', { sessionId: agentId })
     this.invalidateConversationSnapshotAgent(agentId)
-    return this.requestDispatcher.enqueueRequest('archive_session', (requestId) =>
-      buildSessionActionCommand('archive_session', agentId, requestId),
-    )
+    return { agentId, profileId: receipt.projectId!, archivedAt: receipt.result?.archivedAt ?? receipt.updatedAt }
   }
-
   async restoreSession(agentId: string): Promise<SessionRestoreResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('restore_session', (requestId) =>
-      buildSessionActionCommand('restore_session', agentId, requestId),
-    )
+    const receipt = await this.lifecycle('session.restore', { sessionId: agentId })
+    return { agentId, profileId: receipt.projectId!, openAgentId: receipt.result?.openAgentId }
   }
-
   async deleteSession(agentId: string): Promise<SessionActionResult> {
-    assertReconnectableSocket(this.socket)
+    await this.lifecycle('session.delete', { sessionId: agentId })
     this.invalidateConversationSnapshotAgent(agentId)
-    return this.requestDispatcher.enqueueRequest('delete_session', (requestId) =>
-      buildSessionActionCommand('delete_session', agentId, requestId),
-    )
+    return { agentId }
   }
-
   async clearSession(agentId: string): Promise<SessionActionResult> {
-    assertReconnectableSocket(this.socket)
+    await this.lifecycle('session.clear', { sessionId: agentId })
     this.invalidateConversationSnapshotAgent(agentId)
-    return this.requestDispatcher.enqueueRequest('clear_session', (requestId) =>
-      buildSessionActionCommand('clear_session', agentId, requestId),
-    )
+    return { agentId }
   }
 
   controlSessionGoal(agentId: string, action: SessionGoalControlAction): void {
@@ -1296,16 +1273,15 @@ export class ManagerWsClient {
     )
   }
 
-  async forkSession(
-    sourceAgentId: string,
-    label?: string,
-    fromMessageId?: string,
-    options?: { sessionPurpose?: 'side_chat' },
-  ): Promise<SessionForkedResult> {
-    assertReconnectableSocket(this.socket)
-    return this.requestDispatcher.enqueueRequest('fork_session', (requestId) =>
-      buildForkSessionCommand(sourceAgentId, label, fromMessageId, requestId, options?.sessionPurpose),
-    )
+  async forkSession(sourceAgentId: string, label?: string, fromMessageId?: string, options?: { sessionPurpose?: 'side_chat' }): Promise<SessionForkedResult> {
+    const receipt = await this.lifecycle('session.fork', { sessionId: sourceAgentId, ...(label ? { title: label } : {}), ...(fromMessageId ? { fromItemId: fromMessageId } : {}), ...(options?.sessionPurpose ? { purpose: options.sessionPurpose } : {}) })
+    const sessionId = receipt.result?.sessionId ?? receipt.sessionId
+    if (!sessionId) throw new Error('Session fork has no reserved identity')
+    const shell = this.environmentClient!.shell.getSnapshot()
+    const source = shell.sessions.get(sourceAgentId)
+    const summary = shell.sessions.get(sessionId) ?? (source && { ...source, sessionId, title: label ?? source.title, status: 'idle' as const, archived: false, updatedAt: receipt.updatedAt })
+    if (!summary) throw new Error('Session fork is awaiting shell synchronization')
+    return { sourceAgentId, newSessionAgent: projectSession(summary, shell) }
   }
 
   private projectAgentFeatures() {

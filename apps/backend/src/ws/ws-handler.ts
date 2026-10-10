@@ -28,7 +28,8 @@ import type { PresentedChatArtifactTicketStore } from "../swarm/session/presente
 import type { HtmlArtifactPreviewStore } from "../swarm/session/html-artifact-preview.js";
 import type { ControlService, EnvironmentAccessPort, Principal } from "../environment/control/control-types.js";
 import { createBrowserHostRpc, type BrowserHostRpc } from "./rpc/browser-host-rpc.js";
-import { awaitLegacyReceipt, executeMigratedLegacyCommand, legacyCommandScopes, legacySessionEventAllowlist, type LegacyHandlerPorts } from "./rpc/legacy-builder-adapter.js";
+import { executeMigratedLegacyCommand, legacyCommandScopes, legacySessionEventAllowlist, type LegacyHandlerPorts } from "./rpc/legacy-builder-adapter.js";
+import { awaitCommandReceipt } from "./rpc/control-command-helpers.js";
 import type { DetailFeatureStreamItem, RpcInput } from "@forge/protocol/environment-v2";
 import { projectDetailFeature } from "./rpc/detail-feature-rpc.js";
 import { StreamQueue, StreamFault } from "../environment/streams/stream-budget.js";
@@ -422,7 +423,7 @@ export class WsHandler {
       }
       if (migrated) {
         const stoppedWorkerIds = command.type === "stop_session" ? this.swarmManager.listWorkersForSession(command.agentId).map(worker => worker.agentId) : [];
-        const receipt = await awaitLegacyReceipt(this.environmentControl.control, principal,
+        const receipt = await awaitCommandReceipt(this.environmentControl.control, principal,
           await executeMigratedLegacyCommand(this.environmentControl.control, principal, command,
             this.subscriptionManager.getSubscribedAgentId(socket) ?? ""));
         if (command.type === "create_session") {

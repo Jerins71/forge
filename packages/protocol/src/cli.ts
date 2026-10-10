@@ -410,6 +410,7 @@ export interface CliMessageDispatchResult {
   profileId?: string
   messageId?: string
   acceptedAt: string
+  sourceContext?: import('./messaging.js').MessageSourceContext
 }
 
 export interface CliSessionCreatedResult {

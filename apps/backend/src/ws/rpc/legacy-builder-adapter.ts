@@ -1,7 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
+import { controlCommandId } from "./control-command-helpers.js";
 import { legacySessionEventAllowlist, validateLegacySessionEvent, isBoundedLegacyValue as bounded, type ClientCommand, type ServerEvent } from "@forge/protocol";
 export { legacySessionEventAllowlist, validateLegacySessionEvent } from "@forge/protocol";
-import { rpcScopes, type Scope, type RpcInput, type RpcOutput, type RpcStreamItem, type CommandReceipt } from "@forge/protocol/environment-v2";
+import { rpcScopes, type Scope, type RpcInput, type RpcOutput, type RpcStreamItem } from "@forge/protocol/environment-v2";
 import type { ControlService, EnvironmentAccessPort, Principal } from "../../environment/control/control-types.js";
 import { StreamFault, StreamQueue, encodedBytes } from "../../environment/streams/stream-budget.js";
 import { parseClientCommand } from "../ws-command-parser.js";
@@ -95,35 +95,17 @@ export function createLegacyBuilderAdapter({ access, ports }: { access: Environm
   return { execute, subscribe };
 }
 
-export function legacyCommandId(principal: Principal, method: string, requestId?: string): string {
-  if (!requestId) return randomUUID();
-  const hex = createHash("sha256").update(`${principal.deviceSessionId}\0${method}\0${requestId}`).digest("hex").slice(0, 32);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-/** Old clients require materialized descriptors; accepted intent remains retryable after timeout. */
-export async function awaitLegacyReceipt(control: ControlService, principal: Principal, receipt: CommandReceipt): Promise<CommandReceipt> {
-  const deadline = Date.now() + 30_000;
-  while (receipt.state === "accepted" || receipt.state === "running") {
-    if (Date.now() >= deadline) throw new StreamFault("UNAVAILABLE", `Command ${receipt.commandId} was accepted and is still pending.`);
-    await new Promise(resolve => setTimeout(resolve, 25));
-    receipt = await control.getReceipt(principal, receipt.commandId);
-  }
-  if (receipt.state !== "succeeded") throw new StreamFault(receipt.error?.code ?? "UNAVAILABLE", receipt.error?.message ?? `Command ${receipt.commandId} was interrupted.`);
-  return receipt;
-}
-
 export async function executeMigratedLegacyCommand(control: ControlService, principal: Principal, command: ClientCommand, sessionId: string) {
   switch (command.type) {
     case "create_session":
       if (command.sessionPurpose) throw new StreamFault("UNAVAILABLE", "Controlled session purpose is unsupported.");
-      return control.execute(principal, "session.launch", { commandId: legacyCommandId(principal, "session.launch", command.requestId), projectId: command.profileId,
+      return control.execute(principal, "session.launch", { commandId: controlCommandId(principal, "session.launch", command.requestId), projectId: command.profileId,
         title: command.label ?? command.name ?? "New session", workspaceStrategy: { kind: "current_checkout" } });
     case "user_message":
       if (command.attachments?.length || command.replyTo || command.delivery && command.delivery !== "auto" || command.sessionReferenceAgentIds?.length) throw new StreamFault("UNAVAILABLE", "This legacy message needs the typed V2 input path.");
-      return control.execute(principal, "session.send", { commandId: legacyCommandId(principal, "session.send", command.clientRequestId), sessionId: command.agentId ?? sessionId, message: { text: command.text, artifactIds: [] } });
-    case "choice_response": return control.execute(principal, "session.choose", { commandId: legacyCommandId(principal, "session.choose"), sessionId: command.agentId, choiceId: command.choiceId, answers: command.answers });
-    case "stop_session": return control.execute(principal, "session.stop", { commandId: legacyCommandId(principal, "session.stop", command.requestId), sessionId: command.agentId });
+      return control.execute(principal, "session.send", { commandId: controlCommandId(principal, "session.send", command.clientRequestId), sessionId: command.agentId ?? sessionId, message: { text: command.text, artifactIds: [] } });
+    case "choice_response": return control.execute(principal, "session.choose", { commandId: controlCommandId(principal, "session.choose"), sessionId: command.agentId, choiceId: command.choiceId, answers: command.answers });
+    case "stop_session": return control.execute(principal, "session.stop", { commandId: controlCommandId(principal, "session.stop", command.requestId), sessionId: command.agentId });
     default: throw new StreamFault("INVALID_INPUT", "Not a migrated command.");
   }
 }

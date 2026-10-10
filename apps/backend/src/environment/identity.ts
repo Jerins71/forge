@@ -50,6 +50,8 @@ const capabilities: EnvironmentCapabilities = {
   artifactUpload: true,
   terminal: true,
   legacyAdapter: true,
+  cliTransport: true,
+  sessionLifecycle: true,
   projectPolicy: true,
 };
 function describe(file: EnvironmentIdentityFile, options: IdentityOptions): EnvironmentIdentity {

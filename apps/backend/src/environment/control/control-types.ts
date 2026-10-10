@@ -66,6 +66,7 @@ export interface SwarmControlPort {
     projectId: string;
     title: string;
     cwd: string;
+    cli?: RpcInput<"session.launch">["cli"];
     model?: { provider: string; modelId: string; thinkingLevel?: string };
   }): Promise<{ materialized: true }>;
   applyInput(input: {
@@ -74,6 +75,8 @@ export interface SwarmControlPort {
     sessionId: string;
     runGeneration: number;
     message: RpcInput<"session.send">["message"];
+    source?: RpcInput<"session.send">["source"];
+    delivery?: RpcInput<"session.send">["delivery"];
     /** Implemented by the control DB; invoked at the matching boundary inside the existing coordinator. */
     beforeDispatch(): Promise<"dispatch" | "do-not-dispatch">;
     onCanonicalAppend(entryId: string): Promise<void>;

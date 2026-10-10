@@ -1,3 +1,4 @@
+import { createSessionLifecycleRpc } from "../ws/rpc/session-lifecycle-rpc.js";
 import { recoveryProjection } from "./streams/wire-projection.js";
 import { ProjectAgentRpc } from "../ws/rpc/project-agent-rpc.js";
 import { createProjectAgentReferenceRoutes } from "../ws/http/routes/project-agent-reference-routes.js";
@@ -226,6 +227,7 @@ export async function createEnvironmentService(options: {
           access: auth,
           control: owner.controlService,
           projectAgents,
+          lifecycle: createSessionLifecycleRpc({ swarmManager, control: owner.controlService }),
           detailFeatures: createDetailFeatureRpc({ swarmManager, control: owner.controlService }),
           featureStream: { subscribe: (principal, input, signal) => wsHandler.detailFeatures(principal, input, signal) },
           shellStream,

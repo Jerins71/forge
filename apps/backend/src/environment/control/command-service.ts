@@ -381,6 +381,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
               title: launch.title,
               cwd: prepared.cwd,
               model: prepared.model,
+              ...(launch.cli ? { cli: launch.cli } : {}),
             },
           },
         );
@@ -458,7 +459,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           )
           .run(inputId, commandId, sessionId, JSON.stringify(message), runGeneration);
         options.artifacts.pinInput(inputId, rows);
-        effects.push({ kind: "input.apply", inputId, message, runGeneration });
+        effects.push({ kind: "input.apply", inputId, message, runGeneration, ...(method === "session.send" ? { source: (input as RpcInput<"session.send">).source, delivery: (input as RpcInput<"session.send">).delivery } : {}) });
       }
       let dependency: string | null = null;
       effects.forEach((effect, ordinal) => {

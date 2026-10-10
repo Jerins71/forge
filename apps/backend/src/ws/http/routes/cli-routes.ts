@@ -1,3 +1,4 @@
+import { getHttpPrincipal } from "../../rpc/http-principal.js";
 import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
@@ -94,10 +95,12 @@ async function handleCliHttpRequest(
     return;
   }
 
-  const authResult = await authenticateCliHttpRequest(options.cliAccessService, request);
-  if (!authResult.ok) {
-    sendCliAuthFailure(request, response, authResult);
-    return;
+  const principal = getHttpPrincipal(request);
+  if (principal) {
+    if (!principal.scopes.has('session:read')) { sendCliError(response, 403, 'forbidden', 'Session read scope is required'); return; }
+  } else {
+    const authResult = await authenticateCliHttpRequest(options.cliAccessService, request);
+    if (!authResult.ok) { sendCliAuthFailure(request, response, authResult); return; }
   }
 
   if (request.method !== "GET") {

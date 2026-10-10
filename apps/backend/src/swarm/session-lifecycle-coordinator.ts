@@ -487,6 +487,7 @@ export class SessionLifecycleCoordinator {
     sourceAgentId: string,
     options?: {
       label?: string;
+      sessionAgentId?: string;
       fromMessageId?: string;
       sessionPurpose?: AgentDescriptor["sessionPurpose"];
     },

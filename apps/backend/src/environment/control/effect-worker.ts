@@ -157,6 +157,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
             inputId: effect.inputId,
             runGeneration: effect.runGeneration,
             message: effect.message,
+            source: effect.source, delivery: effect.delivery,
             async onCanonicalAppend(entryId) {
               sink.transaction((tx) => {
                 if (!isOwnClaim(row)) throw new Error("Canonical append no longer owns its effect claim");

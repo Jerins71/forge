@@ -106,3 +106,29 @@ describe('environment command identity', () => {
     await until(() => commandIds('session.choose').size === 2)
   })
 })
+
+// Batch 8 acceptance cases precede native lifecycle implementation.
+describe('native environment lifecycle consumers', () => {
+  it.each([
+    ['session.resume', (f: ManagerWsClient) => f.resumeSession('session-1')],
+    ['session.archive', (f: ManagerWsClient) => f.archiveSession('session-1')],
+    ['session.restore', (f: ManagerWsClient) => f.restoreSession('session-1')],
+    ['session.clear', (f: ManagerWsClient) => f.clearSession('session-1')],
+    ['session.delete', (f: ManagerWsClient) => f.deleteSession('session-1')],
+    ['session.fork', (f: ManagerWsClient) => f.forkSession('session-1', 'fork')],
+    ['session.stop', (f: ManagerWsClient) => f.stopAllAgents('session-1')],
+    ['session.choice.cancel', (f: ManagerWsClient) => f.sendChoiceCancel('session-1', 'choice-1')],
+    ['worker.stop', (f: ManagerWsClient) => f.deleteAgent('worker-1')],
+  ] as const)('%s uses a native receipt and no legacy request', async (method, invoke) => {
+    const { server, facade } = await environment()
+    server.transformOutbound = value => {
+      const frame = value as { output?: CommandReceipt }
+      if (frame.output?.commandId) return { ...frame, output: { ...frame.output, state: 'succeeded', result: { sessionId: 'session-1', projectId: 'project-1' } } }
+      return value
+    }
+    const operation = Promise.resolve(invoke(facade)).catch(() => {})
+    await until(() => server.inputs.some(entry => entry.method === method))
+    expect(server.inputs.filter(entry => entry.method.startsWith('legacy.') && entry.method !== 'legacy.session.subscribe')).toEqual([])
+    await operation
+  })
+})

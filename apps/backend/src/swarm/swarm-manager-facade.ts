@@ -131,6 +131,7 @@ export interface CreateManagerInput {
 export type SetSessionProjectAgentInput = SessionProjectAgentInput;
 
 export interface ForkSessionOptions {
+  sessionAgentId?: string;
   label?: string;
   fromMessageId?: string;
   sessionPurpose?: AgentDescriptor["sessionPurpose"];

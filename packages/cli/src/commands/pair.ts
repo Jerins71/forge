@@ -1,6 +1,6 @@
 import { generateKeyPairSync, createHash, sign } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { open, readFile, stat, rm } from 'node:fs/promises';
+import { open, readFile, lstat, rm } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import type { PairingExchange, PairingExchangeResult, Scope } from '../../../protocol/src/environment-v2.js';
 import type { CommandContext } from './types.js';
@@ -45,16 +45,16 @@ export async function exchangePairing(options: { baseUrl: string; environmentId:
 async function storeOsCredential(credential: CliEnvironmentCredential): Promise<void> {
   if (process.platform === 'darwin') {
     // security's interactive mode accepts the secret through stdin, never argv.
-    await runWithPrivateInput('/usr/bin/security', ['-i'], `add-generic-password -U -a ${credential.deviceSessionId} -s forge.environment.${credential.environmentId} -w ${credential.bearerToken}\n`);
+    await runWithPrivateInput('/usr/bin/security', ['-i'], `add-generic-password -U -a ${credential.deviceSessionId} -s forge.environment.${credential.environmentId} -w ${JSON.stringify(JSON.stringify(credential))}\n`);
     return;
   }
   if (process.platform === 'linux') {
-    await runWithPrivateInput('secret-tool', ['store', '--label=Forge environment', 'application', 'Forge', 'environment', credential.environmentId], credential.bearerToken);
+    await runWithPrivateInput('secret-tool', ['store', '--label=Forge environment', 'application', 'Forge', 'environment', credential.environmentId], JSON.stringify(credential));
     return;
   }
   if (process.platform === 'win32') {
     const service = `forge.environment.${credential.environmentId}`;
-    const script = `$ErrorActionPreference='Stop'; [void][Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]; [void][Windows.Security.Credentials.PasswordCredential,Windows.Security.Credentials,ContentType=WindowsRuntime]; $vault=New-Object Windows.Security.Credentials.PasswordVault; $item=New-Object Windows.Security.Credentials.PasswordCredential -ArgumentList ${JSON.stringify(service)},${JSON.stringify(credential.deviceSessionId)},${JSON.stringify(credential.bearerToken)}; $vault.Add($item);`;
+    const script = `$ErrorActionPreference='Stop'; [void][Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]; [void][Windows.Security.Credentials.PasswordCredential,Windows.Security.Credentials,ContentType=WindowsRuntime]; $vault=New-Object Windows.Security.Credentials.PasswordVault; $item=New-Object Windows.Security.Credentials.PasswordCredential -ArgumentList ${JSON.stringify(service)},${JSON.stringify(credential.deviceSessionId)},${JSON.stringify(JSON.stringify(credential))}; $vault.Add($item);`;
     await runWithPrivateInput('powershell.exe',['-NoProfile','-NonInteractive','-Command','-'],script); return;
   }
   throw new Error('OS credential storage is unavailable; explicitly supply --credential-file <absolute-file> for owner-only fallback storage');
@@ -88,10 +88,11 @@ export async function pairEnvironment(options: { target: string; code?: string; 
 }
 export async function loadCliCredential(path: string): Promise<CliEnvironmentCredential> {
   if (!isAbsolute(path)) throw new Error('Credential file must be absolute');
-  const info = await stat(path);
+  const info = await lstat(path);
+  if (!info.isFile()) throw new Error("Credential file must be a regular file");
   if (process.platform !== 'win32' && (info.mode & 0o077) !== 0) throw new Error('Credential file must be owner-only');
   const value = JSON.parse(await readFile(path, 'utf8')) as CliEnvironmentCredential;
-  if (!value || !/^[A-Za-z0-9_-]{43}$/.test(value.bearerToken)) throw new Error('Invalid credential file');
+  validateCliCredential(value);
   return value;
 }
 export async function readHiddenPairingInput(): Promise<string> {
@@ -113,4 +114,44 @@ export async function handlePairCommand(context: CommandContext): Promise<number
   const secret = await readHiddenPairingInput();
   const result = await pairEnvironment({ target: secret.includes('://') ? secret : parsed.baseUrl, code: secret.includes('://') ? undefined : secret, expectedEnvironmentId: context.args.options.environmentId ?? parsed.environmentId, credentialFile: context.args.options.credentialFile, deviceName: context.args.options.name, scopes: context.args.options.scopes?.split(',') as Scope[] | undefined });
   writeHuman(context.io, context.args.options, `Paired with ${result.environment.label} (${result.environment.environmentId}).`); return 0;
+}
+
+export function validateCliCredential(value: CliEnvironmentCredential): void {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  if (!value || !uuid.test(value.environmentId) || !uuid.test(value.deviceSessionId) || !/^[A-Za-z0-9_-]{43}$/.test(value.bearerToken)) throw new Error('Invalid environment credential');
+  if (parsePairTarget(value.baseUrl).baseUrl !== value.baseUrl) throw new Error('Invalid credential base URL');
+}
+async function readPrivateOutput(command: string, args: string[], input?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd: process.cwd(), stdio: ['pipe','pipe','ignore'], windowsHide: true });
+    let output = ''; const fail = () => reject(new Error('Paired credential is unavailable; pair again or select --credential-file'));
+    child.on('error', fail); child.stdin.on('error', fail);
+    child.stdout.on('data', chunk => { output += String(chunk); if (output.length > 16384) { child.kill(); fail(); } });
+    child.on('exit', code => code === 0 ? resolve(output.trim()) : fail()); child.stdin.end(input);
+  });
+}
+/** Selection is explicit: the environment UUID is the OS-vault service key. */
+export async function loadOsCliCredential(environmentId: string, baseUrl?: string): Promise<CliEnvironmentCredential> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(environmentId)) throw new Error('Select a paired environment with --environment-id <UUID>');
+  let raw: string;
+  if (process.platform === 'darwin') raw = await readPrivateOutput('/usr/bin/security', ['find-generic-password','-s',`forge.environment.${environmentId}`,'-w']);
+  else if (process.platform === 'linux') raw = await readPrivateOutput('secret-tool', ['lookup','application','Forge','environment',environmentId]);
+  else if (process.platform === 'win32') raw = await readPrivateOutput('powershell.exe', ['-NoProfile','-NonInteractive','-Command','-'], `$ErrorActionPreference='Stop'; [void][Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]; $vault=New-Object Windows.Security.Credentials.PasswordVault; $item=$vault.FindAllByResource('forge.environment.${environmentId}')[0]; $item.RetrievePassword(); [Console]::Write($item.Password);`);
+  else throw new Error('OS credential storage is unavailable; select --credential-file');
+  // Phase 1 vault entries stored only a token. Resolve their session after the
+  // caller supplies a URL and the public identity matches the selected pin.
+  let credential: CliEnvironmentCredential;
+  if (/^[A-Za-z0-9_-]{43}$/.test(raw)) {
+    if (!baseUrl) throw new Error('Supply --url for this existing paired credential');
+    const url = parsePairTarget(baseUrl).baseUrl;
+    const descriptor = await request(url, '/api/v2/environment') as { environmentId: string; protocolVersion: number };
+    if (descriptor.environmentId !== environmentId || descriptor.protocolVersion !== 1) throw new Error('Environment identity or protocol mismatch');
+    const response = await fetch(url + '/api/v2/access/session', { headers: { Authorization: `Bearer ${raw}`, 'x-forge-environment-protocol': '1' }, redirect: 'error', signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error('Paired credential was revoked or expired; pair again');
+    const session = await response.json() as { deviceSession: { deviceSessionId: string } };
+    credential = { environmentId, baseUrl: url, bearerToken: raw, deviceSessionId: session.deviceSession.deviceSessionId };
+  } else credential = JSON.parse(raw) as CliEnvironmentCredential;
+  validateCliCredential(credential);
+  if (credential.environmentId !== environmentId) throw new Error('Credential environment identity mismatch');
+  return { ...credential, ...(baseUrl ? { baseUrl: parsePairTarget(baseUrl).baseUrl } : {}) };
 }
