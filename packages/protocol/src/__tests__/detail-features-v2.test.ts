@@ -10,6 +10,22 @@ const recovery = {
   undeliveredReports: [{ deliveryId: 'report', fromAgentId: 'worker', toAgentId: 'manager' }],
 }
 describe('typed detail features', () => {
+  it.each(['session.goal.control', 'session.compact', 'session.elicitation.respond', 'session.features.subscribe'])(
+    'declares the migrated %s family', method => {
+      expect(rpcRegistry[method as keyof typeof rpcRegistry]).toBeDefined()
+    },
+  )
+  it.each(['plan.upsert', 'goal.upsert'])('admits typed persisted %s events', type => {
+    const snapshot = type === 'plan.upsert'
+      ? { revision: 1, updatedAt: null, plan: [] }
+      : { revision: 1, measuredAt: '2026-10-09T00:00:00.000Z', goal: null }
+    expect(Value.Check(DetailStreamItemSchema, { kind: 'event', streamEpoch: '00000000-0000-4000-8000-000000000001',
+      sequence: 1, event: { type, snapshot } })).toBe(true)
+  })
+  it('rejects invalid goal budgets before admission', () => {
+    const input = { commandId: '00000000-0000-4000-8000-000000000001', sessionId: 'session', action: 'edit', objective: 'Verify' }
+    for (const tokenBudget of [0, -1, 1.5, 100000001]) expect(Value.Check(rpcRegistry['session.goal.control'].input, { ...input, tokenBudget })).toBe(false)
+  })
   it('addresses recovery without a selected session and declares durable decision receipts', () => {
     const get = rpcRegistry['recovery.get' as keyof typeof rpcRegistry]
     const decide = rpcRegistry['recovery.decide' as keyof typeof rpcRegistry]

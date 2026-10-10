@@ -7,6 +7,8 @@
 import { Type, type Static, type TSchema } from '@sinclair/typebox'
 import { Value } from '@sinclair/typebox/value'
 import { ProjectAgentInfoV2Schema, ProjectAgentInputV2Schema, ProjectAgentConfigV2Schema, ProjectAgentSharingFields, ProjectAgentDirectoryV2Schema, ProjectAgentFileNameSchema, ProjectAgentRevisionSchema, ProjectAgentOperationReceiptSchema } from './project-agent-v2.js'
+import { PlanSnapshotV2Schema, GoalSnapshotV2Schema, GoalControlV2Schema, ElicitationRespondV2Schema, DetailFeatureStreamItemSchema } from './detail-features-v2.js'
+export * from './detail-features-v2.js'
 import { SESSION_ATTENTION_REASONS } from './session-attention.js'
 
 export const ENVIRONMENT_PROTOCOL_VERSION = 1 as const
@@ -206,9 +208,9 @@ export const RpcErrorSchema = O({
 export type RpcError = Static<typeof RpcErrorSchema>
 export const CommandReceiptSchema = O({
   commandId: V2Uuid,
-  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide'),
+  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact'),
   projectId: Type.Optional(V2Id),
-  result: Type.Optional(O({ projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })), profileIds: Type.Optional(Type.Array(V2Id, { maxItems: 10000 })), rosterId: Type.Optional(V2Id), rosterRevision: Type.Optional(V2Sequence) })),
+  result: Type.Optional(O({ compacted: Type.Optional(Type.Boolean()), reason: Type.Optional(ShortText), projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })), profileIds: Type.Optional(Type.Array(V2Id, { maxItems: 10000 })), rosterId: Type.Optional(V2Id), rosterRevision: Type.Optional(V2Sequence) })),
   sessionId: NullableId,
   state: E('accepted', 'running', 'succeeded', 'failed', 'interrupted'),
   acceptedSequence: V2Sequence, updatedSequence: V2Sequence,
@@ -256,6 +258,7 @@ export const DetailItemSchema = O({
   commandId: Type.Union([V2Uuid, Type.Null()]),
 })
 export const DetailSnapshotSchema = O({
+  plan: Type.Optional(PlanSnapshotV2Schema), goal: Type.Optional(GoalSnapshotV2Schema),
   recovery: Type.Optional(RecoveryStateSchema),
   session: SessionSummarySchema,
   items: Type.Array(DetailItemSchema, { maxItems: 200 }),
@@ -272,6 +275,8 @@ export const ShellEventSchema = Type.Union([
   O({ type: Type.Literal('session.remove'), sessionId: V2Id }),
 ])
 export const DetailEventSchema = Type.Union([
+  O({ type: Type.Literal('plan.upsert'), snapshot: PlanSnapshotV2Schema }),
+  O({ type: Type.Literal('goal.upsert'), snapshot: GoalSnapshotV2Schema }),
   O({ type: Type.Literal('recovery.upsert'), recovery: RecoveryStateSchema }),
   O({ type: Type.Literal('item.upsert'), item: DetailItemSchema }),
   O({ type: Type.Literal('worker.upsert'), worker: WorkerSummarySchema }),
@@ -383,6 +388,11 @@ const defineRpc = <I extends TSchema, R extends TSchema, S extends TSchema | und
 ) => ({ input, output, error: RpcErrorSchema, stream: options?.stream, receipt: options?.receipt === true })
 
 export const rpcSchemas = {
+  'session.goal.control': defineRpc(Type.Union([O({ commandId: V2Uuid, sessionId: V2Id, ...GoalControlV2Schema.anyOf[0].properties }), O({ commandId: V2Uuid, sessionId: V2Id, ...GoalControlV2Schema.anyOf[1].properties })]), CommandReceiptSchema, { receipt: true }),
+  'session.compact': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, mode: E('manual','smart'), customInstructions: Type.Optional(Type.String({ maxLength: 32768 })) }), CommandReceiptSchema, { receipt: true }),
+  'session.elicitation.url': defineRpc(O({ sessionId: V2Id, elicitationId: V2Id, generation: V2Id }), O({ url: Type.String({ minLength: 1, maxLength: 8192 }) })),
+  'session.elicitation.respond': defineRpc(ElicitationRespondV2Schema, V2Empty),
+  'session.features.subscribe': defineRpc(O({ sessionId: V2Id }), SubscribeResult, { stream: DetailFeatureStreamItemSchema }),
   'recovery.get': defineRpc(V2Empty, O({ recovery: RecoveryStateSchema })),
   'recovery.decide': defineRpc(RecoveryDecisionSchema, CommandReceiptSchema, { receipt: true }),
   'environment.get': defineRpc(V2Empty, EnvironmentDescriptorSchema),
@@ -444,6 +454,7 @@ export const rpcSchemas = {
 } as const
 export type Method = keyof typeof rpcSchemas
 export const rpcScopes = {
+  'session.goal.control': 'session:operate', 'session.compact': 'session:operate', 'session.elicitation.url': 'session:operate', 'session.elicitation.respond': 'session:operate', 'session.features.subscribe': 'session:read',
   'recovery.get': 'session:read', 'recovery.decide': 'session:operate',
   'environment.get': 'session:read', 'shell.subscribe': 'session:read', 'shell.page': 'session:read',
   'session.subscribe': 'session:read', 'session.history': 'session:read',

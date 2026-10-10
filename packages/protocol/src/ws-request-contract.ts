@@ -35,7 +35,6 @@ type ContractCommandType = Extract<
   | 'restore_session'
   | 'delete_session'
   | 'clear_session'
-  | 'session_goal_control'
   | 'browser_host_register'
   | 'browser_host_hydrate'
   | 'browser_host_state_report'
@@ -264,13 +263,7 @@ export const WS_REQUEST_CONTRACTS = [
     successEvents: ['session_cleared'],
     errorCodeFragments: ['clear_session'],
   },
-{
-    commandType: 'session_goal_control',
-    resultFamily: 'session_goal_control',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['session_goal_snapshot'],
-    errorCodeFragments: ['session_goal_control'],
-  },
+
 ] as const satisfies readonly WsRequestContract<ContractCommandType, ContractSuccessEventType>[]
 
 export type WsRequestContractType = (typeof WS_REQUEST_CONTRACTS)[number]['commandType']

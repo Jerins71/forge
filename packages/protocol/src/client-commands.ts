@@ -3,8 +3,6 @@ import type { ConversationAttachment } from './attachments.js'
 import type { BrowserClientCommand } from './browser-automation.js'
 import type { ConversationReplyTargetInput } from './conversation-events.js'
 import type { BuilderTimelineChannelView } from './builder-timeline-visibility.js'
-import type { CodexElicitationDecision, CodexElicitationPersistScope } from './codex-elicitation.js'
-import type { SessionGoalControlAction } from './goals.js'
 import type { DismissSessionAttentionCommand } from './session-attention.js'
 import type {
   AgentSessionPurpose,
@@ -35,8 +33,6 @@ export type ClientCommand =
       /** Advertises support for request-correlated session goal control results. */
       goalControlRequestId?: true
     }
-  | { type: 'resume_restart_recovery'; requestId?: string }
-  | { type: 'dismiss_restart_recovery'; requestId?: string }
   | {
       type: 'user_message'
       text: string
@@ -77,7 +73,6 @@ export type ClientCommand =
     }
   | { type: 'clear_session'; agentId: string; requestId?: string }
   | DismissSessionAttentionCommand
-  | ({ type: 'session_goal_control'; agentId: string; requestId?: string } & SessionGoalControlAction)
   | { type: 'pin_message'; agentId: string; messageId: string; pinned: boolean }
   | { type: 'clear_all_pins'; agentId: string }
   | { type: 'get_session_workers'; sessionAgentId: string; requestId?: string }
@@ -91,7 +86,6 @@ export type ClientCommand =
     }
   | { type: 'choice_response'; agentId: string; choiceId: string; answers: ChoiceAnswer[] }
   | { type: 'choice_cancel'; agentId: string; choiceId: string }
-  | { type: 'codex_elicitation_response'; agentId: string; elicitationId: string; decision: CodexElicitationDecision; values?: Record<string, unknown>; persistScope?: CodexElicitationPersistScope }
   | { type: 'mark_unread'; agentId: string; requestId?: string }
   | { type: 'mark_all_read'; profileId: string; requestId?: string }
   | { type: 'ping' }
