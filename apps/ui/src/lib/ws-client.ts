@@ -991,20 +991,25 @@ export class ManagerWsClient {
     const workerId = agentId.trim()
     const sessionId = this.state.agents.find(agent => agent.agentId === workerId)?.managerId ?? this.environmentProjection?.session.sessionId ?? this.desiredAgentId
     if (!workerId || !sessionId) return
-    void this.lifecycle('worker.stop', { sessionId, workerId }).catch(error => this.updateState({ lastError: error instanceof Error ? error.message : 'Worker stop failed' }))
+    void this.lifecycle('worker.kill', { sessionId, workerId }).catch(error => this.updateState({ lastError: error instanceof Error ? error.message : 'Worker kill failed' }))
   }
   async stopAllAgents(managerId: string): Promise<{ managerId: string; stoppedWorkerIds: string[]; managerStopped: boolean }> {
-    const stoppedWorkerIds = this.state.agents.filter(agent => agent.role === 'worker' && agent.managerId === managerId && agent.status !== 'terminated').map(agent => agent.agentId)
-    await this.lifecycle('session.stop', { sessionId: managerId })
-    return { managerId, stoppedWorkerIds, managerStopped: true }
+    const receipt = await this.lifecycle('session.stopAll', { sessionId: managerId })
+    return { managerId, stoppedWorkerIds: receipt.result?.stoppedWorkerIds ?? [], managerStopped: receipt.result?.managerStopped ?? false }
   }
-  private async lifecycle<M extends Extract<CommandReceipt['method'], 'session.stop' | 'session.resume' | 'session.archive' | 'session.restore' | 'session.clear' | 'session.delete' | 'session.fork' | 'session.choice.cancel' | 'worker.stop' | 'worker.resume'>>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<CommandReceipt> {
+  private async lifecycle<M extends Extract<CommandReceipt['method'], 'session.stop' | 'session.stopAll' | 'session.resume' | 'session.archive' | 'session.restore' | 'session.clear' | 'session.delete' | 'session.fork' | 'session.choice.cancel' | 'worker.stop' | 'worker.resume' | 'worker.kill'>>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<CommandReceipt> {
     if (!this.environmentClient) throw new Error('A paired environment is required')
     const key = JSON.stringify([method, input])
     const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
     this.intentCommandIds.set(key, commandId)
     try {
-      const receipt = await this.environmentClient.request(method, { ...input, commandId } as RpcInput<M>)
+      let receipt = await this.environmentClient.request(method, { ...input, commandId } as RpcInput<M>)
+      const deadline = Date.now() + 10_000
+      while (receipt.state === 'accepted' || receipt.state === 'running') {
+        if (Date.now() >= deadline) throw new EnvironmentRuntimeError('UNAVAILABLE', 'Session operation is still settling; retry to inspect its receipt', true)
+        await new Promise(resolve => setTimeout(resolve, 25))
+        receipt = await this.environmentClient.request('command.get', { commandId })
+      }
       this.intentCommandIds.delete(key)
       if (receipt.state === 'failed' || receipt.state === 'interrupted') throw new Error(receipt.error?.message ?? 'Session operation was interrupted; inspect the current state')
       return receipt
@@ -1169,12 +1174,14 @@ export class ManagerWsClient {
 
   async stopSession(agentId: string): Promise<SessionActionResult> {
     const worker = this.state.agents.find(agent => agent.agentId === agentId && agent.role === 'worker')
-    worker ? await this.lifecycle('worker.stop', { sessionId: worker.managerId, workerId: agentId }) : await this.lifecycle('session.stop', { sessionId: agentId })
+    if (worker) await this.lifecycle('worker.stop', { sessionId: worker.managerId, workerId: agentId })
+    else await this.lifecycle('session.stop', { sessionId: agentId })
     return { agentId }
   }
   async resumeSession(agentId: string): Promise<SessionActionResult> {
     const worker = this.state.agents.find(agent => agent.agentId === agentId && agent.role === 'worker')
-    worker ? await this.lifecycle('worker.resume', { sessionId: worker.managerId, workerId: agentId }) : await this.lifecycle('session.resume', { sessionId: agentId })
+    if (worker) await this.lifecycle('worker.resume', { sessionId: worker.managerId, workerId: agentId })
+    else await this.lifecycle('session.resume', { sessionId: agentId })
     return { agentId }
   }
   async archiveSession(agentId: string): Promise<SessionArchiveResult> {

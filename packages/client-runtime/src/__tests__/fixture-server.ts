@@ -14,6 +14,7 @@ import {
 import { defaultFixtureSeeds, type FixtureEnvironmentSeed } from '../fixture.js'
 export async function startFixtureServer(index = 0) {
   const seed: FixtureEnvironmentSeed = structuredClone(defaultFixtureSeeds()[0])
+  seed.descriptor.capabilities.sessionLifecycle = true
   seed.entry.environmentId = `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`
   seed.descriptor.environmentId = seed.entry.environmentId
   seed.descriptor.streamEpoch = seed.entry.environmentId
@@ -145,7 +146,7 @@ export async function startFixtureServer(index = 0) {
           commandId: data.commandId,
           method: method as CommandReceipt['method'],
           sessionId: data.sessionId ?? 'new-session',
-          state: ['session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'].includes(method) ? 'succeeded' : 'accepted',
+          state: ['session.launch', 'session.send', 'session.choose'].includes(method) ? 'accepted' : 'succeeded',
           acceptedSequence: ++sequence,
           updatedSequence: sequence,
           acceptedAt: '2026-10-04T00:00:00.000Z',

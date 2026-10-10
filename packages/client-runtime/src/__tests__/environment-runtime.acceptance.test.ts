@@ -674,6 +674,15 @@ it('gates native session state controls when a paired environment has not advert
   expect(server.inputs.some(i => i.method === 'session.update')).toBe(false)
 })
 
+it('gates native lifecycle controls before writing to an older paired environment', async () => {
+  const { servers: [server], registry } = await fleet(1)
+  server.descriptor = { ...server.seed.descriptor, capabilities: { ...server.seed.descriptor.capabilities, sessionLifecycle: false } }
+  await registry.start(); await online(registry, server.seed.entry.environmentId)
+  const client = registry.get(server.seed.entry.environmentId)
+  await expect(client.request('session.clear', { commandId: crypto.randomUUID(), sessionId: 'session-1' })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
+  expect(server.inputs.some(i => i.method === 'session.clear')).toBe(false)
+})
+
 it('routes project unread clearing under the session state capability independently of project policy', async () => {
   const { servers: [server], registry } = await fleet(1)
   server.descriptor = { ...server.seed.descriptor, capabilities: { ...server.seed.descriptor.capabilities, sessionState: true, projectPolicy: false } }

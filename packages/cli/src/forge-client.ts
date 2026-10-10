@@ -1,7 +1,7 @@
 import { randomUUID, webcrypto } from 'node:crypto'
 import type { ChoiceAnswer, CliAgentShowResponse, CliAgentsListResponse, CliChoiceRouteResult, CliChoiceShowResponse, CliChoicesListResponse, CliHttpErrorResponse, CliMessageDispatchResult, CliProfileShowResponse, CliProfilesListResponse, CliProjectAgentShowResponse, CliProjectAgentsListResponse, CliRunResult, CliSessionCompactionResult, CliSessionCreatedResult, CliSessionShowResponse, CliSessionsListResponse, CliSessionTranscriptResponse, CliStatusResponse } from '@forge/protocol'
 import type { CommandReceipt, RpcInput } from '@forge/protocol/environment-v2'
-import { createEnvironmentRegistry, createMemoryCredentialStore, createMemoryPersistence, EnvironmentRuntimeError, type EnvironmentClient } from '@forge/client-runtime'
+import { createEnvironmentRegistry, createMemoryCredentialStore, createMemoryPersistence, EnvironmentRuntimeError, type EnvironmentClient } from '../../client-runtime/src/index.js'
 import { WebSocket } from 'ws'
 import { CliError } from './output.js'
 import { CLI_PROTOCOL_VERSION, EXIT_CODES } from './version.js'
@@ -203,7 +203,7 @@ export class ForgeClient implements ForgeClientLike {
         await this.send(client, target.sessionId, options, target.messageId)
         const result = await tracker.wait()
         if (result.status === 'timeout' && options.stopOnTimeout) await this.control(client, 'session.stop', { commandId: randomUUID(), sessionId: target.sessionId })
-        return result
+        return this.completeRunResult(result)
       } finally { tracker.dispose() }
     })
   }
@@ -215,9 +215,13 @@ export class ForgeClient implements ForgeClientLike {
         await tracker.ready()
         const result = await tracker.wait()
         if (result.status === 'timeout' && options.stopOnTimeout) await this.control(client, 'session.stop', { commandId: randomUUID(), sessionId: agentId })
-        return result
+        return this.completeRunResult(result)
       } finally { tracker.dispose() }
     })
+  }
+  private async completeRunResult(result: CliRunResult): Promise<CliRunResult> {
+    if (result.blocked) result.blocked.choices = await Promise.all(result.blocked.choices.map(async choice => (await this.showChoice(choice.choiceId, result.sessionAgentId)).choice))
+    return result
   }
   private async resolveTarget(client: EnvironmentClient, target: Exclude<ClientRunTarget, { kind: 'new_session' }>) {
     const sessionId = target.kind === 'session' ? target.agentId : (await this.showProjectAgent(target.profileId, target.handle)).projectAgent.agentId
@@ -247,8 +251,7 @@ export class ForgeClient implements ForgeClientLike {
   pinSession(agentId: string, pinned: boolean): Promise<unknown> { return this.updateSession(agentId, { pinned }) }
   private async updateSession(agentId: string, patch: { title?: string; pinned?: boolean }): Promise<unknown> {
     return this.withEnvironment(async client => {
-      // Batch 3 supplies this registry entry before final deletion.
-      await this.control(client, 'session.update' as CommandReceipt['method'], { commandId: randomUUID(), sessionId: agentId, ...patch } as any)
+      await this.control(client, 'session.update', { commandId: randomUUID(), sessionId: agentId, ...patch })
       const session = (await this.showSession(agentId)).session
       return { agentId, ...(patch.title !== undefined ? { label: patch.title } : { pinned: patch.pinned, pinnedAt: session.pinnedAt ?? null }) }
     })
@@ -265,9 +268,12 @@ export class ForgeClient implements ForgeClientLike {
   smartCompactSession(agentId: string, options: ClientCompactionOptions = {}): Promise<CliSessionCompactionResult> { return this.compact(agentId, 'smart', options) }
   private async compact(agentId: string, mode: 'manual' | 'smart', options: ClientCompactionOptions): Promise<CliSessionCompactionResult> {
     return this.withEnvironment(async client => {
-      const receipt = await this.control(client, 'session.compact', { commandId: randomUUID(), sessionId: agentId, mode, source: 'cli', ...(options.customInstructions ? { customInstructions: options.customInstructions } : {}) })
+      const customInstructions = options.customInstructions?.trim() || undefined
+      const receipt = await this.control(client, 'session.compact', { commandId: randomUUID(), sessionId: agentId, mode, source: 'cli', ...(customInstructions ? { customInstructions } : {}) })
       const compacted = receipt.result?.compacted ?? true
-      return { action: mode === 'manual' ? 'compact' : 'smart_compact', sessionAgentId: agentId, profileId: (await this.showSession(agentId)).session.profileId, outcome: compacted ? 'compacted' : 'skipped', compacted, ...(receipt.result?.reason ? { reason: receipt.result.reason } : {}), customInstructionsProvided: !!options.customInstructions, completedAt: receipt.updatedAt }
+      const reason = receipt.result?.reason
+      const skipped = reason === 'claude_runtime_below_compaction_threshold' || reason === 'claude_runtime_context_usage_unknown' || reason === 'runtime_already_compacted'
+      return { action: mode === 'manual' ? 'compact' : 'smart_compact', sessionAgentId: agentId, profileId: (await this.showSession(agentId)).session.profileId, outcome: compacted ? 'compacted' : skipped ? 'skipped' : 'not_reduced', compacted, ...(!compacted && reason ? { reason } : {}), customInstructionsProvided: !!customInstructions, completedAt: receipt.updatedAt }
     })
   }
   async answerChoice(choiceId: string, answers: ChoiceAnswer[], sessionAgentId?: string): Promise<CliChoiceRouteResult> {

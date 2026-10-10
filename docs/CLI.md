@@ -1,6 +1,6 @@
 # Forge CLI
 
-The Forge CLI is a first-party `forge` command for headless automation against a local Forge backend. It can inspect profiles and sessions, send messages, run one-shot automation, wait for quiescence, and answer pending choices.
+The Forge CLI is a first-party `forge` command for headless automation against a selected paired Forge environment. It can inspect profiles and sessions, send messages, run one-shot automation, wait for quiescence, and answer pending choices.
 
 ## Install
 
@@ -9,7 +9,7 @@ The Forge CLI is a first-party `forge` command for headless automation against a
 The desktop app bundles the CLI, so no separate Node.js install is required.
 
 1. Open **Settings → CLI Access**.
-2. Generate a CLI access key. Copy it immediately; the plaintext key is shown only once.
+2. Pair the environment with `forge pair <url>` after installation; enter its device pairing link or code privately.
 3. Click **Install CLI**. Forge installs a small user-local shim:
    - macOS/Linux: `~/.forge/bin/forge`
    - Windows: `%LOCALAPPDATA%\forge\bin\forge.cmd`
@@ -27,11 +27,11 @@ npm install -g @forge/cli
 
 Requires Node.js 22.19.0 or newer.
 
-Configure the backend URL and API key with environment variables or flags:
+Pair and select an environment for automation:
 
 ```bash
-export FORGE_URL=http://127.0.0.1:47287
-export FORGE_CLI_API_KEY=...
+forge pair http://127.0.0.1:47287
+export FORGE_ENVIRONMENT_ID=<paired-environment-UUID>
 forge doctor
 ```
 
@@ -44,11 +44,11 @@ node packages/cli/dist/cli.js --version
 
 ## Authentication and safety
 
-CLI keys are separate from provider credentials and are managed in **Settings → CLI Access**. Settings-generated keys are stored hash-only by the backend, can be revoked or rotated, and authenticate only the CLI HTTP/WebSocket surfaces.
+Pairing pins the environment UUID and stores a revocable device bearer in the OS vault. Select it with `--environment-id` or `FORGE_ENVIRONMENT_ID`. An explicit owner-only `--credential-file` or `FORGE_CREDENTIAL_FILE` is available on every supported platform. Existing token-only OS entries also require `--url`. A changed URL must advertise the pinned UUID.
 
-Prefer `FORGE_CLI_API_KEY` or `--api-key` for automation. `forge config set apiKey <key>` is available for convenience, but it stores the key as plaintext local config and should be treated as restricted local data.
+CLI keys remain supported for the retained `/api/cli/*` HTTP read routes. They are separate from provider credentials and are managed in **Settings → CLI Access**. Settings-generated keys are stored hash-only by the backend and can be revoked or rotated. `forge config set apiKey <key>` stores plaintext local configuration; prefer `FORGE_CLI_API_KEY` or `--api-key` for reads.
 
-Desktop Forge may bind the backend for LAN/Tailscale access. Anyone who can reach the backend and has a CLI key can control the CLI API, so rotate keys if they are shared accidentally and revoke keys that are no longer needed.
+External old CLI and API-key clients may exist. At final V2 cutover the root and `/api/cli/ws` WebSocket endpoints are removed. Upgrade and pair for session controls; API keys continue to authorize retained HTTP reads and Stream Deck HTTP continues to work. There is no legacy WebSocket fallback. Deploy matching backend/UI/CLI builds; older paired backends without the CLI transport capability return an update-required error.
 
 ## Common commands
 
@@ -78,15 +78,15 @@ Durations accept milliseconds by default or `ms`, `s`, and `m` suffixes. Example
 
 ## Session compaction
 
-`forge sessions compact <agentId> [--instructions <text>]` triggers manual context compaction for a manager session. `forge sessions smart-compact <agentId> [--instructions <text>]` asks the runtime to compact only when useful. Both commands use first-class CLI WebSocket commands, not slash-command wrapping. They follow the session's effective context policy: Summary keeps the current handoff/resume path, while Context v2 uses a deterministic checkpoint, skips the Smart LLM handoff, rejects busy manual attempts until idle, and leaves an idle manager idle. On Context v2, older transcript remains on disk for the agent-only `history` tool (`sessions`, `search`, `read`); there is no human history drawer.
+`forge sessions compact <agentId> [--instructions <text>]` triggers manual context compaction for a manager session. `forge sessions smart-compact <agentId> [--instructions <text>]` asks the runtime to compact only when useful. Both use native `session.compact` receipts. They follow the session's effective context policy: Summary keeps the current handoff/resume path, while Context v2 uses a deterministic checkpoint, skips the Smart LLM handoff, rejects busy manual attempts until idle, and leaves an idle manager idle. On Context v2, older transcript remains on disk for the agent-only `history` tool (`sessions`, `search`, `read`); there is no human history drawer.
 
 The CLI waits for the backend compaction mutation to finish or fail, then prints the normalized result. JSON output includes `action`, `sessionAgentId`, `profileId` when available, `outcome` (`compacted`, `skipped`, or `not_reduced`), `compacted`, `reason` when no compaction happened, `customInstructionsProvided`, and `completedAt`. Human output prints the same compact summary. Context before/after values are shown only if the server includes them.
 
-Compaction is Builder-runtime-only in v1 and requires the server to advertise the `sessionCompaction` capability. Older servers, worker sessions, and runtime providers that do not support compaction return stable unsupported or usage errors instead of falling back to slash commands. Context v2 is executable only by supported ordinary Pi Builder managers (OpenAI/Codex or Anthropic); unsupported surfaces cannot run it. If the CLI WebSocket disconnects before the request result arrives, the CLI exits with the connection error code and does not infer whether compaction continued server-side.
+Compaction requires a manager and a runtime that supports it. Context v2 is executable only by supported ordinary Pi Builder managers (OpenAI/Codex or Anthropic). Receipt recovery uses the original command ID after a dropped response. Interrupted receipts remain inspectable and are never automatically replayed as a new operation.
 
 ## Run semantics
 
-`forge run` sends a CLI-attributed user message and waits for strict session quiescence. The wait checks manager status, pending counts, active workers, active tools, pending choices, and a short debounce window. If a choice blocks the session, the command exits with the blocked-choice exit code instead of guessing an answer.
+`forge run` resolves an environment-qualified target, launches when needed, sends a CLI-attributed message and observes native detail and shell projections. The wait checks manager status, pending counts, active workers, active tools, pending choices, and a short debounce window. If a choice blocks the session, the command exits with the blocked-choice exit code instead of guessing an answer. `wait` never marks a session viewed or read.
 
 `forge launch` sends the message and returns after dispatch acknowledgement. Use `forge wait <agentId>` later to wait for completion.
 
@@ -108,9 +108,9 @@ The CLI uses stable non-zero exit codes for automation.
 | 22 | connection | Network or transport failure |
 | 23 | unsupported | Server/capability mismatch |
 
-A missing CLI API key is a usage/configuration error (`20`). A configured key that the backend rejects is an auth failure (`21`).
+A missing paired selection or HTTP read key is a usage/configuration error (`20`). A rejected credential is an auth failure (`21`). Using an API key for V2 session controls requires pairing and returns unsupported (`23`).
 
-Use `forge doctor --json` to diagnose URL, key, and advertised capability issues.
+Use `forge doctor --json` to diagnose the selected credential and advertised capability issues.
 
 ## Validation notes for contributors
 

@@ -1,6 +1,6 @@
 import type { CliRunResult, CliChoiceOwner } from '@forge/protocol'
 import type { DetailStreamItem, SessionSummary } from '@forge/protocol/environment-v2'
-import type { EnvironmentClient } from '@forge/client-runtime'
+import type { EnvironmentClient } from '../../client-runtime/src/index.js'
 import { CliError } from './output.js'
 import { EXIT_CODES } from './version.js'
 
@@ -21,18 +21,18 @@ export class NativeRunWaitTracker {
   private observed = false
   private gateAt = Date.now()
   private quiescentSince: number | null = null
-  private error: unknown = null
+  private error: Error | null = null
   private readonly releases: (() => void)[] = []
   constructor(private readonly client: EnvironmentClient, private readonly sessionId: string,
     private readonly options: { startedAt: number; timeoutMs?: number; requirePostDispatch: boolean; projectAgentHandle?: string | null }) {
-    this.releases.push(client.subscribe('session.subscribe', { sessionId }, { next: item => this.ingest(item as DetailStreamItem), error: error => { this.error = error } }))
+    this.releases.push(client.subscribe('session.subscribe', { sessionId }, { next: item => this.ingest(item as DetailStreamItem), error: error => this.fail(error) }))
     this.releases.push(client.subscribe('session.features.subscribe', { sessionId }, {
       next: ({ event }) => {
         if (event.type === 'tool.activity') {
           if (this.tools !== event.activity.toolCount) this.activity()
           this.tools = event.activity.toolCount
         }
-      }, error: error => { this.error = error },
+      }, error: error => this.fail(error),
     }))
     this.releases.push(client.shell.subscribe(state => state.sessions.get(sessionId), () => {
       const session = client.shell.getSnapshot().sessions.get(sessionId)
@@ -54,6 +54,7 @@ export class NativeRunWaitTracker {
     }
   }
   dispatched(): void { this.gateAt = Date.now(); this.observed = false; this.quiescentSince = null }
+  private fail(error: unknown): void { this.error = error instanceof Error ? error : new Error(String(error)) }
   private ingest(item: DetailStreamItem): void {
     if (item.kind === 'snapshot') {
       this.session = item.snapshot.session

@@ -163,29 +163,6 @@ export function buildChoiceResponseCommand(
   }
 }
 
-export function buildChoiceCancelCommand(agentId: string, choiceId: string): ClientCommand {
-  return {
-    type: 'choice_cancel',
-    agentId,
-    choiceId,
-  }
-}
-
-export function buildKillAgentCommand(agentId: string): ClientCommand {
-  return {
-    type: 'kill_agent',
-    agentId,
-  }
-}
-
-export function buildStopAllAgentsCommand(managerId: string, requestId: string): ClientCommand {
-  return {
-    type: 'stop_all_agents',
-    managerId,
-    requestId,
-  }
-}
-
 export function buildCreateSessionCommand(
   profileId: string,
   name: string | undefined,
@@ -198,35 +175,6 @@ export function buildCreateSessionCommand(
     name: name?.trim() || undefined,
     label: opts?.label?.trim() || undefined,
     sessionPurpose: opts?.sessionPurpose,
-    requestId,
-  }
-}
-
-export function buildSessionActionCommand(
-  type: 'stop_session' | 'resume_session' | 'archive_session' | 'restore_session' | 'delete_session' | 'clear_session',
-  agentId: string,
-  requestId: string,
-): ClientCommand {
-  return {
-    type,
-    agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    requestId,
-  }
-}
-
-export function buildForkSessionCommand(
-  sourceAgentId: string,
-  label: string | undefined,
-  fromMessageId: string | undefined,
-  requestId: string,
-  sessionPurpose?: 'side_chat',
-): ClientCommand {
-  return {
-    type: 'fork_session',
-    sourceAgentId: requireTrimmedValue(sourceAgentId, 'Source agent id is required.'),
-    label: label?.trim() || undefined,
-    fromMessageId: fromMessageId?.trim() || undefined,
-    ...(sessionPurpose ? { sessionPurpose } : {}),
     requestId,
   }
 }

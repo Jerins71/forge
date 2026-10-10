@@ -16,6 +16,7 @@ import { readManifest, controlEnvironment } from './launch.js'
 import { startFaultProxy } from './fault-proxy.js'
 import { openFixtureRpc, until, fixtureRpcOnce } from './fixtures/rpc-client.js'
 import type { BootstrapSession } from './launch.js'
+import { ForgeClient } from '../../packages/cli/src/forge-client.js'
 
 interface UiEnvironment { environmentId: string; label: string; baseUrl: string; projectTitle: string; sessionId: string }
 interface UiFleet {
@@ -387,6 +388,24 @@ test('Batch 3 UI renders durable session and message pins, rename and foreground
   finally { rpc.close(); }
   expect(shell.sessions.find((s: any) => s.sessionId === sessionId)).toMatchObject({ title: 'Batch 3 UI B', pinnedAt: expect.any(String), unread: 0 });
   assertions.batch3Ui = { environmentId: b.environmentId, sessionId, shellRows: shell.sessions, displayedPins: true, freshClientPins: true, pinOrder: expectedOrder, inboxUnread: true, foregroundRead: true };
+});
+
+test('Batch 8 renamed CLI session renders its new shell title after backend restart', async ({ page }) => {
+  test.setTimeout(15_000);
+  const { b } = fleet!;
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!);
+  const principal = await controlEnvironment<BootstrapSession>(manifest, 'env-b', 'bootstrap');
+  const cli = new ForgeClient({ credential: { environmentId: b.environmentId, deviceSessionId: principal.deviceSession!.deviceSessionId, bearerToken: principal.bearer, baseUrl: b.baseUrl } });
+  const created = await cli.createSession({ profileId: b.sessionId, label: 'Original CLI title' });
+  const sessionId = created.session.agentId;
+  await cli.renameSession(sessionId, 'Renamed CLI after restart');
+  await fleet!.stop(b); await fleet!.start(b);
+  await page.goto(`${fleet!.uiUrl}/?agent=${sessionId}&env=${b.environmentId}`);
+  const row = page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${sessionId}"]`).filter({ visible: true }).first();
+  await expect(row).toContainText('Renamed CLI after restart');
+  await expect(row).not.toContainText('Original CLI title');
+  await shot(page, 'batch8-cli-rename-after-restart');
+  assertions.cliRenameRestart = { environmentId: b.environmentId, sessionId, title: 'Renamed CLI after restart', rendered: true };
 });
 
 test('Project Agent config and references use scoped native contracts and survive fresh bootstrap', async ({ page }) => {

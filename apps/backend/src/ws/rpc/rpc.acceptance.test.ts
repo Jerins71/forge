@@ -8,11 +8,29 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createLegacyBuilderAdapter } from "./legacy-builder-adapter.js";
 import { socketFixture, principal, receipt } from "./__tests__/fixtures.js";
 import type { ControlService } from "../../environment/control/control-types.js";
+import { createSessionLifecycleRpc } from "./session-lifecycle-rpc.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanups.splice(0)) await close(); });
 
 describe("environment RPC real socket boundary", () => {
+  it("preserves system-session resume authority while denying destructive lifecycle mutations", async () => {
+    let resumed = 0;
+    const control: ControlService = {
+      execute: async () => { throw new Error("unused"); },
+      getReceipt: async (_principal, id) => receipt("session.resume", id),
+      admitLifecycle: async (_principal, admission, operation) => { admission.preflight?.(); return operation(); },
+    };
+    const rpc = createSessionLifecycleRpc({ control, swarmManager: {
+      getAgent: () => ({ agentId: "system-session", role: "manager", profileId: "system" }),
+      listProfiles: () => [{ profileId: "system", profileType: "system" }],
+      resumeSession: async () => { resumed++; },
+    } as never });
+    await expect(rpc.execute(principal, "session.resume", { commandId: randomUUID(), sessionId: "system-session" })).resolves.toMatchObject({ method: "session.resume" });
+    expect(resumed).toBe(1);
+    await expect(rpc.execute(principal, "session.clear", { commandId: randomUUID(), sessionId: "system-session" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   it("rejects newer-client unsupported request options before durable acceptance", async () => {
     const f = await socketFixture(); cleanups.push(f.close);
     const c = await f.connect();

@@ -58,9 +58,7 @@ import { getSessionDir } from "./data-paths.js";
 import type { DirectoryListingResult, DirectoryValidationResult } from "./cwd-policy.js";
 import type { ForgeExtensionHost } from "./forge-extension-host.js";
 import type { UpdatePlanInput, UpdatePlanResult } from "./planning/update-plan-tool.js";
-import type {
-  AcceptWorkGraphNodeInput,
-} from "./planning/accept-work-graph-node-tool.js";
+import type { AcceptWorkGraphNodeInput } from "./planning/accept-work-graph-node-tool.js";
 import type { UpdateWorkGraphInput } from "./planning/work-graph-state.js";
 import type { ProjectAgentRecommendations } from "./agents/project-agent-analysis.js";
 import type { ProjectAgentCoordinator } from "./project-agent-coordinator.js";

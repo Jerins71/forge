@@ -36,6 +36,7 @@ const CachedProjectsSchema = Type.Array(ProjectSummarySchema)
 const CachedSessionsSchema = Type.Array(SessionSummarySchema)
 function requiresProjectPolicy(method: string): boolean { return (method.startsWith('project.') && method !== 'project.readState.clear') || method === 'session.configure' || method.startsWith('workspace.directories.') || method === 'settings.recommendedDefaults.apply' }
 const sessionStateMethods = new Set(['session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'])
+const sessionLifecycleMethods = new Set(['session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.fork', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill'])
 export class RuntimeEnvironmentClient implements EnvironmentClient {
   readonly environmentId: string
   readonly http: AuthenticatedHttp
@@ -237,6 +238,7 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
           command?.method in rpcRegistry &&
           rpcRegistry[command.method as PendingCommand['method']].receipt &&
           (!requiresProjectPolicy(command.method) || descriptor.capabilities.projectPolicy) &&
+          (!sessionLifecycleMethods.has(command.method) || descriptor.capabilities.sessionLifecycle) &&
           Value.Check(
             rpcRegistry[command.method as PendingCommand['method']].input,
             command.input,
@@ -252,6 +254,7 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
     input: RpcInput<M>,
     options?: { signal?: AbortSignal },
   ): Promise<RpcOutput<M>> {
+    if (sessionLifecycleMethods.has(method) && !this.descriptor()?.capabilities.sessionLifecycle) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to control session lifecycle')
     if (sessionStateMethods.has(method) && !this.descriptor()?.capabilities.sessionState) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to use session state controls')
     if (requiresProjectPolicy(method) && !this.descriptor()?.capabilities.projectPolicy) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to use project policy controls')
     if (!this.supervisor.isOpen()) throw unavailable()
@@ -362,6 +365,7 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
     this.recovering = true
     try {
       for (const command of this.pending.values()) {
+        if (sessionLifecycleMethods.has(command.method) && !this.descriptor()?.capabilities.sessionLifecycle) continue
         if (sessionStateMethods.has(command.method) && !this.descriptor()?.capabilities.sessionState) continue
         if (requiresProjectPolicy(command.method) && !this.descriptor()?.capabilities.projectPolicy) continue
         if (

@@ -285,10 +285,10 @@ export class CliWsHandler {
         this.requireCliSession(command.agentId);
         const { control, principal } = this.requireControl(socket);
         const receipt = await createSessionStateRpc({ swarmManager: this.swarmManager, control }).execute(principal, "session.update", {
-          commandId: legacyCommandId(principal, "session.update", command.requestId), sessionId: command.agentId,
+          commandId: controlCommandId(principal, "session.update", command.requestId), sessionId: command.agentId,
           ...(command.type === "rename_session" ? { title: command.label } : { pinned: command.pinned }),
         });
-        await awaitLegacyReceipt(control, principal, receipt);
+        await awaitCommandReceipt(control, principal, receipt);
         this.sendRequestSuccess(socket, command, { agentId: command.agentId, ...(command.type === "rename_session" ? { label: command.label } : { pinned: command.pinned, pinnedAt: receipt.result?.pinnedAt ?? null }) });
         return;
       }

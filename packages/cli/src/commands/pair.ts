@@ -54,7 +54,8 @@ async function storeOsCredential(credential: CliEnvironmentCredential): Promise<
   }
   if (process.platform === 'win32') {
     const service = `forge.environment.${credential.environmentId}`;
-    const script = `$ErrorActionPreference='Stop'; [void][Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]; [void][Windows.Security.Credentials.PasswordCredential,Windows.Security.Credentials,ContentType=WindowsRuntime]; $vault=New-Object Windows.Security.Credentials.PasswordVault; $item=New-Object Windows.Security.Credentials.PasswordCredential -ArgumentList ${JSON.stringify(service)},${JSON.stringify(credential.deviceSessionId)},${JSON.stringify(JSON.stringify(credential))}; $vault.Add($item);`;
+    const literal = (value: string) => `'${value.replaceAll("'", "''")}'`;
+    const script = `$ErrorActionPreference='Stop'; [void][Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]; [void][Windows.Security.Credentials.PasswordCredential,Windows.Security.Credentials,ContentType=WindowsRuntime]; $vault=New-Object Windows.Security.Credentials.PasswordVault; $item=New-Object Windows.Security.Credentials.PasswordCredential -ArgumentList ${literal(service)},${literal(credential.deviceSessionId)},${literal(JSON.stringify(credential))}; $vault.Add($item);`;
     await runWithPrivateInput('powershell.exe',['-NoProfile','-NonInteractive','-Command','-'],script); return;
   }
   throw new Error('OS credential storage is unavailable; explicitly supply --credential-file <absolute-file> for owner-only fallback storage');

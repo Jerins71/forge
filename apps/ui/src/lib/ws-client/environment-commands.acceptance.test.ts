@@ -23,6 +23,7 @@ afterEach(async () => {
 
 async function environment() {
   const server = await startFixtureServer(0)
+  server.seed.descriptor.capabilities.sessionLifecycle = true
   cleanups.push(() => server.close())
   const registry = createEnvironmentRegistry({
     persistence: createMemoryPersistence(),
@@ -109,6 +110,12 @@ describe('environment command identity', () => {
 
 // Batch 8 acceptance cases precede native lifecycle implementation.
 describe('native environment lifecycle consumers', () => {
+  it('requires an updated environment before sending lifecycle controls', async () => {
+    const { server, client, facade } = await environment()
+    client.descriptor()!.capabilities.sessionLifecycle = false
+    await expect(facade.clearSession('session-1')).rejects.toThrow('Update this environment')
+    expect(server.inputs.some(entry => entry.method === 'session.clear')).toBe(false)
+  })
   it.each([
     ['session.resume', (f: ManagerWsClient) => f.resumeSession('session-1')],
     ['session.archive', (f: ManagerWsClient) => f.archiveSession('session-1')],
@@ -116,9 +123,9 @@ describe('native environment lifecycle consumers', () => {
     ['session.clear', (f: ManagerWsClient) => f.clearSession('session-1')],
     ['session.delete', (f: ManagerWsClient) => f.deleteSession('session-1')],
     ['session.fork', (f: ManagerWsClient) => f.forkSession('session-1', 'fork')],
-    ['session.stop', (f: ManagerWsClient) => f.stopAllAgents('session-1')],
+    ['session.stopAll', (f: ManagerWsClient) => f.stopAllAgents('session-1')],
     ['session.choice.cancel', (f: ManagerWsClient) => f.sendChoiceCancel('session-1', 'choice-1')],
-    ['worker.stop', (f: ManagerWsClient) => f.deleteAgent('worker-1')],
+    ['worker.kill', (f: ManagerWsClient) => f.deleteAgent('worker-1')],
   ] as const)('%s uses a native receipt and no legacy request', async (method, invoke) => {
     const { server, facade } = await environment()
     server.transformOutbound = value => {

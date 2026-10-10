@@ -21,7 +21,7 @@ export function createCliAccessSettingsRoutes(options: {
 }): HttpRoute[] {
   return withEnvironmentRouteAccess([
     {
-      methods: `${LIST_METHODS}, ${ITEM_METHODS}`,
+      methods: "GET, POST, DELETE, OPTIONS",
       matches: (pathname) =>
         pathname === `${ENDPOINT_PREFIX}/keys` ||
         pathname.startsWith(`${ENDPOINT_PREFIX}/keys/`),

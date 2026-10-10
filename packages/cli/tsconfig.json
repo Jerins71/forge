@@ -21,9 +21,6 @@
       ],
       "@forge/protocol/environment-v2": [
         "../protocol/src/environment-v2.ts"
-      ],
-      "@forge/client-runtime": [
-        "../client-runtime/src/index.ts"
       ]
     },
     "skipLibCheck": true,

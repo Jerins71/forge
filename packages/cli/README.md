@@ -2,7 +2,7 @@
 
 First-party Forge command-line interface for headless automation.
 
-The built CLI entrypoint is bundled to `dist/cli.js`. `@forge/protocol` is used as a workspace build-time source and bundled into the entrypoint, but is intentionally not a published/runtime dependency.
+The built CLI entrypoint is bundled to `dist/cli.js`. Protocol and client-runtime workspace sources are bundled into the entrypoint; they are not published runtime dependencies.
 
 ## Install
 
@@ -14,19 +14,19 @@ npm install -g @forge/cli
 
 Requires Node.js 22.19.0 or newer.
 
-Forge Desktop bundles the CLI. Desktop users should open **Settings → CLI Access**, generate a key, and click **Install CLI**. The installed shim uses the packaged app runtime and does not require a separate Node.js install.
+Forge Desktop bundles the CLI. Desktop users can click **Install CLI** in **Settings → CLI Access**. The installed shim uses the packaged app runtime and does not require a separate Node.js install. Pair and select an environment before running session controls.
 
 ## Configure
 
 Prefer environment variables for automation:
 
 ```bash
-export FORGE_URL=http://127.0.0.1:47287
-export FORGE_CLI_API_KEY=...
+forge pair http://127.0.0.1:47287
+export FORGE_ENVIRONMENT_ID=<paired-environment-UUID>
 forge status
 ```
 
-CLI access keys are managed in **Settings → CLI Access**. They are separate from model-provider credentials, are stored hash-only by the backend, and can be revoked or rotated at any time.
+Pairing requests a device grant and stores credentials in the OS vault. Use an explicit owner-only file with `--credential-file` when a vault is unavailable. API keys from **Settings → CLI Access** remain supported for HTTP reads with `FORGE_URL` and `FORGE_CLI_API_KEY`.
 
 Local config is stored in the user Forge config directory and may contain a plaintext API key. Treat it as restricted local data and prefer `FORGE_CLI_API_KEY` or `--api-key` in scripts.
 
@@ -73,10 +73,37 @@ forge wait <agentId> [--timeout <duration>] [--stop-on-timeout]
 
 Durations accept milliseconds by default, or `ms`, `s`, and `m` suffixes.
 
-Compaction commands use first-class CLI WebSocket mutations. They do not wrap slash commands. `sessions compact` waits for manual compaction to finish or fail. `sessions smart-compact` waits for the runtime smart-compaction decision and returns `outcome: "compacted"`, `"skipped"`, or `"not_reduced"`. Both follow the session's effective context policy (Summary handoff/resume, or Context v2 checkpoint with no Smart LLM handoff). Both commands require a Builder runtime that advertises `sessionCompaction`; old servers and runtime providers without compaction support return exit code 23, while invalid or unsupported session targets return typed usage errors.
+Compaction commands use native `session.compact` receipts. `sessions compact` waits for manual compaction to finish or fail. `sessions smart-compact` waits for the runtime smart-compaction decision and returns `outcome: "compacted"`, `"skipped"`, or `"not_reduced"`. Both follow the session's effective context policy (Summary handoff/resume, or Context v2 checkpoint with no Smart LLM handoff). Pair with a backend that advertises the CLI transport capability before running controls.
 
 ## Automation notes
 
 `forge run` sends a CLI-attributed message and waits for strict quiescence: idle manager, no pending count, no streaming workers, no active tools, no pending choices, and a debounce window without new session activity. `forge launch` returns after dispatch acknowledgement; use `forge wait <agentId>` later to wait for completion.
 
 Use `--json` for stable machine-readable output. For more detail, see the repository docs at `docs/CLI.md`.
+
+## Paired environment transport
+
+Use `forge pair <url>` to pair a CLI device, then select it with
+`--environment-id <UUID>` (OS credential storage) or
+`--credential-file <absolute-owner-only-file>`. `FORGE_ENVIRONMENT_ID` and
+`FORGE_CREDENTIAL_FILE` provide the same selection. A credential file carries its
+pinned URL and identity; `--url` can select a new tunnel endpoint only if its
+advertised environment UUID matches. Existing OS entries that contain only a
+bearer token require `--url` as well as the environment UUID. Credentials stay in
+the existing OS vault or explicitly selected owner-only file.
+
+Session controls and headless observation use `/api/v2/rpc` with paired device
+scopes. A run launches (when needed), sends, and observes the typed detail and
+shell projections. Wait never marks a session viewed or read. Interrupted or
+unknown delivery is reported without automatically starting another turn;
+receipt recovery uses the original command ID.
+
+The V2 cutover does not assume that external old CLI or API-key clients are
+absent. Upgrade and pair before using session controls. Old CLI/root WebSocket
+endpoints are removed at final cutover; there is no legacy transport fallback.
+API keys remain supported for the retained authenticated `/api/cli/*` HTTP read
+routes and existing Stream Deck HTTP integration. They do not authorize the new
+CLI's V2 session controls. Deploy matching backend/UI/CLI builds for the cutover;
+older paired servers without the CLI transport capability return an update
+required error. OS vault retrieval paths on Linux and Windows require platform
+validation; the portable explicit-file path is supported on all three systems.
