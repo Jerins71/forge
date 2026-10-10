@@ -9,7 +9,7 @@ import {
   getDirectlyArchivedSessionRows,
 } from '@/lib/agent-hierarchy'
 import type { ProfileTreeRow } from '@/lib/agent-hierarchy'
-import { useOptionalEnvironmentContext, usePrimaryEnvironmentId } from '@/lib/origin-store/environment-provider'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import { useEnvironmentSettingsClient } from '@/hooks/use-environment-settings-client'
 import { profileSidebar } from '@/lib/origin-store/environment-e2e-fixture'
 import { useProviderUsage } from '@/hooks/use-provider-usage'
@@ -306,7 +306,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   ), [agents])
 
   // V2 backends authenticate HTTP; the primary's settings client carries that credential.
-  const primarySettingsClient = useEnvironmentSettingsClient(usePrimaryEnvironmentId())
+  const primarySettingsClient = useEnvironmentSettingsClient(environmentContext?.primaryEnvironmentId)
   const runtimeUpdateAttention = useNativeRuntimeAttention(primarySettingsClient ?? wsUrl)
   const { getEntriesForProfile } = useInactiveRepoProjectAgents({
     connected,

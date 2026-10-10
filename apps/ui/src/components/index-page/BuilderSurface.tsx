@@ -9,9 +9,9 @@ import { AgentSidebarConnected } from '@/components/chat/AgentSidebarConnected'
 import { WorkGraphWorkerHighlightProvider } from '@/components/chat/WorkGraphWorkerHighlight'
 import { ArtifactsSidebar } from '@/components/chat/ArtifactsSidebar'
 import { shouldRevealBrowserPanel } from '@/components/index-page/activity-rail-workspace'
-import { BrowserAutomationHost, type BrowserAutomationHostHandle } from '@/components/browser/BrowserAutomationHost'
+import { PrimaryBrowserAutomationHost, type BrowserAutomationHostHandle } from '@/components/browser/BrowserAutomationHost'
 import { BrowserPreviewSurface } from '@/components/browser/BrowserPreviewSurface'
-import { BrowserPanel, type BrowserWorkspaceCommandPort } from '@/components/browser/BrowserPanel'
+import { BrowserPanel, BrowserUnavailableOnRemote, type BrowserWorkspaceCommandPort } from '@/components/browser/BrowserPanel'
 import { countOpenBrowserTabs, projectRuntimeBrowserTabState } from '@/components/browser/browser-runtime-state'
 import type { ManagedBrowserWorkspaceMode } from '@/lib/electron-bridge'
 import { ArchiveView } from '@/components/index-page/ArchiveView'
@@ -251,9 +251,10 @@ export function BuilderSurface({
       ? { ...next, environmentId: undefined }
       : next, replace)
   }, [navigateToRoute, primaryEnvironmentId])
+  const setPrimaryState = primary.setState
   const handleBrowserRuntimeTabStateChanged = useCallback((tab: Parameters<typeof projectRuntimeBrowserTabState>[1]) => {
-    setState((previous) => projectRuntimeBrowserTabState(previous, tab))
-  }, [setState])
+    setPrimaryState((previous) => projectRuntimeBrowserTabState(previous, tab))
+  }, [setPrimaryState])
 
   useEffect(() => {
     let cancelled = false
@@ -704,8 +705,10 @@ export function BuilderSurface({
     },
   })
 
-  const browserSessionAgentId = activeManagerAgent?.agentId ?? null
-  const browserProfileId = activeManagerAgent?.profileId ?? activeManagerAgent?.agentId ?? null
+  // The embedded browser runs on this machine and serves only its sessions; a remote session has none.
+  const browserManagerAgent = isPrimarySelected ? activeManagerAgent : null
+  const browserSessionAgentId = browserManagerAgent?.agentId ?? null
+  const browserProfileId = browserManagerAgent?.profileId ?? browserManagerAgent?.agentId ?? null
   browserSelectionRef.current = { sessionAgentId: browserSessionAgentId, profileId: browserProfileId }
   const browserSessionSnapshot = browserSessionAgentId
     ? state.browserSessions[browserSessionAgentId] ?? null
@@ -2100,10 +2103,9 @@ export function BuilderSurface({
   return (
     <WorkGraphWorkerHighlightProvider>
       <FileDirtyConfirmDialog state={panels.fileEditorCoordinator.dialogState} />
-      <BrowserAutomationHost
+      <PrimaryBrowserAutomationHost
         ref={browserHostRef}
-        client={localClient}
-        state={state}
+        environmentId={primaryEnvironmentId}
         selectedSessionAgentId={browserSessionAgentId}
         selectedProfileId={browserProfileId}
         panelVisible={activeView === 'chat' && panels.isBrowserOpen}
@@ -2341,6 +2343,8 @@ export function BuilderSurface({
                 onRestoreProfile={session.handleRestoreProfile}
                 onRestoreSession={session.handleRestoreSession}
               />
+            ) : activeView === 'chat' && panels.isBrowserOpen && !isPrimarySelected ? (
+              <BrowserUnavailableOnRemote />
             ) : activeView === 'chat' && panels.isBrowserOpen && browserSessionAgentId && browserProfileId ? (
               browserWorkspaceMode === 'popped-out' || browserWorkspaceMode === 'opening' ? (
                 <section className="relative flex min-h-0 flex-1 items-center justify-center" aria-label="Managed Browser workspace">

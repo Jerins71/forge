@@ -189,6 +189,8 @@ The Automatic Browser Host is attached only to the normal local Builder backend 
 
 A normal manager running on a remote backend may still have structurally planned browser tools. Without a Desktop host connected directly to that backend, calls return `unavailable-host`; the viewing machine's Desktop does not satisfy them.
 
+Forge Desktop registers the host on its own machine's environment connection: the `browser.host.attach` subscription is the host connection, and host commands travel as `browser.host.send` on the same socket. Ending the subscription, a dropped socket, or a reload unregisters the host; the renderer registers and hydrates again when the connection returns. Desktop stays registered with this machine while a session on another machine is on screen, never registers with a remote machine, and shows **Browser is not available on remote machines** in place of the Browser workspace for those sessions.
+
 ## `agent-browser` Skill
 
 The `agent-browser` Skill invokes the separately installed Vercel Labs CLI and owns a separate browser/session lifecycle. It does not register the Automatic Browser Host, use `browser.json`, appear in the Browser workspace, or configure Chrome integration. Use the Skill when you specifically want its command-line browsing and extraction workflow.

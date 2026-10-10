@@ -337,6 +337,16 @@ export interface EnvironmentFeatureClients {
       input: TerminalIssueTicketRequest,
     ): Promise<TerminalIssueTicketResponse>
   }
+  /** Desktop's embedded browser host. Attach only on the primary environment; the subscription is the host connection. */
+  browserHost: {
+    attach(observer: {
+      /** The channel is (re)established; any earlier host registration is gone. */
+      attached(): void
+      event(event: Record<string, unknown>): void
+      error(error: unknown): void
+    }): () => void
+    send(command: ClientCommand): Promise<void>
+  }
   legacy: {
     send(command: ClientCommand, sessionId?: string): Promise<void>
     request(
@@ -345,6 +355,8 @@ export interface EnvironmentFeatureClients {
     ): Promise<readonly Record<string, unknown>[]>
   }
 }
+// A host command is JSON text split to fit the RPC frame limit; matches the browser.host.send part bound.
+const BROWSER_HOST_PART_CHARS = 262_144
 export interface HttpFeatureTransport {
   entry: { environmentId: string }
   fetch(path: string, init?: RequestInit): Promise<Response>
@@ -503,7 +515,6 @@ export function createFeatureClients(
         'browser_host_response',
         'browser_host_state_report',
         'browser_host_lifecycle_response',
-        'browser_panel_reveal_acknowledge',
       ]).has(type)
     )
       throw new Error(
@@ -732,6 +743,26 @@ export function createFeatureClients(
       },
       ticket: (terminalId, i) =>
         post(`/api/terminals/${encodeURIComponent(terminalId)}/ticket`, i),
+    },
+    browserHost: {
+      attach: (observer) =>
+        rpc.subscribe('browser.host.attach', {}, {
+          next: (item) =>
+            item.kind === 'attached' ? observer.attached() : observer.event(item.event),
+          error: (error) => observer.error(error),
+        }),
+      send: async (command) => {
+        const text = JSON.stringify(command)
+        const count = Math.ceil(text.length / BROWSER_HOST_PART_CHARS)
+        const transferId = crypto.randomUUID()
+        for (let index = 0; index < count; index++)
+          await rpc.request('browser.host.send', {
+            transferId,
+            index,
+            count,
+            data: text.slice(index * BROWSER_HOST_PART_CHARS, (index + 1) * BROWSER_HOST_PART_CHARS),
+          })
+      },
     },
     legacy: {
       request: legacyRequest,

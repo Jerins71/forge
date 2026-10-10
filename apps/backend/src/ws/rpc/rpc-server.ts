@@ -128,7 +128,7 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
           const streamMethod = method as StreamMethod;
           const count = [...subscriptions.values()].filter(s => s.method === streamMethod).length;
           if ((streamMethod === "session.subscribe" || streamMethod === "legacy.session.subscribe") &&
-              [...subscriptions.values()].filter(s => s.method === "session.subscribe" || s.method === "legacy.session.subscribe").length >= 32 || streamMethod === "terminal.attach" && count >= 8 || streamMethod === "shell.subscribe" && count >= 1) {
+              [...subscriptions.values()].filter(s => s.method === "session.subscribe" || s.method === "legacy.session.subscribe").length >= 32 || streamMethod === "terminal.attach" && count >= 8 || (streamMethod === "shell.subscribe" || streamMethod === "browser.host.attach") && count >= 1) {
             throw new StreamFault("RATE_LIMITED", "Subscription limit reached.");
           }
           const id = randomUUID();
@@ -137,6 +137,7 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
             case "shell.subscribe": stream = deps.shellStream.shell(principal, input as RpcInput<typeof streamMethod>, controller.signal); break;
             case "session.subscribe": stream = deps.detailStream.detail(principal, input as RpcInput<typeof streamMethod>, controller.signal); break;
             case "legacy.session.subscribe": stream = deps.legacyAdapter.subscribe(principal, input as RpcInput<typeof streamMethod>, controller.signal); break;
+            case "browser.host.attach": stream = deps.browserHost.attach(principal, controller.signal); break;
             case "terminal.attach": stream = deps.terminalTransport.attach(principal, input as RpcInput<typeof streamMethod>, controller.signal, id); break;
           }
           subscriptions.set(id, { method: streamMethod, controller });

@@ -2,6 +2,7 @@ import type { EnvironmentDescriptor, Method, RpcInput } from "@forge/protocol/en
 import type { ControlService, EnvironmentAccessPort, EnvironmentStreamPort, Principal } from "../../environment/control/control-types.js";
 import type { TerminalRpcTransport } from "../../terminal/terminal-rpc-transport.js";
 import type { LegacyBuilderAdapter } from "./legacy-builder-adapter.js";
+import type { BrowserHostRpc } from "./browser-host-rpc.js";
 import { StreamFault } from "../../environment/streams/stream-budget.js";
 
 export interface RpcDependencies {
@@ -10,6 +11,7 @@ export interface RpcDependencies {
   shellStream: Pick<EnvironmentStreamPort, "shell" | "shellPage"> & { descriptor(): EnvironmentDescriptor };
   detailStream: Pick<EnvironmentStreamPort, "detail" | "history" | "workers" | "content">;
   legacyAdapter: LegacyBuilderAdapter;
+  browserHost: Pick<BrowserHostRpc, "attach" | "send">;
   terminalTransport: TerminalRpcTransport;
 }
 
@@ -30,6 +32,7 @@ export function requestHandler(deps: RpcDependencies, principal: Principal, meth
     case "access.devices.revoke": return deps.access.revokeDevice(principal, input as RpcInput<typeof method>);
     case "terminal.input": return deps.terminalTransport.input(principal, input as RpcInput<typeof method>);
     case "terminal.resize": return deps.terminalTransport.resize(principal, input as RpcInput<typeof method>);
+    case "browser.host.send": return deps.browserHost.send(principal, input as RpcInput<typeof method>);
     case "legacy.session.read": case "legacy.session.operate": case "legacy.workspace.read": case "legacy.workspace.write": case "legacy.settings.admin":
       return deps.legacyAdapter.execute(principal, method, input as RpcInput<typeof method>, signal);
     default: throw new StreamFault("INVALID_INPUT", "Method requires subscription dispatch.");

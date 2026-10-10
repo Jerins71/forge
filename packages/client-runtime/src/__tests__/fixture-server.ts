@@ -81,6 +81,9 @@ export async function startFixtureServer(index = 0) {
   const httpRequests: string[] = []
   const inputs: Array<{ method: Method; input: unknown }> = []
   const receipts = new Map<string, CommandReceipt>()
+  // Embedded browser host commands, reassembled from browser.host.send parts.
+  const browserHostCommands: Array<Record<string, unknown>> = []
+  const browserHostParts = new Map<string, string[]>()
   let releasePage = () => {}
   const send = (socket: WebSocket, frame: unknown) =>
     socket.send(JSON.stringify(frame))
@@ -189,7 +192,8 @@ export async function startFixtureServer(index = 0) {
       if (
         method === 'shell.subscribe' ||
         method === 'session.subscribe' ||
-        method === 'legacy.session.subscribe'
+        method === 'legacy.session.subscribe' ||
+        method === 'browser.host.attach'
       ) {
         const subscriptionId = `s${++nextSub}`
         subscriptions.set(subscriptionId, {
@@ -199,6 +203,10 @@ export async function startFixtureServer(index = 0) {
         })
         result({ subscriptionId })
         if (method === 'legacy.session.subscribe') return
+        if (method === 'browser.host.attach') {
+          send(socket, { type: 'stream', subscriptionId, item: { kind: 'attached' } })
+          return
+        }
         const cursor = (
           input as { cursor?: { streamEpoch: string; afterSequence: number } }
         ).cursor
@@ -228,6 +236,17 @@ export async function startFixtureServer(index = 0) {
         })
         return
       }
+      if (method === 'browser.host.send') {
+        const part = input as { transferId: string; count: number; data: string }
+        const parts = [...(browserHostParts.get(part.transferId) ?? []), part.data]
+        browserHostParts.set(part.transferId, parts)
+        if (parts.length === part.count) {
+          browserHostParts.delete(part.transferId)
+          browserHostCommands.push(JSON.parse(parts.join('')))
+        }
+        result({})
+        return
+      }
       if (method.startsWith('legacy.')) {
         result({ events: [] })
         return
@@ -243,6 +262,7 @@ export async function startFixtureServer(index = 0) {
     httpRequests,
     inputs,
     receipts,
+    browserHostCommands,
     subscriptions,
     get connections() {
       return connections

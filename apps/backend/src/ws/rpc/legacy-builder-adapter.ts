@@ -25,8 +25,9 @@ export const legacyCommandScopes = {
   pick_directory: "unsupported", rename_profile: "workspace:write", archive_profile: "workspace:write", restore_profile: "workspace:write",
   reorder_profiles: "workspace:write", choice_cancel: "session:operate", codex_elicitation_response: "session:operate",
   mark_unread: "session:operate", mark_all_read: "session:operate",
+  // Host commands use browser.host.send on the socket that holds the browser.host.attach subscription.
   browser_host_register: "unsupported", browser_host_hydrate: "unsupported", browser_host_focus: "unsupported", browser_host_response: "unsupported",
-  browser_host_state_report: "unsupported", browser_host_lifecycle_response: "unsupported", browser_panel_reveal_acknowledge: "unsupported",
+  browser_host_state_report: "unsupported", browser_host_lifecycle_response: "unsupported", browser_panel_reveal_acknowledge: "session:operate",
   browser_tab_open: "session:operate", browser_tab_activate: "session:operate", browser_tab_close: "session:operate", browser_tab_resize: "session:operate",
   browser_recording_start: "session:operate", browser_recording_stop: "session:operate",
 } as const satisfies Record<ClientCommand["type"], Scope | "unsupported">;

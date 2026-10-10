@@ -28,6 +28,7 @@ import type { RepositoryProjectCreationService } from "../swarm/repository-proje
 import type { PresentedChatArtifactTicketStore } from "../swarm/session/presented-chat-artifact.js";
 import type { HtmlArtifactPreviewStore } from "../swarm/session/html-artifact-preview.js";
 import type { ControlService, EnvironmentAccessPort, Principal } from "../environment/control/control-types.js";
+import { createBrowserHostRpc, type BrowserHostRpc } from "./rpc/browser-host-rpc.js";
 import { awaitLegacyReceipt, executeMigratedLegacyCommand, legacyCommandScopes, legacySessionEventAllowlist, type LegacyHandlerPorts } from "./rpc/legacy-builder-adapter.js";
 import { StreamFault } from "../environment/streams/stream-budget.js";
 
@@ -41,6 +42,8 @@ export class WsHandler {
   private readonly browserAutomationService: BrowserAutomationService;
   private readonly subscriptionManager: WsSubscriptions;
   private readonly browserConnectionIds = new WeakMap<WebSocket, string>();
+  /** Desktop's embedded browser host on the environment RPC socket. */
+  readonly browserHost: BrowserHostRpc;
   private readonly apiProxy: WsApiProxy;
   private repositoryProjectCreationService: RepositoryProjectCreationService | null = null;
   private readonly conversationPageRequestTimes = new WeakMap<WebSocket, number[]>();
@@ -72,6 +75,24 @@ export class WsHandler {
     this.unreadTracker = options.unreadTracker ?? null;
     this.browserAutomationService = options.browserAutomationService ?? new BrowserAutomationService({
       dataDir: this.swarmManager.getConfig().paths.dataDir,
+    });
+
+    this.browserHost = createBrowserHostRpc({
+      detach: connectionId => { this.browserAutomationService.unregisterHost(connectionId); },
+      handle: async ({ command, connectionId, send }) => {
+        await handleBrowserCommand({ command, socket: null, connectionId, browserAutomationService: this.browserAutomationService,
+          resolveManagerContextAgentId: agentId => this.resolveManagerContextAgentId(agentId),
+          resolveProfileIdForAgent: agentId => this.subscriptionManager.resolveProfileIdForAgent(agentId),
+          isEligibleLocalBuilderManager: agentId => {
+            const descriptor = this.swarmManager.getAgent(agentId);
+            return !!descriptor && isEligibleLocalBuilderManager(descriptor);
+          },
+          send: (_connection, event) => send(event),
+          broadcastToSession: (id, event) => this.broadcastToSession(id, event),
+          hydrateHostSessions: () => this.hydrateBrowserHostSessions(),
+          logDebug: (message, details) => this.logDebug(message, details),
+        });
+      },
     });
 
     const feedbackService = options.feedbackService ?? new FeedbackService(this.swarmManager.getConfig().paths.dataDir);
@@ -163,7 +184,7 @@ export class WsHandler {
         }
         if (command.type === "ping") { send({ type: "ready", subscribedAgentId: sessionId, serverTime: new Date().toISOString() }); return; }
         if (isBrowserClientCommand(command)) {
-          await handleBrowserCommand({ ...context, command, connectionId: `rpc:${sessionId}`,
+          await handleBrowserCommand({ ...context, command, connectionId: this.browserHost.connectionId(principal) ?? `rpc:${sessionId}`,
             browserAutomationService: this.browserAutomationService,
             resolveProfileIdForAgent: agentId => this.subscriptionManager.resolveProfileIdForAgent(agentId),
             isEligibleLocalBuilderManager: agentId => {
@@ -266,6 +287,7 @@ export class WsHandler {
   }
 
   broadcastToSubscribed(event: ServerEvent): void {
+    if (event.type === "browser_host_connected") this.browserHost.broadcast(event);
     if (event.type === "secure_secret_catalog_changed") for (const sessionId of this.featureListeners.keys()) this.publishFeatures(sessionId, event);
     else if ("sessionAgentId" in event && typeof event.sessionAgentId === "string") this.publishFeatures(event.sessionAgentId, event);
     else if (event.type === "codex_elicitation_request" || event.type === "codex_elicitation_dismissed") this.publishFeatures(event.agentId, event);
