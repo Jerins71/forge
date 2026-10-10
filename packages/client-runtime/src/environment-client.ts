@@ -377,14 +377,20 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
           if (
             error instanceof EnvironmentRuntimeError &&
             error.code === 'NOT_FOUND'
-          )
-            this.applyReceipt(
-              await this.supervisor.request(
-                command.method,
-                command.input as RpcInput<typeof command.method>,
-              ),
-            )
-          else break
+          ) {
+            try {
+              this.applyReceipt(
+                await this.supervisor.request(
+                  command.method,
+                  command.input as RpcInput<typeof command.method>,
+                ),
+              )
+            } catch {
+              // Disable/disconnect can interrupt this retry after NOT_FOUND.
+              // Retain its original intent for the next synchronized connection.
+              break
+            }
+          } else break
         }
       }
     } finally {

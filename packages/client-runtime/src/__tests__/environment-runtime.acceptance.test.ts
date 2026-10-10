@@ -367,6 +367,38 @@ describe('environment runtime acceptance', () => {
     ).rejects.toThrow()
     expect(s.receipts.size).toBe(2)
   })
+  it('keeps a command recoverable when disabled during its NOT_FOUND retry', async () => {
+    let saved: readonly unknown[] = []
+    const persistence = { ...createMemoryPersistence(), savePending: async (_id: string, commands: readonly unknown[]) => { saved = commands } }
+    const { servers: [s], registry } = await fleet(1, { persistence })
+    await registry.start()
+    await online(registry, s.seed.entry.environmentId)
+    const client = registry.get(s.seed.entry.environmentId)
+    const command = {
+      commandId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      sessionId: 'session-1',
+      message: { text: 'Retry interrupted by disable', artifactIds: [] },
+    }
+    s.lostBeforeAccept = true
+    s.holdReceiptAck = true
+    await expect(client.request('session.send', command)).rejects.toThrow()
+    await until(() => s.inputs.filter(x => x.method === 'session.send').length === 2)
+    await registry.setEnabled(client.environmentId, false)
+    await until(() => client.connection.getSnapshot().phase === 'disabled')
+    expect(saved).toEqual([
+      expect.objectContaining({ method: 'session.send', input: command }),
+    ])
+    // The backend completed the accepted retry while its acknowledgement was lost.
+    s.receipts.set(command.commandId, { ...s.receipts.get(command.commandId)!, state: 'succeeded' })
+    s.holdReceiptAck = false
+    await registry.setEnabled(client.environmentId, true)
+    await online(registry, client.environmentId)
+    await until(() => client.receipts.getSnapshot().get(command.commandId)?.state === 'succeeded')
+    await until(() => s.inputs.filter(x => x.method === 'command.get').length === 2)
+    expect(s.inputs.filter(x => x.method === 'session.send').map(x => x.input)).toEqual([command, command])
+    await registry.dispose()
+    expect(saved).toEqual([])
+  })
   it('stages paged shell before synchronized, persists projection/cursor atomically and resumes without snapshot', async () => {
     const {
       servers: [s],
