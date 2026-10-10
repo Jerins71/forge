@@ -53,7 +53,8 @@ export function createDetailFeatureRpc({ swarmManager: swarm, control, compactio
       }, async () => {
         if (method === 'recovery.decide') {
           const decision = input as RpcInput<'recovery.decide'>;
-          if (decision.action === 'resume') await swarm.resumeRestartRecovery(); else await swarm.dismissRestartRecovery();
+          const snapshot = decision.action === 'resume' ? await swarm.resumeRestartRecovery() : await swarm.dismissRestartRecovery();
+          swarm.emit('restart_recovery_snapshot', { type: 'restart_recovery_snapshot', snapshot });
         } else if (method === 'session.goal.control') {
           const goal = input as RpcInput<'session.goal.control'>;
           await swarm.controlSessionGoal(sessionId!, goal.action === 'edit' ? { action: goal.action, objective: goal.objective, tokenBudget: goal.tokenBudget } : { action: goal.action });

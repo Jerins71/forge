@@ -4,7 +4,7 @@ import { closeSync, createReadStream, openSync, readSync, statSync } from "node:
 import { createInterface } from "node:readline";
 import type { Database } from "better-sqlite3";
 import { decodeEnvironmentValue, PlanSnapshotV2Schema, GoalSnapshotV2Schema } from "@forge/protocol/environment-v2";
-import { recoveryProjection } from "../streams/wire-projection.js";
+import { projectRecoverySnapshot } from "../streams/wire-projection.js";
 import type { ArtifactRef, ProjectSummary, SessionSummary, DetailStreamItem, RpcInput, RpcOutput } from "@forge/protocol/environment-v2";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
 import type { AgentDescriptor, ConversationEntryEvent, ManagerProfile, ChoiceRequestEvent } from "../../swarm/types.js";
@@ -292,12 +292,17 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       ? { type, snapshot: snapshot as import("@forge/protocol").SessionPlanSnapshot }
       : { type, snapshot: snapshot as import("@forge/protocol").SessionGoalSnapshot } }));
   }
+  function publishRecovery(snapshot: import("@forge/protocol").RestartRecoverySnapshot | null) {
+    const recovery = projectRecoverySnapshot(snapshot);
+    const sourceKey = recovery ? `recovery:${recovery.recoveryId}:${recovery.dismissedAt ? "dismiss" : recovery.resumedAt ? "resume" : "pending"}` : undefined;
+    eventSink.transaction(tx => eventSink.append(tx, { topic: "shell", sessionId: null, sourceKey, event: { type: "recovery.upsert", recovery } }));
+  }
   const mirror: SwarmEventMirror = {
     attach() {
       if (attached || disposed) return; attached = true;
       listen("session_plan_snapshot", (event: { sessionAgentId: string }) => detailFeature(event.sessionAgentId, "plan.upsert", event));
       listen("session_goal_snapshot", (event: { sessionAgentId: string }) => detailFeature(event.sessionAgentId, "goal.upsert", event));
-      listen("restart_recovery_snapshot", () => eventSink.transaction(tx => eventSink.append(tx, { topic: "shell", sessionId: null, event: { type: "recovery.upsert", recovery: recoveryProjection(swarmManager) } })));
+      listen("restart_recovery_snapshot", (event: import("@forge/protocol").RestartRecoverySnapshotEvent) => publishRecovery(event.snapshot));
       for (const name of ["conversation_message", "activity_summary", "agent_message", "agent_tool_call"]) listen(name, observeCanonical);
       listen("choice_request", (event: ChoiceRequestEvent) => { eventSink.transaction(tx => choice(tx, event)); });
       listen("agent_status", (event: { agentId: string }) => { const descriptor = swarmManager.getAgentForInternalUse(event.agentId); if (!descriptor) return; eventSink.transaction(tx => { if (descriptor.role === "worker") upsertWorker(tx, descriptor); upsertSession(tx, descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId); }); });
@@ -317,6 +322,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       for (const descriptor of swarmManager.listAgentsForInternalUse()) indexDescriptor(descriptor);
       queueCatalog(undefined, true); queueCatalog(); await Promise.resolve(); await catalogWork;
       if (errors.has("catalog")) throw errors.get("catalog");
+      publishRecovery(swarmManager.getRestartRecoverySnapshot());
       const pending = database.prepare("SELECT choice_id,session_id,runtime_generation,choice_json FROM control_choices WHERE state='pending'").all() as { choice_id: string; session_id: string; runtime_generation: string; choice_json: string }[];
       eventSink.transaction(tx => {
         for (const row of pending) {

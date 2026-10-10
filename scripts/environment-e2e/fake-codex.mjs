@@ -144,6 +144,7 @@ async function request(method, params = {}) {
     const thread = threads.get(params.threadId);
     if (!thread || active) throw new Error('Compaction requires an idle fixture thread');
     count('compactions');
+    if (existsSync(join(checkout, '.fixture-compact-hold'))) return new Promise(() => {});
     const turn = { thread, id: `${thread.id}-compact-${counters.compactions}`, done: false };
     active = turn;
     setTimeout(() => {

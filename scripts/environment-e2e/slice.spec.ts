@@ -487,18 +487,29 @@ test('Batch 5 typed detail features survive reconnect/restart and compact once',
       return until<any>(() => client.frames.find(frame => frame.subscriptionId === sub.subscriptionId && frame.item?.kind === 'snapshot')?.item.snapshot, Boolean);
     };
     const before = await snapshot(fresh); expect(before.plan.plan[0].step).toBe('Verify typed detail'); expect(before.goal.goal.status).toBe('paused'); fresh.close();
+    await writeFile(join(b().checkout, '.fixture-compact-hold'), 'synthetic handoff pause');
+    const ambiguousCompact = { ...compact, commandId: randomUUID() };
+    const handoff = await openFixtureRpc(b().baseUrl, sessions[1]!);
+    try { await expect(handoff.call('session.compact', ambiguousCompact, 'compact-handoff', 500)).rejects.toThrow('timed out'); }
+    finally { handoff.close(); }
+    await until(() => fixtureRpcOnce(b().baseUrl, sessions[1]!, 'command.get', { commandId: ambiguousCompact.commandId }), receipt => receipt.state === 'running');
+    counters.push(await compactCount(join(b().checkout, '.fixture-codex'))); expect(counters[1]).toBe(2);
     const heldId = randomUUID();
     const held = await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', { commandId: heldId, projectId: projects[1]!.sessionId, title: 'Batch 5 interrupted', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:hold]', artifactIds: [] } });
     await settled(heldId);
     const crashId = randomUUID();
-    await controlEnvironment(manifest, b().name, 'fixture', { operation: 'arm-crash', commandId: crashId, boundary: 'pre-commit' });
+    const armed = await controlEnvironment<{ pid: number }>(manifest, b().name, 'fixture', { operation: 'arm-crash', commandId: crashId, boundary: 'pre-commit' });
     await expect(fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', { commandId: crashId, projectId: projects[1]!.sessionId, title: 'Crash probe', workspaceStrategy: { kind: 'current_checkout' } })).rejects.toThrow();
-    await controlEnvironment(manifest, b().name, 'stop'); await controlEnvironment(manifest, b().name, 'start');
+    await until(() => { try { process.kill(armed.pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } }, Boolean);
+    await controlEnvironment(manifest, b().name, 'start');
     const restarted = await openFixtureRpc(b().baseUrl, sessions[1]!);
     try {
       const after = await snapshot(restarted); expect(after.plan).toEqual(before.plan); expect(after.goal.goal).toEqual(before.goal.goal);
       expect((await restarted.call('session.compact', compact)).state).toBe('succeeded');
-      counters.push(await compactCount(join(b().checkout, '.fixture-codex'))); expect(counters[1]).toBe(1);
+      const ambiguousReceipt = await restarted.call('session.compact', ambiguousCompact);
+      expect(ambiguousReceipt).toMatchObject({ state: 'interrupted', delivery: 'unknown' });
+      expect(await restarted.call('session.compact', ambiguousCompact)).toEqual(ambiguousReceipt);
+      counters.push(await compactCount(join(b().checkout, '.fixture-codex'))); expect(counters[2]).toBe(2);
       const recovery = (await restarted.call('recovery.get', {})).recovery;
       expect(recovery?.interruptedManagers).toContain(held.sessionId);
       const shell = await restarted.call('shell.subscribe', {});
@@ -515,6 +526,7 @@ test('Batch 5 typed detail features survive reconnect/restart and compact once',
       }));
       expect(counts).toEqual({ goalCommands: 1, compactCommands: 1 });
       evidence.batch5 = { sessionId, counts, compactDispatches: counters, planRevision: after.plan.revision, goalStatus: after.goal.goal.status,
+        ambiguousCompaction: { state: ambiguousReceipt.state, delivery: ambiguousReceipt.delivery, dispatches: counters[2]! - counters[0]! },
         liveTypedActivity: true, reconnect: true, restart: true, recoveryOnFreshShell: true, duplicateReceipts: true };
     } finally { restarted.close(); }
   } finally { rpc.close(); await proxy.stop(); }

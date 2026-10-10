@@ -11,6 +11,7 @@ import {
   ProjectSummarySchema,
   SessionSummarySchema,
   StreamCursorSchema,
+  RecoveryStateSchema,
   ArtifactRefSchema,
   rpcRegistry,
   decodeEnvironmentValue,
@@ -191,8 +192,9 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
     const cursor = decodeEnvironmentValue(StreamCursorSchema, cached.cursor)
     const projects = decodeEnvironmentValue(CachedProjectsSchema, cached.projects)
     const sessions = decodeEnvironmentValue(CachedSessionsSchema, cached.sessions)
-    return cursor && projects && sessions
-      ? { ...cached, cursor, projects, sessions }
+    const recovery = cached.recovery === undefined ? null : decodeEnvironmentValue(RecoveryStateSchema, cached.recovery)
+    return cursor && projects && sessions && recovery !== undefined
+      ? { ...cached, cursor, projects, sessions, recovery }
       : null
   }
   setEnabled(enabled: boolean): void {

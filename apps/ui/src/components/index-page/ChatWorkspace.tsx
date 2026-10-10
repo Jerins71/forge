@@ -134,13 +134,14 @@ export function ChatWorkspace({
         environmentClient={environmentClient}
       />
 
-      <GoalBar snapshot={goalSnapshot} onAction={onGoalAction} />
-
       <RestartRecoveryBanner
         snapshot={restartRecovery}
         onResume={onResumeRestartRecovery}
         onDismiss={onDismissRestartRecovery}
       />
+
+      {/* GoalBar floats over what follows it, so it must come after in-flow banners. */}
+      <GoalBar snapshot={goalSnapshot} onAction={onGoalAction} />
 
       {lastError && localSettingsClient && isClaudeSignInRequired(lastError) ? (
         <ClaudeNativeAuth key={headerProps.activeAgentId} apiClient={localSettingsClient} inConversation />

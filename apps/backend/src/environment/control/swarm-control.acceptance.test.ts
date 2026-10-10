@@ -58,6 +58,32 @@ async function countInputs(file: string, inputId: string) {
   return (await readFile(file, "utf8")).split("\n").filter(line => { try { return JSON.parse(line).data?.id === inputId; } catch { return false; } }).length;
 }
 describe("controlled swarm canonical/provider boundaries", () => {
+  it("publishes boot recovery for cached shell clients resuming the existing epoch", async () => {
+    const f = await fixture(); const mirror = makeMirror(f);
+    const snapshot = { bootId: "boot", createdAt: new Date().toISOString(), interruptedManagers: [f.sessionId], interruptedWorkers: [], undeliveredReports: [] };
+    vi.spyOn(f.manager, "getRestartRecoverySnapshot").mockReturnValue(snapshot);
+    const cursor = f.eventSink.highWater; mirror.attach(); await mirror.reconcileBeforeReady();
+    const updates = f.database.prepare("SELECT payload_json FROM events WHERE event_type='recovery.upsert' AND sequence>?").all(cursor) as { payload_json: string }[];
+    expect(updates.map(row => JSON.parse(row.payload_json).recovery)).toEqual([{ ...snapshot, recoveryId: "boot" }]); mirror.dispose();
+  });
+  it("publishes one decided recovery update even if the facade also emits and its read projection is stale", async () => {
+    const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
+    const cursor = f.eventSink.highWater;
+    const snapshot = { bootId: "boot", createdAt: new Date().toISOString(), interruptedManagers: [f.sessionId], interruptedWorkers: [], undeliveredReports: [] };
+    vi.spyOn(f.manager, "getRestartRecoverySnapshot").mockReturnValue(snapshot);
+    const decided = { ...snapshot, dismissedAt: snapshot.createdAt };
+    vi.spyOn(f.manager, "dismissRestartRecovery").mockImplementation(async () => { f.manager.emit("restart_recovery_snapshot", { type: "restart_recovery_snapshot", snapshot: decided }); return decided; });
+    const { core } = await makeCore(f);
+    const principal = { deviceSessionId: "fixture-device", scopes: new Set(["session:operate"] as const) };
+    f.database.prepare("INSERT INTO device_sessions (device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES ('fixture-device','fixture-token','fixture-proof','Fixture','cli','[]',0,0,?)").run(Date.now() + 86_400_000);
+    const rpc = createDetailFeatureRpc({ swarmManager: f.manager, control: core.controlService });
+    const input = { commandId: randomUUID(), recoveryId: "boot", action: "dismiss" };
+    await rpc.execute(principal, "recovery.decide", input); await rpc.execute(principal, "recovery.decide", input);
+    await rpc.execute(principal, "recovery.decide", { ...input, commandId: randomUUID() });
+    const updates = f.database.prepare("SELECT payload_json FROM events WHERE event_type='recovery.upsert' AND sequence>?").all(cursor) as { payload_json: string }[];
+    expect(updates.map(row => JSON.parse(row.payload_json).recovery)).toEqual([{ ...decided, recoveryId: "boot" }]);
+    mirror.dispose(); core.eventSink.close();
+  });
   it("materializes one reserved ID and one input for concurrent same-command retries", async () => {
     const f = await fixture();
     await Promise.all([f.adapter.ensureSession({ commandId: f.commandId, sessionId: f.sessionId, projectId: "manager", title: "Controlled", cwd: f.config.defaultCwd }), f.adapter.ensureSession({ commandId: f.commandId, sessionId: f.sessionId, projectId: "manager", title: "Controlled", cwd: f.config.defaultCwd })]);

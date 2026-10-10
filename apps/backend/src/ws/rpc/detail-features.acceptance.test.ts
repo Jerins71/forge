@@ -22,7 +22,8 @@ async function fixture() {
   const swarm = {
     getAgent: () => ({ agentId: 'session', role: 'manager', profileId: 'project' }), listProfiles: () => [],
     getRestartRecoverySnapshot: () => recovery,
-    resumeRestartRecovery: vi.fn(async () => recovery), dismissRestartRecovery: vi.fn(async () => recovery),
+    resumeRestartRecovery: vi.fn(async () => ({ ...recovery, resumedAt: recovery.createdAt })), dismissRestartRecovery: vi.fn(async () => ({ ...recovery, dismissedAt: recovery.createdAt })),
+    emit: vi.fn(),
     controlSessionGoal: vi.fn(async () => ({ revision: 1, goal: null })),
     compactAgentContext: vi.fn(async () => undefined), smartCompactAgentContext: vi.fn(async () => ({ compacted: true })),
     getPendingCodexElicitationsForManager: () => [{ elicitationId: 'pending', managerAgentId: 'session', sidecarAgentId: 'sidecar', threadId: 'thread', turnId: 'turn' }],
@@ -41,6 +42,7 @@ describe('detail control acceptance', () => {
     const b = await f.rpc.execute(principal, 'recovery.decide', input);
     expect(a).toEqual(b); expect(a).toMatchObject({ method: 'recovery.decide', state: 'succeeded', sessionId: null });
     expect(f.swarm.resumeRestartRecovery).toHaveBeenCalledTimes(1);
+    expect(f.swarm.emit).toHaveBeenCalledExactlyOnceWith('restart_recovery_snapshot', { type: 'restart_recovery_snapshot', snapshot: { ...recovery, resumedAt: recovery.createdAt } });
     await expect(f.rpc.execute(principal, 'recovery.decide', { ...input, recoveryId: 'old' })).rejects.toMatchObject({ code: 'CONFLICT' });
   });
   it('moves goal control into the existing receipt admission owner', async () => {

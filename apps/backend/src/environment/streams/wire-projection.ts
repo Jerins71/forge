@@ -51,7 +51,9 @@ export function projectDetailItem(item: DetailItem, maxBytes = EVENT_BYTES - 204
 }
 
 export function recoveryProjection(swarm: Pick<SwarmManager, 'getRestartRecoverySnapshot'>): RecoverySnapshot | null {
-  const snapshot = swarm.getRestartRecoverySnapshot();
+  return projectRecoverySnapshot(swarm.getRestartRecoverySnapshot());
+}
+export function projectRecoverySnapshot(snapshot: ReturnType<SwarmManager['getRestartRecoverySnapshot']>): RecoverySnapshot | null {
   if (!snapshot) return null;
   const result = { ...snapshot, recoveryId: snapshot.bootId };
   if (!Value.Check(RecoverySnapshotSchema, result)) throw new StreamFault('PAYLOAD_TOO_LARGE', 'Recovery presentation exceeds its bounds');
