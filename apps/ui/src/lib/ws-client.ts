@@ -11,7 +11,7 @@ import {
   projectSessionWorkers,
 } from './ws-client/environment-projection'
 import { getCatalogModelsByFamily } from '@forge/protocol'
-import type { CommandReceipt, RpcInput } from '@forge/protocol/environment-v2'
+import type { CommandReceipt } from '@forge/protocol/environment-v2'
 import { environmentCommandIntentKey, sendEnvironmentCommand } from './ws-client/environment-command-transport'
 import { EnvironmentOutbox } from './ws-client/environment-outbox'
 import { BROWSER_HOST_REGISTER_PROTOCOL_INCOMPATIBLE_ERROR } from '@forge/protocol'
