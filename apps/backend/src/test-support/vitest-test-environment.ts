@@ -1,3 +1,4 @@
+import '../../../../scripts/test-installation-state.mjs';
 /**
  * Backend unit/integration tests run as ordinary Node processes, never as the
  * Electron main process. Do not inherit Electron development's ABI-specific

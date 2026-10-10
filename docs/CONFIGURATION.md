@@ -10,6 +10,7 @@ Forge is configured through environment variables, a `.env` file, and the dashbo
 |----------|---------|-------------|
 | `FORGE_HOST` | `127.0.0.1` | Backend bind address. Set to `0.0.0.0` for network/remote access. |
 | `FORGE_PORT` | `47187` (dev) / `47287` (prod) | Backend HTTP + WebSocket port. |
+| `FORGE_INSTALLATION_STATE_DIR` | OS user installation directory | Absolute override for isolated identity registry and Desktop installation manifest; isolated Desktop user-data launches set it automatically. Tests refuse the real host installation directory. |
 | `FORGE_DATA_DIR` | `~/.forge` (macOS/Linux) or `%LOCALAPPDATA%\forge` (Windows) | Data directory for all persistent state. |
 | `FORGE_DEBUG` | `false` | Enable debug logging. Also enables extension tool-call logging, which surfaces tool invocations from Pi extensions in the backend logs. |
 | `FORGE_TELEMETRY` | `true` | Enable or disable anonymous telemetry. It sends a random install identifier, coarse environment/provider/model metadata, and aggregate usage and feature-adoption counts; never prompts, messages, files, or secrets. |
