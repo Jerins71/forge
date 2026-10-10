@@ -14,7 +14,7 @@ import { expect, type BrowserContext, type Page, type Request } from '@playwrigh
 import { test as base } from './fixtures/test.js'
 import { readManifest, controlEnvironment } from './launch.js'
 import { startFaultProxy } from './fault-proxy.js'
-import { fixtureRpcOnce, until } from './fixtures/rpc-client.js'
+import { openFixtureRpc, until, fixtureRpcOnce } from './fixtures/rpc-client.js'
 import type { BootstrapSession } from './launch.js'
 
 interface UiEnvironment { environmentId: string; label: string; baseUrl: string; projectTitle: string; sessionId: string }
@@ -334,6 +334,60 @@ test('9.2.3 Run on B with a new worktree and an attachment uploaded to B; enviro
   expect(new Set(attempts.map(attempt => attempt.commandId)).size).toBe(1)
   assertions.browserLostAck = { droppedResults: proxy.metrics().droppedResponses, attempts, sameCommandId: true, ...evidence }
 })
+
+test('Batch 3 UI renders durable session and message pins, rename and foreground read on B', async ({ page }) => {
+  test.setTimeout(15_000);
+  const { b } = fleet!;
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!);
+  const principal = await controlEnvironment<BootstrapSession>(manifest, 'env-b', 'bootstrap');
+  const sessionId = (assertions.launch as { sessionId: string }).sessionId;
+  await page.goto(`${fleet!.uiUrl}/?agent=${sessionId}&env=${b.environmentId}`);
+  await expect(page.getByTestId('environment-session')).toHaveAttribute('data-environment-id', b.environmentId);
+  const row = page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${sessionId}"]`).filter({ visible: true }).first();
+  await expect(row).toBeVisible();
+  await row.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Rename', exact: true }).click();
+  await page.getByPlaceholder('Session name', { exact: true }).fill('Batch 3 UI B');
+  await page.getByRole('dialog', { name: 'Rename Session' }).getByRole('button', { name: 'Rename', exact: true }).click();
+  await expect(row).toContainText('Batch 3 UI B');
+  // The older seed is pinned first, then the newer session: pin time owns their order.
+  const olderRow = page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${b.sessionId}"]`).filter({ visible: true }).first();
+  await olderRow.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Pin', exact: true }).click();
+  await expect(olderRow.locator('[aria-label="Pinned"]')).toHaveCount(1);
+  await row.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Pin', exact: true }).click();
+  await expect(row.locator('[aria-label="Pinned"]')).toHaveCount(1);
+  const pinOrder = () => row.evaluate((node, environmentId) => Array.from(node.closest('ul')!.querySelectorAll('[data-session-ref]')).map(n => n.getAttribute('data-session-ref')!).filter(ref => ref.startsWith(`${environmentId}:`)), b.environmentId);
+  const expectedOrder = [`${b.environmentId}:${b.sessionId}`, `${b.environmentId}:${sessionId}`];
+  await expect.poll(pinOrder).toEqual(expectedOrder);
+  const pin = page.getByRole('button', { name: 'Pin message (preserve through compaction)', exact: true }).first();
+  await pin.click({ force: true });
+  await expect(page.getByRole('button', { name: 'Unpin message', exact: true }).first()).toBeVisible();
+  await shot(page, 'batch3-pins-before-reload');
+  await page.reload();
+  await expect(row).toContainText('Batch 3 UI B');
+  await expect(row.locator('[aria-label="Pinned"]')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Unpin message', exact: true }).first()).toBeVisible();
+  await expect.poll(pinOrder).toEqual(expectedOrder);
+  await shot(page, 'batch3-pins-fresh-bootstrap');
+  // Set unread while the user is viewing Inbox, then opening detail sends an explicit native read.
+  await page.goto(`${fleet!.uiUrl}/?view=inbox`);
+  await fixtureRpcOnce(b.baseUrl, principal, 'session.readState.set', { commandId: randomUUID(), sessionId, read: false });
+  const inboxRow = page.locator(`[data-inbox-row="${b.environmentId}::${sessionId}"]`).filter({ visible: true });
+  await expect(inboxRow).toHaveCount(1);
+  await expect(inboxRow.getByLabel('1 unread updates', { exact: true })).toBeVisible();
+  await shot(page, 'batch3-unread-inbox');
+  const start = proxy.metrics().commandAttempts.length;
+  await page.goto(`${fleet!.uiUrl}/?agent=${sessionId}&env=${b.environmentId}`);
+  await expect.poll(() => proxy.metrics().commandAttempts.slice(start).some(a => a.method === 'session.readState.set')).toBe(true);
+  const rpc = await openFixtureRpc(b.baseUrl, principal);
+  let shell: any;
+  try { const { subscriptionId } = await rpc.call('shell.subscribe', {}); shell = (await until(() => rpc.frames.find(f => f.type === 'stream' && f.subscriptionId === subscriptionId && f.item?.kind === 'snapshot'), Boolean))!.item.snapshot; }
+  finally { rpc.close(); }
+  expect(shell.sessions.find((s: any) => s.sessionId === sessionId)).toMatchObject({ title: 'Batch 3 UI B', pinnedAt: expect.any(String), unread: 0 });
+  assertions.batch3Ui = { environmentId: b.environmentId, sessionId, shellRows: shell.sessions, displayedPins: true, freshClientPins: true, pinOrder: expectedOrder, inboxUnread: true, foregroundRead: true };
+});
 
 test('Project Agent config and references use scoped native contracts and survive fresh bootstrap', async ({ page }) => {
   const { a } = fleet!

@@ -33,6 +33,7 @@ import { createArtifactService } from "./control/artifact-service.js";
 import { createSwarmControlAdapter, createControlledInputRoutePreflight } from "./control/swarm-control-adapter.js";
 import { createSwarmEventMirror, type SwarmEventMirror } from "./control/swarm-event-mirror.js";
 import { createShellStream } from "./streams/shell-stream.js";
+import { createSessionStateRpc } from "../ws/rpc/session-state-rpc.js";
 import { createDetailFeatureRpc } from "../ws/rpc/detail-feature-rpc.js";
 import { createDetailStream } from "./streams/detail-stream.js";
 import type { StreamDependencies } from "./streams/shell-stream.js";
@@ -192,6 +193,7 @@ export async function createEnvironmentService(options: {
         await descriptorPersistence.load();
         await unreadTracker.load();
         await owner.reconcileOnBoot();
+        await swarmManager.hydrateArchivedLastUsed();
         await source.reconcileBeforeReady();
       },
       composeTransport(wsHandler: WsHandler, terminalService: TerminalService | null) {
@@ -226,6 +228,7 @@ export async function createEnvironmentService(options: {
           access: auth,
           control: owner.controlService,
           projectAgents,
+          sessionState: createSessionStateRpc({ swarmManager, control: owner.controlService, unreadTracker }),
           detailFeatures: createDetailFeatureRpc({ swarmManager, control: owner.controlService }),
           featureStream: { subscribe: (principal, input, signal) => wsHandler.detailFeatures(principal, input, signal) },
           shellStream,

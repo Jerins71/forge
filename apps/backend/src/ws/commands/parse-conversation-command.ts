@@ -110,77 +110,9 @@ export function parseConversationCommand(maybe: ClientCommandCandidate): ParsedC
     });
   }
 
-  if (maybe.type === "pin_message") {
-    const agentId = (maybe as { agentId?: unknown }).agentId;
-    const messageId = (maybe as { messageId?: unknown }).messageId;
-    const pinned = (maybe as { pinned?: unknown }).pinned;
 
-    if (typeof agentId !== "string" || agentId.trim().length === 0) {
-      return fail("pin_message.agentId must be a non-empty string");
-    }
-    if (typeof messageId !== "string" || messageId.trim().length === 0) {
-      return fail("pin_message.messageId must be a non-empty string");
-    }
-    if (typeof pinned !== "boolean") {
-      return fail("pin_message.pinned must be a boolean");
-    }
 
-    return ok({
-      type: "pin_message",
-      agentId: agentId.trim(),
-      messageId: messageId.trim(),
-      pinned,
-    });
-  }
 
-  if (maybe.type === "clear_all_pins") {
-    const agentId = (maybe as { agentId?: unknown }).agentId;
-
-    if (typeof agentId !== "string" || agentId.trim().length === 0) {
-      return fail("clear_all_pins.agentId must be a non-empty string");
-    }
-
-    return ok({
-      type: "clear_all_pins",
-      agentId: agentId.trim(),
-    });
-  }
-
-  if (maybe.type === "mark_unread") {
-    const agentId = (maybe as { agentId?: unknown }).agentId;
-    const requestId = (maybe as { requestId?: unknown }).requestId;
-
-    if (typeof agentId !== "string" || agentId.trim().length === 0) {
-      return fail("mark_unread.agentId must be a non-empty string");
-    }
-    if (requestId !== undefined && typeof requestId !== "string") {
-      return fail("mark_unread.requestId must be a string when provided");
-    }
-
-    return ok({
-      type: "mark_unread",
-      agentId: agentId.trim(),
-      requestId,
-    });
-  }
-
-  if (maybe.type === "mark_all_read") {
-    const profileId = (maybe as { profileId?: unknown }).profileId;
-    const requestId = (maybe as { requestId?: unknown }).requestId;
-
-    if (typeof profileId !== "string" || profileId.trim().length === 0) {
-      return fail("mark_all_read.profileId must be a non-empty string");
-    }
-    if (requestId !== undefined && typeof requestId !== "string") {
-      return fail("mark_all_read.requestId must be a string when provided");
-    }
-
-    return ok({
-      type: "mark_all_read",
-      profileId: profileId.trim(),
-      requestId,
-    });
-  }
 
   return undefined;
 }

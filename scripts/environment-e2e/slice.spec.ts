@@ -86,6 +86,59 @@ test('9.2.2 server repository identity and repeated session IDs are environment 
   expect(projects[0]!.environmentId).not.toBe(projects[1]!.environmentId);
   evidence.repository = { groupedAB: true, independentC: true, repeatedIdsIsolated: true, manualGrouping: 'not-yet' };
 });
+test('Batch 3 native state is isolated, deduplicated and reproduced by fresh shell/detail after restart', async () => {
+  test.setTimeout(15_000);
+  const target = projects[1]!.sessionId;
+  const snapshot = async (index: number, method = 'shell.subscribe', input: unknown = {}) => {
+    const rpc = await openFixtureRpc(manifest.environments[index]!.baseUrl, sessions[index]!);
+    try { const { subscriptionId } = await rpc.call(method, input); return (await until(() => rpc.frames.find(f => f.type === 'stream' && f.subscriptionId === subscriptionId && f.item?.kind === 'snapshot'), Boolean))!.item.snapshot; }
+    finally { rpc.close(); }
+  };
+  const beforeA = (await snapshot(0)).sessions.find((s: any) => s.sessionId === target);
+  const beforeB = (await snapshot(1)).sessions.find((s: any) => s.sessionId === target);
+  const proxy = await startFaultProxy({ upstream: b().baseUrl });
+  const rpc = await openFixtureRpc(b().baseUrl, sessions[1]!, proxy.url);
+  const input = { commandId: randomUUID(), sessionId: target, title: 'Batch 3 B only', pinned: true };
+  try {
+    await rpc.call('shell.subscribe', {});
+    proxy.dropNextResponse({ transport: 'ws', rpcId: 'batch3-lost-ack' });
+    await expect(rpc.call('session.update', input, 'batch3-lost-ack', 500)).rejects.toThrow('timed out');
+    expect(await rpc.call('session.update', input)).toMatchObject({ state: 'succeeded' });
+    await until(() => rpc.frames.find(f => f.item?.event?.session?.title === input.title), Boolean);
+    await rpc.call('session.readState.set', { commandId: randomUUID(), sessionId: target, read: false });
+    const live = (await snapshot(1)).sessions.find((s: any) => s.sessionId === target);
+    expect(live).toMatchObject({ title: input.title, pinnedAt: expect.any(String), unread: 1 });
+    // A new shell and a headless detail read leave the explicit unread count intact.
+    await controlEnvironment(manifest, b().name, 'fixture', { operation: 'burst', sessionId: target, count: 1, status: 'idle' });
+    await until(async () => (await snapshot(1)).sessions.find((s: any) => s.sessionId === target)?.unread, n => n >= 2);
+    await rpc.call('session.readState.set', { commandId: randomUUID(), sessionId: target, read: false });
+    const detail = await snapshot(1, 'session.subscribe', { sessionId: target });
+    expect(detail.session.unread).toBe(1);
+    const item = detail.items.find((i: any) => ['assistant', 'user'].includes(i.kind));
+    expect(item).toBeTruthy();
+    await rpc.call('session.message.pin', { commandId: randomUUID(), sessionId: target, itemId: item.itemId, pinned: true });
+    expect((await snapshot(1, 'session.subscribe', { sessionId: target })).items.find((i: any) => i.itemId === item.itemId).pinned).toBe(true);
+    rpc.close();
+    await controlEnvironment(manifest, b().name, 'stop'); await controlEnvironment(manifest, b().name, 'start');
+    const restarted = (await snapshot(1)).sessions.find((s: any) => s.sessionId === target);
+    expect(restarted).toMatchObject({ title: live.title, pinnedAt: live.pinnedAt, sortKey: live.sortKey, unread: live.unread });
+    expect((await snapshot(1, 'session.subscribe', { sessionId: target })).items.find((i: any) => i.itemId === item.itemId).pinned).toBe(true);
+    await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.pins.clear', { commandId: randomUUID(), sessionId: target });
+    expect((await snapshot(1, 'session.subscribe', { sessionId: target })).items.find((i: any) => i.itemId === item.itemId).pinned).toBe(false);
+    expect((await snapshot(0)).sessions.find((s: any) => s.sessionId === target)).toEqual(beforeA);
+    const [old] = await controlEnvironment<any[]>(manifest, b().name, 'fixture', { operation: 'attention', sessionId: target });
+    await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.attention.dismiss', { commandId: randomUUID(), occurrenceIds: [old.attentionId] });
+    const [next] = await controlEnvironment<any[]>(manifest, b().name, 'fixture', { operation: 'attention', sessionId: target });
+    await expect(fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.attention.dismiss', { commandId: randomUUID(), occurrenceIds: [old.attentionId, next.attentionId] })).rejects.toThrow();
+    expect(await controlEnvironment<any[]>(manifest, b().name, 'fixture', { operation: 'attention-state', sessionId: target })).toMatchObject([{ attentionId: next.attentionId }]);
+    const counts = await readDb(db => db.prepare('SELECT COUNT(*) AS count FROM commands WHERE command_id=?').get(input.commandId));
+    expect(counts).toEqual({ count: 1 });
+    evidence.batch3 = { beforeA, beforeB, live, restarted, itemId: item.itemId, nativeCommands: true, lostAckChanges: 1, messagePinRestart: true, clearedPins: true, shellOnlyUnread: true, oldOccurrenceRejected: true };
+    // Restore the shared slice seed so unrelated acceptance retains its names.
+    await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.update', { commandId: randomUUID(), sessionId: target, title: beforeB.title, pinned: false });
+    await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'project.readState.clear', { commandId: randomUUID(), projectId: live.projectId });
+  } finally { rpc.close(); await proxy.stop(); }
+});
 test('9.2.3 B new worktree + attachment and post-COMMIT lost ack retry execute once', async () => {
   const providerMarker = (index: number) => readFile(join(manifest.environments[index]!.checkout, 'fixture-provider-marker.txt'), 'utf8').catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''; throw error; });
   const untouched = await Promise.all([providerMarker(0), providerMarker(2)]);

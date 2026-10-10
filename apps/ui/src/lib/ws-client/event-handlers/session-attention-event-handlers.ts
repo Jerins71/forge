@@ -60,9 +60,6 @@ export function handleSessionAttentionEvent(
     return true
   }
   if (event.type === 'session_attention_update') {
-    if (event.requestId) {
-      context.requestTracker.resolve('dismiss_session_attention', event.requestId, event)
-    }
     const patch = reduceSessionAttentionUpdate(context.state, event)
     if (patch) context.updateState(patch)
     return true
