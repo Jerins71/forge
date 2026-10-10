@@ -98,6 +98,19 @@ describe('repository checkout HTTP/service flow', () => {
     expect(f.manager.createManager).toHaveBeenCalledWith('', expect.objectContaining({ name: 'Hello-World', modelSelection: { provider: 'openai-codex', modelId: 'gpt-5.5' }, reasoningLevel: 'medium' }))
   })
 
+  it('uses an explicitly chosen create-selectable model and rejects one the machine does not offer', async () => {
+    const f = await fixture()
+    const chosen = { provider: 'claude-native', modelId: 'claude-opus-5-5' }
+    ;(f.catalog.models as unknown[]).push({ ...chosen, defaultReasoningId: 'high', reasoningOptions: [{ id: 'high' }, { id: 'low' }], surfaces: { create: { selectable: true } } })
+    const accepted = await f.request('', 'POST', { repositoryUrl: remote, model: { ...chosen, reasoningLevel: 'low' } })
+    expect(accepted.status).toBe(202)
+    await f.finish((await accepted.json()).checkoutId)
+    expect(f.manager.createManager).toHaveBeenCalledWith('', expect.objectContaining({ modelSelection: chosen, reasoningLevel: 'low' }))
+    const rejected = await f.request('', 'POST', { repositoryUrl: remote, model: { provider: 'nope', modelId: 'missing' } })
+    expect(rejected.status).toBe(400)
+    expect((await rejected.json()).error).toMatch(/model/i)
+  })
+
   it('adopts matching origin including SSH/HTTPS equivalence and returns an existing project', async () => {
     const f = await fixture(); await matchingCheckout(join(f.base, 'Hello-World'), 'git@github.com:octocat/Hello-World.git')
     const done = await f.finish(await f.start()); expect(done).toMatchObject({ phase: 'done', adopted: true })

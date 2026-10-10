@@ -7,14 +7,16 @@ import type { HttpRoute } from '../shared/http-route.js'
 
 const ENDPOINT = '/api/repository-checkouts'
 const METHODS = 'GET, POST, DELETE, OPTIONS'
-export function createRepositoryCheckoutRoutes(service: Pick<RepositoryCheckoutService, 'start' | 'status' | 'cancel'>): HttpRoute[] {
+export function createRepositoryCheckoutRoutes(service: Pick<RepositoryCheckoutService, 'start' | 'status' | 'cancel' | 'checkModel'>): HttpRoute[] {
   return withEnvironmentRouteAccess([
     { methods: 'POST, OPTIONS', matches: pathname => pathname === ENDPOINT, handle: async (request, response) => {
       applyCorsHeaders(request, response, METHODS)
       response.setHeader('Cache-Control', 'no-store')
       try {
         const body = await readJsonBody(request, 4096)
-        if (!validRequest(body)) { sendJson(response, 400, { error: 'Expected repositoryUrl (string), folder (optional string), and name (optional string).' }); return }
+        if (!validRequest(body)) { sendJson(response, 400, { error: 'Expected repositoryUrl (string), folder, name, and model (optional).' }); return }
+        const modelError = body.model ? await service.checkModel(body.model) : null
+        if (modelError) { sendJson(response, 400, { error: modelError }); return }
         sendJson(response, 202, service.start(body))
       } catch (error) {
         if (error instanceof RepositoryProjectCreationError) {
@@ -39,5 +41,8 @@ function validRequest(value: unknown): value is RepositoryCheckoutRequest {
   return typeof body.repositoryUrl === 'string' && body.repositoryUrl.trim().length > 0
     && (body.folder === undefined || typeof body.folder === 'string')
     && (body.name === undefined || typeof body.name === 'string')
-    && Object.keys(body).every(key => key === 'repositoryUrl' || key === 'folder' || key === 'name')
+    && (body.model === undefined || (typeof body.model === 'object' && body.model !== null
+      && typeof (body.model as Record<string, unknown>).provider === 'string' && typeof (body.model as Record<string, unknown>).modelId === 'string'
+      && ['undefined', 'string'].includes(typeof (body.model as Record<string, unknown>).reasoningLevel)))
+    && Object.keys(body).every(key => key === 'repositoryUrl' || key === 'folder' || key === 'name' || key === 'model')
 }
