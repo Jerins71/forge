@@ -55,6 +55,22 @@ async function createPersistence(): Promise<{ dataDir: string; persistence: Term
 
 describe('TerminalPersistence', () => {
 
+  it('orders persisted timestamp ties by terminal ID across filesystem traversal and reload', async () => {
+    // Profile traversal is the reverse of the intended terminal order. No creation
+    // sequence is persisted, so equal timestamps must use the persisted ID.
+    const { dataDir, persistence } = await createPersistence()
+    const laterId = createMeta({ profileId: 'profile-a', terminalId: 'terminal-z' })
+    const earlierId = createMeta({ profileId: 'profile-z', terminalId: 'terminal-a' })
+    const earlierTime = createMeta({ profileId: 'profile-a', terminalId: 'terminal-zz', createdAt: '2026-03-24T00:00:00.000Z' })
+    await persistence.saveMeta(laterId)
+    await persistence.saveMeta(earlierId)
+    await persistence.saveMeta(earlierTime)
+    const expected = ['terminal-zz', 'terminal-a', 'terminal-z']
+    expect((await persistence.listPersistedMeta()).map(meta => meta.terminalId)).toEqual(expected)
+    const reloaded = new TerminalPersistence({ dataDir, scrollbackLines: 5_000, journalMaxBytes: 1_048_576 })
+    expect((await reloaded.listPersistedMeta()).map(meta => meta.terminalId)).toEqual(expected)
+  })
+
   it('restores state by replaying snapshot data plus journal delta after checkpointSeq', async () => {
     const source = await createPersistence()
     const restored = await createPersistence()

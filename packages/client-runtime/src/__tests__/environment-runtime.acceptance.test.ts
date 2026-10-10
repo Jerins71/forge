@@ -104,6 +104,42 @@ describe('environment runtime acceptance', () => {
     expect(shell.cursor).toEqual(cached.cursor)
     expect((await persistence.loadShell(s.seed.entry.environmentId))!.projects[0]).toHaveProperty('futureField')
   })
+  it('connects a newer client to an older server and reloads its older shell cache offline', async () => {
+    const { servers: [s], registry, persistence } = await fleet()
+    const older = (value: unknown): any => {
+      if (Array.isArray(value)) return value.map(older)
+      if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
+        .filter(([key]) => !['defaultModel', 'model', 'attentionOccurrence'].includes(key))
+        .map(([key, item]) => [key, older(item)]))
+      return value
+    }
+    s.transformOutbound = older
+    await registry.start()
+    await online(registry, s.seed.entry.environmentId)
+    const client = registry.get(s.seed.entry.environmentId)
+    expect(await client.request('environment.get', {})).toEqual(s.seed.descriptor)
+    const detail = client.acquireDetail('session-1')
+    await until(() => detail.store.getSnapshot().freshness === 'live')
+    expect(detail.store.getSnapshot().projection).toEqual(older(s.seed.details!['session-1']))
+    s.emit({ kind: 'event', streamEpoch: s.seed.descriptor.streamEpoch, sequence: 2,
+      event: { type: 'session.upsert', session: { ...s.seed.shell!.sessions[0], title: 'Older server event' } } })
+    await until(() => client.shell.getSnapshot().sessions.get('session-1')?.title === 'Older server event')
+    detail.release()
+    await registry.dispose()
+    const cached = (await persistence.loadShell(s.seed.entry.environmentId))!
+    expect(cached.projects[0]).not.toHaveProperty('defaultModel')
+    expect(cached.sessions[0]).not.toHaveProperty('model')
+    const second = createEnvironmentRegistry({ persistence, credentials: createMemoryCredentialStore(),
+      fetch: async () => { throw new Error('Offline') }, webSocket: (url, p) => new WebSocket(url, p),
+      connectivity: { online: () => false, subscribe: () => () => {} } })
+    cleanups.push(() => second.dispose())
+    await second.start()
+    const shell = second.get(s.seed.entry.environmentId).shell.getSnapshot()
+    expect([...shell.projects.values()]).toEqual(cached.projects)
+    expect([...shell.sessions.values()]).toEqual(cached.sessions)
+    expect(shell.sessions.get('session-1')?.title).toBe('Older server event')
+    expect(shell.cursor).toEqual(cached.cursor)
+  })
   it('does not replay restored commands with unsupported request options', async () => {
     let persistedPending: readonly unknown[] | undefined
     const persistence = createMemoryPersistence()
@@ -609,3 +645,19 @@ it.each([
   expect(request).toHaveBeenCalledWith(method, expect.objectContaining({ ...input, commandId: expect.any(String) }))
   expect(fetch).toHaveBeenCalledWith(path, { cache: 'no-store' })
 });
+it('refreshes a verified managed endpoint without replacing its client or deleting pending/cache state', async () => {
+  const purge = {deleteShell:0,deleteCredentials:0}
+  const persistence=createMemoryPersistence(), credentials=createMemoryCredentialStore()
+  persistence.deleteShell=async()=>{purge.deleteShell++}; credentials.delete=async()=>{purge.deleteCredentials++}
+  const {servers:[a],registry}=await fleet(1,{persistence,credentials})
+  await registry.start(); await online(registry,a.seed.entry.environmentId)
+  const client=registry.get(a.seed.entry.environmentId)
+  const b=await startFixtureServer(0); cleanups.push(()=>b.close())
+  await registry.refreshManagedEndpoint(a.seed.entry.environmentId,b.seed.entry.baseUrl)
+  expect(registry.get(a.seed.entry.environmentId)).toBe(client)
+  expect(purge).toEqual({deleteShell:0,deleteCredentials:0})
+  await online(registry,a.seed.entry.environmentId)
+  const alien=await startFixtureServer(1); cleanups.push(()=>alien.close())
+  await expect(registry.refreshManagedEndpoint(a.seed.entry.environmentId,alien.seed.entry.baseUrl)).rejects.toMatchObject({code:'IDENTITY_MISMATCH'})
+  expect(registry.catalog.getSnapshot().get(a.seed.entry.environmentId)?.baseUrl).toBe(b.seed.entry.baseUrl)
+})

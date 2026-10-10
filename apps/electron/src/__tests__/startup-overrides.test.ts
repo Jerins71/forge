@@ -31,14 +31,12 @@ describe('isolated Electron user data override', () => {
       setPath,
     }
 
-    const result = applyElectronStartupOverrides({
-      app,
-      env: {
-        FORGE_ELECTRON_DEV_SERVER_URL: 'http://localhost:49111',
-        FORGE_ELECTRON_USER_DATA_DIR: isolatedUserData,
-        FORGE_DATA_DIR: path.join(root, 'forge-backend-data'),
-      },
-    })
+    const env: NodeJS.ProcessEnv = {
+      FORGE_ELECTRON_DEV_SERVER_URL: 'http://localhost:49111',
+      FORGE_ELECTRON_USER_DATA_DIR: isolatedUserData,
+      FORGE_DATA_DIR: path.join(root, 'forge-backend-data'),
+    }
+    const result = applyElectronStartupOverrides({ app, env })
     const canonicalIsolatedUserData = realpathSync.native(isolatedUserData)
 
     expect(result).toEqual({
@@ -46,6 +44,7 @@ describe('isolated Electron user data override', () => {
       userDataDir: canonicalIsolatedUserData,
       sessionDataDir: path.join(canonicalIsolatedUserData, 'session-data'),
     })
+    expect(env.FORGE_INSTALLATION_STATE_DIR).toBe(path.join(canonicalIsolatedUserData, 'installation'))
     expect(setPath.mock.calls).toEqual([
       ['userData', canonicalIsolatedUserData],
       ['sessionData', path.join(canonicalIsolatedUserData, 'session-data')],

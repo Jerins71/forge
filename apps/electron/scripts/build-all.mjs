@@ -174,6 +174,7 @@ async function main() {
   const streamDeckSetupEnabled = isStreamDeckSetupEnabled()
 
   await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/protocol', 'build'])
+  await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/client-runtime', 'build'])
   await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/backend', 'build'])
   await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/ui', 'build'])
   await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/cli', 'build'])

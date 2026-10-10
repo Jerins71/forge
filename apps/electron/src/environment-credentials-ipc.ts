@@ -1,6 +1,8 @@
 import { randomUUID, generateKeyPairSync, createHash, sign } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import type { WebSocket } from 'ws';
+import { ENVIRONMENT_RPC_PATH, ENVIRONMENT_WS_PROTOCOL } from '@forge/protocol/environment-v2';
 import type { PairingExchange, EnvironmentDescriptor, DeviceSession, Scope, ArtifactRef } from '@forge/protocol/environment-v2';
 
 export const ENVIRONMENT_PERSISTENCE_CHANNEL = 'forge:environment-persistence';
@@ -152,6 +154,31 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     await pinned(t);
     return { t, path: url.pathname + url.search, headers, secureBase: undefined };
   }
+  /** Main-only compensation; the freshly minted bearer never leaves this credential boundary. */
+  async function revokeMinted(t: StoredTarget): Promise<boolean> {
+    let socket: WebSocket | undefined;
+    try {
+      const { WebSocket: Socket } = await import('ws');
+      const headers = { Authorization: `Bearer ${t.bearerToken}`, Origin: clientOrigin, 'Content-Type': 'application/json', 'x-forge-environment-protocol': '1' };
+      const ticket = await checkedJson(await fetcher(t.baseUrl + '/api/v2/access/ws-ticket', { method: 'POST', headers, body: JSON.stringify({ audience: 'rpc', protocolVersion: 1 }), redirect: 'error', signal: AbortSignal.timeout(10_000) })) as { ticket: string };
+      if (!/^[A-Za-z0-9_-]{43}$/.test(ticket.ticket)) return false;
+      const url = new URL(ENVIRONMENT_RPC_PATH, t.baseUrl); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new Socket(url, [ENVIRONMENT_WS_PROTOCOL, 'ticket.' + ticket.ticket], { origin: clientOrigin, handshakeTimeout: 10_000, maxPayload: 16_384 });
+      const ws = socket; const requestId = randomUUID();
+      const acknowledged = await new Promise<boolean>(resolve => {
+        const timer = setTimeout(() => finish(false), 10_000);
+        const finish = (value: boolean) => { clearTimeout(timer); resolve(value); };
+        ws.once('open', () => ws.send(JSON.stringify({ type: 'request', requestId, method: 'access.devices.revoke', input: { deviceSessionId: t.deviceSessionId } })));
+        ws.once('error', () => finish(false)); ws.once('close', () => finish(false));
+        ws.on('message', raw => { try { const frame = JSON.parse(raw.toString()); if (frame.requestId === requestId) finish(frame.type === 'result' && frame.output?.deviceSessionId === t.deviceSessionId); } catch { finish(false); } });
+      });
+      if (acknowledged) return true;
+      // Revoking this same device may close its socket before the RPC result is delivered.
+      const check = await fetcher(t.baseUrl + '/api/v2/access/session', { headers, redirect: 'error', signal: AbortSignal.timeout(10_000) });
+      await check.body?.cancel(); return check.status === 401;
+    } catch { return false; }
+    finally { socket?.terminate(); }
+  }
   async function pairInternal(input: EnvironmentPairInput, primary = false) {
     if (!input || typeof input.baseUrl !== 'string') return fail('INVALID_INPUT','Invalid pairing input');
     const baseUrl = targetUrl(input.baseUrl); await load();
@@ -169,7 +196,12 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     const previous = targets!;
     targets = previous.filter(t => t.environmentId !== input.environmentId).map(t => primary ? { ...t, primary: false } : t);
     targets.push({ ...temporary, label: result.environment.label, bearerToken: result.bearerToken, deviceSessionId: result.deviceSession.deviceSessionId,deviceName:result.deviceSession.deviceName,scopes:result.deviceSession.scopes,pairedAt:result.deviceSession.createdAt,expiresAt:result.deviceSession.expiresAt, primary: primary || previous.some(t => t.environmentId === input.environmentId && t.primary) });
-    try { await save(); await clearRuntime(input.environmentId); } catch (e) { targets = previous; throw e; }
+    try { await save(); await clearRuntime(input.environmentId); } catch {
+      const minted = targets.at(-1)!;
+      const revoked = await revokeMinted(minted);
+      targets = previous; await save().catch(() => undefined);
+      fail('UNAVAILABLE', `Pairing completed but Desktop credential storage failed. ${revoked ? 'The new device was revoked. Restore encrypted storage and use Repair or pair again.' : `Revocation could not be verified. On the host, use a paired administrator to revoke device ${minted.deviceSessionId} or create a fresh pairing grant, then use Repair or pair again.`}`);
+    }
     return { environment: result.environment, deviceSession: result.deviceSession };
   }
   async function artifactResponse(input: EnvironmentArtifactInput): Promise<Response> {
@@ -253,7 +285,20 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     artifact: input => envelope(async () => { const response = await artifactResponse(input); return { bytes: await boundedBytes(response), mimeType: response.headers.get('content-type') ?? 'application/octet-stream', fileName: response.headers.get('content-disposition')?.match(/filename="([^"]*)"/)?.[1] ?? 'artifact' }; }),
     remove: id => envelope(() => mutate(async () => { await load(); const previous = targets!; targets = previous.filter(t => t.environmentId !== id); try { await save(); await clearRuntime(id); } catch (e) { targets = previous; throw e; } return { removed: targets.length !== previous.length }; })),
   };
-  return { ...bridge, persistence, rebindPrimary: (baseUrl: string) => envelope(async () => {
+  return { ...bridge, persistence,
+    // Main-only: SSH management proves the transport; UUID pinning remains independent.
+    // A rejected candidate must not wipe the old endpoint's drafts or pending journal.
+    refreshManagedEndpoint: (environmentId: string, baseUrl: string) => envelope(() => mutate(async () => {
+      const t = await target(environmentId); const candidate = targetUrl(baseUrl);
+      if (!candidate.startsWith('http://127.0.0.1:')) fail('INVALID_INPUT', 'Managed tunnels require a loopback endpoint');
+      const response = await fetcher(candidate + '/api/v2/environment', {redirect:'error',signal:AbortSignal.timeout(10_000)});
+      const descriptor = await checkedJson(response) as EnvironmentDescriptor;
+      if (descriptor.environmentId !== environmentId) fail('IDENTITY_MISMATCH', 'The managed environment identity changed');
+      if (descriptor.protocolVersion !== 1) fail('UNAVAILABLE', 'Environment protocol version does not match');
+      const previous=t.baseUrl;t.baseUrl=candidate;
+      try { await save(); } catch (e) {t.baseUrl=previous;throw e;}
+      return publicTarget(t);
+    })), rebindPrimary: (baseUrl: string) => envelope(async () => {
     const t = (await load()).find(t => t.primary); if (!t) return null;
     const rebound = { ...t, baseUrl: targetUrl(baseUrl) }; await pinned(rebound);
     if (t.baseUrl !== rebound.baseUrl) { t.baseUrl = rebound.baseUrl; await save(); }

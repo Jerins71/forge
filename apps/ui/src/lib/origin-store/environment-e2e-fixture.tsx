@@ -23,7 +23,7 @@ declare global {
     }
   }
 }
-const enabled = import.meta.env.VITE_FORGE_E2E_PROFILE === '1'
+const enabled = import.meta.env.VITE_FORGE_E2E_PROFILE === '1' || import.meta.env.VITE_FORGE_E2E_PLATFORM === '1'
 const onRender: ProfilerOnRenderCallback = (id, phase, duration, _base, start, commit) => {
   window.__forgeE2EPerformance?.commits.push({ id, phase, duration, start, commit })
 }

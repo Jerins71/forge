@@ -1,5 +1,6 @@
 export { useSidebarPrefs } from './useSidebarPrefs'
 export { useSidebarLayout } from './useSidebarLayout'
+export { useIsDesktopViewport } from './useIsDesktopViewport'
 export { useSidebarTreeState } from './useSidebarTreeState'
 export { useProjectViews } from './useProjectViews'
 export type { SidebarProjectView } from './useProjectViews'

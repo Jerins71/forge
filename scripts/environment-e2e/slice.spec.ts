@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './fixtures/test.js';
 import { once } from 'node:events';
 import { get as httpGet } from 'node:http';
 import { execFile } from 'node:child_process';
@@ -23,6 +24,8 @@ import { pairEnvironment } from '../../packages/client-runtime/src/pairing.js';
 import type { RuntimePorts } from '../../packages/client-runtime/src/ports.js';
 import { legacyCommandScopes } from '../../apps/backend/src/ws/rpc/legacy-builder-adapter.js';
 import { parseClientCommand } from '../../apps/backend/src/ws/ws-command-parser.js';
+
+test.use({ environmentSuite: 'slice' });
 
 let manifest: FleetManifest;
 const sessions: BootstrapSession[] = [];
@@ -493,7 +496,3 @@ test('9.2.10 real paged snapshot barrier orders concurrent updates; overflowing 
     evidence.snapshotBarrier = { summaries: 1001, pages: pages.length, barrierSequence: snapshot.sequence, concurrentUpdates: 8, synchronizedBeforeUpdates: true, snapshotUnchanged: true, overflow: error!.error.code, socketSurvived: true, queueFramesMax: metrics.streamQueueFramesMax, queueBytesMax: metrics.streamQueueBytesMax };
   } finally { rpc.close(); }
 });
-
-for (const name of [
-  '9.2.5 mounted UI files/diff/audit/model/terminal target routing and A/C streams',
-]) test.fixme(name, async () => {});

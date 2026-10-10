@@ -7,6 +7,11 @@ export function cloneDescriptor(descriptor: TerminalDescriptor): TerminalDescrip
   return { ...descriptor };
 }
 
+/** No creation sequence is persisted; the ID makes timestamp ties stable. */
+export function compareTerminalOrder(left: Pick<TerminalDescriptor, "createdAt" | "terminalId">, right: Pick<TerminalDescriptor, "createdAt" | "terminalId">): number {
+  return left.createdAt.localeCompare(right.createdAt) || left.terminalId.localeCompare(right.terminalId);
+}
+
 function descriptorFromMeta(meta: TerminalMeta): TerminalDescriptor {
   return {
     terminalId: meta.terminalId,

@@ -1,4 +1,5 @@
-import { test, expect, type Page, type CDPSession } from '@playwright/test';
+import { expect, type Page, type CDPSession } from '@playwright/test';
+import { test } from './fixtures/test.js';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { hostname, cpus, totalmem } from 'node:os';
@@ -9,6 +10,8 @@ import { seedLoadEnvironment } from './fixtures/load-seed.js';
 import { openFixtureRpc, until } from './fixtures/rpc-client.js';
 import { loadConfiguredSqliteDatabaseConstructor } from '../../apps/backend/src/sqlite-database-loader.js';
 import { getEnvironmentDbPath } from '../../apps/backend/src/swarm/storage/data-paths.js';
+
+test.use({ environmentSuite: 'load' });
 
 type Observation = Record<string, any>;
 const percentile = (values: number[]) => {
@@ -85,6 +88,7 @@ test('9.3 real eight-backend production load gate', async ({ browser }) => {
   try {
     await page.goto(`${ui.url}/?view=archive`);
     await page.waitForFunction(() => !!(window as any).__forgeE2ERuntime);
+    await expect.poll(async () => (await browserPerf()).commits.length, { message: 'The qualification UI must use the production React profiling renderer' }).toBeGreaterThan(0);
     await waitFresh(page, 0);
     report.raw.empty = { heap: await heap(cdp), fleet: await metrics(), freshness: await runtime(page) };
     const seeds = [];

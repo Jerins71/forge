@@ -80,3 +80,4 @@ export * from "./openrouter-routing.js";
 export * from "./legacy-feature-events.js";
 
 export * from './project-agent-v2.js'
+export type * from './managed-hosts.js'

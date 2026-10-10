@@ -20,7 +20,7 @@ try {
   await writeFile(inputPath, JSON.stringify({ root: fleet.manifest.root, environment, repositoryRoot, nativeNode: process.execPath, tsx: backendRequire.resolve('tsx'), reportPath,
     binaryPath: `/api/files/raw?agentId=${encodeURIComponent(seeded.sessionId)}&path=preview.pdf`,
     backendEnv: { ...sanitizedEnvironment(), FORGE_DATA_DIR: environment.dataDir, FORGE_HOST: '127.0.0.1', FORGE_PORT: String(environment.port), FORGE_E2E_CHECKOUT: environment.checkout,
-      FORGE_E2E_INSTALLATION_STATE: environment.installationStateDir, FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: '1', FORGE_ALLOWED_CLIENT_ORIGINS: 'app://forge', CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs') },
+      FORGE_INSTALLATION_STATE_DIR: environment.installationStateDir, FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: '1', FORGE_ALLOWED_CLIENT_ORIGINS: 'app://forge', CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs') },
   }), { mode: 0o600 });
   const main = join(fleet.manifest.artifactRoot, 'electron-main.cjs');
   const { build } = electronRequire('esbuild') as { build(options: Record<string, unknown>): Promise<unknown> };

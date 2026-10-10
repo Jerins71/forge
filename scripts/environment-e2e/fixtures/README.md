@@ -15,23 +15,22 @@ pnpm --filter @forge/protocol build
 pnpm e2e:env --environments 3 --provider fixture --smoke --out .internal/forge-v2-remote/harness-three.json
 pnpm e2e:env --environments 1 --provider fixture --legacy-smoke --out .internal/forge-v2-remote/harness-legacy.json
 pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/fixtures/proxy-self-test.ts
-pnpm --filter @forge/ui build
+VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build
 pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/fixtures/ui-fleet-self-test.ts
-pnpm exec playwright test scripts/environment-e2e/slice.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
-pnpm exec playwright test scripts/environment-e2e/load.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
+pnpm exec playwright test scripts/environment-e2e/slice.spec.ts scripts/environment-e2e/ui.spec.ts scripts/environment-e2e/load.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
 pnpm exec tsc -p scripts/environment-e2e/fixtures/tsconfig.json
 pnpm exec eslint scripts/environment-e2e --max-warnings 0
 pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/assert-artifacts.ts --manifest ../../.internal/forge-v2-remote/harness-legacy.json
 ```
 
 Put filename filters before `--project`: Playwright 1.63's variadic project option
-can otherwise consume the filters. The load cases are named fixmes awaiting real
-V2 mirror/RPC and production UI measurements. Skipped scenarios are never reported
-as full Phase 1 acceptance. Current runnable tests are infrastructure acceptance.
+can otherwise consume the filters. The platform build includes the production React
+profiling renderer required by the 8×500 load gate. Slice, UI and load each own
+a fresh fleet, so destructive scenarios cannot contaminate the next suite.
 
 Without `--smoke`/`--legacy-smoke`, launch owns a long-lived fleet until SIGINT or
 SIGTERM. Attach tests using `FORGE_E2E_MANIFEST=<absolute manifest path>`; attached
-Playwright setup never takes ownership of that fleet. Global setup otherwise owns
+Playwright setup never takes ownership of that fleet. Each suite worker otherwise owns
 startup/shutdown. Only owned ChildProcess objects receive shutdown/kill signals.
 Private 0600 Unix-socket lifecycle control lets UI test workers request stop/start
 from the launcher owner. Restart uses the original port and data root. Successful
@@ -44,8 +43,8 @@ Its bootstrap method receives the private backend ChildProcess and public fixtur
 metadata. Stream A/M must implement named private bootstrap IPC then actual
 challenge/exchange, returning `{environmentId, bearer, label?}` only in memory.
 `bootstrap` on the harness Unix socket delivers that in-memory result to the test
-worker. No public backend test endpoint is introduced. Installation state must be
-in each manifest environment's `installationStateDir`, never the host registry.
+worker. No public backend test endpoint is introduced. Installation state is isolated through `FORGE_INSTALLATION_STATE_DIR` in each
+manifest environment's `installationStateDir`, never the host registry.
 
 `openUiFleet(manifestPath)` matches stream E's UiFleet contract. Default bootstrap
 fails explicitly until A/M wire the port. `mintGrant` already uses authenticated
@@ -75,3 +74,18 @@ commit/runtime and rerun command. Infrastructure indexes are explicitly scoped;
 checksums, byte lengths and canonical path containment are verified. Trace recording
 is off until credential exchange can be kept outside/redacted from UI traces.
 Full fixture-provider E2E on Windows needs a native test executable launcher.
+
+Full development Desktop startup and whole-process relaunch use the real main entry,
+preload, renderer and Electron-owned backend with isolated installation/data/user state:
+
+```sh
+pnpm --dir apps/electron verify:runtime
+pnpm --dir apps/electron prepare:dev-native
+pnpm --dir apps/electron build
+pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/electron-smoke.ts
+pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/desktop-smoke.ts
+```
+
+Both smoke scripts write JSON evidence and use fresh harness-owned directories.
+The full-main smoke also captures startup/relaunch screenshots and verifies a
+persisted transcript and encrypted credential reload. Packaged defaults are unchanged.

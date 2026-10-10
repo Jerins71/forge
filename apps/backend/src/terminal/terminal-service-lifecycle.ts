@@ -9,7 +9,7 @@ import type {
   TerminalResizeRequest,
 } from "@forge/protocol";
 import type { TerminalPtyHandle } from "./terminal-pty-runtime.js";
-import { cloneDescriptor, createInactiveRuntime, sanitizeDimension, toError, toErrorMessage } from "./terminal-service-helpers.js";
+import { cloneDescriptor, compareTerminalOrder, createInactiveRuntime, sanitizeDimension, toError, toErrorMessage } from "./terminal-service-helpers.js";
 import {
   TerminalServiceError,
   type TerminalServiceContext,
@@ -391,7 +391,7 @@ export class TerminalServiceLifecycleController {
     return Array.from(this.context.terminals.values())
       .filter((runtime) => runtime.meta.sessionAgentId === scopeSessionAgentId && !runtime.closed && runtime.published)
       .map((runtime) => cloneDescriptor(runtime.descriptor))
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      .sort(compareTerminalOrder);
   }
 
   getTerminal(input: string | { terminalId: string; sessionAgentId: string }): TerminalDescriptor | undefined {

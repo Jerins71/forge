@@ -30,12 +30,12 @@ class FakePty implements TerminalPtyRuntime {
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanups.splice(0)) await close(); });
 
-async function terminalFixture() {
+async function terminalFixture(now?: () => Date) {
   const dataDir = await mkdtemp(join(tmpdir(), "forge-terminal-rpc-"));
   const runtimeConfig = await readTerminalRuntimeConfig({ env: {}, persistedSettings: {} });
   const pty = new FakePty();
   const persistence = new TerminalPersistence({ dataDir, scrollbackLines: 5000, journalMaxBytes: 1024 * 1024 });
-  const newService = () => new TerminalService({ dataDir, runtimeConfig, ptyRuntime: pty, persistence,
+  const newService = () => new TerminalService({ dataDir, runtimeConfig, ptyRuntime: pty, persistence, now,
     sessionResolver: { resolveSession: id => id === "session" ? { sessionAgentId: id, profileId: "project", cwd: dataDir } : undefined,
       listSessions: () => [{ sessionAgentId: "session", profileId: "project", cwd: dataDir }] },
     cwdPolicy: { rootDir: dataDir, allowlistRoots: [] } });
@@ -117,9 +117,25 @@ describe("terminal over environment RPC", () => {
     const c = await f.connect();
     c.send({ type: "request", requestId: "attach", method: "terminal.attach", input: { terminalId: host.terminal.terminalId, sessionId: "session", ticket: transport.issueTicket(principal, host.terminal.terminalId, "session").ticket } });
     await c.next(); await c.next();
+    const restoredOwned = t.pty.handles.find(handle => handle.pid === t.service.getTerminal(owned.terminal.terminalId)!.pid)!;
+    const restoredHost = t.pty.handles.find(handle => handle.pid === t.service.getTerminal(host.terminal.terminalId)!.pid)!;
     await f.rpc.closeDevice(principal.deviceSessionId);
-    expect(t.pty.handles[2].killed).toBe(true); expect(t.pty.handles[3].killed).toBe(false);
+    expect(restoredOwned.killed).toBe(true); expect(restoredHost.killed).toBe(false);
     expect(JSON.parse(await readFile(metaPath, "utf8")).creatorDeviceSessionId).toBe(principal.deviceSessionId);
+  });
+
+  it("keeps timestamp-tied terminal order stable in the live list and after a whole service restart", async () => {
+    const t = await terminalFixture(() => new Date("2026-10-10T00:00:00.000Z"));
+    cleanups.push(async () => { await t.service.shutdown(); await rm(t.dataDir, { recursive: true, force: true }); });
+    const first = await t.service.create({ sessionAgentId: "session", name: "first" });
+    const second = await t.service.create({ sessionAgentId: "session", name: "second" });
+    expect(first.terminal.createdAt).toBe(second.terminal.createdAt);
+    const expected = [first.terminal.terminalId, second.terminal.terminalId].sort();
+    expect(t.service.listTerminals("session").map(terminal => terminal.terminalId)).toEqual(expected);
+    await t.service.shutdown();
+    t.service = t.newService();
+    await t.service.initialize();
+    expect(t.service.listTerminals("session").map(terminal => terminal.terminalId)).toEqual(expected);
   });
 
   it("rejects a terminal ticket bound to a different device/session and ticket replay", async () => {
