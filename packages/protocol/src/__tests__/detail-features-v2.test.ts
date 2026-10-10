@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Value } from '@sinclair/typebox/value'
-import { rpcRegistry, ShellStreamItemSchema, DetailStreamItemSchema } from '../environment-v2.js'
+import { decodeEnvironmentValue, RecoverySnapshotSchema, rpcRegistry, ShellStreamItemSchema, DetailStreamItemSchema } from '../environment-v2.js'
 
 // Failure cases: fake selected-session authority, secret/body-bearing recovery
 // records, unbounded inventories, and incompatible live/replay projections.
@@ -10,6 +10,15 @@ const recovery = {
   undeliveredReports: [{ deliveryId: 'report', fromAgentId: 'worker', toAgentId: 'manager' }],
 }
 describe('typed detail features', () => {
+  it('decodes verbatim composed recovery IDs for long valid worker IDs', () => {
+    const workerId = 'w'.repeat(120)
+    const uuid = '00000000-0000-4000-8000-000000000001'
+    const deliveryId = `worker-result:${workerId}:${uuid}:${uuid}`
+    const assignmentId = `assignment:${workerId}:${uuid}`
+    const snapshot = { ...recovery, interruptedWorkers: [workerId], undeliveredReports: [{ deliveryId, assignmentId, fromAgentId: workerId, toAgentId: 'manager' }] }
+    expect(decodeEnvironmentValue(RecoverySnapshotSchema, snapshot)).toEqual(snapshot)
+    expect(decodeEnvironmentValue(RecoverySnapshotSchema, { ...snapshot, undeliveredReports: [{ ...snapshot.undeliveredReports[0], deliveryId: 'x'.repeat(257) }] })).toBeUndefined()
+  })
   it.each(['session.goal.control', 'session.compact', 'session.elicitation.respond', 'session.features.subscribe'])(
     'declares the migrated %s family', method => {
       expect(rpcRegistry[method as keyof typeof rpcRegistry]).toBeDefined()
