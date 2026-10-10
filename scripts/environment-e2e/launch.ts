@@ -218,7 +218,7 @@ export async function launchFleet(options: { environments?: number; out?: string
         if (match[2] === 'fixture') {
           let body = ''; for await (const chunk of req) { body += chunk.toString(); if (body.length > 65536) throw new Error('Private fixture request too large'); }
           const input = JSON.parse(body);
-          if (input.operation === 'arm-crash') paused.add(environment.name);
+          if (input.operation === 'arm-crash' || input.operation === 'arm-recovery-crash') paused.add(environment.name);
           return fixtureChildRequest(children[manifest.environments.indexOf(environment)]!, input);
         }
         if (match[2] === 'bootstrap') return pairing.bootstrap(children[manifest.environments.indexOf(environment)]!, environment);
