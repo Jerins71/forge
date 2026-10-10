@@ -10,7 +10,7 @@ export function spawnStandaloneBackend(environment: EnvironmentFixture, dataDir 
   const child: ChildProcess = spawn(nativeNode, ['--expose-gc', '--import', require.resolve('tsx'), join(repositoryRoot, 'scripts/environment-e2e/fixtures/backend-process.ts')], {
     cwd: environment.checkout,
     env: { ...sanitizedEnvironment(), FORGE_DATA_DIR: dataDir, FORGE_HOST: '127.0.0.1', FORGE_PORT: '0', FORGE_E2E_CHECKOUT: environment.checkout,
-      FORGE_E2E_INSTALLATION_STATE: environment.installationStateDir, FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: '1', FORGE_ALLOWED_CLIENT_ORIGINS: 'app://forge', CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs') },
+      FORGE_INSTALLATION_STATE_DIR: environment.installationStateDir, FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: '1', FORGE_ALLOWED_CLIENT_ORIGINS: 'app://forge', CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs') },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'], windowsHide: true,
   });
   let mismatch = false; let writerLocked = false;

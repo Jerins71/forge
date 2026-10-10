@@ -1,5 +1,6 @@
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { realpathSync } from "node:fs";
 
 export interface MemoryPathDescriptor {
   agentId: string;
@@ -656,7 +657,29 @@ export function getHostInstallationStateDir(
   env: NodeJS.ProcessEnv = process.env,
   userHome: string = homedir(),
 ): string {
+  const override = env.FORGE_INSTALLATION_STATE_DIR;
+  if (override !== undefined && (!override.trim() || !isAbsolute(override))) {
+    throw new Error("FORGE_INSTALLATION_STATE_DIR must be an absolute directory");
+  }
+  const state = override ?? defaultInstallationStateDir(platform, env, userHome);
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    const realState = defaultInstallationStateDir(process.platform, process.env, homedir());
+    if (canonicalInstallationPath(state) === canonicalInstallationPath(realState)) {
+      throw new Error("Test run refused the real host installation directory; set FORGE_INSTALLATION_STATE_DIR to a temporary directory");
+    }
+  }
+  return state;
+}
+
+function defaultInstallationStateDir(platform: NodeJS.Platform, env: NodeJS.ProcessEnv, userHome: string): string {
   if (platform === "win32") return join(env.LOCALAPPDATA || join(userHome, "AppData", "Local"), "Forge", "installation");
   if (platform === "darwin") return join(userHome, "Library", "Application Support", "Forge", "installation");
   return join(env.XDG_STATE_HOME || join(userHome, ".local", "state"), "forge", "installation");
+}
+function canonicalInstallationPath(value: string): string {
+  try { return realpathSync.native(value); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return resolve(value);
+  }
 }

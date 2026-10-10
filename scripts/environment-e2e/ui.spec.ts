@@ -9,7 +9,8 @@
 //   Pairing request bodies and traces are excluded from artifacts.
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { expect, test as base, type BrowserContext, type Page, type Request } from '@playwright/test'
+import { expect, type BrowserContext, type Page, type Request } from '@playwright/test'
+import { test as base } from './fixtures/test.js'
 import { readManifest, controlEnvironment } from './launch.js'
 import { startFaultProxy } from './fault-proxy.js'
 
@@ -52,7 +53,7 @@ const test = base.extend({
 })
 
 test.describe.configure({ mode: 'serial' })
-test.use({ screenshot: 'off', actionTimeout: 10000 })
+test.use({ environmentSuite: 'ui', screenshot: 'off', actionTimeout: 10000 })
 
 test.beforeAll(async ({ browser }) => {
   sharedContext = await browser.newContext()
@@ -128,7 +129,7 @@ test.afterAll(async () => {
 })
 
 test.beforeEach(() => {
-  test.skip(skipReason !== null, skipReason ?? '')
+  if (skipReason !== null) throw new Error(skipReason)
 })
 
 test.afterEach(() => {
@@ -634,6 +635,17 @@ test('Needs You lists a remote session that was never opened, survives an offlin
   expect(await attention('attention-state')).toEqual([])
   await expect(needsYou.getByRole('alert')).toHaveCount(0)
 
+  // Dismissal is durable in the backend and browser cache, including after both restart.
+  await page.evaluate(() => (window as any).__forgeE2ERuntime.flush())
+  await fleet!.stop(c)
+  await fleet!.start(c)
+  await page.reload()
+  await page.waitForFunction(() => !!(window as any).__forgeE2ERuntime)
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())).find((value: any) => value.environmentId === c.environmentId)?.fresh).toBe(true)
+  await openInbox(page)
+  await expect(row).toHaveCount(0)
+  expect(await attention('attention-state')).toEqual([])
+
   // A newer occurrence is a different item: the earlier dismissal does not hide it.
   const [second] = await attention('attention')
   expect(second.attentionId).not.toBe(first.attentionId)
@@ -642,7 +654,7 @@ test('Needs You lists a remote session that was never opened, survives an offlin
   await expect(row).toHaveCount(0)
   expect(await attention('attention-state')).toEqual([])
   expect(renderErrors).toEqual([])
-  assertions.needsYou = { environmentId: c.environmentId, sessionId: c.sessionId, neverMounted: true, restoredOffline: true, dismissedOccurrences: [first.attentionId, second.attentionId] }
+  assertions.needsYou = { environmentId: c.environmentId, sessionId: c.sessionId, neverMounted: true, restoredOffline: true, dismissalSurvivesRestart: true, dismissedOccurrences: [first.attentionId, second.attentionId] }
 })
 
 test('a launch link for a project that no longer exists does not crash the app', async ({ page }) => {

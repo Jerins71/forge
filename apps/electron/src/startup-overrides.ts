@@ -49,6 +49,7 @@ export function applyElectronStartupOverrides(options: {
   mkdirSync(requestedUserDataDir, { recursive: true, mode: 0o700 })
 
   const canonicalUserDataDir = realpathSync.native(requestedUserDataDir)
+  env.FORGE_INSTALLATION_STATE_DIR ??= path.join(canonicalUserDataDir, 'installation')
   assertIsolatedPath(canonicalUserDataDir, app.getPath('home'), protectedPaths.map(canonicalizeExistingPath))
 
   const sessionDataDir = path.join(canonicalUserDataDir, 'session-data')
