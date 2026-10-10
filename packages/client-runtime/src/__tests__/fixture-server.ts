@@ -17,6 +17,8 @@ export async function startFixtureServer(index = 0) {
   seed.entry.environmentId = `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`
   seed.descriptor.environmentId = seed.entry.environmentId
   seed.descriptor.streamEpoch = seed.entry.environmentId
+  let transformOutbound = (value: unknown): unknown => value
+  const encode = (value: unknown) => JSON.stringify(transformOutbound(value))
   const server = createServer((req, res) => {
     res.setHeader('content-type', 'application/json')
     if (
@@ -26,13 +28,13 @@ export async function startFixtureServer(index = 0) {
       httpRequests.push(req.url)
       res.end('{}')
     } else if (req.url === '/api/v2/environment')
-      res.end(JSON.stringify(descriptor))
+      res.end(encode(descriptor))
     else if (authBlocked) {
       res.statusCode = 401
       res.end(JSON.stringify({ message: 'Needs pairing' }))
     } else if (req.url === '/api/v2/access/session')
       res.end(
-        JSON.stringify({
+        encode({
           deviceSession: {
             deviceSessionId: seed.entry.environmentId,
             deviceName: 'test',
@@ -49,7 +51,7 @@ export async function startFixtureServer(index = 0) {
       )
     else if (req.url === '/api/v2/access/ws-ticket')
       res.end(
-        JSON.stringify({
+        encode({
           ticket: 't'.repeat(43),
           expiresAt: '2026-11-04T00:00:00.000Z',
         }),
@@ -86,7 +88,7 @@ export async function startFixtureServer(index = 0) {
   const browserHostParts = new Map<string, string[]>()
   let releasePage = () => {}
   const send = (socket: WebSocket, frame: unknown) =>
-    socket.send(JSON.stringify(frame))
+    socket.send(encode(frame))
   ws.on('connection', (socket) => {
     connections++
     socket.on('close', () => {
@@ -259,6 +261,9 @@ export async function startFixtureServer(index = 0) {
   seed.entry.baseUrl = `http://127.0.0.1:${address.port}`
   return {
     seed,
+    set transformOutbound(transform: (value: unknown) => unknown) {
+      transformOutbound = transform
+    },
     httpRequests,
     inputs,
     receipts,

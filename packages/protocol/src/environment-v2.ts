@@ -5,6 +5,7 @@
  * implementation spec. Every RPC method declares exactly one scope.
  */
 import { Type, type Static, type TSchema } from '@sinclair/typebox'
+import { Value } from '@sinclair/typebox/value'
 import { SESSION_ATTENTION_REASONS } from './session-attention.js'
 
 export const ENVIRONMENT_PROTOCOL_VERSION = 1 as const
@@ -23,6 +24,27 @@ export const V2_LIMITS = {
   detailCacheIdleMs: 300_000,
   heartbeatMs: 30_000,
 } as const
+
+const inboundSchemas = new WeakMap<object, unknown>()
+function inboundSchema(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value
+  const cached = inboundSchemas.get(value)
+  if (cached) return cached
+  const copy = Array.isArray(value) ? [] : { ...value }
+  inboundSchemas.set(value, copy)
+  for (const [key, item] of Object.entries(value))
+    (copy as Record<string, unknown>)[key] =
+      key === 'additionalProperties' && item === false ? true : inboundSchema(item)
+  return copy
+}
+/** Decode same-version inbound data, ignoring unknown properties without mutating
+ * the payload or weakening producer schemas. Clean selects union branches with
+ * Check first, so it needs a tolerant schema before the final strict check. */
+export function decodeEnvironmentValue<S extends TSchema>(schema: S, value: unknown): Static<S> | undefined {
+  if (Value.Check(schema, value)) return value
+  const cleaned = Value.Clean(inboundSchema(schema) as S, Value.Clone(value))
+  return Value.Check(schema, cleaned) ? cleaned : undefined
+}
 
 const O = <P extends Record<string, TSchema>>(p: P) =>
   Type.Object(p, { additionalProperties: false })

@@ -1,6 +1,7 @@
 import { Value } from '@sinclair/typebox/value'
 import {
   rpcRegistry,
+  decodeEnvironmentValue,
   RpcServerFrameSchema,
   ENVIRONMENT_RPC_PATH,
   ENVIRONMENT_WS_PROTOCOL,
@@ -8,7 +9,6 @@ import {
   type Method,
   type RpcInput,
   type RpcOutput,
-  type RpcServerFrame,
   type StreamMethod,
   type RpcStreamItem,
 } from '@forge/protocol/environment-v2'
@@ -475,8 +475,8 @@ export class EnvironmentSupervisor {
           'PROTOCOL_MISMATCH',
           'Oversized RPC frame',
         )
-      const frame = JSON.parse(text) as RpcServerFrame
-      if (!Value.Check(RpcServerFrameSchema, frame))
+      const frame = decodeEnvironmentValue(RpcServerFrameSchema, JSON.parse(text))
+      if (!frame)
         throw new EnvironmentRuntimeError(
           'PROTOCOL_MISMATCH',
           'Invalid RPC envelope',
@@ -504,10 +504,11 @@ export class EnvironmentSupervisor {
             frame.error.retryAfterMs,
           )
           p.reject(e)
-          if (e.code === 'UNAUTHENTICATED') this.fail(e)
+          if (e.code === 'UNAUTHENTICATED' || e.code === 'PROTOCOL_MISMATCH') this.fail(e)
           return
         }
-        if (!Value.Check(rpcRegistry[p.method].output, frame.output)) {
+        const output = decodeEnvironmentValue(rpcRegistry[p.method].output, frame.output)
+        if (output === undefined) {
           p.reject(
             new EnvironmentRuntimeError(
               'PROTOCOL_MISMATCH',
@@ -519,6 +520,7 @@ export class EnvironmentSupervisor {
             'Invalid RPC result',
           )
         }
+        frame.output = output
         if (p.method === 'environment.get') {
           const descriptor = frame.output as {
             environmentId: string
@@ -567,7 +569,7 @@ export class EnvironmentSupervisor {
           this.restart(sub)
           return
         }
-        if (e.code === 'UNAUTHENTICATED') {
+        if (e.code === 'UNAUTHENTICATED' || e.code === 'PROTOCOL_MISMATCH') {
           this.fail(e)
           return
         }
@@ -584,6 +586,8 @@ export class EnvironmentSupervisor {
           ) as RpcStreamItem<typeof sub.method>,
         )
       } catch (e) {
+        if (e instanceof EnvironmentRuntimeError && e.code === 'PROTOCOL_MISMATCH')
+          throw e
         sub.observer.error(e)
         this.restart(sub)
       }

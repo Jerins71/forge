@@ -13,7 +13,9 @@ import {
   StreamCursorSchema,
   ArtifactRefSchema,
   rpcRegistry,
+  decodeEnvironmentValue,
 } from '@forge/protocol/environment-v2'
+import { Type } from '@sinclair/typebox'
 import { Value } from '@sinclair/typebox/value'
 import type {
   EnvironmentCatalogEntry,
@@ -29,6 +31,8 @@ import { KeyedSelectorStore } from './stores/selector-store.js'
 import { DetailCache } from './stores/detail-cache.js'
 import { createFeatureClients } from './feature-clients/index.js'
 import { EnvironmentRuntimeError, unavailable } from './errors.js'
+const CachedProjectsSchema = Type.Array(ProjectSummarySchema)
+const CachedSessionsSchema = Type.Array(SessionSummarySchema)
 export class RuntimeEnvironmentClient implements EnvironmentClient {
   readonly environmentId: string
   readonly http: AuthenticatedHttp
@@ -70,9 +74,9 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
       (page, onOutput) => {
         void this.supervisor
           .request('shell.page', { page }, { onOutput })
-          .catch(() => {
+          .catch((error) => {
             this.shell.invalidateCursor()
-            this.supervisor.invalidate(unavailable())
+            this.supervisor.invalidate(error)
           })
       },
       () => {
@@ -135,9 +139,10 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
-    const cached = await this.ports.persistence
+    const received = await this.ports.persistence
       .loadShell(this.environmentId)
       .catch(() => null)
+    const cached = received && this.decodeCache(received)
     const credential = await this.ports.credentials.load(this.environmentId)
     if (
       credential?.expiresAt &&
@@ -165,26 +170,29 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
       cached &&
       mayHydrate &&
       (!credential?.deviceSessionId ||
-        credential.deviceSessionId === cached.deviceSessionId) &&
-      this.validCache(cached)
+        credential.deviceSessionId === cached.deviceSessionId)
     )
       this.shell.hydrate(cached)
     if (this.entry.enabled) this.supervisor.start()
   }
-  private validCache(cached: import('./ports.js').ShellCacheRecord): boolean {
-    return (
-      cached.environmentId === this.environmentId &&
-      cached.protocolVersion === 1 &&
-      cached.cacheSchemaVersion === 1 &&
-      cached.streamEpoch === cached.cursor?.streamEpoch &&
-      Value.Check(StreamCursorSchema, cached.cursor) &&
-      Array.isArray(cached.projects) &&
-      cached.projects.every((p) => Value.Check(ProjectSummarySchema, p)) &&
-      Array.isArray(cached.sessions) &&
-      cached.sessions.every((s) => Value.Check(SessionSummarySchema, s)) &&
-      Date.parse(cached.cachedAt) > this.now() - 30 * 86400000 &&
-      new TextEncoder().encode(JSON.stringify(cached)).byteLength <= 4194304
+  private decodeCache(
+    cached: import('./ports.js').ShellCacheRecord,
+  ): import('./ports.js').ShellCacheRecord | null {
+    if (
+      cached.environmentId !== this.environmentId ||
+      cached.protocolVersion !== 1 ||
+      cached.cacheSchemaVersion !== 1 ||
+      cached.streamEpoch !== cached.cursor?.streamEpoch ||
+      !(Date.parse(cached.cachedAt) > this.now() - 30 * 86400000) ||
+      new TextEncoder().encode(JSON.stringify(cached)).byteLength > 4194304
     )
+      return null
+    const cursor = decodeEnvironmentValue(StreamCursorSchema, cached.cursor)
+    const projects = decodeEnvironmentValue(CachedProjectsSchema, cached.projects)
+    const sessions = decodeEnvironmentValue(CachedSessionsSchema, cached.sessions)
+    return cursor && projects && sessions
+      ? { ...cached, cursor, projects, sessions }
+      : null
   }
   setEnabled(enabled: boolean): void {
     this.entry.enabled = enabled
@@ -200,15 +208,15 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
       this.details.purge()
       this.readCache.clear()
     }
-    const cached = await this.ports.persistence.loadShell(this.environmentId)
+    const received = await this.ports.persistence.loadShell(this.environmentId)
+    const cached = received && this.decodeCache(received)
     if (
       cached &&
-      this.validCache(cached) &&
       cached.deviceSessionId === device.deviceSessionId &&
       cached.streamEpoch === descriptor.streamEpoch
     ) {
       if (!this.shell.getSnapshot().complete) this.shell.hydrate(cached)
-    } else if (cached) {
+    } else if (received) {
       this.shell.reset()
       this.readCache.clear()
       await this.ports.persistence.deleteShell(this.environmentId)
@@ -458,21 +466,22 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
     input: Parameters<EnvironmentClient['uploadArtifact']>[0],
   ): Promise<ArtifactRef> {
     if (!this.supervisor.isOpen()) throw unavailable()
-    if (this.ports.platform?.uploadArtifact)
-      return this.ports.platform.uploadArtifact(this.entry, input)
-    const result = await this.http.json<ArtifactRef>(
-      `/api/v2/artifacts?projectId=${encodeURIComponent(input.projectId)}&uploadId=${encodeURIComponent(input.uploadId)}`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': input.mimeType,
-          'x-forge-file-name': encodeURIComponent(input.fileName),
-        },
-        body: input.body as BodyInit,
-        signal: input.signal,
-      },
-    )
-    if (!Value.Check(ArtifactRefSchema, result))
+    const received = this.ports.platform?.uploadArtifact
+      ? await this.ports.platform.uploadArtifact(this.entry, input)
+      : await this.http.json<ArtifactRef>(
+          `/api/v2/artifacts?projectId=${encodeURIComponent(input.projectId)}&uploadId=${encodeURIComponent(input.uploadId)}`,
+          {
+            method: 'POST',
+            headers: {
+              'content-type': input.mimeType,
+              'x-forge-file-name': encodeURIComponent(input.fileName),
+            },
+            body: input.body as BodyInit,
+            signal: input.signal,
+          },
+        )
+    const result = decodeEnvironmentValue(ArtifactRefSchema, received)
+    if (!result)
       throw new EnvironmentRuntimeError(
         'PROTOCOL_MISMATCH',
         'Invalid artifact response',

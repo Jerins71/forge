@@ -13,6 +13,24 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanups.splice(0)) await close(); });
 
 describe("environment RPC real socket boundary", () => {
+  it("rejects newer-client unsupported request options before durable acceptance", async () => {
+    const f = await socketFixture(); cleanups.push(f.close);
+    const c = await f.connect();
+    const input = { commandId: randomUUID(), projectId: "project", title: "Skewed", workspaceStrategy: { kind: "current_checkout" as const }, initialMessage: { text: "hello", artifactIds: [] } };
+    for (const frame of [
+      { type: "request", requestId: "envelope", method: "session.launch", input, futureField: "unsupported" },
+      { type: "request", requestId: "command", method: "session.launch", input: { ...input, futureField: "unsupported" } },
+      { type: "request", requestId: "workspace", method: "session.launch", input: { ...input, workspaceStrategy: { ...input.workspaceStrategy, futureField: "unsupported" } } },
+      { type: "request", requestId: "message", method: "session.launch", input: { ...input, initialMessage: { ...input.initialMessage, futureField: "unsupported" } } },
+    ]) {
+      c.socket.send(JSON.stringify(frame));
+      expect(await c.next()).toMatchObject({ type: "error", requestId: frame.requestId, error: { code: "INVALID_INPUT" } });
+    }
+    expect(f.streams.database.prepare("SELECT COUNT(*) count FROM commands").get()).toEqual({ count: 0 });
+    c.send({ type: "request", requestId: "known", method: "session.launch", input });
+    expect(await c.next()).toMatchObject({ type: "result", requestId: "known", output: { commandId: input.commandId, state: "accepted" } });
+  });
+
   it("routes launch/reconnect retry through the real durable control owner and publishes committed projections", async () => {
     const f = await socketFixture(); cleanups.push(f.close);
     const first = await f.connect();
