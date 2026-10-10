@@ -529,8 +529,7 @@ export function createFeatureClients(
         'choice_response',
         'get_session_workers',
         'get_conversation_page',
-        'pick_directory',
-        'browser_host_register',
+          'browser_host_register',
         'browser_host_hydrate',
         'browser_host_focus',
         'browser_host_response',
@@ -541,21 +540,9 @@ export function createFeatureClients(
       throw new Error(
         'This feature uses the V2 runtime or a local platform service',
       )
-    const workspaceRead = new Set([
-      'list_directories',
-      'validate_directory',
+    const workspaceRead = new Set<string>([
     ])
-    const workspaceWrite = new Set([
-      'create_manager',
-      'create_repository_project',
-      'cancel_repository_project_creation',
-      'delete_manager',
-      'update_manager_cwd',
-      'create_directory',
-      'rename_profile',
-      'archive_profile',
-      'restore_profile',
-      'reorder_profiles',
+    const workspaceWrite = new Set<string>([
     ])
     const sessionRead = new Set([
       'ping',
@@ -577,6 +564,7 @@ export function createFeatureClients(
     return result.events
   }
   const checkSetting = (path: string) => {
+    if (/^\/api\/(profiles|agents)\/[^/?]+\/context-mode$/.test(path) || /^\/api\/agents\/[^/?]+\/context-artifacts$/.test(path)) return
     if (
       !/^\/api\/(settings|stats|auth|skills|specialists|prompts|extensions|slash-commands|secure-sessions|secure-secrets|onboarding|observability|credentials|model-catalog|git\/remote-update-awareness|history\/index|repository-checkouts|reboot|terminals\/(?:available-shells|settings)|transcribe|provider-usage|v1\/profiles\/[^/?]+\/sessions\/[^/?]+\/feedback)(\/|\?|$)/.test(
         path,
@@ -584,8 +572,20 @@ export function createFeatureClients(
     )
       throw new Error('Invalid settings endpoint')
   }
-  const settingsFetch = (path: string, init?: RequestInit) => {
+  const settingsFetch = async (path: string, init?: RequestInit): Promise<Response> => {
     checkSetting(path)
+    const context = path.match(/^\/api\/(profiles|agents)\/([^/?]+)\/context-mode$/)
+    if (context && init?.method?.toUpperCase() === 'PUT') {
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : null
+      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'mode' && key !== 'commandId') || (body.mode !== 'summary' && body.mode !== 'fresh' && !(context[1] === 'agents' && body.mode === null))) throw new Error('Invalid context-mode request')
+      const commandId = body.commandId ?? crypto.randomUUID()
+      const targetId = decodeURIComponent(context[2])
+      const receipt = context[1] === 'profiles'
+        ? await rpc.request('project.update', { commandId, projectId: targetId, patch: { contextMode: body.mode } })
+        : await rpc.request('session.configure', { commandId, sessionId: targetId, contextMode: body.mode })
+      if (receipt.state !== 'succeeded') return Response.json({ error: receipt.error?.message ?? 'Context-mode command was interrupted' }, { status: 409 })
+      return http.fetch(path, { cache: 'no-store' })
+    }
     // Byte bodies (voice uploads) need the binary transport; JSON bodies stay on the text path.
     return init?.body != null && typeof init.body !== 'string' && http.fetchBinary
       ? http.fetchBinary(path, SETTINGS_BINARY_RESPONSE_MAX_BYTES, init)
@@ -669,8 +669,11 @@ export function createFeatureClients(
         ),
     },
     models: {
-      applyRecommendedDefaults: (signal) =>
-        post('/api/settings/recommended-manager-defaults', undefined, signal),
+      applyRecommendedDefaults: async (_signal) => {
+        const receipt = await rpc.request('settings.recommendedDefaults.apply', { commandId: crypto.randomUUID() })
+        if (receipt.state !== 'succeeded' || !receipt.result?.profileIds || !receipt.result.rosterId || receipt.result.rosterRevision === undefined) throw new Error(receipt.error?.message ?? 'Recommended defaults were interrupted')
+        return { profileIds: receipt.result.profileIds, rosterId: receipt.result.rosterId, rosterRevision: receipt.result.rosterRevision }
+      },
       catalog: (p, s) =>
         get('/api/settings/manager-selection-catalog', { profileId: p }, s),
     },

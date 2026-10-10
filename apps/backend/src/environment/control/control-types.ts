@@ -17,7 +17,7 @@ import type {
  * Wire DTOs live in @forge/protocol/environment-v2 and are never duplicated here.
  */
 
-export type ControlMethod = "session.launch" | "session.send" | "session.choose" | "session.stop";
+export type ControlMethod = CommandReceipt["method"];
 
 export interface Principal {
   deviceSessionId: string;
@@ -30,11 +30,14 @@ export interface LifecycleAdmission {
   command: string;
   /** File mutations authorize workspace writes without elevating session privileges. */
   requiredScope?: Scope;
+  receipt?: { method: ControlMethod; projectId?: string; sessionId?: string };
   sessionIds: readonly string[];
   /** Profile teardown also fences launches not yet materialized in the swarm. */
   projectIds?: readonly string[];
   intent: "stop" | "resume" | "inspect" | "cancel-choice";
   request: unknown;
+  /** Resolved policy is durable without changing the caller request hash. */
+  frozenRequest?: unknown;
   choiceId?: string;
   /** Synchronous target policy; only fresh requests run it, before any fence. */
   preflight?: () => void;
@@ -43,6 +46,7 @@ export interface LifecycleAdmission {
 /** Durable owner of session mutations and their lifecycle admission. */
 export interface ControlService {
   execute<M extends ControlMethod>(principal: Principal, method: M, input: RpcInput<M>): Promise<CommandReceipt>;
+  readWorkspace?<M extends import("./project-policy.js").DirectoryReadMethod>(principal: Principal, method: M, input: RpcInput<M>): Promise<RpcOutput<M>>;
   getReceipt(principal: Principal, commandId: string): Promise<CommandReceipt>;
   /** Synchronous lifecycle callbacks are journaled for retry, never automatically replayed. */
   admitLifecycle?<T>(principal: Principal, input: LifecycleAdmission, operation: () => Promise<T>): Promise<T>;

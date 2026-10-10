@@ -21,7 +21,7 @@ async function fixture() {
   migrateControlDatabase(database, { environmentId: randomUUID(), streamEpoch: randomUUID() });
   cleanup.push(async () => { database.close(); await rm(dataDir, { recursive: true, force: true }); });
   database.prepare("INSERT INTO device_sessions (device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES ('device','fixture-token','fixture-proof','Fixture','cli','[]',0,0,?)").run(Date.now() + 86_400_000);
-  database.prepare("INSERT INTO control_projects VALUES ('project','{}',0)").run();
+  database.prepare("INSERT INTO control_projects (project_id,summary_json,updated_sequence) VALUES ('project','{}',0)").run();
   const service = createArtifactService({ database, dataDir });
   const upload = { principal, projectId: "project", uploadId: randomUUID(), fileName: "fixture.txt", mimeType: "text/plain", sizeBytes: 7 };
   async function* body(text = "fixture") { yield Buffer.from(text); }

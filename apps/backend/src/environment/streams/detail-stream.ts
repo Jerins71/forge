@@ -9,7 +9,7 @@ import { decodeStreamItem, projectDetailItem } from "./wire-projection.js";
 
 export function createDetailStream(deps: StreamDependencies) {
   function requireSession(sessionId: string): SessionSummary {
-    const row = deps.database.prepare("SELECT summary_json FROM control_sessions WHERE session_id = ?").get(sessionId) as { summary_json: string } | undefined;
+    const row = deps.database.prepare("SELECT summary_json FROM control_sessions WHERE session_id = ? AND deleted=0").get(sessionId) as { summary_json: string } | undefined;
     if (!row) throw new StreamFault("NOT_FOUND", "Unknown session.");
     return JSON.parse(row.summary_json) as SessionSummary;
   }
@@ -69,7 +69,7 @@ export function createDetailStream(deps: StreamDependencies) {
   }
 
   function workersPage(sessionId: string, offset: number): RpcOutput<"session.workers"> {
-    const rows = deps.database.prepare("SELECT worker_json FROM control_workers WHERE session_id = ? ORDER BY agent_id LIMIT 101 OFFSET ?").all(sessionId, offset) as { worker_json: string }[];
+    const rows = deps.database.prepare("SELECT worker_json FROM control_workers WHERE session_id = ? AND deleted=0 ORDER BY agent_id LIMIT 101 OFFSET ?").all(sessionId, offset) as { worker_json: string }[];
     const workers = rows.slice(0, 100).map(row => JSON.parse(row.worker_json) as WorkerSummary);
     const meta = readMeta(deps.database);
     return { workers, nextPage: rows.length > 100 ? Buffer.from(JSON.stringify({ sessionId, offset: offset + 100, epoch: meta.stream_epoch })).toString("base64url") : null };

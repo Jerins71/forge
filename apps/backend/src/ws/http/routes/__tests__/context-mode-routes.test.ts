@@ -1,5 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { RpcInput } from "@forge/protocol/environment-v2";
+import type { ControlService } from "../../../../environment/control/control-types.js";
+import { bindHttpPrincipal } from "../../../rpc/http-principal.js";
 import type { SessionContextModeSnapshot } from "@forge/protocol";
 import { sendJson } from "../../../http-utils.js";
 import { createContextModeRoutes } from "../context-mode-routes.js";
@@ -34,8 +37,14 @@ describe("createContextModeRoutes", () => {
         }
       }),
     } as unknown as SwarmManager;
+    const execute = vi.fn(async (principal: unknown, method: string, input: RpcInput<"session.configure">) => {
+      expect(principal).toMatchObject({ deviceSessionId: "fixture" });
+      expect(method).toBe("session.configure");
+      await swarmManager.updateSessionContextMode(input.sessionId, input.contextMode!);
+      return { commandId: input.commandId, state: "succeeded", result: { sessionId: input.sessionId } };
+    });
     const server = await createRouteServer(
-      createContextModeRoutes({ swarmManager }),
+      createContextModeRoutes({ swarmManager, control: { execute } as unknown as ControlService }),
     );
 
     const summary = await fetch(`${server.baseUrl}/api/agents/manager/context-mode`, {
@@ -68,6 +77,7 @@ describe("createContextModeRoutes", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ mode: "window" }),
     });
+    expect(execute).toHaveBeenCalledTimes(2);
     expect(invalid.status).toBe(400);
     await expect(invalid.json()).resolves.toMatchObject({
       error: 'mode must be "summary" or "fresh"',
@@ -109,6 +119,7 @@ async function handleRoute(routes: HttpRoute[], request: IncomingMessage, respon
   }
 
   try {
+    bindHttpPrincipal(request, { deviceSessionId: "fixture", scopes: new Set(["session:operate"]) });
     await route.handle(request, response, requestUrl);
   } catch (error) {
     if (response.writableEnded || response.headersSent) {

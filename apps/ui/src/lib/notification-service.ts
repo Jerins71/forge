@@ -113,18 +113,6 @@ export function removeMutedAgent(agentId: string): void {
   }
 }
 
-/** Bulk-remove multiple agents from the muted set (e.g. on manager deletion). */
-export function removeMutedAgents(agentIds: string[]): void {
-  const muted = new Set(loadMutedAgents())
-  let changed = false
-  for (const id of agentIds) {
-    if (muted.delete(id)) changed = true
-  }
-  if (changed) {
-    persistMutedAgents(muted)
-  }
-}
-
 export { MUTE_CHANGE_EVENT }
 
 // Invalidate mute cache on cross-tab storage changes

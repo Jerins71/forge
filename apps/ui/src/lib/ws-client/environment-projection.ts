@@ -46,6 +46,11 @@ export function projectSession(
           : { provider: session.model.provider, modelId: session.model.modelId, thinkingLevel: session.model.thinkingLevel })
       : previous?.model ?? pendingModel,
     modelOrigin: session.model?.origin ?? previous?.modelOrigin,
+    managerPosture: session.delegation?.managerPosture,
+    managerPostureOrigin: session.delegation?.managerPostureOrigin,
+    delegationRosterId: session.delegation?.rosterId,
+    delegationRosterOrigin: session.delegation?.rosterOrigin,
+    contextModeOverride: session.contextMode?.override,
     sessionFile: previous?.sessionFile ?? '',
     workerCount: session.workerCount,
     ...(session.archived
@@ -67,8 +72,12 @@ export function projectShell(shell: ShellState, previous: AgentDescriptor[], pre
     profileId: p.projectId,
     displayName: p.title,
     defaultSessionAgentId:
-      shell.sessionIdsByProject.get(p.projectId)?.[0] ?? '',
+      p.defaultSessionId ?? shell.sessionIdsByProject.get(p.projectId)?.[0] ?? '',
     defaultModel: p.defaultModel ?? pendingModel,
+    defaultManagerPosture: p.delegationDefaults?.managerPosture,
+    defaultDelegationRosterId: p.delegationDefaults?.rosterId,
+    defaultContextMode: p.contextMode,
+    ...(Number.isFinite(Number(p.sortKey)) ? { sortOrder: Number(p.sortKey) } : {}),
     createdAt: p.updatedAt,
     updatedAt: p.updatedAt,
     ...(p.archived ? { archivedAt: p.updatedAt } : {}),

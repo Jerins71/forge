@@ -1,7 +1,10 @@
 import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
-import { applyCorsHeaders, sendJson } from "../../http-utils.js";
+import { randomUUID } from "node:crypto";
+import { requireHttpPrincipal } from "../../rpc/http-principal.js";
+import type { ControlService } from "../../../environment/control/control-types.js";
+import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
 
 export const MANAGER_SELECTION_CATALOG_ENDPOINT_PATH = "/api/settings/manager-selection-catalog";
@@ -13,6 +16,7 @@ const ALLOWED_HEADERS = "content-type, if-none-match";
 
 export function createManagerSelectionCatalogRoutes(options: {
   swarmManager: SwarmManager;
+  control?: ControlService;
 }): HttpRoute[] {
   return withEnvironmentRouteAccess([{
     methods: ROUTE_METHODS,
@@ -22,18 +26,18 @@ export function createManagerSelectionCatalogRoutes(options: {
     handle: async (request, response) => {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
       if (requestUrl.pathname === RECOMMENDED_MANAGER_DEFAULTS_ENDPOINT_PATH) {
-        await handleRecommendedManagerDefaultsRequest(options.swarmManager, request, response);
+        await handleRecommendedManagerDefaultsRequest(request, response, options.control);
         return;
       }
       await handleManagerSelectionCatalogRequest(options.swarmManager, request, response);
     },
-  }], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:read'] }, PUT: { scopes: ['session:read'] }, PATCH: { scopes: ['session:read'] }, DELETE: { scopes: ['session:read'] } });
+  }], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['settings:admin'] }, PUT: { scopes: ['session:read'] }, PATCH: { scopes: ['session:read'] }, DELETE: { scopes: ['session:read'] } });
 }
 
 async function handleRecommendedManagerDefaultsRequest(
-  swarmManager: SwarmManager,
   request: IncomingMessage,
   response: ServerResponse,
+  control?: ControlService,
 ): Promise<void> {
   applyCorsHeaders(request, response, RECOMMENDED_DEFAULTS_METHODS, ALLOWED_HEADERS);
   if (request.method === "OPTIONS") {
@@ -47,7 +51,13 @@ async function handleRecommendedManagerDefaultsRequest(
     return;
   }
   try {
-    sendJson(response, 200, { ...await swarmManager.applyRecommendedManagerDefaults() });
+    if (!control) throw new Error("Project policy is not composed");
+    const body = await readJsonBody(request);
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => key !== "commandId")) { sendJson(response, 400, { error: "Expected commandId" }); return; }
+    const commandId = (body as { commandId?: string }).commandId ?? randomUUID();
+    const receipt = await control.execute(requireHttpPrincipal(request), "settings.recommendedDefaults.apply", { commandId });
+    if (receipt.state !== "succeeded") { sendJson(response, 409, { error: receipt.error }); return; }
+    sendJson(response, 200, { ...receipt.result });
   } catch {
     sendJson(response, 500, { error: "Unable to apply recommended manager defaults" });
   }

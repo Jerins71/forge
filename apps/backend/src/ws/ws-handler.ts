@@ -24,7 +24,6 @@ import { extractRequestId, parseClientCommand } from "./ws-command-parser.js";
 import { WsApiProxy } from "./ws-api-proxy.js";
 import { hasRequestId, sendWsEvent, sendWsEventWithBackpressure } from "./ws-send.js";
 import { WsSubscriptions } from "./ws-subscriptions.js";
-import type { RepositoryProjectCreationService } from "../swarm/repository-project-creation-service.js";
 import type { PresentedChatArtifactTicketStore } from "../swarm/session/presented-chat-artifact.js";
 import type { HtmlArtifactPreviewStore } from "../swarm/session/html-artifact-preview.js";
 import type { ControlService, EnvironmentAccessPort, Principal } from "../environment/control/control-types.js";
@@ -47,7 +46,6 @@ export class WsHandler {
   /** Desktop's embedded browser host on the environment RPC socket. */
   readonly browserHost: BrowserHostRpc;
   private readonly apiProxy: WsApiProxy;
-  private repositoryProjectCreationService: RepositoryProjectCreationService | null = null;
   private readonly conversationPageRequestTimes = new WeakMap<WebSocket, number[]>();
   private environmentControl: { access: EnvironmentAccessPort; control: ControlService } | null = null;
   private readonly principals = new WeakMap<WebSocket, Principal>();
@@ -127,9 +125,6 @@ export class WsHandler {
     });
   }
 
-  setRepositoryProjectCreationService(service: RepositoryProjectCreationService | null): void {
-    this.repositoryProjectCreationService = service;
-  }
 
   setEnvironmentControl(deps: { access: EnvironmentAccessPort; control: ControlService }): void {
     this.environmentControl = deps;
@@ -661,7 +656,6 @@ export class WsHandler {
       broadcastToSubscribed: (event) => this.broadcastToSubscribed(event),
       handleDeletedAgentSubscriptions: (deletedAgentIds) => this.handleDeletedAgentSubscriptions(deletedAgentIds),
       unreadTracker: this.unreadTracker ?? undefined,
-      repositoryProjectCreationService: this.repositoryProjectCreationService ?? undefined,
     });
     if (managerHandled) {
       return;

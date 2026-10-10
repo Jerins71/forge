@@ -103,6 +103,7 @@ export function createSwarmManagerCoreServices(
     logDebug: options.logDebug,
   });
   const persistenceService = new PersistenceService({
+    descriptorStore: options.descriptorStore,
     ...options.persistence,
     config: state.config,
     descriptors: state.descriptors,

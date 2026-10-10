@@ -33,6 +33,7 @@ import { createFeatureClients } from './feature-clients/index.js'
 import { EnvironmentRuntimeError, unavailable } from './errors.js'
 const CachedProjectsSchema = Type.Array(ProjectSummarySchema)
 const CachedSessionsSchema = Type.Array(SessionSummarySchema)
+function requiresProjectPolicy(method: string): boolean { return method.startsWith('project.') || method === 'session.configure' || method.startsWith('workspace.directories.') || method === 'settings.recommendedDefaults.apply' }
 export class RuntimeEnvironmentClient implements EnvironmentClient {
   readonly environmentId: string
   readonly http: AuthenticatedHttp
@@ -230,12 +231,9 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
     )
       for (const command of journal.slice(0, 100))
         if (
-          [
-            'session.launch',
-            'session.send',
-            'session.choose',
-            'session.stop',
-          ].includes(command?.method) &&
+          command?.method in rpcRegistry &&
+          rpcRegistry[command.method as PendingCommand['method']].receipt &&
+          (!requiresProjectPolicy(command.method) || descriptor.capabilities.projectPolicy) &&
           Value.Check(
             rpcRegistry[command.method as PendingCommand['method']].input,
             command.input,
@@ -251,6 +249,7 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
     input: RpcInput<M>,
     options?: { signal?: AbortSignal },
   ): Promise<RpcOutput<M>> {
+    if (requiresProjectPolicy(method) && !this.descriptor()?.capabilities.projectPolicy) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to use project policy controls')
     if (!this.supervisor.isOpen()) throw unavailable()
     const readKey =
       method === 'session.content' ||
@@ -359,6 +358,7 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
     this.recovering = true
     try {
       for (const command of this.pending.values()) {
+        if (requiresProjectPolicy(command.method) && !this.descriptor()?.capabilities.projectPolicy) continue
         if (
           command.deviceSessionId !==
             this.http.deviceSession?.deviceSessionId ||

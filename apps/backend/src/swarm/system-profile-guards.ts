@@ -28,17 +28,6 @@ export function requireNonSystemSessionProfile(
   requireNonSystemProfile(resolveProfileIdForSessionAgent(sessionAgentId, getAgent), profiles, message);
 }
 
-export function filterSystemProfileIds(
-  profileIds: readonly string[],
-  profiles: ProfileCollection,
-): string[] {
-  const profileMap = asProfileMap(profiles);
-  return profileIds.filter((profileId) => {
-    const profile = profileMap.get(profileId);
-    return !profile || !isSystemProfile(profile);
-  });
-}
-
 export function resolveProfileIdForSessionAgent(
   sessionAgentId: string,
   getAgent: SessionDescriptorLookup,

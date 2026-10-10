@@ -72,6 +72,7 @@ it('sets up a real project through authenticated HTTP and projects the same repo
       expect(result.adopted).toBeUndefined()
       expect(await readFile(join(localPath, 'README'), 'utf8')).toContain('Hello World')
     }
+    expect(environment.database.prepare("SELECT method FROM commands WHERE method='project.create'").all()).toHaveLength(1)
     const again = await setup()
     expect(again).toMatchObject({ adopted: true, projectId: result.projectId, sessionId: result.sessionId })
     let project!: ProjectSummary
@@ -93,8 +94,8 @@ it('sets up a real project through authenticated HTTP and projects the same repo
       await writeFile(artifact, `${JSON.stringify({ platform: process.platform, publicClone: process.env.FORGE_CHECKOUT_PUBLIC_ACCEPTANCE === '1', evidence }, null, 2)}\n`)
     }
   } finally {
-    await server.stop(); await environment.stop()
+    await server.stop()
     for (const agent of manager.listAgents().filter(agent => agent.role === 'manager')) await manager.stopSession(agent.agentId)
-    await manager.disposeHistoryRecall(); await configHandle.cleanup()
+    await manager.disposeHistoryRecall(); await environment.stop(); await configHandle.cleanup()
   }
 }, 60_000)

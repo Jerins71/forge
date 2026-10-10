@@ -1,12 +1,6 @@
 import type {
   AgentDescriptor,
-  ManagerModelPreset,
   ManagerProfile,
-  ManagerReasoningLevel,
-  SessionModelUpdateMode,
-  DelegationRosterOrigin,
-  ManagerPostureOrigin,
-  WorkModeId,
 } from './shared-types.js'
 
 export interface SessionCreatedEvent {
@@ -80,25 +74,6 @@ export interface SessionPinnedEvent {
   agentId: string
   pinned: boolean
   pinnedAt: string | null
-  requestId?: string
-}
-
-export interface SessionModelUpdatedEvent {
-  type: 'session_model_updated'
-  sessionAgentId: string
-  mode: SessionModelUpdateMode
-  model?: ManagerModelPreset
-  reasoningLevel?: ManagerReasoningLevel
-  requestId?: string
-}
-
-export interface SessionDelegationUpdatedEvent {
-  type: 'session_delegation_updated'
-  sessionAgentId: string
-  managerPosture: WorkModeId
-  managerPostureOrigin: ManagerPostureOrigin
-  delegationRosterId: string
-  delegationRosterOrigin: DelegationRosterOrigin
   requestId?: string
 }
 

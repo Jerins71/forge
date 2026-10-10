@@ -279,13 +279,13 @@ function project(database: Database, sessionId: string | null, event: ControlEve
     case "project.upsert":
       database
         .prepare(
-          `INSERT INTO control_projects VALUES (?, ?, ?)
-        ON CONFLICT(project_id) DO UPDATE SET summary_json = excluded.summary_json, updated_sequence = excluded.updated_sequence`,
+          `INSERT INTO control_projects (project_id,summary_json,updated_sequence) VALUES (?, ?, ?)
+        ON CONFLICT(project_id) DO UPDATE SET summary_json = excluded.summary_json, updated_sequence = excluded.updated_sequence, deleted=0`,
         )
         .run(event.project.projectId, JSON.stringify(event.project), sequence);
       break;
     case "project.remove":
-      database.prepare("DELETE FROM control_projects WHERE project_id = ?").run(event.projectId);
+      database.prepare("UPDATE control_projects SET deleted=1,updated_sequence=? WHERE project_id = ?").run(sequence, event.projectId);
       break;
     case "session.upsert":
       database
@@ -306,7 +306,7 @@ function project(database: Database, sessionId: string | null, event: ControlEve
       // A control-owned identity remains durable even when no longer in the visible catalog.
       database
         .prepare(
-          "UPDATE control_sessions SET summary_json = json_set(summary_json, '$.archived', json('true')), updated_sequence = ? WHERE session_id = ?",
+          "UPDATE control_sessions SET deleted=1, summary_json = json_set(summary_json, '$.archived', json('true')), updated_sequence = ? WHERE session_id = ?",
         )
         .run(sequence, event.sessionId);
       break;
@@ -356,13 +356,13 @@ function project(database: Database, sessionId: string | null, event: ControlEve
       if (!sessionId) throw new Error("Worker requires session identity");
       database
         .prepare(
-          `INSERT INTO control_workers VALUES (?, ?, ?, ?)
-        ON CONFLICT(session_id, agent_id) DO UPDATE SET worker_json = excluded.worker_json, updated_sequence = excluded.updated_sequence`,
+          `INSERT INTO control_workers (session_id,agent_id,worker_json,updated_sequence) VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_id, agent_id) DO UPDATE SET worker_json = excluded.worker_json, updated_sequence = excluded.updated_sequence, deleted=0`,
         )
         .run(sessionId, event.worker.agentId, JSON.stringify(event.worker), sequence);
       break;
     case "worker.remove":
-      database.prepare("DELETE FROM control_workers WHERE session_id = ? AND agent_id = ?").run(sessionId, event.agentId);
+      database.prepare("UPDATE control_workers SET deleted=1 WHERE session_id = ? AND agent_id = ?").run(sessionId, event.agentId);
       break;
     case "choice.upsert":
       // Runtime-generation ownership is supplied by the mirror in this same transaction.

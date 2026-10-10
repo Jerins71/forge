@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { fixtureRpcOnce } from './rpc-client.js';
 import { once } from 'node:events';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -34,22 +36,14 @@ export async function legacySmoke(environment: EnvironmentFixture, session: Boot
   try {
     send({ type: 'subscribe_inventory', requestId: 'legacy-smoke-inventory' });
     await wait(frame => frame.type === 'inventory_snapshot');
-    phase = 'create manager';
-    send({ type: 'create_manager', name: 'Synthetic native fixture', cwd: environment.checkout,
-      secureSessionsEnabled: false, modelSelection: { provider: 'codex-native', modelId: 'gpt-6-sol' },
-      reasoningLevel: 'high', requestId: 'fixture-manager' });
-    const catalog = await wait(frame => frame.type === 'agents_snapshot' && (frame.agents as { role: string }[]).some(agent => agent.role === 'manager'));
-    const manager = (catalog.agents as { role: string; agentId: string; model: { provider: string }; cwd: string }[]).find(agent => agent.role === 'manager')!;
-    assert.equal(manager.model.provider, 'codex-native');
-    assert.equal(manager.cwd, environment.checkout);
+    phase = 'create project';
+    const receipt = await fixtureRpcOnce(environment.baseUrl, session, 'project.create', { commandId: randomUUID(), title: 'Synthetic native fixture', cwd: environment.checkout, model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' }, secureSessionsEnabled: false });
+    assert.equal(receipt.state, 'succeeded');
+    const manager = { agentId: receipt.result.sessionId };
     let since = frames.length;
     phase = 'subscribe conversation';
     send({ type: 'subscribe', agentId: manager.agentId, conversationView: 'all' });
     await wait(frame => frame.type === 'ready' && frame.subscribedAgentId === manager.agentId, since);
-    // Inventory exposes the descriptor before provisioning finishes. Conversation
-    // subscription can receive the completion event that inventory deliberately filters.
-    phase = 'manager provisioning';
-    await wait(frame => frame.type === 'manager_created');
     async function message(text: string, expected: string) {
       phase = 'hello reply';
       const start = frames.length;

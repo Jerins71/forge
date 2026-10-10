@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { requireHttpPrincipal } from "../../rpc/http-principal.js";
+import type { ControlService } from "../../../environment/control/control-types.js";
 import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type {
   ProjectContextModeSnapshot,
@@ -20,8 +23,9 @@ const CONTEXT_MODE_METHODS = "GET, PUT, OPTIONS";
 
 export function createContextModeRoutes(options: {
   swarmManager: SwarmManager;
+  control?: ControlService;
 }): HttpRoute[] {
-  return withEnvironmentRouteAccess([
+  const routes = withEnvironmentRouteAccess([
     {
       methods: "GET, OPTIONS",
       matches: pathname => CONTEXT_ARTIFACTS_PATTERN.test(pathname),
@@ -66,10 +70,11 @@ export function createContextModeRoutes(options: {
       },
     },
   ], { GET: { scopes: ['session:read'] }, HEAD: { scopes: ['session:read'] }, POST: { scopes: ['session:operate'] }, PUT: { scopes: ['session:operate'] }, PATCH: { scopes: ['session:operate'] }, DELETE: { scopes: ['session:operate'] } });
+  return routes.map(route => route.methods === 'PUT' && route.matches('/api/profiles/fixture/context-mode') ? { ...route, access: { scopes: ['workspace:write'] } } : route);
 }
 
 async function handleProfileContextModeRequest(
-  options: { swarmManager: SwarmManager },
+  options: { swarmManager: SwarmManager; control?: ControlService },
   request: IncomingMessage,
   response: ServerResponse,
   requestUrl: URL,
@@ -108,7 +113,9 @@ async function handleProfileContextModeRequest(
   try {
     const body = await readJsonBody(request);
     const mode = requireContextMode(readModeField(body), "mode");
-    await options.swarmManager.updateProjectContextMode(profileId, mode);
+    if (!options.control) throw new Error("Project policy is not composed");
+    const receipt = await options.control.execute(requireHttpPrincipal(request), "project.update", { commandId: (body as { commandId?: string }).commandId ?? randomUUID(), projectId: profileId, patch: { contextMode: mode } });
+    if (receipt.state !== "succeeded") { sendJson(response, 409, { error: receipt.error }); return; }
     const payload: ProjectContextModeSnapshot = options.swarmManager.getProjectContextMode(profileId);
     sendJson(response, 200, payload as unknown as Record<string, unknown>);
   } catch (error) {
@@ -117,7 +124,7 @@ async function handleProfileContextModeRequest(
 }
 
 async function handleAgentContextModeRequest(
-  options: { swarmManager: SwarmManager },
+  options: { swarmManager: SwarmManager; control?: ControlService },
   request: IncomingMessage,
   response: ServerResponse,
   requestUrl: URL,
@@ -156,7 +163,9 @@ async function handleAgentContextModeRequest(
   try {
     const body = await readJsonBody(request);
     const mode = parseSessionContextModeWrite(readModeField(body, { allowNull: true }));
-    await options.swarmManager.updateSessionContextMode(agentId, mode);
+    if (!options.control) throw new Error("Project policy is not composed");
+    const receipt = await options.control.execute(requireHttpPrincipal(request), "session.configure", { commandId: (body as { commandId?: string }).commandId ?? randomUUID(), sessionId: agentId, contextMode: mode });
+    if (receipt.state !== "succeeded") { sendJson(response, 409, { error: receipt.error }); return; }
     const payload: SessionContextModeSnapshot = options.swarmManager.getSessionContextMode(agentId);
     sendJson(response, 200, payload as unknown as Record<string, unknown>);
   } catch (error) {
@@ -171,6 +180,7 @@ function readModeField(value: unknown, options?: { allowNull?: boolean }): unkno
   if (!Object.prototype.hasOwnProperty.call(value, "mode")) {
     throw new ContextModeValidationError("mode is required");
   }
+  if (Object.keys(value).some(key => key !== "mode" && key !== "commandId")) throw new ContextModeValidationError("Unknown context-mode request field");
   const mode = (value as { mode?: unknown }).mode;
   if (mode === null && options?.allowNull) {
     return null;

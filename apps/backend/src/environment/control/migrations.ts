@@ -193,6 +193,16 @@ export function migrateControlDatabase(database: Database, identity: { environme
       (singleton, schema_version, environment_id, stream_epoch) VALUES (1, 1, ?, ?)`,
         )
         .run(identity.environmentId, identity.streamEpoch);
+      const columns: [string, string, string][] = [
+        ["environment_meta", "descriptors_imported", "INTEGER NOT NULL DEFAULT 0"],
+        ["control_projects", "profile_json", "TEXT"], ["control_projects", "deleted", "INTEGER NOT NULL DEFAULT 0"],
+        ["control_sessions", "descriptor_json", "TEXT"], ["control_sessions", "deleted", "INTEGER NOT NULL DEFAULT 0"],
+        ["control_workers", "descriptor_json", "TEXT"], ["control_workers", "deleted", "INTEGER NOT NULL DEFAULT 0"],
+      ];
+      for (const [table, column, definition] of columns) {
+        const known = database.pragma(`table_info(${table})`) as { name: string }[];
+        if (!known.some(field => field.name === column)) database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+      }
       const meta = database.prepare("SELECT schema_version FROM environment_meta WHERE singleton = 1").get() as { schema_version: number };
       if (meta.schema_version !== 1) throw new Error("Unsupported environment control schema version");
     })

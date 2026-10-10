@@ -391,6 +391,55 @@ test('9.2.7 controlled crash at all seven effect boundaries', async () => {
   evidence.crashes = observations;
 });
 
+test('Batch 2 typed project policy survives lost acknowledgement, replay and restart', async () => {
+  const proxy = await startFaultProxy({ upstream: b().baseUrl });
+  const rpc = await openFixtureRpc(b().baseUrl, sessions[1]!, proxy.url);
+  const model = { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' };
+  const create = { commandId: randomUUID(), title: 'Batch 2 project', cwd: b().checkout, model };
+  const projectId = `project-${create.commandId}`;
+  const commands: string[] = [];
+  const command = async (method: string, input: Record<string, unknown>) => {
+    const receipt = await rpc.call(method, { commandId: randomUUID(), ...input });
+    expect(receipt.state).toBe('succeeded'); commands.push(method); return receipt;
+  };
+  try {
+    expect((await rpc.call('environment.get', {})).capabilities.projectPolicy).toBe(true);
+    const directories = await rpc.call('workspace.directories.list', { path: b().checkout });
+    expect(directories.resolvedPath).toBe(b().checkout);
+    expect((await rpc.call('workspace.directories.validate', { path: b().checkout })).valid).toBe(true);
+    await command('workspace.directories.create', { parentPath: b().checkout, name: `batch2-${create.commandId}` });
+    proxy.dropNextResponse({ transport: 'ws', rpcId: 'policy-lost-create' });
+    await expect(rpc.call('project.create', create, 'policy-lost-create', 500)).rejects.toThrow('timed out');
+    expect((await rpc.call('project.create', create)).result).toEqual({ projectId, sessionId: projectId });
+    commands.push('project.create');
+    await expect(rpc.call('project.update', { commandId: randomUUID(), projectId, patch: { title: 'Rejected', unsupported: true } })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await command('project.update', { projectId, patch: { title: 'Policy restored', cwd: b().checkout, modelDefault: model, delegationDefaults: { managerPosture: 'hands_on' }, contextMode: 'fresh' } });
+    await command('session.configure', { sessionId: projectId, model: { mode: 'override', ...model }, contextMode: 'summary', delegation: { managerPosture: { mode: 'override', value: 'hands_on' } } });
+    await command('session.configure', { sessionId: projectId, model: { mode: 'inherit' }, contextMode: null, delegation: { managerPosture: { mode: 'inherit' } } });
+    await command('project.reorder', { projectIds: [projectId, ...projects.filter((_, i) => i === 1).map(p => p.sessionId)] });
+    await command('project.archive', { projectId });
+    await command('project.restore', { projectId });
+    await command('settings.recommendedDefaults.apply', {});
+    const headers = { Authorization: `Bearer ${sessions[1]!.bearer}`, 'Content-Type': 'application/json' };
+    expect((await fetch(`${b().baseUrl}/api/profiles/${projectId}/context-mode`, { method: 'PUT', headers, body: JSON.stringify({ mode: 'fresh', commandId: randomUUID() }) })).ok).toBe(true);
+    const persisted = await readDb(db => ({ commands: (db.prepare('SELECT count(*) n FROM commands WHERE command_id=?').get(create.commandId) as { n: number }).n, profile: db.prepare('SELECT profile_json FROM control_projects WHERE project_id=?').get(projectId) }));
+    expect(persisted.commands).toBe(1); expect(persisted.profile).toBeTruthy();
+    rpc.close(); await controlEnvironment(manifest, b().name, 'stop'); await controlEnvironment(manifest, b().name, 'start');
+    const restarted = await openFixtureRpc(b().baseUrl, sessions[1]!);
+    try {
+      const subscription = await restarted.call('shell.subscribe', {});
+      const snapshot = await until<any>(() => restarted.frames.find(frame => frame.subscriptionId === subscription.subscriptionId && frame.item?.kind === 'snapshot')?.item.snapshot, Boolean);
+      const profile = snapshot.projects.find((p: any) => p.projectId === projectId);
+      expect(profile).toMatchObject({ title: 'Policy restored', cwd: b().checkout, contextMode: 'fresh', defaultModel: model, defaultSessionId: projectId });
+      expect(snapshot.sessions.find((session: any) => session.sessionId === projectId)).toMatchObject({ model: { ...model, origin: 'profile_default' }, contextMode: { effective: 'fresh' } });
+      expect((await restarted.call('command.get', { commandId: create.commandId })).state).toBe('succeeded');
+      expect((await restarted.call('project.delete', { commandId: randomUUID(), projectId })).state).toBe('succeeded');
+      commands.push('project.delete');
+    } finally { restarted.close(); }
+    evidence.batch2 = { commands, directoryReads: 2, lostCreateAcknowledgement: true, stableProjectIdentity: true, strictInputRejected: true, restartPolicyAndInheritance: true, httpControlOwned: true };
+  } finally { rpc.close(); await proxy.stop(); }
+});
+
 test('9.2.10 copied data root blocks before listen; explicit local re-key revokes copied devices', async () => {
   await controlEnvironment(manifest, b().name, 'stop');
   const copied = join(manifest.root, 'copied-b-data'); await cp(b().dataDir, copied, { recursive: true });
@@ -415,7 +464,7 @@ test('9.2.10 copied data root blocks before listen; explicit local re-key revoke
 test('9.2.10 real paged snapshot barrier orders concurrent updates; overflowing lease resyncs only its stream', async () => {
   test.setTimeout(90000);
   const seeded = await seedLoadEnvironment(manifest, b(), sessions[1]!, 1001);
-  const summaryCount = await readDb(db => (db.prepare('SELECT count(*) n FROM control_sessions').get() as { n: number }).n);
+  const summaryCount = await readDb(db => (db.prepare('SELECT count(*) n FROM control_sessions WHERE deleted=0').get() as { n: number }).n);
   const rpc = await openFixtureRpc(b().baseUrl, sessions[1]!);
   try {
     const first = await rpc.call('shell.subscribe', {});

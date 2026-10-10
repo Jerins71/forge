@@ -28,7 +28,7 @@ export interface ShellCacheRecord {
   cursor: StreamCursor
 }
 export interface PendingCommand {
-  method: 'session.launch' | 'session.send' | 'session.choose' | 'session.stop'
+  method: import('@forge/protocol/environment-v2').CommandReceipt['method']
   input: { commandId: string } & Record<string, unknown>
   credentialRef: string | null
   deviceSessionId: string

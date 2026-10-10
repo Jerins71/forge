@@ -1,12 +1,9 @@
 import {
-  isManagerPosture,
   type ClientCommand,
-  type ManagerPosture,
   type ServerEvent,
 } from "@forge/protocol";
 import type { WebSocket } from "ws";
 import { ArchiveOperationError } from "../../swarm/archive/archive-service.js";
-import { inferSwarmModelPresetFromDescriptor, parseSwarmModelPreset } from "../../swarm/catalog/model-presets.js";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
 import {
   requireNonSystemProfile,
@@ -53,8 +50,6 @@ export async function handleSessionCommand<Connection>(context: SessionCommandRo
     command.type !== "session_goal_control" &&
     command.type !== "rename_session" &&
     command.type !== "pin_session" &&
-    command.type !== "update_session_model" &&
-    command.type !== "update_session_delegation" &&
     command.type !== "fork_session"
   ) {
     return false;
@@ -375,125 +370,6 @@ export async function handleSessionCommand<Connection>(context: SessionCommandRo
     return true;
   }
 
-  if (command.type === "update_session_model") {
-    try {
-      requireNonSystemSessionProfile(
-        command.sessionAgentId,
-        swarmManager.listProfiles(),
-        (agentId) => swarmManager.getAgent(agentId),
-      );
-
-      const canonicalPreset = command.mode === "override" && !command.modelSelection
-        ? parseSwarmModelPreset(command.model, "update_session_model.model")
-        : undefined;
-      // Exact selections without a catalog preset family (discovered OpenRouter models) omit `model`.
-      const eventModel = command.mode === "inherit"
-        ? undefined
-        : command.modelSelection
-          ? inferEventModelPreset(
-              await swarmManager.updateSessionExactModel(
-                command.sessionAgentId,
-                command.modelSelection,
-                command.reasoningLevel,
-              )
-            )
-          : canonicalPreset;
-
-      if (command.mode === "override" && !command.modelSelection) {
-        await swarmManager.updateSessionModel(
-          command.sessionAgentId,
-          command.mode,
-          canonicalPreset,
-          command.reasoningLevel,
-        );
-      }
-
-      if (command.mode === "inherit") {
-        await swarmManager.updateSessionModel(
-          command.sessionAgentId,
-          command.mode,
-          undefined,
-          undefined,
-        );
-      }
-
-      send(socket, {
-        type: "session_model_updated",
-        sessionAgentId: command.sessionAgentId,
-        mode: command.mode,
-        model: eventModel,
-        reasoningLevel: command.reasoningLevel,
-        requestId: command.requestId,
-      });
-    } catch (error) {
-      send(socket, {
-        type: "error",
-        code: "UPDATE_SESSION_MODEL_FAILED",
-        message: error instanceof Error ? error.message : String(error),
-        requestId: command.requestId,
-      });
-    }
-
-    return true;
-  }
-
-  if (command.type === "update_session_delegation") {
-    try {
-      requireNonSystemSessionProfile(
-        command.sessionAgentId,
-        swarmManager.listProfiles(),
-        (agentId) => swarmManager.getAgent(agentId),
-      );
-      let postureUpdate: { mode: "inherit" } | { mode: "override"; value: ManagerPosture } | undefined;
-      if (command.managerPosture?.mode === "inherit") {
-        postureUpdate = command.managerPosture;
-      } else if (command.managerPosture?.mode === "override") {
-        if (!isManagerPosture(command.managerPosture.value)) {
-          send(socket, {
-            type: "error",
-            code: "UPDATE_SESSION_DELEGATION_FAILED",
-            message: 'managerPosture override must be "delegation_first", "adaptive", or "hands_on"',
-            requestId: command.requestId,
-          });
-          return true;
-        }
-        postureUpdate = { mode: "override", value: command.managerPosture.value };
-      }
-      await swarmManager.updateSessionDelegation(command.sessionAgentId, {
-        ...(postureUpdate ? { managerPosture: postureUpdate } : {}),
-        ...(command.delegationRoster
-          ? { delegationRoster: command.delegationRoster }
-          : {}),
-      });
-      const session = swarmManager.getAgent(command.sessionAgentId);
-      if (
-        !session?.managerPosture
-        || !session.managerPostureOrigin
-        || !session.delegationRosterId
-        || !session.delegationRosterOrigin
-      ) {
-        throw new Error("Session delegation state was not persisted.");
-      }
-      send(socket, {
-        type: "session_delegation_updated",
-        sessionAgentId: command.sessionAgentId,
-        managerPosture: session.managerPosture,
-        managerPostureOrigin: session.managerPostureOrigin,
-        delegationRosterId: session.delegationRosterId,
-        delegationRosterOrigin: session.delegationRosterOrigin,
-        requestId: command.requestId,
-      });
-    } catch (error) {
-      send(socket, {
-        type: "error",
-        code: "UPDATE_SESSION_DELEGATION_FAILED",
-        message: error instanceof Error ? error.message : String(error),
-        requestId: command.requestId,
-      });
-    }
-    return true;
-  }
-
   if (command.type === "fork_session") {
     try {
       requireNonSystemSessionProfile(
@@ -537,8 +413,4 @@ function archiveErrorCode(error: unknown, fallback: string): string {
 
 function resolveSessionProfileId(swarmManager: SwarmManager, sessionAgentId: string): string {
   return resolveProfileIdForSessionAgent(sessionAgentId, (agentId) => swarmManager.getAgent(agentId));
-}
-
-function inferEventModelPreset(descriptor: { provider: string; modelId: string }): string | undefined {
-  return inferSwarmModelPresetFromDescriptor(descriptor);
 }

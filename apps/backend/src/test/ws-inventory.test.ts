@@ -99,7 +99,7 @@ describe('passive Builder inventory contract', () => {
     expect(f.owner.getSubscribedAgentId(f.a)).toBeUndefined()
   })
 
-  it('inventory A and chat B permit addressed create/catalog on A without viewing a default; implicit authority stays denied', async () => {
+  it('inventory A rejects replaced project commands and permits remaining addressed session commands', async () => {
     const f = await fixture()
     await f.command(f.a, { type: 'subscribe_inventory', requestId: 'inventory-a' })
     await f.command(f.b, { type: 'subscribe', agentId: 'b' })
@@ -108,7 +108,7 @@ describe('passive Builder inventory contract', () => {
     await f.command(f.a, { type: 'create_session', requestId: 'session', profileId: 'p' })
     await f.command(f.a, { type: 'api_proxy', requestId: 'catalog', method: 'GET', path: '/api/settings/manager-selection-catalog' })
     await flush()
-    expect(f.manager.createManager).toHaveBeenCalledWith('a', expect.objectContaining({ name: 'New' }))
+    expect(f.manager.createManager).not.toHaveBeenCalled()
     expect(f.manager.createSession).toHaveBeenCalledWith('p', expect.anything())
     expect(f.manager.getManagerSelectionCatalog).not.toHaveBeenCalled()
     expect(events(f.a).at(-1)).toMatchObject({ type: 'error', code: 'ENVIRONMENT_COMMAND_REJECTED' })

@@ -47,14 +47,6 @@ export function extractRequestId(command: ClientCommand): string | undefined {
   switch (command.type) {
     case "subscribe_inventory":
     case "api_proxy":
-    case "create_manager":
-    case "create_repository_project":
-    case "cancel_repository_project_creation":
-    case "delete_manager":
-    case "update_profile_default_model":
-    case "update_project_delegation_defaults":
-    case "update_manager_model":
-    case "update_manager_cwd":
     case "create_session":
     case "stop_session":
     case "resume_session":
@@ -65,20 +57,10 @@ export function extractRequestId(command: ClientCommand): string | undefined {
     case "session_goal_control":
     case "rename_session":
     case "pin_session":
-    case "update_session_model":
-    case "update_session_delegation":
-    case "rename_profile":
-    case "archive_profile":
-    case "restore_profile":
     case "fork_session":
     case "get_session_workers":
     case "get_conversation_page":
     case "stop_all_agents":
-    case "reorder_profiles":
-    case "list_directories":
-    case "validate_directory":
-    case "create_directory":
-    case "pick_directory":
     case "mark_unread":
     case "mark_all_read":
     case "resume_restart_recovery":

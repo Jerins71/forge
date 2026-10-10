@@ -1,3 +1,4 @@
+import { requireHttpPrincipal } from '../../rpc/http-principal.js'
 import type { RepositoryCheckoutRequest } from '@forge/protocol'
 import type { RepositoryCheckoutService } from '../../../swarm/repository-checkout-service.js'
 import { RepositoryProjectCreationError } from '../../../swarm/repository-project-creation-service.js'
@@ -17,7 +18,7 @@ export function createRepositoryCheckoutRoutes(service: Pick<RepositoryCheckoutS
         if (!validRequest(body)) { sendJson(response, 400, { error: 'Expected repositoryUrl (string), folder, name, and model (optional).' }); return }
         const modelError = body.model ? await service.checkModel(body.model) : null
         if (modelError) { sendJson(response, 400, { error: modelError }); return }
-        sendJson(response, 202, service.start(body))
+        sendJson(response, 202, service.start(body, requireHttpPrincipal(request)))
       } catch (error) {
         if (error instanceof RepositoryProjectCreationError) {
           sendJson(response, error.code === 'duplicate_operation' ? 429 : 503, { error: error.message, code: error.code }); return

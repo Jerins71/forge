@@ -28,13 +28,6 @@ export interface AgentStatusReduction {
   managerIdleTransitionAgentId: string | null
 }
 
-export interface ManagerDeletedReduction {
-  patch: Partial<ManagerWsState>
-  nextDesiredAgentId?: string | null
-  subscribeToAgentId: string | null
-  deletedAgentIds: string[]
-}
-
 export interface SessionDeletedReduction {
   patch: Partial<ManagerWsState>
   nextDesiredAgentId?: string | null
@@ -360,102 +353,6 @@ function contextUsageEqual(
   if (a === b) return true
   if (a == null || b == null) return false
   return a.tokens === b.tokens && a.contextWindow === b.contextWindow && a.percent === b.percent
-}
-
-export function reduceManagerDeleted(input: {
-  state: ManagerWsState
-  managerId: string
-  socketOpen: boolean
-}): ManagerDeletedReduction {
-  const { state, managerId, socketOpen } = input
-  const wasSelected = state.targetAgentId === managerId || state.subscribedAgentId === managerId
-
-  const nextAgents = state.agents.filter(
-    (agent) => agent.agentId !== managerId && agent.managerId !== managerId,
-  )
-  const nextStatuses = { ...state.statuses }
-  delete nextStatuses[managerId]
-  const nextUnread = { ...state.unreadCounts }
-  delete nextUnread[managerId]
-  const deletedAgentIds = [managerId]
-
-  for (const agent of state.agents) {
-    if (agent.managerId === managerId) {
-      delete nextStatuses[agent.agentId]
-      delete nextUnread[agent.agentId]
-      deletedAgentIds.push(agent.agentId)
-    }
-  }
-
-  const nextLoadedSessionIds = new Set(state.loadedSessionIds)
-  nextLoadedSessionIds.delete(managerId)
-
-  if (wasSelected) {
-    const fallbackId = chooseFallbackAgentId(nextAgents, undefined, state.profiles)
-
-    if (fallbackId && socketOpen) {
-      return {
-        patch: {
-          agents: nextAgents,
-          statuses: nextStatuses,
-          unreadCounts: nextUnread,
-          loadedSessionIds: nextLoadedSessionIds,
-          targetAgentId: fallbackId,
-          subscribedAgentId: fallbackId,
-          messages: [],
-          activityMessages: [],
-          conversationPage: null,
-          conversationPageLoading: false,
-          conversationPageRequestId: null,
-          conversationHistoryMutation: null,
-          modelCacheObservations: [],
-          pendingModelCacheObservations: [],
-          pendingChoiceIds: new Set(),
-          terminals: [],
-          terminalSessionScopeId: null,
-        },
-        nextDesiredAgentId: fallbackId,
-        subscribeToAgentId: fallbackId,
-        deletedAgentIds,
-      }
-    }
-
-    return {
-      patch: {
-        agents: nextAgents,
-        statuses: nextStatuses,
-        unreadCounts: nextUnread,
-        loadedSessionIds: nextLoadedSessionIds,
-        targetAgentId: null,
-        subscribedAgentId: null,
-        messages: [],
-        activityMessages: [],
-        conversationPage: null,
-        conversationPageLoading: false,
-        conversationPageRequestId: null,
-        conversationHistoryMutation: null,
-        modelCacheObservations: [],
-        pendingModelCacheObservations: [],
-        pendingChoiceIds: new Set(),
-        terminals: [],
-        terminalSessionScopeId: null,
-      },
-      nextDesiredAgentId: null,
-      subscribeToAgentId: null,
-      deletedAgentIds,
-    }
-  }
-
-  return {
-    patch: {
-      agents: nextAgents,
-      statuses: nextStatuses,
-      unreadCounts: nextUnread,
-      loadedSessionIds: nextLoadedSessionIds,
-    },
-    subscribeToAgentId: null,
-    deletedAgentIds,
-  }
 }
 
 export function reduceSessionDeleted(input: {

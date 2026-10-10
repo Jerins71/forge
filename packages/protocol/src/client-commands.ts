@@ -7,17 +7,9 @@ import type { CodexElicitationDecision, CodexElicitationPersistScope } from './c
 import type { SessionGoalControlAction } from './goals.js'
 import type { DismissSessionAttentionCommand } from './session-attention.js'
 import type {
-  CancelRepositoryProjectCreationCommandFields,
-  CreateRepositoryProjectCommandFields,
-} from './repository-project.js'
-import type {
   AgentSessionPurpose,
   ChoiceAnswer,
   DeliveryMode,
-  ManagerExactModelSelection,
-  ManagerModelPreset,
-  ManagerReasoningLevel,
-  WorkModeId,
 } from './shared-types.js'
 
 export interface ApiProxyCommand {
@@ -28,13 +20,8 @@ export interface ApiProxyCommand {
   body?: string
 }
 
-type ManagerModelSelectionInput = {
-  model?: ManagerModelPreset
-  modelSelection?: ManagerExactModelSelection
-}
-
 export type ClientCommand =
-  | SubscribeInventoryCommand
+  SubscribeInventoryCommand
   | {
       type: 'subscribe'
       agentId?: string
@@ -70,45 +57,7 @@ export type ClientCommand =
   | ApiProxyCommand
   | { type: 'kill_agent'; agentId: string }
   | { type: 'stop_all_agents'; managerId: string; requestId?: string }
-  | ({ type: 'create_manager'; name: string; cwd: string; secureSessionsEnabled?: boolean; reasoningLevel?: ManagerReasoningLevel; requestId?: string } & ManagerModelSelectionInput)
-  | ({ type: 'create_repository_project' } & CreateRepositoryProjectCommandFields)
-  | ({ type: 'cancel_repository_project_creation' } & CancelRepositoryProjectCreationCommandFields)
-  | { type: 'delete_manager'; managerId: string; requestId?: string }
-  | ({
-      type: 'update_profile_default_model'
-      profileId: string
-      reasoningLevel?: ManagerReasoningLevel
-      requestId?: string
-    } & ManagerModelSelectionInput)
-  | {
-      type: 'update_project_delegation_defaults'
-      profileId: string
-      managerPosture?: WorkModeId | null
-      delegationRosterId?: string | null
-      requestId?: string
-    }
-  | ({
-      type: 'update_manager_model'
-      managerId: string
-      reasoningLevel?: ManagerReasoningLevel
-      requestId?: string
-    } & ManagerModelSelectionInput)
-  | { type: 'update_manager_cwd'; managerId: string; cwd: string; requestId?: string }
-  | ({
-      type: 'update_session_model'
-      sessionAgentId: string
-      mode: 'inherit' | 'override'
-      reasoningLevel?: ManagerReasoningLevel
-      requestId?: string
-    } & ManagerModelSelectionInput)
   | { type: 'create_session'; profileId: string; label?: string; name?: string; sessionPurpose?: AgentSessionPurpose; requestId?: string }
-  | {
-      type: 'update_session_delegation'
-      sessionAgentId: string
-      managerPosture?: { mode: 'inherit' } | { mode: 'override'; value: WorkModeId }
-      delegationRoster?: { mode: 'inherit' } | { mode: 'override'; rosterId: string }
-      requestId?: string
-    }
   | { type: 'stop_session'; agentId: string; requestId?: string }
   | { type: 'resume_session'; agentId: string; requestId?: string }
   | { type: 'hydrate_archive_last_used'; requestId?: string }
@@ -140,14 +89,6 @@ export type ClientCommand =
       view?: BuilderTimelineChannelView
       requestId: string
     }
-  | { type: 'list_directories'; path?: string; requestId?: string }
-  | { type: 'validate_directory'; path: string; requestId?: string }
-  | { type: 'create_directory'; parentPath: string; name: string; requestId?: string }
-  | { type: 'pick_directory'; defaultPath?: string; requestId?: string }
-  | { type: 'rename_profile'; profileId: string; displayName: string; requestId?: string }
-  | { type: 'archive_profile'; profileId: string; requestId?: string }
-  | { type: 'restore_profile'; profileId: string; requestId?: string }
-  | { type: 'reorder_profiles'; profileIds: string[]; requestId?: string }
   | { type: 'choice_response'; agentId: string; choiceId: string; answers: ChoiceAnswer[] }
   | { type: 'choice_cancel'; agentId: string; choiceId: string }
   | { type: 'codex_elicitation_response'; agentId: string; elicitationId: string; decision: CodexElicitationDecision; values?: Record<string, unknown>; persistScope?: CodexElicitationPersistScope }

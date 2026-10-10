@@ -6,10 +6,9 @@ import { createRequire } from 'node:module';
 import { extname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
+import { fixtureRpcOnce, openFixtureRpc, until } from './rpc-client.js';
 import { controlEnvironment, isWithin, readManifest, repositoryRoot, sanitizedEnvironment, type BootstrapSession, type EnvironmentFixture } from '../launch.js';
-import { getAgentsStoreFilePath } from '../../../apps/backend/src/swarm/storage/data-paths.js';
 import * as dataPaths from '../../../apps/backend/src/swarm/storage/data-paths.js';
-import { AgentDescriptorStore } from '../../../apps/backend/src/swarm/agents/agent-descriptor-store.js';
 import { createFixturePlatform } from './ui-platform.js';
 import { fixturePlatformScript } from './ui-platform.js';
 import { WebSocket } from './ws.js';
@@ -153,66 +152,42 @@ export async function authenticatedRpc<T>(baseUrl: string, session: BootstrapSes
   } finally { ws.terminate(); }
 }
 export async function seedUiEnvironment(environment: EnvironmentFixture, session: BootstrapSession): Promise<UiEnvironment> {
-  // Seed through the authenticated legacy inventory and existing serializer/API.
+  // Seed through project control, with reserved project/default-session identities.
   if (environment.name === 'env-c') await promisify(execFile)('git', ['remote', 'set-url', 'origin', 'https://fixture.invalid/forge/independent-fixture.git'], { cwd: environment.checkout, env: sanitizedEnvironment() });
-  const ws = new WebSocket(environment.baseUrl.replace('http:', 'ws:'), ['forge.v2', `ticket.${await ticket(environment.baseUrl, session, 'legacy')}`]);
   const title = environment.name === 'env-c' ? 'Independent fixture' : 'Shared fixture';
-  const profileTitles = new Map<string, string>();
-  const existingIds = new Set<string>();
-  let creating = false;
-  try {
-    await once(ws, 'open');
-    const result = new Promise<{ manager: { agentId: string; profileId?: string } }>((resolveSeed, reject) => {
-      const frameTypes: string[] = [];
-      const timer = setTimeout(() => reject(new Error(`Authenticated fixture descriptor seed timed out (${frameTypes.join(',')})`)), 10_000);
-      ws.on('message', data => {
-        const frame = JSON.parse(data.toString()) as { type: string; agents?: { agentId: string; role: string; profileId?: string }[]; profiles?: { profileId: string; displayName: string }[]; manager: { agentId: string; profileId?: string } };
-        frameTypes.push(frame.type);
-        for (const profile of frame.profiles ?? []) profileTitles.set(profile.profileId, profile.displayName);
-        if (frame.type === 'inventory_snapshot') {
-          for (const agent of frame.agents ?? []) existingIds.add(agent.agentId);
-          creating = true;
-          ws.send(JSON.stringify({ type: 'create_manager', name: title, cwd: environment.checkout,
-            secureSessionsEnabled: false, modelSelection: { provider: 'codex-native', modelId: 'gpt-6-sol' }, requestId: 'ui-fixture-seed' }));
-        }
-        if (frame.type === 'agents_snapshot' && creating) {
-          const manager = frame.agents?.find(agent => agent.role === 'manager' && !existingIds.has(agent.agentId));
-          if (manager) { clearTimeout(timer); resolveSeed({ manager }); }
-        }
-        if (frame.type === 'manager_created') { clearTimeout(timer); resolveSeed(frame); }
-        if (frame.type === 'error') { clearTimeout(timer); reject(new Error('Authenticated fixture descriptor seed rejected')); }
-      });
-      ws.send(JSON.stringify({ type: 'subscribe_inventory', requestId: 'ui-fixture-inventory' }));
-    });
-    const seeded = await result;
-    return { environmentId: session.environmentId, label: session.label ?? environment.name, baseUrl: environment.baseUrl, projectTitle: profileTitles.get(seeded.manager.profileId ?? seeded.manager.agentId) ?? title, sessionId: seeded.manager.agentId };
-  } finally { ws.terminate(); }
+  // Repeated fixture attachment keeps the same environment-qualified session IDs.
+  const commandId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const sessionId = `project-${commandId}`;
+  const rpc = await openFixtureRpc(environment.baseUrl, session);
+  let exists = false;
+  try { await rpc.call('shell.subscribe', {}); const snapshot = await until(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean); exists = snapshot.projects.some((project: any) => project.projectId === sessionId); }
+  finally { rpc.close(); }
+  if (exists) return { environmentId: session.environmentId, label: session.label ?? environment.name, baseUrl: environment.baseUrl, projectTitle: title, sessionId };
+  const receipt = await fixtureRpcOnce(environment.baseUrl, session, 'project.create', { commandId, title, cwd: environment.checkout, model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' }, secureSessionsEnabled: false });
+  if (receipt.state !== 'succeeded' || !receipt.result?.sessionId) throw new Error('Authenticated project-control fixture seed rejected');
+  return { environmentId: session.environmentId, label: session.label ?? environment.name, baseUrl: environment.baseUrl, projectTitle: title, sessionId: receipt.result.sessionId };
 }
+
 /** Only selected synthetic counts leave this reader. It never exports a DB,
  * transcript, upload, token or provider request payload. */
 export async function readLaunchEvidence(environment: EnvironmentFixture, sessionId: string): Promise<LaunchEvidence> {
-  const store = new AgentDescriptorStore({ dataDir: environment.dataDir, storeFilePath: getAgentsStoreFilePath(environment.dataDir) });
-  const descriptors = await store.load();
-  assert.equal(descriptors.agents.filter(agent => agent.agentId === sessionId).length, 1, 'one persisted session descriptor');
-  const descriptor = descriptors.agents.find(agent => agent.agentId === sessionId);
-  if (!descriptor) throw new Error('Fixture session descriptor is missing');
-  assert(isWithin(resolve(environment.checkout, '..'), descriptor.cwd), 'session checkout must stay inside owned environment');
+  const dbPath = dataPaths.getEnvironmentDbPath(environment.dataDir);
+  assert(isWithin(environment.dataDir, dbPath));
+  const require = createRequire(join(repositoryRoot, 'apps/backend/package.json'));
+  const Database = require('better-sqlite3') as SqliteDatabaseConstructor;
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   let commands = 0;
   let workspace: string | undefined;
-  const resolver = (dataPaths as unknown as Record<string, unknown>).getEnvironmentDbPath;
-  if (typeof resolver === 'function') {
-    const dbPath = (resolver as (dataDir: string) => string)(environment.dataDir);
-    assert(isWithin(environment.dataDir, dbPath));
-    const require = createRequire(join(repositoryRoot, 'apps/backend/package.json'));
-    // Test process is ordinary Node; no inherited Electron native-binding override.
-    const Database = require('better-sqlite3') as SqliteDatabaseConstructor;
-    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
-    try {
-      commands = (db.prepare("SELECT count(*) AS count FROM commands WHERE session_id = ? AND method = 'session.launch'").get(sessionId) as { count: number }).count;
-      const reservation = db.prepare("SELECT path FROM workspace_reservations WHERE session_id = ? AND kind = 'new_worktree' AND state = 'ready'").get(sessionId) as { path: string } | undefined;
-      workspace = reservation?.path;
-    } finally { db.close(); }
-  }
+  let descriptor: import('../../../apps/backend/src/swarm/types.js').AgentDescriptor;
+  try {
+    const row = db.prepare('SELECT descriptor_json FROM control_sessions WHERE session_id=? AND deleted=0').get(sessionId) as { descriptor_json: string } | undefined;
+    if (!row) throw new Error('Fixture session descriptor is missing');
+    descriptor = JSON.parse(row.descriptor_json);
+    assert(isWithin(resolve(environment.checkout, '..'), descriptor.cwd), 'session checkout must stay inside owned environment');
+    commands = (db.prepare("SELECT count(*) AS count FROM commands WHERE session_id = ? AND method = 'session.launch'").get(sessionId) as { count: number }).count;
+    const reservation = db.prepare("SELECT path FROM workspace_reservations WHERE session_id = ? AND kind = 'new_worktree' AND state = 'ready'").get(sessionId) as { path: string } | undefined;
+    workspace = reservation?.path;
+  } finally { db.close(); }
   const git = await promisify(execFile)('git', ['worktree', 'list', '--porcelain'], { cwd: environment.checkout, env: sanitizedEnvironment() });
   const worktrees = workspace ? git.stdout.split('\n').filter(line => line === `worktree ${workspace}`).length : 0;
   const marker = await readFile(join(descriptor.cwd, 'fixture-provider-marker.txt'), 'utf8').catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''; throw error; });

@@ -1467,7 +1467,7 @@ export class SwarmAgentLifecycleService {
 
   async createManager(
     callerAgentId: string,
-    input: { name: string; cwd: string; model?: SwarmModelPreset; modelSelection?: ManagerExactModelSelection; reasoningLevel?: SwarmReasoningLevel; secureSessionsEnabled?: boolean }
+    input: { controlCommandId?: string; name: string; cwd: string; model?: SwarmModelPreset; modelSelection?: ManagerExactModelSelection; reasoningLevel?: SwarmReasoningLevel; secureSessionsEnabled?: boolean }
   ): Promise<AgentDescriptor> {
     const callerDescriptor = callerAgentId ? this.options.descriptors.get(callerAgentId) : undefined;
     if (callerAgentId === "") {
@@ -1500,7 +1500,12 @@ export class SwarmAgentLifecycleService {
 
     const requestedModelPreset = parseSwarmModelPreset(input.model, "create_manager.model");
     const requestedReasoningLevel = parseSwarmReasoningLevel(input.reasoningLevel, "create_manager.reasoningLevel");
-    const managerId = this.options.generateUniqueManagerId(requestedName);
+    const managerId = input.controlCommandId ? `project-${input.controlCommandId}` : this.options.generateUniqueManagerId(requestedName);
+    if (input.controlCommandId && this.options.descriptors.has(managerId)) {
+      const existing = this.options.descriptors.get(managerId)!;
+      if (existing.controlCommandId !== input.controlCommandId || existing.cwd !== input.cwd) throw new Error("Controlled project identity conflicts");
+      return cloneDescriptor(existing);
+    }
     const createdAt = this.options.now();
     const cwd = await this.options.resolveAndValidateCwd(input.cwd);
 
@@ -1520,7 +1525,8 @@ export class SwarmAgentLifecycleService {
 
     const descriptor: AgentDescriptor = {
       agentId: managerId,
-      displayName: managerId,
+      ...(input.controlCommandId ? { controlCommandId: input.controlCommandId } : {}),
+      displayName: input.controlCommandId ? requestedName : managerId,
       role: "manager",
       managerId,
       profileId: managerId,
@@ -1585,7 +1591,7 @@ export class SwarmAgentLifecycleService {
       cwd: descriptor.cwd
     });
 
-    await this.options.sendManagerBootstrapMessage(managerId);
+    if (!input.controlCommandId) await this.options.sendManagerBootstrapMessage(managerId);
 
     return cloneDescriptor(descriptor);
   }
@@ -1594,7 +1600,7 @@ export class SwarmAgentLifecycleService {
     callerAgentId: string,
     targetManagerId: string
   ): Promise<{ managerId: string; terminatedWorkerIds: string[] }> {
-    this.options.assertManager(callerAgentId, "delete managers");
+    if (callerAgentId) this.options.assertManager(callerAgentId, "delete managers");
 
     const profile = this.options.profiles.get(targetManagerId);
     const sessionDescriptors = profile ? this.options.getSessionsForProfile(profile.profileId) : [];

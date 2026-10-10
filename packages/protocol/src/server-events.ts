@@ -17,38 +17,15 @@ import type {
   SpecialistRosterChangedEvent,
   ModelCacheVisualizationSettingsChangedEvent,
 } from './config-events.js'
-import type {
-  DirectoriesListedEvent,
-  DirectoryCreatedEvent,
-  DirectoryPickedEvent,
-  DirectoryValidatedEvent,
-} from './directory-events.js'
-import type {
-  ManagerCreatedEvent,
-  ManagerCwdUpdatedEvent,
-  ManagerDeletedEvent,
-  ManagerModelUpdatedEvent,
-  ProfileDefaultModelUpdatedEvent,
-  ProjectDelegationDefaultsUpdatedEvent,
-  StopAllAgentsResultEvent,
-} from './manager-events.js'
-import type {
-  RepositoryProjectCreatedEvent,
-  RepositoryProjectCreationCancelResultEvent,
-  RepositoryProjectCreationCancelledEvent,
-  RepositoryProjectCreationProgressEvent,
-} from './repository-project.js'
+
+import type {StopAllAgentsResultEvent} from './manager-events.js'
+
 import type {
   UnreadCountUpdateEvent,
   UnreadCountsSnapshotEvent,
   UnreadNotificationEvent,
 } from './notification-events.js'
-import type {
-  ProfileArchivedEvent,
-  ProfileRenamedEvent,
-  ProfileRestoredEvent,
-  ProfilesSnapshotEvent,
-} from './profile-events.js'
+import type {ProfilesSnapshotEvent} from './profile-events.js'
 import type {
   SessionProjectAgentUpdatedEvent,
 } from './project-agent-events.js'
@@ -58,9 +35,7 @@ import type {
   SessionClearedEvent,
   SessionCreatedEvent,
   SessionDeletedEvent,
-  SessionDelegationUpdatedEvent,
   SessionForkedEvent,
-  SessionModelUpdatedEvent,
   SessionPinnedEvent,
   SessionRenamedEvent,
   SessionRestoredEvent,
@@ -117,7 +92,6 @@ export * from './session-attention.js'
 export * from './session-events.js'
 export * from './project-agent-events.js'
 export * from './profile-events.js'
-export * from './directory-events.js'
 export * from './notification-events.js'
 export * from './config-events.js'
 export * from './plans.js'
@@ -128,7 +102,7 @@ export * from './remote-update-awareness.js'
 export * from './secure-sessions.js'
 
 export type ServerEvent =
-  | import('./builder-inventory.js').InventorySnapshotEvent
+  import('./builder-inventory.js').InventorySnapshotEvent
   | import('./builder-inventory.js').InventoryPongEvent
   | BuilderSidebarOrderUpdatedEvent
   | BrowserServerEvent
@@ -162,16 +136,6 @@ export type ServerEvent =
   | UnreadNotificationEvent
   | UnreadCountsSnapshotEvent
   | UnreadCountUpdateEvent
-  | ManagerCreatedEvent
-  | ManagerDeletedEvent
-  | ProfileDefaultModelUpdatedEvent
-  | ProjectDelegationDefaultsUpdatedEvent
-  | ManagerModelUpdatedEvent
-  | ManagerCwdUpdatedEvent
-  | RepositoryProjectCreationProgressEvent
-  | RepositoryProjectCreatedEvent
-  | RepositoryProjectCreationCancelledEvent
-  | RepositoryProjectCreationCancelResultEvent
   | SessionCreatedEvent
   | ArchiveLastUsedHydratedEvent
   | SessionStoppedEvent
@@ -179,21 +143,12 @@ export type ServerEvent =
   | SessionArchivedEvent
   | SessionRestoredEvent
   | SessionDeletedEvent
-  | SessionDelegationUpdatedEvent
   | SessionClearedEvent
   | SessionRenamedEvent
   | SessionPinnedEvent
-  | SessionModelUpdatedEvent
   | SessionProjectAgentUpdatedEvent
-  | ProfileRenamedEvent
-  | ProfileArchivedEvent
-  | ProfileRestoredEvent
   | SessionForkedEvent
   | StopAllAgentsResultEvent
-  | DirectoriesListedEvent
-  | DirectoryValidatedEvent
-  | DirectoryCreatedEvent
-  | DirectoryPickedEvent
   | PromptChangedEvent
   | TerminalCreatedEvent
   | TerminalUpdatedEvent

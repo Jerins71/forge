@@ -3,6 +3,7 @@ import { TypeCompiler } from "@sinclair/typebox/compiler";
 import { validateChoiceAnswers } from "@forge/protocol";
 import {
   rpcSchemas,
+  rpcScopes,
   type CommandReceipt,
   type RpcError,
   type RpcInput,
@@ -36,7 +37,7 @@ export interface SessionRow {
   updated_sequence: number;
 }
 export function readSession(sink: EventSink, sessionId: string): SessionRow {
-  const row = sink.database.prepare("SELECT * FROM control_sessions WHERE session_id = ?").get(sessionId) as SessionRow | undefined;
+  const row = sink.database.prepare("SELECT * FROM control_sessions WHERE session_id = ? AND deleted=0").get(sessionId) as SessionRow | undefined;
   if (!row) throw new ControlError("NOT_FOUND", "Session not found");
   return row;
 }
@@ -91,7 +92,7 @@ export function cancelCommand(sink: EventSink, tx: ControlTransaction, commandId
   }
 }
 
-const validators = {
+const validators: Partial<Record<ControlMethod, ReturnType<typeof TypeCompiler.Compile>>> = {
   "session.launch": TypeCompiler.Compile(rpcSchemas["session.launch"].input),
   "session.send": TypeCompiler.Compile(rpcSchemas["session.send"].input),
   "session.choose": TypeCompiler.Compile(rpcSchemas["session.choose"].input),
@@ -132,9 +133,27 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
   // a clear/fork; retain the interrupted claim rather than repeat destructive work.
   sink.transaction(tx => {
     const abandoned = database.prepare("SELECT session_id,payload_json FROM effects WHERE kind='lifecycle.admit' AND state='claimed'").all() as { session_id: string; payload_json: string }[];
-    for (const row of abandoned) if (JSON.parse(row.payload_json).intent === "resume" && database.prepare("SELECT 1 FROM control_sessions WHERE session_id=?").get(row.session_id)) {
+    for (const row of abandoned) if (JSON.parse(row.payload_json).intent === "resume" && database.prepare("SELECT 1 FROM control_sessions WHERE session_id=? AND deleted=0").get(row.session_id)) {
       database.prepare("UPDATE control_sessions SET desired_state='stopped',run_generation=run_generation+1 WHERE session_id=?").run(row.session_id);
       setSessionStatus(sink, tx, row.session_id, "stopping", options.clock);
+    }
+    const interrupted = database.prepare("SELECT DISTINCT e.command_id,c.method FROM effects e JOIN commands c USING(command_id) WHERE e.kind='lifecycle.admit' AND e.state='claimed'").all() as { command_id: string; method: string }[];
+    for (const command of interrupted) {
+      if (!database.prepare("SELECT 1 FROM command_receipts WHERE command_id=? AND state='running'").get(command.command_id)) continue;
+      const effect = database.prepare("SELECT payload_json FROM effects WHERE command_id=? AND ordinal=0").get(command.command_id) as { payload_json: string };
+      const payload = JSON.parse(effect.payload_json);
+      const projectId = `project-${command.command_id}`;
+      const published = command.method === "project.create" ? database.prepare("SELECT p.profile_json,s.descriptor_json FROM control_projects p JOIN control_sessions s ON s.session_id=p.project_id WHERE p.project_id=? AND p.deleted=0 AND s.deleted=0").get(projectId) as { profile_json: string; descriptor_json: string } | undefined : undefined;
+      const frozen = payload.frozenRequest;
+      const profile = published?.profile_json && JSON.parse(published.profile_json);
+      const descriptor = published?.descriptor_json && JSON.parse(published.descriptor_json);
+      if (frozen && descriptor?.controlCommandId === command.command_id && descriptor.cwd === frozen.cwd && profile?.defaultSessionAgentId === projectId && profile.displayName === frozen.title && profile.defaultModel.provider === frozen.model.provider && profile.defaultModel.modelId === frozen.model.modelId && profile.defaultModel.thinkingLevel === frozen.model.thinkingLevel && Boolean(profile.secureSessionsEnabled) === Boolean(frozen.secureSessionsEnabled)) {
+        // A committed identity/configuration proves publication. Rehydrate normally; never replay provisioning.
+        const result = { projectId, sessionId: projectId };
+        database.prepare("UPDATE effects SET state='done' WHERE command_id=?").run(command.command_id);
+        database.prepare("UPDATE effects SET payload_json=? WHERE command_id=? AND ordinal=0").run(JSON.stringify({ ...payload, result }), command.command_id);
+        sink.updateReceipt(tx, command.command_id, { state: "succeeded", result });
+      } else sink.updateReceipt(tx, command.command_id, { state: "interrupted", error: { code: "CONFLICT", message: "Policy command was interrupted by restart; inspect its resulting configuration", retryable: false } });
     }
     database.prepare("UPDATE effects SET state='interrupted' WHERE kind='lifecycle.admit' AND state='claimed'").run();
   });
@@ -147,7 +166,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     if (!principal.scopes.has(input.requiredScope ?? "session:operate") || options.isDeviceRevoked(principal.deviceSessionId))
       throw new ControlError("FORBIDDEN", "Session operation is not authorized");
     input = { ...input, sessionIds: [...input.sessionIds], projectIds: [...(input.projectIds ?? [])] };
-    const method = "lifecycle." + input.command;
+    const method = input.receipt?.method ?? "lifecycle." + input.command;
     const request = canonicalRequest(method, input.request);
     const projectIds = [...new Set(input.projectIds ?? [])].sort();
     const sessionIds = [...new Set([...input.sessionIds, ...projectIds.flatMap(projectId =>
@@ -184,6 +203,12 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       }
       database.prepare("INSERT INTO commands (command_id,device_session_id,method,request_hash,normalized_json,session_id,created_at) VALUES (?,?,?,?,?,?,?)")
         .run(input.commandId, principal.deviceSessionId, method, request.hash, request.normalized, sessionIds[0] ?? null, options.clock());
+      if (input.receipt) {
+        const now = new Date(options.clock()).toISOString();
+        const receipt: CommandReceipt = { commandId: input.commandId, ...input.receipt, sessionId: null, state: "running", acceptedSequence: 0, updatedSequence: 0, acceptedAt: now, updatedAt: now, inputId: null, delivery: "none", error: null };
+        database.prepare("INSERT INTO command_receipts VALUES (?, 'running', 0, 0, ?)").run(input.commandId, JSON.stringify(receipt));
+        sink.updateReceipt(tx, input.commandId, {});
+      }
       const lanes = [...sessionIds, ...projectIds.map(id => "project:" + id)];
       for (const [ordinal, lane] of (lanes.length ? lanes : [""]).entries()) {
         const sessionId = sessionIds.includes(lane) ? lane : "";
@@ -203,7 +228,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           }
         }
         database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,'lifecycle.admit',?,?,'claimed')")
-          .run(input.commandId + ":" + ordinal, input.commandId, lane, ordinal, JSON.stringify({ kind: "lifecycle.admit", intent: input.intent }));
+          .run(input.commandId + ":" + ordinal, input.commandId, lane, ordinal, JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, ...(ordinal === 0 && input.frozenRequest !== undefined ? { frozenRequest: input.frozenRequest } : {}) }));
       }
     });
     const work = (async () => {
@@ -215,20 +240,23 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         }
         if (options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Device session was revoked");
         const result = await operation();
-        const payload = JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, result });
+        const payload = JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, result, ...(input.frozenRequest !== undefined ? { frozenRequest: input.frozenRequest } : {}) });
         if (Buffer.byteLength(payload) > 512 * 1024) throw new ControlError("PAYLOAD_TOO_LARGE", "Lifecycle result exceeds budget");
         sink.transaction(tx => {
-          database.prepare("UPDATE effects SET state='done',payload_json=? WHERE command_id=?").run(payload, input.commandId);
+          database.prepare("UPDATE effects SET state='done' WHERE command_id=?").run(input.commandId);
+          database.prepare("UPDATE effects SET payload_json=? WHERE command_id=? AND ordinal=0").run(payload, input.commandId);
+          if (input.receipt) sink.updateReceipt(tx, input.commandId, { state: "succeeded", result: result as CommandReceipt["result"] });
           if (input.intent === "stop") for (const sessionId of sessionIds) {
-            if (database.prepare("SELECT 1 FROM control_sessions WHERE session_id=?").get(sessionId)) setSessionStatus(sink, tx, sessionId, "stopped", options.clock);
+            if (database.prepare("SELECT 1 FROM control_sessions WHERE session_id=? AND deleted=0").get(sessionId)) setSessionStatus(sink, tx, sessionId, "stopped", options.clock);
           }
         });
         return JSON.parse(payload).result as T;
       } catch (error) {
         sink.transaction(tx => {
           database.prepare("UPDATE effects SET state='interrupted' WHERE command_id=?").run(input.commandId);
+          if (input.receipt) sink.updateReceipt(tx, input.commandId, { state: "interrupted", error: { code: "CONFLICT", message: "Policy command interrupted; inspect the resulting configuration before issuing a fresh request", retryable: false } });
           if (input.intent === "resume") for (const sessionId of sessionIds) {
-            if (!database.prepare("SELECT 1 FROM control_sessions WHERE session_id=?").get(sessionId)) continue;
+            if (!database.prepare("SELECT 1 FROM control_sessions WHERE session_id=? AND deleted=0").get(sessionId)) continue;
             database.prepare("UPDATE control_sessions SET desired_state='stopped',run_generation=run_generation+1 WHERE session_id=?").run(sessionId);
             setSessionStatus(sink, tx, sessionId, "stopping", options.clock);
           }
@@ -262,8 +290,8 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
   };
   const accept = (
     principal: Principal,
-    method: ControlMethod,
-    input: RpcInput<ControlMethod>,
+    method: "session.launch" | "session.send" | "session.choose" | "session.stop",
+    input: RpcInput<"session.launch" | "session.send" | "session.choose" | "session.stop">,
     prepared?: PreparedLaunch,
   ): CommandReceipt => {
     const request = canonicalRequest(method, input);
@@ -462,7 +490,25 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
   };
   return {
     admitLifecycle,
+    async readWorkspace(principal, method, input) {
+      if (!principal.scopes.has(rpcScopes[method]) || options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Workspace read is not authorized");
+      if (!TypeCompiler.Compile(rpcSchemas[method].input).Check(input)) throw new ControlError("INVALID_INPUT", "Invalid directory read");
+      if (!options.policy) throw new ControlError("UNAVAILABLE", "Project policy is not composed");
+      return options.policy.read(method, input);
+    },
     async execute(principal, method, input) {
+      if (!(method in validators)) {
+        if (!TypeCompiler.Compile(rpcSchemas[method].input).Check(input)) throw new ControlError("INVALID_INPUT", "Invalid policy command");
+        if (!principal.scopes.has(rpcScopes[method]) || options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Policy operation is not authorized");
+        const request = canonicalRequest(method, input);
+        const duplicate = sink.transaction(() => prior(principal, method, input.commandId, request.hash));
+        if (duplicate && !["running", "accepted"].includes(duplicate.state)) return duplicate;
+        if (!options.policy) throw new ControlError("UNAVAILABLE", "Project policy is not composed");
+        const normalized = JSON.parse(request.normalized) as RpcInput<import("./project-policy.js").PolicyMethod>;
+        const prepared = duplicate ? { sessionIds: [], projectIds: [], intent: "inspect" as const, frozen: normalized } : await options.policy.prepare(method as import("./project-policy.js").PolicyMethod, normalized);
+        await admitLifecycle(principal, { ...prepared, commandId: input.commandId, command: method, request: normalized, frozenRequest: prepared.frozen, requiredScope: rpcScopes[method], receipt: { method, ...("projectId" in prepared ? { projectId: prepared.projectId } : {}), ...("sessionId" in prepared ? { sessionId: prepared.sessionId } : {}) } }, () => options.policy!.apply(method as import("./project-policy.js").PolicyMethod, prepared.frozen));
+        return readReceipt(sink, input.commandId);
+      }
       if (closed) throw new ControlError("UNAVAILABLE", "Control service is shutting down", true);
       if (!validators[method]?.Check(input)) throw new ControlError("INVALID_INPUT", "Invalid control command");
       if (!principal.scopes.has("session:operate")) throw new ControlError("FORBIDDEN", "Missing session:operate scope");
@@ -475,7 +521,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       }
       // Copy the validated original request before asynchronous preflight; caller mutation cannot change accepted identity.
       const request = canonicalRequest(method, input);
-      const normalized: RpcInput<ControlMethod> = JSON.parse(request.normalized);
+      const normalized: RpcInput<"session.launch" | "session.send" | "session.choose" | "session.stop"> = JSON.parse(request.normalized);
       const duplicate = sink.transaction(() => prior(principal, method, normalized.commandId, request.hash));
       if (duplicate) return duplicate;
       if (method !== "session.launch") {
@@ -485,7 +531,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           readSession(sink, send.sessionId);
           await preflightRoute({ sessionId: send.sessionId, message: send.message });
         }
-        return accept(principal, method, normalized);
+        return accept(principal, method as "session.send" | "session.choose" | "session.stop", normalized);
       }
       const launch = normalized as RpcInput<"session.launch">;
       const previous = launches.get(launch.projectId) ?? Promise.resolve();

@@ -32,6 +32,10 @@ export function requestHandler(deps: RpcDependencies, principal: Principal, meth
     case "session.send": return deps.control.execute(principal, method, input as RpcInput<typeof method>);
     case "session.choose": return deps.control.execute(principal, method, input as RpcInput<typeof method>);
     case "session.stop": return deps.control.execute(principal, method, input as RpcInput<typeof method>);
+    case "project.create": case "project.update": case "project.archive": case "project.restore": case "project.delete": case "project.reorder": case "session.configure": case "settings.recommendedDefaults.apply": case "workspace.directories.create": return deps.control.execute(principal, method, input as RpcInput<typeof method>);
+    case "workspace.directories.list": case "workspace.directories.validate":
+      if (!deps.control.readWorkspace) throw new StreamFault("UNAVAILABLE", "Workspace reads are not composed");
+      return deps.control.readWorkspace(principal, method, input as RpcInput<typeof method>);
     case "command.get": return deps.control.getReceipt(principal, (input as RpcInput<"command.get">).commandId);
     case "access.grant.create": return deps.access.createGrant(principal, input as RpcInput<typeof method>);
     case "access.devices.list": return deps.access.listDevices(principal);
