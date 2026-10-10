@@ -19,7 +19,7 @@ export type RecoveryFact =
   | { t: "delivery_acked"; deliveryId: string; at: string };
 export type RecoveryDelivery = Extract<RecoveryFact, { t: "delivery_pending" }> & { state: "pending" | "dispatching" };
 export interface RecoveryState {
-  openTurns: Map<string, Extract<RecoveryFact, { t: "turn_dispatched" }>>;
+  openTurns: Map<string, Extract<RecoveryFact, { t: "turn_dispatched" }> & { recoveryId?: string }>;
   terminalTurns: Map<string, Extract<RecoveryFact, { t: "turn_terminal" }>>;
   pendingDeliveries: Map<string, RecoveryDelivery>;
   ackedDeliveries: Set<string>;
@@ -108,10 +108,10 @@ export async function readRecoveryState(target: RecoveryTarget): Promise<Recover
     await importRecoveryState(database, target);
     await reconcileRecoveryContent(database, target);
     const state: RecoveryState = { openTurns: new Map(), terminalTurns: new Map(), pendingDeliveries: new Map(), ackedDeliveries: new Set() };
-    const turns = database.prepare("SELECT * FROM control_turns WHERE session_id=? ORDER BY turn_id").all(target.sessionAgentId) as { turn_id: string; agent_id: string; role: "manager" | "worker"; inbound_kind: RecoveryInboundKind; inbound_id: string | null; dispatched_at: string | null; terminal_outcome: RecoveryTerminalOutcome | null; terminal_at: string | null }[];
+    const turns = database.prepare("SELECT * FROM control_turns WHERE session_id=? ORDER BY turn_id").all(target.sessionAgentId) as { turn_id: string; agent_id: string; role: "manager" | "worker"; inbound_kind: RecoveryInboundKind; inbound_id: string | null; dispatched_at: string | null; terminal_outcome: RecoveryTerminalOutcome | null; terminal_at: string | null; recovery_id: string | null }[];
     for (const turn of turns) {
       if (turn.terminal_outcome) state.terminalTurns.set(turn.turn_id, { t: "turn_terminal", turnId: turn.turn_id, outcome: turn.terminal_outcome, at: turn.terminal_at! });
-      else if (turn.dispatched_at) state.openTurns.set(turn.turn_id, { t: "turn_dispatched", turnId: turn.turn_id, agentId: turn.agent_id, role: turn.role, kind: turn.inbound_kind, ...(turn.inbound_id ? { inboundId: turn.inbound_id } : {}), at: turn.dispatched_at });
+      else if (turn.dispatched_at) state.openTurns.set(turn.turn_id, { t: "turn_dispatched", turnId: turn.turn_id, agentId: turn.agent_id, role: turn.role, kind: turn.inbound_kind, ...(turn.inbound_id ? { inboundId: turn.inbound_id } : {}), ...(turn.recovery_id ? { recoveryId: turn.recovery_id } : {}), at: turn.dispatched_at });
     }
     const deliveries = database.prepare("SELECT * FROM control_deliveries WHERE session_id=? ORDER BY delivery_id").all(target.sessionAgentId) as { delivery_id: string; turn_id: string | null; from_agent_id: string; to_agent_id: string; assignment_id: string | null; content_ref_json: string | null; pending_at: string; state: "pending" | "dispatching" | "acked" }[];
     for (const delivery of deliveries) {
@@ -136,15 +136,22 @@ export async function readRecoveryContent(ref: RecoveryContentRef): Promise<stri
 }
 export async function readRecoveryOccurrence(dataDir: string): Promise<RecoverySnapshot | null> {
   return withEnvironmentDatabase(dataDir, async db => {
-    const row = db.prepare("SELECT snapshot_json FROM control_recovery ORDER BY created_at DESC,rowid DESC LIMIT 1").get() as { snapshot_json: string } | undefined;
+    const row = db.prepare("SELECT snapshot_json FROM control_recovery WHERE json_extract(snapshot_json,'$.supersededBy') IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 1").get() as { snapshot_json: string } | undefined;
     return row ? JSON.parse(row.snapshot_json) : null;
   });
 }
-export async function saveRecoveryOccurrence(dataDir: string, snapshot: RecoverySnapshot): Promise<void> {
+export async function saveRecoveryOccurrence(dataDir: string, snapshot: RecoverySnapshot, supersedes?: string): Promise<void> {
   await withEnvironmentDatabase(dataDir, async db => {
     db.transaction(() => {
       const inserted = db.prepare("INSERT INTO control_recovery (recovery_id,snapshot_json,created_at) VALUES (?,?,?) ON CONFLICT(recovery_id) DO NOTHING").run(snapshot.recoveryId, JSON.stringify(snapshot), snapshot.createdAt).changes;
       if (!inserted) return;
+      if (supersedes) {
+        const superseded = db.prepare(`UPDATE control_recovery SET snapshot_json=json_set(snapshot_json,'$.supersededBy',?),decision_applied=1
+          WHERE recovery_id=? AND json_extract(snapshot_json,'$.supersededBy') IS NULL
+          AND json_extract(snapshot_json,'$.resumedAt') IS NULL AND json_extract(snapshot_json,'$.dismissedAt') IS NULL`).run(snapshot.recoveryId, supersedes).changes;
+        if (superseded !== 1) throw new Error("Pending recovery occurrence changed before boot reconciliation");
+        db.prepare("UPDATE control_turns SET recovery_id=? WHERE recovery_id=? AND terminal_outcome IS NULL").run(snapshot.recoveryId, supersedes);
+      }
       for (const agentId of [...snapshot.interruptedManagers, ...snapshot.interruptedWorkers]) db.prepare("UPDATE control_turns SET recovery_id=? WHERE agent_id=? AND terminal_outcome IS NULL AND recovery_id IS NULL").run(snapshot.recoveryId, agentId);
     }).immediate();
   });
@@ -153,7 +160,7 @@ export async function saveRecoveryOccurrence(dataDir: string, snapshot: Recovery
 /** Claim and close only the captured turns in one transaction, before any external dispatch. */
 export async function claimRecoveryOccurrence(dataDir: string, action: "resume" | "dismiss", at: string): Promise<RecoverySnapshot | null> {
   return withEnvironmentDatabase(dataDir, async db => db.transaction(() => {
-    const row = db.prepare("SELECT recovery_id,snapshot_json FROM control_recovery ORDER BY created_at DESC,rowid DESC LIMIT 1").get() as { recovery_id: string; snapshot_json: string } | undefined;
+    const row = db.prepare("SELECT recovery_id,snapshot_json FROM control_recovery WHERE json_extract(snapshot_json,'$.supersededBy') IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 1").get() as { recovery_id: string; snapshot_json: string } | undefined;
     if (!row) return null;
     const snapshot: RecoverySnapshot = JSON.parse(row.snapshot_json);
     if (snapshot.resumedAt || snapshot.dismissedAt) return null;

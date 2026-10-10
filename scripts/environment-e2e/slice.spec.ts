@@ -559,6 +559,10 @@ test('Batch 5 typed detail features survive reconnect/restart and compact once',
     const heldId = randomUUID();
     const held = await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', { commandId: heldId, projectId: projects[1]!.sessionId, title: 'Batch 5 interrupted', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:hold]', artifactIds: [] } });
     await settled(heldId);
+    const heldDispatch = await until(() => readLaunchEvidence(b(), held.sessionId), value => value.dispatches === 1);
+    await until(() => readDb(db => JSON.parse((db.prepare('SELECT descriptor_json FROM control_sessions WHERE session_id=?').get(held.sessionId) as { descriptor_json: string }).descriptor_json).status), status => status === 'streaming');
+    const heldOpenTurns = await readDb(db => (db.prepare('SELECT count(*) n FROM control_turns WHERE session_id=? AND dispatched_at IS NOT NULL AND terminal_outcome IS NULL').get(held.sessionId) as { n: number }).n);
+    expect(heldOpenTurns).toBe(1);
     const crashId = randomUUID();
     const armed = await controlEnvironment<{ pid: number }>(manifest, b().name, 'fixture', { operation: 'arm-crash', commandId: crashId, boundary: 'pre-commit' });
     await expect(fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', { commandId: crashId, projectId: projects[1]!.sessionId, title: 'Crash probe', workspaceStrategy: { kind: 'current_checkout' } })).rejects.toThrow();
@@ -574,6 +578,8 @@ test('Batch 5 typed detail features survive reconnect/restart and compact once',
       counters.push(await compactCount(join(b().checkout, '.fixture-codex'))); expect(counters[2]).toBe(2);
       const recovery = (await restarted.call('recovery.get', {})).recovery;
       expect(recovery?.interruptedManagers).toContain(held.sessionId);
+      expect(recovery.recoveryId).toBe(recovery.bootId);
+      expect((await readLaunchEvidence(b(), held.sessionId)).dispatches).toBe(heldDispatch.dispatches);
       const shell = await restarted.call('shell.subscribe', {});
       const shellSnapshot = await until<any>(() => restarted.frames.find(frame => frame.subscriptionId === shell.subscriptionId && frame.item?.kind === 'snapshot')?.item.snapshot, Boolean);
       expect(shellSnapshot.recovery).toEqual(recovery);
@@ -589,9 +595,57 @@ test('Batch 5 typed detail features survive reconnect/restart and compact once',
       expect(counts).toEqual({ goalCommands: 1, compactCommands: 1 });
       evidence.batch5 = { sessionId, counts, compactDispatches: counters, planRevision: after.plan.revision, goalStatus: after.goal.goal.status,
         ambiguousCompaction: { state: ambiguousReceipt.state, delivery: ambiguousReceipt.delivery, dispatches: counters[2]! - counters[0]! },
+        heldTurn: { dispatches: heldDispatch.dispatches, openTurnRows: heldOpenTurns, interruptedManagerCaptured: true, noAutomaticReplay: true },
         liveTypedActivity: true, reconnect: true, restart: true, recoveryOnFreshShell: true, duplicateReceipts: true };
     } finally { restarted.close(); }
   } finally { rpc.close(); await proxy.stop(); }
+});
+
+test('two consecutive crashes retain every interrupted manager until one decision', async () => {
+  const heldSessions: string[] = [];
+  const occurrences: string[] = [];
+  for (let crash = 0; crash < 2; crash++) {
+    const commandId = randomUUID();
+    const held = await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', { commandId, projectId: projects[1]!.sessionId,
+      title: `Consecutive crash ${crash + 1}`, workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:hold]', artifactIds: [] } });
+    heldSessions.push(held.sessionId);
+    await settled(commandId);
+    await until(() => readLaunchEvidence(b(), held.sessionId), value => value.dispatches === 1);
+    await until(() => readDb(db => JSON.parse((db.prepare('SELECT descriptor_json FROM control_sessions WHERE session_id=?').get(held.sessionId) as { descriptor_json: string }).descriptor_json).status), status => status === 'streaming');
+    const crashId = randomUUID();
+    const armed = await controlEnvironment<{ pid: number }>(manifest, b().name, 'fixture', { operation: 'arm-crash', commandId: crashId, boundary: 'pre-commit' });
+    await expect(fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', { commandId: crashId, projectId: projects[1]!.sessionId,
+      title: 'Consecutive crash probe', workspaceStrategy: { kind: 'current_checkout' } })).rejects.toThrow();
+    await until(() => { try { process.kill(armed.pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } }, Boolean);
+    await controlEnvironment(manifest, b().name, 'start');
+    const recovery = (await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'recovery.get', {})).recovery;
+    expect(recovery.recoveryId).toBe(recovery.bootId);
+    expect(recovery.interruptedManagers).toEqual(expect.arrayContaining(heldSessions));
+    occurrences.push(recovery.recoveryId);
+  }
+  expect(occurrences[1]).not.toBe(occurrences[0]);
+  await controlEnvironment(manifest, b().name, 'stop');
+  await controlEnvironment(manifest, b().name, 'start');
+  const unchanged = (await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'recovery.get', {})).recovery;
+  expect(unchanged.recoveryId).toBe(occurrences[1]);
+  expect(unchanged.interruptedManagers).toEqual(expect.arrayContaining(heldSessions));
+  const beforeDecision = await readDb(db => ({
+    supersededBy: JSON.parse((db.prepare('SELECT snapshot_json FROM control_recovery WHERE recovery_id=?').get(occurrences[0]) as { snapshot_json: string }).snapshot_json).supersededBy,
+    captured: heldSessions.map(sessionId => db.prepare('SELECT recovery_id,terminal_outcome FROM control_turns WHERE agent_id=? AND dispatched_at IS NOT NULL').all(sessionId)),
+  }));
+  expect(beforeDecision.supersededBy).toBe(occurrences[1]);
+  expect(beforeDecision.captured).toEqual(heldSessions.map(() => [{ recovery_id: occurrences[1], terminal_outcome: null }]));
+  const decision = { commandId: randomUUID(), recoveryId: occurrences[1], action: 'dismiss' };
+  const receipt = await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'recovery.decide', decision);
+  expect(receipt.state).toBe('succeeded');
+  expect(await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'recovery.decide', decision)).toEqual(receipt);
+  const closed = await readDb(db => heldSessions.map(sessionId => db.prepare('SELECT terminal_outcome FROM control_turns WHERE agent_id=? AND dispatched_at IS NOT NULL').all(sessionId)));
+  expect(closed).toEqual(heldSessions.map(() => [{ terminal_outcome: 'reconciled' }]));
+  const dispatches = await Promise.all(heldSessions.map(async sessionId => (await readLaunchEvidence(b(), sessionId)).dispatches));
+  expect(dispatches).toEqual([1, 1]);
+  const decided = (await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'recovery.get', {})).recovery;
+  expect(decided.dismissedAt).toEqual(expect.any(String));
+  evidence.consecutiveCrashes = { occurrences, interruptedManagers: heldSessions, supersededBy: beforeDecision.supersededBy, singleDecisionClosesBoth: true, dispatches };
 });
 
 test('9.2.10 copied data root blocks before listen; explicit local re-key revokes copied devices', async () => {
