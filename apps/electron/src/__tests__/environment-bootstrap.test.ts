@@ -114,6 +114,12 @@ it('Desktop defaults to loopback and refuses plaintext safeStorage fallback', as
   expect(await service.list()).toMatchObject({ ok: false, error: { code: 'UNAVAILABLE' } });
 });
 
+it('the explicitly configured development renderer origin participates in V2 pairing, without changing packaged origins', () => {
+  const input = { runtimeRoot: '/tmp', inheritedEnv: { FORGE_ELECTRON_DEV_SERVER_URL: 'http://127.0.0.1:47588' }, isPackaged: false, backendPort: 49991, resourcesDir: '/tmp', appVersion: '1', electronVersion: '1', execArgv: [], devBetterSqlite3Binding: '/tmp/synthetic-binding.node' };
+  expect(createBackendForkOptions(input).env?.FORGE_ALLOWED_CLIENT_ORIGINS?.split(',')).toContain('http://127.0.0.1:47588');
+  expect(createBackendForkOptions({ ...input, isPackaged: true }).env?.FORGE_ALLOWED_CLIENT_ORIGINS?.split(',')).not.toContain('http://127.0.0.1:47588');
+});
+
 it('authenticated activity drives sleep prevention and updater treats revoked or malformed activity as active', async () => {
   const {readPrimaryEnvironmentActivity} = await import('../environment-credentials-ipc.js');
   const {hasActiveSessions} = await import('../auto-updater.js');
@@ -133,4 +139,62 @@ it('authenticated activity drives sleep prevention and updater treats revoked or
   sleep.updateSettings({enabled:true});const previous=activityReads;await vi.waitFor(()=>expect(activityReads).toBeGreaterThan(previous));
   expect(sleep.getStatus().blocking).toBe(true);expect(power.stop).toHaveBeenCalledTimes(stops);
   expect(await hasActiveSessions(async()=>null)).toBe(true);
+});
+
+it('secure IPC confines its main-owned capability to the pinned primary loopback target', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-secure-ipc-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const primaryId = 'a6a8cae8-1291-4bc5-ab1f-a574c4e6fbd9';
+  const remoteId = 'b6a8cae8-1291-4bc5-ab1f-a574c4e6fbd9';
+  const baseUrl = 'http://127.0.0.1:49991';
+  const controlToken = 'synthetic-secure-control-capability'.padEnd(43, 'x');
+  let ownedUrl = baseUrl;
+  let available = true;
+  let mismatch = false;
+  const calls: Array<{ path: string; control: string | null; origin: string | null }> = [];
+  const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const headers = new Headers(init?.headers);
+    calls.push({ path: url.pathname, control: headers.get('x-forge-secure-control'), origin: headers.get('origin') });
+    const id = url.origin === baseUrl ? primaryId : remoteId;
+    let payload: unknown = {};
+    if (url.pathname === '/api/v2/environment') payload = { environmentId: mismatch ? remoteId : id, protocolVersion: 1, label: 'fixture' };
+    if (url.pathname === '/api/v2/access/challenge') payload = { challengeId: id, nonce: 'synthetic-nonce' };
+    if (url.pathname === '/api/v2/access/exchange') payload = { environment: { environmentId: id, label: 'fixture' }, deviceSession: { deviceSessionId: id, deviceName: 'fixture', scopes: ['session:read'], createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 100000).toISOString() }, bearerToken: 't'.repeat(43) };
+    return new Response(JSON.stringify(payload), { status: 200 });
+  });
+  const service = createEnvironmentCredentialService({ storePath: join(root, 'credentials.json'), clientOrigin: 'http://127.0.0.1:47588', fetch: fetcher as typeof fetch,
+    safeStorage: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value).map(b => b ^ 0x55), decryptString: value => value.map(b => b ^ 0x55).toString() },
+    desktopSecureControl: () => available ? { baseUrl: ownedUrl, token: controlToken } : null,
+  });
+  const pair = (environmentId: string, url: string) => ({ environmentId, baseUrl: url, credential: { kind: 'code' as const, code: 'ABCD-EFGH-JKMN' }, deviceName: 'test', requestedScopes: ['session:read' as const] });
+  expect(await service.pairPrimary(pair(primaryId, baseUrl))).toMatchObject({ ok: true });
+  expect(await service.pair(pair(remoteId, 'https://remote.test'))).toMatchObject({ ok: true });
+  const input = { environmentId: primaryId, path: '/api/secure-sessions/manager/start', method: 'POST' as const, headers: { 'Content-Type': 'application/json' }, body: '{}' };
+  expect(await service.request(input)).toMatchObject({ ok: true });
+  expect(calls.at(-1)).toEqual({ path: input.path, control: controlToken, origin: 'app://forge' });
+  expect(await service.requestBinary({ ...input, body: undefined, maxBytes: 100 })).toMatchObject({ ok: true });
+  expect(calls.at(-1)?.control).toBe(controlToken);
+  const sent = calls.length;
+  for (const path of ['/api/secure-sessions/manager', '/api/secure-secrets/providers', '/api/settings/secure-secrets', '/api/secure-browser-control/status', '/api/settings/secure-browsers/devices']) {
+    expect(await service.request({ ...input, environmentId: remoteId, path })).toMatchObject({ ok: false, error: { code: 'UNAVAILABLE', message: 'Secure Sessions are not available on remote machines. Open a session on This machine to use them.' } });
+  }
+  expect(calls).toHaveLength(sent);
+  for (const name of ['X-Forge-Secure-Control', 'Origin', 'Authorization']) {
+    expect(await service.request({ ...input, headers: { [name]: controlToken } })).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+  }
+  ownedUrl = 'http://127.0.0.1:49992';
+  expect(await service.request(input)).toMatchObject({ ok: false, error: { code: 'UNAVAILABLE' } });
+  ownedUrl = baseUrl; available = false;
+  expect(await service.request(input)).toMatchObject({ ok: false, error: { code: 'UNAVAILABLE' } });
+  available = true; mismatch = true;
+  expect(await service.request(input)).toMatchObject({ ok: false, error: { code: 'IDENTITY_MISMATCH' } });
+  expect(calls.at(-1)?.control).toBeNull();
+  mismatch = false;
+  expect(await service.request({ ...input, path: '/api/activity', method: 'GET', body: undefined })).toMatchObject({ ok: true });
+  expect(calls.at(-1)).toEqual({ path: '/api/activity', control: null, origin: 'http://127.0.0.1:47588' });
+  expect(await service.wsTicket(primaryId, 'rpc', 1)).toMatchObject({ ok: true });
+  expect(calls.at(-1)?.origin).toBe('http://127.0.0.1:47588');
+  expect(calls.at(-1)?.control).toBeNull();
+  expect(JSON.stringify(await service.list())).not.toContain(controlToken);
+  expect(await readFile(join(root, 'credentials.json'), 'utf8')).not.toContain(controlToken);
 });

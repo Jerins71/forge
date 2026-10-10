@@ -380,13 +380,13 @@ export function BuilderSurface({
     ? activeAgent.managerId
     : activeAgentId
   const secureSessionSnapshot =
-    secureAuthorityAgentId
+    isPrimarySelected && secureAuthorityAgentId
     && state.secureSessionSnapshotLoadingSessionId !== activeAgentId
       ? state.secureSessionSnapshots[secureAuthorityAgentId] ?? null
       : null
 
   useEffect(() => {
-    if (!state.connected) {
+    if (!isPrimarySelected || !state.connected) {
       setSecureCatalog(null)
       setSecureCatalogLoading(false)
       setSecureCatalogUnavailable(false)
@@ -417,13 +417,15 @@ export function BuilderSurface({
     }
   }, [
     activeAgentId,
+    isPrimarySelected,
+    selectedEnvironmentId,
     httpClientRef,
     state.connected,
     state.secureSecretCatalogRevision,
   ])
 
   const refreshSecureBrowserControl = useCallback(async () => {
-    if (!state.connected) {
+    if (!isPrimarySelected || !state.connected) {
       setSecureBrowserControl(null)
       return null
     }
@@ -437,7 +439,7 @@ export function BuilderSurface({
       setSecureBrowserControl(null)
       return null
     }
-  }, [httpClientRef, state.connected])
+  }, [httpClientRef, isPrimarySelected, state.connected])
 
   useEffect(() => {
     void refreshSecureBrowserControl()
@@ -484,7 +486,7 @@ export function BuilderSurface({
     promptWhenNeeded: secureSessionSnapshot?.accessPolicy?.paused !== true
       && !secureSessionSnapshot?.accessPolicy?.blockedAgentIds.includes(activeAgentId ?? '')
       && secureSessionSnapshot?.projectDefaults?.some((entry) => entry.state === 'unavailable') === true,
-    active: state.connected && true,
+    active: isPrimarySelected && state.connected,
     canUnlock:
       isSecureControlAvailable(secureBrowserControl?.authorized === true)
       && isPrivateSecureFulfillmentAvailable(
@@ -495,7 +497,8 @@ export function BuilderSurface({
 
   useEffect(() => {
     if (
-      !state.connected
+      !isPrimarySelected
+      || !state.connected
       || !activeAgentId
       || !isSecureSessionRuntimeSupported(activeAgent)
     ) {
@@ -528,12 +531,15 @@ export function BuilderSurface({
   }, [
     activeAgentId,
     activeAgent,
+    isPrimarySelected,
+    selectedEnvironmentId,
     clientRef,
     httpClientRef,
     state.connected,
   ])
 
   const secureSessionAvailability = useMemo<SecureSessionAvailability>(() => {
+    if (!isPrimarySelected) return { state: 'remote_origin' }
     if (!isSecureSessionRuntimeSupported(activeAgent) || secureRuntimeUnsupported) {
       return { state: 'unsupported_runtime' }
     }
@@ -543,6 +549,7 @@ export function BuilderSurface({
     return { state: 'available' }
   }, [
     activeAgent,
+    isPrimarySelected,
     secureCatalogUnavailable,
     secureRuntimeUnsupported,
   ])
@@ -1670,7 +1677,7 @@ export function BuilderSurface({
     secureBrowserControl, clientRef, secureAuthorityAgentId, reportSecureMutationError])
 
   const secureSessionPicker = useMemo<SecureSessionPickerConfig | undefined>(() => {
-    if (!activeAgentId || activeAgentProfile?.secureSessionsEnabled === false) return undefined
+    if (!activeAgentId || (isPrimarySelected && activeAgentProfile?.secureSessionsEnabled === false)) return undefined
     const config: SecureSessionPickerConfig = {
       originId: selectedEnvironmentId ?? '',
       availability: secureSessionAvailability,
@@ -1678,7 +1685,7 @@ export function BuilderSurface({
       ...(!isActiveManager ? { readOnly: true } : {}),
       accessAgentId: activeAgentId,
       lockedBitwardenProviderName: lockedBitwardenProvider?.displayName,
-      ...(isSecureControlAvailable(secureBrowserControl?.authorized === true)
+      ...(isPrimarySelected && isSecureControlAvailable(secureBrowserControl?.authorized === true)
         ? { onSetAccess: handleSetSecureAccess,
             ...(isPrivateSecureFulfillmentAvailable(secureBrowserControl?.privateEntryAvailable === true)
               ? { onRecoverAccess: handleRecoverSecureAccess } : {}) } : {}),
@@ -1692,7 +1699,7 @@ export function BuilderSurface({
           secureCatalogLoading
           || state.secureSessionSnapshotLoadingSessionId === activeAgentId
         )),
-      ...(!isActiveManager
+      ...(!isPrimarySelected || !isActiveManager
         ? {}
         : {
             onStart: handleStartSecureSession,
@@ -1705,6 +1712,7 @@ export function BuilderSurface({
     return shouldShowSecureSessionPicker(config) ? config : undefined
   }, [
     selectedEnvironmentId,
+    isPrimarySelected,
     activeAgentProfile?.secureSessionsEnabled,
     activeAgentId,
     lockedBitwardenProvider,
@@ -1762,14 +1770,14 @@ export function BuilderSurface({
           }),
       disabled: !state.connected || secureCatalogLoading,
       canApprove:
-        true
+        isPrimarySelected
         && isSecureControlAvailable(secureBrowserControl?.authorized === true),
       onGrant: handleGrantSecureSession,
       onDeny: handleDenySecureRequest,
       onTrustSshHost: handleTrustSecureSshHost,
       onDismissSshTrustRequest: handleDismissSecureSshTrustRequest,
       ...(isActiveManager ? { onRevoke: handleRevokeSecureSession } : {}),
-      ...(isPrivateSecureFulfillmentAvailable(
+      ...(isPrimarySelected && isPrivateSecureFulfillmentAvailable(
         secureBrowserControl?.privateEntryAvailable === true,
       )
         ? { onPrivateFulfill: handlePrivateSecureFulfillment }
@@ -1790,6 +1798,7 @@ export function BuilderSurface({
   }, [
     selectedEnvironmentId,
     activeAgentId,
+    isPrimarySelected,
     handleDenySecureRequest,
     handleDismissSecureSshTrustRequest,
     handleGrantSecureSession,

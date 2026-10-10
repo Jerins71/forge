@@ -13,6 +13,7 @@ type PickerVisibilityConfig = Pick<
 export function shouldShowSecureSessionPicker(
   config: PickerVisibilityConfig,
 ): boolean {
+  if (config.availability.state === 'remote_origin') return true
   const snapshot = config.snapshot
   const needsAttention =
     config.outputState === 'quarantined'

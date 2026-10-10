@@ -126,7 +126,7 @@ function pickerState(config: SecureSessionPickerConfig, activeLeaseCount: number
 
   if (config.availability.state !== 'available') {
     const label = config.availability.state === 'remote_origin'
-      ? 'Remote'
+      ? 'Unavailable'
       : config.availability.state === 'source_unavailable'
         ? 'Unavailable'
         : 'Unsupported'
@@ -469,7 +469,7 @@ export function SecureSessionPicker({
             <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs">
               <p className="font-medium text-foreground">
                 {config.availability.state === 'remote_origin'
-                  ? 'Remote origin'
+                  ? 'Not available on remote machines'
                   : config.availability.state === 'source_unavailable'
                     ? 'Secret source unavailable'
                     : 'Unsupported runtime'}

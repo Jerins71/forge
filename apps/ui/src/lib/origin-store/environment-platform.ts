@@ -43,6 +43,8 @@ export function createDesktopEnvironmentTransport(
       const headers = Object.fromEntries(new Headers(init.headers))
       delete headers.authorization
       delete headers['x-forge-csrf']
+      // Desktop main supplies its own capability only for its owned local backend.
+      delete headers['x-forge-secure-control']
       if (
         init.body !== undefined &&
         init.body !== null &&
@@ -75,6 +77,7 @@ export function createDesktopEnvironmentTransport(
       const headers = Object.fromEntries(new Headers(init.headers))
       delete headers.authorization
       delete headers['x-forge-csrf']
+      delete headers['x-forge-secure-control']
       const method = (init.method ?? 'GET').toUpperCase()
       if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) throw new Error('Unsupported HTTP method')
       const body = init.body == null ? undefined : new Uint8Array(await new Response(init.body).arrayBuffer())

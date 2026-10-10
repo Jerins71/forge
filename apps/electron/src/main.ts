@@ -138,7 +138,9 @@ const secureVaultController = createSecureVaultController({
   safeStorage,
   platform: process.platform,
 })
-const environmentCredentials = createEnvironmentCredentialService({ storePath: path.join(app.getPath('userData'), 'environment-credentials.json'), safeStorage, clientOrigin: app.isPackaged ? 'app://forge' : new URL(electronDevServerUrl).origin })
+const environmentCredentials = createEnvironmentCredentialService({ storePath: path.join(app.getPath('userData'), 'environment-credentials.json'), safeStorage, clientOrigin: app.isPackaged ? 'app://forge' : new URL(electronDevServerUrl).origin,
+  desktopSecureControl: () => backendBootstrap ? { baseUrl: backendBootstrap.backendUrl, token: backendBootstrap.secureControlToken } : null,
+})
 const handledTerminationSignals = new Set<NodeJS.Signals>()
 const externalChromeUpdateQuiesceHook: UpdateQuiesceHook = {
   quiesce: async () => externalChromeCoordinator?.quiesce('desktop-update'),

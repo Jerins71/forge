@@ -119,6 +119,18 @@ Electron-owned backend. Secure browser pairing supports HTTPS and the explicit
 Trusted network mode for HTTP access over a known private network such as a
 personal VPN.
 
+V2 Desktop Secure Sessions are available for sessions on **This machine**.
+The trusted main-renderer IPC transport supplies the main-owned control capability
+only for secure HTTP requests to the current primary environment at the exact
+Electron-owned loopback backend URL. It uses `app://forge` as the origin for those
+requests, including with `FORGE_ELECTRON_DEV_SERVER_URL`; socket tickets and other
+HTTP requests retain the actual renderer origin. Renderer-supplied capabilities
+are stripped before IPC, and redirects remain forbidden. Remote secure requests
+are rejected locally, with an explicit unavailable explanation in the composer.
+The backend still enforces environment authentication and scopes, the secure
+origin policy, and the control capability. This adds no browser or remote
+authority and does not relax either backend secure gate.
+
 Focused Automatic Browser Host validation commands:
 
 ```bash

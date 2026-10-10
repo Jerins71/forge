@@ -39,6 +39,9 @@ export function createBackendForkOptions({
   if (!isPackaged && !devBetterSqlite3Binding) {
     throw new Error('Electron development backend requires a verified better-sqlite3 native binding')
   }
+  const configuredDevOrigin = !isPackaged && inheritedEnv.FORGE_ELECTRON_DEV_SERVER_URL
+    ? new URL(inheritedEnv.FORGE_ELECTRON_DEV_SERVER_URL).origin
+    : null
 
   const env: NodeJS.ProcessEnv = {
     ...inheritedEnv,
@@ -53,7 +56,7 @@ export function createBackendForkOptions({
     FORGE_TRUSTED_PROXY_HOST: inheritedEnv.FORGE_TRUSTED_PROXY_HOST || exposure?.trustedProxy?.host,
     FORGE_TRUSTED_PROXY_PROTO: inheritedEnv.FORGE_TRUSTED_PROXY_PROTO || exposure?.trustedProxy?.proto,
     FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: '1',
-    FORGE_ALLOWED_CLIENT_ORIGINS: [...new Set(['app://forge', ...(!isPackaged ? ['http://127.0.0.1:47188', 'http://localhost:47188'] : []), ...(inheritedEnv.FORGE_ALLOWED_CLIENT_ORIGINS?.split(',').filter(Boolean) ?? exposure?.allowedClientOrigins ?? [])])].join(','),
+    FORGE_ALLOWED_CLIENT_ORIGINS: [...new Set(['app://forge', ...(!isPackaged ? ['http://127.0.0.1:47188', 'http://localhost:47188'] : []), ...(configuredDevOrigin ? [configuredDevOrigin] : []), ...(inheritedEnv.FORGE_ALLOWED_CLIENT_ORIGINS?.split(',').filter(Boolean) ?? exposure?.allowedClientOrigins ?? [])])].join(','),
     FORGE_PORT: inheritedEnv.FORGE_PORT || String(backendPort),
     FORGE_RESOURCES_DIR: resourcesDir,
     FORGE_APP_VERSION: appVersion,
