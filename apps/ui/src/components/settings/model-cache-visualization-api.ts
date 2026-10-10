@@ -4,9 +4,9 @@ import { resolveSettingsApiClient } from './settings-api-client'
 const MODEL_CACHE_VISUALIZATION_ENABLED_PATH = '/api/settings/model-cache-visualization/enabled'
 
 export async function fetchModelCacheVisualizationEnabled(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
 ): Promise<boolean> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch(MODEL_CACHE_VISUALIZATION_ENABLED_PATH, { cache: 'no-store' })
   if (!response.ok) throw new Error(await client.readApiError(response))
   const payload = (await response.json()) as { enabled?: unknown }
@@ -14,10 +14,10 @@ export async function fetchModelCacheVisualizationEnabled(
 }
 
 export async function setModelCacheVisualizationEnabledApi(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   enabled: boolean,
 ): Promise<void> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch(MODEL_CACHE_VISUALIZATION_ENABLED_PATH, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

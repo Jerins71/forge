@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { RepoProjectAgentInventoryItem } from '@forge/protocol'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { createBuilderSettingsApiClient } from '@/components/settings/settings-api-client'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import {
   ProjectAgentDefinitionRow,
   RepoProjectAgentActivationHeader,
@@ -9,7 +9,7 @@ import {
 import { useRepoProjectAgentActivation } from '@/components/settings/repo-project-agent-ui-utils'
 
 export interface ActivateRepoProjectAgentSheetProps {
-  wsUrl: string
+  settingsClient: SettingsApiClient
   profileId: string
   sessionAgentId: string
   item: RepoProjectAgentInventoryItem
@@ -18,14 +18,13 @@ export interface ActivateRepoProjectAgentSheetProps {
 }
 
 export function ActivateRepoProjectAgentSheet({
-  wsUrl,
+  settingsClient: apiClient,
   profileId,
   sessionAgentId,
   item,
   onClose,
   onActivated,
 }: ActivateRepoProjectAgentSheetProps) {
-  const apiClient = useMemo(() => createBuilderSettingsApiClient(wsUrl), [wsUrl])
   const context = useMemo(() => ({ profileId, sessionAgentId }), [profileId, sessionAgentId])
   const {
     activatingId,

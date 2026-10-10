@@ -20,11 +20,11 @@ import { shareSkill } from './skills-viewer-api'
 interface SkillShareDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  clientOrWsUrl: SettingsApiClient | string
+  settingsClient: SettingsApiClient
   skill: SkillInventoryEntry | null
 }
 
-export function SkillShareDialog({ open, onOpenChange, clientOrWsUrl, skill }: SkillShareDialogProps) {
+export function SkillShareDialog({ open, onOpenChange, settingsClient, skill }: SkillShareDialogProps) {
   const [isSharing, setIsSharing] = useState(false)
   const [share, setShare] = useState<SkillShareResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -54,7 +54,7 @@ export function SkillShareDialog({ open, onOpenChange, clientOrWsUrl, skill }: S
     setError(null)
     setIsSharing(true)
     try {
-      const nextShare = await shareSkill(clientOrWsUrl, skill.skillId)
+      const nextShare = await shareSkill(settingsClient, skill.skillId)
       if (requestId !== shareRequestIdRef.current || !openRef.current) return
       setShare(nextShare)
     } catch (err) {

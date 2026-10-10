@@ -6,6 +6,7 @@ import {
   projectItems,
   projectActivityItems,
   projectWorker,
+  projectSessionWorkers,
 } from './ws-client/environment-projection'
 import { environmentCommandIntentKey, sendEnvironmentCommand } from './ws-client/environment-command-transport'
 import { EnvironmentOutbox } from './ws-client/environment-outbox'
@@ -370,7 +371,8 @@ export class ManagerWsClient {
         )
       updateShell()
       this.environmentDetach.push(
-        client.shell.subscribe((s) => s.sessions, updateShell, Object.is, [
+        // Keyed wake-ups only: a project-only change replaces `projects` but not `sessions`.
+        client.shell.subscribe((s) => s, updateShell, Object.is, [
           'sessions',
           'projects',
         ]),
@@ -2506,7 +2508,7 @@ export class ManagerWsClient {
           messages: [...projectedMessages,...echoes,...(projection?.choices??[]).filter(c=>c.status==='pending').map(c=>({type:'choice_request' as const,agentId:c.agentId,choiceId:c.choiceId,status:'pending' as const,questions:c.questions,timestamp:projection!.session.updatedAt}))],
           commandStatuses: this.outbox?.statuses(),
           pendingChoiceIds:new Set((projection?.choices??[]).filter(c=>c.status==='pending').map(c=>c.choiceId)),
-          agents:[...this.state.agents.filter(a=>a.role!=='worker'||a.managerId!==sessionId),...(projection?.workers??[]).map(w=>projectWorker(w,sessionId,this.environmentClient!.shell.getSnapshot()))],
+          agents: projectSessionWorkers(this.state.agents, projection?.workers ?? [], sessionId, this.environmentClient!.shell.getSnapshot()),
           conversationPage:projection?{hasOlder:!!projection.historyCursor,...(projection.historyCursor?{nextCursor:projection.historyCursor}:{}),completeness:'complete',source:'canonical'}:null,
           conversationPageLoading:false,
           activityMessages: projectDetailActivity(detail),
@@ -2521,14 +2523,15 @@ export class ManagerWsClient {
       for (const [key, event] of detail.transient)
         if (transient.get(key) !== event) this.handleServerEvent(event)
       transient = detail.transient
+      const bootstrap = this.state.conversationBootstrap
+      const phase = detail.freshness === 'live' ? 'ready' : 'pending'
       this.updateState({
         targetAgentId: sessionId,
         subscribedAgentId: sessionId,
-        conversationBootstrap: {
-          ...this.state.conversationBootstrap,
-          agentId: sessionId,
-          phase: detail.freshness === 'live' ? 'ready' : 'pending',
-        },
+        // Same session and phase keeps the same object, so an unchanged detail tick publishes nothing.
+        conversationBootstrap: bootstrap.agentId === sessionId && bootstrap.phase === phase
+          ? bootstrap
+          : { ...bootstrap, agentId: sessionId, phase },
         planSnapshotLoadingSessionId: null,
         goalSnapshotLoadingSessionId: null,
         secureSessionSnapshotLoadingSessionId: null,

@@ -17,7 +17,7 @@ import { OpenRouterContextWindow } from './OpenRouterContextWindow'
 import type { SettingsApiClient } from './settings-api-client'
 
 interface OpenRouterModelCardProps {
-  clientOrWsUrl: SettingsApiClient | string | undefined
+  settingsClient: SettingsApiClient | undefined
   model: OpenRouterModelEntry
   routingSummary?: string
   onConfigureRouting?: () => void
@@ -30,7 +30,7 @@ interface OpenRouterModelCardProps {
 }
 
 export function OpenRouterModelCard({
-  clientOrWsUrl,
+  settingsClient,
   model,
   override,
   routingSummary,
@@ -58,7 +58,7 @@ export function OpenRouterModelCard({
       setIsSavingManagerEnabled(true)
       onCardSaveStart?.(overrideKey)
       try {
-        await updateModelOverride(clientOrWsUrl, overrideKey, {
+        await updateModelOverride(settingsClient, overrideKey, {
           managerEnabled: checked === defaultManagerEnabledValue ? null : checked,
         })
         await onRefresh()
@@ -69,7 +69,7 @@ export function OpenRouterModelCard({
         onCardSaveEnd?.(overrideKey)
       }
     },
-    [clientOrWsUrl, defaultManagerEnabledValue, onCardSaveEnd, onCardSaveStart, onRefresh, overrideKey],
+    [settingsClient, defaultManagerEnabledValue, onCardSaveEnd, onCardSaveStart, onRefresh, overrideKey],
   )
 
   const resetManagerEnabled = useCallback(async () => {
@@ -77,7 +77,7 @@ export function OpenRouterModelCard({
     setIsSavingManagerEnabled(true)
     onCardSaveStart?.(overrideKey)
     try {
-      await updateModelOverride(clientOrWsUrl, overrideKey, { managerEnabled: null })
+      await updateModelOverride(settingsClient, overrideKey, { managerEnabled: null })
       await onRefresh()
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError))
@@ -85,7 +85,7 @@ export function OpenRouterModelCard({
       setIsSavingManagerEnabled(false)
       onCardSaveEnd?.(overrideKey)
     }
-  }, [clientOrWsUrl, onCardSaveEnd, onCardSaveStart, onRefresh, overrideKey])
+  }, [settingsClient, onCardSaveEnd, onCardSaveStart, onRefresh, overrideKey])
 
   const managerEligibilityCopy = managerSupported
     ? 'Show this model in manager create/change selectors.'
@@ -137,7 +137,7 @@ export function OpenRouterModelCard({
         <p className="text-xs text-muted-foreground">{routingSummary}</p>
       </div> : null}
       <OpenRouterContextWindow
-        model={model} override={override} clientOrWsUrl={clientOrWsUrl}
+        model={model} override={override} settingsClient={settingsClient}
         disabled={isRemoving || isSavingManagerEnabled || isSavingContext} onRefresh={onRefresh}
         onSaveStart={() => { setIsSavingContext(true); onCardSaveStart?.(overrideKey) }}
         onSaveEnd={() => { setIsSavingContext(false); onCardSaveEnd?.(overrideKey) }}

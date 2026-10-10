@@ -3,7 +3,7 @@ import { fetchSlashCommands, type SlashCommand } from '@/components/settings/sla
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
 interface UseSlashCommandsOptions {
-  settingsClient: SettingsApiClient | string
+  settingsClient: SettingsApiClient | null
   activeView: string
 }
 
@@ -13,6 +13,7 @@ export function useSlashCommands({ settingsClient, activeView }: UseSlashCommand
 
   useEffect(() => {
     const fetchKey = ++slashCommandsFetchKeyRef.current
+    if (!settingsClient) return
     void (async () => {
       try {
         const cmds = await fetchSlashCommands(settingsClient)

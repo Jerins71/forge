@@ -1,12 +1,14 @@
 import {
   useCallback,
+  useMemo,
   useRef,
   useSyncExternalStore,
 } from 'react'
-import type {
-  ConnectionState,
-  SelectorStore,
-  ShellState,
+import {
+  KeyedSelectorStore,
+  type ConnectionState,
+  type SelectorStore,
+  type ShellState,
 } from '@forge/client-runtime'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 import { recordEnvironmentSelector } from '@/lib/origin-store/environment-e2e-fixture'
@@ -18,10 +20,13 @@ export function useSelectorStore<S, T>(
   const cache = useRef<{ state: S; selector: (s: S) => T; value: T } | null>(
     null,
   )
+  // Keyed by content, so a caller's inline key array does not resubscribe on every render.
+  const dependencyKey = dependencies?.join('\n')
+  const keys = useMemo(() => dependencyKey?.split('\n'), [dependencyKey])
   const subscribe = useCallback(
     (listener: () => void) =>
-      store.subscribe(selector, listener, Object.is, dependencies),
-    [store, selector, dependencies],
+      store.subscribe(selector, listener, Object.is, keys),
+    [store, selector, keys],
   )
   const snapshot = useCallback(() => {
     const state = store.getSnapshot()
@@ -51,7 +56,11 @@ export function useEnvironmentSelector<T>(
   selector: ((s: ShellState) => T) | ((s: ConnectionState) => T),
   dependencies?: readonly string[],
 ): T {
-  const client = useEnvironmentRegistry().get(environmentId)
+  const registry = useEnvironmentRegistry()
+  // An environment can be unpaired, or a link can name one that never existed, while a consumer is
+  // still on screen. It reads an empty state instead of throwing during render.
+  const registered = useSelectorStore(registry.catalog, useCallback((catalog) => catalog.has(environmentId), [environmentId]))
+  const client = registered ? registry.get(environmentId) : UNREGISTERED
   const measuredSelector = useCallback((state: ShellState | ConnectionState) => {
     recordEnvironmentSelector(environmentId)
     return (selector as (state: ShellState | ConnectionState) => T)(state)
@@ -67,6 +76,14 @@ export function useEnvironmentCatalog() {
 }
 export function useLogicalProjects() {
   return useSelectorStore(useEnvironmentRegistry().logicalProjects, identity)
+}
+const UNREGISTERED: { shell: SelectorStore<ShellState>; connection: SelectorStore<ConnectionState> } = {
+  shell: new KeyedSelectorStore<ShellState>({
+    projects: new Map(), sessions: new Map(), sessionIdsByProject: new Map(), cursor: null, complete: false, cachedAt: null,
+  }),
+  connection: new KeyedSelectorStore<ConnectionState>({
+    phase: 'disabled', transportHealthy: false, shellFresh: false, lastSynchronizedAt: null, nextRetryAt: null, reason: null,
+  }),
 }
 function identity<T>(value: T): T {
   return value

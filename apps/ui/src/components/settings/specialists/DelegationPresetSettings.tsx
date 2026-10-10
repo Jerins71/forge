@@ -78,13 +78,13 @@ const TASK_TYPE_ICONS: Record<DelegationBehaviorMode, LucideIcon> = {
 }
 
 export function DelegationPresetSettingsView({
-  clientOrWsUrl,
+  settingsClient,
   modelPresets,
   selectableModels,
   taskInstructions,
   refreshKey,
 }: {
-  clientOrWsUrl: SettingsApiClient | string
+  settingsClient: SettingsApiClient
   modelPresets: ModelPresetInfo[]
   selectableModels: SelectableModel[]
   taskInstructions: ResolvedSpecialistDefinition[]
@@ -105,7 +105,7 @@ export function DelegationPresetSettingsView({
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const next = await fetchDelegationRosterSettings(clientOrWsUrl)
+      const next = await fetchDelegationRosterSettings(settingsClient)
       const cloned = cloneDelegationSettings(next)
       setSettings(cloned)
       setSavedSettings(cloneDelegationSettings(next))
@@ -124,7 +124,7 @@ export function DelegationPresetSettingsView({
     } finally {
       setLoading(false)
     }
-  }, [clientOrWsUrl])
+  }, [settingsClient])
 
   useEffect(() => {
     void load()
@@ -194,7 +194,7 @@ export function DelegationPresetSettingsView({
     setSaving(true)
     setError(null)
     try {
-      const saved = await saveDelegationRosterSettingsApi(clientOrWsUrl, settings)
+      const saved = await saveDelegationRosterSettingsApi(settingsClient, settings)
       const cloned = cloneDelegationSettings(saved)
       setSettings(cloned)
       setSavedSettings(cloneDelegationSettings(saved))
@@ -206,7 +206,7 @@ export function DelegationPresetSettingsView({
     } finally {
       setSaving(false)
     }
-  }, [clientOrWsUrl, settings])
+  }, [settingsClient, settings])
 
   const discard = useCallback(() => {
     if (!savedSettings) return

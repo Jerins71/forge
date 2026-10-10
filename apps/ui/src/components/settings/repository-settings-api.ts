@@ -9,9 +9,9 @@ import { resolveSettingsApiClient } from './settings-api-client'
 const REPOSITORY_SETTINGS_PATH = '/api/settings/repositories'
 
 export async function fetchRepositorySettings(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
 ): Promise<RepositorySettings> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch(REPOSITORY_SETTINGS_PATH, { cache: 'no-store' })
   if (!response.ok) throw new Error(await client.readApiError(response))
   const payload = (await response.json()) as GetRepositorySettingsResponse
@@ -19,10 +19,10 @@ export async function fetchRepositorySettings(
 }
 
 export async function updateRepositorySettings(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   configuredHome: string | null,
 ): Promise<RepositorySettings> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch(REPOSITORY_SETTINGS_PATH, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

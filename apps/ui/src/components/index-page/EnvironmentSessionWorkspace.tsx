@@ -235,12 +235,8 @@ function initialChoice(group: LogicalProjectGroup | undefined, primaryEnvironmen
 /** Locked machine and workspace for a session on another environment; it never moves hosts. */
 export function EnvironmentSessionStrip({ session }: { session: SessionRef }) {
   const label = useEnvironmentLabel(session.environmentId)
-  const workspace = useEnvironmentSelector(
-    session.environmentId,
-    'shell',
-    (shell) => shell.sessions.get(session.sessionId)?.workspace ?? null,
-    [`session:${session.sessionId}`],
-  )
+  const selectWorkspace = useCallback((shell: ShellState) => shell.sessions.get(session.sessionId)?.workspace ?? null, [session.sessionId])
+  const workspace = useEnvironmentSelector(session.environmentId, 'shell', selectWorkspace, [`session:${session.sessionId}`])
   return (
     <div className="flex h-9 shrink-0 items-center gap-2 border-b border-hairline px-4 text-xs text-muted-foreground">
       <span className="inline-flex items-center gap-1.5" data-testid="session-machine">

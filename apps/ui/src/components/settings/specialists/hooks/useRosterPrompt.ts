@@ -5,7 +5,7 @@ import { fetchRosterPrompt } from '../../specialists-api'
 
 /** Manages the roster prompt dialog state and fetching. */
 export function useRosterPrompt(
-  clientOrWsUrl: SettingsApiClient | string,
+  settingsClient: SettingsApiClient,
   selectedScope: string,
   isGlobal: boolean,
   previewSession?: SettingsSessionContext | null,
@@ -26,7 +26,7 @@ export function useRosterPrompt(
 
     try {
       const sessionAgentId = previewSession?.profileId === selectedScope ? previewSession.agentId : undefined
-      const markdown = await fetchRosterPrompt(clientOrWsUrl, selectedScope, sessionAgentId)
+      const markdown = await fetchRosterPrompt(settingsClient, selectedScope, sessionAgentId)
       if (requestId === rosterRequestIdRef.current) {
         setRosterMarkdown(markdown)
       }
@@ -40,7 +40,7 @@ export function useRosterPrompt(
         setRosterLoading(false)
       }
     }
-  }, [clientOrWsUrl, selectedScope, isGlobal, previewSession])
+  }, [settingsClient, selectedScope, isGlobal, previewSession])
 
   /** Reset roster state (used on scope change). */
   const resetRoster = useCallback(() => {

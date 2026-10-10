@@ -61,13 +61,13 @@ export function markRuntimeUpdatesSeen(runtimes: NativeRuntimeStatus[]): void {
  * Whether the addressed environment has a runtime update the user has not seen. Checks on mount
  * and hourly; a backend without the route (Collab, older servers) never asks for attention.
  */
-export function useNativeRuntimeAttention(clientOrWsUrl: SettingsApiClient | string | undefined | null): boolean {
+export function useNativeRuntimeAttention(settingsClient: SettingsApiClient | undefined | null): boolean {
   const [runtimes, setRuntimes] = useState<NativeRuntimeStatus[]>([])
   const [, setSeenVersion] = useState(0)
 
   useEffect(() => {
-    if (clientOrWsUrl == null) return
-    const client = resolveSettingsApiClient(clientOrWsUrl)
+    if (settingsClient == null) return
+    const client = resolveSettingsApiClient(settingsClient)
     let cancelled = false
     const load = () => {
       fetchNativeRuntimes(client)
@@ -83,7 +83,7 @@ export function useNativeRuntimeAttention(clientOrWsUrl: SettingsApiClient | str
       window.clearInterval(timer)
       window.removeEventListener(SEEN_EVENT, onSeen)
     }
-  }, [clientOrWsUrl])
+  }, [settingsClient])
 
   return hasUnseenRuntimeUpdate(runtimes)
 }

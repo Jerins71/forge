@@ -7,9 +7,9 @@ import type { SettingsApiClient } from './settings-api-client'
 import { resolveSettingsApiClient } from './settings-api-client'
 
 export async function fetchCompactionSettings(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
 ): Promise<GetCompactionSettingsResponse> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch('/api/settings/compaction', { cache: 'no-store' })
   if (!response.ok) {
     throw new Error(await client.readApiError(response))
@@ -18,10 +18,10 @@ export async function fetchCompactionSettings(
 }
 
 export async function updateCompactionSettings(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   patch: UpdateCompactionSettingsRequest,
 ): Promise<UpdateCompactionSettingsResponse> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch('/api/settings/compaction', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

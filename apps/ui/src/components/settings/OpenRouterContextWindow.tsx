@@ -7,11 +7,11 @@ import { updateModelOverride } from './models-api'
 import type { SettingsApiClient } from './settings-api-client'
 
 export function OpenRouterContextWindow({
-  model, override, clientOrWsUrl, disabled, onRefresh, onSaveStart, onSaveEnd,
+  model, override, settingsClient, disabled, onRefresh, onSaveStart, onSaveEnd,
 }: {
   model: OpenRouterModelEntry
   override?: ModelOverrideEntry
-  clientOrWsUrl: SettingsApiClient | string | undefined
+  settingsClient: SettingsApiClient | undefined
   disabled: boolean
   onRefresh: () => Promise<void>
   onSaveStart: () => void
@@ -32,7 +32,7 @@ export function OpenRouterContextWindow({
     setError(null)
     onSaveStart()
     try {
-      await updateModelOverride(clientOrWsUrl, getOpenRouterModelOverrideKey(model.modelId), { contextWindowCap: value })
+      await updateModelOverride(settingsClient, getOpenRouterModelOverrideKey(model.modelId), { contextWindowCap: value })
       await onRefresh()
       setDraft(value?.toString() ?? '')
     } catch (saveError) {

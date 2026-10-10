@@ -16,7 +16,7 @@ interface SettingsAboutProps {
 export function SettingsAbout({ apiClient }: SettingsAboutProps) {
   const bridge = window.electronBridge
   const inElectron = isElectron()
-  const clientOrWsUrl = apiClient
+  const settingsClient = apiClient
   const appVersion = inElectron ? (bridge?.getVersion?.() ?? null) : null
   const appRuntime = inElectron ? (bridge?.appRuntime ?? null) : null
   const appStartedAt = inElectron ? (bridge?.appStartedAt ?? null) : null
@@ -57,7 +57,7 @@ export function SettingsAbout({ apiClient }: SettingsAboutProps) {
   // Always fetch target backend version — works for both web and Electron/Collab
   useEffect(() => {
     let cancelled = false
-    fetchServerVersion(clientOrWsUrl).then((resolvedVersion) => {
+    fetchServerVersion(settingsClient).then((resolvedVersion) => {
       if (!cancelled) {
         setBackendVersion(resolvedVersion)
       }
@@ -70,7 +70,7 @@ export function SettingsAbout({ apiClient }: SettingsAboutProps) {
     return () => {
       cancelled = true
     }
-  }, [clientOrWsUrl])
+  }, [settingsClient])
 
   const handleCheckForUpdates = useCallback(() => {
     bridge?.checkForUpdates?.()

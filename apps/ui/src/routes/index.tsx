@@ -8,7 +8,6 @@ import {
 import { BuilderSurface } from '@/components/index-page/BuilderSurface'
 import { BrowserPopoutSurface } from '@/components/browser/BrowserPopoutSurface'
 import { useRouteState } from '@/hooks/index-page/use-route-state'
-import { resolveBackendWsUrl } from '@/lib/backend-url'
 import { useElectronRendererReady } from '@/hooks/use-electron-renderer-ready'
 
 export const Route = createFileRoute('/')({
@@ -33,7 +32,6 @@ export function IndexPage() {
 
 function MainIndexPage() {
   useElectronRendererReady()
-  const wsUrl = resolveBackendWsUrl()
   const navigate = useOptionalNavigate()
   const location = useOptionalLocation()
   const routeSearch = useMemo(() => normalizeRouteSearch(location.search), [location.search])
@@ -47,7 +45,6 @@ function MainIndexPage() {
     <main className="h-dvh app-canvas text-foreground">
       <div className="flex h-dvh w-full min-w-0 overflow-hidden">
         <BuilderSurface
-          wsUrl={wsUrl}
           routeState={routeState}
           activeView={activeView}
           navigateToRoute={navigateToRoute}

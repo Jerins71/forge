@@ -36,7 +36,7 @@ export function OpenRouterBrowseDialog({
   addedModelIds,
   onModelAdded,
 }: OpenRouterBrowseDialogProps) {
-  const clientOrWsUrl = apiClient
+  const settingsClient = apiClient
   const [allModels, setAllModels] = useState<AvailableOpenRouterModel[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -73,7 +73,7 @@ export function OpenRouterBrowseDialog({
       setError(null)
       setActionError(null)
       try {
-        const models = await fetchAvailableOpenRouterModels(clientOrWsUrl)
+        const models = await fetchAvailableOpenRouterModels(settingsClient)
         if (!cancelled) {
           setAllModels(models)
         }
@@ -88,7 +88,7 @@ export function OpenRouterBrowseDialog({
 
     void load()
     return () => { cancelled = true }
-  }, [open, clientOrWsUrl])
+  }, [open, settingsClient])
 
   // Autofocus search on open
   useEffect(() => {
@@ -149,7 +149,7 @@ export function OpenRouterBrowseDialog({
     setActionError(null)
     setAddingModelId(model.modelId)
     try {
-      await addOpenRouterModel(clientOrWsUrl, model)
+      await addOpenRouterModel(settingsClient, model)
       setLocalAddedIds((prev) => new Set(prev).add(model.modelId))
       onModelAdded()
     } catch (addError) {
@@ -157,7 +157,7 @@ export function OpenRouterBrowseDialog({
     } finally {
       setAddingModelId(null)
     }
-  }, [clientOrWsUrl, onModelAdded])
+  }, [settingsClient, onModelAdded])
 
   const toggleFilter = useCallback((filter: CapabilityFilter) => {
     setActiveFilters((prev) => {
@@ -180,14 +180,14 @@ export function OpenRouterBrowseDialog({
     setError(null)
     setActionError(null)
     try {
-      const models = await fetchAvailableOpenRouterModels(clientOrWsUrl)
+      const models = await fetchAvailableOpenRouterModels(settingsClient)
       setAllModels(models)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError))
     } finally {
       setLoading(false)
     }
-  }, [clientOrWsUrl])
+  }, [settingsClient])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

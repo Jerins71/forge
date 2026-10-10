@@ -87,10 +87,10 @@ export function parseSessionContextModeSnapshot(value: unknown): SessionContextM
 }
 
 export async function fetchProjectContextMode(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   profileId: string,
 ): Promise<ProjectContextModeSnapshot> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch(projectContextModePath(profileId), { cache: 'no-store' })
   if (!response.ok) {
     throw new Error(await client.readApiError(response))
@@ -99,11 +99,11 @@ export async function fetchProjectContextMode(
 }
 
 export async function updateProjectContextMode(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   profileId: string,
   mode: ContextMode,
 ): Promise<ProjectContextModeSnapshot> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const body: UpdateProjectContextModeRequest = { mode }
   const response = await client.fetch(projectContextModePath(profileId), {
     method: 'PUT',
@@ -117,10 +117,10 @@ export async function updateProjectContextMode(
 }
 
 export async function fetchSessionContextMode(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   agentId: string,
 ): Promise<SessionContextModeSnapshot> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch(sessionContextModePath(agentId), { cache: 'no-store' })
   if (!response.ok) {
     throw new Error(await client.readApiError(response))
@@ -129,11 +129,11 @@ export async function fetchSessionContextMode(
 }
 
 export async function updateSessionContextMode(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   agentId: string,
   mode: ContextMode | null,
 ): Promise<SessionContextModeSnapshot> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const body: UpdateSessionContextModeRequest = { mode }
   const response = await client.fetch(sessionContextModePath(agentId), {
     method: 'PUT',

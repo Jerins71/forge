@@ -684,7 +684,7 @@ function PiExtensionsSection({ data }: { data: SettingsExtensionsResponse | null
 
 export function SettingsExtensions({ apiClient }: SettingsExtensionsProps) {
   useHelpContext('settings.extensions')
-  const clientOrWsUrl = apiClient
+  const settingsClient = apiClient
 
   const [data, setData] = useState<SettingsExtensionsResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -694,14 +694,14 @@ export function SettingsExtensions({ apiClient }: SettingsExtensionsProps) {
     setIsLoading(true)
     setError(null)
     try {
-      const result = await fetchSettingsExtensions(clientOrWsUrl)
+      const result = await fetchSettingsExtensions(settingsClient)
       setData(result)
     } catch (err) {
       setError(toErrorMessage(err))
     } finally {
       setIsLoading(false)
     }
-  }, [clientOrWsUrl])
+  }, [settingsClient])
 
   useEffect(() => {
     void load()

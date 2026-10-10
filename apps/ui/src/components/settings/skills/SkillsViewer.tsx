@@ -42,7 +42,7 @@ const EMPTY_MANAGERS: AgentDescriptor[] = []
 /** Skills that have a dedicated rich configuration panel. */
 const RICH_CONFIG_SKILLS: Record<
   string,
-  React.ComponentType<{ clientOrWsUrl: SettingsApiClient; onConfigChanged?: () => void }>
+  React.ComponentType<{ settingsClient: SettingsApiClient; onConfigChanged?: () => void }>
 > = {}
 
 /* ------------------------------------------------------------------ */
@@ -72,7 +72,7 @@ export function SkillsViewer({
   onInitialImportUrlConsumed,
 }: SkillsViewerProps) {
   useHelpContext('settings.skills')
-  const clientOrWsUrl = apiClient
+  const settingsClient = apiClient
   /* ---------- Scope ---------- */
   const [selectedScope, setSelectedScope] = useState<string>(initialScope ?? SCOPE_GLOBAL)
   const skillLoadScope = selectedScope
@@ -164,7 +164,7 @@ export function SkillsViewer({
     try {
       const profileId = scope !== SCOPE_GLOBAL ? scope : undefined
       const sessionAgentId = profileId ? sessionAgentIdByProfile.get(profileId) : undefined
-      const result = await fetchSkillInventory(clientOrWsUrl, profileId, sessionAgentId)
+      const result = await fetchSkillInventory(settingsClient, profileId, sessionAgentId)
       if (requestId !== loadSkillsRequestIdRef.current) {
         return
       }
@@ -191,7 +191,7 @@ export function SkillsViewer({
         setSkillsLoading(false)
       }
     }
-  }, [clientOrWsUrl, sessionAgentIdByProfile])
+  }, [settingsClient, sessionAgentIdByProfile])
 
   const handleImportedSkill = useCallback(async (result: SkillImportResultResponse) => {
     const nextScope = result.target.scope === 'profile' && result.target.profileId
@@ -209,14 +209,14 @@ export function SkillsViewer({
     setEnvLoading(true)
     setEnvError(null)
     try {
-      const result = await fetchSettingsEnvVariables(clientOrWsUrl)
+      const result = await fetchSettingsEnvVariables(settingsClient)
       setEnvVariables(result)
     } catch (err) {
       setEnvError(toErrorMessage(err))
     } finally {
       setEnvLoading(false)
     }
-  }, [clientOrWsUrl])
+  }, [settingsClient])
 
   useEffect(() => {
     void loadSkills(skillLoadScope)
@@ -285,7 +285,7 @@ export function SkillsViewer({
     setEnvSuccess(null)
     setSavingVar(variableName)
     try {
-      await updateSettingsEnvVariables(clientOrWsUrl, { [variableName]: value })
+      await updateSettingsEnvVariables(settingsClient, { [variableName]: value })
       setDraftByName((prev) => ({ ...prev, [variableName]: '' }))
       setEnvSuccess(`${variableName} saved successfully.`)
       await loadVariables()
@@ -301,7 +301,7 @@ export function SkillsViewer({
     setEnvSuccess(null)
     setDeletingVar(variableName)
     try {
-      await deleteSettingsEnvVariable(clientOrWsUrl, variableName)
+      await deleteSettingsEnvVariable(settingsClient, variableName)
       setDraftByName((prev) => ({ ...prev, [variableName]: '' }))
       setEnvSuccess(`${variableName} removed.`)
       await loadVariables()
@@ -333,7 +333,7 @@ export function SkillsViewer({
       {RichConfigPanel && (
         <div className="rounded-lg border border-border bg-card/30 p-4">
           <RichConfigPanel
-            clientOrWsUrl={clientOrWsUrl}
+            settingsClient={settingsClient}
             onConfigChanged={handleConfigChanged}
           />
         </div>
@@ -364,13 +364,13 @@ export function SkillsViewer({
       <SkillShareDialog
         open={shareDialogOpen}
         onOpenChange={setShareDialogOpen}
-        clientOrWsUrl={clientOrWsUrl}
+        settingsClient={settingsClient}
         skill={selectedSkill}
       />
       <SkillImportDialog
         open={importDialogOpen}
         onOpenChange={setImportDialogOpen}
-        clientOrWsUrl={clientOrWsUrl}
+        settingsClient={settingsClient}
         profiles={profiles}
         initialUrl={importDialogInitialUrl}
         initialScope={selectedScope === SCOPE_GLOBAL ? SKILL_IMPORT_GLOBAL_SCOPE_VALUE : selectedScope}
@@ -462,7 +462,7 @@ export function SkillsViewer({
           {/* Desktop: side-by-side layout — fills remaining height */}
           <div className="hidden min-h-0 flex-1 md:flex md:flex-col">
             <SkillExplorerDesktop
-              clientOrWsUrl={clientOrWsUrl}
+              settingsClient={settingsClient}
               skills={skills}
               selectedSkillId={selectedSkillId}
               selectedSkill={selectedSkill}
@@ -480,7 +480,7 @@ export function SkillsViewer({
           {/* Mobile: stacked layout — scrolls vertically */}
           <div className="min-h-0 flex-1 overflow-y-auto md:hidden">
             <SkillExplorerMobile
-              clientOrWsUrl={clientOrWsUrl}
+              settingsClient={settingsClient}
               skills={skills}
               selectedSkillId={selectedSkillId}
               selectedSkill={selectedSkill}
@@ -505,7 +505,7 @@ export function SkillsViewer({
 /* ------------------------------------------------------------------ */
 
 function SkillExplorerDesktop({
-  clientOrWsUrl,
+  settingsClient,
   skills,
   selectedSkillId,
   selectedSkill,
@@ -518,7 +518,7 @@ function SkillExplorerDesktop({
   configSection,
   requestContext,
 }: {
-  clientOrWsUrl: SettingsApiClient
+  settingsClient: SettingsApiClient
   skills: SkillInventoryEntry[]
   selectedSkillId: string | null
   selectedSkill: SkillInventoryEntry | null
@@ -572,7 +572,7 @@ function SkillExplorerDesktop({
             {/* File tree */}
             <div className="flex-1 overflow-hidden">
               <SkillFileTree
-                clientOrWsUrl={clientOrWsUrl}
+                settingsClient={settingsClient}
                 skillId={selectedSkill.skillId}
                 selectedFilePath={selectedFilePath}
                 onSelectFile={onSelectFile}
@@ -586,7 +586,7 @@ function SkillExplorerDesktop({
             {/* File viewer fills available space */}
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <SkillFileViewer
-                clientOrWsUrl={clientOrWsUrl}
+                settingsClient={settingsClient}
                 skillId={selectedSkill.skillId}
                 filePath={selectedFilePath}
                 rootPath={selectedSkill.rootPath}
@@ -625,7 +625,7 @@ function SkillExplorerDesktop({
 /* ------------------------------------------------------------------ */
 
 function SkillExplorerMobile({
-  clientOrWsUrl,
+  settingsClient,
   skills,
   selectedSkillId,
   selectedSkill,
@@ -638,7 +638,7 @@ function SkillExplorerMobile({
   configSection,
   requestContext,
 }: {
-  clientOrWsUrl: SettingsApiClient
+  settingsClient: SettingsApiClient
   skills: SkillInventoryEntry[]
   selectedSkillId: string | null
   selectedSkill: SkillInventoryEntry | null
@@ -681,7 +681,7 @@ function SkillExplorerMobile({
             style={{ height: '200px' }}
           >
             <SkillFileTree
-              clientOrWsUrl={clientOrWsUrl}
+              settingsClient={settingsClient}
               skillId={selectedSkill.skillId}
               selectedFilePath={selectedFilePath}
               onSelectFile={onSelectFile}
@@ -695,7 +695,7 @@ function SkillExplorerMobile({
             style={{ minHeight: '300px' }}
           >
             <SkillFileViewer
-              clientOrWsUrl={clientOrWsUrl}
+              settingsClient={settingsClient}
               skillId={selectedSkill.skillId}
               filePath={selectedFilePath}
               rootPath={selectedSkill.rootPath}

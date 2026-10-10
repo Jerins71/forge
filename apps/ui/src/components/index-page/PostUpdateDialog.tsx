@@ -13,7 +13,7 @@ import type { SettingsApiClient } from '@/components/settings/settings-api-clien
 import { applyRecommendedManagerDefaults } from '@/lib/manager-selection-catalog-api'
 import type { PostUpdateInfo } from '@/lib/electron-bridge'
 
-export function PostUpdateDialog({ source }: { source: SettingsApiClient | string }) {
+export function PostUpdateDialog({ source }: { source: SettingsApiClient }) {
   const [info, setInfo] = useState<PostUpdateInfo | null>(null)
   const [applying, setApplying] = useState(false)
   const [appliedProjects, setAppliedProjects] = useState<number | null>(null)

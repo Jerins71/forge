@@ -184,7 +184,7 @@ interface SettingsSlashCommandsProps {
 }
 
 export function SettingsSlashCommands({ apiClient }: SettingsSlashCommandsProps) {
-  const clientOrWsUrl = apiClient
+  const settingsClient = apiClient
   const [commands, setCommands] = useState<SlashCommand[]>([])
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -198,14 +198,14 @@ export function SettingsSlashCommands({ apiClient }: SettingsSlashCommandsProps)
     setIsLoading(true)
     setError(null)
     try {
-      const result = await fetchSlashCommands(clientOrWsUrl)
+      const result = await fetchSlashCommands(settingsClient)
       setCommands(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load slash commands')
     } finally {
       setIsLoading(false)
     }
-  }, [clientOrWsUrl])
+  }, [settingsClient])
 
   useEffect(() => {
     void loadCommands()
@@ -216,7 +216,7 @@ export function SettingsSlashCommands({ apiClient }: SettingsSlashCommandsProps)
     setSuccess(null)
     setIsSaving(true)
     try {
-      await createSlashCommand(clientOrWsUrl, { name, prompt })
+      await createSlashCommand(settingsClient, { name, prompt })
       setSuccess(`/${name} created.`)
       setShowForm(false)
       await loadCommands()
@@ -233,7 +233,7 @@ export function SettingsSlashCommands({ apiClient }: SettingsSlashCommandsProps)
     setSuccess(null)
     setIsSaving(true)
     try {
-      await updateSlashCommand(clientOrWsUrl, editingCommand.id, { name, prompt })
+      await updateSlashCommand(settingsClient, editingCommand.id, { name, prompt })
       setSuccess(`/${name} updated.`)
       setEditingCommand(null)
       await loadCommands()
@@ -249,7 +249,7 @@ export function SettingsSlashCommands({ apiClient }: SettingsSlashCommandsProps)
     setSuccess(null)
     setDeletingId(command.id)
     try {
-      await deleteSlashCommand(clientOrWsUrl, command.id)
+      await deleteSlashCommand(settingsClient, command.id)
       setSuccess(`/${command.name} deleted.`)
       await loadCommands()
     } catch (err) {

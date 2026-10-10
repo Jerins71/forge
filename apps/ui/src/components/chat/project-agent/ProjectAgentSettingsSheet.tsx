@@ -9,7 +9,6 @@ import {
   type RepoProjectAgentSourceIdentity,
 } from '@forge/protocol'
 import { AlertTriangle, Copy, GitBranch, HardDrive, Loader2, Sparkles } from 'lucide-react'
-import { createBuilderSettingsApiClient } from '@/components/settings/settings-api-client'
 import { fetchProjectResourcesSnapshot } from '@/components/settings/project-resources-api'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -35,7 +34,7 @@ export function ProjectAgentSettingsSheet({
   agentId,
   sessionLabel,
   currentProjectAgent,
-  wsUrl,
+  settingsClient: apiClient,
   profileId,
   onSave,
   onDemote,
@@ -175,7 +174,7 @@ export function ProjectAgentSettingsSheet({
   }, [agentId, isPromoting, onGetProjectAgentSharing])
 
   useEffect(() => {
-    if (!isPromoting || !wsUrl || !profileId) {
+    if (!isPromoting || !apiClient || !profileId) {
       setPlacementSnapshot(null)
       setPlacementSnapshotError(null)
       setPlacementSnapshotLoading(false)
@@ -185,7 +184,6 @@ export function ProjectAgentSettingsSheet({
     let cancelled = false
     setPlacementSnapshotLoading(true)
     setPlacementSnapshotError(null)
-    const apiClient = createBuilderSettingsApiClient(wsUrl)
     void fetchProjectResourcesSnapshot(apiClient, { profileId, sessionAgentId: agentId }).then((snapshot) => {
       if (cancelled) return
       setPlacementSnapshot(snapshot)
@@ -197,7 +195,7 @@ export function ProjectAgentSettingsSheet({
       setPlacementSnapshotLoading(false)
     })
     return () => { cancelled = true }
-  }, [agentId, isPromoting, profileId, wsUrl])
+  }, [agentId, apiClient, isPromoting, profileId])
 
   // Source diagnostics: use the live snapshot when available, fall back to descriptor identity
   const effectiveSourcePath = sourceSnapshot?.forgeDirRealpath ?? repoSourcePath

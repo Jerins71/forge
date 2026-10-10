@@ -49,7 +49,7 @@ export function SettingsSpecialists({
   modelConfigChangeKey,
 }: SettingsSpecialistsProps) {
   useHelpContext('settings.specialists')
-  const clientOrWsUrl = apiClient
+  const settingsClient = apiClient
   const presetsApiClient = apiClient
   const [selectedScope, setSelectedScope] = useState<string>(SCOPE_GLOBAL)
   const [delegationTab, setDelegationTab] = useState<'presets' | 'instructions' | 'compatibility'>('presets')
@@ -66,7 +66,7 @@ export function SettingsSpecialists({
     loading,
     error,
     loadSpecialists,
-  } = useSpecialistsData(clientOrWsUrl, selectedScope, isGlobal, specialistChangeKey, previewSession)
+  } = useSpecialistsData(settingsClient, selectedScope, isGlobal, specialistChangeKey, previewSession)
 
   const {
     editStates,
@@ -95,7 +95,7 @@ export function SettingsSpecialists({
     toggleFallbackExpand,
     expandPromptForId,
     resetEditing,
-  } = useCardEditing(clientOrWsUrl, selectedScope, isGlobal, specialists, loadSpecialists, modelPresets)
+  } = useCardEditing(settingsClient, selectedScope, isGlobal, specialists, loadSpecialists, modelPresets)
 
   const {
     rosterOpen,
@@ -105,7 +105,7 @@ export function SettingsSpecialists({
     rosterError,
     handleViewRoster,
     resetRoster,
-  } = useRosterPrompt(clientOrWsUrl, selectedScope, isGlobal, previewSession)
+  } = useRosterPrompt(settingsClient, selectedScope, isGlobal, previewSession)
 
   const {
     showNewForm,
@@ -123,7 +123,7 @@ export function SettingsSpecialists({
     handleCreateNew,
     resetForm: resetNewForm,
   } = useNewSpecialistForm(
-    clientOrWsUrl,
+    settingsClient,
     selectedScope,
     isGlobal,
     specialists,
@@ -354,7 +354,7 @@ export function SettingsSpecialists({
         </TabsList>
         <TabsContent value="presets">
           <DelegationPresetSettingsView
-            clientOrWsUrl={clientOrWsUrl}
+            settingsClient={settingsClient}
             modelPresets={modelPresets}
             selectableModels={selectableModels}
             taskInstructions={visibleSpecialists}

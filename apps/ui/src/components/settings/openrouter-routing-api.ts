@@ -1,7 +1,7 @@
 import type { OpenRouterEndpointsResponse, OpenRouterRoutingConfig, OpenRouterRoutingSettingsResponse } from '@forge/protocol'
 import { resolveSettingsApiClient, type SettingsApiClient } from './settings-api-client'
 
-type Client = SettingsApiClient | string | undefined
+type Client = SettingsApiClient | undefined
 const routingPath = (modelId?: string) => `/api/settings/openrouter/routing${modelId ? `/models/${encodeURIComponent(modelId)}` : ''}`
 
 export function fetchOpenRouterRouting(client: Client, modelId?: string): Promise<OpenRouterRoutingSettingsResponse> {

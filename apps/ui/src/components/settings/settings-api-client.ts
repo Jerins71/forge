@@ -34,41 +34,8 @@ export async function readApiError(response: Response): Promise<string> {
   return `Request failed (${response.status})`
 }
 
-/* ------------------------------------------------------------------ */
-/*  Legacy Builder adapter                                             */
-/* ------------------------------------------------------------------ */
-
-/**
- * Create an unauthenticated Builder client from a raw wsUrl.
- *
- * Compatibility adapter for call sites outside Settings and Stats that have not
- * moved to an environment client yet.
- */
-export function createBuilderSettingsApiClient(wsUrl: string): SettingsApiClient {
-  let base: string | undefined
-  try {
-    const parsed = new URL(wsUrl)
-    base = `${parsed.protocol === 'wss:' ? 'https:' : 'http:'}//${parsed.host}`
-  } catch {
-    base = undefined
-  }
-  const client: SettingsApiClient = {
-    fetch: (path, init) =>
-      globalThis.fetch(base ? new URL(path, base).toString() : path, {
-        ...init,
-        credentials: init?.credentials ?? 'same-origin',
-      }),
-    async fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-      const response = await client.fetch(path, init)
-      if (!response.ok) throw new Error(await readApiError(response))
-      return (await response.json()) as T
-    },
-    readApiError,
-  }
+/** Narrow an optional client; a missing client is a caller bug, never a reason to bypass authentication. */
+export function resolveSettingsApiClient(client?: SettingsApiClient): SettingsApiClient {
+  if (!client) throw new Error('This request needs an environment client')
   return client
-}
-
-/** Accept either a settings client or a legacy Builder wsUrl. */
-export function resolveSettingsApiClient(clientOrWsUrl?: SettingsApiClient | string): SettingsApiClient {
-  return typeof clientOrWsUrl === 'object' ? clientOrWsUrl : createBuilderSettingsApiClient(clientOrWsUrl ?? '')
 }

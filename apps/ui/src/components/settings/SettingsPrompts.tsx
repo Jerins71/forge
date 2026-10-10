@@ -58,7 +58,7 @@ interface SettingsPromptsProps {
 
 export function SettingsPrompts({ apiClient, profiles, promptChangeKey, previewSession }: SettingsPromptsProps) {
   useHelpContext('settings.prompts')
-  const clientOrWsUrl = apiClient
+  const settingsClient = apiClient
 
   const defaultProfileId = profiles.length > 0 ? profiles[0].profileId : ''
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId)
@@ -80,13 +80,13 @@ export function SettingsPrompts({ apiClient, profiles, promptChangeKey, previewS
     setListLoading(true)
     setListError(null)
     try {
-      setPromptList(await fetchPromptList(clientOrWsUrl, selectedProfileId))
+      setPromptList(await fetchPromptList(settingsClient, selectedProfileId))
     } catch (err) {
       setListError(err instanceof Error ? err.message : 'Failed to load prompts')
     } finally {
       setListLoading(false)
     }
-  }, [clientOrWsUrl, selectedProfileId])
+  }, [settingsClient, selectedProfileId])
 
   useEffect(() => {
     void loadPromptData()
@@ -133,14 +133,14 @@ export function SettingsPrompts({ apiClient, profiles, promptChangeKey, previewS
     setPreviewError(null)
     const previewAgentId = previewSession?.profileId === selectedProfileId ? previewSession.agentId : undefined
     try {
-      const result = await fetchPromptPreview(clientOrWsUrl, selectedProfileId, previewAgentId)
+      const result = await fetchPromptPreview(settingsClient, selectedProfileId, previewAgentId)
       setPreviewSections(result.sections)
     } catch (err) {
       setPreviewError(err instanceof Error ? err.message : 'Failed to load preview')
     } finally {
       setPreviewLoading(false)
     }
-  }, [clientOrWsUrl, previewSession, selectedProfileId])
+  }, [settingsClient, previewSession, selectedProfileId])
 
   return (
     <div className="flex flex-col gap-6">
@@ -268,7 +268,7 @@ export function SettingsPrompts({ apiClient, profiles, promptChangeKey, previewS
           <Separator />
           <PromptEditor
             key={`${selectedCategory}:${selectedItemId}:${selectedProfileId}`}
-            clientOrWsUrl={clientOrWsUrl}
+            settingsClient={settingsClient}
             category={selectedCategory}
             promptId={selectedItemId}
             profileId={selectedProfileId}

@@ -10,7 +10,7 @@ import type { SettingsApiClient } from '../settings-api-client'
 import type { PromptCategory, PromptContentResponse } from '@forge/protocol'
 
 interface PromptEditorProps {
-  clientOrWsUrl: SettingsApiClient | string
+  settingsClient: SettingsApiClient
   category: PromptCategory
   promptId: string
   profileId: string
@@ -22,7 +22,7 @@ interface PromptEditorProps {
 }
 
 export function PromptEditor({
-  clientOrWsUrl,
+  settingsClient,
   category,
   promptId,
   profileId,
@@ -48,7 +48,7 @@ export function PromptEditor({
     setLoading(true)
     setError(null)
     try {
-      const data = await fetchPromptContent(clientOrWsUrl, category, promptId, profileId)
+      const data = await fetchPromptContent(settingsClient, category, promptId, profileId)
       setEntry(data)
       setContent(data.content)
       setOriginalContent(data.content)
@@ -57,7 +57,7 @@ export function PromptEditor({
     } finally {
       setLoading(false)
     }
-  }, [clientOrWsUrl, category, promptId, profileId])
+  }, [settingsClient, category, promptId, profileId])
 
   useEffect(() => {
     void loadContent()
@@ -80,10 +80,10 @@ export function PromptEditor({
     setSaving(true)
     setError(null)
     try {
-      await savePromptOverride(clientOrWsUrl, category, promptId, content, profileId)
+      await savePromptOverride(settingsClient, category, promptId, content, profileId)
       setOriginalContent(content)
       // Re-fetch to get updated source layer
-      const data = await fetchPromptContent(clientOrWsUrl, category, promptId, profileId)
+      const data = await fetchPromptContent(settingsClient, category, promptId, profileId)
       setEntry(data)
       showSuccess('Prompt saved.')
     } catch (err) {
@@ -97,9 +97,9 @@ export function PromptEditor({
     setResetting(true)
     setError(null)
     try {
-      await deletePromptOverride(clientOrWsUrl, category, promptId, profileId)
+      await deletePromptOverride(settingsClient, category, promptId, profileId)
       // Re-fetch to get fallback content
-      const data = await fetchPromptContent(clientOrWsUrl, category, promptId, profileId)
+      const data = await fetchPromptContent(settingsClient, category, promptId, profileId)
       setEntry(data)
       setContent(data.content)
       setOriginalContent(data.content)

@@ -120,7 +120,6 @@ function renderSidebar({
   statuses = {},
   unreadCounts = {},
   onCreateSession,
-  wsUrl,
   builderSidebarOrder,
   onMoveBuilderProject,
   isMobileOpen,
@@ -144,7 +143,6 @@ function renderSidebar({
   statuses?: Record<string, { status: AgentStatus; pendingCount: number }>
   unreadCounts?: Record<string, number>
   onCreateSession?: (profileId: string, name?: string) => void
-  wsUrl?: string
   builderSidebarOrder?: BuilderSidebarOrderRef[]
   onMoveBuilderProject?: (active: BuilderSidebarOrderRef, over: BuilderSidebarOrderRef) => void
   isMobileOpen?: boolean
@@ -164,7 +162,6 @@ function renderSidebar({
         null,
         createElement(AgentSidebar, {
           connected: true,
-          wsUrl,
           agents,
           profiles: resolvedProfiles,
           statuses,

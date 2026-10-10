@@ -64,7 +64,6 @@ injectGlowPulseStyle()
 
 export const AgentSidebar = React.memo(function AgentSidebar({
   connected,
-  wsUrl,
   modelConfigChangeKey,
   connectionEpoch,
   agents,
@@ -147,6 +146,16 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   const primaryOriginId = environmentContext?.primaryEnvironmentId ?? ''
   const environmentContextRef = useLatestRef(environmentContext)
   const environmentNavigationRef = useLatestRef(environmentNavigation)
+  // Inbox rows are environment-qualified: a session on another machine is selected and opened there.
+  const remoteSelectedSession = environmentNavigation?.selectedSession ?? null
+  const inboxSelected = useMemo(() => (
+    remoteSelectedSession
+      ? { originId: remoteSelectedSession.environmentId, sessionAgentId: remoteSelectedSession.sessionId }
+      : selectedAgentId ? { originId: primaryOriginId, sessionAgentId: selectedAgentId } : null
+  ), [primaryOriginId, remoteSelectedSession, selectedAgentId])
+  const handleSelectRemoteInboxSession = useCallback((environmentId: string, sessionId: string) => {
+    environmentNavigationRef.current?.onSelectSession({ environmentId, sessionId })
+  }, [environmentNavigationRef])
   const showProjectsBody = !roomsV2 || roomsMode === 'projects'
   const inboxFallbackOrigins = useMemo<RoomsInboxOriginInput[]>(() => {
     const toOriginInput = (
@@ -307,10 +316,10 @@ export const AgentSidebar = React.memo(function AgentSidebar({
 
   // V2 backends authenticate HTTP; the primary's settings client carries that credential.
   const primarySettingsClient = useEnvironmentSettingsClient(environmentContext?.primaryEnvironmentId)
-  const runtimeUpdateAttention = useNativeRuntimeAttention(primarySettingsClient ?? wsUrl)
+  const runtimeUpdateAttention = useNativeRuntimeAttention(primarySettingsClient)
   const { getEntriesForProfile } = useInactiveRepoProjectAgents({
     connected,
-    settingsClient: primarySettingsClient ?? wsUrl,
+    settingsClient: primarySettingsClient,
     treeRows,
     refreshKey: `${inactiveRepoRefreshKey}:${repoProjectAgentSignature}`,
   })
@@ -717,7 +726,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       onToggleHideCliSessions={handleToggleHideCliSessions}
       inactiveRepoProjectAgents={getEntriesForProfile(treeRow.profile.profileId)}
       selectedInactiveRepoEntryKey={selectedInactiveRepoEntryKey}
-      onSelectInactiveRepoProjectAgent={wsUrl ? handleSelectInactiveRepoProjectAgent : undefined}
+      onSelectInactiveRepoProjectAgent={primarySettingsClient ? handleSelectInactiveRepoProjectAgent : undefined}
       environmentNavigation={environmentNavigation}
     />
   ), [
@@ -739,7 +748,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     onPinSession, handleDemoteProjectAgent, onCreateAgentCreator, mutedAgentsState,
     handleToggleMute, handleMuteAllSessions, getCreatorAttribution,
     hideCliSessions, handleToggleHideCliSessions,
-    getEntriesForProfile, selectedInactiveRepoEntryKey, wsUrl, handleSelectInactiveRepoProjectAgent,
+    getEntriesForProfile, selectedInactiveRepoEntryKey, primarySettingsClient, handleSelectInactiveRepoProjectAgent,
     environmentNavigation,
     roomsV2,
   ])
@@ -901,13 +910,11 @@ export const AgentSidebar = React.memo(function AgentSidebar({
           <RoomsInboxLive
             mode={roomsMode}
             onModeChange={setRoomsMode}
-            selected={selectedAgentId ? {
-              originId: primaryOriginId,
-              sessionAgentId: selectedAgentId,
-            } : null}
+            selected={inboxSelected}
             searchQuery={deferredSearchQuery}
             hideCliSessions={hideCliSessions}
             onSelectLocal={handleSelectAgent}
+            onSelectRemote={handleSelectRemoteInboxSession}
             onNewProject={onAddManager}
             projectTree={roomsInboxProjectTree}
             hasInlineProjectContent={hasProjectRows}
@@ -1170,7 +1177,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
           agentId={projectAgentTarget.agentId}
           sessionLabel={projectAgentTarget.sessionLabel}
           currentProjectAgent={projectAgentTarget.currentProjectAgent}
-          wsUrl={wsUrl}
+          settingsClient={primarySettingsClient}
           profileId={agents.find((agent) => agent.agentId === projectAgentTarget.agentId)?.profileId ?? projectAgentTarget.agentId}
           onSave={handleSaveProjectAgent}
           onDemote={handleDemoteProjectAgent}
@@ -1186,9 +1193,9 @@ export const AgentSidebar = React.memo(function AgentSidebar({
         />
       ) : null}
 
-      {inactiveRepoActivationTarget && wsUrl ? (
+      {inactiveRepoActivationTarget && primarySettingsClient ? (
         <ActivateRepoProjectAgentSheet
-          wsUrl={wsUrl}
+          settingsClient={primarySettingsClient}
           profileId={inactiveRepoActivationTarget.profileId}
           sessionAgentId={inactiveRepoActivationTarget.sessionAgentId}
           item={inactiveRepoActivationTarget.item}

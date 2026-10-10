@@ -28,7 +28,7 @@ export function SettingsOpenRouter({
   onCardSaveStart,
   onCardSaveEnd,
 }: SettingsOpenRouterProps) {
-  const clientOrWsUrl = apiClient
+  const settingsClient = apiClient
   const [routingScope, setRoutingScope] = useState<string | null | undefined>(undefined)
   const [defaults, setDefaults] = useState<OpenRouterRoutingConfig | null>(null)
   const [routingError, setRoutingError] = useState('')
@@ -46,14 +46,14 @@ export function SettingsOpenRouter({
     setError(null)
     setLoading(true)
     try {
-      const response = await fetchOpenRouterModels(clientOrWsUrl)
+      const response = await fetchOpenRouterModels(settingsClient)
       if (sequence === loadSequence.current) setData(response)
     } catch (loadError) {
       if (sequence === loadSequence.current) setError(loadError instanceof Error ? loadError.message : String(loadError))
     } finally {
       if (sequence === loadSequence.current) setLoading(false)
     }
-  }, [clientOrWsUrl])
+  }, [settingsClient])
 
   useEffect(() => {
     if (!dialogOpen) {
@@ -67,13 +67,13 @@ export function SettingsOpenRouter({
 
   useEffect(() => {
     let cancelled = false
-    void fetchOpenRouterRouting(clientOrWsUrl).then((response) => {
+    void fetchOpenRouterRouting(settingsClient).then((response) => {
       if (!cancelled) { setDefaults(response.defaults); setRoutingError('') }
     }).catch((reason: unknown) => {
       if (!cancelled) { setDefaults(null); setRoutingError(String(reason)) }
     })
     return () => { cancelled = true }
-  }, [clientOrWsUrl, modelConfigChangeKey, data])
+  }, [settingsClient, modelConfigChangeKey, data])
 
   const summaryFor = (routing: OpenRouterRoutingConfig | undefined) => {
     if (!defaults) return 'Routing settings unavailable'
@@ -88,14 +88,14 @@ export function SettingsOpenRouter({
     setData((prev) => prev ? { ...prev, models: prev.models.filter((m) => m.modelId !== modelId) } : prev)
 
     try {
-      await removeOpenRouterModel(clientOrWsUrl, modelId)
+      await removeOpenRouterModel(settingsClient, modelId)
     } catch (removeError) {
       setActionError(removeError instanceof Error ? removeError.message : String(removeError))
       await loadModels()
     } finally {
       setRemovingModelId(null)
     }
-  }, [data, loadModels, clientOrWsUrl])
+  }, [data, loadModels, settingsClient])
 
   const models = data?.models ?? []
   const isConfigured = data?.isConfigured ?? false
@@ -195,7 +195,7 @@ export function SettingsOpenRouter({
               {sortedModels.map((model) => (
                 <OpenRouterModelCard
                   key={model.modelId}
-                  clientOrWsUrl={clientOrWsUrl}
+                  settingsClient={settingsClient}
                   model={model}
                   routingSummary={summaryFor(model.routing)}
                   onConfigureRouting={() => setRoutingScope(model.modelId)}
@@ -240,7 +240,7 @@ export function SettingsOpenRouter({
 
       {routingScope !== undefined ? <OpenRouterRoutingDialog
         key={routingScope ?? 'defaults'}
-        clientOrWsUrl={clientOrWsUrl}
+        settingsClient={settingsClient}
         modelId={routingScope ?? undefined}
         modelConfigChangeKey={modelConfigChangeKey}
         onClose={() => setRoutingScope(undefined)}

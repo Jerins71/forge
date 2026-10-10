@@ -95,11 +95,11 @@ function isResolvedSpecialistDefinition(value: unknown): value is ResolvedSpecia
 }
 
 export async function fetchSpecialists(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   profileId: string,
   sessionAgentId?: string,
 ): Promise<ResolvedSpecialistDefinition[]> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const path = buildSpecialistPath(profileId, '', BUILDER_TARGET_SPACE, sessionAgentId)
   const response = await client.fetch(path, { cache: 'no-store' })
   if (!response.ok) throw new Error(await client.readApiError(response))
@@ -108,12 +108,12 @@ export async function fetchSpecialists(
 }
 
 export async function saveSpecialist(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   profileId: string,
   handle: string,
   data: SaveSpecialistPayload,
 ): Promise<void> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const path = buildSpecialistPath(profileId, `/${encodeURIComponent(handle)}`, BUILDER_TARGET_SPACE)
   const response = await client.fetch(path, {
     method: 'PUT',
@@ -124,22 +124,22 @@ export async function saveSpecialist(
 }
 
 export async function deleteSpecialist(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   profileId: string,
   handle: string,
 ): Promise<void> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const path = buildSpecialistPath(profileId, `/${encodeURIComponent(handle)}`, BUILDER_TARGET_SPACE)
   const response = await client.fetch(path, { method: 'DELETE' })
   if (!response.ok) throw new Error(await client.readApiError(response))
 }
 
 export async function fetchRosterPrompt(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   profileId: string,
   sessionAgentId?: string,
 ): Promise<string> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const path = buildSpecialistPath(profileId, '/roster-prompt', BUILDER_TARGET_SPACE, sessionAgentId)
   const response = await client.fetch(path, { cache: 'no-store' })
   if (!response.ok) throw new Error(await client.readApiError(response))
@@ -152,10 +152,10 @@ export interface FetchSharedSpecialistsOptions {
 }
 
 export async function fetchSharedSpecialists(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   options: FetchSharedSpecialistsOptions = {},
 ): Promise<ResolvedSpecialistDefinition[]> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const effectiveTargetSpace = options.targetSpace ?? BUILDER_TARGET_SPACE
   const path = buildSpecialistPath(undefined, '', effectiveTargetSpace)
   const response = await client.fetch(path, { cache: 'no-store' })
@@ -165,11 +165,11 @@ export async function fetchSharedSpecialists(
 }
 
 export async function saveSharedSpecialist(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   handle: string,
   data: SaveSpecialistPayload,
 ): Promise<void> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const path = buildSpecialistPath(undefined, `/${encodeURIComponent(handle)}`, BUILDER_TARGET_SPACE)
   const response = await client.fetch(path, {
     method: 'PUT',
@@ -180,29 +180,29 @@ export async function saveSharedSpecialist(
 }
 
 export async function deleteSharedSpecialist(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   handle: string,
 ): Promise<void> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const path = buildSpecialistPath(undefined, `/${encodeURIComponent(handle)}`, BUILDER_TARGET_SPACE)
   const response = await client.fetch(path, { method: 'DELETE' })
   if (!response.ok) throw new Error(await client.readApiError(response))
 }
 
 export async function fetchDelegationRosterSettings(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
 ): Promise<DelegationRosterSettings> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   return client.fetchJson<DelegationRosterSettings>('/api/settings/delegation-rosters', {
     cache: 'no-store',
   })
 }
 
 export async function saveDelegationRosterSettingsApi(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   settings: DelegationRosterSettings,
 ): Promise<DelegationRosterSettings> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   return client.fetchJson<DelegationRosterSettings>('/api/settings/delegation-rosters', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -210,8 +210,8 @@ export async function saveDelegationRosterSettingsApi(
   })
 }
 
-export async function fetchWorkerTemplate(clientOrWsUrl: SettingsApiClient | string | undefined): Promise<string> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+export async function fetchWorkerTemplate(settingsClient: SettingsApiClient | undefined): Promise<string> {
+  const client = resolveSettingsApiClient(settingsClient)
   const path = buildSpecialistPath(undefined, '/template')
   const response = await client.fetch(path, { cache: 'no-store' })
   if (!response.ok) throw new Error(await client.readApiError(response))

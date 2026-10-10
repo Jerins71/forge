@@ -10,6 +10,7 @@ import {
 } from 'react'
 import type { EnvironmentClient } from '@forge/client-runtime'
 import { fetchRepositorySettings } from '@/components/settings/repository-settings-api'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import type { CreateProjectSourceMode } from '@/components/chat/CreateManagerDialog'
 import { deriveRepositoryFolderFromUrl } from '@/lib/repository-project-helpers'
 import { ManagerWsClient } from '@/lib/ws-client'
@@ -25,8 +26,8 @@ import type { AppRouteState } from './use-route-state'
 import { DEFAULT_MANAGER_AGENT_ID } from './use-route-state'
 
 interface UseManagerActionsOptions {
-  /** Primary-bound repository settings endpoint. */
-  wsUrl: string
+  /** The primary environment's settings client, for repository settings; null until it is registered. */
+  settingsClient: SettingsApiClient | null
   /** The environment whose sessions these actions address (compaction, resource seeding). */
   environmentClient: EnvironmentClient | null
   clientRef: MutableRefObject<ManagerWsClient | null>
@@ -40,7 +41,7 @@ interface UseManagerActionsOptions {
 }
 
 export function useManagerActions({
-  wsUrl,
+  settingsClient,
   environmentClient,
   clientRef,
   agents,
@@ -323,7 +324,8 @@ export function useManagerActions({
     setIsCreateManagerDialogOpen(true)
 
     const generation = ++settingsLoadGenerationRef.current
-    void fetchRepositorySettings(wsUrl)
+    if (!settingsClient) return
+    void fetchRepositorySettings(settingsClient)
       .then((settings) => {
         if (settingsLoadGenerationRef.current !== generation) return
         if (basePathTouchedRef.current) return
@@ -332,7 +334,7 @@ export function useManagerActions({
       .catch(() => {
         // Non-blocking: user can still type a base path.
       })
-  }, [activeAgent, agents, resetCloneFields, wsUrl])
+  }, [activeAgent, agents, resetCloneFields, settingsClient])
 
   const handleCreateManagerDialogOpenChange = useCallback((open: boolean) => {
     if (!open) {

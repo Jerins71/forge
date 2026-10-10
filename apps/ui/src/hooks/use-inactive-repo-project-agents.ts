@@ -33,7 +33,7 @@ const NO_ENTRIES: never[] = []
 
 export function useInactiveRepoProjectAgents(options: {
   connected: boolean
-  settingsClient?: SettingsApiClient | string | null
+  settingsClient?: SettingsApiClient | null
   treeRows: ProfileTreeRow[]
   refreshKey?: string | number
 }) {

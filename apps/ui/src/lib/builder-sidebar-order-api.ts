@@ -6,10 +6,7 @@ import {
   type BuilderSidebarOrderState,
   type UpdateBuilderSidebarOrderRequest,
 } from '@forge/protocol'
-import {
-  createBuilderSettingsApiClient,
-  type SettingsApiClient,
-} from '@/components/settings/settings-api-client'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 
 export const BUILDER_SIDEBAR_ORDER_API_PATH = '/api/settings/builder-sidebar-order'
 
@@ -35,12 +32,7 @@ export class BuilderSidebarOrderApiUnavailableError extends Error {
   }
 }
 
-/** Construct the preference API from the local WS URL, never the active origin. */
-export function createLocalBuilderSidebarOrderApi(localWsUrl: string): BuilderSidebarOrderApi {
-  return createBuilderSidebarOrderApi(createBuilderSettingsApiClient(localWsUrl))
-}
-
-/** Create an API bound to the local Builder target. */
+/** Create an API bound to the primary environment's authenticated settings client. */
 export function createBuilderSidebarOrderApi(client: SettingsApiClient): BuilderSidebarOrderApi {
   return {
     async get() {

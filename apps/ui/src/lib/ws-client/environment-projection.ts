@@ -55,9 +55,11 @@ export function projectSession(
 }
 export function projectShell(shell: ShellState, previous: AgentDescriptor[], previousProfiles: ManagerProfile[] = [], previousUnread: Record<string, number> = {}, previousAttentions: Record<string, SessionAttention> = {}) {
   const byId = new Map(previous.map((a) => [a.agentId, a]))
-  const agents = [...shell.sessions.values()].map((s) =>
-    projectSession(s, shell, byId.get(s.sessionId)),
-  )
+  // The shell lists sessions only; the mounted detail's workers are kept across shell updates.
+  const agents = [
+    ...[...shell.sessions.values()].map((s) => projectSession(s, shell, byId.get(s.sessionId))),
+    ...previous.filter((a) => a.role === 'worker' && shell.sessions.has(a.managerId)),
+  ]
   const profilesById = new Map(previousProfiles.map(profile => [profile.profileId, profile]))
   const profiles: ManagerProfile[] = [...shell.projects.values()].map((p) => {
     const next: ManagerProfile = {
@@ -73,6 +75,7 @@ export function projectShell(shell: ShellState, previous: AgentDescriptor[], pre
     const previousProfile = profilesById.get(p.projectId)
     return previousProfile && Object.keys(next).every(key => next[key as keyof ManagerProfile] === previousProfile[key as keyof ManagerProfile]) ? previousProfile : next
   })
+  const sessionCount = shell.sessions.size
   const unreadCounts: Record<string, number> = {}
   for (const s of shell.sessions.values()) unreadCounts[s.sessionId] = s.unread
   // Needs You lists server attention occurrences; the shell carries the current one per session.
@@ -87,12 +90,18 @@ export function projectShell(shell: ShellState, previous: AgentDescriptor[], pre
   }
   const attentionKeys = Object.keys(sessionAttentions)
   return {
-    agents,
-    profiles,
-    unreadCounts: Object.keys(previousUnread).length === agents.length && Object.keys(unreadCounts).every(key => unreadCounts[key] === previousUnread[key]) ? previousUnread : unreadCounts,
+    agents: sameItems(agents, previous) ? previous : agents,
+    profiles: sameItems(profiles, previousProfiles) ? previousProfiles : profiles,
+    unreadCounts: Object.keys(previousUnread).length === sessionCount && Object.keys(unreadCounts).every(key => unreadCounts[key] === previousUnread[key]) ? previousUnread : unreadCounts,
     sessionAttentionAvailable: true,
+    // A complete shell is the whole session and project inventory; no other event reports it here.
+    hasReceivedAgentsSnapshot: shell.complete,
+    hasReceivedProfilesSnapshot: shell.complete,
     sessionAttentions: attentionKeys.length === Object.keys(previousAttentions).length && attentionKeys.every(key => sessionAttentions[key] === previousAttentions[key]) ? previousAttentions : sessionAttentions,
   }
+}
+function sameItems<T>(next: readonly T[], previous: readonly T[]): boolean {
+  return next.length === previous.length && next.every((item, index) => item === previous[index])
 }
 export function projectItems(
   items: NonNullable<DetailState['projection']>['items'],
@@ -174,6 +183,27 @@ export function projectDetailMessages(
     state.projection?.items ?? [],
     state.projection?.session.sessionId ?? '',
   )
+}
+/** Replaces one session's workers with its detail projection, reusing unchanged descriptors and the list itself. */
+export function projectSessionWorkers(
+  agents: AgentDescriptor[],
+  workers: NonNullable<DetailState['projection']>['workers'],
+  sessionId: string,
+  shell: ShellState,
+): AgentDescriptor[] {
+  const byId = new Map(agents.map((agent) => [agent.agentId, agent]))
+  const next = [
+    ...agents.filter((agent) => agent.role !== 'worker' || agent.managerId !== sessionId),
+    ...workers.map((worker) => {
+      const projected = projectWorker(worker, sessionId, shell)
+      const previous = byId.get(worker.agentId)
+      return previous?.role === 'worker' && previous.managerId === sessionId
+        && previous.status === projected.status && previous.displayName === projected.displayName
+        ? previous
+        : projected
+    }),
+  ]
+  return sameItems(next, agents) ? agents : next
 }
 export function projectWorker(
   worker: NonNullable<DetailState['projection']>['workers'][number],

@@ -9,8 +9,8 @@ export interface OpenRouterModelsResponse {
   isConfigured: boolean
 }
 
-export async function fetchOpenRouterModels(clientOrWsUrl: SettingsApiClient | string | undefined): Promise<OpenRouterModelsResponse> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+export async function fetchOpenRouterModels(settingsClient: SettingsApiClient | undefined): Promise<OpenRouterModelsResponse> {
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch('/api/settings/openrouter/models', { cache: 'no-store' })
   if (!response.ok) throw new Error(await client.readApiError(response))
 
@@ -21,8 +21,8 @@ export async function fetchOpenRouterModels(clientOrWsUrl: SettingsApiClient | s
   }
 }
 
-export async function fetchAvailableOpenRouterModels(clientOrWsUrl: SettingsApiClient | string | undefined): Promise<AvailableOpenRouterModel[]> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+export async function fetchAvailableOpenRouterModels(settingsClient: SettingsApiClient | undefined): Promise<AvailableOpenRouterModel[]> {
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch('/api/settings/openrouter/available-models', { cache: 'no-store' })
   if (!response.ok) throw new Error(await client.readApiError(response))
 
@@ -31,10 +31,10 @@ export async function fetchAvailableOpenRouterModels(clientOrWsUrl: SettingsApiC
 }
 
 export async function addOpenRouterModel(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   model: AvailableOpenRouterModel,
 ): Promise<void> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch(`/api/settings/openrouter/models/${encodeURIComponent(model.modelId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -43,8 +43,8 @@ export async function addOpenRouterModel(
   if (!response.ok) throw new Error(await client.readApiError(response))
 }
 
-export async function removeOpenRouterModel(clientOrWsUrl: SettingsApiClient | string | undefined, modelId: string): Promise<void> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+export async function removeOpenRouterModel(settingsClient: SettingsApiClient | undefined, modelId: string): Promise<void> {
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch(`/api/settings/openrouter/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' })
   if (!response.ok) throw new Error(await client.readApiError(response))
 }

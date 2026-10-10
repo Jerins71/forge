@@ -13,8 +13,8 @@ import { OpenRouterProviderPicker } from './OpenRouterProviderPicker'
 
 
 
-export function OpenRouterRoutingDialog({ clientOrWsUrl, modelId, modelConfigChangeKey, onClose, onSaved }: {
-  clientOrWsUrl: SettingsApiClient | string | undefined
+export function OpenRouterRoutingDialog({ settingsClient, modelId, modelConfigChangeKey, onClose, onSaved }: {
+  settingsClient: SettingsApiClient | undefined
   modelId?: string
   modelConfigChangeKey: number
   onClose: () => void
@@ -36,14 +36,14 @@ export function OpenRouterRoutingDialog({ clientOrWsUrl, modelId, modelConfigCha
     let cancelled = false
     setLoading(true)
     setError('')
-    void fetchOpenRouterRouting(clientOrWsUrl, modelId).then((response) => {
+    void fetchOpenRouterRouting(settingsClient, modelId).then((response) => {
       if (cancelled) return
       setSettings(response)
       setDraft(modelId ? response.routing ?? {} : response.defaults)
       setStale(false)
     }).catch((reason: unknown) => { if (!cancelled) setError(String(reason)) }).finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [clientOrWsUrl, modelId, reloadKey])
+  }, [settingsClient, modelId, reloadKey])
   useEffect(() => {
     if (initialEvent.current !== modelConfigChangeKey) {
       initialEvent.current = modelConfigChangeKey
@@ -54,7 +54,7 @@ export function OpenRouterRoutingDialog({ clientOrWsUrl, modelId, modelConfigCha
     if (!modelId) return
     let cancelled = false
     setMetadataError('')
-    void fetchOpenRouterEndpoints(clientOrWsUrl, modelId, refreshKey > 0).then((response) => {
+    void fetchOpenRouterEndpoints(settingsClient, modelId, refreshKey > 0).then((response) => {
       if (!cancelled) setMetadata(response)
     }).catch(() => {
       if (!cancelled) {
@@ -63,7 +63,7 @@ export function OpenRouterRoutingDialog({ clientOrWsUrl, modelId, modelConfigCha
       }
     })
     return () => { cancelled = true }
-  }, [clientOrWsUrl, modelId, refreshKey])
+  }, [settingsClient, modelId, refreshKey])
 
   const update = <K extends keyof OpenRouterRoutingConfig>(key: K, value: OpenRouterRoutingConfig[K]) => setDraft((previous) => {
     const next = { ...previous }
@@ -100,7 +100,7 @@ export function OpenRouterRoutingDialog({ clientOrWsUrl, modelId, modelConfigCha
     setSaving(true)
     setError('')
     try {
-      await saveOpenRouterRouting(clientOrWsUrl, modelId, settings.revision, draft)
+      await saveOpenRouterRouting(settingsClient, modelId, settings.revision, draft)
       onSaved()
       onClose()
     } catch (reason) {

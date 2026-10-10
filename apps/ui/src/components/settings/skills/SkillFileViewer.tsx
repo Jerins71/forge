@@ -65,7 +65,7 @@ function storeBoolPref(key: string, value: boolean): void {
 /* ------------------------------------------------------------------ */
 
 interface SkillFileViewerProps {
-  clientOrWsUrl: SettingsApiClient | string
+  settingsClient: SettingsApiClient
   skillId: string
   filePath: string | null
   /** Root path of the skill for constructing absolute paths */
@@ -79,7 +79,7 @@ interface SkillFileViewerProps {
 /* ------------------------------------------------------------------ */
 
 export function SkillFileViewer({
-  clientOrWsUrl,
+  settingsClient,
   skillId,
   filePath,
   rootPath,
@@ -106,7 +106,7 @@ export function SkillFileViewer({
     setIsLoading(true)
     setError(null)
 
-    fetchSkillFileContent(clientOrWsUrl, skillId, filePath, requestContext)
+    fetchSkillFileContent(settingsClient, skillId, filePath, requestContext)
       .then((result) => {
         if (!cancelled) setContent(result)
       })
@@ -118,7 +118,7 @@ export function SkillFileViewer({
       })
 
     return () => { cancelled = true }
-  }, [clientOrWsUrl, skillId, filePath, requestContext])
+  }, [settingsClient, skillId, filePath, requestContext])
 
   const isMarkdown = useMemo(
     () => (filePath ? isMarkdownFile(filePath) : false),

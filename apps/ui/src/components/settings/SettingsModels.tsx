@@ -118,7 +118,7 @@ function OverrideBadge({ active }: { active: boolean }) {
 }
 
 function ModelCard({
-  clientOrWsUrl,
+  settingsClient,
   model,
   modelKey,
   override,
@@ -128,7 +128,7 @@ function ModelCard({
   onCardSaveStart,
   onCardSaveEnd,
 }: {
-  clientOrWsUrl: SettingsApiClient | string
+  settingsClient: SettingsApiClient
   model: ForgeModelDefinition
   modelKey: string
   override?: ModelOverrideEntry
@@ -175,7 +175,7 @@ function ModelCard({
       setIsSavingEnabled(true)
       onCardSaveStart?.(modelKey)
       try {
-        await updateModelOverride(clientOrWsUrl, modelKey, {
+        await updateModelOverride(settingsClient, modelKey, {
           enabled: checked === model.enabledByDefault ? null : checked,
         })
         await onRefresh()
@@ -186,7 +186,7 @@ function ModelCard({
         onCardSaveEnd?.(modelKey)
       }
     },
-    [clientOrWsUrl, model.enabledByDefault, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh],
+    [settingsClient, model.enabledByDefault, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh],
   )
 
   const saveManagerEnabled = useCallback(
@@ -195,7 +195,7 @@ function ModelCard({
       setIsSavingManagerEnabled(true)
       onCardSaveStart?.(modelKey)
       try {
-        await updateModelOverride(clientOrWsUrl, modelKey, {
+        await updateModelOverride(settingsClient, modelKey, {
           managerEnabled: checked === defaultManagerEnabledValue ? null : checked,
         })
         await onRefresh()
@@ -206,7 +206,7 @@ function ModelCard({
         onCardSaveEnd?.(modelKey)
       }
     },
-    [clientOrWsUrl, defaultManagerEnabledValue, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh],
+    [settingsClient, defaultManagerEnabledValue, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh],
   )
 
   const applyContextCap = useCallback(async () => {
@@ -226,7 +226,7 @@ function ModelCard({
     setIsSavingCap(true)
     onCardSaveStart?.(modelKey)
     try {
-      await updateModelOverride(clientOrWsUrl, modelKey, { contextWindowCap: nextCap })
+      await updateModelOverride(settingsClient, modelKey, { contextWindowCap: nextCap })
       await onRefresh()
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError))
@@ -234,7 +234,7 @@ function ModelCard({
       setIsSavingCap(false)
       onCardSaveEnd?.(modelKey)
     }
-  }, [clientOrWsUrl, contextCapDraft, model.contextWindow, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
+  }, [settingsClient, contextCapDraft, model.contextWindow, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
 
   const applyModelSpecificInstructions = useCallback(async () => {
     setError(null)
@@ -245,7 +245,7 @@ function ModelCard({
     setIsSavingInstructions(true)
     onCardSaveStart?.(modelKey)
     try {
-      await updateModelOverride(clientOrWsUrl, modelKey, { modelSpecificInstructions: nextInstructions })
+      await updateModelOverride(settingsClient, modelKey, { modelSpecificInstructions: nextInstructions })
       await onRefresh()
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError))
@@ -253,7 +253,7 @@ function ModelCard({
       setIsSavingInstructions(false)
       onCardSaveEnd?.(modelKey)
     }
-  }, [clientOrWsUrl, instructionsDraft, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
+  }, [settingsClient, instructionsDraft, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
 
   const resetModelSpecificInstructions = useCallback(async () => {
     setError(null)
@@ -262,7 +262,7 @@ function ModelCard({
     setIsSavingInstructions(true)
     onCardSaveStart?.(modelKey)
     try {
-      await updateModelOverride(clientOrWsUrl, modelKey, { modelSpecificInstructions: null })
+      await updateModelOverride(settingsClient, modelKey, { modelSpecificInstructions: null })
       await onRefresh()
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError))
@@ -270,14 +270,14 @@ function ModelCard({
       setIsSavingInstructions(false)
       onCardSaveEnd?.(modelKey)
     }
-  }, [clientOrWsUrl, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
+  }, [settingsClient, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
 
   const resetEnabled = useCallback(async () => {
     setError(null)
     setIsSavingEnabled(true)
     onCardSaveStart?.(modelKey)
     try {
-      await updateModelOverride(clientOrWsUrl, modelKey, { enabled: null })
+      await updateModelOverride(settingsClient, modelKey, { enabled: null })
       await onRefresh()
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError))
@@ -285,14 +285,14 @@ function ModelCard({
       setIsSavingEnabled(false)
       onCardSaveEnd?.(modelKey)
     }
-  }, [clientOrWsUrl, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
+  }, [settingsClient, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
 
   const resetManagerEnabled = useCallback(async () => {
     setError(null)
     setIsSavingManagerEnabled(true)
     onCardSaveStart?.(modelKey)
     try {
-      await updateModelOverride(clientOrWsUrl, modelKey, { managerEnabled: null })
+      await updateModelOverride(settingsClient, modelKey, { managerEnabled: null })
       await onRefresh()
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError))
@@ -300,7 +300,7 @@ function ModelCard({
       setIsSavingManagerEnabled(false)
       onCardSaveEnd?.(modelKey)
     }
-  }, [clientOrWsUrl, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
+  }, [settingsClient, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
 
   const resetContextCap = useCallback(async () => {
     setError(null)
@@ -308,7 +308,7 @@ function ModelCard({
     setIsSavingCap(true)
     onCardSaveStart?.(modelKey)
     try {
-      await updateModelOverride(clientOrWsUrl, modelKey, { contextWindowCap: null })
+      await updateModelOverride(settingsClient, modelKey, { contextWindowCap: null })
       await onRefresh()
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError))
@@ -316,14 +316,14 @@ function ModelCard({
       setIsSavingCap(false)
       onCardSaveEnd?.(modelKey)
     }
-  }, [clientOrWsUrl, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
+  }, [settingsClient, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
 
   const resetModel = useCallback(async () => {
     setError(null)
     setIsResettingAll(true)
     onCardSaveStart?.(modelKey)
     try {
-      await deleteModelOverride(clientOrWsUrl, modelKey)
+      await deleteModelOverride(settingsClient, modelKey)
       await onRefresh()
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError))
@@ -331,7 +331,7 @@ function ModelCard({
       setIsResettingAll(false)
       onCardSaveEnd?.(modelKey)
     }
-  }, [clientOrWsUrl, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
+  }, [settingsClient, modelKey, onCardSaveEnd, onCardSaveStart, onRefresh])
 
   return (
     <div className="rounded-lg border border-border/70 bg-card/40">
@@ -540,7 +540,7 @@ function ModelCard({
 }
 
 export function SettingsModels({ apiClient, modelConfigChangeKey }: SettingsModelsProps) {
-  const clientOrWsUrl = apiClient
+  const settingsClient = apiClient
   const [overrides, setOverrides] = useState<Record<string, ModelOverrideEntry>>({})
   const [providerAvailability, setProviderAvailability] = useState<Record<string, boolean>>({})
   const [providerCredentials, setProviderCredentials] = useState<Record<string, ForgeProviderCredentialSummary>>({})
@@ -570,7 +570,7 @@ export function SettingsModels({ apiClient, modelConfigChangeKey }: SettingsMode
     setError(null)
     setLoading(true)
     try {
-      const response = await fetchModelOverrides(clientOrWsUrl)
+      const response = await fetchModelOverrides(settingsClient)
       setOverrides(response.overrides ?? {})
       setProviderAvailability(response.providerAvailability ?? {})
       setProviderCredentials(response.providerCredentials ?? {})
@@ -580,7 +580,7 @@ export function SettingsModels({ apiClient, modelConfigChangeKey }: SettingsMode
     } finally {
       setLoading(false)
     }
-  }, [clientOrWsUrl])
+  }, [settingsClient])
 
   useEffect(() => {
     void loadOverrides()
@@ -621,7 +621,7 @@ export function SettingsModels({ apiClient, modelConfigChangeKey }: SettingsMode
     setError(null)
     setResettingAll(true)
     try {
-      await resetAllModelOverrides(clientOrWsUrl)
+      await resetAllModelOverrides(settingsClient)
       await loadOverrides()
     } catch (resetError) {
       setError(resetError instanceof Error ? resetError.message : String(resetError))
@@ -629,7 +629,7 @@ export function SettingsModels({ apiClient, modelConfigChangeKey }: SettingsMode
       setResettingAll(false)
       setIsResetAllDialogOpen(false)
     }
-  }, [hasAnyOverrides, loadOverrides, clientOrWsUrl])
+  }, [hasAnyOverrides, loadOverrides, settingsClient])
 
   return (
     <SettingsSection
@@ -726,7 +726,7 @@ export function SettingsModels({ apiClient, modelConfigChangeKey }: SettingsMode
                     return (
                       <ModelCard
                         key={modelKey}
-                        clientOrWsUrl={clientOrWsUrl}
+                        settingsClient={settingsClient}
                         model={model}
                         modelKey={modelKey}
                         override={override}

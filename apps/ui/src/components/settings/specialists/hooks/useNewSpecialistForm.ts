@@ -20,7 +20,7 @@ import {
 
 /** Manages the new specialist creation form state and submission. */
 export function useNewSpecialistForm(
-  clientOrWsUrl: SettingsApiClient | string,
+  settingsClient: SettingsApiClient,
   selectedScope: string,
   isGlobal: boolean,
   specialists: ResolvedSpecialistDefinition[],
@@ -77,7 +77,7 @@ export function useNewSpecialistForm(
       // Fetch worker template for system prompt
       let template: string
       try {
-        template = await fetchWorkerTemplate(clientOrWsUrl)
+        template = await fetchWorkerTemplate(settingsClient)
       } catch {
         template = [
           'You are a worker agent in a swarm.',
@@ -103,9 +103,9 @@ export function useNewSpecialistForm(
       }
 
       if (isGlobal) {
-        await saveSharedSpecialist(clientOrWsUrl, normalizedNewHandle, payload)
+        await saveSharedSpecialist(settingsClient, normalizedNewHandle, payload)
       } else {
-        await saveSpecialist(clientOrWsUrl, selectedScope, normalizedNewHandle, payload)
+        await saveSpecialist(settingsClient, selectedScope, normalizedNewHandle, payload)
       }
 
       const updatedSpecialists = await loadSpecialists()
@@ -124,7 +124,7 @@ export function useNewSpecialistForm(
       setNewCreating(false)
     }
   }, [
-    clientOrWsUrl,
+    settingsClient,
     selectedScope,
     isGlobal,
     normalizedNewHandle,

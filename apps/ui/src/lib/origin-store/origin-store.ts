@@ -20,7 +20,6 @@ export interface OriginStoreOptions {
 /** React/legacy projection wrapper. Runtime owns every connection and authoritative store. */
 export class OriginStore {
   readonly originId: OriginId
-  readonly wsUrl: string
   private readonly client: ManagerWsClient
   private readonly state: KeyedSelectorStore<ManagerWsState>
   private readonly selections = new WeakMap<OriginSelector<unknown>, { snapshot: ManagerWsState; value: unknown }>()
@@ -33,7 +32,6 @@ export class OriginStore {
   constructor(readonly options: OriginStoreOptions) {
     const environment = options.environmentClient
     this.originId = environment.environmentId
-    this.wsUrl = ''
     this.client = new ManagerWsClient('', null, {
       environmentClient: environment,
     })

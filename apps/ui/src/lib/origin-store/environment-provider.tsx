@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- provider exports its context accessors */
-import { createContext, useContext, useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
 import { originRegistry } from './origin-registry'
 import type { EnvironmentRegistry } from '@forge/client-runtime'
 export interface EnvironmentContextValue {
@@ -13,8 +13,10 @@ export function EnvironmentProvider({
   children,
 }: EnvironmentContextValue & { children: ReactNode }) {
   useEffect(() => originRegistry.attach(registry), [registry])
+  // One value per registry: every environment consumer re-renders when this identity changes.
+  const value = useMemo(() => ({ registry, primaryEnvironmentId }), [registry, primaryEnvironmentId])
   return (
-    <EnvironmentContext.Provider value={{ registry, primaryEnvironmentId }}>
+    <EnvironmentContext.Provider value={value}>
       {children}
     </EnvironmentContext.Provider>
   )

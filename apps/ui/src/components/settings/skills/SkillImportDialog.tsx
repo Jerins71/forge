@@ -37,7 +37,7 @@ const GLOBAL_SCOPE_VALUE = '__global__'
 interface SkillImportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  clientOrWsUrl: SettingsApiClient | string
+  settingsClient: SettingsApiClient
   profiles: ManagerProfile[]
   initialUrl?: string
   initialScope: string
@@ -47,7 +47,7 @@ interface SkillImportDialogProps {
 export function SkillImportDialog({
   open,
   onOpenChange,
-  clientOrWsUrl,
+  settingsClient,
   profiles,
   initialUrl,
   initialScope,
@@ -137,7 +137,7 @@ export function SkillImportDialog({
     setReplaceAccepted(false)
     setIsPreviewing(true)
     try {
-      const nextPreview = await previewSkillImportFromUrl(clientOrWsUrl, { url: nextUrl, target: nextTarget })
+      const nextPreview = await previewSkillImportFromUrl(settingsClient, { url: nextUrl, target: nextTarget })
       if (requestId !== previewRequestIdRef.current) {
         return
       }
@@ -177,7 +177,7 @@ export function SkillImportDialog({
     setSuccess(null)
     setIsImporting(true)
     try {
-      const result = await importSkill(clientOrWsUrl, {
+      const result = await importSkill(settingsClient, {
         source: { url: previewSource.url },
         target: targetFromScope(previewSource.scope),
         ...(hasConflict ? { conflictStrategy: 'replace', confirmReplace: true } : { conflictStrategy: 'reject' }),

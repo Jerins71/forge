@@ -12,7 +12,7 @@ interface GlobalDialogsProps {
   deleteManagerDialogProps: ComponentPropsWithoutRef<typeof DeleteManagerDialog>
   forkSessionDialogProps?: ComponentPropsWithoutRef<typeof ForkSessionDialog> | null
   diffViewerDialogProps: ComponentPropsWithoutRef<typeof DiffViewerDialog>
-  postUpdateSource: ComponentPropsWithoutRef<typeof PostUpdateDialog>['source']
+  postUpdateSource: ComponentPropsWithoutRef<typeof PostUpdateDialog>['source'] | null
 }
 
 export function GlobalDialogs({
@@ -30,7 +30,7 @@ export function GlobalDialogs({
       <DeleteManagerDialog {...deleteManagerDialogProps} />
       {forkSessionDialogProps ? <ForkSessionDialog {...forkSessionDialogProps} /> : null}
       <DiffViewerDialog {...diffViewerDialogProps} />
-      <PostUpdateDialog source={postUpdateSource} />
+      {postUpdateSource ? <PostUpdateDialog source={postUpdateSource} /> : null}
     </>
   )
 }

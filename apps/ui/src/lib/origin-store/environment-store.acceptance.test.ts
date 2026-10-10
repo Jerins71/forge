@@ -82,6 +82,27 @@ describe('environment UI store acceptance', () => {
     await until(() => environment.shell.getSnapshot().cursor?.afterSequence === 3)
     expect(origin.getSnapshot().agents[0]).toBe(previousAgent)
   })
+  it('projects inventory readiness and project-only changes from the shell when no detail was ever mounted', async () => {
+    const { servers: [server], registry } = await fleet(1)
+    const environment = registry.get(server.seed.entry.environmentId)
+    const origin = new OriginStore({ environmentClient: environment })
+    cleanups.push(() => origin.destroy())
+    const initial = origin.getSnapshot()
+    // A complete shell is the whole inventory; nothing else reports it on this path.
+    expect.soft(initial.hasReceivedAgentsSnapshot).toBe(true)
+    expect.soft(initial.hasReceivedProfilesSnapshot).toBe(true)
+    // A change to a project alone reaches the projection and leaves the session list untouched.
+    server.emit({ kind: 'event', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 2, event: { type: 'project.upsert', project: { ...server.seed.shell!.projects[0], title: 'Renamed project' } } })
+    await until(() => environment.shell.getSnapshot().cursor?.afterSequence === 2)
+    const renamed = origin.getSnapshot()
+    expect.soft(renamed.profiles[0]?.displayName).toBe('Renamed project')
+    expect.soft(renamed.agents).toBe(initial.agents)
+    // A session change that alters nothing visible republishes neither list.
+    server.emit({ kind: 'event', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 3, event: { type: 'session.upsert', session: { ...server.seed.shell!.sessions[0] } } })
+    await until(() => environment.shell.getSnapshot().cursor?.afterSequence === 3)
+    expect.soft(origin.getSnapshot().agents).toBe(initial.agents)
+    expect.soft(origin.getSnapshot().profiles).toBe(renamed.profiles)
+  })
   it('uses bounded Desktop binary requests for file, attachment and chat artifact previews', async () => {
     const bytes = new Uint8Array([0, 127, 128, 255])
     const requests: Array<{ path: string; maxBytes: number }> = []

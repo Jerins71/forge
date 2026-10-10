@@ -65,7 +65,6 @@ import { getActiveLocalRemoteUpdateSnapshot } from '@/components/index-page/remo
 import {
   BuilderSidebarOrderApiConflictError,
   createBuilderSidebarOrderApi,
-  createLocalBuilderSidebarOrderApi,
   type BuilderSidebarOrderApi,
 } from '@/lib/builder-sidebar-order-api'
 import {
@@ -155,14 +154,12 @@ import {
 type FileEditorCoordinator = ReturnType<typeof useFileEditorCoordinator>
 
 interface BuilderSurfaceProps {
-  wsUrl: string
   routeState: AppRouteState
   activeView: ActiveView
   navigateToRoute: (nextRouteState: AppRouteState, replace?: boolean) => void
 }
 
 export function BuilderSurface({
-  wsUrl,
   routeState,
   activeView,
   navigateToRoute,
@@ -242,8 +239,8 @@ export function BuilderSurface({
   useRevokedDraftPurge()
   const primaryState = isPrimarySelected ? state : primarySidebarSlice
   const builderSidebarOrderApi = useMemo(
-    () => withPrimaryOrderOrigin(primarySettingsClient ? createBuilderSidebarOrderApi(primarySettingsClient) : createLocalBuilderSidebarOrderApi(wsUrl), primaryEnvironmentId),
-    [primaryEnvironmentId, primarySettingsClient, wsUrl],
+    () => (primarySettingsClient ? withPrimaryOrderOrigin(createBuilderSidebarOrderApi(primarySettingsClient), primaryEnvironmentId) : undefined),
+    [primaryEnvironmentId, primarySettingsClient],
   )
   // Primary routes keep their environment-free URLs.
   const navigateToBuilderRoute = useCallback((next: AppRouteState, replace?: boolean) => {
@@ -256,9 +253,12 @@ export function BuilderSurface({
     setPrimaryState((previous) => projectRuntimeBrowserTabState(previous, tab))
   }, [setPrimaryState])
 
+  const isSelectedConnected = state.connected
   useEffect(() => {
+    // The setting is admin-scoped. A device paired without that permission keeps the default rather than being refused.
+    if (!selectedSettingsClient || !isSelectedConnected || !environmentClient?.deviceSession()?.scopes.includes('settings:admin')) return
     let cancelled = false
-    void fetchModelCacheVisualizationEnabled(httpClientRef.current ?? wsUrl)
+    void fetchModelCacheVisualizationEnabled(selectedSettingsClient)
       .then((enabled) => {
         if (!cancelled) {
           clientRef.current?.applyLoadedModelCacheVisualizationSetting(enabled)
@@ -268,7 +268,7 @@ export function BuilderSurface({
     return () => {
       cancelled = true
     }
-  }, [clientRef, httpClientRef, wsUrl])
+  }, [clientRef, environmentClient, isSelectedConnected, selectedSettingsClient])
 
   useEffect(() => {
     if (activeView !== 'archive') {
@@ -386,11 +386,21 @@ export function BuilderSurface({
       ? state.secureSessionSnapshots[secureAuthorityAgentId] ?? null
       : null
 
+  // Secure Sessions are controlled from Forge Desktop or an authorized browser. Any other client is
+  // refused by the backend, so it shows the unavailable state without asking.
+  const secureControlAvailable = isSecureControlAvailable(secureBrowserControl?.authorized === true)
+
   useEffect(() => {
     if (!isPrimarySelected || !state.connected) {
       setSecureCatalog(null)
       setSecureCatalogLoading(false)
       setSecureCatalogUnavailable(false)
+      return
+    }
+    if (!secureControlAvailable) {
+      setSecureCatalog(null)
+      setSecureCatalogLoading(false)
+      setSecureCatalogUnavailable(true)
       return
     }
     const apiClient = httpClientRef.current
@@ -421,6 +431,7 @@ export function BuilderSurface({
     isPrimarySelected,
     selectedEnvironmentId,
     httpClientRef,
+    secureControlAvailable,
     state.connected,
     state.secureSecretCatalogRevision,
   ])
@@ -501,6 +512,7 @@ export function BuilderSurface({
       !isPrimarySelected
       || !state.connected
       || !activeAgentId
+      || !secureControlAvailable
       || !isSecureSessionRuntimeSupported(activeAgent)
     ) {
       setSecureRuntimeUnsupported(false)
@@ -536,6 +548,7 @@ export function BuilderSurface({
     selectedEnvironmentId,
     clientRef,
     httpClientRef,
+    secureControlAvailable,
     state.connected,
   ])
 
@@ -946,12 +959,12 @@ export function BuilderSurface({
     !hasCreatedProjectManager &&
     Boolean(onboardingState && onboardingState.status !== 'pending')
 
-  const { slashCommands } = useSlashCommands({ settingsClient: selectedSettingsClient ?? wsUrl, activeView })
+  const { slashCommands } = useSlashCommands({ settingsClient: selectedSettingsClient, activeView })
   const builderSlashCommands = useMemo(() => [SIDE_SLASH_COMMAND, ...slashCommands], [slashCommands])
 
   // Project creation and sidebar project actions address the primary environment.
   const localSidebarManager = useManagerActions({
-    wsUrl,
+    settingsClient: primarySettingsClient,
     environmentClient: primary.client.getEnvironmentClient() ?? null,
     clientRef: primary.clientRef,
     agents: primaryState.agents,
@@ -1011,7 +1024,7 @@ export function BuilderSurface({
     isStoppingAllAgents,
     handleStopAllAgents,
   } = useManagerActions({
-    wsUrl,
+    settingsClient: primarySettingsClient,
     environmentClient,
     clientRef,
     agents: state.agents,
@@ -2129,7 +2142,6 @@ export function BuilderSurface({
       />
 
       <AgentSidebarConnected
-        wsUrl={wsUrl}
         modelConfigChangeKey={state.modelConfigChangeKey}
         connectionEpoch={state.connectionEpoch}
         builderSidebarOrderApi={builderSidebarOrderApi}
@@ -2721,7 +2733,7 @@ export function BuilderSurface({
       </div>
 
       <GlobalDialogs
-        postUpdateSource={wsUrl}
+        postUpdateSource={primarySettingsClient}
         artifactPanelProps={{
           artifact: panels.activeArtifact,
           environmentClient,

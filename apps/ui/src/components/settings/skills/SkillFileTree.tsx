@@ -18,7 +18,7 @@ interface TreeNode {
 }
 
 interface SkillFileTreeProps {
-  clientOrWsUrl: SettingsApiClient | string
+  settingsClient: SettingsApiClient
   skillId: string
   selectedFilePath: string | null
   onSelectFile: (path: string) => void
@@ -30,7 +30,7 @@ interface SkillFileTreeProps {
 /* ------------------------------------------------------------------ */
 
 export function SkillFileTree({
-  clientOrWsUrl,
+  settingsClient,
   skillId,
   selectedFilePath,
   onSelectFile,
@@ -58,7 +58,7 @@ export function SkillFileTree({
     setExpandedDirs({})
     setLoadingDirs(new Set())
 
-    fetchSkillFiles(clientOrWsUrl, skillId, '', requestContext)
+    fetchSkillFiles(settingsClient, skillId, '', requestContext)
       .then((result) => {
         if (cancelled) return
         const nodes = entriesToNodes(result.entries)
@@ -73,7 +73,7 @@ export function SkillFileTree({
       })
 
     return () => { cancelled = true }
-  }, [clientOrWsUrl, skillId, requestContext])
+  }, [settingsClient, skillId, requestContext])
 
   const handleToggleDirectory = useCallback(
     async (dirPath: string) => {
@@ -91,7 +91,7 @@ export function SkillFileTree({
       const requestedSkillId = skillId
       setLoadingDirs((prev) => new Set(prev).add(dirPath))
       try {
-        const result = await fetchSkillFiles(clientOrWsUrl, requestedSkillId, dirPath, requestContext)
+        const result = await fetchSkillFiles(settingsClient, requestedSkillId, dirPath, requestContext)
         if (currentSkillIdRef.current !== requestedSkillId) {
           return
         }
@@ -110,7 +110,7 @@ export function SkillFileTree({
         })
       }
     },
-    [clientOrWsUrl, skillId, expandedDirs, requestContext],
+    [settingsClient, skillId, expandedDirs, requestContext],
   )
 
   const handleClick = useCallback(

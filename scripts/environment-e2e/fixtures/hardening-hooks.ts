@@ -186,6 +186,16 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       if (input.operation === 'stream-stop') { for (const timer of streams) clearInterval(timer); streams.clear(); return { stopped: true }; }
       if (!manager || !input.sessionId) throw new Error('Fixture session missing');
       const descriptor = manager.getAgentForInternalUse(input.sessionId); if (!descriptor) throw new Error('Unknown fixture session');
+      // Attention is raised by a settled working epoch; the fixture reports one without a provider turn.
+      if (input.operation === 'attention' || input.operation === 'attention-state') {
+        if (input.operation === 'attention') {
+          const attention = (manager as unknown as { sessionAttention: { reportStatusTransition(input: { agentId: string; previousStatus: AgentDescriptor['status']; nextStatus: AgentDescriptor['status']; transitionedAt: string }): Promise<void> } }).sessionAttention;
+          const transitionedAt = new Date().toISOString();
+          await attention.reportStatusTransition({ agentId: descriptor.agentId, previousStatus: 'idle', nextStatus: 'streaming', transitionedAt });
+          await attention.reportStatusTransition({ agentId: descriptor.agentId, previousStatus: 'streaming', nextStatus: 'idle', transitionedAt });
+        }
+        return manager.getSessionAttentionSnapshot().attentions.filter(attention => attention.sessionAgentId === descriptor.agentId).map(attention => ({ attentionId: attention.attentionId, reason: attention.reason }));
+      }
       const inject = () => {
         const timestamp = new Date(Date.now() + tick++).toISOString();
         // A provider's coalesced detail updates do not advance its session's activity time every token.

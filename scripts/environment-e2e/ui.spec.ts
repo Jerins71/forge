@@ -36,6 +36,12 @@ const secrets: string[] = []
 const leaks: string[] = []
 const featureRequests: Array<{ environmentId: string; path: string; method: string }> = []
 const featureResponses: Array<{ environmentId: string; path: string; status: number; error?: string; cwd?: string }> = []
+// Environment HTTP is authenticated by the platform bridge; any other `/api/` request bypassed it.
+const directApiRequests: string[] = []
+const deniedResponses: Array<{ path: string; status: number }> = []
+const renderErrors: string[] = []
+/** The one unauthenticated endpoint: the public descriptor read before pairing or bootstrap. */
+const PUBLIC_API_PATHS = new Set(['/api/v2/environment'])
 let sharedContext: BrowserContext
 let sharedPage: Page
 let proxy: Awaited<ReturnType<typeof startFaultProxy>>
@@ -71,6 +77,24 @@ test.beforeAll(async ({ browser }) => {
       const message = request.postDataJSON()
       if (['request', 'requestBinary'].includes(message.operation) && !message.input.path.startsWith('/api/v2/access')) featureRequests.push({ environmentId: message.input.environmentId, path: message.input.path, method: message.input.method })
     }
+  })
+  sharedPage.on('request', (request: Request) => {
+    const url = new URL(request.url())
+    if (url.pathname.startsWith('/api/') && !PUBLIC_API_PATHS.has(url.pathname)) directApiRequests.push(`${request.method()} ${url.pathname}`)
+  })
+  sharedPage.on('response', async response => {
+    const request = response.request()
+    const url = new URL(request.url())
+    if (response.status() === 401 || response.status() === 403) deniedResponses.push({ path: url.pathname, status: response.status() })
+    if (url.pathname !== '/__forge_e2e_platform' || request.method() !== 'POST') return
+    const message = request.postDataJSON()
+    const result = await response.json().catch(() => null)
+    const status = result?.ok ? result.value?.status : result?.error?.code === 'UNAUTHENTICATED' ? 401 : undefined
+    if (status === 401 || status === 403) deniedResponses.push({ path: message.input?.path ?? message.operation, status })
+  })
+  sharedPage.on('pageerror', error => { renderErrors.push(error.message) })
+  sharedPage.on('console', message => {
+    if (message.type() === 'error' && /Maximum update depth|Too many re-renders|getSnapshot should be cached|is not registered/.test(message.text())) renderErrors.push(message.text())
   })
   sharedPage.on('response', async response => {
     const request = response.request()
@@ -133,6 +157,24 @@ async function pairByLink(page: Page, pairingUrl: string) {
   await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(pairingUrl)
   await page.getByRole('button', { name: 'Pair', exact: true }).click()
 }
+
+test('primary load sends every request through the authenticated environment client', async ({ page }) => {
+  const { a } = fleet!
+  const direct = directApiRequests.length, denied = deniedResponses.length, features = featureRequests.length
+  await page.goto(fleet!.uiUrl)
+  await page.waitForFunction(() => !!(window as any).__forgeE2ERuntime)
+  await expect(page.getByRole('complementary')).toBeVisible()
+  await page.goto(`${fleet!.uiUrl}/?agent=${encodeURIComponent(a.sessionId)}`)
+  await expect(page.locator('[data-chat-transcript-surface]').filter({ visible: true }).first()).toBeVisible()
+  await expect.poll(() => featureRequests.slice(features).filter(request => request.environmentId === a.environmentId).length).toBeGreaterThan(0)
+  // Settings the chat surface reads on load reach this machine through its authenticated client.
+  await expect.poll(() => featureRequests.slice(features).map(request => request.path)).toEqual(expect.arrayContaining(['/api/settings/model-cache-visualization/enabled', '/api/settings/builder-sidebar-order']))
+  await page.waitForLoadState('networkidle')
+  expect(directApiRequests.slice(direct), 'requests that bypassed the environment client').toEqual([])
+  expect(deniedResponses.slice(denied), '401/403 responses').toEqual([])
+  expect(renderErrors).toEqual([])
+  assertions.primaryLoad = { bypassingRequests: 0, deniedResponses: 0, authenticatedRequests: [...new Set(featureRequests.slice(features).map(request => request.path.split('?')[0]))] }
+})
 
 test('9.2.1 B pairs by link, C pairs by code, and consumed grants cannot be replayed', async ({ page }) => {
   const { a, b, c } = fleet!
@@ -477,6 +519,138 @@ test('embedded Browser: this machine registers as host, opens a tab, survives re
   expect(await hostLog()).toEqual([])
   await shot(page, 'browser-host-remote')
   assertions.browserHost = { primaryOpen: firstLoad, reloadHostGeneration: afterReload[0]!.hostGeneration, hydratedTabs: 1, remote: 'unavailable' }
+})
+
+async function openInbox(page: Page) {
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
+  await expect(page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ })).toHaveAttribute('aria-pressed', 'true')
+}
+
+/** The sidebar is rendered for desktop and for the mobile drawer; only the visible copy counts. */
+function inboxRow(page: Page, environment: UiEnvironment, sessionId = environment.sessionId) {
+  return page.locator(`[data-inbox-row="${environment.environmentId}::${sessionId}"]`).filter({ visible: true })
+}
+
+test('first send on primary and remote, target switches, remounts and background streaming never reach an error boundary', async ({ page }) => {
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  const { a, b } = fleet!
+  const direct = directApiRequests.length, denied = deniedResponses.length
+  const transcript = page.locator('[data-chat-transcript-surface]').filter({ visible: true }).first()
+  const firstSend = async (environment: UiEnvironment, text: string) => {
+    await page.goto(`${fleet!.uiUrl}/?agent=${encodeURIComponent(environment.sessionId)}${environment === a ? '' : `&env=${environment.environmentId}`}`)
+    const composer = page.getByRole('combobox', { name: /^(Message |Send another message to )/ })
+    await expect(composer).toBeEnabled()
+    await composer.fill(text)
+    await page.keyboard.press('Enter')
+    await expect(transcript).toContainText(text)
+    await expect(composer).toHaveValue('')
+    expect(renderErrors, `first send on ${environment.label}`).toEqual([])
+  }
+  await firstSend(b, 'First message to the remote machine')
+  await expect(page.getByTestId('environment-session')).toHaveAttribute('data-environment-id', b.environmentId)
+  await firstSend(a, 'First message to this machine')
+
+  // Repeated target switches remount each environment's detail; B streams while A is on screen.
+  await openInbox(page)
+  for (let round = 0; round < 3; round++) {
+    await inboxRow(page, b).first().click()
+    await expect(page.getByTestId('environment-session')).toHaveAttribute('data-environment-id', b.environmentId)
+    // The transcript is virtualized: once B has streamed, its newest messages are the ones on screen.
+    await expect(transcript).toContainText(round === 0 ? 'First message to the remote machine' : 'Synthetic provider update')
+    await inboxRow(page, a).first().click()
+    await expect(page).not.toHaveURL(/env=/)
+    await expect(transcript).toContainText('First message to this machine')
+    if (round === 0) await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'burst', sessionId: b.sessionId, count: 20 })
+  }
+  await inboxRow(page, b).first().click()
+  await expect(transcript).toContainText('Synthetic provider update')
+  await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'shell-burst', sessionId: b.sessionId, count: 1, status: 'idle' })
+  expect(renderErrors).toEqual([])
+  expect(directApiRequests.slice(direct), 'requests that bypassed the environment client').toEqual([])
+  expect(deniedResponses.slice(denied), '401/403 responses').toEqual([])
+  await shot(page, 'first-send-remote')
+  assertions.firstSend = { environments: [b.environmentId, a.environmentId], targetSwitches: 7, backgroundStreamed: 20, renderErrors: 0, bypassingRequests: 0, deniedResponses: 0 }
+})
+
+test('a session shows the shell status after its detail view is released', async ({ page }) => {
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  const { b } = fleet!
+  const launchedId = (assertions.launch as { sessionId: string }).sessionId
+  await page.goto(`${fleet!.uiUrl}/?agent=${encodeURIComponent(b.sessionId)}&env=${b.environmentId}`)
+  await expect(page.getByTestId('environment-session')).toHaveAttribute('data-environment-id', b.environmentId)
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())).find((value: any) => value.environmentId === b.environmentId)?.fresh).toBe(true)
+  await openInbox(page)
+  // A session that needs the user is listed under Needs you, not Active; clear it so its status is what shows.
+  const done = page.getByRole('button', { name: new RegExp(`^Mark .* on ${b.environmentId} \\(${b.sessionId}\\)$`) }).filter({ visible: true })
+  if (await done.count()) {
+    await done.click()
+    await expect(done).toHaveCount(0)
+  }
+  await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'burst', sessionId: b.sessionId, count: 1 })
+  const streaming = inboxRow(page, b).getByLabel('Manager streaming')
+  await expect(streaming).toHaveCount(1)
+  // The same environment now shows another session; the first one settles in the background.
+  await inboxRow(page, b, launchedId).first().click()
+  await expect(page).toHaveURL(new RegExp(`agent=${launchedId}`))
+  await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'shell-burst', sessionId: b.sessionId, count: 1, status: 'idle' })
+  await expect(streaming).toHaveCount(0)
+  expect(renderErrors).toEqual([])
+  assertions.releasedDetailStatus = { environmentId: b.environmentId, sessionId: b.sessionId, shownAfterRelease: 'idle' }
+})
+
+test('Needs You lists a remote session that was never opened, survives an offline reload, and dismisses by occurrence', async ({ page }) => {
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  const { c } = fleet!
+  const attention = (operation: 'attention' | 'attention-state') => controlEnvironment<Array<{ attentionId: string }>>(manifest, 'env-c', 'fixture', { operation, sessionId: c.sessionId })
+  // The primary route is on screen; no C session is mounted in this page.
+  await page.goto(fleet!.uiUrl)
+  await page.waitForFunction(() => !!(window as any).__forgeE2ERuntime)
+  await openInbox(page)
+  const needsYou = page.locator('[data-inbox-section="needs-you"]').filter({ visible: true })
+  const row = needsYou.locator(`[data-inbox-row="${c.environmentId}::${c.sessionId}"]`)
+  const [first] = await attention('attention')
+  expect(first).toBeTruthy()
+  await expect(row).toHaveCount(1)
+  await expect(page.getByTestId('rooms-mode-switch').getByLabel(/sessions need you/).filter({ visible: true })).toHaveCount(1)
+  await shot(page, 'needs-you-unmounted-remote')
+
+  // The persisted shell alone restores it while C is unreachable, and it is still there after reconnect.
+  await page.evaluate(() => (window as any).__forgeE2ERuntime.flush())
+  await fleet!.stop(c)
+  try {
+    await page.reload()
+    await page.waitForFunction(() => !!(window as any).__forgeE2ERuntime)
+    await expect(row).toHaveCount(1)
+    expect((await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())).find((value: any) => value.environmentId === c.environmentId)?.fresh).toBe(false)
+  } finally {
+    await fleet!.start(c)
+  }
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())).find((value: any) => value.environmentId === c.environmentId)?.fresh).toBe(true)
+  await expect(row).toHaveCount(1)
+  expect(await attention('attention-state')).toHaveLength(1)
+
+  await needsYou.getByRole('button', { name: new RegExp(`^Mark .* on ${c.environmentId} \\(${c.sessionId}\\)$`) }).click()
+  await expect(row).toHaveCount(0)
+  expect(await attention('attention-state')).toEqual([])
+  await expect(needsYou.getByRole('alert')).toHaveCount(0)
+
+  // A newer occurrence is a different item: the earlier dismissal does not hide it.
+  const [second] = await attention('attention')
+  expect(second.attentionId).not.toBe(first.attentionId)
+  await expect(row).toHaveCount(1)
+  await row.locator('xpath=..').getByRole('button', { name: /^Mark / }).click()
+  await expect(row).toHaveCount(0)
+  expect(await attention('attention-state')).toEqual([])
+  expect(renderErrors).toEqual([])
+  assertions.needsYou = { environmentId: c.environmentId, sessionId: c.sessionId, neverMounted: true, restoredOffline: true, dismissedOccurrences: [first.attentionId, second.attentionId] }
+})
+
+test('a launch link for a project that no longer exists does not crash the app', async ({ page }) => {
+  await page.goto(`${fleet!.uiUrl}/?launch=${encodeURIComponent('no-such-project')}`)
+  await page.waitForFunction(() => !!(window as any).__forgeE2ERuntime)
+  await expect(page.getByRole('complementary').getByTestId('unified-project-list')).toBeVisible()
+  expect(renderErrors).toEqual([])
+  assertions.unknownLaunchKey = { crashed: false }
 })
 
 test('offline environment shows age, disables Run on, and never falls back to another machine', async ({ page }) => {

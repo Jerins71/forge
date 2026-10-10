@@ -9,7 +9,7 @@ import {
 
 /** Manages loading of specialist definitions for the selected scope. */
 export function useSpecialistsData(
-  clientOrWsUrl: SettingsApiClient | string,
+  settingsClient: SettingsApiClient,
   selectedScope: string,
   isGlobal: boolean,
   specialistChangeKey: number,
@@ -39,10 +39,10 @@ export function useSpecialistsData(
       let data: ResolvedSpecialistDefinition[]
 
       if (isGlobal) {
-        data = await fetchSharedSpecialists(clientOrWsUrl)
+        data = await fetchSharedSpecialists(settingsClient)
       } else {
         const sessionAgentId = previewSession?.profileId === selectedScope ? previewSession.agentId : undefined
-        data = await fetchSpecialists(clientOrWsUrl, selectedScope, sessionAgentId)
+        data = await fetchSpecialists(settingsClient, selectedScope, sessionAgentId)
       }
 
       if (requestId === loadRequestIdRef.current) {
@@ -60,7 +60,7 @@ export function useSpecialistsData(
         setLoading(false)
       }
     }
-  }, [clientOrWsUrl, selectedScope, isGlobal, previewSession])
+  }, [settingsClient, selectedScope, isGlobal, previewSession])
 
   useEffect(() => {
     void loadSpecialists()

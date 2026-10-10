@@ -26,10 +26,10 @@ function isDefinitivelyUnsupportedCatalogStatus(status: number): boolean {
 }
 
 export async function fetchManagerSelectionCatalog(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   init?: RequestInit,
 ): Promise<ManagerSelectionCatalogResponse> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   let response: Response
   try {
     response = await client.fetch(MANAGER_SELECTION_CATALOG_PATH, { ...init, cache: 'no-store' })
@@ -62,9 +62,9 @@ export async function fetchManagerSelectionCatalog(
 }
 
 export async function applyRecommendedManagerDefaults(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
 ): Promise<ApplyRecommendedManagerDefaultsResponse> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   return client.fetchJson<ApplyRecommendedManagerDefaultsResponse>(
     RECOMMENDED_MANAGER_DEFAULTS_PATH,
     { method: 'POST' },

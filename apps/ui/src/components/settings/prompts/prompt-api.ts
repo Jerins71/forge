@@ -14,10 +14,10 @@ import type { SettingsApiClient } from '../settings-api-client'
 import { resolveSettingsApiClient } from '../settings-api-client'
 
 export async function fetchPromptList(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   profileId?: string,
 ): Promise<PromptListEntry[]> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const params = profileId ? `?profileId=${encodeURIComponent(profileId)}` : ''
   const response = await client.fetch(`/api/prompts${params}`)
   if (!response.ok) throw new Error(await client.readApiError(response))
@@ -27,13 +27,13 @@ export async function fetchPromptList(
 }
 
 export async function fetchPromptContent(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   category: PromptCategory,
   promptId: string,
   profileId?: string,
   layer?: PromptSourceLayer,
 ): Promise<PromptContentResponse> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const params = new URLSearchParams()
   if (profileId) params.set('profileId', profileId)
   if (layer) params.set('layer', layer)
@@ -46,13 +46,13 @@ export async function fetchPromptContent(
 }
 
 export async function savePromptOverride(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   category: PromptCategory,
   promptId: string,
   content: string,
   profileId: string,
 ): Promise<void> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const response = await client.fetch(
     `/api/prompts/${encodeURIComponent(category)}/${encodeURIComponent(promptId)}`,
     {
@@ -67,11 +67,11 @@ export async function savePromptOverride(
 export type { PromptPreviewResponse, PromptPreviewSection } from '@forge/protocol'
 
 export async function fetchPromptPreview(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   profileId: string,
   agentId?: string,
 ): Promise<PromptPreviewResponse> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const params = new URLSearchParams({ profileId })
   if (agentId) params.set('agentId', agentId)
   const response = await client.fetch(`/api/prompts/preview?${params}`)
@@ -95,12 +95,12 @@ export async function fetchPromptPreview(
 }
 
 export async function deletePromptOverride(
-  clientOrWsUrl: SettingsApiClient | string | undefined,
+  settingsClient: SettingsApiClient | undefined,
   category: PromptCategory,
   promptId: string,
   profileId: string,
 ): Promise<void> {
-  const client = resolveSettingsApiClient(clientOrWsUrl)
+  const client = resolveSettingsApiClient(settingsClient)
   const params = new URLSearchParams({ profileId })
   const response = await client.fetch(
     `/api/prompts/${encodeURIComponent(category)}/${encodeURIComponent(promptId)}?${params}`,

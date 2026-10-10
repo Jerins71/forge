@@ -4,7 +4,7 @@ import type { ProjectRef, SessionSummary, WorkspaceStrategy } from '@forge/proto
 import type { ShellState } from '@forge/client-runtime'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
-import { useEnvironmentSelector } from '@/hooks/use-environment-selector'
+import { useEnvironmentCatalog, useEnvironmentSelector } from '@/hooks/use-environment-selector'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 
 /**
@@ -19,7 +19,8 @@ export function WorkspacePicker({ target, value, onChange }: {
   const registry = useEnvironmentRegistry()
   const selectProject = useCallback((shell: ShellState) => shell.projects.get(target.projectId), [target.projectId])
   const project = useEnvironmentSelector(target.environmentId, 'shell', selectProject)
-  const capability = registry.get(target.environmentId).descriptor()?.capabilities.newWorktree ?? false
+  const registered = useEnvironmentCatalog().has(target.environmentId)
+  const capability = (registered && registry.get(target.environmentId).descriptor()?.capabilities.newWorktree) ?? false
   const worktreeUnavailable = !project?.isGit
     ? 'Not a Git repository'
     : !capability ? 'Not supported by this environment' : null

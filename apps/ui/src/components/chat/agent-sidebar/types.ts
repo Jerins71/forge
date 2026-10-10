@@ -15,6 +15,7 @@ import type {
   SessionProjectAgentInput,
 } from '@forge/protocol'
 import type { DirectoryValidationResult } from '@/lib/ws-client'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import type { DraggableAttributes, DraggableSyntheticListeners } from '@dnd-kit/core'
 import type { ProfileTreeRow, SessionRow } from '@/lib/agent-hierarchy'
 import type { EnvironmentSessionNavigation } from './LogicalProjectGroup'
@@ -28,7 +29,6 @@ export type StatusMap = Record<string, { status: AgentStatus; pendingCount: numb
 
 export interface AgentSidebarProps {
   connected: boolean
-  wsUrl?: string
   modelConfigChangeKey?: number
   connectionEpoch?: number
   agents: AgentDescriptor[]
@@ -227,7 +227,8 @@ export interface ProjectAgentSettingsSheetProps {
   sessionLabel: string
   currentProjectAgent: ProjectAgentInfo | null
   onSave: (agentId: string, projectAgent: SessionProjectAgentInput) => Promise<void>
-  wsUrl?: string
+  /** The owning environment's authenticated settings client; null while it is unregistered. */
+  settingsClient?: SettingsApiClient | null
   profileId?: string
   onDemote: (agentId: string) => Promise<void>
   onClose: () => void

@@ -23,7 +23,8 @@ export function useEnvironmentLabel(environmentId: string): string {
   const catalog = useEnvironmentCatalog()
   // Subscribing to connection changes keeps a refreshed descriptor label current.
   useEnvironmentSelector(environmentId, 'connection', selectPhase)
-  return environmentLabel(catalog.get(environmentId), registry.get(environmentId).descriptor())
+  const entry = catalog.get(environmentId)
+  return environmentLabel(entry, entry ? registry.get(environmentId).descriptor() : null)
 }
 
 /** True only for a known environment other than the primary; local-path actions are unavailable there. */
