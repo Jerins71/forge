@@ -55,7 +55,7 @@ export class RestartRecoveryCoordinator {
     const pendingOccurrence = persisted && !persisted.resumedAt && !persisted.dismissedAt ? persisted : null;
     const interruptedManagers = new Set(pendingOccurrence?.interruptedManagers);
     const interruptedWorkers = new Set(pendingOccurrence?.interruptedWorkers);
-    let hasNewInterruptedTurn = false;
+    let hasNewRecoveryItem = false;
     const undeliveredReports = new Map<
       string,
       {
@@ -80,7 +80,7 @@ export class RestartRecoveryCoordinator {
         if (pendingOccurrence && openTurn.recoveryId === pendingOccurrence.recoveryId) continue;
         const actor = this.options.descriptors.get(openTurn.agentId);
         if (actor?.status === "streaming") {
-          hasNewInterruptedTurn = true;
+          hasNewRecoveryItem = true;
           (actor.role === "manager" ? interruptedManagers : interruptedWorkers).add(
             actor.agentId,
           );
@@ -98,6 +98,7 @@ export class RestartRecoveryCoordinator {
       for (const ackedDeliveryId of replay.ackedDeliveries) undeliveredReports.delete(ackedDeliveryId);
       for (const pending of replay.pendingDeliveries.values()) {
         if (replay.ackedDeliveries.has(pending.deliveryId)) continue;
+        if (!undeliveredReports.has(pending.deliveryId)) hasNewRecoveryItem = true;
         undeliveredReports.set(pending.deliveryId, {
           deliveryId: pending.deliveryId,
           fromAgentId: pending.from,
@@ -108,7 +109,7 @@ export class RestartRecoveryCoordinator {
       }
     }
 
-    if (pendingOccurrence && !hasNewInterruptedTurn) {
+    if (pendingOccurrence && !hasNewRecoveryItem) {
       this.projection = pendingOccurrence;
       return;
     }

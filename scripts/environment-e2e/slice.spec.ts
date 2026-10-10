@@ -648,6 +648,58 @@ test('two consecutive crashes retain every interrupted manager until one decisio
   evidence.consecutiveCrashes = { occurrences, interruptedManagers: heldSessions, supersededBy: beforeDecision.supersededBy, singleDecisionClosesBoth: true, dispatches };
 });
 
+test('a pending manager occurrence retains a new report-only crash until one decision', async () => {
+  const heldCommand = randomUUID();
+  const held = await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', { commandId: heldCommand, projectId: projects[1]!.sessionId,
+    title: 'Manager before report-only crash', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:hold]', artifactIds: [] } });
+  await settled(heldCommand);
+  await until(() => readLaunchEvidence(b(), held.sessionId), value => value.dispatches === 1);
+  await until(() => readDb(db => JSON.parse((db.prepare('SELECT descriptor_json FROM control_sessions WHERE session_id=?').get(held.sessionId) as { descriptor_json: string }).descriptor_json).status), status => status === 'streaming');
+  const firstCrash = randomUUID();
+  const firstArmed = await controlEnvironment<{ pid: number }>(manifest, b().name, 'fixture', { operation: 'arm-crash', commandId: firstCrash, boundary: 'pre-commit' });
+  await expect(fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', { commandId: firstCrash, projectId: projects[1]!.sessionId,
+    title: 'Report-only setup crash', workspaceStrategy: { kind: 'current_checkout' } })).rejects.toThrow();
+  await until(() => { try { process.kill(firstArmed.pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } }, Boolean);
+  await controlEnvironment(manifest, b().name, 'start');
+  const earlier = (await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'recovery.get', {})).recovery;
+  expect(earlier.interruptedManagers).toContain(held.sessionId);
+  const resultCommand = randomUUID();
+  const owner = await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', { commandId: resultCommand, projectId: projects[1]!.sessionId,
+    title: 'Report-only result owner', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Synthetic worker result owner', artifactIds: [] } });
+  await settled(resultCommand);
+  await until(() => readDb(db => JSON.parse((db.prepare('SELECT descriptor_json FROM control_sessions WHERE session_id=?').get(owner.sessionId) as { descriptor_json: string }).descriptor_json).status), status => status === 'idle');
+  const secondCrash = randomUUID();
+  const secondArmed = await controlEnvironment<{ pid: number }>(manifest, b().name, 'fixture', { operation: 'arm-recovery-crash', commandId: secondCrash, boundary: 'result-canonical' });
+  try { await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.send', { commandId: secondCrash, sessionId: owner.sessionId, message: { text: '[fixture:spawn]', artifactIds: [] } }); }
+  catch { /* The owner dies after the canonical worker result append. */ }
+  await until(async () => { try { return JSON.parse(await readFile(join(b().checkout, '.fixture-crash.json'), 'utf8')); } catch { return null; } }, marker => marker?.commandId === secondCrash && marker.boundary === 'result-canonical');
+  await until(() => { try { process.kill(secondArmed.pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } }, Boolean);
+  const actorStatuses = await readDb(db => (db.prepare('SELECT descriptor_json FROM control_sessions WHERE session_id=? UNION ALL SELECT descriptor_json FROM control_workers WHERE session_id=?').all(owner.sessionId, owner.sessionId) as { descriptor_json: string }[]).map(row => JSON.parse(row.descriptor_json).status));
+  expect(actorStatuses).not.toContain('streaming');
+  await controlEnvironment(manifest, b().name, 'start');
+  const report = await readDb(db => db.prepare("SELECT delivery_id,state FROM control_deliveries WHERE session_id=? AND delivery_id LIKE 'worker-result:%'").get(owner.sessionId) as { delivery_id: string; state: string });
+  expect(report.state).toBe('pending');
+  const recovery = (await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'recovery.get', {})).recovery;
+  expect(recovery.recoveryId).not.toBe(earlier.recoveryId);
+  expect(recovery.recoveryId).toBe(recovery.bootId);
+  expect(recovery.interruptedManagers).toContain(held.sessionId);
+  expect(recovery.undeliveredReports.map((value: { deliveryId: string }) => value.deliveryId)).toContain(report.delivery_id);
+  expect((await readLaunchEvidence(b(), held.sessionId)).dispatches).toBe(1);
+  const supersededBy = await readDb(db => JSON.parse((db.prepare('SELECT snapshot_json FROM control_recovery WHERE recovery_id=?').get(earlier.recoveryId) as { snapshot_json: string }).snapshot_json).supersededBy);
+  expect(supersededBy).toBe(recovery.recoveryId);
+  const decision = { commandId: randomUUID(), recoveryId: recovery.recoveryId, action: 'resume' };
+  const receipt = await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'recovery.decide', decision);
+  expect(receipt.state).toBe('succeeded');
+  expect(await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'recovery.decide', decision)).toEqual(receipt);
+  const resolved = await readDb(db => ({
+    heldTurns: db.prepare('SELECT terminal_outcome FROM control_turns WHERE agent_id=? AND recovery_id=?').all(held.sessionId, recovery.recoveryId),
+    delivery: (db.prepare('SELECT state FROM control_deliveries WHERE delivery_id=?').get(report.delivery_id) as { state: string }).state,
+  }));
+  expect(resolved).toEqual({ heldTurns: [{ terminal_outcome: 'reconciled' }], delivery: 'acked' });
+  evidence.reportOnlyCrash = { earlierOccurrence: earlier.recoveryId, recoveryId: recovery.recoveryId, interruptedManager: held.sessionId,
+    deliveryId: report.delivery_id, actorStatuses, noAutomaticReplay: true, singleDecisionResolvesBoth: true };
+});
+
 test('9.2.10 copied data root blocks before listen; explicit local re-key revokes copied devices', async () => {
   await controlEnvironment(manifest, b().name, 'stop');
   const copied = join(manifest.root, 'copied-b-data'); await cp(b().dataDir, copied, { recursive: true });
