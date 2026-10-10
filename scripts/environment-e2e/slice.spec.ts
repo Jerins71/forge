@@ -307,7 +307,9 @@ test('9.2.10 real HTTP/RPC negative auth, scope, ticket, payload and command-bod
   const environment = manifest.environments[0]!;
   const headers = { Authorization: `Bearer ${sessions[0]!.bearer}`, 'Content-Type': 'application/json' };
   expect((await fetch(`${environment.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers, body: JSON.stringify({ audience: 'rpc', protocolVersion: 1 }) })).status).toBe(409);
-  expect((await fetch(`${environment.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { ...headers, 'x-forge-environment-protocol': '1' }, body: JSON.stringify({ audience: 'rpc', protocolVersion: 1 }) })).status).toBe(426);
+  const headerMismatch = await fetch(`${environment.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { ...headers, 'x-forge-environment-protocol': '1' }, body: JSON.stringify({ audience: 'rpc', protocolVersion: 1 }) });
+  expect(headerMismatch.status).toBe(409);
+  expect(await headerMismatch.json()).toMatchObject({ error: { code: 'PROTOCOL_MISMATCH', retryable: false } });
   expect((await fetch(`${environment.baseUrl}/api/not-classified`, { headers })).status).toBe(403);
   for (const method of ['HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']) expect((await fetch(`${environment.baseUrl}/api/not-classified`, { method, headers })).status).toBe(403);
   const routeInventory = await controlEnvironment<any[]>(manifest, environment.name, 'fixture', { operation: 'route-inventory' });
