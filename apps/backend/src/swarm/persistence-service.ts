@@ -15,7 +15,7 @@ import {
   getSharedKnowledgeDir,
   resolveMemoryFilePath
 } from "./data-paths.js";
-import { AgentDescriptorStore } from "./agents/agent-descriptor-store.js";
+import type { AgentDescriptorStore } from "./agents/agent-descriptor-store.js";
 import type { AgentDescriptor, AgentsStoreFile, ManagerProfile, SwarmConfig } from "./types.js";
 import { isEnoentError } from "../utils/fs-errors.js";
 
@@ -36,7 +36,7 @@ export const DEFAULT_MEMORY_FILE_CONTENT = `# Swarm Memory
 
 interface PersistenceServiceDependencies {
   config: SwarmConfig;
-  descriptorStore?: AgentDescriptorStore;
+  descriptorStore: AgentDescriptorStore;
   descriptors: Map<string, AgentDescriptor>;
   sortedDescriptors: () => AgentDescriptor[];
   sortedProfiles: () => ManagerProfile[];
@@ -173,23 +173,13 @@ export class PersistenceService {
   }
 
   async loadStore(): Promise<AgentsStoreFile> {
-    const store = this.deps.descriptorStore ?? new AgentDescriptorStore({
-      dataDir: this.deps.config.paths.dataDir,
-      storeFilePath: this.deps.config.paths.agentsStoreFile,
-      configuredManagerId: this.deps.getConfiguredManagerId(),
-      logDebug: this.deps.logDebug
-    });
+    const store = this.deps.descriptorStore;
 
     return store.load();
   }
 
   async saveStore(): Promise<void> {
-    const store = this.deps.descriptorStore ?? new AgentDescriptorStore({
-      dataDir: this.deps.config.paths.dataDir,
-      storeFilePath: this.deps.config.paths.agentsStoreFile,
-      configuredManagerId: this.deps.getConfiguredManagerId(),
-      logDebug: this.deps.logDebug
-    });
+    const store = this.deps.descriptorStore;
     store.replace({
       agents: this.deps.sortedDescriptors(),
       profiles: this.deps.sortedProfiles()

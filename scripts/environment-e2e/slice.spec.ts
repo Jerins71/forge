@@ -391,6 +391,65 @@ test('9.2.7 controlled crash at all seven effect boundaries', async () => {
   evidence.crashes = observations;
 });
 
+test('Batch 7 DB recovery survives canonical/result dispatch/ack/stop deaths without JSON writes', async () => {
+  test.setTimeout(180000);
+  const observations: Record<string, unknown>[] = [];
+  evidence.batch7Recovery = observations;
+  for (const boundary of ['result-canonical', 'result-dispatch', 'result-ack', 'stop-runtime']) {
+    const launchId = randomUUID();
+    const launch = await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', { commandId: launchId, projectId: projects[1]!.sessionId, title: `Batch7 ${boundary}`, workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Synthetic recovery fixture', artifactIds: [] } });
+    const sessionId = launch.sessionId!;
+    await settled(launchId);
+    const commandId = randomUUID();
+    const armed = await controlEnvironment<{ pid: number }>(manifest, b().name, 'fixture', { operation: 'arm-recovery-crash', commandId, boundary });
+    const rpc = await openFixtureRpc(b().baseUrl, sessions[1]!);
+    try {
+      if (boundary === 'stop-runtime') await rpc.call('session.stop', { commandId, sessionId });
+      else await rpc.call('session.send', { commandId, sessionId, message: { text: '[fixture:spawn]', artifactIds: [] } });
+    } catch { /* The owner is killed at its durable seam. */ }
+    const marker = await until(async () => { try { return JSON.parse(await readFile(join(b().checkout, '.fixture-crash.json'), 'utf8')); } catch { return null; } }, value => value?.commandId === commandId && value.boundary === boundary);
+    expect(marker.pid).toBe(armed.pid);
+    await until(() => { try { process.kill(armed.pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } }, Boolean);
+    rpc.close();
+    const query = () => readDb(db => ({
+      deliveries: db.prepare("SELECT delivery_id,state FROM control_deliveries WHERE session_id=? AND delivery_id LIKE 'worker-result:%' ORDER BY delivery_id").all(sessionId) as { delivery_id: string; state: string }[],
+      desired: (db.prepare('SELECT desired_state FROM control_sessions WHERE session_id=?').get(sessionId) as { desired_state: string }).desired_state,
+      turns: (db.prepare('SELECT count(*) n FROM control_turns WHERE session_id=?').get(sessionId) as { n: number }).n,
+    }));
+    const before = await query();
+    if (boundary === 'result-canonical') expect(before.deliveries).toHaveLength(0);
+    else if (boundary !== 'stop-runtime') expect(before.deliveries).toMatchObject([{ state: 'dispatching' }]);
+    else expect(before.desired).toBe('stopped');
+    await controlEnvironment(manifest, b().name, 'start');
+    const repaired = await query();
+    if (boundary === 'result-canonical') expect(repaired.deliveries).toMatchObject([{ state: 'pending' }]);
+    if (boundary !== 'stop-runtime') {
+      const snapshot = await controlEnvironment<any>(manifest, b().name, 'fixture', { operation: 'recovery-snapshot' });
+      expect(snapshot.undeliveredReports.some((report: { deliveryId: string }) => report.deliveryId === repaired.deliveries[0]!.delivery_id)).toBe(true);
+      await controlEnvironment(manifest, b().name, 'stop'); await controlEnvironment(manifest, b().name, 'start');
+      expect((await controlEnvironment<any>(manifest, b().name, 'fixture', { operation: 'recovery-snapshot' })).recoveryId).toBe(snapshot.recoveryId);
+      await controlEnvironment(manifest, b().name, 'fixture', { operation: 'recovery-resume' });
+      const after = await query();
+      expect(after.deliveries.find(row => row.delivery_id === repaired.deliveries[0]!.delivery_id)?.state).toBe(boundary === 'result-canonical' ? 'acked' : 'dispatching');
+      await controlEnvironment(manifest, b().name, 'fixture', { operation: 'recovery-resume' });
+      expect((await query()).deliveries).toEqual(after.deliveries);
+      observations.push({ boundary, before: { deliveryRows: before.deliveries.length, states: before.deliveries.map(row => row.state), turnRows: before.turns }, repaired: { deliveryRows: repaired.deliveries.length, states: repaired.deliveries.map(row => row.state) }, after: { deliveryRows: after.deliveries.length, states: after.deliveries.map(row => row.state) }, stableOccurrence: true, repeatedDecisionNoDispatch: true });
+    } else {
+      const receipt = await settled(commandId); expect(receipt.state).toBe('succeeded');
+      expect((await query()).desired).toBe('stopped');
+      observations.push({ boundary, stoppedIntentSurvives: true, receipt: receipt.state, turnRows: repaired.turns });
+    }
+    const metrics = await controlEnvironment<any>(manifest, b().name, 'fixture', { operation: 'metrics' });
+    expect(metrics.agentsJsonControlWrites).toBe(0);
+  }
+  for (const environment of manifest.environments.slice(0, 3)) {
+    const metrics = await controlEnvironment<any>(manifest, environment.name, 'fixture', { operation: 'metrics' });
+    expect(metrics.agentsJsonControlWrites).toBe(0);
+    await expect(readFile(join(environment.dataDir, 'swarm', 'agents.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  }
+  evidence.batch7DescriptorWrites = { instrumentedControlWrites: 0, fleetRoots: 3, sourceFilesCreated: 0 };
+});
+
 test('Batch 2 typed project policy survives lost acknowledgement, replay and restart', async () => {
   const proxy = await startFaultProxy({ upstream: b().baseUrl });
   const rpc = await openFixtureRpc(b().baseUrl, sessions[1]!, proxy.url);

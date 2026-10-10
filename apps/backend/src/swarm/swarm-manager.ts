@@ -38,7 +38,7 @@ import { RuntimeRecoveryState } from "./runtime/runtime-recovery-state.js";
 import { SwarmRuntimeController } from "./swarm-runtime-controller.js";
 import { SwarmRuntimeLifecycleCoordinator } from "./swarm-runtime-lifecycle-coordinator.js";
 import { SwarmSpecialistFallbackManager } from "./swarm-specialist-fallback-manager.js";
-import { appendTurnLedgerRecord } from "./turn-ledger.js";
+import { appendRecoveryDeliveryContent, claimRecoveryDelivery, recordRecoveryFact } from "./recovery-state.js";
 import {
   getManagedModelProviderCredentialAvailability,
   SecretsEnvService
@@ -1059,29 +1059,29 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private createAgentMessageDispatcher(goals: ReturnType<typeof createSwarmManagerRuntimeComposition>["goals"]): AgentMessageDispatcher<CodexMcpToolGateEvaluation> {
     const ledger = {
       hasSessionTarget: (agentId) =>
-        Boolean(this.runtimeLifecycleCoordinator.getTurnLedgerSessionTarget(agentId)),
+        Boolean(this.runtimeLifecycleCoordinator.getRecoveryTarget(agentId)),
       recordDeliveryPending: async (input) => {
-        const target = this.runtimeLifecycleCoordinator.getTurnLedgerSessionTarget(input.sessionAgentId);
+        const target = this.runtimeLifecycleCoordinator.getRecoveryTarget(input.sessionAgentId);
         if (!target) return;
-        await appendTurnLedgerRecord(target, {
+        await recordRecoveryFact(target, {
           t: "delivery_pending",
           ...(input.turnId ? { turnId: input.turnId } : {}),
           deliveryId: input.deliveryId,
           from: input.fromAgentId,
           to: input.targetAgentId,
-          message: input.message,
+          contentRef: appendRecoveryDeliveryContent(this.runtimeLifecycleCoordinator.runtimes.get(input.targetAgentId), this.descriptors.get(input.targetAgentId)?.sessionFile, input),
           ...(input.assignmentId ? { assignmentId: input.assignmentId } : {}),
           at: input.at,
         });
       },
+      claimDelivery: async (input) => {
+        const target = this.runtimeLifecycleCoordinator.getRecoveryTarget(input.sessionAgentId);
+        if (!target || !await claimRecoveryDelivery(target, input.deliveryId)) throw new Error("Delivery has already crossed its dispatch boundary");
+      },
       recordDeliveryAcked: async (input) => {
-        const target = this.runtimeLifecycleCoordinator.getTurnLedgerSessionTarget(input.sessionAgentId);
+        const target = this.runtimeLifecycleCoordinator.getRecoveryTarget(input.sessionAgentId);
         if (!target) return;
-        await appendTurnLedgerRecord(target, {
-          t: "delivery_acked",
-          deliveryId: input.deliveryId,
-          at: input.at,
-        });
+        await recordRecoveryFact(target, { t: "delivery_acked", deliveryId: input.deliveryId, at: input.at });
       },
     } satisfies AgentMessageLedgerPort;
     return new AgentMessageDispatcher({

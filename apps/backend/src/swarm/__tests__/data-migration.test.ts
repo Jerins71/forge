@@ -122,10 +122,8 @@ describe("data-migration", () => {
     await expect(readFile(profileConfigMarker, "utf8")).resolves.toBe("profile-config-marker-bytes\n");
     await expect(readFile(profileTopicsMarker, "utf8")).resolves.toBe("profile-topics-marker-bytes\n");
 
-    const migratedStore = JSON.parse(await readFile(agentsStoreFile, "utf8")) as {
-      agents: AgentDescriptor[];
-      profiles: ManagerProfile[];
-    };
+    expect(JSON.parse(await readFile(agentsStoreFile, "utf8"))).toEqual({ agents, profiles });
+    const migratedStore = { agents: result.updatedAgents, profiles };
 
     const rootSessionDescriptor = migratedStore.agents.find((descriptor) => descriptor.agentId === rootSessionId);
     const nonRootSessionDescriptor = migratedStore.agents.find((descriptor) => descriptor.agentId === nonRootSessionId);
@@ -151,18 +149,18 @@ describe("data-migration", () => {
 
     await expect(stat(join(dataDir, "profiles", nonRootSessionId))).rejects.toMatchObject({ code: "ENOENT" });
 
-    await expect(stat(join(dataDir, "sessions"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(stat(join(dataDir, "memory"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(stat(join(dataDir, "schedules"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(stat(join(dataDir, "auth"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(dataDir, "sessions"))).resolves.toMatchObject({});
+    await expect(stat(join(dataDir, "memory"))).resolves.toMatchObject({});
+    await expect(stat(join(dataDir, "schedules"))).resolves.toMatchObject({});
+    await expect(stat(join(dataDir, "auth"))).resolves.toMatchObject({});
     await expect(stat(join(dataDir, "integrations"))).resolves.toMatchObject({});
-    await expect(stat(join(dataDir, "secrets.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(dataDir, "secrets.json"))).resolves.toMatchObject({});
 
     const sentinel = await readFile(join(dataDir, ".migration-v1-done"), "utf8");
     expect(sentinel.trim().length).toBeGreaterThan(0);
   });
 
-  it.each(["EXDEV"])("falls back to copy when hardlinking session files fails with %s", async (code) => {
+  it("copies sessions independently of the preserved source", async () => {
     const root = await mkdtemp(join(tmpdir(), "data-migration-link-fallback-"));
     const dataDir = join(root, "data");
     const agentsStoreFile = join(dataDir, "swarm", "agents.json");
@@ -177,10 +175,7 @@ describe("data-migration", () => {
     await writeText(getLegacySessionFilePath(dataDir, rootSessionId), "root-session\n");
     const sourceStatsBeforeMigration = await stat(getLegacySessionFilePath(dataDir, rootSessionId));
 
-    const failingLinkError = Object.assign(new Error("link failed"), { code });
-    const linkMock = vi.fn(async () => {
-      throw failingLinkError;
-    });
+    const copyMock = vi.fn((sourcePath: string, destinationPath: string, mode?: number) => fs.copyFile(sourcePath, destinationPath, mode));
 
     await migrateDataDirectory(
       {
@@ -192,20 +187,32 @@ describe("data-migration", () => {
       {},
       {
         fileOps: {
-          link: linkMock,
-          copyFile: (sourcePath, destinationPath, mode) => fs.copyFile(sourcePath, destinationPath, mode)
+          copyFile: copyMock
         }
       }
     );
 
-    expect(linkMock).toHaveBeenCalledTimes(1);
+    expect(copyMock).toHaveBeenCalled();
 
     const migratedPath = getSessionFilePath(dataDir, profileId, rootSessionId);
     await expect(readFile(migratedPath, "utf8")).resolves.toBe("root-session\n");
 
     const targetStats = await stat(migratedPath);
     expect(targetStats.ino).not.toBe(sourceStatsBeforeMigration.ino);
-    await expect(stat(getLegacySessionFilePath(dataDir, rootSessionId))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(getLegacySessionFilePath(dataDir, rootSessionId), "utf8")).resolves.toBe("root-session\n");
+    await writeFile(migratedPath, "new runtime bytes\n");
+    await expect(readFile(getLegacySessionFilePath(dataDir, rootSessionId), "utf8")).resolves.toBe("root-session\n");
+  });
+
+  it("does no work for a current layout without a legacy sentinel", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "current-layout-"));
+    const agentsStoreFile = join(dataDir, "swarm", "agents.json");
+    const agents = [{ ...createManagerDescriptor("manager", "manager"), sessionFile: getSessionFilePath(dataDir, "manager", "manager") }];
+    await writeText(agents[0]!.sessionFile, "current\n"); await writeJson(agentsStoreFile, { agents, profiles: [] });
+    const before = await fs.readdir(dataDir);
+    const result = await migrateDataDirectory({ dataDir, agentsStoreFile }, agents, []);
+    expect(result.migrated).toBe(false); expect(await fs.readdir(dataDir)).toEqual(before);
+    await expect(stat(agentsStoreFile + ".before-layout-migration")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("skips migration when sentinel exists", async () => {

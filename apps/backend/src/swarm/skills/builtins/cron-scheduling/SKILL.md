@@ -16,6 +16,7 @@ If the request is ambiguous, ask a follow-up question before adding a schedule.
 
 ## Storage
 
+- Calling-session create/list/remove uses `SWARM_SESSION_ID` (or `SWARM_MANAGER_ID`) and `SWARM_PROFILE_ID` without discovery. Cross-manager lookup uses `forge agents list --json` at the local `FORGE_PORT` (default `47187`) and requires the CLI installed and authenticated for that backend.
 - Schedule data is stored under `${SWARM_DATA_DIR}`.
 - Do not hardcode schedule file paths; the scheduler CLI resolves the correct storage location for the selected manager.
 - `--session` is required when adding a schedule. Every schedule must target a specific session.
@@ -71,7 +72,7 @@ node ./schedule.js list --manager "manager"
 `--session` is required for `add`.
 
 `--manager` is optional. If omitted, the CLI will auto-select a manager when there is only one manager
-or when a known default manager is detected.
+or when a known default manager is detected. The calling session identity takes precedence when supplied by the skill environment.
 
 ## Output
 

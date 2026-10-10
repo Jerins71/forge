@@ -52,7 +52,7 @@ import type { SwarmToolHost } from "./swarm-tool-host.js";
 import { SwarmWorkerHealthService } from "./swarm-worker-health-service.js";
 import { getManagedModelProviderCredentialAvailability } from "./secrets-env-service.js";
 import { migrateLegacyProfileKnowledgeToReferenceDoc } from "./reference-docs.js";
-import { appendTurnLedgerRecord } from "./turn-ledger.js";
+import { recordRecoveryFact } from "./recovery-state.js";
 import { TurnContextCoordinator } from "./turn-context-coordinator.js";
 import { createWorkGraphModelRerouteRecorder, createWorkGraphResultRecorder, WorkerResultCoordinator } from "./worker-result-coordinator.js";
 import type {
@@ -106,7 +106,7 @@ export interface RuntimeCompositionMessaging {
     delivery?: RequestedDeliveryMode,
     options?: {
       origin?: "user" | "internal";
-      skipTurnLedger?: boolean;
+      skipRecoveryTracking?: boolean;
       internalDeliveryKind?: "bootstrap" | "codex_plugin_bootstrap";
       attachments?: ConversationAttachment[];
       planStep?: string;
@@ -246,8 +246,9 @@ export class SwarmManagerRuntimeComposition {
   constructor(private readonly options: SwarmManagerRuntimeCompositionOptions) {
     const { state, messaging } = options;
     this.restartRecovery = new RestartRecoveryCoordinator({
+      dataDir: state.config.paths.dataDir,
       descriptors: state.descriptors,
-      getSessionTarget: (agentId) => this.requireRuntimeLifecycle().getTurnLedgerSessionTarget(agentId),
+      getSessionTarget: (agentId) => this.requireRuntimeLifecycle().getRecoveryTarget(agentId),
       sendMessage: (fromAgentId, targetAgentId, message, delivery, sendOptions) =>
         options.messaging.sendMessage(fromAgentId, targetAgentId, message, delivery, sendOptions),
       sendWorkerResult: (workerAgentId, resultText, expectedAssignmentId) =>
@@ -572,9 +573,9 @@ export class SwarmManagerRuntimeComposition {
       ledger: {
         mintTurnId: (descriptor) => services.sessionMeta.mintTurnIdForDescriptor(descriptor),
         recordTurnDispatched: async (input) => {
-          const target = this.requireRuntimeLifecycle().getTurnLedgerSessionTarget(input.agentId);
+          const target = this.requireRuntimeLifecycle().getRecoveryTarget(input.agentId);
           if (!target) return;
-          await appendTurnLedgerRecord(target, {
+          await recordRecoveryFact(target, {
             t: "turn_dispatched",
             ...input,
             at: this.options.state.now(),

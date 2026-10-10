@@ -1,3 +1,4 @@
+import { AgentDescriptorStore } from "../agents/agent-descriptor-store.js";
 import { readFile, writeFile } from 'node:fs/promises';
 
 import { describe, expect, it, vi } from 'vitest'
@@ -240,10 +241,8 @@ describe('SwarmManager', () => {
     const liveDescriptor = manager.listAgents().find((agent) => agent.agentId === sessionAgent.agentId)
     expect(liveDescriptor?.mergedAt).toBeUndefined()
 
-    const persistedStore = JSON.parse(await readFile(config.paths.agentsStoreFile, 'utf8')) as {
-      agents: Array<{ agentId: string; mergedAt?: string }>
-    }
-    expect(persistedStore.agents.find((agent) => agent.agentId === sessionAgent.agentId)?.mergedAt).toBeUndefined()
+    const persistedStore = await new AgentDescriptorStore({ dataDir: config.paths.dataDir, storeFilePath: config.paths.agentsStoreFile }).load()
+    expect(persistedStore.agents.find(agent => agent.agentId === sessionAgent.agentId)?.mergedAt).toBeUndefined()
 
     const sessionMeta = await readSessionMeta(config.paths.dataDir, 'manager', sessionAgent.agentId)
     expect(sessionMeta?.lastMemoryMergeStatus).toBe('failed')

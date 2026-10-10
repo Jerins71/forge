@@ -18,9 +18,9 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, w
   if (eventSink.database !== database) throw new Error("Swarm adapter requires the shared environment database.");
   // Workspace effects run before session effects. This dependency intentionally grants no Git mutation here.
   void workspaceService;
-  swarmManager.setControlledRecoveryPolicy(sessionId => {
+  swarmManager.setControlledRecoveryPolicy((sessionId, activity) => {
     const row = database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(sessionId) as { desired_state: string } | undefined;
-    return row?.desired_state === "stopped" || Boolean(database.prepare("SELECT 1 FROM control_inputs WHERE session_id=? LIMIT 1").get(sessionId));
+    return row?.desired_state === "stopped" || activity === "turn" && Boolean(database.prepare("SELECT 1 FROM control_inputs WHERE session_id=? AND delivery_state IN ('dispatching','unknown') LIMIT 1").get(sessionId));
   });
   return {
     resolveSession(agentId) {

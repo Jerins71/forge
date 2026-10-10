@@ -1,3 +1,4 @@
+import { AgentDescriptorStore } from "../agents/agent-descriptor-store.js";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -202,7 +203,7 @@ export async function backfillCompactionCounts(dataDir: string): Promise<Backfil
 
 export async function rebuildSessionMeta(options: RebuildSessionMetaOptions): Promise<SessionMeta[]> {
   const now = options.now ?? nowIso;
-  const descriptors = options.descriptors ?? (await readDescriptorsFromAgentsStore(options.agentsStoreFile));
+  const descriptors = options.descriptors ?? (await new AgentDescriptorStore({ dataDir: options.dataDir, storeFilePath: options.agentsStoreFile }).load()).agents;
 
   const managerDescriptors = descriptors.filter(isManagerDescriptor);
   const workerDescriptorsByManager = new Map<string, AgentDescriptor[]>();
@@ -598,111 +599,6 @@ async function readFileSize(path: string): Promise<string | null> {
 
     return null;
   }
-}
-
-async function readDescriptorsFromAgentsStore(agentsStoreFile: string): Promise<AgentDescriptor[]> {
-  try {
-    const raw = await readFile(agentsStoreFile, "utf8");
-    const parsed = JSON.parse(raw) as unknown;
-    if (!isRecord(parsed) || !Array.isArray(parsed.agents)) {
-      return [];
-    }
-
-    return parsed.agents
-      .map((candidate) => coerceAgentDescriptor(candidate))
-      .filter((descriptor): descriptor is AgentDescriptor => !!descriptor);
-  } catch {
-    return [];
-  }
-}
-
-function coerceAgentDescriptor(value: unknown): AgentDescriptor | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const role = value.role;
-  if (role !== "manager" && role !== "worker") {
-    return undefined;
-  }
-
-  const agentId = normalizeOptionalString(value.agentId);
-  const managerId = normalizeOptionalString(value.managerId);
-  const createdAt = normalizeOptionalString(value.createdAt);
-  const updatedAt = normalizeOptionalString(value.updatedAt);
-  const cwd = normalizeOptionalString(value.cwd);
-  const sessionFile = normalizeOptionalString(value.sessionFile);
-  const model = isRecord(value.model) ? value.model : undefined;
-  const provider = normalizeOptionalString(model?.provider);
-  const modelId = normalizeOptionalString(model?.modelId);
-  const thinkingLevel = normalizeOptionalString(model?.thinkingLevel);
-  const status = normalizeOptionalString(value.status);
-  const specialistId = normalizeOptionalString(value.specialistId);
-  const projectAgentRecord = isRecord(value.projectAgent) ? value.projectAgent : undefined;
-  const projectAgentHandle = normalizeOptionalString(projectAgentRecord?.handle);
-  const projectAgentWhenToUse = normalizeOptionalString(projectAgentRecord?.whenToUse);
-  const projectAgentSystemPrompt = normalizeOptionalString(projectAgentRecord?.systemPrompt);
-  const projectAgentCreatorSessionId = normalizeOptionalString(projectAgentRecord?.creatorSessionId);
-  const cli = coerceCliSessionMetadata(value.cli);
-
-  // agentCreatorResult (set on wizard sessions after successful agent creation)
-  const creatorResultRecord = isRecord(value.agentCreatorResult) ? value.agentCreatorResult : undefined;
-  const creatorResultAgentId = normalizeOptionalString(creatorResultRecord?.createdAgentId);
-  const creatorResultHandle = normalizeOptionalString(creatorResultRecord?.createdHandle);
-  const creatorResultAt = normalizeOptionalString(creatorResultRecord?.createdAt);
-
-  if (!agentId || !managerId || !createdAt || !updatedAt || !cwd || !sessionFile || !provider || !modelId || !status) {
-    return undefined;
-  }
-
-  return {
-    agentId,
-    managerId,
-    displayName: normalizeOptionalString(value.displayName) ?? agentId,
-    role,
-    archetypeId: normalizeOptionalString(value.archetypeId),
-    status: status as AgentDescriptor["status"],
-    createdAt,
-    updatedAt,
-    cwd,
-    model: {
-      provider,
-      modelId,
-      thinkingLevel: thinkingLevel ?? "default"
-    },
-    sessionFile,
-    contextUsage: undefined,
-    profileId: normalizeOptionalString(value.profileId),
-    sessionLabel: normalizeOptionalString(value.sessionLabel),
-    cli,
-    sessionPurpose:
-      normalizeOptionalString(value.sessionPurpose) === "agent_creator"
-        ? "agent_creator"
-        : undefined,
-    mergedAt: normalizeOptionalString(value.mergedAt),
-    specialistId,
-    projectAgent:
-      projectAgentHandle && projectAgentWhenToUse
-        ? {
-            handle: projectAgentHandle,
-            whenToUse: projectAgentWhenToUse,
-            ...(projectAgentSystemPrompt !== undefined
-              ? { systemPrompt: projectAgentSystemPrompt }
-              : {}),
-            ...(projectAgentCreatorSessionId !== undefined
-              ? { creatorSessionId: projectAgentCreatorSessionId }
-              : {})
-          }
-        : undefined,
-    agentCreatorResult:
-      creatorResultAgentId && creatorResultHandle && creatorResultAt
-        ? {
-            createdAgentId: creatorResultAgentId,
-            createdHandle: creatorResultHandle,
-            createdAt: creatorResultAt,
-          }
-        : undefined,
-  };
 }
 
 function isManagerDescriptor(descriptor: AgentDescriptor): descriptor is AgentDescriptor & { role: "manager" } {

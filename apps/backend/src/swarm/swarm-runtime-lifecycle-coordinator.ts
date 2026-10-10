@@ -26,10 +26,10 @@ import {
   normalizeProviderErrorMessage,
 } from "./session/message-utils.js";
 import {
-  appendTurnLedgerRecord,
-  replayTurnLedger,
-  type TurnLedgerSessionTarget,
-} from "./turn-ledger.js";
+  recordRecoveryFact,
+  readRecoveryState,
+  type RecoveryTarget,
+} from "./recovery-state.js";
 import { isRuntimeRecoveryActiveForRuntime } from "./runtime/runtime-recovery-state.js";
 import { reconcileInterruptedManagerToolCalls } from "./interrupted-tool-reconciliation.js";
 import type { SecureSessionCoordinatorPort } from "./secure-sessions/secure-session-lifecycle-port.js";
@@ -201,7 +201,7 @@ export function createRuntimeLifecycleControllerHostCallbacks(
 }
 
 /**
- * Owns runtime callback ordering, health projection, turn-ledger target
+ * Owns runtime callback ordering, health projection, private recovery target
  * resolution, and manual-stop callback reconciliation. Provider construction
  * remains in SwarmRuntimeController; worker-health policy remains in its leaf
  * service.
@@ -217,7 +217,7 @@ export class SwarmRuntimeLifecycleCoordinator {
       dataDir: options.dataDir,
       descriptors: options.descriptors,
       now: options.now,
-      getSessionTarget: (agentId) => this.getTurnLedgerSessionTarget(agentId),
+      getSessionTarget: (agentId) => this.getRecoveryTarget(agentId),
       getActiveTurnId: (agentId, runtimeToken) => options.turnContext.getActiveTurnId(agentId, runtimeToken),
       hasPendingChoicesForSession: (sessionAgentId) =>
         options.choices.hasPendingChoicesForSession(sessionAgentId),
@@ -231,7 +231,7 @@ export class SwarmRuntimeLifecycleCoordinator {
     return this.options.controller.runtimes;
   }
 
-  getTurnLedgerSessionTarget(agentId: string): TurnLedgerSessionTarget | null {
+  getRecoveryTarget(agentId: string): RecoveryTarget | null {
     const descriptor = this.options.descriptors.get(agentId);
     if (!descriptor) return null;
 
@@ -240,10 +240,13 @@ export class SwarmRuntimeLifecycleCoordinator {
       : this.options.descriptors.get(descriptor.managerId);
     if (!manager || manager.role !== "manager") return null;
 
+    const actors = [...this.options.descriptors.values()].filter(actor => actor.agentId === manager.agentId || actor.role === "worker" && actor.managerId === manager.agentId);
     return {
       dataDir: this.options.dataDir,
       profileId: manager.profileId ?? manager.agentId,
       sessionAgentId: manager.agentId,
+      canonicalFiles: actors.map(actor => actor.sessionFile),
+      actorIds: actors.map(actor => actor.agentId),
     };
   }
 
@@ -292,11 +295,11 @@ export class SwarmRuntimeLifecycleCoordinator {
     }
 
     if (input.turnId) {
-      const target = this.getTurnLedgerSessionTarget(input.agentId);
+      const target = this.getRecoveryTarget(input.agentId);
       if (target) {
-        const ledger = await replayTurnLedger(target);
+        const ledger = await readRecoveryState(target);
         if (ledger.openTurns.has(input.turnId) && !ledger.terminalTurns.has(input.turnId)) {
-          await appendTurnLedgerRecord(target, {
+          await recordRecoveryFact(target, {
             t: "turn_terminal",
             turnId: input.turnId,
             outcome: "abandoned",

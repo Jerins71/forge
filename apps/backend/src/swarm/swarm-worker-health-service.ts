@@ -56,7 +56,7 @@ export interface SwarmWorkerHealthServiceOptions {
     targetAgentId: string,
     message: string,
     delivery?: RequestedDeliveryMode,
-    options?: { origin?: "user" | "internal"; skipTurnLedger?: boolean }
+    options?: { origin?: "user" | "internal"; skipRecoveryTracking?: boolean }
   ): Promise<unknown>;
   publishToUser(
     agentId: string,

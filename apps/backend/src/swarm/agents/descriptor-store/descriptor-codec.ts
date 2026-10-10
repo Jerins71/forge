@@ -5,7 +5,7 @@ import {
   validateAgentDescriptor
 } from "../../swarm-manager-utils.js";
 import { isContextMode, isManagerPosture } from "@forge/protocol";
-import { cloneDescriptorForPersistence, cloneProfile } from "./descriptor-clone.js";
+import { cloneProfile } from "./descriptor-clone.js";
 import { normalizeDescriptorPaths } from "./descriptor-path-resolver.js";
 
 interface DecodeStoreOptions {
@@ -17,7 +17,7 @@ interface DecodeStoreOptions {
 
 /**
  * Raw agents.json records owned by removed features. They are never loaded into
- * the Builder, but are written back verbatim so an upgrade never deletes them.
+ * the Builder. The original read-only import source preserves their exact bytes.
  */
 export interface RetiredStoreRecords {
   agents: unknown[];
@@ -193,11 +193,4 @@ function decodePersistedProfiles(
     profiles.push(cloneProfile(candidate as unknown as ManagerProfile));
   }
   return profiles;
-}
-
-export function encodeAgentsStoreFile(store: AgentsStoreFile, retired?: RetiredStoreRecords): string {
-  return `${JSON.stringify({
-    agents: [...store.agents.map(cloneDescriptorForPersistence), ...(retired?.agents ?? [])],
-    profiles: [...(store.profiles ?? []).map(cloneProfile), ...(retired?.profiles ?? [])]
-  }, null, 2)}\n`;
 }

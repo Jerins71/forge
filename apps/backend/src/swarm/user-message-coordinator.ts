@@ -641,6 +641,7 @@ export class UserMessageCoordinator {
     });
     const { rollback } = await this.options.turns.enqueue(managerContextId, {
       source: "user_input",
+      ...(input.controlledInput ? { skipRecoveryTracking: true } : {}),
       routeOrigin: "user",
       rootTurnId: observabilityInput?.rootTurnId,
       runtimeMessageText: runtimeText,

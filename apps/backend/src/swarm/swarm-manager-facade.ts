@@ -1,3 +1,4 @@
+import type { RecoverySnapshot } from "@forge/protocol/environment-v2";
 import type { HistorySearchRequest, HistorySearchResponse, HistoryReadRequest, HistoryReadResponse } from "@forge/protocol";
 import { createHash } from "node:crypto";
 import type { AuthCredential } from "@earendil-works/pi-coding-agent";
@@ -17,7 +18,6 @@ import type {
   PooledCredentialInfo,
   PromptPreviewResponse,
   RedeemOpenAIBrokerInviteRequest,
-  RestartRecoverySnapshot,
   SessionMemoryMergeResult,
   SessionPlanSnapshotEvent,
   SessionActiveToolsSnapshotEvent,
@@ -486,15 +486,15 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
 
   // Boot, recovery, and read services.
 
-  getRestartRecoverySnapshot(): RestartRecoverySnapshot | null {
+  getRestartRecoverySnapshot(): RecoverySnapshot | null {
     return this.services.recovery.getSnapshot();
   }
 
-  dismissRestartRecovery(): Promise<RestartRecoverySnapshot | null> {
+  dismissRestartRecovery(): Promise<RecoverySnapshot | null> {
     return this.services.recovery.dismiss();
   }
 
-  resumeRestartRecovery(): Promise<RestartRecoverySnapshot | null> {
+  resumeRestartRecovery(): Promise<RecoverySnapshot | null> {
     return this.services.recovery.resume();
   }
 

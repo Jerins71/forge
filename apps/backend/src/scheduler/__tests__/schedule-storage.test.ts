@@ -19,11 +19,18 @@ const scheduleCliPath = resolve(
 )
 
 async function runScheduleCli(args: string[], dataDir: string) {
+  const bin = join(dataDir, 'fixture-bin'); await mkdir(bin, { recursive: true });
+  const source = `#!${process.execPath}\nimport { readFileSync } from 'node:fs'; process.stdout.write(readFileSync(process.env.SWARM_DATA_DIR + '/swarm/agents.json'));\n`;
+  await writeFile(join(bin, 'forge.mjs'), source, { mode: 0o700 });
+  if (process.platform === 'win32') await writeFile(join(bin, 'forge.cmd'), `@"${process.execPath}" "%~dp0forge.mjs" %*\r\n`);
+  else await writeFile(join(bin, 'forge'), source, { mode: 0o700 });
   return execFile(process.execPath, [scheduleCliPath, ...args], {
     cwd: resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..'),
     env: {
       ...process.env,
+      FORCE_COLOR: undefined,
       SWARM_DATA_DIR: dataDir,
+      PATH: bin + (process.platform === 'win32' ? ';' : ':') + process.env.PATH,
     },
   })
 }

@@ -3,9 +3,9 @@ import type { RuntimeErrorEvent, RuntimeSessionEvent } from "./runtime-contracts
 import type { AgentDescriptor, ConversationMessageEvent } from "./types.js";
 import { extractMessageText } from "./session/message-utils.js";
 import {
-  appendTurnLedgerRecord,
-  type TurnLedgerSessionTarget,
-} from "./turn-ledger.js";
+  recordRecoveryFact,
+  type RecoveryTarget,
+} from "./recovery-state.js";
 
 export const MANAGER_TURN_NOTICE_MS = 30_000;
 export const MANAGER_TURN_ESCALATE_MS = 5 * 60_000;
@@ -16,7 +16,7 @@ export interface ManagerTurnWatchdogOptions {
   dataDir: string;
   now(): string;
   descriptors: Map<string, AgentDescriptor>;
-  getSessionTarget(agentId: string): TurnLedgerSessionTarget | null;
+  getSessionTarget(agentId: string): RecoveryTarget | null;
   getActiveTurnId(agentId: string, runtimeToken?: number): string | undefined;
   hasPendingChoicesForSession(sessionAgentId: string): boolean;
   isRuntimeRecoveryActive(agentId: string): boolean;
@@ -126,7 +126,7 @@ export class ManagerTurnWatchdog {
     this.stateByAgentId.delete(agentId);
     const target = this.options.getSessionTarget(agentId);
     if (!target) return;
-    void appendTurnLedgerRecord(target, {
+    void recordRecoveryFact(target, {
       t: "turn_terminal",
       turnId: state.turnId,
       outcome,
@@ -231,7 +231,7 @@ export class ManagerTurnWatchdog {
   private emitStallNotice(agentId: string, state: ManagerTurnState, tier: 1 | 2 | 3): void {
     const target = this.options.getSessionTarget(agentId);
     if (target) {
-      void appendTurnLedgerRecord(target, {
+      void recordRecoveryFact(target, {
         t: "turn_stalled",
         turnId: state.turnId,
         agentId,

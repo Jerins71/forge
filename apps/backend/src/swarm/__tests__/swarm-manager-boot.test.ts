@@ -159,9 +159,9 @@ describe('SwarmManager', () => {
     await first.boot()
     await expectHiddenAndRetained(first)
 
-    // A Builder mutation rewrites agents.json from the live maps.
+    // A Builder mutation commits to the DB; historical JSON remains unchanged.
     await first.renameSession('manager', 'Renamed Manager')
-    expect((await readStore()).agents).toContainEqual(expect.objectContaining({ agentId: 'manager', sessionLabel: 'Renamed Manager' }))
+    expect(first.getAgent("manager")?.sessionLabel).toBe("Renamed Manager")
     await expectHiddenAndRetained(first)
 
     const restarted = new TestSwarmManager(config)
@@ -277,9 +277,9 @@ describe('SwarmManager', () => {
     // Common knowledge is plain user memory now; boot never seeds it.
     await expect(readFile(getCommonKnowledgePath(config.paths.dataDir), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
 
-    // A Builder mutation rewrites agents.json from the live maps.
+    // A Builder mutation commits to the DB; historical JSON remains unchanged.
     await first.renameSession('manager', 'Renamed Manager')
-    expect((await readStore()).agents).toContainEqual(expect.objectContaining({ agentId: 'manager', sessionLabel: 'Renamed Manager' }))
+    expect(first.getAgent("manager")?.sessionLabel).toBe("Renamed Manager")
     await expectHiddenAndRetained(first)
 
     const restarted = new TestSwarmManager(config)

@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync, existsSync, openSync, fsyncSync, closeSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, openSync, fsyncSync, closeSync, promises as filePromises } from 'node:fs';
 import { join } from 'node:path';
 import { basename } from 'node:path';
 import { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { syncBuiltinESMExports } from 'node:module';
 import type { Database } from 'better-sqlite3';
 import { loadConfiguredSqliteDatabaseConstructor } from '../../../apps/backend/src/sqlite-database-loader.js';
 import { getEnvironmentDbPath, getSessionMetaPath } from '../../../apps/backend/src/swarm/storage/data-paths.js';
@@ -20,13 +21,15 @@ import { validateLegacySessionEvent } from '../../../packages/protocol/src/legac
 
 export const crashBoundaries = ['pre-commit', 'post-commit', 'post-Git', 'post-meta', 'post-JSONL', 'post-dispatch-marker', 'post-provider-accept'] as const;
 export type CrashBoundary = typeof crashBoundaries[number];
+const recoveryBoundaries = ['result-canonical', 'result-dispatch', 'result-ack', 'stop-runtime'] as const;
+type RecoveryBoundary = typeof recoveryBoundaries[number];
 /** Instrument the real owners only inside the dedicated fixture child. No production endpoint or environment flag activates this code. */
 export async function installHardeningHooks(dataDir: string, checkout: string) {
   const Constructor = await loadConfiguredSqliteDatabaseConstructor();
   const prototype = Constructor.prototype as Database;
   const databasePath = getEnvironmentDbPath(dataDir);
   const markerPath = join(checkout, '.fixture-crash.json');
-  let armed: { commandId: string; boundary: CrashBoundary } | null = null;
+  let armed: { commandId: string; boundary: CrashBoundary | RecoveryBoundary } | null = null;
   let manager: SwarmManager | undefined;
   let terminalService: TerminalService | undefined;
   let webServer: SwarmWebSocketServer | undefined;
@@ -45,7 +48,20 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
   const timeline = new ConversationTimeline({ now: () => new Date().toISOString() });
   const overlay = new Map<string, AgentDescriptor>();
   const streams = new Set<NodeJS.Timeout>();
-  const counters = { catalogSerializations: 0, transcriptHydrations: 0, gitScans: 0, hostResourceProbes: 0, applicationRxBytes: 0, applicationTxBytes: 0, streamQueueFramesMax: 0, streamQueueBytesMax: 0, sendQueueFramesMax: 0, sendQueueBytesMax: 0, injections: 0 };
+  const counters = { catalogSerializations: 0, transcriptHydrations: 0, gitScans: 0, hostResourceProbes: 0, applicationRxBytes: 0, applicationTxBytes: 0, streamQueueFramesMax: 0, streamQueueBytesMax: 0, sendQueueFramesMax: 0, sendQueueBytesMax: 0, injections: 0, agentsJsonControlWrites: 0 };
+  // Count every filesystem mutation of the retired control file, including atomic rename/open.
+  const agentsFile = join(dataDir, 'swarm', 'agents.json');
+  const touchesAgents = (path: unknown) => String(path) === agentsFile;
+  for (const name of ['writeFile', 'appendFile', 'rename', 'copyFile', 'open'] as const) {
+    const owner = filePromises as unknown as Record<string, (...args: any[]) => any>;
+    const original = owner[name]!;
+    owner[name] = (...args: any[]) => {
+      const target = name === 'rename' || name === 'copyFile' ? args[1] : args[0];
+      if (touchesAgents(target) && (name !== 'open' || /[wa+]/.test(String(args[1])))) counters.agentsJsonControlWrites++;
+      return original(...args);
+    };
+  }
+  syncBuiltinESMExports();
   const sockets = new Set<WeakRef<NativeSocket>>();
   const knownSockets = new WeakSet<NativeSocket>();
   const subscriptions = new WeakMap<NativeSocket, Map<string, { method: string; sessionId?: string }>>();
@@ -100,7 +116,7 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
   SwarmManager.prototype.getAgentForInternalUse = function (id) { manager = this; return overlay.get(id) ?? getAgent.call(this, id); };
   const history = SwarmManager.prototype.getConversationHistoryPage;
   SwarmManager.prototype.getConversationHistoryPage = function (...args) { counters.transcriptHydrations++; return history.apply(this, args); };
-  const hit = (boundary: CrashBoundary, commandId: string) => {
+  const hit = (boundary: CrashBoundary | RecoveryBoundary, commandId: string) => {
     if (!armed || armed.commandId !== commandId || armed.boundary !== boundary) return;
     writeFileSync(markerPath, JSON.stringify({ ...armed, pid: process.pid, reachedAt: new Date().toISOString() }) + '\n', { mode: 0o600 });
     const fd = openSync(markerPath, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
@@ -133,6 +149,18 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       const run = statement.run.bind(statement) as (...args: any[]) => ReturnType<typeof statement.run>;
       statement.run = (...args: any[]) => { hit('post-Git', args[0]); return run(...args); };
     }
+    if (this.name === databasePath && /^(?:INSERT INTO control_deliveries|UPDATE control_deliveries SET state='dispatching')/.test(sql)) {
+      const run = statement.run.bind(statement) as (...args: any[]) => ReturnType<typeof statement.run>;
+      statement.run = (...args: any[]) => {
+        if (armed && String(args[1]).startsWith('worker-result:') && sql.startsWith('INSERT')) {
+          const ack = sql.includes("VALUES (?,?,'acked'");
+          hit(ack ? 'result-ack' : 'result-canonical', armed.commandId);
+        }
+        const result = run(...args);
+        if (armed && String(args[1]).startsWith('worker-result:') && sql.startsWith('UPDATE')) hit('result-dispatch', armed.commandId);
+        return result;
+      };
+    }
     return statement;
   } as Database['prepare'];
   const originalSave = AgentDescriptorStore.prototype.save;
@@ -145,6 +173,11 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       }
     }
     await originalSave.call(this);
+  };
+  const originalStop = SwarmManager.prototype.stopSession;
+  SwarmManager.prototype.stopSession = function (...args) {
+    if (armed) hit('stop-runtime', armed.commandId);
+    return originalStop.apply(this, args);
   };
   const originalApply = SwarmManager.prototype.applyControlledInput;
   SwarmManager.prototype.applyControlledInput = function (text, input) {
@@ -164,7 +197,13 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       if (!/^[0-9a-f-]{36}$/.test(input.commandId) || !crashBoundaries.includes(input.boundary)) throw new Error('Invalid controlled crash request');
       armed = input; return { armed: true, pid: process.pid };
     },
-    async operate(input: { operation: string; commandId?: string; sessionId?: string; count?: number; hz?: number; durationMs?: number; textBytes?: number; status?: AgentDescriptor['status']; gc?: boolean }) {
+    async operate(input: { operation: string; boundary?: string; commandId?: string; sessionId?: string; count?: number; hz?: number; durationMs?: number; textBytes?: number; status?: AgentDescriptor['status']; gc?: boolean }) {
+      if (input.operation === 'arm-recovery-crash') {
+        if (!input.commandId || !/^[0-9a-f-]{36}$/.test(input.commandId) || !recoveryBoundaries.includes(input.boundary as RecoveryBoundary)) throw new Error('Invalid recovery crash request');
+        armed = { commandId: input.commandId, boundary: input.boundary as RecoveryBoundary }; return { pid: process.pid };
+      }
+      if (input.operation === 'recovery-snapshot') return manager!.getRestartRecoverySnapshot();
+      if (input.operation === 'recovery-resume') return manager!.resumeRestartRecovery();
       if (input.operation === 'route-inventory') return webServer!.listRegisteredHttpRoutes().map((route, index) => ({ index, methods: route.methods, access: (route as unknown as { access?: unknown }).access ?? null }));
       if (input.operation === 'terminal-evidence') return terminalEvents;
       if (input.operation === 'hold-dispatch') {

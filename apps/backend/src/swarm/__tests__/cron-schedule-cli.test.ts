@@ -26,19 +26,29 @@ async function writeAgentsStore(dataDir: string, agents: Array<Record<string, un
   const agentsStorePath = join(dataDir, "swarm", "agents.json");
   await mkdir(dirname(agentsStorePath), { recursive: true });
   await writeFile(agentsStorePath, `${JSON.stringify({ agents }, null, 2)}\n`, "utf8");
+  await writeFile(join(dataDir, "backend-agents-fixture.json"), JSON.stringify({ agents }));
+  const bin = join(dataDir, "fixture-bin"); await mkdir(bin, { recursive: true });
+  const source = `#!${process.execPath}\nimport { readFileSync, writeFileSync } from 'node:fs';\nwriteFileSync(process.env.SWARM_DATA_DIR + '/cli-arguments.json', JSON.stringify(process.argv.slice(2)));\nprocess.stdout.write(readFileSync(process.env.SWARM_DATA_DIR + '/backend-agents-fixture.json'));\n`;
+  await writeFile(join(bin, "forge.mjs"), source, { mode: 0o700 });
+  if (process.platform === "win32") await writeFile(join(bin, "forge.cmd"), `@"${process.execPath}" "%~dp0forge.mjs" %*\r\n`);
+  else await writeFile(join(bin, "forge"), source, { mode: 0o700 });
 }
 
 async function readJsonFile(filePath: string) {
   return JSON.parse(await readFile(filePath, "utf8"));
 }
 
-async function runScheduleCli(dataDir: string, args: string[]): Promise<CliResult> {
+async function runScheduleCli(dataDir: string, args: string[], env: NodeJS.ProcessEnv = {}): Promise<CliResult> {
   return await new Promise((resolvePromise, reject) => {
     const child = spawn(process.execPath, [scheduleScript, ...args], {
       cwd: cronSchedulingDir,
       env: {
         ...process.env,
-        SWARM_DATA_DIR: dataDir
+        FORCE_COLOR: undefined,
+        SWARM_DATA_DIR: dataDir,
+        FORGE_PORT: "47187",
+        PATH: join(dataDir, "fixture-bin") + (process.platform === "win32" ? ";" : ":") + process.env.PATH,
+        ...env
       },
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -86,7 +96,30 @@ function addArgs(sessionId: string) {
   ];
 }
 
-describe("cron scheduling schedule.js CLI raw agents-store parity", () => {
+describe("cron scheduling schedule.js CLI catalog", () => {
+  it("creates, lists and removes for the calling manager without any CLI on PATH", async () => {
+    const dataDir = await makeDataDir();
+    const env = { PATH: "", SWARM_SESSION_ID: "calling-manager", SWARM_PROFILE_ID: "calling-project", SWARM_MANAGER_ID: "calling-manager" };
+    const added = await runScheduleCli(dataDir, addArgs("calling-manager"), env);
+    expect(added.status).toBe(0); expect(added.json.managerId).toBe("calling-manager");
+    const list = await runScheduleCli(dataDir, ["list"], env);
+    expect(list.status).toBe(0); expect(list.json.schedules).toHaveLength(1);
+    const removed = await runScheduleCli(dataDir, ["remove", "--id", (added.json.schedule as { id: string }).id], env);
+    expect(removed.status).toBe(0);
+    expect((await runScheduleCli(dataDir, ["list"], env)).json.schedules).toEqual([]);
+    const crossManager = await runScheduleCli(dataDir, ["list", "--manager", "other-manager"], env);
+    expect(crossManager.status).toBe(1); expect(crossManager.json.error).toContain("installed and authenticated");
+  });
+
+  it("uses the existing backend CLI catalog rather than stale agents.json", async () => {
+    const dataDir = await makeDataDir();
+    await writeAgentsStore(dataDir, [{ agentId: "live-manager", role: "manager", profileId: "live-project" }]);
+    await writeFile(join(dataDir, "swarm", "agents.json"), JSON.stringify({ agents: [{ agentId: "stale-manager", role: "manager", profileId: "stale-project" }] }));
+    const result = await runScheduleCli(dataDir, addArgs("live-manager"));
+    expect(result.status).toBe(0); expect(result.json.managerId).toBe("live-manager");
+    expect(await readJsonFile(join(dataDir, "cli-arguments.json"))).toEqual(["agents", "list", "--json", "--url", "http://127.0.0.1:47187"]);
+  });
+
   it("auto-resolves the sole raw manager and writes profile-scoped schedules", async () => {
     const dataDir = await makeDataDir();
     await writeAgentsStore(dataDir, [

@@ -2,6 +2,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { makeTempConfig } from "../../test-support/index.js";
+import { AgentDescriptorStore } from "../agents/agent-descriptor-store.js";
 import { PersistenceService } from "../persistence-service.js";
 import { getConversationHistoryCacheFilePath } from "../session/conversation-history-cache.js";
 import { getSharedKnowledgeDir, getLegacySessionsDirPath } from "../data-paths.js";
@@ -32,6 +33,7 @@ function createPersistenceService(
   const descriptors = new Map(agents.map((agent) => [agent.agentId, agent]));
   return new PersistenceService({
     config,
+    descriptorStore: new AgentDescriptorStore({ dataDir: config.paths.dataDir, storeFilePath: config.paths.agentsStoreFile }),
     descriptors,
     sortedDescriptors: () => agents,
     sortedProfiles: () => profiles,
@@ -66,7 +68,7 @@ describe("PersistenceService", () => {
     await expect(stat(getSharedKnowledgeDir(config.paths.dataDir))).resolves.toBeTruthy();
     await expect(stat(join(config.paths.dataDir, "profiles", "manager", "pi", "skills"))).resolves.toBeTruthy();
     await service.saveStore();
-    expect(JSON.parse(await readFile(config.paths.agentsStoreFile, "utf8"))).toEqual({ agents: [agent], profiles: [profile] });
+    expect(await service.loadStore()).toMatchObject({ agents: [agent], profiles: [profile] });
   });
 
   it("does not overwrite memory files and deletes paired session/cache files", async () => {
@@ -146,6 +148,7 @@ describe("PersistenceService", () => {
 
     expect(loaded.profiles).toEqual(profiles);
     expect(loaded.agents).toHaveLength(1);
-    expect(loaded.agents[0]).toEqual(persisted);
+    const { systemPrompt: _deprecated, ...projectAgent } = persisted.projectAgent!;
+    expect(loaded.agents[0]).toEqual({ ...persisted, projectAgent });
   });
 });
