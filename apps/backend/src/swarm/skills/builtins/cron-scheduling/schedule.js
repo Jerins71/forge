@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -7,7 +9,6 @@ import { dirname, resolve } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 
 const LEGACY_SCHEDULES_DIR_NAME = "schedules";
-const AGENTS_STORE_RELATIVE_PATH = "swarm/agents.json";
 const DEFAULT_MANAGER_CANDIDATES = ["manager", "opus-manager"];
 
 function resolveDataDir() {
@@ -40,32 +41,33 @@ function normalizeOptionalSessionId(rawValue) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-async function loadAgentsStoreAgents(dataDir) {
-  const agentsStoreFile = resolve(dataDir, AGENTS_STORE_RELATIVE_PATH);
-
-  let raw;
-  try {
-    raw = await readFile(agentsStoreFile, "utf8");
-  } catch (error) {
-    if (isEnoentError(error)) {
-      return [];
-    }
-
-    throw error;
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    parsed = {};
-  }
-
-  return Array.isArray(parsed?.agents) ? parsed.agents.filter(isObject) : [];
+function callingSession() {
+  return normalizeOptionalSessionId(process.env.SWARM_SESSION_ID) ?? normalizeOptionalManagerId(process.env.SWARM_MANAGER_ID);
+}
+function callingProfile() {
+  return normalizeOptionalManagerId(process.env.SWARM_PROFILE_ID);
 }
 
-async function loadAgentsStoreManagers(dataDir) {
-  const agents = await loadAgentsStoreAgents(dataDir);
+let agentsCatalog;
+async function loadBackendAgents() {
+  agentsCatalog ??= (async () => {
+    const port = Number(process.env.FORGE_PORT ?? process.env.MIDDLEMAN_PORT ?? "47187");
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid local Forge port");
+    const cliArgs = ["agents", "list", "--json", "--url", `http://127.0.0.1:${port}`];
+    const executable = process.platform === "win32" ? "cmd.exe" : "forge";
+    const args = process.platform === "win32" ? ["/d", "/s", "/c", "forge " + cliArgs.join(" ")] : cliArgs;
+    let stdout;
+    try { ({ stdout } = await promisify(execFile)(executable, args, { windowsHide: true, maxBuffer: 16 * 1024 * 1024 })); }
+    catch { throw new Error("Cross-manager lookup requires the Forge CLI installed and authenticated for the local backend. Use the calling session's SWARM_SESSION_ID and SWARM_PROFILE_ID for local schedules."); }
+    const response = JSON.parse(stdout);
+    if (!Array.isArray(response?.agents)) throw new Error("Forge CLI returned an invalid agent catalog");
+    return response.agents.filter(isObject);
+  })();
+  return agentsCatalog;
+}
+
+async function loadBackendManagers(dataDir) {
+  const agents = await loadBackendAgents();
   const managers = [];
 
   for (const agent of agents) {
@@ -85,8 +87,8 @@ async function loadAgentsStoreManagers(dataDir) {
   return managers;
 }
 
-async function loadManagerIdsFromAgentsStore(dataDir) {
-  const managers = await loadAgentsStoreManagers(dataDir);
+async function loadBackendManagerIds(dataDir) {
+  const managers = await loadBackendManagers(dataDir);
   return managers.map((manager) => manager.managerId);
 }
 
@@ -96,7 +98,8 @@ async function resolveProfileIdForManagerId(dataDir, managerId) {
     return managerId;
   }
 
-  const managers = await loadAgentsStoreManagers(dataDir);
+  if (normalizedManagerId === callingSession() && callingProfile()) return callingProfile();
+  const managers = await loadBackendManagers(dataDir);
   const matchedManager = managers.find((candidate) => candidate.managerId === normalizedManagerId);
   return matchedManager?.profileId ?? normalizedManagerId;
 }
@@ -107,7 +110,8 @@ async function resolveManagerId(flags, dataDir) {
     return explicitManagerId;
   }
 
-  const managerIds = await loadManagerIdsFromAgentsStore(dataDir);
+  if (callingSession()) return callingSession();
+  const managerIds = await loadBackendManagerIds(dataDir);
   if (managerIds.length === 1) {
     return managerIds[0];
   }
@@ -304,7 +308,8 @@ function printUsage() {
 }
 
 async function validateSessionForManager(dataDir, sessionId, expectedProfileId) {
-  const agents = await loadAgentsStoreAgents(dataDir);
+  if (sessionId === callingSession() && expectedProfileId === callingProfile()) return;
+  const agents = await loadBackendAgents();
   const matchingAgent = agents.find((agent) => normalizeOptionalManagerId(agent.agentId) === sessionId);
 
   if (!matchingAgent) {

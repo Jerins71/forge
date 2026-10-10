@@ -67,7 +67,7 @@ export interface AgentMessageSendOptions {
   attachments?: ConversationAttachment[];
   internalDeliveryKind?: AgentMessageInternalDeliveryKind;
   observabilityParentTool?: ObservabilityParentTool;
-  skipTurnLedger?: boolean;
+  skipRecoveryTracking?: boolean;
   planStep?: string;
   planAssignmentSource?: "spawn_agent" | "send_message_to_agent";
   requiresSecureRuntime?: boolean;
@@ -109,6 +109,7 @@ export interface AgentMessageLedgerPort {
     assignmentId?: string;
     at: string;
   }): Promise<void>;
+  claimDelivery?(input: { sessionAgentId: string; deliveryId: string }): Promise<void>;
   recordDeliveryAcked(input: {
     sessionAgentId: string;
     deliveryId: string;
@@ -668,7 +669,7 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
       assistantOutputTarget: output.inputTarget,
       assistantOutputProjectionTarget: output.projectionTarget,
       activationEligible,
-      skipTurnLedger: input.sendOptions?.skipTurnLedger,
+      skipRecoveryTracking: input.sendOptions?.skipRecoveryTracking,
     });
     const { rollback, turnId: managerTurnId } = queuedTurn;
 
@@ -754,7 +755,7 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
       this.createDeliveryNonce(),
     ].join(":");
     const hasDeliveryLedger =
-      input.sendOptions?.skipTurnLedger !== true &&
+      input.sendOptions?.skipRecoveryTracking !== true &&
       this.options.ledger.hasSessionTarget(input.target.agentId);
     if (hasDeliveryLedger) {
       await this.options.ledger.recordDeliveryPending({
@@ -768,13 +769,6 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
           ? { assignmentId: input.workerResult.parentContext.assignmentId }
           : {}),
         at: this.options.now(),
-      }).catch((error) => {
-        this.options.logDebug("turn_ledger:delivery_pending:error", {
-          deliveryId,
-          fromAgentId: input.sender.agentId,
-          toAgentId: input.target.agentId,
-          message: errorToMessage(error),
-        });
       });
     }
 
@@ -807,6 +801,7 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
 
     let receipt: SendMessageReceipt;
     try {
+      if (hasDeliveryLedger) await this.options.ledger.claimDelivery?.({ sessionAgentId: input.target.agentId, deliveryId });
       receipt = await runtime.sendMessage(modelMessage, input.delivery);
     } catch (error) {
       rollback();

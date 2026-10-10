@@ -63,6 +63,7 @@ export interface ConnectionState {
   reason: string | null
 }
 export interface ShellState {
+  recovery?: import('@forge/protocol/environment-v2').RecoverySnapshot | null
   projects: ReadonlyMap<string, ProjectSummary>
   sessions: ReadonlyMap<string, SessionSummary>
   sessionIdsByProject: ReadonlyMap<string, readonly string[]>

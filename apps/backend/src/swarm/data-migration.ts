@@ -32,7 +32,6 @@ const LEGACY_SECRETS_FILE_NAME = "secrets.json";
 const SESSION_AGENT_ID_PATTERN = /^(.*?)--s\d+.*$/;
 
 const DEFAULT_FILE_OPS: DataMigrationFileOps = {
-  link: (existingPath, newPath) => fs.link(existingPath, newPath),
   copyFile: (sourcePath, destinationPath, mode) => fs.copyFile(sourcePath, destinationPath, mode)
 };
 
@@ -53,7 +52,6 @@ interface DataMigrationResult {
 }
 
 interface DataMigrationFileOps {
-  link: (existingPath: string, newPath: string) => Promise<void>;
   copyFile: (sourcePath: string, destinationPath: string, mode?: number) => Promise<void>;
 }
 
@@ -84,10 +82,21 @@ export async function migrateDataDirectory(
     };
   }
 
+  const legacyDirectories = [LEGACY_SESSIONS_DIR_NAME, LEGACY_MEMORY_DIR_NAME, LEGACY_SCHEDULES_DIR_NAME, LEGACY_AUTH_DIR_NAME];
+  let legacy = false;
+  for (const directory of legacyDirectories) {
+    try { if ((await fs.readdir(join(config.dataDir, directory))).length) legacy = true; }
+    catch (error) { if (!isEnoentError(error)) throw error; }
+  }
+  legacy ||= await pathExists(join(config.dataDir, LEGACY_SECRETS_FILE_NAME));
+  if (!legacy) return { migrated: false, updatedAgents: agents };
+  // Capture identity evidence before carrying files forward. Originals remain read-only evidence.
+  await copyFileIfMissing(config.agentsStoreFile, `${config.agentsStoreFile}.before-layout-migration`);
+
   log(
     logger,
     "warn",
-    `[migration] Starting data directory migration. Ensure you have a backup of ${config.dataDir} before proceeding.`
+    "[migration] Copying detected legacy data; source files and identity backup are preserved."
   );
 
   const managerDescriptors = agents.filter(isManagerDescriptor);
@@ -128,18 +137,12 @@ export async function migrateDataDirectory(
     logger
   );
 
-  await writeJsonFileAtomic(config.agentsStoreFile, {
-    agents: updatedAgents,
-    profiles
-  });
-
   await rebuildSessionMeta({
     dataDir: config.dataDir,
     agentsStoreFile: config.agentsStoreFile,
     descriptors: updatedAgents
   });
 
-  await cleanupLegacyFlatPaths(config.dataDir, logger);
 
   await writeFileAtomic(sentinelPath, `${new Date().toISOString()}\n`);
 
@@ -275,7 +278,7 @@ async function migrateManagerSessionFiles(
       continue;
     }
 
-    await hardlinkOrCopyFileIfMissing(sourcePath, targetPath, logger, fileOps);
+    await copySessionFileIfMissing(sourcePath, targetPath, fileOps);
   }
 }
 
@@ -306,7 +309,7 @@ async function migrateWorkerSessionFiles(
       continue;
     }
 
-    await hardlinkOrCopyFileIfMissing(sourcePath, targetPath, logger, fileOps);
+    await copySessionFileIfMissing(sourcePath, targetPath, fileOps);
   }
 }
 
@@ -499,47 +502,6 @@ async function migrateAuthAndSecrets(dataDir: string, _logger: DataMigrationLogg
   await copyFileIfMissing(getLegacySecretsFilePath(dataDir), legacySharedSecretsFilePath);
 }
 
-async function cleanupLegacyFlatPaths(dataDir: string, logger: DataMigrationLogger): Promise<void> {
-  const legacyDirectories = [
-    join(dataDir, LEGACY_SESSIONS_DIR_NAME),
-    join(dataDir, LEGACY_MEMORY_DIR_NAME),
-    join(dataDir, LEGACY_SCHEDULES_DIR_NAME),
-    join(dataDir, LEGACY_AUTH_DIR_NAME)
-  ];
-
-  for (const directoryPath of legacyDirectories) {
-    try {
-      await fs.rm(directoryPath, { recursive: true, force: true });
-      log(logger, "info", "migration:legacy_path_removed", {
-        path: directoryPath,
-        type: "directory"
-      });
-    } catch (error) {
-      log(logger, "warn", "migration:legacy_path_remove_error", {
-        path: directoryPath,
-        type: "directory",
-        message: errorToMessage(error)
-      });
-    }
-  }
-
-  const legacySecretsPath = join(dataDir, LEGACY_SECRETS_FILE_NAME);
-
-  try {
-    await fs.rm(legacySecretsPath, { force: true });
-    log(logger, "info", "migration:legacy_path_removed", {
-      path: legacySecretsPath,
-      type: "file"
-    });
-  } catch (error) {
-    log(logger, "warn", "migration:legacy_path_remove_error", {
-      path: legacySecretsPath,
-      type: "file",
-      message: errorToMessage(error)
-    });
-  }
-}
-
 function rewriteAgentSessionPaths(
   dataDir: string,
   agents: AgentDescriptor[],
@@ -638,33 +600,9 @@ function resolveWorkerProfileId(
   return DEFAULT_FALLBACK_PROFILE_ID;
 }
 
-async function hardlinkOrCopyFileIfMissing(
-  sourcePath: string,
-  targetPath: string,
-  logger: DataMigrationLogger,
-  fileOps: DataMigrationFileOps
-): Promise<void> {
-  if (!(await pathExists(sourcePath)) || (await pathExists(targetPath))) {
-    return;
-  }
-
+async function copySessionFileIfMissing(sourcePath: string, targetPath: string, fileOps: DataMigrationFileOps): Promise<void> {
+  if (!(await pathExists(sourcePath)) || (await pathExists(targetPath))) return;
   await fs.mkdir(dirname(targetPath), { recursive: true });
-
-  try {
-    await fileOps.link(sourcePath, targetPath);
-    return;
-  } catch (error) {
-    if (isErrnoCode(error, "EEXIST") || isEnoentError(error)) {
-      return;
-    }
-
-    log(logger, "debug", "migration:hardlink_failed_copy_fallback", {
-      sourcePath,
-      targetPath,
-      message: errorToMessage(error)
-    });
-  }
-
   try {
     await fileOps.copyFile(sourcePath, targetPath, fsConstants.COPYFILE_EXCL);
   } catch (error) {

@@ -58,6 +58,7 @@ export interface SwarmManagerCoreServicesOptions {
     | "descriptors"
     | "sortedDescriptors"
     | "sortedProfiles"
+    | "descriptorStore"
     | "getConfiguredManagerId"
     | "validateAgentDescriptor"
     | "extractDescriptorAgentId"

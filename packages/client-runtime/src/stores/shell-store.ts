@@ -8,6 +8,7 @@ import type { RuntimePorts, ShellCacheRecord } from '../ports.js'
 import { KeyedSelectorStore } from './selector-store.js'
 import { EnvironmentRuntimeError } from '../errors.js'
 export const emptyShell = (): ShellState => ({
+  recovery: null,
   projects: new Map(),
   sessions: new Map(),
   sessionIdsByProject: new Map(),
@@ -32,6 +33,7 @@ function indexSessions(
 }
 export class ShellStore extends KeyedSelectorStore<ShellState> {
   private staged: {
+    recovery?: ShellState['recovery']
     epoch: string
     sequence: number
     projects: ShellCacheRecord['projects']
@@ -54,6 +56,7 @@ export class ShellStore extends KeyedSelectorStore<ShellState> {
   }
   hydrate(record: ShellCacheRecord): void {
     this.set({
+      recovery: record.recovery ?? null,
       projects: new Map(record.projects.map((p) => [p.projectId, p])),
       sessions: new Map(record.sessions.map((s) => [s.sessionId, s])),
       sessionIdsByProject: indexSessions(
@@ -81,6 +84,7 @@ export class ShellStore extends KeyedSelectorStore<ShellState> {
   ingest(item: ShellStreamItem | UnknownStreamItem): void {
     if (item.kind === 'snapshot') {
       this.staged = {
+        recovery: item.snapshot.recovery ?? null,
         epoch: item.streamEpoch,
         sequence: item.sequence,
         projects: [...item.snapshot.projects],
@@ -106,6 +110,7 @@ export class ShellStore extends KeyedSelectorStore<ShellState> {
           )
         const sessions = new Map(stage.sessions.map((s) => [s.sessionId, s]))
         this.set({
+          recovery: stage.recovery ?? null,
           projects: new Map(stage.projects.map((p) => [p.projectId, p])),
           sessions,
           sessionIdsByProject: indexSessions(sessions),
@@ -187,7 +192,8 @@ export class ShellStore extends KeyedSelectorStore<ShellState> {
     let projects = previous.projects,
       sessions = previous.sessions,
       indices = previous.sessionIdsByProject,
-      cursor = previous.cursor
+      cursor = previous.cursor,
+      recovery = previous.recovery
     const keys = new Set<string>(),
       affectedProjects = new Set<string>()
     for (const item of items) {
@@ -200,6 +206,7 @@ export class ShellStore extends KeyedSelectorStore<ShellState> {
       cursor = { streamEpoch: item.streamEpoch, afterSequence: item.sequence }
       if (item.kind !== 'event') continue
       const event = item.event
+      if (event.type === 'recovery.upsert') { recovery = event.recovery; keys.add('recovery'); continue }
       if (event.type === 'project.upsert' || event.type === 'project.remove') {
         if (projects === previous.projects) projects = new Map(projects)
         const id =
@@ -256,6 +263,7 @@ export class ShellStore extends KeyedSelectorStore<ShellState> {
     this.set(
       {
         ...previous,
+        recovery,
         projects,
         sessions,
         sessionIdsByProject: indices,
@@ -281,6 +289,7 @@ export class ShellStore extends KeyedSelectorStore<ShellState> {
       streamEpoch: s.cursor.streamEpoch,
       protocolVersion: 1,
       cacheSchemaVersion: 1,
+      recovery: s.recovery,
       projects: [...s.projects.values()],
       sessions: [...s.sessions.values()],
       cursor: s.cursor,

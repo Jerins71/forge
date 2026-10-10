@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type Database from "better-sqlite3";
 import type { EnvironmentDescriptor } from "@forge/protocol/environment-v2";
@@ -111,9 +111,9 @@ export async function createEnvironmentService(options: {
       environment_id: string;
       stream_epoch: string;
     };
-    if (hadDatabase && (meta.environment_id !== identity.environmentId || meta.stream_epoch !== identity.file.streamEpoch))
+    if (hadDatabase && !meta.environment_id.startsWith("uncomposed:") && (meta.environment_id !== identity.environmentId || meta.stream_epoch !== identity.file.streamEpoch))
       throw new EnvironmentIdentityMismatch();
-    if (!hadDatabase)
+    if (!hadDatabase || meta.environment_id.startsWith("uncomposed:"))
       database
         .prepare("UPDATE environment_meta SET environment_id=?,stream_epoch=? WHERE singleton=1")
         .run(identity.environmentId, identity.file.streamEpoch);
@@ -187,9 +187,6 @@ export async function createEnvironmentService(options: {
       descriptor: (): EnvironmentDescriptor => identity.descriptor(),
       routes: [...auth.routes, ...createEnvironmentArtifactRoutes({ access: auth, artifactService }), ...createProjectAgentReferenceRoutes(auth, projectAgents)],
       async initialize() {
-        // Called after hydration, before subscriptions/listening. Preserve the old catalog before adoption.
-        if (!hadDatabase && existsSync(config.paths.agentsStoreFile))
-          await copyFile(config.paths.agentsStoreFile, `${config.paths.agentsStoreFile}.v2-before-adoption`);
         await descriptorPersistence.load();
         await unreadTracker.load();
         await owner.reconcileOnBoot();

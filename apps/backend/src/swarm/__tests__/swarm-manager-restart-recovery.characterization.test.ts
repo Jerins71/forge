@@ -1,13 +1,14 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import { createTempConfig, TestSwarmManager, bootWithDefaultManager } from '../../test-support/index.js';
+import { AgentDescriptorStore } from "../agents/agent-descriptor-store.js";
 import type { AgentDescriptor, SwarmConfig } from '../types.js'
 import { SessionPlanStore } from '../planning/session-plan-store.js'
 import {
-  appendTurnLedgerRecord,
-  replayTurnLedger,
-  type TurnLedgerSessionTarget,
-} from '../turn-ledger.js'
+  recordRecoveryFact,
+  readRecoveryState,
+  type RecoveryTarget,
+} from '../recovery-state.js'
 
 const NOW = '2026-07-13T12:00:00.000Z'
 const RECOVERED_REPORT = 'Recovered worker result from the persisted ledger.'
@@ -16,7 +17,7 @@ const RECOVERED_DELIVERY_ID = 'worker-result:recovery-worker:persisted'
 interface RecoveryFixture {
   cleanup: () => Promise<void>
   config: SwarmConfig
-  target: TurnLedgerSessionTarget
+  target: RecoveryTarget
   workerId: string
 }
 
@@ -69,12 +70,12 @@ async function createRecoveryFixture(options?: { withRunningGraph?: boolean }): 
     })
   }
 
-  const target: TurnLedgerSessionTarget = {
+  const target: RecoveryTarget = {
     dataDir: handle.config.paths.dataDir,
     profileId: 'manager',
     sessionAgentId: 'manager',
   }
-  await appendTurnLedgerRecord(target, {
+  await recordRecoveryFact(target, {
     t: 'turn_dispatched',
     turnId: 'manager-turn-before-restart',
     agentId: 'manager',
@@ -82,7 +83,7 @@ async function createRecoveryFixture(options?: { withRunningGraph?: boolean }): 
     kind: 'user',
     at: NOW,
   })
-  await appendTurnLedgerRecord(target, {
+  await recordRecoveryFact(target, {
     t: 'turn_dispatched',
     turnId: 'worker-turn-before-restart',
     agentId: worker.agentId,
@@ -90,13 +91,14 @@ async function createRecoveryFixture(options?: { withRunningGraph?: boolean }): 
     kind: 'agent_message',
     at: NOW,
   })
-  await appendTurnLedgerRecord(target, {
+  await writeFile(handle.config.paths.agentsStoreFile + ".canonical-fixture.jsonl", JSON.stringify({ id: "fixture-result", data: { message: RECOVERED_REPORT } }) + "\n");
+  await recordRecoveryFact(target, {
     t: 'delivery_pending',
     turnId: 'manager-turn-before-restart',
     deliveryId: RECOVERED_DELIVERY_ID,
     from: worker.agentId,
     to: 'manager',
-    message: RECOVERED_REPORT,
+    contentRef: { file: handle.config.paths.agentsStoreFile + ".canonical-fixture.jsonl", entryId: "fixture-result" },
     assignmentId: 'assignment:recovery-worker:persisted',
     at: NOW,
   })
@@ -113,15 +115,13 @@ async function persistAgentStatuses(
   config: SwarmConfig,
   statuses: ReadonlyMap<string, AgentDescriptor['status']>,
 ): Promise<void> {
-  const store = JSON.parse(await readFile(config.paths.agentsStoreFile, 'utf8')) as {
-    agents: AgentDescriptor[]
-    profiles?: unknown[]
-  }
+  const owner = new AgentDescriptorStore({ dataDir: config.paths.dataDir, storeFilePath: config.paths.agentsStoreFile });
+  const store = await owner.load();
   store.agents = store.agents.map((agent) => {
     const status = statuses.get(agent.agentId)
     return status ? { ...agent, status, updatedAt: NOW } : agent
   })
-  await writeFile(config.paths.agentsStoreFile, `${JSON.stringify(store, null, 2)}\n`, 'utf8')
+  owner.replace(store); await owner.save();
 }
 
 async function persistWorkerParentContext(
@@ -129,10 +129,8 @@ async function persistWorkerParentContext(
   workerId: string,
   assignmentId = 'assignment:recovery-worker:persisted',
 ): Promise<void> {
-  const store = JSON.parse(await readFile(config.paths.agentsStoreFile, 'utf8')) as {
-    agents: AgentDescriptor[]
-    profiles?: unknown[]
-  }
+  const owner = new AgentDescriptorStore({ dataDir: config.paths.dataDir, storeFilePath: config.paths.agentsStoreFile });
+  const store = await owner.load();
   store.agents = store.agents.map((agent) => agent.agentId === workerId
     ? {
         ...agent,
@@ -145,7 +143,7 @@ async function persistWorkerParentContext(
         },
       }
     : agent)
-  await writeFile(config.paths.agentsStoreFile, `${JSON.stringify(store, null, 2)}\n`, 'utf8')
+  owner.replace(store); await owner.save();
 }
 
 describe('SwarmManager restart recovery characterization', () => {
@@ -157,6 +155,7 @@ describe('SwarmManager restart recovery characterization', () => {
 
       const snapshot = recovered.getRestartRecoverySnapshot()
       expect(snapshot).toEqual({
+        recoveryId: expect.any(String),
         bootId: expect.any(String),
         createdAt: NOW,
         interruptedManagers: ['manager'],
@@ -179,14 +178,9 @@ describe('SwarmManager restart recovery characterization', () => {
         undeliveredReports: [{ fromAgentId: fixture.workerId }],
       })
 
-      const ledgerAfterFirstRecovery = await replayTurnLedger(fixture.target)
-      const seededInterruptedReceipts = ledgerAfterFirstRecovery.records.filter(
-        (record) => record.t === 'recovery_receipt'
-          && record.receipt === 'turn_interrupted'
-          && (record.turnId === 'manager-turn-before-restart' || record.turnId === 'worker-turn-before-restart'),
-      )
-      expect(seededInterruptedReceipts).toHaveLength(2)
-
+      const stateAfterFirstRecovery = await readRecoveryState(fixture.target);
+      expect(stateAfterFirstRecovery.openTurns.has("manager-turn-before-restart")).toBe(true);
+      expect(stateAfterFirstRecovery.openTurns.has("worker-turn-before-restart")).toBe(true);
       await persistAgentStatuses(fixture.config, new Map([
         ['manager', 'streaming'],
         [fixture.workerId, 'streaming'],
@@ -194,12 +188,9 @@ describe('SwarmManager restart recovery characterization', () => {
       const recoveredAgain = new TestSwarmManager(fixture.config, { now: () => NOW })
       await recoveredAgain.boot()
 
-      const ledgerAfterSecondRecovery = await replayTurnLedger(fixture.target)
-      expect(ledgerAfterSecondRecovery.records.filter(
-        (record) => record.t === 'recovery_receipt'
-          && record.receipt === 'turn_interrupted'
-          && (record.turnId === 'manager-turn-before-restart' || record.turnId === 'worker-turn-before-restart'),
-      )).toHaveLength(2)
+      expect(recoveredAgain.getRestartRecoverySnapshot()?.bootId).toBe(snapshot!.bootId);
+      expect((await readRecoveryState(fixture.target)).openTurns.has("worker-turn-before-restart")).toBe(true);
+
     } finally {
       await fixture.cleanup()
     }

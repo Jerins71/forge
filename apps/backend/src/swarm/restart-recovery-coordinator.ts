@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { RestartRecoveryReport, RestartRecoverySnapshot } from "@forge/protocol";
+import type { RestartRecoveryReport } from "@forge/protocol";
+import type { RecoverySnapshot } from "@forge/protocol/environment-v2";
 import {
-  appendTurnLedgerRecord,
-  replayTurnLedger,
-  type TurnLedgerSessionTarget,
-} from "./turn-ledger.js";
+  recordRecoveryFact,
+  claimRecoveryOccurrence, applyRecoveryDismissal, claimRecoveryDelivery, readRecoveryContent, readRecoveryOccurrence, saveRecoveryOccurrence,
+  readRecoveryState,
+  type RecoveryTarget,
+} from "./recovery-state.js";
 import type {
   AgentDescriptor,
   RequestedDeliveryMode,
@@ -16,8 +18,9 @@ interface InternalSendOptions {
 }
 
 export interface RestartRecoveryCoordinatorOptions {
+  dataDir: string;
   descriptors: Map<string, AgentDescriptor>;
-  getSessionTarget: (agentId: string) => TurnLedgerSessionTarget | null;
+  getSessionTarget: (agentId: string) => RecoveryTarget | null;
   sendMessage: (
     fromAgentId: string,
     targetAgentId: string,
@@ -36,17 +39,20 @@ export interface RestartRecoveryCoordinatorOptions {
   logDebug: (message: string, details?: unknown) => void;
 }
 
-/** Owns boot-time turn-ledger reconciliation and one-shot restart recovery. */
+/** Classifies private DB facts and executes one durable recovery decision. */
 export class RestartRecoveryCoordinator {
-  private controlledRecoveryPolicy: (sessionId: string) => boolean = () => false;
+  private controlledRecoveryPolicy: (sessionId: string, activity?: "turn" | "worker" | "delivery") => boolean = () => false;
 
-  setControlledRecoveryPolicy(policy: (sessionId: string) => boolean): void { this.controlledRecoveryPolicy = policy; }
-  private snapshot: RestartRecoverySnapshot | null = null;
+  setControlledRecoveryPolicy(policy: (sessionId: string, activity?: "turn" | "worker" | "delivery") => boolean): void { this.controlledRecoveryPolicy = policy; }
+  private projection: RecoverySnapshot | null = null;
   private resumeInProgress = false;
 
   constructor(private readonly options: RestartRecoveryCoordinatorOptions) {}
 
   async reconcileForBoot(): Promise<void> {
+    const persisted = await readRecoveryOccurrence(this.options.dataDir);
+    if (persisted?.dismissedAt) await applyRecoveryDismissal(this.options.dataDir, persisted, workers => this.options.onInterruptedWorkersDismissed?.(workers) ?? Promise.resolve());
+    if (persisted && !persisted.resumedAt && !persisted.dismissedAt) { this.projection = persisted; return; }
     const interruptedManagers = new Set<string>();
     const interruptedWorkers = new Set<string>();
     const undeliveredReports = new Map<
@@ -66,41 +72,7 @@ export class RestartRecoveryCoordinator {
       const target = this.options.getSessionTarget(descriptor.agentId);
       if (!target) continue;
 
-      const replay = await replayTurnLedger(target).catch((error) => {
-        this.options.logDebug("turn_ledger:boot_replay:error", {
-          sessionAgentId: descriptor.agentId,
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return null;
-      });
-      if (!replay) continue;
-
-      const dispatchedTurnIds = new Set(
-        replay.records
-          .filter((record) => record.t === "turn_dispatched")
-          .map((record) => record.turnId),
-      );
-      const receiptKeys = new Set(
-        replay.records
-          .filter((record) => record.t === "recovery_receipt")
-          .map(
-            (record) =>
-              `${record.receipt}:${record.turnId ?? ""}:${record.deliveryId ?? ""}`,
-          ),
-      );
-
-      for (const terminal of replay.terminalTurns.values()) {
-        if (dispatchedTurnIds.has(terminal.turnId)) continue;
-        const key = `terminal_without_dispatch:${terminal.turnId}:`;
-        if (!receiptKeys.has(key)) {
-          await appendTurnLedgerRecord(target, {
-            t: "recovery_receipt",
-            receipt: "terminal_without_dispatch",
-            turnId: terminal.turnId,
-            at: this.options.now(),
-          });
-        }
-      }
+      const replay = await readRecoveryState(target);
 
       for (const openTurn of replay.openTurns.values()) {
         const actor = this.options.descriptors.get(openTurn.agentId);
@@ -108,20 +80,10 @@ export class RestartRecoveryCoordinator {
           (actor.role === "manager" ? interruptedManagers : interruptedWorkers).add(
             actor.agentId,
           );
-          const key = `turn_interrupted:${openTurn.turnId}:`;
-          if (!receiptKeys.has(key)) {
-            await appendTurnLedgerRecord(target, {
-              t: "recovery_receipt",
-              receipt: "turn_interrupted",
-              agentId: actor.agentId,
-              turnId: openTurn.turnId,
-              at: this.options.now(),
-            });
-          }
           continue;
         }
 
-        await appendTurnLedgerRecord(target, {
+        await recordRecoveryFact(target, {
           t: "turn_terminal",
           turnId: openTurn.turnId,
           outcome: "reconciled",
@@ -141,8 +103,10 @@ export class RestartRecoveryCoordinator {
       }
     }
 
-    const snapshot: RestartRecoverySnapshot = {
-      bootId: randomUUID(),
+    const bootId = randomUUID();
+    const snapshot: RecoverySnapshot = {
+      recoveryId: bootId,
+      bootId,
       createdAt: this.options.now(),
       interruptedManagers: [...interruptedManagers].sort(),
       interruptedWorkers: [...interruptedWorkers].sort(),
@@ -154,42 +118,40 @@ export class RestartRecoveryCoordinator {
       snapshot.interruptedManagers.length > 0 ||
       snapshot.interruptedWorkers.length > 0 ||
       snapshot.undeliveredReports.length > 0;
-    this.snapshot = hasRecovery ? snapshot : null;
+    this.projection = hasRecovery ? snapshot : persisted;
+    if (hasRecovery) await saveRecoveryOccurrence(this.options.dataDir, snapshot);
     if (hasRecovery) {
       this.options.logDebug("turn_ledger:boot_recovery_snapshot", snapshot);
     }
   }
 
-  getSnapshot(): RestartRecoverySnapshot | null {
-    return this.snapshot ? cloneSnapshot(this.snapshot) : null;
+  getSnapshot(): RecoverySnapshot | null {
+    return this.projection ? cloneSnapshot(this.projection) : null;
   }
 
   isDecisionPending(): boolean {
     return this.resumeInProgress || Boolean(
-      this.snapshot && !this.snapshot.resumedAt && !this.snapshot.dismissedAt,
+      this.projection && !this.projection.resumedAt && !this.projection.dismissedAt,
     );
   }
 
-  async dismiss(): Promise<RestartRecoverySnapshot | null> {
-    if (!this.snapshot) return null;
-    if (this.snapshot.dismissedAt || this.snapshot.resumedAt) return this.getSnapshot();
-    await this.options.onInterruptedWorkersDismissed?.(this.snapshot.interruptedWorkers);
-    this.snapshot = { ...this.snapshot, dismissedAt: this.options.now() };
+  async dismiss(): Promise<RecoverySnapshot | null> {
+    const claimed = await claimRecoveryOccurrence(this.options.dataDir, "dismiss", this.options.now());
+    this.projection = claimed ?? await readRecoveryOccurrence(this.options.dataDir);
+    if (this.projection?.dismissedAt) await applyRecoveryDismissal(this.options.dataDir, this.projection, workers => this.options.onInterruptedWorkersDismissed?.(workers) ?? Promise.resolve());
     this.options.onDecisionResolved?.();
     return this.getSnapshot();
   }
 
-  async resume(): Promise<RestartRecoverySnapshot | null> {
-    const snapshot = this.snapshot;
-    if (!snapshot || snapshot.resumedAt || snapshot.dismissedAt) {
-      return this.getSnapshot();
-    }
+  async resume(): Promise<RecoverySnapshot | null> {
+    const snapshot = await claimRecoveryOccurrence(this.options.dataDir, "resume", this.options.now());
+    this.projection = snapshot ?? await readRecoveryOccurrence(this.options.dataDir);
+    if (!snapshot) return this.getSnapshot();
     this.resumeInProgress = true;
-    this.snapshot = { ...snapshot, resumedAt: this.options.now() };
     try {
       for (const workerId of snapshot.interruptedWorkers) {
       const worker = this.options.descriptors.get(workerId);
-      if (!worker || worker.role !== "worker" || this.options.descriptors.get(worker.managerId)?.controlCommandId || this.controlledRecoveryPolicy(worker.managerId)) continue;
+      if (!worker || worker.role !== "worker" || this.controlledRecoveryPolicy(worker.managerId, "worker")) continue;
       await this.options
         .sendMessage(
           worker.managerId,
@@ -202,7 +164,7 @@ export class RestartRecoveryCoordinator {
       }
 
       for (const managerId of snapshot.interruptedManagers) {
-      if (this.options.descriptors.get(managerId)?.controlCommandId || this.controlledRecoveryPolicy(managerId)) continue;
+      if (this.controlledRecoveryPolicy(managerId, "turn")) continue;
       await this.options
         .sendMessage(
           managerId,
@@ -216,7 +178,7 @@ export class RestartRecoveryCoordinator {
 
       const pendingMessages = await this.resolvePendingReportMessages(snapshot);
       for (const report of snapshot.undeliveredReports) {
-        if (this.controlledRecoveryPolicy(report.toAgentId)) continue;
+        if (this.controlledRecoveryPolicy(report.toAgentId, "delivery")) continue;
         const message = pendingMessages.get(report.deliveryId);
         if (!message) continue;
         const source = this.options.descriptors.get(report.fromAgentId);
@@ -224,6 +186,8 @@ export class RestartRecoveryCoordinator {
           report.deliveryId.startsWith("worker-result:") ||
           (report.deliveryId.startsWith("worker-report:") && source?.role === "worker");
         try {
+          const target = this.options.getSessionTarget(report.toAgentId);
+          if (!target || !await claimRecoveryDelivery(target, report.deliveryId)) continue;
           if (isWorkerResult && source?.role === "worker") {
             if (
               report.assignmentId &&
@@ -278,7 +242,7 @@ export class RestartRecoveryCoordinator {
   }
 
   private async resolvePendingReportMessages(
-    snapshot: RestartRecoverySnapshot,
+    snapshot: RecoverySnapshot,
   ): Promise<Map<string, string>> {
     const wantedIds = new Set(
       snapshot.undeliveredReports.map((report) => report.deliveryId),
@@ -292,15 +256,12 @@ export class RestartRecoveryCoordinator {
     for (const sessionId of sessionIds) {
       const target = this.options.getSessionTarget(sessionId);
       if (!target) continue;
-      const replay = await replayTurnLedger(target).catch(() => null);
+      const replay = await readRecoveryState(target).catch(() => null);
       if (!replay) continue;
-      for (const record of replay.records) {
-        if (
-          record.t === "delivery_pending" &&
-          wantedIds.has(record.deliveryId) &&
-          record.message
-        ) {
-          messages.set(record.deliveryId, record.message);
+      for (const record of replay.pendingDeliveries.values()) {
+        if (wantedIds.has(record.deliveryId) && record.contentRef && record.state === "pending") {
+          const message = await readRecoveryContent(record.contentRef).catch(() => undefined);
+          if (message) messages.set(record.deliveryId, message);
         }
       }
     }
@@ -312,7 +273,7 @@ export class RestartRecoveryCoordinator {
     if (!target) {
       return;
     }
-    await appendTurnLedgerRecord(target, {
+    await recordRecoveryFact(target, {
       t: "delivery_acked",
       deliveryId: report.deliveryId,
       at: this.options.now(),
@@ -339,7 +300,7 @@ function formatLegacyRecoveredWorkerResult(workerAgentId: string, message: strin
   ].join("\n");
 }
 
-function cloneSnapshot(snapshot: RestartRecoverySnapshot): RestartRecoverySnapshot {
+function cloneSnapshot(snapshot: RecoverySnapshot): RecoverySnapshot {
   return {
     ...snapshot,
     interruptedManagers: [...snapshot.interruptedManagers],

@@ -160,7 +160,7 @@ export async function seedUiEnvironment(environment: EnvironmentFixture, session
   const sessionId = `project-${commandId}`;
   const rpc = await openFixtureRpc(environment.baseUrl, session);
   let exists = false;
-  try { await rpc.call('shell.subscribe', {}); const snapshot = await until(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean); exists = snapshot.projects.some((project: any) => project.projectId === sessionId); }
+  try { await rpc.call('shell.subscribe', {}); const snapshot = await until<{ projects: { projectId: string }[] }>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean); exists = snapshot.projects.some((project: any) => project.projectId === sessionId); }
   finally { rpc.close(); }
   if (exists) return { environmentId: session.environmentId, label: session.label ?? environment.name, baseUrl: environment.baseUrl, projectTitle: title, sessionId };
   const receipt = await fixtureRpcOnce(environment.baseUrl, session, 'project.create', { commandId, title, cwd: environment.checkout, model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' }, secureSessionsEnabled: false });

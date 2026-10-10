@@ -23,7 +23,7 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
     return ids.every(id => !this.getFacadeServices().runtime.runtimes.has(id) && !this.getFacadeServices().runtime.controller.isRuntimeShutdownQuarantined(id));
   }
 
-  setControlledRecoveryPolicy(policy: (sessionId: string) => boolean): void {
+  setControlledRecoveryPolicy(policy: (sessionId: string, activity?: "turn" | "worker" | "delivery") => boolean): void {
     this.getFacadeServices().recovery.setControlledRecoveryPolicy(policy);
   }
 

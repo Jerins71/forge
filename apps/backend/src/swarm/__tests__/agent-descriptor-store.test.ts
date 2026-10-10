@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { makeTempConfig } from "../../test-support/index.js";
@@ -43,7 +42,7 @@ describe("AgentDescriptorStore", () => {
       configuredManagerId: config.managerId
     });
     store.replace({ agents: [descriptor(config)], profiles: [] });
-    await writeFile(join(config.paths.dataDir, "missing-parent"), "file blocks mkdir", "utf8");
+    store.setPersistence({ load: async () => ({ agents: [], profiles: [] }), save: async () => { throw new Error("DB failure"); } });
 
     await expect(store.transaction(() => {
       store.patchDescriptor("manager", { displayName: "Changed" });
@@ -64,7 +63,7 @@ describe("AgentDescriptorStore", () => {
       profiles: new Map<string, ManagerProfile>([["manager", profile(config)]])
     };
     const onSaveError = vi.fn();
-    await writeFile(join(config.paths.dataDir, "missing-parent"), "file blocks mkdir", "utf8");
+    store.setPersistence({ load: async () => ({ agents: [], profiles: [] }), save: async () => { throw new Error("DB failure"); } });
 
     await expect(store.transactionWithLiveMaps(
       liveMaps,

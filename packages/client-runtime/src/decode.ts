@@ -8,12 +8,14 @@ import {
 } from '@forge/protocol/environment-v2'
 import { EnvironmentRuntimeError } from './errors.js'
 const shellTypes = new Set([
+  'recovery.upsert',
   'project.upsert',
   'project.remove',
   'session.upsert',
   'session.remove',
 ])
 const detailTypes = new Set([
+  'plan.upsert', 'goal.upsert', 'recovery.upsert',
   'item.upsert',
   'worker.upsert',
   'worker.remove',

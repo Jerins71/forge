@@ -15,7 +15,7 @@ import type {
   ConversationMessageEvent,
   MessageSourceContext,
 } from "./types.js";
-import type { TurnLedgerInboundKind } from "./turn-ledger.js";
+import type { RecoveryInboundKind } from "./recovery-state.js";
 
 export type InboundTurnSource =
   | "user_input"
@@ -45,7 +45,7 @@ export interface InboundTurnContextInput<
   codexMcpToolGate?: TCodexGate;
   codexPluginDelegationContext?: TCodexDelegation;
   codexPluginRetryAuthorizationContext?: TCodexRetryAuthorization;
-  skipTurnLedger?: boolean;
+  skipRecoveryTracking?: boolean;
 }
 
 interface QueuedInboundTurnContext<
@@ -123,7 +123,7 @@ export interface TurnDispatchLedgerInput {
   turnId: string;
   agentId: string;
   role: AgentDescriptor["role"];
-  kind: TurnLedgerInboundKind;
+  kind: RecoveryInboundKind;
 }
 
 export interface TurnContextLedgerPort {
@@ -296,18 +296,12 @@ export class TurnContextCoordinator<
       ...(runtimeToken !== undefined ? { runtimeToken } : {}),
     };
 
-    if (!context.skipTurnLedger) {
+    if (!context.skipRecoveryTracking) {
       await this.options.ledger.recordTurnDispatched({
         turnId: queuedContext.turnId,
         agentId,
         role: descriptor.role,
         kind: classifyInboundKind(queuedContext.source),
-      }).catch((error) => {
-        this.options.logDebug("turn_ledger:dispatch:error", {
-          agentId,
-          turnId: queuedContext.turnId,
-          message: error instanceof Error ? error.message : String(error),
-        });
       });
     }
 
@@ -697,7 +691,7 @@ export class TurnContextCoordinator<
   }
 }
 
-function classifyInboundKind(source: InboundTurnSource): TurnLedgerInboundKind {
+function classifyInboundKind(source: InboundTurnSource): RecoveryInboundKind {
   if (source === "user_input") return "user";
   if (source === "project_agent_input") return "project_agent";
   if (source === "worker_result") return "worker_report";

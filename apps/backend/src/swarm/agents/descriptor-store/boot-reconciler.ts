@@ -21,23 +21,8 @@ export class BootReconciler {
 
   async loadAndReconcilePersistedStore(): Promise<AgentsStoreFile> {
     let loaded = await this.options.loadStore();
-    const migrationResult = await migrateDataDirectory(
-      {
-        dataDir: this.options.config.paths.dataDir,
-        agentsStoreFile: this.options.config.paths.agentsStoreFile
-      },
-      loaded.agents,
-      loaded.profiles ?? [],
-      {
-        debug: (message, details) => this.options.logDebug(message, details),
-        info: (message, details) => this.options.logDebug(message, details),
-        warn: (message, details) => this.options.logDebug(message, details)
-      }
-    );
-    loaded = {
-      ...loaded,
-      agents: migrationResult.updatedAgents
-    };
+    const migration = await migrateDataDirectory({ dataDir: this.options.config.paths.dataDir, agentsStoreFile: this.options.config.paths.agentsStoreFile }, loaded.agents, loaded.profiles ?? [], { debug: this.options.logDebug, info: this.options.logDebug, warn: this.options.logDebug });
+    loaded = { ...loaded, agents: migration.updatedAgents };
 
     const workerSidecarPruneResult = prunePersistedWorkerSidecars(loaded, this.options.logDebug);
     loaded = workerSidecarPruneResult.store;
@@ -62,6 +47,7 @@ export class BootReconciler {
       );
     const normalizedContextModeState = this.options.profileReconciler.normalizeContextModeStateOnBoot();
     if (
+      migration.migrated ||
       workerSidecarPruneResult.pruned ||
       normalizedSessionModelState ||
       normalizedDelegationState ||

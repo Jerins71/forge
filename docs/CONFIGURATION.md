@@ -409,6 +409,7 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 │   │   ├── openrouter-models.json         # User-added OpenRouter models plus routingDefaults and per-model routing
 │   │   ├── model-overrides.json           # Model visibility, context caps, instructions
 │   ├── state/
+│   │   ├── environment/control.sqlite      # Descriptor, command, event and private recovery authority
 │   │   ├── secure-sessions.db             # Secure Session metadata and OS-encrypted material
 │   │   ├── builder-sidebar-order.json     # Unified project order
 │   │   ├── compaction-settings.json       # Manager compaction settings
@@ -457,7 +458,7 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 │   ├── specialists/                       # Profile specialist overrides
 │   └── sessions/<sessionId>/
 │       ├── session.jsonl                  # Canonical conversation history
-│       ├── turns.jsonl                    # Rotating fail-open turn ledger
+│       ├── turns.jsonl                    # Historical recovery import evidence (read-only)
 │       ├── receipts.jsonl[.1]             # Current/rotated routing receipts
 │       ├── memory.md                      # Approved durable session memory
 │       ├── task-notes/<actorId>.json       # Independent factual task-note snapshots
@@ -480,7 +481,7 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 │       └── workers/
 │           ├── <workerId>.jsonl
 │           └── cursor-sdk-state/<workerId>/ # Worker Cursor SDK state roots
-├── swarm/agents.json                      # Global profile/agent registry
+├── swarm/agents.json                      # Historical descriptor import source (read-only)
 ├── session-attention.json                 # Server-owned session attention
 ├── extensions/                            # Global Forge extensions
 ├── agent/

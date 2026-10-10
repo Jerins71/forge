@@ -148,6 +148,45 @@ CREATE TABLE IF NOT EXISTS input_artifacts (
   PRIMARY KEY(input_id, artifact_id)
 );
 
+CREATE TABLE IF NOT EXISTS control_turns (
+  session_id TEXT NOT NULL,
+  turn_id TEXT NOT NULL,
+  agent_id TEXT,
+  role TEXT,
+  inbound_kind TEXT,
+  inbound_id TEXT,
+  dispatched_at TEXT,
+  terminal_outcome TEXT,
+  terminal_at TEXT,
+  stalled_tier INTEGER,
+  stalled_at TEXT,
+  recovery_note TEXT,
+  recovery_at TEXT,
+  PRIMARY KEY(session_id, turn_id)
+);
+CREATE TABLE IF NOT EXISTS control_deliveries (
+  session_id TEXT NOT NULL,
+  delivery_id TEXT NOT NULL,
+  turn_id TEXT,
+  from_agent_id TEXT,
+  to_agent_id TEXT,
+  assignment_id TEXT,
+  content_ref_json TEXT,
+  pending_at TEXT,
+  state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','dispatching','acked')),
+  acked_at TEXT,
+  PRIMARY KEY(session_id, delivery_id)
+);
+CREATE TABLE IF NOT EXISTS control_recovery (
+  recovery_id TEXT PRIMARY KEY,
+  snapshot_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS recovery_imports (
+  session_id TEXT PRIMARY KEY,
+  source_records INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS pairing_grants (
   grant_id TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('link','code','bootstrap')),
@@ -195,6 +234,12 @@ export function migrateControlDatabase(database: Database, identity: { environme
         .run(identity.environmentId, identity.streamEpoch);
       const columns: [string, string, string][] = [
         ["environment_meta", "descriptors_imported", "INTEGER NOT NULL DEFAULT 0"],
+        ["environment_meta", "descriptor_version", "INTEGER NOT NULL DEFAULT 0"],
+        ["control_projects", "profile_version", "INTEGER NOT NULL DEFAULT 1"],
+        ["control_sessions", "descriptor_version", "INTEGER NOT NULL DEFAULT 1"],
+        ["control_workers", "descriptor_version", "INTEGER NOT NULL DEFAULT 1"],
+        ["control_turns", "recovery_id", "TEXT"],
+        ["control_recovery", "decision_applied", "INTEGER NOT NULL DEFAULT 0"],
         ["control_projects", "profile_json", "TEXT"], ["control_projects", "deleted", "INTEGER NOT NULL DEFAULT 0"],
         ["control_sessions", "descriptor_json", "TEXT"], ["control_sessions", "deleted", "INTEGER NOT NULL DEFAULT 0"],
         ["control_workers", "descriptor_json", "TEXT"], ["control_workers", "deleted", "INTEGER NOT NULL DEFAULT 0"],
@@ -204,7 +249,8 @@ export function migrateControlDatabase(database: Database, identity: { environme
         if (!known.some(field => field.name === column)) database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
       }
       const meta = database.prepare("SELECT schema_version FROM environment_meta WHERE singleton = 1").get() as { schema_version: number };
-      if (meta.schema_version !== 1) throw new Error("Unsupported environment control schema version");
+      if (![1, 2].includes(meta.schema_version)) throw new Error("Unsupported environment control schema version");
+      database.prepare("UPDATE environment_meta SET schema_version=2 WHERE singleton=1").run();
     })
     .immediate();
 }

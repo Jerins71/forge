@@ -2,7 +2,7 @@ import type {
   DetailStreamItem,
   UnknownStreamItem,
 } from '@forge/protocol/environment-v2'
-import type { DetailState } from './detail-store.js'
+import type { DetailState, DetailTransientEvent } from './detail-store.js'
 import { KeyedSelectorStore } from './selector-store.js'
 import type { EnvironmentSupervisor } from '../connection/supervisor.js'
 import type { RuntimePorts } from '../ports.js'
@@ -90,7 +90,7 @@ export class DetailCache {
       transient: new Map(),
     })
     let pending: Array<DetailStreamItem | UnknownStreamItem> = []
-    const transientBatch = new Map<string, unknown>()
+    const transientBatch = new Map<string, DetailTransientEvent>()
     const apply = () => {
       entry.cancelBatch?.()
       entry.cancelBatch = undefined
@@ -134,6 +134,9 @@ export class DetailCache {
         const event = item.event,
           projection = state.projection
         switch (event.type) {
+          case 'plan.upsert': state = { ...state, projection: { ...projection, plan: event.snapshot } }; break
+          case 'goal.upsert': state = { ...state, projection: { ...projection, goal: event.snapshot } }; break
+          case 'recovery.upsert': state = { ...state, projection: { ...projection, recovery: event.recovery } }; break
           case 'session.upsert':
             state = {
               ...state,
@@ -274,6 +277,21 @@ export class DetailCache {
         },
       },
     )
+    const features = this.supervisor.subscribe(
+      'session.features.subscribe', () => ({ sessionId }), {
+        next: ({ event }) => {
+          if (!entry.refs) return
+          const key = event.type === 'elicitation.request' ? `elicitation:${event.request.elicitationId}`
+            : event.type === 'elicitation.dismissed' ? `elicitation:${event.elicitationId}`
+            : event.type === 'terminal.upsert' ? `terminal:${event.terminal.terminalId}`
+            : event.type === 'terminal.closed' ? `terminal:${event.terminalId}`
+            : event.type === 'throughput.upsert' ? `throughput:${event.measurement.agentId}`
+            : event.type === 'secure.upsert' ? `secure:${event.snapshot.sessionAgentId}` : event.type
+          transientBatch.set(key, event)
+          if (!entry.cancelBatch) entry.cancelBatch = this.ports.scheduleBatch?.(flush) ?? schedule(flush)
+        }, error: () => {},
+      },
+    )
     const legacy = this.supervisor.subscribe(
       'legacy.session.subscribe',
       () => ({ sessionId }),
@@ -290,7 +308,7 @@ export class DetailCache {
               sessionId,
             (payload.terminal as { terminalId?: string } | undefined)?.terminalId ?? payload.terminalId ?? payload.toolCallId ?? payload.requestId ?? '',
           ])
-          transientBatch.set(key, { ...payload, type: item.type })
+          transientBatch.set(key, { ...payload, type: item.type } as DetailTransientEvent)
           if (!entry.cancelBatch)
             entry.cancelBatch =
               this.ports.scheduleBatch?.(flush) ?? schedule(flush)
@@ -300,6 +318,7 @@ export class DetailCache {
     )
     entry.release = () => {
       durable()
+      features()
       legacy()
       pending = []
       transientBatch.clear()

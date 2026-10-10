@@ -347,7 +347,7 @@ it("restart recovery dismissal cannot alter the work graph across accepted input
   const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady(); const { core } = await makeCore(f);
   const principal = { deviceSessionId: "dismiss-device", scopes: new Set(["session:operate"] as const) };
   f.database.prepare("INSERT INTO device_sessions (device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES ('dismiss-device','fixture-token','fixture-proof','Fixture','cli','[]',0,0,?)").run(Date.now() + 86_400_000);
-  const snapshot = vi.spyOn(f.manager, "getRestartRecoverySnapshot").mockReturnValue({ bootId: "boot", createdAt: new Date().toISOString(), interruptedManagers: [f.sessionId], interruptedWorkers: [], undeliveredReports: [] });
+  const snapshot = vi.spyOn(f.manager, "getRestartRecoverySnapshot").mockReturnValue({ recoveryId: "boot", bootId: "boot", createdAt: new Date().toISOString(), interruptedManagers: [f.sessionId], interruptedWorkers: [], undeliveredReports: [] });
   const handler = new WsHandler({ swarmManager: f.manager, mobilePushService: {} as never, allowNonManagerSubscriptions: true,
     perf: { recordDuration: () => {}, increment: () => {}, readSummary: () => ({ histograms: {}, counters: {} }), readRecentSlowEvents: () => [] } });
   const access = { authorize: () => {} } as never; handler.setEnvironmentControl({ access, control: core.controlService });
