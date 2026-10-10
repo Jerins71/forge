@@ -1,5 +1,6 @@
 import {
   EnvironmentDescriptorSchema,
+  decodeEnvironmentValue,
   ENVIRONMENT_PROTOCOL_VERSION,
   ENVIRONMENT_PROTOCOL_HEADER,
   DeviceSessionSchema,
@@ -7,7 +8,6 @@ import {
   type EnvironmentDescriptor,
   type DeviceSession,
 } from '@forge/protocol/environment-v2'
-import { Value } from '@sinclair/typebox/value'
 import type { EnvironmentCatalogEntry } from '../types.js'
 import type { RuntimePorts, Credential } from '../ports.js'
 import { EnvironmentRuntimeError } from '../errors.js'
@@ -65,8 +65,11 @@ export class AuthenticatedHttp {
         'Environment is unavailable',
         true,
       )
-    const value = await r.json()
-    if (!Value.Check(EnvironmentDescriptorSchema, value))
+    const value = decodeEnvironmentValue(
+      EnvironmentDescriptorSchema,
+      await r.json(),
+    )
+    if (!value)
       throw new EnvironmentRuntimeError(
         'PROTOCOL_MISMATCH',
         'Invalid environment descriptor',
@@ -177,12 +180,16 @@ export class AuthenticatedHttp {
           '/api/v2/access/session',
           { signal },
         )
-    if (!Value.Check(DeviceSessionSchema, session.deviceSession))
+    const deviceSession = decodeEnvironmentValue(
+      DeviceSessionSchema,
+      session.deviceSession,
+    )
+    if (!deviceSession)
       throw new EnvironmentRuntimeError(
         'PROTOCOL_MISMATCH',
         'Invalid device session',
       )
-    if (session.deviceSession.revokedAt)
+    if (deviceSession.revokedAt)
       throw new EnvironmentRuntimeError(
         'UNAUTHENTICATED',
         'Device revoked',
@@ -191,7 +198,7 @@ export class AuthenticatedHttp {
         'revoked',
       )
     if (
-      Date.parse(session.deviceSession.expiresAt) <
+      Date.parse(deviceSession.expiresAt) <
       (this.ports.now?.() ?? Date.now())
     )
       throw new EnvironmentRuntimeError(
@@ -201,11 +208,11 @@ export class AuthenticatedHttp {
         undefined,
         'expired',
       )
-    this.deviceSession = session.deviceSession
+    this.deviceSession = deviceSession
     this.credential = {
       ...this.credential,
-      deviceSessionId: session.deviceSession.deviceSessionId,
-      expiresAt: session.deviceSession.expiresAt,
+      deviceSessionId: deviceSession.deviceSessionId,
+      expiresAt: deviceSession.expiresAt,
       csrfToken: session.csrfToken ?? this.credential?.csrfToken,
     }
     await this.ports.credentials.store(
@@ -216,7 +223,7 @@ export class AuthenticatedHttp {
     return descriptor
   }
   async ticket(signal?: AbortSignal): Promise<string> {
-    const result = this.ports.platform
+    const received = this.ports.platform
       ? await this.ports.platform.wsTicket(this.entry, signal)
       : await this.json<{ ticket: string; expiresAt: string }>(
           '/api/v2/access/ws-ticket',
@@ -230,7 +237,10 @@ export class AuthenticatedHttp {
             signal,
           },
         )
-    if (!this.ports.platform && !Value.Check(WsTicketSchema, result))
+    const result = this.ports.platform
+      ? received
+      : decodeEnvironmentValue(WsTicketSchema, received)
+    if (!result)
       throw new EnvironmentRuntimeError(
         'PROTOCOL_MISMATCH',
         'Invalid socket ticket',

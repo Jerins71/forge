@@ -1,8 +1,8 @@
 import { validateLegacySessionEvent } from '@forge/protocol'
 export { legacySessionEventAllowlist } from '@forge/protocol'
-import { Value } from '@sinclair/typebox/value'
 import {
   rpcRegistry,
+  decodeEnvironmentValue,
   type StreamMethod,
   type UnknownStreamItem,
 } from '@forge/protocol/environment-v2'
@@ -42,14 +42,13 @@ export function decodeStreamItem(
         !known.has(value.event.type)
       ) {
         if (
-          Object.keys(value).length !== 4 ||
           typeof value.streamEpoch !== 'string' ||
           !/^[0-9a-f-]{36}$/.test(value.streamEpoch) ||
           !Number.isSafeInteger(value.sequence) ||
           (value.sequence as number) < 0
         )
           throw new EnvironmentRuntimeError(
-            'RESYNC_REQUIRED',
+            'PROTOCOL_MISMATCH',
             'Invalid unknown event envelope',
           )
         return {
@@ -62,15 +61,16 @@ export function decodeStreamItem(
     }
   }
   const schema = rpcRegistry[method].stream
-  if (!schema || !Value.Check(schema, item))
-    throw new EnvironmentRuntimeError('RESYNC_REQUIRED', 'Invalid stream item')
+  const decoded = schema && decodeEnvironmentValue(schema, item)
+  if (decoded === undefined)
+    throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Invalid stream item')
   if (method === 'legacy.session.subscribe')
     validateLegacyEvent(
-      (item as { type: string; payload: unknown }).type,
-      (item as { payload: unknown }).payload,
+      (decoded as { type: string; payload: unknown }).type,
+      (decoded as { payload: unknown }).payload,
       sessionId,
     )
-  return item
+  return decoded
 }
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 
@@ -88,7 +88,7 @@ export function validateLegacyEvent(
     )
   )
     throw new EnvironmentRuntimeError(
-      'RESYNC_REQUIRED',
+      'PROTOCOL_MISMATCH',
       'Invalid compatibility event',
     )
 }

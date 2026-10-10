@@ -1,12 +1,11 @@
-import { Value } from '@sinclair/typebox/value'
 import {
   EnvironmentDescriptorSchema,
+  decodeEnvironmentValue,
   PairingChallengeSchema,
   PairingExchangeResultSchema,
   ENVIRONMENT_PROTOCOL_VERSION,
   type PairingExchange,
   type PairingExchangeResult,
-  type EnvironmentDescriptor,
 } from '@forge/protocol/environment-v2'
 import type { PairingInput } from './types.js'
 import type { RuntimePorts } from './ports.js'
@@ -49,11 +48,11 @@ export async function pairEnvironment(
     `${baseUrl}/api/v2/environment`,
     { redirect: 'error', credentials: 'omit', cache: 'no-store' },
   )
-  const descriptor = (await descriptorResponse.json()) as EnvironmentDescriptor
-  if (
-    !descriptorResponse.ok ||
-    !Value.Check(EnvironmentDescriptorSchema, descriptor)
+  const descriptor = decodeEnvironmentValue(
+    EnvironmentDescriptorSchema,
+    await descriptorResponse.json(),
   )
+  if (!descriptorResponse.ok || !descriptor)
     throw new EnvironmentRuntimeError(
       'UNAVAILABLE',
       'Environment is unavailable',
@@ -73,13 +72,16 @@ export async function pairEnvironment(
       'Environment identity changed',
     )
   if (ports.platform) {
-    const result = await ports.platform.pair({
-      ...input,
-      baseUrl,
-      expectedEnvironmentId: descriptor.environmentId,
-    })
+    const result = decodeEnvironmentValue(
+      PairingExchangeResultSchema,
+      await ports.platform.pair({
+        ...input,
+        baseUrl,
+        expectedEnvironmentId: descriptor.environmentId,
+      }),
+    )
     if (
-      !Value.Check(PairingExchangeResultSchema, result) ||
+      !result ||
       result.environment.environmentId !== descriptor.environmentId ||
       result.environment.protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION
     )
@@ -109,8 +111,11 @@ export async function pairEnvironment(
       credentials: 'omit',
     },
   )
-  const challenge = await challengeResponse.json()
-  if (!challengeResponse.ok || !Value.Check(PairingChallengeSchema, challenge))
+  const challenge = decodeEnvironmentValue(
+    PairingChallengeSchema,
+    await challengeResponse.json(),
+  )
+  if (!challengeResponse.ok || !challenge)
     throw new EnvironmentRuntimeError('UNAUTHENTICATED', 'Pairing failed')
   const key = await c.subtle.generateKey(
     { name: 'ECDSA', namedCurve: 'P-256' },
@@ -157,11 +162,11 @@ export async function pairEnvironment(
       'Pairing credential is invalid, expired or already used',
       true,
     )
-  const result = await exchange.json()
-  if (
-    !Value.Check(PairingExchangeResultSchema, result) ||
-    result.environment.environmentId !== descriptor.environmentId
+  const result = decodeEnvironmentValue(
+    PairingExchangeResultSchema,
+    await exchange.json(),
   )
+  if (!result || result.environment.environmentId !== descriptor.environmentId)
     throw new EnvironmentRuntimeError(
       'IDENTITY_MISMATCH',
       'Pairing identity differs',

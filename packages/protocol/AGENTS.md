@@ -11,9 +11,14 @@ package barrel. Preserve the root-barrel contract when moving or splitting modul
 
 ## Compatibility
 
-- Additive fields may remain within a protocol version when older consumers can safely ignore them.
-- Removing fields, repurposing their meaning, or changing required behavior needs an explicit protocol
-  compatibility decision and may require a version bump.
+- Within one V2 `protocolVersion`, clients ignore unknown properties in received data, including
+  nested objects, descriptors, pairing/session responses, RPC results, streams, and restored data caches.
+  Use `decodeEnvironmentValue`; keep outbound schemas strict so producers emit only declared fields.
+- Backend RPC/command inputs remain strict: reject unknown request fields rather than silently discard
+  unsupported intent. Clients must gate new request options on a capability or `protocolVersion`.
+- Additive optional response fields preserve defaults and absence behavior. Breaking changes (removing
+  fields, changing their meaning/type, or required behavior) require a `protocolVersion` bump.
+  Descriptor or known-data mismatches block the environment with “Update required” instead of retrying.
 - Optional does not mean semantically unimportant. Preserve defaults and absence behavior across
   serializers, parsers, persisted history, and bootstrap/replay paths.
 - Request identifiers used for optimistic reconciliation are not automatically exactly-once or

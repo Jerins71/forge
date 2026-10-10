@@ -422,6 +422,28 @@ test('unknown environment deep link shows a pairing state and does not open the 
   assertions.unknownEnvironment = { localFallback: false }
 })
 
+test('incompatible protocol shows Update required for one environment and recovers after update', async ({ page }) => {
+  const { a, b } = fleet!
+  const endpoint = `${b.baseUrl}/api/v2/environment`
+  await page.route(endpoint, async route => {
+    const response = await route.fetch()
+    const descriptor = await response.json()
+    await route.fulfill({ response, json: { ...descriptor, protocolVersion: 2, futureField: 'v-next' } })
+  })
+  try {
+    await openEnvironmentsSettings(page)
+    await expect(environmentRow(page, b)).toHaveAttribute('data-environment-status', 'update-required')
+    await expect(environmentRow(page, b)).toContainText('Update required')
+    await expect(environmentRow(page, a)).toHaveAttribute('data-environment-status', 'online')
+    await shot(page, 'update-required-environment')
+    assertions.protocolMismatch = { environmentId: b.environmentId, label: 'Update required', othersOnline: true }
+  } finally {
+    await page.unroute(endpoint)
+    await openEnvironmentsSettings(page)
+    await expect(environmentRow(page, b)).toHaveAttribute('data-environment-status', 'online')
+  }
+})
+
 test('9.2.9 revoking this device on C shows Revoked and leaves A/B online', async ({ page }) => {
   const { a, b, c } = fleet!
   await openEnvironmentsSettings(page)

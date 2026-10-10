@@ -8,6 +8,8 @@ import {
   type EnvironmentRegistry,
   type RuntimePorts,
 } from '../index.js'
+import { pairEnvironment } from '../pairing.js'
+import { decodeStreamItem } from '../decode.js'
 import { startFixtureServer, until } from './fixture-server.js'
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -38,7 +40,144 @@ async function online(registry: EnvironmentRegistry, id: string) {
     () => registry.get(id).connection.getSnapshot().phase === 'online',
   )
 }
+function withFutureProperties(value: unknown): any {
+  if (Array.isArray(value)) return value.map(withFutureProperties)
+  if (value && typeof value === 'object')
+    return { ...Object.fromEntries(Object.entries(value).map(([key, item]) => [key, withFutureProperties(item)])), futureField: 'v-next' }
+  return value
+}
 describe('environment runtime acceptance', () => {
+  it('connects to a newer server with additive descriptor, authentication and ticket fields', async () => {
+    const { servers: [s], registry } = await fleet()
+    s.transformOutbound = withFutureProperties
+    await registry.start()
+    await online(registry, s.seed.entry.environmentId)
+    const client = registry.get(s.seed.entry.environmentId)
+    expect(await client.request('environment.get', {})).toEqual(s.seed.descriptor)
+    await expect(client.request('command.get', { commandId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(client.descriptor()).toEqual(s.seed.descriptor)
+    expect(client.deviceSession()).not.toHaveProperty('futureField')
+  })
+  it('decodes newer-server RPC, shell/detail snapshots and live events and restores cached detail', async () => {
+    const { servers: [s], registry } = await fleet()
+    s.transformOutbound = value => (value as { type?: string })?.type ? withFutureProperties(value) : value
+    await registry.start()
+    await online(registry, s.seed.entry.environmentId)
+    const client = registry.get(s.seed.entry.environmentId)
+    expect(client.shell.getSnapshot().projects.get('forge')).toEqual(s.seed.shell!.projects[0])
+    expect(await client.request('environment.get', {})).toEqual(s.seed.descriptor)
+    const detail = client.acquireDetail('session-1')
+    await until(() => detail.store.getSnapshot().freshness === 'live')
+    expect(detail.store.getSnapshot().projection).toEqual(s.seed.details!['session-1'])
+    s.emit({ kind: 'event', streamEpoch: s.seed.descriptor.streamEpoch, sequence: 2,
+      event: { type: 'session.upsert', session: { ...s.seed.shell!.sessions[0], title: 'New build' } } })
+    s.emit({ kind: 'event', streamEpoch: s.seed.descriptor.streamEpoch, sequence: 2,
+      event: { type: 'session.upsert', session: { ...s.seed.shell!.sessions[0], title: 'New detail' } } }, 'session.subscribe')
+    await until(() => client.shell.getSnapshot().sessions.get('session-1')?.title === 'New build')
+    await until(() => detail.store.getSnapshot().projection?.session.title === 'New detail')
+    expect(client.shell.getSnapshot().sessions.get('session-1')).not.toHaveProperty('futureField')
+    detail.release()
+    const restored = client.acquireDetail('session-1')
+    expect(restored.store.getSnapshot().projection?.session.title).toBe('New detail')
+    expect(restored.store.getSnapshot().projection?.session.workspace).not.toHaveProperty('futureField')
+    restored.release()
+    s.emit({ kind: 'event', streamEpoch: s.seed.descriptor.streamEpoch, sequence: 3,
+      event: { type: 'optional.telemetry', value: 1 } })
+    await until(() => client.shell.getSnapshot().cursor?.afterSequence === 3)
+  })
+  it('restores a newer-build shell cache offline after persistence write/read and runtime restart', async () => {
+    const { servers: [s], registry, persistence } = await fleet()
+    await registry.start()
+    await online(registry, s.seed.entry.environmentId)
+    await registry.dispose()
+    const cached = (await persistence.loadShell(s.seed.entry.environmentId))!
+    await persistence.saveShell(withFutureProperties(cached))
+    const second = createEnvironmentRegistry({ persistence, credentials: createMemoryCredentialStore(),
+      fetch: async () => { throw new Error('Offline') }, webSocket: (url, p) => new WebSocket(url, p),
+      connectivity: { online: () => false, subscribe: () => () => {} } })
+    cleanups.push(() => second.dispose())
+    await second.start()
+    const shell = second.get(s.seed.entry.environmentId).shell.getSnapshot()
+    expect([...shell.projects.values()]).toEqual(cached.projects)
+    expect([...shell.sessions.values()]).toEqual(cached.sessions)
+    expect(shell.cursor).toEqual(cached.cursor)
+    expect((await persistence.loadShell(s.seed.entry.environmentId))!.projects[0]).toHaveProperty('futureField')
+  })
+  it('does not replay restored commands with unsupported request options', async () => {
+    let persistedPending: readonly unknown[] | undefined
+    const persistence = createMemoryPersistence()
+    const input = { commandId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', sessionId: 'session-1', message: { text: 'Restored', artifactIds: [] } }
+    const { servers: [s], registry } = await fleet(1, { persistence: { ...persistence,
+      loadPending: async id => [withFutureProperties({ method: 'session.send', input, credentialRef: null, deviceSessionId: id })],
+      savePending: async (_id, commands) => { persistedPending = commands } } })
+    await registry.start()
+    await online(registry, s.seed.entry.environmentId)
+    await until(() => persistedPending !== undefined)
+    expect(persistedPending).toEqual([])
+    expect(s.inputs.filter(call => call.method === 'session.send' || call.method === 'command.get')).toEqual([])
+  })
+  it('cleans newer-server artifact responses and platform pairing results', async () => {
+    const artifact = { artifactId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', fileName: 'fixture.txt', mimeType: 'text/plain', sizeBytes: 1 }
+    const { servers: [s], registry } = await fleet(1, { fetch: async (url, init) =>
+      url.includes('/api/v2/artifacts?') ? Response.json(withFutureProperties(artifact)) : fetch(url, init) })
+    await registry.start()
+    await online(registry, s.seed.entry.environmentId)
+    const client = registry.get(s.seed.entry.environmentId)
+    expect(await client.uploadArtifact({ projectId: 'forge', uploadId: artifact.artifactId, fileName: artifact.fileName,
+      mimeType: artifact.mimeType, body: new Uint8Array([1]) })).toEqual(artifact)
+    const result = { environment: s.seed.descriptor, deviceSession: client.deviceSession()! }
+    const paired = await pairEnvironment({ persistence: createMemoryPersistence(), credentials: createMemoryCredentialStore(),
+      fetch: (url, init) => fetch(url, init), webSocket: (url, p) => new WebSocket(url, p), platform: {
+        pair: async () => withFutureProperties(result), session: async () => ({ deviceSession: result.deviceSession }),
+        wsTicket: async () => ({ ticket: 't'.repeat(43) }), request: async () => Response.json({}),
+        requestBinary: async () => new Response(), remove: async () => {} } },
+      { baseUrl: s.seed.entry.baseUrl, expectedEnvironmentId: s.seed.entry.environmentId,
+        deviceName: 'fixture', deviceKind: 'desktop', delivery: 'bearer', requestedScopes: ['session:read'],
+        credential: { kind: 'code', code: 'FIXTURE-CODE' } })
+    expect(paired).toEqual(result)
+  })
+  it.each(['rpc-error', 'stream-error', 'page-result'])('blocks incompatible %s without resubscription or backoff', async boundary => {
+    const { servers: [s], registry } = await fleet()
+    const mismatch = { code: 'PROTOCOL_MISMATCH', message: 'Update required', retryable: false, futureField: 'v-next' }
+    if (boundary === 'page-result') {
+      s.pages = true
+      s.transformOutbound = value => {
+        const frame = value as any
+        return frame.type === 'result' && frame.output?.snapshot
+          ? { ...frame, output: { ...frame.output, snapshot: { ...frame.output.snapshot, sessions: [{ ...s.seed.shell!.sessions[0], status: 'future-status' }] } } }
+          : value
+      }
+    }
+    await registry.start()
+    const client = registry.get(s.seed.entry.environmentId)
+    if (boundary !== 'page-result') {
+      await online(registry, s.seed.entry.environmentId)
+      if (boundary === 'rpc-error') {
+        s.transformOutbound = value => {
+          const frame = value as any
+          return frame.type === 'result' ? { type: 'error', requestId: frame.requestId, error: mismatch } : value
+        }
+        await expect(client.request('environment.get', {})).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
+      } else {
+        s.transformOutbound = value => {
+          const frame = value as any
+          return frame.type === 'stream' ? { type: 'stream.error', subscriptionId: frame.subscriptionId, error: mismatch } : value
+        }
+        s.emit({ kind: 'synchronized', streamEpoch: s.seed.descriptor.streamEpoch, sequence: 1 })
+      }
+    }
+    await until(() => client.connection.getSnapshot().phase === 'version-blocked')
+    expect(client.connection.getSnapshot()).toMatchObject({ nextRetryAt: null, blockedCause: 'protocol-mismatch' })
+    expect(s.inputs.filter(call => call.method === 'shell.subscribe')).toHaveLength(1)
+  })
+  it('still rejects malformed known fields and invalid discriminators despite additive fields', () => {
+    const epoch = '00000000-0000-4000-8000-000000000001'
+    for (const item of [
+      { kind: 'event', streamEpoch: epoch, sequence: 1, event: { type: 'session.upsert', session: {} } },
+      { kind: 'synchronized', streamEpoch: epoch, sequence: -1 },
+      { kind: 'future-kind', streamEpoch: epoch, sequence: 1 },
+    ]) expect(() => decodeStreamItem('shell.subscribe', withFutureProperties(item))).toThrow()
+  })
   it('owns exactly eight sockets, independent auth block/retry, keyed selector isolation and disable', async () => {
     const { servers, registry } = await fleet(8)
     servers[1].authBlocked = true
@@ -339,7 +478,7 @@ describe('environment runtime acceptance', () => {
     expect(s.connections).toBe(2)
     expect(s.inputs.length).toBe(before)
   })
-  it('advances optional unknown events, resyncs malformed known events, and rejects foreign targets', async () => {
+  it('advances optional unknown events, blocks incompatible known events, and rejects foreign targets', async () => {
     const {
       servers: [s],
       registry,
@@ -361,11 +500,10 @@ describe('environment runtime acceptance', () => {
       event: { type: 'session.upsert', session: {} },
     })
     await until(
-      () => s.inputs.filter((x) => x.method === 'shell.subscribe').length > 1,
+      () => client.connection.getSnapshot().phase === 'version-blocked',
     )
-    expect(client.shell.getSnapshot().sessions.get('session-1')?.title).toBe(
-      'Builder',
-    )
+    expect(client.connection.getSnapshot()).toMatchObject({ phase: 'version-blocked', nextRetryAt: null, blockedCause: 'protocol-mismatch' })
+    expect(s.inputs.filter(x => x.method === 'shell.subscribe')).toHaveLength(1)
     await expect(
       registry.mergeProjects('foreign', [
         { environmentId: 'missing', projectId: 'forge' },
