@@ -31,11 +31,7 @@ export async function pairTestAccess(access: ReturnType<typeof createEnvironment
   const result = await access.exchange({ ...input, proof: sign('sha256', Buffer.from(pairingProofMessage(input, digest)), { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url') }, null);
   const principal = { deviceSessionId: result.deviceSession.deviceSessionId, scopes: new Set(result.deviceSession.scopes) };
   return { principal, headers: { Authorization: `Bearer ${result.bearerToken!}` },
-    protocols: async (audience: 'legacy' | 'rpc' = 'legacy') => ['forge.v2', `ticket.${(await access.issueWsTicket(principal, { audience, protocolVersion: 1 }, null)).ticket}`],
-    bind: async (handler: import('../ws/ws-handler.js').WsHandler, socket: import('ws').WebSocket) => {
-      const ticket = await access.issueWsTicket(principal, { audience: 'legacy', protocolVersion: 1 }, null);
-      handler.bindPrincipal(socket, await access.consumeWsTicket({ ticket: ticket.ticket, audience: 'legacy', origin: null, protocolVersion: 1 }));
-    },
+    protocols: async (audience: 'rpc' = 'rpc') => ['forge.v2', `ticket.${(await access.issueWsTicket(principal, { audience, protocolVersion: 2 }, null)).ticket}`],
   };
 }
 /** Pair through the public exchange after a private parent-owned bootstrap grant. */
@@ -56,8 +52,8 @@ export async function pairTestServer(server: import('../server.js').StartedServe
   if (!exchanged.ok) throw new Error('Server fixture pairing denied');
   const result = await exchanged.json() as import('@forge/protocol/environment-v2').PairingExchangeResult;
   const headers = { Authorization: `Bearer ${result.bearerToken!}` };
-  return { headers, protocols: async (audience: 'legacy' | 'rpc' = 'legacy') => {
-    const response = await fetch(`${baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ audience, protocolVersion: 1 }) });
+  return { headers, protocols: async (audience: 'rpc' = 'rpc') => {
+    const response = await fetch(`${baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ audience, protocolVersion: 2 }) });
     if (!response.ok) throw new Error('Server fixture ticket denied');
     return ['forge.v2', `ticket.${(await response.json() as { ticket: string }).ticket}`];
   } };
@@ -101,7 +97,6 @@ export async function createAuthOnlyTestEnvironment(host: string, port: number):
   const { createEventSink } = await import('../environment/control/event-sink.js');
   const { createShellStream } = await import('../environment/streams/shell-stream.js');
   const { createDetailStream } = await import('../environment/streams/detail-stream.js');
-  const { createLegacyBuilderAdapter } = await import('../ws/rpc/legacy-builder-adapter.js');
   const { createEnvironmentRpcServer } = await import('../ws/rpc/rpc-server.js');
   migrateControlDatabase(database, { environmentId: identity.environmentId, streamEpoch: identity.file.streamEpoch });
   applyAccessMigrations(database);
@@ -114,12 +109,12 @@ export async function createAuthOnlyTestEnvironment(host: string, port: number):
   const environment: import('../environment/environment-service.js').EnvironmentService = {
     database, access, control, exposure, descriptor: identity.descriptor, routes: access.routes,
     initialize: async () => {}, start: () => {},
-    composeTransport(wsHandler) {
-      wsHandler.setEnvironmentControl({ access, control });
+    composeTransport(sessionFeatures) {
+      sessionFeatures.setEnvironmentControl({ access, control });
       const deps = { database, subscribeCommitted: eventSink.subscribe, getDescriptor: identity.descriptor };
       const terminalTransport = { issueTicket: unavailable, attach: unavailable, input: async () => unavailable(), resize: async () => unavailable(), closeDevice: async () => {} };
       rpc = createEnvironmentRpcServer({ access, control, shellStream: createShellStream(deps), detailStream: createDetailStream(deps),
-        legacyAdapter: createLegacyBuilderAdapter({ access, ports: wsHandler.legacyPorts() }), browserHost: wsHandler.browserHost, terminalTransport });
+        browserHost: sessionFeatures.browserHost, terminalTransport });
       return { rpc, terminalTransport };
     },
     async stop() { await rpc?.stop(); access.dispose(); eventSink.close(); if (database.open) database.close(); },

@@ -56,6 +56,6 @@ describe('typed detail consumers', () => {
     facade.controlSessionGoal('session-1', { action: 'pause' })
     facade.dismissRestartRecovery()
     await until(() => server.inputs.some(e => e.method === 'session.goal.control') && server.inputs.some(e => e.method === 'recovery.decide'))
-    expect(server.inputs.filter(e => e.method.startsWith('legacy.') && e.method !== 'legacy.session.subscribe')).toHaveLength(0)
+    expect(server.inputs.filter(e => e.method.startsWith('legacy.'))).toHaveLength(0)
   })
 })

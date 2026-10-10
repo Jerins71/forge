@@ -48,7 +48,7 @@ Pairing pins the environment UUID and stores a revocable device bearer in the OS
 
 CLI keys remain supported for the retained `/api/cli/*` HTTP read routes. They are separate from provider credentials and are managed in **Settings → CLI Access**. Settings-generated keys are stored hash-only by the backend and can be revoked or rotated. `forge config set apiKey <key>` stores plaintext local configuration; prefer `FORGE_CLI_API_KEY` or `--api-key` for reads.
 
-External old CLI and API-key clients may exist. At final V2 cutover the root and `/api/cli/ws` WebSocket endpoints are removed. Upgrade and pair for session controls; API keys continue to authorize retained HTTP reads and Stream Deck HTTP continues to work. There is no legacy WebSocket fallback. Deploy matching backend/UI/CLI builds; older paired backends without the CLI transport capability return an update-required error.
+External old CLI and API-key clients may exist. Environment protocol 2 removes the root and `/api/cli/ws` WebSocket endpoints. Upgrade and pair for session controls; API keys continue to authorize retained HTTP reads and Stream Deck HTTP continues to work. There is no legacy WebSocket fallback. Deploy matching backend/UI/CLI builds; protocol 1 peers and paired backends without the CLI transport capability show Update required. Version mismatch retains credentials without automatic reconnects. Desktop preserves managed SSH Update for pinned protocol 1 hosts; old cached shells are discarded cleanly.
 
 ## Common commands
 

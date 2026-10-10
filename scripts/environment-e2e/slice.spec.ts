@@ -20,10 +20,9 @@ import { WebSocket } from './fixtures/ws.js';
 import { proxySelfTest } from './fixtures/proxy-self-test.js';
 import { startFaultProxy } from './fault-proxy.js';
 import { crashBoundaries } from './fixtures/hardening-hooks.js';
+import { loadV1Client } from './fixtures/v1-client.js';
 import { pairEnvironment } from '../../packages/client-runtime/src/pairing.js';
 import type { RuntimePorts } from '../../packages/client-runtime/src/ports.js';
-import { legacyCommandScopes } from '../../apps/backend/src/ws/rpc/legacy-builder-adapter.js';
-import { parseClientCommand } from '../../apps/backend/src/ws/ws-command-parser.js';
 
 test.use({ environmentSuite: 'slice' });
 
@@ -58,6 +57,25 @@ test('fleet: distinct processes, ports, data roots and checkout markers are heal
   expect(manifest.environments.length).toBeGreaterThanOrEqual(3); await verifyFleetHealth(manifest);
 });
 test('fault proxy: HTTP and binary WS forwarding, lost result and selected close', proxySelfTest);
+test('protocol-1 client blocks on a real protocol-2 server without retries or credential purges', async () => {
+  test.setTimeout(15_000);
+  const old = await loadV1Client(manifest.repositoryRoot, manifest.artifactRoot);
+  const session = sessions[0]!, environment = manifest.environments[0]!;
+  const credentials = old.createMemoryCredentialStore(), persistence = old.createMemoryPersistence();
+  await credentials.store(session.environmentId, { bearerToken: session.bearer, deviceSessionId: session.deviceSession!.deviceSessionId });
+  let requests = 0, sockets = 0;
+  const registry = old.createEnvironmentRegistry({ credentials, persistence, fetch: (url: string, init: RequestInit) => { requests++; return fetch(url, init); }, webSocket: () => { sockets++; throw new Error('Old client must block before opening a socket'); }, random: () => 0.01 });
+  try {
+    await registry.register({ environmentId: session.environmentId, baseUrl: environment.baseUrl, primary: false, enabled: true, credentialRef: session.deviceSession!.deviceSessionId, labelOverride: null }); await registry.start();
+    await until(() => registry.get(session.environmentId).connection.getSnapshot().phase, phase => phase === 'version-blocked');
+    const blocked = registry.get(session.environmentId).connection.getSnapshot();
+    expect(blocked).toMatchObject({ phase: 'version-blocked', nextRetryAt: null, transportHealthy: false });
+    expect(old.describeOldEnvironmentStatus(blocked)).toMatchObject({ label: 'Update required', kind: 'update-required', blocksLaunch: true });
+    const reads = requests; await new Promise(resolve => setTimeout(resolve, 600)); expect(requests).toBe(reads); expect(sockets).toBe(0);
+    expect(await credentials.load(session.environmentId)).not.toBeNull();
+    evidence.oldClientVersion = { clientCommit: '5d7129ba', serverProtocol: 2, phase: blocked.phase, renderedStatus: 'Update required', retries: 0, socketOpens: 0, credentialsRetained: true };
+  } finally { await registry.dispose(); }
+});
 test('9.2.1 private primary bootstrap, link/code pairing, consumed grants and stable identity', async () => {
   expect(new Set(sessions.map(session => session.environmentId)).size).toBe(3);
   for (const [index, mode] of [[1, 'link'], [2, 'code']] as const) {
@@ -142,7 +160,7 @@ test('Batch 3 native state is isolated, deduplicated and reproduced by fresh she
 test('9.2.3 B new worktree + attachment and post-COMMIT lost ack retry execute once', async () => {
   const providerMarker = (index: number) => readFile(join(manifest.environments[index]!.checkout, 'fixture-provider-marker.txt'), 'utf8').catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''; throw error; });
   const untouched = await Promise.all([providerMarker(0), providerMarker(2)]);
-  const upload = await fetch(`${b().baseUrl}/api/v2/artifacts?projectId=${projects[1]!.sessionId}&uploadId=${randomUUID()}`, { method: 'POST', headers: { Authorization: `Bearer ${sessions[1]!.bearer}`, 'Content-Type': 'text/plain', 'x-forge-environment-protocol': '1', 'x-forge-file-name': 'synthetic.txt' }, body: 'synthetic attachment' });
+  const upload = await fetch(`${b().baseUrl}/api/v2/artifacts?projectId=${projects[1]!.sessionId}&uploadId=${randomUUID()}`, { method: 'POST', headers: { Authorization: `Bearer ${sessions[1]!.bearer}`, 'Content-Type': 'text/plain', 'x-forge-environment-protocol': "2", 'x-forge-file-name': 'synthetic.txt' }, body: 'synthetic attachment' });
   expect(upload.status).toBe(200); attachmentId = (await upload.json()).artifactId;
   const proxy = await startFaultProxy({ upstream: b().baseUrl });
   const rpc = await openFixtureRpc(b().baseUrl, sessions[1]!, proxy.url);
@@ -265,13 +283,13 @@ test('9.2.8 stop, controlled resume and fork mirrored to shell', async () => {
     await controlEnvironment(manifest, b().name, 'stop'); await controlEnvironment(manifest, b().name, 'start');
     const next = await openFixtureRpc(b().baseUrl, sessions[1]!);
     try {
-      const resumed = await next.call('legacy.session.operate', { sessionId: launchedSessionId, command: { type: 'resume_session', agentId: launchedSessionId, requestId: 'slice-resume' } });
-      expect(JSON.stringify(resumed)).toContain('session_resumed');
-      expect(await next.call('legacy.session.operate', { sessionId: launchedSessionId, command: { type: 'resume_session', agentId: launchedSessionId, requestId: 'slice-resume' } })).toEqual(resumed);
+      const resumeInput = { sessionId: launchedSessionId, commandId: randomUUID() };
+      const resumed = await next.call('session.resume', resumeInput); expect((await settled(resumed.commandId)).state).toBe('succeeded');
+      expect((await next.call('session.resume', resumeInput)).commandId).toBe(resumed.commandId);
       await next.call('shell.subscribe', {});
-      const fork = await next.call('legacy.session.operate', { sessionId: launchedSessionId, command: { type: 'fork_session', sourceAgentId: launchedSessionId, label: 'Slice fork', requestId: 'slice-fork' } });
-      expect(JSON.stringify(fork)).toContain('session_forked');
-      expect(await next.call('legacy.session.operate', { sessionId: launchedSessionId, command: { type: 'fork_session', sourceAgentId: launchedSessionId, label: 'Slice fork', requestId: 'slice-fork' } })).toEqual(fork);
+      const forkInput = { sessionId: launchedSessionId, commandId: randomUUID(), title: 'Slice fork' };
+      const fork = await next.call('session.fork', forkInput); expect((await settled(fork.commandId)).state).toBe('succeeded');
+      expect((await next.call('session.fork', forkInput)).commandId).toBe(fork.commandId);
       await until(() => next.frames.find(frame => frame.item?.event?.type === 'session.upsert' && frame.item.event.session.title === 'Slice fork'), Boolean);
       expect((await readDb(db => db.prepare('SELECT desired_state FROM control_sessions WHERE session_id=?').get(launchedSessionId)) as { desired_state: string }).desired_state).toBe('running');
       await next.call('session.subscribe', { sessionId: launchedSessionId });
@@ -288,7 +306,7 @@ test('9.2.8 stop, controlled resume and fork mirrored to shell', async () => {
 test('9.2.10 real HTTP/RPC negative auth, scope, ticket, payload and command-body checks', async () => {
   const environment = manifest.environments[0]!;
   const headers = { Authorization: `Bearer ${sessions[0]!.bearer}`, 'Content-Type': 'application/json' };
-  expect((await fetch(`${environment.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers, body: JSON.stringify({ audience: 'rpc', protocolVersion: 2 }) })).status).toBe(409);
+  expect((await fetch(`${environment.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers, body: JSON.stringify({ audience: 'rpc', protocolVersion: 1 }) })).status).toBe(426);
   expect((await fetch(`${environment.baseUrl}/api/not-classified`, { headers })).status).toBe(403);
   for (const method of ['HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']) expect((await fetch(`${environment.baseUrl}/api/not-classified`, { method, headers })).status).toBe(403);
   const routeInventory = await controlEnvironment<any[]>(manifest, environment.name, 'fixture', { operation: 'route-inventory' });
@@ -306,16 +324,9 @@ test('9.2.10 real HTTP/RPC negative auth, scope, ticket, payload and command-bod
     await expect(rpc.call('session.history', { sessionId: launchedSessionId, turns: 21 })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     await expect(rpc.call('session.choose', { commandId: randomUUID(), sessionId: launchedSessionId, choiceId: randomUUID(), answers: [] })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     await expect(rpc.call('session.launch', { commandId: launchCommandId, projectId: projects[1]!.sessionId, title: 'changed retry body', workspaceStrategy: { kind: 'current_checkout' } })).rejects.toMatchObject({ code: 'CONFLICT' });
-    await expect(rpc.call('legacy.session.read', { sessionId: launchedSessionId, command: { type: 'api_proxy', method: 'GET', path: '/api/health', requestId: 'forbidden-api-proxy' } })).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    const unsupported = Object.entries(legacyCommandScopes).filter(([, scope]) => scope === 'unsupported').map(([type]) => type);
-    const rejectedLegacy: Array<{ type: string; code: string }> = [];
-    for (const type of unsupported) {
-      const command = type === 'subscribe_inventory' ? { type, requestId: 'negative-inventory' } : { type, agentId: launchedSessionId, profileId: projects[1]!.sessionId, sessionAgentId: launchedSessionId, text: 'negative fixture', choiceId: randomUUID(), answers: [], method: 'GET', path: '/api/health', requestId: 'negative-legacy' };
-      const code = parseClientCommand(Buffer.from(JSON.stringify(command))).ok ? 'FORBIDDEN' : 'INVALID_INPUT';
-      await expect(rpc.call('legacy.session.read', { sessionId: launchedSessionId, command })).rejects.toMatchObject({ code });
-      rejectedLegacy.push({ type, code });
-    }
-    evidence.unsupportedLegacy = { classifiedCommandCount: Object.keys(legacyCommandScopes).length, rejected: rejectedLegacy };
+    for (const method of ['legacy.session.read', 'legacy.session.operate', 'legacy.session.subscribe']) await expect(rpc.call(method, {})).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    evidence.removedTransport = { removedMethodsRejected: 3, noLegacyRegistry: true };
+
   } finally { rpc.close(); }
   const grant = await fixtureRpcOnce(environment.baseUrl, sessions[0]!, 'access.grant.create', { kind: 'link', label: 'read only fixture', scopes: ['session:read'], expiresInSeconds: 300, reachableBaseUrl: environment.baseUrl });
   const readOnly = await redeemFixtureGrant(environment, grant, 'link', ['session:read']);
@@ -357,9 +368,9 @@ test('9.2.9 revocation closes C RPC and denies subsequent tickets/API while A/B 
   await rpc.call('terminal.attach', { sessionId: projects[2]!.sessionId, terminalId: terminal.terminalId, ticket: ticket.ticket });
   const hostTicket = await (await fetch(`${c.baseUrl}/api/terminals/${hostTerminal.terminalId}/ticket`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionAgentId: projects[2]!.sessionId, requesterAgentId: projects[2]!.sessionId }) })).json();
   await rpc.call('terminal.attach', { sessionId: projects[2]!.sessionId, terminalId: hostTerminal.terminalId, ticket: hostTicket.ticket });
-  const upload = await fetch(`${c.baseUrl}/api/v2/artifacts?projectId=${projects[2]!.sessionId}&uploadId=${randomUUID()}`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/octet-stream', 'x-forge-environment-protocol': '1', 'x-forge-file-name': 'synthetic.bin' }, body: Buffer.alloc(25 * 1024 * 1024, 120) });
+  const upload = await fetch(`${c.baseUrl}/api/v2/artifacts?projectId=${projects[2]!.sessionId}&uploadId=${randomUUID()}`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/octet-stream', 'x-forge-environment-protocol': "2", 'x-forge-file-name': 'synthetic.bin' }, body: Buffer.alloc(25 * 1024 * 1024, 120) });
   expect(upload.status).toBe(200); const artifactId = (await upload.json()).artifactId;
-  const download = await new Promise<import('node:http').IncomingMessage>((resolve, reject) => { const request = httpGet(`${c.baseUrl}/api/v2/artifacts/${artifactId}`, { agent: false, headers: { Authorization: auth.Authorization, 'x-forge-environment-protocol': '1' } }, response => { response.pause(); response.on('error', () => {}); resolve(response); }); request.on('error', reject); });
+  const download = await new Promise<import('node:http').IncomingMessage>((resolve, reject) => { const request = httpGet(`${c.baseUrl}/api/v2/artifacts/${artifactId}`, { agent: false, headers: { Authorization: auth.Authorization, 'x-forge-environment-protocol': "2" } }, response => { response.pause(); response.on('error', () => {}); resolve(response); }); request.on('error', reject); });
   expect(download.statusCode).toBe(200); const downloadClosed = new Promise<void>(resolve => download.once('close', resolve));
   const closed = once(rpc.socket, 'close');
   const started = Date.now();
@@ -387,9 +398,9 @@ test('9.2.9 revocation closes C RPC and denies subsequent tickets/API while A/B 
     await survivorRpc.call('session.stop', { commandId: randomUUID(), sessionId: projects[2]!.sessionId });
   } finally { survivorRpc.close(); }
   expect((await fetch(`${c.baseUrl}/api/terminals/${hostTerminal.terminalId}?sessionAgentId=${projects[2]!.sessionId}`, { method: 'DELETE', headers: survivorAuth })).status).toBe(204);
-  expect((await fetch(`${c.baseUrl}/api/v2/artifacts?projectId=${projects[2]!.sessionId}&uploadId=${randomUUID()}`, { method: 'POST', headers: { ...auth, 'x-forge-environment-protocol': '1', 'x-forge-file-name': 'denied.txt' }, body: 'denied' })).status).toBe(401);
+  expect((await fetch(`${c.baseUrl}/api/v2/artifacts?projectId=${projects[2]!.sessionId}&uploadId=${randomUUID()}`, { method: 'POST', headers: { ...auth, 'x-forge-environment-protocol': "2", 'x-forge-file-name': 'denied.txt' }, body: 'denied' })).status).toBe(401);
   expect((await fetch(`${c.baseUrl}/api/v2/access/session`, { headers: { Authorization: `Bearer ${sessions[2]!.bearer}` } })).status).toBe(401);
-  expect((await fetch(`${c.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { Authorization: `Bearer ${sessions[2]!.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ audience: 'rpc', protocolVersion: 1 }) })).status).toBe(401);
+  expect((await fetch(`${c.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { Authorization: `Bearer ${sessions[2]!.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ audience: 'rpc', protocolVersion: 2 }) })).status).toBe(401);
   for (const i of [0, 1]) expect((await fixtureRpcOnce(manifest.environments[i]!.baseUrl, sessions[i]!, 'environment.get', {})).environmentId).toBe(sessions[i]!.environmentId);
   evidence.revoke = { closeCode: code, closeElapsedMs, totalVerificationMs: Date.now() - started, futureAccessDenied: true, isolationAB: true, activeDownloadAborted: !download.complete, deviceCreatedPtyEnded: true, hostOwnedPtySurvivedAndReattached: true, acceptedUnsent: interrupted, unsentDispatches: 0, alreadyDispatchedContinued: true, futureUploadDenied: true };
 });

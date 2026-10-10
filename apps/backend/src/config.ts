@@ -69,7 +69,6 @@ export function createConfig(): SwarmConfig {
     remoteUpdateAwarenessModules: {
       loadDatabaseModule: loadConfiguredSqliteDatabaseConstructor,
     },
-    allowNonManagerSubscriptions: true,
     managerId,
     managerDisplayName: "Manager",
     defaultModel: {

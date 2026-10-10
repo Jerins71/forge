@@ -127,10 +127,10 @@ export async function serveBuiltUi(rootPath: string, bootstrapScript = '', optio
   const address = server.address(); assert(address && typeof address === 'object');
   return { url: `http://127.0.0.1:${address.port}`, stop: async () => { server.closeAllConnections(); await new Promise<void>(resolveStop => server.close(() => resolveStop())); } };
 }
-export async function ticket(baseUrl: string, session: BootstrapSession, audience: 'rpc' | 'legacy') {
+export async function ticket(baseUrl: string, session: BootstrapSession, audience: 'rpc') {
   const response = await fetch(`${baseUrl}/api/v2/access/ws-ticket`, { method: 'POST',
-    headers: { Authorization: `Bearer ${session.bearer}`, 'Content-Type': 'application/json', 'x-forge-environment-protocol': '1' },
-    body: JSON.stringify({ audience, protocolVersion: 1 }), signal: AbortSignal.timeout(5000) });
+    headers: { Authorization: `Bearer ${session.bearer}`, 'Content-Type': 'application/json', 'x-forge-environment-protocol': "2" },
+    body: JSON.stringify({ audience, protocolVersion: 2 }), signal: AbortSignal.timeout(5000) });
   if (!response.ok) throw new Error('Fixture authenticated ticket unavailable');
   return (await response.json() as { ticket: string }).ticket;
 }

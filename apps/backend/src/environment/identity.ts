@@ -50,7 +50,6 @@ const capabilities: EnvironmentCapabilities = {
   newWorktree: true,
   artifactUpload: true,
   terminal: true,
-  legacyAdapter: true,
   cliTransport: true,
   sessionLifecycle: true,
   projectPolicy: true,

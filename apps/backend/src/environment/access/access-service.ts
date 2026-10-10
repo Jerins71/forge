@@ -149,7 +149,7 @@ export class EnvironmentLiveResources {
 interface Ticket {
   localBrowserHost?: boolean;
   deviceId: string;
-  audience: "rpc" | "legacy";
+  audience: "rpc";
   origin: string | null;
   protocolVersion: number;
   environmentId: string;
@@ -434,7 +434,7 @@ export function createEnvironmentAccess({
     const c = credentials(request);
     return { deviceSession: deviceView(c.row, c.row.device_session_id), ...(c.cookie ? { csrfToken: csrf(c.token) } : {}) };
   }
-  async function issueWsTicket(p: Principal, input: { audience: "rpc" | "legacy"; protocolVersion: number }, origin: string | null) {
+  async function issueWsTicket(p: Principal, input: { audience: "rpc"; protocolVersion: number }, origin: string | null) {
     current(p.deviceSessionId);
     if (!ticketValidator.Check(input)) throw new AccessError("INVALID_INPUT", "Invalid socket ticket request");
     if (input.protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION)
@@ -455,7 +455,7 @@ export function createEnvironmentAccess({
     });
     return { ticket, expiresAt: new Date(expiresAt).toISOString() };
   }
-  async function consumeWsTicket(input: { ticket: string; audience: "rpc" | "legacy"; origin: string | null; protocolVersion: number }) {
+  async function consumeWsTicket(input: { ticket: string; audience: "rpc"; origin: string | null; protocolVersion: number }) {
     const hash = secretHash("ticket", input.ticket);
     const row = tickets.get(hash);
     tickets.delete(hash);

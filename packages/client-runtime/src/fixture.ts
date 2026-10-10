@@ -1,3 +1,4 @@
+import { ENVIRONMENT_PROTOCOL_VERSION } from '@forge/protocol/environment-v2';
 import type { Static } from '@sinclair/typebox'
 import type {
   CommandReceipt,
@@ -78,7 +79,7 @@ export function defaultFixtureSeeds(): FixtureEnvironmentSeed[] {
         label: i ? 'dev1' : 'This machine',
         platform: { os: i ? 'linux' : 'darwin', arch: 'arm64' },
         forgeVersion: 'fixture',
-        protocolVersion: 1,
+        protocolVersion: ENVIRONMENT_PROTOCOL_VERSION,
         streamEpoch: environmentId,
         capabilities: {
           shellResume: true,
@@ -87,7 +88,6 @@ export function defaultFixtureSeeds(): FixtureEnvironmentSeed[] {
           newWorktree: true,
           artifactUpload: true,
           terminal: true,
-          legacyAdapter: true,
           sessionState: true,
           projectPolicy: true,
         },
@@ -231,7 +231,6 @@ export function createFixtureEnvironmentRegistry(
         value = receipts
           .getSnapshot()
           .get((input as RpcInput<'command.get'>).commandId)
-      else if (method.startsWith('legacy.')) value = { events: [] }
       else if (
         [
           'session.launch',

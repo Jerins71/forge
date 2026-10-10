@@ -301,7 +301,6 @@ export interface SwarmConfig {
   isDesktop: boolean;
   /** Feature-owned SQLite loader available in every runtime target. */
   remoteUpdateAwarenessModules?: RemoteUpdateAwarenessModuleLoaders;
-  allowNonManagerSubscriptions: boolean;
   managerId?: string;
   managerDisplayName: string;
   defaultModel: AgentModelDescriptor;

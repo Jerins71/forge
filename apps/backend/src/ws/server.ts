@@ -9,11 +9,10 @@ import { NativeRuntimeUpdateService } from "../swarm/runtime/runtime-updates/nat
 import { createProjectSecureSessionsRoutes } from "./http/routes/project-secure-sessions-routes.js";
 import { createHash } from "node:crypto";
 import { createServer as createHttpsServer } from "node:https";
-import type { WebSocket } from "ws";
 import type { Principal } from "../environment/control/control-types.js";
 import type { EnvironmentService } from "../environment/environment-service.js";
 import { AccessError } from "../environment/access/access-service.js";
-import { createEnvironmentHttpPolicy, createRouteInventory, wsTicketFromProtocols } from "../environment/access/http-policy.js";
+import { createEnvironmentHttpPolicy, createRouteInventory } from "../environment/access/http-policy.js";
 import { bindHttpPrincipal, requireHttpPrincipal } from "./rpc/http-principal.js";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
@@ -28,7 +27,6 @@ import {
   type TerminalCreatedEvent,
   type TerminalUpdatedEvent,
 } from "@forge/protocol";
-import { WebSocketServer } from "ws";
 
 import { MobilePushService } from "../mobile/mobile-push-service.js";
 
@@ -45,7 +43,6 @@ import { StreamDeckAccessService } from "../swarm/stream-deck-access-service.js"
 import { SecureBrowserAccessService } from "../swarm/secure-browser-access-service.js";
 import {
   NotificationSettingsService,
-  isCliOriginatedSession,
 } from "../swarm/notification-settings-service.js";
 import { isPidAlive } from "../swarm/platform.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
@@ -63,8 +60,6 @@ import {
 
 import {
   authenticateCliHttpRequest,
-  authenticateCliWebSocketRequest,
-  isCliWebSocketPath,
 } from "./cli-auth.js";
 import { applyCorsHeaders, resolveRequestUrl, sendJson } from "./http-utils.js";
 import { createAgentHttpRoutes } from "./http/routes/agent-http-routes.js";
@@ -141,14 +136,12 @@ import { GenerationThroughputService } from "../stats/generation-throughput-serv
 import type { TelemetryService } from "../telemetry/telemetry-service.js";
 import { LocalRemoteUpdateAwarenessService } from "./http/services/remote-update-awareness-service.js";
 
-export const MAX_WS_INCOMING_PAYLOAD_BYTES = 8 * 1024 * 1024;
 import type { TerminalRuntimeConfig } from "../terminal/terminal-config.js";
 import { TerminalSettingsService } from "../terminal/terminal-settings-service.js";
 import type { TerminalService } from "../terminal/terminal-service.js";
 import { TerminalWsProxy } from "../terminal/terminal-ws-proxy.js";
 import { resolveSessionAgentIdForUnread } from "./unread-utils.js";
-import { CliWsHandler } from "./cli-ws-handler.js";
-import { WsHandler } from "./ws-handler.js";
+import { SessionFeaturePublisher } from "./session-feature-publisher.js";
 
 function isSecureBuilderControlPath(pathname: string): boolean {
   return (
@@ -183,15 +176,11 @@ export class SwarmWebSocketServer {
   private readonly environment: EnvironmentService | undefined;
   private readonly environmentTransport: ReturnType<EnvironmentService["composeTransport"]> | undefined;
   private readonly httpPolicy: ReturnType<typeof createEnvironmentHttpPolicy> | undefined;
-  private readonly socketPrincipals = new WeakMap<WebSocket, Principal>();
   private readonly tls: { cert: string; key: string } | undefined;
 
   private httpServer: HttpServer | null = null;
-  private wss: WebSocketServer | null = null;
-  private cliWss: WebSocketServer | null = null;
 
-  private readonly wsHandler: WsHandler;
-  private readonly cliWsHandler: CliWsHandler;
+  private readonly sessionFeatures: SessionFeaturePublisher;
   private readonly cliAccessService: CliAccessService;
   private readonly streamDeckAccessService: StreamDeckAccessService;
   private readonly secureBrowserAccessService: SecureBrowserAccessService;
@@ -219,53 +208,18 @@ export class SwarmWebSocketServer {
 
   private readonly onConversationMessage = (event: ServerEvent): void => {
     if (event.type !== "conversation_message" || isRetiredMessageSource(event.sourceContext)) return;
-    this.wsHandler.broadcastToSubscribed(event);
-    this.cliWsHandler.broadcast(event);
 
     const triggersUnread =
       isTerminalAssistantConversationMessage(event) ||
       event.source === "project_agent_input";
 
     if (triggersUnread) {
-      void this.handleUnreadTrigger(event.agentId, "message");
+      void this.handleUnreadTrigger(event.agentId);
     }
-  };
-
-  private readonly onConversationLog = (event: ServerEvent): void => {
-    if (event.type !== "conversation_log") return;
-    this.wsHandler.broadcastToSubscribed(event);
-    this.cliWsHandler.broadcast(event);
-  };
-
-  private readonly onActivitySummary = (event: ServerEvent): void => {
-    if (event.type !== "activity_summary") return;
-    this.wsHandler.broadcastToSubscribed(event);
-    this.cliWsHandler.broadcast(event);
-  };
-
-  private readonly onPlanSummary = (event: ServerEvent): void => {
-    if (event.type !== "plan_summary") return;
-    this.wsHandler.broadcastToSubscribed(event);
-    this.cliWsHandler.broadcast(event);
-  };
-
-  private readonly onAgentMessage = (event: ServerEvent): void => {
-    if (event.type !== "agent_message") return;
-    this.wsHandler.broadcastToSubscribed(event);
-    this.cliWsHandler.broadcast(event);
-  };
-
-  private readonly onAgentToolCall = (event: ServerEvent): void => {
-    if (event.type !== "agent_tool_call") return;
-    this.wsHandler.broadcastToSubscribed(event);
-    this.cliWsHandler.broadcast(event);
   };
 
   private readonly onChoiceRequest = (event: ServerEvent): void => {
     if (event.type !== "choice_request") return;
-
-    this.wsHandler.broadcastToSubscribed(event);
-    this.cliWsHandler.broadcast(event);
 
     if (event.status === "pending") {
       const sessionAgentId = resolveSessionAgentIdForUnread(this.swarmManager, event.agentId);
@@ -273,92 +227,25 @@ export class SwarmWebSocketServer {
         return;
       }
 
-      void this.handleUnreadTrigger(event.agentId, "choice_request", sessionAgentId);
+      void this.handleUnreadTrigger(event.agentId, sessionAgentId);
     }
   };
 
   private readonly onCodexElicitation = (event: ServerEvent): void => {
     if (event.type !== "codex_elicitation_request" && event.type !== "codex_elicitation_dismissed") return;
-    this.wsHandler.broadcastToSession(event.agentId, event);
-  };
-
-  private readonly onModelCacheObservation = (event: ServerEvent): void => {
-    if (event.type !== "model_cache_observation") return;
-    this.wsHandler.broadcastToSubscribed(event);
-    this.cliWsHandler.broadcast(event);
-  };
-
-  private readonly onConversationReset = (event: ServerEvent): void => {
-    if (event.type !== "conversation_reset") return;
-    this.wsHandler.broadcastToSubscribed(event);
-    this.cliWsHandler.broadcast(event);
-  };
-
-  private readonly onMessagePinned = (event: ServerEvent): void => {
-    if (event.type !== "message_pinned") return;
-    this.wsHandler.broadcastToSubscribed(event);
-    this.cliWsHandler.broadcast(event);
-  };
-
-  private readonly onAgentStatus = (event: ServerEvent): void => {
-    if (event.type !== "agent_status") return;
-    this.wsHandler.broadcastToSubscribed(event);
-    this.cliWsHandler.broadcast(event);
-  };
-
-  private readonly onSessionWorkersSnapshot = (event: ServerEvent): void => {
-    if (event.type !== "session_workers_snapshot") return;
-    this.wsHandler.broadcastToSubscribed(event);
-    this.cliWsHandler.broadcast(event);
+    this.sessionFeatures.publishForSession(event.agentId, event);
   };
 
   private readonly onGenerationThroughput = (event: ServerEvent): void => {
     if (event.type !== "generation_throughput") return;
     // Pi throughput is a Builder-local capability in v1. Do not forward it
     // through CLI subscriptions.
-    this.wsHandler.broadcastGenerationThroughput(event.measurement.sessionId, event);
-  };
-
-  private readonly onSessionActiveToolsSnapshot = (event: ServerEvent): void => {
-    if (event.type !== "session_active_tools_snapshot") return;
-    // Detail-bearing active-tool snapshots remain CLI-only. Builder uses the
-    // count-only manager_tool_activity projection below.
-    this.cliWsHandler.broadcast(event);
+    this.sessionFeatures.publishThroughput(event.measurement.sessionId, event);
   };
 
   private readonly onManagerToolActivity = (event: ServerEvent): void => {
     if (event.type !== "manager_tool_activity") return;
-    this.wsHandler.broadcastManagerToolActivity(event);
-  };
-
-  private readonly onSessionPlanSnapshot = (event: ServerEvent): void => {
-    if (event.type !== "session_plan_snapshot") return;
-    this.wsHandler.broadcastToExactSubscription(event.sessionAgentId, event);
-    this.cliWsHandler.broadcast(event);
-  };
-
-  private readonly onSessionAttentionSnapshot = (event: ServerEvent): void => {
-    if (event.type !== "session_attention_snapshot") return;
-    // Builder-global origin state: every Builder subscription converges, while
-    // CLI sockets remain outside this fanout. The event
-    // carries complete state, so any dropped delivery heals on the next one.
-    this.wsHandler.broadcastToSubscribed(event);
-  };
-
-  private readonly onSessionGoalSnapshot = (event: ServerEvent): void => {
-    if (event.type !== "session_goal_snapshot") return;
-    this.wsHandler.broadcastToExactSubscription(event.sessionAgentId, event);
-    if (event.requestId === undefined) {
-      this.cliWsHandler.broadcast(event);
-      return;
-    }
-    const { requestId: _requestId, ...uncorrelatedEvent } = event;
-    this.cliWsHandler.broadcast(uncorrelatedEvent);
-  };
-
-  private readonly onAgentsSnapshot = (event: ServerEvent): void => {
-    if (event.type !== "agents_snapshot") return;
-    this.wsHandler.broadcastToSubscribed(event);
+    this.sessionFeatures.publishToolActivity(event);
   };
 
   private readonly onProfilesSnapshot = (event: ServerEvent): void => {
@@ -366,34 +253,32 @@ export class SwarmWebSocketServer {
     void this.remoteUpdateAwarenessService?.reconcileProjects().catch((error) => {
       console.warn("[remote-update-awareness] Project reconciliation failed", error);
     });
-    this.wsHandler.broadcastToSubscribed(event);
   };
 
   private readonly onSecureSessionSnapshot = (event: ServerEvent): void => {
     if (event.type !== "secure_session_snapshot") return;
-    this.wsHandler.broadcastSecureSessionSnapshot(event);
+    this.sessionFeatures.publishSecureSnapshot(event);
   };
 
   private readonly onSecureSecretCatalogChanged = (event: ServerEvent): void => {
     if (event.type !== "secure_secret_catalog_changed") return;
-    this.wsHandler.broadcastToSubscribed(event);
+    this.sessionFeatures.publish(event);
   };
 
   private readonly onTerminalCreated = (event: TerminalCreatedEvent): void => {
-    this.wsHandler.broadcastToSession(event.sessionAgentId, event);
+    this.sessionFeatures.publishForSession(event.sessionAgentId, event);
   };
 
   private readonly onTerminalUpdated = (event: TerminalUpdatedEvent): void => {
-    this.wsHandler.broadcastToSession(event.sessionAgentId, event);
+    this.sessionFeatures.publishForSession(event.sessionAgentId, event);
   };
 
   private readonly onTerminalClosed = (event: TerminalClosedEvent): void => {
-    this.wsHandler.broadcastToSession(event.sessionAgentId, event);
+    this.sessionFeatures.publishForSession(event.sessionAgentId, event);
   };
 
   private async handleUnreadTrigger(
     agentId: string,
-    reason: "message" | "choice_request",
     resolvedSessionAgentId?: string
   ): Promise<void> {
     const sessionAgentId = resolvedSessionAgentId ?? resolveSessionAgentIdForUnread(this.swarmManager, agentId);
@@ -401,29 +286,8 @@ export class SwarmWebSocketServer {
       return;
     }
 
-    // Pre-compute CLI-origin status once — used for both suppression and event payload
-    const sessionDescriptor = this.swarmManager.getAgent(sessionAgentId);
-    const cliOriginated = await isCliOriginatedSession(sessionDescriptor);
-
-    const suppressUnreadNotification =
-      cliOriginated && this.notificationSettingsService.getSettings().muteCliOriginatedNotifications;
-    if (!suppressUnreadNotification) {
-      this.wsHandler.broadcastToSubscribed({
-        type: "unread_notification",
-        agentId,
-        reason,
-        sessionAgentId,
-        ...(cliOriginated ? { cliOriginated: true } : {}),
-      });
-    }
-
-    if (!this.wsHandler.hasActiveSubscriptionForSession(sessionAgentId)) {
-      const { profileId } = this.resolveUnreadContext(sessionAgentId);
-      if (profileId) {
-        const newCount = this.unreadTracker.increment(profileId, sessionAgentId);
-        this.wsHandler.broadcastUnreadCountUpdate(sessionAgentId, newCount);
-      }
-    }
+    const { profileId } = this.resolveUnreadContext(sessionAgentId);
+    if (profileId) this.unreadTracker.increment(profileId, sessionAgentId);
   }
 
   private resolveUnreadContext(sessionAgentId: string): { profileId: string | null } {
@@ -439,12 +303,12 @@ export class SwarmWebSocketServer {
     snapshot: BrowserSessionSnapshot,
     reason: "host-report" | "automation" | "human-command" | "lifecycle" | "recovery",
   ): void {
-    this.wsHandler.browser?.publish(snapshot);
+    this.sessionFeatures.browser?.publish(snapshot);
     void reason;
   }
 
   broadcastBrowserHostChanged(host: BrowserHostConnectionSnapshot): void {
-    this.wsHandler.browserHost.publishHost(host);
+    this.sessionFeatures.browserHost.publishHost(host);
   }
 
   constructor(options: {
@@ -453,7 +317,6 @@ export class SwarmWebSocketServer {
     tls?: { cert: string; key: string };
     host: string;
     port: number;
-    allowNonManagerSubscriptions: boolean;
     terminalService?: TerminalService | null;
     terminalRuntimeConfig?: TerminalRuntimeConfig | null;
     terminalSettingsService?: TerminalSettingsService;
@@ -540,8 +403,6 @@ export class SwarmWebSocketServer {
             .map((descriptor) => descriptor.agentId) ?? [],
       });
 
-    let wsHandlerRef: WsHandler | null = null;
-
     const remoteUpdateConfig = this.swarmManager.getConfig();
     this.remoteUpdateAwarenessService = (
       options.remoteUpdateAwarenessService ||
@@ -549,14 +410,13 @@ export class SwarmWebSocketServer {
     )
       ? options.remoteUpdateAwarenessService ?? new LocalRemoteUpdateAwarenessService({
           swarmManager: this.swarmManager,
-          broadcastProjectEvent: (projectId, event) => this.wsHandler.broadcastToProfile(projectId, event),
+          broadcastProjectEvent: () => undefined,
         })
       : null;
 
     this.mobilePushService = new MobilePushService({
       swarmManager: this.swarmManager,
       dataDir: this.swarmManager.getConfig().paths.dataDir,
-      isSessionActive: (sessionAgentId) => wsHandlerRef?.hasActiveSubscription(sessionAgentId) ?? false,
       notificationSettingsService: this.notificationSettingsService,
     });
     this.controlPidFile = getControlPidFilePath(
@@ -568,42 +428,16 @@ export class SwarmWebSocketServer {
     const artifactTicketStore = new PresentedChatArtifactTicketStore();
     const htmlPreviewStore = new HtmlArtifactPreviewStore();
 
-    this.wsHandler = new WsHandler({
+    this.sessionFeatures = new SessionFeaturePublisher({
       swarmManager: this.swarmManager,
-      mobilePushService: this.mobilePushService,
-      allowNonManagerSubscriptions: options.allowNonManagerSubscriptions,
       terminalService: this.terminalService,
       listTerminalsForSession: this.terminalService
         ? (sessionAgentId) => this.terminalService?.listTerminals(sessionAgentId) ?? []
         : undefined,
-      unreadTracker: this.unreadTracker,
-      perf: this.swarmManager.getSidebarPerfRecorder(),
-      feedbackService: this.feedbackService,
+
       browserAutomationService: options.browserAutomationService,
-      artifactTicketStore,
-      htmlPreviewStore,
-      getRemoteUpdateAwarenessBootstrapEvent: this.remoteUpdateAwarenessService
-        ? (projectId) => {
-            try {
-              return {
-                type: "remote_update_awareness_project_changed" as const,
-                snapshot: this.remoteUpdateAwarenessService!.getProjectSnapshot(projectId),
-              };
-            } catch {
-              return { type: "remote_update_awareness_project_cleared" as const, projectId };
-            }
-          }
-        : undefined,
     });
-    this.cliWsHandler = new CliWsHandler(this.swarmManager);
-    this.environmentTransport = this.environment?.composeTransport(this.wsHandler, this.terminalService);
-    if (this.environment) this.cliWsHandler.setEnvironmentControl({ control: this.environment.control, principalForSocket: socket => {
-      const principal = this.socketPrincipals.get(socket);
-      if (!principal) throw new AccessError("UNAUTHENTICATED", "Integration authentication required");
-      this.environment!.access.authorize(principal, ["session:operate"]);
-      return principal;
-    } });
-    wsHandlerRef = this.wsHandler;
+    this.environmentTransport = this.environment?.composeTransport(this.sessionFeatures, this.terminalService);
 
     this.repositorySettingsService = new RepositorySettingsService({ dataDir: this.swarmManager.getConfig().paths.dataDir });
     this.repositoryProjectCreationService = this.repositorySettingsService
@@ -660,10 +494,9 @@ export class SwarmWebSocketServer {
         swarmManager: this.swarmManager,
         unreadTracker: this.unreadTracker,
         statsService: this.statsService,
-        broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
+        broadcastEvent: (event) => this.sessionFeatures.publish(event),
         environmentControl: this.environment ? { control: this.environment.control, principalForRequest: requireHttpPrincipal } : undefined,
-        onUnreadChanged: (sessionAgentId, count) =>
-          this.wsHandler.broadcastUnreadCountUpdate(sessionAgentId, count),
+        onUnreadChanged: () => undefined,
       }),
       ...createStreamDeckPairingRoutes({
         streamDeckAccessService: this.streamDeckAccessService,
@@ -682,7 +515,7 @@ export class SwarmWebSocketServer {
       ...(this.builderSidebarOrderService
         ? createBuilderSidebarOrderRoutes({
             service: this.builderSidebarOrderService,
-            broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
+            broadcastEvent: (event) => this.sessionFeatures.publish(event),
           })
         : []),
       ...createHistoryIndexRoutes({ swarmManager: this.swarmManager }),
@@ -742,20 +575,20 @@ export class SwarmWebSocketServer {
       ...this.settingsRoutes.routes,
       ...createSpecialistRoutes({
         swarmManager: this.swarmManager,
-        broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
+        broadcastEvent: (event) => this.sessionFeatures.publish(event),
       }),
       ...createModelCacheVisualizationRoutes({
         swarmManager: this.swarmManager,
-        broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
+        broadcastEvent: (event) => this.sessionFeatures.publish(event),
       }),
       ...createModelConfigRoutes({
         swarmManager: this.swarmManager,
-        broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
+        broadcastEvent: (event) => this.sessionFeatures.publish(event),
       }),
       ...createProjectResourceRoutes({ swarmManager: this.swarmManager }),
       ...createOpenRouterRoutes({
         swarmManager: this.swarmManager,
-        broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
+        broadcastEvent: (event) => this.sessionFeatures.publish(event),
       }),
       ...createExtensionRoutes({ swarmManager: this.swarmManager }),
       ...createSkillRoutes({ swarmManager: this.swarmManager }),
@@ -763,7 +596,7 @@ export class SwarmWebSocketServer {
       ...(options.promptRegistry
         ? createPromptRoutes({
             promptRegistry: options.promptRegistry,
-            broadcastEvent: (event) => this.wsHandler.broadcastToSubscribed(event),
+            broadcastEvent: (event) => this.sessionFeatures.publish(event),
             promptPreviewProvider: this.swarmManager,
             listProfiles: () => this.swarmManager.listProfiles(),
           })
@@ -820,7 +653,7 @@ export class SwarmWebSocketServer {
   }
 
   async start(): Promise<void> {
-    if (this.httpServer || this.wss) {
+    if (this.httpServer) {
       return;
     }
 
@@ -843,15 +676,7 @@ export class SwarmWebSocketServer {
 
     const listener = (request: IncomingMessage, response: ServerResponse) => { void this.handleHttpRequest(request, response); };
     const httpServer = this.tls ? createHttpsServer({ cert: await readFile(this.tls.cert), key: await readFile(this.tls.key) }, listener) : createServer(listener);
-    const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_INCOMING_PAYLOAD_BYTES, handleProtocols: protocols => protocols.has("forge.v2") ? "forge.v2" : false });
-    const cliWss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_INCOMING_PAYLOAD_BYTES });
-
     this.httpServer = httpServer;
-    this.wss = wss;
-    this.cliWss = cliWss;
-
-    this.wsHandler.attach(wss);
-    this.cliWsHandler.attach(cliWss);
     httpServer.on("upgrade", (request, socket, head) => {
       void this.handleUpgrade(request, socket, head);
     });
@@ -883,26 +708,11 @@ export class SwarmWebSocketServer {
     }
 
     this.swarmManager.on("conversation_message", this.onConversationMessage);
-    this.swarmManager.on("conversation_log", this.onConversationLog);
-    this.swarmManager.on("activity_summary", this.onActivitySummary);
-    this.swarmManager.on("agent_message", this.onAgentMessage);
-    this.swarmManager.on("agent_tool_call", this.onAgentToolCall);
     this.swarmManager.on("choice_request", this.onChoiceRequest);
     this.swarmManager.on("codex_elicitation_request", this.onCodexElicitation);
     this.swarmManager.on("codex_elicitation_dismissed", this.onCodexElicitation);
-    this.swarmManager.on("plan_summary", this.onPlanSummary);
-    this.swarmManager.on("model_cache_observation", this.onModelCacheObservation);
-    this.swarmManager.on("conversation_reset", this.onConversationReset);
-    this.swarmManager.on("message_pinned", this.onMessagePinned);
-    this.swarmManager.on("agent_status", this.onAgentStatus);
-    this.swarmManager.on("session_workers_snapshot", this.onSessionWorkersSnapshot);
     this.swarmManager.on("generation_throughput", this.onGenerationThroughput);
-    this.swarmManager.on("session_active_tools_snapshot", this.onSessionActiveToolsSnapshot);
     this.swarmManager.on("manager_tool_activity", this.onManagerToolActivity);
-    this.swarmManager.on("session_plan_snapshot", this.onSessionPlanSnapshot);
-    this.swarmManager.on("session_attention_snapshot", this.onSessionAttentionSnapshot);
-    this.swarmManager.on("session_goal_snapshot", this.onSessionGoalSnapshot);
-    this.swarmManager.on("agents_snapshot", this.onAgentsSnapshot);
     this.swarmManager.on("profiles_snapshot", this.onProfilesSnapshot);
     this.swarmManager.on("secure_session_snapshot", this.onSecureSessionSnapshot);
     this.swarmManager.on(
@@ -965,26 +775,11 @@ export class SwarmWebSocketServer {
     }
 
     this.swarmManager.off("conversation_message", this.onConversationMessage);
-    this.swarmManager.off("conversation_log", this.onConversationLog);
-    this.swarmManager.off("activity_summary", this.onActivitySummary);
-    this.swarmManager.off("agent_message", this.onAgentMessage);
-    this.swarmManager.off("agent_tool_call", this.onAgentToolCall);
     this.swarmManager.off("choice_request", this.onChoiceRequest);
     this.swarmManager.off("codex_elicitation_request", this.onCodexElicitation);
     this.swarmManager.off("codex_elicitation_dismissed", this.onCodexElicitation);
-    this.swarmManager.off("plan_summary", this.onPlanSummary);
-    this.swarmManager.off("model_cache_observation", this.onModelCacheObservation);
-    this.swarmManager.off("conversation_reset", this.onConversationReset);
-    this.swarmManager.off("message_pinned", this.onMessagePinned);
-    this.swarmManager.off("agent_status", this.onAgentStatus);
-    this.swarmManager.off("session_workers_snapshot", this.onSessionWorkersSnapshot);
     this.swarmManager.off("generation_throughput", this.onGenerationThroughput);
-    this.swarmManager.off("session_active_tools_snapshot", this.onSessionActiveToolsSnapshot);
     this.swarmManager.off("manager_tool_activity", this.onManagerToolActivity);
-    this.swarmManager.off("session_plan_snapshot", this.onSessionPlanSnapshot);
-    this.swarmManager.off("session_attention_snapshot", this.onSessionAttentionSnapshot);
-    this.swarmManager.off("session_goal_snapshot", this.onSessionGoalSnapshot);
-    this.swarmManager.off("agents_snapshot", this.onAgentsSnapshot);
     this.swarmManager.off("profiles_snapshot", this.onProfilesSnapshot);
     this.swarmManager.off("secure_session_snapshot", this.onSecureSessionSnapshot);
     this.swarmManager.off(
@@ -995,12 +790,8 @@ export class SwarmWebSocketServer {
     this.terminalService?.off("terminal_updated", this.onTerminalUpdated);
     this.terminalService?.off("terminal_closed", this.onTerminalClosed);
 
-    const currentWss = this.wss;
-    const currentCliWss = this.cliWss;
     const currentHttpServer = this.httpServer;
 
-    this.wss = null;
-    this.cliWss = null;
     this.httpServer = null;
     this.actualPort = null;
 
@@ -1011,8 +802,7 @@ export class SwarmWebSocketServer {
     // socket bookkeeping while it aborts and cleans up active operations.
     const transportShutdown = Promise.allSettled([
       this.terminalWsProxy?.stop() ?? Promise.resolve(),
-      currentWss ? closeWebSocketServer(currentWss) : Promise.resolve(),
-      currentCliWss ? closeWebSocketServer(currentCliWss) : Promise.resolve(),
+
       currentHttpServer ? closeHttpServer(currentHttpServer) : Promise.resolve(),
     ]);
 
@@ -1022,8 +812,6 @@ export class SwarmWebSocketServer {
     await this.repositoryCheckoutService.shutdown();
     await this.repositoryProjectCreationService?.shutdown();
 
-    this.wsHandler.reset();
-    this.cliWsHandler.reset();
     this.settingsRoutes.cancelActiveSettingsAuthLoginFlows();
     await this.claudeAuthService?.shutdown();
     this.codexAuthService.shutdown();
@@ -1045,7 +833,7 @@ export class SwarmWebSocketServer {
   }
 
   private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
-    if (!this.httpServer || !this.wss || !this.cliWss) {
+    if (!this.httpServer) {
       ignoreSocketErrors(socket);
       socket.destroy();
       return;
@@ -1060,48 +848,14 @@ export class SwarmWebSocketServer {
         await this.environmentTransport!.rpc.handleUpgrade(request, socket, head, requestUrl.pathname);
         return;
       }
-      if (isCliWebSocketPath(requestUrl.pathname) && !requestUrl.search) {
-        await this.handleCliUpgrade(request, socket, head);
-        return;
-      }
       if (this.terminalWsProxy?.canHandleUpgrade(requestUrl.pathname)) {
         await this.terminalWsProxy.handleUpgrade(request, socket, head, requestUrl.pathname);
         return;
       }
-      if (requestUrl.pathname !== "/") { rejectWebSocketUpgrade(socket, 404, "Not Found"); return; }
-      if (requestUrl.search) throw new AccessError("UNAUTHENTICATED", "Socket queries are not allowed");
-      const principal = await this.environment.access.consumeWsTicket({ ticket: wsTicketFromProtocols(request.headers["sec-websocket-protocol"]),
-        audience: "legacy", origin: request.headers.origin ?? null, protocolVersion: 1 });
-      this.wss.handleUpgrade(request, socket, head, client => {
-        this.wsHandler.bindPrincipal(client, principal);
-        this.wss!.emit("connection", client, request);
-      });
+      rejectWebSocketUpgrade(socket, 404, "Not Found");
     } catch (error) {
       rejectWebSocketUpgrade(socket, error instanceof AccessError && error.code === "FORBIDDEN" ? 403 : 401, "Environment socket access denied");
     }
-  }
-
-  private async handleCliUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
-    const cliWss = this.cliWss;
-    if (!cliWss) {
-      ignoreSocketErrors(socket);
-      socket.destroy();
-      return;
-    }
-
-    const authResult = await authenticateCliWebSocketRequest(this.cliAccessService, request);
-    if (!authResult.ok) {
-      rejectWebSocketUpgrade(socket, authResult.statusCode, authResult.message);
-      return;
-    }
-
-    const principal = this.cliPrincipalForAuth(request, authResult);
-    cliWss.handleUpgrade(request, socket, head, (client) => {
-      this.socketPrincipals.set(client, principal);
-      const unregister = this.environment!.access.registerResource(principal, force => { if (force) client.terminate(); else client.close(4401, "Authentication expired or revoked"); });
-      client.once("close", unregister);
-      cliWss.emit("connection", client, request);
-    });
   }
 
   private async handleHttpRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -1290,23 +1044,6 @@ function isErrorWithCode(error: unknown, code: string): boolean {
     "code" in error &&
     (error as { code?: string }).code === code
   );
-}
-
-async function closeWebSocketServer(server: WebSocketServer): Promise<void> {
-  for (const client of server.clients) {
-    client.terminate();
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve();
-    });
-  });
 }
 
 async function closeHttpServer(server: HttpServer): Promise<void> {

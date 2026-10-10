@@ -2,7 +2,6 @@ import type { HistoryCacheState, HistorySource } from "./sidebar-perf-metrics.js
 
 export type SidebarPerfSurface = "backend";
 export type SidebarPerfMetricKind = "duration" | "counter";
-export type SidebarPerfBuildMode = "dev" | "prod";
 
 export const SIDEBAR_PERF_LABEL_KEYS = [
   "cacheState",

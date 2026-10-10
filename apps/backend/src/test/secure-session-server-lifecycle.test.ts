@@ -159,7 +159,7 @@ describe("Secure Sessions server lifecycle", () => {
     });
 
     const paired = await pairTestServer(activeServer);
-    const client = new WebSocket(`ws://${activeServer.host}:${activeServer.port}`, await paired.protocols());
+    const client = new WebSocket(`ws://${activeServer.host}:${activeServer.port}/api/v2/rpc`, await paired.protocols());
     const shutdownOrder: string[] = [];
     const originalTerminate = WebSocket.prototype.terminate;
     vi.spyOn(WebSocket.prototype, "terminate").mockImplementation(function terminateForOrderTest(this: WebSocket) {

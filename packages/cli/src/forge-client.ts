@@ -1,3 +1,4 @@
+import { ENVIRONMENT_PROTOCOL_VERSION } from '../../protocol/src/environment-v2.js';
 import { randomUUID, webcrypto } from 'node:crypto'
 import type { ChoiceAnswer, CliAgentShowResponse, CliAgentsListResponse, CliChoiceRouteResult, CliChoiceShowResponse, CliChoicesListResponse, CliHttpErrorResponse, CliMessageDispatchResult, CliProfileShowResponse, CliProfilesListResponse, CliProjectAgentShowResponse, CliProjectAgentsListResponse, CliRunResult, CliSessionCompactionResult, CliSessionCreatedResult, CliSessionShowResponse, CliSessionsListResponse, CliSessionTranscriptResponse, CliStatusResponse } from '@forge/protocol'
 import type { CommandReceipt, RpcInput } from '@forge/protocol/environment-v2'
@@ -349,7 +350,7 @@ export class ForgeClient implements ForgeClientLike {
     if (!response.ok) throw new CliError('Environment descriptor is unavailable.', { exitCode: EXIT_CODES.connection, code: 'connection_failed' })
     const descriptor = await response.json() as { environmentId: string; protocolVersion: number }
     if (descriptor.environmentId !== this.credential.environmentId) throw new CliError('Environment identity mismatch; explicitly pair the new environment.', { exitCode: EXIT_CODES.auth, code: 'identity_mismatch' })
-    if (descriptor.protocolVersion !== 1) throw new CliError('Environment protocol mismatch.', { exitCode: EXIT_CODES.unsupported, code: 'unsupported_protocol' })
+    if (descriptor.protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION) throw new CliError('Update required: environment protocol version differs.', { exitCode: EXIT_CODES.unsupported, code: 'unsupported_protocol' })
   }
   private async get<T>(path: string): Promise<T> {
     await this.verifyIdentity()

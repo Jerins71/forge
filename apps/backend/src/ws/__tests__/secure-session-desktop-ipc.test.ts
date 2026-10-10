@@ -12,7 +12,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 it.each(['app://forge', 'http://127.0.0.1:47588'])('Desktop IPC lists, starts, grants and revokes with renderer %s', async (clientOrigin) => {
   vi.stubEnv('FORGE_DESKTOP', '1');
   const port = await getAvailablePort();
-  const config = await makeWsServerTempConfig(port, true);
+  const config = await makeWsServerTempConfig(port);
   const manager = new WsServerTestSwarmManager(config);
   await bootWsServerTestManager(manager, config);
   const { environment, unreadTracker, paired } = await createTestEnvironment(manager);

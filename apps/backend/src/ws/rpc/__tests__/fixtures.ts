@@ -15,8 +15,8 @@ import { createDetailStream } from "../../../environment/streams/detail-stream.j
 
 export const descriptor: EnvironmentDescriptor = {
   environmentId: "11111111-1111-1111-1111-111111111111", streamEpoch: "22222222-2222-2222-2222-222222222222", label: "test",
-  platform: { os: "unknown", arch: "test" }, forgeVersion: "test", protocolVersion: 1,
-  capabilities: { shellResume: true, sessionDetail: true, durableCommands: true, newWorktree: true, artifactUpload: true, terminal: true, legacyAdapter: true },
+  platform: { os: "unknown", arch: "test" }, forgeVersion: "test", protocolVersion: 2,
+  capabilities: { shellResume: true, sessionDetail: true, durableCommands: true, newWorktree: true, artifactUpload: true, terminal: true, },
 };
 export const principal: Principal = { deviceSessionId: "33333333-3333-3333-3333-333333333333", scopes: new Set<Scope>(["session:read", "session:operate", "terminal:operate", "workspace:read", "workspace:write", "access:admin", "settings:admin"]) };
 export const session = (sessionId = "session", title = "Session"): SessionSummary => ({
@@ -31,7 +31,6 @@ export const control: ControlService = {
   execute: async (_principal, method, input) => receipt(method, input.commandId),
   getReceipt: async (_principal, commandId) => receipt("session.send", commandId),
 };
-export const emptyLegacy: RpcDependencies["legacyAdapter"] = { execute: async () => ({ events: [] }), subscribe: async function* () {} };
 export const emptyBrowserHost: RpcDependencies["browserHost"] = { attach: async function* () {}, send: async () => ({}), execute: async () => { throw new StreamFault("UNAVAILABLE", "Browser host unavailable"); } };
 export const emptyTerminal: RpcDependencies["terminalTransport"] = { attach: async function* () {}, input: async () => ({}), resize: async () => ({}), closeDevice: async () => {} };
 
@@ -66,7 +65,7 @@ export async function socketFixture(overrides: Partial<RpcDependencies> = {}) {
     consumeWsTicket: async input => {
       const p = tickets.get(input.ticket);
       tickets.delete(input.ticket);
-      if (!p || input.audience !== "rpc" || input.protocolVersion !== 1) throw new StreamFault("UNAUTHENTICATED", "Invalid ticket.");
+      if (!p || input.audience !== "rpc" || input.protocolVersion !== 2) throw new StreamFault("UNAUTHENTICATED", "Invalid ticket.");
       return p;
     },
     registerResource: (p, close) => {
@@ -82,7 +81,7 @@ export async function socketFixture(overrides: Partial<RpcDependencies> = {}) {
     },
   };
   const streams = await streamFixture();
-  const deps: RpcDependencies = { access, control: streams.core.controlService, shellStream: streams.shellStream, detailStream: streams.detailStream, legacyAdapter: emptyLegacy, browserHost: emptyBrowserHost, terminalTransport: emptyTerminal, ...overrides };
+  const deps: RpcDependencies = { access, control: streams.core.controlService, shellStream: streams.shellStream, detailStream: streams.detailStream, browserHost: emptyBrowserHost, terminalTransport: emptyTerminal, ...overrides };
   const rpc = createEnvironmentRpcServer(deps);
   const sockets = new Set<WebSocket>();
   const server = createServer(async (request, response) => {

@@ -24,24 +24,12 @@ package barrel. Preserve the root-barrel contract when moving or splitting modul
 - Request identifiers used for optimistic reconciliation are not automatically exactly-once or
   idempotency guarantees.
 
-## Opt-in local Builder inventory
+## Environment transport
 
-Local Builder clients may opt into a distinct `subscribe_inventory` command. It is not a
-conversation subscription and must not be treated as a compatible alias of `subscribe`.
-
-- Wire types live in `src/builder-inventory.ts` and are re-exported through the package barrel.
-- `requestId` is required and bounded. The command accepts no conversation target or options.
-- The correlated `inventory_snapshot` is the complete origin baseline and the positive capability
-  acknowledgement. It is not transcript data, does not select a conversation, and does not mark
-  anything read.
-- `inventory_pong` is transport liveness only. It is not a capability acknowledgement, a viewed
-  target, or a substitute for `ready`.
-- These events are transient per-socket control/inventory state. They are not recorded conversation
-  events and do not participate in JSONL history or replay.
-- Older servers reject the distinct command as unknown (`INVALID_COMMAND`). Clients must fail closed
-  and must not recover that rejection or a timeout by sending ordinary `subscribe`.
-- Legacy conversation `subscribe` remains the viewed-session contract on Builder sockets. Ordinary
-  `ping`/`ready` remain transport compatibility on non-inventory sockets.
+Paired clients use the native environment RPC contract. Protocol 2 removes the legacy
+command registry and root/CLI WebSocket routes. Version mismatches block with “Update required”;
+they must preserve credentials and avoid reconnect loops. Cached protocol 1 data may be discarded
+cleanly. Shell/detail subscriptions remain read-only; explicit read-state RPCs own read mutations.
 
 ## Downstream validation
 

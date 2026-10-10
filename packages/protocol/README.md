@@ -13,6 +13,8 @@ Read [`AGENTS.md`](AGENTS.md) before changing an exported type. A protocol chang
 
 Model catalog definitions live in [`src/model-catalog-data.ts`](src/model-catalog-data.ts); public types live in [`src/model-catalog-types.ts`](src/model-catalog-types.ts). The maintainer workflow is in [Adding Models](../../docs/ADDING_MODELS.md).
 
-Opt-in local Builder inventory types live in [`src/builder-inventory.ts`](src/builder-inventory.ts). `subscribe_inventory` requires a bounded `requestId` and is not a conversation `subscribe`. The correlated `inventory_snapshot` is the origin baseline and the positive capability acknowledgement; `inventory_pong` is liveness only. Older servers reject the command with `INVALID_COMMAND`; clients must not fall back to `subscribe`. Legacy conversation `subscribe` and ordinary `ping`/`ready` remain unchanged on non-inventory sockets.
-
-For repository setup and validation tiers, see the root [README](../../README.md) and [Quality guide](../../docs/QUALITY.md).
+Paired UI and CLI clients use the native environment RPC registry in
+[`src/environment-v2.ts`](src/environment-v2.ts). Protocol 2 removes root/CLI WebSockets
+and the legacy command registry. Mixed protocol versions show **Update required**;
+matching clients retain credentials and block reconnect retries until upgraded.
+Shell and detail subscriptions do not mark sessions read.

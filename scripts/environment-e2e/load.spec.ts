@@ -152,7 +152,7 @@ test('9.3 real eight-backend production load gate', async ({ browser }) => {
     report.raw.isolated = { before: isolatedBefore, after: isolatedAfter, unrelatedRows }; report.budgets.unrelatedRows = { expected: 0, pass: unrelatedRows.every(row => row.renders === 0) };
     await page.evaluate(() => (window as any).__forgeE2ERuntime.mountDetails([])); await page.waitForTimeout(300);
     report.raw.released = await metrics();
-    report.budgets.detailSubscriptions.releasedPass = report.raw.released.every((value: any) => !value.subscriptions.some((subscription: any) => ['session.subscribe', 'legacy.session.subscribe'].includes(subscription.method)));
+    report.budgets.detailSubscriptions.releasedPass = report.raw.released.every((value: any) => !value.subscriptions.some((subscription: any) => subscription.method === 'session.subscribe'));
     await save();
     const Constructor = await loadConfiguredSqliteDatabaseConstructor();
     const gapObservations = [];

@@ -1,4 +1,4 @@
-import type { SidebarPerfBuildMode, SidebarPerfMetricDefinition } from "./sidebar-perf-types.js";
+import type { SidebarPerfMetricDefinition } from "./sidebar-perf-types.js";
 
 export const SIDEBAR_BOOTSTRAP_METRIC = "sidebar.bootstrap";
 export const SIDEBAR_HISTORY_CACHE_STATE_METRIC = "sidebar.history.cache_state";
@@ -98,7 +98,3 @@ export const backendSidebarPerfMetricManifest = Object.freeze(
     }
   )
 );
-
-export function resolveBackendSidebarPerfBuildMode(): SidebarPerfBuildMode {
-  return process.env.NODE_ENV === "development" ? "dev" : "prod";
-}

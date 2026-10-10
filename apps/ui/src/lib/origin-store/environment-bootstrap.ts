@@ -1,3 +1,4 @@
+import { ENVIRONMENT_PROTOCOL_VERSION } from '@forge/protocol/environment-v2';
 import {
   createEnvironmentRegistry,
   createMemoryCredentialStore,
@@ -152,7 +153,7 @@ async function bootstrap(): Promise<EnvironmentContextValue> {
           signal: AbortSignal.timeout(10000),
         })
         const descriptor = (await response.json()) as EnvironmentDescriptor
-        if (!response.ok || descriptor.protocolVersion !== 1)
+        if (!response.ok || descriptor.protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION)
           throw new Error('Environment is unavailable or needs a client update')
         primaryEnvironmentId = descriptor.environmentId
         await registry.register({

@@ -361,7 +361,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       tls: exposureOptions.tlsCert && exposureOptions.tlsKey ? { cert: exposureOptions.tlsCert, key: exposureOptions.tlsKey } : undefined,
       host: config.host,
       port: config.port,
-      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
       terminalService,
       terminalRuntimeConfig,
       terminalSettingsService,

@@ -16,9 +16,8 @@ import type { SwarmConfig } from "../swarm/types.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
 import type { UnreadTracker } from "../swarm/session/unread-tracker.js";
 import type { TerminalService } from "../terminal/terminal-service.js";
-import type { WsHandler } from "../ws/ws-handler.js";
+import type { SessionFeaturePublisher } from "../ws/session-feature-publisher.js";
 import { createEnvironmentRpcServer } from "../ws/rpc/rpc-server.js";
-import { createLegacyBuilderAdapter } from "../ws/rpc/legacy-builder-adapter.js";
 import { createTerminalRpcTransport } from "../terminal/terminal-rpc-transport.js";
 import { createEnvironmentArtifactRoutes } from "../ws/http/routes/environment-artifact-routes.js";
 import { loadEnvironmentIdentity, EnvironmentIdentityMismatch, type IdentityOptions } from "./identity.js";
@@ -50,7 +49,7 @@ export interface EnvironmentService {
   routes: import("../ws/http/shared/http-route.js").HttpRoute[];
   initialize(): Promise<void>;
   composeTransport(
-    wsHandler: WsHandler,
+    sessionFeatures: SessionFeaturePublisher,
     terminalService: TerminalService | null,
   ): {
     rpc: ReturnType<typeof createEnvironmentRpcServer>;
@@ -198,7 +197,7 @@ export async function createEnvironmentService(options: {
         await swarmManager.hydrateArchivedLastUsed();
         await source.reconcileBeforeReady();
       },
-      composeTransport(wsHandler: WsHandler, terminalService: TerminalService | null) {
+      composeTransport(sessionFeatures: SessionFeaturePublisher, terminalService: TerminalService | null) {
         if (rpc) throw new Error("Environment transport already composed");
         const dependencies: StreamDependencies = {
           database,
@@ -212,8 +211,8 @@ export async function createEnvironmentService(options: {
         };
         const shellStream = createShellStream(dependencies);
         const detailStream = createDetailStream(dependencies);
-        wsHandler.setEnvironmentControl({ access: auth, control: owner.controlService });
-        const legacyAdapter = createLegacyBuilderAdapter({ access: auth, ports: wsHandler.legacyPorts() });
+        sessionFeatures.setEnvironmentControl({ access: auth, control: owner.controlService });
+
         const unavailable = () => {
           throw new StreamFault("UNAVAILABLE", "Terminal service is unavailable");
         };
@@ -233,12 +232,11 @@ export async function createEnvironmentService(options: {
           lifecycle: createSessionLifecycleRpc({ swarmManager, control: owner.controlService }),
           sessionState: createSessionStateRpc({ swarmManager, control: owner.controlService, unreadTracker }),
           detailFeatures: createDetailFeatureRpc({ swarmManager, control: owner.controlService }),
-          featureStream: { subscribe: (principal, input, signal) => wsHandler.detailFeatures(principal, input, signal) },
+          featureStream: { subscribe: (principal, input, signal) => sessionFeatures.detailFeatures(principal, input, signal) },
           shellStream,
           detailStream,
-          legacyAdapter,
-          browserHost: wsHandler.browserHost,
-          browser: wsHandler.browser,
+          browserHost: sessionFeatures.browserHost,
+          browser: sessionFeatures.browser,
           terminalTransport,
         });
         return { rpc, terminalTransport };

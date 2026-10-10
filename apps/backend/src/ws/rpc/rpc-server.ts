@@ -127,8 +127,8 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
         if (rpcRegistry[method].stream) {
           const streamMethod = method as StreamMethod;
           const count = [...subscriptions.values()].filter(s => s.method === streamMethod).length;
-          if ((streamMethod === "session.subscribe" || streamMethod === "legacy.session.subscribe" || streamMethod === "session.features.subscribe") &&
-              [...subscriptions.values()].filter(s => s.method === "session.subscribe" || s.method === "legacy.session.subscribe" || s.method === "session.features.subscribe").length >= 32 || streamMethod === "terminal.attach" && count >= 8 || (streamMethod === "shell.subscribe" || streamMethod === "browser.host.attach") && count >= 1) {
+          if ((streamMethod === "session.subscribe" || streamMethod === "session.features.subscribe") &&
+              [...subscriptions.values()].filter(s => s.method === "session.subscribe" || s.method === "session.features.subscribe").length >= 32 || streamMethod === "terminal.attach" && count >= 8 || (streamMethod === "shell.subscribe" || streamMethod === "browser.host.attach") && count >= 1) {
             throw new StreamFault("RATE_LIMITED", "Subscription limit reached.");
           }
           if (method === 'browser.host.attach' && !principal.localBrowserHost) throw new StreamFault('FORBIDDEN', 'Local Desktop browser capability is required');
@@ -140,7 +140,6 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
             case "session.features.subscribe":
               if (!deps.featureStream) throw new StreamFault("UNAVAILABLE", "Detail feature stream is not composed");
               stream = deps.featureStream.subscribe(principal, input as RpcInput<typeof streamMethod>, controller.signal); break;
-            case "legacy.session.subscribe": stream = deps.legacyAdapter.subscribe(principal, input as RpcInput<typeof streamMethod>, controller.signal); break;
             case "browser.subscribe":
               if (!deps.browser) throw new StreamFault('UNAVAILABLE', 'Browser workspace is unavailable');
               stream = deps.browser.subscribe(principal, input as RpcInput<typeof streamMethod>, controller.signal); break;

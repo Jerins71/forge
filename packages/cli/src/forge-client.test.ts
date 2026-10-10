@@ -37,6 +37,18 @@ describe('ForgeClient', () => {
     })
   })
 
+  it('shows Update required for a paired protocol-1 host before authenticated reads', async () => {
+    const environmentId = '11111111-1111-1111-1111-111111111111';
+    const requests: string[] = [];
+    const client = new ForgeClient({ credential: { environmentId, baseUrl: 'http://127.0.0.1:47287', bearerToken: 'P'.repeat(43), deviceSessionId: environmentId } as never, fetchImpl: async (url, init) => {
+      requests.push(new URL(String(url)).pathname);
+      expect(new Headers(init?.headers).has('authorization')).toBe(false);
+      return Response.json({ environmentId, protocolVersion: 1 });
+    } });
+    await expect(client.getStatus()).rejects.toMatchObject({ message: expect.stringContaining('Update required'), exitCode: 23, code: 'unsupported_protocol' });
+    expect(requests).toEqual(['/api/v2/environment']);
+  })
+
   it('requires pairing for session controls while API-key HTTP reads remain supported', async () => {
     const client = new ForgeClient({ url: 'http://127.0.0.1:47287', apiKey: 'secret' })
     await expect(client.run({ command: 'run', target: { kind: 'session', agentId: 'session-1' }, text: 'hello' })).rejects.toMatchObject({ code: 'pairing_required', exitCode: 23 })

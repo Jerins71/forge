@@ -1,3 +1,4 @@
+import { ENVIRONMENT_PROTOCOL_VERSION } from '@forge/protocol/environment-v2';
 import type {
   ArtifactRef,
   CommandReceipt,
@@ -184,7 +185,7 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
   ): import('./ports.js').ShellCacheRecord | null {
     if (
       cached.environmentId !== this.environmentId ||
-      cached.protocolVersion !== 1 ||
+      cached.protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION ||
       cached.cacheSchemaVersion !== 1 ||
       cached.streamEpoch !== cached.cursor?.streamEpoch ||
       !(Date.parse(cached.cachedAt) > this.now() - 30 * 86400000) ||

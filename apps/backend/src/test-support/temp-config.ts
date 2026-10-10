@@ -16,7 +16,6 @@ export interface TempConfigOptions {
   host?: string
   debug?: boolean
   isDesktop?: boolean
-  allowNonManagerSubscriptions?: boolean
   managerId?: string
   managerDisplayName?: string
   defaultModel?: AgentModelDescriptor
@@ -131,7 +130,6 @@ export async function createTempConfig(options: TempConfigOptions = {}): Promise
     port: options.port ?? (await getAvailablePort(options.host ?? '127.0.0.1')),
     debug: options.debug ?? false,
     isDesktop: options.isDesktop ?? false,
-    allowNonManagerSubscriptions: options.allowNonManagerSubscriptions ?? false,
     managerId,
     managerDisplayName: options.managerDisplayName ?? 'Manager',
     defaultModel: options.defaultModel ?? DEFAULT_MODEL,

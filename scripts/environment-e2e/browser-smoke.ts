@@ -103,7 +103,7 @@ try {
       const replay = await page.evaluate(async ({ commandId, input }) => {
         const bridge = (window as any).electronBridge.environmentCredentials;
         const primary = (await bridge.primary()).value;
-        const ticket = await bridge.wsTicket(primary.environmentId, 'rpc', 1); if (!ticket.ok) throw new Error(ticket.error.message);
+        const ticket = await bridge.wsTicket(primary.environmentId, 'rpc', 2); if (!ticket.ok) throw new Error(ticket.error.message);
         const target = (window as any).electronBridge.backendWsUrl.replace(/\/$/, '') + '/api/v2/rpc';
         const ws = new WebSocket(target, ['forge.v2', `ticket.${ticket.value.ticket}`]);
         await new Promise<void>((resolve, reject) => { ws.onopen = () => resolve(); ws.onerror = () => reject(new Error('Receipt replay socket failed')); });

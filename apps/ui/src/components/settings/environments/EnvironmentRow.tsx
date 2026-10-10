@@ -45,7 +45,7 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
     const result = await managedBridge[action](managed.hostAlias)
     if (!result.ok) throw new Error(result.error.message)
   }
-  const updateAvailable = Boolean(managed?.desiredVersion && managed.desiredVersion !== managed.installedVersion)
+  const updateAvailable = Boolean(managed && (status.kind === 'update-required' || managed.desiredVersion && managed.desiredVersion !== managed.installedVersion))
 
   const run = async (action: string, task: () => Promise<void>) => {
     setBusy(action)
@@ -139,7 +139,7 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
             <>
               {updateAvailable ? (
                 <Button size="sm" variant="ghost" className="gap-1" disabled={busy !== null} onClick={() => void run('update', () => managedAction('update'))}>
-                  {busy === 'update' ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUpCircle className="size-3.5" />} Update to {managed.desiredVersion}
+                  {busy === 'update' ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUpCircle className="size-3.5" />} Update{managed.desiredVersion ? ` to ${managed.desiredVersion}` : ''}
                 </Button>
               ) : null}
               <Button size="sm" variant="ghost" className="gap-1" disabled={busy !== null} onClick={() => void run('repair', () => managedAction('repair'))}>

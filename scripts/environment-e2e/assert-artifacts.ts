@@ -6,7 +6,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import type { FleetManifest } from './launch.js';
-import type { LegacySmokeEvidence } from './fixtures/legacy-smoke.js';
+import type { NativeSmokeEvidence } from './fixtures/native-smoke.js';
 
 export type ArtifactKind = 'trace' | 'screenshot' | 'assertions' | 'wire-metrics' | 'performance';
 export interface ArtifactIndex {
@@ -50,7 +50,7 @@ export async function validateArtifactIndex(path: string): Promise<ArtifactIndex
   if (value.suite !== 'infrastructure' && value.status === 'passed') assert.equal(value.deferred.length, 0, 'complete acceptance cannot defer scenarios');
   return value;
 }
-export async function writeInfrastructureArtifacts(manifest: FleetManifest, manifestPath: string, smoke?: LegacySmokeEvidence): Promise<string> {
+export async function writeInfrastructureArtifacts(manifest: FleetManifest, manifestPath: string, smoke?: NativeSmokeEvidence): Promise<string> {
   const root = manifest.artifactRoot;
   const assertions = {
     formatVersion: 1, fleetHealthy: true, environments: manifest.environments.length,
@@ -59,7 +59,7 @@ export async function writeInfrastructureArtifacts(manifest: FleetManifest, mani
     cleanTeardown: manifest.teardown?.ownedChildrenExited === manifest.environments.length,
     markedRootRemoved: manifest.teardown?.rootRemoved ?? false,
     failureRootPreserved: manifest.status === 'failed',
-    nativeLegacySmoke: smoke ?? null,
+    nativeSmoke: smoke ?? null,
     deferred: ['Full slice and load acceptance are separate from infrastructure health; see available per-test assertions'],
   };
   const bytes = Buffer.from(`${JSON.stringify(assertions, null, 2)}\n`);
@@ -73,7 +73,7 @@ export async function writeInfrastructureArtifacts(manifest: FleetManifest, mani
   const index: ArtifactIndex = {
     formatVersion: 1, runId: manifest.runId, suite: 'infrastructure', status: manifest.status === 'failed' ? 'failed' : 'passed', manifestPath: archivedManifestPath,
     commit: manifest.testedCommit ?? commit.trim(), runtime: { node: process.version, playwright: playwright.version, platform: process.platform, arch: process.arch },
-    rerunCommand: `pnpm e2e:env --environments ${manifest.environments.length} --provider fixture ${smoke ? '--legacy-smoke' : '--smoke'} --out ${JSON.stringify(manifestPath)}`,
+    rerunCommand: `pnpm e2e:env --environments ${manifest.environments.length} --provider fixture ${smoke ? '--native-smoke' : '--smoke'} --out ${JSON.stringify(manifestPath)}`,
     artifacts: [{ kind: 'assertions', path: 'assertions.json', sha256: createHash('sha256').update(bytes).digest('hex'), sizeBytes: bytes.length }],
     deferred: assertions.deferred,
   };

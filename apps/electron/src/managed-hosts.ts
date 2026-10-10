@@ -459,7 +459,7 @@ export function createManagedHostService(options: {
         if (
           response.ok &&
           uuid.test(value.environmentId) &&
-          value.protocolVersion === 1
+          (value.protocolVersion === 1 || value.protocolVersion === 2)
         )
           return value
       } catch {
@@ -492,7 +492,7 @@ export function createManagedHostService(options: {
             : 'UNAVAILABLE',
         refreshed.error.message,
       )
-    const session = await options.credentials.session(r.environmentId)
+    const session = await options.credentials.managedTransport.session(r.environmentId)
     if (!session.ok)
       fail(
         session.error.code === 'UNAUTHENTICATED'
@@ -601,7 +601,7 @@ export function createManagedHostService(options: {
       if (!r.environmentId)
         fail('BUSY_OR_UNKNOWN', 'The host state is unknown.')
       await assertManagedHostIdle(
-        options.credentials,
+        options.credentials.managedTransport,
         r,
         baseUrl,
         options.clientOrigin,

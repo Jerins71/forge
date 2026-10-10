@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { launchFleet, verifyFleetHealth, repositoryRoot, controlEnvironment, type BootstrapSession } from '../launch.js';
-import { legacySmoke } from './legacy-smoke.js';
+import { nativeSmoke } from './native-smoke.js';
 import { openUiFleet } from './ui-fleet.js';
 import { writeInfrastructureArtifacts, validateArtifactIndex } from '../assert-artifacts.js';
 
@@ -11,7 +11,7 @@ let failed = true;
 try {
   const environment = fleet.manifest.environments[0]!;
   const session = await controlEnvironment<BootstrapSession>(fleet.manifest, environment.name, 'bootstrap');
-  const smoke = await legacySmoke(environment, session);
+  const smoke = await nativeSmoke(environment, session);
   const ui = await openUiFleet(fleet.manifestPath);
   try {
     assert.equal((await fetch(ui.uiUrl)).status, 200, 'real built UI shell');
@@ -20,7 +20,7 @@ try {
     assert(platformCode.includes('__forgeE2EPlatform'));
     assert(!platformCode.includes(session.bearer), 'platform script contains no credential');
     const evidence = await ui.launchEvidence(ui.a, smoke.sessionId);
-    assert.equal(evidence.commands, 0, 'legacy fixture created no V2 launch command');
+    assert.equal(evidence.commands, 0, 'native project create owns its initial session');
     assert.equal(evidence.worktrees, 0);
     assert(evidence.dispatches >= 3);
     assert.equal(evidence.markerChanged, true);

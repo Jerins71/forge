@@ -25,7 +25,7 @@ it.each([1, 2])(
         return res.end(
           JSON.stringify({
             environmentId: id,
-            protocolVersion: 1,
+            protocolVersion: 2,
             label: 'fixture',
           }),
         )

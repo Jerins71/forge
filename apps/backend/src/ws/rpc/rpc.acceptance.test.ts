@@ -5,7 +5,6 @@ import { createHealthRoutes } from "../http/routes/health-routes.js";
 import type { EnvironmentHttpRoute } from "./http-route-access.js";
 import { WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
-import { createLegacyBuilderAdapter } from "./legacy-builder-adapter.js";
 import { socketFixture, principal, receipt } from "./__tests__/fixtures.js";
 import type { ControlService } from "../../environment/control/control-types.js";
 import { createSessionLifecycleRpc } from "./session-lifecycle-rpc.js";
@@ -79,7 +78,7 @@ describe("environment RPC real socket boundary", () => {
       const status = await new Promise<number>(resolve => { socket.on("unexpected-response", (_request, response) => { response.resume(); socket.terminate(); resolve(response.statusCode!); }); socket.on("error", () => {}); });
       expect(status).toBe(path.startsWith("/api/v2/rpc") ? 401 : 404);
     }
-    const mismatch = new WebSocket(`${f.base.replace("http", "ws")}/api/v2/rpc`, ["forge.v2", `ticket.${f.issueTicket()}`], { headers: { "x-forge-environment-protocol": "2" } });
+    const mismatch = new WebSocket(`${f.base.replace("http", "ws")}/api/v2/rpc`, ["forge.v2", `ticket.${f.issueTicket()}`], { headers: { "x-forge-environment-protocol": "1" } });
     const mismatchStatus = await new Promise<number>(resolve => { mismatch.on("unexpected-response", (_request, response) => { response.resume(); mismatch.terminate(); resolve(response.statusCode!); }); mismatch.on("error", () => {}); });
     expect(mismatchStatus).toBe(426);
     const ticket = f.issueTicket();
@@ -149,19 +148,6 @@ describe("environment RPC real socket boundary", () => {
     expect(await c.next(frame => frame.type === "stream.error")).toMatchObject({ error: { code: "RESYNC_REQUIRED" } });
     c.send({ type: "ping", nonce: "alive" });
     expect(await c.next(frame => frame.type === "pong")).toMatchObject({ nonce: "alive" });
-  });
-
-  it("generic legacy adapter rejects migrated commands, cross-session and scope mismatches", async () => {
-    const f = await socketFixture(); cleanups.push(f.close);
-    const adapter = createLegacyBuilderAdapter({ access: f.access, ports: {
-      executeCommand: async ({ send }) => send({ type: "error", code: "EXAMPLE", message: "test" }),
-      featureState: async () => [], subscribeFeatures: () => () => {},
-    } });
-    const signal = new AbortController().signal;
-    await expect(adapter.execute(principal, "legacy.session.operate", { sessionId: "session", command: { type: "user_message", text: "hello" } }, signal)).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(adapter.execute(principal, "legacy.workspace.read", { sessionId: "session", command: { type: "resume_session", agentId: "session" } }, signal)).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(adapter.execute(principal, "legacy.session.operate", { sessionId: "session", command: { type: "resume_session", agentId: "other" } }, signal)).rejects.toMatchObject({ code: "FORBIDDEN" });
-    expect(await adapter.execute(principal, "legacy.session.operate", { sessionId: "session", command: { type: "resume_session", agentId: "session" } }, signal)).toMatchObject({ events: [{ type: "error" }] });
   });
 
   it("bounds pending requests, detail mounts and terminal mounts per socket", async () => {

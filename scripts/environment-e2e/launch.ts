@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { legacySmoke } from './fixtures/legacy-smoke.js';
+import { nativeSmoke } from './fixtures/native-smoke.js';
 import { writeInfrastructureArtifacts } from './assert-artifacts.js';
 
 export const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -313,8 +313,8 @@ async function main() {
   const onSignal = () => { void fleet.stop().then(() => process.exit(0), () => process.exit(1)); };
   process.once('SIGINT', onSignal); process.once('SIGTERM', onSignal);
   try {
-    if (args.includes('--smoke') || args.includes('--legacy-smoke')) {
-      const evidence = args.includes('--legacy-smoke') ? await legacySmoke(fleet.manifest.environments[0]!, await fleet.pairing.bootstrap(fleet.children[0]!, fleet.manifest.environments[0]!)) : undefined;
+    if (args.includes('--smoke') || args.includes('--native-smoke')) {
+      const evidence = args.includes('--native-smoke') ? await nativeSmoke(fleet.manifest.environments[0]!, await fleet.pairing.bootstrap(fleet.children[0]!, fleet.manifest.environments[0]!)) : undefined;
       await fleet.stop();
       await writeInfrastructureArtifacts(fleet.manifest, fleet.manifestPath, evidence);
       console.log('Fleet health and owned-child teardown passed');

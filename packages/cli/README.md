@@ -100,10 +100,13 @@ receipt recovery uses the original command ID.
 
 The V2 cutover does not assume that external old CLI or API-key clients are
 absent. Upgrade and pair before using session controls. Old CLI/root WebSocket
-endpoints are removed at final cutover; there is no legacy transport fallback.
+endpoints are removed in environment protocol 2; there is no legacy transport fallback.
 API keys remain supported for the retained authenticated `/api/cli/*` HTTP read
 routes and existing Stream Deck HTTP integration. They do not authorize the new
 CLI's V2 session controls. Deploy matching backend/UI/CLI builds for the cutover;
-older paired servers without the CLI transport capability return an update
-required error. OS vault retrieval paths on Linux and Windows require platform
+protocol 1 servers or servers without the CLI transport capability return an update
+required error. A protocol 1 paired client also blocks on a protocol 2 server.
+Desktop retains the managed SSH Update action for a pinned protocol 1 host; its
+main-only idle inspection accepts protocol 1 while normal client controls remain
+blocked. Cached protocol 1 shells are discarded cleanly without purging credentials. OS vault retrieval paths on Linux and Windows require platform
 validation; the portable explicit-file path is supported on all three systems.

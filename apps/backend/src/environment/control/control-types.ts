@@ -103,7 +103,7 @@ export interface EnvironmentAccessPort {
   revokeDevice(principal: Principal, input: RpcInput<"access.devices.revoke">): Promise<RpcOutput<"access.devices.revoke">>;
   consumeWsTicket(input: {
     ticket: string;
-    audience: "rpc" | "legacy";
+    audience: "rpc";
     origin: string | null;
     protocolVersion: number;
   }): Promise<Principal>;

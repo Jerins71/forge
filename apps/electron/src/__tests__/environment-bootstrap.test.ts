@@ -18,10 +18,10 @@ afterEach(async () => { for (const fn of cleanup.splice(0).reverse()) await fn()
 it('safeStorage ciphertext stays on disk; parent IPC pairs via ordinary HTTP and valid primary session is reused', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forge-desktop-env-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
   const token = randomBytes(32).toString('base64url'); const id = 'a6a8cae8-1291-4bc5-ab1f-a574c4e6fbd9';
-  let exchanges = 0;
+  let exchanges = 0, remoteProtocol = 2;
   const server = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
-    if (req.url === '/api/v2/environment') res.end(JSON.stringify({ environmentId: id, protocolVersion: 1, label: 'primary' }));
+    if (req.url === '/api/v2/environment') res.end(JSON.stringify({ environmentId: id, protocolVersion: remoteProtocol, label: 'primary' }));
     else if (req.url === '/api/v2/access/challenge') res.end(JSON.stringify({ challengeId: id, nonce: randomBytes(32).toString('base64url') }));
     else if (req.url === '/api/v2/access/exchange') {
       exchanges++; for await (const chunk of req) expect(chunk).toBeDefined();
@@ -37,17 +37,22 @@ it('safeStorage ciphertext stays on disk; parent IPC pairs via ordinary HTTP and
       expect([...Buffer.concat(chunks)]).toEqual([0, 128, 255]); res.end(Buffer.from([255, 128, 0]));
     } else if (req.url?.startsWith('/api/v2/artifacts?')) {
       expect(req.headers.authorization).toBe(`Bearer ${token}`);
-      expect(req.headers['x-forge-environment-protocol']).toBe('1');
+      expect(req.headers['x-forge-environment-protocol']).toBe('2');
       expect(req.headers['content-length']).toBe('3'); expect(req.headers['x-forge-file-name']).toBe('test%20data.bin');
       const parts: Buffer[] = []; for await (const chunk of req) parts.push(Buffer.from(chunk));
       expect([...Buffer.concat(parts)]).toEqual([0,127,255]);
       res.end(JSON.stringify({artifactId:id,fileName:'test data.bin',mimeType:'application/octet-stream',sizeBytes:3}));
     } else if (req.url === `/api/v2/artifacts/${id}`) {
       expect(req.headers.authorization).toBe(`Bearer ${token}`);
-      expect(req.headers['x-forge-environment-protocol']).toBe('1');
+      expect(req.headers['x-forge-environment-protocol']).toBe('2');
       res.setHeader('Content-Type','application/octet-stream');res.setHeader('Content-Disposition','inline; filename="test data.bin"');
       if(req.headers.range) { expect(req.headers.range).toBe('bytes=0-1');res.statusCode=206;res.setHeader('Content-Range','bytes 0-1/3');res.end(Buffer.from([0,127])); }
       else res.end(Buffer.from([0,127,255]));
+    } else if (req.url === '/api/v2/access/ws-ticket') {
+      expect(req.headers['x-forge-environment-protocol']).toBe(String(remoteProtocol));
+      const parts: Buffer[] = []; for await (const part of req) parts.push(Buffer.from(part));
+      expect(JSON.parse(Buffer.concat(parts).toString())).toEqual({ audience: 'rpc', protocolVersion: remoteProtocol });
+      res.end(JSON.stringify({ ticket: 't'.repeat(43), expiresAt: new Date(Date.now() + 10000).toISOString() }));
     } else {
       expect(req.headers.authorization).toBe(`Bearer ${token}`);
       res.end(JSON.stringify({ deviceSession: { deviceSessionId: id, deviceName:'test', scopes:['session:read'],createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+30*24*60*60*1000).toISOString() } }));
@@ -87,7 +92,6 @@ it('safeStorage ciphertext stays on disk; parent IPC pairs via ordinary HTTP and
   expect((await reopened.list()).value).toHaveLength(1);
   expect((await reopened.list()).value?.[0]).toMatchObject({deviceSessionId:id,deviceName:'test',scopes:['session:read'],pairedAt:expect.any(String),expiresAt:expect.any(String)});
   expect(JSON.stringify(await reopened.session(id))).not.toContain(token);
-  server.closeAllConnections(); await new Promise<void>(r=>server.close(()=>r()));
   expect(await reopened.primary()).toMatchObject({ok:true,value:{environmentId:id,deviceSessionId:id}});
   expect(await reopened.list()).toMatchObject({ok:true,value:[{environmentId:id,deviceName:'test'}]});
   expect(await reopened.persistence.save({environmentId:id,deviceSessionId:id,key:'shell',value:JSON.stringify({items:['retained']})})).toEqual({ok:true,value:undefined});
@@ -96,6 +100,16 @@ it('safeStorage ciphertext stays on disk; parent IPC pairs via ordinary HTTP and
   expect(await restored.persistence.load({environmentId:id,deviceSessionId:'e6a8cae8-1291-4bc5-ab1f-a574c4e6fbd9',key:'shell'})).toMatchObject({ok:false,error:{code:'UNAUTHENTICATED'}});
   expect(await readFile(storePath+'.runtime','utf8')).not.toContain('retained');
   expect(await restored.persistence.save({environmentId:id,deviceSessionId:id,key:'pending',value:JSON.stringify({bearerToken:token})})).toMatchObject({ok:false,error:{code:'INVALID_INPUT'}});
+  remoteProtocol = 1;
+  expect(await restored.session(id)).toMatchObject({ ok: false, error: { code: 'PROTOCOL_MISMATCH', retryable: false } });
+  expect(await restored.managedTransport.session(id)).toMatchObject({ ok: true });
+  expect(await restored.managedTransport.wsTicket(id, 'rpc', 2)).toMatchObject({ ok: true });
+  expect(await restored.managedTransport.request({ environmentId: id, path: '/api/terminals?sessionAgentId=manager', method: 'GET' })).toMatchObject({ ok: true });
+  expect(await restored.managedTransport.request({ environmentId: id, path: '/api/settings/models', method: 'GET' })).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+  expect(await restored.managedTransport.request({ environmentId: id, path: '/api/terminals?sessionAgentId=manager', method: 'POST' })).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+  expect(await restored.persistence.load({environmentId:id,key:'shell'})).toEqual({ok:true,value:JSON.stringify({items:['retained']})});
+  expect(await restored.list()).toMatchObject({ ok: true, value: [{ environmentId: id }] });
+  server.closeAllConnections(); await new Promise<void>(r=>server.close(()=>r()));
   await restored.remove(id);
   expect(await restored.persistence.load({environmentId:id,key:'shell'})).toMatchObject({ok:false,error:{code:'UNAUTHENTICATED'}});
   const runtime = await readFile(storePath+'.runtime','utf8'); expect(runtime).not.toContain(token);
@@ -126,7 +140,7 @@ it('authenticated activity drives sleep prevention and updater treats revoked or
   const {SleepBlockerService} = await import('../sleep-blocker.js');
   const root = await mkdtemp(join(tmpdir(),'forge-activity-'));cleanup.push(()=>rm(root,{recursive:true,force:true}));
   const token = randomBytes(32).toString('base64url'); const id='a6a8cae8-1291-4bc5-ab1f-a574c4e6fbd9'; let activityStatus=200; let activityReads=0;
-  const server=createServer(async(req,res)=>{res.setHeader('Content-Type','application/json');if(req.url==='/api/v2/environment')res.end(JSON.stringify({environmentId:id,protocolVersion:1,label:'primary'}));else if(req.url==='/api/v2/access/challenge')res.end(JSON.stringify({challengeId:id,nonce:randomBytes(32).toString('base64url')}));else if(req.url==='/api/v2/access/exchange'){for await(const chunk of req)expect(chunk).toBeDefined();res.end(JSON.stringify({environment:{environmentId:id,label:'primary'},deviceSession:{deviceSessionId:id,deviceName:'test',scopes:['session:read'],createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+30*24*60*60*1000).toISOString()},bearerToken:token}));}else if(req.url==='/api/activity'){expect(req.headers.authorization).toBe(`Bearer ${token}`);activityReads++;res.statusCode=activityStatus;res.end(JSON.stringify({activeSessions:1,activeWorkers:0,hasActiveSessions:true,hasActiveWorkers:false}));}else{res.statusCode=404;res.end('{}');}});
+  const server=createServer(async(req,res)=>{res.setHeader('Content-Type','application/json');if(req.url==='/api/v2/environment')res.end(JSON.stringify({environmentId:id,protocolVersion:2,label:'primary'}));else if(req.url==='/api/v2/access/challenge')res.end(JSON.stringify({challengeId:id,nonce:randomBytes(32).toString('base64url')}));else if(req.url==='/api/v2/access/exchange'){for await(const chunk of req)expect(chunk).toBeDefined();res.end(JSON.stringify({environment:{environmentId:id,label:'primary'},deviceSession:{deviceSessionId:id,deviceName:'test',scopes:['session:read'],createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+30*24*60*60*1000).toISOString()},bearerToken:token}));}else if(req.url==='/api/activity'){expect(req.headers.authorization).toBe(`Bearer ${token}`);activityReads++;res.statusCode=activityStatus;res.end(JSON.stringify({activeSessions:1,activeWorkers:0,hasActiveSessions:true,hasActiveWorkers:false}));}else{res.statusCode=404;res.end('{}');}});
   server.listen(0,'127.0.0.1');await once(server,'listening');cleanup.push(()=>{server.closeAllConnections();return new Promise<void>(r=>server.close(()=>r()));});
   const baseUrl=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
   const credentials=createEnvironmentCredentialService({storePath:join(root,'credentials.json'),safeStorage:{isEncryptionAvailable:()=>true,encryptString:text=>Buffer.from(text).map(v=>v^0x55),decryptString:data=>data.map(v=>v^0x55).toString()}});
@@ -152,7 +166,7 @@ it('secure IPC sends the capability only to the loopback backend when the primar
     const url = new URL(String(input)); const headers = new Headers(init?.headers);
     calls.push({ origin: url.origin, path: url.pathname, control: headers.get('x-forge-secure-control'), requestOrigin: headers.get('origin') });
     let payload: unknown = {};
-    if (url.pathname === '/api/v2/environment') payload = { environmentId: primaryId, protocolVersion: 1, label: 'fixture' };
+    if (url.pathname === '/api/v2/environment') payload = { environmentId: primaryId, protocolVersion: 2, label: 'fixture' };
     if (url.pathname === '/api/v2/access/challenge') payload = { challengeId: primaryId, nonce: 'synthetic-nonce' };
     if (url.pathname === '/api/v2/access/exchange') payload = { environment: { environmentId: primaryId, label: 'fixture' }, deviceSession: { deviceSessionId: primaryId, deviceName: 'fixture', scopes: ['session:read'], createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 100000).toISOString() }, bearerToken: 't'.repeat(43) };
     return new Response(JSON.stringify(payload), { status: 200 });
@@ -186,7 +200,7 @@ it('secure IPC confines its main-owned capability to the pinned primary loopback
     calls.push({ path: url.pathname, control: headers.get('x-forge-secure-control'), origin: headers.get('origin') });
     const id = url.origin === baseUrl ? primaryId : remoteId;
     let payload: unknown = {};
-    if (url.pathname === '/api/v2/environment') payload = { environmentId: mismatch ? remoteId : id, protocolVersion: 1, label: 'fixture' };
+    if (url.pathname === '/api/v2/environment') payload = { environmentId: mismatch ? remoteId : id, protocolVersion: 2, label: 'fixture' };
     if (url.pathname === '/api/v2/access/challenge') payload = { challengeId: id, nonce: 'synthetic-nonce' };
     if (url.pathname === '/api/v2/access/exchange') payload = { environment: { environmentId: id, label: 'fixture' }, deviceSession: { deviceSessionId: id, deviceName: 'fixture', scopes: ['session:read'], createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 100000).toISOString() }, bearerToken: 't'.repeat(43) };
     return new Response(JSON.stringify(payload), { status: 200 });
@@ -221,10 +235,10 @@ it('secure IPC confines its main-owned capability to the pinned primary loopback
   mismatch = false;
   expect(await service.request({ ...input, path: '/api/activity', method: 'GET', body: undefined })).toMatchObject({ ok: true });
   expect(calls.at(-1)).toEqual({ path: '/api/activity', control: null, origin: 'http://127.0.0.1:47588' });
-  expect(await service.wsTicket(primaryId, 'rpc', 1)).toMatchObject({ ok: true });
+  expect(await service.wsTicket(primaryId, 'rpc', 2)).toMatchObject({ ok: true });
   expect(calls.at(-1)?.origin).toBe('http://127.0.0.1:47588');
   expect(calls.at(-1)?.control).toBe(controlToken);
-  expect(await service.wsTicket(remoteId, 'rpc', 1)).toMatchObject({ ok: true });
+  expect(await service.wsTicket(remoteId, 'rpc', 2)).toMatchObject({ ok: true });
   expect(calls.at(-1)?.control).toBeNull();
   expect(JSON.stringify(await service.list())).not.toContain(controlToken);
   expect(await readFile(join(root, 'credentials.json'), 'utf8')).not.toContain(controlToken);

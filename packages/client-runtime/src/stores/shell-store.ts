@@ -1,3 +1,4 @@
+import { ENVIRONMENT_PROTOCOL_VERSION } from '@forge/protocol/environment-v2';
 import type {
   ShellStreamItem,
   UnknownStreamItem,
@@ -287,7 +288,7 @@ export class ShellStore extends KeyedSelectorStore<ShellState> {
       environmentId,
       deviceSessionId,
       streamEpoch: s.cursor.streamEpoch,
-      protocolVersion: 1,
+      protocolVersion: ENVIRONMENT_PROTOCOL_VERSION,
       cacheSchemaVersion: 1,
       recovery: s.recovery,
       projects: [...s.projects.values()],

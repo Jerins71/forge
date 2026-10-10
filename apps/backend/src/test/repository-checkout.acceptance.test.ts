@@ -26,7 +26,7 @@ it('sets up a real project through authenticated HTTP and projects the same repo
   await bootWithDefaultManager(manager, config)
   const exposure = createExposurePolicy({ host: '127.0.0.1', port: config.port })
   const environment = await createEnvironmentService({ config, swarmManager: manager, unreadTracker: unread, exposure, identityOptions: { installationStateDir: join(configHandle.tempRootDir, 'installation'), label: 'Acceptance Mac' } })
-  const server = new SwarmWebSocketServer({ swarmManager: manager, environment, host: config.host, port: config.port, allowNonManagerSubscriptions: false, unreadTracker: unread })
+  const server = new SwarmWebSocketServer({ swarmManager: manager, environment, host: config.host, port: config.port, unreadTracker: unread })
   // Synthetic access credentials stay inside the fixture; no real account or credential is needed.
   function fixtureBearer(char: string, scopes: Scope[]): string {
     const token = char.repeat(43)

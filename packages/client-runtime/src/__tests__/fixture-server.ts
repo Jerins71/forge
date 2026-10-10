@@ -206,7 +206,6 @@ export async function startFixtureServer(index = 0) {
       if (
         method === 'shell.subscribe' ||
         method === 'session.subscribe' ||
-        method === 'legacy.session.subscribe' ||
         method === 'session.features.subscribe' ||
         method === 'browser.subscribe' || method === 'browser.host.attach'
       ) {
@@ -217,7 +216,7 @@ export async function startFixtureServer(index = 0) {
           sessionId: (input as { sessionId?: string }).sessionId,
         })
         result({ subscriptionId })
-        if (method === 'legacy.session.subscribe' || method === 'session.features.subscribe') return
+        if (method === 'session.features.subscribe') return
         if (method === 'browser.subscribe') { resultAlreadyBrowser(socket, subscriptionId); return }
         if (method === 'browser.host.attach') {
           send(socket, { type: 'stream', subscriptionId, item: { kind: 'attached' } })
@@ -273,10 +272,6 @@ export async function startFixtureServer(index = 0) {
           browserHostCommands.push(JSON.parse(parts.join('')))
         }
         result({})
-        return
-      }
-      if (method.startsWith('legacy.')) {
-        result({ events: [] })
         return
       }
       error('NOT_FOUND')

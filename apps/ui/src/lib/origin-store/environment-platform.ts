@@ -1,3 +1,4 @@
+import { ENVIRONMENT_PROTOCOL_VERSION } from '@forge/protocol/environment-v2';
 import {
   EnvironmentRuntimeError,
   type PlatformTransport,
@@ -24,7 +25,7 @@ export function createDesktopEnvironmentTransport(
 ): PlatformTransport {
   return {
     session: (e) => unwrap(bridge.session(e.environmentId)),
-    wsTicket: (e) => unwrap(bridge.wsTicket(e.environmentId, 'rpc', 1)),
+    wsTicket: (e) => unwrap(bridge.wsTicket(e.environmentId, 'rpc', ENVIRONMENT_PROTOCOL_VERSION)),
     pair: (input) => {
       if (!input.expectedEnvironmentId)
         throw new Error('Environment identity is required')

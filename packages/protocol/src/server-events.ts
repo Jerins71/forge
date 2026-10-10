@@ -1,10 +1,10 @@
+import type { SessionActiveToolsSnapshotEvent } from './cli.js'
 import type {
   AgentStatusEvent,
   AgentsSnapshotEvent,
   SessionWorkersSnapshotEvent,
 } from './agent-events.js'
 import type { BuilderSidebarOrderUpdatedEvent } from './builder-sidebar-order.js'
-import type { CliServerEvent } from './cli.js'
 import type { CodexElicitationDismissedEvent, CodexElicitationRequestEvent } from './codex-elicitation.js'
 import type {
   ConversationEntry,
@@ -98,10 +98,7 @@ export * from './remote-update-awareness.js'
 export * from './secure-sessions.js'
 
 export type ServerEvent =
-  import('./builder-inventory.js').InventorySnapshotEvent
-  | import('./builder-inventory.js').InventoryPongEvent
-  | BuilderSidebarOrderUpdatedEvent
-  | CliServerEvent
+  BuilderSidebarOrderUpdatedEvent
   | CodexElicitationRequestEvent
   | CodexElicitationDismissedEvent
   | ReadyEvent
@@ -127,6 +124,7 @@ export type ServerEvent =
   | AgentStatusEvent
   | AgentsSnapshotEvent
   | SessionWorkersSnapshotEvent
+  | SessionActiveToolsSnapshotEvent
   | ProfilesSnapshotEvent
   | UnreadNotificationEvent
   | UnreadCountsSnapshotEvent

@@ -16,7 +16,7 @@ import { runCli } from '../../packages/cli/src/commands/index.js';
 import { startFaultProxy } from './fault-proxy.js';
 import { pairEnvironment, type CliEnvironmentCredential } from '../../packages/cli/src/commands/pair.js';
 import { createEnvironmentRegistry, createMemoryCredentialStore, createMemoryPersistence } from '../../packages/client-runtime/dist/index.js';
-import { ManagerWsClient } from '../../apps/ui/src/lib/ws-client.js';
+
 
 test.use({ environmentSuite: 'cli' });
 test.describe.configure({ mode: 'serial', timeout: 15_000 });
@@ -34,7 +34,7 @@ async function sessionProjection(id: string): Promise<any> {
   const shell = await openFixtureRpc(credential.baseUrl, admin);
   try {
     await shell.call('shell.subscribe', {});
-    const snapshot = await until(() => shell.frames.filter(frame => frame.item?.kind === 'snapshot').at(-1)?.item.snapshot, Boolean);
+    const snapshot = await until<any>(() => shell.frames.filter(frame => frame.item?.kind === 'snapshot').at(-1)?.item.snapshot, Boolean);
     return snapshot.sessions.find((row: any) => row.sessionId === id);
   } finally { shell.close(); }
 }
@@ -64,7 +64,7 @@ test.afterAll(async () => {
 });
 test('selects the paired credential and preserves exact JSON and human read output', async () => {
   let stdout = ''; let stderr = '';
-  const io = { stdout: { write: (text: string) => { stdout += text; } }, stderr: { write: (text: string) => { stderr += text; } } };
+  const io = { stdout: { write: (text: string) => { stdout += text; } }, stderr: { write: (text: string) => { stderr += text; } } } as never;
   const args = ['--credential-file', credentialFile, '--environment-id', credential.environmentId];
   expect(await runCli(['sessions','show',projectId,'--json',...args], { cwd: manifest.environments[1]!.checkout, env: {}, io })).toBe(0);
   expect(JSON.parse(stdout)).toEqual(await client.showSession(projectId)); expect(stderr).toBe('');
@@ -78,7 +78,7 @@ test('macOS OS-vault selection reads the existing paired storage and cleans its 
   const paired = await pairEnvironment({ target: credential.baseUrl, code: grant.code, scopes: ['session:read','session:operate','workspace:read','workspace:write'] });
   try {
     let stdout = '';
-    expect(await runCli(['sessions', 'show', projectId, '--environment-id', credential.environmentId, '--json'], { cwd: manifest.environments[1]!.checkout, env: {}, io: { stdout: { write: text => { stdout += text; } }, stderr: { write: () => {} } } })).toBe(0);
+    expect(await runCli(['sessions', 'show', projectId, '--environment-id', credential.environmentId, '--json'], { cwd: manifest.environments[1]!.checkout, env: {}, io: { stdout: { write: (text: string) => { stdout += text; } }, stderr: { write: () => {} } } as never })).toBe(0);
     expect(JSON.parse(stdout)).toEqual(await client.showSession(projectId));
     evidence.osVaultSelection = true;
   } finally { await promisify(execFile)('/usr/bin/security', ['delete-generic-password', '-s', `forge.environment.${credential.environmentId}`, '-a', paired.deviceSession.deviceSessionId], { cwd: manifest.environments[1]!.checkout }); }
@@ -105,7 +105,7 @@ test('receipt loss reuses one native command ID and one reserved session', async
   const proxy = await startFaultProxy({ upstream: credential.baseUrl });
   try {
     proxy.dropNextResponse({ transport: 'ws', method: 'session.launch', closeAfterDrop: true });
-    const remote = new ForgeClient({ credential: { ...credential, baseUrl: proxy.url }, WebSocketImpl: RecordingSocket });
+    const remote = new ForgeClient({ credential: { ...credential, baseUrl: proxy.url }, WebSocketImpl: RecordingSocket as never });
     const created = await remote.createSession({ profileId: projectId, label: 'Dropped CLI receipt' });
     expect(new Set(proxy.metrics().commandAttempts.map(attempt => attempt.commandId)).size).toBe(1);
     expect(created.session.agentId).toBe(`v2-${proxy.metrics().commandAttempts[0]!.commandId}`);
@@ -160,7 +160,7 @@ test('rename/pin update the selected environment and fresh bootstrap only', asyn
   expect((await client.showSession(sessionId)).session).toMatchObject({ sessionLabel: 'Paired CLI renamed', pinnedAt: expect.any(String) });
   expect((await sessionProjection(sessionId)).title).toBe('Paired CLI renamed');
   let printed = '';
-  expect(await runCli(['sessions', 'list', '--profile', projectId, '--credential-file', credentialFile], { cwd: manifest.environments[1]!.checkout, env: {}, io: { stdout: { write: text => { printed += text; } }, stderr: { write: () => {} } } })).toBe(0);
+  expect(await runCli(['sessions', 'list', '--profile', projectId, '--credential-file', credentialFile], { cwd: manifest.environments[1]!.checkout, env: {}, io: { stdout: { write: (text: string) => { printed += text; } }, stderr: { write: () => {} } } as never })).toBe(0);
   expect(printed.split('\n').find(line => line.includes(sessionId))).toContain('Paired CLI renamed');
   expect(await client.pinSession(sessionId, false)).toEqual({ agentId: sessionId, pinned: false, pinnedAt: null });
   const foreign = new ForgeClient({ credential: { ...credential, environmentId: manifest.environments[0]!.environment!.environmentId } });
@@ -182,6 +182,8 @@ async function uiConsumer(id: string) {
     if ('commandId' in input) calls.push({ method, input, receipt });
     return receipt;
   }) as typeof environment.request;
+  const uiModulePath = '../../apps/ui/src/lib/ws-client.js';
+  const { ManagerWsClient } = await import(uiModulePath);
   const facade = new ManagerWsClient('', id, { environmentClient: environment });
   await until(() => facade.getState().conversationBootstrap.phase, phase => phase === 'ready');
   return { facade, calls, dispose: async () => { facade.destroy(); await registry.dispose(); } };
@@ -223,7 +225,7 @@ test('UI worker stop/resume/kill, choice cancel and stop-all preserve parent aut
   try {
     const blocked = await client.run({ command: 'run', target: { kind: 'session', agentId: id }, text: '[fixture:spawn-choice]', timeoutMs: 5000 });
     const choice = blocked.blocked!.choices[0]!;
-    await until(() => ui.facade.getState().agents, agents => agents.some(agent => agent.agentId === choice.agentId));
+    await until(() => ui.facade.getState().agents, agents => (agents as any[]).some((agent: any) => agent.agentId === choice.agentId));
     ui.facade.sendChoiceCancel(choice.agentId, choice.choiceId);
     await until(() => ui.calls, calls => calls.some(call => call.method === 'session.choice.cancel'));
     await ui.facade.stopSession(choice.agentId);

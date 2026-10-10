@@ -126,7 +126,7 @@ describe("CLI routes and bearer auth", () => {
     }
   });
 
-  it("authenticates /api/cli/ws before accepting the isolated headless socket", async () => {
+  it("removes /api/cli/ws for anonymous and old API-key clients without frames or key use", async () => {
     const configHandle = await createTempConfig({ prefix: "cli-ws-route-", port: await getAvailablePort() });
     activeServers.push({ baseUrl: "cleanup-only", close: configHandle.cleanup });
     const service = new CliAccessService({
@@ -143,7 +143,6 @@ describe("CLI routes and bearer auth", () => {
       swarmManager: manager as unknown as never,
       host: configHandle.config.host,
       port: configHandle.config.port,
-      allowNonManagerSubscriptions: false,
       cliAccessService: service,
     });
     activeSwarmServers.push(server);
@@ -151,7 +150,7 @@ describe("CLI routes and bearer auth", () => {
 
     await expect(connectWebSocket(`ws://${configHandle.config.host}:${configHandle.config.port}/api/cli/ws`)).resolves.toMatchObject({
       opened: false,
-      errorMessage: expect.stringContaining("Unexpected server response: 401") as string,
+      errorMessage: expect.stringContaining("Unexpected server response: 404") as string,
     });
 
     await expect(
@@ -160,7 +159,7 @@ describe("CLI routes and bearer auth", () => {
       })
     ).resolves.toMatchObject({
       opened: false,
-      errorMessage: expect.stringContaining("Unexpected server response: 401") as string,
+      errorMessage: expect.stringContaining("Unexpected server response: 404") as string,
     });
 
     await expect(
@@ -168,13 +167,15 @@ describe("CLI routes and bearer auth", () => {
         authorization: `Bearer ${generated.plaintextKey}`,
       }, "not json")
     ).resolves.toMatchObject({
-      opened: true,
-      messages: [expect.objectContaining({ type: "cli_request_error", code: "bad_request" })],
+      opened: false,
+      messages: [],
+      errorMessage: expect.stringContaining("Unexpected server response: 404"),
     });
 
-    await expect(service.listKeys()).resolves.toMatchObject([
-      { id: generated.key.id, lastUsedAt: "2026-05-11T00:00:00.000Z", lastUsedSource: "ws" },
-    ]);
+    const keys = await service.listKeys();
+    expect(keys).toMatchObject([{ id: generated.key.id }]);
+    expect(keys[0]!.lastUsedAt).toBeUndefined();
+    expect(keys[0]!.lastUsedSource).toBeUndefined();
   });
 
 });

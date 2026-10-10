@@ -63,7 +63,7 @@ export function createFixturePlatform(environments: EnvironmentFixture[], primar
       if (typeof input.value !== 'string' || Buffer.byteLength(input.value) > (input.key === 'pending' ? 262144 : 8388608) || input.value.includes(session.bearer)) throw new Error('Persistence budget/credential violation');
       records.set(key, input.value); return;
     }
-    const headers = { Authorization: `Bearer ${session.bearer}`, Origin: clientOrigin(), 'x-forge-environment-protocol': '1' };
+    const headers = { Authorization: `Bearer ${session.bearer}`, Origin: clientOrigin(), 'x-forge-environment-protocol': "2" };
     let response: Response;
     if (operation === 'session') response = await fetch(`${environment.baseUrl}/api/v2/access/session`, { headers });
     else if (operation === 'wsTicket') response = await fetch(`${environment.baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ audience: input.audience, protocolVersion: input.protocolVersion }) });

@@ -60,7 +60,7 @@ void app.whenReady().then(async () => {
     uninstall = installEnvironmentCredentialsIpc({ ipcMain, service: credentials, isTrustedSender: event => (event as Electron.IpcMainInvokeEvent).sender.id === window?.webContents.id && (event as Electron.IpcMainInvokeEvent).senderFrame?.url.startsWith('app://forge/') === true })
     const revoked = await window.webContents.executeJavaScript(`(async () => {
       const bridge = window.electronBridge.environmentCredentials; const primary = (await bridge.primary()).value;
-      const ticket = await bridge.wsTicket(primary.environmentId, 'rpc', 1); if (!ticket.ok) throw new Error(ticket.error.code);
+      const ticket = await bridge.wsTicket(primary.environmentId, 'rpc', 2); if (!ticket.ok) throw new Error(ticket.error.code);
       const ws = new WebSocket(${JSON.stringify(input.environment.baseUrl.replace(/^http/, 'ws') + '/api/v2/rpc')}, ['forge.v2', 'ticket.' + ticket.value.ticket]);
       const closed = new Promise(resolve => ws.onclose = event => resolve(event.code));
       await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = () => reject(new Error('Renderer RPC unavailable')) });

@@ -1,8 +1,7 @@
-import { readFile, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { isPathWithinRoots, normalizeAllowlistRoots, resolveDirectoryPath } from "../swarm/cwd-policy.js";
 import type { AgentDescriptor } from "../swarm/types.js";
-import { resolveReadFileContentType } from "./http-utils.js";
 
 export const MAX_READ_FILE_CONTENT_BYTES = 2 * 1024 * 1024;
 
@@ -41,12 +40,6 @@ export interface FileAccessSource extends AgentWorkspaceFileAccessSource {
     cwdAllowlistRoots: string[];
     paths: { rootDir: string; dataDir: string; uploadsDir: string };
   };
-}
-
-export interface ApiProxyReadFileResult {
-  status: number;
-  payload: Record<string, unknown>;
-  headers?: Record<string, string>;
 }
 
 function normalizeFileAccessPath(pathValue: string): string {
@@ -155,90 +148,4 @@ export function resolveReadFilePath(
     requestedPathContext.allowedRoots,
     { enforceAllowedRoots: options?.enforceAllowedRoots },
   );
-}
-
-export async function readApiProxyFile(options: {
-  requestedPath: string;
-  swarmManager: FileAccessSource;
-  agentId?: string;
-}): Promise<ApiProxyReadFileResult> {
-  const { requestedPath, swarmManager, agentId } = options;
-  const resolvedPath = await resolveReadFilePath(requestedPath, swarmManager, agentId);
-
-  let fileStats;
-  try {
-    fileStats = await stat(resolvedPath);
-  } catch {
-    return {
-      status: 404,
-      payload: { error: "File not found." }
-    };
-  }
-
-  if (!fileStats.isFile()) {
-    return {
-      status: 400,
-      payload: { error: "Requested path must point to a file." }
-    };
-  }
-
-  if (fileStats.size > MAX_READ_FILE_CONTENT_BYTES) {
-    return {
-      status: 413,
-      payload: {
-        error: `File is too large. Maximum supported size is ${MAX_READ_FILE_CONTENT_BYTES} bytes.`
-      }
-    };
-  }
-
-  const fileContents = await readFile(resolvedPath);
-  const contentType = resolveReadFileContentType(resolvedPath);
-  const binary = isLikelyBinary(fileContents) || contentType.startsWith("image/");
-
-  if (binary) {
-    return {
-      status: 200,
-      payload: {
-        path: resolvedPath,
-        binary: true,
-        encoding: "base64",
-        contentType,
-        content: fileContents.toString("base64")
-      },
-      headers: {
-        "x-read-file-content-type": contentType,
-        "x-read-file-content-encoding": "base64"
-      }
-    };
-  }
-
-  return {
-    status: 200,
-    payload: {
-      path: resolvedPath,
-      content: fileContents.toString("utf8"),
-      contentType
-    },
-    headers: {
-      "x-read-file-content-type": contentType
-    }
-  };
-}
-
-function isLikelyBinary(content: Buffer): boolean {
-  if (content.length === 0) {
-    return false;
-  }
-
-  const sample = content.subarray(0, 4000);
-  let suspiciousChars = 0;
-
-  for (const code of sample) {
-    const isAllowedControl = code === 9 || code === 10 || code === 13;
-    if (!isAllowedControl && (code < 32 || code === 255)) {
-      suspiciousChars += 1;
-    }
-  }
-
-  return suspiciousChars > 0 && suspiciousChars / sample.length > 0.12;
 }

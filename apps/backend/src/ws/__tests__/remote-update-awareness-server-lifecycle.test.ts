@@ -35,7 +35,6 @@ describe("remote update awareness server lifecycle", () => {
       swarmManager: manager,
       host: config.host,
       port: config.port,
-      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
       remoteUpdateAwarenessService: awareness.service,
     });
 

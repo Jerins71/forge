@@ -3,7 +3,6 @@ import type { ProjectAgentRpc, ProjectAgentMethod } from "./project-agent-rpc.js
 import type { EnvironmentDescriptor, Method, RpcInput } from "@forge/protocol/environment-v2";
 import type { ControlService, EnvironmentAccessPort, EnvironmentStreamPort, Principal } from "../../environment/control/control-types.js";
 import type { TerminalRpcTransport } from "../../terminal/terminal-rpc-transport.js";
-import type { LegacyBuilderAdapter } from "./legacy-builder-adapter.js";
 import type { BrowserHostRpc } from "./browser-host-rpc.js";
 import { StreamFault } from "../../environment/streams/stream-budget.js";
 
@@ -18,12 +17,11 @@ export interface RpcDependencies {
   control: ControlService;
   shellStream: Pick<EnvironmentStreamPort, "shell" | "shellPage"> & { descriptor(): EnvironmentDescriptor };
   detailStream: Pick<EnvironmentStreamPort, "detail" | "history" | "workers" | "content">;
-  legacyAdapter: LegacyBuilderAdapter;
   browserHost: Pick<BrowserHostRpc, "attach" | "send" | "execute">;
   terminalTransport: TerminalRpcTransport;
 }
 
-export function requestHandler(deps: RpcDependencies, principal: Principal, method: Method, input: unknown, signal: AbortSignal): Promise<unknown> | unknown {
+export function requestHandler(deps: RpcDependencies, principal: Principal, method: Method, input: unknown, _signal: AbortSignal): Promise<unknown> | unknown {
   if ((lifecycleMethods as readonly string[]).includes(method)) {
     if (!deps.lifecycle) throw new StreamFault("UNAVAILABLE", "Lifecycle service is unavailable");
     return deps.lifecycle.execute(principal, method as SessionLifecycleMethod, input);
@@ -64,8 +62,7 @@ export function requestHandler(deps: RpcDependencies, principal: Principal, meth
     case "terminal.input": return deps.terminalTransport.input(principal, input as RpcInput<typeof method>);
     case "terminal.resize": return deps.terminalTransport.resize(principal, input as RpcInput<typeof method>);
     case "browser.host.send": return deps.browserHost.send(principal, input as RpcInput<typeof method>);
-    case "legacy.session.read": case "legacy.session.operate": case "legacy.workspace.read": case "legacy.workspace.write": case "legacy.settings.admin":
-      return deps.legacyAdapter.execute(principal, method, input as RpcInput<typeof method>, signal);
+
     default: throw new StreamFault("INVALID_INPUT", "Method requires subscription dispatch.");
   }
 }

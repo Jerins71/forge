@@ -1,6 +1,5 @@
 import { createBrowserHostClient } from './browser-host.js'
 import type {
-  ClientCommand,
   ProjectAgentReferenceWrite, ProjectAgentReferenceDelete, ProjectAgentReferenceMutationResult,
   ProjectResourcesSnapshotResponse,
   ProjectResourceSeedRequest,
@@ -348,13 +347,7 @@ export interface EnvironmentFeatureClients {
   }
   /** Desktop's embedded browser host. Attach only on the primary environment; the subscription is the host connection. */
   browserHost: ReturnType<typeof createBrowserHostClient>
-  legacy: {
-    send(command: ClientCommand, sessionId?: string): Promise<void>
-    request(
-      command: ClientCommand,
-      sessionId?: string,
-    ): Promise<readonly Record<string, unknown>[]>
-  }
+
 }
 // A host command is JSON text split to fit the RPC frame limit; matches the browser.host.send part bound.
 export interface HttpFeatureTransport {
@@ -508,46 +501,6 @@ export function createFeatureClients(
       { agentId: id(agentId), repoTarget: 'workspace', ...extra },
       signal,
     )
-  const legacyRequest = async (command: ClientCommand, sessionId?: string) => {
-    const type = command.type
-    if (
-      new Set([
-        'subscribe',
-        'subscribe_inventory',
-        'api_proxy',
-        'user_message',
-        'create_session',
-        'stop_session',
-        'choice_response',
-        'get_session_workers',
-        'get_conversation_page',
-      ]).has(type)
-    )
-      throw new Error(
-        'This feature uses the V2 runtime or a local platform service',
-      )
-    const workspaceRead = new Set<string>([
-    ])
-    const workspaceWrite = new Set<string>([
-    ])
-    const sessionRead = new Set([
-      'ping',
-    ])
-    const method: Extract<Method, `legacy.${string}`> = workspaceRead.has(type)
-      ? 'legacy.workspace.read'
-      : workspaceWrite.has(type)
-        ? 'legacy.workspace.write'
-        : sessionRead.has(type)
-          ? 'legacy.session.read'
-          : 'legacy.session.operate'
-    if (!sessionId && method.startsWith('legacy.session.'))
-      throw new Error('Legacy feature requests require an addressed session')
-    const result = await rpc.request(method, {
-      ...(sessionId ? { sessionId } : {}),
-      command: command as unknown as Record<string, unknown>,
-    })
-    return result.events
-  }
   const checkSetting = (path: string) => {
     if (/^\/api\/(profiles|agents)\/[^/?]+\/context-mode$/.test(path) || /^\/api\/agents\/[^/?]+\/context-artifacts$/.test(path)) return
     if (
@@ -754,11 +707,6 @@ export function createFeatureClients(
         post(`/api/terminals/${encodeURIComponent(terminalId)}/ticket`, i),
     },
     browserHost: createBrowserHostClient(rpc),
-    legacy: {
-      request: legacyRequest,
-      send: async (c, s) => {
-        await legacyRequest(c, s)
-      },
-    },
+
   }
 }

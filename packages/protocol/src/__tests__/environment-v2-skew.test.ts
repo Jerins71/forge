@@ -3,7 +3,7 @@ import { Type } from '@sinclair/typebox'
 import { Value } from '@sinclair/typebox/value'
 import {
   decodeEnvironmentValue, ProjectSummarySchema, ShellStreamItemSchema,
-  RpcClientFrameSchema, rpcRegistry,
+  RpcClientFrameSchema,
 } from '../environment-v2.js'
 
 const project = {
@@ -35,10 +35,7 @@ describe('V2 additive compatibility', () => {
     expect(Value.Check(ShellStreamItemSchema, item)).toBe(false)
     expect(Value.Check(ShellStreamItemSchema, decoded)).toBe(true)
   })
-  it('preserves intentionally open legacy response records while cleaning their outer envelope', () => {
-    const output = { events: [{ type: 'test', futureField: 'legacy' }], futureField: 'v2' }
-    expect(decodeEnvironmentValue(rpcRegistry['legacy.session.operate'].output, output)).toEqual({ events: output.events })
-  })
+
   it('does not repair invalid known fields or accept unknown request methods', () => {
     for (const value of [{ ...project, title: 42, futureField: 1 }, { ...project, projectId: '', futureField: 1 }, { ...project, archived: undefined, futureField: 1 }])
       expect(decodeEnvironmentValue(ProjectSummarySchema, value)).toBeUndefined()

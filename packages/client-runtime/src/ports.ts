@@ -1,3 +1,4 @@
+import { ENVIRONMENT_PROTOCOL_VERSION } from '@forge/protocol/environment-v2';
 import type {
   DeviceSession,
   PairingExchangeResult,
@@ -20,7 +21,7 @@ export interface ShellCacheRecord {
   recovery?: import('@forge/protocol/environment-v2').RecoverySnapshot | null
   environmentId: string
   streamEpoch: string
-  protocolVersion: 1
+  protocolVersion: typeof ENVIRONMENT_PROTOCOL_VERSION
   cacheSchemaVersion: 1
   deviceSessionId: string
   cachedAt: string

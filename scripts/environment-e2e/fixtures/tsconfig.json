@@ -21,6 +21,8 @@
       "ws": [
         "apps/backend/node_modules/@types/ws"
       ],
+      "@forge/protocol": ["packages/protocol/src/index.ts"],
+      "@forge/protocol/*": ["packages/protocol/src/*.ts"],
       "@forge/protocol/environment-v2": [
         "packages/protocol/src/environment-v2.ts"
       ]

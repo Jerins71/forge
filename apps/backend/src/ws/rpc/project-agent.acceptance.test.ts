@@ -6,7 +6,7 @@ import { WebSocket } from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeTempConfig, TestSwarmManager, bootWithDefaultManager } from "../../test-support/index.js";
 import { createTestEnvironment } from "../../test-support/environment-auth.js";
-import { WsHandler } from "../ws-handler.js";
+import { SessionFeaturePublisher } from "../session-feature-publisher.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
@@ -19,8 +19,7 @@ async function fixture() {
   await manager.setSessionProjectAgent(sessionId, { handle: "docs", whenToUse: "Documentation", systemPrompt: "Write docs" });
   await manager.setProjectAgentReference(sessionId, "guide.md", "Original\n");
   let f = await createTestEnvironment(manager);
-  const handler = new WsHandler({ swarmManager: manager, unreadTracker: f.unreadTracker, mobilePushService: {} as never, allowNonManagerSubscriptions: true,
-    perf: { recordDuration() {}, increment() {}, readSummary() {}, readRecentSlowEvents() {} } as never });
+  const handler = new SessionFeaturePublisher({ swarmManager: manager });
   let { rpc } = f.environment.composeTransport(handler, null);
   const server = createServer(async (req, res) => {
     const url = new URL(req.url!, "http://forge.invalid");
@@ -39,7 +38,7 @@ async function fixture() {
   const originalHeaders = f.paired.headers;
   const reconnect = async () => {
     socket.terminate();
-    const ticket = await f.environment.access.issueWsTicket(originalPrincipal, { audience: "rpc", protocolVersion: 1 }, null);
+    const ticket = await f.environment.access.issueWsTicket(originalPrincipal, { audience: "rpc", protocolVersion: 2 }, null);
     socket = new WebSocket(base.replace("http", "ws") + "/api/v2/rpc", ["forge.v2", `ticket.${ticket.ticket}`]);
     listen(); await once(socket, "open");
   };
@@ -50,10 +49,9 @@ async function fixture() {
     await manager.disposeHistoryRecall();
     manager = new TestSwarmManager(config);
     f = await createTestEnvironment(manager, { boot: true });
-    const restartedHandler = new WsHandler({ swarmManager: manager, unreadTracker: f.unreadTracker, mobilePushService: {} as never, allowNonManagerSubscriptions: true,
-      perf: { recordDuration() {}, increment() {}, readSummary() {}, readRecentSlowEvents() {} } as never });
+    const restartedHandler = new SessionFeaturePublisher({ swarmManager: manager });
     rpc = f.environment.composeTransport(restartedHandler, null).rpc;
-    const ticket = await f.environment.access.issueWsTicket(originalPrincipal, { audience: "rpc", protocolVersion: 1 }, null);
+    const ticket = await f.environment.access.issueWsTicket(originalPrincipal, { audience: "rpc", protocolVersion: 2 }, null);
     socket = new WebSocket(base.replace("http", "ws") + "/api/v2/rpc", ["forge.v2", `ticket.${ticket.ticket}`]);
     listen(); await once(socket, "open");
     return { manager, environment: f.environment };
@@ -66,7 +64,7 @@ async function fixture() {
   });
   const request = (method: string, input: unknown) => new Promise<any>(resolve => { const requestId = randomUUID(); pending.set(requestId, resolve); socket.send(JSON.stringify({ type: "request", requestId, method, input })); });
   const reference = async (method: string, input: unknown) => {
-    const response = await fetch(base + "/api/v2/project-agents/reference", { method, headers: { ...originalHeaders, "Content-Type": "application/json", "x-forge-environment-protocol": "1" }, body: JSON.stringify(input) });
+    const response = await fetch(base + "/api/v2/project-agents/reference", { method, headers: { ...originalHeaders, "Content-Type": "application/json", "x-forge-environment-protocol": "2" }, body: JSON.stringify(input) });
     return { status: response.status, output: response.status === 404 ? {} : await response.json() };
   };
   return { ...f, config, manager, target, sessionId, request, reference, restart, reconnect, streams };

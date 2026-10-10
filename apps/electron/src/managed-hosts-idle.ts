@@ -1,3 +1,4 @@
+import { ENVIRONMENT_PROTOCOL_VERSION } from '@forge/protocol/environment-v2'
 import { WebSocket } from 'ws'
 import { randomUUID } from 'node:crypto'
 import { posix } from 'node:path'
@@ -21,7 +22,7 @@ async function readShell(
   baseUrl: string,
   origin: string,
 ): Promise<SessionSummary[]> {
-  const ticket = await credentials.wsTicket(environmentId, 'rpc', 1)
+  const ticket = await credentials.wsTicket(environmentId, 'rpc', ENVIRONMENT_PROTOCOL_VERSION)
   if (!ticket.ok) throw new Error('Host authentication is unknown')
   const url = new URL(ENVIRONMENT_RPC_PATH, baseUrl)
   url.protocol = 'ws:'

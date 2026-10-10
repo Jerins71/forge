@@ -83,14 +83,14 @@ describe("environment artifact ingress and references", () => {
     server.listen(0, "127.0.0.1"); await once(server, "listening");
     const address = server.address() as { port: number }; const base = `http://127.0.0.1:${address.port}/api/v2/artifacts`;
     cleanup.unshift(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
-    const headers = { authorization: "Bearer fixture", "x-forge-environment-protocol": "1", "x-forge-file-name": encodeURIComponent("fixture.txt"), "content-type": "text/plain" };
+    const headers = { authorization: "Bearer fixture", "x-forge-environment-protocol": "2", "x-forge-file-name": encodeURIComponent("fixture.txt"), "content-type": "text/plain" };
     const uploaded = await fetch(`${base}?projectId=project&uploadId=${randomUUID()}`, { method: "POST", headers, body: "fixture" });
     expect(uploaded.status).toBe(200); const artifact = await uploaded.json() as { artifactId: string };
     const download = await fetch(`${base}/${artifact.artifactId}`, { headers: { ...headers, range: "bytes=1-3" } });
     expect(download.status).toBe(206); expect(download.headers.get("content-range")).toBe("bytes 1-3/7"); expect(await download.text()).toBe("ixt");
     expect(download.headers.get("cache-control")).toBe("private, no-store"); expect(download.headers.get("content-security-policy")).toContain("sandbox");
-    const denied = await fetch(`${base}/${artifact.artifactId}`, { headers: { "x-forge-environment-protocol": "1" } }); expect(denied.status).toBe(401);
-    const wrongVersion = await fetch(`${base}/${artifact.artifactId}`, { headers: { authorization: "Bearer fixture", "x-forge-environment-protocol": "2" } }); expect(wrongVersion.status).toBe(409);
+    const denied = await fetch(`${base}/${artifact.artifactId}`, { headers: { "x-forge-environment-protocol": "2" } }); expect(denied.status).toBe(401);
+    const wrongVersion = await fetch(`${base}/${artifact.artifactId}`, { headers: { authorization: "Bearer fixture", "x-forge-environment-protocol": "1" } }); expect(wrongVersion.status).toBe(409);
     expect(resources.size).toBe(0);
   });
 

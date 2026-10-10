@@ -135,7 +135,7 @@ describe('native environment lifecycle consumers', () => {
     }
     const operation = Promise.resolve(invoke(facade)).catch(() => {})
     await until(() => server.inputs.some(entry => entry.method === method))
-    expect(server.inputs.filter(entry => entry.method.startsWith('legacy.') && entry.method !== 'legacy.session.subscribe')).toEqual([])
+    expect(server.inputs.filter(entry => entry.method.startsWith('legacy.'))).toEqual([])
     await operation
   })
 })
@@ -157,7 +157,7 @@ describe('native session state controls', () => {
     expect(server.inputs.find(e => e.method === 'session.pins.clear')?.input).toMatchObject({ sessionId: 'session-1' })
     expect(server.inputs.find(e => e.method === 'session.readState.set' && (e.input as { read: boolean }).read === false)?.input).toMatchObject({ sessionId: 'session-1', read: false })
     expect(server.inputs.find(e => e.method === 'project.readState.clear')?.input).toMatchObject({ projectId: 'project-1' })
-    expect(server.inputs.some(e => e.method.startsWith('legacy.') && e.method !== 'legacy.session.subscribe')).toBe(false)
+    expect(server.inputs.some(e => e.method.startsWith('legacy.'))).toBe(false)
     await rename
   })
   it('keeps authoritative unread until the shell acknowledges the requested state', async () => {

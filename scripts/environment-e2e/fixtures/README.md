@@ -13,14 +13,14 @@ From the selected repository root:
 ```sh
 pnpm --filter @forge/protocol build
 pnpm e2e:env --environments 3 --provider fixture --smoke --out .internal/forge-v2-remote/harness-three.json
-pnpm e2e:env --environments 1 --provider fixture --legacy-smoke --out .internal/forge-v2-remote/harness-legacy.json
+pnpm e2e:env --environments 1 --provider fixture --native-smoke --out .internal/forge-v2-remote/harness-native.json
 pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/fixtures/proxy-self-test.ts
 VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build
 pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/fixtures/ui-fleet-self-test.ts
 pnpm exec playwright test scripts/environment-e2e/slice.spec.ts scripts/environment-e2e/ui.spec.ts scripts/environment-e2e/load.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
 pnpm exec tsc -p scripts/environment-e2e/fixtures/tsconfig.json
 pnpm exec eslint scripts/environment-e2e --max-warnings 0
-pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/assert-artifacts.ts --manifest ../../.internal/forge-v2-remote/harness-legacy.json
+pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/assert-artifacts.ts --manifest ../../.internal/forge-v2-remote/harness-native.json
 ```
 
 Put filename filters before `--project`: Playwright 1.63's variadic project option
@@ -28,7 +28,7 @@ can otherwise consume the filters. The platform build includes the production Re
 profiling renderer required by the 8×500 load gate. Slice, UI and load each own
 a fresh fleet, so destructive scenarios cannot contaminate the next suite.
 
-Without `--smoke`/`--legacy-smoke`, launch owns a long-lived fleet until SIGINT or
+Without `--smoke`/`--native-smoke`, launch owns a long-lived fleet until SIGINT or
 SIGTERM. Attach tests using `FORGE_E2E_MANIFEST=<absolute manifest path>`; attached
 Playwright setup never takes ownership of that fleet. Each suite worker otherwise owns
 startup/shutdown. Only owned ChildProcess objects receive shutdown/kill signals.

@@ -11,7 +11,6 @@ import { BrowserAutomationService } from '../../swarm/browser-automation/browser
 import { createBrowserHostRpc } from './browser-host-rpc.js';
 import { createBrowserWorkspaceRpc } from './browser-workspace-rpc.js';
 import { principal, session, streamFixture, socketFixture } from './__tests__/fixtures.js';
-import { parseClientCommand } from '../ws-command-parser.js';
 const closes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); });
 const local = { ...principal, localBrowserHost: true };
@@ -64,6 +63,11 @@ it('enforces local host authority through the authenticated RPC socket', async (
   remote.send({ type: 'request', requestId: 'open', method: 'browser.tab.open', input: { sessionId: 'session', commandId: randomUUID() } });
   expect(await remote.next(frame => 'requestId' in frame && frame.requestId === 'open')).toMatchObject({ type: 'error', error: { code: 'FORBIDDEN' } });
 });
-it('rejects all thirteen legacy browser command types', () => {
-  for (const type of ['browser_host_register','browser_host_hydrate','browser_host_focus','browser_host_response','browser_host_state_report','browser_host_lifecycle_response','browser_panel_reveal_acknowledge','browser_tab_open','browser_tab_activate','browser_tab_close','browser_tab_resize','browser_recording_start','browser_recording_stop']) expect(parseClientCommand(Buffer.from(JSON.stringify({ type, requestId: 'x', sessionAgentId: 's', profileId: 'p', tabId: 't', recordingId: 'r', hostId: 'h', hostGeneration: 1, focused: true, viewport: { mode: 'fill' }, sequence: 1, sessions: [] }))).ok).toBe(false);
+it('rejects old browser frames through the authenticated RPC socket', async () => {
+  const f = await fixture(); const sockets = await socketFixture({ browserHost: f.host, browser: f.browser }); closes.push(sockets.close);
+  const remote = await sockets.connect(local);
+  for (const type of ['browser_host_register','browser_host_hydrate','browser_host_focus','browser_host_response','browser_host_state_report','browser_host_lifecycle_response','browser_panel_reveal_acknowledge','browser_tab_open','browser_tab_activate','browser_tab_close','browser_tab_resize','browser_recording_start','browser_recording_stop']) {
+    remote.send({ type: 'request', requestId: type, method: 'legacy.session.operate', input: { command: { type } } });
+    expect(await remote.next(frame => 'requestId' in frame && frame.requestId === type)).toMatchObject({ type: 'error', error: { code: 'INVALID_INPUT' } });
+  }
 });

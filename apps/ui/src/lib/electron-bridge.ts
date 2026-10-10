@@ -225,7 +225,7 @@ export interface EnvironmentCredentialsBridge {
   >
   wsTicket(
     environmentId: string,
-    audience: 'rpc' | 'legacy',
+    audience: 'rpc',
     protocolVersion: number,
   ): Promise<EnvironmentCredentialResult<{ ticket: string; expiresAt: string }>>
   request(input: {

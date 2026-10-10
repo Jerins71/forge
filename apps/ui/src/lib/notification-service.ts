@@ -1,4 +1,3 @@
-import type { ManagerWsState } from './ws-state'
 
 // ── Types ──
 
@@ -37,8 +36,6 @@ export interface NotificationStore {
 
 const STORAGE_KEY = 'swarm-notifications'
 const MUTE_CHANGE_EVENT = 'forge-mute-change'
-
-const DEBOUNCE_MS = 2_000
 
 const BUILT_IN_SOUNDS: SoundOption[] = [
   { id: 'notification', name: 'Default Notification', url: '/sounds/notification.mp3', builtIn: true },
@@ -83,10 +80,6 @@ function persistMutedAgents(muted: Set<string>): void {
   }
 }
 
-function isMuted(agentId: string): boolean {
-  return loadMutedAgents().has(agentId)
-}
-
 export function toggleMute(agentId: string): void {
   const muted = new Set(loadMutedAgents())
   if (muted.has(agentId)) {
@@ -103,14 +96,6 @@ export function getMutedAgents(): Set<string> {
 
 export function setMutedAgents(agentIds: Set<string>): void {
   persistMutedAgents(new Set(agentIds))
-}
-
-/** Remove a single agent from the muted set (e.g. on session deletion). */
-export function removeMutedAgent(agentId: string): void {
-  const muted = new Set(loadMutedAgents())
-  if (muted.delete(agentId)) {
-    persistMutedAgents(muted)
-  }
 }
 
 export { MUTE_CHANGE_EVENT }
@@ -214,11 +199,6 @@ export function getAgentPrefs(store: NotificationStore, agentId: string): AgentN
   return store.agents[agentId] ?? { ...DEFAULT_AGENT_PREFS }
 }
 
-/** Resolve effective prefs for a profile, respecting the defaults cascade. */
-function getEffectivePrefs(store: NotificationStore, prefsKey: string): AgentNotificationPrefs {
-  return store.agents[prefsKey] ?? store.defaults
-}
-
 /** Check if a profile has an explicit override (not using defaults). */
 export function hasExplicitOverride(store: NotificationStore, prefsKey: string): boolean {
   return prefsKey in store.agents
@@ -305,226 +285,6 @@ export function previewSound(soundId: string, store: NotificationStore, volume?:
   const url = resolveSoundUrl(soundId, store)
   if (!url) return
   playSound(url, volume ?? 0.7)
-}
-
-// ── Debounce tracking ──
-
-const lastPlayedAt: Record<string, number> = {}
-
-function canPlay(key: string): boolean {
-  const now = Date.now()
-  const last = lastPlayedAt[key]
-  if (last && now - last < DEBOUNCE_MS) return false
-  lastPlayedAt[key] = now
-  return true
-}
-
-// ── Deferred completion tracking ──
-
-/**
- * Tracks agents that have a pending all-done evaluation.
- * When a `speak_to_user` fires while the manager is still streaming,
- * we record the agent here and defer the all-done decision until the
- * manager transitions to idle.
- */
-const pendingCompletionCheck = new Map<string, { timestamp: number; cliOriginated?: boolean }>() // agentId → pending info
-
-// ── Trigger checks ──
-
-function hasStreamingWorkers(managerAgentId: string, state: ManagerWsState): boolean {
-  const hasLoadedStreamingWorker = state.agents.some((agent) => {
-    if (agent.role !== 'worker' || agent.managerId !== managerAgentId) return false
-    const liveStatus = state.statuses[agent.agentId]?.status ?? agent.status
-    return liveStatus === 'streaming'
-  })
-
-  if (hasLoadedStreamingWorker) {
-    return true
-  }
-
-  const manager = state.agents.find((agent) => agent.role === 'manager' && agent.agentId === managerAgentId)
-  return (manager?.activeWorkerCount ?? 0) > 0
-}
-
-function isManagerStreaming(agentId: string, state: ManagerWsState): boolean {
-  const liveStatus = state.statuses[agentId]?.status
-  if (liveStatus) return liveStatus === 'streaming'
-  const agent = state.agents.find((a) => a.agentId === agentId)
-  return agent?.status === 'streaming'
-}
-
-function shouldPlayQuestion(
-  prefsKey: string,
-  agentId: string,
-  state: ManagerWsState,
-  store: NotificationStore,
-): boolean {
-  if (!store.globalEnabled) return false
-  if (agentId === state.targetAgentId && document.hasFocus()) return false
-  const prefs = getEffectivePrefs(store, prefsKey)
-  return prefs.questionSound.enabled
-}
-
-function shouldPlayUnread(
-  prefsKey: string,
-  agentId: string,
-  state: ManagerWsState,
-  store: NotificationStore,
-): boolean {
-  if (!store.globalEnabled) return false
-  // Don't play for the currently viewed agent if the user is actively looking at it
-  if (agentId === state.targetAgentId && document.hasFocus()) return false
-  const prefs = getEffectivePrefs(store, prefsKey)
-  return prefs.unreadSound.enabled
-}
-
-function shouldPlayAllDone(
-  prefsKey: string,
-  agentId: string,
-  state: ManagerWsState,
-  store: NotificationStore,
-): boolean {
-  if (!store.globalEnabled) return false
-  // Don't play for the currently viewed agent if the user is actively looking at it
-  if (agentId === state.targetAgentId && document.hasFocus()) return false
-  const prefs = getEffectivePrefs(store, prefsKey)
-  if (!prefs.allDoneSound.enabled) return false
-  // Hard safety guard: never classify as all-done while the manager itself is streaming.
-  // speak_to_user is a tool call that fires mid-turn; workers may not be spawned yet.
-  if (isManagerStreaming(agentId, state)) return false
-  return !hasStreamingWorkers(agentId, state)
-}
-
-// ── Public API: play notification sounds ──
-
-function playUnread(prefsKey: string, store: NotificationStore): void {
-  if (!canPlay(`unread:${prefsKey}`)) return
-  const prefs = getEffectivePrefs(store, prefsKey)
-  const url = resolveSoundUrl(prefs.unreadSound.soundId, store)
-  if (!url) return
-  playSound(url, prefs.volume)
-}
-
-function playAllDone(prefsKey: string, store: NotificationStore): void {
-  if (!canPlay(`allDone:${prefsKey}`)) return
-  const prefs = getEffectivePrefs(store, prefsKey)
-  const url = resolveSoundUrl(prefs.allDoneSound.soundId, store)
-  if (!url) return
-  playSound(url, prefs.volume)
-}
-
-function playQuestion(prefsKey: string, store: NotificationStore): void {
-  if (!canPlay(`question:${prefsKey}`)) return
-  const prefs = getEffectivePrefs(store, prefsKey)
-  const url = resolveSoundUrl(prefs.questionSound.soundId, store)
-  if (!url) return
-  playSound(url, prefs.volume)
-}
-
-/**
- * Main entry point — called from ws-client on `unread_notification`.
- *
- * Uses deferred classification to avoid false-positive "all done" sounds:
- * - If the manager is still streaming (mid-turn), the all-done decision is
- *   deferred until the manager goes idle. Only the unread sound plays now.
- * - If the manager is already idle (e.g. replayed history), classify immediately.
- */
-export function handleUnreadNotification(
-  agentId: string,
-  state: ManagerWsState,
-  reason?: 'message' | 'choice_request',
-  sessionAgentId?: string,
-  cliOriginated?: boolean,
-): void {
-  const store = readNotificationStore()
-  if (!store.globalEnabled) return
-
-  // Resolve profileId-based prefs key (settings UI saves prefs keyed by profileId)
-  // For worker-originated events, sessionAgentId lets us find the owning manager's profile
-  const resolvedAgentId = sessionAgentId ?? agentId
-  const agent = state.agents.find((a) => a.agentId === resolvedAgentId)
-  const prefsKey = agent?.profileId ?? resolvedAgentId
-
-  // Check if the session agent is muted — suppress all sounds
-  if (isMuted(resolvedAgentId)) return
-
-  // Suppress sounds for CLI-originated sessions when the user opted in.
-  // Prefer the authoritative cliOriginated flag from the backend (covers both
-  // CLI-created sessions AND sessions whose latest user input came from CLI).
-  // Fall back to agent.cli for backward compat with older backends.
-  if (store.muteCliNotifications && (cliOriginated || agent?.cli)) return
-
-  // Choice-request events get their own branch — never enter the all-done path.
-  if (reason === 'choice_request') {
-    if (shouldPlayQuestion(prefsKey, agentId, state, store)) {
-      playQuestion(prefsKey, store)
-      return
-    }
-    // Question sound disabled — fall back to unread, but never all-done
-    if (shouldPlayUnread(prefsKey, agentId, state, store)) {
-      playUnread(prefsKey, store)
-    }
-    return
-  }
-
-  if (isManagerStreaming(agentId, state)) {
-    // Manager is mid-turn — defer the all-done decision until idle transition.
-    // Record this agent as having a pending completion candidate.
-    pendingCompletionCheck.set(agentId, { timestamp: Date.now(), cliOriginated })
-
-    // Still play the lower-priority unread sound immediately for awareness.
-    if (shouldPlayUnread(prefsKey, agentId, state, store)) {
-      playUnread(prefsKey, store)
-    }
-    return
-  }
-
-  // Manager is already idle — classify immediately.
-  // "All done" takes priority — it's the higher-importance sound.
-  if (shouldPlayAllDone(prefsKey, agentId, state, store)) {
-    playAllDone(prefsKey, store)
-    return
-  }
-
-  // Fall back to the generic unread sound
-  if (shouldPlayUnread(prefsKey, agentId, state, store)) {
-    playUnread(prefsKey, store)
-  }
-}
-
-/**
- * Called from ws-client when a manager transitions from `streaming` → `idle`.
- * Evaluates whether a deferred all-done sound should play now.
- */
-export function handleManagerIdleTransition(
-  agentId: string,
-  state: ManagerWsState,
-): void {
-  // Only process if there's a pending completion candidate for this agent.
-  const pending = pendingCompletionCheck.get(agentId)
-  if (!pending) return
-  pendingCompletionCheck.delete(agentId)
-
-  const store = readNotificationStore()
-  if (!store.globalEnabled) return
-
-  // Check mute state before playing deferred sound
-  if (isMuted(agentId)) return
-
-  const agent = state.agents.find((a) => a.agentId === agentId)
-
-  // Suppress sounds for CLI-originated sessions when the user opted in.
-  // Use the cliOriginated flag captured at notification time, fall back to agent.cli.
-  if (store.muteCliNotifications && (pending.cliOriginated || agent?.cli)) return
-
-  const prefsKey = agent?.profileId ?? agentId
-
-  // Now that the manager is idle, evaluate the deferred all-done check.
-  // shouldPlayAllDone will verify no streaming workers remain.
-  if (shouldPlayAllDone(prefsKey, agentId, state, store)) {
-    playAllDone(prefsKey, store)
-  }
-  // No else — the unread sound already played at notification time.
 }
 
 // ── Custom sound management ──

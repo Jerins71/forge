@@ -82,7 +82,7 @@ export class AuthenticatedHttp {
     if (value.protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION)
       throw new EnvironmentRuntimeError(
         'PROTOCOL_MISMATCH',
-        'Environment protocol version differs',
+        'Update required: environment protocol version differs',
       )
     return value
   }

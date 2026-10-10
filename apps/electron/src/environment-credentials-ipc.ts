@@ -1,3 +1,4 @@
+import { ENVIRONMENT_PROTOCOL_VERSION } from '@forge/protocol/environment-v2';
 import { randomUUID, generateKeyPairSync, createHash, sign } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -10,7 +11,7 @@ export const ENVIRONMENT_CREDENTIALS_CHANNEL = 'forge:environment-credentials';
 export const ENVIRONMENT_ARTIFACT_SCHEME = 'forge-artifact';
 const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-export interface EnvironmentCredentialError { code: 'INVALID_INPUT' | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'IDENTITY_MISMATCH' | 'UNAVAILABLE' | 'INTERNAL'; message: string; retryable: boolean }
+export interface EnvironmentCredentialError { code: 'INVALID_INPUT' | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'IDENTITY_MISMATCH' | 'PROTOCOL_MISMATCH' | 'UNAVAILABLE' | 'INTERNAL'; message: string; retryable: boolean }
 export type EnvironmentCredentialResult<T> = { ok: true; value: T } | { ok: false; error: EnvironmentCredentialError };
 export interface DesktopEnvironmentTarget { environmentId: string; baseUrl: string; label: string; primary: boolean; deviceSessionId:string; deviceName:string; scopes:Scope[]; pairedAt:string; expiresAt:string }
 export interface EnvironmentPairInput { baseUrl: string; environmentId: string; credential: PairingExchange['credential']; deviceName: string; requestedScopes: Scope[] }
@@ -23,7 +24,7 @@ export interface EnvironmentCredentialsBridge {
   list(): Promise<EnvironmentCredentialResult<DesktopEnvironmentTarget[]>>;
   pair(input: EnvironmentPairInput): Promise<EnvironmentCredentialResult<{ environment: EnvironmentDescriptor; deviceSession: DeviceSession }>>;
   session(environmentId: string): Promise<EnvironmentCredentialResult<{ deviceSession: DeviceSession }>>;
-  wsTicket(environmentId: string, audience: 'rpc' | 'legacy', protocolVersion: number): Promise<EnvironmentCredentialResult<{ ticket: string; expiresAt: string }>>;
+  wsTicket(environmentId: string, audience: 'rpc', protocolVersion: number): Promise<EnvironmentCredentialResult<{ ticket: string; expiresAt: string }>>;
   request(input: EnvironmentHttpInput): Promise<EnvironmentCredentialResult<{ status: number; headers: Record<string, string>; body: string }>>;
   requestBinary(input: EnvironmentBinaryHttpInput): Promise<EnvironmentCredentialResult<{ status: number; headers: Record<string, string>; bytes: Uint8Array }>>;
   uploadArtifact(input: EnvironmentUploadInput): Promise<EnvironmentCredentialResult<ArtifactRef>>;
@@ -113,21 +114,22 @@ export function createEnvironmentCredentialService(options: { storePath: string;
   }
   async function target(id: string): Promise<StoredTarget> { if (!UUID.test(id)) return fail('INVALID_INPUT', 'Invalid environment identity'); const t = (await load()).find(t => t.environmentId === id); if (!t) return fail('UNAUTHENTICATED', 'Environment needs pairing'); return t; }
   /** `secureBase` is set only by checkedRequest for main-owned Secure Sessions calls to the loopback backend. */
-  async function http(t: StoredTarget, path: string, init: RequestInit = {}, secureBase?: string) {
-    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', secureBase ? 'app://forge' : clientOrigin); headers.set('x-forge-environment-protocol', '1');
+  async function http(t: StoredTarget, path: string, init: RequestInit = {}, secureBase?: string, protocolVersion: number = ENVIRONMENT_PROTOCOL_VERSION) {
+    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', secureBase ? 'app://forge' : clientOrigin); headers.set('x-forge-environment-protocol', String(protocolVersion));
     try { const response = await fetcher((secureBase ?? t.baseUrl) + path, { ...init, headers, redirect: 'error', signal: init.signal ?? AbortSignal.timeout(30_000) }); if (response.status === 401) await clearRuntime(t.environmentId); return response; } catch { return fail('UNAVAILABLE', 'Environment request could not connect'); }
   }
   async function checkedJson(response: Response): Promise<unknown> {
+    if (response.status === 426) fail('PROTOCOL_MISMATCH', 'Update required: environment protocol version differs');
     if (response.status === 401) fail('UNAUTHENTICATED', 'Environment needs pairing');
     if (response.status === 403) fail('FORBIDDEN', 'Environment access was denied');
     if (!response.ok) fail('UNAVAILABLE', 'Environment request was rejected');
     try { return JSON.parse(new TextDecoder().decode(await boundedBytes(response, 1_048_576))); } catch (e) { if (e instanceof CredentialFailure) throw e; return fail('UNAVAILABLE', 'Invalid environment response'); }
   }
-  async function pinned(t: Pick<StoredTarget,'environmentId'|'baseUrl'>) {
+  async function pinned(t: Pick<StoredTarget,'environmentId'|'baseUrl'>, managedRead = false) {
     const response = await fetcher(t.baseUrl + '/api/v2/environment', { redirect: 'error', signal: AbortSignal.timeout(10_000) });
     const environment = await checkedJson(response) as EnvironmentDescriptor;
     if (environment.environmentId !== t.environmentId) { await clearRuntime(t.environmentId); fail('IDENTITY_MISMATCH', 'Environment identity changed; explicitly pair the replacement'); }
-    if (environment.protocolVersion !== 1) fail('UNAVAILABLE', 'Environment protocol version does not match');
+    if (environment.protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION && !(managedRead && environment.protocolVersion === 1)) fail('PROTOCOL_MISMATCH', 'Update required: environment protocol version differs');
     return environment;
   }
   async function envelope<T>(fn: () => Promise<T>): Promise<EnvironmentCredentialResult<T>> {
@@ -159,8 +161,8 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     let socket: WebSocket | undefined;
     try {
       const { WebSocket: Socket } = await import('ws');
-      const headers = { Authorization: `Bearer ${t.bearerToken}`, Origin: clientOrigin, 'Content-Type': 'application/json', 'x-forge-environment-protocol': '1' };
-      const ticket = await checkedJson(await fetcher(t.baseUrl + '/api/v2/access/ws-ticket', { method: 'POST', headers, body: JSON.stringify({ audience: 'rpc', protocolVersion: 1 }), redirect: 'error', signal: AbortSignal.timeout(10_000) })) as { ticket: string };
+      const headers = { Authorization: `Bearer ${t.bearerToken}`, Origin: clientOrigin, 'Content-Type': 'application/json', 'x-forge-environment-protocol': String(ENVIRONMENT_PROTOCOL_VERSION) };
+      const ticket = await checkedJson(await fetcher(t.baseUrl + '/api/v2/access/ws-ticket', { method: 'POST', headers, body: JSON.stringify({ audience: 'rpc', protocolVersion: ENVIRONMENT_PROTOCOL_VERSION }), redirect: 'error', signal: AbortSignal.timeout(10_000) })) as { ticket: string };
       if (!/^[A-Za-z0-9_-]{43}$/.test(ticket.ticket)) return false;
       const url = new URL(ENVIRONMENT_RPC_PATH, t.baseUrl); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       socket = new Socket(url, [ENVIRONMENT_WS_PROTOCOL, 'ticket.' + ticket.ticket], { origin: clientOrigin, handshakeTimeout: 10_000, maxPayload: 16_384 });
@@ -264,7 +266,7 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     pair: input => envelope(() => mutate(() => pairInternal(input))),
     session: id => envelope(async () => { const t = await target(id); await pinned(t); const result = await checkedJson(await http(t, '/api/v2/access/session')) as { deviceSession: DeviceSession }; return { deviceSession: result.deviceSession }; }),
     wsTicket: (id, audience, protocolVersion) => envelope(async () => {
-      if (!['rpc', 'legacy'].includes(audience) || protocolVersion !== 1) fail('INVALID_INPUT', 'Invalid socket ticket input');
+      if (audience !== 'rpc' || protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION) fail('INVALID_INPUT', 'Invalid socket ticket input');
       const t = await target(id); await pinned(t);
       const headers = new Headers({ 'Content-Type': 'application/json' });
       const control = options.desktopSecureControl?.(); const loopback = control ? new URL(control.loopbackUrl) : null;
@@ -273,7 +275,7 @@ export function createEnvironmentCredentialService(options: { storePath: string;
       const owned = audience === 'rpc' && t.primary && control && loopback && control.baseUrl === t.baseUrl
         && control.token.length >= 32 && loopback.protocol === 'http:' && ['localhost','127.0.0.1','[::1]'].includes(loopback.hostname) && loopback.origin === control.loopbackUrl;
       if (owned) headers.set('x-forge-secure-control', control.token);
-      headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', clientOrigin); headers.set('x-forge-environment-protocol', '1');
+      headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', clientOrigin); headers.set('x-forge-environment-protocol', String(ENVIRONMENT_PROTOCOL_VERSION));
       return await checkedJson(await fetcher((owned ? loopback.origin : t.baseUrl) + '/api/v2/access/ws-ticket', { method: 'POST', headers, body: JSON.stringify({ audience, protocolVersion }), redirect: 'error', signal: AbortSignal.timeout(10000) })) as { ticket: string; expiresAt: string };
     }),
     request: input => envelope(async () => {
@@ -298,6 +300,25 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     remove: id => envelope(() => mutate(async () => { await load(); const previous = targets!; targets = previous.filter(t => t.environmentId !== id); try { await save(); await clearRuntime(id); } catch (e) { targets = previous; throw e; } return { removed: targets.length !== previous.length }; })),
   };
   return { ...bridge, persistence,
+    // Main-only reads let SSH Update inspect a paired v1 host before replacing it.
+    // This object is never exposed through renderer IPC.
+    managedTransport: {
+      session: (id: string) => envelope(async () => {
+        const t = await target(id); const descriptor = await pinned(t, true);
+        return await checkedJson(await http(t, '/api/v2/access/session', {}, undefined, descriptor.protocolVersion)) as { deviceSession: DeviceSession };
+      }),
+      wsTicket: (id: string, audience: 'rpc', _protocolVersion: number) => envelope(async () => {
+        if (audience !== 'rpc') fail('INVALID_INPUT', 'Invalid managed socket audience');
+        const t = await target(id); const descriptor = await pinned(t, true);
+        return await checkedJson(await http(t, '/api/v2/access/ws-ticket', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audience, protocolVersion: descriptor.protocolVersion }) }, undefined, descriptor.protocolVersion)) as { ticket: string; expiresAt: string };
+      }),
+      request: (input: EnvironmentHttpInput) => envelope(async () => {
+        if (input.method !== 'GET' || !/^\/api\/terminals\?sessionAgentId=[A-Za-z0-9%_.-]+$/.test(input.path)) fail('FORBIDDEN', 'Managed update reads are limited to terminal inventory');
+        const t = await target(input.environmentId); const descriptor = await pinned(t, true);
+        const response = await http(t, input.path, {}, undefined, descriptor.protocolVersion);
+        return { status: response.status, body: new TextDecoder().decode(await boundedBytes(response, 1_048_576)), headers: safeHeaders(response) };
+      }),
+    },
     // Main-only: SSH management proves the transport; UUID pinning remains independent.
     // A rejected candidate must not wipe the old endpoint's drafts or pending journal.
     refreshManagedEndpoint: (environmentId: string, baseUrl: string) => envelope(() => mutate(async () => {
@@ -306,7 +327,7 @@ export function createEnvironmentCredentialService(options: { storePath: string;
       const response = await fetcher(candidate + '/api/v2/environment', {redirect:'error',signal:AbortSignal.timeout(10_000)});
       const descriptor = await checkedJson(response) as EnvironmentDescriptor;
       if (descriptor.environmentId !== environmentId) fail('IDENTITY_MISMATCH', 'The managed environment identity changed');
-      if (descriptor.protocolVersion !== 1) fail('UNAVAILABLE', 'Environment protocol version does not match');
+      if (descriptor.protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION && descriptor.protocolVersion !== 1) fail('PROTOCOL_MISMATCH', 'Update required: environment protocol version differs');
       const previous=t.baseUrl;t.baseUrl=candidate;
       try { await save(); } catch (e) {t.baseUrl=previous;throw e;}
       return publicTarget(t);
@@ -330,7 +351,7 @@ export type EnvironmentCredentialService = ReturnType<typeof createEnvironmentCr
 export function installEnvironmentCredentialsIpc(options: { ipcMain: { handle(channel: string, listener: (event: unknown, input: unknown) => unknown): void; removeHandler(channel: string): void }; service: EnvironmentCredentialService; isTrustedSender(event: unknown): boolean }): () => void {
   options.ipcMain.handle(ENVIRONMENT_CREDENTIALS_CHANNEL, async (event, input) => {
     if (!options.isTrustedSender(event)) return { ok: false, error: { code: 'FORBIDDEN', message: 'Environment credentials require the trusted main renderer', retryable: false } };
-    const r = input as { operation?: string; input?: unknown; environmentId?: string; audience?: 'rpc' | 'legacy'; protocolVersion?: number };
+    const r = input as { operation?: string; input?: unknown; environmentId?: string; audience?: 'rpc'; protocolVersion?: number };
     if (!r || typeof r.operation !== 'string') return { ok: false, error: { code: 'INVALID_INPUT', message: 'Invalid credential operation', retryable: false } };
     switch (r.operation) {
       case 'primary': return options.service.primary();

@@ -4,27 +4,20 @@ This directory contains shared client-side infrastructure. Treat the websocket c
 
 ## ws-client
 
-`@forge/client-runtime` owns environment catalog, the single socket/supervisor per enabled environment, shell/detail stores, authentication and command recovery. React consumers use environment-qualified selector hooks and mounted detail leases. `ManagerWsClient` is a temporary socketless facade/reducer on the V2 path; inject `EnvironmentClient`, never call its legacy `start()` for an environment. Feature components never own sockets or construct backend URLs.
+`@forge/client-runtime` owns environment catalog, the single socket/supervisor per enabled environment, shell/detail stores, authentication and command recovery. React consumers use environment-qualified selector hooks and mounted detail leases. `ManagerWsClient` is a temporary socketless facade/reducer on the V2 path; inject `EnvironmentClient`, use native lifecycle RPCs for actions. Feature components never own sockets or construct backend URLs.
 
-Keep the compatibility `ManagerWsState` shape stable. Primary identity comes from bootstrap as a paired UUID; unknown environments never route to the primary. Any change to the state contract needs a full consumer audit across the UI.
+Keep the presentation `ManagerWsState` facade stable while auditing every consumer of changed
+fields. Primary identity comes from bootstrap as a paired UUID; unknown environments never route
+to the primary. Shell/detail/runtime caches are authoritative; do not restore a second presentation
+cache or raw WebSocket reducer path.
 
-Decomposition lives in:
-- `ws-client/` for request builders, runtime constants, reducers, utilities, and helpers
-- `ws-client/event-handlers/` for event-specific reducers and dispatch logic
+Decomposition lives in `ws-client/`: native projection, outbox, browser and bounded typed detail
+features. Terminal and throughput presentation retain their focused event reducers. Native lifecycle
+senders use the same RPCs as CLI consumers.
 
-Event handlers are grouped by domain:
-- `agent`
-- `session`
-- `conversation`
-- `config`
-- `directory`
-- `project-agent`
-- `system`
-- `terminal`
-
-Key test:
-- `apps/ui/src/lib/ws-client.test.ts`
+Key tests are `ws-client/environment-commands.acceptance.test.ts`,
+`ws-client/detail-features.acceptance.test.ts`, and the fresh environment UI fleet.
 
 ## General
 
-When editing ws-client behavior, keep the facade contract intact and update handler submodules in the matching domain instead of centralizing more logic in the top-level file.
+Keep facade contracts intact and update focused native modules when changing behavior.

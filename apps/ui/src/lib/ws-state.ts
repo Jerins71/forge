@@ -20,8 +20,7 @@ import type {
   ManagerToolActivityEvent,
   SessionAttention,
 } from '@forge/protocol'
-import type { ConversationPresentationSnapshot } from './ws-client/conversation-snapshot-cache'
-import type { ConversationSubscriptionReason } from './ws-client/conversation-bootstrap-metrics'
+import type { ConversationSubscriptionReason } from './ws-client/types'
 
 export type ConversationHistoryEntry = Extract<
   ConversationEntry,
@@ -52,7 +51,6 @@ export interface ConversationHistoryMutation {
 }
 
 export type ConversationBootstrapPhase = 'idle' | 'pending' | 'ready' | 'error'
-export type BootstrapProtocolMode = 'unknown' | 'correlated' | 'legacy'
 
 export interface ConversationBootstrapState {
   phase: ConversationBootstrapPhase
@@ -61,7 +59,6 @@ export interface ConversationBootstrapState {
   requestedView: BuilderTimelineChannelView
   servedView: BuilderTimelineChannelView | null
   reason: ConversationSubscriptionReason | null
-  protocolMode: BootstrapProtocolMode
   startedAt: number | null
   errorCode?: string
   errorMessage?: string
@@ -84,7 +81,6 @@ export interface ManagerWsState {
   /** Explicit lifecycle for the selected conversation bootstrap. */
   conversationBootstrap: ConversationBootstrapState
   /** Frozen, passive cache overlay. Never used as reducer or command authority. */
-  conversationPresentation: ConversationPresentationSnapshot | null
   messages: ConversationHistoryEntry[]
   activityMessages: AgentActivityEntry[]
   /** V2 environments only; absent for legacy transports. */
@@ -187,10 +183,8 @@ export function createInitialManagerWsState(targetAgentId: string | null): Manag
       requestedView: 'web',
       servedView: null,
       reason: null,
-      protocolMode: 'unknown',
       startedAt: null,
     },
-    conversationPresentation: null,
     messages: [],
     activityMessages: [],
     conversationPage: null,

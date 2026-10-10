@@ -1,3 +1,4 @@
+import { ENVIRONMENT_PROTOCOL_VERSION } from '../../../protocol/src/environment-v2.js';
 import { generateKeyPairSync, createHash, sign } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { open, readFile, lstat, rm } from 'node:fs/promises';
@@ -72,7 +73,7 @@ export async function pairEnvironment(options: { target: string; code?: string; 
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(environment.environmentId)) throw new Error('Invalid environment identity');
   const expected = options.expectedEnvironmentId ?? parsed.environmentId;
   if (expected && expected !== environment.environmentId) throw new Error('Environment identity mismatch; explicitly pair the new environment');
-  if (environment.protocolVersion !== 1) throw new Error('Environment protocol version does not match');
+  if (environment.protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION) throw new Error('Environment protocol version does not match');
   // Reserve fallback destination before consuming a one-use grant. Refuse symlinks/overwrite.
   const file = options.credentialFile ? await open(options.credentialFile, 'wx', 0o600) : null;
   let savedCredential = false;
@@ -146,8 +147,8 @@ export async function loadOsCliCredential(environmentId: string, baseUrl?: strin
     if (!baseUrl) throw new Error('Supply --url for this existing paired credential');
     const url = parsePairTarget(baseUrl).baseUrl;
     const descriptor = await request(url, '/api/v2/environment') as { environmentId: string; protocolVersion: number };
-    if (descriptor.environmentId !== environmentId || descriptor.protocolVersion !== 1) throw new Error('Environment identity or protocol mismatch');
-    const response = await fetch(url + '/api/v2/access/session', { headers: { Authorization: `Bearer ${raw}`, 'x-forge-environment-protocol': '1' }, redirect: 'error', signal: AbortSignal.timeout(10000) });
+    if (descriptor.environmentId !== environmentId || descriptor.protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION) throw new Error('Environment identity or protocol mismatch');
+    const response = await fetch(url + '/api/v2/access/session', { headers: { Authorization: `Bearer ${raw}`, 'x-forge-environment-protocol': String(ENVIRONMENT_PROTOCOL_VERSION) }, redirect: 'error', signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error('Paired credential was revoked or expired; pair again');
     const session = await response.json() as { deviceSession: { deviceSessionId: string } };
     credential = { environmentId, baseUrl: url, bearerToken: raw, deviceSessionId: session.deviceSession.deviceSessionId };

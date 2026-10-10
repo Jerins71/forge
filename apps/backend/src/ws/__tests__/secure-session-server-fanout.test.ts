@@ -16,7 +16,7 @@ describe("secure session server transport", () => {
   it("fans the manager session snapshot to its manager and every worker", async () => {
     const port = await getAvailablePort();
     const secureControlToken = "s".repeat(43);
-    const config = await makeWsServerTempConfig(port, true);
+    const config = await makeWsServerTempConfig(port);
     const manager = new WsServerTestSwarmManager(config);
     await bootWsServerTestManager(manager, config);
     const secureBrowserAccessService = new SecureBrowserAccessService({
@@ -35,7 +35,6 @@ describe("secure session server transport", () => {
       swarmManager: manager,
       host: config.host,
       port: config.port,
-      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
       secureControlToken,
       secureBrowserAccessService,
     });
@@ -318,72 +317,28 @@ describe("secure session server transport", () => {
     expect(hostileDismissal.status).toBe(403);
 
     const hostileWebSocketStatus = await rejectedWebSocketStatus(
-      `ws://${config.host}:${config.port}`,
+      `ws://${config.host}:${config.port}/api/v2/rpc`,
       "https://evil.example",
     );
     expect(hostileWebSocketStatus).toBe(403);
 
-    const managerClient = new WebSocket(`ws://${config.host}:${config.port}`, await paired.protocols());
-    const workerClient = new WebSocket(`ws://${config.host}:${config.port}`, await paired.protocols());
-    const siblingClient = new WebSocket(`ws://${config.host}:${config.port}`, await paired.protocols());
-    const otherClient = new WebSocket(`ws://${config.host}:${config.port}`, await paired.protocols());
-    const managerEvents: ServerEvent[] = [];
-    const workerEvents: ServerEvent[] = [];
-    const siblingEvents: ServerEvent[] = [];
-    const otherEvents: ServerEvent[] = [];
-    managerClient.on("message", (raw) => {
-      managerEvents.push(JSON.parse(raw.toString()) as ServerEvent);
-    });
-    workerClient.on("message", (raw) => {
-      workerEvents.push(JSON.parse(raw.toString()) as ServerEvent);
-    });
-    siblingClient.on("message", (raw) => {
-      siblingEvents.push(JSON.parse(raw.toString()) as ServerEvent);
-    });
-    otherClient.on("message", (raw) => {
-      otherEvents.push(JSON.parse(raw.toString()) as ServerEvent);
-    });
-
+    const managerEvents: ServerEvent[] = [], workerEvents: ServerEvent[] = [], siblingEvents: ServerEvent[] = [], otherEvents: ServerEvent[] = [];
+    const connect = async (sessionId: string, events: ServerEvent[]) => {
+      const client = new WebSocket(`ws://${config.host}:${config.port}/api/v2/rpc`, await paired.protocols());
+      const subscribed = new Promise<void>((resolve, reject) => {
+        client.on("message", raw => {
+          const frame = JSON.parse(raw.toString());
+          if (frame.requestId === sessionId && frame.type === "result") resolve();
+          if (frame.type === "error") reject(new Error(frame.error.message));
+          if (frame.item?.event.type === "secure.catalog.changed") events.push({ type: "secure_secret_catalog_changed", revision: frame.item.event.revision });
+          if (frame.item?.event.type === "secure.upsert") events.push({ type: "secure_session_snapshot", ...frame.item.event.snapshot });
+        });
+      });
+      await once(client, "open"); client.send(JSON.stringify({ type: "request", requestId: sessionId, method: "session.features.subscribe", input: { sessionId } }));
+      await subscribed; return client;
+    };
+    const managerClient = await connect("manager", managerEvents), workerClient = await connect(worker.agentId, workerEvents), siblingClient = await connect(sibling.agentId, siblingEvents), otherClient = await connect(otherSession.agentId, otherEvents);
     try {
-      await Promise.all([
-        once(managerClient, "open"),
-        once(workerClient, "open"),
-        once(siblingClient, "open"),
-        once(otherClient, "open"),
-      ]);
-      managerClient.send(JSON.stringify({
-        type: "subscribe",
-        agentId: "manager",
-      }));
-      otherClient.send(JSON.stringify({
-        type: "subscribe",
-        agentId: otherSession.agentId,
-      }));
-      workerClient.send(JSON.stringify({
-        type: "subscribe",
-        agentId: worker.agentId,
-      }));
-      siblingClient.send(JSON.stringify({
-        type: "subscribe",
-        agentId: sibling.agentId,
-      }));
-      await Promise.all([
-        waitForEvent(managerEvents, (event) =>
-          event.type === "ready" && event.subscribedAgentId === "manager"
-        ),
-        waitForEvent(otherEvents, (event) =>
-          event.type === "ready"
-          && event.subscribedAgentId === otherSession.agentId
-        ),
-        waitForEvent(workerEvents, (event) =>
-          event.type === "ready"
-          && event.subscribedAgentId === worker.agentId
-        ),
-        waitForEvent(siblingEvents, (event) =>
-          event.type === "ready"
-          && event.subscribedAgentId === sibling.agentId
-        ),
-      ]);
       managerEvents.length = 0;
       workerEvents.length = 0;
       siblingEvents.length = 0;

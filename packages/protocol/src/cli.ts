@@ -1,13 +1,9 @@
-import type { ConversationAttachment } from './attachments.js'
 import type {
-  AgentContextUsage,
   AgentDescriptor,
-  AgentStatus,
   ManagerProfile,
   ProjectAgentCapability,
 } from './agents.js'
-import type { ChoiceAnswer, ChoiceQuestion, ChoiceRequestStatus } from './choices.js'
-import type { DeliveryMode } from './messaging.js'
+import type { ChoiceQuestion, ChoiceRequestStatus } from './choices.js'
 
 export const CLI_PROTOCOL_VERSION = 1 as const
 
@@ -247,114 +243,14 @@ export interface SessionActiveToolsSnapshotEvent {
   requestId?: string
 }
 
-export interface CliAgentStatusSnapshot {
-  agentId: string
-  status: AgentStatus
-  pendingCount: number
-  contextUsage?: AgentContextUsage
-  contextRecoveryInProgress?: boolean
-  streamingStartedAt?: number
-}
-
-export interface CliHeadlessSubscriptionTarget {
-  agentId?: string
-  profileId?: string
-}
-
-export interface CliHeadlessReadyEvent {
-  type: 'headless_ready'
-  requestId?: string
-  serverTime: string
-  capabilities: CliCapabilities
-  subscribed: CliHeadlessSubscriptionTarget
-  targetAgent?: AgentDescriptor
-  profile?: ManagerProfile
-  pendingChoices?: CliChoiceOwner[]
-  workers?: AgentDescriptor[]
-  activeTools?: CliActiveToolSnapshotEntry[]
-  status?: CliAgentStatusSnapshot
-}
-
-export interface CliPendingChoicesSnapshotEvent {
-  type: 'cli_pending_choices_snapshot'
-  sessionAgentId: string
-  choices: CliChoiceOwner[]
-  requestId?: string
-}
-
-export interface CliRequestSuccessEvent<TResult = unknown> {
-  type: 'cli_request_success'
-  requestId: string
-  commandType: CliWsCommand['type']
-  result?: TResult
-}
-
-export interface CliFieldError {
-  field: string
-  message: string
-}
-
-export interface CliRequestErrorEvent {
-  type: 'cli_request_error'
-  requestId?: string
-  commandType?: CliWsCommand['type']
-  code: string
-  message: string
-  status?: number
-  retryable?: boolean
-  fieldErrors?: CliFieldError[]
-}
-
-export type CliServerEvent =
-  | CliHeadlessReadyEvent
-  | SessionActiveToolsSnapshotEvent
-  | CliPendingChoicesSnapshotEvent
-  | CliRequestSuccessEvent
-  | CliRequestErrorEvent
-
-export interface CliSubscribeHeadlessCommand {
-  type: 'subscribe_headless'
-  requestId?: string
-  agentId?: string
-  profileId?: string
-}
-
-export interface CliCreateSessionCommand {
-  type: 'cli_create_session'
-  requestId: string
-  profileId: string
-  label?: string
-  name?: string
-  cli?: CliSessionMetadata
-}
-
 export type CliMessageTarget =
   | { kind: 'session'; agentId: string }
   | { kind: 'project_agent'; profileId: string; handle: string }
-
-export interface CliSendMessageCommand {
-  type: 'cli_send_message'
-  requestId: string
-  target: CliMessageTarget
-  text: string
-  attachments?: ConversationAttachment[]
-  delivery?: DeliveryMode
-}
 
 export type CliRunTarget =
   | { kind: 'new_session'; profileId: string; label?: string; name?: string }
   | { kind: 'session'; agentId: string }
   | { kind: 'project_agent'; profileId: string; handle: string }
-
-export interface CliRunCommand {
-  type: 'cli_run'
-  requestId: string
-  target: CliRunTarget
-  text: string
-  attachments?: ConversationAttachment[]
-  delivery?: DeliveryMode
-  cli?: CliSessionMetadata
-}
 
 export type CliSessionCompactionAction = 'compact' | 'smart_compact'
 export type CliSessionCompactionOutcome = 'compacted' | 'skipped' | 'not_reduced'
@@ -369,41 +265,6 @@ export interface CliSessionCompactionResult {
   customInstructionsProvided: boolean
   completedAt: string
 }
-
-export type CliSessionMutationCommand =
-  | { type: 'stop_session'; requestId: string; agentId: string }
-  | { type: 'resume_session'; requestId: string; agentId: string }
-  | { type: 'delete_session'; requestId: string; agentId: string }
-  | { type: 'clear_session'; requestId: string; agentId: string }
-  | { type: 'rename_session'; requestId: string; agentId: string; label: string }
-  | { type: 'pin_session'; requestId: string; agentId: string; pinned: boolean }
-  | { type: 'fork_session'; requestId: string; sourceAgentId: string; label?: string; fromMessageId?: string }
-  | { type: 'compact_session'; requestId: string; agentId: string; customInstructions?: string }
-  | { type: 'smart_compact_session'; requestId: string; agentId: string; customInstructions?: string }
-
-export interface CliChoiceResponseCommand {
-  type: 'cli_choice_response'
-  requestId: string
-  choiceId: string
-  sessionAgentId?: string
-  answers: ChoiceAnswer[]
-}
-
-export interface CliChoiceCancelCommand {
-  type: 'cli_choice_cancel'
-  requestId: string
-  choiceId: string
-  sessionAgentId?: string
-}
-
-export type CliWsCommand =
-  | CliSubscribeHeadlessCommand
-  | CliCreateSessionCommand
-  | CliSendMessageCommand
-  | CliRunCommand
-  | CliSessionMutationCommand
-  | CliChoiceResponseCommand
-  | CliChoiceCancelCommand
 
 export interface CliMessageDispatchResult {
   sessionAgentId: string

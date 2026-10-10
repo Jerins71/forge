@@ -1,5 +1,4 @@
 import type {
-  AgentDescriptor,
   GenerationThroughputEvent,
   GenerationThroughputLiveMeasurement,
   GenerationThroughputSnapshotEvent,
@@ -13,29 +12,6 @@ export interface GenerationThroughputReduction {
   patch: Partial<ManagerWsState>
   accepted: boolean
   terminal?: { agentId: string; measurementId: string; sequence: number }
-}
-
-/** Returns the current-session worker roster needed before this event can be classified. */
-export function pendingGenerationThroughputWorkerMetadataSessionId(
-  state: ManagerWsState,
-  event: GenerationThroughputEvent | GenerationThroughputSnapshotEvent,
-): string | null {
-  const sessionAgentId = event.type === 'generation_throughput'
-    ? event.measurement.sessionId
-    : event.sessionAgentId
-  const workerMeasurements = event.type === 'generation_throughput'
-    ? event.measurement.role === 'worker' ? [event.measurement] : []
-    : event.measurements.filter((measurement) => measurement.role === 'worker')
-  if (workerMeasurements.length === 0) return null
-
-  const selectedAgentId = state.targetAgentId ?? state.subscribedAgentId
-  const selectedWorkerTelemetry = selectedAgentId !== null
-    && workerMeasurements.some((measurement) => measurement.agentId === selectedAgentId)
-  if (!isCurrentSession(state, sessionAgentId) && !selectedWorkerTelemetry) return null
-
-  return !state.workerMetadataSessionIds.has(sessionAgentId)
-    ? sessionAgentId
-    : null
 }
 
 /**
@@ -144,82 +120,6 @@ export function reduceGenerationThroughputSnapshot(
       generationThroughputTombstonesByMeasurementId: {},
       generationThroughputTombstoneOrder: [],
     },
-  }
-}
-
-export function clearGenerationThroughputForAgents(
-  state: ManagerWsState,
-  agentIds: Iterable<string>,
-): Partial<ManagerWsState> {
-  const ids = new Set(agentIds)
-  if (ids.size === 0) return {}
-  let changed = false
-  const measurements = { ...state.generationThroughputByAgentId }
-  const latestFinals = { ...state.generationThroughputLatestFinalByAgentId }
-  const sequences = { ...state.generationThroughputSequenceByMeasurementId }
-  let tombstones = state.generationThroughputTombstonesByMeasurementId
-  let tombstoneOrder = state.generationThroughputTombstoneOrder
-
-  const tombstone = (measurement: GenerationThroughputLiveMeasurement) => {
-    const next = addGenerationThroughputTombstone(
-      tombstones, tombstoneOrder, measurement.measurementId, measurement.sequence,
-    )
-    tombstones = next.generationThroughputTombstonesByMeasurementId
-    tombstoneOrder = next.generationThroughputTombstoneOrder
-  }
-
-  for (const agentId of ids) {
-    const measurement = measurements[agentId]
-    if (measurement) {
-      changed = true
-      delete measurements[agentId]
-      delete sequences[measurement.measurementId]
-      tombstone(measurement)
-    }
-    const latestFinal = latestFinals[agentId]
-    if (latestFinal) {
-      changed = true
-      delete latestFinals[agentId]
-      delete sequences[latestFinal.measurementId]
-      tombstone(latestFinal)
-    }
-  }
-
-  return changed
-    ? {
-        generationThroughputByAgentId: measurements,
-        generationThroughputLatestFinalByAgentId: latestFinals,
-        generationThroughputSequenceByMeasurementId: sequences,
-        generationThroughputTombstonesByMeasurementId: tombstones,
-        generationThroughputTombstoneOrder: tombstoneOrder,
-      }
-    : {}
-}
-
-/** Remove all Pi-only presentation state when descriptor metadata selects Cursor SDK. */
-export function clearGenerationThroughputForIneligibleAgents(
-  state: ManagerWsState,
-  agents: Iterable<Pick<AgentDescriptor, 'agentId' | 'model'>>,
-): Partial<ManagerWsState> {
-  const ineligibleAgentIds = [...agents]
-    .filter((agent) => !isPiGenerationThroughputEligible(agent))
-    .map((agent) => agent.agentId)
-  return clearGenerationThroughputForAgents(state, ineligibleAgentIds)
-}
-
-/** Clear transient calls while retaining the latest exact result through reconnects. */
-export function clearGenerationThroughputState(): Pick<
-  ManagerWsState,
-  | 'generationThroughputByAgentId'
-  | 'generationThroughputSequenceByMeasurementId'
-  | 'generationThroughputTombstonesByMeasurementId'
-  | 'generationThroughputTombstoneOrder'
-> {
-  return {
-    generationThroughputByAgentId: {},
-    generationThroughputSequenceByMeasurementId: {},
-    generationThroughputTombstonesByMeasurementId: {},
-    generationThroughputTombstoneOrder: [],
   }
 }
 

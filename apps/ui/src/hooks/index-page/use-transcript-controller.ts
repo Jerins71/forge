@@ -74,17 +74,11 @@ export function useTranscriptController({
       : null
   const isConversationInteractive =
     !bootstrapForActiveAgent || bootstrapForActiveAgent.phase === 'ready' || bootstrapForActiveAgent.phase === 'idle'
-  const stalePresentation =
-    !isConversationInteractive &&
-    state.conversationPresentation?.agentId === activeAgentId &&
-    state.conversationPresentation.servedView === bootstrapForActiveAgent?.servedView
-      ? state.conversationPresentation
-      : null
   const isLoading = activeAgentStatus === 'streaming' || isAwaitingResponseStart
 
   const { allMessages, visibleMessages } = useVisibleMessages({
-    messages: stalePresentation?.messages ?? state.messages,
-    activityMessages: stalePresentation?.activityMessages ?? state.activityMessages,
+    messages: state.messages,
+    activityMessages: state.activityMessages,
     agents: state.agents,
     activeAgent,
     channelView: messageSourceView,
@@ -204,7 +198,7 @@ export function useTranscriptController({
     feedbackProfileId,
     feedback,
     conversationBootstrap: bootstrapForActiveAgent,
-    hasStaleConversationPresentation: stalePresentation !== null,
+    hasStaleConversationPresentation: false,
     isConversationInteractive,
   }
 }

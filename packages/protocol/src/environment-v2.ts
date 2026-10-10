@@ -13,7 +13,7 @@ import { BrowserViewportV2Schema, BrowserSnapshotV2Schema, BrowserRegistrationV2
 export * from './browser-v2.js'
 import { SESSION_ATTENTION_REASONS } from './session-attention.js'
 
-export const ENVIRONMENT_PROTOCOL_VERSION = 1 as const
+export const ENVIRONMENT_PROTOCOL_VERSION = 2 as const
 export const ENVIRONMENT_PROTOCOL_HEADER = 'x-forge-environment-protocol'
 export const ENVIRONMENT_RPC_PATH = '/api/v2/rpc'
 export const ENVIRONMENT_WS_PROTOCOL = 'forge.v2'
@@ -90,7 +90,6 @@ export const EnvironmentCapabilitiesSchema = O({
   newWorktree: Type.Boolean(),
   artifactUpload: Type.Boolean(),
   terminal: Type.Boolean(),
-  legacyAdapter: Type.Boolean(),
   projectAgentMetadata: Type.Optional(Type.Boolean()),
   projectPolicy: Type.Optional(Type.Boolean()),
   cliTransport: Type.Optional(Type.Boolean()),
@@ -373,17 +372,11 @@ export type PairingExchange = Static<typeof PairingExchangeSchema>
 export type PairingExchangeResult = Static<typeof PairingExchangeResultSchema>
 export const RevokeDeviceSessionSchema = O({ deviceSessionId: V2Uuid })
 export const RevokeDeviceSessionResultSchema = O({ deviceSessionId: V2Uuid, revokedAt: V2Time })
-export const WsTicketRequestSchema = O({ audience: E('rpc', 'legacy'), protocolVersion: Type.Integer({ minimum: 1 }) })
+export const WsTicketRequestSchema = O({ audience: E('rpc'), protocolVersion: Type.Integer({ minimum: 1 }) })
 export const WsTicketSchema = O({ ticket: Type.String({ minLength: 43, maxLength: 43 }), expiresAt: V2Time })
 
 const SubscribeResult = O({ subscriptionId: V2Id })
 const SessionInput = O({ sessionId: V2Id })
-const LegacyInput = O({
-  sessionId: Type.Optional(V2Id),
-  // Temporary envelope. Existing strict ClientCommand parser is mandatory inside adapter.
-  command: Type.Record(Type.String(), Type.Unknown()),
-})
-const LegacyResult = O({ events: Type.Array(Type.Record(Type.String(), Type.Unknown()), { maxItems: 64 }) })
 const TerminalRef = O({ terminalId: V2Id, sessionId: V2Id })
 const TerminalFrame = Type.Union([
   O({ kind: Type.Literal('snapshot'), snapshotId: V2Uuid, part: Type.Integer({ minimum: 0 }),
@@ -484,14 +477,7 @@ export const rpcSchemas = {
   'projectAgent.sharing.set': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, targetProjectIds: Type.Array(V2Id, { maxItems: 100, uniqueItems: true }) }), O({ ...ProjectAgentSharingFields, addedTargetProfileIds: Type.Array(V2Id), removedTargetProfileIds: Type.Array(V2Id), receipt: ProjectAgentOperationReceiptSchema })),
   'projectAgent.recommend': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id }), O({ sessionId: V2Id, whenToUse: Type.String({ maxLength: 4096 }), systemPrompt: Type.String({ maxLength: 131072 }), receipt: ProjectAgentOperationReceiptSchema })),
   'projectAgent.operation.get': defineRpc(O({ commandId: V2Uuid }), ProjectAgentOperationReceiptSchema),
-  // Migration-only methods, each with a compile-time scope and a stricter inner allowlist.
-  'legacy.session.subscribe': defineRpc(SessionInput, SubscribeResult, { stream:
-    O({ type: Type.String({ minLength: 1, maxLength: 128 }), payload: Type.Unknown() }) }),
-  'legacy.session.read': defineRpc(LegacyInput, LegacyResult),
-  'legacy.session.operate': defineRpc(LegacyInput, LegacyResult),
-  'legacy.workspace.read': defineRpc(LegacyInput, LegacyResult),
-  'legacy.workspace.write': defineRpc(LegacyInput, LegacyResult),
-  'legacy.settings.admin': defineRpc(LegacyInput, LegacyResult),
+
 } as const
 export type Method = keyof typeof rpcSchemas
 export const rpcScopes = {
@@ -520,10 +506,6 @@ export const rpcScopes = {
   'projectAgent.get': 'session:read', 'projectAgent.references.list': 'session:read', 'projectAgent.reference.read': 'session:read',
   'projectAgent.sharing.get': 'session:read', 'projectAgent.directory': 'workspace:read',
   'projectAgent.set': 'session:operate', 'projectAgent.sharing.set': 'session:operate', 'projectAgent.recommend': 'session:operate', 'projectAgent.operation.get': 'session:operate',
-  'legacy.session.subscribe': 'session:read',
-  'legacy.session.read': 'session:read', 'legacy.session.operate': 'session:operate',
-  'legacy.workspace.read': 'workspace:read', 'legacy.workspace.write': 'workspace:write',
-  'legacy.settings.admin': 'settings:admin',
 } as const satisfies Record<Method, Scope>
 export const rpcRegistry = Object.fromEntries(Object.entries(rpcSchemas).map(([method, schemas]) =>
   [method, { method, ...schemas, scope: rpcScopes[method as Method] }],

@@ -153,13 +153,13 @@ it("one exchange wins a real HTTP race; scopes narrow, secrets never enter DB/re
     await fetch(`${h.base}/api/v2/access/ws-ticket`, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ audience: "rpc", protocolVersion: 1 }),
+      body: JSON.stringify({ audience: "rpc", protocolVersion: 2 }),
     })
   ).json();
   h.restart();
   expect((await fetch(`${h.base}/api/v2/access/session`, { headers })).status).toBe(200);
   await expect(
-    h.access.consumeWsTicket({ ticket: ticket.ticket, audience: "rpc", origin: null, protocolVersion: 1 }),
+    h.access.consumeWsTicket({ ticket: ticket.ticket, audience: "rpc", origin: null, protocolVersion: 2 }),
   ).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
   const admin = await paired(h);
   const devices = await h.access.listDevices({ deviceSessionId: admin.payload.deviceSession.deviceSessionId, scopes: new Set(all) });
@@ -191,7 +191,7 @@ it("cookie mutations enforce CSRF and exact Origin; public descriptor and unclas
     fetch(`${h.base}/api/v2/access/ws-ticket`, {
       method: "POST",
       headers: { Cookie: cookie!, "Content-Type": "application/json", ...extra },
-      body: '{"audience":"rpc","protocolVersion":1}',
+      body: '{"audience":"rpc","protocolVersion":2}',
     });
   expect((await req({ Origin: h.base })).status).toBe(403);
   expect((await req({ Origin: "http://evil.test", "X-Forge-CSRF": payload.csrfToken })).status).toBe(403);
@@ -211,7 +211,7 @@ it("tickets use real sockets, replay fails, revocation commits then closes resou
   const first = await paired(h);
   const second = await paired(h);
   const principal: Principal = { deviceSessionId: first.payload.deviceSession.deviceSessionId, scopes: new Set(all) };
-  const ticket = await h.access.issueWsTicket(principal, { audience: "rpc", protocolVersion: 1 }, null);
+  const ticket = await h.access.issueWsTicket(principal, { audience: "rpc", protocolVersion: 2 }, null);
   const wss = new WebSocketServer({ noServer: true, handleProtocols: (protocols) => (protocols.has("forge.v2") ? "forge.v2" : false) });
   cleanup.push(() => wss.close());
   h.server.on("upgrade", async (req, socket, head) => {
@@ -224,7 +224,7 @@ it("tickets use real sockets, replay fails, revocation commits then closes resou
         ticket: value,
         audience: "rpc",
         origin: req.headers.origin ?? null,
-        protocolVersion: 1,
+        protocolVersion: 2,
       });
       wss.handleUpgrade(req, socket, head, (ws) => {
         const unregister = h.access.registerResource(authenticated, () => ws.close(4401));
@@ -237,7 +237,7 @@ it("tickets use real sockets, replay fails, revocation commits then closes resou
   const ws = new WebSocket(h.base.replace("http:", "ws:") + "/api/v2/rpc", ["forge.v2", `ticket.${ticket.ticket}`]);
   await once(ws, "open");
   await expect(
-    h.access.consumeWsTicket({ ticket: ticket.ticket, audience: "rpc", origin: null, protocolVersion: 1 }),
+    h.access.consumeWsTicket({ ticket: ticket.ticket, audience: "rpc", origin: null, protocolVersion: 2 }),
   ).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
   const closed = once(ws, "close");
   await h.access.revokeDevice(

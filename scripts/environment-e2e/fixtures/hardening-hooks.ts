@@ -17,7 +17,7 @@ import { SwarmWebSocketServer } from '../../../apps/backend/src/ws/server.js';
 import { WebSocket } from './ws.js';
 import type NativeSocket from 'ws';
 import type { AgentDescriptor } from '../../../apps/backend/src/swarm/types.js';
-import { validateLegacySessionEvent } from '../../../packages/protocol/src/legacy-feature-events.js';
+import { projectDetailFeature } from '../../../apps/backend/src/ws/rpc/detail-feature-rpc.js';
 
 export const crashBoundaries = ['pre-commit', 'post-commit', 'post-Git', 'post-meta', 'post-JSONL', 'post-dispatch-marker', 'post-provider-accept'] as const;
 export type CrashBoundary = typeof crashBoundaries[number];
@@ -41,7 +41,7 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
   const terminalEvents: unknown[] = [];
   const terminalEmit = TerminalService.prototype.emit;
   TerminalService.prototype.emit = function (name, ...args) {
-    if (name === 'terminal_created') { const event = args[0]; terminalEvents.push({ type: name, sessionAgentId: event.sessionAgentId, terminalSessionAgentId: event.terminal.sessionAgentId, listeners: this.listenerCount(name), valid: validateLegacySessionEvent(event, event.sessionAgentId) }); }
+    if (name === 'terminal_created') { const event = args[0]; terminalEvents.push({ type: name, sessionAgentId: event.sessionAgentId, terminalSessionAgentId: event.terminal.sessionAgentId, listeners: this.listenerCount(name), valid: Boolean(projectDetailFeature(event)) }); }
     return terminalEmit.call(this, name, ...args);
   };
   let tick = 0;

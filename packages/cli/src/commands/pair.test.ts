@@ -15,7 +15,7 @@ it('pairs over real HTTP with signed canonical transcript, pins environment and 
   let signed = false;
   const server = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
-    if (req.url === '/api/v2/environment') { res.end(JSON.stringify({ environmentId, protocolVersion: 1 })); return; }
+    if (req.url === '/api/v2/environment') { res.end(JSON.stringify({ environmentId, protocolVersion: 2 })); return; }
     if (req.url === '/api/v2/access/challenge') { res.end(JSON.stringify({ challengeId: 'a6a8cae8-1291-4bc5-ab1f-a574c4e6fbd0', nonce })); return; }
     let body = ''; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body); const { proof, ...fields } = input;

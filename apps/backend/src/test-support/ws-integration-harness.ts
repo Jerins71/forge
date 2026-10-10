@@ -139,11 +139,10 @@ export class WsServerTestSwarmManager extends SwarmManager {
   }
 }
 
-export async function makeWsServerTempConfig(port: number, allowNonManagerSubscriptions = false): Promise<SwarmConfig> {
+export async function makeWsServerTempConfig(port: number): Promise<SwarmConfig> {
   return buildTempConfig({
     prefix: 'swarm-ws-test-',
     port,
-    allowNonManagerSubscriptions,
   })
 }
 

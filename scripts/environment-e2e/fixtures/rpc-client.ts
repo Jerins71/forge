@@ -5,7 +5,7 @@ import type { BootstrapSession } from '../launch.js';
 
 export type WireFrame = Record<string, any>;
 export async function openFixtureRpc(baseUrl: string, session: BootstrapSession, socketBase = baseUrl) {
-  const response = await fetch(`${baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { Connection: 'close', Authorization: `Bearer ${session.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ audience: 'rpc', protocolVersion: 1 }) });
+  const response = await fetch(`${baseUrl}/api/v2/access/ws-ticket`, { method: 'POST', headers: { Connection: 'close', Authorization: `Bearer ${session.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ audience: 'rpc', protocolVersion: 2 }) });
   if (!response.ok) throw new Error(`RPC ticket denied (${response.status})`);
   const ticket = (await response.json() as { ticket: string }).ticket;
   const socket = new WebSocket(`${socketBase.replace(/^http/, 'ws')}/api/v2/rpc`, ['forge.v2', `ticket.${ticket}`]);

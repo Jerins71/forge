@@ -94,6 +94,8 @@ async function fixture() {
     })),
   }
   const storePath = join(root, 'hosts.json')
+  const managedSession = credentials.session.getMockImplementation()!
+  Object.assign(credentials, { managedTransport: { session: managedSession } })
   const options = {
     storePath,
     driver,
@@ -205,6 +207,15 @@ describe('SSH managed host failure acceptance', () => {
     })
     expect(f.scripts).toEqual([])
     expect(f.credentials.remove).toHaveBeenCalledWith(id)
+  })
+  it('updates through SSH when the ordinary v2 credential bridge blocks the v1 remote', async () => {
+    const f = await fixture()
+    await f.service.add({ hostAlias: 'dev1', remotePort: 47788 })
+    f.credentials.session.mockImplementation(async () => ({ ok: false, error: { code: 'PROTOCOL_MISMATCH', message: 'Update required', retryable: false } }) as never)
+    f.scripts.length = 0
+    expect(await f.service.update('dev1')).toMatchObject({ ok: true, value: { phase: 'ready' } })
+    expect(f.scripts.some(script => script.includes('# forge:install'))).toBe(true)
+    expect(f.counts().grants).toBe(1)
   })
   it('rejects untrusted IPC and gives preload the same typed contract', async () => {
     const f = await fixture()

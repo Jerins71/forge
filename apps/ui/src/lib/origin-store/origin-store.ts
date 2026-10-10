@@ -6,7 +6,7 @@ import {
 import { ManagerWsClient } from '@/lib/ws-client'
 import type { ManagerWsState } from '@/lib/ws-state'
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
-import { handleConversationEvent } from '@/lib/ws-client/event-handlers/conversation-event-handlers'
+import { applyDetailFeature } from '@/lib/ws-client/detail-feature-state'
 import {
   createInitialOriginMetaState,
   type OriginMetaState,
@@ -17,7 +17,7 @@ export interface OriginStoreOptions {
   environmentClient: EnvironmentClient
   httpClient?: SettingsApiClient
 }
-/** React/legacy projection wrapper. Runtime owns every connection and authoritative store. */
+/** React presentation wrapper. Runtime owns every connection and authoritative store. */
 export class OriginStore {
   readonly originId: OriginId
   private readonly client: ManagerWsClient
@@ -105,7 +105,7 @@ export class OriginStore {
       this.client.applyCompatibilitySnapshot(input.state)
       return
     }
-    handleConversationEvent(input.event, {
+    applyDetailFeature(input.event, {
       state: this.getSnapshot(),
       updateState: (patch) => this.client.applyCompatibilitySnapshot(patch),
     })

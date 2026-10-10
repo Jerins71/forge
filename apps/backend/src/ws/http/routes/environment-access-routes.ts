@@ -12,7 +12,7 @@ interface AccessHttpPort extends EnvironmentAccessPort {
   exchangeHttp(input: PairingExchange, request: IncomingMessage, response: ServerResponse): Promise<PairingExchangeResult>;
   session(request: IncomingMessage): Promise<{ deviceSession: DeviceSession; csrfToken?: string }>;
   authenticateCurrentHttp(request: IncomingMessage, csrf: boolean): Promise<Principal>;
-  issueWsTicket(principal: Principal, input: { audience: 'rpc' | 'legacy'; protocolVersion: number }, origin: string | null): Promise<{ ticket: string; expiresAt: string }>;
+  issueWsTicket(principal: Principal, input: { audience: 'rpc'; protocolVersion: number }, origin: string | null): Promise<{ ticket: string; expiresAt: string }>;
 }
 function json(response: ServerResponse, value: unknown) { response.setHeader('Content-Type', 'application/json'); response.setHeader('Cache-Control', 'no-store'); response.setHeader('X-Content-Type-Options', 'nosniff'); response.end(JSON.stringify(value)); }
 async function body(request: IncomingMessage): Promise<unknown> {
@@ -39,7 +39,7 @@ export function createEnvironmentAccessRoutes({ access, exposure }: { access: Ac
       const input = await body(request);
       if (r.path === 'challenge') { if (!validators.empty.Check(input)) throw new AccessError('INVALID_INPUT', 'Challenge input must be empty'); json(response, await access.createChallenge(exposure.sourceIp(request))); }
       else if (r.path === 'exchange') { if (!validators.exchange.Check(input)) throw new AccessError('INVALID_INPUT', 'Invalid pairing exchange'); json(response, await access.exchangeHttp(input, request, response)); }
-      else { if (!validators.ticket.Check(input)) throw new AccessError('INVALID_INPUT', 'Invalid ticket request'); const principal = await access.authenticateCurrentHttp(request, true); json(response, await access.issueWsTicket(principal, input as RpcInput<'access.devices.list'> & { audience: 'rpc' | 'legacy'; protocolVersion: number }, request.headers.origin ?? null)); }
+      else { if (!validators.ticket.Check(input)) throw new AccessError('INVALID_INPUT', 'Invalid ticket request'); const principal = await access.authenticateCurrentHttp(request, true); json(response, await access.issueWsTicket(principal, input as RpcInput<'access.devices.list'> & { audience: 'rpc'; protocolVersion: number }, request.headers.origin ?? null)); }
     } catch (error) { sendAccessError(response, error); }
   } }));
 }

@@ -1,4 +1,3 @@
-import type { WsRequestTracker } from '../ws-request-tracker'
 import type {
   AgentDescriptor,
   PersistedProjectAgentConfig,
@@ -9,7 +8,6 @@ import type {
   ProjectAgentShareGrantInfo,
   ConversationEntry,
   ConversationHistoryPageMetadata,
-  InventorySnapshotEvent,
 } from '@forge/protocol'
 import type { ManagerWsState } from '../ws-state'
 
@@ -89,36 +87,6 @@ export type ProjectAgentExternalDirectoryResult = {
   entries: ProjectAgentExternalDirectoryEntry[]
 }
 
-export type WsRequestResultMap = {
-
-  stop_all_agents: { managerId: string; stoppedWorkerIds: string[]; managerStopped: boolean }
-  create_session: SessionCreatedResult
-  stop_session: SessionActionResult
-  resume_session: SessionActionResult
-  archive_session: SessionArchiveResult
-  restore_session: SessionRestoreResult
-  delete_session: SessionActionResult
-  clear_session: SessionActionResult
-  subscribe_inventory: InventorySnapshotEvent
-
-  fork_session: SessionForkedResult
-  get_session_workers: SessionWorkersResult
-  get_conversation_page: ConversationPageResult
-
-}
-
-export type WsRequestType = Extract<keyof WsRequestResultMap, string>
-
-export interface WsRequestErrorHint {
-  requestType: WsRequestType
-  codeFragment: string
-}
-
-export type RequestTrackerAdapter = Pick<
-  WsRequestTracker<WsRequestResultMap>,
-  'resolve' | 'reject' | 'getPendingRequestType' | 'rejectByRequestId' | 'rejectOldest' | 'rejectOnlyPending'
->
-
 export interface ManagerWsConversationEventContext {
   state: ManagerWsState
   updateState: (patch: Partial<ManagerWsState>) => void
@@ -129,41 +97,4 @@ export interface ManagerWsTerminalEventContext {
   updateState: (patch: Partial<ManagerWsState>) => void
 }
 
-export interface ManagerWsAgentEventContext {
-  applyAgentStatus: (event: Extract<import('@forge/protocol').ServerEvent, { type: 'agent_status' }>) => void
-  applyAgentsSnapshot: (agents: AgentDescriptor[]) => void
-  applySessionWorkersSnapshot: (
-    sessionAgentId: string,
-    workers: AgentDescriptor[],
-    requestId?: string,
-  ) => void
-  requestTracker: RequestTrackerAdapter
-
-}
-
-export interface ManagerWsSessionEventContext {
-  applySessionDeleted: (agentId: string, profileId: string) => void
-  requestTracker: RequestTrackerAdapter
-}
-
-export interface ManagerWsSessionAttentionEventContext {
-  state: ManagerWsState
-  updateState: (patch: Partial<ManagerWsState>) => void
-  requestTracker: RequestTrackerAdapter
-}
-
-
-
-export interface ManagerWsConfigEventContext {
-  state: ManagerWsState
-  updateState: (patch: Partial<ManagerWsState>) => void
-  requestTracker: RequestTrackerAdapter
-}
-
-export interface ManagerWsSystemEventContext {
-  requestTracker: Pick<RequestTrackerAdapter, 'resolve'>
-  updateState: (patch: Partial<ManagerWsState>) => void
-  pushSystemMessage: (text: string) => void
-  /** Utility browser command errors reject their caller but are not chat events. */
-  rejectPendingFromError: (code: string, message: string, requestId?: string) => void
-}
+export type ConversationSubscriptionReason = 'selection' | 'view_change' | 'refresh' | 'reconnect' | 'create' | 'fork' | 'fallback' | 'retry'

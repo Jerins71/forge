@@ -74,7 +74,6 @@ async function startServer(): Promise<{
     swarmManager: manager,
     host: config.host,
     port: config.port,
-    allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
   });
   await server.start();
 

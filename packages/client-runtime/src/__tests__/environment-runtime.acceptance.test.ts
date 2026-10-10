@@ -34,7 +34,7 @@ async function fleet(count = 1, overrides: Partial<RuntimePorts> = {}) {
   const registry = createEnvironmentRegistry(ports)
   cleanups.push(() => registry.dispose())
   for (const s of servers) await registry.register(s.seed.entry)
-  return { servers, registry, persistence }
+  return { servers, registry, persistence, credentials }
 }
 async function online(registry: EnvironmentRegistry, id: string) {
   await until(
@@ -512,6 +512,31 @@ describe('environment runtime acceptance', () => {
     const record = await persistence.loadShell(client.environmentId)
     expect(JSON.stringify(record)).not.toContain('Fixture environment ready')
   })
+  it('blocks a v1 server without retries or credential purges and discards a v1 cache cleanly', async () => {
+    const { servers: [s], registry, credentials, persistence } = await fleet()
+    await credentials.store(s.seed.entry.environmentId, { bearerToken: 'paired-device', deviceSessionId: s.seed.entry.environmentId })
+    await persistence.saveShell({ ...s.seed.shell, environmentId: s.seed.entry.environmentId, protocolVersion: 1, cacheSchemaVersion: 1, deviceSessionId: s.seed.entry.environmentId, streamEpoch: s.seed.descriptor.streamEpoch, cursor: { streamEpoch: s.seed.descriptor.streamEpoch, afterSequence: 0 }, cachedAt: new Date().toISOString() } as never)
+    s.descriptor = { ...s.seed.descriptor, protocolVersion: 1 }
+    await registry.start()
+    await until(() => registry.get(s.seed.entry.environmentId).connection.getSnapshot().phase === 'version-blocked')
+    const requests = s.inputs.length
+    await new Promise(resolve => setTimeout(resolve, 600))
+    expect(s.connections).toBe(0)
+    expect(s.inputs).toHaveLength(requests)
+    expect(await credentials.load(s.seed.entry.environmentId)).toMatchObject({ bearerToken: 'paired-device' })
+    expect(registry.get(s.seed.entry.environmentId).connection.getSnapshot().reason).toContain('Update required')
+    expect(registry.get(s.seed.entry.environmentId).shell.getSnapshot().sessions.size).toBe(0)
+  })
+  it('starts offline with a v1 cached shell without crashing or purging the paired device', async () => {
+    const { servers: [s], registry, credentials, persistence } = await fleet(1, { fetch: async () => { throw new TypeError('Owned fixture is offline') } })
+    const id = s.seed.entry.environmentId
+    await credentials.store(id, { bearerToken: 'paired-offline-device', deviceSessionId: id })
+    await persistence.saveShell({ ...s.seed.shell, environmentId: id, protocolVersion: 1, cacheSchemaVersion: 1, deviceSessionId: id, streamEpoch: s.seed.descriptor.streamEpoch, cursor: { streamEpoch: s.seed.descriptor.streamEpoch, afterSequence: 0 }, cachedAt: new Date().toISOString() } as never)
+    await registry.start()
+    await until(() => ['backoff', 'offline'].includes(registry.get(id).connection.getSnapshot().phase))
+    expect(registry.get(id).shell.getSnapshot().sessions.size).toBe(0)
+    expect(await credentials.load(id)).toMatchObject({ bearerToken: 'paired-offline-device', deviceSessionId: id })
+  })
   it('pins environment UUID/version, refusing replacement identity before opening a socket', async () => {
     const {
       servers: [s],
@@ -519,7 +544,7 @@ describe('environment runtime acceptance', () => {
     } = await fleet()
     await registry.start()
     await online(registry, s.seed.entry.environmentId)
-    s.descriptor = { ...s.seed.descriptor, protocolVersion: 2 as 1 }
+    s.descriptor = { ...s.seed.descriptor, protocolVersion: 3 }
     s.disconnect()
     await until(
       () =>

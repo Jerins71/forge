@@ -872,23 +872,34 @@ test('unknown environment deep link shows a pairing state and does not open the 
   assertions.unknownEnvironment = { localFallback: false }
 })
 
-test('incompatible protocol shows Update required for one environment and recovers after update', async ({ page }) => {
+test('v1 remote shows Update required, retains the managed SSH Update action, and recovers', async ({ page }) => {
+  test.setTimeout(15_000)
   const { a, b } = fleet!
   const endpoint = `${b.baseUrl}/api/v2/environment`
   await page.route(endpoint, async route => {
     const response = await route.fetch()
     const descriptor = await response.json()
-    await route.fulfill({ response, json: { ...descriptor, protocolVersion: 2, futureField: 'v-next' } })
+    await route.fulfill({ response, json: { ...descriptor, protocolVersion: 1, futureField: 'v-next' } })
+  })
+  const platformScript = `${fleet!.uiUrl}/__forge_e2e_platform.js`
+  await page.route(platformScript, async route => {
+    const response = await route.fetch()
+    const status = { hostAlias: 'owned-v1-fixture', environmentId: b.environmentId, baseUrl: b.baseUrl, phase: 'ready', desiredVersion: 'same-version', installedVersion: 'same-version' }
+    const script = `window.__managedUpdateCalls = 0; window.electronBridge = { platform: 'darwin', managedHosts: { onChanged: () => () => {}, status: async () => ({ ok: true, value: [${JSON.stringify(status)}] }), update: async alias => { if (alias !== 'owned-v1-fixture') throw new Error('Wrong host'); window.__managedUpdateCalls++; return { ok: true, value: ${JSON.stringify(status)} }; } } };`
+    await route.fulfill({ response, body: `${await response.text()}\n${script}` })
   })
   try {
     await openEnvironmentsSettings(page)
     await expect(environmentRow(page, b)).toHaveAttribute('data-environment-status', 'update-required')
     await expect(environmentRow(page, b)).toContainText('Update required')
     await expect(environmentRow(page, a)).toHaveAttribute('data-environment-status', 'online')
+    await environmentRow(page, b).getByRole('button', { name: /Update to/ }).click()
+    expect(await page.evaluate(() => (window as any).__managedUpdateCalls)).toBe(1)
     await shot(page, 'update-required-environment')
     assertions.protocolMismatch = { environmentId: b.environmentId, label: 'Update required', othersOnline: true }
   } finally {
     await page.unroute(endpoint)
+    await page.unroute(platformScript)
     await openEnvironmentsSettings(page)
     await expect(environmentRow(page, b)).toHaveAttribute('data-environment-status', 'online')
   }

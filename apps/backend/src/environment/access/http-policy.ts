@@ -126,13 +126,3 @@ export function createEnvironmentHttpPolicy(options: {
     }
   };
 }
-/** Exact socket protocol parsing: tickets in query strings are never accepted. */
-export function wsTicketFromProtocols(header: string | string[] | undefined): string {
-  if (typeof header !== "string") throw new AccessError("UNAUTHENTICATED", "Socket ticket required");
-  const protocols = header.split(",").map((s) => s.trim());
-  if (protocols.length !== 2 || !protocols.includes("forge.v2"))
-    throw new AccessError("UNAUTHENTICATED", "Socket protocol and ticket required");
-  const ticket = protocols.find((p) => /^ticket\.[A-Za-z0-9_-]{43}$/.test(p));
-  if (!ticket) throw new AccessError("UNAUTHENTICATED", "Socket ticket required");
-  return ticket.slice(7);
-}

@@ -120,7 +120,7 @@ it('consumes Browser canonical snapshots through typed detail bootstrap and live
   server.emit({ snapshot: { ...original, revision: 2, panelVisible: true } }, 'browser.subscribe')
   await until(() => facade.getState().browserSessions['session-1']?.revision === 2)
   expect(facade.getState().browserSessions['session-1'].panelVisible).toBe(true)
-  expect(server.inputs.some(input => input.method === 'legacy.session.subscribe')).toBe(false)
+  expect(server.inputs.some(input => input.method.startsWith('legacy.'))).toBe(false)
 })
 
 // Failure mode: dropping an old deduplication key at the transfer budget lets a

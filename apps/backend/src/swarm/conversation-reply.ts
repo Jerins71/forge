@@ -1,5 +1,4 @@
 import {
-  isConversationMessageSource,
   isUserVisibleConversationMessage,
   type ConversationEntryEvent,
   type ConversationMessageEvent,
@@ -9,59 +8,7 @@ import {
 
 export const CONVERSATION_REPLY_TEXT_MAX_CHARS = 2000;
 
-const REPLY_ROLES = ["user", "assistant", "system"] as const;
-
 export type ParsedConversationReplyTargetInput = ConversationReplyTargetInput;
-
-export function parseConversationReplyTargetInput(
-  value: unknown,
-): ParsedConversationReplyTargetInput | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-
-  const maybe = value as Partial<ConversationReplyTargetInput>;
-  if (typeof maybe.messageId !== "string" || maybe.messageId.trim().length === 0) {
-    return undefined;
-  }
-
-  if (
-    maybe.role !== undefined &&
-    (typeof maybe.role !== "string" || !(REPLY_ROLES as readonly string[]).includes(maybe.role))
-  ) {
-    return undefined;
-  }
-
-  if (maybe.timestamp !== undefined && typeof maybe.timestamp !== "string") {
-    return undefined;
-  }
-
-  if (maybe.text !== undefined && typeof maybe.text !== "string") {
-    return undefined;
-  }
-
-  if (maybe.source !== undefined && !isConversationMessageSource(maybe.source)) {
-    return undefined;
-  }
-
-  if (
-    maybe.attachmentCount !== undefined &&
-    (typeof maybe.attachmentCount !== "number" ||
-      !Number.isInteger(maybe.attachmentCount) ||
-      maybe.attachmentCount < 0)
-  ) {
-    return undefined;
-  }
-
-  return {
-    messageId: maybe.messageId.trim(),
-    role: maybe.role,
-    timestamp: maybe.timestamp?.trim() || undefined,
-    text: maybe.text,
-    source: maybe.source,
-    attachmentCount: maybe.attachmentCount,
-  };
-}
 
 export function sanitizeConversationReplyTargetInput(
   input: ParsedConversationReplyTargetInput,

@@ -1,5 +1,3 @@
-import { validateLegacySessionEvent } from '@forge/protocol'
-export { legacySessionEventAllowlist } from '@forge/protocol'
 import {
   rpcRegistry,
   decodeEnvironmentValue,
@@ -27,7 +25,6 @@ const detailTypes = new Set([
 export function decodeStreamItem(
   method: StreamMethod,
   item: unknown,
-  sessionId?: string,
 ): unknown {
   if (method === 'shell.subscribe' || method === 'session.subscribe') {
     if (item && typeof item === 'object') {
@@ -66,31 +63,5 @@ export function decodeStreamItem(
   const decoded = schema && decodeEnvironmentValue(schema, item)
   if (decoded === undefined)
     throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Invalid stream item')
-  if (method === 'legacy.session.subscribe')
-    validateLegacyEvent(
-      (decoded as { type: string; payload: unknown }).type,
-      (decoded as { payload: unknown }).payload,
-      sessionId,
-    )
   return decoded
-}
-const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
-
-export function validateLegacyEvent(
-  type: string,
-  payload: unknown,
-  sessionId?: string,
-): void {
-  if (
-    !isRecord(payload) ||
-    payload.type !== type ||
-    !validateLegacySessionEvent(
-      payload,
-      sessionId ?? String(payload.sessionAgentId ?? payload.agentId ?? ''),
-    )
-  )
-    throw new EnvironmentRuntimeError(
-      'PROTOCOL_MISMATCH',
-      'Invalid compatibility event',
-    )
 }

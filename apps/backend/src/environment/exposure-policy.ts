@@ -1,3 +1,4 @@
+import { ENVIRONMENT_PROTOCOL_VERSION } from '@forge/protocol/environment-v2';
 import type { IncomingMessage } from "node:http";
 import { isIP } from "node:net";
 import { readFile, open, unlink } from "node:fs/promises";
@@ -154,7 +155,7 @@ export async function enableTailscaleServe(options: {
       const descriptor = (await result.json()) as { environmentId?: string; protocolVersion?: number };
       if (
         !descriptor.environmentId ||
-        descriptor.protocolVersion !== 1 ||
+        descriptor.protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION ||
         (options.environmentId && descriptor.environmentId !== options.environmentId)
       )
         throw new Error("Tailscale environment identity probe failed");

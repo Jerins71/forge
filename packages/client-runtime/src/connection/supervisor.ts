@@ -1,3 +1,4 @@
+import { ENVIRONMENT_PROTOCOL_VERSION } from '@forge/protocol/environment-v2';
 import { Value } from '@sinclair/typebox/value'
 import {
   rpcRegistry,
@@ -538,7 +539,7 @@ export class EnvironmentSupervisor {
               'Environment identity changed',
             )
           }
-          if (descriptor.protocolVersion !== 1) {
+          if (descriptor.protocolVersion !== ENVIRONMENT_PROTOCOL_VERSION) {
             p.reject(
               new EnvironmentRuntimeError(
                 'PROTOCOL_MISMATCH',
@@ -582,7 +583,6 @@ export class EnvironmentSupervisor {
           decodeStreamItem(
             sub.method,
             frame.item,
-            (sub.activeInput as { sessionId?: string })?.sessionId,
           ) as RpcStreamItem<typeof sub.method>,
         )
       } catch (e) {
