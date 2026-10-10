@@ -92,6 +92,7 @@ export class UnreadTracker {
   async flush(): Promise<void> {
     this.clearFlushTimer();
     await this.flushDirtyProfiles();
+    if (this.dirtyProfiles.size > 0) throw new Error("Unread state could not be persisted");
   }
 
   increment(profileId: string, sessionAgentId: string): number {

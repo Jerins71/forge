@@ -57,14 +57,3 @@ export const SESSION_ATTENTION_MAX_DISMISS_IDS = 100
 
 /** Maximum length for opaque attention instance identifiers. */
 export const SESSION_ATTENTION_MAX_ID_LENGTH = 256
-
-/**
- * A dismissal is instance-exact: an old attentionId must not clear attention
- * raised by a later work epoch for the same session.
- */
-export interface DismissSessionAttentionCommand {
-  type: 'dismiss_session_attention'
-  /** Nonempty, deduplicated exact IDs; bounded by the exported limits above. */
-  attentionIds: string[]
-  requestId: string
-}

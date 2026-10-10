@@ -21,16 +21,12 @@ type ContractCommandType = Extract<
   ClientCommand['type'],
   | 'get_session_workers'
   | 'get_conversation_page'
-  | 'dismiss_session_attention'
   | 'subscribe_inventory'
-  | 'rename_session'
-  | 'pin_session'
   | 'fork_session'
   | 'stop_all_agents'
   | 'create_session'
   | 'stop_session'
   | 'resume_session'
-  | 'hydrate_archive_last_used'
   | 'archive_session'
   | 'restore_session'
   | 'delete_session'
@@ -41,16 +37,12 @@ type ContractSuccessEventType = Extract<
   | 'session_workers_snapshot'
   | 'conversation_history'
   | 'conversation_page'
-  | 'session_attention_update'
   | 'inventory_snapshot'
-  | 'session_renamed'
-  | 'session_pinned'
   | 'session_forked'
   | 'stop_all_agents_result'
   | 'session_created'
   | 'session_stopped'
   | 'session_resumed'
-  | 'archive_last_used_hydrated'
   | 'session_archived'
   | 'session_restored'
   | 'session_deleted'
@@ -79,27 +71,6 @@ export const WS_REQUEST_CONTRACTS = [
     requestId: { ui: 'required', wire: 'required' },
     successEvents: ['conversation_page'],
     errorCodeFragments: ['get_conversation_page'],
-  },
-{
-    commandType: 'dismiss_session_attention',
-    resultFamily: 'session_attention_update',
-    requestId: { ui: 'required', wire: 'required' },
-    successEvents: ['session_attention_update'],
-    errorCodeFragments: ['dismiss_session_attention'],
-  },
-{
-    commandType: 'rename_session',
-    resultFamily: 'session_rename',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['session_renamed'],
-    errorCodeFragments: ['rename_session'],
-  },
-{
-    commandType: 'pin_session',
-    resultFamily: 'session_pin',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['session_pinned'],
-    errorCodeFragments: ['pin_session'],
   },
 {
     commandType: 'fork_session',
@@ -135,13 +106,6 @@ export const WS_REQUEST_CONTRACTS = [
     requestId: { ui: 'required', wire: 'optional' },
     successEvents: ['session_resumed'],
     errorCodeFragments: ['resume_session'],
-  },
-{
-    commandType: 'hydrate_archive_last_used',
-    resultFamily: 'archive_last_used_hydration',
-    requestId: { ui: 'required', wire: 'optional' },
-    successEvents: ['archive_last_used_hydrated'],
-    errorCodeFragments: ['hydrate_archive_last_used'],
   },
 {
     commandType: 'archive_session',

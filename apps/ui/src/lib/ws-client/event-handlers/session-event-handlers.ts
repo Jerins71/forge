@@ -25,12 +25,6 @@ export function handleSessionEvent(
       })
       return true
 
-    case 'archive_last_used_hydrated':
-      context.requestTracker.resolve('hydrate_archive_last_used', event.requestId, {
-        scannedSessionCount: event.scannedSessionCount,
-        hydratedSessionCount: event.hydratedSessionCount,
-      })
-      return true
 
     case 'session_archived':
       context.requestTracker.resolve('archive_session', event.requestId, {
@@ -61,17 +55,7 @@ export function handleSessionEvent(
       })
       return true
 
-    case 'session_renamed':
-      context.requestTracker.resolve('rename_session', event.requestId, {
-        agentId: event.agentId,
-      })
-      return true
 
-    case 'session_pinned':
-      context.requestTracker.resolve('pin_session', event.requestId, {
-        pinnedAt: event.pinnedAt,
-      })
-      return true
 
     case 'session_forked':
       context.requestTracker.resolve('fork_session', event.requestId, {

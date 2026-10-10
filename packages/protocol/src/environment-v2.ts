@@ -93,6 +93,7 @@ export const EnvironmentCapabilitiesSchema = O({
   legacyAdapter: Type.Boolean(),
   projectAgentMetadata: Type.Optional(Type.Boolean()),
   projectPolicy: Type.Optional(Type.Boolean()),
+  sessionState: Type.Optional(Type.Boolean()),
 })
 export type EnvironmentCapabilities = Static<typeof EnvironmentCapabilitiesSchema>
 export const EnvironmentDescriptorSchema = O({
@@ -149,6 +150,9 @@ export const SessionSummarySchema = O({
   unread: Type.Integer({ minimum: 0 }),
   workerCount: Type.Integer({ minimum: 0 }),
   updatedAt: V2Time, sortKey: ShortText, archived: Type.Boolean(),
+  createdAt: Type.Optional(V2Time),
+  pinnedAt: Type.Optional(Type.Union([V2Time, Type.Null()])),
+  lastUsedAt: Type.Optional(Type.Union([V2Time, Type.Null()])),
   workspace: O({ kind: E('current_checkout', 'new_worktree'),
     cwd: Type.Union([Type.String({ maxLength: 4096 }), Type.Null()]),
     branch: Type.Union([ShortText, Type.Null()]) }),
@@ -211,9 +215,9 @@ export const RpcErrorSchema = O({
 export type RpcError = Static<typeof RpcErrorSchema>
 export const CommandReceiptSchema = O({
   commandId: V2Uuid,
-  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact', 'browser.tab.open', 'browser.tab.activate', 'browser.tab.close', 'browser.recording.start', 'browser.recording.stop'),
+  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact', 'browser.tab.open', 'browser.tab.activate', 'browser.tab.close', 'browser.recording.start', 'browser.recording.stop', 'session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'),
   projectId: Type.Optional(V2Id),
-  result: Type.Optional(O({ browserRecording: Type.Optional(BrowserRecordingV2Schema), tabId: Type.Optional(V2Id), compacted: Type.Optional(Type.Boolean()), reason: Type.Optional(ShortText), projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })), profileIds: Type.Optional(Type.Array(V2Id, { maxItems: 10000 })), rosterId: Type.Optional(V2Id), rosterRevision: Type.Optional(V2Sequence) })),
+  result: Type.Optional(O({ pinnedAt: Type.Optional(Type.Union([V2Time, Type.Null()])), browserRecording: Type.Optional(BrowserRecordingV2Schema), tabId: Type.Optional(V2Id), compacted: Type.Optional(Type.Boolean()), reason: Type.Optional(ShortText), projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })), profileIds: Type.Optional(Type.Array(V2Id, { maxItems: 10000 })), rosterId: Type.Optional(V2Id), rosterRevision: Type.Optional(V2Sequence) })),
   sessionId: NullableId,
   state: E('accepted', 'running', 'succeeded', 'failed', 'interrupted'),
   acceptedSequence: V2Sequence, updatedSequence: V2Sequence,
@@ -254,6 +258,7 @@ export const WorkerSummarySchema = O({
 })
 export const DetailItemSchema = O({
   itemId: V2Id, userTurnId: V2Id, actorId: V2Id,
+  pinned: Type.Optional(Type.Boolean()),
   kind: E('user', 'assistant', 'worker_result', 'tool', 'activity'),
   timestamp: V2Time, text: Type.String({ maxLength: 8192 }),
   contentRef: Type.Union([V2Id, Type.Null()]), // fetch full text/tool arguments/output by ID
@@ -414,6 +419,12 @@ export const rpcSchemas = {
   'project.restore': defineRpc(O({ commandId: V2Uuid, projectId: V2Id }), CommandReceiptSchema, { receipt: true }),
   'project.delete': defineRpc(O({ commandId: V2Uuid, projectId: V2Id }), CommandReceiptSchema, { receipt: true }),
   'project.reorder': defineRpc(O({ commandId: V2Uuid, projectIds: Type.Array(V2Id, { uniqueItems: true, maxItems: 100 }) }), CommandReceiptSchema, { receipt: true }),
+  'session.update': defineRpc(Type.Object({ commandId: V2Uuid, sessionId: V2Id, title: Type.Optional(ShortText), pinned: Type.Optional(Type.Boolean()) }, { additionalProperties: false, minProperties: 3 }), CommandReceiptSchema, { receipt: true }),
+  'session.message.pin': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, itemId: V2Id, pinned: Type.Boolean() }), CommandReceiptSchema, { receipt: true }),
+  'session.pins.clear': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id }), CommandReceiptSchema, { receipt: true }),
+  'session.readState.set': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, read: Type.Boolean() }), CommandReceiptSchema, { receipt: true }),
+  'project.readState.clear': defineRpc(O({ commandId: V2Uuid, projectId: V2Id }), CommandReceiptSchema, { receipt: true }),
+  'session.attention.dismiss': defineRpc(O({ commandId: V2Uuid, occurrenceIds: Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { minItems: 1, maxItems: 100, uniqueItems: true }) }), CommandReceiptSchema, { receipt: true }),
   'session.configure': defineRpc(SessionConfigureSchema, CommandReceiptSchema, { receipt: true }),
   'settings.recommendedDefaults.apply': defineRpc(O({ commandId: V2Uuid }), CommandReceiptSchema, { receipt: true }),
   'workspace.directories.list': defineRpc(O({ path: Type.Optional(DirectoryPath) }), O({ requestedPath: Type.Optional(DirectoryPath), resolvedPath: DirectoryPath, parentPath: Type.Union([DirectoryPath, Type.Null()]), roots: Type.Array(DirectoryRoot, { maxItems: 100 }), entries: Type.Array(DirectoryEntry, { maxItems: 10000 }) })),
@@ -472,6 +483,8 @@ export const rpcScopes = {
   'session.choose': 'session:operate', 'session.stop': 'session:operate', 'command.get': 'session:read',
   'project.create': 'workspace:write', 'project.update': 'workspace:write',
   'project.archive': 'workspace:write', 'project.restore': 'workspace:write', 'project.delete': 'workspace:write', 'project.reorder': 'workspace:write',
+  'session.update': 'session:operate', 'session.message.pin': 'session:operate', 'session.pins.clear': 'session:operate',
+  'session.readState.set': 'session:operate', 'project.readState.clear': 'session:operate', 'session.attention.dismiss': 'session:operate',
   'session.configure': 'session:operate', 'settings.recommendedDefaults.apply': 'settings:admin',
   'workspace.directories.list': 'workspace:read', 'workspace.directories.validate': 'workspace:read', 'workspace.directories.create': 'workspace:write',
   'access.grant.create': 'access:admin', 'access.devices.list': 'access:admin',

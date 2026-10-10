@@ -149,7 +149,7 @@ export async function startFixtureServer(index = 0) {
           commandId: data.commandId,
           method: method as CommandReceipt['method'],
           sessionId: data.sessionId ?? 'new-session',
-          state: 'accepted',
+          state: ['session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'].includes(method) ? 'succeeded' : 'accepted',
           acceptedSequence: ++sequence,
           updatedSequence: sequence,
           acceptedAt: '2026-10-04T00:00:00.000Z',

@@ -45,8 +45,6 @@ export async function handleSessionCommand<Connection>(context: SessionCommandRo
     command.type !== "restore_session" &&
     command.type !== "delete_session" &&
     command.type !== "clear_session" &&
-    command.type !== "rename_session" &&
-    command.type !== "pin_session" &&
     command.type !== "fork_session"
   ) {
     return false;
@@ -266,58 +264,6 @@ export async function handleSessionCommand<Connection>(context: SessionCommandRo
       send(socket, {
         type: "error",
         code: "CLEAR_SESSION_FAILED",
-        message: error instanceof Error ? error.message : String(error),
-        requestId: command.requestId
-      });
-    }
-
-    return true;
-  }
-
-  if (command.type === "rename_session") {
-    try {
-      requireNonSystemSessionProfile(command.agentId, swarmManager.listProfiles(), (agentId) => swarmManager.getAgent(agentId));
-      await swarmManager.renameSession(command.agentId, command.label);
-
-      send(socket, {
-        type: "session_renamed",
-        agentId: command.agentId,
-        label: command.label,
-        requestId: command.requestId
-      });
-    } catch (error) {
-      send(socket, {
-        type: "error",
-        code: "RENAME_SESSION_FAILED",
-        message: error instanceof Error ? error.message : String(error),
-        requestId: command.requestId
-      });
-    }
-
-    return true;
-  }
-
-  if (command.type === "pin_session") {
-    try {
-      requireNonSystemSessionProfile(
-        command.agentId,
-        swarmManager.listProfiles(),
-        (agentId) => swarmManager.getAgent(agentId),
-      );
-
-      const result = await swarmManager.pinSession(command.agentId, command.pinned);
-
-      send(socket, {
-        type: "session_pinned",
-        agentId: command.agentId,
-        pinned: command.pinned,
-        pinnedAt: result.pinnedAt,
-        requestId: command.requestId
-      });
-    } catch (error) {
-      send(socket, {
-        type: "error",
-        code: "PIN_SESSION_FAILED",
         message: error instanceof Error ? error.message : String(error),
         requestId: command.requestId
       });

@@ -88,6 +88,8 @@ export function defaultFixtureSeeds(): FixtureEnvironmentSeed[] {
           artifactUpload: true,
           terminal: true,
           legacyAdapter: true,
+          sessionState: true,
+          projectPolicy: true,
         },
       },
       shell: { projects: [project], sessions: [session] },

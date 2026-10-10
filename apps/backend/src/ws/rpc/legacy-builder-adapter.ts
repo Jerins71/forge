@@ -11,12 +11,10 @@ export const legacyCommandScopes = {
   user_message: "unsupported", create_session: "unsupported", stop_session: "unsupported", choice_response: "unsupported",
   kill_agent: "session:operate", stop_all_agents: "session:operate",
 
-  resume_session: "session:operate", hydrate_archive_last_used: "session:read", archive_session: "session:operate", restore_session: "session:operate",
-  delete_session: "session:operate", rename_session: "session:operate", pin_session: "session:operate", fork_session: "session:operate", clear_session: "session:operate", dismiss_session_attention: "session:operate",
-  pin_message: "session:operate", clear_all_pins: "session:operate", get_session_workers: "unsupported",
+  resume_session: "session:operate", archive_session: "session:operate", restore_session: "session:operate",
+  delete_session: "session:operate", fork_session: "session:operate", clear_session: "session:operate", get_session_workers: "unsupported",
   get_conversation_page: "unsupported",
   choice_cancel: "session:operate",
-  mark_unread: "session:operate", mark_all_read: "session:operate",
 } as const satisfies Record<ClientCommand["type"], Scope | "unsupported">;
 
 /** Remove a literal when its authoritative feature projection migrates to V2. */

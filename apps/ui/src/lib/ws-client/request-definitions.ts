@@ -51,31 +51,6 @@ export function buildSubscribeCommand(
 }
 
 
-export function buildMarkUnreadCommand(agentId: string): ClientCommand {
-  return {
-    type: 'mark_unread',
-    agentId,
-  }
-}
-
-export function buildMarkAllReadCommand(profileId: string): ClientCommand {
-  return {
-    type: 'mark_all_read',
-    profileId,
-  }
-}
-
-export function buildDismissSessionAttentionCommand(
-  attentionIds: string[],
-  requestId: string,
-): ClientCommand {
-  return {
-    type: 'dismiss_session_attention',
-    attentionIds,
-    requestId,
-  }
-}
-
 export function buildUserMessageCommand(input: {
   text: string
   agentId: string
@@ -118,26 +93,6 @@ export function buildChoiceCancelCommand(agentId: string, choiceId: string): Cli
   }
 }
 
-export function buildPinMessageCommand(
-  agentId: string,
-  messageId: string,
-  pinned: boolean,
-): ClientCommand {
-  return {
-    type: 'pin_message',
-    agentId,
-    messageId,
-    pinned,
-  }
-}
-
-export function buildClearAllPinsCommand(agentId: string): ClientCommand {
-  return {
-    type: 'clear_all_pins',
-    agentId,
-  }
-}
-
 export function buildKillAgentCommand(agentId: string): ClientCommand {
   return {
     type: 'kill_agent',
@@ -177,39 +132,6 @@ export function buildSessionActionCommand(
   return {
     type,
     agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    requestId,
-  }
-}
-
-export function buildRenameSessionCommand(
-  agentId: string,
-  label: string,
-  requestId: string,
-): ClientCommand {
-  return {
-    type: 'rename_session',
-    agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    label: requireTrimmedValue(label, 'Session label is required.'),
-    requestId,
-  }
-}
-
-export function buildPinSessionCommand(
-  agentId: string,
-  pinned: boolean,
-  requestId: string,
-): ClientCommand {
-  return {
-    type: 'pin_session',
-    agentId: requireTrimmedValue(agentId, 'Agent id is required.'),
-    pinned,
-    requestId,
-  }
-}
-
-export function buildHydrateArchiveLastUsedCommand(requestId: string): ClientCommand {
-  return {
-    type: 'hydrate_archive_last_used',
     requestId,
   }
 }

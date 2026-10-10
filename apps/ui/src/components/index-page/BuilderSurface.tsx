@@ -178,7 +178,6 @@ export function BuilderSurface({
   const messageListRef = useRef<MessageListHandle | null>(null)
   const previousAgentsByIdRef = useRef<Map<string, AgentDescriptor>>(new Map())
   const fileEditorCoordinatorRef = useRef<FileEditorCoordinator | null>(null)
-  const archiveHydrationRequestedRef = useRef(false)
   const browserHostRef = useRef<BrowserAutomationHostHandle | null>(null)
   const browserSelectionRef = useRef<{ sessionAgentId: string | null; profileId: string | null }>({
     sessionAgentId: null,
@@ -270,18 +269,6 @@ export function BuilderSurface({
     }
   }, [clientRef, environmentClient, isSelectedConnected, selectedSettingsClient])
 
-  useEffect(() => {
-    if (activeView !== 'archive') {
-      archiveHydrationRequestedRef.current = false
-      return
-    }
-    if (!state.connected || archiveHydrationRequestedRef.current) return
-    archiveHydrationRequestedRef.current = true
-    clientRef.current?.hydrateArchiveLastUsed().catch((error) => {
-      console.warn('Failed to hydrate archive last-used metadata', error)
-      archiveHydrationRequestedRef.current = false
-    })
-  }, [activeView, clientRef, state.connected])
 
   const {
     onboardingState,

@@ -2,7 +2,6 @@ import type { SubscribeInventoryCommand } from './builder-inventory.js'
 import type { ConversationAttachment } from './attachments.js'
 import type { ConversationReplyTargetInput } from './conversation-events.js'
 import type { BuilderTimelineChannelView } from './builder-timeline-visibility.js'
-import type { DismissSessionAttentionCommand } from './session-attention.js'
 import type {
   AgentSessionPurpose,
   ChoiceAnswer,
@@ -54,12 +53,9 @@ export type ClientCommand =
   | { type: 'create_session'; profileId: string; label?: string; name?: string; sessionPurpose?: AgentSessionPurpose; requestId?: string }
   | { type: 'stop_session'; agentId: string; requestId?: string }
   | { type: 'resume_session'; agentId: string; requestId?: string }
-  | { type: 'hydrate_archive_last_used'; requestId?: string }
   | { type: 'archive_session'; agentId: string; requestId?: string }
   | { type: 'restore_session'; agentId: string; requestId?: string }
   | { type: 'delete_session'; agentId: string; requestId?: string }
-  | { type: 'rename_session'; agentId: string; label: string; requestId?: string }
-  | { type: 'pin_session'; agentId: string; pinned: boolean; requestId?: string }
   | {
       type: 'fork_session'
       sourceAgentId: string
@@ -70,9 +66,6 @@ export type ClientCommand =
       requestId?: string
     }
   | { type: 'clear_session'; agentId: string; requestId?: string }
-  | DismissSessionAttentionCommand
-  | { type: 'pin_message'; agentId: string; messageId: string; pinned: boolean }
-  | { type: 'clear_all_pins'; agentId: string }
   | { type: 'get_session_workers'; sessionAgentId: string; requestId?: string }
   | {
       type: 'get_conversation_page'
@@ -84,6 +77,4 @@ export type ClientCommand =
     }
   | { type: 'choice_response'; agentId: string; choiceId: string; answers: ChoiceAnswer[] }
   | { type: 'choice_cancel'; agentId: string; choiceId: string }
-  | { type: 'mark_unread'; agentId: string; requestId?: string }
-  | { type: 'mark_all_read'; profileId: string; requestId?: string }
   | { type: 'ping' }

@@ -52,19 +52,12 @@ export function extractRequestId(command: ClientCommand): string | undefined {
     case "restore_session":
     case "delete_session":
     case "clear_session":
-    case "rename_session":
-    case "pin_session":
     case "fork_session":
     case "get_session_workers":
     case "get_conversation_page":
     case "stop_all_agents":
-    case "mark_unread":
-    case "mark_all_read":
-    case "dismiss_session_attention":
       return command.requestId;
 
-    case "pin_message":
-    case "clear_all_pins":
     case "subscribe":
     case "user_message":
     case "kill_agent":
