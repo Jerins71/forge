@@ -1,3 +1,4 @@
+import { useEnvironmentLabel } from '@/components/chat/agent-sidebar/hooks/useEnvironmentStatus'
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -78,6 +79,8 @@ interface CreateManagerDialogProps {
   repositoryUrl?: string
   repositoryFolder?: string
   repositoryBasePath?: string
+  /** Set when cloning on another machine: it clones into that machine's repositories folder. */
+  remoteCloneEnvironmentId?: string
   cloneStage?: RepositoryProjectCreationStage | null
   clonePercent?: number | null
   cloneCancellable?: boolean
@@ -129,6 +132,7 @@ export function CreateManagerDialog({
   repositoryUrl = '',
   repositoryFolder = '',
   repositoryBasePath = '',
+  remoteCloneEnvironmentId,
   cloneStage = null,
   clonePercent = null,
   cloneCancellable = false,
@@ -359,6 +363,11 @@ export function CreateManagerDialog({
                 />
               </div>
 
+              {remoteCloneEnvironmentId ? (
+                <p className="text-[11px] text-muted-foreground">
+                  Clones into <RemoteMachineName environmentId={remoteCloneEnvironmentId} />'s repositories folder (its Settings → General → Repositories). If that machine already has a checkout of this repository there, Forge uses it.
+                </p>
+              ) : (
               <div className="space-y-2">
                 <Label htmlFor="repository-base" className="text-xs font-medium text-muted-foreground">
                   Destination base path
@@ -400,6 +409,7 @@ export function CreateManagerDialog({
                   Defaults follow Settings → General → Repositories: configured home, otherwise last-used base, otherwise your home directory.
                 </p>
               </div>
+              )}
             </>
           ) : (
             <div className="space-y-2">
@@ -611,4 +621,8 @@ export function CreateManagerDialog({
     ) : null}
     </>
   )
+}
+
+function RemoteMachineName({ environmentId }: { environmentId: string }) {
+  return <span className="font-medium text-foreground">{useEnvironmentLabel(environmentId)}</span>
 }

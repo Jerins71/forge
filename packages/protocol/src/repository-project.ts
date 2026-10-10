@@ -74,6 +74,8 @@ export interface RepositoryCheckoutRequest {
   folder?: string
   /** Project name; defaults to the repository name. */
   name?: string
+  /** Project default model; must be create-selectable on that environment. Defaults to its create default. */
+  model?: ManagerExactModelSelection & { reasoningLevel?: ManagerReasoningLevel }
 }
 
 export type RepositoryCheckoutPhase =

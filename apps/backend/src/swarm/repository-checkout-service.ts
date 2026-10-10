@@ -92,7 +92,7 @@ export class RepositoryCheckoutService {
         managerContextId: '',
         adoptExisting: true,
         signal: record.abort.signal,
-        resolveModelSelection: () => this.defaultModel(),
+        resolveModelSelection: () => input.model ? this.requestedModel(input.model) : this.defaultModel(),
         onProgress: ({ stage, percent }) => {
           if (record.abort.signal.aborted) return
           record.status = { checkoutId, phase: stage === 'creating_manager' ? 'creating_project' : stage,
@@ -111,6 +111,19 @@ export class RepositoryCheckoutService {
       record.finishedAt = this.clock()
       this.prune()
     }
+  }
+
+  /** Null when the model can create projects on this machine; otherwise the reason it cannot. */
+  async checkModel(model: NonNullable<RepositoryCheckoutRequest['model']>): Promise<string | null> {
+    try { await this.requestedModel(model); return null } catch (error) { return error instanceof Error ? error.message : 'Model is not available.' }
+  }
+
+  private async requestedModel(requested: NonNullable<RepositoryCheckoutRequest['model']>): Promise<{ modelSelection: ManagerExactModelSelection; reasoningLevel: ManagerReasoningLevel }> {
+    const catalog = await this.options.swarmManager.getManagerSelectionCatalog()
+    const model = catalog.models.find(model => model.provider === requested.provider && model.modelId === requested.modelId && model.surfaces.create?.selectable)
+    if (!model) throw new Error(`The model ${requested.provider}/${requested.modelId} cannot create projects on ${this.machineName}.`)
+    const reasoning = requested.reasoningLevel && model.reasoningOptions.some(option => option.id === requested.reasoningLevel) ? requested.reasoningLevel : model.defaultReasoningId
+    return { modelSelection: { provider: model.provider, modelId: model.modelId }, reasoningLevel: reasoning as ManagerReasoningLevel }
   }
 
   private async defaultModel(): Promise<{ modelSelection: ManagerExactModelSelection; reasoningLevel: ManagerReasoningLevel }> {

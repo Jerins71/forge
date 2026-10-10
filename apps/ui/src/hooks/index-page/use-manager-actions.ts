@@ -1,3 +1,4 @@
+import { startRepositoryCheckout } from '@/lib/repository-checkout-operation'
 import {
   useCallback,
   useRef,
@@ -441,11 +442,62 @@ export function useManagerActions({
       return
     }
 
-    if (createProjectSourceMode === 'clone_repository') {
-      if (projectEnvironmentId) {
-        setCreateManagerError('Cloning runs on this machine only for now. Choose an existing folder on the other machine.')
+    if (createProjectSourceMode === 'clone_repository' && projectEnvironmentId) {
+      // Another machine clones through its own checkout service into its repositories folder.
+      const url = repositoryUrl.trim()
+      if (!url) {
+        setCreateManagerError('Repository URL is required.')
         return
       }
+      if (!targetEnvironmentClient) {
+        setCreateManagerError('That environment is not connected.')
+        return
+      }
+      setCreateManagerError(null)
+      setIsCreatingManager(true)
+      setCloneStage('validating')
+      setClonePercent(null)
+      setCloneCancellable(true)
+      try {
+        const operation = startRepositoryCheckout(
+          (path, init) => targetEnvironmentClient.features.settings.fetchJson(path, init),
+          {
+            repositoryUrl: url,
+            ...(repositoryFolder.trim() ? { folder: repositoryFolder.trim() } : {}),
+            name,
+            model: { ...newManagerModelSelection, ...(newManagerReasoningLevel ? { reasoningLevel: newManagerReasoningLevel } : {}) },
+          },
+          (status) => {
+            if (status.phase === 'done' || status.phase === 'error' || status.phase === 'cancelled') return
+            setCloneStage(status.phase === 'creating_project' ? 'creating_manager' : status.phase)
+            setClonePercent(status.percent ?? null)
+            setCloneCancellable(status.phase === 'validating' || status.phase === 'cloning')
+          },
+        )
+        activeCloneCancelRef.current = operation.cancel
+        const result = await operation.promise
+        if (result.sessionId) navigateToRoute({ view: 'chat', agentId: result.sessionId, environmentId: projectEnvironmentId })
+        setIsCreateManagerDialogOpen(false)
+        setNewManagerName('')
+        setNewManagerModelSelection(undefined)
+        setNewManagerReasoningLevel(undefined)
+        setCreateManagerError(null)
+        resetCloneFields()
+      } catch (error) {
+        const message = toErrorMessage(error)
+        setCreateManagerError(/cancelled/i.test(message) ? null : message)
+      } finally {
+        setIsCreatingManager(false)
+        setIsCancellingClone(false)
+        setCloneStage(null)
+        setClonePercent(null)
+        setCloneCancellable(false)
+        activeCloneCancelRef.current = null
+      }
+      return
+    }
+
+    if (createProjectSourceMode === 'clone_repository') {
       const url = repositoryUrl.trim()
       const folder = repositoryFolder.trim()
       const basePath = repositoryBasePath.trim()

@@ -81,6 +81,8 @@
         "src/**/*.{ts,tsx}"
       ],
       "ignoreDependencies": [
+        "@fontsource-variable/geist",
+        "@fontsource-variable/geist-mono",
         "mermaid",
         "tailwindcss"
       ]
