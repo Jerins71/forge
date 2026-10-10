@@ -30,7 +30,7 @@ it.each(['app://forge', 'http://127.0.0.1:47588'])('Desktop IPC lists, starts, g
   const credentials = createEnvironmentCredentialService({
     storePath: join(config.paths.dataDir, 'desktop-credentials.json'), clientOrigin,
     safeStorage: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value).map(b => b ^ 0x55), decryptString: value => value.map(b => b ^ 0x55).toString() },
-    desktopSecureControl: () => ({ baseUrl, token }),
+    desktopSecureControl: () => ({ baseUrl, loopbackUrl: baseUrl, token }),
   });
   await server.start();
   try {
