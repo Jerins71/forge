@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { createServer, createConnection } from 'node:net'
+import { createServer } from 'node:net'
 import type { ManagedHostDriver, ManagedTunnel } from './managed-hosts.js'
 export const shellQuote = (value: string): string =>
   "'" + value.replaceAll("'", "'\\''") + "'"
@@ -41,84 +41,105 @@ export function sshFailure(stderr: string): Error {
     'SSH connection failed. Check the host alias, existing SSH keys/agent, and host prerequisites.',
   )
 }
-async function unusedPort(): Promise<number> {
-  const server = createServer()
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', resolve)
-  })
-  const port = (
-    server.address() as {
-      port: number
-    }
-  ).port
-  await new Promise<void>((resolve, reject) =>
-    server.close((e) => (e ? reject(e) : resolve())),
-  )
-  return port
-}
 export function createOpenSshDriver(): ManagedHostDriver {
-  return {
-    run: (alias, script, options = {}) =>
-      new Promise<string>((resolve, reject) => {
-        const child = spawn(
-          'ssh',
-          [...sshOptions, '-o', 'ClearAllForwardings=yes', alias, 'sh -s'],
-          { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
-        )
-        const maximum = options.maxBytes ?? 65536
-        let bytes = 0,
-          stderr = '',
-          output = '',
-          settled = false
-        const finish = (error?: Error) => {
-          if (settled) return
-          settled = true
-          clearTimeout(timer)
-          if (error) {
-            child.kill()
-            reject(error)
-          } else resolve(output)
-        }
-        const timer = setTimeout(
-          () => finish(new Error('SSH command timed out')),
-          options.timeoutMs ?? 60000,
-        )
-        child.stdout.on('data', (chunk: Buffer) => {
-          bytes += chunk.length
-          if (bytes > maximum)
-            finish(new Error('SSH response exceeded its limit'))
-          else output += chunk.toString('utf8')
-        })
-        child.stderr.on('data', (chunk: Buffer) => {
-          if (stderr.length < 8192) stderr += chunk.toString('utf8')
-        })
-        child.on('error', () =>
-          finish(
-            new Error(
-              'OpenSSH is unavailable. Install the native OpenSSH client.',
-            ),
-          ),
-        )
-        child.on('exit', (code) =>
-          finish(code === 0 ? undefined : sshFailure(stderr)),
-        )
-        child.stdin.on('error', () => {})
-        child.stdin.end(script)
+  let disposed = false
+  const children = new Map<
+    import('node:child_process').ChildProcess,
+    Promise<void>
+  >()
+  const listeners = new Set<ManagedTunnel>()
+  function start(args: string[], stdio: ['pipe', 'pipe' | 'ignore', 'pipe']) {
+    if (disposed) throw new Error('Desktop SSH transport is closed')
+    const child = spawn('ssh', [...sshOptions, ...args], {
+      stdio,
+      windowsHide: true,
+    })
+    const closed = new Promise<void>((resolve) =>
+      child.once('close', () => {
+        children.delete(child)
+        resolve()
       }),
+    )
+    children.set(child, closed)
+    return child
+  }
+  async function stop(child: import('node:child_process').ChildProcess) {
+    const closed = children.get(child)
+    if (!closed) return
+    child.kill()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        closed,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, 1000)
+        }),
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+    if (children.has(child)) child.kill('SIGKILL')
+    await closed
+  }
+  const run: ManagedHostDriver['run'] = (alias, script, options = {}) =>
+    new Promise<string>((resolve, reject) => {
+      const child = start(
+        ['-o', 'ClearAllForwardings=yes', alias, 'sh -s'],
+        ['pipe', 'pipe', 'pipe'],
+      )
+      const maximum = options.maxBytes ?? 65536
+      let bytes = 0,
+        stderr = '',
+        output = '',
+        settled = false
+      const finish = (error?: Error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        if (error) {
+          void stop(child)
+          reject(error)
+        } else resolve(output)
+      }
+      const timer = setTimeout(
+        () => finish(new Error('SSH command timed out')),
+        options.timeoutMs ?? 60000,
+      )
+      child.stdout!.on('data', (chunk: Buffer) => {
+        bytes += chunk.length
+        if (bytes > maximum)
+          finish(new Error('SSH response exceeded its limit'))
+        else output += chunk.toString('utf8')
+      })
+      child.stderr!.on('data', (chunk: Buffer) => {
+        if (stderr.length < 8192) stderr += chunk.toString('utf8')
+      })
+      child.on('error', () =>
+        finish(
+          new Error(
+            'OpenSSH is unavailable. Install the native OpenSSH client.',
+          ),
+        ),
+      )
+      child.on('close', (code) =>
+        finish(code === 0 ? undefined : sshFailure(stderr)),
+      )
+      child.stdin!.on('error', () => {})
+      child.stdin!.end(script)
+    })
+  return {
+    run,
     upload: (alias, localFile, remoteFile) =>
       new Promise<void>((resolve, reject) => {
         const command = 'umask 077; cat > ' + shellQuote(remoteFile)
-        const child = spawn(
-          'ssh',
+        const child = start(
           [
-            ...sshOptions,
             '-o',
             'ClearAllForwardings=yes',
             alias,
             'sh -c ' + shellQuote(command),
           ],
-          { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true },
+          ['pipe', 'ignore', 'pipe'],
         )
         let stderr = '',
           settled = false
@@ -129,7 +150,7 @@ export function createOpenSshDriver(): ManagedHostDriver {
           clearTimeout(timer)
           file.destroy()
           if (error) {
-            child.kill()
+            void stop(child)
             reject(error)
           } else resolve()
         }
@@ -137,92 +158,109 @@ export function createOpenSshDriver(): ManagedHostDriver {
           () => finish(new Error('SSH artifact upload timed out')),
           300000,
         )
-        child.stderr.on('data', (chunk: Buffer) => {
+        child.stderr!.on('data', (chunk: Buffer) => {
           if (stderr.length < 8192) stderr += chunk.toString('utf8')
         })
         child.on('error', () => finish(new Error('OpenSSH is unavailable')))
-        child.on('exit', (code) =>
+        child.on('close', (code) =>
           finish(code === 0 ? undefined : sshFailure(stderr)),
         )
         file.on('error', () =>
           finish(new Error('Server artifact could not be read')),
         )
-        child.stdin.on('error', () => {})
-        file.pipe(child.stdin)
+        child.stdin!.on('error', () => {})
+        file.pipe(child.stdin!)
       }),
     tunnel: async (alias, remotePort) => {
-      const localPort = await unusedPort()
-      const child = spawn(
-        'ssh',
-        [
-          ...sshOptions,
-          '-o',
-          'ExitOnForwardFailure=yes',
-          '-o',
-          'ServerAliveInterval=15',
-          '-o',
-          'ServerAliveCountMax=3',
-          '-N',
-          '-L',
-          `127.0.0.1:${localPort}:127.0.0.1:${remotePort}`,
-          alias,
-        ],
-        { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true },
-      )
-      let stderr = '',
-        ended = false,
-        error: Error | undefined
-      child.stderr.on('data', (chunk: Buffer) => {
-        if (stderr.length < 8192) stderr += chunk.toString('utf8')
-      })
-      const exited = new Promise<void>((resolve) => {
-        child.once('error', () => {
-          ended = true
-          error = new Error('OpenSSH is unavailable')
-          resolve()
-        })
-        child.once('exit', () => {
-          ended = true
-          error = sshFailure(stderr)
-          resolve()
-        })
-      })
-      const close = async () => {
-        if (!ended) child.kill()
-        await exited
-      }
-      try {
-        const until = Date.now() + 15000
-        while (Date.now() < until) {
-          if (ended) throw error ?? new Error('SSH tunnel ended')
-          const listening = await new Promise<boolean>((resolve) => {
-            const socket = createConnection({
-              host: '127.0.0.1',
-              port: localPort,
-            })
-            socket.once('connect', () => {
-              socket.destroy()
-              resolve(true)
-            })
-            socket.once('error', () => resolve(false))
-            socket.setTimeout(200, () => {
-              socket.destroy()
-              resolve(false)
-            })
-          })
-          if (listening)
-            return {
-              baseUrl: `http://127.0.0.1:${localPort}`,
-              exited,
-              close,
-            } satisfies ManagedTunnel
-          await new Promise((resolve) => setTimeout(resolve, 50))
+      // Authenticate the SSH host before publishing an endpoint. Keep the actual TCP listener
+      // continuously owned by Desktop; no port is released for ssh (or another user) to bind.
+      await run(alias, 'true\n', { timeoutMs: 15000 })
+      if (disposed) throw new Error('Desktop SSH transport is closed')
+      const connections = new Map<
+        import('node:net').Socket,
+        import('node:child_process').ChildProcess
+      >()
+      let closing: Promise<void> | undefined
+      const server = createServer({ allowHalfOpen: true }, (socket) => {
+        if (disposed || closing || connections.size >= 128) {
+          socket.destroy()
+          return
         }
-        throw new Error('SSH tunnel did not open its loopback port')
-      } catch (e) {
-        await close()
-        throw e
+        let child: import('node:child_process').ChildProcess
+        try {
+          child = start(
+            [
+              '-o',
+              'ClearAllForwardings=yes',
+              '-o',
+              'ServerAliveInterval=15',
+              '-o',
+              'ServerAliveCountMax=3',
+              '-W',
+              `127.0.0.1:${remotePort}`,
+              alias,
+            ],
+            ['pipe', 'pipe', 'pipe'],
+          )
+        } catch {
+          socket.destroy()
+          return
+        }
+        connections.set(socket, child)
+        // stdout is only the SSH direct-tcpip stream. SSH diagnostics never enter HTTP/IPC/logs.
+        child.stderr!.resume()
+        socket.on('error', () => {})
+        child.stdin!.on('error', () => socket.destroy())
+        child.stdout!.on('error', () => socket.destroy())
+        child.on('error', () => socket.destroy())
+        child.once('close', () => {
+          connections.delete(socket)
+          socket.destroy()
+        })
+        socket.once('close', () => {
+          connections.delete(socket)
+          void stop(child)
+        })
+        socket.pipe(child.stdin!)
+        child.stdout!.pipe(socket)
+      })
+      const exited = new Promise<void>((resolve) =>
+        server.once('close', resolve),
+      )
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(0, '127.0.0.1', resolve)
+      })
+      const address = server.address() as { port: number }
+      const tunnel: ManagedTunnel = {
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        exited,
+        close: () =>
+          (closing ??= (async () => {
+            listeners.delete(tunnel)
+            const transports = [...connections]
+            for (const [socket] of transports) socket.destroy()
+            const closed = new Promise<void>((resolve) =>
+              server.close(() => resolve()),
+            )
+            await Promise.all(transports.map(([, child]) => stop(child)))
+            await closed
+          })()),
       }
+      server.on('error', () => {
+        void tunnel.close()
+      })
+      listeners.add(tunnel)
+      if (disposed) {
+        await tunnel.close()
+        throw new Error('Desktop SSH transport is closed')
+      }
+      return tunnel
+    },
+    dispose: async () => {
+      disposed = true
+      await Promise.all([...listeners].map((t) => t.close()))
+      await Promise.all([...children.keys()].map(stop))
     },
   }
 }

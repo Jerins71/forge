@@ -50,53 +50,85 @@ function requireOk<T>(
         ok: false
         error: {
           code: string
+          message?: string
         }
       },
 ): T {
-  if (!result.ok) throw new Error(result.error.code)
+  if (!result.ok)
+    throw new Error(
+      result.error.code + ': ' + (result.error.message ?? 'Operation failed'),
+    )
   return result.value
 }
 void app
   .whenReady()
   .then(async () => {
     await mkdir(proofRoot, { recursive: true, mode: 0o700 })
+    let failCredentialWrite =
+      process.env.FORGE_MANAGED_PROOF_INJECT_STORAGE_FAILURE === '1'
+    const credentialStorage = {
+      isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+      isAsyncEncryptionAvailable: () =>
+        safeStorage.isAsyncEncryptionAvailable(),
+      getSelectedStorageBackend: () =>
+        safeStorage.getSelectedStorageBackend?.() ?? 'unknown',
+      decryptStringAsync: (value: Buffer) =>
+        safeStorage.decryptStringAsync(value),
+      encryptStringAsync: async (text: string) => {
+        if (failCredentialWrite) {
+          failCredentialWrite = false
+          throw new Error('Injected credential write failure')
+        }
+        return safeStorage.encryptStringAsync
+          ? safeStorage.encryptStringAsync(text)
+          : safeStorage.encryptString(text)
+      },
+    }
     const credentials = createEnvironmentCredentialService({
       storePath: join(
         proofRoot,
         'desktop-user-data',
         'environment-credentials.json',
       ),
-      safeStorage,
+      safeStorage:
+        process.env.FORGE_MANAGED_PROOF_INJECT_STORAGE_FAILURE === '1'
+          ? credentialStorage
+          : safeStorage,
       clientOrigin: 'app://forge',
     })
     let tunnelCount = 0,
       grantReadCount = 0
-    const driver: ManagedHostDriver = {
-      ...native,
-      tunnel: async (...args) => {
-        tunnelCount++
-        return native.tunnel(...args)
-      },
-      run: async (...args) => {
-        if (args[1].includes('# forge:grant')) grantReadCount++
-        try {
-          return await native.run(...args)
-        } catch {
-          stage('remote-command-failed', {
-            phase: args[1].match(/# forge:([a-z-]+)/)?.[1] ?? 'cleanup',
-          })
-          throw new Error(
-            'SSH_PHASE_' +
-              (args[1].match(/# forge:([a-z-]+)/)?.[1] ?? 'cleanup'),
-          )
-        }
-      },
+    const makeDriver = (): ManagedHostDriver => {
+      const transport = createOpenSshDriver()
+      return {
+        ...transport,
+        tunnel: async (...args) => {
+          tunnelCount++
+          return transport.tunnel(...args)
+        },
+        run: async (...args) => {
+          if (args[1].includes('# forge:grant')) grantReadCount++
+          try {
+            return await transport.run(...args)
+          } catch {
+            stage('remote-command-failed', {
+              phase: args[1].match(/# forge:([a-z-]+)/)?.[1] ?? 'cleanup',
+            })
+            throw new Error(
+              'SSH_PHASE_' +
+                (args[1].match(/# forge:([a-z-]+)/)?.[1] ?? 'cleanup'),
+            )
+          }
+        },
+      }
     }
     const options = {
       storePath: join(proofRoot, 'desktop-user-data', 'managed-hosts.json'),
       credentials,
       clientOrigin: 'app://forge',
-      driver,
+      get driver() {
+        return makeDriver()
+      },
       artifact: async () => ({
         version: '0.26.1',
         sha256:
@@ -108,14 +140,25 @@ void app
       if (!safeStorage.isEncryptionAvailable())
         throw new Error('NATIVE_ENCRYPTION_UNAVAILABLE')
       service = createManagedHostService(options)
-      const added = requireOk(
-        await service.add({
-          hostAlias: 'dev1',
-          serviceName: 'forge-v2-managed',
-          installDir: '~/.forge-managed-test',
-          remotePort: 47788,
-        }),
-      )
+      const input = {
+        hostAlias: 'dev1',
+        serviceName: 'forge-v2-managed',
+        installDir: '~/.forge-managed-test',
+        remotePort: 47788,
+      }
+      const result = await service.add(input)
+      let added
+      if (process.env.FORGE_MANAGED_PROOF_INJECT_STORAGE_FAILURE === '1') {
+        if (result.ok || !result.error.message.includes('revoked'))
+          throw new Error('MINTED_DEVICE_REVOCATION_UNVERIFIED')
+        stage('credential-write-failed-session-revoked', {
+          revocationVerified: true,
+        })
+        added = requireOk(await service.repair('dev1'))
+        stage('pairing-repair-after-storage-failure', {
+          ready: added.phase === 'ready',
+        })
+      } else added = requireOk(result)
       installDir = added.installDir
       if (added.phase !== 'ready' || !added.environmentId || !added.baseUrl)
         throw new Error('ADD_NOT_READY')
@@ -163,12 +206,21 @@ void app
         environmentId: id,
         deviceSessionKept: true,
       })
+      if (process.env.FORGE_MANAGED_PROOF_INJECT_STORAGE_FAILURE === '1') {
+        // This extra stress run intentionally performs more than five starts in one minute.
+        // Reset only the isolated unit's counter so the normal restart limit stays qualified.
+        await native.run(
+          'dev1',
+          'systemctl --user reset-failed forge-v2-managed.service\n',
+        )
+        stage('reset-isolated-test-start-limit')
+      }
       const updated = requireOk(await service.update('dev1'))
       if (updated.phase !== 'ready' || updated.environmentId !== id)
         throw new Error('UPDATE_NOT_READY')
       const updatedSessionKept =
-        requireOk(await credentials.session(id)).deviceSession.deviceSessionId ===
-        oldSession
+        requireOk(await credentials.session(id)).deviceSession
+          .deviceSessionId === oldSession
       if (!updatedSessionKept) throw new Error('UPDATE_SESSION_CHANGED')
       stage('explicit-update-rerun', {
         environmentId: id,
@@ -212,6 +264,7 @@ void app
       } catch {
         evidence.cleanup = false
       }
+      await native.dispose?.()
       await writeFile(
         join(proofRoot, 'dev1-evidence.json'),
         JSON.stringify(evidence, null, 2) + '\n',

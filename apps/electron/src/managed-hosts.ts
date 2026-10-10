@@ -26,6 +26,7 @@ export interface ManagedTunnel {
   close(): void | Promise<void>
 }
 export interface ManagedHostDriver {
+  dispose?(): Promise<void>
   run(
     hostAlias: string,
     script: string,
@@ -252,7 +253,8 @@ export function createManagedHostService(options: {
     tunnels = new Map<string, ManagedTunnel>(),
     timers = new Map<string, ReturnType<typeof setTimeout>>(),
     attempts = new Map<string, number>(),
-    busy = new Set<string>()
+    busy = new Set<string>(),
+    reconnects = new Map<string, Promise<void>>()
   async function load() {
     if (records) return
     if (loading) return loading
@@ -350,6 +352,8 @@ export function createManagedHostService(options: {
       busy.add(alias)
       cancelRetry(alias)
       try {
+        await reconnects.get(alias)
+        if (disposed) fail('UNAVAILABLE', 'Desktop host management is closed.')
         return await work()
       } catch (e) {
         const r = records!.find((r) => r.hostAlias === alias)
@@ -445,6 +449,7 @@ export function createManagedHostService(options: {
     if (options.health) return options.health(baseUrl)
     const until = Date.now() + 45000
     while (Date.now() < until) {
+      if (disposed) fail('UNAVAILABLE', 'Desktop host management is closed.')
       try {
         const response = await fetch(baseUrl + '/api/v2/environment', {
           redirect: 'error',
@@ -497,10 +502,23 @@ export function createManagedHostService(options: {
             : 'UNAVAILABLE',
         session.error.message,
       )
+    if (disposed) fail('UNAVAILABLE', 'Desktop host management is closed.')
     attempts.delete(r.hostAlias)
     set(r, 'ready', null, t.baseUrl)
   }
-  async function reconnect(r: ManagedHostRecord) {
+  function reconnect(r: ManagedHostRecord): Promise<void> {
+    if (disposed || busy.has(r.hostAlias)) return Promise.resolve()
+    const pending = reconnects.get(r.hostAlias)
+    if (pending) return pending
+    const task = reconnectWork(r)
+    reconnects.set(r.hostAlias, task)
+    void task.then(
+      () => reconnects.delete(r.hostAlias),
+      () => reconnects.delete(r.hostAlias),
+    )
+    return task
+  }
+  async function reconnectWork(r: ManagedHostRecord) {
     try {
       set(r, 'connecting')
       if (!r.environmentId) {
@@ -514,6 +532,7 @@ export function createManagedHostService(options: {
       const t = await openTunnel(r)
       await verifyConnection(r, t)
     } catch (e) {
+      if (disposed) return
       const f = failure(e)
       set(
         r,
@@ -704,22 +723,48 @@ export function createManagedHostService(options: {
           result.error.message,
         )
     } finally {
-      if (started) await steady(r)
-      else
-        await driver
-          .run(
+      let cleaned = false
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await driver.run(
             r.hostAlias,
-            `${remoteOwned(r, owner)}# forge:steady\nrm -f ${q(file)} "$unit.d/forge-pairing.conf"\nsystemctl --user daemon-reload\n`,
+            `${remoteOwned(r, owner)}# forge:pair-cleanup\nrm -f ${q(file)} "$unit.d/forge-pairing.conf"\nsystemctl --user daemon-reload\n`,
           )
-          .catch(() => {})
+          if (started) await steady(r)
+          cleaned = true
+          break
+        } catch {
+          /* Retry the bounded, idempotent cleanup once. */
+        }
+      }
+      if (!cleaned)
+        fail(
+          'UNAVAILABLE',
+          'Pairing cleanup could not complete. Use Repair to remove the private grant and pairing override and restore the steady service.',
+        )
     }
     await verifyConnection(r, t)
   }
-  async function setup(r: ManagedHostRecord, artifact: ManagedServerArtifact) {
+  async function verifyInstalled(r: ManagedHostRecord) {
+    const version = posix.join(
+      r.installDir,
+      'versions',
+      `forge-server-${r.installedVersion}-linux-x64`,
+    )
+    await driver.run(
+      r.hostAlias,
+      `${remoteOwned(r, owner)}# forge:installed\nversion=${q(version)}\ntest ! -L "$version" && test "$(cat "$version/.artifact-sha256")" = ${q(r.artifactSha256)} && test -x "$version/bin/forge" && test -x "$version/node/bin/node" || fail ARTIFACT\n"$version/bin/forge" --version >/dev/null || fail ARTIFACT\n`,
+    )
+  }
+  async function setup(
+    r: ManagedHostRecord,
+    artifact: ManagedServerArtifact | null,
+  ) {
     set(r, 'installing')
     await preflight(r.hostAlias)
     await prepare(r)
-    await install(r, artifact)
+    if (artifact) await install(r, artifact)
+    else await verifyInstalled(r)
     if (r.environmentId) {
       await steady(r, false)
       await driver.run(
@@ -737,6 +782,58 @@ export function createManagedHostService(options: {
       }
     }
     await pair(r, t)
+  }
+  async function updateHost(
+    r: ManagedHostRecord,
+    artifact: ManagedServerArtifact,
+  ) {
+    const numeric = (v: string) => v.split(/[.-]/).slice(0, 3).map(Number)
+    const from = numeric(r.installedVersion),
+      to = numeric(artifact.version)
+    for (let i = 0; i < 3; i++) {
+      if (to[i] < from[i])
+        fail('ARTIFACT', 'An older Desktop cannot downgrade this managed host.')
+      if (to[i] > from[i]) break
+    }
+    const t = await openTunnel(r)
+    await verifyConnection(r, t)
+    await idle(r, t.baseUrl)
+    await prepare(r)
+    await install(r, artifact)
+    await idle(r, t.baseUrl)
+    const next = {
+      ...r,
+      installedVersion: artifact.version,
+      artifactSha256: artifact.sha256,
+    }
+    try {
+      await steady(next)
+    } catch {
+      let restored = false
+      try {
+        await steady(r)
+        restored = true
+      } catch {
+        /* Keep both artifacts for explicit Repair. */
+      }
+      fail(
+        'UNAVAILABLE',
+        restored
+          ? 'Update restart failed; the previous service was restored. Use Repair to retry the desired artifact.'
+          : 'Update restart failed and the previous service could not be restored. Use Repair to recover the installed or desired artifact.',
+      )
+    }
+    r.installedVersion = artifact.version
+    r.artifactSha256 = artifact.sha256
+    await save()
+    await verifyConnection(r, t)
+    const info = await health(t.baseUrl)
+    if (info.forgeVersion !== artifact.version)
+      fail(
+        'ARTIFACT',
+        'The restarted host reports an unexpected version. Repair the service; the previous artifact has been retained.',
+      )
+    return statuses.get(r.hostAlias)!
   }
   return {
     start: async () => {
@@ -788,58 +885,29 @@ export function createManagedHostService(options: {
     repair: (alias: string) =>
       action(alias, async () => {
         const r = record(alias)
-        const artifact = await desired()
-        if (
-          artifact.version !== r.installedVersion ||
-          artifact.sha256 !== r.artifactSha256
-        )
+        const artifact = await options.artifact().catch(() => null)
+        await closeTunnel(alias)
+        let installed = false
+        try {
+          await verifyInstalled(r)
+          installed = true
+        } catch {
+          /* Matching pinned archive can repair missing content. */
+        }
+        const matches =
+          artifact?.version === r.installedVersion &&
+          artifact.sha256 === r.artifactSha256
+        if (!installed && !matches)
           fail(
             'ARTIFACT',
-            'Repair requires the installed pinned artifact. Use Update when this Desktop has a newer version.',
+            'The installed artifact is unavailable. Restore its pinned archive to repair this host.',
           )
-        await closeTunnel(alias)
-        await setup(r, artifact)
+        await setup(r, installed ? null : artifact)
+        if (artifact && !matches) return updateHost(r, artifact)
         return statuses.get(alias)!
       }),
     update: (alias: string) =>
-      action(alias, async () => {
-        const r = record(alias)
-        const artifact = await desired()
-        const numeric = (v: string) => v.split(/[.-]/).slice(0, 3).map(Number)
-        const from = numeric(r.installedVersion),
-          to = numeric(artifact.version)
-        for (let i = 0; i < 3; i++) {
-          if (to[i] < from[i])
-            fail(
-              'ARTIFACT',
-              'An older Desktop cannot downgrade this managed host.',
-            )
-          if (to[i] > from[i]) break
-        }
-        const t = await openTunnel(r)
-        await verifyConnection(r, t)
-        await idle(r, t.baseUrl)
-        await prepare(r)
-        await install(r, artifact)
-        await idle(r, t.baseUrl)
-        const next = {
-          ...r,
-          installedVersion: artifact.version,
-          artifactSha256: artifact.sha256,
-        }
-        await steady(next)
-        r.installedVersion = artifact.version
-        r.artifactSha256 = artifact.sha256
-        await save()
-        await verifyConnection(r, t)
-        const info = await health(t.baseUrl)
-        if (info.forgeVersion !== artifact.version)
-          fail(
-            'ARTIFACT',
-            'The restarted host reports an unexpected version. Repair the service; the previous artifact has been retained.',
-          )
-        return statuses.get(alias)!
-      }),
+      action(alias, async () => updateHost(record(alias), await desired())),
     removeConnection: (alias: string) =>
       action(alias, async () => {
         const r = record(alias)
@@ -859,6 +927,8 @@ export function createManagedHostService(options: {
       disposed = true
       for (const alias of timers.keys()) cancelRetry(alias)
       await Promise.all([...tunnels.keys()].map(closeTunnel))
+      await driver.dispose?.()
+      await Promise.allSettled([...reconnects.values()])
     },
   }
 }

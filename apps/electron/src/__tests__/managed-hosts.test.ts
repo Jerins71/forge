@@ -274,3 +274,123 @@ it('explicit repair of a revoked unused host can create one grant, while ordinar
   expect((await f.service.repair('dev1')).ok).toBe(false)
   expect(f.counts().grants).toBe(2)
 })
+
+it('restores the installed unit after an update restart failure and can repair to the desired artifact', async () => {
+  const f = await fixture()
+  await f.service.add({ hostAlias: 'dev1', remotePort: 47788 })
+  f.options.artifact = async () => ({
+    version: '0.26.2',
+    sha256: 'b'.repeat(64),
+    source: '/test/new.tar.gz',
+  })
+  const original = f.driver.run
+  let failed = false
+  f.driver.run = async (...args) => {
+    if (
+      !failed &&
+      args[1].includes('# forge:steady') &&
+      args[1].includes('forge-server-0.26.2') &&
+      args[1].includes('systemctl --user restart')
+    ) {
+      failed = true
+      f.scripts.push(args[1])
+      throw new Error('restart failed')
+    }
+    return original(...args)
+  }
+  f.scripts.length = 0
+  expect((await f.service.update('dev1')).ok).toBe(false)
+  expect(
+    f.scripts
+      .filter((s) => s.includes('# forge:steady'))
+      .map((s) => s.includes('forge-server-0.26.2')),
+  ).toEqual([true, false])
+  expect(
+    JSON.parse(await readFile(f.storePath, 'utf8'))[0].installedVersion,
+  ).toBe('0.26.1')
+  f.options.health = async () => ({
+    environmentId: id,
+    forgeVersion: '0.26.2',
+  })
+  expect(await f.service.repair('dev1')).toMatchObject({
+    ok: true,
+    value: { phase: 'ready', installedVersion: '0.26.2' },
+  })
+})
+it('repairs from the verified installed artifact when no desired archive is configured', async () => {
+  const f = await fixture()
+  await f.service.add({ hostAlias: 'dev1', remotePort: 47788 })
+  f.options.artifact = async () => null as any
+  expect(await f.service.repair('dev1')).toMatchObject({
+    ok: true,
+    value: { phase: 'ready', installedVersion: '0.26.1' },
+  })
+})
+it('awaits an in-flight reconnect before repair and closes every resulting tunnel on dispose', async () => {
+  const f = await fixture()
+  await f.service.add({ hostAlias: 'dev1', remotePort: 47788 })
+  await f.service.dispose()
+  const original = f.driver.tunnel
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let opens = 0
+  const created: Awaited<ReturnType<typeof original>>[] = []
+  f.driver.tunnel = async (...args) => {
+    if (++opens === 1) await gate
+    const t = await original(...args)
+    created.push(t)
+    return t
+  }
+  const reopened = createManagedHostService(f.options)
+  cleanups.push(() => reopened.dispose())
+  const starting = reopened.start()
+  await vi.waitFor(() => expect(opens).toBe(1))
+  const repairing = reopened.repair('dev1')
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  const openedDuringReconnect = opens
+  release()
+  await starting
+  await repairing
+  await reopened.dispose()
+  expect(openedDuringReconnect).toBe(1)
+  expect(created.every((t) => vi.mocked(t.close).mock.calls.length === 1)).toBe(
+    true,
+  )
+})
+it.each([1, 2])(
+  'retries final pairing cleanup once and names Repair if %i cleanup attempt(s) fail',
+  async (failures) => {
+    const f = await fixture()
+    const original = f.driver.run
+    let attempts = 0
+    f.driver.run = async (...args) => {
+      if (
+        f.credentials.pair.mock.calls.length &&
+        args[1].includes('# forge:steady') &&
+        args[1].includes('systemctl --user restart')
+      ) {
+        if (++attempts <= failures) throw new Error('cleanup transport failed')
+      }
+      return original(...args)
+    }
+    const result = await f.service.add({
+      hostAlias: 'dev1',
+      remotePort: 47788,
+    })
+    expect(attempts).toBe(2)
+    if (failures === 1)
+      expect(result).toMatchObject({ ok: true, value: { phase: 'ready' } })
+    else {
+      expect(result).toMatchObject({
+        ok: false,
+        error: { message: expect.stringContaining('Repair') },
+      })
+      expect(await f.service.status()).toMatchObject({
+        ok: true,
+        value: [{ message: expect.stringContaining('Repair') }],
+      })
+    }
+  },
+)
