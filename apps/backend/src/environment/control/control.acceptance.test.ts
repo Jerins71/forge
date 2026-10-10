@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ProjectSummary, RpcInput } from "@forge/protocol/environment-v2";
+import { executeStreamDeckAction } from "../../ws/http/routes/stream-deck-routes.js";
 import { createControlCore } from "./database.js";
 import type { SwarmControlPort, Principal } from "./control-types.js";
 import type { ControlCoreOptions, WorkspacePort } from "./effect-types.js";
@@ -572,9 +573,7 @@ describe("durable control acceptance on real SQLite", () => {
 
 it("resumes stopped control state under the writer barrier, preserves input identity and fences failed/revoked resumes", async () => {
   const f = await fixture();
-  const service = f.core.controlService as typeof f.core.controlService & {
-    resumeSession<T>(principal: Principal, sessionId: string, resume: () => Promise<T>): Promise<T>;
-  };
+  const service = f.core.controlService;
   const receipt = await service.execute(principal, "session.launch", launch);
   await f.core.effectWorker.drain();
   await service.execute(principal, "session.stop", { commandId: STOP, sessionId: receipt.sessionId! });
@@ -585,7 +584,7 @@ it("resumes stopped control state under the writer barrier, preserves input iden
   expect(before.desired_state).toBe("stopped");
   const inputCount = count(f.core, "control_inputs");
   await expect(
-    service.resumeSession(principal, receipt.sessionId!, async () => {
+    service.admitLifecycle!(principal, { commandId: "10000000-0000-4000-8000-000000000001", command: "resume_session", sessionIds: [receipt.sessionId!], intent: "resume", request: {} }, async () => {
       throw new Error("unsafe writer");
     }),
   ).rejects.toThrow("unsafe writer");
@@ -596,7 +595,9 @@ it("resumes stopped control state under the writer barrier, preserves input iden
       }
     ).desired_state,
   ).toBe("stopped");
-  await service.resumeSession(principal, receipt.sessionId!, async () => {
+  await service.execute(principal, "session.stop", { commandId: "10000000-0000-4000-8000-000000000003", sessionId: receipt.sessionId! });
+  await f.core.effectWorker.drain();
+  await service.admitLifecycle!(principal, { commandId: "10000000-0000-4000-8000-000000000002", command: "resume_session", sessionIds: [receipt.sessionId!], intent: "resume", request: {} }, async () => {
     expect(f.core.database.inTransaction).toBe(false);
     const state = f.core.database
       .prepare("SELECT desired_state,run_generation FROM control_sessions WHERE session_id=?")
@@ -624,8 +625,142 @@ it("resumes stopped control state under the writer barrier, preserves input iden
   ).toBe("running");
   f.revoke();
   await expect(
-    (restarted.controlService as typeof service).resumeSession(principal, receipt.sessionId!, async () => {
+    restarted.controlService.admitLifecycle!(principal, { commandId: "10000000-0000-4000-8000-000000000004", command: "resume_session", sessionIds: [receipt.sessionId!], intent: "resume", request: {} }, async () => {
       throw new Error("must not run");
     }),
   ).rejects.toMatchObject({ code: "FORBIDDEN" });
+});
+
+// Regression cases are written before implementing lifecycle admission.
+describe("lifecycle command admission", () => {
+  it.each(["clear_session", "delete_session", "archive_session", "stop_all_agents"])("%s fences a claimed send before touching session state", async command => {
+    const entered = deferred<void>(); const release = deferred<void>();
+    let dispatched = false; let mutated = false;
+    const f = await fixture({ async applyInput(input) {
+      await input.onCanonicalAppend("saved"); entered.resolve(); await release.promise;
+      dispatched = await input.beforeDispatch() === "dispatch";
+      if (dispatched) await input.onDispatchAccepted();
+      return { delivery: dispatched ? "dispatched" : "unknown" };
+    } });
+    await f.core.controlService.execute(principal, "session.launch", launch);
+    const drain = f.core.effectWorker.drain(); await entered.promise;
+    const mutation = Promise.resolve().then(() => f.core.controlService.admitLifecycle!(principal, {
+      commandId: STOP, command, sessionIds: ["v2-" + COMMAND], intent: "stop", request: { command },
+    }, async () => { mutated = true; return { completed: true }; }));
+    // Attach before releasing the held effect so failure cannot strand teardown.
+    const outcome = mutation.then(value => ({ value }), error => ({ error }));
+    await Promise.resolve(); expect(mutated).toBe(false);
+    const send = f.core.controlService.execute(principal, "session.send", {
+      commandId: SEND, sessionId: "v2-" + COMMAND, message: { text: "racing", artifactIds: [] },
+    });
+    const sendOutcome = send.then(value => ({ value }), error => ({ error }));
+    release.resolve(); await drain;
+    expect(await outcome).toEqual({ value: { completed: true } });
+    expect(await sendOutcome).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(dispatched).toBe(false);
+    expect(await f.core.controlService.getReceipt(principal, COMMAND)).toMatchObject({ state: "interrupted", delivery: "none" });
+  });
+
+  it.each(["resume_session", "resume_restart_recovery", "fork_session"])("%s refuses to bypass an accepted stop or send", async command => {
+    const f = await fixture(); const sessionId = "v2-" + COMMAND;
+    await f.core.controlService.execute(principal, "session.launch", launch); let calls = 0;
+    await expect(f.core.controlService.admitLifecycle!(principal, {
+      commandId: STOP, command, sessionIds: [sessionId], intent: command === "resume_session" ? "resume" : "inspect", request: {},
+    }, async () => { calls++; })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(calls).toBe(0); await f.core.effectWorker.drain();
+    await f.core.controlService.execute(principal, "session.stop", { commandId: STOP, sessionId });
+    await expect(f.core.controlService.admitLifecycle!(principal, {
+      commandId: SEND, command, sessionIds: [sessionId], intent: command === "resume_session" ? "resume" : "inspect", request: {},
+    }, async () => { calls++; })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(calls).toBe(0);
+  });
+
+  it("choice_cancel conflicts with an accepted answer", async () => {
+    const f = await fixture(); const sessionId = "v2-" + COMMAND;
+    await f.core.controlService.execute(principal, "session.launch", { ...launch, initialMessage: undefined }); await f.core.effectWorker.drain();
+    const choice = { choiceId: "cancel", agentId: sessionId, status: "pending", questions: [{ id: "q", question: "Pick", options: [{ id: "yes", label: "Yes" }] }] };
+    f.core.database.prepare("INSERT INTO control_choices VALUES (?, ?, ?, ?, ?, NULL, 0)").run("cancel", sessionId, "runtime", "pending", JSON.stringify(choice));
+    await f.core.controlService.execute(principal, "session.choose", { commandId: SEND, sessionId, choiceId: "cancel", answers: [{ questionId: "q", selectedOptionIds: ["yes"] }] });
+    await expect(f.core.controlService.admitLifecycle!(principal, { commandId: STOP, command: "choice_cancel", sessionIds: [sessionId], intent: "cancel-choice", choiceId: "cancel", request: {} }, async () => {})).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("fork replays a completed result after restart without repeating the mutation", async () => {
+    const f = await fixture(); const sessionId = "v2-" + COMMAND;
+    await f.core.controlService.execute(principal, "session.launch", { ...launch, initialMessage: undefined }); await f.core.effectWorker.drain(); let calls = 0;
+    const input = { commandId: SEND, command: "fork_session", sessionIds: [sessionId], intent: "inspect" as const, request: { label: "fork" } };
+    expect(await f.core.controlService.admitLifecycle!(principal, input, async () => { calls++; return { forkId: "one" }; })).toEqual({ forkId: "one" });
+    await f.core.close(); const reopened = await f.open(); await reopened.reconcileOnBoot();
+    expect(await reopened.controlService.admitLifecycle!(principal, input, async () => { calls++; return { forkId: "two" }; })).toEqual({ forkId: "one" }); expect(calls).toBe(1);
+    await expect(reopened.controlService.admitLifecycle!(principal, { ...input, request: { label: "other" } }, async () => {})).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("kill_agent via typed worker stop preserves manager intent and shares effect admission", async () => {
+    const f = await fixture(); const sessionId = "v2-" + COMMAND;
+    await f.core.controlService.execute(principal, "session.launch", { ...launch, initialMessage: undefined }); await f.core.effectWorker.drain();
+    f.swarm.resolveSession = id => id === "worker" ? { sessionId, workerId: id } : { sessionId: id };
+    const calls: string[] = []; f.swarm.stopSession = async input => { calls.push(input.sessionId); return { stopped: true }; };
+    await f.core.controlService.execute(principal, "session.stop", { commandId: STOP, sessionId: "worker" }); await f.core.effectWorker.drain();
+    expect(calls).toEqual(["worker"]);
+    expect(f.core.database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(sessionId)).toEqual({ desired_state: "running" });
+    expect(await f.core.controlService.execute(principal, "session.stop", { commandId: STOP, sessionId: "worker" })).toMatchObject({ state: "succeeded" }); expect(calls).toHaveLength(1);
+  });
+});
+
+
+it.each(["resume_session", "toggle_session"] as const)("Stream Deck %s enters lifecycle admission before resuming", async type => {
+  const f = await fixture(); const sessionId = "v2-" + COMMAND;
+  await f.core.controlService.execute(principal, "session.launch", launch);
+  let resumes = 0;
+  const options = { swarmManager: { getAgent: () => ({ agentId: sessionId, role: "manager", status: "stopped" }), resumeSession: async () => { resumes++; } },
+    environmentControl: { control: f.core.controlService },
+  } as unknown as Parameters<typeof executeStreamDeckAction>[0];
+  await expect(executeStreamDeckAction(options, { type, requestId: "deck-resume", sessionAgentId: sessionId }, principal)).rejects.toMatchObject({ code: "CONFLICT" });
+  expect(resumes).toBe(0);
+});
+
+it("an interrupted resume remains fenced on restart and is never replayed", async () => {
+  const f = await fixture(); const sessionId = "v2-" + COMMAND;
+  await f.core.controlService.execute(principal, "session.launch", { ...launch, initialMessage: undefined }); await f.core.effectWorker.drain();
+  await f.core.controlService.execute(principal, "session.stop", { commandId: STOP, sessionId }); await f.core.effectWorker.drain();
+  const input = { commandId: SEND, command: "resume_session", sessionIds: [sessionId], intent: "resume" as const, request: {} };
+  await f.core.controlService.admitLifecycle!(principal, input, async () => ({}));
+  // Simulate loss after runtime creation, before result COMMIT.
+  f.core.database.prepare("UPDATE effects SET state='claimed',payload_json=? WHERE command_id=?").run(JSON.stringify({ kind: "lifecycle.admit", intent: "resume" }), SEND);
+  await f.core.close(); const reopened = await f.open(); await reopened.reconcileOnBoot();
+  expect(reopened.database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(sessionId)).toEqual({ desired_state: "stopped" });
+  await expect(reopened.controlService.admitLifecycle!(principal, input, async () => { throw new Error("must not replay"); })).rejects.toMatchObject({ code: "CONFLICT", retryable: false });
+});
+
+it("clear retry cannot erase a later send and failed shutdown stays fenced", async () => {
+  const f = await fixture(); const sessionId = "v2-" + COMMAND;
+  await f.core.controlService.execute(principal, "session.launch", { ...launch, initialMessage: undefined }); await f.core.effectWorker.drain();
+  let clears = 0;
+  const input = { commandId: SEND, command: "clear_session", sessionIds: [sessionId], intent: "stop" as const, request: {} };
+  await f.core.controlService.admitLifecycle!(principal, input, async () => { clears++; return {}; });
+  await f.core.controlService.execute(principal, "session.send", { commandId: STOP, sessionId, message: { text: "new input after clear", artifactIds: [] } }); await f.core.effectWorker.drain();
+  await f.core.controlService.admitLifecycle!(principal, input, async () => { clears++; return {}; }); expect(clears).toBe(1); expect(f.counts().dispatchCount).toBe(1);
+});
+
+it("profile teardown includes an unmaterialized accepted launch and excludes another launch", async () => {
+  const f = await fixture(); await f.core.controlService.execute(principal, "session.launch", launch);
+  const entered = deferred<void>(); const release = deferred<void>();
+  const mutation = f.core.controlService.admitLifecycle!(principal, { commandId: STOP, command: "archive_profile", sessionIds: [], projectIds: ["project"], intent: "stop", request: { profileId: "project" } }, async () => { entered.resolve(); await release.promise; return {}; });
+  await entered.promise;
+  const next = f.core.controlService.execute(principal, "session.launch", { ...launch, commandId: SEND }).then(value => ({ value }), error => ({ error }));
+  const prior = await f.core.controlService.getReceipt(principal, COMMAND);
+  const nextOutcome = await next; release.resolve(); await mutation;
+  expect(nextOutcome).toMatchObject({ error: { code: "CONFLICT" } });
+  expect(prior).toMatchObject({ state: "interrupted", delivery: "none" });
+});
+
+it("rejected lifecycle preflight preserves accepted intent and creates no mutation journal", async () => {
+  const f = await fixture(); await f.core.controlService.execute(principal, "session.launch", launch);
+  const mutation = f.core.controlService.admitLifecycle!(principal, {
+    commandId: STOP, command: "delete_session", sessionIds: ["v2-" + COMMAND], intent: "stop", request: {},
+    preflight: () => { throw Object.assign(new Error("Forbidden lifecycle target"), { code: "FORBIDDEN" }); },
+  }, async () => ({}));
+  const outcome = await mutation.then(value => ({ value }), error => ({ error }));
+  expect(outcome).toMatchObject({ error: { code: "FORBIDDEN" } });
+  expect(count(f.core, "commands")).toBe(1);
+  expect(await f.core.controlService.getReceipt(principal, COMMAND)).toMatchObject({ state: "accepted" });
 });

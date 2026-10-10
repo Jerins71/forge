@@ -31,6 +31,8 @@ import type { ControlService, EnvironmentAccessPort, Principal } from "../enviro
 import { awaitLegacyReceipt, executeMigratedLegacyCommand, legacyCommandScopes, legacySessionEventAllowlist, type LegacyHandlerPorts } from "./rpc/legacy-builder-adapter.js";
 import { StreamFault } from "../environment/streams/stream-budget.js";
 
+import { admitLifecycleCommand, isLifecycleCommand } from "./rpc/lifecycle-command-admission.js";
+
 const CONVERSATION_PAGE_RATE_WINDOW_MS = 5_000;
 const MAX_CONVERSATION_PAGE_REQUESTS_PER_WINDOW = 8;
 
@@ -44,7 +46,7 @@ export class WsHandler {
   private readonly apiProxy: WsApiProxy;
   private repositoryProjectCreationService: RepositoryProjectCreationService | null = null;
   private readonly conversationPageRequestTimes = new WeakMap<WebSocket, number[]>();
-  private environmentControl: { access: EnvironmentAccessPort; control: ControlService & Partial<Pick<import("../environment/control/command-service.js").EnvironmentControlService, "resumeSession">> } | null = null;
+  private environmentControl: { access: EnvironmentAccessPort; control: ControlService } | null = null;
   private readonly principals = new WeakMap<WebSocket, Principal>();
   private readonly featureListeners = new Map<string, Set<(event: ServerEvent) => void>>();
   private readonly listTerminalsForSession: (sessionId: string) => TerminalDescriptor[];
@@ -108,7 +110,7 @@ export class WsHandler {
     this.repositoryProjectCreationService = service;
   }
 
-  setEnvironmentControl(deps: { access: EnvironmentAccessPort; control: ControlService & Partial<Pick<import("../environment/control/command-service.js").EnvironmentControlService, "resumeSession">> }): void {
+  setEnvironmentControl(deps: { access: EnvironmentAccessPort; control: ControlService }): void {
     this.environmentControl = deps;
   }
 
@@ -120,72 +122,84 @@ export class WsHandler {
   }
 
   legacyPorts(): LegacyHandlerPorts {
+    const executeCommand: LegacyHandlerPorts["executeCommand"] = async ({ sessionId, command, signal, send }) => {
+      if (signal.aborted) return;
+      if (sessionId && !this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session.");
+      // Handler identity is a token, never a socket. Handlers touch it only through send.
+      const socket = Symbol("legacy-command");
+      const context = { command, socket, subscribedAgentId: sessionId, swarmManager: this.swarmManager,
+        resolveManagerContextAgentId: (agentId: string) => this.resolveManagerContextAgentId(agentId),
+        send: (_connection: symbol, event: ServerEvent) => { if (!signal.aborted) send(event); },
+        handleDeletedAgentSubscriptions: (ids: Set<string>) => this.handleDeletedAgentSubscriptions(ids),
+        unreadTracker: this.unreadTracker ?? undefined,
+      };
+      if (command.type === "resume_restart_recovery" || command.type === "dismiss_restart_recovery") {
+        const snapshot = command.type === "resume_restart_recovery" ? await this.swarmManager.resumeRestartRecovery() : await this.swarmManager.dismissRestartRecovery();
+        send({ type: "restart_recovery_snapshot", snapshot, requestId: command.requestId });
+        return;
+      }
+      if (command.type === "pin_message") {
+        const result = await this.swarmManager.pinMessage(sessionId, command.messageId, command.pinned);
+        send({ type: "message_pinned", agentId: sessionId, messageId: command.messageId, pinned: result.pinned, timestamp: result.timestamp });
+        return;
+      }
+      if (command.type === "clear_all_pins") { await this.swarmManager.clearAllPins(sessionId); return; }
+      if (command.type === "dismiss_session_attention") {
+        const result = await this.swarmManager.dismissSessionAttention(command.attentionIds);
+        send({ type: "session_attention_update", revision: result.revision, changes: result.changes, requestId: command.requestId });
+        return;
+      }
+      if (command.type === "mark_unread" || command.type === "mark_all_read") {
+        if (!this.unreadTracker) return;
+        const agents = command.type === "mark_unread" ? [this.swarmManager.getAgent(sessionId)] : this.swarmManager.listAgents();
+        for (const agent of agents) {
+          if (!agent || agent.role !== "manager") continue;
+          const profileId = this.subscriptionManager.resolveProfileIdForAgent(agent.agentId) ?? agent.agentId;
+          if (command.type === "mark_all_read" && command.profileId !== profileId) continue;
+          if (command.type === "mark_unread") this.unreadTracker.markUnread(profileId, agent.agentId);
+          else this.unreadTracker.markRead(profileId, agent.agentId);
+          this.broadcastUnreadCountUpdate(agent.agentId, this.unreadTracker.getCount(profileId, agent.agentId));
+        }
+        return;
+      }
+      if (command.type === "ping") { send({ type: "ready", subscribedAgentId: sessionId, serverTime: new Date().toISOString() }); return; }
+      if (isBrowserClientCommand(command)) {
+        await handleBrowserCommand({ ...context, command, connectionId: `rpc:${sessionId}`,
+          browserAutomationService: this.browserAutomationService,
+          resolveProfileIdForAgent: agentId => this.subscriptionManager.resolveProfileIdForAgent(agentId),
+          isEligibleLocalBuilderManager: agentId => {
+            const descriptor = this.swarmManager.getAgent(agentId);
+            return !!descriptor && isEligibleLocalBuilderManager(descriptor);
+          },
+          broadcastToSession: (id, event) => this.broadcastToSession(id, event),
+          hydrateHostSessions: () => this.hydrateBrowserHostSessions(),
+        });
+        return;
+      }
+      if (await handleManagerCommand({ ...context, broadcastToSubscribed: event => { send(event); this.broadcastToSubscribed(event); } })) return;
+      if (await handleSessionCommand({ ...context, supportsGoalControlRequestId: true, broadcastUnreadCountUpdate: (id, count) => this.broadcastUnreadCountUpdate(id, count) })) return;
+      if (await handleAgentCommand(context)) return;
+      if (await handleConversationCommand({ ...context, allowNonManagerSubscriptions: this.allowNonManagerSubscriptions, logDebug: () => {}, resolveConfiguredManagerId: () => this.resolveConfiguredManagerId() })) return;
+      throw new StreamFault("UNAVAILABLE", `Legacy command ${command.type} has no port adapter.`);
+    };
     return {
-      executeCommand: async ({ principal, sessionId, command, signal, send }) => {
-        if (signal.aborted) return;
-        if (sessionId && !this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session.");
-        // Handler identity is a token, never a socket. Handlers touch it only through send.
-        const socket = Symbol("legacy-command");
-        const context = { command, socket, subscribedAgentId: sessionId, swarmManager: this.swarmManager,
-          resolveManagerContextAgentId: (agentId: string) => this.resolveManagerContextAgentId(agentId),
-          send: (_connection: symbol, event: ServerEvent) => { if (!signal.aborted) send(event); },
-          handleDeletedAgentSubscriptions: (ids: Set<string>) => this.handleDeletedAgentSubscriptions(ids),
-          unreadTracker: this.unreadTracker ?? undefined,
-        };
-        if (command.type === "resume_restart_recovery" || command.type === "dismiss_restart_recovery") {
-          const snapshot = command.type === "resume_restart_recovery" ? await this.swarmManager.resumeRestartRecovery() : await this.swarmManager.dismissRestartRecovery();
-          send({ type: "restart_recovery_snapshot", snapshot, requestId: command.requestId });
-          return;
-        }
-        if (command.type === "pin_message") {
-          const result = await this.swarmManager.pinMessage(sessionId, command.messageId, command.pinned);
-          send({ type: "message_pinned", agentId: sessionId, messageId: command.messageId, pinned: result.pinned, timestamp: result.timestamp });
-          return;
-        }
-        if (command.type === "clear_all_pins") { await this.swarmManager.clearAllPins(sessionId); return; }
-        if (command.type === "dismiss_session_attention") {
-          const result = await this.swarmManager.dismissSessionAttention(command.attentionIds);
-          send({ type: "session_attention_update", revision: result.revision, changes: result.changes, requestId: command.requestId });
-          return;
-        }
-        if (command.type === "mark_unread" || command.type === "mark_all_read") {
-          if (!this.unreadTracker) return;
-          const agents = command.type === "mark_unread" ? [this.swarmManager.getAgent(sessionId)] : this.swarmManager.listAgents();
-          for (const agent of agents) {
-            if (!agent || agent.role !== "manager") continue;
-            const profileId = this.subscriptionManager.resolveProfileIdForAgent(agent.agentId) ?? agent.agentId;
-            if (command.type === "mark_all_read" && command.profileId !== profileId) continue;
-            if (command.type === "mark_unread") this.unreadTracker.markUnread(profileId, agent.agentId);
-            else this.unreadTracker.markRead(profileId, agent.agentId);
-            this.broadcastUnreadCountUpdate(agent.agentId, this.unreadTracker.getCount(profileId, agent.agentId));
-          }
-          return;
-        }
-        if (command.type === "ping") { send({ type: "ready", subscribedAgentId: sessionId, serverTime: new Date().toISOString() }); return; }
-        if (isBrowserClientCommand(command)) {
-          await handleBrowserCommand({ ...context, command, connectionId: `rpc:${sessionId}`,
-            browserAutomationService: this.browserAutomationService,
-            resolveProfileIdForAgent: agentId => this.subscriptionManager.resolveProfileIdForAgent(agentId),
-            isEligibleLocalBuilderManager: agentId => {
-              const descriptor = this.swarmManager.getAgent(agentId);
-              return !!descriptor && isEligibleLocalBuilderManager(descriptor);
-            },
-            broadcastToSession: (id, event) => this.broadcastToSession(id, event),
-            hydrateHostSessions: () => this.hydrateBrowserHostSessions(),
+      executeCommand: async input => {
+        if (!isLifecycleCommand(input.command)) return executeCommand(input);
+        if (input.signal.aborted) return;
+        if (!this.environmentControl) throw new StreamFault("UNAVAILABLE", "Control is not composed.");
+        const events = await admitLifecycleCommand(this.environmentControl.control, input.principal, this.swarmManager,
+          input.command, input.sessionId, async () => {
+            const events: ServerEvent[] = [];
+            // Once admitted, socket cancellation cannot cancel a storage mutation.
+            await executeCommand({ ...input, signal: new AbortController().signal, send: event => {
+              if (event.type === "error") throw new StreamFault("UNAVAILABLE", event.message);
+              if (events.length >= 64 || Buffer.byteLength(JSON.stringify([...events, event])) > 512 * 1024)
+                throw new StreamFault("PAYLOAD_TOO_LARGE", "Lifecycle response exceeds budget.");
+              events.push(event);
+            } });
+            return events;
           });
-          return;
-        }
-        if (command.type === "resume_session" && this.swarmManager.getAgent(command.agentId)?.role !== "worker") {
-          if (!this.environmentControl?.control.resumeSession) throw new StreamFault("UNAVAILABLE", "Controlled resume is not composed");
-          await this.environmentControl.control.resumeSession(principal, command.agentId, () => this.swarmManager.resumeSession(command.agentId));
-          send({ type: "session_resumed", agentId: command.agentId, profileId: this.subscriptionManager.resolveProfileIdForAgent(command.agentId) ?? command.agentId, requestId: command.requestId });
-          return;
-        }
-        if (await handleManagerCommand({ ...context, broadcastToSubscribed: event => { send(event); this.broadcastToSubscribed(event); } })) return;
-        if (await handleSessionCommand({ ...context, supportsGoalControlRequestId: true, broadcastUnreadCountUpdate: (id, count) => this.broadcastUnreadCountUpdate(id, count) })) return;
-        if (await handleAgentCommand(context)) return;
-        if (await handleConversationCommand({ ...context, allowNonManagerSubscriptions: this.allowNonManagerSubscriptions, logDebug: () => {}, resolveConfiguredManagerId: () => this.resolveConfiguredManagerId() })) return;
-        throw new StreamFault("UNAVAILABLE", `Legacy command ${command.type} has no port adapter.`);
+        for (const event of events ?? []) if (!input.signal.aborted) input.send(event);
       },
       featureState: async (sessionId, signal) => {
         if (!this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session.");
@@ -348,10 +362,17 @@ export class WsHandler {
       const scope = migrated ? "session:operate" : command.type === "subscribe" || command.type === "subscribe_inventory" || command.type === "get_conversation_page" || command.type === "get_session_workers" ? "session:read" : legacyCommandScopes[command.type];
       if (scope === "unsupported") throw new StreamFault("FORBIDDEN", "Legacy command is unavailable on this transport.");
       this.environmentControl.access.authorize(principal, [scope]);
-      if (command.type === "resume_session" && this.swarmManager.getAgent(command.agentId)?.role !== "worker") {
-        if (!this.environmentControl.control.resumeSession) throw new StreamFault("UNAVAILABLE", "Controlled resume is not composed");
-        await this.environmentControl.control.resumeSession(principal, command.agentId, () => this.swarmManager.resumeSession(command.agentId));
-        this.send(socket, { type: "session_resumed", agentId: command.agentId, profileId: this.subscriptionManager.resolveProfileIdForAgent(command.agentId) ?? command.agentId, requestId: command.requestId });
+      if (isLifecycleCommand(command)) {
+        if (this.subscriptionManager.isInventorySubscription(socket) && !isInventoryCommandAllowed(command)) {
+          this.send(socket, { type: "error", code: "NOT_SUBSCRIBED", message: "This command requires an explicit conversation subscription.", requestId: extractRequestId(command) });
+          return;
+        }
+        await this.legacyPorts().executeCommand({ principal, command,
+          sessionId: this.subscriptionManager.getSubscribedAgentId(socket) ?? ("agentId" in command ? command.agentId : "sourceAgentId" in command ? command.sourceAgentId : "managerId" in command ? command.managerId : "") ?? "",
+          signal: new AbortController().signal, send: event => {
+            if (event.type === "restart_recovery_snapshot") this.broadcastToSubscribed(event);
+            else this.send(socket, event);
+          } });
         return;
       }
       if (migrated) {
@@ -554,44 +575,6 @@ export class WsHandler {
 
     if (command.type === "api_proxy") {
       await this.handleApiProxyCommand(socket, command, subscribedAgentId);
-      return;
-    }
-
-    if (command.type === "resume_restart_recovery") {
-      try {
-        const snapshot = await this.swarmManager.resumeRestartRecovery();
-        this.broadcastToSubscribed({
-          type: "restart_recovery_snapshot",
-          snapshot,
-          requestId: command.requestId,
-        });
-      } catch (error) {
-        this.send(socket, {
-          type: "error",
-          code: "RESUME_RESTART_RECOVERY_FAILED",
-          message: error instanceof Error ? error.message : String(error),
-          requestId: command.requestId,
-        });
-      }
-      return;
-    }
-
-    if (command.type === "dismiss_restart_recovery") {
-      try {
-        const snapshot = await this.swarmManager.dismissRestartRecovery();
-        this.broadcastToSubscribed({
-          type: "restart_recovery_snapshot",
-          snapshot,
-          requestId: command.requestId,
-        });
-      } catch (error) {
-        this.send(socket, {
-          type: "error",
-          code: "DISMISS_RESTART_RECOVERY_FAILED",
-          message: error instanceof Error ? error.message : String(error),
-          requestId: command.requestId,
-        });
-      }
       return;
     }
 

@@ -9,7 +9,7 @@ import type { EventSink } from "./event-sink.js";
 import type { InputRoutePort, WorkspacePort } from "./effect-types.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, workspaceService, artifactService }: {
-  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "setControlledRecoveryPolicy" | "getAgentForInternalUse" | "listProfiles">;
+  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "setControlledRecoveryPolicy" | "getAgentForInternalUse" | "listProfiles" | "killAgent">;
   database: Database;
   eventSink: EventSink;
   workspaceService: Pick<WorkspacePort, "ensure">;
@@ -23,6 +23,10 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, w
     return row?.desired_state === "stopped" || Boolean(database.prepare("SELECT 1 FROM control_inputs WHERE session_id=? LIMIT 1").get(sessionId));
   });
   return {
+    resolveSession(agentId) {
+      const descriptor = swarmManager.getAgentForInternalUse(agentId);
+      return descriptor?.role === "worker" ? { sessionId: descriptor.managerId, workerId: agentId } : { sessionId: agentId };
+    },
     async ensureSession(input) {
       const defaultModel = swarmManager.listProfiles().find(profile => profile.profileId === input.projectId)?.defaultModel;
       const { model, ...identity } = input;
@@ -52,7 +56,8 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, w
     async stopSession(input) {
       const descriptor = swarmManager.getAgentForInternalUse(input.sessionId);
       if (!descriptor) return { stopped: true }; // An unmaterialized launch has no runtime to stop.
-      await swarmManager.stopSession(input.sessionId);
+      if (descriptor.role === "worker") await swarmManager.killAgent(descriptor.managerId, descriptor.agentId);
+      else await swarmManager.stopSession(input.sessionId);
       return { stopped: swarmManager.isSessionShutdownSafe(input.sessionId) }; // Legacy stop can return while its writer remains quarantined.
     },
   };

@@ -24,14 +24,32 @@ export interface Principal {
   scopes: ReadonlySet<Scope>;
 }
 
-/** Durable owner of the four user-facing session mutations. */
+/** Backend-only admission data; existing validated wire commands remain unchanged. */
+export interface LifecycleAdmission {
+  commandId: string;
+  command: string;
+  sessionIds: readonly string[];
+  /** Profile teardown also fences launches not yet materialized in the swarm. */
+  projectIds?: readonly string[];
+  intent: "stop" | "resume" | "inspect" | "cancel-choice";
+  request: unknown;
+  choiceId?: string;
+  /** Synchronous target policy; only fresh requests run it, before any fence. */
+  preflight?: () => void;
+}
+
+/** Durable owner of session mutations and their lifecycle admission. */
 export interface ControlService {
   execute<M extends ControlMethod>(principal: Principal, method: M, input: RpcInput<M>): Promise<CommandReceipt>;
   getReceipt(principal: Principal, commandId: string): Promise<CommandReceipt>;
+  /** Synchronous lifecycle callbacks are journaled for retry, never automatically replayed. */
+  admitLifecycle?<T>(principal: Principal, input: LifecycleAdmission, operation: () => Promise<T>): Promise<T>;
 }
 
 /** Narrow calls into the existing SwarmManager facade used by control effects. */
 export interface SwarmControlPort {
+  /** Resolve worker targets to their owning manager's admission lane. */
+  resolveSession?(agentId: string): { sessionId: string; workerId?: string };
   ensureSession(input: {
     commandId: string;
     sessionId: string;

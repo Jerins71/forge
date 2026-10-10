@@ -62,7 +62,7 @@ export type ControlEffect =
   | { kind: "session.ensure"; input: Parameters<SwarmControlPort["ensureSession"]>[0] }
   | { kind: "input.apply"; inputId: string; runGeneration: number; message: RpcInput<"session.send">["message"] }
   | { kind: "choice.apply"; choiceId: string; runtimeGeneration: string; answers: RpcInput<"session.choose">["answers"] }
-  | { kind: "session.stop" };
+  | { kind: "session.stop"; targetAgentId?: string };
 export interface EffectRow {
   effect_id: string;
   command_id: string;

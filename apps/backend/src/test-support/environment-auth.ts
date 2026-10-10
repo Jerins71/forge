@@ -107,7 +107,7 @@ export async function createAuthOnlyTestEnvironment(host: string, port: number):
   const access = createEnvironmentAccess({ database, identity, exposure });
   const eventSink = createEventSink(database, Date.now, randomUUID);
   const unavailable = () => { throw new Error('This feature fixture does not execute control effects'); };
-  const control = { execute: async () => unavailable(), getReceipt: async () => unavailable(), resumeSession: async <T>(_principal: unknown, _id: string, resume: () => Promise<T>) => resume(), close: () => {} };
+  const control = { execute: async () => unavailable(), getReceipt: async () => unavailable(), admitLifecycle: async <T>(_principal: unknown, _input: unknown, operation: () => Promise<T>) => operation(), close: async () => {} };
   let rpc: ReturnType<typeof createEnvironmentRpcServer> | undefined;
   const environment: import('../environment/environment-service.js').EnvironmentService = {
     database, access, control, exposure, descriptor: identity.descriptor, routes: access.routes,

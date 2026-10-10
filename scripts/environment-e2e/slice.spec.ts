@@ -211,9 +211,11 @@ test('9.2.8 stop, controlled resume and fork mirrored to shell', async () => {
     try {
       const resumed = await next.call('legacy.session.operate', { sessionId: launchedSessionId, command: { type: 'resume_session', agentId: launchedSessionId, requestId: 'slice-resume' } });
       expect(JSON.stringify(resumed)).toContain('session_resumed');
+      expect(await next.call('legacy.session.operate', { sessionId: launchedSessionId, command: { type: 'resume_session', agentId: launchedSessionId, requestId: 'slice-resume' } })).toEqual(resumed);
       await next.call('shell.subscribe', {});
       const fork = await next.call('legacy.session.operate', { sessionId: launchedSessionId, command: { type: 'fork_session', sourceAgentId: launchedSessionId, label: 'Slice fork', requestId: 'slice-fork' } });
       expect(JSON.stringify(fork)).toContain('session_forked');
+      expect(await next.call('legacy.session.operate', { sessionId: launchedSessionId, command: { type: 'fork_session', sourceAgentId: launchedSessionId, label: 'Slice fork', requestId: 'slice-fork' } })).toEqual(fork);
       await until(() => next.frames.find(frame => frame.item?.event?.type === 'session.upsert' && frame.item.event.session.title === 'Slice fork'), Boolean);
       expect((await readDb(db => db.prepare('SELECT desired_state FROM control_sessions WHERE session_id=?').get(launchedSessionId)) as { desired_state: string }).desired_state).toBe('running');
       await next.call('session.subscribe', { sessionId: launchedSessionId });

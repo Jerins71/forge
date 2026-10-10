@@ -80,6 +80,7 @@ export async function createEnvironmentService(options: {
     const artifactService = createArtifactService({ database, dataDir: config.paths.dataDir, swarmManager });
     // The lazy port breaks only the construction cycle; effects start after this const is assigned.
     const swarm: SwarmControlPort = {
+      resolveSession: (agentId) => adapter.resolveSession!(agentId),
       ensureSession: (input) => adapter.ensureSession(input),
       applyInput: (input) => adapter.applyInput(input),
       applyChoice: (input) => adapter.applyChoice(input),

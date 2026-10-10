@@ -15,39 +15,6 @@ export interface AgentCommandRouteContext<Connection = WebSocket> {
 export async function handleAgentCommand<Connection>(context: AgentCommandRouteContext<Connection>): Promise<boolean> {
   const { command, socket, subscribedAgentId, swarmManager, resolveManagerContextAgentId, send } = context;
 
-  if (command.type === "kill_agent") {
-    const target = swarmManager.getAgent(command.agentId);
-    if (!target) {
-      send(socket, {
-        type: "error",
-        code: "UNKNOWN_AGENT",
-        message: `Agent ${command.agentId} does not exist.`
-      });
-      return true;
-    }
-
-    if (target.role !== "worker") {
-      send(socket, {
-        type: "error",
-        code: "KILL_AGENT_FAILED",
-        message: "Manager cannot be killed"
-      });
-      return true;
-    }
-
-    try {
-      await swarmManager.killAgent(target.managerId, target.agentId);
-    } catch (error) {
-      send(socket, {
-        type: "error",
-        code: "KILL_AGENT_FAILED",
-        message: error instanceof Error ? error.message : String(error)
-      });
-    }
-
-    return true;
-  }
-
   if (command.type === "stop_all_agents") {
     const managerContextId = resolveManagerContextAgentId(subscribedAgentId);
     if (!managerContextId) {

@@ -10,7 +10,7 @@ import {
   type ChoiceSummarySchema,
 } from "@forge/protocol/environment-v2";
 import type { Static } from "@sinclair/typebox";
-import type { ControlMethod, ControlService, Principal } from "./control-types.js";
+import type { ControlMethod, ControlService, LifecycleAdmission, Principal } from "./control-types.js";
 import type { ControlCoreOptions, ControlEffect, InputRoutePort, PreparedLaunch } from "./effect-types.js";
 import type { ControlTransaction, EventSink } from "./event-sink.js";
 
@@ -98,7 +98,7 @@ const validators = {
   "session.stop": TypeCompiler.Compile(rpcSchemas["session.stop"].input),
 };
 /** JSON key ordering freezes the original request, independently of resolved profile defaults. */
-export function canonicalRequest(method: ControlMethod, input: unknown): { normalized: string; hash: string } {
+export function canonicalRequest(method: string, input: unknown): { normalized: string; hash: string } {
   const order = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(order);
     if (value && typeof value === "object")
@@ -120,14 +120,126 @@ export function canonicalRequest(method: ControlMethod, input: unknown): { norma
 }
 
 export interface EnvironmentControlService extends ControlService {
-  /** Compatibility resume changes only desired lifecycle state; it never accepts or replays input. */
-  resumeSession<T>(principal: Principal, sessionId: string, resume: () => Promise<T>): Promise<T>;
-  close(): void;
+  admitLifecycle<T>(principal: Principal, input: LifecycleAdmission, operation: () => Promise<T>): Promise<T>;
+  close(): Promise<void>;
 }
 export function createCommandService(sink: EventSink, options: ControlCoreOptions): EnvironmentControlService {
   const database = sink.database;
   const launches = new Map<string, Promise<unknown>>();
   let closed = false;
+  const lifecycleOperations = new Map<string, Promise<unknown>>();
+  // These callbacks have no replayable effect. A lost process may have completed
+  // a clear/fork; retain the interrupted claim rather than repeat destructive work.
+  sink.transaction(tx => {
+    const abandoned = database.prepare("SELECT session_id,payload_json FROM effects WHERE kind='lifecycle.admit' AND state='claimed'").all() as { session_id: string; payload_json: string }[];
+    for (const row of abandoned) if (JSON.parse(row.payload_json).intent === "resume" && database.prepare("SELECT 1 FROM control_sessions WHERE session_id=?").get(row.session_id)) {
+      database.prepare("UPDATE control_sessions SET desired_state='stopped',run_generation=run_generation+1 WHERE session_id=?").run(row.session_id);
+      setSessionStatus(sink, tx, row.session_id, "stopping", options.clock);
+    }
+    database.prepare("UPDATE effects SET state='interrupted' WHERE kind='lifecycle.admit' AND state='claimed'").run();
+  });
+  const assertAdmissionAvailable = (sessionId: string): void => {
+    if (database.prepare("SELECT 1 FROM effects WHERE session_id=? AND kind='lifecycle.admit' AND state='claimed' LIMIT 1").get(sessionId))
+      throw new ControlError("CONFLICT", "Session lifecycle operation is still settling", true);
+  };
+  const admitLifecycle = async <T>(principal: Principal, input: LifecycleAdmission, operation: () => Promise<T>): Promise<T> => {
+    if (closed) throw new ControlError("UNAVAILABLE", "Control service is shutting down", true);
+    if (!principal.scopes.has("session:operate") || options.isDeviceRevoked(principal.deviceSessionId))
+      throw new ControlError("FORBIDDEN", "Session operation is not authorized");
+    input = { ...input, sessionIds: [...input.sessionIds], projectIds: [...(input.projectIds ?? [])] };
+    const method = "lifecycle." + input.command;
+    const request = canonicalRequest(method, input.request);
+    const projectIds = [...new Set(input.projectIds ?? [])].sort();
+    const sessionIds = [...new Set([...input.sessionIds, ...projectIds.flatMap(projectId =>
+      (database.prepare("SELECT session_id FROM control_sessions WHERE project_id=? AND json_extract(summary_json,'$.archived')=0").all(projectId) as { session_id: string }[]).map(row => row.session_id),
+    )])].sort();
+    const duplicate = sink.transaction(() => {
+      const prior = database.prepare("SELECT device_session_id,method,request_hash FROM commands WHERE command_id=?").get(input.commandId) as
+        { device_session_id: string; method: string; request_hash: string } | undefined;
+      if (!prior) return undefined;
+      if (prior.device_session_id !== principal.deviceSessionId || prior.method !== method || prior.request_hash !== request.hash)
+        throw new ControlError("CONFLICT", "Command identity conflicts with an accepted request");
+      const row = database.prepare("SELECT state,payload_json FROM effects WHERE command_id=? ORDER BY ordinal LIMIT 1").get(input.commandId) as { state: string; payload_json: string };
+      if (row.state === "done") return { value: JSON.parse(row.payload_json).result as T };
+      const active = lifecycleOperations.get(input.commandId);
+      if (active) return { active };
+      if (row.state === "claimed") throw new ControlError("CONFLICT", "Lifecycle command is still settling", true);
+      throw new ControlError("CONFLICT", "Lifecycle command was interrupted; inspect its outcome before issuing a new request", false);
+    });
+    if (duplicate) return ("active" in duplicate ? await duplicate.active : duplicate.value) as T;
+    input.preflight?.();
+    sink.transaction(tx => {
+      for (const projectId of projectIds) assertAdmissionAvailable("project:" + projectId);
+      for (const sessionId of sessionIds) {
+        assertAdmissionAvailable(sessionId);
+        readSession(sink, sessionId);
+        if (input.intent !== "stop" && database.prepare("SELECT 1 FROM effects WHERE session_id=? AND state IN ('pending','claimed') LIMIT 1").get(sessionId))
+          throw new ControlError("CONFLICT", "Accepted session intent is still settling", true);
+      }
+      if (input.intent === "cancel-choice") {
+        const choice = database.prepare("SELECT session_id,state,answer_command_id FROM control_choices WHERE choice_id=?").get(input.choiceId) as
+          { session_id: string; state: string; answer_command_id: string | null } | undefined;
+        if (!choice || !sessionIds.includes(choice.session_id)) throw new ControlError("NOT_FOUND", "Choice not found");
+        if (choice.state !== "pending" || choice.answer_command_id) throw new ControlError("CONFLICT", "Choice is no longer pending");
+      }
+      database.prepare("INSERT INTO commands (command_id,device_session_id,method,request_hash,normalized_json,session_id,created_at) VALUES (?,?,?,?,?,?,?)")
+        .run(input.commandId, principal.deviceSessionId, method, request.hash, request.normalized, sessionIds[0] ?? null, options.clock());
+      const lanes = [...sessionIds, ...projectIds.map(id => "project:" + id)];
+      for (const [ordinal, lane] of (lanes.length ? lanes : [""]).entries()) {
+        const sessionId = sessionIds.includes(lane) ? lane : "";
+        if (sessionId && input.intent === "stop") {
+          database.prepare("UPDATE control_sessions SET desired_state='stopped',run_generation=run_generation+1 WHERE session_id=?").run(sessionId);
+          const pending = database.prepare("SELECT DISTINCT command_id FROM effects WHERE session_id=? AND state='pending'").all(sessionId) as { command_id: string }[];
+          for (const command of pending) cancelCommand(sink, tx, command.command_id, { code: "CONFLICT", message: "Superseded by session lifecycle change", retryable: false }, options.clock);
+          setSessionStatus(sink, tx, sessionId, "stopping", options.clock);
+        }
+        if (sessionId && input.intent === "resume") {
+          const session = readSession(sink, sessionId);
+          if (JSON.parse(session.summary_json).archived) throw new ControlError("CONFLICT", "Archived sessions must be restored before resuming");
+          if (session.desired_state === "stopped") {
+            if (JSON.parse(session.summary_json).status !== "stopped") throw new ControlError("CONFLICT", "Session shutdown is incomplete", true);
+            database.prepare("UPDATE control_sessions SET desired_state='running',run_generation=run_generation+1 WHERE session_id=?").run(sessionId);
+            setSessionStatus(sink, tx, sessionId, "idle", options.clock);
+          }
+        }
+        database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,'lifecycle.admit',?,?,'claimed')")
+          .run(input.commandId + ":" + ordinal, input.commandId, lane, ordinal, JSON.stringify({ kind: "lifecycle.admit", intent: input.intent }));
+      }
+    });
+    const work = (async () => {
+      try {
+        const deadline = Date.now() + 30_000;
+        while (sessionIds.some(sessionId => database.prepare("SELECT 1 FROM effects WHERE session_id=? AND state='claimed' AND command_id!=? LIMIT 1").get(sessionId, input.commandId))) {
+          if (closed || Date.now() >= deadline) throw new ControlError("UNAVAILABLE", "Accepted session operation has not settled", false);
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        if (options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Device session was revoked");
+        const result = await operation();
+        const payload = JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, result });
+        if (Buffer.byteLength(payload) > 512 * 1024) throw new ControlError("PAYLOAD_TOO_LARGE", "Lifecycle result exceeds budget");
+        sink.transaction(tx => {
+          database.prepare("UPDATE effects SET state='done',payload_json=? WHERE command_id=?").run(payload, input.commandId);
+          if (input.intent === "stop") for (const sessionId of sessionIds) {
+            if (database.prepare("SELECT 1 FROM control_sessions WHERE session_id=?").get(sessionId)) setSessionStatus(sink, tx, sessionId, "stopped", options.clock);
+          }
+        });
+        return JSON.parse(payload).result as T;
+      } catch (error) {
+        sink.transaction(tx => {
+          database.prepare("UPDATE effects SET state='interrupted' WHERE command_id=?").run(input.commandId);
+          if (input.intent === "resume") for (const sessionId of sessionIds) {
+            if (!database.prepare("SELECT 1 FROM control_sessions WHERE session_id=?").get(sessionId)) continue;
+            database.prepare("UPDATE control_sessions SET desired_state='stopped',run_generation=run_generation+1 WHERE session_id=?").run(sessionId);
+            setSessionStatus(sink, tx, sessionId, "stopping", options.clock);
+          }
+        });
+        throw error;
+      } finally { lifecycleOperations.delete(input.commandId); }
+    })();
+    lifecycleOperations.set(input.commandId, work);
+    return work;
+  };
+
   const preflightRoute = async (input: Parameters<InputRoutePort["preflight"]>[0]): Promise<void> => {
     const result = await options.inputRoute?.preflight(input);
     if (result && !result.ok) {
@@ -162,11 +274,15 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       if (options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Device session was revoked");
       const now = options.clock();
       const commandId = input.commandId;
-      const sessionId = method === "session.launch" ? "v2-" + commandId : (input as RpcInput<"session.send">).sessionId;
+      const targetId = method === "session.launch" ? "v2-" + commandId : (input as RpcInput<"session.send">).sessionId;
+      const target = method === "session.stop" ? options.swarm.resolveSession?.(targetId) : undefined;
+      const sessionId = target?.sessionId ?? targetId;
+      assertAdmissionAvailable(sessionId);
       let session: SessionRow | undefined;
       if (method !== "session.launch") session = readSession(sink, sessionId);
+      assertAdmissionAvailable("project:" + (prepared?.project.projectId ?? session!.project_id));
       if (prepared && !options.workspace.isLaunchCurrent(prepared)) throw new ProfileChanged();
-      if (method === "session.send" && JSON.parse(session!.summary_json).status === "stopping") {
+      if ((method === "session.send" || method === "session.choose") && (JSON.parse(session!.summary_json).status === "stopping" || JSON.parse(session!.summary_json).archived)) {
         throw new ControlError("CONFLICT", "Session shutdown is still in progress");
       }
       database
@@ -276,6 +392,8 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           runtimeGeneration: choice.runtime_generation,
           answers: choose.answers,
         });
+      } else if (target?.workerId) {
+        effects.push({ kind: "session.stop", targetAgentId: target.workerId });
       } else {
         database
           .prepare("UPDATE control_sessions SET desired_state = 'stopped', run_generation = run_generation + 1 WHERE session_id = ?")
@@ -325,7 +443,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       const placeholder: CommandReceipt = {
         commandId,
         method,
-        sessionId,
+        sessionId: targetId,
         state: "accepted",
         acceptedSequence: 0,
         updatedSequence: 0,
@@ -343,46 +461,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     });
   };
   return {
-    async resumeSession(principal, sessionId, resume) {
-      const generation = sink.transaction((tx) => {
-        if (closed) throw new ControlError("UNAVAILABLE", "Control service is shutting down", true);
-        if (!principal.scopes.has("session:operate") || options.isDeviceRevoked(principal.deviceSessionId))
-          throw new ControlError("FORBIDDEN", "Session operation is not authorized");
-        const row = database.prepare("SELECT * FROM control_sessions WHERE session_id=?").get(sessionId) as SessionRow | undefined;
-        if (!row || row.desired_state !== "stopped") return null;
-        if (
-          database
-            .prepare("SELECT 1 FROM effects WHERE session_id=? AND kind='session.stop' AND state IN ('pending','claimed') LIMIT 1")
-            .get(sessionId)
-        )
-          throw new ControlError("UNAVAILABLE", "Session stop is still settling", true);
-        const next = row.run_generation + 1;
-        database.prepare("UPDATE control_sessions SET desired_state='running',run_generation=? WHERE session_id=?").run(next, sessionId);
-        setSessionStatus(sink, tx, sessionId, "idle", options.clock);
-        return next;
-      });
-      try {
-        const result = await resume();
-        if (generation !== null)
-          sink.transaction(() => {
-            const current = readSession(sink, sessionId);
-            if (current.run_generation !== generation || current.desired_state !== "running")
-              throw new ControlError("CONFLICT", "Session lifecycle changed while resuming");
-          });
-        return result;
-      } catch (error) {
-        if (generation !== null)
-          sink.transaction((tx) => {
-            const current = readSession(sink, sessionId);
-            if (current.run_generation !== generation || current.desired_state !== "running") return;
-            database
-              .prepare("UPDATE control_sessions SET desired_state='stopped',run_generation=run_generation+1 WHERE session_id=?")
-              .run(sessionId);
-            setSessionStatus(sink, tx, sessionId, "stopped", options.clock);
-          });
-        throw error;
-      }
-    },
+    admitLifecycle,
     async execute(principal, method, input) {
       if (closed) throw new ControlError("UNAVAILABLE", "Control service is shutting down", true);
       if (!validators[method]?.Check(input)) throw new ControlError("INVALID_INPUT", "Invalid control command");
@@ -440,8 +519,9 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       if (!row || row.device_session_id !== principal.deviceSessionId) throw new ControlError("NOT_FOUND", "Command not found");
       return readReceipt(sink, commandId);
     },
-    close() {
+    async close() {
       closed = true;
+      await Promise.allSettled(lifecycleOperations.values());
     },
   };
 }

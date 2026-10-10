@@ -51,7 +51,7 @@ export async function createControlCore(options: ControlCoreOptions & { dataDir?
       async close() {
         if (closed) return;
         closed = true;
-        controlService.close();
+        await controlService.close();
         await effectWorker.stop();
         eventSink.close();
         if (owned && database.open) database.close();

@@ -25,7 +25,10 @@ import { getCliChoiceOwner } from "./cli-choice-owners.js";
 import { toPublicCliAgentDescriptor } from "./cli-public-descriptors.js";
 import type { ControlService, Principal } from "../environment/control/control-types.js";
 import { awaitLegacyReceipt, legacyCommandId } from "./rpc/legacy-builder-adapter.js";
+import { ControlError } from "../environment/control/command-service.js";
 import { StreamFault } from "../environment/streams/stream-budget.js";
+
+import { admitLifecycleCommand } from "./rpc/lifecycle-command-admission.js";
 
 export class CliWsHandler {
   private readonly subscriptions: CliHeadlessSubscriptions;
@@ -111,7 +114,7 @@ export class CliWsHandler {
       }
 
       if (command.type === "cli_choice_cancel") {
-        this.handleChoiceCancel(socket, command);
+        await this.handleChoiceCancel(socket, command);
         return;
       }
 
@@ -127,6 +130,11 @@ export class CliWsHandler {
         return;
       }
 
+      if (error instanceof ControlError) {
+        const status = error.code === "CONFLICT" ? 409 : error.code === "FORBIDDEN" ? 403 : error.code === "NOT_FOUND" ? 404 : error.code === "INVALID_INPUT" ? 400 : 503;
+        this.sendRequestError(socket, command, error.code, error.message, status, undefined, error.retryable);
+        return;
+      }
       this.sendRequestError(
         socket,
         command,
@@ -206,14 +214,20 @@ export class CliWsHandler {
     this.sendRequestSuccess(socket, command, { choiceId: command.choiceId, sessionAgentId, status: "answered" });
   }
 
-  private handleChoiceCancel(socket: WebSocket, command: CliChoiceCancelCommand): void {
-    const pending = this.requireCliPendingChoice(command.choiceId, command.sessionAgentId);
-    this.swarmManager.cancelChoiceRequest(command.choiceId, "cancelled");
-    this.sendRequestSuccess(socket, command, {
-      choiceId: command.choiceId,
-      sessionAgentId: pending.sessionAgentId,
-      status: "cancelled",
+  private async handleChoiceCancel(socket: WebSocket, command: CliChoiceCancelCommand): Promise<void> {
+    const { control, principal } = this.requireControl(socket);
+    if (!control.admitLifecycle) throw new StreamFault("UNAVAILABLE", "Lifecycle admission is not composed.");
+    const ownerId = command.sessionAgentId ?? getCliChoiceOwner(this.swarmManager, command.choiceId)?.sessionAgentId;
+    const result = await control.admitLifecycle(principal, {
+      commandId: legacyCommandId(principal, "choice_cancel", command.requestId), command: "choice_cancel",
+      sessionIds: ownerId ? [ownerId] : [],
+      intent: "cancel-choice", choiceId: command.choiceId, request: command,
+    }, async () => {
+      const pending = this.requireCliPendingChoice(command.choiceId, command.sessionAgentId);
+      this.swarmManager.cancelChoiceRequest(command.choiceId, "cancelled");
+      return { choiceId: command.choiceId, sessionAgentId: pending.sessionAgentId, status: "cancelled" };
     });
+    this.sendRequestSuccess(socket, command, result);
   }
 
   private async handleSessionMutation(socket: WebSocket, command: CliSessionMutationCommand): Promise<void> {
@@ -228,15 +242,23 @@ export class CliWsHandler {
         return;
       }
 
-      case "resume_session":
-        this.requireCliSession(command.agentId);
-        await this.swarmManager.resumeSession(command.agentId);
-        this.sendRequestSuccess(socket, command, { agentId: command.agentId });
+      case "resume_session": {
+        const { control, principal } = this.requireControl(socket);
+        const result = await admitLifecycleCommand(control, principal, this.swarmManager, command, command.agentId, async () => {
+          this.requireCliSession(command.agentId);
+          await this.swarmManager.resumeSession(command.agentId);
+          return { agentId: command.agentId };
+        });
+        this.sendRequestSuccess(socket, command, result);
         return;
+      }
 
       case "delete_session": {
-        this.requireCliSession(command.agentId);
-        const result = await this.swarmManager.deleteSession(command.agentId);
+        const { control, principal } = this.requireControl(socket);
+        const result = await admitLifecycleCommand(control, principal, this.swarmManager, command, command.agentId, async () => {
+          this.requireCliSession(command.agentId);
+          return this.swarmManager.deleteSession(command.agentId);
+        });
         if (this.subscriptions.getSubscribedSessionAgentId(socket) === command.agentId) {
           this.subscriptions.remove(socket);
         }
@@ -244,11 +266,16 @@ export class CliWsHandler {
         return;
       }
 
-      case "clear_session":
-        this.requireCliSession(command.agentId);
-        await this.swarmManager.clearSessionConversation(command.agentId);
-        this.sendRequestSuccess(socket, command, { agentId: command.agentId });
+      case "clear_session": {
+        const { control, principal } = this.requireControl(socket);
+        const result = await admitLifecycleCommand(control, principal, this.swarmManager, command, command.agentId, async () => {
+          this.requireCliSession(command.agentId);
+          await this.swarmManager.clearSessionConversation(command.agentId);
+          return { agentId: command.agentId };
+        });
+        this.sendRequestSuccess(socket, command, result);
         return;
+      }
 
       case "rename_session":
         this.requireCliSession(command.agentId);
@@ -311,10 +338,10 @@ export class CliWsHandler {
       }
 
       case "fork_session": {
-        this.requireCliSession(command.sourceAgentId);
-        const forked = await this.swarmManager.forkSession(command.sourceAgentId, {
-          label: command.label,
-          fromMessageId: command.fromMessageId,
+        const { control, principal } = this.requireControl(socket);
+        const forked = await admitLifecycleCommand(control, principal, this.swarmManager, command, command.sourceAgentId, async () => {
+          this.requireCliSession(command.sourceAgentId);
+          return this.swarmManager.forkSession(command.sourceAgentId, { label: command.label, fromMessageId: command.fromMessageId });
         });
         this.sendRequestSuccess(socket, command, {
           sourceAgentId: command.sourceAgentId,
@@ -503,6 +530,7 @@ export class CliWsHandler {
     message: string,
     status?: number,
     fieldErrors?: CliFieldError[],
+    retryable?: boolean,
   ): void {
     const commandType = command?.type && isKnownCliCommandType(command.type) ? command.type : undefined;
     this.send(socket, {
@@ -512,6 +540,7 @@ export class CliWsHandler {
       code,
       message,
       ...(status !== undefined ? { status } : {}),
+      ...(retryable !== undefined ? { retryable } : {}),
       ...(fieldErrors !== undefined && fieldErrors.length > 0 ? { fieldErrors } : {}),
     });
   }
