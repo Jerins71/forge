@@ -63,7 +63,7 @@ async function boundedBytes(response: Response, maximum = MAX_ARTIFACT_BYTES): P
   const result = new Uint8Array(bytes); let offset = 0; for (const part of parts) { result.set(part, offset); offset += part.length; } return result;
 }
 function publicTarget(value: StoredTarget): DesktopEnvironmentTarget { return { environmentId: value.environmentId, baseUrl: value.baseUrl, label: value.label, primary: value.primary, deviceSessionId:value.deviceSessionId,deviceName:value.deviceName,scopes:[...value.scopes],pairedAt:value.pairedAt,expiresAt:value.expiresAt }; }
-export function createEnvironmentCredentialService(options: { storePath: string; safeStorage: EnvironmentSafeStorage; fetch?: typeof fetch; clientOrigin?: string }) {
+export function createEnvironmentCredentialService(options: { storePath: string; safeStorage: EnvironmentSafeStorage; fetch?: typeof fetch; clientOrigin?: string; desktopSecureControl?: () => { baseUrl: string; token: string } | null }) {
   const fetcher = options.fetch ?? fetch;
   // Socket tickets are bound to the requesting origin, so it must be the renderer's real origin (dev servers are not app://forge).
   const clientOrigin = options.clientOrigin ?? 'app://forge';
@@ -111,7 +111,7 @@ export function createEnvironmentCredentialService(options: { storePath: string;
   }
   async function target(id: string): Promise<StoredTarget> { if (!UUID.test(id)) return fail('INVALID_INPUT', 'Invalid environment identity'); const t = (await load()).find(t => t.environmentId === id); if (!t) return fail('UNAUTHENTICATED', 'Environment needs pairing'); return t; }
   async function http(t: StoredTarget, path: string, init: RequestInit = {}) {
-    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', clientOrigin); headers.set('x-forge-environment-protocol', '1');
+    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', headers.has('x-forge-secure-control') ? 'app://forge' : clientOrigin); headers.set('x-forge-environment-protocol', '1');
     try { const response = await fetcher(t.baseUrl + path, { ...init, headers, redirect: 'error', signal: init.signal ?? AbortSignal.timeout(30_000) }); if (response.status === 401) await clearRuntime(t.environmentId); return response; } catch { return fail('UNAVAILABLE', 'Environment request could not connect'); }
   }
   async function checkedJson(response: Response): Promise<unknown> {
@@ -135,6 +135,16 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     const t = await target(input.environmentId); const url = new URL(input.path, t.baseUrl);
     if (url.origin !== t.baseUrl || !url.pathname.startsWith('/api/') || url.pathname.startsWith('/api/v2/access/')) fail('FORBIDDEN', 'Use the dedicated access methods');
     const headers = new Headers(); for (const [name, value] of Object.entries(input.headers ?? {})) { if (!['content-type', 'x-forge-environment-protocol'].includes(name.toLowerCase())) fail('FORBIDDEN', 'Request header is not permitted'); headers.set(name, value); }
+    const securePath = url.pathname.startsWith('/api/secure-') || url.pathname.startsWith('/api/settings/secure-');
+    if (securePath) {
+      if (!t.primary) fail('UNAVAILABLE', 'Secure Sessions are not available on remote machines. Open a session on This machine to use them.');
+      const control = options.desktopSecureControl?.();
+      const endpoint = new URL(t.baseUrl);
+      // Only main may supply the capability. A persisted primary flag or a paired remote
+      // cannot move it away from the currently owned, direct loopback backend.
+      if (!control || control.token.length < 32 || control.baseUrl !== t.baseUrl || endpoint.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname)) return fail('UNAVAILABLE', 'Local Desktop Secure Sessions are unavailable.');
+      headers.set('x-forge-secure-control', control.token);
+    }
     await pinned(t);
     return { t, path: url.pathname + url.search, headers };
   }

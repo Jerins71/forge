@@ -56,7 +56,7 @@ export function formatSecureAvailability(
     case 'unsupported_runtime':
       return 'This runtime does not support Secure Sessions.'
     case 'remote_origin':
-      return 'Secure Sessions are unavailable for remote projects.'
+      return 'Secure Sessions are not available on remote machines. Open a session on This machine to use them.'
     case 'source_unavailable':
       return 'The secure secret source is unavailable.'
   }
