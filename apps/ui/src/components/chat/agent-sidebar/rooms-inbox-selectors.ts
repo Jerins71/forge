@@ -96,10 +96,6 @@ export interface SelectRoomsInboxOptions {
 export const MAX_SECTION_ITEMS = 5
 const RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
-export function getRoomsInboxIdentityKey(originId: string, sessionAgentId: string): string {
-  return `${originId}::${sessionAgentId}`
-}
-
 // Sorting thousands of sessions re-reads the same ISO strings many times; parse each once.
 const parsedTimestamps = new Map<string, number>()
 function timestampMs(value: string | undefined): number {
@@ -116,21 +112,6 @@ function timestampMs(value: string | undefined): number {
 
 function sessionTimestamp(session: RoomsInboxSessionInput): string {
   return session.updatedAt || session.createdAt
-}
-
-/** Latest session activity per project, indexed in one pass over the visible sessions. */
-function latestSessionTimestampByProject(sessions: readonly RoomsInboxSessionInput[]): Map<string, string> {
-  const latest = new Map<string, string>()
-  for (const session of sessions) {
-    const key = getRoomsInboxIdentityKey(session.identity.originId, session.identity.profileId)
-    const candidate = session.updatedAt || session.lastUserMessageAt || session.createdAt
-    if (timestampMs(candidate) > timestampMs(latest.get(key))) latest.set(key, candidate)
-  }
-  return latest
-}
-
-function projectTimestamp(project: RoomsInboxProjectInput, latestByProject: ReadonlyMap<string, string>): string {
-  return latestByProject.get(getRoomsInboxIdentityKey(project.originId, project.profileId)) || project.updatedAt || project.createdAt
 }
 
 function isSelected(
@@ -172,15 +153,6 @@ function compareActive(
   }
 }
 
-function isLocallyMuted(
-  session: RoomsInboxSessionInput,
-  mutedSessionIds: ReadonlySet<string> | undefined,
-  primaryOriginId: string | undefined,
-): boolean {
-  return session.identity.originId === primaryOriginId
-    && mutedSessionIds?.has(session.identity.sessionAgentId) === true
-}
-
 function matchesSearch(
   value: Pick<RoomsInboxSessionInput, 'identity' | 'label' | 'profileName'>,
   searchQuery: string,
@@ -216,32 +188,99 @@ function reasonForActive(session: RoomsInboxSessionInput): RoomsInboxReason {
   return session.contextRecoveryInProgress ? 'compacting' : 'manager_working'
 }
 
-/** Returns all sessions to which the origin-global Inbox rules can apply. */
-export function getRoomsInboxVisibleSessions(
-  origins: readonly RoomsInboxOriginInput[],
-  options: Pick<SelectRoomsInboxOptions, 'selected' | 'hideCliSessions'> = {},
-): RoomsInboxSessionInput[] {
-  const sessionByIdentity = new Map<string, RoomsInboxSessionInput>()
-  for (const session of origins.flatMap((origin) => origin.sessions)) {
-    const key = getRoomsInboxIdentityKey(session.identity.originId, session.identity.sessionAgentId)
-    if (!sessionByIdentity.has(key)) sessionByIdentity.set(key, session)
-  }
-  return [...sessionByIdentity.values()]
-    .filter((session) => !session.archived && !session.agentCreatorResult)
-    .filter((session) => !options.hideCliSessions || !session.cli || isSelected(session, options.selected))
+interface NeedsYouCandidate {
+  session: RoomsInboxSessionInput
+  attention: SessionAttention
+  raisedAt: number
 }
 
-function getVisibleAttentionBySession(origins: readonly RoomsInboxOriginInput[]): Map<string, SessionAttention> {
-  const attentions = new Map<string, SessionAttention>()
-  for (const origin of origins) {
-    if (!origin.attentionAvailable) continue
+/** One origin's sessions classified once; search, the Recent window, and section limits apply when origins are combined. */
+interface OriginSelection {
+  hideCliSessions: boolean
+  selectedSessionId: string | undefined
+  mutedSessionIds: ReadonlySet<string> | undefined
+  needsYou: NeedsYouCandidate[]
+  active: RoomsInboxSessionViewModel[]
+  /** Sessions neither needing the user nor working, newest first. */
+  idle: Array<{ session: RoomsInboxSessionViewModel; at: number }>
+  projects: RoomsInboxProjectViewModel[]
+}
+
+// A streamed update replaces one origin's input. Keeping each origin's classification means the
+// other origins' sessions are not classified again for it.
+const selectionByOrigin = new WeakMap<RoomsInboxOriginInput, OriginSelection>()
+
+function selectOrigin(origin: RoomsInboxOriginInput, options: SelectRoomsInboxOptions): OriginSelection {
+  const hideCliSessions = options.hideCliSessions === true
+  // A hidden CLI session stays listed while it is the selected one.
+  const selectedSessionId = hideCliSessions && options.selected?.originId === origin.originId
+    ? options.selected.sessionAgentId
+    : undefined
+  // Mute is a local display preference. It must not dismiss server attention,
+  // but it also must not claim the user's attention.
+  const mutedSessionIds = origin.originId === options.primaryOriginId ? options.mutedSessionIds : undefined
+  const cached = selectionByOrigin.get(origin)
+  if (
+    cached
+    && cached.hideCliSessions === hideCliSessions
+    && cached.selectedSessionId === selectedSessionId
+    && cached.mutedSessionIds === mutedSessionIds
+  ) return cached
+
+  const attentionBySession = new Map<string, SessionAttention>()
+  if (origin.attentionAvailable) {
     for (const attention of origin.attentions ?? []) {
-      if (!attentions.has(getRoomsInboxIdentityKey(origin.originId, attention.sessionAgentId))) {
-        attentions.set(getRoomsInboxIdentityKey(origin.originId, attention.sessionAgentId), attention)
-      }
+      if (!attentionBySession.has(attention.sessionAgentId)) attentionBySession.set(attention.sessionAgentId, attention)
     }
   }
-  return attentions
+  const needsYou: NeedsYouCandidate[] = []
+  const active: RoomsInboxSessionViewModel[] = []
+  const idle: OriginSelection['idle'] = []
+  const latestByProject = new Map<string, string>()
+  for (const session of origin.sessions) {
+    if (session.archived || session.agentCreatorResult) continue
+    const sessionId = session.identity.sessionAgentId
+    if (hideCliSessions && session.cli && sessionId !== selectedSessionId) continue
+    const latest = session.updatedAt || session.lastUserMessageAt || session.createdAt
+    if (timestampMs(latest) > timestampMs(latestByProject.get(session.identity.profileId))) {
+      latestByProject.set(session.identity.profileId, latest)
+    }
+    const attention = attentionBySession.get(sessionId)
+    const timestamp = sessionTimestamp(session)
+    if (attention && !mutedSessionIds?.has(sessionId)) {
+      needsYou.push({ session, attention, raisedAt: timestampMs(attention.raisedAt) })
+    } else if (isRoomsInboxSessionActive(session)) {
+      // Active sessions never also appear as recent.
+      active.push({ ...session, reason: reasonForActive(session), timestamp })
+    } else {
+      idle.push({ session: { ...session, reason: 'recently_updated', timestamp }, at: timestampMs(timestamp) })
+    }
+  }
+  idle.sort(compareRecent)
+
+  const selection: OriginSelection = {
+    hideCliSessions,
+    selectedSessionId,
+    mutedSessionIds,
+    needsYou,
+    active,
+    idle,
+    projects: origin.projects
+      .filter((project) => !project.archived)
+      .map((project) => ({
+        ...project,
+        timestamp: latestByProject.get(project.profileId) || project.updatedAt || project.createdAt,
+      })),
+  }
+  selectionByOrigin.set(origin, selection)
+  return selection
+}
+
+function compareRecent(
+  left: OriginSelection['idle'][number],
+  right: OriginSelection['idle'][number],
+): number {
+  return right.at - left.at || compareIdentity(left.session, right.session)
 }
 
 /**
@@ -254,32 +293,32 @@ export function selectRoomsInboxSections(
 ): RoomsInboxSections {
   const nowMs = options.now instanceof Date ? options.now.getTime() : options.now ?? Date.now()
   const searchQuery = options.searchQuery ?? ''
-  const sessions = getRoomsInboxVisibleSessions(origins, options)
-  const attentionBySession = getVisibleAttentionBySession(origins)
-  const attentionSessions = new Set<RoomsInboxSessionInput>()
-  const needsYouCandidates: Array<{
-    session: RoomsInboxSessionInput
-    attention: SessionAttention
-    raisedAt: number
-  }> = []
+  const recentSince = nowMs - RECENT_WINDOW_MS
+  const needsYouCandidates: NeedsYouCandidate[] = []
+  const activeCandidates: RoomsInboxSessionViewModel[] = []
+  const recentCandidates: OriginSelection['idle'] = []
+  const projectCandidates: RoomsInboxProjectViewModel[] = []
+  const originIds = new Set<string>()
 
-  for (const session of sessions) {
-    const key = getRoomsInboxIdentityKey(session.identity.originId, session.identity.sessionAgentId)
-    const attention = attentionBySession.get(key)
-    if (!attention) continue
-    // Mute is a local display preference. It must not dismiss server attention,
-    // but it also must not claim the user's attention.
-    if (isLocallyMuted(session, options.mutedSessionIds, options.primaryOriginId)) continue
-    attentionSessions.add(session)
-    needsYouCandidates.push({
-      session,
-      attention,
-      raisedAt: timestampMs(attention.raisedAt),
-    })
+  for (const origin of origins) {
+    // An origin listed twice contributes its first entry only.
+    if (originIds.has(origin.originId)) continue
+    originIds.add(origin.originId)
+    const selection = selectOrigin(origin, options)
+    for (const candidate of selection.needsYou) {
+      if (matchesSearch(candidate.session, searchQuery)) needsYouCandidates.push(candidate)
+    }
+    for (const session of selection.active) {
+      if (matchesSearch(session, searchQuery)) activeCandidates.push(session)
+    }
+    for (const entry of selection.idle) {
+      if (entry.at < recentSince) break
+      if (matchesSearch(entry.session, searchQuery)) recentCandidates.push(entry)
+    }
+    for (const project of selection.projects) projectCandidates.push(project)
   }
 
   const needsYou = needsYouCandidates
-    .filter(({ session }) => matchesSearch(session, searchQuery))
     .sort(compareNeedsYou)
     .map(({ session, attention, raisedAt }) => ({
       ...session,
@@ -289,41 +328,12 @@ export function selectRoomsInboxSections(
       raisedAt,
     }))
 
-  // One pass partitions the remaining sessions: active ones never also appear as recent.
-  const activeCandidates: RoomsInboxSessionInput[] = []
-  const recentCandidates: RoomsInboxSessionInput[] = []
-  const recentSince = nowMs - RECENT_WINDOW_MS
-  for (const session of sessions) {
-    if (attentionSessions.has(session) || !matchesSearch(session, searchQuery)) continue
-    if (isRoomsInboxSessionActive(session)) activeCandidates.push(session)
-    else if (timestampMs(sessionTimestamp(session)) >= recentSince) recentCandidates.push(session)
-  }
   activeCandidates.sort(compareActive(options.selected))
   const activeWorkerCount = activeCandidates.reduce((total, session) => total + session.activeWorkerCount, 0)
-  const active = activeCandidates.slice(0, MAX_SECTION_ITEMS).map((session) => ({
-    ...session,
-    reason: reasonForActive(session),
-    timestamp: sessionTimestamp(session),
-  }))
+  const active = activeCandidates.slice(0, MAX_SECTION_ITEMS)
+  const recent = recentCandidates.sort(compareRecent).map(({ session }) => session)
 
-  // Decorate once: comparing thousands of sessions must not re-read each timestamp per comparison.
-  const recent = recentCandidates
-    .map((session) => ({ session, at: timestampMs(sessionTimestamp(session)) }))
-    .sort((left, right) => right.at - left.at || compareIdentity(left.session, right.session))
-    .map(({ session }) => ({
-      ...session,
-      reason: 'recently_updated' as const,
-      timestamp: sessionTimestamp(session),
-    }))
-
-  const latestByProject = latestSessionTimestampByProject(sessions)
-  const projects = origins
-    .flatMap((origin) => origin.projects)
-    .filter((project) => !project.archived)
-    .map((project) => ({
-      ...project,
-      timestamp: projectTimestamp(project, latestByProject),
-    }))
+  const projects = projectCandidates
     .filter((project) => matchesSearch({
       identity: { originId: project.originId, profileId: project.profileId, sessionAgentId: project.profileId },
       label: project.profileName,

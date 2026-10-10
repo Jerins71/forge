@@ -626,7 +626,8 @@ test('Needs You lists a remote session that was never opened, survives an offlin
   } finally {
     await fleet!.start(c)
   }
-  await expect.poll(async () => (await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())).find((value: any) => value.environmentId === c.environmentId)?.fresh).toBe(true)
+  // Supervisor connect has a 10s budget; allow 5s for the next scheduled reconnect.
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())).find((value: any) => value.environmentId === c.environmentId)?.fresh, { timeout: 15_000 }).toBe(true)
   await expect(row).toHaveCount(1)
   expect(await attention('attention-state')).toHaveLength(1)
 
