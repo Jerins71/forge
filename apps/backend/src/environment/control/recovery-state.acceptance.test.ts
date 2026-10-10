@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { decodeEnvironmentValue, RecoverySnapshotSchema } from "@forge/protocol/environment-v2";
 import { recordRecoveryFact, readRecoveryState, readRecoveryOccurrence, saveRecoveryOccurrence, claimRecoveryDelivery, claimRecoveryOccurrence } from "../../swarm/recovery-state.js";
 import { getSessionTurnLedgerPath } from "../../swarm/storage/data-paths.js";
 import { withEnvironmentDatabase } from "./database.js";
@@ -32,6 +33,35 @@ describe("private recovery authority", () => {
     expect(await claimRecoveryDelivery(target, "result")).toBe(true); expect(await claimRecoveryDelivery(target, "result")).toBe(false);
     expect((await readRecoveryState(target)).pendingDeliveries.get("result")?.state).toBe("dispatching");
     await recordRecoveryFact(target, { t: "turn_terminal", turnId: "schedule-turn", outcome: "abandoned", at }); expect((await readRecoveryState(target)).openTurns.size).toBe(0);
+  });
+  it("imports and restores composed report IDs for a maximum-length worker ID", async () => {
+    const target = await fixture();
+    const workerId = "worker-" + "w".repeat(121);
+    const turnId = randomUUID();
+    const deliveryId = `worker-result:${workerId}:${turnId}:${randomUUID()}`;
+    const assignmentId = `assignment:${workerId}:${randomUUID()}`;
+    const source = getSessionTurnLedgerPath(target.dataDir, target.profileId, target.sessionAgentId);
+    await mkdir(dirname(source), { recursive: true });
+    const raw = JSON.stringify({ t: "turn_dispatched", turnId, agentId: workerId, role: "worker", kind: "agent_message", at }) + "\n"
+      + JSON.stringify({ t: "delivery_pending", deliveryId, turnId, from: workerId, to: "manager", assignmentId, message: "private long-ID fixture body", at }) + "\n";
+    await writeFile(source, raw);
+    const imported = await readRecoveryState(target);
+    expect(workerId).toHaveLength(128);
+    expect(deliveryId.length).toBeGreaterThan(128);
+    expect(assignmentId.length).toBeGreaterThan(128);
+    expect(imported.pendingDeliveries.get(deliveryId)?.assignmentId).toBe(assignmentId);
+    const recoveryId = randomUUID();
+    const snapshot = decodeEnvironmentValue(RecoverySnapshotSchema, { recoveryId, bootId: recoveryId, createdAt: at, interruptedManagers: [], interruptedWorkers: [workerId], undeliveredReports: [{ deliveryId, fromAgentId: workerId, toAgentId: "manager", assignmentId }] });
+    expect(snapshot).toBeDefined();
+    await saveRecoveryOccurrence(target.dataDir, snapshot!);
+    expect(decodeEnvironmentValue(RecoverySnapshotSchema, await readRecoveryOccurrence(target.dataDir))).toEqual(snapshot);
+    expect((await readRecoveryState(target)).pendingDeliveries.get(deliveryId)?.assignmentId).toBe(assignmentId);
+    expect(await readFile(source, "utf8")).toBe(raw);
+    await withEnvironmentDatabase(target.dataDir, async db => {
+      expect(db.prepare("SELECT count(*) n FROM control_deliveries").get()).toEqual({ n: 1 });
+      expect(db.prepare("SELECT count(*) n FROM recovery_imports").get()).toEqual({ n: 1 });
+      expect(JSON.stringify(db.prepare("SELECT * FROM control_deliveries").all())).not.toContain("private long-ID fixture body");
+    });
   });
   it("gates a partial recovery import when a typed fact is malformed", async () => {
     const target = await fixture(); const source = getSessionTurnLedgerPath(target.dataDir, target.profileId, target.sessionAgentId);
