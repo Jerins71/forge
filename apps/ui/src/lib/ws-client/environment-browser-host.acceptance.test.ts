@@ -154,3 +154,28 @@ it('keeps the newer canonical live revision when hydration races an update', asy
   await completeHandshake(1)
   expect(facade.getState().browserSessions['session-1']).toMatchObject({ revision: 2, panelVisible: true })
 })
+
+// Failure mode: a report result spans multiple bounded frames, or an uncertain
+// report is replayed after the host's generation reconnects.
+it('reassembles bounded report results and rejects unknown reports without replay', async () => {
+  const { facade, hostEvent, commands, completeHandshake, server } = await environment()
+  facade.registerBrowserAutomationHost(registration, async () => { throw new Error('No automation expected') })
+  await completeHandshake(1)
+  let settled = false
+  const report = facade.reportBrowserHostState([]).then(value => { settled = true; return value }, error => ({ error }))
+  await until(() => commands('report').length === 1)
+  const requestId = commands('report')[0]!.requestId
+  const result = { hostId: registration.hostId, hostGeneration: 1, status: 'processed', sessions: [{ sessionAgentId: 'session-1', profileId: 'forge', status: 'revision-conflict', snapshot: facade.getState().browserSessions['session-1'] }] }
+  const bytes = Buffer.from(JSON.stringify(result)); const split = Math.floor(bytes.length / 2)
+  hostEvent({ kind: 'report.result', requestId, hostId: registration.hostId, hostGeneration: 1, chunkIndex: 0, chunkCount: 2, payloadBase64: bytes.subarray(0, split).toString('base64') })
+  await new Promise(resolve => setTimeout(resolve, 20)); expect(settled).toBe(false)
+  hostEvent({ kind: 'report.result', requestId, hostId: registration.hostId, hostGeneration: 1, chunkIndex: 1, chunkCount: 2, payloadBase64: bytes.subarray(split).toString('base64') })
+  await until(() => settled)
+  expect(await report).toEqual(result)
+  const unknown = facade.reportBrowserHostState([]).then(() => null, error => error)
+  await until(() => commands('report').length === 2)
+  server.disconnect()
+  expect(await unknown).toMatchObject({ code: 'UNAVAILABLE' })
+  await completeHandshake(2)
+  expect(commands('report')).toHaveLength(2)
+})

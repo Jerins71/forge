@@ -1,5 +1,5 @@
 import { Type } from '@sinclair/typebox'
-import { BrowserSnapshotV2Schema, decodeEnvironmentValue, type BrowserHostMessageV2, type RpcStreamItem } from '@forge/protocol/environment-v2'
+import { BrowserSnapshotV2Schema, BrowserReportResultV2Schema, decodeEnvironmentValue, type BrowserHostMessageV2, type RpcStreamItem } from '@forge/protocol/environment-v2'
 import type { BrowserAutomationRequest, BrowserAutomationResponse, BrowserHostLifecycleRequest, BrowserHostLifecycleResponse, BrowserHostRegistration, BrowserSessionSnapshot, BrowserHostConnectionSnapshot, BrowserHostSessionStateReport, BrowserHostStateReportResult } from '@forge/protocol'
 import { EnvironmentRuntimeError } from '../errors.js'
 import type { RpcFeatureTransport } from './index.js'
@@ -16,7 +16,7 @@ export function createBrowserHostClient(rpc: RpcFeatureTransport) {
   let epoch = 0
   let host: BrowserHostConnectionSnapshot | null = null
   let release = () => {}
-  const reports = new Map<string, { resolve(value: BrowserHostStateReportResult): void; reject(error: unknown): void; timer: ReturnType<typeof setTimeout> }>()
+  const reports = new Map<string, { resolve(value: BrowserHostStateReportResult): void; reject(error: unknown): void; timer: ReturnType<typeof setTimeout>; chunks: Uint8Array[]; bytes: number; count: number | undefined }>()
   const seen = new Map<string, number>()
   const reset = () => { epoch++; host = null; for (const report of reports.values()) { clearTimeout(report.timer); report.reject(new EnvironmentRuntimeError('UNAVAILABLE', 'Browser host disconnected; report outcome is unknown')) }; reports.clear() }
   async function send(message: BrowserHostMessageV2, expectedEpoch: number) {
@@ -60,7 +60,21 @@ export function createBrowserHostClient(rpc: RpcFeatureTransport) {
         if (hydrating && (hydrationUpdates.get(item.snapshot.sessionAgentId)?.revision ?? -1) < item.snapshot.revision) hydrationUpdates.set(item.snapshot.sessionAgentId, item.snapshot)
         observer.snapshot(item.snapshot); return
       }
-      if (item.kind === 'report.result') { const pending = reports.get(item.requestId); if (pending) { reports.delete(item.requestId); clearTimeout(pending.timer); pending.resolve(item.result) }; return }
+      if (item.kind === 'report.result') {
+        const pending = reports.get(item.requestId); if (!pending) return
+        try {
+          if (item.chunkIndex !== pending.chunks.length || pending.count !== undefined && item.chunkCount !== pending.count) throw new Error('Invalid Browser report result chunk sequence')
+          pending.count = item.chunkCount
+          const binary = atob(item.payloadBase64); const bytes = Uint8Array.from(binary, char => char.charCodeAt(0)); pending.bytes += bytes.length
+          if (pending.bytes > 32 * 1024 * 1024) throw new Error('Browser report result exceeds budget')
+          pending.chunks.push(bytes); if (pending.chunks.length !== pending.count) return
+          const joined = new Uint8Array(pending.bytes); let offset = 0; for (const chunk of pending.chunks) { joined.set(chunk, offset); offset += chunk.length }
+          const decoded = decodeEnvironmentValue(BrowserReportResultV2Schema, JSON.parse(new TextDecoder().decode(joined)))
+          if (!decoded || decoded.hostId !== item.hostId || decoded.hostGeneration !== item.hostGeneration) throw new Error('Invalid Browser report result')
+          reports.delete(item.requestId); clearTimeout(pending.timer); pending.resolve(decoded)
+        } catch (error) { reports.delete(item.requestId); clearTimeout(pending.timer); pending.reject(error) }
+        return
+      }
       if (item.kind === 'hydration') {
         if (!matches(item) || item.requestId !== hydrationId || item.chunkIndex !== chunks.length || item.chunkCount < 1 || item.chunkCount > 4096) return
         try {
@@ -115,7 +129,7 @@ export function createBrowserHostClient(rpc: RpcFeatureTransport) {
       const requestId = crypto.randomUUID(); const message = { kind: 'report' as const, requestId, ...lease(), sessions }; const expectedEpoch = epoch
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => { reports.delete(requestId); reject(new EnvironmentRuntimeError('UNAVAILABLE', 'Browser report result is unknown; hydrate before another report')) }, 15000)
-        reports.set(requestId, { resolve, reject, timer }); void send(message, expectedEpoch).catch(error => { const pending = reports.get(requestId); if (!pending) return; reports.delete(requestId); clearTimeout(timer); reject(error) })
+        reports.set(requestId, { resolve, reject, timer, chunks: [], bytes: 0, count: undefined }); void send(message, expectedEpoch).catch(error => { const pending = reports.get(requestId); if (!pending) return; reports.delete(requestId); clearTimeout(timer); reject(error) })
       })
     },
   }

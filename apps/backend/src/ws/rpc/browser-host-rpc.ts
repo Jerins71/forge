@@ -65,15 +65,8 @@ export function createBrowserHostRpc(deps: { service: BrowserAutomationService; 
       case 'browser.host.hydrate': {
         const hydration = input as RpcInput<'browser.host.hydrate'>; assertLease(current, hydration);
         const snapshots = await deps.hydrateSessions(); assertLease(current, hydration);
-        const bytes = Buffer.from(JSON.stringify(snapshots)); const chunkBytes = 256 * 1024; const chunkCount = Math.max(1, Math.ceil(bytes.length / chunkBytes));
-        if (snapshots.length > 500 || bytes.length > 32 * 1024 * 1024) throw new StreamFault('PAYLOAD_TOO_LARGE', 'Browser hydration exceeds its budget');
-        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
-          assertLease(current, hydration);
-          current.queue.push({ kind: 'hydration', ...hydration, chunkIndex, chunkCount, payloadBase64: bytes.subarray(chunkIndex * chunkBytes, (chunkIndex + 1) * chunkBytes).toString('base64') });
-          // Let the existing stream pump drain each bounded chunk. Eagerly
-          // filling its live queue makes a valid multi-session read resync.
-          await new Promise<void>(resolve => setImmediate(resolve));
-        }
+        if (snapshots.length > 500) throw new StreamFault('PAYLOAD_TOO_LARGE', 'Browser hydration exceeds its budget');
+        await sendChunks(current, { kind: 'hydration', ...hydration }, snapshots);
         result = {}; break;
       }
       case 'browser.host.focus': { const focus = input as RpcInput<'browser.host.focus'>; assertLease(current, focus); deps.service.setHostFocused(current.connectionId, focus.hostId, focus.hostGeneration, focus.focused); result = {}; break; }
@@ -89,6 +82,17 @@ export function createBrowserHostRpc(deps: { service: BrowserAutomationService; 
   function assertLease(current: Attachment, lease: { hostId: string; hostGeneration: number }) {
     if (!deps.service.broker.isCurrentConnection(current.connectionId, lease.hostId, lease.hostGeneration)) throw new StreamFault('CONFLICT', 'Stale browser host generation');
   }
+  async function sendChunks(current: Attachment, header: { kind: 'hydration' | 'report.result'; requestId: string; hostId: string; hostGeneration: number }, value: unknown) {
+    const bytes = Buffer.from(JSON.stringify(value)); const chunkBytes = 256 * 1024;
+    if (bytes.length > 32 * 1024 * 1024) throw new StreamFault('PAYLOAD_TOO_LARGE', 'Browser host read exceeds its budget');
+    const chunkCount = Math.max(1, Math.ceil(bytes.length / chunkBytes));
+    for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
+      if (header.kind === 'hydration') assertLease(current, header);
+      current.queue.push({ ...header, chunkIndex, chunkCount, payloadBase64: bytes.subarray(chunkIndex * chunkBytes, (chunkIndex + 1) * chunkBytes).toString('base64') });
+      // Drain the existing stream pump between bounded read chunks.
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+  }
   async function handleMessage(current: Attachment, message: BrowserHostMessageV2) {
     switch (message.kind) {
       case 'respond': deps.service.acceptHostResponse(current.connectionId, message.response); return;
@@ -97,7 +101,7 @@ export function createBrowserHostRpc(deps: { service: BrowserAutomationService; 
         // Membership is environment addressed; a host cannot invent remote or Collaboration sessions.
         for (const session of message.sessions) if (deps.resolveSession(session.sessionAgentId) !== session.profileId) throw new StreamFault('FORBIDDEN', 'Host report targets an unavailable local session');
         const result = await deps.service.reportHostState(current.connectionId, message.hostId, message.hostGeneration, message.sessions);
-        current.queue.push({ kind: 'report.result', requestId: message.requestId, result });
+        await sendChunks(current, { kind: 'report.result', requestId: message.requestId, hostId: message.hostId, hostGeneration: message.hostGeneration }, result);
       }
     }
   }

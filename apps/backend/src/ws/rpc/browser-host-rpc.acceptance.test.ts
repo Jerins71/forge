@@ -18,7 +18,7 @@ function tab(request: BrowserAutomationRequest): BrowserTabSnapshot { return { t
 async function harness(hydration?: BrowserSessionSnapshot[]) {
   const root = await mkdtemp(join(tmpdir(), 'forge-browser-host-rpc-')); cleanups.push(() => rm(root, { recursive: true, force: true }));
   const service = new BrowserAutomationService({ dataDir: root });
-  const browserHost = createBrowserHostRpc({ service, resolveSession: id => id === 'manager-1' ? 'profile-1' : undefined, hydrateSessions: async () => hydration ?? [await service.getHostHydrationSnapshot('profile-1','manager-1')] });
+  const browserHost = createBrowserHostRpc({ service, resolveSession: id => hydration ? hydration.find(snapshot => snapshot.sessionAgentId === id)?.profileId : id === 'manager-1' ? 'profile-1' : undefined, hydrateSessions: async () => hydration ?? [await service.getHostHydrationSnapshot('profile-1','manager-1')] });
   const f = await socketFixture({ browserHost }); cleanups.push(f.close); return { service, f };
 }
 type Client = Awaited<ReturnType<Awaited<ReturnType<typeof socketFixture>>['connect']>>;
@@ -69,5 +69,29 @@ it('streams canonical hydration larger than the live queue without losing the le
   }
   expect(Buffer.concat(chunks).length).toBeGreaterThan(2 * 1024 * 1024);
   expect(JSON.parse(Buffer.concat(chunks).toString())).toHaveLength(12);
+  expect(service.broker.getConnectionSnapshot().connected).toBe(true);
+});
+
+// Failure mode: a valid multi-session report returns more than one wire frame
+// of canonical state, so an unchunked result disconnects the application socket.
+it('returns large report results in bounded chunks without losing the host', async () => {
+  const now = registration.registeredAt;
+  const large: BrowserSessionSnapshot[] = Array.from({ length: 3 }, (_, index) => ({ schemaVersion: 2, sessionAgentId: `manager-${index}`, profileId: 'profile-1', hostingState: 'hosted', revision: 1, activeTabId: null, defaultTabId: null, panelVisible: false, recentActions: [], createdAt: now, updatedAt: now,
+    tabs: Array.from({ length: 100 }, (_, tabIndex) => ({ targetAffinity: 'managed-electron', tabId: `tab-${index}-${tabIndex}`, sessionAgentId: `manager-${index}`, profileId: 'profile-1', url: 'about:blank', title: 't'.repeat(4096), lifecycle: 'ready', loading: false, live: false, canGoBack: false, canGoForward: false, zoomFactor: 1, controller: 'none', agentCursor: null, recording: null, viewportSetting: { mode: 'fill' }, renderedViewport: null, error: null, createdAt: now, updatedAt: now })) }));
+  const { f, service } = await harness(large);
+  for (const snapshot of large) await service.store.save(snapshot);
+  const host = await f.connect(local); const id = await attach(host);
+  await call(host, 'browser.host.register', { registration });
+  await message(host, { kind: 'report', requestId: 'large-report', hostId: registration.hostId, hostGeneration: 1, sessions: large.map(snapshot => ({ sessionAgentId: snapshot.sessionAgentId, profileId: snapshot.profileId, baseRevision: 0, tabs: [] })) });
+  const chunks: Buffer[] = []; let count = 1;
+  while (chunks.length < count) {
+    const frame = await host.next(value => 'subscriptionId' in value && value.subscriptionId === id);
+    expect(frame.type).toBe('stream');
+    const item = (frame as { item: { kind: string; chunkCount: number; payloadBase64: string } }).item;
+    expect(item.kind).toBe('report.result'); expect(typeof item.payloadBase64).toBe('string');
+    count = item.chunkCount; chunks.push(Buffer.from(item.payloadBase64, 'base64'));
+  }
+  const bytes = Buffer.concat(chunks); expect(bytes.length).toBeGreaterThan(1048576);
+  expect(JSON.parse(bytes.toString()).sessions).toHaveLength(3);
   expect(service.broker.getConnectionSnapshot().connected).toBe(true);
 });
