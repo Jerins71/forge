@@ -21,7 +21,7 @@ const stateDir = dirname(nativeHome);
 mkdirSync(stateDir, { recursive: true });
 const counterPath = join(stateDir, `process-${process.pid}.json`);
 const counters = { formatVersion: 1, instanceId: fixture.instanceId, pid: process.pid, ownerAgentId: null, threadId: null,
-  initialize: 0, threadStarts: 0, turnStarts: 0, steers: 0, interrupts: 0, toolCalls: 0, choices: 0, workerSpawns: 0, workerResults: 0 };
+  initialize: 0, threadStarts: 0, turnStarts: 0, compactions: 0, steers: 0, interrupts: 0, toolCalls: 0, choices: 0, workerSpawns: 0, workerResults: 0 };
 const threads = new Map();
 const pending = new Map();
 let requestId = 0;
@@ -63,6 +63,10 @@ async function runTurn(turn, text) {
   let reply = `fixture:${fixture.instanceId}:assistant reply`;
   try {
     if (text.includes('[fixture:hold]')) return;
+    if (text.includes('[fixture:detail]')) {
+      await dynamicTool(turn, 'update_plan', { plan: [{ step: 'Verify typed detail', status: 'in_progress' }] });
+      await dynamicTool(turn, 'create_goal', { objective: 'Verify the explicitly requested fixture goal', tokenBudget: 1 });
+    }
     if (text.includes('[fixture:choice]')) {
       count('choices');
       const result = await ask('item/tool/requestUserInput', { ...context(turn), itemId: `${turn.id}-choice`, questions: [{
@@ -135,6 +139,22 @@ async function request(method, params = {}) {
     write(counterPath, `${JSON.stringify(counters)}\n`);
     threads.set(thread.id, thread);
     return threadResponse(thread);
+  }
+  if (method === 'thread/compact/start') {
+    const thread = threads.get(params.threadId);
+    if (!thread || active) throw new Error('Compaction requires an idle fixture thread');
+    count('compactions');
+    if (existsSync(join(checkout, '.fixture-compact-hold'))) return new Promise(() => {});
+    const turn = { thread, id: `${thread.id}-compact-${counters.compactions}`, done: false };
+    active = turn;
+    setTimeout(() => {
+      notify('turn/started', { threadId: thread.id, turn: { id: turn.id, status: 'inProgress', items: [] } });
+      const item = { id: `${turn.id}-item`, type: 'contextCompaction' };
+      notify('item/started', { ...context(turn), item });
+      notify('item/completed', { ...context(turn), item });
+      complete(turn);
+    }, 15);
+    return {};
   }
   if (method === 'thread/inject_items') return {};
   if (method === 'turn/start') {

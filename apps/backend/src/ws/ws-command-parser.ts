@@ -54,7 +54,6 @@ export function extractRequestId(command: ClientCommand): string | undefined {
     case "restore_session":
     case "delete_session":
     case "clear_session":
-    case "session_goal_control":
     case "rename_session":
     case "pin_session":
     case "fork_session":
@@ -63,8 +62,6 @@ export function extractRequestId(command: ClientCommand): string | undefined {
     case "stop_all_agents":
     case "mark_unread":
     case "mark_all_read":
-    case "resume_restart_recovery":
-    case "dismiss_restart_recovery":
     case "dismiss_session_attention":
     case "browser_tab_open":
     case "browser_tab_activate":
@@ -81,7 +78,6 @@ export function extractRequestId(command: ClientCommand): string | undefined {
     case "kill_agent":
     case "choice_response":
     case "choice_cancel":
-    case "codex_elicitation_response":
     case "browser_host_register":
     case "browser_host_focus":
     case "browser_host_response":

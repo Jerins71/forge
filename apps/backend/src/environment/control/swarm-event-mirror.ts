@@ -3,6 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { closeSync, createReadStream, openSync, readSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import type { Database } from "better-sqlite3";
+import { decodeEnvironmentValue, PlanSnapshotV2Schema, GoalSnapshotV2Schema } from "@forge/protocol/environment-v2";
+import { projectRecoverySnapshot } from "../streams/wire-projection.js";
 import type { ArtifactRef, ProjectSummary, SessionSummary, DetailStreamItem, RpcInput, RpcOutput } from "@forge/protocol/environment-v2";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
 import type { AgentDescriptor, ConversationEntryEvent, ManagerProfile, ChoiceRequestEvent } from "../../swarm/types.js";
@@ -46,7 +48,7 @@ function source(file: string): Source {
   } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { generation: "missing", size: 0 }; throw error; }
 }
 export function createSwarmEventMirror({ swarmManager, database, eventSink, wireProjection }: {
-  swarmManager: Pick<SwarmManager, "on" | "off" | "listAgentsForInternalUse" | "getAgentForInternalUse" | "listProfiles" | "listWorkersForSession" | "getConversationHistoryPage" | "getPendingChoiceRequestsForSession" | "getSessionAttentionSnapshot" | "observeCatalogDirty" | "isSessionShutdownSafe">;
+  swarmManager: Pick<SwarmManager, "getRestartRecoverySnapshot" | "getSessionPlanSnapshot" | "getSessionGoalSnapshot" | "on" | "off" | "listAgentsForInternalUse" | "getAgentForInternalUse" | "listProfiles" | "listWorkersForSession" | "getConversationHistoryPage" | "getPendingChoiceRequestsForSession" | "getSessionAttentionSnapshot" | "observeCatalogDirty" | "isSessionShutdownSafe">;
   database: Database; eventSink: EventSink; wireProjection: MirrorWireProjection;
 }): SwarmEventMirror {
   if (eventSink.database !== database) throw new Error("Mirror requires the shared environment database.");
@@ -281,9 +283,26 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       }
     } finally { closeSync(fd); }
   }
+  function detailFeature(sessionId: string, type: "plan.upsert" | "goal.upsert", raw: unknown) {
+    const snapshot = type === "plan.upsert" ? decodeEnvironmentValue(PlanSnapshotV2Schema, raw) : decodeEnvironmentValue(GoalSnapshotV2Schema, raw);
+    if (!snapshot) throw new Error("Invalid typed detail snapshot");
+    const prior = database.prepare("SELECT payload_json FROM events WHERE session_id=? AND event_type=? ORDER BY sequence DESC LIMIT 1").get(sessionId, type) as { payload_json: string } | undefined;
+    if (prior && JSON.stringify(JSON.parse(prior.payload_json).snapshot) === JSON.stringify(snapshot)) return;
+    eventSink.transaction(tx => eventSink.append(tx, { topic: "detail", sessionId, event: type === "plan.upsert"
+      ? { type, snapshot: snapshot as import("@forge/protocol").SessionPlanSnapshot }
+      : { type, snapshot: snapshot as import("@forge/protocol").SessionGoalSnapshot } }));
+  }
+  function publishRecovery(snapshot: import("@forge/protocol").RestartRecoverySnapshot | null) {
+    const recovery = projectRecoverySnapshot(snapshot);
+    const sourceKey = recovery ? `recovery:${recovery.recoveryId}:${recovery.dismissedAt ? "dismiss" : recovery.resumedAt ? "resume" : "pending"}` : undefined;
+    eventSink.transaction(tx => eventSink.append(tx, { topic: "shell", sessionId: null, sourceKey, event: { type: "recovery.upsert", recovery } }));
+  }
   const mirror: SwarmEventMirror = {
     attach() {
       if (attached || disposed) return; attached = true;
+      listen("session_plan_snapshot", (event: { sessionAgentId: string }) => detailFeature(event.sessionAgentId, "plan.upsert", event));
+      listen("session_goal_snapshot", (event: { sessionAgentId: string }) => detailFeature(event.sessionAgentId, "goal.upsert", event));
+      listen("restart_recovery_snapshot", (event: import("@forge/protocol").RestartRecoverySnapshotEvent) => publishRecovery(event.snapshot));
       for (const name of ["conversation_message", "activity_summary", "agent_message", "agent_tool_call"]) listen(name, observeCanonical);
       listen("choice_request", (event: ChoiceRequestEvent) => { eventSink.transaction(tx => choice(tx, event)); });
       listen("agent_status", (event: { agentId: string }) => { const descriptor = swarmManager.getAgentForInternalUse(event.agentId); if (!descriptor) return; eventSink.transaction(tx => { if (descriptor.role === "worker") upsertWorker(tx, descriptor); upsertSession(tx, descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId); }); });
@@ -303,6 +322,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       for (const descriptor of swarmManager.listAgentsForInternalUse()) indexDescriptor(descriptor);
       queueCatalog(undefined, true); queueCatalog(); await Promise.resolve(); await catalogWork;
       if (errors.has("catalog")) throw errors.get("catalog");
+      publishRecovery(swarmManager.getRestartRecoverySnapshot());
       const pending = database.prepare("SELECT choice_id,session_id,runtime_generation,choice_json FROM control_choices WHERE state='pending'").all() as { choice_id: string; session_id: string; runtime_generation: string; choice_json: string }[];
       eventSink.transaction(tx => {
         for (const row of pending) {
@@ -325,6 +345,8 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       const existing = initializing.get(sessionId); if (existing) return existing;
       const work = (async () => {
         const sources = sessionSources(sessionId);
+        if (swarmManager.getSessionPlanSnapshot) detailFeature(sessionId, "plan.upsert", await swarmManager.getSessionPlanSnapshot(sessionId));
+        if (swarmManager.getSessionGoalSnapshot) detailFeature(sessionId, "goal.upsert", await swarmManager.getSessionGoalSnapshot(sessionId));
         if (checkpoint(`detail:${sessionId}`)) for (const actor of sources) tail(actor);
         const recent = historyWindow(sessionId, 20);
         await wireProjection.prepareArtifacts?.(sessionId, recent.rows.map(row => row.entry));

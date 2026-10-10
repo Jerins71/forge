@@ -9,10 +9,13 @@
 //   Pairing request bodies and traces are excluded from artifacts.
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { expect, type BrowserContext, type Page, type Request } from '@playwright/test'
 import { test as base } from './fixtures/test.js'
 import { readManifest, controlEnvironment } from './launch.js'
 import { startFaultProxy } from './fault-proxy.js'
+import { fixtureRpcOnce, until } from './fixtures/rpc-client.js'
+import type { BootstrapSession } from './launch.js'
 
 interface UiEnvironment { environmentId: string; label: string; baseUrl: string; projectTitle: string; sessionId: string }
 interface UiFleet {
@@ -457,6 +460,46 @@ test('9.2.5/6 explicitly mounted three views share sockets, release streams, and
   expect(cachedB.at(-1).fresh).toBe(true)
   assertions.cacheHydration = { environmentId: b.environmentId, staleCompleteThenFresh: cachedB }
   assertions.mountedViews = { sockets: metrics.map(value => value.sockets), explicitDetails: 3, releasedDetails: 0, shellFreshness: freshness, browserReloadCachedResume: { requestBytes: proxyAfter.ws.requestBytes - proxyBefore.ws.requestBytes, responseBytes: proxyAfter.ws.responseBytes - proxyBefore.ws.responseBytes } }
+})
+
+test('Batch 5 displays persisted plans/goals and fresh recovery with native decisions', async ({ page }) => {
+  const { a } = fleet!
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  const session = await controlEnvironment<BootstrapSession>(manifest, 'env-a', 'bootstrap')
+  const launchId = randomUUID()
+  const launched = await fixtureRpcOnce(a.baseUrl, session, 'session.launch', { commandId: launchId, projectId: a.sessionId,
+    title: 'Batch 5 UI detail', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:detail] Create the explicitly requested fixture goal and plan.', artifactIds: [] } })
+  await until(() => fixtureRpcOnce(a.baseUrl, session, 'command.get', { commandId: launchId }), receipt => receipt.state === 'succeeded')
+  await page.goto(`${fleet!.uiUrl}/?agent=${launched.sessionId}`)
+  await expect(page.getByText('Verify the explicitly requested fixture goal', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /Open working plan/ }).click()
+  await expect(page.getByText('Verify typed detail', { exact: true }).last()).toBeVisible()
+  await shot(page, 'batch5-live-plan-goal')
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Edit goal', exact: true }).click()
+  await page.getByRole('textbox', { name: 'Goal objective', exact: true }).fill('Persist the typed UI goal')
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByText('Persist the typed UI goal', { exact: true })).toBeVisible()
+  await page.reload()
+  await expect(page.getByText('Persist the typed UI goal', { exact: true })).toBeVisible()
+  const heldId = randomUUID()
+  const held = await fixtureRpcOnce(a.baseUrl, session, 'session.launch', { commandId: heldId, projectId: a.sessionId,
+    title: 'Batch 5 UI interrupted', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:hold]', artifactIds: [] } })
+  await until(() => fixtureRpcOnce(a.baseUrl, session, 'command.get', { commandId: heldId }), receipt => receipt.state === 'succeeded')
+  const crashId = randomUUID()
+  const armed = await controlEnvironment<{ pid: number }>(manifest, 'env-a', 'fixture', { operation: 'arm-crash', commandId: crashId, boundary: 'pre-commit' })
+  await expect(fixtureRpcOnce(a.baseUrl, session, 'session.launch', { commandId: crashId, projectId: a.sessionId, title: 'Crash probe', workspaceStrategy: { kind: 'current_checkout' } })).rejects.toThrow()
+  await until(() => { try { process.kill(armed.pid, 0); return false } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH' } }, Boolean)
+  await fleet!.start(a)
+  await page.reload()
+  await expect(page.getByText('Persist the typed UI goal', { exact: true })).toBeVisible()
+  await expect(page.getByText(/Restart interrupted \d+ sessions? \/ \d+ workers?/)).toBeVisible()
+  await shot(page, 'batch5-fresh-recovery')
+  await page.getByRole('button', { name: 'Dismiss', exact: true }).click()
+  await expect(page.getByText(/Restart interrupted \d+ sessions? \/ \d+ workers?/)).not.toBeVisible()
+  await shot(page, 'batch5-recovery-dismissed')
+  await fixtureRpcOnce(a.baseUrl, session, 'session.stop', { commandId: randomUUID(), sessionId: held.sessionId })
+  assertions.batch5 = { sessionId: launched.sessionId, livePlanGoal: true, reload: true, restart: true, freshRecoveryBanner: true, nativeGoalEdit: true, nativeRecoveryDismiss: true }
 })
 
 test('Settings and Stats edit the picked environment only, with no secret material in URLs', async ({ page }) => {

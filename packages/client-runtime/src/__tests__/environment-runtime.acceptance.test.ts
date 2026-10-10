@@ -92,6 +92,8 @@ describe('environment runtime acceptance', () => {
     await online(registry, s.seed.entry.environmentId)
     await registry.dispose()
     const cached = (await persistence.loadShell(s.seed.entry.environmentId))!
+    const recovery = { recoveryId: 'boot', bootId: 'boot', createdAt: '2026-10-09T00:00:00.000Z', interruptedManagers: ['session-1'], interruptedWorkers: [], undeliveredReports: [] }
+    cached.recovery = recovery
     await persistence.saveShell(withFutureProperties(cached))
     const second = createEnvironmentRegistry({ persistence, credentials: createMemoryCredentialStore(),
       fetch: async () => { throw new Error('Offline') }, webSocket: (url, p) => new WebSocket(url, p),
@@ -102,6 +104,7 @@ describe('environment runtime acceptance', () => {
     expect([...shell.projects.values()]).toEqual(cached.projects)
     expect([...shell.sessions.values()]).toEqual(cached.sessions)
     expect(shell.cursor).toEqual(cached.cursor)
+    expect(shell.recovery).toEqual(recovery)
     expect((await persistence.loadShell(s.seed.entry.environmentId))!.projects[0]).toHaveProperty('futureField')
   })
   it('connects a newer client to an older server and reloads its older shell cache offline', async () => {
@@ -455,7 +458,7 @@ describe('environment runtime acceptance', () => {
       () =>
         [...s.subscriptions.values()].filter(
           (x) => x.method !== 'shell.subscribe',
-        ).length === 2,
+        ).length === 3,
     )
     const oldDurable = [...s.subscriptions].find(
       ([, x]) => x.method === 'session.subscribe',

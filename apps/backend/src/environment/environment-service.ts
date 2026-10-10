@@ -1,3 +1,4 @@
+import { recoveryProjection } from "./streams/wire-projection.js";
 import { ProjectAgentRpc } from "../ws/rpc/project-agent-rpc.js";
 import { createProjectAgentReferenceRoutes } from "../ws/http/routes/project-agent-reference-routes.js";
 import { execFile } from "node:child_process";
@@ -32,6 +33,7 @@ import { createArtifactService } from "./control/artifact-service.js";
 import { createSwarmControlAdapter, createControlledInputRoutePreflight } from "./control/swarm-control-adapter.js";
 import { createSwarmEventMirror, type SwarmEventMirror } from "./control/swarm-event-mirror.js";
 import { createShellStream } from "./streams/shell-stream.js";
+import { createDetailFeatureRpc } from "../ws/rpc/detail-feature-rpc.js";
 import { createDetailStream } from "./streams/detail-stream.js";
 import type { StreamDependencies } from "./streams/shell-stream.js";
 import { StreamFault } from "./streams/stream-budget.js";
@@ -196,6 +198,7 @@ export async function createEnvironmentService(options: {
         if (rpc) throw new Error("Environment transport already composed");
         const dependencies: StreamDependencies = {
           database,
+          recovery: () => recoveryProjection(swarmManager),
           subscribeCommitted: (listener) => owner.eventSink.subscribe(listener),
           withReadBarrier: (fn) => owner.eventSink.readBarrier(fn).value,
           getDescriptor: () => identity.descriptor(),
@@ -223,6 +226,8 @@ export async function createEnvironmentService(options: {
           access: auth,
           control: owner.controlService,
           projectAgents,
+          detailFeatures: createDetailFeatureRpc({ swarmManager, control: owner.controlService }),
+          featureStream: { subscribe: (principal, input, signal) => wsHandler.detailFeatures(principal, input, signal) },
           shellStream,
           detailStream,
           legacyAdapter,

@@ -733,7 +733,7 @@ export class SwarmWebSocketServer {
       ...createSlashCommandRoutes({ swarmManager: this.swarmManager }),
       ...createMobileRoutes({ mobilePushService: this.mobilePushService }),
       ...createManagerSelectionCatalogRoutes({ swarmManager: this.swarmManager, control: this.environment?.control }),
-      ...createAgentHttpRoutes({ swarmManager: this.swarmManager }),
+      ...createAgentHttpRoutes({ swarmManager: this.swarmManager, control: this.environment?.control }),
       ...createContextModeRoutes({ swarmManager: this.swarmManager, control: this.environment?.control }),
       ...createSessionAuditRoutes({ swarmManager: this.swarmManager }),
       ...createCodexCatalogRoutes({ swarmManager: this.swarmManager }),

@@ -27,7 +27,7 @@ export function createDetailStream(deps: StreamDependencies) {
       readBarrier(deps, () => {
         requireSession(input.sessionId);
         unsubscribe = deps.subscribeCommitted(event => {
-          if (event.sessionId !== input.sessionId || event.topic === "shell" || event.sequence <= high) return;
+          if (event.sequence <= high || (event.eventType !== "recovery.upsert" && (event.sessionId !== input.sessionId || event.topic === "shell"))) return;
           const item = { kind: "event", streamEpoch: epoch, sequence: event.sequence, event: event.event };
           try {
             if (encodedBytes(item) > EVENT_BYTES) throw new StreamFault("RESYNC_REQUIRED", "Event exceeds wire budget.");
@@ -45,7 +45,12 @@ export function createDetailStream(deps: StreamDependencies) {
           const workers = workersPage(input.sessionId, 0);
           const choices = (deps.database.prepare("SELECT choice_json FROM control_choices WHERE session_id = ? AND state = 'pending' ORDER BY choice_id LIMIT 21").all(input.sessionId) as { choice_json: string }[]).map(row => JSON.parse(row.choice_json) as ChoiceSummary);
           if (choices.length > 20) throw new StreamFault("PAYLOAD_TOO_LARGE", "Too many pending choices.");
+          const feature = (type: "plan.upsert" | "goal.upsert") => {
+            const row = deps.database.prepare("SELECT payload_json FROM events WHERE session_id=? AND event_type=? ORDER BY sequence DESC LIMIT 1").get(input.sessionId, type) as { payload_json: string } | undefined;
+            return row ? JSON.parse(row.payload_json).snapshot : undefined;
+          };
           const snapshot: DetailSnapshot = {
+            plan: feature("plan.upsert"), goal: feature("goal.upsert"), recovery: deps.recovery?.() ?? null,
             session: requireSession(input.sessionId), items: recentItems(deps.database, input.sessionId).map(item => projectDetailItem(item)),
             workers: workers.workers, choices, historyCursor: initialized?.historyCursor ?? null, workersCursor: workers.nextPage,
           };

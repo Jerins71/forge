@@ -29,7 +29,9 @@ import type { HtmlArtifactPreviewStore } from "../swarm/session/html-artifact-pr
 import type { ControlService, EnvironmentAccessPort, Principal } from "../environment/control/control-types.js";
 import { createBrowserHostRpc, type BrowserHostRpc } from "./rpc/browser-host-rpc.js";
 import { awaitLegacyReceipt, executeMigratedLegacyCommand, legacyCommandScopes, legacySessionEventAllowlist, type LegacyHandlerPorts } from "./rpc/legacy-builder-adapter.js";
-import { StreamFault } from "../environment/streams/stream-budget.js";
+import type { DetailFeatureStreamItem, RpcInput } from "@forge/protocol/environment-v2";
+import { projectDetailFeature } from "./rpc/detail-feature-rpc.js";
+import { StreamQueue, StreamFault } from "../environment/streams/stream-budget.js";
 
 import { admitLifecycleCommand, isLifecycleCommand } from "./rpc/lifecycle-command-admission.js";
 
@@ -149,11 +151,6 @@ export class WsHandler {
         handleDeletedAgentSubscriptions: (ids: Set<string>) => this.handleDeletedAgentSubscriptions(ids),
         unreadTracker: this.unreadTracker ?? undefined,
       };
-      if (command.type === "resume_restart_recovery" || command.type === "dismiss_restart_recovery") {
-        const snapshot = command.type === "resume_restart_recovery" ? await this.swarmManager.resumeRestartRecovery() : await this.swarmManager.dismissRestartRecovery();
-        send({ type: "restart_recovery_snapshot", snapshot, requestId: command.requestId });
-        return;
-      }
       if (command.type === "pin_message") {
         const result = await this.swarmManager.pinMessage(sessionId, command.messageId, command.pinned);
         send({ type: "message_pinned", agentId: sessionId, messageId: command.messageId, pinned: result.pinned, timestamp: result.timestamp });
@@ -193,7 +190,7 @@ export class WsHandler {
         return;
       }
       if (await handleManagerCommand({ ...context, broadcastToSubscribed: event => { send(event); this.broadcastToSubscribed(event); } })) return;
-      if (await handleSessionCommand({ ...context, supportsGoalControlRequestId: true, broadcastUnreadCountUpdate: (id, count) => this.broadcastUnreadCountUpdate(id, count) })) return;
+      if (await handleSessionCommand({ ...context, broadcastUnreadCountUpdate: (id, count) => this.broadcastUnreadCountUpdate(id, count) })) return;
       if (await handleAgentCommand(context)) return;
       if (await handleConversationCommand({ ...context, allowNonManagerSubscriptions: this.allowNonManagerSubscriptions, logDebug: () => {}, resolveConfiguredManagerId: () => this.resolveConfiguredManagerId() })) return;
       throw new StreamFault("UNAVAILABLE", `Legacy command ${command.type} has no port adapter.`);
@@ -219,20 +216,8 @@ export class WsHandler {
       },
       featureState: async (sessionId, signal) => {
         if (!this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session.");
-        const events: ServerEvent[] = [await this.swarmManager.getSessionPlanSnapshot(sessionId), await this.swarmManager.getSessionGoalSnapshot(sessionId)];
-        // Terminals are owned by the session's terminal scope (its profile); events keep that scope ID.
-        const terminalScopeId = this.subscriptionManager.resolveTerminalScopeAgentId(sessionId) ?? sessionId;
-        events.push({ type: "terminals_snapshot", sessionAgentId: terminalScopeId, terminals: this.listTerminalsForSession(terminalScopeId) });
+        const events: ServerEvent[] = [];
         if (signal.aborted) return [];
-        const activity = this.swarmManager.getManagerToolActivitySnapshot(sessionId);
-        if (activity) events.push(activity);
-        events.push(await this.swarmManager.getGenerationThroughputSnapshot(sessionId));
-        for (const snapshot of await this.swarmManager.listSecureSessionTeamSnapshots(sessionId)) events.push({ type: "secure_session_snapshot", ...snapshot });
-        for (const elicitation of this.swarmManager.getPendingCodexElicitationsForManager(sessionId)) events.push({
-          type: "codex_elicitation_request", elicitationId: elicitation.elicitationId, agentId: elicitation.managerAgentId,
-          sidecarAgentId: elicitation.sidecarAgentId, mode: elicitation.mode, title: elicitation.title,
-          message: elicitation.message, fields: elicitation.fields, urlOrigin: elicitation.urlOrigin, persistScopes: elicitation.persistScopes,
-        });
         const profileId = this.subscriptionManager.resolveProfileIdForAgent(sessionId);
         const browser = profileId ? await this.browserAutomationService.getSessionSnapshot(profileId, sessionId) : null;
         if (browser) events.push({ type: "browser_session_snapshot", snapshot: browser });
@@ -247,8 +232,46 @@ export class WsHandler {
     };
   }
 
+  /** Ephemeral typed feature stream. Listener ownership stays on the existing
+   * mounted-session publisher, including profile-shared terminal fanout. */
+  async *detailFeatures(principal: Principal, input: RpcInput<"session.features.subscribe">, signal: AbortSignal): AsyncGenerator<DetailFeatureStreamItem> {
+    this.environmentControl?.access.authorize(principal, ["session:read"]);
+    const sessionId = input.sessionId;
+    if (!this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session");
+    const queue = new StreamQueue<DetailFeatureStreamItem>();
+    const buffered: DetailFeatureStreamItem[] = [];
+    let ready = false;
+    const observe = (raw: ServerEvent) => {
+      const event = projectDetailFeature(raw); if (!event) return;
+      if (ready) queue.push({ event });
+      else { if (buffered.length >= 128) { queue.fail(new StreamFault("RESYNC_REQUIRED", "Feature bootstrap exceeded bounds")); return; } buffered.push({ event }); }
+    };
+    let listeners = this.featureListeners.get(sessionId);
+    if (!listeners) this.featureListeners.set(sessionId, listeners = new Set());
+    listeners.add(observe);
+    const abort = () => { listeners.delete(observe); if (!listeners.size) this.featureListeners.delete(sessionId); queue.end(); };
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      if (signal.aborted) return;
+      const initial: ServerEvent[] = [];
+      const scope = this.subscriptionManager.resolveTerminalScopeAgentId(sessionId) ?? sessionId;
+      initial.push({ type: "terminals_snapshot", sessionAgentId: scope, terminals: this.listTerminalsForSession(scope) });
+      const activity = this.swarmManager.getManagerToolActivitySnapshot(sessionId); if (activity) initial.push(activity);
+      initial.push(await this.swarmManager.getGenerationThroughputSnapshot(sessionId));
+      for (const snapshot of await this.swarmManager.listSecureSessionTeamSnapshots(sessionId)) initial.push({ type: "secure_session_snapshot", ...snapshot });
+      for (const request of this.swarmManager.getPendingCodexElicitationsForManager(sessionId)) initial.push({
+        type: "codex_elicitation_request", elicitationId: request.elicitationId, agentId: request.managerAgentId, sidecarAgentId: request.sidecarAgentId,
+        mode: request.mode, title: request.title, message: request.message, fields: request.fields, urlOrigin: request.urlOrigin, persistScopes: request.persistScopes,
+      });
+      if (signal.aborted) return;
+      for (const raw of initial) { const event = projectDetailFeature(raw); if (event) queue.push({ event }); }
+      ready = true; for (const event of buffered) queue.push(event); buffered.length = 0;
+      yield* queue;
+    } finally { signal.removeEventListener("abort", abort); abort(); }
+  }
+
   private publishFeatures(sessionId: string, event: ServerEvent): void {
-    if (!legacySessionEventAllowlist.includes(event.type as typeof legacySessionEventAllowlist[number])) return;
+    if (!legacySessionEventAllowlist.includes(event.type as typeof legacySessionEventAllowlist[number]) && !projectDetailFeature(event)) return;
     if (event.type === "terminal_created" || event.type === "terminal_updated" || event.type === "terminal_closed") {
       // `sessionId` is a terminal scope here; deliver to every mounted session that resolves to it.
       for (const [mountedId, listeners] of this.featureListeners) {
@@ -335,7 +358,12 @@ export class WsHandler {
   broadcastSecureSessionSnapshot(
     event: Extract<ServerEvent, { type: "secure_session_snapshot" }>,
   ): void {
-    this.publishFeatures(event.sessionAgentId, event);
+    const ownerManagerAgentId = event.ownerManagerAgentId ?? event.sessionAgentId;
+    for (const mountedId of this.featureListeners.keys()) {
+      const mounted = this.swarmManager.getAgent(mountedId);
+      const authority = mounted?.role === "worker" ? mounted.managerId : mountedId;
+      if (mountedId === event.sessionAgentId || authority === ownerManagerAgentId) this.publishFeatures(mountedId, event);
+    }
     this.subscriptionManager.broadcastSecureSessionSnapshot(event);
   }
 
@@ -582,10 +610,7 @@ export class WsHandler {
         type: "error",
         code: "NOT_SUBSCRIBED",
         message: `Send subscribe before ${command.type}.`,
-        requestId: command.type === "session_goal_control" &&
-          !this.subscriptionManager.supportsGoalControlRequestId(socket)
-          ? undefined
-          : extractRequestId(command),
+        requestId: extractRequestId(command),
       });
       return;
     }
@@ -671,7 +696,6 @@ export class WsHandler {
       handleDeletedAgentSubscriptions: (deletedAgentIds) => this.handleDeletedAgentSubscriptions(deletedAgentIds),
       unreadTracker: this.unreadTracker ?? undefined,
       broadcastUnreadCountUpdate: (sessionAgentId, count) => this.broadcastUnreadCountUpdate(sessionAgentId, count),
-      supportsGoalControlRequestId: this.subscriptionManager.supportsGoalControlRequestId(socket),
     });
     if (sessionHandled) {
       return;

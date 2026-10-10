@@ -7,6 +7,8 @@ import type { BrowserHostRpc } from "./browser-host-rpc.js";
 import { StreamFault } from "../../environment/streams/stream-budget.js";
 
 export interface RpcDependencies {
+  detailFeatures?: ReturnType<typeof import("./detail-feature-rpc.js").createDetailFeatureRpc>;
+  featureStream?: { subscribe(principal: Principal, input: RpcInput<"session.features.subscribe">, signal: AbortSignal): AsyncIterable<import("@forge/protocol/environment-v2").DetailFeatureStreamItem> };
   projectAgents?: Pick<ProjectAgentRpc, "execute">;
   access: EnvironmentAccessPort;
   control: ControlService;
@@ -23,6 +25,9 @@ export function requestHandler(deps: RpcDependencies, principal: Principal, meth
     return deps.projectAgents.execute(principal, method as ProjectAgentMethod, input);
   }
   switch (method) {
+    case "recovery.get": case "recovery.decide": case "session.goal.control": case "session.compact": case "session.elicitation.respond": case "session.elicitation.url":
+      if (!deps.detailFeatures) throw new StreamFault("UNAVAILABLE", "Detail features are not composed");
+      return deps.detailFeatures.execute(principal, method, input);
     case "environment.get": return deps.shellStream.descriptor();
     case "shell.page": return deps.shellStream.shellPage(principal, input as RpcInput<"shell.page">);
     case "session.history": return deps.detailStream.history(principal, input as RpcInput<"session.history">);

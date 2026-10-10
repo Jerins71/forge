@@ -26,6 +26,10 @@ export interface Principal {
 
 /** Backend-only admission data; existing validated wire commands remain unchanged. */
 export interface LifecycleAdmission {
+  /** Return saved receipts after interruption; never repeat the callback. */
+  receiptReplay?: boolean;
+  /** A claimed provider operation cannot be safely replayed after interruption. */
+  ambiguousDelivery?: boolean;
   commandId: string;
   command: string;
   /** File mutations authorize workspace writes without elevating session privileges. */

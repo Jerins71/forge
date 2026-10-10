@@ -19,6 +19,7 @@ export interface CommittedStreamEvent {
 }
 
 export interface StreamDependencies {
+  recovery?(): import("@forge/protocol/environment-v2").RecoverySnapshot | null;
   database: Database.Database;
   subscribeCommitted(listener: (event: CommittedStreamEvent) => void): () => void;
   getDescriptor(): EnvironmentDescriptor;
@@ -46,7 +47,7 @@ export function readReplay(deps: StreamDependencies, topic: "shell" | "detail", 
   cursor: RpcInput<"shell.subscribe">["cursor"], meta: StreamMeta): (ShellStreamItem | import("@forge/protocol/environment-v2").DetailStreamItem)[] | null {
   if (!cursor || cursor.streamEpoch !== meta.stream_epoch || cursor.afterSequence > meta.high_water_sequence ||
       cursor.afterSequence < meta.retained_after_sequence) return null;
-  const filter = topic === "shell" ? "topic = 'shell'" : "topic IN ('detail', 'receipt') AND session_id = @sessionId";
+  const filter = topic === "shell" ? "topic = 'shell'" : "((topic IN ('detail', 'receipt') AND session_id = @sessionId) OR (topic='shell' AND event_type='recovery.upsert'))";
   const bindings = { after: cursor.afterSequence, high: meta.high_water_sequence, ...(sessionId ? { sessionId } : {}) };
   const budget = deps.database.prepare(`SELECT COUNT(*) count, COALESCE(SUM(payload_bytes),0) bytes,
     COALESCE(SUM(length(CAST(payload_json AS BLOB))),0) raw FROM events WHERE ${filter} AND sequence > @after AND sequence <= @high`).get(bindings) as { count: number; bytes: number; raw: number };
@@ -131,7 +132,7 @@ export function createShellStream(deps: StreamDependencies) {
         let p = 0;
         let s = 0;
         do {
-          const page: Lease["pages"][number] = { projects: [], sessions: [], nextPage: null };
+          const page: Lease["pages"][number] = { projects: [], sessions: [], nextPage: null, recovery: deps.recovery?.() ?? null };
           while (p < projects.length && page.projects.length < V2_LIMITS.shellPageProjects) {
             page.projects.push(projects[p]);
             if (encodedBytes(page) > SNAPSHOT_BYTES - 1024) { page.projects.pop(); break; }

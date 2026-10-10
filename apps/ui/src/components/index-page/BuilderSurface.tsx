@@ -2538,6 +2538,9 @@ export function BuilderSurface({
                   onChoiceCancel: conversationActionsEnabled ? session.handleChoiceCancel : undefined,
                   pendingChoiceIds: conversationActionsEnabled ? state.pendingChoiceIds : new Set(),
                   codexElicitations: conversationActionsEnabled ? state.codexElicitations : [],
+                  onCodexElicitationUrl: conversationActionsEnabled
+                    ? (agentId, elicitationId) => clientRef.current?.readCodexElicitationUrl(agentId, elicitationId) ?? Promise.reject(new Error('Elicitation is unavailable'))
+                    : undefined,
                   onCodexElicitationResponse: conversationActionsEnabled
                     ? (agentId, elicitationId, decision, values, persistScope) =>
                         clientRef.current?.sendCodexElicitationResponse(agentId, elicitationId, decision, values, persistScope)

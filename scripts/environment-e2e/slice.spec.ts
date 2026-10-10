@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { get as httpGet } from 'node:http';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, cp } from 'node:fs/promises';
+import { readFile, writeFile, readdir, cp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { readManifest, verifyFleetHealth, controlEnvironment, type BootstrapSession, type FleetManifest } from './launch.js';
@@ -499,6 +499,98 @@ test('Batch 2 typed project policy survives lost acknowledgement, replay and res
       commands.push('project.delete');
     } finally { restarted.close(); }
     evidence.batch2 = { commands, directoryReads: 2, lostCreateAcknowledgement: true, stableProjectIdentity: true, strictInputRejected: true, restartPolicyAndInheritance: true, httpControlOwned: true };
+  } finally { rpc.close(); await proxy.stop(); }
+});
+
+test('Batch 5 typed detail features survive reconnect/restart and compact once', async () => {
+  const proxy = await startFaultProxy({ upstream: b().baseUrl });
+  const rpc = await openFixtureRpc(b().baseUrl, sessions[1]!, proxy.url);
+  const launchId = randomUUID();
+  const launched = await rpc.call('session.launch', { commandId: launchId, projectId: projects[1]!.sessionId,
+    title: 'Batch 5 detail', workspaceStrategy: { kind: 'current_checkout' } });
+  const sessionId = launched.sessionId;
+  await settled(launchId);
+  const detail = await rpc.call('session.subscribe', { sessionId });
+  const features = await rpc.call('session.features.subscribe', { sessionId });
+  try {
+    const sendId = randomUUID();
+    await rpc.call('session.send', { commandId: sendId, sessionId, message: { text: '[fixture:detail] Create the synthetic plan and explicitly requested goal.', artifactIds: [] } });
+    await settled(sendId);
+    await until(() => rpc.frames.filter(frame => frame.subscriptionId === detail.subscriptionId).find(frame => frame.item?.event?.type === 'plan.upsert' && frame.item.event.snapshot.plan.length), Boolean);
+    await until(() => rpc.frames.filter(frame => frame.subscriptionId === detail.subscriptionId).find(frame => frame.item?.event?.type === 'goal.upsert' && frame.item.event.snapshot.goal), Boolean);
+    await until(() => rpc.frames.filter(frame => frame.subscriptionId === features.subscriptionId).find(frame => frame.item?.event?.type === 'tool.activity' && frame.item.event.activity.toolCount > 0), Boolean);
+    const pause = { commandId: randomUUID(), sessionId, action: 'pause' };
+    proxy.dropNextResponse({ transport: 'ws', rpcId: 'goal-lost-ack' });
+    await expect(rpc.call('session.goal.control', pause, 'goal-lost-ack', 500)).rejects.toThrow('timed out');
+    const paused = await rpc.call('session.goal.control', pause); expect(paused.state).toBe('succeeded');
+    await until(() => rpc.frames.filter(frame => frame.subscriptionId === detail.subscriptionId).find(frame => frame.item?.event?.type === 'goal.upsert' && frame.item.event.snapshot.goal?.status === 'paused'), Boolean);
+    const compactLaunchId = randomUUID();
+    const compactSession = await rpc.call('session.launch', { commandId: compactLaunchId, projectId: projects[1]!.sessionId, title: 'Batch 5 compact',
+      workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Synthetic compaction target', artifactIds: [] } });
+    await settled(compactLaunchId);
+    await until(() => readLaunchEvidence(b(), compactSession.sessionId), value => value.markerChanged);
+    const compact = { commandId: randomUUID(), sessionId: compactSession.sessionId, mode: 'manual' };
+    expect((await rpc.call('session.compact', compact)).state).toBe('succeeded');
+    expect((await rpc.call('session.compact', compact)).state).toBe('succeeded');
+    const counters = [];
+    async function compactCount(path: string): Promise<number> {
+      let count = 0;
+      for (const entry of await readdir(path, { withFileTypes: true })) {
+        if (entry.isDirectory()) count += await compactCount(join(path, entry.name));
+        else if (/^process-\d+\.json$/.test(entry.name)) count += JSON.parse(await readFile(join(path, entry.name), 'utf8')).compactions ?? 0;
+      }
+      return count;
+    }
+    counters.push(await compactCount(join(b().checkout, '.fixture-codex'))); expect(counters[0]).toBe(1);
+    rpc.close();
+    const fresh = await openFixtureRpc(b().baseUrl, sessions[1]!);
+    const snapshot = async (client: typeof fresh) => {
+      const sub = await client.call('session.subscribe', { sessionId });
+      return until<any>(() => client.frames.find(frame => frame.subscriptionId === sub.subscriptionId && frame.item?.kind === 'snapshot')?.item.snapshot, Boolean);
+    };
+    const before = await snapshot(fresh); expect(before.plan.plan[0].step).toBe('Verify typed detail'); expect(before.goal.goal.status).toBe('paused'); fresh.close();
+    await writeFile(join(b().checkout, '.fixture-compact-hold'), 'synthetic handoff pause');
+    const ambiguousCompact = { ...compact, commandId: randomUUID() };
+    const handoff = await openFixtureRpc(b().baseUrl, sessions[1]!);
+    try { await expect(handoff.call('session.compact', ambiguousCompact, 'compact-handoff', 500)).rejects.toThrow('timed out'); }
+    finally { handoff.close(); }
+    await until(() => fixtureRpcOnce(b().baseUrl, sessions[1]!, 'command.get', { commandId: ambiguousCompact.commandId }), receipt => receipt.state === 'running');
+    counters.push(await compactCount(join(b().checkout, '.fixture-codex'))); expect(counters[1]).toBe(2);
+    const heldId = randomUUID();
+    const held = await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', { commandId: heldId, projectId: projects[1]!.sessionId, title: 'Batch 5 interrupted', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:hold]', artifactIds: [] } });
+    await settled(heldId);
+    const crashId = randomUUID();
+    const armed = await controlEnvironment<{ pid: number }>(manifest, b().name, 'fixture', { operation: 'arm-crash', commandId: crashId, boundary: 'pre-commit' });
+    await expect(fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.launch', { commandId: crashId, projectId: projects[1]!.sessionId, title: 'Crash probe', workspaceStrategy: { kind: 'current_checkout' } })).rejects.toThrow();
+    await until(() => { try { process.kill(armed.pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } }, Boolean);
+    await controlEnvironment(manifest, b().name, 'start');
+    const restarted = await openFixtureRpc(b().baseUrl, sessions[1]!);
+    try {
+      const after = await snapshot(restarted); expect(after.plan).toEqual(before.plan); expect(after.goal.goal).toEqual(before.goal.goal);
+      expect((await restarted.call('session.compact', compact)).state).toBe('succeeded');
+      const ambiguousReceipt = await restarted.call('session.compact', ambiguousCompact);
+      expect(ambiguousReceipt).toMatchObject({ state: 'interrupted', delivery: 'unknown' });
+      expect(await restarted.call('session.compact', ambiguousCompact)).toEqual(ambiguousReceipt);
+      counters.push(await compactCount(join(b().checkout, '.fixture-codex'))); expect(counters[2]).toBe(2);
+      const recovery = (await restarted.call('recovery.get', {})).recovery;
+      expect(recovery?.interruptedManagers).toContain(held.sessionId);
+      const shell = await restarted.call('shell.subscribe', {});
+      const shellSnapshot = await until<any>(() => restarted.frames.find(frame => frame.subscriptionId === shell.subscriptionId && frame.item?.kind === 'snapshot')?.item.snapshot, Boolean);
+      expect(shellSnapshot.recovery).toEqual(recovery);
+      {
+        const decide = { commandId: randomUUID(), recoveryId: recovery.recoveryId, action: 'dismiss' };
+        const first = await restarted.call('recovery.decide', decide); expect(first.state).toBe('succeeded');
+        expect(await restarted.call('recovery.decide', decide)).toEqual(first);
+      }
+      const counts = await readDb(db => ({
+        goalCommands: (db.prepare('SELECT count(*) n FROM commands WHERE command_id=?').get(pause.commandId) as { n: number }).n,
+        compactCommands: (db.prepare('SELECT count(*) n FROM commands WHERE command_id=?').get(compact.commandId) as { n: number }).n,
+      }));
+      expect(counts).toEqual({ goalCommands: 1, compactCommands: 1 });
+      evidence.batch5 = { sessionId, counts, compactDispatches: counters, planRevision: after.plan.revision, goalStatus: after.goal.goal.status,
+        ambiguousCompaction: { state: ambiguousReceipt.state, delivery: ambiguousReceipt.delivery, dispatches: counters[2]! - counters[0]! },
+        liveTypedActivity: true, reconnect: true, restart: true, recoveryOnFreshShell: true, duplicateReceipts: true };
+    } finally { restarted.close(); }
   } finally { rpc.close(); await proxy.stop(); }
 });
 

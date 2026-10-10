@@ -6,7 +6,7 @@ import { StreamFault } from "../../environment/streams/stream-budget.js";
 import { awaitLegacyReceipt, legacyCommandId } from "./legacy-builder-adapter.js";
 
 const lifecycleCommands = new Set<ClientCommand["type"]>([
-  "resume_session", "resume_restart_recovery", "dismiss_restart_recovery", "kill_agent", "stop_all_agents",
+  "resume_session", "kill_agent", "stop_all_agents",
   "choice_cancel", "clear_session", "delete_session", "archive_session", "fork_session",
 ]);
 export function isLifecycleCommand(command: ClientCommand): boolean { return lifecycleCommands.has(command.type); }
@@ -30,11 +30,7 @@ export async function admitLifecycleCommand<T>(control: ControlService, principa
     }));
     return undefined as T;
   }
-  const recovery = command.type === "resume_restart_recovery" || command.type === "dismiss_restart_recovery";
-  const snapshot = recovery ? swarm.getRestartRecoverySnapshot() : null;
-  const sessionIds = snapshot ? [...new Set([
-    ...snapshot.interruptedManagers, ...snapshot.interruptedWorkers.map(owner), ...snapshot.undeliveredReports.map(report => owner(report.toAgentId)),
-  ])] : recovery ? [] : [owner(targetId)];
+  const sessionIds = [owner(targetId)];
   if (command.type === "delete_session" || command.type === "fork_session" && command.sessionPurpose === "side_chat")
     sessionIds.push(...swarm.listAgents().filter(agent => agent.role === "manager" && agent.sideChatSourceAgentId === targetId).map(agent => agent.agentId));
   const stop = command.type === "clear_session" || command.type === "delete_session" || command.type === "archive_session" || command.type === "stop_all_agents";

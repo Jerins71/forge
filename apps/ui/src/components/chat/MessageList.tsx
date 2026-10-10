@@ -91,6 +91,7 @@ export interface MessageListProps {
   onChoiceCancel?: (agentId: string, choiceId: string) => void
   pendingChoiceIds: Set<string>
   codexElicitations?: CodexElicitationRequestEvent[]
+  onCodexElicitationUrl?: (agentId: string, elicitationId: string) => Promise<string>
   onCodexElicitationResponse?: (agentId: string, elicitationId: string, decision: 'allow' | 'deny' | 'cancel', values?: Record<string, unknown>, persistScope?: CodexElicitationPersistScope) => void
   missingPendingChoiceIds?: string[]
   streamingStartedAt?: number
@@ -451,6 +452,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
   pendingChoiceIds,
   codexElicitations = [],
   onCodexElicitationResponse,
+  onCodexElicitationUrl,
   missingPendingChoiceIds = [],
   streamingStartedAt,
   planSnapshot,
@@ -1466,7 +1468,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
           ) : null}
         </div>
       ) : null}
-      {codexElicitations.length ? <div className="shrink-0 space-y-2 overflow-auto p-2 md:p-3">{codexElicitations.map((request) => <CodexElicitationCard key={request.elicitationId} request={request} onRespond={(decision, values, persistScope) => onCodexElicitationResponse?.(request.agentId, request.elicitationId, decision, values, persistScope)} />)}</div> : null}
+      {codexElicitations.length ? <div className="shrink-0 space-y-2 overflow-auto p-2 md:p-3">{codexElicitations.map((request) => <CodexElicitationCard key={request.elicitationId} request={request} readUrl={onCodexElicitationUrl ? () => onCodexElicitationUrl(request.agentId, request.elicitationId) : undefined} onRespond={(decision, values, persistScope) => onCodexElicitationResponse?.(request.agentId, request.elicitationId, decision, values, persistScope)} />)}</div> : null}
       <div
         ref={(el) => {
           scrollElRef.current = el

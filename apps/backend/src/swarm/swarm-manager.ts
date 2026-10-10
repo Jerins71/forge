@@ -678,14 +678,14 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
     });
   }
   respondToCodexElicitation(input: {
-    elicitationId: string;
-    managerAgentId: string;
+    elicitationId: string; managerAgentId: string;
     decision: "allow" | "deny" | "cancel";
     values?: Record<string, unknown>;
     persistScope?: "session" | "always";
   }): boolean {
     return this.codexDirectSidecarCoordinator.respondToElicitation(input);
   }
+  getCodexElicitationUrl(input: { managerAgentId: string; elicitationId: string; generation: string }) { return this.codexDirectSidecarCoordinator.getElicitationUrl(input); }
   getPendingCodexElicitationsForManager(managerAgentId: string) {
     return this.codexDirectSidecarCoordinator.getPendingElicitationsForManager(managerAgentId);
   }
@@ -731,7 +731,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
           ...(event.title ? { title: event.title } : {}),
           message: event.message,
           ...(event.fields ? { fields: event.fields } : {}),
-          ...(event.url ? { url: event.url, ...(event.urlOrigin ? { urlOrigin: event.urlOrigin } : {}) } : event.urlOrigin ? { urlOrigin: event.urlOrigin } : {}),
+          ...(event.urlOrigin ? { urlOrigin: event.urlOrigin } : {}),
           persistScopes: event.persistScopes,
         }),
         dismissCodexElicitation: (elicitationId, managerAgentId) =>

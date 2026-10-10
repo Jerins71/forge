@@ -6,7 +6,9 @@ import { Input } from '@/components/ui/input'
 export function CodexElicitationCard({
   request,
   onRespond,
+  readUrl,
 }: {
+  readUrl?: () => Promise<string>
   request: CodexElicitationRequestEvent
   onRespond: (
     decision: 'allow' | 'deny' | 'cancel',
@@ -21,7 +23,7 @@ export function CodexElicitationCard({
   const validFields = request.fields?.every(
     (field) => !field.required || (values[field.key] !== undefined && values[field.key] !== ''),
   ) ?? true
-  const valid = validFields && (request.mode !== 'url' || (Boolean(request.url) && urlFlowStarted))
+  const valid = validFields && (request.mode !== 'url' || (Boolean(readUrl) && urlFlowStarted))
 
   function setFieldValue(key: string, value: unknown): void {
     setValues((current) => ({ ...current, [key]: value }))
@@ -39,21 +41,26 @@ export function CodexElicitationCard({
     })
   }
 
-  function openUrl(): void {
-    if (!request.url) return
-    if (window.open(request.url, '_blank', 'noopener,noreferrer') !== null) {
+  async function openUrl(): Promise<void> {
+    if (!readUrl) return
+    const popup = window.open('about:blank', '_blank')
+    if (!popup) return
+    popup.opener = null
+    try {
+      const url = await readUrl()
+      popup.location.replace(url)
       setUrlFlowStarted(true)
-    }
+    } catch { popup.close() }
   }
 
   async function copyUrl(): Promise<void> {
     const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard
-    if (!request.url || !clipboard?.writeText) return
+    if (!readUrl || !clipboard?.writeText) return
     try {
-      await clipboard.writeText(request.url)
+      await clipboard.writeText(await readUrl())
       setUrlFlowStarted(true)
     } catch {
-      // Keep Allow disabled if the browser declined the copy request.
+      // Keep Allow disabled if the request is stale or copying is denied.
     }
   }
 
@@ -76,9 +83,9 @@ export function CodexElicitationCard({
               : 'The secure link is no longer available after reconnecting.'}
             {' Forge does not open links automatically.'}
           </p>
-          {request.url ? (
+          {readUrl ? (
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" onClick={openUrl}>
+              <Button size="sm" variant="secondary" onClick={() => void openUrl()}>
                 Open link
               </Button>
               {canCopyUrl ? (
@@ -88,7 +95,7 @@ export function CodexElicitationCard({
               ) : null}
             </div>
           ) : null}
-          {request.url && !urlFlowStarted ? (
+          {readUrl && !urlFlowStarted ? (
             <p>Open or copy the link, complete the requested flow, then return here to allow it.</p>
           ) : null}
           {urlFlowStarted ? <p>Complete the requested flow before allowing it here.</p> : null}

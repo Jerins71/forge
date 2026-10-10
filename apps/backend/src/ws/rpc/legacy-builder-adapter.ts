@@ -9,14 +9,13 @@ import { parseClientCommand } from "../ws-command-parser.js";
 export const legacyCommandScopes = {
   subscribe: "unsupported", subscribe_inventory: "unsupported", api_proxy: "unsupported", ping: "session:read",
   user_message: "unsupported", create_session: "unsupported", stop_session: "unsupported", choice_response: "unsupported",
-  resume_restart_recovery: "session:operate", dismiss_restart_recovery: "session:operate",
   kill_agent: "session:operate", stop_all_agents: "session:operate",
 
   resume_session: "session:operate", hydrate_archive_last_used: "session:read", archive_session: "session:operate", restore_session: "session:operate",
-  delete_session: "session:operate", rename_session: "session:operate", pin_session: "session:operate", fork_session: "session:operate", clear_session: "session:operate", dismiss_session_attention: "session:operate", session_goal_control: "session:operate",
+  delete_session: "session:operate", rename_session: "session:operate", pin_session: "session:operate", fork_session: "session:operate", clear_session: "session:operate", dismiss_session_attention: "session:operate",
   pin_message: "session:operate", clear_all_pins: "session:operate", get_session_workers: "unsupported",
   get_conversation_page: "unsupported",
-  choice_cancel: "session:operate", codex_elicitation_response: "session:operate",
+  choice_cancel: "session:operate",
   mark_unread: "session:operate", mark_all_read: "session:operate",
   // Host commands use browser.host.send on the socket that holds the browser.host.attach subscription.
   browser_host_register: "unsupported", browser_host_hydrate: "unsupported", browser_host_focus: "unsupported", browser_host_response: "unsupported",

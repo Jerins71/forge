@@ -474,6 +474,10 @@ export class CodexAppServerService {
     return this.elicitationBroker.respond(input);
   }
 
+  getElicitationUrl(input: { managerAgentId: string; elicitationId: string; generation: string }): string | undefined {
+    return this.elicitationBroker.readUrl(input);
+  }
+
   getPendingElicitationsForManager(managerAgentId: string) {
     return this.elicitationBroker.getPendingForManager(managerAgentId);
   }
