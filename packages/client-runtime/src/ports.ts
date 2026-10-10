@@ -17,6 +17,7 @@ export interface CredentialStore {
   delete(environmentId: string): Promise<void>
 }
 export interface ShellCacheRecord {
+  recovery?: import('@forge/protocol/environment-v2').RecoverySnapshot | null
   environmentId: string
   streamEpoch: string
   protocolVersion: 1
