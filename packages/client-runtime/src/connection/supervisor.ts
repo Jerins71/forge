@@ -39,7 +39,7 @@ interface Subscription {
 export function retryDelayMs(attempt: number, random: number): number {
   return Math.floor(
     Math.max(0, Math.min(1, random)) *
-      Math.min(300000, 1000 * 2 ** Math.min(20, attempt)),
+      Math.min(30000, 500 * 2 ** Math.min(20, attempt)),
   )
 }
 /** Sole socket, retry and heartbeat owner for one environment. */

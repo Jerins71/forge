@@ -439,15 +439,12 @@ export class SwarmWebSocketServer {
     snapshot: BrowserSessionSnapshot,
     reason: "host-report" | "automation" | "human-command" | "lifecycle" | "recovery",
   ): void {
-    this.wsHandler.broadcastToManagerSession(snapshot.sessionAgentId, {
-      type: "browser_session_changed",
-      snapshot,
-      reason,
-    });
+    this.wsHandler.browser?.publish(snapshot);
+    void reason;
   }
 
   broadcastBrowserHostChanged(host: BrowserHostConnectionSnapshot): void {
-    this.wsHandler.broadcastToSubscribed({ type: "browser_host_connected", host });
+    this.wsHandler.browserHost.publishHost(host);
   }
 
   constructor(options: {

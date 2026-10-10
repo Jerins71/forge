@@ -17,7 +17,6 @@ import {
   selectBootstrapConversationHistory as selectBootstrapConversationHistoryByPolicy
 } from "../swarm/session/history-policy.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
-import type { BrowserAutomationService } from "../swarm/browser-automation/index.js";
 import { filterBuilderVisibleAgents, filterBuilderVisibleProfiles, isBuilderInventorySession } from "./builder-visibility.js";
 import { MAX_WS_EVENT_BYTES } from "./ws-send.js";
 import { warnWsThrottled } from "./ws-log-throttle.js";
@@ -120,7 +119,6 @@ export async function sendSubscriptionBootstrap(options: {
   terminalService: TerminalService | null;
   listTerminalsForSession?: (sessionAgentId: string) => TerminalDescriptor[];
   unreadTracker: UnreadTracker | null;
-  browserAutomationService?: BrowserAutomationService | null;
   perf: SidebarPerfRecorder;
   send: (socket: WebSocket, event: ServerEvent) => number | null | Promise<number | null>;
   resolveTerminalScopeAgentId: (subscribedAgentId: string) => string | undefined;
@@ -129,7 +127,6 @@ export async function sendSubscriptionBootstrap(options: {
   resolveGenerationThroughputSessionAgentId?: (subscribedAgentId: string) => string | undefined;
   /** Builder-only authority for ephemeral manager tool activity. */
   resolveManagerToolActivitySessionAgentId?: (subscribedAgentId: string) => string | undefined;
-  resolveBrowserSessionAgentId?: (subscribedAgentId: string) => string | undefined;
   includeAgentsSnapshot?: boolean;
   includeProfilesSnapshot?: boolean;
   remoteUpdateAwarenessEvent?: Extract<ServerEvent, { type: "remote_update_awareness_project_changed" | "remote_update_awareness_project_cleared" }> | null;
@@ -147,14 +144,12 @@ export async function sendSubscriptionBootstrap(options: {
     terminalService,
     listTerminalsForSession,
     unreadTracker,
-    browserAutomationService,
     perf,
     send,
     resolveTerminalScopeAgentId,
     resolvePlanSnapshotSessionAgentId,
     resolveGenerationThroughputSessionAgentId = resolvePlanSnapshotSessionAgentId,
     resolveManagerToolActivitySessionAgentId = resolvePlanSnapshotSessionAgentId,
-    resolveBrowserSessionAgentId = resolvePlanSnapshotSessionAgentId,
     includeAgentsSnapshot = true,
     includeProfilesSnapshot = true,
     remoteUpdateAwarenessEvent,
@@ -355,21 +350,6 @@ export async function sendSubscriptionBootstrap(options: {
       "managerToolActivity",
       swarmManager.getManagerToolActivitySnapshot(managerToolActivitySessionAgentId),
     );
-  }
-
-  const browserSessionAgentId = resolveBrowserSessionAgentId(targetAgentId);
-  if (browserAutomationService && browserSessionAgentId) {
-    const descriptor = swarmManager.getAgent(browserSessionAgentId);
-    if (descriptor?.role === "manager") {
-      const snapshot = await browserAutomationService.getSessionSnapshot(
-        descriptor.profileId ?? descriptor.agentId,
-        descriptor.agentId,
-      );
-      await sendMeasured("browserSessionSnapshot", {
-        type: "browser_session_snapshot",
-        snapshot,
-      });
-    }
   }
 
   const historyMessageCount = requestedMessageCount !== undefined

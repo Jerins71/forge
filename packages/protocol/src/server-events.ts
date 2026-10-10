@@ -4,7 +4,6 @@ import type {
   SessionWorkersSnapshotEvent,
 } from './agent-events.js'
 import type { BuilderSidebarOrderUpdatedEvent } from './builder-sidebar-order.js'
-import type { BrowserServerEvent } from './browser-automation.js'
 import type { CliServerEvent } from './cli.js'
 import type { CodexElicitationDismissedEvent, CodexElicitationRequestEvent } from './codex-elicitation.js'
 import type {
@@ -102,7 +101,6 @@ export type ServerEvent =
   import('./builder-inventory.js').InventorySnapshotEvent
   | import('./builder-inventory.js').InventoryPongEvent
   | BuilderSidebarOrderUpdatedEvent
-  | BrowserServerEvent
   | CliServerEvent
   | CodexElicitationRequestEvent
   | CodexElicitationDismissedEvent

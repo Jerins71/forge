@@ -20,6 +20,8 @@ import type {
 export type ControlMethod = CommandReceipt["method"];
 
 export interface Principal {
+  /** Private platform capability, minted only on a loopback Desktop ticket. Never a grant scope. */
+  localBrowserHost?: boolean;
   deviceSessionId: string;
   scopes: ReadonlySet<Scope>;
 }

@@ -147,6 +147,7 @@ export class EnvironmentLiveResources {
   }
 }
 interface Ticket {
+  localBrowserHost?: boolean;
   deviceId: string;
   audience: "rpc" | "legacy";
   origin: string | null;
@@ -161,6 +162,7 @@ export interface EnvironmentAccessOptions {
   clock?: () => number;
   random?: (bytes: number) => Buffer;
   liveResources?: EnvironmentLiveResources;
+  localBrowserOrigin?: (request: IncomingMessage) => boolean;
 }
 
 export function createEnvironmentAccess({
@@ -170,6 +172,7 @@ export function createEnvironmentAccess({
   clock = Date.now,
   random = randomBytes,
   liveResources = new EnvironmentLiveResources(),
+  localBrowserOrigin = () => false,
 }: EnvironmentAccessOptions) {
   const store = new AccessStore(database);
   const devices = new Map<string, DeviceRow>();
@@ -443,6 +446,7 @@ export function createEnvironmentAccess({
     const expiresAt = clock() + 30_000;
     tickets.set(secretHash("ticket", ticket), {
       deviceId: p.deviceSessionId,
+      localBrowserHost: input.audience === "rpc" && p.localBrowserHost === true,
       audience: input.audience,
       origin,
       protocolVersion: input.protocolVersion,
@@ -465,7 +469,7 @@ export function createEnvironmentAccess({
       !exposure.allowsOrigin(input.origin)
     )
       throw invalid();
-    return principal(current(row.deviceId));
+    return { ...principal(current(row.deviceId)), localBrowserHost: row.localBrowserHost === true };
   }
   function registerResource(p: Principal, close: (force?: boolean) => void) {
     const row = current(p.deviceSessionId);
@@ -593,7 +597,10 @@ export function createEnvironmentAccess({
     expiryTimers.clear();
     liveResources.dispose();
   }
-  const authenticateCurrentHttp = (request: IncomingMessage, requireCsrf: boolean) => authenticateHttp(request, undefined, requireCsrf);
+  const authenticateCurrentHttp = async (request: IncomingMessage, requireCsrf: boolean): Promise<Principal> => {
+    const authenticated = await authenticateHttp(request, undefined, requireCsrf);
+    return { ...authenticated, localBrowserHost: request.url?.split('?')[0] === '/api/v2/access/ws-ticket' && localBrowserOrigin(request) };
+  };
   // HTTP routes call before reading a body, so malformed attempts count toward both limits.
   const checkExchangeRate = (request: IncomingMessage) => {
     rate("exchange:environment", 100);

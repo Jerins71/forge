@@ -1,7 +1,5 @@
-import { randomUUID } from "node:crypto";
 import type {
   ApiProxyCommand,
-  BrowserClientCommand,
   BuilderTimelineChannelView,
   ServerEvent,
   TerminalDescriptor,
@@ -16,7 +14,6 @@ import type { TerminalService } from "../terminal/terminal-service.js";
 import { WebSocketServer, type RawData, WebSocket } from "ws";
 import { isInventoryCommandAllowed } from "./inventory-command-access.js";
 import { handleAgentCommand } from "./commands/agent-command-handler.js";
-import { handleBrowserCommand } from "./commands/browser-command-handler.js";
 import { handleConversationCommand } from "./commands/conversation-command-handler.js";
 import { handleSessionCommand } from "./commands/session-command-handler.js";
 import { extractRequestId, parseClientCommand } from "./ws-command-parser.js";
@@ -26,6 +23,7 @@ import { WsSubscriptions } from "./ws-subscriptions.js";
 import type { PresentedChatArtifactTicketStore } from "../swarm/session/presented-chat-artifact.js";
 import type { HtmlArtifactPreviewStore } from "../swarm/session/html-artifact-preview.js";
 import type { ControlService, EnvironmentAccessPort, Principal } from "../environment/control/control-types.js";
+import { createBrowserWorkspaceRpc } from "./rpc/browser-workspace-rpc.js";
 import { createBrowserHostRpc, type BrowserHostRpc } from "./rpc/browser-host-rpc.js";
 import { executeMigratedLegacyCommand, legacyCommandScopes, legacySessionEventAllowlist, type LegacyHandlerPorts } from "./rpc/legacy-builder-adapter.js";
 import { awaitCommandReceipt } from "./rpc/control-command-helpers.js";
@@ -44,7 +42,7 @@ export class WsHandler {
   private readonly unreadTracker: UnreadTracker | null;
   private readonly browserAutomationService: BrowserAutomationService;
   private readonly subscriptionManager: WsSubscriptions;
-  private readonly browserConnectionIds = new WeakMap<WebSocket, string>();
+  browser!: ReturnType<typeof createBrowserWorkspaceRpc>;
   /** Desktop's embedded browser host on the environment RPC socket. */
   readonly browserHost: BrowserHostRpc;
   private readonly apiProxy: WsApiProxy;
@@ -79,23 +77,8 @@ export class WsHandler {
       dataDir: this.swarmManager.getConfig().paths.dataDir,
     });
 
-    this.browserHost = createBrowserHostRpc({
-      detach: connectionId => { this.browserAutomationService.unregisterHost(connectionId); },
-      handle: async ({ command, connectionId, send }) => {
-        await handleBrowserCommand({ command, socket: null, connectionId, browserAutomationService: this.browserAutomationService,
-          resolveManagerContextAgentId: agentId => this.resolveManagerContextAgentId(agentId),
-          resolveProfileIdForAgent: agentId => this.subscriptionManager.resolveProfileIdForAgent(agentId),
-          isEligibleLocalBuilderManager: agentId => {
-            const descriptor = this.swarmManager.getAgent(agentId);
-            return !!descriptor && isEligibleLocalBuilderManager(descriptor);
-          },
-          send: (_connection, event) => send(event),
-          broadcastToSession: (id, event) => this.broadcastToSession(id, event),
-          hydrateHostSessions: () => this.hydrateBrowserHostSessions(),
-          logDebug: (message, details) => this.logDebug(message, details),
-        });
-      },
-    });
+    this.browserHost = createBrowserHostRpc({ service: this.browserAutomationService,
+      hydrateSessions: () => this.hydrateBrowserHostSessions(), resolveSession: id => this.resolveBrowserProfile(id) });
 
     const feedbackService = options.feedbackService ?? new FeedbackService(this.swarmManager.getConfig().paths.dataDir);
     const terminalService = options.terminalService ?? null;
@@ -108,7 +91,6 @@ export class WsHandler {
       terminalService,
       listTerminalsForSession: options.listTerminalsForSession,
       unreadTracker: this.unreadTracker,
-      browserAutomationService: this.browserAutomationService,
       perf,
       send: (socket, event) => this.send(socket, event),
       sendBootstrapCritical: (socket, event, shouldSend) => this.sendWithBackpressure(socket, event, shouldSend),
@@ -130,6 +112,8 @@ export class WsHandler {
 
   setEnvironmentControl(deps: { access: EnvironmentAccessPort; control: ControlService }): void {
     this.environmentControl = deps;
+    this.browser = createBrowserWorkspaceRpc({ service: this.browserAutomationService, host: this.browserHost,
+      control: deps.control, resolveSession: id => this.resolveBrowserProfile(id) });
   }
 
   /** Called by the exact upgrade router after consuming an audience:'legacy' ticket. */
@@ -140,7 +124,7 @@ export class WsHandler {
   }
 
   legacyPorts(): LegacyHandlerPorts {
-    const executeCommand: LegacyHandlerPorts["executeCommand"] = async ({ principal, sessionId, command, signal, send }) => {
+    const executeCommand: LegacyHandlerPorts["executeCommand"] = async ({ sessionId, command, signal, send }) => {
       if (signal.aborted) return;
       if (sessionId && !this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session.");
       // Handler identity is a token, never a socket. Handlers touch it only through send.
@@ -152,19 +136,6 @@ export class WsHandler {
         unreadTracker: this.unreadTracker ?? undefined,
       };
       if (command.type === "ping") { send({ type: "ready", subscribedAgentId: sessionId, serverTime: new Date().toISOString() }); return; }
-      if (isBrowserClientCommand(command)) {
-        await handleBrowserCommand({ ...context, command, connectionId: this.browserHost.connectionId(principal) ?? `rpc:${sessionId}`,
-          browserAutomationService: this.browserAutomationService,
-          resolveProfileIdForAgent: agentId => this.subscriptionManager.resolveProfileIdForAgent(agentId),
-          isEligibleLocalBuilderManager: agentId => {
-            const descriptor = this.swarmManager.getAgent(agentId);
-            return !!descriptor && isEligibleLocalBuilderManager(descriptor);
-          },
-          broadcastToSession: (id, event) => this.broadcastToSession(id, event),
-          hydrateHostSessions: () => this.hydrateBrowserHostSessions(),
-        });
-        return;
-      }
       if (await handleSessionCommand({ ...context, broadcastUnreadCountUpdate: (id, count) => this.broadcastUnreadCountUpdate(id, count) })) return;
       if (await handleAgentCommand(context)) return;
       if (await handleConversationCommand({ ...context, allowNonManagerSubscriptions: this.allowNonManagerSubscriptions, logDebug: () => {}, resolveConfiguredManagerId: () => this.resolveConfiguredManagerId() })) return;
@@ -193,9 +164,6 @@ export class WsHandler {
         if (!this.swarmManager.getAgent(sessionId)) throw new StreamFault("NOT_FOUND", "Unknown session.");
         const events: ServerEvent[] = [];
         if (signal.aborted) return [];
-        const profileId = this.subscriptionManager.resolveProfileIdForAgent(sessionId);
-        const browser = profileId ? await this.browserAutomationService.getSessionSnapshot(profileId, sessionId) : null;
-        if (browser) events.push({ type: "browser_session_snapshot", snapshot: browser });
         return events;
       },
       subscribeFeatures: (sessionId, listener) => {
@@ -270,19 +238,16 @@ export class WsHandler {
       const unregister = this.environmentControl.access.registerResource(principal, (force?: boolean) => {
         if (force) socket.terminate(); else socket.close(1008, "Device access ended");
       });
-      this.browserConnectionIds.set(socket, randomUUID());
       socket.on("message", (raw) => {
         void this.handleSocketMessage(socket, raw);
       });
 
       socket.on("close", () => {
         unregister();
-        this.unregisterBrowserHost(socket);
         this.subscriptionManager.remove(socket);
       });
 
       socket.on("error", () => {
-        this.unregisterBrowserHost(socket);
         this.subscriptionManager.remove(socket);
       });
     });
@@ -294,7 +259,6 @@ export class WsHandler {
   }
 
   broadcastToSubscribed(event: ServerEvent): void {
-    if (event.type === "browser_host_connected") this.browserHost.broadcast(event);
     if (event.type === "secure_secret_catalog_changed") for (const sessionId of this.featureListeners.keys()) this.publishFeatures(sessionId, event);
     else if ("sessionAgentId" in event && typeof event.sessionAgentId === "string") this.publishFeatures(event.sessionAgentId, event);
     else if (event.type === "codex_elicitation_request" || event.type === "codex_elicitation_dismissed") this.publishFeatures(event.agentId, event);
@@ -456,30 +420,6 @@ export class WsHandler {
 
     if (this.subscriptionManager.isInventorySubscription(socket) && !isInventoryCommandAllowed(command)) {
       this.send(socket, { type: "error", code: "NOT_SUBSCRIBED", message: "This command requires an explicit conversation subscription.", requestId: extractRequestId(command) });
-      return;
-    }
-
-    if (isBrowserClientCommand(command)) {
-      const subscribedAgentId = this.subscriptionManager.getSubscribedAgentId(socket);
-      await handleBrowserCommand({
-        command,
-        socket,
-        connectionId: this.getBrowserConnectionId(socket),
-        subscribedAgentId,
-        browserAutomationService: this.browserAutomationService,
-        resolveManagerContextAgentId: (agentId) => this.subscriptionManager.resolveManagerContextAgentId(agentId),
-        resolveProfileIdForAgent: (agentId) => this.subscriptionManager.resolveProfileIdForAgent(agentId),
-        isEligibleLocalBuilderManager: (agentId) => {
-          const descriptor = this.swarmManager.getAgent(agentId);
-          return !!descriptor && isEligibleLocalBuilderManager(descriptor);
-        },
-        send: sendForCommand,
-        sendCritical: (targetSocket, event) => this.sendWithBackpressure(targetSocket, event, () =>
-          !this.subscriptionManager.isInventorySubscription(targetSocket) || isInventoryCommandAllowed(command)),
-        broadcastToSession: (sessionAgentId, event) => this.broadcastToSession(sessionAgentId, event),
-        hydrateHostSessions: () => this.hydrateBrowserHostSessions(),
-        logDebug: (message, details) => this.logDebug(message, details),
-      });
       return;
     }
 
@@ -652,17 +592,9 @@ export class WsHandler {
     return normalized.length > 0 ? normalized : undefined;
   }
 
-  private getBrowserConnectionId(socket: WebSocket): string {
-    const existing = this.browserConnectionIds.get(socket);
-    if (existing) return existing;
-    const connectionId = randomUUID();
-    this.browserConnectionIds.set(socket, connectionId);
-    return connectionId;
-  }
-
-  private unregisterBrowserHost(socket: WebSocket): void {
-    const connectionId = this.browserConnectionIds.get(socket);
-    if (connectionId) this.browserAutomationService.unregisterHost(connectionId);
+  private resolveBrowserProfile(agentId: string): string | undefined {
+    const descriptor = this.swarmManager.getAgent(agentId);
+    return descriptor && isEligibleLocalBuilderManager(descriptor) ? descriptor.profileId ?? descriptor.agentId : undefined;
   }
 
   private async hydrateBrowserHostSessions() {
@@ -737,7 +669,6 @@ export class WsHandler {
   }
 
   private dropSocket(socket: WebSocket): void {
-    this.unregisterBrowserHost(socket);
     this.subscriptionManager.remove(socket);
 
     try {
@@ -746,8 +677,4 @@ export class WsHandler {
       // best effort
     }
   }
-}
-
-function isBrowserClientCommand(command: { type: string }): command is BrowserClientCommand {
-  return command.type.startsWith("browser_");
 }

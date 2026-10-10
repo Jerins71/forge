@@ -223,6 +223,8 @@ it('secure IPC confines its main-owned capability to the pinned primary loopback
   expect(calls.at(-1)).toEqual({ path: '/api/activity', control: null, origin: 'http://127.0.0.1:47588' });
   expect(await service.wsTicket(primaryId, 'rpc', 1)).toMatchObject({ ok: true });
   expect(calls.at(-1)?.origin).toBe('http://127.0.0.1:47588');
+  expect(calls.at(-1)?.control).toBe(controlToken);
+  expect(await service.wsTicket(remoteId, 'rpc', 1)).toMatchObject({ ok: true });
   expect(calls.at(-1)?.control).toBeNull();
   expect(JSON.stringify(await service.list())).not.toContain(controlToken);
   expect(await readFile(join(root, 'credentials.json'), 'utf8')).not.toContain(controlToken);

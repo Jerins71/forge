@@ -1,9 +1,5 @@
 import {
   type AgentSessionPurpose,
-  type BrowserHostLifecycleResponse,
-  type BrowserHostRegistration,
-  type BrowserHostSessionStateReport,
-  type BrowserViewportSetting,
   type BuilderTimelineChannelView,
   type ChoiceAnswer,
   type ClientCommand,
@@ -54,80 +50,6 @@ export function buildSubscribeCommand(
   }
 }
 
-export function buildBrowserHostRegisterCommand(requestId: string, registration: BrowserHostRegistration): ClientCommand {
-  return { type: 'browser_host_register', requestId, registration }
-}
-
-export function buildBrowserHostHydrateCommand(requestId: string, hostId: string, hostGeneration: number): ClientCommand {
-  return { type: 'browser_host_hydrate', requestId, hostId, hostGeneration }
-}
-
-export function buildBrowserHostFocusCommand(hostId: string, hostGeneration: number, focused: boolean): ClientCommand {
-  return { type: 'browser_host_focus', hostId, hostGeneration, focused }
-}
-
-export function buildBrowserHostResponseCommand(response: Extract<ClientCommand, { type: 'browser_host_response' }>['response']): ClientCommand {
-  return { type: 'browser_host_response', response }
-}
-
-export function buildBrowserHostLifecycleResponseCommand(response: BrowserHostLifecycleResponse): ClientCommand {
-  return { type: 'browser_host_lifecycle_response', response }
-}
-
-export function buildBrowserHostStateReportCommand(
-  requestId: string,
-  hostId: string,
-  hostGeneration: number,
-  sessions: BrowserHostSessionStateReport[],
-): ClientCommand {
-  return { type: 'browser_host_state_report', requestId, hostId, hostGeneration, sessions }
-}
-
-export function buildBrowserPanelRevealAcknowledgeCommand(options: {
-  requestId: string
-  hostId: string
-  hostGeneration: number
-  sessionAgentId: string
-  profileId: string
-  tabId: string
-  sequence: number
-}): ClientCommand {
-  return { type: 'browser_panel_reveal_acknowledge', ...options }
-}
-
-export function buildBrowserTabOpenCommand(
-  sessionAgentId: string,
-  profileId: string,
-  requestId: string,
-  options?: { url?: string; activate?: boolean },
-): ClientCommand {
-  return { type: 'browser_tab_open', requestId, sessionAgentId, profileId, ...options }
-}
-
-export function buildBrowserTabActivateCommand(sessionAgentId: string, tabId: string, requestId: string): ClientCommand {
-  return { type: 'browser_tab_activate', requestId, sessionAgentId, tabId }
-}
-
-export function buildBrowserTabCloseCommand(sessionAgentId: string, tabId: string, requestId: string): ClientCommand {
-  return { type: 'browser_tab_close', requestId, sessionAgentId, tabId }
-}
-
-export function buildBrowserTabResizeCommand(
-  sessionAgentId: string,
-  tabId: string,
-  viewport: BrowserViewportSetting,
-  requestId: string,
-): ClientCommand {
-  return { type: 'browser_tab_resize', requestId, sessionAgentId, tabId, viewport }
-}
-
-export function buildBrowserRecordingStartCommand(sessionAgentId: string, tabId: string, requestId: string): ClientCommand {
-  return { type: 'browser_recording_start', requestId, sessionAgentId, tabId }
-}
-
-export function buildBrowserRecordingStopCommand(sessionAgentId: string, tabId: string, recordingId: string, requestId: string): ClientCommand {
-  return { type: 'browser_recording_stop', requestId, sessionAgentId, tabId, recordingId }
-}
 
 export function buildUserMessageCommand(input: {
   text: string

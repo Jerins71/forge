@@ -481,7 +481,7 @@ describe('environment runtime acceptance', () => {
     )
     expect(
       [...s.subscriptions.values()].filter(
-        (x) => x.method === 'legacy.session.subscribe',
+        (x) => x.method === 'browser.subscribe',
       ),
     ).toHaveLength(1)
     a.release()

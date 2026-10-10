@@ -263,7 +263,19 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     list: () => envelope(async () => (await load()).map(publicTarget)),
     pair: input => envelope(() => mutate(() => pairInternal(input))),
     session: id => envelope(async () => { const t = await target(id); await pinned(t); const result = await checkedJson(await http(t, '/api/v2/access/session')) as { deviceSession: DeviceSession }; return { deviceSession: result.deviceSession }; }),
-    wsTicket: (id, audience, protocolVersion) => envelope(async () => { if (!['rpc', 'legacy'].includes(audience) || protocolVersion !== 1) fail('INVALID_INPUT', 'Invalid socket ticket input'); const t = await target(id); await pinned(t); return await checkedJson(await http(t, '/api/v2/access/ws-ticket', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audience, protocolVersion }) })) as { ticket: string; expiresAt: string }; }),
+    wsTicket: (id, audience, protocolVersion) => envelope(async () => {
+      if (!['rpc', 'legacy'].includes(audience) || protocolVersion !== 1) fail('INVALID_INPUT', 'Invalid socket ticket input');
+      const t = await target(id); await pinned(t);
+      const headers = new Headers({ 'Content-Type': 'application/json' });
+      const control = options.desktopSecureControl?.(); const loopback = control ? new URL(control.loopbackUrl) : null;
+      // The private platform capability stays in main and only reaches this
+      // installation's loopback server. A remote primary flag cannot forward it.
+      const owned = audience === 'rpc' && t.primary && control && loopback && control.baseUrl === t.baseUrl
+        && control.token.length >= 32 && loopback.protocol === 'http:' && ['localhost','127.0.0.1','[::1]'].includes(loopback.hostname) && loopback.origin === control.loopbackUrl;
+      if (owned) headers.set('x-forge-secure-control', control.token);
+      headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', clientOrigin); headers.set('x-forge-environment-protocol', '1');
+      return await checkedJson(await fetcher((owned ? loopback.origin : t.baseUrl) + '/api/v2/access/ws-ticket', { method: 'POST', headers, body: JSON.stringify({ audience, protocolVersion }), redirect: 'error', signal: AbortSignal.timeout(10000) })) as { ticket: string; expiresAt: string };
+    }),
     request: input => envelope(async () => {
       if (!input || input.body !== undefined && (typeof input.body !== 'string' || Buffer.byteLength(input.body) > 1_048_576)) fail('INVALID_INPUT', 'Invalid environment HTTP request');
       const { t, path, headers, secureBase } = await checkedRequest(input);

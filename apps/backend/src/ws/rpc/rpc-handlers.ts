@@ -9,6 +9,7 @@ import { StreamFault } from "../../environment/streams/stream-budget.js";
 
 export interface RpcDependencies {
   lifecycle?: ReturnType<typeof import("./session-lifecycle-rpc.js").createSessionLifecycleRpc>;
+  browser?: ReturnType<typeof import('./browser-workspace-rpc.js').createBrowserWorkspaceRpc>;
   sessionState?: ReturnType<typeof import("./session-state-rpc.js").createSessionStateRpc>;
   detailFeatures?: ReturnType<typeof import("./detail-feature-rpc.js").createDetailFeatureRpc>;
   featureStream?: { subscribe(principal: Principal, input: RpcInput<"session.features.subscribe">, signal: AbortSignal): AsyncIterable<import("@forge/protocol/environment-v2").DetailFeatureStreamItem> };
@@ -18,7 +19,7 @@ export interface RpcDependencies {
   shellStream: Pick<EnvironmentStreamPort, "shell" | "shellPage"> & { descriptor(): EnvironmentDescriptor };
   detailStream: Pick<EnvironmentStreamPort, "detail" | "history" | "workers" | "content">;
   legacyAdapter: LegacyBuilderAdapter;
-  browserHost: Pick<BrowserHostRpc, "attach" | "send">;
+  browserHost: Pick<BrowserHostRpc, "attach" | "send" | "execute">;
   terminalTransport: TerminalRpcTransport;
 }
 
@@ -30,6 +31,11 @@ export function requestHandler(deps: RpcDependencies, principal: Principal, meth
   if (method.startsWith("projectAgent.")) {
     if (!deps.projectAgents) throw new StreamFault("UNAVAILABLE", "Project Agent service is unavailable");
     return deps.projectAgents.execute(principal, method as ProjectAgentMethod, input);
+  }
+  if (method === 'browser.host.register' || method === 'browser.host.hydrate' || method === 'browser.host.focus' || method === 'browser.host.reveal') return deps.browserHost.execute(principal, method, input as RpcInput<typeof method>);
+  if (method === 'browser.get' || method === 'browser.tab.open' || method === 'browser.tab.activate' || method === 'browser.tab.close' || method === 'browser.tab.resize' || method === 'browser.recording.start' || method === 'browser.recording.stop') {
+    if (!deps.browser) throw new StreamFault('UNAVAILABLE', 'Browser workspace is unavailable');
+    return deps.browser.execute(principal, method, input as RpcInput<typeof method>);
   }
   switch (method) {
     case "session.update": case "session.message.pin": case "session.pins.clear": case "session.readState.set": case "project.readState.clear": case "session.attention.dismiss":

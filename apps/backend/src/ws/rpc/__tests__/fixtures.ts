@@ -32,7 +32,7 @@ export const control: ControlService = {
   getReceipt: async (_principal, commandId) => receipt("session.send", commandId),
 };
 export const emptyLegacy: RpcDependencies["legacyAdapter"] = { execute: async () => ({ events: [] }), subscribe: async function* () {} };
-export const emptyBrowserHost: RpcDependencies["browserHost"] = { attach: async function* () {}, send: () => ({}) };
+export const emptyBrowserHost: RpcDependencies["browserHost"] = { attach: async function* () {}, send: async () => ({}), execute: async () => { throw new StreamFault("UNAVAILABLE", "Browser host unavailable"); } };
 export const emptyTerminal: RpcDependencies["terminalTransport"] = { attach: async function* () {}, input: async () => ({}), resize: async () => ({}), closeDevice: async () => {} };
 
 export async function streamFixture() {

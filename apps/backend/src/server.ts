@@ -1,4 +1,5 @@
 import type { EnvironmentDescriptor } from "@forge/protocol/environment-v2";
+import { validateSecureBuilderControlCapability, validateSecureBuilderControlOrigin } from "./terminal/terminal-access-policy.js";
 import { createEnvironmentService, type EnvironmentService } from "./environment/environment-service.js";
 import { createExposurePolicy, enableTailscaleServe } from "./environment/exposure-policy.js";
 import { getEnvironmentDbPath } from "./swarm/storage/data-paths.js";
@@ -194,7 +195,14 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
           )
           .map((descriptor) => descriptor.agentId),
     });
-    environment = await createEnvironmentService({ config, swarmManager, unreadTracker, exposure, identityOptions: options.environmentIdentity });
+    environment = await createEnvironmentService({ config, swarmManager, unreadTracker, exposure, identityOptions: options.environmentIdentity,
+      localBrowserOrigin: request => {
+        const address = request.socket.localAddress;
+        const peer = request.socket.remoteAddress?.replace(/^::ffff:/, '');
+        if (!config.isDesktop || !address || !peer || !['127.0.0.1', '::1'].includes(peer)) return false;
+        return validateSecureBuilderControlCapability(request, options.secureControlToken)
+          && validateSecureBuilderControlOrigin(request, { backendHost: request.headers.host?.split(":")[0] ?? "127.0.0.1", backendPort: request.socket.localPort ?? config.port }).ok;
+      } });
     await swarmManager.boot();
     await environment.initialize();
 
