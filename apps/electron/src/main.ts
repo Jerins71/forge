@@ -95,6 +95,8 @@ type BackendReadyMessage = {
 
 type BackendBootstrap = {
   backendUrl: string
+  /** Direct loopback address of the owned backend; Secure Sessions only ever use this. */
+  loopbackUrl: string
   backendWsUrl: string
   version: string
   platform: string
@@ -139,7 +141,7 @@ const secureVaultController = createSecureVaultController({
   platform: process.platform,
 })
 const environmentCredentials = createEnvironmentCredentialService({ storePath: path.join(app.getPath('userData'), 'environment-credentials.json'), safeStorage, clientOrigin: app.isPackaged ? 'app://forge' : new URL(electronDevServerUrl).origin,
-  desktopSecureControl: () => backendBootstrap ? { baseUrl: backendBootstrap.backendUrl, token: backendBootstrap.secureControlToken } : null,
+  desktopSecureControl: () => backendBootstrap ? { baseUrl: backendBootstrap.backendUrl, loopbackUrl: backendBootstrap.loopbackUrl, token: backendBootstrap.secureControlToken } : null,
 })
 const handledTerminationSignals = new Set<NodeJS.Signals>()
 const externalChromeUpdateQuiesceHook: UpdateQuiesceHook = {
@@ -1679,6 +1681,7 @@ function buildBackendBootstrap(
 ): BackendBootstrap {
   return {
     backendUrl: publicBaseUrl,
+    loopbackUrl: `http://127.0.0.1:${port}`,
     backendWsUrl: publicBaseUrl.replace(/^http/, 'ws'),
     version: app.getVersion(),
     platform: process.platform,

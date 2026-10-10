@@ -141,6 +141,35 @@ it('authenticated activity drives sleep prevention and updater treats revoked or
   expect(await hasActiveSessions(async()=>null)).toBe(true);
 });
 
+it('secure IPC sends the capability only to the loopback backend when the primary is exposed publicly', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-secure-exposed-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const primaryId = 'c6a8cae8-1291-4bc5-ab1f-a574c4e6fbd9';
+  const publicUrl = 'https://mac.tailnet.ts.net';
+  const loopbackUrl = 'http://127.0.0.1:49993';
+  const controlToken = 'synthetic-secure-control-capability'.padEnd(43, 'y');
+  const calls: Array<{ origin: string; path: string; control: string | null; requestOrigin: string | null }> = [];
+  const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input)); const headers = new Headers(init?.headers);
+    calls.push({ origin: url.origin, path: url.pathname, control: headers.get('x-forge-secure-control'), requestOrigin: headers.get('origin') });
+    let payload: unknown = {};
+    if (url.pathname === '/api/v2/environment') payload = { environmentId: primaryId, protocolVersion: 1, label: 'fixture' };
+    if (url.pathname === '/api/v2/access/challenge') payload = { challengeId: primaryId, nonce: 'synthetic-nonce' };
+    if (url.pathname === '/api/v2/access/exchange') payload = { environment: { environmentId: primaryId, label: 'fixture' }, deviceSession: { deviceSessionId: primaryId, deviceName: 'fixture', scopes: ['session:read'], createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 100000).toISOString() }, bearerToken: 't'.repeat(43) };
+    return new Response(JSON.stringify(payload), { status: 200 });
+  });
+  const service = createEnvironmentCredentialService({ storePath: join(root, 'credentials.json'), clientOrigin: 'app://forge', fetch: fetcher as typeof fetch,
+    safeStorage: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value).map(b => b ^ 0x55), decryptString: value => value.map(b => b ^ 0x55).toString() },
+    desktopSecureControl: () => ({ baseUrl: publicUrl, loopbackUrl, token: controlToken }),
+  });
+  expect(await service.pairPrimary({ environmentId: primaryId, baseUrl: publicUrl, credential: { kind: 'code', code: 'ABCD-EFGH-JKMN' }, deviceName: 'test', requestedScopes: ['session:read'] })).toMatchObject({ ok: true });
+  const secure = { environmentId: primaryId, path: '/api/secure-sessions/manager/start', method: 'POST' as const, headers: { 'Content-Type': 'application/json' }, body: '{}' };
+  expect(await service.request(secure)).toMatchObject({ ok: true });
+  expect(calls.at(-1)).toEqual({ origin: loopbackUrl, path: secure.path, control: controlToken, requestOrigin: 'app://forge' })
+  expect(calls.filter(call => call.origin !== loopbackUrl).every(call => call.control === null)).toBe(true)
+  expect(await service.request({ ...secure, path: '/api/activity', method: 'GET', body: undefined })).toMatchObject({ ok: true });
+  expect(calls.at(-1)).toMatchObject({ origin: publicUrl, control: null });
+});
+
 it('secure IPC confines its main-owned capability to the pinned primary loopback target', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forge-secure-ipc-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
   const primaryId = 'a6a8cae8-1291-4bc5-ab1f-a574c4e6fbd9';
@@ -164,7 +193,7 @@ it('secure IPC confines its main-owned capability to the pinned primary loopback
   });
   const service = createEnvironmentCredentialService({ storePath: join(root, 'credentials.json'), clientOrigin: 'http://127.0.0.1:47588', fetch: fetcher as typeof fetch,
     safeStorage: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value).map(b => b ^ 0x55), decryptString: value => value.map(b => b ^ 0x55).toString() },
-    desktopSecureControl: () => available ? { baseUrl: ownedUrl, token: controlToken } : null,
+    desktopSecureControl: () => available ? { baseUrl: ownedUrl, loopbackUrl: ownedUrl, token: controlToken } : null,
   });
   const pair = (environmentId: string, url: string) => ({ environmentId, baseUrl: url, credential: { kind: 'code' as const, code: 'ABCD-EFGH-JKMN' }, deviceName: 'test', requestedScopes: ['session:read' as const] });
   expect(await service.pairPrimary(pair(primaryId, baseUrl))).toMatchObject({ ok: true });

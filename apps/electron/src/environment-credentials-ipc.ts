@@ -63,7 +63,7 @@ async function boundedBytes(response: Response, maximum = MAX_ARTIFACT_BYTES): P
   const result = new Uint8Array(bytes); let offset = 0; for (const part of parts) { result.set(part, offset); offset += part.length; } return result;
 }
 function publicTarget(value: StoredTarget): DesktopEnvironmentTarget { return { environmentId: value.environmentId, baseUrl: value.baseUrl, label: value.label, primary: value.primary, deviceSessionId:value.deviceSessionId,deviceName:value.deviceName,scopes:[...value.scopes],pairedAt:value.pairedAt,expiresAt:value.expiresAt }; }
-export function createEnvironmentCredentialService(options: { storePath: string; safeStorage: EnvironmentSafeStorage; fetch?: typeof fetch; clientOrigin?: string; desktopSecureControl?: () => { baseUrl: string; token: string } | null }) {
+export function createEnvironmentCredentialService(options: { storePath: string; safeStorage: EnvironmentSafeStorage; fetch?: typeof fetch; clientOrigin?: string; desktopSecureControl?: () => { baseUrl: string; loopbackUrl: string; token: string } | null }) {
   const fetcher = options.fetch ?? fetch;
   // Socket tickets are bound to the requesting origin, so it must be the renderer's real origin (dev servers are not app://forge).
   const clientOrigin = options.clientOrigin ?? 'app://forge';
@@ -110,9 +110,10 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     writes = write.catch(() => undefined); return write;
   }
   async function target(id: string): Promise<StoredTarget> { if (!UUID.test(id)) return fail('INVALID_INPUT', 'Invalid environment identity'); const t = (await load()).find(t => t.environmentId === id); if (!t) return fail('UNAUTHENTICATED', 'Environment needs pairing'); return t; }
-  async function http(t: StoredTarget, path: string, init: RequestInit = {}) {
-    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', headers.has('x-forge-secure-control') ? 'app://forge' : clientOrigin); headers.set('x-forge-environment-protocol', '1');
-    try { const response = await fetcher(t.baseUrl + path, { ...init, headers, redirect: 'error', signal: init.signal ?? AbortSignal.timeout(30_000) }); if (response.status === 401) await clearRuntime(t.environmentId); return response; } catch { return fail('UNAVAILABLE', 'Environment request could not connect'); }
+  /** `secureBase` is set only by checkedRequest for main-owned Secure Sessions calls to the loopback backend. */
+  async function http(t: StoredTarget, path: string, init: RequestInit = {}, secureBase?: string) {
+    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${t.bearerToken}`); headers.set('Origin', secureBase ? 'app://forge' : clientOrigin); headers.set('x-forge-environment-protocol', '1');
+    try { const response = await fetcher((secureBase ?? t.baseUrl) + path, { ...init, headers, redirect: 'error', signal: init.signal ?? AbortSignal.timeout(30_000) }); if (response.status === 401) await clearRuntime(t.environmentId); return response; } catch { return fail('UNAVAILABLE', 'Environment request could not connect'); }
   }
   async function checkedJson(response: Response): Promise<unknown> {
     if (response.status === 401) fail('UNAUTHENTICATED', 'Environment needs pairing');
@@ -139,14 +140,17 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     if (securePath) {
       if (!t.primary) fail('UNAVAILABLE', 'Secure Sessions are not available on remote machines. Open a session on This machine to use them.');
       const control = options.desktopSecureControl?.();
-      const endpoint = new URL(t.baseUrl);
-      // Only main may supply the capability. A persisted primary flag or a paired remote
-      // cannot move it away from the currently owned, direct loopback backend.
-      if (!control || control.token.length < 32 || control.baseUrl !== t.baseUrl || endpoint.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname)) return fail('UNAVAILABLE', 'Local Desktop Secure Sessions are unavailable.');
+      const loopback = control ? new URL(control.loopbackUrl) : null;
+      // Only main may supply the capability, and it only ever travels to the owned backend's
+      // loopback port, even when this machine is also exposed on LAN or a tailnet. A persisted
+      // primary flag or a paired remote cannot move it elsewhere.
+      if (!control || !loopback || control.token.length < 32 || control.baseUrl !== t.baseUrl || loopback.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(loopback.hostname) || loopback.origin !== control.loopbackUrl) return fail('UNAVAILABLE', 'Local Desktop Secure Sessions are unavailable.');
       headers.set('x-forge-secure-control', control.token);
+      await pinned(t);
+      return { t, path: url.pathname + url.search, headers, secureBase: loopback.origin };
     }
     await pinned(t);
-    return { t, path: url.pathname + url.search, headers };
+    return { t, path: url.pathname + url.search, headers, secureBase: undefined };
   }
   async function pairInternal(input: EnvironmentPairInput, primary = false) {
     if (!input || typeof input.baseUrl !== 'string') return fail('INVALID_INPUT','Invalid pairing input');
@@ -230,14 +234,14 @@ export function createEnvironmentCredentialService(options: { storePath: string;
     wsTicket: (id, audience, protocolVersion) => envelope(async () => { if (!['rpc', 'legacy'].includes(audience) || protocolVersion !== 1) fail('INVALID_INPUT', 'Invalid socket ticket input'); const t = await target(id); await pinned(t); return await checkedJson(await http(t, '/api/v2/access/ws-ticket', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audience, protocolVersion }) })) as { ticket: string; expiresAt: string }; }),
     request: input => envelope(async () => {
       if (!input || input.body !== undefined && (typeof input.body !== 'string' || Buffer.byteLength(input.body) > 1_048_576)) fail('INVALID_INPUT', 'Invalid environment HTTP request');
-      const { t, path, headers } = await checkedRequest(input);
-      const response = await http(t, path, { method: input.method, headers, body: input.body });
+      const { t, path, headers, secureBase } = await checkedRequest(input);
+      const response = await http(t, path, { method: input.method, headers, body: input.body }, secureBase);
       return { status: response.status, headers: safeHeaders(response), body: new TextDecoder().decode(await boundedBytes(response)) };
     }),
     requestBinary: input => envelope(async () => {
       if (!input || !Number.isSafeInteger(input.maxBytes) || input.maxBytes < 1 || input.maxBytes > MAX_ARTIFACT_BYTES || input.body !== undefined && (!(input.body instanceof Uint8Array) || input.body.byteLength > MAX_ARTIFACT_BYTES)) fail('INVALID_INPUT', 'Invalid environment binary request');
-      const { t, path, headers } = await checkedRequest(input);
-      const response = await http(t, path, { method: input.method, headers, ...(input.body ? { body: Buffer.from(input.body) } : {}) });
+      const { t, path, headers, secureBase } = await checkedRequest(input);
+      const response = await http(t, path, { method: input.method, headers, ...(input.body ? { body: Buffer.from(input.body) } : {}) }, secureBase);
       return { status: response.status, headers: safeHeaders(response), bytes: await boundedBytes(response, input.maxBytes) };
     }),
     uploadArtifact: input => envelope(async () => {
