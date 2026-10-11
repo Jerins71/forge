@@ -468,9 +468,9 @@ export class ConversationProjector {
   }
 
   /** Closes the rows a finished turn left open and persists them, including its retry or failure status. */
-  settleProviderTurn(actorId: string, error?: string): void {
+  settleProviderTurn(actorId: string, end: { error?: string; stopped?: boolean; runId?: string } = {}): void {
     const sessionId = resolveManagerContextId(this.deps.descriptors.get(actorId), actorId);
-    for (const finished of this.activity.settleTurn({ actorId, sessionId, error, timestamp: this.deps.now() })) this.emitActivitySummary(buildTimelineSummary(finished));
+    for (const finished of this.activity.settleTurn({ actorId, sessionId, ...end, timestamp: this.deps.now() })) this.emitActivitySummary(buildTimelineSummary(finished));
   }
 
   emitAgentToolCall(event: AgentToolCallEvent): void {

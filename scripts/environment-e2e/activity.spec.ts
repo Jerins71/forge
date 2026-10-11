@@ -220,12 +220,13 @@ test('provider retries and the final failure show as one status row, live and af
 // Last: the fixture's provider process exits, and recovering the session is outside this suite.
 test('a provider process that dies mid-turn is one failed status row', async ({ page }) => {
   const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
-  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.b.sessionId)}&env=${fleet.b.environmentId}`)
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
   await expect(transcript(page)).toBeVisible()
+  const before = await status().count()
   await send(page, '[fixture:crash] Lose the provider')
-  await expect(status().last()).toHaveAttribute('data-activity-status', 'failed', { timeout: 30_000 })
+  await expect(status()).toHaveCount(before + 1, { timeout: 30_000 })
+  await expect(status().last()).toHaveAttribute('data-activity-status', 'failed')
   await expect(status().last()).toContainText('Failed: The provider process stopped unexpectedly.')
-  expect(await status().count()).toBe(1)
   await status().last().getByRole('button').click()
   await expect(status().last().getByTestId('activity-detail')).toContainText('exited')
   await page.waitForTimeout(1500)

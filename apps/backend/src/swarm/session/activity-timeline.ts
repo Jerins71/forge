@@ -38,7 +38,7 @@ export class ActivityTimelineTracker {
   /** The open status row of each actor's current turn, and the retries it has counted. */
   private readonly status = new Map<string, Tracked>();
   private readonly attempts = new Map<string, number>();
-  private readonly failedAt = new Map<string, number>();
+  private readonly failedAt = new Map<string, { at: number; runId?: string }>();
 
   constructor(private readonly publish: (item: TimelineActivity) => void, private readonly now: () => number = Date.now) {}
 
@@ -130,7 +130,7 @@ export class ActivityTimelineTracker {
    * Ends the turn's open rows: reasoning an interrupt left running, and the status row, which
    * fails with the provider error or records the retries the turn recovered from.
    */
-  settleTurn(fact: { actorId: string; sessionId: string; error?: string; runId?: string; timestamp: string }): TimelineActivity[] {
+  settleTurn(fact: { actorId: string; sessionId: string; error?: string; stopped?: boolean; runId?: string; timestamp: string }): TimelineActivity[] {
     const finished: TimelineActivity[] = [];
     for (const tracked of this.items.values()) {
       if (tracked.item.actorId !== fact.actorId || tracked.item.status !== "running") continue;
@@ -141,8 +141,8 @@ export class ActivityTimelineTracker {
     const open = this.status.get(fact.actorId);
     if (!open && !fact.error) return finished;
     // The adapter and the runtime can both report one failure; the first report is the row.
-    if (fact.error && this.hasRecentFailure(fact.actorId)) return finished;
-    if (fact.error) this.failedAt.set(fact.actorId, this.now());
+    if (fact.error && this.hasRecentFailure(fact.actorId, fact.runId)) return finished;
+    if (fact.error) this.failedAt.set(fact.actorId, { at: this.now(), runId: fact.runId });
     const tracked = open ?? this.statusRow(fact);
     const item = tracked.item;
     const attempts = this.attempts.get(item.itemId);
@@ -153,7 +153,7 @@ export class ActivityTimelineTracker {
       Object.assign(item, bounded("detail", `${attempts ? `Retried ${attempts} ${attempts === 1 ? "time" : "times"}\n` : ""}${fact.error}`, "head"));
     } else {
       item.status = "completed";
-      item.summary = `Recovered after ${attempts} ${attempts === 1 ? "retry" : "retries"}: ${oneLine((item.detail ?? "").split("\n").slice(1).join(" "))}`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
+      item.summary = `${fact.stopped ? "Stopped" : "Recovered"} after ${attempts} ${attempts === 1 ? "retry" : "retries"}: ${oneLine((item.detail ?? "").split("\n").slice(1).join(" "))}`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
     }
     item.completedAt = fact.timestamp;
     this.publishNow(tracked);
@@ -161,9 +161,11 @@ export class ActivityTimelineTracker {
     return finished;
   }
 
-  hasRecentFailure(actorId: string): boolean {
-    const at = this.failedAt.get(actorId);
-    return at !== undefined && this.now() - at < FAILURE_REPORT_WINDOW_MS;
+  /** A failure already reported for this actor's turn. A known different run is always a new failure. */
+  hasRecentFailure(actorId: string, runId?: string): boolean {
+    const last = this.failedAt.get(actorId);
+    if (!last || this.now() - last.at >= FAILURE_REPORT_WINDOW_MS) return false;
+    return !runId || !last.runId || runId === last.runId;
   }
 
   private statusRow(fact: { actorId: string; sessionId: string; runId?: string; timestamp: string }): Tracked {

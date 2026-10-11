@@ -6,8 +6,8 @@ export interface ProviderReasoningSink {
   text(fact: { channel: "assistant" | "reasoning"; nativeId: string; phase: "start" | "delta" | "complete"; text: string }): void;
   /** The provider is retrying a failed request on its own. */
   retrying(fact: { attempt: number; message: string }): void;
-  /** The root attempt ended, with the provider error that ended it when there was one. */
-  settled(error?: string): void;
+  /** The root attempt ended: with the provider error that ended it, or cut short without completing. */
+  settled(end: { error?: string; stopped?: boolean }): void;
 }
 
 /**
@@ -26,7 +26,8 @@ export function tapProviderReasoning(adapter: ProviderAdapter, sink: ProviderRea
     else if (observation.type === "error" || observation.type === "terminal") {
       const error = observation.type === "error" ? observation.message
         : observation.outcome === "failed" ? observation.error?.message ?? "The provider turn failed." : undefined;
-      sink.settled(failureReported ? undefined : error);
+      sink.settled({ ...(error !== undefined && !failureReported ? { error } : {}),
+        ...(observation.type === "terminal" && observation.outcome !== "completed" && error === undefined ? { stopped: true } : {}) });
       failureReported ||= error !== undefined;
     }
   };

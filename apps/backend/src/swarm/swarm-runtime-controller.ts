@@ -114,7 +114,7 @@ export interface SwarmRuntimeControllerHost extends SwarmToolHost {
     emitConversationMessage(event: ConversationMessageEvent, options?: { routingReceipt?: MessageRoutingReceiptRecord }): void;
     observeProviderText(fact: { actorId: string; channel: "assistant" | "reasoning"; nativeId: string; phase: "start" | "delta" | "complete"; text: string; runId?: string }): void;
     observeProviderRetry(fact: { actorId: string; attempt: number; message: string; runId?: string }): void;
-    settleProviderTurn(actorId: string, error?: string): void;
+    settleProviderTurn(actorId: string, end?: { error?: string; stopped?: boolean; runId?: string }): void;
     hasRecentProviderFailure(actorId: string): boolean;
   };
   promptService: {
@@ -384,7 +384,7 @@ export class SwarmRuntimeController {
       return { binding, adapter: tapProviderReasoning(adapter, {
         text: fact => this.host.conversationProjector.observeProviderText({ ...fact, actorId, runId: this.host.getActiveTurnId?.(actorId) }),
         retrying: fact => this.host.conversationProjector.observeProviderRetry({ ...fact, actorId, runId: this.host.getActiveTurnId?.(actorId) }),
-        settled: error => this.host.conversationProjector.settleProviderTurn(actorId, error),
+        settled: end => this.host.conversationProjector.settleProviderTurn(actorId, { ...end, runId: this.host.getActiveTurnId?.(actorId) }),
       }) };
     };
     try { return await open(); } catch (error) {
@@ -814,7 +814,7 @@ export class SwarmRuntimeController {
         patchDescriptorFromRuntimeStatus: (agentId, patch) =>
           this.host.patchDescriptorFromRuntimeStatus(agentId, patch),
         emitConversationMessage: (event) => this.host.emitConversationMessage(event),
-        reportProviderFailure: (agentId, message) => this.host.conversationProjector.settleProviderTurn(agentId, message),
+        reportProviderFailure: (agentId, message) => this.host.conversationProjector.settleProviderTurn(agentId, { error: message, runId: this.host.getActiveTurnId?.(agentId) }),
         logDebug: (message, details) => this.logDebug(message, details)
       });
     }
