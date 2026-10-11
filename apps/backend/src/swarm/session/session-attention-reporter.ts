@@ -31,6 +31,8 @@ export interface SessionAttentionReporterOptions {
   getPendingChoiceCount: (sessionAgentId: string) => number;
   /** Committed accepted-turn queue depth for a session. */
   getPendingTurnContextCount: (sessionAgentId: string) => number;
+  /** What started the manager's running turn; undefined when it is not tracked. */
+  getActiveTurnSource?: (sessionAgentId: string) => "user_input" | "project_agent_input" | "agent_message" | "worker_result" | undefined;
   log?: (message: string, details?: Record<string, unknown>) => void;
 }
 
@@ -59,10 +61,14 @@ export class SessionAttentionReporter {
     const snapshot = this.snapshot(sessionAgentId);
     if (!snapshot) return;
 
+    const turnSource = this.options.getActiveTurnSource?.(sessionAgentId);
     await this.options.coordinator.observeStatus({
       ...snapshot,
       agentId: input.agentId,
       source: descriptor.role === "worker" ? "owned_worker" : "manager",
+      ...(descriptor.role === "manager" && turnSource
+        ? { turnInitiator: turnSource === "user_input" || turnSource === "project_agent_input" ? "user" as const : "internal" as const }
+        : {}),
       previousStatus: input.previousStatus,
       nextStatus: input.nextStatus,
       transitionedAt: input.transitionedAt,

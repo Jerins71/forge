@@ -216,6 +216,11 @@ export class TurnContextCoordinator<TCodexGate=unknown,TCodexDelegation=unknown,
     if (runtimeToken!==undefined && active?.runtimeToken!==undefined && runtimeToken!==active.runtimeToken) return undefined;
     return this.core?.read(agentId).activeRunId;
   }
+  /** What started the manager's running turn; undefined when no tracked turn is active. */
+  getActiveTurnSource(agentId:string):InboundTurnSource|undefined {
+    const activeRunId=this.core?.read(agentId).activeRunId;
+    return activeRunId ? this.contexts.get(agentId)?.get(activeRunId)?.source : undefined;
+  }
   getPendingContextCount(agentId:string):number { return this.core?.read(agentId).pendingRunIds.length ?? 0; }
   getActiveWorkerParentContext(agentId:string):ActiveWorkerParentContext|undefined {
     const context=this.activeTurnByAgentId.get(agentId)?.parentContext;

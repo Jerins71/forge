@@ -14,7 +14,7 @@ import { decide } from "./orchestration/kernel.js";
 import { lineageSnapshot,sessionTransferCapabilities } from "./orchestration/transfers.js";
 import { loadState, projectLifecycle } from "./orchestration/store.js";
 import type { CoreCommand, Decision } from "./orchestration/types.js";
-import { requestChoice, requestSession } from "./orchestration/request-projection.js";
+import { requestChoice, requestSession, requestAttention } from "./orchestration/request-projection.js";
 
 type ShellEvent = Extract<ShellStreamItem, { kind: "event" }>["event"];
 type DetailEvent = Extract<DetailStreamItem, { kind: "event" }>["event"];
@@ -320,9 +320,10 @@ export function createEventSink(database: Database, clock: () => number, random:
         const run = thread.activeRunId ? state.runs[thread.activeRunId] : undefined;
         const terminal = [...decision.events].reverse().find(event => event.type === "run.terminal" && event.run.threadId === threadId);
         const attention = Object.values(state.requests).some(request => request.threadId === threadId && request.state === "pending") ? "choice" : run ? "none" : terminal?.type === "run.terminal" ? terminal.run.outcome === "completed" ? "result" : terminal.run.outcome === "failed" ? "error" : "none" : summary.attention;
+        const attentionOccurrence = requestAttention(database, state, threadId) ?? (summary.attentionOccurrence?.attentionId.startsWith("native-choice:") ? undefined : summary.attentionOccurrence);
         const status = lifecycleStatus.sessionStatus;
         database.prepare("UPDATE control_sessions SET desired_state=?,run_generation=? WHERE session_id=?").run(thread.desired, thread.generation, threadId);
-        sink.append(tx, { topic: "shell", sessionId: threadId, event: { type: "session.upsert", session: { ...summary, ...(thread.model ? { model: { ...thread.model, origin: thread.model.provider !== summary.model?.provider || thread.model.modelId !== summary.model?.modelId ? "session_override" : summary.model.origin } } : {}), transferCapabilities:sessionTransferCapabilities(binding), ...(thread.lineage ? {lineage:thread.lineage}:{}), status, attention, pendingCount: Object.values(state.runs).filter(r => r.threadId === threadId && r.state === "queued").length } } });
+        sink.append(tx, { topic: "shell", sessionId: threadId, event: { type: "session.upsert", session: { ...summary, ...(thread.model ? { model: { ...thread.model, origin: thread.model.provider !== summary.model?.provider || thread.model.modelId !== summary.model?.modelId ? "session_override" : summary.model.origin } } : {}), transferCapabilities:sessionTransferCapabilities(binding), ...(thread.lineage ? {lineage:thread.lineage}:{}), status, attention, attentionOccurrence, pendingCount: Object.values(state.runs).filter(r => r.threadId === threadId && r.state === "queued").length } } });
       }
       return decision;
     },
