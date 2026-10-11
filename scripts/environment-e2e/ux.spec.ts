@@ -369,6 +369,37 @@ test('a turn the user did not send raises no attention; a turn they sent still d
   assertions.internalTurnAttention = { sessionId, afterOnboarding: null, afterUserTurn: (await attention())?.reason }
 })
 
+test('a decision asked by a turn the user did not send still reaches Needs you, and its completion does not', async () => {
+  const { a } = fleet
+  const session = await bootstrap(a)
+  const directory = await mkdtemp(join(tmpdir(), 'forge-ux-decision-'))
+  await copyFile(join(fixture(a).checkout, '.fixture-environment.json'), join(directory, '.fixture-environment.json'))
+  const commandId = randomUUID()
+  const projectId = `project-${commandId}`
+  // A project-level override of the onboarding prompt makes that hidden turn ask the user to choose.
+  const prompts = join(fixture(a).dataDir, 'profiles', projectId, 'prompts', 'operational')
+  await mkdir(prompts, { recursive: true })
+  await writeFile(join(prompts, 'bootstrap.md'), '[fixture:choice] Ask before starting.\n')
+  const created = await fixtureRpcOnce(a.baseUrl, session, 'project.create', { commandId, title: 'UX Decision', cwd: directory, model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' }, secureSessionsEnabled: false })
+  expect(created.state).toBe('succeeded')
+  const sessionId = created.result.sessionId as string
+  const attention = async () => (await shellSession(a, sessionId))?.attentionOccurrence?.reason ?? null
+  const rpc = await openFixtureRpc(a.baseUrl, session)
+  try {
+    await rpc.call('session.subscribe', { sessionId })
+    const pending = () => [...rpc.frames].reverse().flatMap(frame => frame.item?.kind === 'snapshot' ? frame.item.snapshot.choices : frame.item?.event?.type === 'choice.upsert' ? [frame.item.event.choice] : []).find((choice: { status: string }) => choice.status === 'pending')
+    const choice = await until<any>(pending, Boolean, 30_000)
+    await expect.poll(attention, { timeout: 15_000 }).toBe('decision_waiting')
+    const answer = await rpc.call('session.choose', { commandId: randomUUID(), sessionId, choiceId: choice.choiceId, answers: choice.questions.map((question: any) => ({ questionId: question.id, selectedOptionIds: [question.options[0].id] })) })
+    await until(() => fixtureRpcOnce(a.baseUrl, session, 'command.get', { commandId: answer.commandId }), receipt => !['accepted', 'running'].includes(receipt.state))
+    // Answered and finished: the decision is gone and nothing reports the internal work as finished.
+    await expect.poll(async () => (await shellSession(a, sessionId))?.status, { timeout: 30_000 }).toBe('idle')
+    await new Promise(resolve => setTimeout(resolve, 3_000))
+    expect(await attention()).toBeNull()
+    assertions.internalTurnDecision = { sessionId, whilePending: 'decision_waiting', afterAnswer: null }
+  } finally { rpc.close() }
+})
+
 test('a new project opens clean: no settling error and nothing in Needs you', async ({ page }) => {
   // The scripted Codex peer only runs in a directory that carries its environment's marker.
   const directory = await mkdtemp(join(tmpdir(), 'forge-ux-project-'))

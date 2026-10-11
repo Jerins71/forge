@@ -52,7 +52,8 @@ export interface SessionAttentionStatusObservation extends SessionAttentionSessi
   source: "manager" | "owned_worker";
   /**
    * Who started the manager turn behind this transition. Work the user did not ask for (project
-   * onboarding, a peer's message, a late worker result) never asks for their attention by itself.
+   * onboarding, a peer's message, a late worker result) never reports itself as finished; a decision
+   * it needs from the user, or its failure, still does.
    */
   turnInitiator?: "user" | "internal";
   previousStatus: AgentStatus;
@@ -214,10 +215,13 @@ export class SessionAttentionCoordinator {
         if (current?.phase === "working") {
           // The continuation actually began, which is the only authoritative
           // release for the accepted-turn barrier. Same epoch continues.
-          if (!current.awaitingContinuation) return { value: undefined };
+          const adopts = current.internal === true && observation.source === "manager" && observation.turnInitiator === "user";
+          if (!current.awaitingContinuation && !adopts) return { value: undefined };
           const resumed = cloneSessionAttentionState(state);
           const record = { ...current };
           delete record.awaitingContinuation;
+          // A turn the user sends into an internal epoch makes its outcome theirs.
+          if (adopts) delete record.internal;
           const progressed = await this.progressWorkingEpoch(observation, record);
           if (progressed) {
             resumed.sessions[sessionAgentId] = progressed.record;
@@ -241,7 +245,8 @@ export class SessionAttentionCoordinator {
       }
 
       if (!current || current.phase !== "working") {
-        return { value: undefined };
+        // An internal turn has no epoch. Its failure still needs the user.
+        return observation.nextStatus === "error" ? this.raiseForInternalTurn(state, observation, true) : { value: undefined };
       }
 
       const next = cloneSessionAttentionState(state);
@@ -305,7 +310,8 @@ export class SessionAttentionCoordinator {
         return { value: undefined, state: next, changes: [] };
       }
       if (!current || current.phase !== "working") {
-        return { value: undefined };
+        // An internal turn has no epoch. A decision it puts to the user still needs them.
+        return hasPendingChoice(session) ? this.raiseForInternalTurn(state, session, false) : { value: undefined };
       }
 
       // Latch the barrier for this epoch the first time an accepted turn is
@@ -479,10 +485,36 @@ export class SessionAttentionCoordinator {
     }
 
     const settled = await this.settledRecord(session, record);
+    if (record.internal && settled.attention?.reason !== "work_failed") {
+      // Nobody asked for this work, so its completion is not news: settle already dismissed.
+      const quiet: PersistedSessionAttentionRecord = { ...settled, attention: { ...settled.attention!, dismissedAt: settled.attention!.raisedAt } };
+      return { record: quiet, changes: toAttention(sessionAgentId, record) ? [{ sessionAgentId, attention: null }] : [] };
+    }
     return {
       record: settled,
       changes: [{ sessionAgentId, attention: toAttention(sessionAgentId, settled)! }],
     };
+  }
+
+  /**
+   * Opens an epoch for a turn the user did not send, at the moment it needs them: a pending choice
+   * raises decision_waiting, a failure settles as work_failed. The epoch is marked internal so that
+   * finishing quietly afterwards raises nothing.
+   */
+  private async raiseForInternalTurn(
+    state: PersistedSessionAttentionState,
+    session: SessionAttentionSessionSnapshot,
+    hadError: boolean,
+  ): Promise<StateMutation<void>> {
+    const started = startEpoch(state, session, this.now());
+    const record = started.state?.sessions[session.manager.agentId];
+    if (!started.state || !record) return started;
+    const internal: PersistedSessionAttentionRecord = { ...record, internal: true, ...(hadError ? { hadError: true } : {}) };
+    started.state.sessions[session.manager.agentId] = internal;
+    const progressed = await this.progressWorkingEpoch(session, internal);
+    if (!progressed) return started;
+    started.state.sessions[session.manager.agentId] = progressed.record;
+    return { value: undefined, state: started.state, changes: [...(started.changes ?? []), ...progressed.changes] };
   }
 
   private async settledRecord(
