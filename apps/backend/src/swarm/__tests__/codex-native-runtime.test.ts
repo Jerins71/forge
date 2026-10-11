@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Type } from "@sinclair/typebox";
 import { CodexAgentRuntime, NATIVE_CODEX_STATE } from "../runtime/codex/codex-agent-runtime.js";
+import { CodexProviderAdapter } from "../runtime/codex/codex-provider-adapter.js";
 import { nativeCodexEnvironment } from "../runtime/codex/codex-runtime-auth.js";
 import type { CodexAppServerClientHandlers } from "../codex-app-server/types.js";
 import type { AgentDescriptor } from "../types.js";
@@ -71,6 +72,19 @@ async function fixture(options: { model?: AgentDescriptor["model"]; root?: strin
 }
 
 describe("Native Codex manager", () => {
+  it("stops an acknowledged controlled turn before its turn-start notification arrives", async () => {
+    const open = vi.spyOn(CodexProviderAdapter.prototype, "open");
+    const f = await fixture();
+    const binding = await open.mock.results[0]!.value;
+    open.mockRestore();
+    expect(await f.runtime.providerAdapter.start({ binding, runId: "controlled-run", attemptId: "controlled-attempt", input: { text: "Work" } }))
+      .toMatchObject({ status: "accepted", turn: { nativeId: "turn-1" } });
+    // The fixture returns the acceptance response without any turn/started notification.
+    await expect(f.runtime.terminate()).resolves.toBeUndefined();
+    expect(f.client.request).toHaveBeenCalledWith("turn/interrupt", { threadId: "native-thread", turnId: "turn-1" });
+    expect(await f.runtime.providerAdapter.drain(binding)).toEqual({ status: "clean" });
+  });
+
   it("keeps stop blocked when process exit is unconfirmed and permits cleanup retry", async () => {
     const f = await fixture();
     await f.runtime.sendMessage("Work");

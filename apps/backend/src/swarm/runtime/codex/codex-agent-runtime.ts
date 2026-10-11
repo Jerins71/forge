@@ -98,6 +98,11 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       projectTrusted: options.projectTrusted, auth: options.auth, createClient: options.createClient,
       previousPromptDigest: stored?.promptDigest, host: options.host, autoRespond: true,
       onStart: input => this.prepareTurnProjection(input),
+      onTurnAccepted: (turn, attemptId) => {
+        if (this.active?.attemptId !== attemptId || turn.conversationId !== this.threadId) return;
+        this.active.id = turn.nativeId;
+        this.markThreadStarted();
+      },
       onStartRejected: async (input, error) => {
         if (this.active?.runId === input.runId && this.active.attemptId === input.attemptId && !this.active.legacy) await this.fail(error, true);
       },

@@ -76,6 +76,7 @@ interface Options {
 
 /** Creator-prepared canonical projection; admission and queueing remain external. */
   onStart?(input: ProviderStartInput): Promise<void>;
+  onTurnAccepted?(turn: ProviderTurnRef, attemptId: string): void;
   onStartRejected?(input: ProviderStartInput, error: unknown): Promise<void>;
   onNotification?(method: string, params: Record<string, any>): Promise<void>;
   onExit?(error: Error): void;
@@ -535,6 +536,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
     if (turn.accepted || turn.ended) return;
     this.state!.turns.set(`${turn.conversation.nativeId}\0${id}`, turn);
     turn.accepted = true;
+    if (!turn.parentTurn) this.options.onTurnAccepted?.(this.turnRef(turn), turn.attemptId);
     this.emit(turn, { type: "accepted", origin: this.origin(turn), turn: this.turnRef(turn) });
   }
   private origin(turn: NativeTurn): Origin {
