@@ -473,6 +473,9 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
         if (active) {
           try {
             for (const event of active.mapper.finish()) await this.emit(event);
+            // Process exit has no native turn/completed notification. Close
+            // that failed cycle before agent_end evaluates visible output.
+            await this.emit({ type: "turn_end", toolResults: [], meta: { outcome: "failed" } });
             await this.emit({ type: "agent_end" });
           } finally { active.settle(); }
         }
