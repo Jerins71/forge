@@ -44,7 +44,7 @@ export const ActivityGroup = memo(function ActivityGroup({ groupId, rows, open, 
   const Icon = ACTIVITY_ICONS[groupKind(rows)]
   const failed = rows.some((row) => row.status === 'failed')
   return (
-    <div className="mx-auto w-full max-w-[760px] py-0.5 pl-[40px]" data-testid="activity-group" data-activity-group-open={expanded ? 'true' : 'false'}>
+    <div className="w-full py-0.5 pl-[40px]" data-testid="activity-group" data-activity-group-open={expanded ? 'true' : 'false'}>
       {turn ? <WorkTimer startedAt={turn.startedAt} endedAt={turn.endedAt} /> : null}
       {open ? null : (
         <button type="button" className={cn(activityRowClassName, 'cursor-pointer')} aria-expanded={expanded} aria-controls={listId} onClick={() => onToggle(groupId)} data-testid="activity-group-header">
