@@ -9,7 +9,9 @@ import type { ControlCoreOptions } from "../effect-types.js";
 import { loadState } from "./store.js";
 import { createSwarmControlAdapter } from "../swarm-control-adapter.js";
 import { createArtifactService } from "../artifact-service.js";
-import type { HandleUserMessageOptions } from "../../../swarm/user-message-coordinator.js";
+import { UserMessageCoordinator, type HandleUserMessageOptions, type UserMessageCoordinatorOptions } from "../../../swarm/user-message-coordinator.js";
+import { ConversationAttachmentService } from "../../../swarm/conversation-attachment-service.js";
+import type { AgentDescriptor } from "../../../swarm/types.js";
 const roots: string[] = []; const cores: ControlCore[] = [];
 afterEach(async () => { for (const core of cores.splice(0)) await core.close(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 const commandId = "00000000-0000-4000-8000-000000000001";
@@ -38,6 +40,35 @@ async function fixture() {
 const principal = { deviceSessionId: "device", scopes: new Set(["session:operate" as const]) };
 
 describe("durable provider outbox", () => {
+  it("rebuilds provider images from pinned prepared-message attachments after restart", async () => {
+    const f = await fixture(); const root = path.dirname(f.options.databasePath!);
+    const descriptor = { agentId: "manager", role: "manager", status: "idle", profileId: "project" } as AgentDescriptor;
+    const attachments = new ConversationAttachmentService({ dataDir: root, uploadsDir: path.join(root, "uploads") });
+    const coordinator = new UserMessageCoordinator({
+      targeting: { descriptors: new Map([["manager", descriptor]]), assertDescriptorNotEffectivelyArchived() {} }, attachments,
+      codex: { plugin: { assertWorkerNotUserTargetable() {} } }, projectAgents: { async preflightRuntime() {} },
+      runtime: { withRuntimeAdmission: async (_id: string, work: () => Promise<unknown>) => work() },
+      inboundConversation: { async append(_target: unknown, input: { attachments: import("../../../swarm/types.js").ConversationAttachment[] }) { return { event: { id: "canonical", timelineEntryId: "canonical" }, runtimeAttachments: input.attachments }; } },
+      turns: { async enqueue() {} },
+    } as unknown as UserMessageCoordinatorOptions);
+    let submit!: (text: string, options: HandleUserMessageOptions) => Promise<void>;
+    const acquire = f.options.swarm.acquireProvider;
+    const swarm = { installProviderScopeOwner() {}, installAuthoritativeInputOwner(callback: typeof submit) { submit = callback; }, installControlledTurnProjection() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
+      getAgentForInternalUse: () => descriptor, acquireControlledProvider: acquire, applyControlledInput: coordinator.applyControlledInput.bind(coordinator),
+    } as unknown as Parameters<typeof createSwarmControlAdapter>[0]["swarmManager"];
+    const artifactService = createArtifactService({ database: f.core.database, dataDir: root });
+    const imageRows = await artifactService.prepareInternalInput({ commandId: "prepared-image", threadId: "manager", projectId: "project", attachments: [{ type: "image", mimeType: "image/png", fileName: "image.png", data: Buffer.from("fixture image bytes").toString("base64") }] });
+    f.options.artifacts = artifactService;
+    await f.core.controlService.submitInput({ commandId: "prepared-image", threadId: "manager", message: { text: "Prepared text with guidance.", artifactIds: imageRows.map(row => row.artifactId) }, artifactRows: imageRows,
+      prepared: { runtimeMessage: { text: "Prepared text with guidance." }, presentation: { source: "agent_message" } } });
+    await f.core.close(); const second = await f.open();
+    const reloadedArtifacts = createArtifactService({ database: second.database, dataDir: root });
+    Object.assign(f.options.swarm, createSwarmControlAdapter({ swarmManager: swarm, database: second.database, eventSink: second.eventSink, controlService: second.controlService, workspaceService: f.options.workspace, artifactService: reloadedArtifacts }));
+    let nativeInput: import("../../../swarm/runtime-contracts.js").RuntimeUserMessage | undefined;
+    f.adapter.start = async input => { nativeInput = input.input; return { status: "accepted", turn: { ...input.binding.scope, kind: "turn", conversationId: "native", nativeId: "turn" } }; };
+    await second.effectWorker.drain();
+    expect(nativeInput).toEqual({ text: "Prepared text with guidance.", images: [{ mimeType: "image/png", data: Buffer.from("fixture image bytes").toString("base64") }] });
+  });
   it("persists every user input option and pinned attachment through restart before dispatch", async () => {
     const f = await fixture(); let submit!: (text: string, options: HandleUserMessageOptions) => Promise<void>;
     const delivered: Array<HandleUserMessageOptions> = []; const acquire = f.options.swarm.acquireProvider;

@@ -132,7 +132,7 @@ export interface InternalInput {
   thread?: { role: "manager" | "worker"; projectId: string; managerId?: string };
   /** Public input metadata; attachment bytes remain in the pinned artifact files. */
   userOptions?: Omit<import("../../swarm/user-message-coordinator.js").HandleUserMessageOptions, "controlledInput" | "attachments">;
-  prepared?: { runtimeMessage: Omit<import("../../swarm/runtime-contracts.js").RuntimeUserMessage, "attachments">;
+  prepared?: { runtimeMessage: Pick<import("../../swarm/runtime-contracts.js").RuntimeUserMessage, "text">;
     presentation: import("../../swarm/turn-context-coordinator.js").InboundTurnContextInput; requiresSecureRuntime?: boolean; parentContext?: import("../../swarm/core-agent-message-port.js").CoreAgentMessagePort extends { submit(input:infer I):unknown } ? I extends { parentContext?: infer P } ? P : never : never };
   artifactRows?: readonly import("./effect-types.js").InputArtifact[];
   assignment?: { assignmentId: string; parentThreadId: string; parentRunId: string;
