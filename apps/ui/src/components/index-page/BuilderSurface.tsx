@@ -360,6 +360,14 @@ export function BuilderSurface({
     clientRef.current?.setConversationView(messageSourceView)
   }, [clientRef, messageSourceView])
 
+  // Only the chat on screen counts as read; a client keeps its last session mounted behind other views.
+  const viewedSessionId = activeView === 'chat' ? (activeAgent?.role === 'worker' ? activeAgent.managerId : activeAgentId) ?? null : null
+  useEffect(() => {
+    const client = clientRef.current
+    client?.setViewedSession(viewedSessionId)
+    return () => client?.setViewedSession(null)
+  }, [clientRef, localClient, viewedSessionId])
+
   const planSnapshot = isActiveManager && activeAgentId && state.planSnapshotLoadingSessionId !== activeAgentId
     ? state.planSnapshots[activeAgentId] ?? null
     : null
@@ -2671,6 +2679,7 @@ export function BuilderSurface({
                   onSend: session.handleSend,
                   onSubmitted: session.handleMessageInputSubmitted,
                   isLoading,
+                  onStop: activeAgentId && conversationActionsEnabled ? () => session.handleStopSession(activeAgentId) : undefined,
                   disabled: !state.connected || !activeAgentId || hasActivePendingChoice || !conversationActionsEnabled,
                   placeholderOverride: hasActivePendingChoice
                     ? 'Respond to the choice above or click Skip…'

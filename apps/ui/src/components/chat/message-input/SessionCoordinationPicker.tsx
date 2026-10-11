@@ -77,8 +77,9 @@ export function SessionCoordinationPicker({
     }
   }
 
-  const currentWorkModeId = config.managerPosture
   const projectPosture = config.projectDefaultManagerPosture ?? catalog?.defaults.workModeId
+  // A thread that does not exist yet has no posture of its own; it starts on the project's.
+  const currentWorkModeId = config.managerPosture ?? projectPosture
   const workModes = useMemo(
     () => projectWorkModeOptions(catalog, currentWorkModeId),
     [catalog, currentWorkModeId],
@@ -190,7 +191,7 @@ export function SessionCoordinationPicker({
           title={`${currentPostureLabel} · ${currentRosterLabel}`}
         >
           <GitBranch className="size-3 shrink-0" aria-hidden="true" />
-          <span className="hidden truncate @[50rem]/composer:inline">{currentPostureLabel}</span>
+          <span className={cn('truncate', config.showLabel ? 'inline' : 'hidden @[50rem]/composer:inline')}>{currentPostureLabel}</span>
           <ChevronDown className="size-3 shrink-0 opacity-60" aria-hidden="true" />
         </button>
       </PopoverTrigger>

@@ -70,6 +70,8 @@ export interface SessionCoordinationPickerConfig {
   delegationRosterOrigin?: DelegationRosterOrigin
   projectDefaultDelegationRosterId?: string
   disabled?: boolean
+  /** Show the work mode beside the icon at any width; the session composer shows it only when wide. */
+  showLabel?: boolean
   /** Bump from `model_config_changed` so the catalog fetch refreshes. */
   modelConfigChangeKey?: number
   /** Bump from transport reconnect so a new server projection is fetched. */
@@ -103,6 +105,8 @@ export interface MessageInputProps {
   onSend: (message: string, attachments?: ConversationAttachment[], options?: MessageInputSendOptions) => void | boolean | Promise<boolean>
   onSubmitted?: () => void
   isLoading: boolean
+  /** Stops the running turn. While `isLoading`, the composer shows a Stop button and Escape calls this. */
+  onStop?: () => void
   disabled?: boolean
   placeholderOverride?: string
   agentLabel?: string

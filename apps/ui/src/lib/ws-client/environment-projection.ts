@@ -115,28 +115,39 @@ export function projectShell(shell: ShellState, previous: AgentDescriptor[], pre
 function sameItems<T>(next: readonly T[], previous: readonly T[]): boolean {
   return next.length === previous.length && next.every((item, index) => item === previous[index])
 }
+type DetailItem = NonNullable<DetailState['projection']>['items'][number]
+
+/**
+ * A result the environment delivered to the manager as input. The delivering command is what marks
+ * it: earlier environments also sent each worker message and manager-to-worker assignment as
+ * `worker_result`, and those carry none.
+ */
+function isDeliveredWorkerResult(item: DetailItem): boolean {
+  return item.kind === 'worker_result' && item.source === 'worker_report' && item.commandId !== null
+}
+
+/**
+ * The chat of one agent. A session's detail also carries its workers' own messages, under the worker
+ * as actor; those belong to the worker's view, so only `agentId`'s messages and the results delivered
+ * to it are projected here.
+ */
 export function projectItems(
   items: NonNullable<DetailState['projection']>['items'],
-  sessionId: string,
+  agentId: string,
 ): ConversationMessageEvent[] {
   return items
-    .filter(
-      (i) =>
-        i.kind === 'user' ||
-        i.kind === 'assistant' ||
-        i.kind === 'worker_result',
-    )
+    .filter((i) => i.kind === 'worker_result' ? isDeliveredWorkerResult(i) : (i.kind === 'user' || i.kind === 'assistant') && i.actorId === agentId)
     .map((i) => ({
       type: 'conversation_message',
       id: i.itemId,
-      agentId: sessionId,
+      agentId,
       turnId: i.userTurnId,
       ...(i.kind === 'worker_result' ? { sourceWorkerId: i.actorId } : {}),
-      role: i.kind === 'user' ? 'user' : 'assistant',
+      role: i.kind === 'user' ? 'user' : i.kind === 'worker_result' ? 'system' : 'assistant',
       text: i.text,
       timestamp: i.timestamp,
       pinned: i.pinned ?? false,
-      source: i.kind === 'user' ? 'user_input' : 'assistant',
+      source: i.kind === 'user' ? 'user_input' : i.kind === 'worker_result' ? 'worker_report' : 'assistant',
       ...(i.commandId ? { clientRequestId: i.commandId } : {}),
       ...(i.artifacts.length ? { attachments: i.artifacts.map(artifactAttachment) } : {}),
     })) as ConversationMessageEvent[]

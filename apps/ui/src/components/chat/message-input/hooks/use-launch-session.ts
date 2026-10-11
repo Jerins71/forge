@@ -1,9 +1,15 @@
 import { useCallback, useRef, useState } from 'react'
-import type { AgentModelDescriptor, ConversationAttachment } from '@forge/protocol'
+import type { AgentModelDescriptor, ConversationAttachment, WorkModeId } from '@forge/protocol'
 import type { CommandReceipt, ProjectRef, WorkspaceStrategy } from '@forge/protocol/environment-v2'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 import { describeEnvironmentStatus } from '@/components/settings/environments/environment-status'
 import { isInterruptedReceipt } from '@forge/client-runtime'
+
+/** Session overrides for the new thread; an absent field starts on the project default. */
+export interface LaunchDelegation {
+  managerPosture?: WorkModeId
+  rosterId?: string
+}
 
 interface PendingLaunch {
   fingerprint: string
@@ -24,6 +30,7 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
   const [workspace, setWorkspace] = useState<WorkspaceStrategy>({ kind: 'current_checkout' })
   /** Null launches on the project's default model. */
   const [model, setModel] = useState<AgentModelDescriptor | null>(null)
+  const [delegation, setDelegation] = useState<LaunchDelegation>({})
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const pendingRef = useRef<PendingLaunch | null>(null)
@@ -36,6 +43,8 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
       setWorkspace({ kind: 'current_checkout' })
       // Each machine has its own model catalog.
       if (current?.environmentId !== next?.environmentId) setModel(null)
+      // Rosters and project defaults belong to the target project.
+      setDelegation({})
       setError(null)
       return next
     })
@@ -58,7 +67,9 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
       return false
     }
     const attachmentKeys = attachments.map(attachmentFingerprint)
-    const fingerprint = JSON.stringify([target, workspace, model, text, attachmentKeys])
+    // An environment that cannot take the overrides with the launch is never sent them.
+    const overrides = client.descriptor()?.capabilities.launchDelegation && (delegation.managerPosture || delegation.rosterId) ? delegation : null
+    const fingerprint = JSON.stringify([target, workspace, model, overrides, text, attachmentKeys])
     if (pendingRef.current?.fingerprint !== fingerprint) {
       pendingRef.current = { fingerprint, commandId: crypto.randomUUID(), artifactIds: new Map() }
     }
@@ -89,6 +100,7 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
         title: titleFromText(text),
         workspaceStrategy: workspace,
         ...(model ? { model: { provider: model.provider, modelId: model.modelId, ...(model.thinkingLevel ? { thinkingLevel: model.thinkingLevel } : {}) } } : {}),
+        ...(overrides ? { delegation: { ...(overrides.managerPosture ? { managerPosture: overrides.managerPosture as 'delegation_first' | 'adaptive' | 'hands_on' } : {}), ...(overrides.rosterId ? { rosterId: overrides.rosterId } : {}) } } : {}),
         initialMessage: { text, artifactIds },
       })
       pendingRef.current = null
@@ -107,9 +119,9 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
     } finally {
       setSubmitting(false)
     }
-  }, [model, onLaunched, registry, target, workspace])
+  }, [delegation, model, onLaunched, registry, target, workspace])
 
-  return { target, setTarget, workspace, setWorkspace, model, setModel, error, submitting, launch }
+  return { target, setTarget, workspace, setWorkspace, model, setModel, delegation, setDelegation, error, submitting, launch }
 }
 
 function titleFromText(text: string): string {
