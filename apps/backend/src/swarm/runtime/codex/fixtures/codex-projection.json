@@ -1,0 +1,239 @@
+{
+  "provider": "codex",
+  "protocol": "app-server/stdio-jsonrpc",
+  "version": "0.155.0",
+  "scenario": "projection",
+  "provenance": "Synthetic raw Codex 0.155 app-server frames, never normalized Forge observations. Only process transport is substituted. Real-provider spot check remains necessary.",
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "initialize",
+        "params": {
+          "capabilities": {
+            "experimentalApi": true
+          }
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "userAgent": "codex-cli/0.155.0"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "method": "initialized"
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "account/login/start",
+        "params": {
+          "type": "apiKey",
+          "apiKey": "forge-fixture-inert-not-a-provider-key"
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "type": "apiKey"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "thread/start",
+        "params": {
+          "model": "gpt-6-sol",
+          "cwd": "$cwd",
+          "developerInstructions": "$any",
+          "approvalPolicy": "never",
+          "sandbox": "danger-full-access",
+          "allowProviderModelFallback": false,
+          "dynamicTools": "$any",
+          "ephemeral": false
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      },
+      "label": "open"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "thread": {
+            "id": "native-root",
+            "path": "$rollout"
+          },
+          "model": "gpt-6-sol"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "turn/start",
+        "params": {
+          "threadId": "native-root",
+          "input": [
+            {
+              "type": "text",
+              "text": "Work"
+            }
+          ],
+          "clientUserMessageId": "$any"
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      },
+      "label": "start"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "turn": {
+            "id": "turn-root",
+            "status": "inProgress",
+            "items": []
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "native-root",
+          "turn": {
+            "id": "turn-root"
+          }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "turn/steer",
+        "params": {
+          "threadId": "native-root",
+          "expectedTurnId": "turn-root",
+          "input": [
+            {
+              "type": "text",
+              "text": "Steer"
+            }
+          ]
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      },
+      "label": "steer"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "turnId": "turn-root"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root",
+          "itemId": "root-text",
+          "delta": "Canonical adapter output."
+        }
+      },
+      "label": "output"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root",
+          "item": {
+            "id": "root-text",
+            "type": "agentMessage",
+            "text": "Canonical adapter output.",
+            "phase": "final_answer"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "native-root",
+          "turn": {
+            "id": "turn-root",
+            "status": "completed",
+            "items": []
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "native-root",
+          "turn": {
+            "id": "turn-root",
+            "status": "completed",
+            "items": []
+          }
+        }
+      }
+    }
+  ]
+}

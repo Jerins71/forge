@@ -7,8 +7,9 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { Value } from "@sinclair/typebox/value";
 import { Type } from "@sinclair/typebox";
-import { ProviderObservationSchema, type ProviderObservation, type InstructionBundle, type ToolHostSnapshot, type ProviderScope } from "@forge/protocol";
+import { ProviderObservationSchema, type ProviderConversationRef, type ProviderObservation, type InstructionBundle, type ToolHostSnapshot, type ProviderScope } from "@forge/protocol";
 import { createTempConfig } from "../../test-support/temp-config.js";
+import { getNativeCodexHome, getSessionFilePath } from "../storage/data-paths.js";
 import { createCodexAppServerClient } from "../codex-app-server/codex-app-server-client.js";
 import { createTaskNotesTool } from "../task-notes-tool.js";
 import { TaskNotesStore } from "../task-notes-store.js";
@@ -17,7 +18,7 @@ import { createInstructionBundle } from "../runtime/instruction-bundle.js";
 import { bindRuntimeToolHost } from "../runtime/runtime-tool-plan.js";
 import { createReplayHarness, ReplaySignals, watchdog, type ReplayTranscript } from "../runtime/replay/replay-harness.js";
 import { nativeCodexEnvironment, CodexRuntimeAuth } from "../runtime/codex/codex-runtime-auth.js";
-import { ProviderRefreshRequiredError } from "../runtime/provider-contract.js";
+import { ProviderDispatchRejectedError, ProviderRefreshRequiredError } from "../runtime/provider-contract.js";
 import { CodexProviderAdapter } from "../runtime/codex/codex-provider-adapter.js";
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -92,6 +93,111 @@ async function fixture(scenario: string, options: { persistedPath?: string; code
 }
 
 describe("Codex ProviderAdapter over production JSON-RPC and raw replay", () => {
+  it.each([{ legacy: false, appendCrash: false }, { legacy: true, appendCrash: false }, { legacy: false, appendCrash: true }])(
+    "projects canonical output and one end without queueing: %j", async ({ legacy, appendCrash }) => {
+    const handle = await createTempConfig({ prefix: "forge-codex-projection-", port: 0,
+      defaultModel: { provider: "codex-native", modelId: "gpt-6-sol", thinkingLevel: "high" },
+      sharedAuthContent: { "openai-codex": { type: "api_key", key: "forge-fixture-inert-not-a-provider-key" } } });
+    cleanup.push(handle.cleanup);
+    const root = await realpath(handle.tempRootDir);
+    handle.config.defaultCwd = root;
+    const descriptor: AgentDescriptor = { agentId: "adapter-agent", displayName: "Adapter replay", role: "manager", managerId: "adapter-agent", profileId: "adapter-agent",
+      status: "idle", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", cwd: root,
+      sessionFile: getSessionFilePath(handle.config.paths.dataDir, "adapter-agent", "adapter-agent"), model: handle.config.defaultModel };
+    await writeFile(handle.config.paths.agentsStoreFile, JSON.stringify({ agents: [descriptor] }));
+    const transcript = JSON.parse(await readFile(join(directory, "fixtures/codex-projection.json"), "utf8")) as ReplayTranscript;
+    const crashTranscript = JSON.parse(await readFile(join(directory, "fixtures/codex-append-crash.json"), "utf8")) as ReplayTranscript;
+    const resumeTranscript = JSON.parse(await readFile(join(directory, "fixtures/codex-append-resume.json"), "utf8")) as ReplayTranscript;
+    let persistedPath: string | undefined;
+    const replay = await createReplayHarness(runtime => appendCrash
+      ? runtime === 1 ? crashTranscript : { ...resumeTranscript, bindings: { $persistedPath: persistedPath } } : transcript);
+    cleanup.push(replay.close);
+    const configPath = join(root, "projection-input.json");
+    const childOptions = {
+      cwd: root, execPath: process.execPath, execArgv: ["--import", join(process.cwd(), "node_modules/tsx/dist/loader.mjs")], stdio: ["ignore", "pipe", "pipe", "ipc"],
+      env: Object.fromEntries(Object.entries(process.env).filter(([key]) => ["PATH", "HOME", "USER", "TMPDIR", "FORGE_INSTALLATION_STATE_DIR"].includes(key))) } as const;
+    let conversation: ProviderConversationRef | undefined;
+    if (appendCrash) {
+      await writeFile(configPath, JSON.stringify({ config: handle.config, descriptor, port: replay.port, legacy: false, appendCrash: true }));
+      const first = fork(fileURLToPath(new URL("../runtime/codex/codex-projection-replay-child.ts", import.meta.url)), [configPath], { ...childOptions, stdio: [...childOptions.stdio] });
+      cleanup.push(async () => { if (first.exitCode === null && first.signalCode === null) { const exit = once(first, "exit"); first.kill(); await exit; } });
+      first.stdout!.resume();
+      first.stderr!.resume();
+      conversation = await watchdog("durable append before crash", new Promise<ProviderConversationRef>((resolve, reject) => {
+        first.on("message", message => { const m = message as { appended?: ProviderConversationRef; error?: string }; if (m.error) reject(new Error(m.error)); else if (m.appended) resolve(m.appended); });
+        first.once("exit", code => { if (code) reject(new Error(`Append child failed: ${code}`)); });
+      }));
+      const exit = once(first, "exit");
+      first.kill("SIGKILL");
+      await watchdog("append crash exit", exit);
+      const peerPid = await replay.signals.wait("1:connected");
+      persistedPath = join(getNativeCodexHome(handle.config.paths.dataDir), `replay-rollout-${peerPid}.jsonl`);
+      const before = await readFile(descriptor.sessionFile, "utf8");
+      expect(before).toContain('"hasStartedTurn":false');
+      expect(before).toContain('"id":"append-input"');
+      expect(conversation).toMatchObject({ nativeId: "native-root", generation: 1 });
+    }
+    await writeFile(configPath, JSON.stringify({ config: handle.config, descriptor, port: replay.port, legacy, conversation }));
+    const child = fork(fileURLToPath(new URL("../runtime/codex/codex-projection-replay-child.ts", import.meta.url)), [configPath], { ...childOptions, stdio: [...childOptions.stdio] });
+    cleanup.push(async () => { if (child.exitCode === null && child.signalCode === null) { const exit = once(child, "exit"); child.kill(); await exit; } });
+    let stderr = "";
+    child.stderr!.on("data", data => { stderr += String(data); });
+    child.stdout!.resume();
+    interface Result {
+      activeStatus: string; status: string; pending: number; statuses: string[]; ends: number;
+      busy: unknown; earlyLegacyBusy?: unknown; legacyBusy?: unknown; events: Array<{ type: string; message?: { role: string; content: string } }>;
+      jsonl: Array<{ type: string; customType?: string; data?: { role: string; text: string; turnId?: string }; message?: { role: string; content: Array<{ type: string; text: string }> } }>;
+      observations: ProviderObservation[]; conversation: ProviderConversationRef; drain: { status: string };
+    }
+    const resultPromise = new Promise<Result>((resolve, reject) => {
+      child.on("message", message => {
+        const response = message as { error?: string; result?: Result; ready?: boolean };
+        if (response.error) reject(new Error(response.error));
+        else if (response.result) resolve(response.result);
+        else if (response.ready) void watchdog("output held", replay.signals.wait(`${appendCrash ? 2 : 1}:output:held`)).then(() => replay.release(`${appendCrash ? 2 : 1}:output`)).catch(reject);
+      });
+      child.once("exit", code => { if (code) reject(new Error(`Projection child failed: ${stderr}`)); });
+    });
+    const result = await watchdog("projection child", Promise.race([resultPromise,
+      replay.signals.wait("failure").then(failure => { throw new Error(`Raw projection replay failed: ${failure}`); }),
+    ]));
+    const busy = { name: "ProviderDispatchRejectedError", code: "PROVIDER_DISPATCH_REJECTED", delivery: "not_dispatched", reason: "busy", sharedClass: true };
+    expect(result.activeStatus).toBe("streaming");
+    expect(result.status).toBe("idle");
+    expect(result.statuses).toEqual(["streaming", "idle"]);
+    expect(result.pending).toBe(0);
+    expect(result.ends).toBe(1);
+    expect(result.busy).toMatchObject(busy);
+    if (!legacy) {
+      expect(result.earlyLegacyBusy).toMatchObject(busy);
+      expect(result.legacyBusy).toMatchObject(busy);
+    }
+    for (const type of ["agent_start", "turn_start", "turn_end", "agent_end"]) expect(result.events.filter(event => event.type === type)).toHaveLength(1);
+    expect(result.events.filter(event => event.type === "message_start" && event.message?.role === "user")).toHaveLength(1);
+    expect(result.jsonl.filter(entry => entry.type === "message" && entry.message?.role === "assistant").map(entry => entry.message!.content)).toContainEqual([{ type: "text", text: "Canonical adapter output." }]);
+    expect(result.jsonl.filter(entry => entry.customType === "swarm_conversation_entry" && entry.data?.role === "assistant").map(entry => entry.data!.text)).toEqual(["Canonical adapter output."]);
+    if (!legacy) {
+      expect(result.observations.every(event => event.attemptId === "projection-attempt")).toBe(true);
+      const outbound = await replay.signals.wait(`${appendCrash ? 2 : 1}:start`) as { params: { clientUserMessageId: string } };
+      expect(outbound.params.clientUserMessageId).toBe("projection-run");
+    }
+    expect(result.observations.filter(event => event.type === "terminal" && event.origin.kind === "root")).toHaveLength(1);
+    expect(result.drain).toEqual({ status: "clean" });
+    expect(replay.trace.filter(entry => entry.direction === "outbound" && (entry.frame as { method?: string }).method === "turn/start")).toHaveLength(1);
+    if (appendCrash) {
+      expect(result.conversation).toMatchObject({ nativeId: conversation!.nativeId, generation: 2 });
+      expect(result.observations.every(event => event.scope.generation === 2)).toBe(true);
+      expect(result.jsonl.filter(entry => entry.customType === "swarm_conversation_entry" && entry.data?.role === "user")).toHaveLength(1);
+      expect(replay.trace.filter(entry => entry.direction === "outbound" && (entry.frame as { method?: string }).method === "thread/start")).toHaveLength(1);
+      expect(replay.trace.filter(entry => entry.direction === "outbound" && (entry.frame as { method?: string }).method === "thread/resume")).toHaveLength(1);
+    }
+    expect(replay.failures).toEqual([]);
+    const evidencePath = join(process.cwd(), "../../.internal/core/evidence", `codex-projection-${appendCrash ? "append-crash" : legacy ? "legacy" : "adapter"}.json`);
+    await mkdir(dirname(evidencePath), { recursive: true });
+    await writeFile(evidencePath, JSON.stringify({ scenario: appendCrash ? "append-crash" : transcript.scenario, legacy, trace: replay.trace, statuses: result.statuses,
+      ends: result.ends, busy: result.busy, pending: result.pending, assertions: { canonicalAssistantOutput: true, exactlyOneProjection: true, queueOwnedByKernel: true } }, null, 2));
+  }, 60_000);
+
   it("exposes the same adapter through the real creator and reports the exact final native instructions and schemas", async () => {
     const handle = await createTempConfig({ prefix: "forge-codex-prepared-", port: 0,
       sharedAuthContent: { "openai-codex": { type: "api_key", key: "forge-fixture-inert-not-a-provider-key" } } });
@@ -130,7 +236,7 @@ describe("Codex ProviderAdapter over production JSON-RPC and raw replay", () => 
     await writeFile(evidencePath, JSON.stringify({ scenario: "prepared", trace: replay.trace, calls: result.calls,
       scope: result.scope, instructionRevision: result.instructions.revision, toolSchemaSha256: digest(result.tools.tools),
       assertions: { exactPreparedInstructions: true, exactPreparedToolSchemas: true, adapterBound: result.adapterBound, authFailureDrained: result.authFailureDrained } }, null, 2));
-  });
+  }, 30_000);
 
   it("starts, steers, fences approvals, maps native children, terminates, compacts and reads native context", async () => {
     const f = await fixture("lifecycle");
@@ -282,7 +388,7 @@ describe("Codex ProviderAdapter over production JSON-RPC and raw replay", () => 
     expect(await dispatch).toEqual({ status: "unknown" });
     expect(await f.wait("error:root:")).toMatchObject({ delivery: "unknown" });
     expect(f.events.filter(event => event.type === "terminal")).toHaveLength(0);
-    await expect(f.start()).rejects.toThrow(/active|unavailable/i);
+    await expect(f.start()).rejects.toBeInstanceOf(ProviderDispatchRejectedError);
     expect(await f.adapter.drain(f.binding)).toEqual({ status: "pending" });
     await f.evidence();
   });

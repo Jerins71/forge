@@ -31,6 +31,7 @@ import {
   normalizeMessageSourceContext,
   parseCompactSlashCommand,
   previewForLog,
+  toRuntimeImageAttachments,
 } from "./swarm-manager-utils.js";
 import type { TurnContextCoordinator } from "./turn-context-coordinator.js";
 import type {
@@ -303,7 +304,8 @@ export class UserMessageCoordinator {
           projectAgentContext:presentation.projectAgentContext, sourceContext:presentation.sourceContext, turnId:options.runId,
           sourceWorkerId:presentation.sourceWorkerId, controlledInput:options.controlledInput });
         await this.options.turns.enqueue(target.agentId,{ ...presentation,turnId:options.runId } as Parameters<UserMessageCoordinatorOptions["turns"]["enqueue"]>[1]);
-        return { entryId:appended.event.timelineEntryId ?? appended.event.id!, runtimeMessage:{ ...runtimeMessage, attachments:appended.runtimeAttachments } };
+        const images = toRuntimeImageAttachments(appended.runtimeAttachments);
+        return { entryId:appended.event.timelineEntryId ?? appended.event.id!, runtimeMessage:{ ...runtimeMessage, ...(images.length ? { images } : {}) } };
       }
       const replyTo = options.replyTo ? resolveConversationReplyTarget(this.options.targeting.getConversationHistory(target.agentId), options.replyTo) : undefined;
       const classification = target.role === "manager" ? this.options.codex.plugin.classifyAndPreflightUserTurn(target as ManagerDescriptor, text, sourceContext) : { kind: "none" } as const;

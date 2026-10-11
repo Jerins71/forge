@@ -7,10 +7,10 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
-import type { SwarmConfig } from "../../types.js";
+import type { SwarmConfig, AgentsStoreFile } from "../../types.js";
 
-export interface BackendReplayBoot { config: SwarmConfig; boot: number; crashAfterAppend?: string }
-const { config, boot, crashAfterAppend } = JSON.parse(readFileSync(process.argv[2]!, "utf8")) as BackendReplayBoot;
+export interface BackendReplayBoot { config: SwarmConfig; boot: number; initialStore?: AgentsStoreFile; crashAfterAppend?: string }
+const { config, boot, initialStore, crashAfterAppend } = JSON.parse(readFileSync(process.argv[2]!, "utf8")) as BackendReplayBoot;
 const fixedNow = Date.parse("2026-10-10T12:00:00.000Z");
 let id = 0;
 crypto.randomUUID = () => {
@@ -80,6 +80,7 @@ applyAccessMigrations(database);
 const access = accessModule.createEnvironmentAccess({ database, identity, exposure });
 const adapter = adapterModule.createSwarmControlAdapter({ swarmManager: manager, database, eventSink: core.eventSink, controlService: core.controlService, workspaceService: workspace, artifactService: artifacts });
 const descriptors = descriptorModule.createControlDescriptorPersistence({ database, eventSink: core.eventSink, dataDir: config.paths.dataDir, storeFilePath: config.paths.agentsStoreFile });
+if (initialStore) await descriptors.save(initialStore);
 manager.installDescriptorPersistence(descriptors);
 const unread = new unreadModule.UnreadTracker({ dataDir: config.paths.dataDir,
   getProfileIds: () => manager.listProfiles().map(p => p.profileId),
@@ -129,7 +130,7 @@ manager.applyControlledInput = (text, input) => apply(text, { ...input, controll
 } });
 await core.reconcileOnBoot();
 await manager.boot();
-if (!manager.listAgents().length) await manager.createManager("manager", { name: "Manager", cwd: config.defaultCwd });
+if (!manager.listAgents().length) throw new Error("Replay fixture descriptor was not seeded");
 await descriptors.load();
 await unread.load();
 await core.reconcileOnBoot();

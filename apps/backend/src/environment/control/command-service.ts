@@ -130,7 +130,9 @@ export function canonicalRequest(method: string, input: unknown): { normalized: 
 export interface InternalInput {
   commandId: string; threadId: string; message: Run["input"]; source?: Run["source"]; delivery?: Run["delivery"];
   thread?: { role: "manager" | "worker"; projectId: string; managerId?: string };
-  prepared?: { runtimeMessage: Omit<import("../../swarm/runtime-contracts.js").RuntimeUserMessage, "attachments">;
+  /** Public input metadata; attachment bytes remain in the pinned artifact files. */
+  userOptions?: Omit<import("../../swarm/user-message-coordinator.js").HandleUserMessageOptions, "controlledInput" | "attachments">;
+  prepared?: { runtimeMessage: Pick<import("../../swarm/runtime-contracts.js").RuntimeUserMessage, "text">;
     presentation: import("../../swarm/turn-context-coordinator.js").InboundTurnContextInput; requiresSecureRuntime?: boolean; parentContext?: import("../../swarm/core-agent-message-port.js").CoreAgentMessagePort extends { submit(input:infer I):unknown } ? I extends { parentContext?: infer P } ? P : never : never };
   artifactRows?: readonly import("./effect-types.js").InputArtifact[];
   assignment?: { assignmentId: string; parentThreadId: string; parentRunId: string;
@@ -544,10 +546,9 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         if (owner.desired === "stopped") sink.commitCommand(tx, { type:"thread.resume", commandId:input.commandId, now:options.clock(), threadId:input.threadId });
         if (input.assignment) sink.commitCommand(tx, { type:"worker.assign", ...base, ...input.assignment, workerThreadId:input.threadId, workerRunId:runId, authorized:true });
         else sink.commitCommand(tx, { type:"run.submit", ...base, threadId:input.threadId, runId, source:input.source, delivery:input.delivery ?? "queue" });
-        if (input.prepared) {
-          database.prepare("INSERT INTO orchestration_run_inputs (run_id,prepared_json) VALUES (?,?)").run(runId,JSON.stringify(input.prepared));
-          tx.afterCommit(() => options.swarm.enqueuePresentation?.(input.threadId,runId,input.prepared!.presentation));
-        }
+        if (input.prepared || input.userOptions)
+          database.prepare("INSERT INTO orchestration_run_inputs (run_id,prepared_json) VALUES (?,?)").run(runId,JSON.stringify({ ...input.prepared, ...(input.userOptions ? { userOptions: input.userOptions } : {}) }));
+        if (input.prepared) tx.afterCommit(() => options.swarm.enqueuePresentation?.(input.threadId,runId,input.prepared!.presentation));
         options.artifacts.pinInput(inputId, input.artifactRows ?? input.message.artifactIds.map(artifactId => ({ artifactId })));
         return { runId, receipt: readReceipt(sink,input.commandId) };
       });

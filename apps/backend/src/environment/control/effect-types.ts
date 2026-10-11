@@ -61,8 +61,7 @@ export type ControlEffect =
   | import("./orchestration/types.js").CoreEffect
   | { kind: "workspace.ensure"; reservation: WorkspaceReservation }
   | { kind: "session.ensure"; input: Parameters<SwarmControlPort["ensureSession"]>[0] }
-  | { kind: "choice.apply"; choiceId: string; runtimeGeneration: string; answers: RpcInput<"session.choose">["answers"] }
-  | { kind: "session.stop"; targetAgentId?: string };
+  | { kind: "choice.apply"; choiceId: string; runtimeGeneration: string; answers: RpcInput<"session.choose">["answers"] };
 export interface EffectRow {
   effect_id: string;
   command_id: string;

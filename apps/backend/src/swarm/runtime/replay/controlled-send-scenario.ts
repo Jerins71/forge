@@ -12,7 +12,7 @@ import { getNativeCodexHome, getSessionFilePath } from "../../storage/data-paths
 import { canonicalPairingFields, pairingProofMessage } from "../../../environment/access/access-service.js";
 import { createReplayHarness, ReplaySignals, watchdog, type ReplayTranscript } from "./replay-harness.js";
 import type { BackendReplayBoot } from "./backend-child.js";
-import type { SwarmConfig } from "../../types.js";
+import type { SwarmConfig, AgentsStoreFile } from "../../types.js";
 
 type Scenario = "dropped-rpc-receipt" | "lost-provider-acknowledgment" | "append-before-locator";
 const commandId = "11111111-1111-4111-8111-111111111111";
@@ -34,9 +34,9 @@ interface Inspection {
   sequences: { shell: number; detail: number };
   canonical: { agentId: string; sessionFile: string }[];
 }
-async function startBackend(config: SwarmConfig, boot: number, scenario: Scenario) {
+async function startBackend(config: SwarmConfig, boot: number, scenario: Scenario, initialStore?: AgentsStoreFile) {
   const input = resolve(config.paths.rootDir, `boot-${boot}.json`);
-  await writeFile(input, JSON.stringify({ config, boot, crashAfterAppend: scenario === "append-before-locator" && boot === 1 ? commandId : undefined } satisfies BackendReplayBoot));
+  await writeFile(input, JSON.stringify({ config, boot, initialStore, crashAfterAppend: scenario === "append-before-locator" && boot === 1 ? commandId : undefined } satisfies BackendReplayBoot));
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TMP", "TEMP", "LANG", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "APPDATA", "LOCALAPPDATA"].includes(key.toUpperCase())));
   const child = fork(resolve(directory, "backend-child.ts"), [input], { cwd: root, execPath: process.execPath, execArgv: ["--import", resolve(root, "apps/backend/node_modules/tsx/dist/loader.mjs")], env,
     stdio: ["ignore", "pipe", "pipe", "ipc"] });
@@ -151,8 +151,8 @@ export async function runControlledSendReplay(scenario: Scenario) {
   config.cwdAllowlistRoots = [config.defaultCwd];
   const at = "2026-10-10T12:00:00.000Z";
   const sessionFile = getSessionFilePath(config.paths.dataDir, "manager", "manager");
-  await writeFile(config.paths.agentsStoreFile, JSON.stringify({ agents: [{ agentId: "manager", managerId: "manager", profileId: "manager", displayName: "Manager", role: "manager", status: "idle", createdAt: at, updatedAt: at, cwd: config.defaultCwd, model: config.defaultModel, sessionFile }],
-    profiles: [{ profileId: "manager", displayName: "Manager", defaultSessionAgentId: "manager", defaultModel: config.defaultModel, createdAt: at, updatedAt: at }] }));
+  const initialStore: AgentsStoreFile = { agents: [{ agentId: "manager", managerId: "manager", profileId: "manager", displayName: "Manager", role: "manager", status: "idle", createdAt: at, updatedAt: at, cwd: config.defaultCwd, model: config.defaultModel, sessionFile }],
+    profiles: [{ profileId: "manager", displayName: "Manager", defaultSessionAgentId: "manager", defaultModel: config.defaultModel, createdAt: at, updatedAt: at }] };
   const base: ReplayTranscript = JSON.parse(await readFile(resolve(directory, "fixtures/codex-controlled-send.json"), "utf8"));
   const harness = await createReplayHarness(runtime => {
     if (runtime !== 1 && !(scenario === "append-before-locator" && runtime === 2)) throw new Error("Recovery created an unexpected provider process");
@@ -172,7 +172,7 @@ export async function runControlledSendReplay(scenario: Scenario) {
   let unusedHostReleased: boolean | undefined;
   let assertions: Record<string, boolean> | undefined;
   try {
-    let backend = await startBackend(config, 1, scenario); backends.push(backend);
+    let backend = await startBackend(config, 1, scenario, initialStore); backends.push(backend);
     config.port = Number(new URL(backend.ready.baseUrl).port);
     const pairing = await pair(backend);
     const live = await liveClient(backend, pairing); clients.push(live);

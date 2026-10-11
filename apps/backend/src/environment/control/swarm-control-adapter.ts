@@ -37,7 +37,8 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
     if (!descriptor) throw new Error("Input target is unavailable");
     const commandId = options.commandId ?? options.clientRequestId ?? `input:${crypto.randomUUID()}`;
     const rows = await artifactService.prepareInternalInput({ commandId,threadId:descriptor.agentId,projectId:descriptor.profileId ?? descriptor.agentId,attachments:options.attachments ?? [] });
-    await controlService.submitInput({ commandId, threadId: options.targetAgentId, message: { text, artifactIds: rows.map(row => row.artifactId) }, artifactRows:rows, source: options.sourceContext, delivery: options.delivery === "steer" ? "steer" : "queue" });
+    const { attachments: _attachments, controlledInput: _controlledInput, ...userOptions } = options;
+    await controlService.submitInput({ commandId, threadId: options.targetAgentId, message: { text, artifactIds: rows.map(row => row.artifactId) }, artifactRows:rows, userOptions, source: options.sourceContext, delivery: options.delivery === "steer" ? "steer" : "queue" });
   }, {
     getSnapshot: () => loadState(database).recovery,
     async decide(action) {
@@ -76,7 +77,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
       const sourceKey = `input:${input.inputId}`;
       const locator = database.prepare("SELECT byte_offset FROM mirror_sources WHERE source_key=?").get(sourceKey) as { byte_offset: number } | undefined;
       return swarmManager.applyControlledInput(input.message.text, {
-        prepared:input.prepared, targetAgentId: input.sessionId, attachments, sourceContext: input.source, delivery: input.delivery, runId: input.runId,
+        ...input.userOptions, prepared:input.prepared, targetAgentId: input.sessionId, attachments, sourceContext: input.userOptions?.sourceContext ?? input.source, delivery: input.userOptions?.delivery ?? input.delivery, runId: input.runId,
         controlledInput: {
           inputId: input.inputId, commandId: input.commandId,
           contentHash: createHash("sha256").update(JSON.stringify({ text: input.message.text, artifactIds: [...input.message.artifactIds].sort() })).digest("hex"),

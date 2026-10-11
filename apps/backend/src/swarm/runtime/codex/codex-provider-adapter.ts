@@ -6,7 +6,7 @@ import type { CodexAppServerClientFactory, CodexAppServerClientPort } from "../.
 import type { RuntimeSessionEvent } from "../../runtime-contracts.js";
 import type { SwarmToolHost } from "../../swarm-tool-host.js";
 import { normalizeCodexUsage } from "../../../utils/native-usage-records.js";
-import { assertProviderRequirements, ProviderRefreshRequiredError, UnsupportedProviderBehaviorError, type ProviderAdapter, type ProviderBinding,
+import { assertProviderRequirements, ProviderDispatchRejectedError, ProviderRefreshRequiredError, UnsupportedProviderBehaviorError, type ProviderAdapter, type ProviderBinding,
   type ProviderContext, type ProviderDispatchResult, type ProviderDrainResult, type ProviderOpenInput,
   type ProviderRespondInput, type ProviderResumeInput, type ProviderStartInput, type ProviderSteerInput } from "../provider-contract.js";
 import { renderInstructionBundle } from "../instruction-bundle.js";
@@ -70,7 +70,9 @@ interface Options {
   projectTrusted: boolean;
   auth: Pick<CodexRuntimeAuth, "login" | "refresh" | "release">;
   createClient?: CodexAppServerClientFactory;
-  /** Legacy lifecycle projection. Phase 3 consumes observations instead. */
+  /** Creator-prepared canonical projection; admission and queueing remain external. */
+  onStart?(input: ProviderStartInput): Promise<void>;
+  onStartRejected?(input: ProviderStartInput, error: unknown): Promise<void>;
   onNotification?(method: string, params: Record<string, any>): Promise<void>;
   onExit?(error: Error): void;
   toolEvents?(event: RuntimeSessionEvent): Promise<void>;
@@ -198,17 +200,26 @@ export class CodexProviderAdapter implements ProviderAdapter {
 
   async start(input: ProviderStartInput): Promise<ProviderDispatchResult> {
     const s = this.owned(input.binding);
-    if (s.root && !s.root.ended) throw new Error("Codex already has an active or uncertain native turn");
-    await this.refresh(input);
+    if (s.root && !s.root.ended) throw new ProviderDispatchRejectedError("busy");
+    // Reserve before asynchronous preparation so concurrent starts cannot both dispatch.
     const turn = this.begin(s.binding.conversation, input.attemptId);
     s.root = turn;
     return this.track((async () => {
+      try { await this.refresh(input); }
+      catch (error) { turn.ended = true; throw error; }
       try {
+        // Finish the preceding turn's canonical projection before admitting its successor.
+        await s.events;
         await this.options.auth.login(s.client);
       } catch (error) {
         turn.ended = true;
         this.emit(turn, { type: "error", origin: this.origin(turn), code: "CODEX_AUTH", message: message(error), delivery: "not_dispatched" });
         throw new CodexProviderDispatchError(error);
+      }
+      try { await this.options.onStart?.(input); }
+      catch (error) {
+        turn.ended = true;
+        throw error instanceof ProviderDispatchRejectedError ? error : new CodexProviderDispatchError(error);
       }
       try {
         const response = await s.client.request<any>("turn/start", { threadId: s.binding.conversation.nativeId,
@@ -216,7 +227,10 @@ export class CodexProviderAdapter implements ProviderAdapter {
         if (typeof response?.turn?.id !== "string") throw new Error("Codex did not acknowledge a turn identity");
         this.accept(turn, response.turn.id);
         return { status: "accepted", turn: this.turnRef(turn) };
-      } catch (error) { return this.dispatchFailure(turn, error); }
+      } catch (error) {
+        if (typeof (error as { code?: unknown })?.code === "number") await this.options.onStartRejected?.(input, error);
+        return this.dispatchFailure(turn, error);
+      }
     })());
   }
 
@@ -532,7 +546,8 @@ export class CodexProviderAdapter implements ProviderAdapter {
   }
   private owned(binding: ProviderBinding, allowClosed = false): BindingState {
     const s = this.state;
-    if (!s || !sameScope(binding.scope, s.scope) || binding.conversation.nativeId !== s.conversationId || (!allowClosed && (s.closing || s.closed || s.client.isDisposed()))) throw new Error("Codex binding scope is stale, closed or unavailable");
+    if (!s || !sameScope(binding.scope, s.scope) || binding.conversation.nativeId !== s.conversationId) throw new ProviderDispatchRejectedError("stale_scope");
+    if (!allowClosed && (s.closing || s.closed || s.client.isDisposed())) throw new ProviderDispatchRejectedError("closed");
     return s;
   }
   private assertScope(scope: ProviderScope): void {

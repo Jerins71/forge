@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ProviderBinding, ProviderAdapter, ProviderOpenInput, ProviderResumeInput, ProviderStartInput, ProviderDispatchResult, ProviderSteerInput, ProviderRespondInput, ProviderDrainResult } from "../provider-contract.js";
-import { assertProviderRequirements, ProviderRefreshRequiredError, UnsupportedProviderBehaviorError } from "../provider-contract.js";
+import { assertProviderRequirements, ProviderDispatchRejectedError, ProviderRefreshRequiredError, UnsupportedProviderBehaviorError } from "../provider-contract.js";
 import type { ProviderCapabilities, ProviderObservation, ProviderTurnRef } from "@forge/protocol";
 import { renderProviderInstructions } from "../instruction-bundle.js";
 import type { SwarmRuntimeCallbacks } from "../../runtime-contracts.js";
@@ -12,7 +12,7 @@ import { toCursorSdkModelSelection } from "./cursor-sdk-model-selection.js";
 import { CursorSdkObservationMapper } from "./cursor-sdk-observation-mapper.js";
 
 export class CursorSdkDegradationError extends Error {
-  constructor(readonly code: "CURSOR_BINDING_STALE" | "CURSOR_APPROVAL_UNSUPPORTED" | "CURSOR_DISPATCH_BUSY" | "CURSOR_MODEL_REFRESH_REQUIRED" | "CURSOR_INTERRUPT_FAILED", message: string) { super(message); this.name = "CursorSdkDegradationError"; }
+  constructor(readonly code: "CURSOR_BINDING_STALE" | "CURSOR_APPROVAL_UNSUPPORTED" | "CURSOR_MODEL_REFRESH_REQUIRED" | "CURSOR_INTERRUPT_FAILED", message: string) { super(message); this.name = "CursorSdkDegradationError"; }
 }
 
 interface CursorSdkAdapterOptions {
@@ -75,7 +75,7 @@ export class CursorSdkProviderAdapter implements ProviderAdapter {
     if (instructionsChanged || toolsChanged) throw new ProviderRefreshRequiredError("cursor-sdk", instructionsChanged && toolsChanged ? "both" : instructionsChanged ? "instructions" : "tools");
     if (input.toolHost?.security) throw new UnsupportedProviderBehaviorError("cursor-sdk", "secureSessions");
     if (this.active || this.getRuntime().hasPendingInputDispatch() || this.getRuntime().getStatus() !== "idle") {
-      throw new CursorSdkDegradationError("CURSOR_DISPATCH_BUSY", "Cursor cannot start another native turn while dispatch is unsettled.");
+      throw new ProviderDispatchRejectedError("busy");
     }
     return new Promise<ProviderDispatchResult>((resolve, reject) => {
       this.bridge!.beginTurn();
@@ -205,7 +205,7 @@ export class CursorSdkProviderAdapter implements ProviderAdapter {
       const original = this.runtime[method].bind(this.runtime);
       this.runtime[method] = async (...args: Parameters<typeof original>) => {
         if (method !== "terminate" && (this.runtime!.getStatus() !== "idle" || this.runtime!.hasUnsettledDispatches() || this.runtime!.getPendingCount() > 0)) {
-          throw new CursorSdkDegradationError("CURSOR_DISPATCH_BUSY", "Cursor replacement must wait for all dispatch callbacks to settle.");
+          throw new ProviderDispatchRejectedError("busy");
         }
         this.bridge!.cancelPending();
         try { await original(...args); this.shutdownComplete = true; }
