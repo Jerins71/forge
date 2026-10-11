@@ -62,6 +62,19 @@ describe("retained lifecycle commit", () => {
     await expect(initialize(db)).rejects.toThrow(/incompatible/i);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE name IN ('orchestration_assignments','orchestration_transfers')").all()).toEqual([]);
   });
+  it("rejects a declared-current database with a required table missing and preserves its retained facts", async () => {
+    const db = await database(); await initialize(db);
+    const sink = createEventSink(db, () => now, () => "retained");
+    sink.transaction(tx => sink.commitCommand(tx, { type: "thread.create", commandId: "retained", now, threadId: "retained-thread", role: "manager", projectId: "project" }));
+    const meta = db.prepare("SELECT * FROM environment_meta").get();
+    const facts = db.prepare("SELECT * FROM lifecycle_events").all();
+    db.exec("DROP TABLE orchestration_run_inputs");
+    const schema = db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all();
+    await expect(initialize(db)).rejects.toThrow(/incompatible/i);
+    expect(db.prepare("SELECT * FROM environment_meta").get()).toEqual(meta);
+    expect(db.prepare("SELECT * FROM lifecycle_events").all()).toEqual(facts);
+    expect(db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all()).toEqual(schema);
+  });
   it("rejects an incompatible database without creating tables or importing files", async () => {
     const db = await database(); db.exec("CREATE TABLE environment_meta (singleton INTEGER PRIMARY KEY, schema_version INTEGER); INSERT INTO environment_meta VALUES (1,2)");
     await expect(initialize(db)).rejects.toThrow(/incompatible/i);

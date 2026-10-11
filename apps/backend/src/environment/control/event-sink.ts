@@ -9,6 +9,7 @@ import {
   type ShellStreamItem,
 } from "@forge/protocol/environment-v2";
 import { runtimeProviderCapabilities } from "../../swarm/runtime/provider-selection.js";
+import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
 import { decide } from "./orchestration/kernel.js";
 import { lineageSnapshot,sessionTransferCapabilities } from "./orchestration/transfers.js";
 import { loadState, projectLifecycle } from "./orchestration/store.js";
@@ -298,6 +299,14 @@ export function createEventSink(database: Database, clock: () => number, random:
       const changedThreads = new Set(decision.events.flatMap(event => "thread" in event ? [event.thread.threadId] : "run" in event ? [event.run.threadId] : "request" in event ? [event.request.threadId] : []));
       for (const threadId of changedThreads) {
         const thread = state.threads[threadId];
+        const lifecycleStatus = projectLifecycleStatus(state, threadId)!;
+        if (thread.role === "worker") {
+          const workerRow = database.prepare("SELECT worker_json FROM control_workers WHERE agent_id=? AND deleted=0").get(threadId) as { worker_json: string } | undefined;
+          if (workerRow && thread.managerId) {
+            const worker = { ...JSON.parse(workerRow.worker_json), status: lifecycleStatus.agentStatus };
+            if (JSON.stringify(worker) !== workerRow.worker_json) sink.append(tx, { topic: "detail", sessionId: thread.managerId, event: { type: "worker.upsert", worker } });
+          }
+        }
         const row = database.prepare("SELECT summary_json FROM control_sessions WHERE session_id=?").get(threadId) as { summary_json: string } | undefined;
         if (!row) continue;
         const summary = JSON.parse(row.summary_json);
@@ -305,7 +314,7 @@ export function createEventSink(database: Database, clock: () => number, random:
         const run = thread.activeRunId ? state.runs[thread.activeRunId] : undefined;
         const terminal = [...decision.events].reverse().find(event => event.type === "run.terminal" && event.run.threadId === threadId);
         const attention = Object.values(state.requests).some(request => request.threadId === threadId && request.state === "pending") ? "choice" : run ? "none" : terminal?.type === "run.terminal" ? terminal.run.outcome === "completed" ? "result" : terminal.run.outcome === "failed" ? "error" : "none" : summary.attention;
-        const status = thread.desired === "stopped" ? thread.shutdown === "clean" ? "stopped" : "stopping" : run?.state === "recovery" ? "interrupted" : run ? "running" : "idle";
+        const status = lifecycleStatus.sessionStatus;
         database.prepare("UPDATE control_sessions SET desired_state=?,run_generation=? WHERE session_id=?").run(thread.desired, thread.generation, threadId);
         sink.append(tx, { topic: "shell", sessionId: threadId, event: { type: "session.upsert", session: { ...summary, transferCapabilities:sessionTransferCapabilities(binding), ...(thread.lineage ? {lineage:thread.lineage}:{}), status, attention, pendingCount: Object.values(state.runs).filter(r => r.threadId === threadId && r.state === "queued").length } } });
       }

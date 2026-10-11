@@ -1,3 +1,5 @@
+import { loadState } from "./orchestration/store.js";
+import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
 import { projectAgentMetadata } from "@forge/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, createReadStream, openSync, readSync, statSync } from "node:fs";
@@ -16,6 +18,7 @@ import type { ProviderBinding } from "../../swarm/runtime/provider-contract.js";
 import type { Principal } from "./control-types.js";
 import { CONVERSATION_ENTRY_TYPE } from "../../swarm/session/conversation-timeline.js";
 import type { ControlTransaction, EventSink } from "./event-sink.js";
+import { receiptIdentity } from "./event-sink.js";
 
 type DetailItem = Extract<Extract<DetailStreamItem, { kind: "event" }>["event"], { type: "item.upsert" }>["item"];
 type ChoiceSummary = Extract<Extract<DetailStreamItem, { kind: "event" }>["event"], { type: "choice.upsert" }>["choice"];
@@ -83,12 +86,14 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const pending = swarmManager.getPendingChoiceRequestsForSession(descriptor.agentId).length > 0 || Boolean(database.prepare("SELECT 1 FROM control_choices WHERE session_id=? AND state='pending' LIMIT 1").get(descriptor.agentId));
     const attention = swarmManager.getSessionAttentionSnapshot().attentions.find(attention => attention.sessionAgentId === descriptor.agentId);
     const row = database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(descriptor.agentId) as { desired_state: string } | undefined;
-    const nativeBinding=(database.prepare("SELECT state_json FROM orchestration_bindings WHERE thread_id=? ORDER BY generation DESC").all(descriptor.agentId) as {state_json:string}[]).map(row=>JSON.parse(row.state_json) as ProviderBinding).find(b=>b.capabilities.provider===runtimeProviderCapabilities(descriptor.model.provider).provider);
-    const lifecycle = database.prepare("SELECT state_json FROM orchestration_threads WHERE thread_id=?").get(descriptor.agentId) as { state_json: string } | undefined;
-    const status = lifecycle ? prior?.status ?? "idle" : row?.desired_state === "stopped" ? swarmManager.isSessionShutdownSafe(descriptor.agentId) ? "stopped" : "stopping"
+    const state=loadState(database);
+    const nativeBinding=Object.values(state.bindings).filter(b=>b.scope.threadId===descriptor.agentId && b.capabilities.provider===runtimeProviderCapabilities(descriptor.model.provider).provider).sort((a,b)=>b.scope.generation-a.scope.generation)[0];
+    const lineage=state.threads[descriptor.agentId]?.lineage;
+    const lifecycle = projectLifecycleStatus(state, descriptor.agentId);
+    const status = lifecycle ? lifecycle.sessionStatus : row?.desired_state === "stopped" ? swarmManager.isSessionShutdownSafe(descriptor.agentId) ? "stopped" : "stopping"
       : descriptor.status === "streaming" ? "running" : descriptor.status === "terminated" ? "stopped"
         : descriptor.status === "idle" && pending ? "waiting" : descriptor.status;
-    return { transferCapabilities:sessionTransferCapabilities(nativeBinding), ...(lifecycle && JSON.parse(lifecycle.state_json).lineage ? {lineage:JSON.parse(lifecycle.state_json).lineage}:{}), projectAgent: descriptor.projectAgent ? projectAgentMetadata(descriptor.projectAgent) : null, sessionId: descriptor.agentId, projectId: descriptor.profileId ?? descriptor.agentId,
+    return { transferCapabilities:sessionTransferCapabilities(nativeBinding), ...(lineage ? {lineage}:{}), projectAgent: descriptor.projectAgent ? projectAgentMetadata(descriptor.projectAgent) : null, sessionId: descriptor.agentId, projectId: descriptor.profileId ?? descriptor.agentId,
       title: (descriptor.sessionLabel ?? descriptor.displayName).slice(0, 256), status,
       attention: pending ? "choice" : descriptor.status === "error" ? "error" : attention ? "result" : "none",
       unread: wireProjection.unread(descriptor.agentId, descriptor.profileId ?? descriptor.agentId),
@@ -111,7 +116,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
   }
   function upsertWorker(tx: ControlTransaction, descriptor: AgentDescriptor) {
     indexDescriptor(descriptor);
-    const worker = { agentId: descriptor.agentId, title: descriptor.displayName.slice(0, 256), status: descriptor.status };
+    const worker = { agentId: descriptor.agentId, title: descriptor.displayName.slice(0, 256), status: projectLifecycleStatus(loadState(database), descriptor.agentId)?.agentStatus ?? descriptor.status };
     const prior = database.prepare("SELECT worker_json FROM control_workers WHERE session_id=? AND agent_id=? AND deleted=0").get(descriptor.managerId, descriptor.agentId) as { worker_json: string } | undefined;
     if (JSON.stringify(worker) !== prior?.worker_json) eventSink.append(tx, { topic: "detail", sessionId: descriptor.managerId, event: { type: "worker.upsert", worker } });
   }
@@ -122,15 +127,16 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const id = entry.timelineEntryId ?? ("id" in entry && typeof entry.id === "string" ? entry.id : undefined);
     if (!id) return null;
     const text = "text" in entry && typeof entry.text === "string" ? entry.text : "displaySummary" in entry && typeof entry.displaySummary === "string" ? entry.displaySummary : "";
-    const user = entry.type === "conversation_message" && entry.role === "user";
+    const workerResult = entry.type === "conversation_message" && entry.source === "worker_report";
+    const user = entry.type === "conversation_message" && entry.role === "user" && !workerResult;
     const runId="turnId" in entry && entry.turnId && database.prepare("SELECT 1 FROM orchestration_runs WHERE run_id=? AND thread_id=?").get(entry.turnId,entry.agentId) ? entry.turnId:undefined;
     return { itemId: id, ...(runId ? {runId}:{}), userTurnId: user ? entry.id ?? id : userTurns.get(sessionId) ?? ("turnId" in entry ? entry.turnId : undefined) ?? id,
-      actorId: "actorAgentId" in entry ? entry.actorAgentId : entry.agentId,
-      kind: entry.type === "conversation_message" ? user ? "user" : "assistant" : entry.type === "agent_message" ? "worker_result" : entry.type === "agent_tool_call" ? "tool" : "activity",
+      actorId: workerResult && entry.sourceWorkerId ? entry.sourceWorkerId : "actorAgentId" in entry ? entry.actorAgentId : entry.agentId,
+      kind: workerResult ? "worker_result" : entry.type === "conversation_message" ? user ? "user" : "assistant" : entry.type === "agent_message" ? "worker_result" : entry.type === "agent_tool_call" ? "tool" : "activity",
       pinned: swarmManager.getPinnedMessageIds(sessionId)?.has(entry.type === "conversation_message" ? entry.id ?? id : id) ?? false,
       timestamp: entry.timestamp, ...(entry.type === "conversation_message" ? { source: entry.source } : {}), text: text.slice(0, 8192), contentRef: text.length > 8192 ? id : null,
       artifacts: (wireProjection.artifacts?.(entry, sessionId) ?? []).slice(0, 20),
-      commandId: entry.type === "conversation_message" ? entry.controlCommandId ?? null : null };
+      commandId: entry.type === "conversation_message" && entry.controlCommandId ? receiptIdentity(entry.controlCommandId) : null };
   }
   function canonical(tx: ControlTransaction, entry: ConversationEntryEvent, descriptor: AgentDescriptor, evidence: Source, projectedItem?: DetailItem) {
     const sessionId = actors.get(descriptor.agentId) ?? (descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId);

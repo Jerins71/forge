@@ -8,10 +8,11 @@ import type { EventSink } from "./event-sink.js";
 import type { InputRoutePort, WorkspacePort } from "./effect-types.js";
 import type { EnvironmentControlService } from "./command-service.js";
 import { createCoreAgentMessagePort } from "./orchestration/agent-message-port.js";
+import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
 import { loadState } from "./orchestration/store.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, controlService, workspaceService, artifactService }: {
-  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "getAgentForInternalUse" | "listProfiles" | "releaseControlledWorker" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner"> & Pick<SwarmManager,"installCoreAgentMessagePort">;
+  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "getAgentForInternalUse" | "listProfiles" | "releaseControlledWorker" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner"> & Pick<SwarmManager,"installCoreAgentMessagePort">;
   database: Database;
   eventSink: EventSink;
   controlService: EnvironmentControlService;
@@ -50,7 +51,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
   });
   swarmManager.installControlledTurnProjection({ read(agentId) {
     const state = loadState(database);
-    return { activeRunId:state.threads[agentId]?.activeRunId,pendingRunIds:Object.values(state.runs).filter(run => run.threadId === agentId && run.state === "queued").sort((a,b)=>a.sequence-b.sequence).map(run=>run.runId) };
+    return { status:projectLifecycleStatus(state,agentId)?.agentStatus,activeRunId:state.threads[agentId]?.activeRunId,pendingRunIds:Object.values(state.runs).filter(run => run.threadId === agentId && run.state === "queued").sort((a,b)=>a.sequence-b.sequence).map(run=>run.runId) };
   } });
   eventSink.subscribeCommit(() => swarmManager.reflectControlledTurns());
   const messages = createCoreAgentMessagePort({ controlService,sink:eventSink,artifacts:artifactService,swarm:swarmManager,clock:Date.now,random:()=>crypto.randomUUID() });
@@ -67,6 +68,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
       return { materialized: true };
     },
     enqueuePresentation:(threadId,runId,presentation) => swarmManager.enqueueControlledPresentation(threadId,runId,presentation),
+    prepareWorkerResult: (assignment,resultText) => swarmManager.prepareControlledWorkerResult(assignment,resultText),
     async extractWorkerResult(threadId,runId,inputEntryId) {
       const final=inputEntryId ? swarmManager.extractWorkerRunResult(threadId,runId,inputEntryId) : { resultText:`status: blocked\nsummary: Worker ${threadId} settled without a canonical input.\nfollow-up: Check the worker or retry the assignment.` };
       return final.entryId ? { entryId:final.entryId,resultText:final.resultText } : swarmManager.appendControlledBlockedResult(threadId,runId,final.resultText);
@@ -104,13 +106,14 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
 
 /** Runs outside acceptance; unsupported routes cannot leave an accepted but unsendable input. */
 export function createControlledInputRoutePreflight({ swarmManager }: {
-  swarmManager: Pick<SwarmManager, "getAgentForInternalUse" | "listProfiles" | "isControlledInputPersistenceReady">;
+  swarmManager: Pick<SwarmManager, "getAgentForInternalUse" | "listProfiles" | "isControlledInputPersistenceReady" | "assertControlledUserInputTargetable">;
 }): InputRoutePort {
   return {
     async preflight(input) {
       const profile = input.projectId ? swarmManager.listProfiles().find(profile => profile.profileId === input.projectId) : undefined;
       const sessionId = input.sessionId ?? profile?.defaultSessionAgentId;
       const descriptor = sessionId ? swarmManager.getAgentForInternalUse(sessionId) : undefined;
+      if (descriptor) swarmManager.assertControlledUserInputTargetable(descriptor.agentId);
       const unsupported = parseCompactSlashCommand(input.message.text) || classifyCodexUserMessage(input.message.text).kind === "sidecar" || descriptor?.externalThread;
       const buffering = Boolean(input.sessionId && !swarmManager.isControlledInputPersistenceReady(input.sessionId));
       if (unsupported || buffering) return { ok: false, error: { code: "UNAVAILABLE", message: buffering ? "This new session has no persisted conversation yet. Start a new session or wait for its first response before sending." : "This input route cannot acknowledge durable control delivery.", retryable: false } };

@@ -11,6 +11,9 @@ import { createSwarmControlAdapter } from "../swarm-control-adapter.js";
 import { createArtifactService } from "../artifact-service.js";
 import { UserMessageCoordinator, type HandleUserMessageOptions, type UserMessageCoordinatorOptions } from "../../../swarm/user-message-coordinator.js";
 import { ConversationAttachmentService } from "../../../swarm/conversation-attachment-service.js";
+import { projectLifecycleStatus } from "./lifecycle-projection.js";
+import { AssistantOutputRouter } from "../../../swarm/assistant-output-router.js";
+import { AgentDirectory } from "../../../swarm/agent-directory.js";
 import type { AgentDescriptor } from "../../../swarm/types.js";
 const roots: string[] = []; const cores: ControlCore[] = [];
 afterEach(async () => { for (const core of cores.splice(0)) await core.close(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -46,14 +49,13 @@ describe("durable provider outbox", () => {
     const attachments = new ConversationAttachmentService({ dataDir: root, uploadsDir: path.join(root, "uploads") });
     const coordinator = new UserMessageCoordinator({
       targeting: { descriptors: new Map([["manager", descriptor]]), assertDescriptorNotEffectivelyArchived() {} }, attachments,
-      codex: { plugin: { assertWorkerNotUserTargetable() {} } }, projectAgents: { async preflightRuntime() {} },
+      codex: { plugin: { assertWorkerNotUserTargetable() { throw new Error("Internal prepared inputs are user-gated"); } } }, projectAgents: { async preflightRuntime() {} },
       runtime: { withRuntimeAdmission: async (_id: string, work: () => Promise<unknown>) => work() },
       inboundConversation: { async append(_target: unknown, input: { attachments: import("../../../swarm/types.js").ConversationAttachment[] }) { return { event: { id: "canonical", timelineEntryId: "canonical" }, runtimeAttachments: input.attachments }; } },
       turns: { async enqueue() {} },
     } as unknown as UserMessageCoordinatorOptions);
-    let submit!: (text: string, options: HandleUserMessageOptions) => Promise<void>;
     const acquire = f.options.swarm.acquireProvider;
-    const swarm = { installProviderScopeOwner() {}, installAuthoritativeInputOwner(callback: typeof submit) { submit = callback; }, installControlledTurnProjection() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
+    const swarm = { installProviderScopeOwner() {}, installAuthoritativeInputOwner() {}, installControlledTurnProjection() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
       getAgentForInternalUse: () => descriptor, acquireControlledProvider: acquire, applyControlledInput: coordinator.applyControlledInput.bind(coordinator),
     } as unknown as Parameters<typeof createSwarmControlAdapter>[0]["swarmManager"];
     const artifactService = createArtifactService({ database: f.core.database, dataDir: root });
@@ -68,6 +70,41 @@ describe("durable provider outbox", () => {
     f.adapter.start = async input => { nativeInput = input.input; return { status: "accepted", turn: { ...input.binding.scope, kind: "turn", conversationId: "native", nativeId: "turn" } }; };
     await second.effectWorker.drain();
     expect(nativeInput).toEqual({ text: "Prepared text with guidance.", images: [{ mimeType: "image/png", data: Buffer.from("fixture image bytes").toString("base64") }] });
+  });
+  it("persists the internal worker-result envelope and routing through recovery before dispatch", async () => {
+    const f = await fixture(); const root = path.dirname(f.options.databasePath!);
+    const manager = { agentId: "manager", role: "manager", status: "idle", profileId: "project" } as AgentDescriptor;
+    const worker = { ...manager, agentId: "worker", managerId: "manager", role: "worker", displayName: "Fixture Worker" } as AgentDescriptor;
+    const canonical: Array<Record<string, unknown>> = [];
+    const coordinator = new UserMessageCoordinator({ targeting: { descriptors: new Map([["manager", manager], ["worker", worker]]), assertDescriptorNotEffectivelyArchived() {} },
+      attachments: new ConversationAttachmentService({ dataDir: root, uploadsDir: path.join(root, "uploads") }),
+      codex: { plugin: { assertWorkerNotUserTargetable() { throw new Error("Internal result must bypass the user gate"); } } },
+      projectAgents: { async preflightRuntime() {} }, runtime: { withRuntimeAdmission: async (_id: string, work: () => Promise<unknown>) => work() },
+      agentMessages: { async prepareModelInboundMessage(_id: string, input: { text: string }, origin: string) { expect(origin).toBe("internal"); return input.text; } },
+      assistantOutput: new AssistantOutputRouter({} as ConstructorParameters<typeof AssistantOutputRouter>[0]),
+      inboundConversation: { async append(_target: unknown, input: Record<string, unknown>) { canonical.push(input); const entryId = (input.controlledInput as { inputId: string }).inputId; return { event: { id: entryId, timelineEntryId: entryId }, runtimeAttachments: [] }; } },
+      turns: { async enqueue() {} },
+    } as unknown as UserMessageCoordinatorOptions);
+    f.options.swarm.extractWorkerResult = async () => ({ entryId: "worker-final", resultText: "status: done\nsummary: Finished the bounded task." });
+    f.options.swarm.prepareWorkerResult = (assignment, resultText) => coordinator.prepareWorkerResult(assignment, resultText);
+    await f.core.controlService.submitInput({ commandId: "parent", threadId: "manager", message: { text: "parent", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.submitInput({ commandId: "worker", threadId: "worker", thread: { role: "worker", managerId: "manager", projectId: "project" }, message: { text: "worker", artifactIds: [] },
+      assignment: { assignmentId: "assignment", parentThreadId: "manager", parentRunId: "run-parent", selection: { provider: "pi", modelId: "fixture" }, parentContext: { outputTarget: { kind: "internal_only", reason: "result-fixture" }, rootTurnId: "parent-root" } } }); await f.core.effectWorker.drain();
+    const terminal = (core: ControlCore, threadId: string) => { const state = loadState(core.database); const run = state.runs[state.threads[threadId].activeRunId!]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+      core.controlService.record({ type: "provider.observe", commandId: `terminal-${threadId}`, now: f.options.clock(), observation: { type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation, turn: attempt.turn }, terminalAuthority: "root_attempt", outcome: "completed" } }); };
+    terminal(f.core, "worker"); await f.core.effectWorker.drain();
+    const row = f.core.database.prepare("SELECT prepared_json FROM orchestration_run_inputs WHERE run_id='assignment:result:run'").get() as { prepared_json: string } | undefined;
+    expect(row).toBeDefined(); const prepared = JSON.parse(row!.prepared_json);
+    expect(prepared.runtimeMessage.text).toContain("[workerResult]"); expect(prepared.runtimeMessage.text).toContain("Fixture Worker");
+    expect(prepared.presentation).toMatchObject({ source: "worker_result", routeOrigin: "worker_result", sourceWorkerId: "worker", parentRootTurnId: "parent-root", assistantOutputTarget: { kind: "internal_only", reason: "result-fixture" } });
+    terminal(f.core, "manager"); await f.core.close(); const reboot = await f.open();
+    expect(JSON.parse((reboot.database.prepare("SELECT prepared_json FROM orchestration_run_inputs WHERE run_id='assignment:result:run'").get() as typeof row & {}).prepared_json)).toEqual(prepared);
+    const state = loadState(reboot.database);
+    reboot.controlService.record({ type: "recovery.resume", commandId: "resume-result", now: f.options.clock(), recoveryId: state.recovery!.recoveryId, attempts: { "assignment:result:run": "result-retry" }, bindingIds: { manager: "result-binding" } });
+    f.options.swarm.applyInput = input => coordinator.applyControlledInput(input.message.text, { targetAgentId: input.sessionId, runId: input.runId, controlledInput: { inputId: input.inputId, commandId: input.commandId, contentHash: "fixture" }, prepared: input.prepared });
+    let nativeText = ""; f.adapter.start = async input => { nativeText = input.input.text; return { status: "accepted", turn: { ...input.binding.scope, kind: "turn", conversationId: "native", nativeId: "result-turn" } }; };
+    await reboot.effectWorker.drain(); expect(nativeText).toBe(prepared.runtimeMessage.text);
+    expect(canonical).toEqual([expect.objectContaining({ role: "system", source: "worker_report", sourceWorkerId: "worker", text: "status: done\nsummary: Finished the bounded task." })]);
   });
   it("persists every user input option and pinned attachment through restart before dispatch", async () => {
     const f = await fixture(); let submit!: (text: string, options: HandleUserMessageOptions) => Promise<void>;
@@ -131,6 +168,7 @@ describe("durable provider outbox", () => {
     const f = await fixture(); const stopped: string[] = [];
     f.options.swarm.resolveSession = agentId => agentId === "worker" ? { sessionId: "manager", workerId: "worker" } : { sessionId: agentId };
     f.options.swarm.stopSession = async input => { stopped.push(input.sessionId); return { stopped: true }; };
+    f.core.eventSink.transaction(tx => f.core.eventSink.append(tx, { topic: "detail", sessionId: "manager", event: { type: "worker.upsert", worker: { agentId: "worker", title: "Worker", status: "idle" } } }));
     await f.core.controlService.submitInput({ commandId: "worker-input", threadId: "worker", thread: { role: "worker", projectId: "project", managerId: "manager" }, message: { text: "worker", artifactIds: [] } });
     await f.core.effectWorker.drain();
     await f.core.controlService.execute(principal, method, method === "worker.kill" ? { commandId, sessionId: "manager", workerId: "worker" } : { commandId, sessionId: "worker" });
@@ -139,7 +177,11 @@ describe("durable provider outbox", () => {
     expect(state.threads.worker).toMatchObject({ desired: "stopped", shutdown: "clean" });
     expect(state.threads.manager.desired).toBe("running");
     expect(stopped).toEqual(["worker"]);
-    expect((await f.core.controlService.getReceipt(principal, commandId)).state).toBe("succeeded");
+    const row = f.core.database.prepare("SELECT worker_json FROM control_workers WHERE agent_id='worker'").get() as { worker_json: string };
+    expect(JSON.parse(row.worker_json).status).toBe("terminated");
+    await f.core.close(); const reboot = await f.open();
+    expect(JSON.parse((reboot.database.prepare("SELECT worker_json FROM control_workers WHERE agent_id='worker'").get() as typeof row).worker_json).status).toBe("terminated");
+    expect((await reboot.controlService.getReceipt(principal, commandId)).state).toBe("succeeded");
   });
   it("accepts and dispatches an input once while receipt completion is independent of run completion", async () => {
     const f = await fixture(); const input = { commandId, sessionId: "manager", message: { text: "fixture", artifactIds: [] } };
@@ -156,6 +198,11 @@ describe("durable provider outbox", () => {
   it("retains a marked unknown dispatch through two restarts without invoking the provider again", async () => {
     const f = await fixture(); f.adapter.start = async () => { throw new Error("lost acknowledgment"); };
     await f.core.controlService.execute(principal, "session.send", { commandId, sessionId: "manager", message: { text: "fixture", artifactIds: [] } }); await f.core.effectWorker.drain();
+    const drained = loadState(f.core.database);
+    expect(drained.threads.manager.activeRunId).toBeUndefined();
+    expect(drained.runs[`run-${commandId}`].state).toBe("recovery");
+    expect(projectLifecycleStatus(drained, "manager")).toEqual({ agentStatus: "error", sessionStatus: "interrupted" });
+    expect(JSON.parse((f.core.database.prepare("SELECT summary_json FROM control_sessions WHERE session_id='manager'").get() as { summary_json: string }).summary_json).status).toBe("interrupted");
     const before = loadState(f.core.database).recovery!; expect(before).not.toBeNull(); await f.core.close();
     const second = await f.open(); await second.effectWorker.drain(); expect(loadState(second.database).recovery?.recoveryId).toBe(before.recoveryId); await second.close();
     const third = await f.open(); await third.effectWorker.drain(); expect(loadState(third.database).recovery?.recoveryId).toBe(before.recoveryId);
@@ -219,4 +266,17 @@ describe("durable provider outbox", () => {
     expect(loadState(f.core.database).assignments.assignment.selection.modelId).toBe("selected-fallback");
   });
 
+});
+
+it("projects authoritative worker status across all directory reads without changing the descriptor", () => {
+  const manager = { agentId: "manager", role: "manager", status: "idle", createdAt: "2026-01-01", updatedAt: "2026-01-01", model: { provider: "pi", modelId: "fixture" } } as AgentDescriptor;
+  const worker = { ...manager, agentId: "worker", managerId: "manager", role: "worker" } as AgentDescriptor;
+  const directory = new AgentDirectory({ descriptors: new Map([["manager", manager], ["worker", worker]]), profiles: new Map(), getPendingChoiceCount: () => 0 });
+  directory.installLifecycleStatus(id => id === "worker" ? "terminated" : undefined);
+  expect(directory.getAgent("worker")?.status).toBe("terminated");
+  expect(directory.getAgentForInternalUse("worker")?.status).toBe("terminated");
+  expect(directory.listAgents().find(agent => agent.agentId === "worker")?.status).toBe("terminated");
+  expect(directory.listAgentsForInternalUse().find(agent => agent.agentId === "worker")?.status).toBe("terminated");
+  expect(directory.listWorkersForSession("manager")[0].status).toBe("terminated");
+  expect(worker.status).toBe("idle");
 });

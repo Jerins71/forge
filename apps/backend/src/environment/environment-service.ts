@@ -92,8 +92,9 @@ export async function createEnvironmentService(options: {
       ensureSession: (input) => adapter.ensureSession(input),
       applyInput: (input) => adapter.applyInput(input),
       enqueuePresentation:(threadId,runId,presentation)=>adapter.enqueuePresentation?.(threadId,runId,presentation),
+      prepareWorkerResult: (assignment,resultText) => { if (!adapter.prepareWorkerResult) throw new Error("Worker result preparation port missing"); return adapter.prepareWorkerResult(assignment,resultText); },
       extractWorkerResult: (threadId,runId,inputEntryId) => { if (!adapter.extractWorkerResult) throw new Error("Worker extraction port missing"); return adapter.extractWorkerResult(threadId,runId,inputEntryId); },
-      acquireProvider: (scope,conversation) => adapter.acquireProvider(scope,conversation),
+      acquireProvider: (scope,conversation,model) => adapter.acquireProvider(scope,conversation,model),
       applyChoice: (input) => adapter.applyChoice(input),
       stopSession: (input) => adapter.stopSession(input),
     };

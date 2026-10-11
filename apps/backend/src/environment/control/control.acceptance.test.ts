@@ -1,3 +1,6 @@
+import type { ProviderAdapter } from '../../swarm/runtime/provider-contract.js';
+import { piProviderCapabilities } from '../../swarm/runtime/pi/pi-provider-adapter.js';
+import { loadState } from './orchestration/store.js';
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -43,7 +46,7 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
-async function fixture(overrides: Partial<SwarmControlPort> = {}) {
+async function fixture(overrides: Partial<SwarmControlPort> = {}, providerOverrides: Partial<ProviderAdapter> = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "forge-control-"));
   roots.push(root);
   const databasePath = path.join(root, "control.sqlite");
@@ -54,6 +57,23 @@ async function fixture(overrides: Partial<SwarmControlPort> = {}) {
   let materialized = 0;
   let stops = 0;
   const canonical = new Map<string, string>();
+  let completeTurns = true;
+  let currentCore: Awaited<ReturnType<typeof createControlCore>>;
+  const provider: ProviderAdapter = {
+    capabilities: piProviderCapabilities,
+    open: async () => { throw new Error("acquireProvider owns fixture initialization"); },
+    resume: async () => { throw new Error("acquireProvider owns fixture initialization"); },
+    start: async input => {
+      dispatchCount++;
+      const turn = { ...input.binding.scope, kind: "turn" as const, nativeId: input.attemptId, conversationId: input.binding.conversation.nativeId };
+      if (completeTurns) queueMicrotask(() => currentCore.controlService.record({ type: "provider.observe", commandId: `terminal:${input.attemptId}`, now: options.clock(),
+        observation: { type: "terminal", scope: input.binding.scope, attemptId: input.attemptId, sequence: 0, origin: { kind: "root", turn }, terminalAuthority: "root_attempt", outcome: "completed" } }));
+      return { status: "accepted", turn };
+    },
+    steer: async () => { throw new Error("Core queues fixture input"); }, interrupt: async () => {}, respond: async () => {}, compact: async () => {}, close: async () => {}, drain: async () => ({ status: "clean" }),
+    observations: async function* (_binding, signal) { if (!signal?.aborted) await new Promise<void>(resolve => signal?.addEventListener("abort", () => resolve(), { once: true })); },
+    ...providerOverrides,
+  };
   const workspace: WorkspacePort = {
     async prepareLaunch(input) {
       preflightCount++;
@@ -90,11 +110,10 @@ async function fixture(overrides: Partial<SwarmControlPort> = {}) {
     },
     async applyInput(input) {
       if (!canonical.has(input.inputId)) canonical.set(input.inputId, "entry-" + input.inputId);
-      await input.onCanonicalAppend(canonical.get(input.inputId)!);
-      if ((await input.beforeDispatch()) === "do-not-dispatch") return { delivery: "unknown" };
-      dispatchCount++;
-      await input.onDispatchAccepted();
-      return { delivery: "dispatched" };
+      return { entryId: canonical.get(input.inputId)!, runtimeMessage: { text: input.message.text } };
+    },
+    async acquireProvider(scope) {
+      return { adapter: provider, binding: { scope, conversation: { ...scope, kind: "conversation", nativeId: `native:${scope.threadId}` }, capabilities: provider.capabilities(), instructionRevision: "fixture", toolContractRevision: "fixture" } };
     },
     async applyChoice() {
       return "answered";
@@ -121,6 +140,7 @@ async function fixture(overrides: Partial<SwarmControlPort> = {}) {
   };
   const open = async () => {
     const core = await createControlCore(options);
+    currentCore = core;
     cores.push(core);
     return core;
   };
@@ -128,9 +148,11 @@ async function fixture(overrides: Partial<SwarmControlPort> = {}) {
     core: await open(),
     open,
     swarm,
+    provider,
     workspace,
     options,
     canonical,
+    holdNativeTurns() { completeTurns = false; },
     revoke() {
       revoked = true;
     },
@@ -138,7 +160,7 @@ async function fixture(overrides: Partial<SwarmControlPort> = {}) {
   };
 }
 function count(core: Awaited<ReturnType<typeof createControlCore>>, table: string) {
-  return (core.database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
+  return (core.database.prepare(`SELECT COUNT(*) AS count FROM ${table}${table === "commands" ? " WHERE device_session_id != 'core'" : ""}`).get() as { count: number }).count;
 }
 
 describe("durable control acceptance on real SQLite", () => {
@@ -168,7 +190,7 @@ describe("durable control acceptance on real SQLite", () => {
     expect(await f.core.controlService.execute(principal, "session.launch", launch)).toEqual(receipt);
     expect(f.counts().preflightCount).toBe(1);
     for (const table of ["commands", "control_sessions", "workspace_reservations", "control_inputs"]) expect(count(f.core, table)).toBe(1);
-    expect(count(f.core, "effects")).toBe(3);
+    expect(count(f.core, "effects")).toBe(4);
     expect(count(f.core, "events")).toBe(events);
     await expect(f.core.controlService.execute(principal, "session.launch", { ...launch, title: "changed" })).rejects.toMatchObject({
       code: "CONFLICT",
@@ -239,11 +261,10 @@ describe("durable control acceptance on real SQLite", () => {
 
   it("never re-dispatches an ambiguous provider handoff on restart or retry", async () => {
     let calls = 0;
-    const f = await fixture({
-      async applyInput(input) {
+    const f = await fixture({}, {
+      async start(input) {
         calls++;
-        await input.onCanonicalAppend("stable-entry");
-        expect(await input.beforeDispatch()).toBe("dispatch");
+        expect(loadState(f.core.database).attempts[input.attemptId].state).toBe("dispatching");
         throw new Error("provider transport broke after marker");
       },
     });
@@ -266,11 +287,13 @@ describe("durable control acceptance on real SQLite", () => {
   it("reconciles a dead claimed dispatch marker to unknown without executing the input", async () => {
     const f = await fixture();
     await f.core.controlService.execute(principal, "session.launch", launch);
-    f.core.database.prepare("UPDATE effects SET state = 'done' WHERE ordinal < 2").run();
-    f.core.database.prepare("UPDATE effects SET state = 'claimed', claimed_boot_id = 'dead' WHERE ordinal = 2").run();
-    f.core.database
-      .prepare("UPDATE control_inputs SET append_state = 'recorded', canonical_entry_id = 'persisted', delivery_state = 'dispatching'")
-      .run();
+    const state = loadState(f.core.database); const run = Object.values(state.runs)[0]; const attempt = state.attempts[run.activeAttemptId];
+    const resource = await f.swarm.acquireProvider({ threadId: run.threadId, bindingId: attempt.bindingId, generation: attempt.generation });
+    f.core.controlService.record({ type: "binding.acquired", commandId: "dead-binding", now: f.options.clock(), threadId: run.threadId, binding: resource.binding });
+    f.core.controlService.record({ type: "input.recorded", commandId: "dead-append", now: f.options.clock(), threadId: run.threadId, inputId: run.inputId, entryId: "persisted" });
+    f.core.controlService.record({ type: "attempt.dispatch", commandId: "dead-dispatch", now: f.options.clock(), threadId: run.threadId, attemptId: attempt.attemptId, authorized: true });
+    f.core.database.prepare("UPDATE effects SET state='done' WHERE kind != 'provider.start'").run();
+    f.core.database.prepare("UPDATE effects SET state='claimed',claimed_boot_id='dead' WHERE kind='provider.start'").run();
     await f.core.close();
     const reopened = await f.open();
     await reopened.reconcileOnBoot();
@@ -285,12 +308,9 @@ describe("durable control acceptance on real SQLite", () => {
     let crossed = false;
     const f = await fixture({
       async applyInput(input) {
-        await input.onCanonicalAppend("persisted");
         entered.resolve();
         await release.promise;
-        crossed = (await input.beforeDispatch()) === "dispatch";
-        if (crossed) await input.onDispatchAccepted();
-        return { delivery: crossed ? "dispatched" : "unknown" };
+        return { entryId: "persisted", runtimeMessage: { text: input.message.text } };
       },
     });
     await f.core.controlService.execute(principal, "session.launch", launch);
@@ -306,17 +326,20 @@ describe("durable control acceptance on real SQLite", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" });
     release.resolve();
     await draining;
+    crossed = f.counts().dispatchCount > 0;
     expect(crossed).toBe(false);
     expect(await f.core.controlService.getReceipt(principal, STOP)).toMatchObject({ state: "succeeded" });
     expect(await f.core.controlService.getReceipt(principal, COMMAND)).toMatchObject({ state: "interrupted", delivery: "none" });
+    const stoppedGeneration = loadState(f.core.database).threads["v2-" + COMMAND].generation;
     await f.core.controlService.execute(principal, "session.send", {
       commandId: SEND,
       sessionId: "v2-" + COMMAND,
       message: { text: "explicit recovery", artifactIds: [] },
     });
-    expect(
-      (f.core.database.prepare("SELECT run_generation FROM control_sessions").get() as { run_generation: number }).run_generation,
-    ).toBe(2);
+    const state = loadState(f.core.database);
+    expect(state.threads["v2-" + COMMAND]).toMatchObject({ desired: "running", shutdown: "clean", generation: stoppedGeneration + 1 });
+    expect(state.attempts[state.runs[`run-${SEND}`].activeAttemptId].generation).toBe(stoppedGeneration + 1);
+    expect(state.threads["v2-" + COMMAND].generation).toBeGreaterThan(state.attempts[state.runs[`run-${COMMAND}`].activeAttemptId].generation);
   });
 
   it("cancels revoked unclaimed effects and retains an unmaterialized stopped reservation", async () => {
@@ -368,8 +391,8 @@ describe("durable control acceptance on real SQLite", () => {
   it("reconciles a canonical append whose locator transaction was lost without duplicating input", async () => {
     const f = await fixture();
     await f.core.controlService.execute(principal, "session.launch", launch);
-    f.core.database.prepare("UPDATE effects SET state = 'done' WHERE ordinal < 2").run();
-    f.core.database.prepare("UPDATE effects SET state = 'claimed', claimed_boot_id = 'dead' WHERE ordinal = 2").run();
+    f.core.database.prepare("UPDATE effects SET state='done' WHERE kind IN ('workspace.ensure','session.ensure','runtime.acquire')").run();
+    f.core.database.prepare("UPDATE effects SET state='claimed',claimed_boot_id='dead' WHERE kind='transcript.append'").run();
     f.canonical.set("input-" + COMMAND, "already-persisted-in-jsonl");
     await f.core.close();
     const reopened = await f.open();
@@ -460,7 +483,7 @@ describe("durable control acceptance on real SQLite", () => {
     await f.core.controlService.execute(principal, "session.launch", launch);
     expect(f.counts().preflightCount).toBe(2);
     expect(count(f.core, "commands")).toBe(1);
-    expect(count(f.core, "effects")).toBe(3);
+    expect(count(f.core, "effects")).toBe(4);
   });
 
   it("keeps epoch/high water and command knowledge after journal prefix retention", async () => {
@@ -482,7 +505,7 @@ describe("durable control acceptance on real SQLite", () => {
   });
 
   it("keeps already dispatched work running when a revoked device loses another pending send", async () => {
-    const f = await fixture();
+    const f = await fixture(); f.holdNativeTurns();
     const sessionId = "v2-" + COMMAND;
     await f.core.controlService.execute(principal, "session.launch", launch);
     await f.core.effectWorker.drain();
@@ -565,7 +588,7 @@ describe("durable control acceptance on real SQLite", () => {
     await expect(f.core.controlService.execute(principal, "session.send", { ...input, commandId: STOP })).rejects.toMatchObject(error);
     expect(count(f.core, "commands")).toBe(2);
     expect(count(f.core, "control_inputs")).toBe(2);
-    expect(count(f.core, "effects")).toBe(4);
+    expect(count(f.core, "effects")).toBe(5);
     expect(count(f.core, "events")).toBe(eventCount);
     expect(calls).toBe(2);
   });
@@ -637,10 +660,8 @@ describe("lifecycle command admission", () => {
     const entered = deferred<void>(); const release = deferred<void>();
     let dispatched = false; let mutated = false;
     const f = await fixture({ async applyInput(input) {
-      await input.onCanonicalAppend("saved"); entered.resolve(); await release.promise;
-      dispatched = await input.beforeDispatch() === "dispatch";
-      if (dispatched) await input.onDispatchAccepted();
-      return { delivery: dispatched ? "dispatched" : "unknown" };
+      entered.resolve(); await release.promise;
+      return { entryId: "saved", runtimeMessage: { text: input.message.text } };
     } });
     await f.core.controlService.execute(principal, "session.launch", launch);
     const drain = f.core.effectWorker.drain(); await entered.promise;
@@ -657,6 +678,7 @@ describe("lifecycle command admission", () => {
     release.resolve(); await drain;
     expect(await outcome).toEqual({ value: { completed: true } });
     expect(await sendOutcome).toMatchObject({ error: { code: "CONFLICT" } });
+    dispatched = f.counts().dispatchCount > 0;
     expect(dispatched).toBe(false);
     expect(await f.core.controlService.getReceipt(principal, COMMAND)).toMatchObject({ state: "interrupted", delivery: "none" });
   });

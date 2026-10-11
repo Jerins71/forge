@@ -1,3 +1,9 @@
+import { createDetailStream } from "../streams/detail-stream.js";
+import { createControlDescriptorPersistence } from './descriptor-persistence.js';
+import { createTestEnvironment } from '../../test-support/environment-auth.js';
+import * as controlDatabase from './database.js';
+import { loadState } from './orchestration/store.js';
+import type { SessionManager } from '@earendil-works/pi-coding-agent';
 import { createSessionLifecycleRpc } from "../../ws/rpc/session-lifecycle-rpc.js";
 import { SessionFeaturePublisher } from "../../ws/session-feature-publisher.js";
 import { createDetailFeatureRpc } from "../../ws/rpc/detail-feature-rpc.js";
@@ -5,9 +11,7 @@ import { randomUUID } from "node:crypto";
 import { getSessionDir } from "../../swarm/storage/data-paths.js";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeTempConfig, TestSwarmManager, bootWithDefaultManager } from "../../test-support/index.js";
-import { loadConfiguredSqliteDatabaseConstructor } from "../../sqlite-database-loader.js";
-import { migrateControlDatabase } from "./migrations.js";
+import { makeTempConfig, TestSwarmManager } from "../../test-support/index.js";
 import { createSwarmEventMirror } from "./swarm-event-mirror.js";
 import { createProjectPolicy } from "./project-policy.js";
 import { createControlCore } from "./database.js";
@@ -18,24 +22,50 @@ import type { SwarmControlPort } from "./control-types.js";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
+async function createFixtureEnvironment(manager: TestSwarmManager) {
+  // Capture the actual environment owner only to drain its worker deterministically.
+  let core!: Awaited<ReturnType<typeof createControlCore>>;
+  const onCreateRuntime = manager.onCreateRuntime;
+  manager.onCreateRuntime = async input => {
+    await onCreateRuntime?.(input);
+    const descriptor = input.descriptor;
+    if (!loadState(core.database).threads[descriptor.agentId]) core.controlService.record({ type: "thread.create", commandId: `thread:${descriptor.agentId}`, now: Date.now(), threadId: descriptor.agentId, role: descriptor.role, projectId: descriptor.profileId ?? descriptor.managerId, managerId: descriptor.role === "worker" ? descriptor.managerId : undefined });
+    core.controlService.record({ type: "thread.prepare_binding", commandId: `prepare:${randomUUID()}`, now: Date.now(), threadId: descriptor.agentId, bindingId: randomUUID() });
+  };
+  const create = controlDatabase.createControlCore;
+  const capture = vi.spyOn(controlDatabase, "createControlCore").mockImplementation(async options => {
+    core = await create({ ...options, isDeviceRevoked: () => false });
+    return core;
+  });
+  try { return { ...await createTestEnvironment(manager, { boot: true }), core }; } finally { capture.mockRestore(); }
+}
 async function fixture(auth = false) {
   const config = await makeTempConfig({ prefix: "v2-swarm-", omitSharedAuthFile: !auth, ...(auth ? { sharedAuthContent: { "openai-codex": { type: "api_key", key: "forge-fixture-inert-not-a-provider-key" } } } : {}), omitSharedSecretsFile: true });
-  const manager = new TestSwarmManager(config); await bootWithDefaultManager(manager, config);
-  const Database = await loadConfiguredSqliteDatabaseConstructor(); const database = new Database(`${config.paths.dataDir}/control.sqlite`);
-  migrateControlDatabase(database, { environmentId: randomUUID(), streamEpoch: randomUUID() });
-  const {core,adapter}=await makeCore({config,manager,database} as Awaited<ReturnType<typeof fixture>>);
-  const eventSink=core.eventSink;
-  await core.reconcileOnBoot();
-  cleanup.push(()=>core.close());
+  const manager = new TestSwarmManager(config);
+  manager.onCreateRuntime = ({ runtime }) => {
+    const native = (runtime as unknown as { sessionManager: SessionManager }).sessionManager;
+    native.appendMessage({ role: "assistant", content: [{ type: "text", text: "fixture ready" }] } as never);
+  };
+  const { environment, core, paired } = await createFixtureEnvironment(manager);
+  if (!manager.getAgent("manager")) await manager.createManager("manager", { name: "Manager", cwd: config.defaultCwd });
+  await core.effectWorker.drain();
+  const bootstrap = manager.runtimeByAgentId.get("manager"); if (bootstrap) { bootstrap.sendCalls = []; bootstrap.nextDeliveryId = 0; }
+  const database = environment.database; const eventSink = core.eventSink;
+  const workspace = createWorkspaceService({ database, dataDir: config.paths.dataDir, swarmManager: manager });
+  const artifacts = createArtifactService({ database, dataDir: config.paths.dataDir, swarmManager: manager });
+  const adapter = createSwarmControlAdapter({ swarmManager: manager, database, eventSink, controlService: core.controlService, workspaceService: workspace, artifactService: artifacts });
+  let coreClosed = false;
+  const close = core.close.bind(core); core.close = async () => { coreClosed = true; await close(); };
   const commandId = randomUUID(); const sessionId = `v2-${commandId}`;
   await adapter.ensureSession({ commandId, sessionId, projectId: "manager", title: "Controlled", cwd: config.defaultCwd });
-  cleanup.push(async () => { for (const agent of manager.listAgents().filter(agent => agent.role === "manager")) await manager.stopSession(agent.agentId); await manager.disposeHistoryRecall(); eventSink.close(); if (database.open) database.close(); await rm(config.paths.dataDir, { recursive: true, force: true }); });
+  await core.effectWorker.drain();
+  cleanup.push(async () => { await manager.disposeHistoryRecall(); await environment.stop(); await core.close(); await rm(config.paths.dataDir, { recursive: true, force: true }); });
   const inputId = `input-${randomUUID()}`;
   const input: Parameters<SwarmControlPort["applyInput"]>[0] = {
     commandId: randomUUID(), inputId, sessionId, runGeneration: 1, message: { text: "durable fixture input", artifactIds: [] },
     runId:`run-${inputId}`,
   };
-  return { config, manager, database, eventSink, adapter, input, sessionId, commandId };
+  return { config, manager, database, eventSink, adapter, input, sessionId, commandId, core, artifacts, environment, paired, get coreClosed() { return coreClosed; } };
 }
 function makeMirror(f: Awaited<ReturnType<typeof fixture>>, unread: () => number = () => 0) {
   return createSwarmEventMirror({ swarmManager: f.manager, database: f.database, eventSink: f.eventSink, wireProjection: {
@@ -44,12 +74,15 @@ function makeMirror(f: Awaited<ReturnType<typeof fixture>>, unread: () => number
   } });
 }
 async function makeCore(f: Awaited<ReturnType<typeof fixture>>, manager = f.manager, database = f.database) {
+  if (manager === f.manager && database === f.database && !f.coreClosed) return { core: f.core, adapter: f.adapter, artifacts: f.artifacts };
   const workspace = createWorkspaceService({ database, dataDir: f.config.paths.dataDir, swarmManager: manager });
   const artifacts = createArtifactService({ database, dataDir: f.config.paths.dataDir, swarmManager: manager });
   const core = await createControlCore({ database, clock: Date.now, random: randomUUID,
     swarm: { resolveSession: id => adapter.resolveSession!(id), ensureSession: input => adapter.ensureSession(input), applyInput: input => adapter.applyInput(input), acquireProvider:(scope,conversation,model)=>adapter.acquireProvider(scope,conversation,model),enqueuePresentation:(threadId,runId,presentation)=>adapter.enqueuePresentation!(threadId,runId,presentation),extractWorkerResult:(threadId,runId,entryId)=>adapter.extractWorkerResult!(threadId,runId,entryId), applyChoice: input => adapter.applyChoice(input), stopSession: input => adapter.stopSession(input) },
     policy: createProjectPolicy(manager), workspace, artifacts, isDeviceRevoked: () => false, inputRoute: createControlledInputRoutePreflight({ swarmManager: manager }) });
   const adapter = createSwarmControlAdapter({ swarmManager: manager, database, eventSink: core.eventSink, controlService:core.controlService,workspaceService: workspace, artifactService: artifacts });
+  manager.installDescriptorPersistence(createControlDescriptorPersistence({ database, eventSink: core.eventSink, dataDir: f.config.paths.dataDir, storeFilePath: f.config.paths.agentsStoreFile }));
+  cleanup.unshift(() => core.close());
   return { core, adapter, artifacts };
 }
 async function countInputs(file: string, inputId: string) {
@@ -57,57 +90,82 @@ async function countInputs(file: string, inputId: string) {
 }
 describe("controlled swarm canonical/provider boundaries", () => {
   it("publishes boot recovery for cached shell clients resuming the existing epoch", async () => {
-    const f = await fixture(); const mirror = makeMirror(f);
-    const snapshot = { bootId: "boot", createdAt: new Date().toISOString(), interruptedManagers: [f.sessionId], interruptedWorkers: [], undeliveredReports: [] };
-    vi.spyOn(f.manager, "getRestartRecoverySnapshot").mockReturnValue(snapshot);
-    const cursor = f.eventSink.highWater; mirror.attach(); await mirror.reconcileBeforeReady();
+    const f = await fixture();
+    f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true;
+    const principal = f.paired.principal;
+    await f.core.controlService.execute(principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "interrupted work", artifactIds: [] } });
+    await f.core.effectWorker.drain();
+    const cursor = f.eventSink.highWater; const epoch = f.eventSink.streamEpoch;
+    await f.core.close(); const { core } = await makeCore(f); await core.reconcileOnBoot();
+    const snapshot = loadState(f.database).recovery!;
+    expect(snapshot.interruptedManagers).toEqual([f.sessionId]);
+    expect(core.eventSink.streamEpoch).toBe(epoch);
     const updates = f.database.prepare("SELECT payload_json FROM events WHERE event_type='recovery.upsert' AND sequence>?").all(cursor) as { payload_json: string }[];
-    expect(updates.map(row => JSON.parse(row.payload_json).recovery)).toEqual([{ ...snapshot, recoveryId: "boot" }]); mirror.dispose();
+    expect(updates.map(row => JSON.parse(row.payload_json).recovery)).toEqual([snapshot]);
+    expect(f.manager.getRestartRecoverySnapshot()).toEqual(snapshot);
   });
-  it("publishes one decided recovery update even if the facade also emits and its read projection is stale", async () => {
-    const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
-    const cursor = f.eventSink.highWater;
-    const snapshot = { bootId: "boot", createdAt: new Date().toISOString(), interruptedManagers: [f.sessionId], interruptedWorkers: [], undeliveredReports: [] };
-    vi.spyOn(f.manager, "getRestartRecoverySnapshot").mockReturnValue(snapshot);
-    const decided = { ...snapshot, dismissedAt: snapshot.createdAt };
-    vi.spyOn(f.manager, "dismissRestartRecovery").mockImplementation(async () => { f.manager.emit("restart_recovery_snapshot", { type: "restart_recovery_snapshot", snapshot: decided }); return decided; });
-    const { core } = await makeCore(f);
-    const principal = { deviceSessionId: "fixture-device", scopes: new Set(["session:operate"] as const) };
-    f.database.prepare("INSERT INTO device_sessions (device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES ('fixture-device','fixture-token','fixture-proof','Fixture','cli','[]',0,0,?)").run(Date.now() + 86_400_000);
+  it("publishes one decided recovery update from committed facts despite duplicate requests", async () => {
+    const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true;
+    const principal = f.paired.principal;
+    await f.core.controlService.execute(principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "interrupted work", artifactIds: [] } });
+    await f.core.effectWorker.drain(); await f.core.close(); const { core } = await makeCore(f); await core.reconcileOnBoot();
+    const snapshot = loadState(f.database).recovery!; const cursor = core.eventSink.highWater;
     const rpc = createDetailFeatureRpc({ swarmManager: f.manager, control: core.controlService });
-    const input = { commandId: randomUUID(), recoveryId: "boot", action: "dismiss" };
+    const input = { commandId: randomUUID(), recoveryId: snapshot.recoveryId, action: "dismiss" };
     await rpc.execute(principal, "recovery.decide", input); await rpc.execute(principal, "recovery.decide", input);
     await rpc.execute(principal, "recovery.decide", { ...input, commandId: randomUUID() });
+    const decided = loadState(f.database).recovery!;
+    expect(decided).toMatchObject({ ...snapshot, dismissedAt: expect.any(String) });
     const updates = f.database.prepare("SELECT payload_json FROM events WHERE event_type='recovery.upsert' AND sequence>?").all(cursor) as { payload_json: string }[];
-    expect(updates.map(row => JSON.parse(row.payload_json).recovery)).toEqual([{ ...decided, recoveryId: "boot" }]);
-    mirror.dispose(); core.eventSink.close();
+    expect(updates.map(row => JSON.parse(row.payload_json).recovery)).toEqual([decided]);
+    expect(f.database.prepare("SELECT COUNT(*) n FROM lifecycle_events WHERE event_type='recovery.resolved'").get()).toEqual({ n: 1 });
   });
   it("materializes one reserved ID and one input for concurrent same-command retries", async () => {
     const f = await fixture();
     await Promise.all([f.adapter.ensureSession({ commandId: f.commandId, sessionId: f.sessionId, projectId: "manager", title: "Controlled", cwd: f.config.defaultCwd }), f.adapter.ensureSession({ commandId: f.commandId, sessionId: f.sessionId, projectId: "manager", title: "Controlled", cwd: f.config.defaultCwd })]);
-    let dispatched = false;
-    f.input.beforeDispatch = vi.fn(async () => { if (dispatched) return "do-not-dispatch"; dispatched = true; return "dispatch"; });
-    await Promise.all([f.adapter.applyInput(f.input), f.adapter.applyInput(f.input)]);
-    expect(await countInputs(f.manager.getAgent(f.sessionId)!.sessionFile, f.input.inputId)).toBe(1);
+    const principal = f.paired.principal;
+    const input = { commandId: f.input.commandId, sessionId: f.sessionId, message: f.input.message };
+    const receipts = await Promise.all([f.core.controlService.execute(principal, "session.send", input), f.core.controlService.execute(principal, "session.send", input)]);
+    expect(receipts[0]).toEqual(receipts[1]); await f.core.effectWorker.drain();
+    expect(await countInputs(f.manager.getAgent(f.sessionId)!.sessionFile, `input-${input.commandId}`)).toBe(1);
     expect(f.manager.runtimeByAgentId.get(f.sessionId)?.sendCalls).toHaveLength(1);
-    expect(f.input.onDispatchAccepted).toHaveBeenCalledTimes(1);
+    expect(Object.values(loadState(f.database).runs).filter(run => run.commandId === input.commandId)).toHaveLength(1);
+    expect(f.database.prepare("SELECT COUNT(*) n FROM lifecycle_events WHERE event_type='attempt.accepted' AND thread_id=?").get(f.sessionId)).toEqual({ n: 1 });
   });
   it("reconciles JSONL after append/DB crash without a second append", async () => {
-    const f = await fixture(); f.input.onCanonicalAppend = vi.fn(async () => { throw new Error("kill after canonical append"); });
+    const f = await fixture();
+    f.database.exec("CREATE TRIGGER fail_locator BEFORE INSERT ON mirror_sources WHEN NEW.source_key LIKE 'input:%' BEGIN SELECT RAISE(ABORT, 'kill after canonical append'); END");
     await expect(f.adapter.applyInput(f.input)).rejects.toThrow("kill after canonical append");
     expect(f.manager.runtimeByAgentId.get(f.sessionId)?.sendCalls).toHaveLength(0);
-    f.input.onCanonicalAppend = vi.fn(async () => {});
-    const restartedAdapter = createSwarmControlAdapter({ swarmManager: f.manager, database: f.database, eventSink: f.eventSink, workspaceService: { ensure: async () => ({ cwd: f.config.defaultCwd, branch: null }) }, artifactService: { attachmentsForInput: async () => [] } });
-    await restartedAdapter.applyInput(f.input);
     expect(await countInputs(f.manager.getAgent(f.sessionId)!.sessionFile, f.input.inputId)).toBe(1);
+    f.database.exec("DROP TRIGGER fail_locator");
+    const restartedAdapter = createSwarmControlAdapter({ swarmManager: f.manager, database: f.database, eventSink: f.eventSink, controlService: f.core.controlService, workspaceService: { ensure: async () => ({ cwd: f.config.defaultCwd, branch: null }) }, artifactService: f.artifacts });
+    const recorded = await restartedAdapter.applyInput(f.input);
+    const canonical = (await readFile(f.manager.getAgent(f.sessionId)!.sessionFile, "utf8")).split("\n").flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } }).find(row => row.data?.id === f.input.inputId);
+    expect(recorded.entryId).toBe(canonical.data.timelineEntryId);
+    expect(await countInputs(f.manager.getAgent(f.sessionId)!.sessionFile, f.input.inputId)).toBe(1);
+    expect(f.manager.runtimeByAgentId.get(f.sessionId)?.sendCalls).toHaveLength(0);
   });
   it("fails closed on writer failure and never dispatches across an unknown marker", async () => {
     const f = await fixture(); const runtime = f.manager.runtimeByAgentId.get(f.sessionId)!;
+    const principal = f.paired.principal;
+    const commandId = randomUUID();
     const original = runtime.appendCustomEntry.bind(runtime); runtime.appendCustomEntry = () => { throw new Error("disk failed"); };
-    await expect(f.adapter.applyInput(f.input)).rejects.toThrow("disk failed");
-    expect(f.input.beforeDispatch).not.toHaveBeenCalled(); expect(f.input.onCanonicalAppend).not.toHaveBeenCalled();
-    runtime.appendCustomEntry = original; f.input.beforeDispatch = vi.fn(async () => "do-not-dispatch");
-    expect(await f.adapter.applyInput(f.input)).toEqual({ delivery: "unknown" }); expect(runtime.sendCalls).toHaveLength(0);
+    await f.core.controlService.execute(principal, "session.send", { commandId, sessionId: f.sessionId, message: f.input.message });
+    await f.core.effectWorker.drain();
+    expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "failed", delivery: "none", error: { message: "disk failed" } });
+    expect(loadState(f.database).runs[`run-${commandId}`]).toMatchObject({ state: "terminal", outcome: "failed" });
+    expect(runtime.sendCalls).toHaveLength(0); runtime.appendCustomEntry = original;
+    const ambiguous = randomUUID();
+    await f.core.controlService.execute(principal, "session.send", { commandId: ambiguous, sessionId: f.sessionId, message: f.input.message });
+    const state = loadState(f.database); const run = state.runs[`run-${ambiguous}`]; const attempt = state.attempts[run.activeAttemptId];
+    const result = await f.adapter.applyInput({ ...f.input, commandId: ambiguous, inputId: run.inputId, runId: run.runId, runGeneration: attempt.generation });
+    f.core.controlService.record({ type: "input.recorded", commandId: "ambiguous-recorded", now: Date.now(), threadId: f.sessionId, inputId: run.inputId, entryId: result.entryId });
+    f.core.controlService.record({ type: "attempt.dispatch", commandId: "ambiguous-marked", now: Date.now(), threadId: f.sessionId, attemptId: attempt.attemptId, authorized: true });
+    await f.core.close(); const { core } = await makeCore(f); await core.reconcileOnBoot(); await core.effectWorker.drain();
+    expect(await core.controlService.getReceipt(principal, ambiguous)).toMatchObject({ state: "interrupted", delivery: "unknown" });
+    expect(runtime.sendCalls).toHaveLength(0);
+    expect(loadState(f.database).attempts[attempt.attemptId].state).toBe("unknown");
   });
   it("does not answer a destroyed or different-generation choice continuation", async () => {
     const f = await fixture(); const promise = f.manager.requestUserChoice(f.sessionId, [{ id: "q", question: "Which?", options: [{ id: "a", label: "A" }] }]);
@@ -122,8 +180,12 @@ describe("controlled swarm canonical/provider boundaries", () => {
     expect(JSON.parse(await readFile(`${f.config.paths.dataDir}/profiles/manager/sessions/${f.sessionId}/meta.json`, "utf8")).controlCommandId).toBe(f.commandId);
     const stop = vi.spyOn(f.manager, "stopSession").mockRejectedValue(new Error("Runtime shutdown is still pending"));
     await expect(f.adapter.stopSession({ commandId: randomUUID(), sessionId: descriptor.agentId })).rejects.toThrow("still pending"); stop.mockRestore();
-    for (const agent of f.manager.listAgents().filter(agent => agent.role === "manager")) await f.manager.stopSession(agent.agentId); const restarted = new TestSwarmManager(f.config); await bootWithDefaultManager(restarted, f.config);
-    const resumed = createSwarmControlAdapter({ swarmManager: restarted, database: f.database, eventSink: f.eventSink, workspaceService: { ensure: async () => ({ cwd: f.config.defaultCwd, branch: null }) }, artifactService: { attachmentsForInput: async () => [] } });
+    for (const agent of f.manager.listAgents().filter(agent => agent.role === "manager")) await f.manager.stopSession(agent.agentId);
+    await f.environment.stop();
+    const restarted = new TestSwarmManager(f.config);
+    const reopened = await createFixtureEnvironment(restarted);
+    const artifacts = createArtifactService({ database: reopened.environment.database, dataDir: f.config.paths.dataDir, swarmManager: restarted });
+    const resumed = createSwarmControlAdapter({ swarmManager: restarted, database: reopened.environment.database, eventSink: reopened.core.eventSink, controlService: reopened.core.controlService, workspaceService: { ensure: async () => ({ cwd: f.config.defaultCwd, branch: null }) }, artifactService: artifacts });
     await expect(resumed.ensureSession({ commandId: f.commandId, sessionId: f.sessionId, projectId: "manager", title: "Controlled", cwd: f.config.defaultCwd })).resolves.toEqual({ materialized: true });
     expect(restarted.listAgents().filter(agent => agent.agentId === f.sessionId)).toHaveLength(1); for (const agent of restarted.listAgents().filter(agent => agent.role === "manager")) await restarted.stopSession(agent.agentId); await restarted.disposeHistoryRecall();
   });
@@ -218,13 +280,16 @@ describe("controlled swarm canonical/provider boundaries", () => {
   });
 
   it("interrupts persisted choices whose Promise generation was destroyed", async () => {
-    const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
+    const f = await fixture();
     const pending = f.manager.requestUserChoice(f.sessionId, [{ id: "q", question: "Decision?", options: [{ id: "a", label: "A" }] }]); void pending.catch(() => {});
     const choice = f.manager.getPendingChoiceRequestsForSession(f.sessionId)[0]!;
     expect(f.database.prepare("SELECT state FROM control_choices WHERE choice_id=?").get(choice.choiceId)).toEqual({ state: "pending" });
-    mirror.dispose(); f.manager.cancelChoiceRequest(choice.choiceId, "cancelled");
-    const restarted = makeMirror(f); restarted.attach(); await restarted.reconcileBeforeReady();
-    expect(f.database.prepare("SELECT state FROM control_choices WHERE choice_id=?").get(choice.choiceId)).toEqual({ state: "interrupted" }); restarted.dispose();
+    await f.environment.stop();
+    const restarted = new TestSwarmManager(f.config);
+    const { environment } = await createFixtureEnvironment(restarted);
+    expect(restarted.getPendingChoiceRequestsForSession(f.sessionId)).toEqual([]);
+    expect(environment.database.prepare("SELECT state FROM control_choices WHERE choice_id=?").get(choice.choiceId)).toEqual({ state: "interrupted" });
+    await restarted.disposeHistoryRecall();
   });
   it("reports incomplete cleanup from the real shutdown barrier without creating a second writer", async () => {
     const f = await fixture(); const runtime = f.manager.runtimeByAgentId.get(f.sessionId)!;
@@ -266,30 +331,37 @@ describe("controlled swarm canonical/provider boundaries", () => {
   });
 
   it("reopens the real DB/runtime after the canonical seam and never replays an ambiguous provider marker", async () => {
-    const f = await fixture(); let { core, adapter } = await makeCore(f);
-    f.database.prepare("INSERT INTO device_sessions (device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES ('device','fixture-token','fixture-proof','Fixture','cli','[]',0,0,?)").run(Date.now() + 86_400_000);
-    const principal = { deviceSessionId: "device", scopes: new Set(["session:operate", "session:read"] as const) };
-    const launch = { commandId: randomUUID(), projectId: "manager", title: "Restart fixture", workspaceStrategy: { kind: "current_checkout" as const } };
-    const accepted = await core.controlService.execute(principal, "session.launch", launch); await core.reconcileOnBoot(); await core.effectWorker.drain(); const sessionId = accepted.sessionId!;
-    const send = { commandId: randomUUID(), sessionId, message: { text: "restart seam input", artifactIds: [] } };
+    const f = await fixture(); const core = f.core; const adapter = f.adapter;
+    const principal = f.paired.principal;
+    const send = { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "restart seam input", artifactIds: [] } };
     await core.controlService.execute(principal, "session.send", send);
-    f.database.prepare("UPDATE effects SET state='claimed',claimed_boot_id='dead-boot' WHERE command_id=?").run(send.commandId);
-    await expect(adapter.applyInput({ ...send, inputId: `input-${send.commandId}`, runGeneration: 0, beforeDispatch: async () => "dispatch", onCanonicalAppend: async () => { throw new Error("synthetic crash after JSONL"); }, onDispatchAccepted: async () => {} })).rejects.toThrow("synthetic crash");
-    await core.close(); for (const agent of f.manager.listAgents().filter(agent => agent.role === "manager")) await f.manager.stopSession(agent.agentId); f.database.close();
-    const Database = await loadConfiguredSqliteDatabaseConstructor(); const reopened = new Database(`${f.config.paths.dataDir}/control.sqlite`);
-    const restarted = new TestSwarmManager(f.config); await bootWithDefaultManager(restarted, f.config);
-    ({ core, adapter } = await makeCore(f, restarted, reopened));
-    cleanup.unshift(async () => { await core.close(); for (const agent of restarted.listAgents().filter(agent => agent.role === "manager")) await restarted.stopSession(agent.agentId); await restarted.disposeHistoryRecall(); reopened.close(); });
-    await core.reconcileOnBoot(); await core.effectWorker.drain();
-    expect((await core.controlService.getReceipt(principal, send.commandId)).delivery).toBe("dispatched");
-    expect(await countInputs(restarted.getAgent(sessionId)!.sessionFile, `input-${send.commandId}`)).toBe(1); expect(restarted.runtimeByAgentId.get(sessionId)?.sendCalls).toHaveLength(1);
-    const ambiguous = { commandId: randomUUID(), sessionId, message: { text: "marker ambiguity fixture", artifactIds: [] } };
-    await core.controlService.execute(principal, "session.send", ambiguous);
-    reopened.prepare("UPDATE effects SET state='claimed',claimed_boot_id='dead-boot' WHERE command_id=?").run(ambiguous.commandId);
-    reopened.prepare("UPDATE control_inputs SET delivery_state='dispatching' WHERE command_id=?").run(ambiguous.commandId);
-    await core.close(); ({ core, adapter } = await makeCore(f, restarted, reopened)); await core.reconcileOnBoot(); await core.effectWorker.drain();
-    expect(await core.controlService.getReceipt(principal, ambiguous.commandId)).toMatchObject({ state: "interrupted", delivery: "unknown" });
-    expect(restarted.runtimeByAgentId.get(sessionId)?.sendCalls).toHaveLength(1);
+    const run = loadState(f.database).runs[`run-${send.commandId}`]; const attempt = loadState(f.database).attempts[run.activeAttemptId];
+    f.database.prepare("UPDATE effects SET state='claimed',claimed_boot_id='dead-boot' WHERE kind='transcript.append' AND command_id=?").run(send.commandId);
+    f.database.exec("CREATE TRIGGER fail_locator BEFORE INSERT ON mirror_sources WHEN NEW.source_key LIKE 'input:%' BEGIN SELECT RAISE(ABORT, 'synthetic crash after JSONL'); END");
+    await expect(adapter.applyInput({ ...send, inputId: run.inputId, runId: run.runId, runGeneration: attempt.generation })).rejects.toThrow("synthetic crash");
+    expect(await countInputs(f.manager.getAgent(f.sessionId)!.sessionFile, run.inputId)).toBe(1);
+    f.database.exec("DROP TRIGGER fail_locator"); await f.environment.stop();
+    const restarted = new TestSwarmManager(f.config);
+    restarted.onCreateRuntime = ({ runtime }) => { const native = (runtime as unknown as { sessionManager: SessionManager }).sessionManager; native.appendMessage({ role: "assistant", content: [{ type: "text", text: "fixture ready" }] } as never); };
+    const reopened = await createFixtureEnvironment(restarted); await reopened.core.effectWorker.drain();
+    expect(await reopened.core.controlService.getReceipt(principal, send.commandId)).toMatchObject({ state: "succeeded", delivery: "dispatched" });
+    expect(await countInputs(restarted.getAgent(f.sessionId)!.sessionFile, run.inputId)).toBe(1); expect(restarted.runtimeByAgentId.get(f.sessionId)?.sendCalls).toHaveLength(1);
+    const ambiguous = { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "marker ambiguity fixture", artifactIds: [] } };
+    await reopened.core.controlService.execute(principal, "session.send", ambiguous);
+    const next = loadState(reopened.environment.database); const nextRun = next.runs[`run-${ambiguous.commandId}`]; const nextAttempt = next.attempts[nextRun.activeAttemptId];
+    const artifacts = createArtifactService({ database: reopened.environment.database, dataDir: f.config.paths.dataDir, swarmManager: restarted });
+    const nextAdapter = createSwarmControlAdapter({ swarmManager: restarted, database: reopened.environment.database, eventSink: reopened.core.eventSink, controlService: reopened.core.controlService, workspaceService: { ensure: async () => ({ cwd: f.config.defaultCwd, branch: null }) }, artifactService: artifacts });
+    const recorded = await nextAdapter.applyInput({ ...ambiguous, inputId: nextRun.inputId, runId: nextRun.runId, runGeneration: nextAttempt.generation });
+    reopened.core.controlService.record({ type: "input.recorded", commandId: "ambiguous-recorded", now: Date.now(), threadId: f.sessionId, inputId: nextRun.inputId, entryId: recorded.entryId });
+    reopened.core.controlService.record({ type: "attempt.dispatch", commandId: "ambiguous-dispatch", now: Date.now(), threadId: f.sessionId, attemptId: nextAttempt.attemptId, authorized: true });
+    reopened.environment.database.prepare("UPDATE effects SET state='claimed',claimed_boot_id='dead-boot' WHERE kind='provider.start'").run();
+    await reopened.environment.stop(); await restarted.disposeHistoryRecall();
+    const finalManager = new TestSwarmManager(f.config); const final = await createFixtureEnvironment(finalManager); await final.core.effectWorker.drain();
+    expect(await final.core.controlService.getReceipt(principal, ambiguous.commandId)).toMatchObject({ state: "interrupted", delivery: "unknown" });
+    expect(loadState(final.environment.database).attempts[nextAttempt.attemptId].state).toBe("unknown");
+    expect(finalManager.runtimeByAgentId.get(f.sessionId)?.sendCalls ?? []).toHaveLength(0);
+    expect(await countInputs(finalManager.getAgent(f.sessionId)!.sessionFile, nextRun.inputId)).toBe(1);
+    await finalManager.disposeHistoryRecall();
   });
 
 });
@@ -304,7 +376,15 @@ it("the composed swarm port routes a typed worker stop to the owning manager lan
     const commandId = randomUUID();
     await core.controlService.execute(principal, "session.stop", { commandId, sessionId: worker.agentId }); await core.effectWorker.drain();
     expect(await core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded", sessionId: worker.agentId });
-    expect(f.manager.getAgent(worker.agentId)?.status).toBe("terminated");
+    expect(loadState(f.database).threads[worker.agentId]).toMatchObject({ desired: "stopped", shutdown: "clean" });
+    expect(loadState(f.database).threads[worker.agentId].activeRunId).toBeUndefined();
+    const detail = createDetailStream({ database: f.database, getDescriptor: () => f.environment.descriptor(), subscribeCommitted: listener => core.eventSink.subscribe(listener), withReadBarrier: fn => core.eventSink.readBarrier(fn).value });
+    await vi.waitFor(async () => {
+      const visibleWorker = (await detail.workers(principal, { sessionId: f.sessionId })).workers.find(row => row.agentId === worker.agentId);
+      expect({ facade: f.manager.getAgent(worker.agentId)?.status, detail: visibleWorker?.status }).toEqual({ facade: expect.stringMatching(/^(stopped|terminated)$/), detail: expect.stringMatching(/^(stopped|terminated)$/) });
+    });
+    expect(f.manager.isSessionShutdownSafe(worker.agentId)).toBe(true);
+    expect(f.manager.runtimeByAgentId.get(worker.agentId)?.terminateCalls).toHaveLength(1);
     expect(f.database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(f.sessionId)).toEqual({ desired_state: "running" });
     expect(f.manager.runtimeByAgentId.has(f.sessionId)).toBe(true);
   } finally { mirror.dispose(); await core.close(); }
@@ -478,6 +558,7 @@ it("preserves project onboarding under admission and never bootstraps a duplicat
   expect(receipt.state).toBe("succeeded");
   expect(send).toHaveBeenCalledTimes(1);
   expect(send.mock.calls[0]?.[4]).toMatchObject({ origin: "internal", internalDeliveryKind: "bootstrap" });
+  await core.effectWorker.drain();
   expect(f.manager.runtimeByAgentId.get(receipt.result!.sessionId!)!.sendCalls).toHaveLength(1);
   expect(await core.controlService.execute(principal, "project.create", input)).toEqual(receipt);
   expect(send).toHaveBeenCalledTimes(1);
@@ -509,7 +590,20 @@ it.each(["stopped", "error", "queued"] as const)("native worker.kill under %s ma
     const worker = await f.manager.spawnAgent(f.sessionId, { agentId: "review-worker" });
     const queuedId = randomUUID();
     if (state === "queued") await core.controlService.execute(principal, "session.send", { commandId: queuedId, sessionId: f.sessionId, message: { text: "keep this manager input", artifactIds: [] } });
-    else { (f.manager as unknown as { descriptors: Map<string, { status: typeof state }> }).descriptors.get(f.sessionId)!.status = state; expect(f.manager.getAgent(f.sessionId)?.status).toBe(state); }
+    else if (state === "stopped") {
+      await core.controlService.execute(principal, "session.stop", { commandId: randomUUID(), sessionId: f.sessionId });
+      await core.effectWorker.drain();
+      expect(f.manager.getAgent(f.sessionId)?.status).toBe("stopped");
+    } else {
+      f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true;
+      await core.controlService.execute(principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "manager transport becomes unknown", artifactIds: [] } });
+      await core.effectWorker.drain();
+      const current = loadState(f.database); const run = current.runs[current.threads[f.sessionId].activeRunId!];
+      core.controlService.record({ type: "attempt.unknown", commandId: randomUUID(), now: Date.now(), threadId: f.sessionId, attemptId: run.activeAttemptId });
+      await core.effectWorker.drain();
+      expect(loadState(f.database).runs[run.runId].state, JSON.stringify(loadState(f.database).threads[f.sessionId])).toBe("recovery");
+      expect(f.manager.getAgent(f.sessionId)?.status).toBe("error");
+    }
     const input = { commandId: randomUUID(), sessionId: f.sessionId, workerId: worker.agentId };
     await expect(lifecycle.execute(principal, "worker.kill", { ...input, commandId: randomUUID(), sessionId: "manager" })).rejects.toMatchObject({ code: "NOT_FOUND" });
     const receipt = await lifecycle.execute(principal, "worker.kill", input);
@@ -517,8 +611,19 @@ it.each(["stopped", "error", "queued"] as const)("native worker.kill under %s ma
     if (state === "queued") expect(await core.controlService.getReceipt(principal, queuedId)).toMatchObject({ state: "accepted", delivery: "pending" });
     await core.effectWorker.drain();
     expect(await core.controlService.getReceipt(principal, input.commandId)).toMatchObject({ state: "succeeded", method: "worker.kill" });
-    expect(f.manager.getAgent(worker.agentId)?.status).toBe("terminated");
-    expect(f.database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(f.sessionId)).toEqual({ desired_state: "running" });
+    expect(loadState(f.database).threads[worker.agentId]).toMatchObject({ desired: "stopped", shutdown: "clean" });
+    expect(loadState(f.database).threads[worker.agentId].activeRunId).toBeUndefined();
+    const detail = createDetailStream({ database: f.database, getDescriptor: () => f.environment.descriptor(), subscribeCommitted: listener => core.eventSink.subscribe(listener), withReadBarrier: fn => core.eventSink.readBarrier(fn).value });
+    await vi.waitFor(async () => {
+      const visibleWorker = (await detail.workers(principal, { sessionId: f.sessionId })).workers.find(row => row.agentId === worker.agentId);
+      expect({ facade: f.manager.getAgent(worker.agentId)?.status, detail: visibleWorker?.status }).toEqual({ facade: expect.stringMatching(/^(stopped|terminated)$/), detail: expect.stringMatching(/^(stopped|terminated)$/) });
+    });
+    expect(f.manager.isSessionShutdownSafe(worker.agentId)).toBe(true);
+    expect(f.manager.runtimeByAgentId.get(worker.agentId)?.terminateCalls).toHaveLength(1);
+    expect(f.database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(f.sessionId)).toEqual({ desired_state: state === "stopped" ? "stopped" : "running" });
+    const parentSummary = f.database.prepare("SELECT summary_json FROM control_sessions WHERE session_id=?").get(f.sessionId) as { summary_json: string };
+    expect(JSON.parse(parentSummary.summary_json).status).toBe(state === "stopped" ? "stopped" : state === "error" ? "interrupted" : "idle");
+    expect(f.manager.getAgent(f.sessionId)?.status).toBe(state === "error" ? "error" : state === "stopped" ? "stopped" : "idle");
     if (state === "queued") expect(await core.controlService.getReceipt(principal, queuedId)).toMatchObject({ state: "succeeded", delivery: "dispatched" });
     expect(await lifecycle.execute(principal, "worker.kill", input)).toMatchObject({ state: "succeeded" });
   } finally { mirror.dispose(); await core.close(); }

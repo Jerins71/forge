@@ -95,6 +95,7 @@ export interface SwarmControlPort {
   /** Descriptor/resources only: no provider, credential, or implicit tool-grant acquisition. */
   prepareLineageSession?(input: { kind: "fork" | "continued_worker"; sourceThreadId: string; targetThreadId: string; commandId: string; title?: string; historical?: boolean; sourcePoint: import("@forge/protocol/environment-v2").ContextSourcePoint; model?: import("../../swarm/types.js").AgentDescriptor["model"]; purpose?: "side_chat" }): Promise<void>;
   enqueuePresentation?(threadId:string,runId:string,presentation:import("../../swarm/turn-context-coordinator.js").InboundTurnContextInput):void;
+  prepareWorkerResult?(assignment: import("./orchestration/assignments.js").WorkerAssignment, resultText: string): Promise<NonNullable<import("./command-service.js").InternalInput["prepared"]>>;
   extractWorkerResult?(threadId:string,runId:string,inputEntryId:string):Promise<{ entryId:string; resultText:string }>;
   applyChoice(input: {
     commandId: string;

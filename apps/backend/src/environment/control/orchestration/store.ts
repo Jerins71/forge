@@ -20,7 +20,13 @@ export function loadState(database: Database): CoreState {
 
 export function projectLifecycle(database: Database, event: LifecycleEvent): void {
   if ("thread" in event) database.prepare("INSERT INTO orchestration_threads VALUES (?,?) ON CONFLICT(thread_id) DO UPDATE SET state_json=excluded.state_json").run(event.thread.threadId, JSON.stringify(event.thread));
-  else if ("run" in event) database.prepare("INSERT INTO orchestration_runs VALUES (?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET state_json=excluded.state_json").run(event.run.runId, event.run.threadId, event.run.inputId, JSON.stringify(event.run));
+  else if ("run" in event) {
+    database.prepare("INSERT INTO orchestration_runs VALUES (?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET state_json=excluded.state_json").run(event.run.runId, event.run.threadId, event.run.inputId, JSON.stringify(event.run));
+    if (event.type === "input.accepted") {
+      const assignment = Object.values(loadState(database).assignments).find(candidate => `${candidate.assignmentId}:result:run` === event.run.runId);
+      if (assignment?.resultPrepared) database.prepare("INSERT OR IGNORE INTO orchestration_run_inputs (run_id,prepared_json) VALUES (?,?)").run(event.run.runId, JSON.stringify(assignment.resultPrepared));
+    }
+  }
   else if ("attempt" in event) database.prepare("INSERT INTO orchestration_attempts VALUES (?,?,?,?) ON CONFLICT(attempt_id) DO UPDATE SET state_json=excluded.state_json").run(event.attempt.attemptId, event.attempt.runId, event.attempt.threadId, JSON.stringify(event.attempt));
   else if ("binding" in event) database.prepare("INSERT INTO orchestration_bindings VALUES (?,?,?,?) ON CONFLICT(binding_id) DO UPDATE SET state_json=excluded.state_json").run(event.binding.scope.bindingId, event.binding.scope.threadId, event.binding.scope.generation, JSON.stringify(event.binding));
   else if ("request" in event) database.prepare("INSERT INTO orchestration_requests VALUES (?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET state_json=excluded.state_json").run(event.request.requestId, event.request.threadId, event.request.attemptId, JSON.stringify(event.request));

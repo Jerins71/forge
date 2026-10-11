@@ -2,6 +2,7 @@ import { access, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { AuthStorage, type AuthCredential } from "@earendil-works/pi-coding-agent";
 import { copyFileIfMissing } from "./storage/copy-file-if-missing.js";
+import { modelCatalogService } from "./catalog/model-catalog-service.js";
 import { CredentialPoolService } from "./credential-pool.js";
 import {
   LEGACY_OPENAI_AUTH_BROKER_TOKEN_SECRET_KEY,
@@ -36,6 +37,7 @@ const RESERVED_NON_ENV_SECRET_KEYS = new Set<string>([
 const SETTINGS_AUTH_PROVIDER_DEFINITIONS: Array<{
   provider: SettingsAuthProviderName;
   storageProvider: string;
+  runtimeProviders?: readonly string[];
 }> = [
   {
     provider: "anthropic",
@@ -43,7 +45,8 @@ const SETTINGS_AUTH_PROVIDER_DEFINITIONS: Array<{
   },
   {
     provider: "openai-codex",
-    storageProvider: "openai-codex"
+    storageProvider: "openai-codex",
+    runtimeProviders: ["codex-native"],
   },
   {
     provider: "xai",
@@ -413,6 +416,16 @@ export async function resolveCursorSdkApiKey(config: SwarmConfig): Promise<Curso
   throw new Error("Cursor SDK auth not configured. Add Cursor SDK auth in Settings → Authentication.");
 }
 
+/** Resolve runtime/model aliases against the catalog and the auth owner's definitions. */
+export function resolveModelCredentialProvider(model: Pick<import("./types.js").AgentModelDescriptor, "provider" | "modelId">): string {
+  const provider = model.provider.trim().toLowerCase();
+  const definition = SETTINGS_AUTH_PROVIDER_DEFINITIONS.find(entry => entry.provider === provider || entry.runtimeProviders?.includes(provider));
+  if (definition) return definition.provider;
+  // Explicit catalog providers (including external endpoints) retain their own credentials.
+  if (modelCatalogService.getProvider(provider)) return provider;
+  return modelCatalogService.getModel(model.modelId)?.provider ?? provider;
+}
+
 export async function getManagedModelProviderCredentialAvailability(
   config: SwarmConfig,
   options: { credentialPoolService?: CredentialPoolService } = {}
@@ -428,7 +441,9 @@ export async function getManagedModelProviderCredentialAvailability(
     availability.set(provider, summary.configured);
   }
 
-  availability.set("codex-native", availability.get("openai-codex") ?? false);
+  for (const definition of SETTINGS_AUTH_PROVIDER_DEFINITIONS) {
+    for (const provider of definition.runtimeProviders ?? []) availability.set(provider, availability.get(definition.provider) ?? false);
+  }
   return availability;
 }
 

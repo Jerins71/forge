@@ -210,7 +210,7 @@ export interface UserMessageCoordinatorOptions {
     AgentMessageDispatcher<CodexMcpToolGateEvaluation>,
     "sendMessage" | "prepareModelInboundMessage"
   >;
-  assistantOutput: Pick<AssistantOutputRouter, "resolveTargetForUserInput">;
+  assistantOutput: Pick<AssistantOutputRouter, "resolveTargetForUserInput" | "prepareWorkerResult" | "resolveWorkerParentOutputTarget">;
   codex: {
     direct: Pick<CodexDirectSidecarCoordinator, "maybeRouteUserMessage">;
     plugin: Pick<
@@ -289,17 +289,29 @@ export class UserMessageCoordinator {
     return { entryId:appended.event.timelineEntryId ?? appended.event.id!,resultText };
   }
 
+  async prepareWorkerResult(assignment: import("../environment/control/orchestration/assignments.js").WorkerAssignment, resultText: string): Promise<NonNullable<import("../environment/control/command-service.js").InternalInput["prepared"]>> {
+    const worker = this.options.targeting.descriptors.get(assignment.workerThreadId);
+    const target = this.options.targeting.descriptors.get(assignment.parentThreadId);
+    if (!worker || worker.role !== "worker" || !target || target.role !== "manager" || worker.managerId !== target.agentId) throw new Error("Worker result owner conflicts");
+    const envelope = `[workerResult] ${JSON.stringify({ workerAgentId: worker.agentId, workerDisplayName: worker.displayName, assignmentId: assignment.assignmentId })}\n${resultText.trim() || "Worker completed without a final text result."}`;
+    const modelMessage = await this.options.agentMessages.prepareModelInboundMessage(target.agentId, { text: envelope, attachments: [] }, "internal");
+    const parentContext = assignment.parentContext ?? { schemaVersion: 1 as const, assignmentId: assignment.assignmentId, managerId: target.agentId, assignedAt: new Date(assignment.assignedAt).toISOString(), outputTarget: this.options.assistantOutput.resolveWorkerParentOutputTarget(target.agentId) };
+    const output = this.options.assistantOutput.prepareWorkerResult({ worker: worker as AgentDescriptor & { role: "worker" }, target: target as AgentDescriptor & { role: "manager" }, parentContext, modelMessage });
+    const runtimeMessage = { text: typeof output.modelMessage === "string" ? output.modelMessage : output.modelMessage.text };
+    return { runtimeMessage, parentContext, presentation: { source: "worker_result", routeOrigin: "worker_result", sourceWorkerId: worker.agentId, runtimeMessageText: runtimeMessage.text,
+      parentRootTurnId: parentContext.rootTurnId, assistantOutputTarget: output.inputTarget, assistantOutputProjectionTarget: output.projectionTarget, requiresVisibleResponse: output.requiresVisibleResponse } };
+  }
+
   /** Resource/presentation preparation only. The decision kernel owns provider dispatch. */
   async applyControlledInput(text: string, options: HandleUserMessageOptions & { targetAgentId: string; controlledInput: ControlledInputContext; runId?: string; prepared?: import("../environment/control/command-service.js").InternalInput["prepared"] }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }> {
     const target = this.resolveTarget(options.targetAgentId, true);
     const sourceContext = normalizeMessageSourceContext(options.sourceContext ?? { channel: "web" });
     const attachments = this.options.attachments.normalize(options.attachments);
-    this.options.codex.plugin.assertWorkerNotUserTargetable(target);
     await this.options.projectAgents.preflightRuntime(target);
     return this.options.runtime.withRuntimeAdmission(target.agentId, async () => {
       if (options.prepared) {
         const { presentation,runtimeMessage } = options.prepared;
-        const appended = await this.options.inboundConversation.append(target, { text, attachments,
+        const appended = await this.options.inboundConversation.append(target, { text, attachments, role: presentation.source === "worker_result" ? "system" : undefined,
           source:presentation.source === "project_agent_input" ? "project_agent_input" : presentation.source === "user_input" ? "user_input" : presentation.source === "worker_result" ? "worker_report" : "system",
           projectAgentContext:presentation.projectAgentContext, sourceContext:presentation.sourceContext, turnId:options.runId,
           sourceWorkerId:presentation.sourceWorkerId, controlledInput:options.controlledInput });
@@ -378,12 +390,15 @@ export class UserMessageCoordinator {
     });
   }
 
+  assertUserInputTargetable(agentId: string): void { this.options.codex.plugin.assertWorkerNotUserTargetable(this.resolveTarget(agentId, true)); }
+
   async handleUserMessage(text: string, options?: HandleUserMessageOptions): Promise<void> {
     const trimmed = text.trim();
     const attachments = this.options.attachments.normalize(options?.attachments);
     if (!trimmed && attachments.length === 0) return;
     if (this.submitAuthoritativeInput && !options?.controlledInput) {
       const target = this.resolveTarget(options?.targetAgentId, true);
+      this.options.codex.plugin.assertWorkerNotUserTargetable(target);
       if (!isExternalThreadDescriptor(target) && !parseCompactSlashCommand(trimmed) && classifyCodexUserMessage(trimmed).kind !== "sidecar") {
         await this.submitAuthoritativeInput(trimmed, { ...options, targetAgentId: target.agentId });
         return;

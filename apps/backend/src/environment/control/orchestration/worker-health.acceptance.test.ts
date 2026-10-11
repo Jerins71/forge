@@ -94,19 +94,29 @@ it("preflights worker selection facts and lets the transaction enforce specialis
   f.worker.delegationRosterRevision = 3; f.worker.delegationRouteId = "implement";
   f.worker.model = { provider: "openai-codex", modelId: "gpt-5.4", thinkingLevel: "high" };
   f.worker.delegationFallbackModel = { provider: "cursor-sdk", modelId: "fixture-cursor", thinkingLevel: "high" };
+  let specialistEnabled = true;
   const service = new SwarmAgentLifecycleService({ descriptors: f.descriptors,
     modelCapacityBlocks: new Map(), now: () => new Date(f.now()).toISOString(),
     getManagedModelProviderAvailability: async () => new Map([["openai-codex", false], ["cursor-sdk", true]]),
-    resolveSpecialistRosterForManager: async () => [], logDebug: () => {},
+    resolveSpecialistRosterForManager: async () => [{ specialistId: "builder", enabled: specialistEnabled }], logDebug: () => {},
   } as unknown as SwarmAgentLifecycleServiceOptions);
   const selection = await service.resolveWorkerAssignmentSelection(f.worker, false, 1);
   expect(selection).toMatchObject({ specialistId: "builder", rosterId: "roster", rosterRevision: 3, routeId: "implement", maxConcurrent: 1,
     candidates: [{ provider: "openai-codex", modelId: "gpt-5.4", available: false }, { provider: "cursor-sdk", modelId: "fixture-cursor", available: true }] });
   let event = 0; const sink = createEventSink(f.db, f.now, () => `selection-event-${++event}`);
   sink.transaction(tx => sink.commitCommand(tx, { type: "worker.stop", commandId: "settle-worker", now: f.now(), threadId: "worker", managerId: "manager", authorized: true }));
+  sink.transaction(tx => sink.commitCommand(tx, { type: "binding.drained", commandId: "drain-selected-worker", now: f.now(), threadId: "worker", bindingId: "worker-binding", status: "clean" }));
   sink.transaction(tx => sink.commitCommand(tx, { type: "thread.resume", commandId: "resume-selected-worker", now: f.now(), threadId: "worker" }));
   sink.transaction(tx => sink.commitCommand(tx, { type: "worker.assign", commandId: "selected-assignment", now: f.now(), assignmentId: "selected", parentThreadId: "manager", parentRunId: "parent", workerThreadId: "worker", workerRunId: "selected-run", inputId: "selected-input", attemptId: "selected-attempt", bindingId: "selected-binding", input: { text: "selection fixture", artifactIds: [] }, authorized: true, selection }));
   expect(loadState(f.db).assignments.selected.selection).toMatchObject({ provider: "cursor-sdk", rosterId: "roster", rosterRevision: 3 });
+  sink.transaction(tx => sink.commitCommand(tx, { type: "thread.create", commandId: "second-worker", now: f.now(), threadId: "second-worker", role: "worker", projectId: "project", managerId: "manager" }));
+  const beforeCapacity = loadState(f.db);
+  expect(() => sink.transaction(tx => sink.commitCommand(tx, { type: "worker.assign", commandId: "over-capacity", now: f.now(), assignmentId: "over-capacity", parentThreadId: "manager", parentRunId: "parent", workerThreadId: "second-worker", workerRunId: "second-run", inputId: "second-input", attemptId: "second-attempt", bindingId: "second-binding", input: { text: "capacity fixture", artifactIds: [] }, authorized: true, selection }))).toThrow("Specialist concurrency limit reached");
+  expect(loadState(f.db)).toEqual(beforeCapacity);
+  expect(loadState(f.db).runs.parent.state).toBe("running");
   const secureSelection = await service.resolveWorkerAssignmentSelection(f.worker, true, 1);
   expect(secureSelection.candidates?.[1].available).toBe(false);
+  specialistEnabled = false;
+  const disabledSelection = await service.resolveWorkerAssignmentSelection(f.worker, false, 1);
+  expect(disabledSelection.candidates?.map(candidate => candidate.available)).toEqual([false, false]);
 });

@@ -30,6 +30,10 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
     return ids.every(id => !this.getFacadeServices().runtime.runtimes.has(id) && !this.getFacadeServices().runtime.controller.isRuntimeShutdownQuarantined(id));
   }
 
+  assertControlledUserInputTargetable(agentId: string): void { this.getFacadeServices().userMessages.assertUserInputTargetable(agentId); }
+
+  prepareControlledWorkerResult(assignment: Parameters<UserMessageCoordinator["prepareWorkerResult"]>[0], resultText: string) { return this.getFacadeServices().userMessages.prepareWorkerResult(assignment, resultText); }
+
   applyControlledInput(text: string, options: Parameters<UserMessageCoordinator["applyControlledInput"]>[1]): ReturnType<UserMessageCoordinator["applyControlledInput"]> {
     return this.getFacadeServices().userMessages.applyControlledInput(text, options);
   }
@@ -48,6 +52,7 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
 
   installControlledTurnProjection(port:import("./turn-context-coordinator.js").CoreTurnProjectionPort): void {
     this.getFacadeServices().runtime.turns.installCore(port);
+    this.getFacadeServices().registry.directory.installLifecycleStatus(agentId => port.read(agentId).status);
   }
   reflectControlledTurns(): void { this.getFacadeServices().runtime.turns.reflectCore(); }
   enqueueControlledPresentation(agentId:string,runId:string,context:import("./turn-context-coordinator.js").InboundTurnContextInput): void {
