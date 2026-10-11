@@ -87,6 +87,8 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       const row = database.prepare(`SELECT e.* FROM effects e JOIN commands c USING(command_id)
         LEFT JOIN command_receipts r USING(command_id)
         WHERE e.state='pending' AND e.not_before<=? AND e.kind!='lifecycle.admit'
+        AND (e.kind NOT IN ('runtime.acquire','transcript.append','provider.start') OR NOT EXISTS(
+          SELECT 1 FROM orchestration_threads t WHERE t.thread_id=e.session_id AND json_extract(t.state_json,'$.shutdown')!='clean'))
         AND (e.depends_on IS NULL OR EXISTS(SELECT 1 FROM effects d WHERE d.effect_id=e.depends_on AND d.state='done'))
         AND NOT EXISTS(SELECT 1 FROM effects a WHERE a.session_id=e.session_id AND a.state='claimed' AND a.kind!='lifecycle.admit')
         ORDER BY COALESCE(r.accepted_sequence,c.created_at),e.ordinal,e.effect_id LIMIT 1`).get(options.clock()) as EffectRow | undefined;

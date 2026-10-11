@@ -15,7 +15,7 @@ import type { ControlMethod, ControlService, LifecycleAdmission, Principal } fro
 import type { ControlCoreOptions, ControlEffect, InputRoutePort, PreparedLaunch } from "./effect-types.js";
 import type { ControlTransaction, EventSink } from "./event-sink.js";
 import { loadState } from "./orchestration/store.js";
-import type { CoreCommand, Run, Request } from "./orchestration/types.js";
+import type { CoreCommand, Run, Request, Thread } from "./orchestration/types.js";
 import { requestForChoice, requestSession } from "./orchestration/request-projection.js";
 
 export class ControlError extends Error implements RpcError {
@@ -72,6 +72,10 @@ export function readReceipt(sink: EventSink, commandId: string): CommandReceipt 
     { receipt_json: string } | undefined;
   if (!row) throw new ControlError("NOT_FOUND", "Command not found");
   return JSON.parse(row.receipt_json);
+}
+function assertInputShutdown(owner: Thread): void {
+  if (owner.shutdown === "quarantined" || (owner.desired === "stopped" && owner.shutdown !== "clean"))
+    throw new ControlError("CONFLICT", "Thread shutdown must be confirmed before input admission", true);
 }
 export function cancelCommand(sink: EventSink, tx: ControlTransaction, commandId: string, error: RpcError, clock: () => number): void {
   sink.database
@@ -526,6 +530,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       ensureThread(tx, sessionId);
       if (message && inputId) {
         const owner = loadState(database).threads[sessionId];
+        assertInputShutdown(owner);
         if (owner.desired === "stopped") sink.commitCommand(tx, { type: "thread.resume", commandId, now, threadId: sessionId });
         const send = method === "session.send" ? input as RpcInput<"session.send"> : undefined;
         sink.commitCommand(tx, { type: "run.submit", commandId, now, threadId: sessionId, inputId, runId: `run-${commandId}`, attemptId: options.random(), bindingId: options.random(), input: message,
@@ -569,6 +574,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         const inputId = `input-${input.commandId}`;
         const base = { commandId:input.commandId, now:options.clock(), inputId, attemptId:options.random(), bindingId:options.random(), input:input.message };
         const owner = loadState(database).threads[input.threadId];
+        assertInputShutdown(owner);
         if (owner.desired === "stopped") sink.commitCommand(tx, { type:"thread.resume", commandId:input.commandId, now:options.clock(), threadId:input.threadId });
         if (input.assignment) sink.commitCommand(tx, { type:"worker.assign", ...base, ...input.assignment, workerThreadId:input.threadId, workerRunId:runId, authorized:true });
         else sink.commitCommand(tx, { type:"run.submit", ...base, threadId:input.threadId, runId, source:input.source, delivery:input.delivery ?? "queue" });

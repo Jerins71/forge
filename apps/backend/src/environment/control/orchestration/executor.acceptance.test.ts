@@ -6,7 +6,7 @@ import { createControlCore, type ControlCore } from "../database.js";
 import { piProviderCapabilities } from "../../../swarm/runtime/pi/pi-provider-adapter.js";
 import { ProviderDispatchRejectedError, type ProviderAdapter, type ProviderBinding } from "../../../swarm/runtime/provider-contract.js";
 import type { ControlCoreOptions } from "../effect-types.js";
-import { loadState, rebuildLifecycleProjections } from "./store.js";
+import { loadState, projectLifecycle, replayLifecycle, rebuildLifecycleProjections } from "./store.js";
 import { readReceipt } from "../command-service.js";
 import { createSwarmControlAdapter } from "../swarm-control-adapter.js";
 import { createArtifactService } from "../artifact-service.js";
@@ -96,6 +96,43 @@ describe("durable provider outbox", () => {
     }
     expect(starts).toEqual(["run-first", "run-first", "run-newer"]); expect(readReceipt(f.core.eventSink, "newer")).toMatchObject({ state: "succeeded", delivery: "dispatched" });
     const before = loadState(f.core.database); rebuildLifecycleProjections(f.core.database); expect(loadState(f.core.database)).toEqual(before);
+  });
+  it("queues an immediate send after a configure receipt while its provider release is pending", async () => {
+    const f = await fixture(); let release!: () => void; const shutdown = new Promise<void>(resolve => { release = resolve; });
+    f.options.swarm.stopSession = async () => { await shutdown; return { stopped: true }; };
+    const generations: number[] = []; const acquire = f.options.swarm.acquireProvider;
+    f.options.swarm.acquireProvider = async (...args) => { generations.push(args[0].generation); return acquire(...args); };
+    try {
+      await f.core.controlService.submitInput({ commandId: "before-configure", threadId: "manager", message: { text: "before", artifactIds: [] } }); await f.core.effectWorker.drain();
+      const state = loadState(f.core.database); const attempt = state.attempts[state.runs["run-before-configure"].activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+      f.core.controlService.record({ type: "provider.observe", commandId: "first-terminal", now: f.options.clock(), observation: { type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: "completed" } });
+      f.options.policy = { prepare: async (_method, input) => ({ sessionIds: ["manager"], projectIds: ["project"], intent: "inspect", frozen: input }), read: async () => { throw new Error("unused"); }, apply: async (_method, input) => {
+        // Seed the settings owner's retained handoff boundary without importing Phase 5 policy.
+        f.core.eventSink.transaction(() => {
+          const owner = loadState(f.core.database).threads.manager;
+          const event = { type: "thread.changed" as const, commandId: input.commandId, at: f.options.clock(), thread: { ...owner, shutdown: "pending" as const } };
+          f.core.database.prepare("INSERT INTO lifecycle_events(event_id,command_id,thread_id,event_type,event_json,created_at) VALUES (?,?,?,?,?,?)").run("handoff-fact", input.commandId, "manager", event.type, JSON.stringify(event), event.at); projectLifecycle(f.core.database, event);
+          const ordinal = (f.core.database.prepare("SELECT MAX(ordinal)+1 n FROM effects WHERE command_id=?").get(input.commandId) as { n: number }).n;
+          f.core.database.prepare("INSERT INTO effects(effect_id,command_id,session_id,kind,ordinal,payload_json,state,not_before) VALUES (?,?,'manager','provider.release',?,?,'pending',?)").run("handoff-release", input.commandId, ordinal, JSON.stringify({ kind: "provider.release", threadId: "manager", bindingId: owner.bindingId }), f.options.clock() + 60_000);
+        });
+        return {};
+      } };
+      const configured = await f.core.controlService.execute(principal, "session.configure", { commandId: "00000000-0000-4000-8000-000000000002", sessionId: "manager", contextMode: "fresh" });
+      expect(configured.state).toBe("succeeded"); expect(loadState(f.core.database).threads.manager.shutdown).toBe("pending");
+      const sent = await f.core.controlService.execute(principal, "session.send", { commandId, sessionId: "manager", message: { text: "immediate", artifactIds: [] } });
+      expect(sent.state).toBe("accepted"); expect(loadState(f.core.database).runs[`run-${commandId}`].state).toBe("queued");
+      await f.core.effectWorker.drain(); expect(generations).toEqual([0]); expect(f.canonical.size).toBe(1); expect(f.dispatches()).toBe(1);
+      f.core.database.prepare("UPDATE effects SET not_before=0 WHERE effect_id='handoff-release'").run(); release(); await f.core.effectWorker.drain();
+      expect(generations).toEqual([0, 1]); expect(f.dispatches()).toBe(2); expect(f.canonical.size).toBe(2);
+      expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded", delivery: "dispatched" });
+      expect(loadState(f.core.database).threads.manager).toMatchObject({ shutdown: "clean", activeRunId: `run-${commandId}` }); expect(replayLifecycle(f.core.database)).toEqual(loadState(f.core.database));
+    } finally { release(); }
+  });
+  it("returns typed conflicts for quarantined RPC and internal input admission", async () => {
+    const f = await fixture(); await f.core.controlService.submitInput({ commandId: "before", threadId: "manager", message: { text: "before", artifactIds: [] } }); await f.core.effectWorker.drain();
+    f.core.controlService.record({ type: "binding.drained", commandId: "unsafe", now: f.options.clock(), threadId: "manager", bindingId: loadState(f.core.database).threads.manager.bindingId!, status: "pending" });
+    await expect(f.core.controlService.execute(principal, "session.send", { commandId, sessionId: "manager", message: { text: "unsafe", artifactIds: [] } })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(f.core.controlService.submitInput({ commandId: "unsafe-internal", threadId: "manager", message: { text: "unsafe", artifactIds: [] } })).rejects.toMatchObject({ code: "CONFLICT" });
   });
   it("settles runtime cleanup before closing the adapter binding", async () => {
     const f = await fixture(); let nativeClosed = false; const order: string[] = [];
