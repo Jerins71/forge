@@ -408,7 +408,9 @@ test('Batch 3 UI renders durable session and message pins, rename and foreground
   await fixtureRpcOnce(b.baseUrl, principal, 'session.readState.set', { commandId: randomUUID(), sessionId, read: false });
   const inboxRow = page.locator(`[data-inbox-row="${b.environmentId}::${sessionId}"]`).filter({ visible: true });
   await expect(inboxRow).toHaveCount(1);
-  await expect(inboxRow.getByLabel('1 unread updates', { exact: true })).toBeVisible();
+  // The session was just in view, so its "work completed" attention is gone and the Inbox row carries no
+  // badge; the unread count itself shows on its project row.
+  await expect(row).toHaveText(/Batch 3 UI B\s*1/);
   await shot(page, 'batch3-unread-inbox');
   const start = proxy.metrics().commandAttempts.length;
   await page.goto(`${fleet!.uiUrl}/?agent=${sessionId}&env=${b.environmentId}`);
