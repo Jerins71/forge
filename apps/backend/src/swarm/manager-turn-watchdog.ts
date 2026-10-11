@@ -3,7 +3,6 @@ import type { RuntimeErrorEvent, RuntimeSessionEvent } from "./runtime-contracts
 import type { AgentDescriptor, ConversationMessageEvent } from "./types.js";
 import { extractMessageText } from "./session/message-utils.js";
 import {
-  recordRecoveryFact,
   type RecoveryTarget,
 } from "./recovery-state.js";
 
@@ -120,20 +119,11 @@ export class ManagerTurnWatchdog {
     this.recordTerminal(agentId, "error");
   }
 
-  recordTerminal(agentId: string, outcome: "agent_end" | "idle" | "error" | "recycled" | "abandoned" | "reconciled"): void {
+  recordTerminal(agentId: string, _outcome: "agent_end" | "idle" | "error" | "recycled" | "abandoned" | "reconciled"): void {
     const state = this.stateByAgentId.get(agentId);
     if (!state) return;
     this.stateByAgentId.delete(agentId);
-    const target = this.options.getSessionTarget(agentId);
-    if (!target) return;
-    void recordRecoveryFact(target, {
-      t: "turn_terminal",
-      turnId: state.turnId,
-      outcome,
-      at: this.options.now(),
-    }).catch((error) => {
-      this.options.logDebug("turn_ledger:terminal:error", { agentId, turnId: state.turnId, error: String(error) });
-    });
+
   }
 
   check(nowMs = Date.now()): void {
@@ -229,22 +219,9 @@ export class ManagerTurnWatchdog {
   }
 
   private emitStallNotice(agentId: string, state: ManagerTurnState, tier: 1 | 2 | 3): void {
-    const target = this.options.getSessionTarget(agentId);
-    if (target) {
-      void recordRecoveryFact(target, {
-        t: "turn_stalled",
-        turnId: state.turnId,
-        agentId,
-        tier,
-        at: this.options.now(),
-      }).catch((error) => {
-        this.options.logDebug("turn_ledger:stalled:error", { agentId, turnId: state.turnId, tier, error: String(error) });
-      });
-    }
-
     // A short gap in observable runtime events is useful liveness telemetry,
     // but normal model deliberation frequently crosses this threshold. Keep
-    // the tier-one ledger record without adding misleading transcript noise.
+    // tier-one observation without adding misleading transcript noise.
     if (tier === 1) {
       return;
     }

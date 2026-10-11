@@ -669,7 +669,6 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
       assistantOutputTarget: output.inputTarget,
       assistantOutputProjectionTarget: output.projectionTarget,
       activationEligible,
-      skipRecoveryTracking: input.sendOptions?.skipRecoveryTracking,
     });
     const { rollback, turnId: managerTurnId } = queuedTurn;
 

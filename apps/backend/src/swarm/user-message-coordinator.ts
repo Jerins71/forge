@@ -44,11 +44,7 @@ import type {
 } from "./types.js";
 import { linkSessionReferences, type SessionReferenceDependencies } from "./session-references.js";
 
-export interface ControlledInputContext extends ControlledAppendContext {
-  beforeDispatch(): Promise<"dispatch" | "do-not-dispatch">;
-  onCanonicalAppend(entryId: string): Promise<void>;
-  onDispatchAccepted(): Promise<void>;
-}
+export type ControlledInputContext = ControlledAppendContext;
 
 type ManagerDescriptor = AgentDescriptor & { role: "manager"; profileId: string };
 type CodexClassification = CodexUserMessageRoute;
@@ -87,6 +83,7 @@ export interface HandleUserMessageOptions {
   sourceContext?: MessageSourceContext;
   replyTo?: ConversationReplyTargetInput;
   clientRequestId?: string;
+  commandId?: string;
   /** Internal control effect context; external parsers never populate this. */
   controlledInput?: ControlledInputContext;
   /** Manager sessions the user referenced in this message; linked as peers of the target. */
@@ -156,7 +153,6 @@ export class InboundConversationAppender {
 
     if (payload.controlledInput) {
       event = await this.options.events.appendControlledConversationMessage(event, payload.controlledInput);
-      await payload.controlledInput.onCanonicalAppend(event.timelineEntryId ?? event.id!);
     } else {
       this.options.events.emitConversationMessage(event);
     }
@@ -267,17 +263,40 @@ interface RuntimeDispatchInput {
  * their ordering and rollback boundary.
  */
 export class UserMessageCoordinator {
-  private readonly controlledInputLocks = new Map<string, Promise<void>>();
+  private submitAuthoritativeInput?: (text: string, options: HandleUserMessageOptions) => Promise<void>;
   constructor(private readonly options: UserMessageCoordinatorOptions) {}
 
-  async applyControlledInput(text: string, options: HandleUserMessageOptions & { targetAgentId: string; controlledInput: ControlledInputContext }): Promise<{ delivery: "dispatched" | "unknown" }> {
-    const prior = this.controlledInputLocks.get(options.targetAgentId) ?? Promise.resolve();
-    let accepted = false;
-    const control = options.controlledInput;
-    const operation = prior.catch(() => {}).then(() => this.handleUserMessage(text, { ...options, controlledInput: { ...control, onDispatchAccepted: async () => { await control.onDispatchAccepted(); accepted = true; } } }));
-    this.controlledInputLocks.set(options.targetAgentId, operation);
-    try { await operation; return { delivery: accepted ? "dispatched" : "unknown" }; }
-    finally { if (this.controlledInputLocks.get(options.targetAgentId) === operation) this.controlledInputLocks.delete(options.targetAgentId); }
+  installInputOwner(submit: (text: string, options: HandleUserMessageOptions) => Promise<void>): void {
+    this.submitAuthoritativeInput = submit;
+  }
+
+  async acquireRuntime(agentId: string): Promise<SwarmAgentRuntime> {
+    return this.options.runtime.getOrCreateRuntime(this.resolveTarget(agentId, true));
+  }
+
+  /** Resource/presentation preparation only. The decision kernel owns provider dispatch. */
+  async applyControlledInput(text: string, options: HandleUserMessageOptions & { targetAgentId: string; controlledInput: ControlledInputContext; runId?: string }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }> {
+    const target = this.resolveTarget(options.targetAgentId, true);
+    const sourceContext = normalizeMessageSourceContext(options.sourceContext ?? { channel: "web" });
+    const attachments = this.options.attachments.normalize(options.attachments);
+    this.options.codex.plugin.assertWorkerNotUserTargetable(target);
+    await this.options.projectAgents.preflightRuntime(target);
+    return this.options.runtime.withRuntimeAdmission(target.agentId, async () => {
+      const replyTo = options.replyTo ? resolveConversationReplyTarget(this.options.targeting.getConversationHistory(target.agentId), options.replyTo) : undefined;
+      const classification = target.role === "manager" ? this.options.codex.plugin.classifyAndPreflightUserTurn(target as ManagerDescriptor, text, sourceContext) : { kind: "none" } as const;
+      await this.options.goals.noteUserTurn(target);
+      const guidance = await linkSessionReferences(this.options.sessionReferences, target, options.sessionReferenceAgentIds);
+      const appended = await this.appendUserMessage(target, text, attachments, sourceContext, replyTo, options.clientRequestId, options.controlledInput);
+      const prepared = target.role === "manager" ? this.options.codex.plugin.prepareUserTurn({ manager: target as ManagerDescriptor, text, sourceContext, classification, userMessageId: appended.event.id }) : {};
+      const outputTarget = this.options.assistantOutput.resolveTargetForUserInput(sourceContext);
+      const visible = formatInboundUserMessageForManager(text, sourceContext, outputTarget, replyTo);
+      const runtimeText = this.options.codex.plugin.appendManagerTurnGuidance(guidance ? `${visible}\n\n${guidance}` : visible, prepared.delegationContext, prepared.retryAuthorizationContext);
+      const input = await this.options.agentMessages.prepareModelInboundMessage(target.agentId, { text: runtimeText, attachments: appended.runtimeAttachments }, "user");
+      await this.options.turns.enqueue(target.agentId, { source: "user_input", routeOrigin: "user", runtimeMessageText: extractRuntimeMessageText(input), sourceContext, assistantOutputTarget: outputTarget, turnId: options.runId,
+        codexMcpToolGate: target.role === "manager" ? this.options.codex.plugin.buildTurnGate(target as ManagerDescriptor, sourceContext, text, classification, "user_input") : undefined, codexPluginDelegationContext: prepared.delegationContext, codexPluginRetryAuthorizationContext: prepared.retryAuthorizationContext });
+      if (target.role === "manager") this.options.runtime.executableTrust.schedulePrompt(target as ManagerDescriptor);
+      return { entryId: appended.event.timelineEntryId ?? appended.event.id!, runtimeMessage: typeof input === "string" ? { text: input } : input };
+    });
   }
 
   async appendConversationUserMessage(
@@ -338,6 +357,13 @@ export class UserMessageCoordinator {
     const trimmed = text.trim();
     const attachments = this.options.attachments.normalize(options?.attachments);
     if (!trimmed && attachments.length === 0) return;
+    if (this.submitAuthoritativeInput && !options?.controlledInput) {
+      const target = this.resolveTarget(options?.targetAgentId, true);
+      if (!isExternalThreadDescriptor(target) && !parseCompactSlashCommand(trimmed) && classifyCodexUserMessage(trimmed).kind !== "sidecar") {
+        await this.submitAuthoritativeInput(trimmed, { ...options, targetAgentId: target.agentId });
+        return;
+      }
+    }
 
     const sourceContext = normalizeMessageSourceContext(options?.sourceContext ?? { channel: "web" });
     let target = this.resolveTarget(options?.targetAgentId, true);
@@ -531,7 +557,6 @@ export class UserMessageCoordinator {
         )
       : input.text;
     let receipt: SendMessageReceipt;
-    if (input.controlledInput && await input.controlledInput.beforeDispatch() !== "dispatch") return;
     try {
       receipt = await this.options.agentMessages.sendMessage(
         managerContextId,
@@ -545,7 +570,6 @@ export class UserMessageCoordinator {
       throw error;
     }
 
-    await input.controlledInput?.onDispatchAccepted();
     this.options.logDebug("manager:user_message_dispatch_complete", {
       managerContextId,
       targetAgentId: target.agentId,
@@ -652,14 +676,8 @@ export class UserMessageCoordinator {
     });
 
     try {
-      if (input.controlledInput && await input.controlledInput.beforeDispatch() !== "dispatch") {
-        rollback();
-        this.options.observability.cancelRuntimeInput(observabilityInput, "controlled_input_fenced");
-        return;
-      }
       const receipt = await runtime.sendMessage(runtimeMessage, "steer");
-      await input.controlledInput?.onDispatchAccepted();
-      this.options.observability.completeRuntimeInput(observabilityInput, receipt, metadata);
+        this.options.observability.completeRuntimeInput(observabilityInput, receipt, metadata);
       this.options.codex.plugin.recordDispatchAccepted(managerContextId, {
         gate: codexMcpToolGate,
         delegation: input.codexPluginDelegationContext,

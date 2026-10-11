@@ -297,6 +297,7 @@ export class CronSchedulerService {
     try {
       await this.swarmManager.handleUserMessage(message, {
         targetAgentId: schedule.sessionId,
+        commandId: `schedule:${schedule.id}:${scheduledForIso}`,
         sourceContext: { channel: "web" }
       });
 

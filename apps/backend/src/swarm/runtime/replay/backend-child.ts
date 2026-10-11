@@ -63,6 +63,8 @@ const core = await control.createControlCore({ database, clock: Date.now, random
   swarm: {
     resolveSession: agentId => adapter.resolveSession!(agentId),
     ensureSession: input => adapter.ensureSession(input), applyInput: input => adapter.applyInput(input),
+    acquireProvider: scope => adapter.acquireProvider(scope),
+    deliverRecoveredResult: id => adapter.deliverRecoveredResult!(id),
     applyChoice: input => adapter.applyChoice(input), stopSession: input => adapter.stopSession(input),
   }, workspace, artifacts, policy: createProjectPolicy(manager),
   inputRoute: adapterModule.createControlledInputRoutePreflight({ swarmManager: manager }),
@@ -76,7 +78,7 @@ const exposure = exposureModule.createExposurePolicy({ host: "127.0.0.1", port: 
 const { applyAccessMigrations } = await import("../../../environment/access/access-migrations.js");
 applyAccessMigrations(database);
 const access = accessModule.createEnvironmentAccess({ database, identity, exposure });
-const adapter = adapterModule.createSwarmControlAdapter({ swarmManager: manager, database, eventSink: core.eventSink, workspaceService: workspace, artifactService: artifacts });
+const adapter = adapterModule.createSwarmControlAdapter({ swarmManager: manager, database, eventSink: core.eventSink, controlService: core.controlService, workspaceService: workspace, artifactService: artifacts });
 const descriptors = descriptorModule.createControlDescriptorPersistence({ database, eventSink: core.eventSink, dataDir: config.paths.dataDir, storeFilePath: config.paths.agentsStoreFile });
 manager.installDescriptorPersistence(descriptors);
 const unread = new unreadModule.UnreadTracker({ dataDir: config.paths.dataDir,

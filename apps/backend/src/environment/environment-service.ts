@@ -84,8 +84,6 @@ export async function createEnvironmentService(options: {
   let rpc: ReturnType<typeof createEnvironmentRpcServer> | undefined;
   let access: EnvironmentAccess | undefined;
   try {
-    if (hadDatabase && !(database.pragma("table_info(control_projects)") as { name: string }[]).some(column => column.name === "profile_json"))
-      await database.backup(`${databasePath}.v2-before-policy-adoption`);
     const workspaceService = createWorkspaceService({ database, dataDir: config.paths.dataDir, swarmManager });
     const artifactService = createArtifactService({ database, dataDir: config.paths.dataDir, swarmManager });
     // The lazy port breaks only the construction cycle; effects start after this const is assigned.
@@ -93,6 +91,8 @@ export async function createEnvironmentService(options: {
       resolveSession: (agentId) => adapter.resolveSession!(agentId),
       ensureSession: (input) => adapter.ensureSession(input),
       applyInput: (input) => adapter.applyInput(input),
+      acquireProvider: scope => adapter.acquireProvider(scope),
+      deliverRecoveredResult: id => adapter.deliverRecoveredResult!(id),
       applyChoice: (input) => adapter.applyChoice(input),
       stopSession: (input) => adapter.stopSession(input),
     };
@@ -131,7 +131,7 @@ export async function createEnvironmentService(options: {
         return result;
       },
     };
-    const adapter = createSwarmControlAdapter({ swarmManager, database, eventSink: core.eventSink, workspaceService, artifactService });
+    const adapter = createSwarmControlAdapter({ swarmManager, database, eventSink: core.eventSink, controlService: core.controlService, workspaceService, artifactService });
     mirror = createSwarmEventMirror({
       swarmManager,
       database,

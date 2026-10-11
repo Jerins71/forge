@@ -1,4 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { ProviderScope } from "@forge/protocol";
+import type { ProviderAdapter, ProviderBinding } from "./runtime/provider-contract.js";
 import type {
   AgentRuntimeExtensionSnapshot,
   GenerationThroughputEvent,
@@ -264,6 +266,12 @@ export class SwarmRuntimeController {
   private readonly secureRuntimeBindingsByRuntime = new Map<string, SecureRuntimeBinding>();
   private readonly secureRuntimeBindingsByRuntimeObject =
     new WeakMap<SwarmAgentRuntime, SecureRuntimeBinding>();
+  private readonly providerCreationScope = new AsyncLocalStorage<ProviderScope>();
+  private readonly preparedProviderInputs = new Map<SwarmAgentRuntime, {
+    runtimeToken: number;
+    generation?: number;
+    prepared: Parameters<NonNullable<RuntimeCreationOptions["onProviderPrepared"]>>[0];
+  }>();
 
   constructor(private readonly host: SwarmRuntimeControllerHost) {
     this.runtimeBinding = new RuntimeBinding({
@@ -368,6 +376,21 @@ export class SwarmRuntimeController {
 
   getRuntime(agentId: string): SwarmAgentRuntime | undefined {
     return this.runtimeBinding.getRuntime(agentId);
+  }
+
+  /** Executor-only acquisition. Native creators supply their exact final prompt/tool host. */
+  async acquireProvider(scope: ProviderScope, create: () => Promise<SwarmAgentRuntime>): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }> {
+    const runtime = await this.providerCreationScope.run(scope, create);
+    const adapter = runtime.providerAdapter;
+    const record = this.preparedProviderInputs.get(runtime);
+    if (!adapter || !record || record.runtimeToken !== this.getRuntimeToken(scope.threadId)) {
+      throw new Error("Runtime has no prepared provider adapter");
+    }
+    if (record.generation !== undefined && record.generation !== scope.generation) throw new Error("Provider generation requires confirmed runtime replacement");
+    record.generation = scope.generation;
+    const input = { scope, model: runtime.descriptor.model, instructions: record.prepared.instructionBundle, toolHost: record.prepared.toolHostBinding };
+    const binding = await adapter.open(input);
+    return { adapter, binding };
   }
 
   hasRuntime(agentId: string): boolean {
@@ -478,14 +501,20 @@ export class SwarmRuntimeController {
     }
 
     try {
+      let prepared: Parameters<NonNullable<RuntimeCreationOptions["onProviderPrepared"]>>[0] | undefined;
+      const creationOptions: RuntimeCreationOptions = {
+        ...options,
+        ...(secureRuntimeBinding ? { secureRuntimeBinding } : {}),
+        ...(this.providerCreationScope.getStore() ? { providerScope: this.providerCreationScope.getStore() } : {}),
+        onProviderPrepared: input => { prepared = input; options?.onProviderPrepared?.(input); },
+      };
       const runtime = await this.runtimeFactory.createRuntimeForDescriptor(
         descriptor,
         systemPrompt,
         runtimeToken,
-        secureRuntimeBinding
-          ? { ...options, secureRuntimeBinding }
-          : options,
+        creationOptions,
       );
+      if (prepared) this.preparedProviderInputs.set(runtime, { runtimeToken, prepared });
       if (secureRuntimeBinding) {
         this.secureRuntimeBindingsByRuntimeObject.set(
           runtime,
@@ -522,10 +551,12 @@ export class SwarmRuntimeController {
   }
 
   detachRuntime(agentId: string, runtimeToken?: number): boolean {
+    const runtime = this.getRuntime(agentId);
     const resolvedRuntimeToken =
       runtimeToken ?? this.runtimeBinding.getRuntimeToken(agentId);
     const detached = this.runtimeBinding.detachRuntime(agentId, runtimeToken);
     if (detached && resolvedRuntimeToken !== undefined) {
+      if (runtime) this.preparedProviderInputs.delete(runtime);
       this.invalidateSecureRuntimeBinding(agentId, resolvedRuntimeToken);
     }
     return detached;
@@ -544,6 +575,7 @@ export class SwarmRuntimeController {
       runtimeToken,
     );
     if (detached && resolvedRuntimeToken !== undefined) {
+      this.preparedProviderInputs.delete(expectedRuntime);
       this.invalidateSecureRuntimeBinding(agentId, resolvedRuntimeToken);
     }
     return detached;

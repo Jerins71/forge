@@ -4,7 +4,6 @@ import { closeSync, createReadStream, openSync, readSync, statSync } from "node:
 import { createInterface } from "node:readline";
 import type { Database } from "better-sqlite3";
 import { decodeEnvironmentValue, PlanSnapshotV2Schema, GoalSnapshotV2Schema } from "@forge/protocol/environment-v2";
-import { projectRecoverySnapshot } from "../streams/wire-projection.js";
 import type { ArtifactRef, ProjectSummary, SessionSummary, DetailStreamItem, RpcInput, RpcOutput } from "@forge/protocol/environment-v2";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
 import type { AgentDescriptor, ConversationEntryEvent, ManagerProfile, ChoiceRequestEvent } from "../../swarm/types.js";
@@ -81,7 +80,8 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const pending = swarmManager.getPendingChoiceRequestsForSession(descriptor.agentId).length > 0 || Boolean(database.prepare("SELECT 1 FROM control_choices WHERE session_id=? AND state='pending' LIMIT 1").get(descriptor.agentId));
     const attention = swarmManager.getSessionAttentionSnapshot().attentions.find(attention => attention.sessionAgentId === descriptor.agentId);
     const row = database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(descriptor.agentId) as { desired_state: string } | undefined;
-    const status = row?.desired_state === "stopped" ? swarmManager.isSessionShutdownSafe(descriptor.agentId) ? "stopped" : "stopping"
+    const lifecycle = database.prepare("SELECT state_json FROM orchestration_threads WHERE thread_id=?").get(descriptor.agentId) as { state_json: string } | undefined;
+    const status = lifecycle ? prior?.status ?? "idle" : row?.desired_state === "stopped" ? swarmManager.isSessionShutdownSafe(descriptor.agentId) ? "stopped" : "stopping"
       : descriptor.status === "streaming" ? "running" : descriptor.status === "terminated" ? "stopped"
         : descriptor.status === "idle" && pending ? "waiting" : descriptor.status;
     return { projectAgent: descriptor.projectAgent ? projectAgentMetadata(descriptor.projectAgent) : null, sessionId: descriptor.agentId, projectId: descriptor.profileId ?? descriptor.agentId,
@@ -102,7 +102,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
   function upsertSession(tx: ControlTransaction, sessionId: string, pendingCount?: number) {
     const descriptor = swarmManager.getAgentForInternalUse(sessionId);
     if (!descriptor || descriptor.role !== "manager" || swarmManager.listProfiles().some(profile => profile.profileId === descriptor.profileId && profile.profileType === "system")) return;
-    indexDescriptor(descriptor); const next = summary(descriptor); if (pendingCount !== undefined) next.pendingCount = pendingCount;
+    indexDescriptor(descriptor); const next = summary(descriptor); if (pendingCount !== undefined && !database.prepare("SELECT 1 FROM orchestration_threads WHERE thread_id=?").get(sessionId)) next.pendingCount = pendingCount;
     if (JSON.stringify(next) !== JSON.stringify(storedSummary(sessionId))) eventSink.append(tx, { topic: "shell", sessionId, event: { type: "session.upsert", session: next } });
   }
   function upsertWorker(tx: ControlTransaction, descriptor: AgentDescriptor) {
@@ -295,17 +295,11 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       ? { type, snapshot: snapshot as import("@forge/protocol").SessionPlanSnapshot }
       : { type, snapshot: snapshot as import("@forge/protocol").SessionGoalSnapshot } }));
   }
-  function publishRecovery(snapshot: import("@forge/protocol").RestartRecoverySnapshot | null) {
-    const recovery = projectRecoverySnapshot(snapshot);
-    const sourceKey = recovery ? `recovery:${recovery.recoveryId}:${recovery.dismissedAt ? "dismiss" : recovery.resumedAt ? "resume" : "pending"}` : undefined;
-    eventSink.transaction(tx => eventSink.append(tx, { topic: "shell", sessionId: null, sourceKey, event: { type: "recovery.upsert", recovery } }));
-  }
   const mirror: SwarmEventMirror = {
     attach() {
       if (attached || disposed) return; attached = true;
       listen("session_plan_snapshot", (event: { sessionAgentId: string }) => detailFeature(event.sessionAgentId, "plan.upsert", event));
       listen("session_goal_snapshot", (event: { sessionAgentId: string }) => detailFeature(event.sessionAgentId, "goal.upsert", event));
-      listen("restart_recovery_snapshot", (event: import("@forge/protocol").RestartRecoverySnapshotEvent) => publishRecovery(event.snapshot));
       for (const name of ["conversation_message", "activity_summary", "agent_message", "agent_tool_call"]) listen(name, observeCanonical);
       listen("choice_request", (event: ChoiceRequestEvent) => { eventSink.transaction(tx => choice(tx, event)); });
       listen("agent_status", (event: { agentId: string; pendingCount: number }) => { const descriptor = swarmManager.getAgentForInternalUse(event.agentId); if (!descriptor) return; eventSink.transaction(tx => { if (descriptor.role === "worker") upsertWorker(tx, descriptor); upsertSession(tx, descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId, descriptor.role === "manager" ? event.pendingCount : undefined); }); });
@@ -336,7 +330,6 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       for (const descriptor of swarmManager.listAgentsForInternalUse()) indexDescriptor(descriptor);
       queueCatalog(undefined, true); queueCatalog(); await Promise.resolve(); await catalogWork;
       if (errors.has("catalog")) throw errors.get("catalog");
-      publishRecovery(swarmManager.getRestartRecoverySnapshot());
       const pending = database.prepare("SELECT choice_id,session_id,runtime_generation,choice_json FROM control_choices WHERE state='pending'").all() as { choice_id: string; session_id: string; runtime_generation: string; choice_json: string }[];
       eventSink.transaction(tx => {
         for (const row of pending) {

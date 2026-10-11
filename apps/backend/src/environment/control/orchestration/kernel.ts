@@ -28,7 +28,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
   };
   const finish = (run: Run, outcome: NonNullable<Run["outcome"]>) => {
     const attempt = state.attempts[run.activeAttemptId];
-    emit({ type: "attempt.terminal", attempt: { ...attempt, state: "terminal", outcome } });
+    emit({ type: "attempt.terminal", attempt: { ...attempt, state: "terminal", outcome, delivery: attempt.state === "dispatching" && outcome === "completed" ? "dispatched" : attempt.delivery } });
     emit({ type: "run.terminal", run: { ...run, state: "terminal", outcome } });
     for (const request of Object.values(state.requests)) if (request.attemptId === attempt.attemptId && ["pending", "responding"].includes(request.state))
       emit({ type: "request.expired", request: { ...request, state: "expired" } });
@@ -71,7 +71,9 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     }
     if (processLost) for (const owner of Object.values(state.threads)) {
       // The process boundary proves old writers are gone. In-process failures require drain.
-      emit({ type: "thread.changed", thread: { ...owner, generation: owner.generation + 1, bindingId: undefined, shutdown: "clean", compaction: undefined } });
+      const nextBindingId = `binding:${command.commandId}:${owner.threadId}`;
+      emit({ type: "thread.changed", thread: { ...owner, generation: owner.generation + 1, bindingId: nextBindingId, shutdown: "clean", compaction: undefined } });
+      for (const attempt of Object.values(state.attempts)) if (attempt.threadId === owner.threadId && attempt.state === "created") emit({ type: "attempt.created", attempt: { ...attempt, generation: owner.generation + 1, bindingId: nextBindingId } });
     }
     const deliveries = new Map((pending?.undeliveredReports ?? []).map(r => [r.deliveryId, r]));
     for (const report of reports) deliveries.set(report.deliveryId, report);
@@ -116,7 +118,8 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       if (Object.values(state.runs).some(run => run.inputId === command.inputId)) break;
       emit({ type: "input.accepted", run: { runId: command.runId, threadId: command.threadId, inputId: command.inputId, input: command.input, source: command.source, delivery: command.delivery, commandId: command.commandId, state: "queued", sequence: owner.nextRunSequence, activeAttemptId: command.attemptId } });
       emit({ type: "attempt.created", attempt: { attemptId: command.attemptId, runId: command.runId, threadId: owner.threadId, bindingId: owner.bindingId ?? command.bindingId, generation: owner.generation, state: "created", delivery: "pending", lastSequence: -1 } });
-      emit({ type: "thread.changed", thread: { ...owner, nextRunSequence: owner.nextRunSequence + 1 } });
+      emit({ type: "thread.changed", thread: { ...owner, bindingId: owner.bindingId ?? command.bindingId, nextRunSequence: owner.nextRunSequence + 1 } });
+      if (!owner.bindingId) decision.effects.push({ kind: "runtime.acquire", threadId: owner.threadId, bindingId: command.bindingId, generation: owner.generation });
       decision.effects.push({ kind: "transcript.append", threadId: owner.threadId, inputId: command.inputId, runId: command.runId });
       if (command.delivery === "steer" && owner.activeRunId) {
         const active = state.attempts[state.runs[owner.activeRunId].activeAttemptId];
@@ -169,7 +172,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     case "binding.drained": {
       const owner = thread(command.threadId); if (owner.bindingId !== command.bindingId) break;
       emit({ type: "thread.changed", thread: { ...owner, shutdown: command.status === "clean" ? "clean" : "quarantined", ...(command.status === "clean" ? { bindingId: undefined, activeRunId: undefined } : {}) } });
-      if (command.status === "clean" && owner.activeRunId) finish(state.runs[owner.activeRunId], "cancelled"); break;
+      if (command.status === "clean" && owner.activeRunId && owner.desired === "stopped") finish(state.runs[owner.activeRunId], "cancelled"); break;
     }
     case "thread.resume": {
       const owner = thread(command.threadId); if (owner.shutdown !== "clean") throw new Error("Thread shutdown remains quarantined");

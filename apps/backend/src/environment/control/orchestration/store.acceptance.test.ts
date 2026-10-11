@@ -33,7 +33,7 @@ describe("retained lifecycle commit", () => {
       sink.updateReceipt(tx, "00000000-0000-4000-8000-000000000001", {});
     });
     expect(observed).toEqual([true]);
-    expect((db.prepare("SELECT kind FROM effects").all())).toEqual([{ kind: "transcript.append" }]);
+    expect((db.prepare("SELECT kind FROM effects").all())).toEqual([{ kind: "runtime.acquire" }, { kind: "transcript.append" }]);
     expect(db.prepare("SELECT COUNT(*) n FROM lifecycle_events").get()).toEqual({ n: 4 });
     const before = loadState(db); sink.close(); db.close();
     const Constructor = await loadConfiguredSqliteDatabaseConstructor(); const reopened = new Constructor(db.name); databases.push(reopened); await initialize(reopened);

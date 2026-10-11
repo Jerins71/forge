@@ -177,6 +177,7 @@ export function createEventSink(database: Database, clock: () => number, random:
       if (closed) throw new Error("Control event sink is closed");
       if (active || database.inTransaction) throw new Error("Nested control transactions are forbidden");
       const tx = { database };
+      const beforeChanges = (database.prepare("SELECT total_changes() count").get() as { count: number }).count;
       pending = [];
       let result: ReturnType<typeof write>;
       let pruned: { count: number; bytes: number } | undefined;
@@ -227,7 +228,8 @@ export function createEventSink(database: Database, clock: () => number, random:
           publishing = false;
         }
       }
-      for (const listener of [...commitListeners]) {
+      const changed = (database.prepare("SELECT total_changes() count").get() as { count: number }).count !== beforeChanges;
+      for (const listener of changed ? [...commitListeners] : []) {
         try { listener(); } catch { commitListeners.delete(listener); }
       }
       return result;
@@ -257,6 +259,8 @@ export function createEventSink(database: Database, clock: () => number, random:
           if (["attempt.accepted", "attempt.unknown"].includes(event.type) && database.prepare("SELECT 1 FROM command_receipts WHERE command_id=?").get(run.commandId)) {
             sink.updateReceipt(tx, run.commandId, event.type === "attempt.accepted" ? { state: "succeeded", delivery: "dispatched", error: null } : { state: "interrupted", delivery: "unknown", error: { code: "UNAVAILABLE", message: "Provider delivery is unknown; explicit recovery is required", retryable: false } });
           }
+          if (event.type === "attempt.terminal" && hasPendingReceipt(database, run.commandId)) sink.updateReceipt(tx, run.commandId,
+            event.attempt.delivery === "dispatched" ? { state: "succeeded", delivery: "dispatched", error: null } : { state: event.attempt.outcome === "failed" ? "failed" : "interrupted", delivery: "none", error: { code: "CONFLICT", message: "Input was fenced before provider delivery", retryable: false } });
         }
         if ("recovery" in event) sink.append(tx, { topic: "shell", sessionId: null, event: { type: "recovery.upsert", recovery: event.recovery } });
       }
@@ -265,6 +269,18 @@ export function createEventSink(database: Database, clock: () => number, random:
         const effectId = `${command.commandId}:${ordinal}`;
         database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,?,?,?,'pending')")
           .run(effectId, command.commandId, effect.threadId, effect.kind, ordinal++, JSON.stringify(effect));
+      }
+      const state = loadState(database);
+      const changedThreads = new Set(decision.events.flatMap(event => "thread" in event ? [event.thread.threadId] : "run" in event ? [event.run.threadId] : "request" in event ? [event.request.threadId] : []));
+      for (const threadId of changedThreads) {
+        const thread = state.threads[threadId];
+        const row = database.prepare("SELECT summary_json FROM control_sessions WHERE session_id=?").get(threadId) as { summary_json: string } | undefined;
+        if (!row) continue;
+        const summary = JSON.parse(row.summary_json);
+        const run = thread.activeRunId ? state.runs[thread.activeRunId] : undefined;
+        const status = thread.desired === "stopped" ? thread.shutdown === "clean" ? "stopped" : "stopping" : run?.state === "recovery" ? "interrupted" : run ? "running" : "idle";
+        database.prepare("UPDATE control_sessions SET desired_state=?,run_generation=? WHERE session_id=?").run(thread.desired, thread.generation, threadId);
+        sink.append(tx, { topic: "shell", sessionId: threadId, event: { type: "session.upsert", session: { ...summary, status, pendingCount: Object.values(state.runs).filter(r => r.threadId === threadId && r.state === "queued").length } } });
       }
       return decision;
     },
@@ -319,6 +335,10 @@ export function createEventSink(database: Database, clock: () => number, random:
     },
   };
   return sink;
+}
+
+function hasPendingReceipt(database: Database, commandId: string): boolean {
+  return Boolean(database.prepare("SELECT 1 FROM command_receipts WHERE command_id=? AND state IN ('accepted','running')").get(commandId));
 }
 
 function project(database: Database, sessionId: string | null, event: ControlEvent, sequence: number, sourceKey?: string | null): void {

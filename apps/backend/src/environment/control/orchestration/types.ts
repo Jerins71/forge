@@ -22,7 +22,7 @@ export interface Run {
   commandId: string;
   inputId: string;
   input: RpcInput<"session.send">["message"];
-  source?: RpcInput<"session.send">["source"];
+  source?: import("../../../swarm/types.js").MessageSourceContext;
   delivery: "queue" | "steer";
   sequence: number;
   state: "queued" | "running" | "terminal" | "recovery";

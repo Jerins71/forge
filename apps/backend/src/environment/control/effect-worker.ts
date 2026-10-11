@@ -1,7 +1,11 @@
-import type { CommandReceipt, RpcError } from "@forge/protocol/environment-v2";
+import type { RpcError } from "@forge/protocol/environment-v2";
+import type { ProviderAdapter, ProviderBinding } from "../../swarm/runtime/provider-contract.js";
+import type { RuntimeUserMessage } from "../../swarm/runtime-contracts.js";
 import type { ControlCoreOptions, ControlEffect, EffectRow } from "./effect-types.js";
-import type { ControlTransaction, EventSink } from "./event-sink.js";
-import { cancelCommand, readReceipt, readSession, setSessionStatus } from "./command-service.js";
+import type { EventSink } from "./event-sink.js";
+import { cancelCommand, readReceipt, setSessionStatus } from "./command-service.js";
+import { loadState, rebuildLifecycleProjections } from "./orchestration/store.js";
+import type { CoreCommand, CoreEffect, Run } from "./orchestration/types.js";
 
 export interface EffectWorker {
   readonly bootId: string;
@@ -10,360 +14,205 @@ export interface EffectWorker {
   stop(): Promise<void>;
   reconcileOnBoot(): Promise<void>;
 }
-interface InputRow {
-  input_id: string;
-  canonical_entry_id: string | null;
-  append_state: "pending" | "recorded";
-  delivery_state: "pending" | "dispatching" | "dispatched" | "unknown";
-  run_generation: number;
-}
-const interrupted: RpcError = { code: "UNAVAILABLE", message: "Effect interrupted before completion", retryable: false };
-const unknown: RpcError = {
-  code: "UNAVAILABLE",
-  message: "Provider handoff outcome is unknown; input will not be dispatched again",
-  retryable: false,
-};
+const unavailable: RpcError = { code: "UNAVAILABLE", message: "Effect interrupted before completion", retryable: false };
 
+/** One outbox executor. Every native result returns through the decision/transaction owner. */
 export function createEffectWorker(sink: EventSink, options: ControlCoreOptions): EffectWorker {
   const database = sink.database;
   const bootId = options.random();
-  let stopped = false;
-  let started = false;
-  let reconcileComplete = false;
-  let draining: Promise<void> | undefined;
-  let unsubscribe: (() => void) | undefined;
-  const inputRow = (inputId: string): InputRow =>
-    database.prepare("SELECT * FROM control_inputs WHERE input_id = ?").get(inputId) as InputRow;
-  const device = (commandId: string): string =>
-    (database.prepare("SELECT device_session_id FROM commands WHERE command_id = ?").get(commandId) as { device_session_id: string })
-      .device_session_id;
-  const isOwnClaim = (row: EffectRow): boolean =>
-    !!database
-      .prepare("SELECT effect_id FROM effects WHERE effect_id = ? AND state = 'claimed' AND claimed_boot_id = ?")
-      .get(row.effect_id, bootId);
-  const settle = (
-    tx: ControlTransaction,
-    row: EffectRow,
-    state: "done" | "failed" | "interrupted",
-    error: RpcError | null,
-    delivery?: CommandReceipt["delivery"],
-  ): void => {
-    database
-      .prepare("UPDATE effects SET state = ?, last_error_json = ? WHERE effect_id = ?")
-      .run(state, error ? JSON.stringify(error) : null, row.effect_id);
-    const prior = readReceipt(sink, row.command_id);
-    if (state !== "done") {
-      database.prepare("UPDATE effects SET state = 'cancelled' WHERE command_id = ? AND state = 'pending'").run(row.command_id);
-      sink.updateReceipt(tx, row.command_id, { state, error, ...(delivery ? { delivery } : {}) });
-      const session = readSession(sink, row.session_id);
-      if (session.desired_state === "running")
-        setSessionStatus(sink, tx, row.session_id, state === "failed" ? "error" : "interrupted", options.clock);
-      if (row.kind === "workspace.ensure")
-        database.prepare("UPDATE workspace_reservations SET state = ? WHERE command_id = ?").run(state, row.command_id);
-      return;
-    }
-    if (row.kind === "workspace.ensure")
-      database.prepare("UPDATE workspace_reservations SET state = 'ready' WHERE command_id = ?").run(row.command_id);
-    const remaining = database
-      .prepare("SELECT effect_id FROM effects WHERE command_id = ? AND state != 'done' LIMIT 1")
-      .get(row.command_id);
-    if (!remaining && ["accepted", "running"].includes(prior.state)) {
-      sink.updateReceipt(tx, row.command_id, { state: "succeeded", error: null, ...(delivery ? { delivery } : {}) });
-      const session = readSession(sink, row.session_id);
-      if (row.kind === "session.stop" && !(JSON.parse(row.payload_json) as { targetAgentId?: string }).targetAgentId) setSessionStatus(sink, tx, row.session_id, "stopped", options.clock);
-      else if (session.desired_state === "running" && prior.method !== "session.choose" && !(row.kind === "session.stop" && (JSON.parse(row.payload_json) as { targetAgentId?: string }).targetAgentId))
-        setSessionStatus(sink, tx, row.session_id, delivery === "dispatched" ? "running" : "idle", options.clock);
-    }
+  const live = new Map<string, { adapter: ProviderAdapter; binding: ProviderBinding; stop: AbortController }>();
+  const prepared = new Map<string, RuntimeUserMessage>();
+  const observations = new Set<Promise<void>>();
+  let stopped = false; let started = false; let reconciled = false;
+  let draining: Promise<void> | undefined; let unsubscribe: (() => void) | undefined;
+  const record = (command: CoreCommand) => sink.transaction(tx => sink.commitCommand(tx, command));
+  const result = (row: EffectRow, suffix: string) => ({ commandId: `${row.effect_id}:${suffix}`, now: options.clock() });
+  const hasReceipt = (commandId: string) => !!database.prepare("SELECT 1 FROM command_receipts WHERE command_id=?").get(commandId);
+  const authorized = (commandId: string) => {
+    const command = database.prepare("SELECT device_session_id FROM commands WHERE command_id=?").get(commandId) as { device_session_id: string };
+    return command.device_session_id === "core" || !options.isDeviceRevoked(command.device_session_id);
   };
-  const claim = (): EffectRow | undefined =>
-    sink.transaction((tx) => {
-      for (;;) {
-        const row = database
-          .prepare(
-            `SELECT e.* FROM effects e INDEXED BY effects_ready
-        JOIN command_receipts r ON r.command_id = e.command_id
-        WHERE e.state = 'pending' AND e.not_before <= ?
-        AND (e.depends_on IS NULL OR EXISTS (SELECT 1 FROM effects d WHERE d.effect_id = e.depends_on AND d.state = 'done'))
-        AND NOT EXISTS (SELECT 1 FROM effects a WHERE a.session_id = e.session_id AND a.state = 'claimed')
-        ORDER BY r.accepted_sequence, e.ordinal LIMIT 1`,
-          )
-          .get(options.clock()) as EffectRow | undefined;
-        if (!row) return undefined;
-        const effect: ControlEffect = JSON.parse(row.payload_json);
-        const input = effect.kind === "input.apply" ? inputRow(effect.inputId) : undefined;
-        if (
-          options.isDeviceRevoked(device(row.command_id)) &&
-          input?.delivery_state !== "dispatched" &&
-          input?.delivery_state !== "dispatching"
-        ) {
-          cancelCommand(
-            sink,
-            tx,
-            row.command_id,
-            { code: "FORBIDDEN", message: "Device revoked before effect execution", retryable: false },
-            options.clock,
-          );
-          continue;
+  const settle = (row: EffectRow, state: "done" | "interrupted" | "failed" | "cancelled", error?: RpcError) => sink.transaction(tx => {
+    database.prepare("UPDATE effects SET state=?,last_error_json=? WHERE effect_id=? AND state='claimed' AND claimed_boot_id=?")
+      .run(state, error ? JSON.stringify(error) : null, row.effect_id, bootId);
+    if (!hasReceipt(row.command_id)) return;
+    const receipt = readReceipt(sink, row.command_id);
+    // Acceptance/delivery receipts do not wait for provider terminal observations.
+    if (state !== "done" && ["accepted", "running"].includes(receipt.state)) sink.updateReceipt(tx, row.command_id, { state: state === "failed" ? "failed" : "interrupted", error: error ?? unavailable });
+    else if (state === "done" && !receipt.inputId && ["accepted", "running"].includes(receipt.state) && !database.prepare("SELECT 1 FROM effects WHERE command_id=? AND state IN ('pending','claimed')").get(row.command_id))
+      sink.updateReceipt(tx, row.command_id, { state: "succeeded", error: null });
+  });
+  const startObservations = (binding: ProviderBinding, adapter: ProviderAdapter, stop: AbortController) => {
+    const task = (async () => {
+      try {
+        for await (const observation of adapter.observations(binding, stop.signal)) {
+          if (stop.signal.aborted || stopped) break;
+          record({ type: "provider.observe", commandId: `observation:${binding.scope.bindingId}:${binding.scope.generation}:${observation.attemptId}:${observation.sequence}`, now: options.clock(), observation });
         }
-        const session = readSession(sink, row.session_id);
-        if (
-          effect.kind === "input.apply" &&
-          input?.delivery_state === "pending" &&
-          (session.desired_state !== "running" || session.run_generation !== effect.runGeneration)
-        ) {
-          cancelCommand(
-            sink,
-            tx,
-            row.command_id,
-            { code: "CONFLICT", message: "Input superseded by stop generation", retryable: false },
-            options.clock,
-          );
-          continue;
+      } catch {
+        if (!stop.signal.aborted && !stopped) {
+          const state = loadState(database); const owner = state.threads[binding.scope.threadId];
+          if (owner?.activeRunId) record({ type: "attempt.unknown", commandId: `observation-failed:${binding.scope.bindingId}`, now: options.clock(), threadId: owner.threadId, attemptId: state.runs[owner.activeRunId].activeAttemptId });
         }
-        database
-          .prepare("UPDATE effects SET state = 'claimed', claimed_boot_id = ?, attempt = attempt + 1 WHERE effect_id = ?")
-          .run(bootId, row.effect_id);
-        if (readReceipt(sink, row.command_id).state === "accepted") sink.updateReceipt(tx, row.command_id, { state: "running" });
-        return { ...row, state: "claimed", claimed_boot_id: bootId, attempt: row.attempt + 1 };
       }
-    });
-  const execute = async (row: EffectRow): Promise<void> => {
+    })();
+    observations.add(task); void task.finally(() => observations.delete(task));
+  };
+  const acquire = async (threadId: string, bindingId: string, generation: number) => {
+    const existing = live.get(bindingId); if (existing) return existing;
+    const resource = await options.swarm.acquireProvider({ threadId, bindingId, generation });
+    if (resource.binding.scope.threadId !== threadId || resource.binding.scope.bindingId !== bindingId || resource.binding.scope.generation !== generation) throw new Error("Acquired provider scope differs from authoritative scope");
+    const entry = { ...resource, stop: new AbortController() }; live.set(bindingId, entry);
+    startObservations(entry.binding, entry.adapter, entry.stop);
+    record({ type: "binding.acquired", commandId: `binding:${bindingId}:${generation}`, now: options.clock(), threadId, binding: entry.binding });
+    return entry;
+  };
+  const append = async (run: Run) => {
+    const state = loadState(database); const attempt = state.attempts[run.activeAttemptId];
+    await acquire(run.threadId, attempt.bindingId, attempt.generation);
+    const value = await options.swarm.applyInput({ commandId: run.commandId, inputId: run.inputId, sessionId: run.threadId, runGeneration: attempt.generation, message: run.input, source: run.source, delivery: run.delivery === "queue" ? "followUp" : "steer", runId: run.runId });
+    prepared.set(run.runId, value.runtimeMessage);
+    record({ type: "input.recorded", commandId: `recorded:${run.inputId}`, now: options.clock(), threadId: run.threadId, inputId: run.inputId, entryId: value.entryId });
+    return value.runtimeMessage;
+  };
+  const claim = (): EffectRow | undefined => sink.transaction(tx => {
+    for (;;) {
+      const row = database.prepare(`SELECT e.* FROM effects e JOIN commands c USING(command_id)
+        LEFT JOIN command_receipts r USING(command_id)
+        WHERE e.state='pending' AND e.not_before<=? AND e.kind!='lifecycle.admit'
+        AND (e.depends_on IS NULL OR EXISTS(SELECT 1 FROM effects d WHERE d.effect_id=e.depends_on AND d.state='done'))
+        AND NOT EXISTS(SELECT 1 FROM effects a WHERE a.session_id=e.session_id AND a.state='claimed')
+        ORDER BY COALESCE(r.accepted_sequence,c.created_at),e.ordinal,e.effect_id LIMIT 1`).get(options.clock()) as EffectRow | undefined;
+      if (!row) return;
+      const effect: ControlEffect = JSON.parse(row.payload_json);
+      if (!["provider.release", "session.stop", "provider.interrupt"].includes(effect.kind) && !authorized(row.command_id)) {
+        if (hasReceipt(row.command_id)) cancelCommand(sink, tx, row.command_id, { code: "FORBIDDEN", message: "Device revoked before effect execution", retryable: false }, options.clock);
+        else database.prepare("UPDATE effects SET state='cancelled' WHERE effect_id=?").run(row.effect_id);
+        continue;
+      }
+      database.prepare("UPDATE effects SET state='claimed',claimed_boot_id=?,attempt=attempt+1 WHERE effect_id=?").run(bootId, row.effect_id);
+      if (hasReceipt(row.command_id) && readReceipt(sink, row.command_id).state === "accepted") sink.updateReceipt(tx, row.command_id, { state: "running" });
+      return { ...row, state: "claimed", claimed_boot_id: bootId, attempt: row.attempt + 1 };
+    }
+  });
+  const execute = async (row: EffectRow) => {
     const effect: ControlEffect = JSON.parse(row.payload_json);
+    let attemptedNative = false;
     try {
-      let delivery: CommandReceipt["delivery"] | undefined;
       switch (effect.kind) {
-        case "workspace.ensure":
-          await options.workspace.ensure(row.command_id);
-          break;
-        case "session.ensure":
-          await options.swarm.ensureSession(effect.input);
-          break;
-        case "input.apply": {
-          const prior = inputRow(effect.inputId);
-          if (prior.delivery_state === "dispatched") {
-            delivery = "dispatched";
-            break;
-          }
-          if (prior.delivery_state === "dispatching" || prior.delivery_state === "unknown") {
-            sink.transaction((tx) => {
-              database.prepare("UPDATE control_inputs SET delivery_state = 'unknown' WHERE input_id = ?").run(effect.inputId);
-              settle(tx, row, "interrupted", unknown, "unknown");
-            });
-            return;
-          }
-          await options.swarm.applyInput({
-            commandId: row.command_id,
-            sessionId: row.session_id,
-            inputId: effect.inputId,
-            runGeneration: effect.runGeneration,
-            message: effect.message,
-            source: effect.source, delivery: effect.delivery,
-            async onCanonicalAppend(entryId) {
-              sink.transaction((tx) => {
-                if (!isOwnClaim(row)) throw new Error("Canonical append no longer owns its effect claim");
-                const input = inputRow(effect.inputId);
-                if (input.canonical_entry_id && input.canonical_entry_id !== entryId)
-                  throw new Error("Controlled input canonical identity conflicts");
-                const receipt = sink.updateReceipt(tx, row.command_id, {});
-                database
-                  .prepare(
-                    "UPDATE control_inputs SET canonical_entry_id = ?, append_state = 'recorded', updated_sequence = ? WHERE input_id = ?",
-                  )
-                  .run(entryId, receipt.updatedSequence, effect.inputId);
-              });
-            },
-            async beforeDispatch() {
-              return sink.transaction((tx) => {
-                if (!isOwnClaim(row)) return "do-not-dispatch";
-                const input = inputRow(effect.inputId);
-                const session = readSession(sink, row.session_id);
-                if (
-                  options.isDeviceRevoked(device(row.command_id)) ||
-                  session.desired_state !== "running" ||
-                  session.run_generation !== effect.runGeneration
-                )
-                  return "do-not-dispatch";
-                if (input.append_state !== "recorded") throw new Error("Provider dispatch requires a persisted canonical input");
-                if (input.delivery_state !== "pending") return "do-not-dispatch";
-                const receipt = sink.updateReceipt(tx, row.command_id, { state: "running", delivery: "pending" });
-                database
-                  .prepare("UPDATE control_inputs SET delivery_state = 'dispatching', updated_sequence = ? WHERE input_id = ?")
-                  .run(receipt.updatedSequence, effect.inputId);
-                return "dispatch";
-              });
-            },
-            async onDispatchAccepted() {
-              sink.transaction((tx) => {
-                if (!isOwnClaim(row)) throw new Error("Provider acknowledgment no longer owns its effect claim");
-                if (inputRow(effect.inputId).delivery_state !== "dispatching")
-                  throw new Error("Provider acknowledgment requires a dispatch marker");
-                const receipt = sink.updateReceipt(tx, row.command_id, { delivery: "dispatched" });
-                database
-                  .prepare("UPDATE control_inputs SET delivery_state = 'dispatched', updated_sequence = ? WHERE input_id = ?")
-                  .run(receipt.updatedSequence, effect.inputId);
-              });
-            },
-          });
-          const input = inputRow(effect.inputId);
-          if (input.delivery_state !== "dispatched") {
-            sink.transaction((tx) => {
-              const marked = input.delivery_state === "dispatching" || input.delivery_state === "unknown";
-              if (marked) database.prepare("UPDATE control_inputs SET delivery_state = 'unknown' WHERE input_id = ?").run(effect.inputId);
-              settle(tx, row, "interrupted", marked ? unknown : interrupted, marked ? "unknown" : "none");
-            });
-            return;
-          }
-          delivery = "dispatched";
+        case "workspace.ensure": await options.workspace.ensure(row.command_id); break;
+        case "session.ensure": await options.swarm.ensureSession(effect.input); break;
+        case "runtime.acquire": {
+          const owner = loadState(database).threads[effect.threadId];
+          if (owner?.desired !== "running" || owner.shutdown !== "clean") { settle(row, "cancelled"); return; }
+          await acquire(owner.threadId, owner.bindingId ?? effect.bindingId, owner.generation); break;
+        }
+        case "transcript.append": {
+          const run = loadState(database).runs[effect.runId];
+          if (!run || run.state === "terminal") { settle(row, "cancelled"); return; }
+          await append(run); break;
+        }
+        case "provider.start": {
+          let state = loadState(database); const attempt = state.attempts[effect.attemptId];
+          if (!attempt || attempt.state !== "created") { settle(row, "cancelled"); return; }
+          const run = state.runs[attempt.runId];
+          const resource = await acquire(effect.threadId, attempt.bindingId, attempt.generation);
+          const input = prepared.get(run.runId) ?? await append(run);
+          // No await between this committed fence and calling the provider method.
+          record({ type: "attempt.dispatch", ...result(row, "dispatch"), threadId: effect.threadId, attemptId: effect.attemptId, authorized: authorized(run.commandId) });
+          state = loadState(database);
+          if (state.attempts[effect.attemptId].state !== "dispatching") { settle(row, "cancelled"); return; }
+          attemptedNative = true;
+          const accepted = await resource.adapter.start({ binding: resource.binding, runId: run.runId, attemptId: attempt.attemptId, input });
+          if (accepted.status === "accepted") record({ type: "attempt.accepted", ...result(row, "accepted"), threadId: effect.threadId, attemptId: attempt.attemptId, turn: accepted.turn });
+          else record({ type: "attempt.unknown", ...result(row, "unknown"), threadId: effect.threadId, attemptId: attempt.attemptId });
           break;
         }
+        case "provider.interrupt": {
+          const attempt = loadState(database).attempts[effect.attemptId]; const resource = attempt && live.get(attempt.bindingId);
+          if (attempt?.turn && resource && attempt.state !== "terminal") {
+            attemptedNative = true; await resource.adapter.interrupt({ binding: resource.binding, attemptId: attempt.attemptId, turn: attempt.turn });
+            record({ type: "attempt.interrupt_acknowledged", ...result(row, "ack"), threadId: effect.threadId, attemptId: attempt.attemptId });
+          } break;
+        }
+        case "provider.respond": {
+          const state = loadState(database); const request = state.requests[effect.requestId]; const owner = state.threads[effect.threadId];
+          if (!request || request.state !== "responding" || owner.desired !== "running" || owner.generation !== request.ref.generation || !authorized(row.command_id) || (request.lifetime.expiresAt && Date.parse(request.lifetime.expiresAt) <= options.clock())) {
+            if (request) record({ type: "request.cancel", ...result(row, "expired"), threadId: effect.threadId, requestId: effect.requestId }); settle(row, "interrupted", unavailable); return;
+          }
+          const resource = live.get(request.ref.bindingId); if (!resource) throw new Error("Expired provider callback");
+          attemptedNative = true; await resource.adapter.respond({ binding: resource.binding, request: request.ref, lifetime: request.lifetime, response: effect.response });
+          record({ type: "request.responded", ...result(row, "responded"), threadId: effect.threadId, requestId: request.requestId }); break;
+        }
+        case "provider.release": {
+          const resource = live.get(effect.bindingId);
+          if (resource) { attemptedNative = true; await resource.adapter.close(resource.binding); const drained = await resource.adapter.drain(resource.binding);
+            if (drained.status !== "clean") { record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: drained.status }); settle(row, "interrupted", unavailable); return; }
+            resource.stop.abort(); live.delete(effect.bindingId);
+          }
+          if (!(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.threadId })).stopped) throw new Error("Runtime writer shutdown is incomplete");
+          record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: "clean" }); break;
+        }
+        case "provider.compact": {
+          const owner = loadState(database).threads[effect.threadId]; const resource = owner.bindingId && live.get(owner.bindingId);
+          if (!resource || owner.desired !== "running" || !authorized(row.command_id)) throw new Error("Compaction has no live binding");
+          attemptedNative = true; await resource.adapter.compact({ binding: resource.binding, attemptId: effect.attemptId, instructions: effect.instructions });
+          record({ type: "compaction.completed", ...result(row, "compact"), threadId: effect.threadId, attemptId: effect.attemptId, succeeded: true }); break;
+        }
+        case "recovery.deliver":
+          if (!options.swarm.deliverRecoveredResult) throw new Error("Assignment result recovery is not composed");
+          attemptedNative = true; await options.swarm.deliverRecoveredResult(effect.deliveryId); break;
         case "choice.apply": {
-          const choice = database
-            .prepare("SELECT state, runtime_generation FROM control_choices WHERE choice_id = ?")
-            .get(effect.choiceId) as { state: string; runtime_generation: string } | undefined;
-          const result =
-            choice?.state === "pending" && choice.runtime_generation === effect.runtimeGeneration
-              ? await options.swarm.applyChoice({ commandId: row.command_id, sessionId: row.session_id, ...effect })
-              : "interrupted";
-          sink.transaction((tx) => {
-            const record = database.prepare("SELECT choice_json FROM control_choices WHERE choice_id = ?").get(effect.choiceId) as
-              { choice_json: string } | undefined;
-            if (record)
-              sink.append(tx, {
-                topic: "detail",
-                sessionId: row.session_id,
-                commandId: row.command_id,
-                event: { type: "choice.upsert", choice: { ...JSON.parse(record.choice_json), status: result } },
-              });
-            settle(tx, row, result === "answered" ? "done" : "interrupted", result === "answered" ? null : interrupted);
-          });
-          return;
+          const choice = database.prepare("SELECT state,runtime_generation FROM control_choices WHERE choice_id=?").get(effect.choiceId) as { state: string; runtime_generation: string } | undefined;
+          if (!authorized(row.command_id) || choice?.state !== "pending" || choice.runtime_generation !== effect.runtimeGeneration || await options.swarm.applyChoice({ commandId: row.command_id, sessionId: row.session_id, ...effect }) !== "answered") { settle(row, "interrupted", unavailable); return; } break;
         }
         case "session.stop": {
-          const session = readSession(sink, row.session_id);
-          const materialized =
-            session.launch_command_id === null ||
-            !!database
-              .prepare("SELECT effect_id FROM effects WHERE command_id = ? AND kind = 'session.ensure' AND attempt > 0")
-              .get(session.launch_command_id);
-          if (materialized && !(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.targetAgentId ?? row.session_id })).stopped) {
-            sink.transaction((tx) =>
-              settle(tx, row, "interrupted", { code: "UNAVAILABLE", message: "Session shutdown is not safely complete", retryable: false }),
-            );
-            return;
-          }
-          break;
+          if (!(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.targetAgentId ?? row.session_id })).stopped) throw new Error("Session shutdown remains quarantined");
+          if (!effect.targetAgentId) sink.transaction(tx => setSessionStatus(sink, tx, row.session_id, "stopped", options.clock)); break;
         }
       }
-      sink.transaction((tx) => settle(tx, row, "done", null, delivery));
+      settle(row, "done");
     } catch {
-      sink.transaction((tx) => {
-        const input = effect.kind === "input.apply" ? inputRow(effect.inputId) : undefined;
-        if (input?.delivery_state === "dispatched") settle(tx, row, "done", null, "dispatched");
-        else if (input?.delivery_state === "dispatching" || input?.delivery_state === "unknown") {
-          database.prepare("UPDATE control_inputs SET delivery_state = 'unknown' WHERE input_id = ?").run(input.input_id);
-          settle(tx, row, "interrupted", unknown, "unknown");
-        } else settle(tx, row, effect.kind === "session.stop" ? "interrupted" : "failed", interrupted, input ? "none" : undefined);
-      });
+      const attemptId = "attemptId" in effect ? effect.attemptId : effect.kind === "runtime.acquire" || effect.kind === "transcript.append" ? Object.values(loadState(database).attempts).find(a => a.threadId === row.session_id && a.state !== "terminal")?.attemptId : undefined;
+      if (effect.kind === "provider.compact") record({ type: "compaction.completed", ...result(row, "failed"), threadId: effect.threadId, attemptId: effect.attemptId, succeeded: false });
+      else if (effect.kind.startsWith("provider.") || effect.kind === "runtime.acquire" || effect.kind === "transcript.append") record({ type: "effect.failed", ...result(row, "failed"), threadId: row.session_id, attemptId, kind: effect.kind as CoreEffect["kind"], delivery: attemptedNative ? "unknown" : "not_dispatched" });
+      settle(row, attemptedNative ? "interrupted" : "failed", unavailable);
     }
   };
-  const kick = () => {
-    if (started && !stopped)
-      queueMicrotask(() => {
-        void worker.drain().catch(() => {
-          started = false;
-        });
-      });
-  };
+  const kick = () => { if (started && !stopped) queueMicrotask(() => { void worker.drain().catch(() => { started = false; }); }); };
   const worker: EffectWorker = {
     bootId,
-    start() {
-      if (!reconcileComplete) throw new Error("Reconcile control effects before starting the worker");
-      if (stopped) throw new Error("Control effect worker is stopped");
-      started = true;
-      unsubscribe ??= sink.subscribe(kick);
-      kick();
-    },
+    start() { if (!reconciled || stopped) throw new Error("Reconcile before starting effects"); started = true; unsubscribe ??= sink.subscribeCommit(kick); kick(); },
     drain() {
-      if (stopped) return Promise.resolve();
-      if (draining) return draining;
+      if (stopped) return Promise.resolve(); if (draining) return draining;
       draining = (async () => {
         const active = new Set<Promise<void>>();
         while (!stopped) {
-          while (active.size < 4) {
-            const row = claim();
-            if (!row) break;
-            const task = execute(row).finally(() => active.delete(task));
-            active.add(task);
-          }
-          if (!active.size) break;
-          await Promise.race(active);
+          while (active.size < 4) { const row = claim(); if (!row) break; const task = execute(row).finally(() => active.delete(task)); active.add(task); }
+          if (!active.size) break; await Promise.race(active);
         }
         await Promise.all(active);
-      })().finally(() => {
-        draining = undefined;
-      });
-      return draining;
+      })().finally(() => { draining = undefined; }); return draining;
     },
-    async stop() {
-      stopped = true;
-      started = false;
-      unsubscribe?.();
-      unsubscribe = undefined;
-      await draining;
-    },
+    async stop() { stopped = true; started = false; unsubscribe?.(); for (const resource of live.values()) resource.stop.abort(); await draining; await Promise.allSettled(observations); },
     async reconcileOnBoot() {
-      if (reconcileComplete) return;
-      if (draining || started) throw new Error("Restart reconciliation must precede effect execution");
-      sink.transaction((tx) => {
-        const choices = database
-          .prepare("SELECT choice_id, session_id, choice_json, answer_command_id FROM control_choices WHERE state = 'pending'")
-          .all() as {
-          choice_id: string;
-          session_id: string;
-          choice_json: string;
-          answer_command_id: string | null;
-        }[];
-        for (const choice of choices) {
-          sink.append(tx, {
-            topic: "detail",
-            sessionId: choice.session_id,
-            event: { type: "choice.upsert", choice: { ...JSON.parse(choice.choice_json), status: "interrupted" } },
-          });
-          if (choice.answer_command_id) cancelCommand(sink, tx, choice.answer_command_id, interrupted, options.clock);
-        }
-      });
-      const rows = database.prepare("SELECT * FROM effects WHERE state = 'claimed' AND kind != 'lifecycle.admit' ORDER BY command_id, ordinal").all() as EffectRow[];
-      for (const row of rows) {
+      if (reconciled) return; if (started || draining) throw new Error("Boot reconciliation precedes execution");
+      rebuildLifecycleProjections(database);
+      const reports = database.prepare("SELECT delivery_id,from_agent_id,to_agent_id,turn_id,assignment_id FROM control_deliveries WHERE state!='acked'").all() as { delivery_id: string; from_agent_id: string; to_agent_id: string; turn_id: string | null; assignment_id: string | null }[];
+      record({ type: "environment.recover", commandId: `boot:${bootId}`, now: options.clock(), bootId, recoveryId: options.random(), reports: reports.map(r => ({ deliveryId: r.delivery_id, fromAgentId: r.from_agent_id, toAgentId: r.to_agent_id, ...(r.turn_id ? { turnId: r.turn_id } : {}), ...(r.assignment_id ? { assignmentId: r.assignment_id } : {}) })) });
+      for (const row of database.prepare("SELECT * FROM effects WHERE state='claimed' AND kind!='lifecycle.admit'").all() as EffectRow[]) {
         const effect: ControlEffect = JSON.parse(row.payload_json);
+        const safe = ["runtime.acquire", "transcript.append", "session.ensure", "session.stop", "provider.release"].includes(effect.kind);
         if (effect.kind === "workspace.ensure") {
-          let result: "ready" | "retry" | "interrupted" = "interrupted";
-          try {
-            result = await options.workspace.reconcile(row.command_id);
-          } catch {
-            /* Conflicting evidence remains interrupted. */
-          }
-          sink.transaction((tx) => {
-            if (result === "ready") settle(tx, row, "done", null);
-            else if (result === "retry")
-              database.prepare("UPDATE effects SET state = 'pending', claimed_boot_id = NULL WHERE effect_id = ?").run(row.effect_id);
-            else settle(tx, row, "interrupted", interrupted);
-          });
-        } else if (effect.kind === "input.apply") {
-          sink.transaction((tx) => {
-            const input = inputRow(effect.inputId);
-            if (input.delivery_state === "dispatched") settle(tx, row, "done", null, "dispatched");
-            else if (input.delivery_state === "dispatching" || input.delivery_state === "unknown") {
-              database.prepare("UPDATE control_inputs SET delivery_state = 'unknown' WHERE input_id = ?").run(effect.inputId);
-              settle(tx, row, "interrupted", unknown, "unknown");
-            } else database.prepare("UPDATE effects SET state = 'pending', claimed_boot_id = NULL WHERE effect_id = ?").run(row.effect_id);
-          });
-        } else if (effect.kind === "choice.apply") sink.transaction((tx) => settle(tx, row, "interrupted", interrupted));
-        else
-          sink.transaction(() =>
-            database.prepare("UPDATE effects SET state = 'pending', claimed_boot_id = NULL WHERE effect_id = ?").run(row.effect_id),
-          );
+          const value = await options.workspace.reconcile(row.command_id).catch(() => "interrupted" as const);
+          sink.transaction(() => database.prepare("UPDATE effects SET state=?,claimed_boot_id=NULL WHERE effect_id=?").run(value === "ready" ? "done" : value === "retry" ? "pending" : "interrupted", row.effect_id));
+        } else sink.transaction(() => database.prepare("UPDATE effects SET state=?,claimed_boot_id=NULL WHERE effect_id=?").run(safe ? "pending" : "interrupted", row.effect_id));
       }
-      reconcileComplete = true;
+      sink.transaction(tx => {
+        for (const choice of database.prepare("SELECT choice_id,session_id,choice_json FROM control_choices WHERE state='pending'").all() as { choice_id: string; session_id: string; choice_json: string }[])
+          sink.append(tx, { topic: "detail", sessionId: choice.session_id, event: { type: "choice.upsert", choice: { ...JSON.parse(choice.choice_json), status: "interrupted" } } });
+      });
+      reconciled = true;
     },
   };
   return worker;

@@ -45,7 +45,7 @@ export interface InboundTurnContextInput<
   codexMcpToolGate?: TCodexGate;
   codexPluginDelegationContext?: TCodexDelegation;
   codexPluginRetryAuthorizationContext?: TCodexRetryAuthorization;
-  skipRecoveryTracking?: boolean;
+  turnId?: string;
 }
 
 interface QueuedInboundTurnContext<
@@ -291,19 +291,11 @@ export class TurnContextCoordinator<
     > = {
       ...context,
       activationEligible: context.activationEligible ?? true,
-      turnId: await this.options.ledger.mintTurnId(descriptor),
+      turnId: context.turnId ?? await this.options.ledger.mintTurnId(descriptor),
       sequence,
       ...(runtimeToken !== undefined ? { runtimeToken } : {}),
     };
 
-    if (!context.skipRecoveryTracking) {
-      await this.options.ledger.recordTurnDispatched({
-        turnId: queuedContext.turnId,
-        agentId,
-        role: descriptor.role,
-        kind: classifyInboundKind(queuedContext.source),
-      });
-    }
 
     const queue = this.pendingByAgentId.get(agentId) ?? [];
     queue.push(queuedContext);
@@ -689,13 +681,6 @@ export class TurnContextCoordinator<
       return target ? [target] : [];
     });
   }
-}
-
-function classifyInboundKind(source: InboundTurnSource): RecoveryInboundKind {
-  if (source === "user_input") return "user";
-  if (source === "project_agent_input") return "project_agent";
-  if (source === "worker_result") return "worker_report";
-  return "agent_message";
 }
 
 function runtimeMessageTextMatches(expected: string, actual: string): boolean {

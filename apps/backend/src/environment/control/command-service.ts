@@ -14,6 +14,8 @@ import type { Static } from "@sinclair/typebox";
 import type { ControlMethod, ControlService, LifecycleAdmission, Principal } from "./control-types.js";
 import type { ControlCoreOptions, ControlEffect, InputRoutePort, PreparedLaunch } from "./effect-types.js";
 import type { ControlTransaction, EventSink } from "./event-sink.js";
+import { loadState } from "./orchestration/store.js";
+import type { CoreCommand, Run } from "./orchestration/types.js";
 
 export class ControlError extends Error implements RpcError {
   readonly retryable: boolean;
@@ -124,11 +126,18 @@ export function canonicalRequest(method: string, input: unknown): { normalized: 
 export interface EnvironmentControlService extends ControlService {
   admitLifecycle<T>(principal: Principal, input: LifecycleAdmission, operation: () => Promise<T>): Promise<T>;
   close(): Promise<void>;
+  submitInput(input: { commandId: string; threadId: string; message: Run["input"]; source?: Run["source"]; delivery?: Run["delivery"] }): Promise<void>;
+  record(command: CoreCommand): void;
 }
 export function createCommandService(sink: EventSink, options: ControlCoreOptions): EnvironmentControlService {
   const database = sink.database;
   const launches = new Map<string, Promise<unknown>>();
   let closed = false;
+  const ensureThread = (tx: ControlTransaction, sessionId: string) => {
+    if (loadState(database).threads[sessionId]) return;
+    const session = readSession(sink, sessionId);
+    sink.commitCommand(tx, { type: "thread.create", commandId: `thread:${sessionId}`, now: options.clock(), threadId: sessionId, projectId: session.project_id, role: "manager" });
+  };
   const lifecycleOperations = new Map<string, Promise<unknown>>();
   // These callbacks have no replayable effect. A lost process may have completed
   // a clear/fork; retain the interrupted claim rather than repeat destructive work.
@@ -461,7 +470,6 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           )
           .run(inputId, commandId, sessionId, JSON.stringify(message), runGeneration);
         options.artifacts.pinInput(inputId, rows);
-        effects.push({ kind: "input.apply", inputId, message, runGeneration, ...(method === "session.send" ? { source: (input as RpcInput<"session.send">).source, delivery: (input as RpcInput<"session.send">).delivery } : {}) });
       }
       let dependency: string | null = null;
       effects.forEach((effect, ordinal) => {
@@ -488,6 +496,16 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         error: null,
       };
       database.prepare("INSERT INTO command_receipts VALUES (?, ?, 0, 0, ?)").run(commandId, "accepted", JSON.stringify(placeholder));
+      ensureThread(tx, sessionId);
+      if (message && inputId) {
+        const owner = loadState(database).threads[sessionId];
+        if (owner.desired === "stopped") sink.commitCommand(tx, { type: "thread.resume", commandId, now, threadId: sessionId });
+        const send = method === "session.send" ? input as RpcInput<"session.send"> : undefined;
+        sink.commitCommand(tx, { type: "run.submit", commandId, now, threadId: sessionId, inputId, runId: `run-${commandId}`, attemptId: options.random(), bindingId: options.random(), input: message,
+          source: send?.source, delivery: send?.delivery === "followUp" ? "queue" : "steer" });
+      } else if ((method === "session.stop" || method === "worker.kill") && !target?.workerId) {
+        sink.commitCommand(tx, { type: "thread.stop", commandId, now, threadId: sessionId });
+      }
       const receipt = sink.updateReceipt(tx, commandId, {});
       if (inputId)
         database.prepare("UPDATE control_inputs SET updated_sequence = ? WHERE input_id = ?").run(receipt.updatedSequence, inputId);
@@ -496,6 +514,22 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
   };
   return {
     admitLifecycle,
+    record(command) { sink.transaction(tx => sink.commitCommand(tx, command)); },
+    async submitInput(input) {
+      if (closed) throw new ControlError("UNAVAILABLE", "Control service is shutting down", true);
+      const request = canonicalRequest("run.submit", input);
+      sink.transaction(tx => {
+        const prior = database.prepare("SELECT request_hash FROM commands WHERE command_id=?").get(input.commandId) as { request_hash: string } | undefined;
+        if (prior) { if (prior.request_hash !== request.hash) throw new ControlError("CONFLICT", "Input identity conflicts"); return; }
+        ensureThread(tx, input.threadId);
+        database.prepare("INSERT INTO commands VALUES (?, 'core', 'run.submit', ?, ?, ?, ?)").run(input.commandId, request.hash, request.normalized, input.threadId, options.clock());
+        const inputId = `input-${input.commandId}`;
+        const owner = loadState(database).threads[input.threadId];
+        database.prepare("INSERT INTO control_inputs (input_id,command_id,session_id,message_json,append_state,delivery_state,run_generation,updated_sequence) VALUES (?,?,?,?,'pending','pending',?,0)")
+          .run(inputId, input.commandId, input.threadId, JSON.stringify(input.message), owner.generation);
+        sink.commitCommand(tx, { type: "run.submit", commandId: input.commandId, now: options.clock(), threadId: input.threadId, inputId, runId: `run-${input.commandId}`, attemptId: options.random(), bindingId: options.random(), input: input.message, source: input.source, delivery: input.delivery ?? "queue" });
+      });
+    },
     async readWorkspace(principal, method, input) {
       if (!principal.scopes.has(rpcScopes[method]) || options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Workspace read is not authorized");
       if (!TypeCompiler.Compile(rpcSchemas[method].input).Check(input)) throw new ControlError("INVALID_INPUT", "Invalid directory read");

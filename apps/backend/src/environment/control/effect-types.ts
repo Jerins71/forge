@@ -58,9 +58,9 @@ export interface InputRoutePort {
   ): Promise<{ ok: true } | { ok: false; error: RpcError & { code: "UNAVAILABLE" } }>;
 }
 export type ControlEffect =
+  | import("./orchestration/types.js").CoreEffect
   | { kind: "workspace.ensure"; reservation: WorkspaceReservation }
   | { kind: "session.ensure"; input: Parameters<SwarmControlPort["ensureSession"]>[0] }
-  | { kind: "input.apply"; inputId: string; runGeneration: number; message: RpcInput<"session.send">["message"]; source?: RpcInput<"session.send">["source"]; delivery?: RpcInput<"session.send">["delivery"] }
   | { kind: "choice.apply"; choiceId: string; runtimeGeneration: string; answers: RpcInput<"session.choose">["answers"] }
   | { kind: "session.stop"; targetAgentId?: string };
 export interface EffectRow {

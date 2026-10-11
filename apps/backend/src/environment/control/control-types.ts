@@ -1,4 +1,7 @@
 import type { IncomingMessage } from "node:http";
+import type { ProviderScope } from "@forge/protocol";
+import type { ProviderAdapter, ProviderBinding } from "../../swarm/runtime/provider-contract.js";
+import type { RuntimeUserMessage } from "../../swarm/runtime-contracts.js";
 import type {
   CommandReceipt,
   DetailStreamItem,
@@ -79,13 +82,13 @@ export interface SwarmControlPort {
     sessionId: string;
     runGeneration: number;
     message: RpcInput<"session.send">["message"];
-    source?: RpcInput<"session.send">["source"];
+    source?: import("../../swarm/types.js").MessageSourceContext;
     delivery?: RpcInput<"session.send">["delivery"];
-    /** Implemented by the control DB; invoked at the matching boundary inside the existing coordinator. */
-    beforeDispatch(): Promise<"dispatch" | "do-not-dispatch">;
-    onCanonicalAppend(entryId: string): Promise<void>;
-    onDispatchAccepted(): Promise<void>;
-  }): Promise<{ delivery: "dispatched" | "unknown" }>;
+    runId: string;
+  }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }>;
+  acquireProvider(scope: ProviderScope): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
+  /** Phase 4 retains assignment result delivery until its transfer cutover. */
+  deliverRecoveredResult?(deliveryId: string): Promise<void>;
   applyChoice(input: {
     commandId: string;
     sessionId: string;

@@ -26,8 +26,6 @@ import {
   normalizeProviderErrorMessage,
 } from "./session/message-utils.js";
 import {
-  recordRecoveryFact,
-  readRecoveryState,
   type RecoveryTarget,
 } from "./recovery-state.js";
 import { isRuntimeRecoveryActiveForRuntime } from "./runtime/runtime-recovery-state.js";
@@ -295,18 +293,6 @@ export class SwarmRuntimeLifecycleCoordinator {
     }
 
     if (input.turnId) {
-      const target = this.getRecoveryTarget(input.agentId);
-      if (target) {
-        const ledger = await readRecoveryState(target);
-        if (ledger.openTurns.has(input.turnId) && !ledger.terminalTurns.has(input.turnId)) {
-          await recordRecoveryFact(target, {
-            t: "turn_terminal",
-            turnId: input.turnId,
-            outcome: "abandoned",
-            at: this.options.now(),
-          });
-        }
-      }
       this.managerTurnWatchdog.clearIfTurnMatches(input.agentId, input.turnId);
     }
 

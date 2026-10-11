@@ -7,17 +7,33 @@ import type { ConversationAttachment } from "../../swarm/types.js";
 import type { SwarmControlPort } from "./control-types.js";
 import type { EventSink } from "./event-sink.js";
 import type { InputRoutePort, WorkspacePort } from "./effect-types.js";
+import type { EnvironmentControlService } from "./command-service.js";
+import { loadState } from "./orchestration/store.js";
 
-export function createSwarmControlAdapter({ swarmManager, database, eventSink, workspaceService, artifactService }: {
-  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "setControlledRecoveryPolicy" | "getAgentForInternalUse" | "listProfiles" | "killControlledWorker">;
+export function createSwarmControlAdapter({ swarmManager, database, eventSink, controlService, workspaceService, artifactService }: {
+  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "setControlledRecoveryPolicy" | "getAgentForInternalUse" | "listProfiles" | "killControlledWorker" | "installAuthoritativeInputOwner" | "deliverControlledRecoveredResult">;
   database: Database;
   eventSink: EventSink;
+  controlService: EnvironmentControlService;
   workspaceService: Pick<WorkspacePort, "ensure">;
   artifactService: { attachmentsForInput(inputId: string): Promise<ConversationAttachment[]> };
 }): SwarmControlPort {
   if (eventSink.database !== database) throw new Error("Swarm adapter requires the shared environment database.");
   // Workspace effects run before session effects. This dependency intentionally grants no Git mutation here.
   void workspaceService;
+  swarmManager.installAuthoritativeInputOwner(async (text, options) => {
+    if (!options.targetAgentId) throw new Error("Input requires an authoritative thread");
+    if (options.attachments?.length) throw new Error("Internal inputs require durable artifact references");
+    await controlService.submitInput({ commandId: options.commandId ?? options.clientRequestId ?? `input:${crypto.randomUUID()}`, threadId: options.targetAgentId, message: { text, artifactIds: [] }, source: options.sourceContext, delivery: options.delivery === "steer" ? "steer" : "queue" });
+  }, {
+    getSnapshot: () => loadState(database).recovery,
+    async decide(action) {
+      const state = loadState(database); if (!state.recovery) return;
+      const base = { commandId: `recovery:${state.recovery.recoveryId}:${action}`, now: Date.now(), recoveryId: state.recovery.recoveryId };
+      if (action === "dismiss") controlService.record({ ...base, type: "recovery.dismiss" });
+      else controlService.record({ ...base, type: "recovery.resume", attempts: Object.fromEntries(Object.values(state.runs).filter(run => run.state === "recovery").map(run => [run.runId, crypto.randomUUID()])), bindingIds: Object.fromEntries(Object.values(state.threads).map(thread => [thread.threadId, crypto.randomUUID()])) });
+    },
+  });
   swarmManager.setControlledRecoveryPolicy((sessionId, activity) => {
     const row = database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(sessionId) as { desired_state: string } | undefined;
     return row?.desired_state === "stopped" || activity === "turn" && Boolean(database.prepare("SELECT 1 FROM control_inputs WHERE session_id=? AND delivery_state IN ('dispatching','unknown') LIMIT 1").get(sessionId));
@@ -33,12 +49,14 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, w
       await swarmManager.ensureControlledSession({ ...identity, ...(model ? { model: { ...model, thinkingLevel: model.thinkingLevel ?? defaultModel?.thinkingLevel ?? "medium" } } : {}) });
       return { materialized: true };
     },
+    acquireProvider: scope => swarmManager.acquireControlledProvider(scope),
+    deliverRecoveredResult: id => swarmManager.deliverControlledRecoveredResult(id),
     async applyInput(input) {
       const attachments = await artifactService.attachmentsForInput(input.inputId);
       const sourceKey = `input:${input.inputId}`;
       const locator = database.prepare("SELECT byte_offset FROM mirror_sources WHERE source_key=?").get(sourceKey) as { byte_offset: number } | undefined;
       return swarmManager.applyControlledInput(input.message.text, {
-        targetAgentId: input.sessionId, attachments, sourceContext: input.source, delivery: input.delivery,
+        targetAgentId: input.sessionId, attachments, sourceContext: input.source, delivery: input.delivery, runId: input.runId,
         controlledInput: {
           inputId: input.inputId, commandId: input.commandId,
           contentHash: createHash("sha256").update(JSON.stringify({ text: input.message.text, artifactIds: [...input.message.artifactIds].sort() })).digest("hex"),
@@ -48,7 +66,6 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, w
               ON CONFLICT(source_key) DO UPDATE SET file_generation=excluded.file_generation,byte_offset=excluded.byte_offset,last_entry_id=excluded.last_entry_id,updated_at=excluded.updated_at`)
               .run(sourceKey, proof.fileGeneration, proof.byteOffset, proof.entryId, Date.now());
           },
-          beforeDispatch: input.beforeDispatch, onCanonicalAppend: input.onCanonicalAppend, onDispatchAccepted: input.onDispatchAccepted,
         },
       });
     },

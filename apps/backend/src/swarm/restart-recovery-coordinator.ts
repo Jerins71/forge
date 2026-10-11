@@ -1,9 +1,7 @@
-import { randomUUID } from "node:crypto";
-import type { RestartRecoveryReport } from "@forge/protocol";
 import type { RecoverySnapshot } from "@forge/protocol/environment-v2";
 import {
   recordRecoveryFact,
-  claimRecoveryOccurrence, applyRecoveryDismissal, claimRecoveryDelivery, readRecoveryContent, readRecoveryOccurrence, saveRecoveryOccurrence,
+  claimRecoveryDelivery, readRecoveryContent,
   readRecoveryState,
   type RecoveryTarget,
 } from "./recovery-state.js";
@@ -39,283 +37,36 @@ export interface RestartRecoveryCoordinatorOptions {
   logDebug: (message: string, details?: unknown) => void;
 }
 
-/** Classifies private DB facts and executes one durable recovery decision. */
+/** Presentation and assignment-delivery resource adapter. The control kernel owns recovery. */
+export interface CoreRecoveryPort {
+  getSnapshot(): RecoverySnapshot | null;
+  decide(action: "resume" | "dismiss"): Promise<void>;
+}
 export class RestartRecoveryCoordinator {
-  private controlledRecoveryPolicy: (sessionId: string, activity?: "turn" | "worker" | "delivery") => boolean = () => false;
-
-  setControlledRecoveryPolicy(policy: (sessionId: string, activity?: "turn" | "worker" | "delivery") => boolean): void { this.controlledRecoveryPolicy = policy; }
-  private projection: RecoverySnapshot | null = null;
-  private resumeInProgress = false;
-
+  private core?: CoreRecoveryPort;
   constructor(private readonly options: RestartRecoveryCoordinatorOptions) {}
+  installCore(port: CoreRecoveryPort): void { this.core = port; }
+  setControlledRecoveryPolicy(_policy: (sessionId: string, activity?: "turn" | "worker" | "delivery") => boolean): void {}
+  async reconcileForBoot(): Promise<void> {}
+  getSnapshot(): RecoverySnapshot | null { return this.core?.getSnapshot() ?? null; }
+  isDecisionPending(): boolean { const snapshot = this.getSnapshot(); return Boolean(snapshot && !snapshot.resumedAt && !snapshot.dismissedAt); }
+  async dismiss(): Promise<RecoverySnapshot | null> { await this.core?.decide("dismiss"); this.options.onDecisionResolved?.(); return this.getSnapshot(); }
+  async resume(): Promise<RecoverySnapshot | null> { await this.core?.decide("resume"); this.options.onDecisionResolved?.(); return this.getSnapshot(); }
 
-  async reconcileForBoot(): Promise<void> {
-    const persisted = await readRecoveryOccurrence(this.options.dataDir);
-    if (persisted?.dismissedAt) await applyRecoveryDismissal(this.options.dataDir, persisted, workers => this.options.onInterruptedWorkersDismissed?.(workers) ?? Promise.resolve());
-    const pendingOccurrence = persisted && !persisted.resumedAt && !persisted.dismissedAt ? persisted : null;
-    const interruptedManagers = new Set(pendingOccurrence?.interruptedManagers);
-    const interruptedWorkers = new Set(pendingOccurrence?.interruptedWorkers);
-    let hasNewRecoveryItem = false;
-    const undeliveredReports = new Map<
-      string,
-      {
-        deliveryId: string;
-        fromAgentId: string;
-        toAgentId: string;
-        turnId?: string;
-        assignmentId?: string;
-      }
-    >((pendingOccurrence?.undeliveredReports ?? []).map(report => [report.deliveryId, report]));
-
-    for (const descriptor of this.options.descriptors.values()) {
-      if (descriptor.role !== "manager") continue;
-
-      const target = this.options.getSessionTarget(descriptor.agentId);
-      if (!target) continue;
-
-      const replay = await readRecoveryState(target);
-
-      for (const openTurn of replay.openTurns.values()) {
-        // Captured turns stay unresolved until a decision, even after boot normalizes their actor.
-        if (pendingOccurrence && openTurn.recoveryId === pendingOccurrence.recoveryId) continue;
-        const actor = this.options.descriptors.get(openTurn.agentId);
-        if (actor?.status === "streaming") {
-          hasNewRecoveryItem = true;
-          (actor.role === "manager" ? interruptedManagers : interruptedWorkers).add(
-            actor.agentId,
-          );
-          continue;
-        }
-
-        await recordRecoveryFact(target, {
-          t: "turn_terminal",
-          turnId: openTurn.turnId,
-          outcome: "reconciled",
-          at: this.options.now(),
-        });
-      }
-
-      for (const ackedDeliveryId of replay.ackedDeliveries) undeliveredReports.delete(ackedDeliveryId);
-      for (const pending of replay.pendingDeliveries.values()) {
-        if (replay.ackedDeliveries.has(pending.deliveryId)) continue;
-        if (!undeliveredReports.has(pending.deliveryId)) hasNewRecoveryItem = true;
-        undeliveredReports.set(pending.deliveryId, {
-          deliveryId: pending.deliveryId,
-          fromAgentId: pending.from,
-          toAgentId: pending.to,
-          ...(pending.turnId ? { turnId: pending.turnId } : {}),
-          ...(pending.assignmentId ? { assignmentId: pending.assignmentId } : {}),
-        });
-      }
-    }
-
-    if (pendingOccurrence && !hasNewRecoveryItem) {
-      this.projection = pendingOccurrence;
-      return;
-    }
-
-    const bootId = randomUUID();
-    const snapshot: RecoverySnapshot = {
-      recoveryId: bootId,
-      bootId,
-      createdAt: this.options.now(),
-      interruptedManagers: [...interruptedManagers].sort(),
-      interruptedWorkers: [...interruptedWorkers].sort(),
-      undeliveredReports: [...undeliveredReports.values()].sort((left, right) =>
-        left.deliveryId.localeCompare(right.deliveryId),
-      ),
-    };
-    const hasRecovery =
-      snapshot.interruptedManagers.length > 0 ||
-      snapshot.interruptedWorkers.length > 0 ||
-      snapshot.undeliveredReports.length > 0;
-    this.projection = hasRecovery ? snapshot : persisted;
-    if (hasRecovery) await saveRecoveryOccurrence(this.options.dataDir, snapshot, pendingOccurrence?.recoveryId);
-    if (hasRecovery) {
-      this.options.logDebug("turn_ledger:boot_recovery_snapshot", snapshot);
-    }
-  }
-
-  getSnapshot(): RecoverySnapshot | null {
-    return this.projection ? cloneSnapshot(this.projection) : null;
-  }
-
-  isDecisionPending(): boolean {
-    return this.resumeInProgress || Boolean(
-      this.projection && !this.projection.resumedAt && !this.projection.dismissedAt,
-    );
-  }
-
-  async dismiss(): Promise<RecoverySnapshot | null> {
-    const claimed = await claimRecoveryOccurrence(this.options.dataDir, "dismiss", this.options.now());
-    this.projection = claimed ?? await readRecoveryOccurrence(this.options.dataDir);
-    if (this.projection?.dismissedAt) await applyRecoveryDismissal(this.options.dataDir, this.projection, workers => this.options.onInterruptedWorkersDismissed?.(workers) ?? Promise.resolve());
-    this.options.onDecisionResolved?.();
-    return this.getSnapshot();
-  }
-
-  async resume(): Promise<RecoverySnapshot | null> {
-    const snapshot = await claimRecoveryOccurrence(this.options.dataDir, "resume", this.options.now());
-    this.projection = snapshot ?? await readRecoveryOccurrence(this.options.dataDir);
-    if (!snapshot) return this.getSnapshot();
-    this.resumeInProgress = true;
-    try {
-      for (const workerId of snapshot.interruptedWorkers) {
-      const worker = this.options.descriptors.get(workerId);
-      if (!worker || worker.role !== "worker" || this.controlledRecoveryPolicy(worker.managerId, "worker")) continue;
-      await this.options
-        .sendMessage(
-          worker.managerId,
-          worker.agentId,
-          "The backend restarted while you were mid-turn. Continue from the last persisted state. If your last action was interrupted, the process died during your last action — consider whether repeating it is safe.",
-          "auto",
-          { origin: "internal" },
-        )
-        .catch((error) => this.logResumeError("worker", workerId, error));
-      }
-
-      for (const managerId of snapshot.interruptedManagers) {
-      if (this.controlledRecoveryPolicy(managerId, "turn")) continue;
-      await this.options
-        .sendMessage(
-          managerId,
-          managerId,
-          "The backend restarted while you were mid-turn. Resume the authorized task from the last persisted state, preserving existing ownership. Continue direct work or handle existing worker results as appropriate; the restart itself is not a reason to delegate.",
-          "auto",
-          { origin: "internal" },
-        )
-        .catch((error) => this.logResumeError("manager", managerId, error));
-      }
-
-      const pendingMessages = await this.resolvePendingReportMessages(snapshot);
-      for (const report of snapshot.undeliveredReports) {
-        if (this.controlledRecoveryPolicy(report.toAgentId, "delivery")) continue;
-        const message = pendingMessages.get(report.deliveryId);
-        if (!message) continue;
-        const source = this.options.descriptors.get(report.fromAgentId);
-        const isWorkerResult =
-          report.deliveryId.startsWith("worker-result:") ||
-          (report.deliveryId.startsWith("worker-report:") && source?.role === "worker");
-        try {
-          const target = this.options.getSessionTarget(report.toAgentId);
-          if (!target || !await claimRecoveryDelivery(target, report.deliveryId)) continue;
-          if (isWorkerResult && source?.role === "worker") {
-            if (
-              report.assignmentId &&
-              source.workerParentContext?.assignmentId === report.assignmentId
-            ) {
-              await this.options.sendWorkerResult(
-                source.agentId,
-                message,
-                report.assignmentId,
-              );
-            } else if (report.assignmentId) {
-              this.options.logDebug("restart_recovery:worker_result_obsolete", {
-                deliveryId: report.deliveryId,
-                workerAgentId: source.agentId,
-                assignmentId: report.assignmentId,
-                currentAssignmentId: source.workerParentContext?.assignmentId,
-              });
-            } else {
-              await this.options.sendMessage(
-                report.toAgentId,
-                report.toAgentId,
-                formatLegacyRecoveredWorkerResult(source.agentId, message),
-                "auto",
-                { origin: "internal" },
-              );
-            }
-          } else {
-            await this.options.sendMessage(
-              report.fromAgentId,
-              report.toAgentId,
-              message,
-              "auto",
-              { origin: "internal" },
-            );
-          }
-          await this.ackRecoveredDelivery(report);
-        } catch (error) {
-          this.options.logDebug("restart_recovery:report_redelivery:error", {
-            deliveryId: report.deliveryId,
-            fromAgentId: report.fromAgentId,
-            toAgentId: report.toAgentId,
-            message: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-
-      return this.getSnapshot();
-    } finally {
-      this.resumeInProgress = false;
-      this.options.onDecisionResolved?.();
-    }
-  }
-
-  private async resolvePendingReportMessages(
-    snapshot: RecoverySnapshot,
-  ): Promise<Map<string, string>> {
-    const wantedIds = new Set(
-      snapshot.undeliveredReports.map((report) => report.deliveryId),
-    );
-    const messages = new Map<string, string>();
-    if (wantedIds.size === 0) return messages;
-
-    const sessionIds = new Set(
-      snapshot.undeliveredReports.map((report) => report.toAgentId),
-    );
-    for (const sessionId of sessionIds) {
-      const target = this.options.getSessionTarget(sessionId);
-      if (!target) continue;
-      const replay = await readRecoveryState(target).catch(() => null);
-      if (!replay) continue;
-      for (const record of replay.pendingDeliveries.values()) {
-        if (wantedIds.has(record.deliveryId) && record.contentRef && record.state === "pending") {
-          const message = await readRecoveryContent(record.contentRef).catch(() => undefined);
-          if (message) messages.set(record.deliveryId, message);
-        }
-      }
-    }
-    return messages;
-  }
-
-  private async ackRecoveredDelivery(report: RestartRecoveryReport): Promise<void> {
+  /** Phase 4 replaces this last assignment-delivery resource with transfer effects. */
+  async deliverReport(deliveryId: string): Promise<void> {
+    const report = this.getSnapshot()?.undeliveredReports.find(report => report.deliveryId === deliveryId);
+    if (!report) throw new Error("Recovered result is unavailable");
     const target = this.options.getSessionTarget(report.toAgentId);
-    if (!target) {
-      return;
-    }
-    await recordRecoveryFact(target, {
-      t: "delivery_acked",
-      deliveryId: report.deliveryId,
-      at: this.options.now(),
-    });
+    if (!target) throw new Error("Recovered result target is unavailable");
+    const state = await readRecoveryState(target);
+    const pending = state.pendingDeliveries.get(deliveryId);
+    if (!pending?.contentRef || pending.state !== "pending") throw new Error("Recovered result delivery is ambiguous");
+    const message = await readRecoveryContent(pending.contentRef);
+    if (!message || !await claimRecoveryDelivery(target, deliveryId)) throw new Error("Recovered result could not be claimed");
+    const source = this.options.descriptors.get(report.fromAgentId);
+    if (source?.role === "worker" && report.assignmentId) await this.options.sendWorkerResult(source.agentId, message, report.assignmentId);
+    else await this.options.sendMessage(report.fromAgentId, report.toAgentId, message, "auto", { origin: "internal" });
+    await recordRecoveryFact(target, { t: "delivery_acked", deliveryId, at: this.options.now() });
   }
-
-  private logResumeError(
-    role: "worker" | "manager",
-    agentId: string,
-    error: unknown,
-  ): void {
-    this.options.logDebug(`restart_recovery:${role}_resume:error`, {
-      [`${role}Id`]: agentId,
-      message: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-function formatLegacyRecoveredWorkerResult(workerAgentId: string, message: string): string {
-  return [
-    `SYSTEM: Recovered an undelivered result from worker \`${workerAgentId}\`:`,
-    "",
-    message,
-  ].join("\n");
-}
-
-function cloneSnapshot(snapshot: RecoverySnapshot): RecoverySnapshot {
-  return {
-    ...snapshot,
-    interruptedManagers: [...snapshot.interruptedManagers],
-    interruptedWorkers: [...snapshot.interruptedWorkers],
-    undeliveredReports: snapshot.undeliveredReports.map((report) => ({ ...report })),
-  };
 }
