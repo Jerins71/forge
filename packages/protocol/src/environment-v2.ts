@@ -11,6 +11,8 @@ import { PlanSnapshotV2Schema, GoalSnapshotV2Schema, GoalControlV2Schema, Elicit
 export * from './detail-features-v2.js'
 import { BrowserViewportV2Schema, BrowserSnapshotV2Schema, BrowserRegistrationV2Schema, BrowserHostV2Schema, BrowserHostLeaseV2Schema, BrowserHostStreamV2Schema, BrowserStreamV2Schema, BrowserRecordingV2Schema } from './browser-v2.js'
 export * from './browser-v2.js'
+import { ContextSourceSelectorSchema, ThreadLineageSchema, SessionLineageSnapshotSchema } from './lineage-v2.js'
+export * from './lineage-v2.js'
 import { SESSION_ATTENTION_REASONS } from './session-attention.js'
 
 export const ENVIRONMENT_PROTOCOL_VERSION = 2 as const
@@ -95,6 +97,7 @@ export const EnvironmentCapabilitiesSchema = O({
   cliTransport: Type.Optional(Type.Boolean()),
   sessionLifecycle: Type.Optional(Type.Boolean()),
   sessionState: Type.Optional(Type.Boolean()),
+  contextTransfers: Type.Optional(Type.Boolean()),
 })
 export type EnvironmentCapabilities = Static<typeof EnvironmentCapabilitiesSchema>
 export const EnvironmentDescriptorSchema = O({
@@ -144,6 +147,7 @@ export const WorkspaceStrategySchema = Type.Union([
 ])
 export type WorkspaceStrategy = Static<typeof WorkspaceStrategySchema>
 export const SessionSummarySchema = O({
+  lineage: Type.Optional(ThreadLineageSchema),
   sessionId: V2Id, projectId: V2Id, title: ShortText,
   projectAgent: Type.Optional(Type.Union([ProjectAgentInfoV2Schema, Type.Null()])),
   status: E('preparing', 'idle', 'running', 'waiting', 'stopping', 'stopped', 'error', 'interrupted'),
@@ -224,7 +228,7 @@ export const RpcErrorSchema = O({
 export type RpcError = Static<typeof RpcErrorSchema>
 export const CommandReceiptSchema = O({
   commandId: V2Uuid,
-  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact', 'browser.tab.open', 'browser.tab.activate', 'browser.tab.close', 'browser.recording.start', 'browser.recording.stop', 'session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.fork', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill', 'session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'),
+  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact', 'browser.tab.open', 'browser.tab.activate', 'browser.tab.close', 'browser.recording.start', 'browser.recording.stop', 'session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.fork', 'session.provider.switch', 'session.mergeBack', 'worker.continue', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill', 'session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'),
   projectId: Type.Optional(V2Id),
   result: Type.Optional(O({ browserRecording: Type.Optional(BrowserRecordingV2Schema), tabId: Type.Optional(V2Id), stoppedWorkerIds: Type.Optional(Type.Array(V2Id, { maxItems: 1000 })), managerStopped: Type.Optional(Type.Boolean()), pinnedAt: Type.Optional(Type.Union([V2Time, Type.Null()])), terminatedWorkerIds: Type.Optional(Type.Array(V2Id, { maxItems: 1000 })), archivedAt: Type.Optional(V2Time), openAgentId: Type.Optional(V2Id), compacted: Type.Optional(Type.Boolean()), reason: Type.Optional(ShortText), projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })), profileIds: Type.Optional(Type.Array(V2Id, { maxItems: 10000 })), rosterId: Type.Optional(V2Id), rosterRevision: Type.Optional(V2Sequence) })),
   sessionId: NullableId,
@@ -276,6 +280,7 @@ export const DetailItemSchema = O({
   commandId: Type.Union([V2Uuid, Type.Null()]),
 })
 export const DetailSnapshotSchema = O({
+  lineage: Type.Optional(SessionLineageSnapshotSchema),
   plan: Type.Optional(PlanSnapshotV2Schema), goal: Type.Optional(GoalSnapshotV2Schema),
   recovery: Type.Optional(RecoveryStateSchema),
   session: SessionSummarySchema,
@@ -293,6 +298,7 @@ export const ShellEventSchema = Type.Union([
   O({ type: Type.Literal('session.remove'), sessionId: V2Id }),
 ])
 export const DetailEventSchema = Type.Union([
+  O({ type: Type.Literal('lineage.upsert'), snapshot: SessionLineageSnapshotSchema }),
   O({ type: Type.Literal('plan.upsert'), snapshot: PlanSnapshotV2Schema }),
   O({ type: Type.Literal('goal.upsert'), snapshot: GoalSnapshotV2Schema }),
   O({ type: Type.Literal('recovery.upsert'), recovery: RecoveryStateSchema }),
@@ -418,7 +424,11 @@ export const rpcSchemas = {
   'session.restore': defineRpc(StopSessionSchema, CommandReceiptSchema, { receipt: true }),
   'session.clear': defineRpc(StopSessionSchema, CommandReceiptSchema, { receipt: true }),
   'session.delete': defineRpc(StopSessionSchema, CommandReceiptSchema, { receipt: true }),
-  'session.fork': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), fromItemId: Type.Optional(V2Id), purpose: Type.Optional(Type.Literal('side_chat')) }), CommandReceiptSchema, { receipt: true }),
+  'session.fork': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), fromItemId: Type.Optional(V2Id), sourcePoint: Type.Optional(ContextSourceSelectorSchema), model: Type.Optional(O({ provider: ShortText, modelId: ShortText, thinkingLevel: Type.Optional(ShortText) })), purpose: Type.Optional(Type.Literal('side_chat')) }), CommandReceiptSchema, { receipt: true }),
+  'session.provider.switch': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, model: O({ provider: ShortText, modelId: ShortText, thinkingLevel: Type.Optional(ShortText) }) }), CommandReceiptSchema, { receipt: true }),
+  'session.mergeBack': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, sourcePoint: Type.Optional(ContextSourceSelectorSchema) }), CommandReceiptSchema, { receipt: true }),
+  'worker.continue': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, workerId: V2Id, title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) }), CommandReceiptSchema, { receipt: true }),
+  'session.lineage.get': defineRpc(O({ sessionId: V2Id }), SessionLineageSnapshotSchema),
   'session.choice.cancel': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, choiceId: V2Id }), CommandReceiptSchema, { receipt: true }),
   'session.stopAll': defineRpc(StopSessionSchema, CommandReceiptSchema, { receipt: true }),
   'worker.stop': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, workerId: V2Id }), CommandReceiptSchema, { receipt: true }),
@@ -487,7 +497,7 @@ export const rpcScopes = {
   'environment.get': 'session:read', 'shell.subscribe': 'session:read', 'shell.page': 'session:read',
   'session.subscribe': 'session:read', 'session.history': 'session:read',
   'session.workers': 'session:read', 'session.content': 'session:read',
-  'session.resume': 'session:operate', 'session.archive': 'session:operate', 'session.restore': 'session:operate', 'session.clear': 'session:operate', 'session.delete': 'session:operate', 'session.fork': 'session:operate', 'session.choice.cancel': 'session:operate', 'session.stopAll': 'session:operate', 'worker.stop': 'session:operate', 'worker.resume': 'session:operate', 'worker.kill': 'session:operate',
+  'session.resume': 'session:operate', 'session.archive': 'session:operate', 'session.restore': 'session:operate', 'session.clear': 'session:operate', 'session.delete': 'session:operate', 'session.fork': 'session:operate', 'session.provider.switch': 'session:operate', 'session.mergeBack': 'session:operate', 'worker.continue': 'session:operate', 'session.lineage.get': 'session:read', 'session.choice.cancel': 'session:operate', 'session.stopAll': 'session:operate', 'worker.stop': 'session:operate', 'worker.resume': 'session:operate', 'worker.kill': 'session:operate',
   'session.launch': 'session:operate', 'session.send': 'session:operate',
   'session.choose': 'session:operate', 'session.stop': 'session:operate', 'command.get': 'session:read',
   'project.create': 'workspace:write', 'project.update': 'workspace:write',
