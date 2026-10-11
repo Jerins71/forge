@@ -158,6 +158,11 @@ export interface ProviderAdapter {
   /** Resolving interrupt is an acknowledgment, not a terminal observation. */
   interrupt(input: { binding: ProviderBinding; attemptId: string; turn: ProviderTurnRef }): Promise<void>;
   respond(input: ProviderRespondInput): Promise<void>;
+  /**
+   * The user dismissed the request without answering. The pending callback must return to the
+   * provider as declined, so the tool call ends and the turn can continue.
+   */
+  decline?(input: Omit<ProviderRespondInput, "response">): Promise<void>;
   compact(input: { binding: ProviderBinding; attemptId: string; instructions?: string }): Promise<void>;
   fork?(input: { binding: ProviderBinding; through?: ProviderTurnRef }): Promise<ProviderConversationRef>;
   readContext?(input: { binding: ProviderBinding; through?: ProviderTurnRef }): Promise<ProviderContext>;

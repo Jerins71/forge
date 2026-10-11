@@ -327,6 +327,15 @@ export class CodexProviderAdapter implements ProviderAdapter {
     this.resolveRequest(pending, codexChoiceResponse(pending.choice, input.response));
   }
 
+  /** The user skipped the request: the app-server gets the same empty or declining answer as an aborted one. */
+  async decline(input: Omit<ProviderRespondInput, "response">): Promise<void> {
+    const s = this.state;
+    if (!s || !sameScope(s.scope, input.binding.scope) || !sameScope(s.scope, input.request)) throw new ProviderRequestRejectedError("stale_scope");
+    const pending = s.requests.get(input.request.nativeId);
+    if (!pending) throw new ProviderRequestRejectedError("unknown_request");
+    pending.cancel();
+  }
+
   private resolveRequest(pending: PendingRequest, response: unknown): void {
     this.state!.requests.delete(pending.ref.nativeId);
     pending.turn.abort.signal.removeEventListener("abort", pending.cancel);

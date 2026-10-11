@@ -299,6 +299,14 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           attemptedNative = true; await resource.adapter.respond({ binding: resource.binding, request: request.ref, lifetime: request.lifetime, response: effect.response });
           record({ type: "request.responded", ...result(row, "responded"), threadId: effect.threadId, requestId: request.requestId }); break;
         }
+        case "provider.decline": {
+          // Best effort: the request is already cancelled in the core. A provider that is gone or has
+          // already closed the callback has nothing left to hear.
+          const state = loadState(database); const request = state.requests[effect.requestId]; const owner = state.threads[effect.threadId];
+          const resource = request && owner?.desired === "running" && owner.generation === request.ref.generation ? live.get(request.ref.bindingId) : undefined;
+          try { await resource?.adapter.decline?.({ binding: resource.binding, request: request.ref, lifetime: request.lifetime }); } catch { /* Declining twice or late is not an error. */ }
+          break;
+        }
         case "provider.release": {
           // A drain owed to an earlier binding was already settled; never stop the thread's newer runtime for it.
           const owner = loadState(database).threads[effect.threadId];

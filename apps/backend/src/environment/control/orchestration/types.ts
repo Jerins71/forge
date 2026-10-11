@@ -113,6 +113,7 @@ export type CoreEffect =
   | { kind: "provider.start"; threadId: string; attemptId: string }
   | { kind: "provider.steer"; threadId: string; attemptId: string; targetAttemptId: string }
   | { kind: "provider.respond"; threadId: string; requestId: string; response: unknown }
+  | { kind: "provider.decline"; threadId: string; requestId: string }
   | { kind: "provider.release"; threadId: string; bindingId: string; /** The user stopped the session while a turn was running. */ stoppedTurn?: boolean }
   | { kind: "provider.compact"; threadId: string; attemptId: string; instructions?: string }
   | { kind: "recovery.deliver"; threadId: string; recoveryId: string; deliveryId: string };
