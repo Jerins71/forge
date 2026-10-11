@@ -219,8 +219,10 @@ export function SideChatPanel({
       </div>
 
       {scopedState?.lastError ? (
-        <div role="alert" className="mx-3 mt-2 shrink-0 whitespace-pre-wrap break-words rounded-xl border border-danger/25 bg-danger/[0.08] px-3 py-2 text-[12.5px] text-danger md:mx-auto md:w-full md:max-w-[760px]">
-          {scopedState.lastError}
+        <div className="content-gutter mt-2 shrink-0">
+          <div role="alert" className="content-column whitespace-pre-wrap break-words rounded-xl border border-danger/25 bg-danger/[0.08] px-3 py-2 text-[12.5px] text-danger">
+            {scopedState.lastError}
+          </div>
         </div>
       ) : null}
 

@@ -49,7 +49,7 @@ export function ChatSearchBar({ search }: ChatSearchBarProps) {
   const hasMatches = search.totalMatches > 0
 
   return (
-    <div className="flex items-center gap-1.5 border-b border-hairline bg-transparent px-4 py-2">
+    <div className="flex items-center gap-1.5 border-b border-hairline bg-transparent content-gutter py-2">
       <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       <input
         ref={inputRef}

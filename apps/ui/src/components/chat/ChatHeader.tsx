@@ -256,7 +256,7 @@ export function ChatHeader({
   return (
     <header
       className={cn(
-        'sticky top-0 z-10 flex h-[62px] w-full shrink-0 items-center justify-between gap-2 overflow-hidden border-b bg-transparent px-3 md:px-6',
+        'sticky top-0 z-10 flex h-[62px] w-full shrink-0 items-center justify-between gap-2 overflow-hidden border-b bg-transparent content-gutter',
         isAgentCreator
           ? 'border-b-2 border-violet-500/40'
           : 'border-hairline',

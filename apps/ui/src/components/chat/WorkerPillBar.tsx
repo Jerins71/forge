@@ -456,7 +456,7 @@ export const WorkerPillBar = memo(function WorkerPillBar({
       <div className="overflow-hidden">
         {/* Fix #15: Single TooltipProvider for all pills */}
         <TooltipProvider delayDuration={400}>
-          <div className="flex items-center gap-1.5 overflow-x-auto border-t border-hairline bg-transparent px-4 py-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <div className="flex items-center gap-1.5 overflow-x-auto border-t border-hairline bg-transparent content-gutter py-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             {pillEntries.map((entry) => {
               // The pill entry intentionally survives reconnects for UI continuity, but its
               // descriptor is stale until this socket delivers the authoritative roster.
