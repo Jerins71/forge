@@ -214,13 +214,17 @@ export const MarkdownMessage = memo(function MarkdownMessage({
                 </ul>
               )
             },
-            ol({ children }) {
+            ol({ children, node, start }) {
+              // Markers sit outside the list box, so the indent has to fit the widest number.
+              const items = node?.children.filter((child) => child.type === 'element' && child.tagName === 'li').length ?? 0
+              const lastNumber = (start ?? 1) + items - 1
               return (
                 <ol
+                  start={start}
                   className={cn(
-                    isDocument
-                      ? 'mb-5 list-decimal space-y-1.5 pl-6 text-foreground/90 last:mb-0'
-                      : 'mb-2 list-decimal space-y-0.5 pl-5 last:mb-0',
+                    'list-decimal marker:tabular-nums last:mb-0',
+                    isDocument ? 'mb-5 space-y-1.5 text-foreground/90' : 'mb-2 space-y-0.5',
+                    lastNumber >= 100 ? 'pl-10' : lastNumber >= 10 ? 'pl-8' : isDocument ? 'pl-6' : 'pl-5',
                   )}
                 >
                   {children}

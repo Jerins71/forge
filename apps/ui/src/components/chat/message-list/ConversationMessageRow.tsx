@@ -370,7 +370,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
       <div className="flex flex-col items-end">
         <div
           className={cn(
-            'max-w-[82%] rounded-2xl rounded-br-md border px-4 py-3 text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]',
+            'max-w-[82%] rounded-2xl rounded-br-md border px-4 pb-2 pt-3 text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]',
             isCliMessage
               ? 'border-compacting/30 bg-compacting/10'
               : 'border-hairline bg-foreground/[0.06]',

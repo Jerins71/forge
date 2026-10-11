@@ -113,6 +113,19 @@
   --app-font-sans: "Geist Variable", "Geist", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --app-font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --radius: 0.625rem;
+
+  /* Layout: the one width policy for reading surfaces (transcript, composer, banners, settings).
+     Columns follow their pane; the gutter grows with it. Percentages resolve against the pane,
+     so an open sidebar or side panel narrows the column without a viewport breakpoint. */
+  --content-gutter: clamp(0.875rem, 4.5%, 6rem);
+  /* Upper bound for ultrawide panes only; ordinary windows never reach it. */
+  --content-max: 128rem;
+  /* Forms keep label and control within reach of each other. */
+  --content-max-form: 68rem;
+  /* A single focused task, such as starting a thread. */
+  --content-max-focus: 54rem;
+  /* Running text keeps a readable line inside a wider column. */
+  --prose-measure: 84ch;
   /* Native Chromium/Electron/Firefox chrome follows Forge's class theme, not OS. */
   color-scheme: light;
 }
@@ -331,6 +344,48 @@ body {
     var(--background);
 }
 
+/* Layout utilities for the width policy tokens above. `content-gutter` pads a pane,
+   `content-column` centres the column inside it, and `content-frame` does both on one element. */
+@utility content-gutter {
+  padding-inline: var(--content-gutter);
+}
+
+@utility content-column {
+  width: 100%;
+  max-width: var(--content-max);
+  margin-inline: auto;
+}
+
+@utility content-frame {
+  width: 100%;
+  max-width: calc(var(--content-max) + 2 * var(--content-gutter));
+  margin-inline: auto;
+  padding-inline: var(--content-gutter);
+}
+
+@utility content-form {
+  --content-max: var(--content-max-form);
+}
+
+@utility content-focus {
+  --content-max: var(--content-max-focus);
+}
+
+/* Running text keeps its measure; code, tables, diffs and tool output span the column.
+   Sits below utilities so a row can still set its own width. */
+@layer components {
+  .content-prose :where(p, h1, h2, h3, h4, h5, h6, blockquote, dl, li:not(:has(pre, table))) {
+    max-width: var(--prose-measure);
+  }
+}
+
+/* Tables size to their content, from the prose measure up to the column, rather than
+   stretching a few short cells across a wide pane. Unlayered so it holds over `w-full`. */
+.content-prose table {
+  width: auto;
+  min-width: min(100%, var(--prose-measure));
+}
+
 @utility eyebrow {
   font-size: 0.6875rem;
   font-weight: 500;
@@ -371,6 +426,19 @@ body {
   .live-dot-animated,
   .rise-in {
     animation: none;
+  }
+}
+
+/* Reduced motion everywhere else: state changes land at once. Spinners keep turning
+   because they are the only sign that work is in progress. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 

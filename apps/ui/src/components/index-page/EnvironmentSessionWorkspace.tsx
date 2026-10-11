@@ -20,8 +20,8 @@ import type { SettingsApiClient } from '@/components/settings/settings-api-clien
 import { SessionModelPicker } from '@/components/chat/message-input/SessionModelPicker'
 import { SessionCoordinationPicker } from '@/components/chat/message-input/SessionCoordinationPicker'
 
-/** Same column as MessageInput (`max-w-[760px]` inside `px-3 md:px-6`). */
-const COMPOSER_COLUMN = 'mx-auto w-full max-w-[calc(760px+1.5rem)] px-3 md:max-w-[calc(760px+3rem)] md:px-6'
+/** Same column and gutters as MessageInput. */
+const COMPOSER_COLUMN = 'content-frame'
 
 function TraySeparator() {
   return <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-hairline" />
@@ -82,16 +82,16 @@ export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
     return <EmptyState title="Project not found" detail="This project is no longer available on any paired environment." />
   }
 
-  // One composer: heading, message box and the context tray tucked under it share one 760px column,
+  // One composer: heading, message box and the context tray tucked under it share one focused column,
   // aligned with MessageInput's own max width and gutters.
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="launch-workspace">
+    <div className="content-focus flex min-h-0 flex-1 flex-col" data-testid="launch-workspace">
       <div className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto pb-[6vh] pt-6">
         <div className={COMPOSER_COLUMN}>
           <div className="pb-6 text-center">
             <p className="eyebrow mb-2">New thread</p>
             <h1 className="truncate text-[30px] font-medium leading-tight tracking-[-0.025em] text-foreground">{targetTitle ?? group.title}</h1>
-            <p className="mx-auto mt-1.5 max-w-md text-[13.5px] text-muted-foreground">Start a new thread. Choose the machine below, then send your first message.</p>
+            <p className="mx-auto mt-1.5 max-w-lg text-balance text-[13.5px] text-muted-foreground">Start a new thread. Choose the machine below, then send your first message.</p>
           </div>
           {launch.error ? (
             <div role="alert" className="mx-1 mb-2 rounded-xl border border-danger/25 bg-danger/10 px-3 py-2 text-xs text-danger">{launch.error}</div>
@@ -300,7 +300,7 @@ export function EnvironmentSessionStrip({ session }: { session: SessionRef }) {
   const selectWorkspace = useCallback((shell: ShellState) => shell.sessions.get(session.sessionId)?.workspace ?? null, [session.sessionId])
   const workspace = useEnvironmentSelector(session.environmentId, 'shell', selectWorkspace, [`session:${session.sessionId}`])
   return (
-    <div className="flex h-9 shrink-0 items-center gap-2 border-b border-hairline px-4 text-xs text-muted-foreground">
+    <div className="flex h-9 shrink-0 items-center gap-2 border-b border-hairline content-gutter text-xs text-muted-foreground">
       <span className="inline-flex items-center gap-1.5" data-testid="session-machine">
         <Server className="size-3 text-subtle-foreground" />
         <EnvironmentBadge label={label} />
