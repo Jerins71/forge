@@ -44,6 +44,32 @@ async function fixture() {
 const principal = { deviceSessionId: "device", scopes: new Set(["session:operate" as const]) };
 
 describe("durable provider outbox", () => {
+  it.each(["append", "dispatch"] as const)("waits for the internal worker-result %s before admitting a context mutation", async boundary => {
+    const f = await fixture();
+    await f.core.controlService.submitInput({ commandId: "parent", threadId: "manager", message: { text: "parent", artifactIds: [] } });
+    await f.core.effectWorker.drain();
+    await f.core.controlService.submitInput({ commandId: "worker", threadId: "worker", thread: { role: "worker", managerId: "manager", projectId: "project" }, message: { text: "worker", artifactIds: [] },
+      assignment: { assignmentId: "assignment", parentThreadId: "manager", parentRunId: "run-parent", selection: { provider: "pi", modelId: "fixture" } } });
+    await f.core.effectWorker.drain();
+    for (const runId of ["run-parent", "run-worker"]) {
+      const state = loadState(f.core.database); const attempt = state.attempts[state.runs[runId].activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+      f.core.controlService.record({ type: "provider.observe", commandId: `terminal:${runId}`, now: f.options.clock(), observation: { type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: "completed" } });
+    }
+    let enter!: () => void; let release!: () => void; let mutated = false;
+    const entered = new Promise<void>(resolve => { enter = resolve; }); const held = new Promise<void>(resolve => { release = resolve; });
+    const apply = f.options.swarm.applyInput; const start = f.adapter.start;
+    f.options.swarm.applyInput = async input => { if (boundary === "append" && input.runId === "assignment:result:run") { enter(); await held; } return apply(input); };
+    f.adapter.start = async input => { if (boundary === "dispatch" && input.runId === "assignment:result:run") { enter(); await held; } return start(input); };
+    f.core.controlService.record({ type: "worker.result", commandId: "canonical-report", now: f.options.clock(), assignmentId: "assignment", workerRunId: "run-worker", resultRef: { threadId: "worker", runId: "run-worker", entryId: "worker-final" }, input: { text: "durable worker report", artifactIds: [] } });
+    const drain = f.core.effectWorker.drain(); await entered;
+    const mutation = f.core.controlService.admitLifecycle(principal, { commandId, command: "worker.continue", sessionIds: ["manager"], intent: "inspect", request: {} }, async () => { mutated = true; return { completed: true }; });
+    const outcome = mutation.then(value => ({ value }), error => ({ error }));
+    try {
+      await new Promise(resolve => setTimeout(resolve, 25)); expect(mutated).toBe(false);
+      release(); await drain;
+      expect(await outcome).toEqual({ value: { completed: true } });
+    } finally { release(); await drain; }
+  });
   it.each(["resume", "dismiss"] as const)("repairs a claimed canonical report before its first recovery snapshot and waits for %s", async action => {
     const f = await fixture();
     const canonicalFile = path.join(path.dirname(f.options.databasePath!), "report.jsonl");

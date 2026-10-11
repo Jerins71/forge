@@ -214,15 +214,29 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
    */
   const bookkeeping = database.prepare(`SELECT 1 FROM effects e JOIN commands c USING(command_id) WHERE e.session_id=? AND e.kind='lifecycle.admit' AND e.state='claimed'
     AND c.method IN ('session.readState.set','project.readState.clear','session.attention.dismiss','session.message.pin','session.pins.clear','session.update') LIMIT 1`);
-  /** Undefined when nothing is in flight, so an uncontended command is admitted in the same tick as before. */
-  const settleBookkeeping = (sessionIds: readonly string[]): Promise<void> | undefined => {
+  const internalDelivery = database.prepare(`SELECT 1 FROM effects e JOIN orchestration_transfers t ON t.target_thread_id=e.session_id AND t.kind='worker_result'
+    WHERE e.session_id=? AND e.state IN ('pending','claimed') AND (
+      (e.kind='transcript.append' AND json_extract(e.payload_json,'$.runId')=json_extract(t.state_json,'$.targetRunId')) OR
+      (e.kind IN ('provider.start','provider.steer','runtime.acquire') AND EXISTS (
+        SELECT 1 FROM orchestration_attempts a WHERE a.run_id=json_extract(t.state_json,'$.targetRunId') AND (
+          a.attempt_id=json_extract(e.payload_json,'$.attemptId') OR
+          (e.kind='runtime.acquire' AND json_extract(a.state_json,'$.bindingId')=json_extract(e.payload_json,'$.bindingId')
+            AND EXISTS (SELECT 1 FROM orchestration_threads owner WHERE owner.thread_id=e.session_id AND json_extract(owner.state_json,'$.activeRunId')=a.run_id))
+        )
+      ))
+    ) LIMIT 1`);
+  /** Undefined when nothing is in flight, preserving synchronous uncontended admission and Stop fences. */
+  const settleAdmission = (sessionIds: readonly string[], waitForInternalDelivery = false): Promise<void> | undefined => {
     const lanes = sessionIds.flatMap(sessionId => {
       const owner = database.prepare("SELECT project_id FROM control_sessions WHERE session_id=?").get(sessionId) as { project_id: string } | undefined;
       return owner ? [sessionId, "project:" + owner.project_id] : [sessionId];
     });
-    if (!lanes.some(lane => bookkeeping.get(lane))) return undefined;
+    // Automatic worker results can be dispatching after their worker has completed. Wait for the
+    // small canonical/dispatch handoff, never for the provider turn itself or a user operation.
+    const pending = () => lanes.some(lane => bookkeeping.get(lane) || (waitForInternalDelivery && internalDelivery.get(lane)));
+    if (!pending()) return undefined;
     const deadline = Date.now() + 2_000;
-    return (async () => { while (!closed && Date.now() < deadline && lanes.some(lane => bookkeeping.get(lane))) await new Promise(resolve => setTimeout(resolve, 5)); })();
+    return (async () => { while (!closed && Date.now() < deadline && pending()) await new Promise(resolve => setTimeout(resolve, 5)); })();
   };
   /** A change must not run across a launch, input or stop the session accepted and has not finished applying. */
   const assertSettled = (sessionId: string): void => {
@@ -234,7 +248,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     if (!principal.scopes.has(input.requiredScope ?? "session:operate") || options.isDeviceRevoked(principal.deviceSessionId))
       throw new ControlError("FORBIDDEN", "Session operation is not authorized");
     input = { ...input, sessionIds: [...input.sessionIds], projectIds: [...(input.projectIds ?? [])] };
-    { const busy = settleBookkeeping(input.sessionIds); if (busy) await busy; }
+    { const busy = settleAdmission(input.sessionIds, input.intent !== "stop"); if (busy) await busy; }
     const method = input.receipt?.method ?? "lifecycle." + input.command;
     const request = canonicalRequest(method, input.request);
     const projectIds = [...new Set(input.projectIds ?? [])].sort();
@@ -653,7 +667,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         if (duplicate && !["running", "accepted"].includes(duplicate.state)) return duplicate;
         if (!options.policy) throw new ControlError("UNAVAILABLE", "Project policy is not composed");
         const normalized = JSON.parse(request.normalized) as RpcInput<import("./project-policy.js").PolicyMethod>;
-        if (!duplicate && "sessionId" in normalized) { { const busy = settleBookkeeping([normalized.sessionId]); if (busy) await busy; } assertAdmissionAvailable(normalized.sessionId); assertSettled(normalized.sessionId); }
+        if (!duplicate && "sessionId" in normalized) { { const busy = settleAdmission([normalized.sessionId], true); if (busy) await busy; } assertAdmissionAvailable(normalized.sessionId); assertSettled(normalized.sessionId); }
         const prepared = duplicate ? { sessionIds: [], projectIds: [], intent: "inspect" as const, frozen: normalized } : await options.policy.prepare(method as import("./project-policy.js").PolicyMethod, normalized);
         await admitLifecycle(principal, { ...prepared, commandId: input.commandId, command: method, request: normalized, frozenRequest: prepared.frozen, requiredScope: rpcScopes[method], receipt: { method, ...("projectId" in prepared ? { projectId: prepared.projectId } : {}), ...("sessionId" in prepared ? { sessionId: prepared.sessionId } : {}) } }, () => options.policy!.apply(method as import("./project-policy.js").PolicyMethod, prepared.frozen));
         return readReceipt(sink, input.commandId);
@@ -697,7 +711,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           readSession(sink, send.sessionId);
           await preflightRoute({ sessionId: send.sessionId, message: send.message });
         }
-        { const busy = settleBookkeeping([(normalized as RpcInput<"session.send">).sessionId]); if (busy) await busy; }
+        { const busy = settleAdmission([(normalized as RpcInput<"session.send">).sessionId]); if (busy) await busy; }
         return accept(principal, method as "session.send" | "session.choose" | "session.stop" | "worker.kill", normalized);
       }
       const launch = normalized as RpcInput<"session.launch">;
