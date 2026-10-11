@@ -18,7 +18,7 @@ import { CodexProviderAdapter, CodexProviderDispatchError } from "./codex-provid
 import { createInstructionBundle } from "../instruction-bundle.js";
 import { bindRuntimeToolHost } from "../runtime-tool-plan.js";
 import type { SwarmToolHost } from "../../swarm-tool-host.js";
-import type { ProviderBinding, ProviderOpenInput, ToolHostBinding } from "../provider-contract.js";
+import { ProviderDispatchRejectedError, type ProviderBinding, type ProviderOpenInput, type ProviderStartInput, type ToolHostBinding } from "../provider-contract.js";
 import { ChoiceRequestCancelledError } from "../../swarm-choice-service.js";
 
 export const NATIVE_CODEX_STATE = "swarm_native_codex_state";
@@ -29,7 +29,9 @@ interface QueuedInput {
   recorded?: boolean;
 }
 interface ActiveTurn {
+  runId: string;
   attemptId: string;
+  legacy: boolean;
   id?: string;
   startedAt: number;
   failed?: boolean;
@@ -75,6 +77,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
   private stopping = false;
   private closed = false;
   private dispatching = false;
+  private legacyStart?: { runId: string; message: RuntimeUserMessage };
   private operations: Promise<unknown> = Promise.resolve();
   private events: Promise<void> = Promise.resolve();
   private pinned?: string;
@@ -98,6 +101,10 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     this.providerAdapter = new CodexProviderAdapter({ codexHome: options.codexHome, dataDir: options.dataDir,
       projectTrusted: options.projectTrusted, auth: options.auth, createClient: options.createClient,
       previousPromptDigest: stored?.promptDigest, host: options.host, autoRespond: true,
+      onStart: input => this.prepareTurnProjection(input),
+      onStartRejected: async (input, error) => {
+        if (this.active?.runId === input.runId && this.active.attemptId === input.attemptId && !this.active.legacy) await this.fail(error, true);
+      },
       toolEvents: event => this.emit(event),
       onNotification: (method, params) => {
         this.events = this.events.then(() => this.onNotification(method, params)).catch(error => this.fail(error, this.active?.finishing === true));
@@ -111,6 +118,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     const runtime = new CodexAgentRuntime(options);
     try {
       const stored = runtime.getCustomEntries(NATIVE_CODEX_STATE).at(-1) as ThreadState | undefined;
+      const conversation = options.creationOptions?.providerConversation;
       // Model switches use Forge's explicit historical recovery block. Ordinary restarts resume.
       // Codex does not persist an unused thread. Recreate that empty allocation
       // after settings recycle; never discard a thread that has accepted a turn.
@@ -124,13 +132,15 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       const forkFrom = reuse || !usable ? undefined
         : owned ? stored.forkFrom
         : stored.hasStartedTurn !== false && stored.cwd === options.descriptor.cwd ? stored.threadId : undefined;
-      runtime.providerBinding = reuse
+      runtime.providerBinding = conversation
+        ? await runtime.providerAdapter.resume({ ...runtime.providerInput, conversation })
+        : reuse
         ? await runtime.providerAdapter.resume({ ...runtime.providerInput, conversation: { ...runtime.providerInput.scope, kind: "conversation", nativeId: stored.threadId } })
         : forkFrom ? await runtime.providerAdapter.fork({ ...runtime.providerInput, source: { ...runtime.providerInput.scope, kind: "conversation", nativeId: forkFrom } })
         : await runtime.providerAdapter.open(runtime.providerInput);
       runtime.threadId = runtime.providerBinding.conversation.nativeId;
-      runtime.hasStartedTurn = Boolean(reuse);
-      if (!reuse && !forkFrom) {
+      runtime.hasStartedTurn = Boolean(reuse || (conversation && stored?.threadId === conversation.nativeId && stored.hasStartedTurn));
+      if (!conversation && !reuse && !forkFrom) {
         const recovery = options.creationOptions?.startupRecoveryContext?.blockText
           ?? buildModelChangeRecoveryContext({ descriptor: options.descriptor,
             entries: runtime.getCustomEntries("swarm_conversation_entry").filter(isConversationEntryEvent),
@@ -174,6 +184,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     const deliveryId = randomUUID();
     return this.serialize(async () => {
       this.assertOpen();
+      if (this.active && !this.active.legacy) throw new ProviderDispatchRejectedError("busy");
       if (this.active?.finishing) await this.active.settled;
       if (this.active && requestedMode === "followUp") {
         this.queued.push({ message, deliveryId });
@@ -268,21 +279,15 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
 
   private async startTurn(message: RuntimeUserMessage, deliveryId: string, recorded = false): Promise<void> {
     this.dispatching = true;
-    const active = this.beginTurn(deliveryId);
+    this.legacyStart = { runId: deliveryId, message };
     let submitted = false;
     try {
-      await this.publishStatus();
-      await this.emit({ type: "agent_start" });
-      await this.emit({ type: "turn_start" });
-      // Activate Forge's queued input/output target before native output can
-      // arrive. turn_start alone does not consume an inbound user message.
-      await this.emit({ type: "message_start", message: { role: "user", content: message.text } });
       const text = [this.pinned ? `<forge_pinned_context>\n${this.pinned}\n</forge_pinned_context>` : undefined, message.text].filter(Boolean).join("\n\n");
       submitted = true;
       const response = await this.providerAdapter.start({ binding: this.providerBinding, runId: deliveryId,
-        attemptId: active.attemptId, input: { ...message, text } });
+        attemptId: deliveryId, input: { ...message, text } });
       if (response.status !== "accepted") throw new Error("Codex did not acknowledge a turn identity");
-      active.id = response.turn.nativeId;
+      if (this.active?.attemptId === deliveryId) this.active.id = response.turn.nativeId;
       this.markThreadStarted();
       if (!recorded) this.recordUser(message);
       if (!this.recoveryConsumed) {
@@ -291,10 +296,13 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       }
     } catch (error) {
       // A protocol rejection is acknowledged failure; a lost response is uncertain ownership.
-      await this.fail(error, !submitted || error instanceof CodexProviderDispatchError || typeof (error as { code?: unknown })?.code === "number");
+      // Busy admission belongs to the already-running native turn; never abort its projection.
+      if (!(error instanceof ProviderDispatchRejectedError)) {
+        await this.fail(error, !submitted || error instanceof CodexProviderDispatchError || typeof (error as { code?: unknown })?.code === "number");
+      }
       throw error;
     }
-    finally { this.dispatching = false; }
+    finally { this.legacyStart = undefined; this.dispatching = false; }
   }
 
   private markThreadStarted(): void {
@@ -304,9 +312,23 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     this.appendCustomEntry(NATIVE_CODEX_STATE, { ...state, hasStartedTurn: true } satisfies ThreadState);
   }
 
-  private beginTurn(attemptId: string = randomUUID()): ActiveTurn {
+  private async prepareTurnProjection(input: ProviderStartInput): Promise<void> {
+    this.assertOpen();
+    if (this.active) throw new ProviderDispatchRejectedError("busy");
+    const legacy = this.legacyStart?.runId === input.runId;
+    this.beginTurn(input.attemptId, input.runId, legacy);
+    try {
+      await this.publishStatus();
+      await this.emit({ type: "agent_start" });
+      await this.emit({ type: "turn_start" });
+      // Activate the creator's input/output projection before native output can arrive.
+      await this.emit({ type: "message_start", message: { role: "user", content: legacy ? this.legacyStart!.message.text : input.input.text } });
+    } catch (error) { await this.fail(error, true); throw error; }
+  }
+
+  private beginTurn(attemptId: string = randomUUID(), runId = attemptId, legacy = true): ActiveTurn {
     let settle!: () => void;
-    const active: ActiveTurn = { attemptId, startedAt: Date.now(), pendingSteers: new Map(), asyncQuestionIds: new Set(), abort: new AbortController(), mapper: new CodexRuntimeEvents(),
+    const active: ActiveTurn = { runId, attemptId, legacy, startedAt: Date.now(), pendingSteers: new Map(), asyncQuestionIds: new Set(), abort: new AbortController(), mapper: new CodexRuntimeEvents(),
       settled: new Promise<void>(resolve => { settle = resolve; }), settle: () => settle() };
     this.active = active;
     this.status = "streaming";
@@ -354,7 +376,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     }
     const asyncQuestions = method === "item/completed" && params.item?.type === "agentMessage" && params.item.delivery === "async"
       ? parseNativeAsyncQuestions(params.item.questions) : undefined;
-    if (asyncQuestions) {
+    if (asyncQuestions && active.legacy) {
       const itemId = String(params.item.id ?? "");
       if (active.asyncQuestionIds.has(itemId)) return;
       active.asyncQuestionIds.add(itemId);
@@ -380,7 +402,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       // Acknowledgement is not consumption. A successful turn must continue any
       // unconsumed input (including worker results); only stopped/failed work is
       // retained as history without an automatic restart.
-      if (active.pendingSteers.size) {
+      if (active.legacy && active.pendingSteers.size) {
         if (params.turn?.status === "completed" && !this.stopping) {
           this.queued.unshift(...[...active.pendingSteers].map(([deliveryId, message]) => ({
             message, deliveryId, recorded: true,
@@ -408,7 +430,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       await this.emit({ type: "agent_end" });
       await this.publishStatus();
       await this.options.callbacks.onAgentEnd?.(this.descriptor.agentId);
-      this.dispatchQueued();
+      if (active.legacy) this.dispatchQueued();
     }
   }
 

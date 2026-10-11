@@ -16,6 +16,14 @@ cancelled native tool calls from writing. A production SwarmManager creator chil
 asserts the exact prepared instructions/tool schemas, kernel scope, exposed adapter,
 and definite authentication failure before native dispatch.
 
+The projection replay also boots the real manager and acquires its prepared adapter
+without calling `sendMessage`. It asserts canonical assistant JSONL, streaming/idle
+status and exactly one end callback, rejects busy dispatch with the shared typed
+error, and steers through the adapter. The same frames verify legacy projection
+does not initialize twice. An abrupt backend crash after canonical input append,
+before any native turn, preserves the durable locator: eager generation-2 creation
+resumes that thread and dispatches once, with one canonical input and output.
+
 Tests live in the backend's included `swarm/__tests__` directory. Redacted traces,
 hash summaries and evaluated assertions are written to `.internal/core/evidence/`.
 Existing prompt/tool baseline snapshots are asserted unchanged. Replay barriers
