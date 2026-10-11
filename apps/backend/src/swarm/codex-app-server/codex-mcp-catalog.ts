@@ -11,6 +11,7 @@ import {
   parseCodexMcpToolSafetyFields,
 } from "./codex-mcp-tool-safety.js";
 import type { CodexAppServerClientPort } from "./types.js";
+import type { CodexCatalogApp, CodexCatalogDiagnostics, CodexCatalogMcpTool, CodexCatalogPlugin, CodexCatalogSnapshot } from "@forge/protocol";
 
 const CATALOG_CACHE_TTL_MS = 30_000;
 const MCP_SERVER_STATUS_LIST_TIMEOUT_MS = 60_000;
@@ -20,62 +21,7 @@ const MAX_CATALOG_ENTRIES = 500;
 const MAX_TOOL_ARGS_BYTES = 16 * 1024;
 const CODEX_APPS_AGGREGATE_SERVER = "codex_apps";
 
-export interface CodexCatalogApp {
-  id: string;
-  name: string;
-  description?: string;
-  pluginDisplayNames?: Record<string, string>;
-}
-
-export interface CodexCatalogPlugin {
-  /** User-facing plugin slug used in @Codex mentions (typically plugin `name`). */
-  selector: string;
-  /** Short plugin name from app-server (e.g. fireflies). */
-  name?: string;
-  pluginId?: string;
-  uri?: string;
-  displayName: string;
-  description?: string;
-  enabled?: boolean;
-  installed?: boolean;
-  accessState?: string;
-  availability?: string;
-  icon?: string;
-  riskHints?: string[];
-  category?: string;
-  marketplaceName?: string;
-  marketplacePath?: string;
-  relatedServerNames?: string[];
-  relatedAppIds?: string[];
-  /** Tool names on aggregate codex_apps server uniquely mapped to this plugin. */
-  codexAppsToolNames?: string[];
-}
-
-export interface CodexCatalogMcpTool {
-  selector: string;
-  serverName: string;
-  toolName: string;
-  appId?: string;
-  appName?: string;
-  description?: string;
-  inputSchema?: Record<string, unknown>;
-  readOnly?: boolean;
-  destructive?: boolean;
-  annotations?: Record<string, unknown>;
-}
-
-export interface CodexCatalogDiagnostics {
-  /** Non-empty when MCP tool discovery failed and no prior good snapshot was available. */
-  mcpToolsError?: string;
-}
-
-export interface CodexCatalogSnapshot {
-  apps: CodexCatalogApp[];
-  plugins: CodexCatalogPlugin[];
-  tools: CodexCatalogMcpTool[];
-  fetchedAt: string;
-  diagnostics?: CodexCatalogDiagnostics;
-}
+export type { CodexCatalogApp, CodexCatalogDiagnostics, CodexCatalogMcpTool, CodexCatalogPlugin, CodexCatalogSnapshot };
 
 export interface CodexMcpToolCallInput {
   managerAgentId: string;
@@ -179,7 +125,8 @@ export class CodexMcpCatalog {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const ready = new Promise<CodexCatalogSnapshot>((resolve) => {
       timer = setTimeout(
-        () => resolve(this.cache?.snapshot ?? pluginsOnlySnapshot(discovered ?? { apps: [], plugins: [] })),
+        // Answering early: mark the snapshot as unfinished so the client asks again, once.
+        () => resolve(this.cache?.snapshot ?? { ...pluginsOnlySnapshot(discovered ?? { apps: [], plugins: [] }), complete: false }),
         this.timing.browseWaitMs ?? CATALOG_BROWSE_WAIT_MS,
       );
     });
