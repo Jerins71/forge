@@ -236,7 +236,9 @@ function isConversationMessageRoleSourcePair(
     case "project_agent_input":
       return role === "user";
     case "system":
-      return role === "system" || role === "assistant";
+      // A user-role system entry is an internal input: what the core delivered to an agent as its
+      // turn input (a worker's assignment, a peer message). Readers never present it as the user's.
+      return role === "system" || role === "assistant" || role === "user";
     case "worker_report":
       return role === "system";
     default:

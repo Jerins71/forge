@@ -235,6 +235,22 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
       )
     }
 
+    if (message.systemNoticeKind === 'assignment') {
+      // The model-facing "SYSTEM:" framing is not part of what the worker was asked.
+      const assignment = normalizedText.replace(/^SYSTEM:\s*/, '')
+      return (
+        <div className="glass-inset rise-in rounded-xl px-3.5 py-2.5 text-sm text-foreground/90" data-assignment>
+          <div className="eyebrow !text-primary">Assignment</div>
+          <p className="mt-1 whitespace-pre-wrap break-words leading-relaxed">{assignment}</p>
+          {timestampLabel ? (
+            <div className="mt-1 font-mono text-[11px] text-subtle-foreground">
+              <span>{timestampLabel}</span>
+            </div>
+          ) : null}
+        </div>
+      )
+    }
+
     // Informational notices (auto-surfaced worker outcomes) get a calm,
     // neutral presentation; the amber styling stays reserved for warnings and
     // errors so its signal is not diluted.

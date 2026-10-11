@@ -128,6 +128,9 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     // Each worker message is also copied into its manager's transcript for the legacy All view. The session
     // detail already carries the worker's own entry, so the copy is not a second item, and not a result.
     if (entry.type === "conversation_message" && entry.source === "worker_report" && entry.excludeFromModelContext) return null;
+    // An internal input to the manager is already shown as what caused it (the worker result, the peer's
+    // message). A worker's is its assignment: it travels as a user item whose source is `system`.
+    if (entry.type === "conversation_message" && entry.role === "user" && entry.source === "system" && entry.agentId === sessionId) return null;
     const id = entry.timelineEntryId ?? ("id" in entry && typeof entry.id === "string" ? entry.id : undefined);
     if (!id) return null;
     const text = "text" in entry && typeof entry.text === "string" ? entry.text : "displaySummary" in entry && typeof entry.displaySummary === "string" ? entry.displaySummary : "";

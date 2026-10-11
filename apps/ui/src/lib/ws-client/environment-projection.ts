@@ -126,6 +126,11 @@ function isDeliveredWorkerResult(item: DetailItem): boolean {
   return item.kind === 'worker_result' && item.source === 'worker_report' && item.commandId !== null
 }
 
+/** What the core delivered to an agent as its turn input (a worker's assignment); not something the user typed. */
+function isInternalInput(item: DetailItem): boolean {
+  return item.kind === 'user' && item.source === 'system'
+}
+
 /**
  * The chat of one agent. A session's detail also carries its workers' own messages, under the worker
  * as actor, and a worker is read through its session's detail. So only `agentId`'s messages are
@@ -137,19 +142,24 @@ export function projectItems(
   sessionId: string = agentId,
 ): ConversationMessageEvent[] {
   return items
-    .filter((i) => i.kind === 'worker_result' ? agentId === sessionId && isDeliveredWorkerResult(i) : (i.kind === 'user' || i.kind === 'assistant') && i.actorId === agentId)
+    .filter((i) => i.kind === 'worker_result'
+      ? agentId === sessionId && isDeliveredWorkerResult(i)
+      : (i.kind === 'user' || i.kind === 'assistant') && i.actorId === agentId && !(isInternalInput(i) && agentId === sessionId))
     .map((i) => ({
       type: 'conversation_message',
       id: i.itemId,
       agentId,
       turnId: i.userTurnId,
       ...(i.kind === 'worker_result' ? { sourceWorkerId: i.actorId } : {}),
-      role: i.kind === 'user' ? 'user' : i.kind === 'worker_result' ? 'system' : 'assistant',
+      // An internal input is never the user's bubble: in a worker's view it is the assignment card.
+      ...(isInternalInput(i) ? { role: 'system', source: 'system', systemNoticeKind: 'assignment' } : {
+        role: i.kind === 'user' ? 'user' : i.kind === 'worker_result' ? 'system' : 'assistant',
+        source: i.kind === 'user' ? 'user_input' : i.kind === 'worker_result' ? 'worker_report' : 'assistant',
+      }),
       text: i.text,
       timestamp: i.timestamp,
       pinned: i.pinned ?? false,
-      source: i.kind === 'user' ? 'user_input' : i.kind === 'worker_result' ? 'worker_report' : 'assistant',
-      ...(i.commandId ? { clientRequestId: i.commandId } : {}),
+      ...(i.commandId && !isInternalInput(i) ? { clientRequestId: i.commandId } : {}),
       ...(i.artifacts.length ? { attachments: i.artifacts.map(artifactAttachment) } : {}),
     })) as ConversationMessageEvent[]
 }

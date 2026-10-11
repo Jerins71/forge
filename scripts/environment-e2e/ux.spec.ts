@@ -265,8 +265,14 @@ test('a spawned worker leaves one result in the manager chat, live and after rel
 test('the worker view shows the worker\'s own transcript and status, read-only', async ({ page }) => {
   await page.goto(`${fleet.uiUrl}/?agent=fixture-worker`)
   await expect(transcript(page)).toBeVisible()
-  // The worker's own output; nothing of the manager's conversation.
+  // Its assignment as a card, then its own output; nothing of the manager's conversation.
   await expect(transcript(page)).toContainText(':worker result', { timeout: 30_000 })
+  const assignment = transcript(page).locator('[data-assignment]')
+  await expect(assignment).toHaveCount(1)
+  await expect(assignment).toContainText('Assignment')
+  await expect(assignment).toContainText('Return the synthetic worker result')
+  await expect(assignment).not.toContainText('SYSTEM:')
+  expect(await transcript(page).evaluate(node => node.innerText.indexOf('Return the synthetic worker result') < node.innerText.indexOf(':worker result'))).toBe(true)
   const text = await transcript(page).innerText()
   expect(text).not.toContain('worker spawned')
   expect(text).not.toContain('Delegate the fixture task')
@@ -281,6 +287,7 @@ test('the worker view shows the worker\'s own transcript and status, read-only',
   // The same after a reload, and nothing overflows the page in the All view.
   await page.reload()
   await expect(transcript(page)).toContainText(':worker result', { timeout: 30_000 })
+  await expect(transcript(page).locator('[data-assignment]')).toHaveCount(1)
   expect(((await transcript(page).innerText()).match(/:worker result/g) ?? []).length).toBe(1)
   await expect(page.getByRole('alert')).toHaveCount(0)
   await page.getByRole('button', { name: 'All', exact: true }).click()
