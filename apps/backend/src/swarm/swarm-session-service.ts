@@ -1,4 +1,5 @@
 import { isEnoentError } from "../utils/fs-errors.js";
+import { ConversationTimeline } from "./session/conversation-timeline.js";
 import { TaskNotesStore } from './task-notes-store.js';
 import { existsSync } from "node:fs";
 import { readSessionMeta } from "./session/session-manifest.js";
@@ -408,6 +409,14 @@ export class SwarmSessionService {
           forkedDescriptor.agentId,
           normalizedFromMessageId ?? (options?.historical ? options.sourcePoint?.entryId : undefined)
         );
+        if (options?.sourcePoint) {
+          const count = options.sourcePoint.sequence;
+          const label = sourceDescriptor.sessionLabel ?? sourceDescriptor.displayName ?? sourceDescriptor.agentId;
+          new ConversationTimeline({ now: this.options.now }).appendConversationEntry(forkedDescriptor, {
+            type: "conversation_message", agentId: forkedDescriptor.agentId, role: "system", source: "system", timestamp: this.options.now(),
+            text: `${count} earlier conversation item${count === 1 ? "" : "s"} inherited from “${label}”. Send a message to continue.`,
+          });
+        }
       },
       beforeRollbackRemoval: async () => {
         await rollbackSecureAccess?.();

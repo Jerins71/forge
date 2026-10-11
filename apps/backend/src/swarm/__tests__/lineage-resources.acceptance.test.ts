@@ -25,6 +25,18 @@ async function fixture() {
   return {dataDir,source,target,options,notes,runtime,copyHistory,copyAccess,service:new SwarmSessionService(options)};
 }
 describe('lazy fork file-backed resource policy',()=>{
+  // A lazy fork has no provider yet, but its initial canonical transcript must
+  // explain the inherited context for both a manager fork and worker continuation.
+  it.each(['manager', 'worker'] as const)('persists visible inherited context for a %s source before the first send', async role => {
+    const f = await fixture();
+    f.source.role = role;
+    f.source.displayName = 'Source conversation';
+    await f.service.forkSession('source', { sessionAgentId: 'target', continueWorker: role === 'worker', sourcePoint: { threadId: 'source', sequence: 2, entryId: 'last' } });
+    const rows = (await readFile(f.target.sessionFile, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    expect(rows.filter(row => row.customType === 'swarm_conversation_entry')).toEqual([expect.objectContaining({ data: expect.objectContaining({ agentId: 'target', role: 'system', text: '2 earlier conversation items inherited from “Source conversation”. Send a message to continue.' }) })]);
+    expect(f.runtime).not.toHaveBeenCalled();
+    expect(f.copyHistory).not.toHaveBeenCalled();
+  });
   it('snapshots notes and memory provenance without copying history, starting providers, or transferring credentials',async()=>{
     const f=await fixture();await f.service.forkSession('source',{sessionAgentId:'target',sourcePoint:{threadId:'source',sequence:2,entryId:'last'}});
     expect(f.runtime).not.toHaveBeenCalled();expect(f.copyHistory).not.toHaveBeenCalled();expect(f.copyAccess).toHaveBeenCalledOnce(); // Policy owner clones only exclusions and explicit access policy, never leases/credentials.
