@@ -221,7 +221,7 @@ export function migrateControlDatabase(database: Database, identity: { environme
   if (existing.length) {
     if (!existing.some(row => row.name === "environment_meta")) throw new Error("Incompatible environment control database; select a fresh data root");
     const meta = database.prepare("SELECT schema_version FROM environment_meta WHERE singleton=1").get() as { schema_version: number } | undefined;
-    if (meta?.schema_version !== 3) throw new Error("Incompatible environment control schema; select a fresh data root");
+    if (meta?.schema_version !== 3 || !["orchestration_assignments", "orchestration_transfers"].every(name => existing.some(row => row.name === name))) throw new Error("Incompatible environment control schema; select a fresh data root");
     return;
   }
   database.transaction(() => {

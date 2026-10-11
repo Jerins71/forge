@@ -56,6 +56,12 @@ describe("retained lifecycle commit", () => {
     db.prepare("DELETE FROM events").run(); rebuildLifecycleProjections(db);
     expect(loadState(db).threads.thread.threadId).toBe("thread");
   });
+  it("rejects a previous v3 schema missing the authoritative assignment projections without repairing it", async () => {
+    const db = await database(); await initialize(db);
+    db.exec("DROP TABLE orchestration_transfers; DROP TABLE orchestration_assignments");
+    await expect(initialize(db)).rejects.toThrow(/incompatible/i);
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name IN ('orchestration_assignments','orchestration_transfers')").all()).toEqual([]);
+  });
   it("rejects an incompatible database without creating tables or importing files", async () => {
     const db = await database(); db.exec("CREATE TABLE environment_meta (singleton INTEGER PRIMARY KEY, schema_version INTEGER); INSERT INTO environment_meta VALUES (1,2)");
     await expect(initialize(db)).rejects.toThrow(/incompatible/i);
