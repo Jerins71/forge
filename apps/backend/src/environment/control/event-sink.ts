@@ -14,7 +14,7 @@ import { decide } from "./orchestration/kernel.js";
 import { lineageSnapshot,sessionTransferCapabilities } from "./orchestration/transfers.js";
 import { loadState, projectLifecycle } from "./orchestration/store.js";
 import type { CoreCommand, Decision } from "./orchestration/types.js";
-import { requestChoice, requestSession, requestAttention } from "./orchestration/request-projection.js";
+import { requestChoice, requestChoiceId, requestSession, requestAttention, storedChoice } from "./orchestration/request-projection.js";
 
 type ShellEvent = Extract<ShellStreamItem, { kind: "event" }>["event"];
 type DetailEvent = Extract<DetailStreamItem, { kind: "event" }>["event"];
@@ -276,7 +276,8 @@ export function createEventSink(database: Database, clock: () => number, random:
         }
         projectLifecycle(database, event);
         if ("request" in event) {
-          const choice = requestChoice(event.request);
+          // The projection just written carries the choice's times; the bare request does not.
+          const choice = storedChoice(database, requestChoiceId(event.request.requestId)) ?? requestChoice(event.request);
           if (choice) sink.append(tx, { topic: "detail", sessionId: requestSession(loadState(database).threads[event.request.threadId]), event: { type: "choice.upsert", choice } });
         }
         if (event.type === "input.recorded") {

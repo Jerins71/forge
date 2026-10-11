@@ -29,10 +29,15 @@ export const ContextHandoffSchema = O({
   budget: O({ maxChars: ordinal, usedChars: ordinal, truncated: Type.Boolean() }),
 })
 export type ContextHandoff = Static<typeof ContextHandoffSchema>
+/** Which model a conversation ran on. Names only: never a credential or an endpoint. */
+export const ContextTransferModelSchema = O({ provider: id, modelId: id })
+export type ContextTransferModel = Static<typeof ContextTransferModelSchema>
 export const ContextTransferSchema = O({
   transferId: id, kind: E('fork', 'provider_switch', 'merge_back', 'worker_input', 'worker_result'),
   source: ContextSourcePointSchema, basePoint: Type.Optional(ContextSourcePointSchema), targetThreadId: id,
   targetRunId: Type.Optional(id), sourceProvider: Type.Optional(id), targetProvider: Type.Optional(id),
+  /** The model before and after. Equal models mean the provider was only restarted, for example after a sign-in change. */
+  sourceModel: Type.Optional(ContextTransferModelSchema), targetModel: Type.Optional(ContextTransferModelSchema),
   strategy: E('unresolved', 'native_fork', 'portable_context', 'delta_context', 'canonical_input'),
   state: E('pending', 'resolving', 'resolved', 'dispatch_marked', 'consumed', 'unknown', 'failed', 'superseded'),
   createdAt: ordinal, consumingAttemptId: Type.Optional(id), consumedAt: Type.Optional(ordinal), handoffId: Type.Optional(id),

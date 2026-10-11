@@ -3,6 +3,7 @@ import { BellOff, CheckCheck, ChevronDown, ChevronUp, CircleAlert, Globe, Inbox,
 import { cn } from '@/lib/utils'
 import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import type { SessionRow } from '@/lib/agent-hierarchy'
+import { RemoteSessionMenu } from './RemoteSessionMenu'
 import { SessionContextMenu, type SessionContextMenuActions } from './SessionContextMenu'
 import { SidebarRoomAvatar } from './shared'
 import { formatRoomsInboxRelativeTime, presentRoomsInboxReason } from './rooms-inbox-presenter'
@@ -389,7 +390,12 @@ function InboxSessionRow({
     </div>
   )
 
-  if (!sessionMenu) return row
+  if (!sessionMenu) {
+    // A session on another machine has the same menu, run on that machine.
+    return primaryOriginId && session.identity.originId !== primaryOriginId
+      ? <RemoteSessionMenu environmentId={session.identity.originId} sessionId={session.identity.sessionAgentId}>{row}</RemoteSessionMenu>
+      : row
+  }
 
   return (
     <SessionContextMenu session={sessionMenu.session} actions={sessionMenu.actions}>

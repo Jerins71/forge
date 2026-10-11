@@ -15,7 +15,8 @@ export function createCoreLineagePort(sink:EventSink,control:EnvironmentControlS
       control.record({type:'thread.create',commandId:`settings-owner:${options.random()}`,now:options.clock(),threadId,role:'manager',projectId:descriptor.profileId ?? descriptor.agentId,model:descriptor.model});
       state=loadState(sink.database);
     }
-    control.record({type:'transfer.create',commandId:`settings-switch:${options.random()}`,now:options.clock(),transferId:`settings-transfer:${options.random()}`,kind:'provider_switch',source:resolveSourcePoint(state,threadId,{kind:'latest_stable'},entries),targetThreadId:threadId,targetModel:model,authorized:true});
+    // The descriptor still names the model in use: it changes only after this transfer is recorded.
+    control.record({type:'transfer.create',commandId:`settings-switch:${options.random()}`,now:options.clock(),transferId:`settings-transfer:${options.random()}`,kind:'provider_switch',source:resolveSourcePoint(state,threadId,{kind:'latest_stable'},entries),targetThreadId:threadId,targetModel:model,sourceModel:state.threads[threadId]?.model ?? options.getAgent(threadId)?.model,authorized:true});
   };
   // Threads whose credentials changed while they were working. Memory only: a restart starts every provider afresh.
   const refreshes=new Set<string>();

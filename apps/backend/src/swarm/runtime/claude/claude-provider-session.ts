@@ -20,7 +20,7 @@ export class ClaudeProviderSession {
   private readonly tools = new Map<string, { name: string; origin: Origin; turn: ProviderTurnRef }>();
   private readonly tasks = new Map<string, { parent: ProviderTurnRef; agent: boolean; toolId?: string }>();
   private readonly messages = new Map<string, string>();
-  private readonly blocks = new Map<string, { id: string; text: string; channel: "assistant" | "reasoning" }>();
+  private readonly blocks = new Map<string, { id: string; text: string; channel: "assistant" | "reasoning"; done?: boolean }>();
   private readonly requests = new Map<string, { ref: ProviderRequestRef; resolve(answers: ChoiceAnswer[]): void; cancel(): void }>();
   private compacting = false;
   private interrupted = false;
@@ -188,7 +188,10 @@ export class ClaudeProviderSession {
     if (frame.type === "stream_event") {
       const event = frame.event;
       const prefix = parent ?? "root";
-      if (event.type === "message_start") this.messages.set(prefix, event.message.id);
+      if (event.type === "message_start") {
+        this.messages.set(prefix, event.message.id);
+        for (const key of this.blocks.keys()) if (key.startsWith(`${prefix}:`)) this.blocks.delete(key);
+      }
       if (event.type === "content_block_start" && (event.content_block.type === "text" || event.content_block.type === "thinking")) {
         const block = event.content_block;
         const value = { id: `${this.messages.get(prefix) || frame.uuid}:${event.index}`, text: block.type === "text" ? block.text : block.thinking,
@@ -205,15 +208,22 @@ export class ClaudeProviderSession {
         if (value) { const text = event.delta.type === "text_delta" ? event.delta.text : event.delta.thinking; value.text += text; this.message(value, currentOrigin, turn, "delta", text); }
       } else if (event.type === "content_block_stop") {
         const value = this.blocks.get(`${prefix}:${event.index}`);
-        if (value) this.message(value, currentOrigin, turn, "complete", value.text);
+        if (value && !value.done) { value.done = true; this.message(value, currentOrigin, turn, "complete", value.text); }
       }
     }
     if (frame.type === "assistant") {
       for (const [index, block] of frame.message.content.entries()) {
-        if (block.type === "text" || block.type === "thinking") {
-          if (!this.blocks.has(`${parent ?? "root"}:${index}`)) this.message({ id: `${frame.message.id}:${index}`, channel: block.type === "text" ? "assistant" : "reasoning" }, currentOrigin, turn, "complete", block.type === "text" ? block.text : block.thinking);
-        } else if (block.type === "redacted_thinking") {
-          if (!this.blocks.has(`${parent ?? "root"}:${index}`)) this.message({ id: `${frame.message.id}:${index}`, channel: "reasoning" }, currentOrigin, turn, "complete", "");
+        if (block.type === "text" || block.type === "thinking" || block.type === "redacted_thinking") {
+          // The CLI sends a finished block as an assistant frame, usually before its stream stop and alone at
+          // index 0. Match it to the oldest streamed block of the same channel instead of by position.
+          const channel = block.type === "text" ? "assistant" as const : "reasoning" as const;
+          const text = block.type === "text" ? block.text : block.type === "thinking" ? block.thinking : "";
+          const streamed = [...this.blocks].find(([key, value]) => key.startsWith(`${parent ?? "root"}:`) && value.channel === channel);
+          if (!streamed) this.message({ id: `${frame.message.id}:${index}`, channel }, currentOrigin, turn, "complete", text);
+          else {
+            if (!streamed[1].done) this.message(streamed[1], currentOrigin, turn, "complete", text || streamed[1].text);
+            this.blocks.delete(streamed[0]);
+          }
         } else if (block.type === "tool_use") {
           const name = block.name.replace(/^mcp__forge__/, "");
           if (!this.tools.has(block.id)) this.publish({ type: "tool", origin: currentOrigin,
@@ -221,7 +231,6 @@ export class ClaudeProviderSession {
           this.tools.set(block.id, { name, origin: currentOrigin, turn });
         }
       }
-      for (const key of this.blocks.keys()) if (key.startsWith(`${parent ?? "root"}:`)) this.blocks.delete(key);
     }
     if (frame.type === "user" && Array.isArray(frame.message.content)) for (const block of frame.message.content) {
       if (block.type !== "tool_result") continue;

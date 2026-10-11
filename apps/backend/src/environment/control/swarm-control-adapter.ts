@@ -115,8 +115,8 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
     },
     async applyChoice(input) { return swarmManager.applyControlledChoice(input); },
     async stopSession(input) {
-      // The core emits a release for each owned binding, including child Stop
-      // effects. Recovery of one dead provider must leave healthy workers alive.
+      // Stop and assignment cancellation belong to the kernel. Release drains only
+      // this owned binding; recovery and provider handoffs leave healthy workers alive.
       return { stopped: await swarmManager.releaseControlledProvider(input.sessionId) };
     },
   };

@@ -50,6 +50,7 @@ import type { CodexNormalizedDetailRow } from "./codex-app-server-event-normaliz
 
 export class CodexAppServerService {
   private sharedClient: CodexAppServerClientPort | undefined;
+  private disposed = false;
   private clientStartPromise: Promise<CodexAppServerClientPort> | undefined;
   private readonly sidecarRuntimeByAgentId = new Map<string, CodexSidecarRuntimeState>();
   private pendingPriorTurnlessInvalidationGeneration = 0;
@@ -87,6 +88,11 @@ export class CodexAppServerService {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  /** The catalog for display: cached, single-flight, and never held up by slow MCP status. */
+  browseCodexCatalog(): Promise<CodexCatalogSnapshot> {
+    return this.mcpCatalog.browseCatalog();
   }
 
   async listCodexMcpTools(): Promise<CodexCatalogSnapshot> {
@@ -541,6 +547,8 @@ export class CodexAppServerService {
   }
 
   dispose(): void {
+    // Shutdown is final: a request that fails now must not start another app-server process.
+    this.disposed = true;
     this.elicitationBroker.cancelAll();
     for (const runtime of this.sidecarRuntimeByAgentId.values()) {
       if (runtime.activeTurn) {
@@ -643,6 +651,7 @@ export class CodexAppServerService {
   }
 
   private async ensureSharedClient(): Promise<CodexAppServerClientPort> {
+    if (this.disposed) throw new Error("Codex app-server is shut down");
     if (this.sharedClient && !this.sharedClient.isDisposed()) {
       return this.sharedClient;
     }

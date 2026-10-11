@@ -513,6 +513,7 @@ export class SwarmRuntimeLifecycleCoordinator {
   emitImmediateManualManagerStopNotice(
     agentId: string,
     text = MANUAL_MANAGER_STOP_NOTICE,
+    systemNoticeKind?: "worker_stopped",
   ): void {
     this.clearPendingManualManagerStopNotice(agentId);
     this.options.controller.clearInvalidatedManualStopMessageEndAllowance(agentId);
@@ -523,6 +524,7 @@ export class SwarmRuntimeLifecycleCoordinator {
       text,
       timestamp: this.options.now(),
       source: "system",
+      ...(systemNoticeKind ? { systemNoticeKind } : {}),
     });
   }
 

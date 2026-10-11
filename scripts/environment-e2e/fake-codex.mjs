@@ -123,6 +123,13 @@ async function runTurn(turn, text) {
       if (result.success !== true) throw new Error('Fixture worker spawn failed');
       reply = `fixture:${fixture.instanceId}:worker spawned`;
     }
+    if (text.includes('[fixture:spawn-hold]')) {
+      count('workerSpawns');
+      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-hold-worker', customSpecialist: 'fixture-worker',
+        cwd: checkout, initialMessage: '[fixture:hold] Keep working until stopped.' });
+      if (result.success !== true) throw new Error('Fixture worker spawn failed');
+      reply = `fixture:${fixture.instanceId}:hold worker spawned`;
+    }
     if (text.includes('[fixture:spawn-activity]')) {
       count('workerSpawns');
       const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-activity-worker', customSpecialist: 'fixture-worker',

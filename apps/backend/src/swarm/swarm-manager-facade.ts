@@ -304,8 +304,8 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
     return this.services.sessions.restoreProfile(profileId);
   }
 
-  stopSession(agentId: string): ReturnType<SessionLifecycleCoordinator["stopSession"]> {
-    return this.services.sessions.stopSession(agentId);
+  stopSession(agentId: string, options?: { manualStopNotice?: boolean }): ReturnType<SessionLifecycleCoordinator["stopSession"]> {
+    return this.services.sessions.stopSession(agentId, options);
   }
 
   resumeSession(agentId: string): ReturnType<SessionLifecycleCoordinator["resumeSession"]> {
@@ -390,7 +390,7 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
 
   async stopWorker(agentId: string): Promise<void> {
     this.services.codexPlugin.markWorkerStoppedAndCloseScope(agentId);
-    await this.services.agents.stopWorker(agentId);
+    await this.services.agents.stopWorkerByUser(agentId);
   }
 
   resumeWorker(agentId: string): Promise<void> {
@@ -1021,6 +1021,8 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
   ): Promise<AgentDescriptor> {
     return this.services.codexPlugin.retryWorker(managerAgentId, input);
   }
+
+  shutdownCodexAppServer(): void { this.services.codexPlugin.shutdown(); }
 
   browseCodexMcpCatalog(managerAgentId: string): Promise<CodexCatalogSnapshot> {
     return this.services.codexPlugin.browseCatalog(managerAgentId);

@@ -582,7 +582,7 @@ test('native choices expire after restart and remain readable without answer con
   await expect(page.getByText('Which synthetic option?', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible()
   await fleet!.stop(a); await fleet!.start(a); await page.reload()
-  const row = page.locator('[data-choice-id]').filter({ hasText: 'Choice expired' })
+  const row = page.locator('[data-choice-id]').filter({ hasText: 'Question expired' })
   await expect(row).toBeVisible()
   await expect(page.getByRole('button', { name: 'Submit', exact: true })).toHaveCount(0)
   await row.getByRole('button').click()

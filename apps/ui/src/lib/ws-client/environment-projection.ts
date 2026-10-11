@@ -6,6 +6,7 @@ import {
   type ConversationMessageEvent,
   type ManagerProfile,
 } from '@forge/protocol'
+import type { ChoiceRequestEvent } from '@forge/protocol'
 import type { ArtifactRef } from '@forge/protocol/environment-v2'
 import type { EnvironmentActivityEntry } from '../ws-state'
 import type { SessionSummary } from '@forge/protocol/environment-v2'
@@ -152,7 +153,10 @@ export function projectItems(
       turnId: i.userTurnId,
       ...(i.kind === 'worker_result' ? { sourceWorkerId: i.actorId } : {}),
       // An internal input is never the user's bubble: in a worker's view it is the assignment card.
-      ...(isInternalInput(i) ? { role: 'system', source: 'system', systemNoticeKind: 'assignment' } : {
+      ...(isInternalInput(i) ? { role: 'system', source: 'system', systemNoticeKind: 'assignment' }
+        // A model switch or a worker the user stopped is a marker in the timeline, not something the assistant said.
+        : i.kind === 'assistant' && (i.source === 'system:model_change' || i.source === 'system:worker_stopped')
+          ? { role: 'system', source: 'system', systemNoticeKind: i.source === 'system:model_change' ? 'model_change' : 'worker_stopped' } : {
         role: i.kind === 'user' ? 'user' : i.kind === 'worker_result' ? 'system' : 'assistant',
         source: i.kind === 'user' ? 'user_input' : i.kind === 'worker_result' ? 'worker_report' : 'assistant',
       }),
@@ -162,6 +166,41 @@ export function projectItems(
       ...(i.commandId && !isInternalInput(i) ? { clientRequestId: i.commandId } : {}),
       ...(i.artifacts.length ? { attachments: i.artifacts.map(artifactAttachment) } : {}),
     })) as ConversationMessageEvent[]
+}
+
+/**
+ * Choices sit where they were asked and keep that time, whatever happens to them later. One with no
+ * recorded time (from an older environment) follows the messages, as it always did, and shows no time.
+ */
+export function withChoicesInTimelineOrder(
+  messages: ConversationMessageEvent[],
+  choices: NonNullable<DetailState['projection']>['choices'],
+  hasOlder = false,
+): Array<ConversationMessageEvent | ChoiceRequestEvent> {
+  const rows: Array<ConversationMessageEvent | ChoiceRequestEvent> = [...messages]
+  const untimed: ChoiceRequestEvent[] = []
+  const timed = choices
+    .filter((choice) => choice.requestedAt || choice.status !== 'answered')
+    .map((choice): ChoiceRequestEvent => ({
+      type: 'choice_request',
+      agentId: choice.agentId,
+      choiceId: choice.choiceId,
+      status: choice.status === 'interrupted' ? 'expired' : choice.status,
+      questions: choice.questions,
+      ...(choice.answers ? { answers: choice.answers } : {}),
+      timestamp: choice.requestedAt ?? '',
+    }))
+    .filter((row) => row.timestamp ? true : (untimed.push(row), false))
+    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
+  for (const row of timed) {
+    const asked = Date.parse(row.timestamp)
+    let at = rows.length
+    while (at > 0 && Date.parse(rows[at - 1]!.timestamp) > asked) at--
+    // Asked before the loaded page begins: it belongs with the older history, not above this page.
+    if (at === 0 && hasOlder && row.status !== 'pending') continue
+    rows.splice(at, 0, row)
+  }
+  return [...rows, ...untimed]
 }
 
 /** Tool and activity items render collapsed; their full content is fetched by `contentRef` on expansion. */

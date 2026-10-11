@@ -55,7 +55,7 @@ export function createDetailStream(deps: StreamDependencies) {
           const choices = (deps.database.prepare("SELECT choice_json FROM control_choices WHERE session_id = ? AND state = 'pending' ORDER BY choice_id LIMIT 21").all(input.sessionId) as { choice_json: string }[]).map(row => JSON.parse(row.choice_json) as ChoiceSummary);
           if (choices.length > 20) throw new StreamFault("PAYLOAD_TOO_LARGE", "Too many pending choices.");
           const pendingChoices = choices.length;
-          choices.push(...(deps.database.prepare("SELECT choice_json FROM control_choices WHERE session_id = ? AND state IN ('expired','cancelled','interrupted') ORDER BY updated_sequence DESC,choice_id LIMIT ?")
+          choices.push(...(deps.database.prepare("SELECT choice_json FROM control_choices WHERE session_id = ? AND state IN ('answered','expired','cancelled','interrupted') ORDER BY updated_sequence DESC,choice_id LIMIT ?")
             .all(input.sessionId, 20 - pendingChoices) as { choice_json: string }[]).map(row => JSON.parse(row.choice_json) as ChoiceSummary));
           const feature = (type: "plan.upsert" | "goal.upsert") => {
             const row = deps.database.prepare("SELECT payload_json FROM events WHERE session_id=? AND event_type=? ORDER BY sequence DESC LIMIT 1").get(input.sessionId, type) as { payload_json: string } | undefined;

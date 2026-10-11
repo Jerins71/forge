@@ -212,6 +212,95 @@ test('a new thread on a paired machine starts with the chosen work mode and rost
   assertions.launchRemote = { environmentId: b.environmentId, ...launched }
 })
 
+test('a session on a paired machine is archived and deleted from its row, live and after reload', async ({ page }) => {
+  const { b } = fleet
+  const session = await bootstrap(b)
+  const projectId = (await shellSession(b, b.sessionId))!.projectId
+  const launch = async (title: string) => {
+    const commandId = randomUUID()
+    const receipt = await fixtureRpcOnce(b.baseUrl, session, 'session.launch', { commandId, projectId, title, workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: title, artifactIds: [] } })
+    await until(async () => (await shellSession(b, receipt.sessionId))?.status, status => status === 'idle', 30_000)
+    return receipt.sessionId as string
+  }
+  const archived = await launch('Remote session to archive')
+  const deleted = await launch('Remote session to delete')
+  const row = (sessionId: string) => page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${sessionId}"]`).filter({ visible: true })
+
+  await page.goto(fleet.uiUrl)
+  await expect(row(archived)).toHaveCount(1)
+  await expect(row(deleted)).toHaveCount(1)
+
+  // Archive: the same menu a local session has, applied on the machine that owns the session.
+  await row(archived).click({ button: 'right' })
+  await shot(page, 'remote-session-menu')
+  await page.getByRole('menuitem', { name: 'Archive', exact: true }).click()
+  await expect(row(archived)).toHaveCount(0)
+  await expect.poll(async () => (await shellSession(b, archived))?.archived).toBe(true)
+
+  // Delete asks first, then removes the session from that machine.
+  await row(deleted).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
+  await page.getByRole('button', { name: 'Delete session', exact: true }).click()
+  await expect(row(deleted)).toHaveCount(0)
+  await expect.poll(async () => (await shellSession(b, deleted)) ?? null).toBeNull()
+  await expect(page.getByRole('complementary').getByRole('alert')).toHaveCount(0)
+
+  await page.reload()
+  await expect(row(b.sessionId)).toHaveCount(1)
+  await expect(row(archived)).toHaveCount(0)
+  await expect(row(deleted)).toHaveCount(0)
+  // The project's own session keeps Archive but, as on this machine, is not deleted on its own.
+  await row(b.sessionId).click({ button: 'right' })
+  await expect(page.getByRole('menuitem', { name: 'Archive', exact: true })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'Delete', exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await shot(page, 'remote-session-removed')
+  assertions.remoteSessionMenu = { environmentId: b.environmentId, archived, deleted }
+  expect(renderErrors).toEqual([])
+})
+
+test('a paired machine\'s session has the full session menu in the Inbox list', async ({ page }) => {
+  const { b } = fleet
+  const session = await bootstrap(b)
+  const projectId = (await shellSession(b, b.sessionId))!.projectId
+  const commandId = randomUUID()
+  const receipt = await fixtureRpcOnce(b.baseUrl, session, 'session.launch', { commandId, projectId, title: 'Remote inbox session', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Remote inbox session', artifactIds: [] } })
+  const sessionId = receipt.sessionId as string
+  await until(async () => (await shellSession(b, sessionId))?.status, status => status === 'idle', 30_000)
+  const row = () => page.locator(`[data-inbox-row="${b.environmentId}::${sessionId}"]`).filter({ visible: true })
+
+  await page.goto(fleet.uiUrl)
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
+  await expect(row()).toHaveCount(1)
+  await row().click({ button: 'right' })
+  // The same menu a local session has, limited to what the other machine supports.
+  for (const name of ['Mark as unread', 'Pin', 'Rename', 'Archive', 'Delete']) await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'Copy session data path' })).toHaveCount(0)
+  await shot(page, 'remote-inbox-menu')
+
+  await page.getByRole('menuitem', { name: 'Rename', exact: true }).click()
+  await page.getByPlaceholder('Session name', { exact: true }).fill('Remote inbox renamed')
+  await page.keyboard.press('Enter')
+  await expect.poll(async () => (await shellSession(b, sessionId))?.title).toBe('Remote inbox renamed')
+  await expect(row()).toContainText('Remote inbox renamed')
+
+  await row().click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Pin', exact: true }).click()
+  await expect.poll(async () => Boolean((await shellSession(b, sessionId))?.pinnedAt)).toBe(true)
+
+  await row().click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
+  await page.getByRole('button', { name: 'Delete session', exact: true }).click()
+  await expect(row()).toHaveCount(0)
+  await expect.poll(async () => (await shellSession(b, sessionId)) ?? null).toBeNull()
+  await page.reload()
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
+  await expect(row()).toHaveCount(0)
+  await expect(page.getByRole('complementary').getByRole('alert')).toHaveCount(0)
+  assertions.remoteInboxMenu = { environmentId: b.environmentId, sessionId, renamed: true, pinned: true, deleted: true }
+  expect(renderErrors).toEqual([])
+})
+
 test('a spawned worker leaves one result in the manager chat, live and after reload', async ({ page }) => {
   const { a } = fleet
   await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(viewedSession())}`)
@@ -481,5 +570,53 @@ test('the session in view stays read and out of Needs you across turns', async (
   await expect(page.locator(`[data-testid="needs-you"] [data-inbox-row$="::${viewedSession()}"]`)).toHaveCount(0)
   await shot(page, 'viewed-session-read')
   assertions.viewedSession = await state()
+  expect(renderErrors).toEqual([])
+})
+
+test('Archive all sessions archives every session but each checkout\'s own, here and on the paired machine', async ({ page }) => {
+  const { a, b } = fleet
+  const all = async (environment: UiEnvironment) => {
+    const rpc = await openFixtureRpc(environment.baseUrl, await bootstrap(environment))
+    try {
+      await rpc.call('shell.subscribe', {})
+      const snapshot = await until<{ sessions: SessionSummary[] } | undefined>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
+      const projectId = snapshot!.sessions.find(session => session.sessionId === environment.sessionId)!.projectId
+      return snapshot!.sessions.filter(session => session.projectId === projectId)
+    } finally { rpc.close() }
+  }
+  const before = { a: await all(a), b: await all(b) }
+  const open = (sessions: SessionSummary[], environment: UiEnvironment) => sessions.filter(session => !session.archived && session.sessionId !== environment.sessionId)
+  const expected = open(before.a, a).length + open(before.b, b).length
+  expect(open(before.a, a).length).toBeGreaterThan(0)
+  expect(open(before.b, b).length).toBeGreaterThan(0)
+
+  await page.goto(fleet.uiUrl)
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Projects/ }).click()
+  await page.getByRole('complementary').getByRole('button', { name: `Project actions for ${a.projectTitle}` }).filter({ visible: true }).first().click()
+  await page.getByRole('menuitem', { name: 'Archive all sessions…', exact: true }).click()
+  const dialog = page.getByTestId('archive-all-sessions')
+  // The confirmation states the count and what is spared.
+  await expect(dialog).toContainText(`Archive ${expected} sessions in “${a.projectTitle}” across 2 machines?`)
+  await expect(dialog).toContainText("The project's own session is kept and nothing is deleted")
+  await shot(page, 'archive-all-confirm')
+  await dialog.getByRole('button', { name: `Archive ${expected} sessions`, exact: true }).click()
+  await expect(dialog.getByRole('status')).toHaveText(`Archived ${expected} sessions.`, { timeout: 60_000 })
+  await shot(page, 'archive-all-done')
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click()
+
+  // On each machine: every other session is archived, none is gone, and the project's own is untouched.
+  for (const [environment, sessions] of [[a, before.a], [b, before.b]] as const) {
+    const after = await all(environment)
+    expect(after.map(session => session.sessionId).sort()).toEqual(sessions.map(session => session.sessionId).sort())
+    expect(after.filter(session => !session.archived).map(session => session.sessionId)).toEqual([environment.sessionId])
+  }
+  await page.reload()
+  await expect(page.getByRole('complementary').locator('[data-session-ref]').filter({ visible: true })).toHaveCount(1)
+  // Nothing left to do: the dialog says so instead of offering an empty action.
+  await page.getByRole('complementary').getByRole('button', { name: `Project actions for ${a.projectTitle}` }).filter({ visible: true }).first().click()
+  await page.getByRole('menuitem', { name: 'Archive all sessions…', exact: true }).click()
+  await expect(page.getByTestId('archive-all-sessions')).toContainText('has no sessions to archive')
+  await page.getByTestId('archive-all-sessions').getByRole('button', { name: 'OK', exact: true }).click()
+  assertions.archiveAll = { archived: expected, machines: 2 }
   expect(renderErrors).toEqual([])
 })

@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
-// Failure cases: the header names the wrong origin or hides what a handoff omitted or truncated;
+// Failure cases: the header names the wrong origin, shows internal IDs or provider IDs, counts a sign-in
+// refresh as a switch, or hides what a handoff omitted or truncated;
 // a fork drops its source point or model; a provider change runs without the user confirming a
 // handoff, or runs as a plain model override; merge-back or worker continuation is offered where
 // the environment or provider cannot do it, or is refused without saying why.
@@ -19,7 +20,7 @@ import { ForkButton } from '../message-list/ForkButton'
 import { SessionModelPicker } from '../message-input/SessionModelPicker'
 import type { SessionModelPickerConfig } from '../message-input/types'
 import { LineageIndicator } from './LineageIndicator'
-import { mergeBackUnsupportedReason, summarizeLineage } from './lineage-presentation'
+import { mergeBackUnsupportedReason, providerChange, summarizeLineage, transfersNewestFirst } from './lineage-presentation'
 
 vi.mock('@/lib/use-manager-selection-catalog', () => ({
   useManagerSelectionCatalog: () => ({ catalog: makeManagerSelectionCatalog(), loading: false, error: null, refetch: () => {} }),
@@ -72,20 +73,34 @@ function lineage(overrides: Partial<SessionLineageSnapshot> = {}): SessionLineag
 const labels = (id: string) => ({ 'parent-session': 'Builder' } as Record<string, string>)[id]
 
 describe('lineage summary', () => {
-  it('names the fork parent and base message, then the provider it switched from', () => {
-    expect(summarizeLineage(lineage(), labels)).toEqual({ label: 'Forked from Builder at message entry-42 · switched from codex-native', tone: 'neutral' })
-    expect(summarizeLineage(lineage({ transfers: [] }), labels)?.label).toBe('Forked from Builder at message entry-42')
+  it('names the fork parent, then the provider it switched from, by their display names', () => {
+    expect(summarizeLineage(lineage(), labels)).toEqual({ label: 'Forked from Builder · switched from Codex', tone: 'neutral' })
+    expect(summarizeLineage(lineage({ transfers: [] }), labels)?.label).toBe('Forked from Builder')
   })
-  it('falls back to the sequence and the session ID when the base entry or parent title is unknown', () => {
-    const snapshot = lineage({ transfers: [] })
-    snapshot.lineage = { ...snapshot.lineage!, basePoint: { threadId: 'parent-session', sequence: 42 } }
-    expect(summarizeLineage(snapshot, () => undefined)?.label).toBe('Forked from parent-session at message #42')
+  it('never shows a session ID when the parent title is unknown', () => {
+    expect(summarizeLineage(lineage({ transfers: [] }), () => undefined)?.label).toBe('Forked from another conversation')
+  })
+  it('does not call a sign-in refresh or a model change on the same provider a switch', () => {
+    const base = lineage().transfers[0]!
+    const sol = { provider: 'codex-native', modelId: 'gpt-6-sol' }
+    // The provider binding reports `codex` where the model says `codex-native`: still the same provider.
+    const refresh = { ...base, sourceProvider: 'codex', targetProvider: 'codex-native', sourceModel: sol, targetModel: sol }
+    const modelChange = { ...refresh, targetModel: { provider: 'codex-native', modelId: 'gpt-6-luna' } }
+    expect(providerChange(refresh)).toBe('refresh')
+    expect(providerChange(modelChange)).toBe('model')
+    expect(providerChange(base)).toBe('provider')
+    expect(summarizeLineage(lineage({ lineage: null, transfers: [refresh], handoffs: [] }), labels)).toBeNull()
+    expect(summarizeLineage(lineage({ lineage: null, transfers: [modelChange], handoffs: [] }), labels)).toBeNull()
+    expect(transfersNewestFirst(lineage({ transfers: [refresh, modelChange] })).map(transfer => transfer.targetModel?.modelId)).toEqual(['gpt-6-luna'])
+    // An older environment records no models: a same-provider transfer still raises no header chip.
+    expect(summarizeLineage(lineage({ lineage: null, transfers: [{ ...base, sourceProvider: 'codex', targetProvider: 'codex-native' }], handoffs: [] }), labels)).toBeNull()
   })
   it('describes a continued worker and a provider switch on a session with no parent', () => {
     const continued = lineage({ transfers: [] })
     continued.lineage = { ...continued.lineage!, relationship: 'continued_worker' }
-    expect(summarizeLineage(continued, labels)?.label).toBe('Continued from a worker of Builder')
-    expect(summarizeLineage(lineage({ lineage: null, transfers: [lineage().transfers[0]!] }), labels)?.label).toBe('Switched from codex-native')
+    expect(summarizeLineage(continued, labels)?.label).toBe('Continued from Builder')
+    expect(summarizeLineage(continued, () => undefined)?.label).toBe('Continued from a worker')
+    expect(summarizeLineage(lineage({ lineage: null, transfers: [lineage().transfers[0]!] }), labels)?.label).toBe('Switched from Codex')
   })
   it('has nothing to show for a session with no lineage and no transfers', () => {
     expect(summarizeLineage(lineage({ lineage: null, transfers: [], handoffs: [] }), labels)).toBeNull()
@@ -93,11 +108,11 @@ describe('lineage summary', () => {
   })
   it('warns when the latest transfer failed', () => {
     const failed = lineage({ lineage: null, handoffs: [], transfers: [{ ...lineage().transfers[0]!, state: 'failed', error: { code: 'UNSUPPORTED', message: 'cursor does not accept portable context' } }] })
-    expect(summarizeLineage(failed, labels)).toEqual({ label: 'Switch from codex-native failed', tone: 'warning' })
+    expect(summarizeLineage(failed, labels)).toEqual({ label: 'Switch from Codex failed', tone: 'warning' })
   })
   it('reports a provider that declared merge-back unsupported, and only while that is its latest answer', () => {
     const transfer = { ...lineage().transfers[0]!, transferId: 'm1', kind: 'merge_back' as const, state: 'failed' as const, createdAt: 5, error: { code: 'UNSUPPORTED' as const, message: 'claude-native cannot accept a merge' } }
-    expect(mergeBackUnsupportedReason(lineage({ transfers: [transfer] }))).toBe('UNSUPPORTED: claude-native cannot accept a merge')
+    expect(mergeBackUnsupportedReason(lineage({ transfers: [transfer] }))).toBe('claude-native cannot accept a merge')
     expect(mergeBackUnsupportedReason(lineage({ transfers: [transfer, { ...transfer, transferId: 'm2', state: 'consumed', createdAt: 6, error: undefined }] }))).toBeNull()
     expect(mergeBackUnsupportedReason(lineage({ transfers: [{ ...transfer, error: { code: 'SOURCE_UNAVAILABLE', message: 'gone' } }] }))).toBeNull()
     expect(mergeBackUnsupportedReason(lineage())).toBeNull()
@@ -117,25 +132,25 @@ describe('LineageIndicator', () => {
   it('shows a compact label and a popover with handoff coverage and provenance', () => {
     const onOpenSession = vi.fn()
     render(createElement(LineageIndicator, { lineage: lineage(), resolveSessionLabel: labels, onOpenSession }))
-    const trigger = getByRole(container, 'button', { name: 'Lineage: Forked from Builder at message entry-42 · switched from codex-native' })
+    const trigger = getByRole(container, 'button', { name: 'Lineage: Forked from Builder · switched from Codex' })
+    expect(trigger.getAttribute('data-base-entry')).toBe('entry-42')
     expect(trigger.textContent).toContain('Forked from Builder')
     click(trigger)
     const popover = getByRole(body(), 'dialog')
     const text = popover.textContent!
     expect(text).toContain('Forked from Builder')
-    expect(text).toContain('message entry-42')
-    expect(text).toContain('Provider switch')
-    expect(text).toContain('codex-native → claude-native')
-    expect(text).toContain('Portable context')
+    expect(text).toContain('up to message 42')
+    expect(text).toContain('Switched to Claude')
+    expect(text).toContain('Codex → Claude')
+    expect(text).toContain('Earlier conversation carried over')
+    // No entry IDs, provider IDs, renderer names, hashes or raw states reach the reader.
+    for (const internal of ['entry-42', 'codex-native', 'claude-native', 'canonical_jsonl', 'forge-portable-v1', 'ab12ab12ab12', 'resolved', 'consumed']) expect(text).not.toContain(internal)
     expect(getByLabelText(popover, 'Handoff coverage for Provider switch').textContent).toBe('Included2 of 4Omitted1Truncated1')
     expect(text).toContain('120,000 of 120,000 characters · budget reached')
-    expect(text).toContain('canonical_jsonl')
-    expect(text).toContain('forge-portable-v1')
     expect(text).toContain('Credentials excluded')
     expect(text).toContain('Tool grants excluded')
-    expect(text).toContain('ab12ab12ab12')
     // A native fork carries no rendered handoff, so it claims no coverage.
-    expect(text).toContain('Native fork')
+    expect(text).toContain('Full history kept')
     expect(popover.querySelectorAll('[aria-label^="Handoff coverage"]')).toHaveLength(1)
     click(getByRole(popover, 'button', { name: 'Open Builder' }))
     expect(onOpenSession).toHaveBeenCalledWith('parent-session')
@@ -159,8 +174,8 @@ describe('LineageIndicator', () => {
     expect(getByLabelText(popover, 'Handoff coverage for Provider switch from Builder').textContent).toBe('Included2 of 3Omitted1Truncated0')
     expect(getByLabelText(popover, 'Handoff coverage for Provider switch from Fork').textContent).toBe('Included0 of 1Omitted0Truncated1')
     expect(popover.querySelectorAll('[aria-label^="Handoff coverage"]')).toHaveLength(2)
-    expect(popover.textContent).toContain('Builder · up to message entry-42')
-    expect(popover.textContent).toContain('Fork · up to message #57')
+    expect(popover.textContent).toContain('Builder · up to message 42')
+    expect(popover.textContent).toContain('Fork · up to message 57')
     expect(popover.textContent).toContain('120,000 of 120,000 characters · budget reached')
   })
   it('falls back to the flat coverage when the source list is empty', () => {
@@ -172,8 +187,8 @@ describe('LineageIndicator', () => {
   })
   it('shows a failed transfer with its typed reason', () => {
     render(createElement(LineageIndicator, { lineage: lineage({ lineage: null, handoffs: [], transfers: [{ ...lineage().transfers[0]!, state: 'failed', error: { code: 'UNSUPPORTED', message: 'cursor does not accept portable context' } }] }) }))
-    click(getByRole(container, 'button', { name: 'Lineage: Switch from codex-native failed' }))
-    expect(getByRole(body(), 'alert').textContent).toBe('UNSUPPORTED: cursor does not accept portable context')
+    click(getByRole(container, 'button', { name: 'Lineage: Switch from Codex failed' }))
+    expect(getByRole(body(), 'alert').textContent).toBe('cursor does not accept portable context')
   })
 })
 

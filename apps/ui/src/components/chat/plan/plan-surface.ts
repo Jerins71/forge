@@ -1,9 +1,13 @@
-/** Shared max width for plan / work-graph surfaces in chat (inline card + summary). */
-export const PLAN_SURFACE_WIDTH_CLASS = 'max-w-3xl'
+/**
+ * Width of plan surfaces in chat (inline card + summary), from the shared width tokens in styles.css.
+ * A checklist keeps the form measure so step and status stay close; a work graph uses the whole column.
+ */
+export function planSurfaceWidthClass(isGraph: boolean): string {
+  return isGraph ? 'w-full' : 'w-full max-w-(--content-max-form)'
+}
 
 /**
- * Dock popover width matching {@link PLAN_SURFACE_WIDTH_CLASS}.
- * `max-w-3xl` is 48rem; popovers need an explicit width rather than a max-width alone.
+ * Dock popover width. Popovers need an explicit width rather than a max-width alone.
  * Must win over PopoverContent's base `w-72` via `cn`/`twMerge`.
  */
 export const PLAN_DOCK_POPOVER_WIDTH_CLASS = 'w-[min(48rem,calc(100vw-2rem))]'

@@ -30,7 +30,6 @@ export const WorkerRow = React.memo(function WorkerRow({
   ]
   const statusValue = liveStatus.status
   const isActive = statusValue === 'streaming'
-  const isRunning = statusValue === 'streaming' || statusValue === 'idle'
   const isStopped = statusValue === 'terminated' || statusValue === 'stopped'
   const isCodexWorker = isCodexAppServerExternalThreadDescriptor(agent)
 
@@ -95,7 +94,8 @@ export const WorkerRow = React.memo(function WorkerRow({
 
   // A worker that is no longer producing output can carry on as a normal conversation.
   const canContinue = Boolean(onContinue) && !isActive
-  const hasLifecycleAction = (isRunning && Boolean(onStop)) || (isStopped && Boolean(onResume))
+  // Stop is for a worker that is working. One that has stopped or finished offers what comes next instead.
+  const hasLifecycleAction = (isActive && Boolean(onStop)) || (isStopped && Boolean(onResume))
 
   if (!onDelete && !onStop && !onResume && !onContinue) return row
 
@@ -103,7 +103,7 @@ export const WorkerRow = React.memo(function WorkerRow({
     <ContextMenu>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
       <ContextMenuContent>
-        {isRunning && onStop ? (
+        {isActive && onStop ? (
           <ContextMenuItem onClick={() => onStop()}>
             <Pause className="mr-2 size-3.5" />
             Stop

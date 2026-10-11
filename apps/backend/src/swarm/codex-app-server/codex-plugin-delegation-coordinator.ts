@@ -117,6 +117,8 @@ export type CodexPluginAppServerPort = Pick<
   | "resolveCodexMcpToolInCatalog"
   | "filterCodexMcpToolsForAuthorizedSelectors"
   | "callCodexMcpToolByExactTool"
+  | "browseCodexCatalog"
+  | "dispose"
 >;
 
 export interface CodexPluginDelegationCoordinatorOptions {
@@ -466,10 +468,18 @@ export class CodexPluginDelegationCoordinator {
     }
   }
 
+  /**
+   * Ends the shared app-server process at backend shutdown. Its in-flight catalog and tool requests fail at
+   * once; otherwise an HTTP request waiting on one keeps the server from closing for up to a minute.
+   */
+  shutdown(): void {
+    this.options.appServer.dispose();
+  }
+
   async browseCatalog(managerAgentId: string): Promise<CodexCatalogSnapshot> {
     const manager = this.requireManagerForTools(managerAgentId);
     assertCodexMcpToolGateAllowed(evaluateCodexMcpCatalogBrowseGate({ manager }));
-    return this.options.appServer.listCodexMcpTools();
+    return this.options.appServer.browseCodexCatalog();
   }
 
   listRawTools(): never {

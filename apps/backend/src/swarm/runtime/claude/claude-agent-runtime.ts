@@ -125,6 +125,9 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
         : { sessionId: runtime.state.sessionId }),
       model: options.descriptor.model.modelId,
       effort: level as QueryOptions["effort"],
+      // Without this the CLI omits thinking text and sends only its signature, so reasoning rows would have nothing to show.
+      // The display mode alone is set; how much the model thinks stays with the reasoning level above.
+      extraArgs: { "thinking-display": "summarized" },
       ...renderProviderInstructions(opened.instructions, "claude"),
       settingSources: options.projectTrusted ? ["project", "local"] : [],
       settings: { autoMemoryEnabled: false },

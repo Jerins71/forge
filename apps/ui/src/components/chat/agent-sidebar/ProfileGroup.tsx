@@ -15,7 +15,7 @@ import {
   Terminal,
   Trash2,
 } from 'lucide-react'
-import React from 'react'
+import React, { useState } from 'react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -28,6 +28,8 @@ import { MAX_VISIBLE_SESSIONS } from './constants'
 import { buildSessionContextMenuActions, getProjectRoomSummary } from './utils'
 import { getInactiveRepoProjectAgentEntryKey, matchesRepoProjectAgentSearch } from '@/components/settings/repo-project-agent-ui-utils'
 import type { ProfileGroupProps, SessionContextMenuActionSource, StatusMap } from './types'
+import { ArchiveAllSessionsDialog } from './dialogs/ArchiveAllSessionsDialog'
+import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import { EnvironmentSessionRow, ProjectGroupMenu, ProjectMachineChips, ShowMoreSessions } from './LogicalProjectGroup'
 import {
   isSelectedRemoteSession,
@@ -104,6 +106,8 @@ export const ProfileGroup = React.memo(function ProfileGroup({
   const { profile, sessions } = treeRow
   // Other machines' sessions of the same logical project join this row's list.
   const logicalGroup = useLocalProjectGroup(profile.profileId)
+  const primaryEnvironmentId = useOptionalEnvironmentContext()?.primaryEnvironmentId
+  const [archivingAll, setArchivingAll] = useState(false)
   const remoteSessions = useRemoteSessions(environmentNavigation ? logicalGroup?.members : undefined, highlightQuery)
   const actionSource = React.useMemo<SessionContextMenuActionSource>(() => ({
     onStopSession, onResumeSession, onDeleteSession, onArchiveSession, onRequestRenameSession, onForkSession,
@@ -246,6 +250,12 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                     <Settings2 className="size-3.5" />
                     Project Settings
                   </DropdownMenuItem>
+                  {environmentNavigation ? (
+                    <DropdownMenuItem onSelect={() => setArchivingAll(true)}>
+                      <Archive className="size-3.5" />
+                      Archive all sessions…
+                    </DropdownMenuItem>
+                  ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
@@ -293,6 +303,12 @@ export const ProfileGroup = React.memo(function ProfileGroup({
             <ContextMenuItem onClick={() => onCreateSession(profile.profileId)}>
               <Plus className="mr-2 size-3.5" />
               New Session
+            </ContextMenuItem>
+          ) : null}
+          {environmentNavigation ? (
+            <ContextMenuItem onClick={() => setArchivingAll(true)}>
+              <Archive className="mr-2 size-3.5" />
+              Archive all sessions…
             </ContextMenuItem>
           ) : null}
           {onRequestRenameProfile ? (
@@ -360,6 +376,13 @@ export const ProfileGroup = React.memo(function ProfileGroup({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+      {archivingAll && primaryEnvironmentId ? (
+        <ArchiveAllSessionsDialog
+          projectTitle={profile.displayName}
+          members={logicalGroup?.members ?? [{ environmentId: primaryEnvironmentId, projectId: profile.profileId }]}
+          onClose={() => setArchivingAll(false)}
+        />
+      ) : null}
 
       {/* Sessions list */}
       {!isCollapsed && hasAnySessions ? (
@@ -474,7 +497,6 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                       roomsV2={roomsV2}
                       selected={isSelectedRemoteSession(entry, environmentNavigation?.selectedSession)}
                       onSelect={environmentNavigation!.onSelectSession}
-                      navigation={environmentNavigation}
                     />
                   ))}
                   {/* Regular sessions from every machine below */}
@@ -486,7 +508,6 @@ export const ProfileGroup = React.memo(function ProfileGroup({
                       roomsV2={roomsV2}
                       selected={isSelectedRemoteSession(item.entry, environmentNavigation?.selectedSession)}
                       onSelect={environmentNavigation!.onSelectSession}
-                      navigation={environmentNavigation}
                     />
                   ))}
                 </ul>

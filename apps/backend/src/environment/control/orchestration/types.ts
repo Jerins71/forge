@@ -56,6 +56,8 @@ export interface Request {
   kind: "approval" | "user_input";
   state: "pending" | "responding" | "resolved" | "expired" | "cancelled";
   payload: unknown;
+  /** The user's answer, kept once it is sent to the provider so the settled choice can show it. */
+  response?: unknown;
 }
 export interface CoreState {
   threads: Record<string, Thread>;

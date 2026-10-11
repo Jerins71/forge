@@ -558,7 +558,7 @@ export class SwarmManagerRuntimeComposition {
       allowInvalidatedManualStopMessageEnd: (agentId, token) =>
         this.runtimeController.allowInvalidatedManualStopMessageEnd(agentId, token),
       markPendingManualManagerStopNotice: (agentId) => runtimeLifecycle.markPendingManualManagerStopNotice(agentId),
-      emitImmediateManualManagerStopNotice: (agentId, text) => runtimeLifecycle.emitImmediateManualManagerStopNotice(agentId, text),
+      emitImmediateManualManagerStopNotice: (agentId, text, systemNoticeKind) => runtimeLifecycle.emitImmediateManualManagerStopNotice(agentId, text, systemNoticeKind),
       cancelAllPendingChoicesForAgent: (agentId) => {
         this.assistantOutput.clearChoiceContinuationsForAgent(agentId);
         services.choices.cancelAllPendingChoicesForAgent(agentId);

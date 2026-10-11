@@ -7,6 +7,7 @@ import {
   projectShell,
   projectSession,
   projectItems,
+  withChoicesInTimelineOrder,
   projectActivityItems,
   projectWorker,
   projectSessionWorkers,
@@ -958,10 +959,9 @@ export class ManagerWsClient {
     this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))
     const kept = this.state.messages.filter((message) =>
       !(message.type === 'conversation_message' && !message.id && message.clientRequestId && previousEchoIds.has(message.clientRequestId)))
-    const firstChoice = kept.findIndex((message) => message.type === 'choice_request')
-    const at = firstChoice < 0 ? kept.length : firstChoice
     this.updateState({
-      messages: previousEchoIds.size || echoes.length ? [...kept.slice(0, at), ...echoes, ...kept.slice(at)] : this.state.messages,
+      // Choices hold their place in the timeline, so a message still being sent is always the newest row.
+      messages: previousEchoIds.size || echoes.length ? [...kept, ...echoes] : this.state.messages,
       commandStatuses: this.outbox.statuses(),
     })
   }
@@ -1001,7 +1001,7 @@ export class ManagerWsClient {
         const echoes = this.outbox?.pendingMessages(sessionId, projectedCommandIds(projection)) ?? []
         this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))
         this.updateState({
-          messages: [...projectedMessages,...echoes,...(projection?.choices??[]).filter(c=>c.status!=='answered').map(c=>({type:'choice_request' as const,agentId:c.agentId,choiceId:c.choiceId,status:c.status==='interrupted'?'expired' as const:c.status,questions:c.questions,timestamp:projection!.session.updatedAt}))],
+          messages: [...withChoicesInTimelineOrder(projectedMessages, projection?.choices ?? [], !!projection?.historyCursor), ...echoes],
           commandStatuses: this.outbox?.statuses(),
           pendingChoiceIds:new Set((projection?.choices??[]).filter(c=>c.status==='pending').map(c=>c.choiceId)),
           agents: projectSessionWorkers(this.state.agents, projection?.workers ?? [], ownerId, this.environmentClient!.shell.getSnapshot()),

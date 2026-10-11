@@ -274,6 +274,13 @@ export const ChoiceSummarySchema = O({
   choiceId: V2Id, agentId: V2Id,
   status: E('pending', 'answered', 'cancelled', 'expired', 'interrupted'),
   questions: Type.Array(ChoiceQuestionSchema, { maxItems: 20 }),
+  /** When the question was first asked. Fixed for the life of the choice, so it keeps its place in the timeline. */
+  requestedAt: Type.Optional(V2Time),
+  /** When it was answered, cancelled or expired. */
+  settledAt: Type.Optional(V2Time),
+  /** What the user chose; present once answered. */
+  answers: Type.Optional(Type.Array(O({ questionId: V2Id, selectedOptionIds: Type.Array(V2Id, { maxItems: 50 }),
+    text: Type.Optional(Type.String({ maxLength: 8192 })) }), { maxItems: 20 })),
 })
 export const WorkerSummarySchema = O({
   agentId: V2Id, title: ShortText, status: E('idle', 'streaming', 'terminated', 'stopped', 'error'),

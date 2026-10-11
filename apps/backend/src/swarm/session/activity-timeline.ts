@@ -301,6 +301,7 @@ function resultText(payload: unknown): string {
   if (typeof payload === "string") return payload;
   if (Array.isArray(payload)) return payload.map(contentText).filter(Boolean).join("\n");
   if (!isRecord(payload)) return payload === undefined || payload === null ? "" : String(payload);
+  if (typeof payload.content === "string" && payload.content) return payload.content;
   if (Array.isArray(payload.content)) {
     const text = payload.content.map(contentText).filter(Boolean).join("\n");
     if (text) return text;

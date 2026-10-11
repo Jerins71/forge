@@ -145,9 +145,9 @@ test('fork from an exact message selects a model and shows durable lineage live 
   expect(pending.lineage!.basePoint.entryId).toBe(parentItemId)
   expect(pending.transfers[0]!.state).toBe('pending')
   expect((await readLaunchEvidence(manifest.environments[0]!, forkSessionId)).dispatches).toBe(0)
-  await expect(lineageChip(page)).toContainText(`at message ${parentItemId}`)
+  await expect(lineageChip(page)).toHaveAttribute('data-base-entry', parentItemId)
   await page.reload()
-  await expect(lineageChip(page)).toContainText(`at message ${parentItemId}`)
+  await expect(lineageChip(page)).toHaveAttribute('data-base-entry', parentItemId)
   await sendMessage(page, 'Continue the portable Claude fork', 'Claude lineage fixture reply.')
   const consumed = await until(() => lineage(forkSessionId), snapshot => snapshot.transfers[0]!.state === 'consumed')
   expect(consumed.transfers[0]!.strategy).toBe('portable_context')
@@ -166,8 +166,12 @@ test('provider switching keeps the session and exposes real handoff coverage and
   await dialog.getByRole('button', { name: 'Hand off', exact: true }).click()
   await successful('session.provider.switch', 0)
   expect(page.url()).toBe(before)
-  await expect(lineageChip(page)).toContainText('switched from claude')
+  await expect(lineageChip(page)).toContainText('switched from Claude')
   await sendMessage(page, 'Continue after the explicit provider handoff')
+  // The handoff is one quiet marker in the transcript, and nothing says the session stopped.
+  await expect(transcript(page).locator('[data-system-marker="model_change"]')).toHaveCount(1)
+  await expect(transcript(page).locator('[data-system-marker="model_change"]')).toContainText(/^Switched to /)
+  await expect(transcript(page)).not.toContainText('Session stopped')
   const snapshot = await until(() => lineage(forkSessionId), snapshot => snapshot.transfers.some(t => t.kind === 'provider_switch' && t.state === 'consumed'))
   const transfer = snapshot.transfers.find(t => t.kind === 'provider_switch')!
   const handoff = snapshot.handoffs.find(h => h.transferId === transfer.transferId)!
@@ -178,6 +182,9 @@ test('provider switching keeps the session and exposes real handoff coverage and
   await expect(popover.getByLabel(/^Handoff coverage for Provider switch from /)).toHaveCount(2)
   await expect(popover).toContainText('Credentials excluded')
   await expect(popover).toContainText('Tool grants excluded')
+  // Names a person would use: no IDs, provider IDs, renderer names or raw transfer states.
+  await expect(popover).toContainText(/Switched to /)
+  for (const internal of [/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/, /codex-native|claude-native/, /Unresolved|canonical_jsonl|forge-portable/, /\bconsumed\b|\bresolved\b|\bpending\b/]) await expect(popover).not.toContainText(internal)
   await shot(page, '04-coverage')
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 390, height: 844 })
@@ -187,7 +194,7 @@ test('provider switching keeps the session and exposes real handoff coverage and
   expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(390)
   await shot(page, '05-narrow-coverage')
   await page.keyboard.press('Escape'); await page.setViewportSize({ width: 1440, height: 900 })
-  await page.reload(); await expect(lineageChip(page)).toContainText('switched from claude')
+  await page.reload(); await expect(lineageChip(page)).toContainText('switched from Claude')
   // Same-provider model configuration uses configure; cross-provider configure is refused.
   await expect(rpc.call('session.configure', { commandId: randomUUID(), sessionId: forkSessionId, model: { mode: 'override', provider: 'claude-native', modelId: 'claude-sonnet-5' } })).rejects.toThrow('session.provider.switch')
   const configured = await rpc.call<CommandReceipt>('session.configure', { commandId: randomUUID(), sessionId: forkSessionId, model: { mode: 'override', provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' } })
@@ -230,7 +237,9 @@ test('an idle completed worker continues into the receipt new conversation and a
   const sessionId = receipt.result!.sessionId!
   expect(sessionId).not.toBe(workerId)
   await expect.poll(() => new URL(page.url()).searchParams.get('agent')).toBe(sessionId)
-  await expect(lineageChip(page)).toContainText('Continued from a worker')
+  await expect(lineageChip(page)).toContainText('Continued from')
+  // The chip names the worker it came from, or says "a worker"; never an ID or "a worker of <itself>".
+  await expect(lineageChip(page)).not.toContainText(/a worker of|[0-9a-f]{8}-[0-9a-f]{4}-/)
   await sendMessage(page, 'Continue the finished worker as a conversation')
   expect((await detail(sessionId)).session.sessionId).toBe(sessionId)
   await shot(page, '07-continued-worker')

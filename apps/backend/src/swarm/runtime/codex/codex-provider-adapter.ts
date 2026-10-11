@@ -234,7 +234,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
       }
       try {
         const response = await s.client.request<any>("turn/start", { threadId: s.binding.conversation.nativeId,
-          input: codexNativeInput(input.input), model: s.input.model.modelId, effort: s.input.model.thinkingLevel, clientUserMessageId: input.runId });
+          input: codexNativeInput(input.input), model: s.input.model.modelId, effort: s.input.model.thinkingLevel,
+          // Ask for reasoning summaries; without them Codex reports no reasoning items to show.
+          summary: "auto", clientUserMessageId: input.runId });
         if (typeof response?.turn?.id !== "string") throw new Error("Codex did not acknowledge a turn identity");
         this.accept(turn, response.turn.id);
         return { status: "accepted", turn: this.turnRef(turn) };
