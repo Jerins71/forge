@@ -1,0 +1,17 @@
+{
+  "provider": "pi",
+  "protocol": "openai-completions/http-sse",
+  "version": "pi-0.80.6",
+  "scenario": "native-tool-loop",
+  "provenance": "Synthetic redacted OpenAI-compatible SSE frames, consumed by the real Pi transport parser. No live account capture; real-provider fidelity remains a qualification step.",
+  "entries": [
+    { "type": "expect_outbound", "label": "start", "frame": { "method": "POST", "path": "/v1/chat/completions", "body": { "model": "gpt-5.5", "stream": true } } },
+    { "type": "emit_inbound", "label": "tool", "frame": { "chunk": { "id": "response-1", "object": "chat.completion.chunk", "choices": [{ "index": 0, "delta": { "role": "assistant", "tool_calls": [{ "index": 0, "id": "native-notes-1", "type": "function", "function": { "name": "notes", "arguments": "{\"op\":\"write\",\"path\":\"checkpoint.md\",\"text\":\"Native Forge notes result\"}" } }] }, "finish_reason": null }] } } },
+    { "type": "emit_inbound", "frame": { "chunk": { "id": "response-1", "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }], "usage": { "prompt_tokens": 50, "completion_tokens": 12, "total_tokens": 62 } } } },
+    { "type": "emit_inbound", "frame": { "end": true } },
+    { "type": "expect_outbound", "label": "tool-result", "frame": { "body": { "model": "gpt-5.5" } } },
+    { "type": "emit_inbound", "frame": { "chunk": { "id": "response-2", "choices": [{ "index": 0, "delta": { "role": "assistant", "content": "Native tool completed." }, "finish_reason": null }] } } },
+    { "type": "emit_inbound", "frame": { "chunk": { "id": "response-2", "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }], "usage": { "prompt_tokens": 75, "completion_tokens": 8, "total_tokens": 83 } } } },
+    { "type": "emit_inbound", "frame": { "end": true } }
+  ]
+}

@@ -1,0 +1,34 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Pi provider adapter on the native production path > records pre-migration native prompt and final schema hashes > native Pi before adapter migration 1`] = `
+{
+  "names": [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "bash_process",
+    "history",
+    "list_agents",
+    "send_message_to_agent",
+    "update_work_graph",
+    "accept_work_graph_node",
+    "update_plan",
+    "create_goal",
+    "get_goal",
+    "update_goal",
+    "spawn_agent",
+    "delegate_codex_plugin",
+    "retry_codex_plugin_worker",
+    "kill_agent",
+    "speak_to_user",
+    "present_choices",
+    "discover_tools",
+    "notes",
+    "get_context_remaining",
+    "new_context",
+  ],
+  "promptSha256": "87ef758c6476e1620f68e2da09edde0dc538e24d43d1ae192e6c258c75b7f14a",
+  "schemaSha256": "382a9fccd1b8e673b9ed1ec585eefcadb0e247f2c261a68ffacb63b9a948da77",
+}
+`;
