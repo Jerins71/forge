@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isChoiceAnswer } from "@forge/protocol";
 import type { ProviderCapabilities, ProviderConversationRef, ProviderObservation, ProviderRequestLifetime, ProviderRequestRef,
   ProviderScope, ProviderToolCallRef, ProviderTurnRef } from "@forge/protocol";
 import { createCodexAppServerClient } from "../../codex-app-server/codex-app-server-client.js";
@@ -6,14 +7,14 @@ import type { CodexAppServerClientFactory, CodexAppServerClientPort } from "../.
 import type { RuntimeSessionEvent } from "../../runtime-contracts.js";
 import type { SwarmToolHost } from "../../swarm-tool-host.js";
 import { normalizeCodexUsage } from "../../../utils/native-usage-records.js";
-import { assertProviderRequirements, ProviderDispatchRejectedError, ProviderRefreshRequiredError, UnsupportedProviderBehaviorError, type ProviderAdapter, type ProviderBinding,
+import { assertProviderRequirements, ProviderDispatchRejectedError, ProviderRefreshRequiredError, ProviderRequestRejectedError, UnsupportedProviderBehaviorError, type ProviderAdapter, type ProviderBinding,
   type ProviderContext, type ProviderDispatchResult, type ProviderDrainResult, type ProviderOpenInput,
   type ProviderRespondInput, type ProviderResumeInput, type ProviderStartInput, type ProviderSteerInput } from "../provider-contract.js";
 import { renderInstructionBundle } from "../instruction-bundle.js";
 import { buildCodexInstructionRefresh, buildCodexThreadRequest, codexNativeInput, type CodexNativeThreadTarget } from "./codex-native-requests.js";
 import { assertNativeCodexVersion, resolveNativeCodexBinary } from "./codex-native-binary.js";
 import { CodexRuntimeEvents } from "./codex-runtime-events.js";
-import { CodexRuntimeTools } from "./codex-runtime-tools.js";
+import { CodexRuntimeTools, prepareCodexChoiceRequest, codexChoiceResponse, type CodexChoiceRequest } from "./codex-runtime-tools.js";
 import { nativeCodexEnvironment, type CodexRuntimeAuth } from "./codex-runtime-auth.js";
 import { readNativeToolContract, stableToolContract } from "./codex-tool-contract.js";
 
@@ -36,6 +37,7 @@ interface PendingRequest {
   turn: NativeTurn;
   ref: ProviderRequestRef;
   lifetime: ProviderRequestLifetime;
+  choice: CodexChoiceRequest;
   resolve(value: unknown): void;
   reject(error: Error): void;
   cancel(): void;
@@ -280,15 +282,23 @@ export class CodexProviderAdapter implements ProviderAdapter {
   }
 
   async respond(input: ProviderRespondInput): Promise<void> {
-    const s = this.owned(input.binding);
-    this.assertScope(input.request);
+    const s = this.state;
+    if (!s || !sameScope(s.scope, input.binding.scope) || input.binding.conversation.nativeId !== s.conversationId
+      || !sameScope(s.scope, input.request)) throw new ProviderRequestRejectedError("stale_scope");
     const pending = s.requests.get(input.request.nativeId);
-    if (!pending || pending.turn.ended || pending.turn.abort.signal.aborted) throw new Error("Codex request has expired or already resolved");
+    if (!pending) throw new ProviderRequestRejectedError("unknown_request");
+    if (s.closing || s.closed || s.client.isDisposed() || pending.turn.ended || pending.turn.abort.signal.aborted) throw new ProviderRequestRejectedError("expired");
     if (stableToolContract(pending.ref) !== stableToolContract(input.request) || stableToolContract(pending.lifetime) !== stableToolContract(input.lifetime)
-      || input.lifetime.generation !== s.binding.scope.generation || (input.lifetime.expiresAt && Date.parse(input.lifetime.expiresAt) <= Date.now())) throw new Error("Codex request lifetime or scope is stale");
-    s.requests.delete(input.request.nativeId);
+      || input.lifetime.generation !== s.binding.scope.generation || (input.lifetime.expiresAt
+        && (!Number.isFinite(Date.parse(input.lifetime.expiresAt)) || Date.parse(input.lifetime.expiresAt) <= Date.now()))) throw new ProviderRequestRejectedError("stale_scope");
+    if (!Array.isArray(input.response) || !input.response.every(isChoiceAnswer)) throw new Error("Codex response must contain choice answers.");
+    this.resolveRequest(pending, codexChoiceResponse(pending.choice, input.response));
+  }
+
+  private resolveRequest(pending: PendingRequest, response: unknown): void {
+    this.state!.requests.delete(pending.ref.nativeId);
     pending.turn.abort.signal.removeEventListener("abort", pending.cancel);
-    pending.resolve(input.response);
+    pending.resolve(response);
     this.emit(pending.turn, { type: "request_resolved", origin: this.origin(pending.turn), request: pending.ref, resolution: "answered" });
   }
 
@@ -368,31 +378,31 @@ export class CodexProviderAdapter implements ProviderAdapter {
           conversationId: turn.conversation.nativeId, turnId: this.turnRef(turn).nativeId, nativeId: params.callId });
       } finally { turn.pendingTools--; this.releaseTurn(turn); }
     }
-    if (!["item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval", "item/tool/requestUserInput", "mcpServer/elicitation/request"].includes(method)) throw new Error(`Unsupported native Codex request: ${method}`);
-    if (method === "item/tool/requestUserInput" && (!Array.isArray(params.questions) || params.questions.some((q: any) => q.isSecret))) throw new Error("Native Codex cannot collect secrets through ordinary questions. Use a supported Secure Session.");
+    const enriched = method === "item/fileChange/requestApproval" ? { ...params, forgeFileChanges: turn.mapper.fileChangeApproval(params.itemId) } : params;
+    const choice = prepareCodexChoiceRequest(method, enriched);
     if (id === undefined) throw new Error("Codex provider request has no native RPC identity");
     const nativeId = `${typeof id}:${id}`;
     if (s.requests.has(nativeId)) throw new Error("Codex provider request identity is already pending");
     const ref: ProviderRequestRef = { ...s.scope, kind: "request", conversationId: turn.conversation.nativeId, turnId: this.turnRef(turn).nativeId, nativeId };
     const lifetime: ProviderRequestLifetime = { kind: "live_callback", generation: s.binding.scope.generation };
-    const enriched = method === "item/fileChange/requestApproval" ? { ...params, forgeFileChanges: turn.mapper.fileChangeApproval(params.itemId) } : params;
     const response = new Promise<unknown>((resolve, reject) => {
       const cancel = () => {
         if (!s.requests.delete(nativeId)) return;
         turn.abort.signal.removeEventListener("abort", cancel);
-        resolve(decline(method));
+        resolve(codexChoiceResponse(choice, []));
         this.emit(turn, { type: "request_resolved", origin: this.origin(turn), request: ref, resolution: "cancelled" });
       };
-      s.requests.set(nativeId, { turn, ref, lifetime, resolve, reject, cancel });
+      s.requests.set(nativeId, { turn, ref, lifetime, choice, resolve, reject, cancel });
       turn.abort.signal.addEventListener("abort", cancel, { once: true });
     });
     this.emit(turn, { type: "request_opened", origin: this.origin(turn), request: ref,
-      requestKind: method === "item/tool/requestUserInput" || method === "mcpServer/elicitation/request" ? "user_input" : "approval", lifetime, payload: json(enriched) });
+      requestKind: method === "item/tool/requestUserInput" || method === "mcpServer/elicitation/request" ? "user_input" : "approval", lifetime, payload: json(choice) });
     if (this.options.autoRespond && !s.consuming) {
       void this.track((async () => {
         try {
           const answer = await s.bridge.request(method, enriched, turn.abort.signal);
-          if (s.requests.has(nativeId) && !s.closing) await this.respond({ binding: s.binding, request: ref, lifetime, response: answer });
+          const pending = s.requests.get(nativeId);
+          if (pending && !s.closing) this.resolveRequest(pending, answer);
         } catch {
           const pending = s.requests.get(nativeId);
           if (pending) pending.cancel();
@@ -569,7 +579,6 @@ function record(value: unknown): Record<string, any> { return value && typeof va
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 function toolRevision(value: unknown): string { return createHash("sha256").update(stableToolContract(value) ?? "null").digest("hex"); }
 function json(value: unknown): any { return JSON.parse(JSON.stringify(value ?? null)); }
-function decline(method: string): unknown { return method === "item/permissions/requestApproval" ? { permissions: {}, scope: "turn" } : method === "item/tool/requestUserInput" ? { answers: {} } : method === "mcpServer/elicitation/request" ? { action: "decline" } : { decision: "decline" }; }
 async function deadline(operation: Promise<void>): Promise<void> {
   let timer: NodeJS.Timeout | undefined;
   try { await Promise.race([operation, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("Native Codex cleanup has not settled; replacement remains blocked")), 3_000); })]); }

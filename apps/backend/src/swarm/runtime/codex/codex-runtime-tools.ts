@@ -1,6 +1,6 @@
 import { Value } from "@sinclair/typebox/value";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { ProviderToolCallRef, ChoiceQuestion } from "@forge/protocol";
+import type { ProviderToolCallRef, ChoiceQuestion, ChoiceAnswer } from "@forge/protocol";
 import type { RuntimeSessionEvent } from "../../runtime-contracts.js";
 import type { SwarmToolHost } from "../../swarm-tool-host.js";
 import { normalizeNativeToolContract, stableToolContract } from "./codex-tool-contract.js";
@@ -9,6 +9,12 @@ import type { ToolHostBinding } from "../provider-contract.js";
 
 type Tool = ToolDefinition<any, any, any>;
 type NativeTool = { name: string; type: string; inputSchema: unknown };
+
+export interface CodexChoiceRequest {
+  method: string;
+  params: Record<string, any>;
+  questions: ChoiceQuestion[];
+}
 
 /** Dynamic tools preserve Forge ownership; native coding tools stay inside Codex. */
 export class CodexRuntimeTools {
@@ -66,46 +72,15 @@ export class CodexRuntimeTools {
 
   private async handleRequest(method: string, params: Record<string, any>, signal: AbortSignal, ref?: ProviderToolCallRef): Promise<unknown> {
     if (method === "item/tool/call") return this.callTool(params, signal, ref);
-    if (method === "item/tool/requestUserInput") {
-      if (!Array.isArray(params.questions) || params.questions.some((q: any) => q.isSecret)) {
-        throw new Error("Native Codex cannot collect secrets through ordinary questions. Use a supported Secure Session.");
-      }
-      const questions: ChoiceQuestion[] = params.questions.map((q: any) => ({
-        id: q.id, header: q.header, question: q.question,
-        options: q.options?.map((o: any, index: number) => ({ id: String(index), label: o.label, description: o.description })),
-      }));
-      const answers = await waitWithAbort(this.options.host.requestUserChoice(this.options.agentId, questions), signal);
-      return { answers: Object.fromEntries(answers.map(answer => [answer.questionId, { answers: answer.text
-        ? [answer.text] : answer.selectedOptionIds.map(id => questions.find(q => q.id === answer.questionId)?.options?.find(o => o.id === id)?.label ?? id) }])) };
+    const request = prepareCodexChoiceRequest(method, params);
+    if (method === "mcpServer/elicitation/request") return codexChoiceResponse(request, []);
+    try {
+      const answers = await waitWithAbort(this.options.host.requestUserChoice(this.options.agentId, request.questions), signal);
+      return codexChoiceResponse(request, signal.aborted ? [] : answers);
+    } catch (error) {
+      if (method === "item/tool/requestUserInput") throw error;
+      return codexChoiceResponse(request, []);
     }
-    if (method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval" || method === "item/permissions/requestApproval") {
-      if (method === "item/commandExecution/requestApproval" && !params.command && !params.networkApprovalContext && !params.additionalPermissions) {
-        throw new Error("Command approval details are unavailable.");
-      }
-      if (method === "item/fileChange/requestApproval" && !params.forgeFileChanges) {
-        throw new Error("File approval requires the complete proposed changes. Split large changes into smaller patches and retry.");
-      }
-      const description = method === "item/commandExecution/requestApproval"
-        ? `Allow this command or permission request?\n\n${String(params.command ?? "")}\n\nDirectory: ${String(params.cwd ?? "current workspace")}\n${String(params.reason ?? "")}\n${params.networkApprovalContext ? JSON.stringify(params.networkApprovalContext) : ""}\n${params.additionalPermissions ? JSON.stringify(params.additionalPermissions) : ""}`
-        : method === "item/fileChange/requestApproval"
-          ? `Allow these file changes once?\n\n${String(params.reason ?? "")}\n${params.forgeFileChanges}`
-          : `Allow these additional permissions for this turn?\n\n${JSON.stringify(params.permissions)}`;
-      if (description.length > 12_000) throw new Error("Approval details are too large to review. Split the request and retry.");
-      try {
-        const answers = await waitWithAbort(this.options.host.requestUserChoice(this.options.agentId, [{
-          id: "approval", header: "Codex permission", question: description, options: [
-            { id: "decline", label: "Deny" }, { id: "accept", label: "Allow once" },
-          ],
-        }]), signal);
-        const accepted = !signal.aborted && answers[0]?.selectedOptionIds.includes("accept");
-        if (method === "item/permissions/requestApproval") return { permissions: accepted ? params.permissions : {}, scope: "turn" };
-        return { decision: accepted ? "accept" : "decline" };
-      } catch {
-        return method === "item/permissions/requestApproval" ? { permissions: {}, scope: "turn" } : { decision: "decline" };
-      }
-    }
-    if (method === "mcpServer/elicitation/request") return { action: "decline" };
-    throw new Error(`Unsupported native Codex request: ${method}`);
   }
 
   private async callTool(params: Record<string, any>, signal: AbortSignal, ref?: ProviderToolCallRef): Promise<unknown> {
@@ -143,6 +118,52 @@ export class CodexRuntimeTools {
       return { success: false, contentItems: [{ type: "inputText", text: result.content[0]!.text }] };
     }
   }
+}
+
+/** Shared by legacy host choices and provider observations; retain the native bridge's review wording. */
+export function prepareCodexChoiceRequest(method: string, params: Record<string, any>): CodexChoiceRequest {
+  if (method === "item/tool/requestUserInput") {
+    if (!Array.isArray(params.questions) || params.questions.some((q: any) => q.isSecret)) {
+      throw new Error("Native Codex cannot collect secrets through ordinary questions. Use a supported Secure Session.");
+    }
+    const questions: ChoiceQuestion[] = params.questions.map((q: any) => ({
+      id: q.id, header: q.header, question: q.question,
+      options: q.options?.map((o: any, index: number) => ({ id: String(index), label: o.label, description: o.description })),
+    }));
+    return { method, params, questions };
+  }
+  if (method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval" || method === "item/permissions/requestApproval") {
+    if (method === "item/commandExecution/requestApproval" && !params.command && !params.networkApprovalContext && !params.additionalPermissions) {
+      throw new Error("Command approval details are unavailable.");
+    }
+    if (method === "item/fileChange/requestApproval" && !params.forgeFileChanges) {
+      throw new Error("File approval requires the complete proposed changes. Split large changes into smaller patches and retry.");
+    }
+    const description = method === "item/commandExecution/requestApproval"
+      ? `Allow this command or permission request?\n\n${String(params.command ?? "")}\n\nDirectory: ${String(params.cwd ?? "current workspace")}\n${String(params.reason ?? "")}\n${params.networkApprovalContext ? JSON.stringify(params.networkApprovalContext) : ""}\n${params.additionalPermissions ? JSON.stringify(params.additionalPermissions) : ""}`
+      : method === "item/fileChange/requestApproval"
+        ? `Allow these file changes once?\n\n${String(params.reason ?? "")}\n${params.forgeFileChanges}`
+        : `Allow these additional permissions for this turn?\n\n${JSON.stringify(params.permissions)}`;
+    if (description.length > 12_000) throw new Error("Approval details are too large to review. Split the request and retry.");
+    return { method, params, questions: [{ id: "approval", header: "Codex permission", question: description, options: [
+      { id: "decline", label: "Deny" }, { id: "accept", label: "Allow once" },
+    ] }] };
+  }
+  if (method === "mcpServer/elicitation/request") return { method, params, questions: [] };
+  throw new Error(`Unsupported native Codex request: ${method}`);
+}
+
+/** Convert Forge answers to the original request kind's native JSON-RPC result. */
+export function codexChoiceResponse(request: CodexChoiceRequest, answers: ChoiceAnswer[]): unknown {
+  const { method, params, questions } = request;
+  if (method === "item/tool/requestUserInput") {
+    return { answers: Object.fromEntries(answers.map(answer => [answer.questionId, { answers: answer.text
+      ? [answer.text] : answer.selectedOptionIds.map(id => questions.find(q => q.id === answer.questionId)?.options?.find(o => o.id === id)?.label ?? id) }])) };
+  }
+  if (method === "mcpServer/elicitation/request") return { action: "decline" };
+  const accepted = answers[0]?.selectedOptionIds.includes("accept");
+  if (method === "item/permissions/requestApproval") return { permissions: accepted ? params.permissions : {}, scope: "turn" };
+  return { decision: accepted ? "accept" : "decline" };
 }
 
 export async function waitWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
