@@ -336,10 +336,11 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       const steered = f.adapter.steer({ binding, runId: "run", attemptId: "attempt", input: { text: "steer" }, turn: accepted.turn });
       await f.release("steered"); expect(await steered).toMatchObject({ status: "accepted" });
       await f.release("child");
-      const child = await f.observed("terminal:native_child"); expect(child).toMatchObject({ origin: { kind: "child", nativeAgentId: "native-child" } });
+      const child = await f.observed("terminal:native_child"); expect(child).toMatchObject({ origin: { kind: "child", nativeAgentId: "native-child", parentTurn: accepted.turn } });
       expect(f.observations.some(value => value.type === "terminal" && value.terminalAuthority === "root_attempt")).toBe(false);
       expect(f.onAgentEnd).not.toHaveBeenCalled();
-      await f.release("terminal"); await f.observed("terminal:root_attempt");
+      await f.release("terminal"); expect(await f.observed("terminal:root_attempt")).toMatchObject({ origin: { turn: accepted.turn } });
+      expect(f.observations.filter(value => value.type === "accepted")).toHaveLength(1);
       expect(f.observations.some(value => value.type === "message" && value.origin.kind === "child" && value.text === "Child text")).toBe(true);
       expect(f.observations.map(value => value.sequence)).toEqual(f.observations.map((_value, i) => i));
     } finally { await f.close(); await f.cleanup(); }

@@ -46,7 +46,7 @@ export class ClaudeProviderSession {
     const entry = this.inputs.get(id);
     if (!entry) return Promise.resolve({ status: "unknown" });
     const turn: ProviderTurnRef = { ...this.binding.scope, kind: "turn", conversationId: this.binding.conversation.nativeId, nativeId: id };
-    if (entry.accepted) return Promise.resolve({ status: "accepted", turn });
+    if (entry.accepted) return Promise.resolve({ status: "accepted", turn: this.current?.turn ?? turn });
     if (entry.unknown || this.ended || this.terminalSeen || this.interrupted) return Promise.resolve({ status: "unknown" });
     if (!entry.dispatch) {
       let resolve!: (result: ProviderDispatchResult) => void;
@@ -171,12 +171,15 @@ export class ClaudeProviderSession {
         const entry = this.inputs.get(id);
         if (!entry) continue;
         const turn: ProviderTurnRef = { ...this.binding.scope, kind: "turn", conversationId: this.binding.conversation.nativeId, nativeId: id };
-        this.current = { attemptId: entry.attemptId, turn, accepted: true, managed: entry.managed };
+        // A steered input has its own consumption UUID but remains inside the
+        // accepted root. Keep that root identity for tool ancestry and Stop.
+        const root = !this.current.accepted || this.current.turn.nativeId === id;
+        if (root) this.current = { attemptId: entry.attemptId, turn, accepted: true, managed: entry.managed };
         if (!entry.accepted) {
           entry.accepted = true;
           const pending = entry.dispatch; entry.dispatch = undefined;
-          if (pending) { clearTimeout(pending.timer); pending.resolve({ status: "accepted", turn }); }
-          this.publish({ type: "accepted", origin: this.origin(), turn });
+          if (pending) { clearTimeout(pending.timer); pending.resolve({ status: "accepted", turn: this.current.turn }); }
+          if (root) this.publish({ type: "accepted", origin: this.origin(), turn });
         }
       }
     }
