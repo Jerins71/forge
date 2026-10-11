@@ -54,6 +54,15 @@ export class ProviderDispatchRejectedError extends Error {
   }
 }
 
+/** The binding cannot answer an unknown, expired, or stale native request. */
+export class ProviderRequestRejectedError extends Error {
+  readonly code = "PROVIDER_REQUEST_REJECTED" as const;
+  constructor(readonly reason: "unknown_request" | "expired" | "stale_scope") {
+    super(`Provider request is expired, already resolved, or belongs to a stale scope: ${reason}.`);
+    this.name = "ProviderRequestRejectedError";
+  }
+}
+
 /** Admission is explicit. This helper never chooses or dispatches a weaker fallback. */
 export function assertProviderRequirements(capabilities: ProviderCapabilities, requirements: ProviderRequirements = {}): void {
   const support: Record<Exclude<keyof ProviderRequirements, "instructionChannel">, boolean> = {

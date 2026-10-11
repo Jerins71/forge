@@ -24,6 +24,15 @@ does not initialize twice. An abrupt backend crash after canonical input append,
 before any native turn, preserves the durable locator: eager generation-2 creation
 resumes that thread and dispatches once, with one canonical input and output.
 
+The choice fixtures round trip native user-input questions (option labels and free
+text), command approval accept/decline, and file-change approval with the complete
+proposed diff. Observations carry normalized Forge questions plus the original
+native method/params. Both the adapter and legacy choice bridge use the same
+formatting and conversion functions. Malformed responses leave the live request
+available for correction; duplicate, unknown and previous-generation requests are
+rejected with the shared `ProviderRequestRejectedError`. Native callbacks expire
+on restart and cannot be reconstructed from persisted display/audit payloads.
+
 Tests live in the backend's included `swarm/__tests__` directory. Redacted traces,
 hash summaries and evaluated assertions are written to `.internal/core/evidence/`.
 Existing prompt/tool baseline snapshots are asserted unchanged. Replay barriers
