@@ -357,8 +357,10 @@ export function selectChecks(tier, changedFiles) {
 
   if (tier === 'quick') {
     const existingChangedFiles = changedFiles.filter((entry) => existsSync(path.join(repoRoot, entry.path)));
+    // Changed files can include paths ESLint is configured to ignore (vendored shadcn components); naming
+    // one explicitly is otherwise a warning, and warnings fail the check.
     const lintFiles = existingChangedFiles.map((entry) => entry.path).filter((file) => isCodeFile(file));
-    if (lintFiles.length > 0) checks.push({ id: 'lint:changed-files', label: `ESLint changed files (${lintFiles.length})`, command: [pnpm, ['exec', 'eslint', '--max-warnings', '0', ...lintFiles]] });
+    if (lintFiles.length > 0) checks.push({ id: 'lint:changed-files', label: `ESLint changed files (${lintFiles.length})`, command: [pnpm, ['exec', 'eslint', '--max-warnings', '0', '--no-warn-ignored', ...lintFiles]] });
     else skipped.push({ id: 'lint:changed-files', reason: 'No changed JS/TS files.' });
     addWorkspaceChecks(checks, areas, 'typecheck');
 
