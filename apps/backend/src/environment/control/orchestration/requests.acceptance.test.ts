@@ -138,6 +138,25 @@ describe("authoritative native choices", () => {
     expect(await f.core.controlService.getReceipt(principal, answerId)).toMatchObject({ state: "interrupted", error: { code: "CONFLICT", retryable: false } });
     expect(loadState(f.core.database).recovery).toBeNull(); expect(loadState(f.core.database).runs["run-initial"].state).toBe("running");
   });
+  it.each(["approval", "user_input"] as const)("restores a live %s after an ordinary response failure and permits one retry", async kind => {
+    const f = await fixture(); const request = f.publish(f.observation(kind)); const respond = f.adapter.respond;
+    f.adapter.respond = async () => { throw new Error("Transient response transport failure"); };
+    await f.core.controlService.execute(principal, "session.choose", { commandId: answerId, sessionId: "manager", choiceId: request.requestId, answers }); await f.core.effectWorker.drain();
+    expect(loadState(f.core.database).requests[request.requestId].state).toBe("pending"); expect(choice(f.core, request.requestId).status).toBe("pending");
+    expect(f.core.database.prepare("SELECT answer_command_id FROM control_choices WHERE choice_id=?").get(request.requestId)).toEqual({ answer_command_id: null });
+    expect(loadState(f.core.database).recovery).toBeNull(); expect(loadState(f.core.database).runs["run-initial"].state).toBe("running");
+    f.adapter.respond = respond;
+    await f.core.controlService.execute(principal, "session.choose", { commandId: "00000000-0000-4000-8000-000000000002", sessionId: "manager", choiceId: request.requestId, answers }); await f.core.effectWorker.drain();
+    expect(f.responses).toHaveLength(1); expect(loadState(f.core.database).requests[request.requestId].state).toBe("resolved");
+  });
+  it.each(["approval", "user_input"] as const)("expires %s if its callback lifetime ends during an ordinary response failure", async kind => {
+    const f = await fixture(); const request = f.publish(f.observation(kind, new Date(1_800_000_030_000).toISOString()));
+    f.adapter.respond = async () => { f.advance(); throw new Error("Response transport closed"); };
+    await f.core.controlService.execute(principal, "session.choose", { commandId: answerId, sessionId: "manager", choiceId: request.requestId, answers }); await f.core.effectWorker.drain();
+    expect(loadState(f.core.database).requests[request.requestId].state).toBe("expired"); expect(choice(f.core, request.requestId).status).toBe("expired"); expect(f.responses).toEqual([]);
+    const before = loadState(f.core.database); rebuildLifecycleProjections(f.core.database); expect(loadState(f.core.database)).toEqual(before);
+    await f.core.close(); const reboot = await f.open(); await reboot.effectWorker.drain(); expect(choice(reboot, request.requestId).status).toBe("expired"); expect(f.responses).toEqual([]);
+  });
   it("projects native cancellation as cancelled rather than answered", async () => {
     const f = await fixture(); const opened = f.observation("user_input"); const request = f.publish(opened);
     f.publish({ type: "request_resolved", scope: opened.scope, attemptId: opened.attemptId, sequence: opened.sequence + 1, origin: opened.origin, request: opened.request, resolution: "cancelled" });

@@ -284,7 +284,15 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       for (const owner of Object.values(state.threads)) advance(owner.threadId); break;
     }
     case "effect.failed": {
-      if (command.attemptId && state.attempts[command.attemptId]) {
+      if (command.kind === "provider.respond" && command.requestId) {
+        const request = state.requests[command.requestId];
+        if (request?.state === "responding") {
+          const owner = thread(request.threadId); const attempt = state.attempts[request.attemptId];
+          const live = owner.desired === "running" && owner.shutdown === "clean" && owner.generation === request.lifetime.generation && owner.bindingId === request.ref.bindingId &&
+            !!attempt && owner.activeRunId === attempt.runId && attempt.state !== "terminal" && attempt.state !== "unknown" && (!request.lifetime.expiresAt || Date.parse(request.lifetime.expiresAt) > command.now);
+          emit({ type: live ? "request.opened" : "request.expired", request: { ...request, state: live ? "pending" : "expired" } });
+        }
+      } else if (command.attemptId && state.attempts[command.attemptId]) {
         const attempt = state.attempts[command.attemptId];
         if (attempt.state === "terminal") break;
         if (command.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); }

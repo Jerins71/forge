@@ -24,6 +24,6 @@ export function projectRequestChoice(database: Database, request: Request): void
   const row = database.prepare("SELECT state_json FROM orchestration_threads WHERE thread_id=?").get(request.threadId) as { state_json: string } | undefined;
   if (!choice || !row) return;
   database.prepare(`INSERT INTO control_choices (choice_id,session_id,runtime_generation,state,choice_json,updated_sequence) VALUES (?,?,?,?,?,0)
-    ON CONFLICT(choice_id) DO UPDATE SET state=excluded.state,choice_json=excluded.choice_json`)
-    .run(choice.choiceId, requestSession(JSON.parse(row.state_json)), `${request.ref.bindingId}:${request.ref.generation}`, choice.status, JSON.stringify(choice));
+    ON CONFLICT(choice_id) DO UPDATE SET state=excluded.state,choice_json=excluded.choice_json,answer_command_id=CASE WHEN ? THEN NULL ELSE control_choices.answer_command_id END`)
+    .run(choice.choiceId, requestSession(JSON.parse(row.state_json)), `${request.ref.bindingId}:${request.ref.generation}`, choice.status, JSON.stringify(choice), request.state === "pending" ? 1 : 0);
 }
