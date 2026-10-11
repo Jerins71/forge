@@ -495,6 +495,8 @@ class BackendServer implements StartedServer {
     this.swarmManager.off("agents_snapshot", this.handleTerminalAgentsSnapshot);
 
     try {
+      // Before the HTTP server closes: a request waiting on the shared Codex app-server would hold it open.
+      this.swarmManager.shutdownCodexAppServer();
       await this.wsServer.stop();
       await this.environmentService.stop();
     } finally {

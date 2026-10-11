@@ -1022,6 +1022,8 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
     return this.services.codexPlugin.retryWorker(managerAgentId, input);
   }
 
+  shutdownCodexAppServer(): void { this.services.codexPlugin.shutdown(); }
+
   browseCodexMcpCatalog(managerAgentId: string): Promise<CodexCatalogSnapshot> {
     return this.services.codexPlugin.browseCatalog(managerAgentId);
   }
