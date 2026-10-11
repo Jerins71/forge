@@ -404,9 +404,9 @@ export class SessionLifecycleCoordinator {
     return result;
   }
 
-  async stopSession(agentId: string): Promise<{ terminatedWorkerIds: string[] }> {
+  async stopSession(agentId: string, options?: { manualStopNotice?: boolean }): Promise<{ terminatedWorkerIds: string[] }> {
     this.getRequiredSessionDescriptor(agentId);
-    return this.stopValidatedSession(agentId);
+    return this.stopValidatedSession(agentId, options);
   }
 
   async resumeSession(agentId: string): Promise<void> {
@@ -663,6 +663,7 @@ export class SessionLifecycleCoordinator {
 
   private async stopValidatedSession(
     agentId: string,
+    options?: { manualStopNotice?: boolean },
   ): Promise<{ terminatedWorkerIds: string[] }> {
     await this.options.secureSessions.stopForLifecycle(agentId);
     this.cleanupCodex(agentId);
@@ -670,7 +671,7 @@ export class SessionLifecycleCoordinator {
     this.options.browser.cancelSession(agentId);
     const descriptor = this.getRequiredSessionDescriptor(agentId);
     await this.releaseBeforeStop(descriptor.profileId, agentId);
-    const result = await this.options.lifecycle.stopSession(agentId);
+    const result = await this.options.lifecycle.stopSession(agentId, options);
     this.options.activeTools.clearSession(agentId);
     return result;
   }

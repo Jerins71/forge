@@ -20,6 +20,11 @@ const STATUS_CONFIG: Record<
   expired: { icon: Clock, label: 'Expired', className: 'text-muted-foreground' },
 }
 
+const STATUS_SUMMARY: Record<'cancelled' | 'expired', string> = {
+  cancelled: 'You skipped this question',
+  expired: 'Question expired before it was answered',
+}
+
 function formatTimestamp(timestamp: string): string | null {
   const date = new Date(timestamp)
   if (Number.isNaN(date.getTime())) {
@@ -96,7 +101,7 @@ export function ChoiceAnsweredRow({
         />
         <StatusIcon className={cn('h-3.5 w-3.5 shrink-0', config.className)} />
         <span className="truncate max-w-[500px]">
-          {resolvedStatus === 'answered' ? `Choice: ${summary}` : `Choice ${config.label.toLowerCase()}`}
+          {resolvedStatus === 'answered' ? (summary ? `You chose ${summary}` : 'You answered') : STATUS_SUMMARY[resolvedStatus]}
         </span>
         {formattedTimestamp ? (
           <span className="shrink-0 font-mono text-[11px] text-subtle-foreground">{formattedTimestamp}</span>

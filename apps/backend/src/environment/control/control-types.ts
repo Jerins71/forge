@@ -105,7 +105,8 @@ export interface SwarmControlPort {
     runtimeGeneration: string;
     answers: RpcInput<"session.choose">["answers"];
   }): Promise<"answered" | "interrupted">;
-  stopSession(input: { commandId: string; sessionId: string }): Promise<{ stopped: boolean }>;
+  /** `quiet` replaces the provider without telling the transcript the session stopped. */
+  stopSession(input: { commandId: string; sessionId: string; quiet?: boolean }): Promise<{ stopped: boolean }>;
 }
 
 export interface EnvironmentAccessPort {

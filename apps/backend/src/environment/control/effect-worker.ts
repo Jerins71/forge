@@ -292,7 +292,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           const owner = loadState(database).threads[effect.threadId];
           if (owner && owner.bindingId !== effect.bindingId) break;
           // Runtime cleanup may need to interrupt its native projection before close.
-          if (!(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.threadId })).stopped) { retryRelease(row, effect, "Runtime writer shutdown is incomplete"); return; }
+          if (!(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.threadId, quiet: effect.quiet })).stopped) { retryRelease(row, effect, "Runtime writer shutdown is incomplete"); return; }
           const resource = live.get(effect.bindingId);
           if (resource) { attemptedNative = true; await resource.adapter.close(resource.binding); const drained = await resource.adapter.drain(resource.binding);
             if (drained.status !== "clean") { retryRelease(row, effect, "Provider binding drain is incomplete"); return; }

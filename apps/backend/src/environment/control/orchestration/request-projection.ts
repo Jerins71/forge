@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Database } from "better-sqlite3";
+import { isChoiceAnswer } from "@forge/protocol";
 import { ChoiceSummarySchema, decodeEnvironmentValue, type SessionSummary } from "@forge/protocol/environment-v2";
 import type { Static } from "@sinclair/typebox";
 import type { CoreState, Request, Thread } from "./types.js";
@@ -12,15 +13,27 @@ export function requestForChoice(state: CoreState, choiceId: string): Request | 
 }
 export function requestChoice(request: Request): Static<typeof ChoiceSummarySchema> | undefined {
   const payload = request.payload as { questions?: unknown } | null;
+  const status = request.state === "responding" ? "pending" : request.state === "resolved" ? "answered" : request.state;
+  const answers = status === "answered" && Array.isArray(request.response) && request.response.every(isChoiceAnswer) ? request.response : undefined;
   return decodeEnvironmentValue(ChoiceSummarySchema, { choiceId: requestChoiceId(request.requestId), agentId: request.threadId,
-    status: request.state === "responding" ? "pending" : request.state === "resolved" ? "answered" : request.state,
-    questions: payload?.questions });
+    status, questions: payload?.questions, ...(answers ? { answers } : {}) });
+}
+/** The stored projection of a choice, which also carries when it was asked and settled. */
+export function storedChoice(database: Database, choiceId: string): Static<typeof ChoiceSummarySchema> | undefined {
+  const row = database.prepare("SELECT choice_json FROM control_choices WHERE choice_id=?").get(choiceId) as { choice_json: string } | undefined;
+  return row ? JSON.parse(row.choice_json) : undefined;
+}
+/** A choice keeps the time it was first asked; the time it settled is recorded once. */
+export function withChoiceTimes<T extends Static<typeof ChoiceSummarySchema>>(choice: T, prior: Static<typeof ChoiceSummarySchema> | undefined, at: string): T {
+  const settled = choice.status !== "pending";
+  return { ...choice, requestedAt: prior?.requestedAt ?? at, ...(settled ? { settledAt: prior?.settledAt ?? at } : {}) };
 }
 export function requestSession(thread: Thread): string { return thread.role === "worker" ? thread.managerId! : thread.threadId; }
 
 /** A disposable read projection of retained request facts, never a callback owner. */
-export function projectRequestChoice(database: Database, request: Request): void {
-  const choice = requestChoice(request);
+export function projectRequestChoice(database: Database, request: Request, at: number): void {
+  const projected = requestChoice(request);
+  const choice = projected && withChoiceTimes(projected, storedChoice(database, projected.choiceId), new Date(at).toISOString());
   const row = database.prepare("SELECT state_json FROM orchestration_threads WHERE thread_id=?").get(request.threadId) as { state_json: string } | undefined;
   if (!choice || !row) return;
   database.prepare(`INSERT INTO control_choices (choice_id,session_id,runtime_generation,state,choice_json,updated_sequence) VALUES (?,?,?,?,?,0)

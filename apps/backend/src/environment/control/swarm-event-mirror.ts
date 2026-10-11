@@ -1,6 +1,6 @@
 import { loadState } from "./orchestration/store.js";
 import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
-import { requestForChoice, requestAttention } from "./orchestration/request-projection.js";
+import { requestForChoice, requestAttention, withChoiceTimes } from "./orchestration/request-projection.js";
 import { formatActivityContent, projectAgentMetadata } from "@forge/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, createReadStream, openSync, readSync, statSync } from "node:fs";
@@ -22,6 +22,8 @@ import type { ControlTransaction, EventSink } from "./event-sink.js";
 import { receiptIdentity } from "./event-sink.js";
 
 type DetailItem = Extract<Extract<DetailStreamItem, { kind: "event" }>["event"], { type: "item.upsert" }>["item"];
+/** A model switch or a user-stopped worker travels as an ordinary item whose source tells clients to draw a marker, not a reply. */
+const MARKER_NOTICE_KINDS = new Set(["model_change", "worker_stopped"]);
 type ChoiceSummary = Extract<Extract<DetailStreamItem, { kind: "event" }>["event"], { type: "choice.upsert" }>["choice"];
 export interface MirrorWireProjection {
   project(profile: ManagerProfile): Promise<ProjectSummary>;
@@ -162,7 +164,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       actorId: workerResult && entry.sourceWorkerId ? entry.sourceWorkerId : "actorAgentId" in entry ? entry.actorAgentId : entry.agentId,
       kind: workerResult ? "worker_result" : entry.type === "conversation_message" ? user ? "user" : "assistant" : "activity",
       pinned: swarmManager.getPinnedMessageIds(sessionId)?.has(entry.type === "conversation_message" ? entry.id ?? id : id) ?? false,
-      timestamp: entry.timestamp, ...(entry.type === "conversation_message" ? { source: entry.source } : {}), text: text.slice(0, 8192), contentRef: text.length > 8192 || (entry.type === "activity_summary" && activityContent(entry)) ? id : null,
+      timestamp: entry.timestamp, ...(entry.type === "conversation_message" ? { source: entry.systemNoticeKind && MARKER_NOTICE_KINDS.has(entry.systemNoticeKind) ? `system:${entry.systemNoticeKind}` : entry.source } : {}), text: text.slice(0, 8192), contentRef: text.length > 8192 || (entry.type === "activity_summary" && activityContent(entry)) ? id : null,
       ...(entry.type === "activity_summary" ? { activity: activityMetadata(entry, sessionId) } : {}),
       artifacts: (wireProjection.artifacts?.(entry, sessionId) ?? []).slice(0, 20),
       commandId: entry.type === "conversation_message" && entry.controlCommandId ? receiptIdentity(entry.controlCommandId) : null };
@@ -256,10 +258,11 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
   function choice(tx: ControlTransaction, entry: ChoiceRequestEvent, generation?: string) {
     const sessionId = entry.sessionAgentId ?? actors.get(entry.agentId) ?? entry.agentId;
     const status = entry.status;
-    const value: ChoiceSummary = { choiceId: entry.choiceId, agentId: entry.agentId, status, questions: entry.questions };
     const runtimeGeneration = generation ?? (entry as typeof entry & { runtimeGeneration?: string }).runtimeGeneration;
     if (!runtimeGeneration) return; // Historical Promise continuations cannot be reconstructed.
     const prior = database.prepare("SELECT choice_json FROM control_choices WHERE choice_id=?").get(entry.choiceId) as { choice_json: string } | undefined;
+    const value: ChoiceSummary = withChoiceTimes({ choiceId: entry.choiceId, agentId: entry.agentId, status, questions: entry.questions,
+      ...(status === "answered" && entry.answers?.length ? { answers: entry.answers } : {}) }, prior ? JSON.parse(prior.choice_json) : undefined, entry.timestamp);
     if (prior?.choice_json === JSON.stringify(value)) return;
     database.prepare(`INSERT INTO control_choices (choice_id,session_id,runtime_generation,state,choice_json,updated_sequence) VALUES (?,?,?,?,?,0)
       ON CONFLICT(choice_id) DO UPDATE SET runtime_generation=excluded.runtime_generation`)

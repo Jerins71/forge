@@ -58,6 +58,8 @@ export interface Request {
   kind: "approval" | "user_input";
   state: "pending" | "responding" | "resolved" | "expired" | "cancelled";
   payload: unknown;
+  /** The user's answer, kept once it is sent to the provider so the settled choice can show it. */
+  response?: unknown;
 }
 export interface CoreState {
   threads: Record<string, Thread>;
@@ -114,7 +116,7 @@ export type CoreEffect =
   | { kind: "provider.start"; threadId: string; attemptId: string }
   | { kind: "provider.interrupt"; threadId: string; attemptId: string }
   | { kind: "provider.respond"; threadId: string; requestId: string; response: unknown }
-  | { kind: "provider.release"; threadId: string; bindingId: string }
+  | { kind: "provider.release"; threadId: string; bindingId: string; quiet?: boolean }
   | { kind: "provider.compact"; threadId: string; attemptId: string; instructions?: string }
   | { kind: "recovery.deliver"; threadId: string; recoveryId: string; deliveryId: string };
 export interface Decision { events: LifecycleEvent[]; effects: CoreEffect[]; }

@@ -21,7 +21,7 @@ export interface ResolvedSourcePoint extends ContextSourcePoint {
 }
 export interface LineageTransfer extends Omit<ContextTransfer, 'kind' | 'source'> {
   kind: 'fork' | 'provider_switch' | 'merge_back'; source: ResolvedSourcePoint;
-  targetGeneration: number; targetModel?: AgentDescriptor['model']; targetBindingId?: string;
+  targetGeneration: number; targetModel?: AgentDescriptor['model']; sourceModel?: AgentDescriptor['model']; targetBindingId?: string;
   resolutionAttemptId?: string; nativeFork?: Pick<ProviderBinding, "conversation" | "nativeRunIds" | "contextCoverage">;
 }
 export type Transfer = WorkerTransfer | LineageTransfer;
@@ -29,7 +29,9 @@ export type TransferEvent = { type: 'transfer.created' | 'transfer.resolving' | 
 export type LineageEvent = TransferEvent | { type: 'handoff.recorded'; handoff: ContextHandoff };
 export type TransferCommand =
   | { type:'transfer.fallback'; threadId:string; failedAttemptId:string; attemptId:string; bindingId:string; transferId:string; targetModel:AgentDescriptor['model']; source:ResolvedSourcePoint; reason:string }
-  | { type: 'transfer.create'; transferId: string; kind: LineageTransfer['kind']; source: ResolvedSourcePoint; targetThreadId: string; targetModel?: AgentDescriptor['model']; continueWorker?: boolean; authorized: boolean }
+  | { type: 'transfer.create'; transferId: string; kind: LineageTransfer['kind']; source: ResolvedSourcePoint; targetThreadId: string; targetModel?: AgentDescriptor['model'];
+    /** The model in use before a provider switch, for threads the core has not yet recorded one for. */
+    sourceModel?: AgentDescriptor['model']; continueWorker?: boolean; authorized: boolean }
   | { type: 'transfer.resolve'; transferId: string; attemptId: string; strategy?:'native_fork'|'portable_context'|'delta_context'; error?:ContextTransfer['error'] }
   | {type:'transfer.interrupted';transferId:string}
   | { type: 'transfer.resolved'; transferId: string; attemptId: string; strategy: 'native_fork' | 'portable_context' | 'delta_context'; handoff?: ContextHandoff; nativeFork?: LineageTransfer["nativeFork"] }
@@ -138,14 +140,15 @@ export function decideTransfer(initial: CoreState, command: CoreCommand & Transf
       if(target.activeRunId || target.compaction || target.shutdown!=='clean' || Object.values(state.runs).some(r=>r.threadId===target.threadId && r.state==='queued')) throw new Error('Provider switch requires an idle thread with confirmed shutdown');
       const bindingId=target.bindingId;
       emit({type:'thread.changed',thread:{...target,model:command.targetModel,generation:target.generation+1,shutdown:bindingId ? 'pending':'clean',...(bindingId ? {} : {bindingId:undefined})}});
-      if(bindingId) decision.effects.push({kind:'provider.release',threadId:target.threadId,bindingId});
+      // The user changed the model or sign-in, not the session: the old provider leaves without a stop notice.
+      if(bindingId) decision.effects.push({kind:'provider.release',threadId:target.threadId,bindingId,quiet:true});
     } else {
       if(!target || source.lineage?.parentThreadId!==target.threadId || source.projectId!==target.projectId) throw new Error('Merge-back requires the original fork parent');
       basePoint=source.lineage.basePoint;
     }
     target=state.threads[command.targetThreadId];
     if(Object.values(state.transfers).some(t=>isLineageTransfer(t) && t.targetThreadId===target.threadId && !['consumed','superseded','failed'].includes(t.state))) throw new Error('Target has an unresolved context transfer');
-    emit({type:'transfer.created',transfer:{transferId:command.transferId,kind:command.kind,source:command.source,basePoint,targetThreadId:target.threadId,targetGeneration:target.generation,targetModel:command.targetModel ?? target.model,sourceProvider:command.source.bindingId ? state.bindings[command.source.bindingId]?.capabilities.provider : source.model?.provider,targetProvider:command.targetModel?.provider ?? target.model?.provider,strategy:'unresolved',state:'pending',createdAt:command.now}});
+    emit({type:'transfer.created',transfer:{transferId:command.transferId,kind:command.kind,source:command.source,basePoint,targetThreadId:target.threadId,targetGeneration:target.generation,targetModel:command.targetModel ?? target.model,sourceModel:source.model ?? command.sourceModel,sourceProvider:command.source.bindingId ? state.bindings[command.source.bindingId]?.capabilities.provider : source.model?.provider,targetProvider:command.targetModel?.provider ?? target.model?.provider,strategy:'unresolved',state:'pending',createdAt:command.now}});
     return decision;
   }
   const transfer=state.transfers[command.transferId];if(!transfer || !isLineageTransfer(transfer)) throw new Error('Unknown lineage transfer');
@@ -179,7 +182,10 @@ export function publicPoint(point:ContextSourcePoint):ContextSourcePoint { retur
 export function lineageSnapshot(state:CoreState,threadId:string):SessionLineageSnapshot {
   const transfers=Object.values(state.transfers).filter(t=>t.source.threadId===threadId || t.targetThreadId===threadId).sort((a,b)=>a.createdAt-b.createdAt || a.transferId.localeCompare(b.transferId)).slice(-1000).map(t=>{
     if(!isLineageTransfer(t)) return {transferId:t.transferId,kind:t.kind,source:{...t.source,sequence:state.runs[t.source.runId]?.sequence ?? 0},targetThreadId:t.targetThreadId,targetRunId:t.targetRunId,strategy:t.strategy,state:t.state,createdAt:t.createdAt,consumingAttemptId:t.consumingAttemptId,consumedAt:t.consumedAt};
-    const {targetGeneration:_,targetModel:_model,targetBindingId:_binding,resolutionAttemptId:_attempt,nativeFork:_native,...wire}=t;return {...wire,source:publicPoint(t.source)};
+    const {targetGeneration:_,targetModel,sourceModel,targetBindingId:_binding,resolutionAttemptId:_attempt,nativeFork:_native,...wire}=t;
+    const model=(value?:AgentDescriptor['model'])=>value?.provider && value.modelId ? {provider:value.provider,modelId:value.modelId}:undefined;
+    const from=model(sourceModel),to=model(targetModel);
+    return {...wire,source:publicPoint(t.source),...(from ? {sourceModel:from}:{}),...(to ? {targetModel:to}:{})};
   });
   const selected:SessionLineageSnapshot['transfers']=[],handoffs:ContextHandoff[]=[];
   const base={threadId,lineage:state.threads[threadId]?.lineage ?? null};

@@ -38,6 +38,8 @@ export interface WorkerAssignment {
 export type AssignmentCommand =
   | { type: "worker.assign"; assignmentId: string; parentThreadId: string; parentRunId: string; workerThreadId: string; workerRunId: string; inputId: string; attemptId: string; bindingId: string; input: Run["input"]; authorized: boolean; selection: AssignmentSelection; planStep?: WorkerAssignment["planStep"]; parentContext?: Pick<WorkerParentContext, "outputTarget" | "rootTurnId" | "parentRootTurnId"> }
   | { type: "worker.stop"; threadId: string; managerId: string; authorized: boolean }
+  /** The user stopped the worker: its unfinished work is cancelled, and the worker itself stays resumable. */
+  | { type: "worker.assignment.cancel"; threadId: string; managerId: string; authorized: boolean }
   | { type: "worker.result"; assignmentId: string; workerRunId: string; resultRef: TransferPoint; input: Run["input"]; prepared?: WorkerAssignment["resultPrepared"] }
   | { type: "assignment.deliver"; assignmentId: string; authorized: boolean }
   | { type: "assignments.clear"; threadId: string; authorized: boolean };
@@ -118,12 +120,12 @@ export function decideAssignment(initial: CoreState, command: CoreCommand & Assi
         attemptId: command.attemptId, bindingId: command.bindingId, input: command.input, delivery: "queue" });
       break;
     }
-    case "worker.stop": {
+    case "worker.stop": case "worker.assignment.cancel": {
       const worker = state.threads[command.threadId]; const manager = state.threads[command.managerId];
       if (!command.authorized || !manager || manager.role !== "manager" || !worker || worker.role !== "worker" || worker.managerId !== manager.threadId) throw new Error("Authorized worker owner required");
       for (const assignment of Object.values(state.assignments)) if (assignment.workerThreadId === worker.threadId && ["assigned", "running"].includes(assignment.state))
         emit({ type: "assignment.cancelled", assignment: { ...assignment, state: "cancelled", terminalAt: command.now, outcome: "cancelled" } });
-      apply({ type: "thread.stop", commandId: command.commandId, now: command.now, threadId: worker.threadId });
+      if (command.type === "worker.stop") apply({ type: "thread.stop", commandId: command.commandId, now: command.now, threadId: worker.threadId });
       break;
     }
     case "worker.result": {
