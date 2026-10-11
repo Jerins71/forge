@@ -20,10 +20,6 @@ import { readNativeToolContract, stableToolContract } from "./codex-tool-contrac
 
 type Origin = ProviderObservation["origin"];
 type Fact = ProviderObservation extends infer O ? O extends ProviderObservation ? Omit<O, "sequence" | "scope" | "attemptId"> : never : never;
-/** Models whose provider refused detailed reasoning summaries; they get the provider default for the rest of this process. */
-const detailedSummaryRefused = new Set<string>();
-const refusesReasoningSummary = (text: string) => /summar/i.test(text) && /unsupported|not supported|invalid|unknown|unrecognized/i.test(text);
-
 interface NativeTurn {
   attemptId: string;
   conversation: ProviderConversationRef;
@@ -237,18 +233,10 @@ export class CodexProviderAdapter implements ProviderAdapter {
         throw error instanceof ProviderDispatchRejectedError ? error : new CodexProviderDispatchError(error);
       }
       try {
-        const modelId = s.input.model.modelId;
-        // Ask for detailed reasoning summaries; without a summary setting Codex reports no reasoning to show.
-        const start = (summary: "detailed" | "auto") => s.client.request<any>("turn/start", { threadId: s.binding.conversation.nativeId,
-          input: codexNativeInput(input.input), model: modelId, effort: s.input.model.thinkingLevel, summary, clientUserMessageId: input.runId });
-        let response;
-        try { response = await start(detailedSummaryRefused.has(modelId) ? "auto" : "detailed"); }
-        catch (error) {
-          // A refused summary setting is rejected before any turn exists, so asking again starts nothing twice.
-          if (detailedSummaryRefused.has(modelId) || !refusesReasoningSummary(message(error))) throw error;
-          detailedSummaryRefused.add(modelId);
-          response = await start("auto");
-        }
+        const response = await s.client.request<any>("turn/start", { threadId: s.binding.conversation.nativeId,
+          input: codexNativeInput(input.input), model: s.input.model.modelId, effort: s.input.model.thinkingLevel,
+          // Ask for reasoning summaries; without them Codex reports no reasoning items to show.
+          summary: "auto", clientUserMessageId: input.runId });
         if (typeof response?.turn?.id !== "string") throw new Error("Codex did not acknowledge a turn identity");
         this.accept(turn, response.turn.id);
         return { status: "accepted", turn: this.turnRef(turn) };
@@ -459,8 +447,6 @@ export class CodexProviderAdapter implements ProviderAdapter {
       if (typeof tokens === "number" && typeof contextWindow === "number") this.emit(turn, { type: "context_usage", origin: this.origin(turn), tokens, contextWindow, percent: contextWindow ? tokens / contextWindow * 100 : 0 });
     }
     // Codex reports its own reconnect attempts as errors that it will retry; the turn is still running.
-    // A provider that refuses detailed summaries mid-turn gets the default from this model's next turn on.
-    if (method === "error" && refusesReasoningSummary(String(params.error?.message ?? ""))) detailedSummaryRefused.add(s.input.model.modelId);
     if (method === "error" && params.willRetry === true) this.emit(turn, { type: "retry", origin: this.origin(turn), attempt: ++turn.retries, message: String(params.error?.message ?? "Provider request failed") });
     if (method === "error" && params.willRetry !== true) this.emit(turn, { type: "error", origin: this.origin(turn), code: "CODEX_PROVIDER", message: String(params.error?.message ?? "Provider request failed"), delivery: turn.accepted ? "accepted" : "unknown" });
     if (method === "turn/completed") {

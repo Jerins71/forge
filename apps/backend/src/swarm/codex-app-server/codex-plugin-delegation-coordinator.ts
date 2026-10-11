@@ -117,6 +117,7 @@ export type CodexPluginAppServerPort = Pick<
   | "resolveCodexMcpToolInCatalog"
   | "filterCodexMcpToolsForAuthorizedSelectors"
   | "callCodexMcpToolByExactTool"
+  | "dispose"
 >;
 
 export interface CodexPluginDelegationCoordinatorOptions {
@@ -464,6 +465,14 @@ export class CodexPluginDelegationCoordinator {
         "Codex Plugin workers do not accept attachment payloads. Inspect or summarize attachments in the manager turn, then pass only relevant text context to the Codex Plugin specialist.",
       );
     }
+  }
+
+  /**
+   * Ends the shared app-server process at backend shutdown. Its in-flight catalog and tool requests fail at
+   * once; otherwise an HTTP request waiting on one keeps the server from closing for up to a minute.
+   */
+  shutdown(): void {
+    this.options.appServer.dispose();
   }
 
   async browseCatalog(managerAgentId: string): Promise<CodexCatalogSnapshot> {
