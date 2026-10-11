@@ -10,7 +10,9 @@ HTTP/terminal services are omitted. Production transport clients are unchanged.
 The test also uses the built production `RuntimeEnvironmentClient`, including its
 stream reducers and reconnect/replay behavior. The original live client survives
 outer backend crashes; its final projections must equal a second client's fresh
-bootstrap. The child fixes clock/UUIDs, runs `effectWorker.drain()`, and reports
+bootstrap (projects, sessions, recovery and detail). Project metadata comes from
+real profile/session/repository state, with the EnvironmentService wiring policy.
+The child fixes clock/UUIDs, runs `effectWorker.drain()`, and reports
 committed-event signals and persisted sequence watermarks. Its IPC is test control,
 not execution authority. Crashes use SIGKILL without runtime disposal callbacks.
 All data and native-provider homes belong to disposable temporary roots; listeners
