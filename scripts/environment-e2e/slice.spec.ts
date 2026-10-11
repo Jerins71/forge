@@ -1069,17 +1069,17 @@ test('F7: Stop interrupts and failed turns never gain an empty completion notice
   } finally { f.rpc.close(); }
 });
 test('F4: a newly created and seeded project sends its first message without a trust decision, including after restart', async () => {
-  const f = await busySendFixture(2);
+  const f = await busySendFixture(1);
   try {
     const seeded = await fetch(`${f.environment.baseUrl}/api/settings/project-resources/seed`, { method: 'POST', headers: {
-      Authorization: `Bearer ${sessions[2]!.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: f.sessionId, sessionAgentId: f.sessionId }) });
+      Authorization: `Bearer ${sessions[1]!.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: f.sessionId, sessionAgentId: f.sessionId }) });
     expect(seeded.status).toBe(200);
     const resources = await seeded.json() as any;
     expect(resources.snapshot.trust.state).toBe('trusted');
     await controlEnvironment(manifest, f.environment.name, 'stop'); await controlEnvironment(manifest, f.environment.name, 'start');
-    const sent = await fixtureRpcOnce(f.environment.baseUrl, sessions[2]!, 'session.send', { commandId: randomUUID(), sessionId: f.sessionId, message: { text: 'First user message', artifactIds: [] } });
+    const sent = await fixtureRpcOnce(f.environment.baseUrl, sessions[1]!, 'session.send', { commandId: randomUUID(), sessionId: f.sessionId, message: { text: 'First user message', artifactIds: [] } });
     expect(await f.run(sent.commandId)).toMatchObject({ outcome: 'completed' });
-    const next = await openFixtureRpc(f.environment.baseUrl, sessions[2]!);
+    const next = await openFixtureRpc(f.environment.baseUrl, sessions[1]!);
     try { const { subscriptionId } = await next.call('session.subscribe', { sessionId: f.sessionId });
       const detail = (await until(() => next.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot;
       expect(detail.choices.filter((choice: any) => choice.status === 'pending')).toHaveLength(0);
