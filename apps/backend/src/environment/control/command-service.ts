@@ -206,6 +206,22 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     if (database.prepare("SELECT 1 FROM effects WHERE session_id=? AND kind='lifecycle.admit' AND state='claimed' LIMIT 1").get(sessionId))
       throw new ControlError("CONFLICT", "Another change to this session is still being applied. Try again in a moment.", true);
   };
+  /**
+   * Read state, attention, pins and renames are bookkeeping: each holds its session's lane for the
+   * moment it takes to record. A client that views a session issues them on its own, so another
+   * command arriving in that moment waits for them here instead of being refused over the overlap.
+   * Anything longer is still refused by the admission checks.
+   */
+  const bookkeeping = database.prepare(`SELECT 1 FROM effects e JOIN commands c USING(command_id) WHERE e.session_id=? AND e.kind='lifecycle.admit' AND e.state='claimed'
+    AND c.method IN ('session.readState.set','project.readState.clear','session.attention.dismiss','session.message.pin','session.pins.clear','session.update') LIMIT 1`);
+  const settleBookkeeping = async (sessionIds: readonly string[]): Promise<void> => {
+    const lanes = sessionIds.flatMap(sessionId => {
+      const owner = database.prepare("SELECT project_id FROM control_sessions WHERE session_id=?").get(sessionId) as { project_id: string } | undefined;
+      return owner ? [sessionId, "project:" + owner.project_id] : [sessionId];
+    });
+    const deadline = Date.now() + 2_000;
+    while (!closed && Date.now() < deadline && lanes.some(lane => bookkeeping.get(lane))) await new Promise(resolve => setTimeout(resolve, 5));
+  };
   /** A change must not run across a launch, input or stop the session accepted and has not finished applying. */
   const assertSettled = (sessionId: string): void => {
     if (database.prepare("SELECT 1 FROM effects WHERE session_id=? AND state IN ('pending','claimed') LIMIT 1").get(sessionId))
@@ -216,6 +232,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     if (!principal.scopes.has(input.requiredScope ?? "session:operate") || options.isDeviceRevoked(principal.deviceSessionId))
       throw new ControlError("FORBIDDEN", "Session operation is not authorized");
     input = { ...input, sessionIds: [...input.sessionIds], projectIds: [...(input.projectIds ?? [])] };
+    await settleBookkeeping(input.sessionIds);
     const method = input.receipt?.method ?? "lifecycle." + input.command;
     const request = canonicalRequest(method, input.request);
     const projectIds = [...new Set(input.projectIds ?? [])].sort();
@@ -624,7 +641,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         if (duplicate && !["running", "accepted"].includes(duplicate.state)) return duplicate;
         if (!options.policy) throw new ControlError("UNAVAILABLE", "Project policy is not composed");
         const normalized = JSON.parse(request.normalized) as RpcInput<import("./project-policy.js").PolicyMethod>;
-        if (!duplicate && "sessionId" in normalized) { assertAdmissionAvailable(normalized.sessionId); assertSettled(normalized.sessionId); }
+        if (!duplicate && "sessionId" in normalized) { await settleBookkeeping([normalized.sessionId]); assertAdmissionAvailable(normalized.sessionId); assertSettled(normalized.sessionId); }
         const prepared = duplicate ? { sessionIds: [], projectIds: [], intent: "inspect" as const, frozen: normalized } : await options.policy.prepare(method as import("./project-policy.js").PolicyMethod, normalized);
         await admitLifecycle(principal, { ...prepared, commandId: input.commandId, command: method, request: normalized, frozenRequest: prepared.frozen, requiredScope: rpcScopes[method], receipt: { method, ...("projectId" in prepared ? { projectId: prepared.projectId } : {}), ...("sessionId" in prepared ? { sessionId: prepared.sessionId } : {}) } }, () => options.policy!.apply(method as import("./project-policy.js").PolicyMethod, prepared.frozen));
         return readReceipt(sink, input.commandId);
@@ -668,6 +685,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           readSession(sink, send.sessionId);
           await preflightRoute({ sessionId: send.sessionId, message: send.message });
         }
+        await settleBookkeeping([(normalized as RpcInput<"session.send">).sessionId]);
         return accept(principal, method as "session.send" | "session.choose" | "session.stop" | "worker.kill", normalized);
       }
       const launch = normalized as RpcInput<"session.launch">;
