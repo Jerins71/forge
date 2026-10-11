@@ -107,7 +107,7 @@ describe("controlled swarm canonical/provider boundaries", () => {
     expect(updates.map(row => JSON.parse(row.payload_json).recovery)).toEqual([snapshot]);
     expect(f.manager.getRestartRecoverySnapshot()).toEqual(snapshot);
   });
-  it("publishes one decided recovery update from committed facts despite duplicate requests", async () => {
+  it("replays a recovery decision receipt and rejects a fresh decision after resolution", async () => {
     const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true;
     const principal = f.paired.principal;
     await f.core.controlService.execute(principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "interrupted work", artifactIds: [] } });
@@ -116,7 +116,7 @@ describe("controlled swarm canonical/provider boundaries", () => {
     const rpc = createDetailFeatureRpc({ swarmManager: f.manager, control: core.controlService });
     const input = { commandId: randomUUID(), recoveryId: snapshot.recoveryId, action: "dismiss" };
     await rpc.execute(principal, "recovery.decide", input); await rpc.execute(principal, "recovery.decide", input);
-    await rpc.execute(principal, "recovery.decide", { ...input, commandId: randomUUID() });
+    await expect(rpc.execute(principal, "recovery.decide", { ...input, commandId: randomUUID() })).rejects.toMatchObject({ code: "CONFLICT" });
     const decided = loadState(f.database).recovery!;
     expect(decided).toMatchObject({ ...snapshot, dismissedAt: expect.any(String) });
     const updates = f.database.prepare("SELECT payload_json FROM events WHERE event_type='recovery.upsert' AND sequence>?").all(cursor) as { payload_json: string }[];
