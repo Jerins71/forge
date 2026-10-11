@@ -1008,7 +1008,7 @@ test('F7: an immediate first send after project.create joins onboarding without 
     const sent = await f.send('The immediate first user task');
     expect(await f.run(sent.commandId)).toMatchObject({ outcome: 'completed' });
     expect(await settled(sent.commandId, 0)).toMatchObject({ state: 'succeeded', delivery: 'dispatched' });
-    const state = await f.state();
+    const state = await until(f.state, state => !state.threads[f.sessionId]?.activeRunId);
     const onboarding = Object.values(state.runs).filter(run => run.threadId === f.sessionId && run.runId !== `run-${sent.commandId}`);
     expect(onboarding).toHaveLength(1);
     expect(onboarding[0]).toMatchObject({ state: 'terminal', outcome: 'completed' });
