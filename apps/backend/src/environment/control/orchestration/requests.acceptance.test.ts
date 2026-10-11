@@ -47,7 +47,7 @@ async function fixture() {
       lifetime: { kind: "live_callback", generation: binding.scope.generation, ...(expiresAt ? { expiresAt } : {}) }, requestKind: kind, payload: { questions } };
   }
   function publish(value: ProviderObservation) { core.controlService.record({ type: "provider.observe", commandId: `observation-${++serial}`, now, observation: value }); return Object.values(loadState(core.database).requests).at(-1)!; }
-  return { core, open, adapter, responses, observation, publish, advance: () => { now += 60_000; } };
+  return { core, options, open, adapter, responses, observation, publish, advance: () => { now += 60_000; } };
 }
 function choice(core: ControlCore, requestId: string) { const row = core.database.prepare("SELECT choice_json FROM control_choices WHERE choice_id=?").get(requestId) as { choice_json: string } | undefined; return row && JSON.parse(row.choice_json); }
 
@@ -106,6 +106,16 @@ describe("authoritative native choices", () => {
     const f = await fixture(); const request = f.publish(f.observation("approval", new Date(1_800_000_030_000).toISOString())); f.advance();
     await expect(f.core.controlService.execute(principal, "session.choose", { commandId: answerId, sessionId: "manager", choiceId: request.requestId, answers })).rejects.toMatchObject({ code: "CONFLICT" });
     expect(loadState(f.core.database).requests[request.requestId].state).toBe("expired"); expect(choice(f.core, request.requestId).status).toBe("expired"); expect(f.responses).toEqual([]);
+  });
+  it("rejects an answer that expires between preflight and admission after committing its expired projection", async () => {
+    const f = await fixture(); const request = f.publish(f.observation("approval", new Date(1_800_000_030_000).toISOString()));
+    const clock = f.options.clock; let reads = 0; f.options.clock = () => clock() + (++reads === 1 ? 0 : 60_000);
+    const input = { commandId: answerId, sessionId: "manager", choiceId: request.requestId, answers };
+    await expect(f.core.controlService.execute(principal, "session.choose", input)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(loadState(f.core.database).requests[request.requestId].state).toBe("expired"); expect(choice(f.core, request.requestId).status).toBe("expired");
+    expect(await f.core.controlService.getReceipt(principal, answerId)).toMatchObject({ state: "interrupted", error: { code: "CONFLICT" } });
+    await expect(f.core.controlService.execute(principal, "session.choose", input)).rejects.toMatchObject({ code: "CONFLICT" });
+    await f.core.effectWorker.drain(); expect(f.responses).toEqual([]); expect(f.core.database.prepare("SELECT 1 FROM effects WHERE command_id=? AND kind='provider.respond'").get(answerId)).toBeUndefined();
   });
   it("settles pending callbacks and the choice projection on stop before releasing the provider", async () => {
     const f = await fixture(); const request = f.publish(f.observation("approval"));
