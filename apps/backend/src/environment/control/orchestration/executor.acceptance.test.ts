@@ -43,6 +43,16 @@ async function fixture() {
 const principal = { deviceSessionId: "device", scopes: new Set(["session:operate" as const]) };
 
 describe("durable provider outbox", () => {
+  it.each(["pending", "error"] as const)("quarantines %s runtime cleanup and interrupts the stop receipt before adapter close", async mode => {
+    const f = await fixture(); let closes = 0;
+    f.adapter.close = async () => { closes++; };
+    f.options.swarm.stopSession = async () => { if (mode === "error") throw new Error("Runtime cleanup failed"); return { stopped: false }; };
+    await f.core.controlService.submitInput({ commandId: "held", threadId: "manager", message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" }); await f.core.effectWorker.drain();
+    expect(closes).toBe(0); expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "interrupted" });
+    expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "stopped", shutdown: "quarantined" });
+    await expect(f.core.controlService.submitInput({ commandId: "replacement", threadId: "manager", message: { text: "replacement", artifactIds: [] } })).rejects.toThrow(/shutdown/i);
+  });
   it("settles runtime cleanup before closing the adapter binding", async () => {
     const f = await fixture(); let nativeClosed = false; const order: string[] = [];
     f.adapter.close = async () => { nativeClosed = true; order.push("adapter.close"); };

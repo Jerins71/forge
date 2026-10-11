@@ -190,6 +190,10 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       }
       settle(row, "done");
     } catch (error) {
+      if (effect.kind === "provider.release") {
+        record({ type: "binding.drained", ...result(row, "drain-failed"), threadId: effect.threadId, bindingId: effect.bindingId, status: "pending" });
+        settle(row, "interrupted", { ...unavailable, message: error instanceof Error ? error.message : String(error) }); return;
+      }
       if (effect.kind === "provider.respond" && error && typeof error === "object" && "code" in error && error.code === "PROVIDER_REQUEST_REJECTED") {
         record({ type: "request.expire", ...result(row, "expired"), threadId: effect.threadId, requestId: effect.requestId });
         settle(row, "interrupted", { code: "CONFLICT", message: "Provider request expired", retryable: false }); return;
