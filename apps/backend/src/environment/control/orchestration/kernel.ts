@@ -182,12 +182,18 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     case "thread.stop": {
       const owner = thread(command.threadId);
       const needsDrain = !!owner.bindingId && (command.writerPending !== false || !!state.bindings[owner.bindingId]);
-      emit({ type: "thread.stopped", thread: { ...owner, desired: "stopped", shutdown: needsDrain ? "pending" : "clean", ...(!needsDrain ? { bindingId: undefined } : {}) } });
+      const retained = command.retain === true && owner.role === "worker" && owner.desired === "running";
+      emit({ type: "thread.stopped", thread: { ...owner, desired: retained ? "running" : "stopped", shutdown: needsDrain ? "pending" : "clean", ...(!needsDrain ? { bindingId: undefined } : {}) } });
       for (const run of Object.values(state.runs)) if (run.threadId === owner.threadId && run.state === "queued") finish(run, "cancelled");
+      if (retained) {
+        for (const assignment of Object.values(state.assignments)) if (assignment.workerThreadId === owner.threadId && ["assigned", "running"].includes(assignment.state))
+          emit({ type: "assignment.cancelled", assignment: { ...assignment, state: "cancelled", terminalAt: command.now, outcome: "cancelled" } });
+        if (owner.activeRunId && state.runs[owner.activeRunId].state !== "terminal") finish(state.runs[owner.activeRunId], "cancelled");
+      }
       if (needsDrain) decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: owner.bindingId! });
       else if (owner.activeRunId && state.runs[owner.activeRunId].state !== "terminal") finish(state.runs[owner.activeRunId], "cancelled");
       if (owner.role === "manager") for (const worker of Object.values(state.threads).filter(candidate => candidate.managerId === owner.threadId && (candidate.desired !== "stopped" || candidate.shutdown !== "clean"))) {
-        const stopped = decide(state, { ...command, threadId: worker.threadId, writerPending: !!worker.bindingId });
+        const stopped = decide(state, { ...command, threadId: worker.threadId, writerPending: !!worker.bindingId, retain: !command.terminateChildren });
         for (const event of stopped.events) emit(event);
         decision.effects.push(...stopped.effects);
       }

@@ -156,11 +156,11 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     const session = readSession(sink, sessionId);
     sink.commitCommand(tx, { type: "thread.create", commandId: `thread:${sessionId}`, now: options.clock(), threadId: sessionId, projectId: session.project_id, role: "manager" });
   };
-  const stopThread = (tx: ControlTransaction, sessionId: string, commandId: string) => {
+  const stopThread = (tx: ControlTransaction, sessionId: string, commandId: string, terminateChildren = false) => {
     ensureThread(tx, sessionId);
     const session = database.prepare("SELECT launch_command_id,descriptor_json FROM control_sessions WHERE session_id=?").get(sessionId) as { launch_command_id: string | null; descriptor_json: string | null } | undefined;
     const writerPending = !session?.launch_command_id || !!session.descriptor_json || !!database.prepare("SELECT 1 FROM effects WHERE session_id=? AND kind IN ('session.ensure','runtime.acquire','transcript.append') AND attempt>0").get(sessionId);
-    sink.commitCommand(tx, { type: "thread.stop", commandId, now: options.clock(), threadId: sessionId, writerPending });
+    sink.commitCommand(tx, { type: "thread.stop", commandId, now: options.clock(), threadId: sessionId, writerPending, terminateChildren });
     const pending = database.prepare("SELECT DISTINCT command_id FROM effects WHERE session_id=? AND state='pending' AND kind!='provider.release' AND command_id!=?").all(sessionId, commandId) as { command_id: string }[];
     for (const command of pending) {
       const error = { code: "CONFLICT" as const, message: "Superseded by session lifecycle change", retryable: false };
@@ -262,7 +262,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       for (const lane of lanes) {
         const sessionId = sessionIds.includes(lane) ? lane : "";
         if (sessionId && input.intent === "stop") {
-          stopThread(tx, sessionId, input.commandId);
+          stopThread(tx, sessionId, input.commandId, input.command === "session.delete" || input.command === "delete_session");
         }
         if (sessionId && input.intent === "resume") {
           const session = readSession(sink, sessionId);
