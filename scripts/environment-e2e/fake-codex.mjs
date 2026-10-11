@@ -96,6 +96,8 @@ async function runTurn(turn, text) {
   notify('turn/started', { threadId: turn.thread.id, turn: { id: turn.id, status: 'inProgress', items: [] } });
   let reply = `fixture:${fixture.instanceId}:assistant reply`;
   try {
+    if (text.includes('Your first job is to orient to THIS project.') && existsSync(join(checkout, '.fixture-onboarding-slow'))) await pause(1500);
+    if (turn.done) return;
     if (text.includes('[fixture:hold]')) { turn.holding = true; return; }
     if (text.includes('[fixture:crash]')) { process.exit(1); }
     if (text.includes('[fixture:empty]')) { complete(turn); return; }

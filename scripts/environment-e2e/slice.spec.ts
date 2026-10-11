@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { get as httpGet } from 'node:http';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, readdir, cp } from 'node:fs/promises';
+import { readFile, writeFile, readdir, cp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { readManifest, verifyFleetHealth, controlEnvironment, type BootstrapSession, type FleetManifest } from './launch.js';
@@ -965,14 +965,14 @@ test('a hung turn that ignores interrupt and SIGTERM is stopped, settled, and th
 
 
 // QA F7/F4: exercise real RPC admission, native provider dispatch and durable live/replay projections.
-async function busySendFixture(index = 0) {
+async function busySendFixture(index = 0, waitForOnboarding = true) {
   const environment = manifest.environments[index]!;
   const rpc = await openFixtureRpc(environment.baseUrl, sessions[index]!);
   const created = await rpc.call('project.create', { commandId: randomUUID(), title: 'Busy send QA', cwd: environment.checkout,
     model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' }, secureSessionsEnabled: false });
   const sessionId = created.result.sessionId as string;
   const state = () => readDb(db => loadState(db), index);
-  await until(async () => (await state()).threads[sessionId]?.activeRunId, value => !value);
+  if (waitForOnboarding) await until(async () => (await state()).threads[sessionId]?.activeRunId, value => !value);
   const run = (commandId: string) => until(async () => (await state()).runs[`run-${commandId}`], value => value?.state === 'terminal');
   const counters = async () => {
     const files = await readdir(join(environment.checkout, '.fixture-codex'));
@@ -999,6 +999,28 @@ async function busySendFixture(index = 0) {
   return { environment, rpc, sessionId, state, run, counters, detail, send, slow };
 }
 const silentNotice = 'The manager completed this turn without a visible response.';
+test('F7: an immediate first send after project.create joins onboarding without interrupting it', async () => {
+  const hold = join(manifest.environments[0]!.checkout, '.fixture-onboarding-slow');
+  await writeFile(hold, 'hold the hidden onboarding turn');
+  const f = await busySendFixture(0, false);
+  try {
+    // No readiness, settlement or provider poll between project.create and session.send.
+    const sent = await f.send('The immediate first user task');
+    expect(await f.run(sent.commandId)).toMatchObject({ outcome: 'completed' });
+    expect(await settled(sent.commandId, 0)).toMatchObject({ state: 'succeeded', delivery: 'dispatched' });
+    const state = await f.state();
+    const onboarding = Object.values(state.runs).filter(run => run.threadId === f.sessionId && run.runId !== `run-${sent.commandId}`);
+    expect(onboarding).toHaveLength(1);
+    expect(onboarding[0]).toMatchObject({ state: 'terminal', outcome: 'completed' });
+    expect((await f.counters()).interrupts).toBe(0);
+    const detail = await f.detail();
+    expect(detail.items.some((item: any) => item.text?.includes('no active turn to interrupt'))).toBe(false);
+    expect(detail.items.some((item: any) => item.text === silentNotice)).toBe(false);
+    expect(detail.items.filter((item: any) => item.kind === 'user' && item.text === 'The immediate first user task')).toHaveLength(1);
+    evidence.immediateProjectSend = { onboardingOutcome: onboarding[0]!.outcome, inputOutcome: 'completed', counters: await f.counters(), delivery: state.runs[`run-${sent.commandId}`].delivery };
+  } finally { f.rpc.close(); await rm(hold, { force: true }); }
+});
+
 for (const delivery of ['followUp'] as const) {
   test(`F7: busy ${delivery ?? 'composer default'} send queues, preserves the reply and projects pending live/replay`, async () => {
     const f = await busySendFixture();
