@@ -1,6 +1,5 @@
 export interface RuntimeCallbackGateOptions {
   getCurrentRuntimeToken(agentId: string): number | undefined;
-  now?: () => string;
 }
 
 /**

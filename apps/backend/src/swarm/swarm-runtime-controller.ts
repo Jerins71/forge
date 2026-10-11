@@ -279,8 +279,7 @@ export class SwarmRuntimeController {
     this.runtimeExtensionSnapshotsByAgentId = this.runtimeBinding.runtimeExtensionSnapshotsByAgentId;
 
     this.runtimeCallbackGate = new RuntimeCallbackGate({
-      getCurrentRuntimeToken: (agentId) => this.runtimeBinding.getRuntimeToken(agentId),
-      now: () => this.now()
+      getCurrentRuntimeToken: (agentId) => this.runtimeBinding.getRuntimeToken(agentId)
     });
     this.generationMeasurementCoordinator = new GenerationMeasurementCoordinator({
       descriptors: this.host.descriptors,
