@@ -149,8 +149,8 @@ test('resolves Project Agent in selected environment and preserves timeout exit 
   const result = await client.run({ command: 'run', target: { kind: 'project_agent', profileId: projectId, handle: 'cli-agent' }, text: '[fixture:hold]', timeoutMs: 1, stopOnTimeout: true });
   expect(result).toMatchObject({ status: 'timeout', projectAgentHandle: 'cli-agent', timedOut: true });
   expect((await sessionProjection(sessionId)).status).toBe('stopped');
-  // The retained CLI descriptor preserves the domain's idle-after-shutdown state.
-  expect((await client.showSession(sessionId)).session.status).toBe('idle');
+  // CLI and shell share the authoritative stopped lifecycle projection.
+  expect((await client.showSession(sessionId)).session.status).toBe('stopped');
   evidence.projectAgent = true;
 });
 test('rename/pin update the selected environment and fresh bootstrap only', async () => {
