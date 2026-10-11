@@ -10,6 +10,8 @@ import type { AgentDescriptor, ConversationEntryEvent, ManagerProfile, ChoiceReq
 import { backfillConversationMessageEntryId, backfillConversationTimelineMetadata } from "../../swarm/session/conversation-entry-id.js";
 import { isConversationEntryEvent } from "../../swarm/session/conversation-validators.js";
 import { createConversationHistorySeamCursor, readConversationHistoryPage } from "../../swarm/session/conversation-page-reader.js";
+import { sessionTransferCapabilities } from "./orchestration/transfers.js";
+import type { ProviderBinding } from "../../swarm/runtime/provider-contract.js";
 import type { Principal } from "./control-types.js";
 import { CONVERSATION_ENTRY_TYPE } from "../../swarm/session/conversation-timeline.js";
 import type { ControlTransaction, EventSink } from "./event-sink.js";
@@ -80,11 +82,12 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const pending = swarmManager.getPendingChoiceRequestsForSession(descriptor.agentId).length > 0 || Boolean(database.prepare("SELECT 1 FROM control_choices WHERE session_id=? AND state='pending' LIMIT 1").get(descriptor.agentId));
     const attention = swarmManager.getSessionAttentionSnapshot().attentions.find(attention => attention.sessionAgentId === descriptor.agentId);
     const row = database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(descriptor.agentId) as { desired_state: string } | undefined;
+    const nativeBinding=(database.prepare("SELECT state_json FROM orchestration_bindings WHERE thread_id=? ORDER BY generation DESC").all(descriptor.agentId) as {state_json:string}[]).map(row=>JSON.parse(row.state_json) as ProviderBinding).find(b=>b.model?.provider===descriptor.model.provider);
     const lifecycle = database.prepare("SELECT state_json FROM orchestration_threads WHERE thread_id=?").get(descriptor.agentId) as { state_json: string } | undefined;
     const status = lifecycle ? prior?.status ?? "idle" : row?.desired_state === "stopped" ? swarmManager.isSessionShutdownSafe(descriptor.agentId) ? "stopped" : "stopping"
       : descriptor.status === "streaming" ? "running" : descriptor.status === "terminated" ? "stopped"
         : descriptor.status === "idle" && pending ? "waiting" : descriptor.status;
-    return { projectAgent: descriptor.projectAgent ? projectAgentMetadata(descriptor.projectAgent) : null, sessionId: descriptor.agentId, projectId: descriptor.profileId ?? descriptor.agentId,
+    return { transferCapabilities:sessionTransferCapabilities(nativeBinding), ...(lifecycle && JSON.parse(lifecycle.state_json).lineage ? {lineage:JSON.parse(lifecycle.state_json).lineage}:{}), projectAgent: descriptor.projectAgent ? projectAgentMetadata(descriptor.projectAgent) : null, sessionId: descriptor.agentId, projectId: descriptor.profileId ?? descriptor.agentId,
       title: (descriptor.sessionLabel ?? descriptor.displayName).slice(0, 256), status,
       attention: pending ? "choice" : descriptor.status === "error" ? "error" : attention ? "result" : "none",
       unread: wireProjection.unread(descriptor.agentId, descriptor.profileId ?? descriptor.agentId),
@@ -119,7 +122,8 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     if (!id) return null;
     const text = "text" in entry && typeof entry.text === "string" ? entry.text : "displaySummary" in entry && typeof entry.displaySummary === "string" ? entry.displaySummary : "";
     const user = entry.type === "conversation_message" && entry.role === "user";
-    return { itemId: id, userTurnId: user ? entry.id ?? id : userTurns.get(sessionId) ?? ("turnId" in entry ? entry.turnId : undefined) ?? id,
+    const runId="turnId" in entry && entry.turnId && database.prepare("SELECT 1 FROM orchestration_runs WHERE run_id=? AND thread_id=?").get(entry.turnId,entry.agentId) ? entry.turnId:undefined;
+    return { itemId: id, ...(runId ? {runId}:{}), userTurnId: user ? entry.id ?? id : userTurns.get(sessionId) ?? ("turnId" in entry ? entry.turnId : undefined) ?? id,
       actorId: "actorAgentId" in entry ? entry.actorAgentId : entry.agentId,
       kind: entry.type === "conversation_message" ? user ? "user" : "assistant" : entry.type === "agent_message" ? "worker_result" : entry.type === "agent_tool_call" ? "tool" : "activity",
       pinned: swarmManager.getPinnedMessageIds(sessionId)?.has(entry.type === "conversation_message" ? entry.id ?? id : id) ?? false,

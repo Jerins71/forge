@@ -1,5 +1,6 @@
 import type { RpcError } from "@forge/protocol/environment-v2";
 import type { ProviderAdapter, ProviderBinding } from "../../swarm/runtime/provider-contract.js";
+import { runtimeProviderCapabilities } from "../../swarm/runtime/provider-selection.js";
 import type { RuntimeUserMessage } from "../../swarm/runtime-contracts.js";
 import type { ControlCoreOptions, ControlEffect, EffectRow } from "./effect-types.js";
 import type { EventSink } from "./event-sink.js";
@@ -44,12 +45,30 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     else if (state === "done" && !receipt.inputId && ["accepted", "running"].includes(receipt.state) && !database.prepare("SELECT 1 FROM effects WHERE command_id=? AND state IN ('pending','claimed')").get(row.command_id))
       sink.updateReceipt(tx, row.command_id, { state: "succeeded", error: null });
   });
+  const fallbackSelections=new Map<string,Promise<void>>();
+  const selectFallback=(threadId:string,attemptId:string,message:string):Promise<void>=>{
+    const pending=fallbackSelections.get(attemptId);if(pending) return pending;
+    const task=(async()=>{
+      if(!options.swarm.selectProviderFallback || !options.swarm.readTransferEntries) return;
+      const state=loadState(database),attempt=state.attempts[attemptId],run=attempt && state.runs[attempt.runId];
+      if(!attempt || !run || attempt.delivery!=="pending" || run.outcome!=="failed" || run.activeAttemptId!==attemptId || (run.fallbackCount ?? 0)>=1) return;
+      try {
+        const model=await options.swarm.selectProviderFallback(threadId,state.threads[threadId].model);
+        if(model && !stopped) {
+          const entries=await options.swarm.readTransferEntries(threadId);
+          if(stopped) return;
+          record({type:"transfer.fallback",commandId:`fallback:${attemptId}`,now:options.clock(),threadId,failedAttemptId:attemptId,attemptId:options.random(),bindingId:options.random(),transferId:`fallback:${attemptId}`,targetModel:model,source:resolveSourcePoint(loadState(database),threadId,{kind:"run",runId:run.runId},entries),reason:`Primary provider failed before dispatch: ${message.slice(0,3000)}; selected configured specialist fallback`});
+        }
+      } catch { /* Policy/materialization failure retains the terminal provider failure. */ }
+    })();fallbackSelections.set(attemptId,task);void task.finally(()=>fallbackSelections.delete(attemptId));return task;
+  };
   const startObservations = (binding: ProviderBinding, adapter: ProviderAdapter, stop: AbortController) => {
     const task = (async () => {
       try {
         for await (const observation of adapter.observations(binding, stop.signal)) {
           if (stop.signal.aborted || stopped) break;
           record({ type: "provider.observe", commandId: `observation:${binding.scope.bindingId}:${binding.scope.generation}:${observation.attemptId}:${observation.sequence}`, now: options.clock(), observation });
+          if(observation.type==="error" && observation.delivery==="not_dispatched" && observation.origin.kind==="root") await selectFallback(binding.scope.threadId,observation.attemptId,observation.message);
         }
       } catch {
         if (!stop.signal.aborted && !stopped) {
@@ -64,30 +83,36 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     const existing = live.get(bindingId);
     let state = loadState(database); const owner = state.threads[threadId];
     const attempt = owner.activeRunId ? state.attempts[state.runs[owner.activeRunId].activeAttemptId] : undefined;
+    const assignment=Object.values(state.assignments).find(value=>value.workerThreadId===threadId && ["assigned","running"].includes(value.state));
+    const effectiveModel=assignment && !(attempt && state.runs[attempt.runId].fallbackCount) ? { ...owner.model,provider:assignment.selection.provider,modelId:assignment.selection.modelId }:owner.model;
+    const targetCapabilities=effectiveModel ? runtimeProviderCapabilities(effectiveModel.provider):undefined;
+    const providerModel=effectiveModel ? {...effectiveModel,thinkingLevel:effectiveModel.thinkingLevel ?? "medium"}:undefined;
     const transfer = Object.values(state.transfers).find(t => isLineageTransfer(t) && t.targetThreadId === threadId && !["consumed","superseded"].includes(t.state));
     if(existing && !transfer) return existing;
-    let nativeBinding: ProviderBinding | undefined; let nativeAdapter: ProviderAdapter | undefined;
-    let conversation = Object.values(state.bindings).filter(value => value.scope.threadId === threadId && value.scope.bindingId !== bindingId && (!owner.model || value.model?.provider === owner.model.provider && value.model.modelId === owner.model.modelId))
+    let nativeFork: Pick<ProviderBinding,"conversation"|"nativeRunIds"|"contextCoverage"> | undefined;
+    let conversation = Object.values(state.bindings).filter(value => value.scope.threadId === threadId && value.scope.bindingId !== bindingId && (!targetCapabilities || value.capabilities.provider===targetCapabilities.provider))
       .sort((a,b) => a.scope.generation-b.scope.generation).at(-1)?.conversation;
     if (transfer && isLineageTransfer(transfer)) {
       if (!attempt || ["unknown","dispatch_marked","failed"].includes(transfer.state)) throw new Error("Context transfer requires explicit recovery");
       if (transfer.state !== "resolved") {
         let attemptedFork = false;
         try {
-          const sourceBinding=transfer.source.bindingId && state.bindings[transfer.source.bindingId];
-          const nativeCandidate=transfer.kind==="fork" && !transfer.source.messageBounded && sourceBinding && sourceBinding.capabilities.native.fork && owner.model?.provider===sourceBinding.model?.provider;
-          const target = nativeCandidate && options.swarm.prepareProvider ? await options.swarm.prepareProvider({threadId,bindingId,generation},owner.model ?? transfer.targetModel) : undefined;
-          state = loadState(database);
+          const sourceBinding=transfer.source.bindingId ? state.bindings[transfer.source.bindingId]:undefined;
+          const caps=targetCapabilities;
+          const plan=planTransferResolution(state,transfer,caps);
           if (state.threads[threadId].generation !== generation || state.threads[threadId].desired !== "running" || state.attempts[attempt.attemptId].state !== "created" || !authorized(state.runs[attempt.runId].commandId)) throw new Error("Context transfer target was fenced");
-          const caps = target?.adapter.capabilities();
-          const plan = planTransferResolution(state,transfer,caps);
-          record({ type:"transfer.resolve",commandId:`resolve:${transfer.transferId}:${attempt.attemptId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId,strategy:plan.strategy,...(transfer.kind==="fork" && plan.strategy!=="native_fork" ? {error:{code:"UNSUPPORTED" as const,message:transfer.source.messageBounded ? "Native turn boundaries cannot prove this exact message cutoff; portable context selected" : "Provider capabilities or source binding cannot prove a native fork boundary; portable context selected"}}:{}) });
+          record({ type:"transfer.resolve",commandId:`resolve:${transfer.transferId}:${attempt.attemptId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId,strategy:plan.strategy,...(transfer.kind==="fork" && plan.strategy!=="native_fork" ? {error:{code:"UNSUPPORTED" as const,message:transfer.source.messageBounded ? "Native turn boundaries cannot prove this exact message cutoff; portable context selected" : caps?.native.forkThroughTurn === false ? "Native through-turn fork unsupported; exact latest boundary is not provable; portable context selected" : "Provider capabilities or source binding cannot prove a native fork boundary; portable context selected"}}:{}) });
           conversation = plan.prior?.conversation ?? conversation;
-          if (plan.strategy === "native_fork" && target && target.adapter.fork && caps?.native.fork) {
+          if (plan.strategy === "native_fork" && sourceBinding && caps?.native.fork) {
             const source = state.bindings[transfer.source.bindingId!];
             try {
+              const activeSource=live.get(source.scope.bindingId);
+              const sourceResource=activeSource ?? await options.swarm.acquireProvider(source.scope,source.conversation,source.model);
+              if (!sourceResource.adapter.capabilities().native.fork || !sourceResource.adapter.fork) throw Object.assign(new Error("Native source fork unsupported"),{code:"PROVIDER_BEHAVIOR_UNSUPPORTED"});
+              const latestState=loadState(database);
+              if(latestState.threads[threadId].generation!==generation || latestState.threads[threadId].desired!=="running" || latestState.attempts[attempt.attemptId].state!=="created") throw new Error("Native fork target was fenced");
               attemptedFork = true;
-              nativeBinding = await target.adapter.fork({...target.input,source:source.conversation,...(plan.through ? {through:plan.through}: {})});
+              const forkedConversation=await sourceResource.adapter.fork({binding:sourceResource.binding,...(plan.through ? {through:plan.through}: {})});
               const points=handoffSourcePoints(state,transfer);
               const limits=new Map(points.map(point=>[point.threadId,point.runId ? state.runs[point.runId]?.sequence:undefined]));
               const nativeRunIds=(source.nativeRunIds ?? []).filter(id=>{const run=state.runs[id],limit=run && limits.get(run.threadId);return run && limit!==undefined && run.sequence<=limit;});
@@ -97,17 +122,23 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
                 const entries=await options.swarm.readTransferEntries(point.threadId);const ids=new Set(entries.slice(0,point.sequence).map(entryIdentity));
                 contextCoverage[point.threadId]=source.contextCoverage[point.threadId].filter(id=>ids.has(id));
               }
-              nativeBinding={...nativeBinding,model:owner.model,nativeRunIds,contextCoverage};
-              nativeAdapter = target.adapter;
+              nativeFork={conversation:forkedConversation,nativeRunIds,contextCoverage};
+              // Commit the public locator before target creation or source cleanup; restart resumes it.
+              record({type:"transfer.resolved",commandId:`resolved:${transfer.transferId}:${attempt.attemptId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId,strategy:"native_fork",nativeFork});
+              attemptedFork=false;
+              if(!activeSource) {
+                await sourceResource.adapter.close(sourceResource.binding);
+                if((await sourceResource.adapter.drain(sourceResource.binding)).status!=="clean") throw new Error("Temporary source fork runtime requires confirmed shutdown");
+                await options.swarm.stopSession({sessionId:source.scope.threadId,commandId:`fork-source-release:${transfer.transferId}`});
+              }
             } catch (error) {
               // A typed unsupported boundary is known not-dispatched, so portable transfer is safe.
-              if ((error as {code?:string}).code !== "UNSUPPORTED_PROVIDER_BEHAVIOR") throw error;
+              if ((error as {code?:string}).code !== "PROVIDER_BEHAVIOR_UNSUPPORTED") throw error;
               attemptedFork = false;
               record({type:"transfer.resolve",commandId:`portable:${transfer.transferId}:${attempt.attemptId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId,strategy:"portable_context",error:{code:"UNSUPPORTED",message:"Native fork does not support the exact through-turn boundary; portable context selected"}});
             }
           }
-          if (nativeBinding) record({type:"transfer.resolved",commandId:`resolved:${transfer.transferId}:${attempt.attemptId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId,strategy:"native_fork",binding:nativeBinding});
-          else {
+          if (!nativeFork) {
             if (!options.dataDir || !options.swarm.readTransferEntries) throw new Error("Portable handoff materializer is not composed");
             const sources=[];
             for(const sourcePoint of handoffSourcePoints(state,transfer)) {
@@ -133,17 +164,17 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       state = loadState(database);
       const resolved = state.transfers[transfer.transferId];
       if(!isLineageTransfer(resolved) || resolved.state !== "resolved") throw new Error("Context transfer resolution was fenced");
-      if (resolved.nativeBinding) {
-        nativeBinding = resolved.nativeBinding;
-        if (!nativeAdapter) { conversation=nativeBinding.conversation;nativeBinding=undefined; } // A recorded native fork resumes its native locator; it is never forked again.
+      if (resolved.nativeFork) {
+        nativeFork=resolved.nativeFork;
+        conversation=nativeFork.conversation;
       }
     }
     const latest=loadState(database).threads[threadId];
     if(latest.generation!==generation || latest.desired!=="running" || latest.shutdown!=="clean") throw new Error("Runtime acquisition target was fenced");
-    const resource = existing ?? (nativeBinding && nativeAdapter ? {binding:nativeBinding,adapter:nativeAdapter} : await options.swarm.acquireProvider({threadId,bindingId,generation},conversation,owner.model));
+    const resource = existing ?? await options.swarm.acquireProvider({threadId,bindingId,generation},conversation,effectiveModel);
     if (resource.binding.scope.threadId !== threadId || resource.binding.scope.bindingId !== bindingId || resource.binding.scope.generation !== generation) throw new Error("Acquired provider scope differs from authoritative scope");
     const previous=Object.values(loadState(database).bindings).find(b=>b.conversation.nativeId===conversation?.nativeId && b.capabilities.provider===resource.binding.capabilities.provider);
-    resource.binding={...resource.binding,model:owner.model ?? resource.binding.model,nativeRunIds:previous?.nativeRunIds ?? resource.binding.nativeRunIds,contextCoverage:previous?.contextCoverage ?? resource.binding.contextCoverage};
+    Object.assign(resource.binding,{model:providerModel ?? resource.binding.model,nativeRunIds:nativeFork?.nativeRunIds ?? previous?.nativeRunIds ?? resource.binding.nativeRunIds,contextCoverage:nativeFork?.contextCoverage ?? previous?.contextCoverage ?? resource.binding.contextCoverage});
     const entry = {...resource,stop:new AbortController()};live.set(bindingId,entry);
     startObservations(entry.binding,entry.adapter,entry.stop);
     record({type:"binding.acquired",commandId:`binding:${bindingId}:${generation}`,now:options.clock(),threadId,binding:entry.binding});
@@ -276,17 +307,9 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       const attemptId = "attemptId" in effect ? effect.attemptId : effect.kind === "runtime.acquire" || effect.kind === "transcript.append" ? Object.values(loadState(database).attempts).find(a => a.threadId === row.session_id && a.state !== "terminal")?.attemptId : undefined;
       if (effect.kind === "provider.compact") record({ type: "compaction.completed", ...result(row, "failed"), threadId: effect.threadId, attemptId: effect.attemptId, succeeded: false });
       else if (effect.kind.startsWith("provider.") || effect.kind === "runtime.acquire" || effect.kind === "transcript.append") record({ type: "effect.failed", ...result(row, "failed"), threadId: row.session_id, attemptId, kind: effect.kind as CoreEffect["kind"], delivery: attemptedNative ? "unknown" : "not_dispatched" });
-      if(provedNotDispatched && effect.kind === "provider.start" && attemptId && options.swarm.selectProviderFallback && options.swarm.readTransferEntries) {
-        const state=loadState(database),attempt=state.attempts[attemptId],run=state.runs[attempt.runId];
-        if(attempt.delivery === "pending" && run.outcome === "failed" && (run.fallbackCount ?? 0)<1) {
-          try {
-            const model=await options.swarm.selectProviderFallback(effect.threadId,state.threads[effect.threadId].model);
-            if(model) {
-              const entries=await options.swarm.readTransferEntries(effect.threadId);
-              record({type:"transfer.fallback",...result(row,"fallback"),threadId:effect.threadId,failedAttemptId:attemptId,attemptId:options.random(),bindingId:options.random(),transferId:`fallback:${attemptId}`,targetModel:model,source:resolveSourcePoint(loadState(database),effect.threadId,{kind:"run",runId:run.runId},entries),reason:`Primary provider failed before dispatch: ${failure.message.slice(0,3000)}; selected configured specialist fallback`});
-            }
-          } catch { /* Failed fallback selection remains an explicit terminal failure. */ }
-        }
+      if(effect.kind==="provider.start" && attemptId) {
+        if(provedNotDispatched) await selectFallback(effect.threadId,attemptId,failure.message);
+        else await fallbackSelections.get(attemptId);
       }
       settle(row, attemptedNative ? "interrupted" : "failed", failure);
       if(hasReceipt(row.command_id)) sink.transaction(tx=>sink.updateReceipt(tx,row.command_id,{error:failure}));
@@ -307,7 +330,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         await Promise.all(active);
       })().finally(() => { draining = undefined; }); return draining;
     },
-    async stop() { stopped = true; started = false; unsubscribe?.(); for (const resource of live.values()) resource.stop.abort(); await draining; await Promise.allSettled(observations); },
+    async stop() { stopped = true; started = false; unsubscribe?.(); for (const resource of live.values()) resource.stop.abort(); await draining; await Promise.allSettled([...observations,...fallbackSelections.values()]); },
     async reconcileOnBoot() {
       if (reconciled) return; if (started || draining) throw new Error("Boot reconciliation precedes execution");
       rebuildLifecycleProjections(database);

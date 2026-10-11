@@ -66,7 +66,7 @@
       "type": "expect_outbound",
       "frame": {
         "id": "$any",
-        "method": "thread/fork",
+        "method": "thread/resume",
         "params": {
           "model": "gpt-6-sol",
           "cwd": "$cwd",
@@ -74,9 +74,7 @@
           "approvalPolicy": "never",
           "sandbox": "danger-full-access",
           "allowProviderModelFallback": false,
-          "threadId": "native-root",
-          "lastTurnId": "turn-source",
-          "ephemeral": false
+          "threadId": "native-root"
         }
       },
       "capture": {
@@ -92,8 +90,8 @@
         "id": "$rpcId",
         "result": {
           "thread": {
-            "id": "fork-root",
-            "path": "$rollout"
+            "id": "native-root",
+            "path": "$persistedPath"
           },
           "model": "gpt-6-sol"
         }
@@ -105,7 +103,7 @@
         "id": "$any",
         "method": "thread/inject_items",
         "params": {
-          "threadId": "fork-root",
+          "threadId": "native-root",
           "items": [
             {
               "type": "message",
@@ -138,16 +136,11 @@
       "type": "expect_outbound",
       "frame": {
         "id": "$any",
-        "method": "turn/start",
+        "method": "thread/fork",
         "params": {
-          "threadId": "fork-root",
-          "input": [
-            {
-              "type": "text",
-              "text": "Work"
-            }
-          ],
-          "model": "gpt-6-sol"
+          "threadId": "native-root",
+          "lastTurnId": "turn-source",
+          "ephemeral": false
         }
       },
       "capture": {
@@ -155,46 +148,20 @@
           "id"
         ]
       },
-      "label": "start"
+      "label": "open"
     },
     {
       "type": "emit_inbound",
       "frame": {
         "id": "$rpcId",
         "result": {
-          "turn": {
-            "id": "turn-root",
-            "status": "inProgress",
-            "items": []
-          }
+          "thread": {
+            "id": "fork-root",
+            "path": "$rollout"
+          },
+          "model": "gpt-6-sol"
         }
       }
-    },
-    {
-      "type": "emit_inbound",
-      "frame": {
-        "method": "turn/started",
-        "params": {
-          "threadId": "fork-root",
-          "turn": {
-            "id": "turn-root"
-          }
-        }
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "frame": {
-        "method": "turn/completed",
-        "params": {
-          "threadId": "fork-root",
-          "turn": {
-            "id": "turn-root",
-            "status": "completed"
-          }
-        }
-      },
-      "label": "terminal"
     }
   ]
 }

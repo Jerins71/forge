@@ -1,3 +1,4 @@
+import { runtimeProviderCapabilities } from "./provider-selection.js";
 import { type AgentRuntimeExtensionSnapshot, type InstructionBundle } from "@forge/protocol";
 import type { ObservabilityFacade } from "../../observability/observability-types.js";
 import type { CredentialPoolService } from "../credential-pool.js";
@@ -135,8 +136,9 @@ export class RuntimeFactory {
     }
     const creationOptions = { ...options, instructionBundle, ...(secureRuntimeBinding ? { secureRuntimeBinding } : {}) };
 
-    if (["codex-native", "claude-native"].includes(descriptor.model.provider)) {
-      const creator = descriptor.model.provider === "codex-native" ? new CodexRuntimeCreator(this.deps) : new ClaudeRuntimeCreator(this.deps);
+    const provider=runtimeProviderCapabilities(descriptor.model.provider).provider;
+    if (["codex", "claude"].includes(provider)) {
+      const creator = provider === "codex" ? new CodexRuntimeCreator(this.deps) : new ClaudeRuntimeCreator(this.deps);
       return creator.create({ descriptor, sessionDescriptor: this.getForgeSessionDescriptor(descriptor), systemPrompt, runtimeToken, creationOptions,
         callbacks: {
           onStatusChange: (...args) => this.deps.callbacks.onStatusChange(runtimeToken, ...args),
@@ -147,7 +149,7 @@ export class RuntimeFactory {
       });
     }
 
-    if (isCursorSdkModelDescriptor(descriptor.model)) {
+    if (provider === "cursor-sdk") {
       return this.cursorSdkRuntimeCreator.createRuntimeForDescriptor({
         descriptor,
         systemPrompt,
@@ -193,10 +195,6 @@ export class RuntimeFactory {
     const sessionDescriptor = this.deps.getAgentDescriptor?.(descriptor.managerId);
     return sessionDescriptor?.role === "manager" ? sessionDescriptor : undefined;
   }
-}
-
-function isCursorSdkModelDescriptor(descriptor: Pick<AgentModelDescriptor, "provider">): boolean {
-  return descriptor.provider.trim().toLowerCase() === "cursor-sdk";
 }
 
 function isAcpModelDescriptor(descriptor: Pick<AgentModelDescriptor, "provider">): boolean {

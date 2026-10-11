@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type { ProviderScope, ProviderConversationRef } from "@forge/protocol";
-import type { ProviderAdapter, ProviderBinding, ProviderOpenInput } from "../../swarm/runtime/provider-contract.js";
+import type { ProviderAdapter, ProviderBinding } from "../../swarm/runtime/provider-contract.js";
 import type { RuntimeUserMessage } from "../../swarm/runtime-contracts.js";
 import type {
   CommandReceipt,
@@ -89,10 +89,8 @@ export interface SwarmControlPort {
     prepared?: import("./command-service.js").InternalInput["prepared"];
     userOptions?: import("./command-service.js").InternalInput["userOptions"];
   }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }>;
-  acquireProvider(scope: ProviderScope, conversation?: ProviderConversationRef, model?: import("../../swarm/types.js").AgentDescriptor["model"]): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
-  /** Returns an unopened target. Only the core may capability-check and invoke native fork. */
+  acquireProvider(scope: ProviderScope, conversation?: ProviderConversationRef, model?: Pick<import("../../swarm/types.js").AgentModelDescriptor,"provider"|"modelId"> & Partial<Pick<import("../../swarm/types.js").AgentModelDescriptor,"thinkingLevel">>): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
   selectProviderFallback?(threadId: string, currentModel?: import("../../swarm/types.js").AgentDescriptor["model"]): Promise<import("../../swarm/types.js").AgentDescriptor["model"] | undefined>;
-  prepareProvider?(scope: ProviderScope, model?: import("../../swarm/types.js").AgentDescriptor["model"]): Promise<{ adapter: ProviderAdapter; input: ProviderOpenInput }>;
   readTransferEntries?(threadId: string): Promise<import("../../swarm/types.js").ConversationEntryEvent[]>;
   /** Descriptor/resources only: no provider, credential, or implicit tool-grant acquisition. */
   prepareLineageSession?(input: { kind: "fork" | "continued_worker"; sourceThreadId: string; targetThreadId: string; commandId: string; title?: string; historical?: boolean; sourcePoint: import("@forge/protocol/environment-v2").ContextSourcePoint; model?: import("../../swarm/types.js").AgentDescriptor["model"]; purpose?: "side_chat" }): Promise<void>;

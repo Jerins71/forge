@@ -17,8 +17,12 @@ export function createCoreLineagePort(sink:EventSink,control:EnvironmentControlS
     },
     read(callerId,threadId){requireTeam(callerId,threadId);return lineageSnapshot(loadState(sink.database),threadId);},
     async switchContext(threadId,model) {
-      const entries=await options.readEntries(threadId);const state=loadState(sink.database);
-      if(!state.threads[threadId]) return; // Never-used metadata has no provider context to transfer.
+      const entries=await options.readEntries(threadId);let state=loadState(sink.database);
+      if(!state.threads[threadId]) {
+        const descriptor=options.getAgent(threadId);if(!descriptor || descriptor.role!=='manager') throw new Error('Model context target is unavailable');
+        control.record({type:'thread.create',commandId:`settings-owner:${options.random()}`,now:options.clock(),threadId,role:'manager',projectId:descriptor.profileId ?? descriptor.agentId,model:descriptor.model});
+        state=loadState(sink.database);
+      }
       control.record({type:'transfer.create',commandId:`settings-switch:${options.random()}`,now:options.clock(),transferId:`settings-transfer:${options.random()}`,kind:'provider_switch',source:resolveSourcePoint(state,threadId,{kind:'latest_stable'},entries),targetThreadId:threadId,targetModel:model,authorized:true});
     },
   };

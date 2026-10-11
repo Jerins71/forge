@@ -14,12 +14,10 @@ import { bindRuntimeToolHost } from "../runtime-tool-plan.js";
 import { ClaudeProviderAdapter } from "./claude-provider-adapter.js";
 import type { ClaudeProviderSession } from "./claude-provider-session.js";
 import { openSessionManagerWithSizeGuard } from "../../session/session-file-guard.js";
-import { isConversationEntryEvent } from "../../session/conversation-validators.js";
 import type { AgentContextUsage, AgentDescriptor, AgentStatus, RequestedDeliveryMode, SendMessageReceipt } from "../../types.js";
 import type { RuntimeCreationOptions, RuntimeSessionEvent, RuntimeShutdownOptions, RuntimeUserMessage, RuntimeUserMessageInput, SwarmAgentRuntime, SwarmRuntimeCallbacks } from "../../runtime-contracts.js";
 import type { SwarmToolHost } from "../../swarm-tool-host.js";
 import { normalizeRuntimeUserMessage } from "../runtime-utils.js";
-import { buildModelChangeRecoveryContext } from "../model-change-recovery-context.js";
 import { ClaudeRuntimeTools } from "./claude-runtime-tools.js";
 import { ClaudeRuntimeEvents } from "./claude-runtime-events.js";
 import { claudeCommandWaitHook } from "./claude-command-policy.js";
@@ -72,8 +70,6 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   private turnError?: string;
   private stopping = false;
   private closed = false;
-  private recovery?: string;
-  private recoveryConsumed = false;
   private pinned?: string;
   private previousCost = 0;
   private readonly accounting = new NativeUsageAccumulator();
@@ -109,19 +105,11 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   static async createNative(options: ClaudeRuntimeOptions): Promise<{ runtime: ClaudeAgentRuntime; binding: ProviderBinding }> {
     const runtime = new ClaudeAgentRuntime(options);
     const stored = runtime.getCustomEntries(NATIVE_CLAUDE_STATE).at(-1) as NativeState | undefined;
-    const usable = stored?.version === 1 && stored.cwd === options.descriptor.cwd && !options.creationOptions?.startupRecoveryContext;
+    const usable = stored?.version === 1 && stored.cwd === options.descriptor.cwd;
     const owned = usable && stored.ownerAgentId === options.descriptor.agentId;
-    const resume = !!options.nativeConversation?.resumeId || (owned && stored.hasStartedTurn && !options.nativeConversation?.forkFrom);
-    // A latest-message fork keeps its source's native identity (message-bounded
-    // forks omit it and rebuild from the bounded canonical copy). Fork that native
-    // thread so the new session starts with the source's full context. Until the
-    // first turn persists the fork, a restart forks the same source again.
-    const forkFrom = options.nativeConversation?.forkFrom ?? (resume || !usable ? undefined : owned ? stored.forkFrom : stored.hasStartedTurn ? stored.sessionId : undefined);
+    const resume = !!options.nativeConversation?.resumeId || (!options.creationOptions?.providerScope && owned && stored.hasStartedTurn && !options.nativeConversation?.forkFrom);
+    const forkFrom=options.nativeConversation?.forkFrom;
     runtime.state = options.nativeConversation?.resumeId ? { version: 1, sessionId: options.nativeConversation.resumeId, ownerAgentId: options.descriptor.agentId, cwd: options.descriptor.cwd, hasStartedTurn: true } : resume ? stored! : { version: 1, sessionId: options.nativeConversation?.sessionId ?? randomUUID(), ownerAgentId: options.descriptor.agentId, cwd: options.descriptor.cwd, hasStartedTurn: false, ...(forkFrom ? { forkFrom } : {}) };
-    if (!resume && !forkFrom) runtime.recovery = options.creationOptions?.startupRecoveryContext?.blockText
-      ?? buildModelChangeRecoveryContext({ descriptor: options.descriptor,
-        entries: runtime.getCustomEntries("swarm_conversation_entry").filter(isConversationEntryEvent),
-        modelContextWindow: getCatalogContextWindow(options.descriptor.model.modelId, options.descriptor.model.provider), existingPrompt: options.systemPrompt }).blockText;
     const opened = options.providerOpen!;
     const binding: ProviderBinding = { scope: opened.scope, conversation: { ...opened.scope, kind: "conversation", nativeId: runtime.state.sessionId },
       capabilities: runtime.providerAdapter.capabilities(), instructionRevision: opened.instructions.revision,
@@ -276,7 +264,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     this.sent.set(input.id, input);
     this.status = "streaming";
     if (first) { await this.begin(); await this.activate(input); }
-    const text = [this.recovery, this.pinned ? `<forge_pinned_context>\n${this.pinned}\n</forge_pinned_context>` : undefined, input.message.text].filter(Boolean).join("\n\n");
+    const text = [this.pinned ? `<forge_pinned_context>\n${this.pinned}\n</forge_pinned_context>` : undefined, input.message.text].filter(Boolean).join("\n\n");
     if (!input.compact) this.session.appendMessage({ role: "user", content: input.message.text, timestamp: Date.now() });
     this.state.hasStartedTurn = true;
     this.appendCustomEntry(NATIVE_CLAUDE_STATE, this.state);
@@ -284,7 +272,6 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
       message: { role: "user", content: input.compact ? input.message.text : [{ type: "text", text }, ...(input.message.images ?? []).map(image => ({
         type: "image" as const, source: { type: "base64" as const, media_type: image.mimeType as "image/png", data: image.data },
       }))] } });
-    this.recovery = undefined;
     await this.publishStatus();
   }
 
@@ -324,7 +311,6 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
       const input = this.sent.get(id);
       if (!input) continue;
       await this.begin(); await this.activate(input); this.sent.delete(id);
-      if (!this.recoveryConsumed) { await this.options.creationOptions?.onStartupRecoveryConsumed?.(); this.recoveryConsumed = true; }
     }
     if (ids.length) await this.publishStatus();
     // Background completion can trigger a new native turn without new user input.

@@ -107,7 +107,6 @@ export function planPiResourceLoaderOptions(options: PlanPiResourceLoaderOptions
           memoryContextFile: memoryResources.memoryContextFile,
           swarmContextFiles,
         }),
-        ...(promptPlan.startupRecoveryContextFile ? [promptPlan.startupRecoveryContextFile] : []),
       ],
     }),
     extensionFactories,

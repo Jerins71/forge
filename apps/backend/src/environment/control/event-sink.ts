@@ -9,7 +9,7 @@ import {
   type ShellStreamItem,
 } from "@forge/protocol/environment-v2";
 import { decide } from "./orchestration/kernel.js";
-import { lineageSnapshot } from "./orchestration/transfers.js";
+import { lineageSnapshot,sessionTransferCapabilities } from "./orchestration/transfers.js";
 import { loadState, projectLifecycle } from "./orchestration/store.js";
 import type { CoreCommand, Decision } from "./orchestration/types.js";
 
@@ -300,12 +300,13 @@ export function createEventSink(database: Database, clock: () => number, random:
         const row = database.prepare("SELECT summary_json FROM control_sessions WHERE session_id=?").get(threadId) as { summary_json: string } | undefined;
         if (!row) continue;
         const summary = JSON.parse(row.summary_json);
+        const binding=Object.values(state.bindings).filter(b=>b.scope.threadId===threadId && b.model?.provider===thread.model?.provider).sort((a,b)=>a.scope.generation-b.scope.generation).at(-1);
         const run = thread.activeRunId ? state.runs[thread.activeRunId] : undefined;
         const terminal = [...decision.events].reverse().find(event => event.type === "run.terminal" && event.run.threadId === threadId);
         const attention = Object.values(state.requests).some(request => request.threadId === threadId && request.state === "pending") ? "choice" : run ? "none" : terminal?.type === "run.terminal" ? terminal.run.outcome === "completed" ? "result" : terminal.run.outcome === "failed" ? "error" : "none" : summary.attention;
         const status = thread.desired === "stopped" ? thread.shutdown === "clean" ? "stopped" : "stopping" : run?.state === "recovery" ? "interrupted" : run ? "running" : "idle";
         database.prepare("UPDATE control_sessions SET desired_state=?,run_generation=? WHERE session_id=?").run(thread.desired, thread.generation, threadId);
-        sink.append(tx, { topic: "shell", sessionId: threadId, event: { type: "session.upsert", session: { ...summary, ...(thread.lineage ? {lineage:thread.lineage}:{}), status, attention, pendingCount: Object.values(state.runs).filter(r => r.threadId === threadId && r.state === "queued").length } } });
+        sink.append(tx, { topic: "shell", sessionId: threadId, event: { type: "session.upsert", session: { ...summary, transferCapabilities:sessionTransferCapabilities(binding), ...(thread.lineage ? {lineage:thread.lineage}:{}), status, attention, pendingCount: Object.values(state.runs).filter(r => r.threadId === threadId && r.state === "queued").length } } });
       }
       return decision;
     },

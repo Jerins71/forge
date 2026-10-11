@@ -70,9 +70,7 @@ async function setupRuntime(options: {
   sdkAgent?: CursorSdkAgent;
   sdk?: CursorSdkModule;
   systemPrompt?: string;
-  startupSystemPromptOverride?: string;
   skipInitialSessionResume?: boolean;
-  onStartupRecoveryConsumed?: () => void | Promise<void>;
   promptHash?: string;
   model?: CursorSdkModelSelection;
   callbacks?: Partial<SwarmRuntimeCallbacks>;
@@ -103,9 +101,7 @@ async function setupRuntime(options: {
     apiKey: "cursor-key",
     model: options.model ?? { id: "composer-2.5", params: [{ id: "fast", value: "true" }] },
     systemPrompt: options.systemPrompt ?? "Forge worker instructions",
-    startupSystemPromptOverride: options.startupSystemPromptOverride,
     skipInitialSessionResume: options.skipInitialSessionResume,
-    onStartupRecoveryConsumed: options.onStartupRecoveryConsumed,
     mcpServers: { forge: { type: "http", url: "http://127.0.0.1:1/mcp" } },
     stateRoot: join(rootDir, "cursor-sdk-state", descriptor.agentId),
     promptHash: options.promptHash ?? "hash-1",

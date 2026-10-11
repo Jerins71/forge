@@ -26,7 +26,7 @@ afterEach(async () => { for (const clean of cleanup.splice(0).reverse()) await c
 const directory = fileURLToPath(new URL("../runtime/codex/", import.meta.url));
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
-async function fixture(scenario: string, options: { persistedPath?: string; codexHome?: string; changedSchema?: boolean } = {}) {
+async function fixture(scenario: string, options: { persistedPath?: string; codexHome?: string; changedSchema?: boolean; conversation?:ProviderConversationRef } = {}) {
   const handle = await createTempConfig({ prefix: "forge-codex-adapter-", port: 0 });
   cleanup.push(handle.cleanup);
   const root = await realpath(handle.tempRootDir);
@@ -43,7 +43,8 @@ async function fixture(scenario: string, options: { persistedPath?: string; code
   const tool = createTaskNotesTool(notes);
   if (options.changedSchema) tool.parameters = Type.Object({ changed: Type.String() });
   const toolHost = bindRuntimeToolHost({ descriptor, tools: [tool], mechanism: "dynamic_tools", scope });
-  const transcript = JSON.parse(await readFile(join(directory, `fixtures/codex-${scenario}.json`), "utf8")) as ReplayTranscript;
+  let transcript = JSON.parse(await readFile(join(directory, `fixtures/codex-${scenario}.json`), "utf8")) as ReplayTranscript;
+  if(options.conversation) transcript=JSON.parse(JSON.stringify(transcript).replaceAll("native-root",options.conversation.nativeId));
   const replay = await createReplayHarness(() => ({ ...transcript, bindings: { ...transcript.bindings, $persistedPath: options.persistedPath } }));
   cleanup.push(replay.close);
   await writeFile(join(codexHome, "replay-peer.json"), JSON.stringify({ port: replay.port }));
@@ -54,9 +55,7 @@ async function fixture(scenario: string, options: { persistedPath?: string; code
       args: [fileURLToPath(new URL("../runtime/codex/codex-scripted-peer.mjs", import.meta.url))],
       spawnOptions: { cwd: root, env: nativeCodexEnvironment(codexHome) } }) });
   const input = { scope, instructions, toolHost, model: descriptor.model };
-  const binding = scenario === "resume" ? await adapter.resume({ ...input, conversation: { ...scope, generation: 1, kind: "conversation", nativeId: "native-root" } })
-    : scenario === "fork" ? await adapter.fork({ ...input, source: { ...scope, bindingId: "binding-seed", kind: "conversation", nativeId: "native-root" },
-      through: { ...scope, bindingId: "binding-seed", kind: "turn", nativeId: "turn-source", conversationId: "native-root" } }) : await adapter.open(input);
+  const binding = scenario === "resume" || scenario === "fork" ? await adapter.resume({ ...input, conversation: options.conversation ?? { ...scope, generation: 1, kind: "conversation", nativeId: "native-root" } }) : await adapter.open(input);
   cleanup.push(async () => { await adapter.close(binding); });
   const events: ProviderObservation[] = [];
   const signals = new ReplaySignals<ProviderObservation>();
@@ -361,12 +360,15 @@ describe("Codex ProviderAdapter over production JSON-RPC and raw replay", () => 
   it("forks through an exact native turn and keeps the inherited immutable tool contract", async () => {
     const source = await fixture("seed");
     await source.adapter.close(source.binding);
-    const forked = await fixture("fork", { codexHome: source.codexHome });
-    expect(forked.binding.conversation.nativeId).toBe("fork-root");
-    await forked.start();
-    await forked.release("terminal");
-    await forked.wait("terminal:root:completed");
-    await forked.evidence();
+    const sourceRollout=join(source.codexHome,(await readdir(source.codexHome)).find(name=>name.startsWith("replay-rollout-"))!);
+    const forkSource = await fixture("fork", { codexHome: source.codexHome,persistedPath:sourceRollout });
+    const conversation=await forkSource.adapter.fork({binding:forkSource.binding,through:{...forkSource.scope,kind:"turn",nativeId:"turn-source",conversationId:forkSource.binding.conversation.nativeId}});
+    expect(conversation.nativeId).toBe("fork-root");
+    await forkSource.evidence();
+    const forkRollout=join(source.codexHome,(await readdir(source.codexHome)).find(name=>name.startsWith("replay-rollout-") && join(source.codexHome,name)!==sourceRollout)!);
+    const target=await fixture("resume",{codexHome:source.codexHome,conversation,persistedPath:forkRollout});
+    expect(target.binding.conversation.nativeId).toBe(conversation.nativeId);
+    await target.start();await target.release("terminal");await target.wait("terminal:root:completed");await target.evidence();
   });
 
   it("keeps an ambiguous steer receipt unknown even when the root turn was already accepted", async () => {

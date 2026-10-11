@@ -10,9 +10,6 @@ import type { RuntimeCreationOptions, RuntimeSessionEvent, RuntimeShutdownOption
 import { normalizeRuntimeError, normalizeRuntimeUserMessage } from "../runtime-utils.js";
 import { CodexRuntimeEvents } from "./codex-runtime-events.js";
 import type { CodexRuntimeAuth } from "./codex-runtime-auth.js";
-import { buildModelChangeRecoveryContext } from "../model-change-recovery-context.js";
-import { isConversationEntryEvent } from "../../session/conversation-validators.js";
-import { getCatalogContextWindow } from "@forge/protocol";
 import type { ChoiceQuestion, ChoiceAnswer } from "@forge/protocol";
 import { CodexProviderAdapter, CodexProviderDispatchError } from "./codex-provider-adapter.js";
 import { createInstructionBundle } from "../instruction-bundle.js";
@@ -22,7 +19,7 @@ import { ProviderDispatchRejectedError, type ProviderBinding, type ProviderOpenI
 import { ChoiceRequestCancelledError } from "../../swarm-choice-service.js";
 
 export const NATIVE_CODEX_STATE = "swarm_native_codex_state";
-interface ThreadState { version: 1; threadId: string; ownerAgentId: string; cwd: string; promptDigest?: string; hasStartedTurn?: boolean; forkFrom?: string }
+interface ThreadState { version: 1; threadId: string; ownerAgentId: string; cwd: string; promptDigest?: string; hasStartedTurn?: boolean }
 interface QueuedInput {
   message: RuntimeUserMessage;
   deliveryId: string;
@@ -81,7 +78,6 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
   private operations: Promise<unknown> = Promise.resolve();
   private events: Promise<void> = Promise.resolve();
   private pinned?: string;
-  private recoveryConsumed = false;
 
   private constructor(private readonly options: Options) {
     this.descriptor = options.descriptor;
@@ -119,42 +115,17 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     try {
       const stored = runtime.getCustomEntries(NATIVE_CODEX_STATE).at(-1) as ThreadState | undefined;
       const conversation = options.creationOptions?.providerConversation;
-      // Model switches use Forge's explicit historical recovery block. Ordinary restarts resume.
-      // Codex does not persist an unused thread. Recreate that empty allocation
-      // after settings recycle; never discard a thread that has accepted a turn.
-      const usable = stored?.version === 1 && !options.creationOptions?.startupRecoveryContext;
-      const owned = usable && stored.ownerAgentId === options.descriptor.agentId;
-      const reuse = owned && stored.hasStartedTurn !== false;
-      // Forge can fork at an individual message, while native fork boundaries are
-      // whole turns. Message-bounded forks omit the source identity and rebuild from
-      // the bounded canonical copy; a latest-message fork forks the source thread.
-      // Until the first turn, a restart forks the same source again.
-      const forkFrom = reuse || !usable ? undefined
-        : owned ? stored.forkFrom
-        : stored.hasStartedTurn !== false && stored.cwd === options.descriptor.cwd ? stored.threadId : undefined;
-      runtime.providerBinding = conversation
-        ? await runtime.providerAdapter.resume({ ...runtime.providerInput, conversation })
-        : reuse
-        ? await runtime.providerAdapter.resume({ ...runtime.providerInput, conversation: { ...runtime.providerInput.scope, kind: "conversation", nativeId: stored.threadId } })
-        : forkFrom ? await runtime.providerAdapter.fork({ ...runtime.providerInput, source: { ...runtime.providerInput.scope, kind: "conversation", nativeId: forkFrom } })
+      const owned=stored?.version===1 && stored.ownerAgentId===options.descriptor.agentId;
+      const reuse=!options.creationOptions?.providerScope && owned && stored.hasStartedTurn!==false;
+      runtime.providerBinding=conversation
+        ? await runtime.providerAdapter.resume({...runtime.providerInput,conversation})
+        : reuse ? await runtime.providerAdapter.resume({...runtime.providerInput,conversation:{...runtime.providerInput.scope,kind:"conversation",nativeId:stored.threadId}})
         : await runtime.providerAdapter.open(runtime.providerInput);
-      runtime.threadId = runtime.providerBinding.conversation.nativeId;
-      runtime.hasStartedTurn = Boolean(reuse || (conversation && stored?.threadId === conversation.nativeId && stored.hasStartedTurn));
-      if (!conversation && !reuse && !forkFrom) {
-        const recovery = options.creationOptions?.startupRecoveryContext?.blockText
-          ?? buildModelChangeRecoveryContext({ descriptor: options.descriptor,
-            entries: runtime.getCustomEntries("swarm_conversation_entry").filter(isConversationEntryEvent),
-            modelContextWindow: getCatalogContextWindow(options.descriptor.model.modelId, options.descriptor.model.provider),
-            existingPrompt: options.systemPrompt,
-          }).blockText;
-        if (recovery) await runtime.client.request("thread/inject_items", { threadId: runtime.threadId, items: [{
-          type: "message", role: "user", content: [{ type: "input_text", text: recovery }],
-        }] });
-      }
+      runtime.threadId=runtime.providerBinding.conversation.nativeId;
+      runtime.hasStartedTurn=Boolean(reuse || (conversation && stored?.threadId===conversation.nativeId && stored.hasStartedTurn));
       const promptDigest = createHash("sha256").update(options.systemPrompt).digest("hex");
       runtime.appendCustomEntry(NATIVE_CODEX_STATE, { version: 1, threadId: runtime.threadId,
-        ownerAgentId: options.descriptor.agentId, cwd: options.descriptor.cwd, promptDigest, hasStartedTurn: runtime.hasStartedTurn,
-        ...(forkFrom ? { forkFrom } : {}) } satisfies ThreadState);
+        ownerAgentId: options.descriptor.agentId, cwd: options.descriptor.cwd, promptDigest, hasStartedTurn: runtime.hasStartedTurn } satisfies ThreadState);
       return runtime;
     } catch (error) {
       runtime.closed = true;
@@ -290,10 +261,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       if (this.active?.attemptId === deliveryId) this.active.id = response.turn.nativeId;
       this.markThreadStarted();
       if (!recorded) this.recordUser(message);
-      if (!this.recoveryConsumed) {
-        await this.options.creationOptions?.onStartupRecoveryConsumed?.();
-        this.recoveryConsumed = true;
-      }
+
     } catch (error) {
       // A protocol rejection is acknowledged failure; a lost response is uncertain ownership.
       // Busy admission belongs to the already-running native turn; never abort its projection.

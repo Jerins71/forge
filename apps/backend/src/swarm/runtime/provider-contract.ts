@@ -150,7 +150,7 @@ export interface ProviderAdapter {
   interrupt(input: { binding: ProviderBinding; attemptId: string; turn: ProviderTurnRef }): Promise<void>;
   respond(input: ProviderRespondInput): Promise<void>;
   compact(input: { binding: ProviderBinding; attemptId: string; instructions?: string }): Promise<void>;
-  fork?(input: ProviderOpenInput & { source: ProviderConversationRef; through?: ProviderTurnRef }): Promise<ProviderBinding>;
+  fork?(input: { binding: ProviderBinding; through?: ProviderTurnRef }): Promise<ProviderConversationRef>;
   readContext?(input: { binding: ProviderBinding; through?: ProviderTurnRef }): Promise<ProviderContext>;
   /** A single ordered stream per binding. The adapter cannot assign children to Forge workers. */
   observations(binding: ProviderBinding, signal?: AbortSignal): AsyncIterable<ProviderObservation>;

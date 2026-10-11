@@ -118,12 +118,6 @@ export interface SpecialistFallbackReplaySnapshot {
   messages: RuntimeUserMessage[];
 }
 
-export interface RuntimeStartupRecoveryContext {
-  reason: "model_change";
-  blockText: string;
-  requestId?: string;
-}
-
 export interface RuntimeCodexTransportDebugStats {
   requests: number;
   connectionsCreated: number;
@@ -162,9 +156,6 @@ export interface RuntimeCreationOptions {
   onProviderPrepared?: (prepared: { instructionBundle: InstructionBundle; toolHostBinding: ToolHostBinding }) => void;
   /** Required behavior is checked before preparation or provider dispatch. */
   providerRequirements?: ProviderRequirements;
-  startupRecoveryContext?: RuntimeStartupRecoveryContext;
-  /** Invoked after startup recovery context is committed on the first accepted prompt dispatch. */
-  onStartupRecoveryConsumed?: () => void | Promise<void>;
   /** Fail closed unless this runtime is backed by the current Secure Session. */
   secureRuntimeRequired?: boolean;
   /**

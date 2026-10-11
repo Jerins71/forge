@@ -41,7 +41,6 @@ import type {
   RuntimeUserMessageInput,
   SmartCompactOptions,
   SmartCompactResult,
-  SpecialistFallbackReplaySnapshot,
   SwarmAgentRuntime,
   SwarmRuntimeCallbacks
 } from "../runtime-contracts.js";
@@ -242,7 +241,6 @@ export class AgentRuntime implements SwarmAgentRuntime {
   private lastStreamingStatusEmitAtMs = 0;
   private lastContextUsage: AgentContextUsage | undefined;
   private currentTurnReplayMessages: RuntimeUserMessage[] = [];
-  private preparedSpecialistFallbackSessionMessages: EmergencyContextTrimMessage[] | undefined;
   private contextRecoveryInProgress = false;
   private contextRecoveryGraceUntilMs = 0;
   private contextRecoveryGraceTimer: NodeJS.Timeout | undefined;
@@ -426,37 +424,6 @@ export class AgentRuntime implements SwarmAgentRuntime {
     );
   }
 
-  async prepareForSpecialistFallbackReplay(): Promise<SpecialistFallbackReplaySnapshot | undefined> {
-    const replayMessages = [
-      ...this.currentTurnReplayMessages
-        .map((message) => cloneRuntimeUserMessage(message))
-        .filter((message): message is RuntimeUserMessage => message !== undefined),
-      ...this.pendingDeliveries
-        .map((delivery) => cloneRuntimeUserMessage(delivery.message))
-        .filter((message): message is RuntimeUserMessage => message !== undefined)
-    ];
-
-    if (replayMessages.length === 0) {
-      return undefined;
-    }
-
-    const stateMessages = structuredClone(this.getSessionAgentMessages()) as EmergencyContextTrimMessage[];
-    this.preparedSpecialistFallbackSessionMessages = stateMessages;
-
-    this.pruneFailedTurnForReplay(replayMessages);
-    return {
-      messages: replayMessages
-    };
-  }
-
-  async restorePreparedSpecialistFallbackReplay(): Promise<void> {
-    if (!this.preparedSpecialistFallbackSessionMessages) {
-      return;
-    }
-
-    this.rebuildSessionContextFromTrimmedMessages(this.preparedSpecialistFallbackSessionMessages);
-    this.preparedSpecialistFallbackSessionMessages = undefined;
-  }
 
   async sendMessage(
     input: RuntimeUserMessageInput,
@@ -647,7 +614,6 @@ export class AgentRuntime implements SwarmAgentRuntime {
     this.recoveryBufferedMessages.length = 0;
     this.promptDispatchPending = false;
     this.currentTurnReplayMessages = [];
-    this.preparedSpecialistFallbackSessionMessages = undefined;
     this.ignoreNextAgentStart = false;
     this.managerOutputRecovery = undefined;
     this.managerOutputRetryDeliveryId = undefined;
@@ -941,7 +907,6 @@ export class AgentRuntime implements SwarmAgentRuntime {
       this.recoveryBufferedMessages.length = 0;
       this.promptDispatchPending = false;
       this.currentTurnReplayMessages = [];
-      this.preparedSpecialistFallbackSessionMessages = undefined;
       this.ignoreNextAgentStart = false;
       this.latestAutoCompactionReason = undefined;
       this.autoCompactionRecoveryInProgress = false;
@@ -3385,52 +3350,6 @@ export class AgentRuntime implements SwarmAgentRuntime {
     return this.lastContextUsage;
   }
 
-  private pruneFailedTurnForReplay(replayMessages: RuntimeUserMessage[]): void {
-    const stateMessages = this.getSessionAgentMessages();
-    if (stateMessages.length === 0 || replayMessages.length === 0) {
-      return;
-    }
-
-    let trimmedMessages = [...stateMessages];
-    let changed = false;
-
-    const lastMessage = trimmedMessages.at(-1);
-    if (isAssistantErrorLike(lastMessage)) {
-      trimmedMessages = trimmedMessages.slice(0, -1);
-      changed = true;
-    }
-
-    let replayIndex = replayMessages.length - 1;
-    let matchedAcceptedSuffix = false;
-    while (replayIndex >= 0 && trimmedMessages.length > 0) {
-      const trailingUserKey = extractRuntimeMessageKeyFromSessionMessage(trimmedMessages.at(-1));
-      if (trailingUserKey === undefined) {
-        break;
-      }
-
-      const replayMessageKey = buildRuntimeMessageKey(replayMessages[replayIndex]);
-      if (trailingUserKey === replayMessageKey) {
-        trimmedMessages = trimmedMessages.slice(0, -1);
-        replayIndex -= 1;
-        changed = true;
-        matchedAcceptedSuffix = true;
-        continue;
-      }
-
-      if (!matchedAcceptedSuffix) {
-        replayIndex -= 1;
-        continue;
-      }
-
-      break;
-    }
-
-    if (!changed) {
-      return;
-    }
-
-    this.rebuildSessionContextFromTrimmedMessages(trimmedMessages as EmergencyContextTrimMessage[]);
-  }
 
   private async reportRuntimeError(error: RuntimeErrorEvent): Promise<void> {
     if (!this.callbacks.onRuntimeError) {
@@ -3789,31 +3708,6 @@ function extractTextFromMessageRecord(message: unknown): string {
 
 function isRecordLikeMessage(message: unknown): message is Record<string, any> {
   return !!message && typeof message === "object";
-}
-
-function isAssistantErrorLike(message: unknown): boolean {
-  if (!isRecordLikeMessage(message)) {
-    return false;
-  }
-
-  if (message.role !== "assistant") {
-    return false;
-  }
-
-  return message.stopReason === "error" || typeof message.errorMessage === "string";
-}
-
-function extractRuntimeMessageKeyFromSessionMessage(message: unknown): string | undefined {
-  if (!message || typeof message !== "object") {
-    return undefined;
-  }
-
-  const candidate = message as { role?: unknown; content?: unknown };
-  if (candidate.role !== "user") {
-    return undefined;
-  }
-
-  return extractMessageKeyFromRuntimeContent(candidate.content);
 }
 
 async function prepareRuntimeUserMessageForDispatch(

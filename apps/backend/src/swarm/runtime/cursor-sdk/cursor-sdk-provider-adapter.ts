@@ -22,11 +22,21 @@ interface CursorSdkAdapterOptions {
   stateRoot: string;
   callbacks: SwarmRuntimeCallbacks;
   now?: () => string;
-  startupSystemPromptOverride?: string;
-  onStartupRecoveryConsumed?: () => void | Promise<void>;
 }
 
 /** Cursor owns transport/correlation only. Today's runtime retains its queue, callbacks and journal. */
+export function cursorProviderCapabilities(): ProviderCapabilities {
+    return { version: 1, provider: "cursor-sdk", adapterVersion: "forge-cursor-sdk-2",
+      // The SDK has no system-prompt parameter: the logical system bundle is wrapped in the first user payload.
+      instructions: { channels: ["system"], update: "on_open", nativeBase: "preserved" },
+      tools: { registration: "immutable", host: "loopback_mcp", nativeCallIdentity: false, cancellation: "abort_signal", extensionHooks: true },
+      streaming: { text: "delta", reasoning: "none", tools: "snapshot", usage: "final", terminal: "authoritative" },
+      native: { resume: true, fork: false, steer: false, compact: false, readContext: false, interrupt: true },
+      approvals: { lifetime: "none", nativeRequestIdentity: false, childRequests: false },
+      secureSessions: { supported: false, mechanism: "none" },
+    };
+  }
+
 export class CursorSdkProviderAdapter implements ProviderAdapter {
   private binding?: ProviderBinding;
   private opening?: { input: ProviderOpenInput; promise: Promise<ProviderBinding> };
@@ -45,17 +55,7 @@ export class CursorSdkProviderAdapter implements ProviderAdapter {
 
   constructor(private readonly options: CursorSdkAdapterOptions) {}
 
-  capabilities(): ProviderCapabilities {
-    return { version: 1, provider: "cursor-sdk", adapterVersion: "forge-cursor-sdk-2",
-      // The SDK has no system-prompt parameter: the logical system bundle is wrapped in the first user payload.
-      instructions: { channels: ["system"], update: "on_open", nativeBase: "preserved" },
-      tools: { registration: "immutable", host: "loopback_mcp", nativeCallIdentity: false, cancellation: "abort_signal", extensionHooks: true },
-      streaming: { text: "delta", reasoning: "none", tools: "snapshot", usage: "final", terminal: "authoritative" },
-      native: { resume: true, fork: false, steer: false, compact: false, readContext: false, interrupt: true },
-      approvals: { lifetime: "none", nativeRequestIdentity: false, childRequests: false },
-      secureSessions: { supported: false, mechanism: "none" },
-    };
-  }
+  capabilities(): ProviderCapabilities { return cursorProviderCapabilities(); }
 
   async open(input: ProviderOpenInput): Promise<ProviderBinding> { return this.bind(input); }
   async resume(input: ProviderResumeInput): Promise<ProviderBinding> {
@@ -87,7 +87,7 @@ export class CursorSdkProviderAdapter implements ProviderAdapter {
 
   async steer(_input: ProviderSteerInput): Promise<ProviderDispatchResult> { throw new UnsupportedProviderBehaviorError("cursor-sdk", "nativeSteer"); }
   async compact(_input: { binding: ProviderBinding; attemptId: string; instructions?: string }): Promise<void> { throw new UnsupportedProviderBehaviorError("cursor-sdk", "nativeCompact"); }
-  async fork(_input: ProviderOpenInput & { source: ProviderBinding["conversation"]; through?: ProviderTurnRef }): Promise<ProviderBinding> { throw new UnsupportedProviderBehaviorError("cursor-sdk", "nativeFork"); }
+  async fork(_input: { binding: ProviderBinding; through?: ProviderTurnRef }): Promise<ProviderBinding["conversation"]> { throw new UnsupportedProviderBehaviorError("cursor-sdk", "nativeFork"); }
   async readContext(_input: { binding: ProviderBinding; through?: ProviderTurnRef }): Promise<never> { throw new UnsupportedProviderBehaviorError("cursor-sdk", "readContext"); }
   async respond(_input: ProviderRespondInput): Promise<void> { throw new CursorSdkDegradationError("CURSOR_APPROVAL_UNSUPPORTED", "Cursor SDK does not expose a response callback for native requests."); }
 

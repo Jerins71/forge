@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
-import type { ProviderCapabilities, ProviderObservation } from "@forge/protocol";
+import type { ProviderCapabilities, ProviderConversationRef, ProviderObservation } from "@forge/protocol";
 import { assertProviderRequirements, ProviderRefreshRequiredError, ProviderDispatchRejectedError, UnsupportedProviderBehaviorError, type ProviderAdapter, type ProviderBinding, type ProviderOpenInput,
   type ProviderResumeInput, type ProviderStartInput, type ProviderSteerInput, type ProviderRespondInput, type ProviderDrainResult, type ToolHostBinding } from "../provider-contract.js";
 import { renderInstructionBundle } from "../instruction-bundle.js";
@@ -11,10 +11,11 @@ const capabilities: ProviderCapabilities = {
   instructions: { channels: ["preset_append"], update: "on_open", nativeBase: "preset" },
   tools: { registration: "immutable", host: "in_process_mcp", nativeCallIdentity: true, cancellation: "abort_signal", extensionHooks: true },
   streaming: { text: "delta", reasoning: "delta", tools: "snapshot", usage: "final", terminal: "authoritative" },
-  native: { resume: true, fork: true, steer: true, compact: true, readContext: false, interrupt: true },
+  native: { resume: true, fork: true, forkThroughTurn: false, steer: true, compact: true, readContext: false, interrupt: true },
   approvals: { lifetime: "live_callback", nativeRequestIdentity: true, childRequests: true },
   secureSessions: { supported: true, mechanism: "secure_bash" },
 };
+export function claudeProviderCapabilities():ProviderCapabilities { return structuredClone(capabilities); }
 const revision = (toolHost: ToolHostBinding) => createHash("sha256").update(JSON.stringify(toolHost.snapshot)).digest("hex");
 const sameScope = (a: ProviderBinding["scope"], b: ProviderBinding["scope"]) => a.threadId === b.threadId && a.bindingId === b.bindingId && a.generation === b.generation;
 
@@ -25,16 +26,21 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
   private runtime?: ClaudeAgentRuntime;
   private opening?: Promise<ProviderBinding>;
   constructor(private readonly options: ClaudeRuntimeOptions) {}
-  capabilities(): ProviderCapabilities { return structuredClone(capabilities); }
+  capabilities(): ProviderCapabilities { return claudeProviderCapabilities(); }
   open(input: ProviderOpenInput): Promise<ProviderBinding> { return this.acquire(input); }
-  resume(input: ProviderResumeInput): Promise<ProviderBinding> { return this.acquire(input, input.conversation.nativeId); }
-  fork(input: ProviderOpenInput & { source: ProviderBinding["conversation"]; through?: ProviderSteerInput["turn"] }): Promise<ProviderBinding> {
-    if (input.through) throw new UnsupportedProviderBehaviorError("claude", "nativeFork");
-    return this.acquire(input, undefined, input.source.nativeId);
+  resume(input: ProviderResumeInput): Promise<ProviderBinding> {
+    const ref=input.conversation;
+    if(ref.forkOnResume && !ref.forkSource) throw new Error("Claude fork locator is missing its source");
+    return this.acquire(input,ref.forkOnResume ? undefined:ref.nativeId,ref.forkOnResume ? ref.forkSource!.nativeId:undefined,ref.forkOnResume ? ref.nativeId:undefined);
   }
-  private async acquire(input: ProviderOpenInput, resumeId?: string, forkFrom?: string): Promise<ProviderBinding> {
+  async fork(input: { binding: ProviderBinding; through?: ProviderSteerInput["turn"] }): Promise<ProviderConversationRef> {
+    if (input.through) throw new UnsupportedProviderBehaviorError("claude", "nativeFork");
+    this.assertBinding(input.binding);
+    return {...input.binding.conversation,nativeId:randomUUID(),forkOnResume:true,forkSource:{nativeId:input.binding.conversation.nativeId}};
+  }
+  private async acquire(input: ProviderOpenInput, resumeId?: string, forkFrom?: string, forkSessionId?:string): Promise<ProviderBinding> {
     assertProviderRequirements(capabilities, input.required);
-    if (this.opening) { await this.opening; return this.acquire(input, resumeId, forkFrom); }
+    if (this.opening) { await this.opening; return this.acquire(input, resumeId, forkFrom, forkSessionId); }
     if (this.binding && this.runtime?.getProviderDrainStatus() === "open") {
       if (!sameScope(this.binding.scope, input.scope)) throw new Error("Close and drain the previous Claude binding before opening another scope.");
       if (forkFrom) throw new Error("Claude fork requires a fresh binding scope.");
@@ -58,7 +64,7 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
           secureRuntimeBinding: input.toolHost.security ?? this.options.creationOptions?.secureRuntimeBinding },
         providerAdapter: this, providerSession: this.session, providerOpen: input,
         onNativePrepared: (runtime, binding) => { this.runtime = runtime; this.binding = binding; },
-        nativeConversation: resumeId ? { resumeId } : forkFrom ? { forkFrom, sessionId: randomUUID() } : undefined });
+        nativeConversation: resumeId ? { resumeId } : forkFrom ? { forkFrom, sessionId: forkSessionId ?? randomUUID() } : undefined });
       this.runtime = native.runtime; this.binding = native.binding;
       return native.binding;
     })();

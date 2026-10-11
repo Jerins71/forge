@@ -91,6 +91,20 @@ const start = (f: Awaited<ReturnType<typeof fixture>>, binding: Awaited<ReturnTy
 describe("Claude frozen provider contract through real SDK transport", () => {
   // Glue failure modes: direct starts bypass native activation, duplicate legacy activation,
   // missing canonical assistant output or end callbacks, and busy starts implicitly steer/queue.
+  it("returns a durable latest fork locator and resumes it with the SDK forkSession flag",async()=>{
+    const source=await fixture("idle");const binding=await source.open();
+    await expect(source.adapter.fork({binding,through:{...scope,kind:"turn",conversationId:binding.conversation.nativeId,nativeId:"historical"}})).rejects.toMatchObject({code:"PROVIDER_BEHAVIOR_UNSUPPORTED"});
+    const conversation=await source.adapter.fork({binding});expect(conversation).toMatchObject({forkOnResume:true,forkSource:{nativeId:binding.conversation.nativeId}});
+    await source.close();
+    const target=await fixture("idle",{root:source.root,scope:{...scope,bindingId:"fork-target"}});const argsPath=join(source.root,"fork-args.jsonl");Object.assign(target.runtimeOptions.env,{FORGE_CLAUDE_REPLAY_ARGS_PATH:argsPath});
+    try {
+      const opened=await target.open(conversation);expect(opened.conversation.nativeId).toBe(conversation.nativeId);
+      const args=JSON.parse((await readFile(argsPath,"utf8")).trim()) as string[];
+      const option=(name:string)=>args.find(arg=>arg.startsWith(name+"="))?.slice(name.length+1) ?? (args.includes(name)?args[args.indexOf(name)+1]:undefined);
+      expect(args).toContain("--fork-session");expect(option("--resume")).toBe(binding.conversation.nativeId);expect(option("--session-id")).toBe(conversation.nativeId);
+    } finally {await target.close();await source.cleanup();}
+  });
+
   it.each(["adapter", "legacy"] as const)("projects one canonical assistant and one end through creator callbacks for %s dispatch", async dispatch => {
     const resources = await createProviderBoundaryFixture();
     const f = await fixture("one-turn", { root: resources.root, matchAnyPrompt: true });

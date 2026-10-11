@@ -325,8 +325,7 @@ export class PiRuntimeCreator {
     const memoryResources = await this.deps.getMemoryRuntimeResources(descriptor);
     const promptPlan = planPiRuntimePrompt({
       systemPrompt, instructionBundle: creationOptions?.instructionBundle,
-      cwd: descriptor.cwd,
-      startupRecoveryContext: creationOptions?.startupRecoveryContext
+      cwd: descriptor.cwd
     });
     const authFilePath = await ensureCanonicalAuthFilePath(this.deps.config);
 

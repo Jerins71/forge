@@ -28,6 +28,12 @@ export function createProjectPolicy(swarm: SwarmManager): PolicyPort {
     if (!selected.reasoningOptions.some(option => option.id === thinkingLevel)) throw new ControlError("INVALID_INPUT", "Reasoning level is unavailable for this model");
     return { provider: selected.provider, modelId: selected.modelId, thinkingLevel };
   };
+  const requireSameProvider=(configure:RpcInput<"session.configure">)=>{
+    if(!configure.model) return;
+    const target=swarm.getAgent(configure.sessionId);
+    const selection=configure.model.mode==="override" ? configure.model : swarm.listProfiles().find(p=>p.profileId===(target?.profileId ?? target?.agentId))?.defaultModel;
+    if(selection && target && selection.provider!==target.model.provider) throw new ControlError("CONFLICT","Cross-provider changes require session.provider.switch and an explicit handoff");
+  };
   return {
     async prepare(method, input) {
       if (method === "project.create") {
@@ -43,6 +49,7 @@ export function createProjectPolicy(swarm: SwarmManager): PolicyPort {
         const target = swarm.getAgent(configure.sessionId);
         if (!target || target.role !== "manager") throw new ControlError("NOT_FOUND", "Manager session not found");
         requireNonSystemSessionProfile(configure.sessionId, swarm.listProfiles(), id => swarm.getAgent(id));
+        requireSameProvider(configure);
         if (target.archivedAt) throw new ControlError("CONFLICT", "Restore the session before configuring it");
         if (!configure.model && !configure.delegation && configure.contextMode === undefined) throw new ControlError("INVALID_INPUT", "Configuration is empty");
         return { sessionIds: [configure.sessionId], projectIds: [target.profileId ?? target.agentId], intent: "inspect", frozen: { ...configure, ...(configure.model?.mode === "override" ? { model: { mode: "override", ...await freezeModel(configure.model, "change") } } : {}) }, sessionId: configure.sessionId };
@@ -80,6 +87,7 @@ export function createProjectPolicy(swarm: SwarmManager): PolicyPort {
         }
         case "session.configure": {
           const configure = input as RpcInput<typeof method>;
+          requireSameProvider(configure);
           if (configure.model?.mode === "inherit") await swarm.updateSessionModel(configure.sessionId, "inherit");
           else if (configure.model?.mode === "override") await swarm.updateSessionExactModel(configure.sessionId, configure.model, configure.model.thinkingLevel as SwarmReasoningLevel | undefined);
           if (configure.delegation) await swarm.updateSessionDelegation(configure.sessionId, configure.delegation);

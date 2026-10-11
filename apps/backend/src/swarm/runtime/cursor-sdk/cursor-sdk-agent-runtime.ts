@@ -14,7 +14,6 @@ import type {
   RuntimeUserMessageInput,
   SmartCompactOptions,
   SmartCompactResult,
-  SpecialistFallbackReplaySnapshot,
   SwarmAgentRuntime,
   SwarmRuntimeCallbacks
 } from "../../runtime-contracts.js";
@@ -113,8 +112,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
   private readonly now: () => string;
   private readonly model: CursorSdkModelSelection;
   private readonly systemPrompt: string;
-  private readonly startupSystemPromptOverride: string | undefined;
-  private readonly onStartupRecoveryConsumed: (() => void | Promise<void>) | undefined;
   private readonly mcpServers: CursorSdkMcpServers;
   private readonly stateRoot: string;
   private readonly eventMapper: CursorSdkEventMapper;
@@ -125,12 +122,10 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
   private status: AgentStatus;
   private sdkAgent: CursorSdkAgent;
   private needsPromptInjection = true;
-  private startupRecoveryConsumed = false;
   private activePrompt: ActivePromptState | undefined;
   private promptDispatchPending = false;
   private stoppedPendingDispatch = false;
   private nextPromptToken = 0;
-  private currentTurnReplayMessage: RuntimeUserMessage | undefined;
   private lastSessionEntryId: string | null = null;
   private readonly dispatches = new Set<Promise<void>>();
   private readonly pendingSends = new Set<Promise<CursorSdkRun>>();
@@ -146,8 +141,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     apiKey: string;
     model: CursorSdkModelSelection;
     systemPrompt: string;
-    startupSystemPromptOverride?: string;
-    onStartupRecoveryConsumed?: () => void | Promise<void>;
     mcpServers: CursorSdkMcpServers;
     stateRoot: string;
     promptHash?: string;
@@ -160,8 +153,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     this.sdkAgent = options.sdkAgent;
     this.model = options.model;
     this.systemPrompt = options.systemPrompt;
-    this.startupSystemPromptOverride = options.startupSystemPromptOverride?.trim() || undefined;
-    this.onStartupRecoveryConsumed = options.onStartupRecoveryConsumed;
     this.mcpServers = options.mcpServers;
     this.stateRoot = options.stateRoot;
     this.promptHash = options.promptHash;
@@ -199,9 +190,7 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     apiKey: string;
     model: CursorSdkModelSelection;
     systemPrompt: string;
-    startupSystemPromptOverride?: string;
     skipInitialSessionResume?: boolean;
-    onStartupRecoveryConsumed?: () => void | Promise<void>;
     mcpServers: CursorSdkMcpServers;
     stateRoot: string;
     promptHash?: string;
@@ -242,8 +231,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
         apiKey: options.apiKey,
         model: options.model,
         systemPrompt: options.systemPrompt,
-        startupSystemPromptOverride: options.startupSystemPromptOverride,
-        onStartupRecoveryConsumed: options.onStartupRecoveryConsumed,
         mcpServers: options.mcpServers,
         stateRoot: options.stateRoot,
         promptHash: options.promptHash,
@@ -284,18 +271,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     return this.systemPrompt;
   }
 
-  async prepareForSpecialistFallbackReplay(): Promise<SpecialistFallbackReplaySnapshot | undefined> {
-    const replayMessages = [
-      ...(this.currentTurnReplayMessage ? [cloneRuntimeUserMessage(this.currentTurnReplayMessage)] : []),
-      ...this.queuedPrompts.map((entry) => cloneRuntimeUserMessage(entry.message))
-    ];
-    return replayMessages.length > 0 ? { messages: replayMessages } : undefined;
-  }
-
-  async restorePreparedSpecialistFallbackReplay(): Promise<void> {
-    // Replay snapshots are non-destructive.
-  }
-
   async sendMessage(input: RuntimeUserMessageInput, requestedMode: RequestedDeliveryMode = "auto"): Promise<SendMessageReceipt> {
     this.ensureNotTerminated();
     if (requestedMode === "steer") throw new UnsupportedProviderBehaviorError("cursor-sdk", "nativeSteer");
@@ -309,7 +284,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     }
 
     this.promptDispatchPending = true;
-    this.currentTurnReplayMessage = cloneRuntimeUserMessage(message);
     this.schedulePromptDispatch(message);
     return { targetAgentId: this.descriptor.agentId, deliveryId, acceptedMode: "prompt" };
   }
@@ -326,7 +300,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
 
   async stopInFlight(): Promise<void> {
     this.queuedPrompts.length = 0;
-    this.currentTurnReplayMessage = undefined;
     const active = this.activePrompt;
     if (active) {
       if (active.run) await active.run.cancel();
@@ -401,7 +374,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
   private async dispatchPrompt(message: RuntimeUserMessage): Promise<void> {
     if (this.status === "terminated") {
       this.promptDispatchPending = false;
-      this.currentTurnReplayMessage = undefined;
       return;
     }
 
@@ -417,7 +389,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     this.stoppedPendingDispatch = false;
     this.activePrompt = active;
     this.promptDispatchPending = true;
-    this.currentTurnReplayMessage = cloneRuntimeUserMessage(message);
 
     const preparedPayload = this.prepareSendPayload(message);
     const attemptIndex = 0;
@@ -484,7 +455,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
           if (preparedPayload.consumesPromptInjection && !promptInjectionCommitted) {
             this.needsPromptInjection = false;
             promptInjectionCommitted = true;
-            await this.commitStartupRecoveryConsumption();
           }
 
           await backgroundScope.runWithAttribution(() => this.raceContainedBackgroundFailure(
@@ -528,7 +498,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
         this.activePrompt = undefined;
       }
       this.promptDispatchPending = false;
-      this.currentTurnReplayMessage = undefined;
       try {
         if (!this.isTerminated()) {
           await this.updateStatus("idle");
@@ -638,22 +607,13 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
 
   private prepareSendPayload(message: RuntimeUserMessage): PreparedSendPayload {
     const consumesPromptInjection = this.needsPromptInjection;
-    const injectionPrompt = this.startupSystemPromptOverride ?? this.systemPrompt;
+    const injectionPrompt=this.systemPrompt;
     const text = consumesPromptInjection ? wrapWithForgeSystemContext(injectionPrompt, message.text) : message.text;
     const images = (message.images ?? []).map((image) => ({ data: image.data, mimeType: image.mimeType }));
     return {
       payload: images.length > 0 ? { text, images } : text,
       consumesPromptInjection
     };
-  }
-
-  private async commitStartupRecoveryConsumption(): Promise<void> {
-    if (this.startupRecoveryConsumed || !this.onStartupRecoveryConsumed) {
-      return;
-    }
-
-    this.startupRecoveryConsumed = true;
-    await this.onStartupRecoveryConsumed();
   }
 
   private async streamCursorRun(active: ActivePromptState, token: number, run: CursorSdkRun): Promise<void> {
@@ -739,7 +699,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     const next = this.queuedPrompts.shift();
     if (!next) return;
     this.promptDispatchPending = true;
-    this.currentTurnReplayMessage = cloneRuntimeUserMessage(next.message);
     this.schedulePromptDispatch(next.message);
   }
 
@@ -748,7 +707,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
       await this.safeEmitRuntimeError(error);
       if (this.activePrompt === undefined) {
         this.promptDispatchPending = false;
-        this.currentTurnReplayMessage = undefined;
         if (this.status !== "terminated") {
           await this.updateStatus("idle").catch(() => undefined);
           await this.dispatchQueuedPrompts().catch(() => undefined);
@@ -1066,9 +1024,6 @@ function wrapWithForgeSystemContext(systemPrompt: string, userMessage: string): 
   return `<forge_system_context>\n${systemPrompt}\n</forge_system_context>\n\n<forge_user_message>\n${userMessage}\n</forge_user_message>`;
 }
 
-function cloneRuntimeUserMessage(message: RuntimeUserMessage): RuntimeUserMessage {
-  return { text: message.text, images: message.images?.map((image) => ({ ...image })) ?? [] };
-}
 
 function generateSessionEntryId(): string {
   return `evt_${randomUUID()}`;

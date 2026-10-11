@@ -70,7 +70,9 @@ interface Options {
   projectTrusted: boolean;
   auth: Pick<CodexRuntimeAuth, "login" | "refresh" | "release">;
   createClient?: CodexAppServerClientFactory;
-  /** Creator-prepared canonical projection; admission and queueing remain external. */
+
+
+/** Creator-prepared canonical projection; admission and queueing remain external. */
   onStart?(input: ProviderStartInput): Promise<void>;
   onStartRejected?(input: ProviderStartInput, error: unknown): Promise<void>;
   onNotification?(method: string, params: Record<string, any>): Promise<void>;
@@ -80,6 +82,16 @@ interface Options {
   autoRespond?: boolean;
   previousPromptDigest?: string;
 }
+
+export function codexProviderCapabilities(): ProviderCapabilities {
+    return { version: 1, provider: "codex", adapterVersion: "forge-codex-2",
+      instructions: { channels: ["developer"], update: "explicit_refresh", nativeBase: "preserved" },
+      tools: { registration: "immutable", host: "dynamic_tools", nativeCallIdentity: true, cancellation: "abort_signal", extensionHooks: true },
+      streaming: { text: "delta", reasoning: "delta", tools: "delta", usage: "final", terminal: "authoritative" },
+      native: { resume: true, fork: true, forkThroughTurn: true, steer: true, compact: true, readContext: true, interrupt: true },
+      approvals: { lifetime: "live_callback", nativeRequestIdentity: true, childRequests: true },
+      secureSessions: { supported: true, mechanism: "secure_bash" } };
+  }
 
 /** Preserves definite pre-dispatch failure for the transitional lifecycle owner. */
 export class CodexProviderDispatchError extends Error {
@@ -93,15 +105,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
   private opening?: { input: ProviderOpenInput; scope: ProviderScope; promise: Promise<ProviderBinding> };
   constructor(private readonly options: Options) {}
 
-  capabilities(): ProviderCapabilities {
-    return { version: 1, provider: "codex", adapterVersion: "forge-codex-2",
-      instructions: { channels: ["developer"], update: "explicit_refresh", nativeBase: "preserved" },
-      tools: { registration: "immutable", host: "dynamic_tools", nativeCallIdentity: true, cancellation: "abort_signal", extensionHooks: true },
-      streaming: { text: "delta", reasoning: "delta", tools: "delta", usage: "final", terminal: "authoritative" },
-      native: { resume: true, fork: true, steer: true, compact: true, readContext: true, interrupt: true },
-      approvals: { lifetime: "live_callback", nativeRequestIdentity: true, childRequests: true },
-      secureSessions: { supported: true, mechanism: "secure_bash" } };
-  }
+  capabilities(): ProviderCapabilities { return codexProviderCapabilities(); }
 
   /** Transitional native operations (history injection/terminal cleanup), never a second transport. */
   get nativeClient(): CodexAppServerClientPort {
@@ -113,12 +117,13 @@ export class CodexProviderAdapter implements ProviderAdapter {
   async resume(input: ProviderResumeInput): Promise<ProviderBinding> {
     return this.allocate(input, { method: "thread/resume", threadId: input.conversation.nativeId });
   }
-  fork(input: ProviderOpenInput & { source: ProviderConversationRef; through?: ProviderTurnRef }): Promise<ProviderBinding> {
-    if (input.through && (!sameScope(input.source, input.through) || input.through.conversationId !== input.source.nativeId)) {
-      return Promise.reject(new Error("Codex fork boundary does not belong to the source conversation"));
-    }
-    return this.allocate(input, { method: "thread/fork", threadId: input.source.nativeId,
-      ...(input.through ? { lastTurnId: input.through.nativeId } : {}) });
+  async fork(input: { binding: ProviderBinding; through?: ProviderTurnRef }): Promise<ProviderConversationRef> {
+    const source=input.binding.conversation;
+    const state=this.owned(input.binding);
+    if (input.through && (!sameScope(source,input.through) || input.through.conversationId !== source.nativeId)) throw new Error("Codex fork boundary does not belong to the source conversation");
+    const response=await state.client.request<any>("thread/fork",{threadId:source.nativeId,...(input.through ? {lastTurnId:input.through.nativeId}:{}),ephemeral:false});
+    if(typeof response?.thread?.id!=="string" || !response.thread.id) throw new Error("Codex fork returned no native conversation identity");
+    return {...source,nativeId:response.thread.id};
   }
 
   private allocate(input: ProviderOpenInput, target?: CodexNativeThreadTarget): Promise<ProviderBinding> {
@@ -487,7 +492,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
     if (rejected && endRejected) turn.ended = true;
     this.emit(turn, { type: "error", origin: this.origin(turn), code: rejected ? "CODEX_REJECTED" : "CODEX_TRANSPORT",
       message: message(error), delivery: rejected ? "not_dispatched" : endRejected && turn.accepted ? "accepted" : "unknown" });
-    if (rejected) throw error;
+    if (rejected) throw Object.assign(new CodexProviderDispatchError(error),{code:(error as {code:number}).code});
     return endRejected && turn.accepted ? { status: "accepted", turn: this.turnRef(turn) } : { status: "unknown" };
   }
   private onExit(error: Error): void {

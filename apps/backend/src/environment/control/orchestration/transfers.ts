@@ -22,7 +22,7 @@ export interface ResolvedSourcePoint extends ContextSourcePoint {
 export interface LineageTransfer extends Omit<ContextTransfer, 'kind' | 'source'> {
   kind: 'fork' | 'provider_switch' | 'merge_back'; source: ResolvedSourcePoint;
   targetGeneration: number; targetModel?: AgentDescriptor['model']; targetBindingId?: string;
-  resolutionAttemptId?: string; nativeBinding?: ProviderBinding;
+  resolutionAttemptId?: string; nativeFork?: Pick<ProviderBinding, "conversation" | "nativeRunIds" | "contextCoverage">;
 }
 export type Transfer = WorkerTransfer | LineageTransfer;
 export type TransferEvent = { type: 'transfer.created' | 'transfer.resolving' | 'transfer.resolved' | 'transfer.failed' | 'transfer.dispatch_marked' | 'transfer.consumed' | 'transfer.unknown' | 'transfer.superseded'; transfer: Transfer };
@@ -32,7 +32,7 @@ export type TransferCommand =
   | { type: 'transfer.create'; transferId: string; kind: LineageTransfer['kind']; source: ResolvedSourcePoint; targetThreadId: string; targetModel?: AgentDescriptor['model']; continueWorker?: boolean; authorized: boolean }
   | { type: 'transfer.resolve'; transferId: string; attemptId: string; strategy?:'native_fork'|'portable_context'|'delta_context'; error?:ContextTransfer['error'] }
   | {type:'transfer.interrupted';transferId:string}
-  | { type: 'transfer.resolved'; transferId: string; attemptId: string; strategy: 'native_fork' | 'portable_context' | 'delta_context'; handoff?: ContextHandoff; binding?: ProviderBinding }
+  | { type: 'transfer.resolved'; transferId: string; attemptId: string; strategy: 'native_fork' | 'portable_context' | 'delta_context'; handoff?: ContextHandoff; nativeFork?: LineageTransfer["nativeFork"] }
   | { type: 'transfer.failed'; transferId: string; attemptId: string; error: NonNullable<ContextTransfer['error']> }
   | { type: 'transfer.consume'; transferId: string; attemptId: string };
 export const isLineageTransfer = (transfer: Transfer): transfer is LineageTransfer => transfer.kind !== 'worker_input' && transfer.kind !== 'worker_result';
@@ -63,17 +63,17 @@ export function resolveSourcePoint(state: CoreState, threadId: string, selector:
   } else if (thread.activeRunId) throw new Error('Transfer source has no stable terminal point');
   const last = entries[cutoff-1];
   const attempt = run && state.attempts[run.activeAttemptId];
-  const latest = !thread.activeRunId && run?.runId === runs.at(-1)?.runId && cutoff === entries.length;
+  const latest = !!run && !thread.activeRunId && run?.runId === runs.at(-1)?.runId && cutoff === entries.length;
   return { threadId, sequence:cutoff, ...(run ? {runId:run.runId} : {}), ...(last && entryIdentity(last) ? {entryId:entryIdentity(last)} : {}),
     ...(attempt && state.bindings[attempt.bindingId] ? {bindingId:attempt.bindingId,turn:attempt.turn} : {}),
     ...(selector.kind === 'message' ? {messageBounded:true} : {}), nativeLatest:latest };
 }
 export function planTransferResolution(state: CoreState, transfer: LineageTransfer, capabilities?: ProviderCapabilities): { strategy:'native_fork'|'portable_context'|'delta_context'; prior?: ProviderBinding; coveredEntryIds:string[]; coveredRunIds:string[]; through?:ProviderTurnRef } {
-  const bindings = Object.values(state.bindings).filter(b => b.scope.threadId === transfer.targetThreadId && (capabilities ? b.capabilities.provider === capabilities.provider : transfer.targetModel && b.model?.provider === transfer.targetModel.provider) && (!transfer.targetModel || b.model?.modelId === transfer.targetModel.modelId));
+  const bindings = Object.values(state.bindings).filter(b => b.scope.threadId === transfer.targetThreadId && (capabilities ? b.capabilities.provider === capabilities.provider : transfer.targetModel && b.model?.provider === transfer.targetModel.provider));
   const prior = bindings.sort((a,b) => a.scope.generation-b.scope.generation).at(-1);
   const sourceBinding = transfer.source.bindingId ? state.bindings[transfer.source.bindingId] : undefined;
   // Exact turns are expressible by the adapter. Latest-only adapters may explicitly reject `through`.
-  const native = capabilities && transfer.kind === 'fork' && !transfer.source.messageBounded && sourceBinding?.capabilities.provider === capabilities.provider && capabilities.native.fork && (transfer.source.turn || transfer.source.nativeLatest);
+  const native = capabilities && transfer.kind === 'fork' && !transfer.source.messageBounded && sourceBinding?.capabilities.provider === capabilities.provider && capabilities.native.fork && capabilities.native.forkThroughTurn !== false && (transfer.source.turn || transfer.source.nativeLatest);
   return { strategy:native ? 'native_fork' : transfer.kind === 'merge_back' || prior ? 'delta_context' : 'portable_context', prior,
     coveredEntryIds:prior?.contextCoverage?.[transfer.source.threadId] ?? [], coveredRunIds:prior?.nativeRunIds ?? [],
     ...(native && transfer.source.turn ? {through:transfer.source.turn} : {}) };
@@ -130,7 +130,7 @@ export function decideTransfer(initial: CoreState, command: CoreCommand & Transf
     let basePoint:ContextSourcePoint|undefined;
     if(command.kind==='fork') {
       if(target) throw new Error('Fork target already exists');
-      if(command.continueWorker && (source.role!=='worker' || source.activeRunId || !run)) throw new Error('Continue requires a completed worker conversation');
+      if(command.continueWorker && (source.role!=='worker' || source.activeRunId || Object.values(state.runs).some(r=>r.threadId===source.threadId && r.state!=='terminal'))) throw new Error('Continue requires an idle worker conversation');
       apply({type:'thread.create',commandId:command.commandId,now:command.now,threadId:command.targetThreadId,role:'manager',projectId:source.projectId});target=state.threads[command.targetThreadId];
       emit({type:'thread.changed',thread:{...target,model:command.targetModel ?? source.model,lineage:{parentThreadId:source.threadId,rootThreadId:source.lineage?.rootThreadId ?? source.threadId,relationship:command.continueWorker ? 'continued_worker':'fork',transferId:command.transferId,basePoint:publicPoint(command.source)}}});
     } else if(command.kind==='provider_switch') {
@@ -164,21 +164,33 @@ export function decideTransfer(initial: CoreState, command: CoreCommand & Transf
   } else if((transfer.resolutionAttemptId===command.attemptId && transfer.state==='resolving') || command.type==='transfer.failed' && transfer.state==='pending') {
     if(command.type==='transfer.failed') emit({type:command.error.code==='DELIVERY_UNKNOWN'?'transfer.unknown':'transfer.failed',transfer:{...transfer,state:command.error.code==='DELIVERY_UNKNOWN'?'unknown':'failed',error:command.error}});
     else {
-      if(command.strategy==='native_fork' && !command.binding || command.strategy!=='native_fork' && !command.handoff) throw new Error('Transfer resolution artifact is missing');
+      if(command.strategy==='native_fork' && !command.nativeFork || command.strategy!=='native_fork' && !command.handoff) throw new Error('Transfer resolution artifact is missing');
       if(command.handoff) {if(command.handoff.transferId!==transfer.transferId) throw new Error('Handoff transfer conflicts');emit({type:'handoff.recorded',handoff:command.handoff});}
-      emit({type:'transfer.resolved',transfer:{...transfer,strategy:command.strategy,state:'resolved',handoffId:command.handoff?.handoffId,nativeBinding:command.binding}});
+      emit({type:'transfer.resolved',transfer:{...transfer,strategy:command.strategy,state:'resolved',handoffId:command.handoff?.handoffId,nativeFork:command.nativeFork}});
     }
   }
   return decision;
+}
+/** Portable fork/switch need no provider startup; native affordances use the adapter's persisted declaration. */
+export function sessionTransferCapabilities(binding?:ProviderBinding) {
+  return {fork:true,nativeFork:binding?.capabilities.native.fork ?? false,throughTurnFork:binding?.capabilities.native.forkThroughTurn ?? false,providerSwitch:true};
 }
 export function publicPoint(point:ContextSourcePoint):ContextSourcePoint { return {threadId:point.threadId,sequence:point.sequence,...(point.runId ? {runId:point.runId}:{}),...(point.entryId ? {entryId:point.entryId}:{})}; }
 export function lineageSnapshot(state:CoreState,threadId:string):SessionLineageSnapshot {
   const transfers=Object.values(state.transfers).filter(t=>t.source.threadId===threadId || t.targetThreadId===threadId).sort((a,b)=>a.createdAt-b.createdAt || a.transferId.localeCompare(b.transferId)).slice(-1000).map(t=>{
     if(!isLineageTransfer(t)) return {transferId:t.transferId,kind:t.kind,source:{...t.source,sequence:state.runs[t.source.runId]?.sequence ?? 0},targetThreadId:t.targetThreadId,targetRunId:t.targetRunId,strategy:t.strategy,state:t.state,createdAt:t.createdAt,consumingAttemptId:t.consumingAttemptId,consumedAt:t.consumedAt};
-    const {targetGeneration:_,targetModel:_model,targetBindingId:_binding,resolutionAttemptId:_attempt,nativeBinding:_native,...wire}=t;return {...wire,source:publicPoint(t.source)};
+    const {targetGeneration:_,targetModel:_model,targetBindingId:_binding,resolutionAttemptId:_attempt,nativeFork:_native,...wire}=t;return {...wire,source:publicPoint(t.source)};
   });
-  const ids=new Set(transfers.flatMap(t=>'handoffId' in t && t.handoffId ? [t.handoffId]:[]));
-  return {threadId,lineage:state.threads[threadId]?.lineage ?? null,transfers,handoffs:Object.values(state.handoffs).filter(h=>ids.has(h.handoffId))};
+  const selected:SessionLineageSnapshot['transfers']=[],handoffs:ContextHandoff[]=[];
+  const base={threadId,lineage:state.threads[threadId]?.lineage ?? null};
+  let truncated=Object.values(state.transfers).filter(t=>t.source.threadId===threadId || t.targetThreadId===threadId).length>transfers.length;
+  for(const transfer of [...transfers].reverse()) {
+    const handoff="handoffId" in transfer && transfer.handoffId ? state.handoffs[transfer.handoffId]:undefined;
+    const nextHandoffs=handoff && !handoffs.some(h=>h.handoffId===handoff.handoffId) ? [handoff,...handoffs]:handoffs;
+    if(Buffer.byteLength(JSON.stringify({...base,transfers:[transfer,...selected],handoffs:nextHandoffs,truncated:true}))>48_000) {truncated=true;break;}
+    selected.unshift(transfer);handoffs.splice(0,handoffs.length,...nextHandoffs);
+  }
+  return {...base,transfers:selected,handoffs,...(truncated ? {truncated:true}: {})};
 }
 
 /** Consumption follows accepted delivery only. Marked/unknown input is never silently reinjected. */

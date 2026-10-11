@@ -35,7 +35,7 @@ export function createLineageCommands(sink:EventSink,options:ControlCoreOptions,
           }
           const live=loadState(sink.database).threads[sourceId];
           if(!live) throw new ControlError('NOT_FOUND','Source conversation not found');
-          if(method==='worker.continue' && (live.role!=='worker' || live.managerId!==input.sessionId || live.activeRunId)) throw new ControlError('CONFLICT','Continue requires a completed worker owned by this session');
+          if(method==='worker.continue' && (live.role!=='worker' || live.managerId!==input.sessionId || live.activeRunId || Object.values(loadState(sink.database).runs).some(r=>r.threadId===sourceId && r.state!=='terminal'))) throw new ControlError('CONFLICT','Continue requires an idle worker owned by this session');
         },
       },async()=>{
         if(!options.swarm.readTransferEntries) throw new ControlError('UNAVAILABLE','Canonical context reader is unavailable');
@@ -54,7 +54,7 @@ export function createLineageCommands(sink:EventSink,options:ControlCoreOptions,
           await options.swarm.prepareLineageSession({kind:method==='worker.continue'?'continued_worker':'fork',commandId:input.commandId,sourceThreadId:sourceId,targetThreadId:targetId,title:'title' in input ? input.title:undefined,sourcePoint:point,historical:!!point.messageBounded || !point.nativeLatest,model,...('purpose' in input ? {purpose:input.purpose}: {})});
         }
         sink.transaction(tx=>sink.commitCommand(tx,command));
-        return {sessionId:targetId,projectId};
+        return {sessionId:targetId,projectId:source.projectId};
       });
       return getReceipt(principal,input.commandId);
     },

@@ -18,7 +18,6 @@ import type { SwarmToolHost } from "../../swarm-tool-host.js";
 import type { AgentContextUsage, AgentDescriptor, AgentStatus, SwarmConfig } from "../../types.js";
 import type { SkillMetadata } from "../../skills/skill-metadata-service.js";
 import { recordRuntimePromptAndCreation, summarizeRuntimeTools } from "../runtime-observability-capture.js";
-import { planCursorSdkRuntimePrompt } from "../runtime-prompt-plan.js";
 import { bindRuntimeToolHost, planRuntimeTools } from "../runtime-tool-plan.js";
 import { getPersistedCursorSdkConversationId, getDefaultCursorSdkStateRoot } from "./cursor-sdk-agent-runtime.js";
 import { loadCursorSdkModule } from "./cursor-sdk-loader.js";
@@ -94,17 +93,11 @@ export class CursorSdkRuntimeCreator {
       ? await this.deps.buildCursorSdkRuntimeInstructionBundle(descriptor, baseInstructions)
       : createInstructionBundle(descriptor, await this.deps.buildCursorSdkRuntimeSystemPrompt!(descriptor, renderInstructionBundle(baseInstructions)));
     const cursorSystemPrompt = renderInstructionBundle(instructionBundle);
-    const promptPlan = planCursorSdkRuntimePrompt({
-      systemPrompt: cursorSystemPrompt,
-      startupRecoveryContext: creationOptions?.startupRecoveryContext,
-    });
     const stateRoot = getDefaultCursorSdkStateRoot(descriptor);
     const scope: ProviderScope = creationOptions?.providerScope ?? { threadId: descriptor.agentId, bindingId: randomUUID(), generation: 0 };
     const toolHost = creationOptions?.toolHostBinding ?? bindRuntimeToolHost({ descriptor, tools: swarmTools, scope,
       forgeExtensionHost: this.deps.forgeExtensionHost, preparedForgeBindings, mechanism: "loopback_mcp" });
     const adapter = new CursorSdkProviderAdapter({ descriptor: structuredClone(descriptor), sdk, apiKey: auth.apiKey, stateRoot, now: this.deps.now,
-      startupSystemPromptOverride: promptPlan.startupSystemPromptOverride,
-      onStartupRecoveryConsumed: creationOptions?.onStartupRecoveryConsumed,
       callbacks: {
         onStatusChange: (agentId, status, pendingCount, contextUsage) => this.deps.callbacks.onStatusChange(runtimeToken, agentId, status, pendingCount, contextUsage),
         onSessionEvent: (agentId, event) => this.deps.callbacks.onSessionEvent(runtimeToken, agentId, event),
@@ -131,7 +124,7 @@ export class CursorSdkRuntimeCreator {
       if (creationOptions?.providerConversation) {
         await adapter.resume({ ...input, conversation: creationOptions.providerConversation });
       } else {
-        const nativeId = promptPlan.skipInitialSessionResume ? undefined : getPersistedCursorSdkConversationId(descriptor.sessionFile);
+        const nativeId = creationOptions?.providerScope ? undefined:getPersistedCursorSdkConversationId(descriptor.sessionFile);
         if (nativeId) await adapter.resume({ ...input, conversation: { ...scope, kind: "conversation", nativeId } });
         else await adapter.open(input);
       }
@@ -158,7 +151,6 @@ export class CursorSdkRuntimeCreator {
       runtimeType: "cursor-sdk",
       forgeResolvedPrompt: systemPrompt,
       finalSystemPrompt: cursorSystemPrompt,
-      startupSystemPromptOverride: promptPlan.startupSystemPromptOverride,
       activeTools: summarizeRuntimeTools(swarmTools),
       mcpServers: [`forge-swarm-${descriptor.agentId}`],
       metadata: {

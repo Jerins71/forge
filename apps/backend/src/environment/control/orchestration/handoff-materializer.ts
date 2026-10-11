@@ -50,6 +50,7 @@ export async function materializeHandoff(input:{dataDir:string;transfer:LineageT
   const metadata:ContextHandoff={handoffId:`handoff:${digest(transfer.transferId+':'+sha256)}`,transferId:transfer.transferId,artifactRef,sha256,createdAt:input.now,
     provenance:{source:'canonical_jsonl',renderer:'forge-portable-v1',credentials:'excluded',toolGrants:'excluded'},
     coverage:{sourceThreadId:transfer.source.threadId,requestedEntryIds:requested,includedEntryIds:included,omittedEntryIds:omitted,partialEntryIds:partial,sources:perSource.map(source=>{const requestedEntryIds=source.candidates.map(e=>e.id);return {sourcePoint:source.sourcePoint,requestedEntryIds,includedEntryIds:requestedEntryIds.filter(id=>included.includes(id)),omittedEntryIds:requestedEntryIds.filter(id=>omitted.includes(id)),partialEntryIds:requestedEntryIds.filter(id=>partial.includes(id))};})},budget:{maxChars,usedChars:text.length,truncated}};
+  if(Buffer.byteLength(JSON.stringify(metadata))>24_000) throw new Error('Portable coverage metadata budget exceeded; source coverage cannot be represented safely');
   const dir=getEnvironmentHandoffDir(input.dataDir);await mkdir(dir,{recursive:true,mode:0o700});
   // Transfer identity participates in the payload address, so equal text from separate transfers
   // cannot accidentally share another transfer's immutable metadata.
