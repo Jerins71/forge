@@ -83,8 +83,10 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     if (!this.session!.turnActive(input.turn)) throw new ProviderDispatchRejectedError("stale_scope");
     this.assertTurn(input.binding, input.turn); this.assertUpdates(input);
     this.session!.enableObservations();
-    const id = await this.assertBinding(input.binding).dispatchProviderTurn(input.input, input.attemptId, input.turn);
-    return this.session!.waitForInputAcceptance(id);
+    await this.assertBinding(input.binding).dispatchProviderTurn(input.input, input.attemptId, input.turn);
+    // Written to a live process is delivered: Claude folds it in at its next boundary or runs it when the
+    // reply ends. Waiting for that echo would time out a long reply; only a process that fails first is ambiguous.
+    return { status: "accepted" as const, turn: input.turn };
   }
   async interrupt(input: Parameters<ProviderAdapter["interrupt"]>[0]): Promise<void> {
     this.assertTurn(input.binding, input.turn);

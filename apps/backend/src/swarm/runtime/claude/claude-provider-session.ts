@@ -1,6 +1,6 @@
 import type { CanUseTool, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ChoiceAnswer, ChoiceQuestion, ProviderObservation, ProviderRequestRef, ProviderTurnRef } from "@forge/protocol";
-import { ProviderDispatchRejectedError, ProviderRequestRejectedError, type ProviderBinding, type ProviderDispatchResult, type ProviderRespondInput } from "../provider-contract.js";
+import { ProviderRequestRejectedError, type ProviderBinding, type ProviderDispatchResult, type ProviderRespondInput } from "../provider-contract.js";
 
 type Fact = ProviderObservation extends infer O ? O extends ProviderObservation ? Omit<O, "scope" | "attemptId" | "sequence"> : never : never;
 type Origin = ProviderObservation["origin"];
@@ -15,7 +15,7 @@ export class ClaudeProviderSession {
   private wake?: () => void;
   private ended = false;
   private reading = false;
-  private readonly inputs = new Map<string, { attemptId: string; accepted: boolean; managed: boolean; unknown?: boolean; dispatch?: { promise: Promise<ProviderDispatchResult>; resolve(result: ProviderDispatchResult): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> } }>();
+  private readonly inputs = new Map<string, { attemptId: string; accepted: boolean; managed: boolean; unknown?: boolean; dispatch?: { promise: Promise<ProviderDispatchResult>; resolve(result: ProviderDispatchResult): void; timer: ReturnType<typeof setTimeout> } }>();
   private current?: { attemptId: string; turn: ProviderTurnRef; accepted: boolean; managed: boolean };
   private readonly tools = new Map<string, { name: string; origin: Origin; turn: ProviderTurnRef }>();
   private readonly tasks = new Map<string, { parent: ProviderTurnRef; agent: boolean; toolId?: string }>();
@@ -49,24 +49,15 @@ export class ClaudeProviderSession {
     if (entry.accepted) return Promise.resolve({ status: "accepted", turn: this.current?.turn ?? turn });
     if (entry.unknown || this.ended || this.terminalSeen || this.interrupted) return Promise.resolve({ status: "unknown" });
     if (!entry.dispatch) {
-      let resolve!: (result: ProviderDispatchResult) => void; let reject!: (error: Error) => void;
-      const promise = new Promise<ProviderDispatchResult>((done, fail) => { resolve = done; reject = fail; });
+      let resolve!: (result: ProviderDispatchResult) => void;
+      const promise = new Promise<ProviderDispatchResult>(done => { resolve = done; });
       const timer = setTimeout(() => {
         const pending = entry.dispatch; entry.dispatch = undefined; entry.unknown = true;
         pending?.resolve({ status: "unknown" });
       }, 30_000);
-      entry.dispatch = { promise, resolve, reject, timer };
+      entry.dispatch = { promise, resolve, timer };
     }
     return entry.dispatch.promise;
-  }
-  /** The reply ended while the native still holds these inputs. It runs them next, so the runtime bounds that wait instead. */
-  holdDispatches(ids: readonly string[]): void { for (const id of ids) clearTimeout(this.inputs.get(id)?.dispatch?.timer); }
-  /** The native never consumed these inputs and is being stopped, which proves they will not run. */
-  rejectDispatches(ids: readonly string[]): void {
-    for (const id of ids) {
-      const pending = this.inputs.get(id)?.dispatch; this.inputs.delete(id);
-      pending?.reject(new ProviderDispatchRejectedError("stale_scope"));
-    }
   }
   private settleDispatches(): void {
     for (const entry of this.inputs.values()) {
@@ -110,7 +101,8 @@ export class ClaudeProviderSession {
     for (const request of this.requests.values()) request.cancel();
     if (this.compacting) { this.compacting = false; this.publish({ type: "compaction", origin: this.origin(), phase: "failed" }); }
     this.publish({ type: "error", origin: this.origin(), code: "CLAUDE_TRANSPORT_ERROR", message,
-      delivery: this.current.accepted ? "accepted" : "unknown" });
+      // A steer the native still held when it failed may or may not have run.
+      delivery: this.current.accepted && ![...this.inputs.values()].some(entry => entry.managed && !entry.accepted) ? "accepted" : "unknown" });
   }
   finish(): void { this.settleDispatches(); for (const request of this.requests.values()) request.cancel(); this.ended = true; this.wake?.(); }
 

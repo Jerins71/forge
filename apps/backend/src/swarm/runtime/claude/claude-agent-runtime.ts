@@ -70,6 +70,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   private turnOpen = false;
   private turnError?: string;
   private stopping = false;
+  private interrupted = false;
   private closed = false;
   private pinned?: string;
   private previousCost = 0;
@@ -218,7 +219,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     for (const id of this.mapper.foregroundCommands()) void this.native.backgroundTasks(id).catch(() => undefined);
   }
 
-  async interruptProvider(): Promise<void> { this.assertOpen(); await this.native.interrupt(); }
+  async interruptProvider(): Promise<void> { this.assertOpen(); this.interrupted = true; await this.native.interrupt(); }
 
   async compact(instructions?: string, attemptId?: string): Promise<unknown> {
     let resolve!: (value: unknown) => void;
@@ -385,10 +386,11 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     // Forge turn active until tracked commands/wakeups settle and Claude handles their
     // notifications. Steering stays available; worker completion must wait too.
     // Input the native has not consumed yet is not lost when a reply ends: the native
-    // runs it next. That reply belongs to this turn, so the steer is accepted rather than unknown.
-    const queued = success ? [...this.sent.values()].filter(input => input.attemptId !== undefined).map(input => input.id) : [];
-    if (this.mapper.hasBackgroundWork() || queued.length) {
-      if (queued.length) this.boundQueuedInputs(queued);
+    // runs it next. After a clean reply that belongs to this turn.
+    const queued = [...this.sent.values()].filter(input => input.attemptId !== undefined).map(input => input.id);
+    const stopped = this.interrupted || !success; this.interrupted = false;
+    if (this.mapper.hasBackgroundWork() || (queued.length && !stopped)) {
+      if (queued.length && !stopped) this.boundQueuedInputs(queued);
       await this.publishStatus();
       return;
     }
@@ -396,27 +398,18 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     this.status = this.sent.size ? "streaming" : "idle";
     await this.emit({ type: "agent_end" }); await this.publishStatus();
     await this.options.callbacks.onAgentEnd?.(this.descriptor.agentId);
+    // A stopped or failed turn must not be followed by a queued input running unseen. Only the process can drop it.
+    if (queued.length) { void this.stopInFlight().catch(() => undefined); return; }
     if (!this.stopping && !this.sent.size && this.followUps.length) await this.submit(this.followUps.shift()!);
   }
 
   /** A queued input the native never echoes must not hold the turn open or run later unseen. */
   private boundQueuedInputs(ids: string[]): void {
-    this.options.providerSession!.holdDispatches(ids);
-    setTimeout(() => void (async () => {
-      const lost = await this.serialize(async () => {
-        const lost = ids.filter(id => this.sent.has(id));
-        if (this.stopping || !lost.length) return false;
-        // Refuse further frames first: stopping the process is what proves these inputs never ran.
-        this.stopping = true;
-        this.options.providerSession!.rejectDispatches(lost);
-        for (const id of lost) this.sent.delete(id);
-        this.turnOpen = false; this.status = "idle";
-        await this.emit({ type: "agent_end" });
-        await this.options.callbacks.onAgentEnd?.(this.descriptor.agentId);
-        return true;
-      });
-      if (lost) await this.stopInFlight();
-    })().catch(() => undefined), 30_000).unref();
+    setTimeout(() => void this.serialize(async () => {
+      if (this.stopping || !ids.some(id => this.sent.has(id))) return;
+      await this.fail(new Error("Claude did not run a queued message after its reply ended."));
+      void this.stopInFlight().catch(() => undefined);
+    }).catch(() => undefined), 30_000).unref();
   }
 
   private guard<T>(value: T): T {

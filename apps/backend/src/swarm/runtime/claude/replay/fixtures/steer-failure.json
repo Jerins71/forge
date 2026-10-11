@@ -1,0 +1,124 @@
+{
+  "provider": "claude",
+  "protocol": "agent-sdk/stdio-control",
+  "version": "0.3.280",
+  "scenario": "steer-failure",
+  "provenance": "Synthetic raw frames from the installed SDK wire contract; not captured from a real account. The native holds a queued user message it never consumes.",
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "type": "control_request",
+        "request": {
+          "subtype": "initialize",
+          "sdkMcpServers": [
+            "forge"
+          ],
+          "appendSystemPrompt": "$prompt"
+        }
+      },
+      "capture": {
+        "$initId": [
+          "request_id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "$initId",
+          "response": {
+            "commands": [],
+            "models": [],
+            "agents": []
+          }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "type": "user",
+        "uuid": "$any",
+        "parent_tool_use_id": null,
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "work"
+            }
+          ]
+        }
+      },
+      "capture": {
+        "$inputId": [
+          "uuid"
+        ]
+      },
+      "label": "input"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "assistant",
+        "uuid": "assistant-envelope",
+        "session_id": "$sessionId",
+        "parent_tool_use_id": null,
+        "message": {
+          "id": "message-1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-opus-5-5",
+          "content": [
+            {
+              "type": "text",
+              "text": "Working"
+            }
+          ],
+          "stop_reason": "end_turn",
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 1
+          }
+        },
+        "user_message_uuid": "$inputId"
+      },
+      "label": "accepted"
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "type": "user",
+        "uuid": "$any",
+        "parent_tool_use_id": null,
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "steer"
+            }
+          ]
+        }
+      },
+      "capture": {
+        "$steerId": [
+          "uuid"
+        ]
+      },
+      "label": "steer"
+    },
+    {
+      "type": "runtime_exit",
+      "status": "error",
+      "error": {
+        "message": "transport lost"
+      },
+      "label": "failure"
+    }
+  ]
+}
