@@ -1249,7 +1249,7 @@ test('F15/F16: a native choice reaches Needs You and a background worker can be 
   const worker = await until<any>(async () => (await detail()).workers[0], Boolean)
   await until<any>(async () => (await detail()).choices.find((choice: any) => choice.agentId === worker.agentId && choice.status === 'pending'), Boolean)
   await page.goto(`${fleet!.uiUrl}/?agent=${a.sessionId}`)
-  const row = page.getByRole('complementary').locator(`[data-session-ref="${a.environmentId}:${launched.sessionId}"]`).filter({ visible: true }).first()
+  const row = page.getByRole('complementary').locator('li button').filter({ hasText: 'Background worker QA', visible: true }).first()
   await expect(row).toBeVisible()
   const sessionLi = row.locator('xpath=ancestor::li[1]')
   const expand = sessionLi.getByRole('button', { name: 'Expand session workers', exact: true })

@@ -19,6 +19,7 @@ import type NativeSocket from 'ws';
 import type { AgentDescriptor } from '../../../apps/backend/src/swarm/types.js';
 import { projectDetailFeature } from '../../../apps/backend/src/ws/rpc/detail-feature-rpc.js';
 import { loadState } from '../../../apps/backend/src/environment/control/orchestration/store.js';
+import type { SessionAttentionCoordinator } from '../../../apps/backend/src/swarm/session/session-attention-coordinator.js';
 
 export const crashBoundaries = ['pre-commit', 'post-commit', 'post-Git', 'post-meta', 'post-JSONL', 'post-dispatch-marker', 'post-provider-accept'] as const;
 export type CrashBoundary = typeof crashBoundaries[number];
@@ -313,13 +314,16 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
         };
         return { configured: true };
       }
-      // Attention is raised by a settled working epoch; the fixture reports one without a provider turn.
+      // A synthetic user working epoch exercises persisted attention without a
+      // provider turn; it must not inherit a hidden onboarding turn's origin.
       if (input.operation === 'attention' || input.operation === 'attention-state') {
         if (input.operation === 'attention') {
-          const attention = (manager as unknown as { sessionAttention: { reportStatusTransition(input: { agentId: string; previousStatus: AgentDescriptor['status']; nextStatus: AgentDescriptor['status']; transitionedAt: string }): Promise<void> } }).sessionAttention;
+          const attention = (manager as unknown as { sessionAttention: { coordinator: SessionAttentionCoordinator } }).sessionAttention.coordinator;
           const transitionedAt = new Date().toISOString();
-          await attention.reportStatusTransition({ agentId: descriptor.agentId, previousStatus: 'idle', nextStatus: 'streaming', transitionedAt });
-          await attention.reportStatusTransition({ agentId: descriptor.agentId, previousStatus: 'streaming', nextStatus: 'idle', transitionedAt });
+          const snapshot = { profile: manager.getProfile(descriptor.profileId ?? descriptor.agentId), activeWorkerCount: 0, hasTerminallyErroredWorker: false, pendingChoiceCount: 0, pendingTurnContextCount: 0,
+            agentId: descriptor.agentId, source: 'manager' as const, turnInitiator: 'user' as const, transitionedAt };
+          await attention.observeStatus({ ...snapshot, manager: { ...descriptor, status: 'streaming' }, previousStatus: 'idle', nextStatus: 'streaming' });
+          await attention.observeStatus({ ...snapshot, manager: { ...descriptor, status: 'idle' }, previousStatus: 'streaming', nextStatus: 'idle' });
         }
         return manager.getSessionAttentionSnapshot().attentions.filter(attention => attention.sessionAgentId === descriptor.agentId).map(attention => ({ attentionId: attention.attentionId, reason: attention.reason }));
       }
