@@ -24,6 +24,7 @@ import { loadV1Client } from './fixtures/v1-client.js';
 import { pairEnvironment } from '../../packages/client-runtime/src/pairing.js';
 import type { RuntimePorts } from '../../packages/client-runtime/src/ports.js';
 import { loadState } from '../../apps/backend/src/environment/control/orchestration/store.js';
+import { projectLifecycleStatus } from '../../apps/backend/src/environment/control/orchestration/lifecycle-projection.js';
 import type { CoreState, LifecycleEvent } from '../../apps/backend/src/environment/control/orchestration/types.js';
 import type { InternalInput } from '../../apps/backend/src/environment/control/command-service.js';
 
@@ -444,6 +445,7 @@ test('9.2.7 controlled crash at all seven effect boundaries', async () => {
       try { return JSON.parse(await readFile(join(b().checkout, '.fixture-crash.json'), 'utf8')); } catch { return null; }
     }, result => result?.commandId === commandId && result.boundary === boundary);
     expect(marker.pid).toBe(armed.pid);
+    expect(marker.fired).toBe(true);
     await until(() => { try { process.kill(armed.pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } }, Boolean);
     rpc.close();
     const before = await readDb(db => ({
@@ -499,6 +501,7 @@ test('Batch 7 DB recovery survives canonical/result dispatch/ack/stop deaths wit
     } catch { /* The owner is killed at its durable seam. */ }
     const marker = await until(async () => { try { return JSON.parse(await readFile(join(b().checkout, '.fixture-crash.json'), 'utf8')); } catch { return null; } }, value => value?.commandId === commandId && value.boundary === boundary);
     expect(marker.pid).toBe(armed.pid);
+    expect(marker.fired).toBe(true);
     await until(() => { try { process.kill(armed.pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } }, Boolean);
     rpc.close();
     const query = () => readDb(db => ({
@@ -521,18 +524,34 @@ test('Batch 7 DB recovery survives canonical/result dispatch/ack/stop deaths wit
       expect(snapshot.undeliveredReports.some((report: { deliveryId: string }) => report.deliveryId === repaired.deliveries[0]!.delivery_id)).toBe(true);
       await controlEnvironment(manifest, b().name, 'stop'); await controlEnvironment(manifest, b().name, 'start');
       expect((await controlEnvironment<any>(manifest, b().name, 'fixture', { operation: 'recovery-snapshot' })).recoveryId).toBe(snapshot.recoveryId);
+      const reportAttempt = () => readDb(db => {
+        const state = loadState(db), transfer = state.transfers[repaired.deliveries[0]!.delivery_id];
+        if (transfer.kind !== 'worker_result' || !transfer.targetRunId) throw new Error('Missing canonical report run');
+        const run = state.runs[transfer.targetRunId];
+        return { attempt: state.attempts[run.activeAttemptId], attempts: Object.values(state.attempts).filter(attempt => attempt.runId === run.runId), resolutions: recoveryEvents(db).filter(row => row.event.type === 'recovery.resolved' && row.event.recovery.recoveryId === snapshot.recoveryId).length };
+      });
+      const original = await reportAttempt();
+      if (boundary !== 'result-canonical') expect(original.attempt).toMatchObject({ state: 'unknown', delivery: 'unknown' });
       await controlEnvironment(manifest, b().name, 'fixture', { operation: 'recovery-resume' });
-      const after = await query();
-      expect(after.deliveries.find(row => row.delivery_id === repaired.deliveries[0]!.delivery_id)?.state).toBe(boundary === 'result-canonical' ? 'consumed' : 'unknown');
+      const after = await query(), resumed = await reportAttempt();
+      expect(after.deliveries.find(row => row.delivery_id === repaired.deliveries[0]!.delivery_id)?.state).toBe('consumed');
+      expect(resumed.attempt.delivery).toBe('dispatched');
+      expect(resumed.resolutions).toBe(1);
+      if (boundary !== 'result-canonical') {
+        expect(resumed.attempt.attemptId).not.toBe(original.attempt.attemptId);
+        expect(resumed.attempts.find(attempt => attempt.attemptId === original.attempt.attemptId)).toMatchObject({ state: 'unknown', delivery: 'unknown' });
+        expect(resumed.attempts.filter(attempt => !original.attempts.some(prior => prior.attemptId === attempt.attemptId))).toHaveLength(1);
+      }
       await controlEnvironment(manifest, b().name, 'fixture', { operation: 'recovery-resume' });
+      expect((await reportAttempt()).resolutions).toBe(1);
       expect((await query()).deliveries).toEqual(after.deliveries);
       expect((await query()).turns).toBe(after.turns);
       expect((await query()).attempts).toBe(after.attempts);
-      observations.push({ boundary, before: { deliveryRows: before.deliveries.length, states: before.deliveries.map(row => row.state), turnRows: before.turns }, repaired: { deliveryRows: repaired.deliveries.length, states: repaired.deliveries.map(row => row.state) }, after: { deliveryRows: after.deliveries.length, states: after.deliveries.map(row => row.state) }, stableOccurrence: true, repeatedDecisionNoDispatch: true });
+      observations.push({ boundary, marker, before: { deliveryRows: before.deliveries.length, states: before.deliveries.map(row => row.state), turnRows: before.turns }, repaired: { deliveryRows: repaired.deliveries.length, states: repaired.deliveries.map(row => row.state) }, after: { deliveryRows: after.deliveries.length, states: after.deliveries.map(row => row.state) }, originalAttemptId: original.attempt.attemptId, resumedAttemptId: resumed.attempt.attemptId, originalDelivery: original.attempt.delivery, resumedDelivery: resumed.attempt.delivery, resolutions: resumed.resolutions, stableOccurrence: true, repeatedDecisionNoDispatch: true });
     } else {
       const receipt = await settled(commandId); expect(receipt.state).toBe('succeeded');
       expect((await query()).desired).toBe('stopped');
-      observations.push({ boundary, stoppedIntentSurvives: true, receipt: receipt.state, turnRows: repaired.turns });
+      observations.push({ boundary, marker, stoppedIntentSurvives: true, receipt: receipt.state, turnRows: repaired.turns });
     }
     const metrics = await controlEnvironment<any>(manifest, b().name, 'fixture', { operation: 'metrics' });
     expect(metrics.agentsJsonControlWrites).toBe(0);
@@ -797,9 +816,14 @@ test('a pending manager occurrence retains a new report-only crash until one dec
   const secondArmed = await controlEnvironment<{ pid: number }>(manifest, b().name, 'fixture', { operation: 'arm-recovery-crash', commandId: secondCrash, boundary: 'result-canonical' });
   try { await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.send', { commandId: secondCrash, sessionId: owner.sessionId, message: { text: '[fixture:spawn]', artifactIds: [] } }); }
   catch { /* The owner dies after the canonical worker result append. */ }
-  await until(async () => { try { return JSON.parse(await readFile(join(b().checkout, '.fixture-crash.json'), 'utf8')); } catch { return null; } }, marker => marker?.commandId === secondCrash && marker.boundary === 'result-canonical');
+  const secondMarker = await until(async () => { try { return JSON.parse(await readFile(join(b().checkout, '.fixture-crash.json'), 'utf8')); } catch { return null; } }, marker => marker?.commandId === secondCrash && marker.boundary === 'result-canonical');
+  expect(secondMarker).toMatchObject({ fired: true, pid: secondArmed.pid });
   await until(() => { try { process.kill(secondArmed.pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } }, Boolean);
-  const actorStatuses = await readDb(db => (db.prepare('SELECT descriptor_json FROM control_sessions WHERE session_id=? UNION ALL SELECT descriptor_json FROM control_workers WHERE session_id=?').all(owner.sessionId, owner.sessionId) as { descriptor_json: string }[]).map(row => JSON.parse(row.descriptor_json).status));
+  const actorStatuses = await readDb(db => {
+    const state = loadState(db);
+    return Object.values(state.threads).filter(thread => thread.threadId === owner.sessionId || thread.role === 'worker' && thread.managerId === owner.sessionId)
+      .map(thread => projectLifecycleStatus(state, thread.threadId)!.agentStatus);
+  });
   expect(actorStatuses).not.toContain('streaming');
   await controlEnvironment(manifest, b().name, 'start');
   const reports = await readDb(db => workerReports(db, owner.sessionId));
@@ -847,7 +871,7 @@ test('a pending manager occurrence retains a new report-only crash until one dec
   expect(resolved.resolutions[0]!.event.commandId).toBe(decision.commandId);
   expect(resolved.resolutions[0]!.event.recovery.resumedAt).toEqual(expect.any(String));
   expect((await readLaunchEvidence(b(), held.sessionId)).dispatches).toBe(2);
-  evidence.reportOnlyCrash = { earlierOccurrence: earlier.recoveryId, recoveryId: recovery.recoveryId, interruptedManager: held.sessionId,
+  evidence.reportOnlyCrash = { marker: secondMarker, earlierOccurrence: earlier.recoveryId, recoveryId: recovery.recoveryId, interruptedManager: held.sessionId,
     deliveryId: report.delivery_id, actorStatuses, noAutomaticReplay: true, singleDecisionResolvesBoth: true };
 });
 

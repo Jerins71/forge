@@ -187,16 +187,20 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     record({ type: "input.recorded", commandId: `recorded:${run.inputId}`, now: options.clock(), threadId: run.threadId, inputId: run.inputId, entryId: value.entryId });
     return value.runtimeMessage;
   };
-  const claim = (): EffectRow | undefined => sink.transaction(tx => {
+  const claim = (kinds?: readonly CoreEffect["kind"][]): EffectRow | undefined => sink.transaction(tx => {
     for (;;) {
       const row = database.prepare(`SELECT e.* FROM effects e JOIN commands c USING(command_id)
         LEFT JOIN command_receipts r USING(command_id)
         WHERE e.state='pending' AND e.not_before<=? AND e.kind!='lifecycle.admit'
+        ${kinds ? `AND e.kind IN (${kinds.map(() => "?").join(",")})` : ""}
+        ${kinds ? `AND (e.kind!='transcript.append' OR e.attempt>0 OR EXISTS(
+          SELECT 1 FROM orchestration_transfers t WHERE t.kind='worker_result'
+          AND json_extract(t.state_json,'$.targetRunId')=json_extract(e.payload_json,'$.runId')))` : ""}
         AND (e.kind NOT IN ('runtime.acquire','transcript.append','provider.start') OR NOT EXISTS(
           SELECT 1 FROM orchestration_threads t WHERE t.thread_id=e.session_id AND json_extract(t.state_json,'$.shutdown')!='clean'))
         AND (e.depends_on IS NULL OR EXISTS(SELECT 1 FROM effects d WHERE d.effect_id=e.depends_on AND d.state='done'))
         AND NOT EXISTS(SELECT 1 FROM effects a WHERE a.session_id=e.session_id AND a.state='claimed' AND a.kind!='lifecycle.admit')
-        ORDER BY COALESCE(r.accepted_sequence,c.created_at),e.ordinal,e.effect_id LIMIT 1`).get(options.clock()) as EffectRow | undefined;
+        ORDER BY COALESCE(r.accepted_sequence,c.created_at),e.ordinal,e.effect_id LIMIT 1`).get(options.clock(), ...(kinds ?? [])) as EffectRow | undefined;
       if (!row) return;
       const effect: ControlEffect = JSON.parse(row.payload_json);
       if (!["provider.release", "provider.interrupt"].includes(effect.kind) && !authorized(row.command_id)) {
@@ -329,37 +333,41 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       if(hasReceipt(row.command_id)) sink.transaction(tx=>sink.updateReceipt(tx,row.command_id,{error:failure}));
     }
   };
+  const drainEffects = (kinds?: readonly CoreEffect["kind"][]): Promise<void> => {
+    if (stopped) return Promise.resolve(); if (draining) return draining;
+    draining = (async () => {
+      const active = new Set<Promise<void>>();
+      while (!stopped) {
+        while (active.size < 4) { const row = claim(kinds); if (!row) break; const task = execute(row).finally(() => active.delete(task)); active.add(task); }
+        if (!active.size) break; await Promise.race(active);
+      }
+      await Promise.all(active);
+    })().finally(() => { draining = undefined; }); return draining;
+  };
   const kick = () => { if (started && !stopped) queueMicrotask(() => { void worker.drain().catch(() => { started = false; }); }); };
   const worker: EffectWorker = {
     bootId,
     start() { if (!reconciled || stopped) throw new Error("Reconcile before starting effects"); started = true; unsubscribe ??= sink.subscribeCommit(kick); kick(); },
-    drain() {
-      if (stopped) return Promise.resolve(); if (draining) return draining;
-      draining = (async () => {
-        const active = new Set<Promise<void>>();
-        while (!stopped) {
-          while (active.size < 4) { const row = claim(); if (!row) break; const task = execute(row).finally(() => active.delete(task)); active.add(task); }
-          if (!active.size) break; await Promise.race(active);
-        }
-        await Promise.all(active);
-      })().finally(() => { draining = undefined; }); return draining;
-    },
+    drain: () => drainEffects(),
     async stop() { stopped = true; started = false; unsubscribe?.(); for (const resource of live.values()) resource.stop.abort(); await draining; await Promise.allSettled([...observations,...fallbackSelections.values()]); },
     async reconcileOnBoot() {
       if (reconciled) return; if (started || draining) throw new Error("Boot reconciliation precedes execution");
       rebuildLifecycleProjections(database);
-      const state=loadState(database);
-      const reports=Object.values(state.transfers).filter(transfer => !isLineageTransfer(transfer) && transfer.kind === "worker_result" && !["consumed","superseded"].includes(transfer.state)).map(transfer => ({ deliveryId:transfer.transferId,fromAgentId:transfer.source.threadId,toAgentId:transfer.targetThreadId,turnId:transfer.source.runId,assignmentId:"assignmentId" in transfer ? transfer.assignmentId : undefined }));
-      for(const transfer of Object.values(state.transfers)) if(isLineageTransfer(transfer) && transfer.state === "resolving") record({type:"transfer.interrupted",commandId:`lost-resolution:${bootId}:${transfer.transferId}`,now:options.clock(),transferId:transfer.transferId});
-      record({ type: "environment.recover", commandId: `boot:${bootId}`, now: options.clock(), bootId, recoveryId: options.random(), reports });
       for (const row of database.prepare("SELECT * FROM effects WHERE state='claimed' AND kind!='lifecycle.admit'").all() as EffectRow[]) {
         const effect: ControlEffect = JSON.parse(row.payload_json);
-        const safe = ["runtime.acquire", "transcript.append", "session.ensure", "provider.release"].includes(effect.kind);
+        const safe = ["runtime.acquire", "transcript.append", "assignment.result.extract", "session.ensure", "provider.release"].includes(effect.kind);
         if (effect.kind === "workspace.ensure") {
           const value = await options.workspace.reconcile(row.command_id).catch(() => "interrupted" as const);
           sink.transaction(() => database.prepare("UPDATE effects SET state=?,claimed_boot_id=NULL WHERE effect_id=?").run(value === "ready" ? "done" : value === "retry" ? "pending" : "interrupted", row.effect_id));
         } else sink.transaction(() => database.prepare("UPDATE effects SET state=?,claimed_boot_id=NULL WHERE effect_id=?").run(safe ? "pending" : "interrupted", row.effect_id));
       }
+      // Repair durable canonical inputs through the same outbox before publishing recovery.
+      // Provider effects remain unopened until ordinary execution starts after readiness.
+      await drainEffects(["transcript.append", "assignment.result.extract"]);
+      const state=loadState(database);
+      const reports=Object.values(state.transfers).filter(transfer => !isLineageTransfer(transfer) && transfer.kind === "worker_result" && !["consumed","superseded"].includes(transfer.state)).map(transfer => ({ deliveryId:transfer.transferId,fromAgentId:transfer.source.threadId,toAgentId:transfer.targetThreadId,turnId:transfer.source.runId,assignmentId:"assignmentId" in transfer ? transfer.assignmentId : undefined }));
+      for(const transfer of Object.values(state.transfers)) if(isLineageTransfer(transfer) && transfer.state === "resolving") record({type:"transfer.interrupted",commandId:`lost-resolution:${bootId}:${transfer.transferId}`,now:options.clock(),transferId:transfer.transferId});
+      record({ type: "environment.recover", commandId: `boot:${bootId}`, now: options.clock(), bootId, recoveryId: options.random(), reports });
       sink.transaction(tx => {
         for (const choice of database.prepare("SELECT choice_id,session_id,choice_json FROM control_choices WHERE state='pending'").all() as { choice_id: string; session_id: string; choice_json: string }[]) {
           if (requestForChoice(loadState(database), choice.choice_id)) continue;

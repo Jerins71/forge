@@ -128,7 +128,6 @@ manager.applyControlledInput = (text, input) => apply(text, { ...input, controll
     input.controlledInput.onLocator?.(locator);
   },
 } });
-await core.reconcileOnBoot();
 await manager.boot();
 if (!manager.listAgents().length) throw new Error("Replay fixture descriptor was not seeded");
 await descriptors.load();

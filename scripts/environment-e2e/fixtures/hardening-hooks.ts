@@ -18,6 +18,7 @@ import { WebSocket } from './ws.js';
 import type NativeSocket from 'ws';
 import type { AgentDescriptor } from '../../../apps/backend/src/swarm/types.js';
 import { projectDetailFeature } from '../../../apps/backend/src/ws/rpc/detail-feature-rpc.js';
+import { loadState } from '../../../apps/backend/src/environment/control/orchestration/store.js';
 
 export const crashBoundaries = ['pre-commit', 'post-commit', 'post-Git', 'post-meta', 'post-JSONL', 'post-dispatch-marker', 'post-provider-accept'] as const;
 export type CrashBoundary = typeof crashBoundaries[number];
@@ -30,6 +31,7 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
   const databasePath = getEnvironmentDbPath(dataDir);
   const markerPath = join(checkout, '.fixture-crash.json');
   let armed: { commandId: string; boundary: CrashBoundary | RecoveryBoundary } | null = null;
+  let controlDatabase: Database | undefined;
   let manager: SwarmManager | undefined;
   let terminalService: TerminalService | undefined;
   let webServer: SwarmWebSocketServer | undefined;
@@ -118,10 +120,19 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
   SwarmManager.prototype.getConversationHistoryPage = function (...args) { counters.transcriptHydrations++; return history.apply(this, args); };
   const hit = (boundary: CrashBoundary | RecoveryBoundary, commandId: string) => {
     if (!armed || armed.commandId !== commandId || armed.boundary !== boundary) return;
-    writeFileSync(markerPath, JSON.stringify({ ...armed, pid: process.pid, reachedAt: new Date().toISOString() }) + '\n', { mode: 0o600 });
+    writeFileSync(markerPath, JSON.stringify({ ...armed, fired: true, pid: process.pid, reachedAt: new Date().toISOString() }) + '\n', { mode: 0o600 });
     const fd = openSync(markerPath, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
     process.kill(process.pid, 'SIGKILL');
     throw new Error('Crash hook returned unexpectedly');
+  };
+  const isArmedReportRun = (runId: string | undefined, database = controlDatabase) => {
+    if (!armed || !database || !runId) return false;
+    const state = loadState(database);
+    return Object.values(state.assignments).some(assignment => {
+      const transfer = assignment.resultTransferId && state.transfers[assignment.resultTransferId];
+      return transfer && transfer.kind === 'worker_result' && transfer.targetRunId === runId &&
+        state.runs[assignment.parentRunId]?.commandId === armed!.commandId;
+    });
   };
   const originalTransaction = prototype.transaction;
   prototype.transaction = function (this: Database, fn: (...args: any[]) => any) {
@@ -134,12 +145,17 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
     const wrap = (operation: (...args: any[]) => any) => (...args: any[]) => {
       const result = operation(...args);
       if (armed && database.name === databasePath && database.prepare('SELECT command_id FROM command_receipts WHERE command_id=? AND state=\'accepted\'').get(armed.commandId)) hit('post-commit', armed.commandId);
+      if (armed?.boundary === 'result-dispatch' && database.name === databasePath &&
+        Object.values(loadState(database).transfers).some(transfer => transfer.kind === 'worker_result' &&
+          transfer.state === 'dispatch_marked' && isArmedReportRun(transfer.targetRunId, database)))
+        hit('result-dispatch', armed.commandId);
       return result;
     };
     return Object.assign(wrap(transaction), { deferred: wrap(transaction.deferred), immediate: wrap(transaction.immediate), exclusive: wrap(transaction.exclusive) });
   } as Database['transaction'];
   const originalPrepare = prototype.prepare;
   prototype.prepare = function (this: Database, sql: string) {
+    if (armed && this.name === databasePath) controlDatabase = this;
     const statement = originalPrepare.call(this, sql);
     if (this.name === databasePath && /SELECT summary_json FROM control_(?:sessions|projects) ORDER BY/.test(sql)) {
       const all = statement.all.bind(statement) as (...args: any[]) => unknown[];
@@ -148,18 +164,6 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
     if (this.name === databasePath && sql === "UPDATE workspace_reservations SET state='ready' WHERE command_id=?") {
       const run = statement.run.bind(statement) as (...args: any[]) => ReturnType<typeof statement.run>;
       statement.run = (...args: any[]) => { hit('post-Git', args[0]); return run(...args); };
-    }
-    if (this.name === databasePath && /^(?:INSERT INTO control_deliveries|UPDATE control_deliveries SET state='dispatching')/.test(sql)) {
-      const run = statement.run.bind(statement) as (...args: any[]) => ReturnType<typeof statement.run>;
-      statement.run = (...args: any[]) => {
-        if (armed && String(args[1]).startsWith('worker-result:') && sql.startsWith('INSERT')) {
-          const ack = sql.includes("VALUES (?,?,'acked'");
-          hit(ack ? 'result-ack' : 'result-canonical', armed.commandId);
-        }
-        const result = run(...args);
-        if (armed && String(args[1]).startsWith('worker-result:') && sql.startsWith('UPDATE')) hit('result-dispatch', armed.commandId);
-        return result;
-      };
     }
     return statement;
   } as Database['prepare'];
@@ -185,7 +189,11 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
     if (!armed && held?.commandId !== control.commandId) return originalApply.call(this, text, input);
     const result = originalApply.call(this, text, { ...input, controlledInput: {
       ...control,
-      onLocator(locator) { hit('post-JSONL', control.commandId); control.onLocator?.(locator); },
+      onLocator(locator) {
+        hit('post-JSONL', control.commandId);
+        if (armed?.boundary === 'result-canonical' && isArmedReportRun(input.runId)) hit('result-canonical', armed.commandId);
+        control.onLocator?.(locator);
+      },
     } });
     // Hold after canonical append and before the core's durable dispatch marker.
     if (held?.commandId === control.commandId) {
@@ -199,13 +207,25 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
     const acquired = await originalAcquire.apply(this, args);
     const adapter = acquired.adapter;
     const start = adapter.start.bind(adapter);
+    const observe = adapter.observations.bind(adapter);
+    let armedAttemptId: string | undefined;
     acquired.adapter = new Proxy(adapter, {
       get(target, key) {
         if (key === 'start') return (input: Parameters<typeof start>[0]) => {
           const commandId = input.runId.replace(/^run-/, '');
           if (!armed || armed.commandId !== commandId) return start(input);
+          if (armed.boundary === 'post-provider-accept') armedAttemptId = input.attemptId;
           hit('post-dispatch-marker', commandId);
-          return start(input).then(request => { hit('post-provider-accept', commandId); return request; });
+          return start(input);
+        };
+        if (key === 'observations') return async function* (...args: Parameters<typeof observe>) {
+          for await (const event of observe(...args)) {
+            if (armed?.boundary === 'post-provider-accept' && event.type === 'accepted' && event.attemptId === armedAttemptId)
+              hit('post-provider-accept', armed.commandId);
+            if (armed?.boundary === 'result-ack' && event.type === 'accepted' && controlDatabase &&
+              isArmedReportRun(loadState(controlDatabase).attempts[event.attemptId]?.runId)) hit('result-ack', armed.commandId);
+            yield event;
+          }
         };
         const member = Reflect.get(target, key);
         return typeof member === 'function' ? member.bind(target) : member;
@@ -224,7 +244,23 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
         armed = { commandId: input.commandId, boundary: input.boundary as RecoveryBoundary }; return { pid: process.pid };
       }
       if (input.operation === 'recovery-snapshot') return manager!.getRestartRecoverySnapshot();
-      if (input.operation === 'recovery-resume') return manager!.resumeRestartRecovery();
+      if (input.operation === 'recovery-resume') {
+        const reports = manager!.getRestartRecoverySnapshot()?.undeliveredReports ?? [];
+        await manager!.resumeRestartRecovery();
+        // The private fixture observes asynchronous outbox completion, as RPC receipts
+        // acknowledge the durable decision before provider acceptance.
+        const database = new Constructor(databasePath, { readonly: true });
+        try {
+          const expires = Date.now() + 15_000;
+          while (reports.length) {
+            const state = loadState(database);
+            if (reports.every(report => { const transfer = state.transfers[report.deliveryId]; return transfer && ['consumed', 'unknown', 'superseded'].includes(transfer.state); })) break;
+            if (Date.now() >= expires) throw new Error('Recovery report outbox did not settle');
+            await new Promise(resolve => setTimeout(resolve, 25));
+          }
+        } finally { database.close(); }
+        return { resumed: true };
+      }
       if (input.operation === 'route-inventory') return webServer!.listRegisteredHttpRoutes().map((route, index) => ({ index, methods: route.methods, access: (route as unknown as { access?: unknown }).access ?? null }));
       if (input.operation === 'terminal-evidence') return terminalEvents;
       if (input.operation === 'hold-dispatch') {

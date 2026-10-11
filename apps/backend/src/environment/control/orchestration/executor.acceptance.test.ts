@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createControlCore, type ControlCore } from "../database.js";
@@ -44,6 +44,53 @@ async function fixture() {
 const principal = { deviceSessionId: "device", scopes: new Set(["session:operate" as const]) };
 
 describe("durable provider outbox", () => {
+  it.each(["resume", "dismiss"] as const)("repairs a claimed canonical report before its first recovery snapshot and waits for %s", async action => {
+    const f = await fixture();
+    const canonicalFile = path.join(path.dirname(f.options.databasePath!), "report.jsonl");
+    const apply = f.options.swarm.applyInput;
+    f.options.swarm.applyInput = async input => {
+      if (input.runId === "assignment:result:run") {
+        const prior = await readFile(canonicalFile, "utf8").catch(() => "");
+        if (!prior) await writeFile(canonicalFile, JSON.stringify({ id: input.inputId, text: input.message.text }) + "\n");
+      }
+      return apply(input);
+    };
+    await f.core.controlService.submitInput({ commandId: "parent", threadId: "manager", message: { text: "parent", artifactIds: [] } });
+    await f.core.effectWorker.drain();
+    await f.core.controlService.submitInput({ commandId: "worker", threadId: "worker", thread: { role: "worker", managerId: "manager", projectId: "project" }, message: { text: "worker", artifactIds: [] },
+      assignment: { assignmentId: "assignment", parentThreadId: "manager", parentRunId: "run-parent", selection: { provider: "pi", modelId: "fixture" } } });
+    await f.core.effectWorker.drain();
+    for (const threadId of ["manager", "worker"]) {
+      const state = loadState(f.core.database), run = state.runs[state.threads[threadId].activeRunId!], attempt = state.attempts[run.activeAttemptId], binding = state.bindings[attempt.bindingId];
+      f.core.controlService.record({ type: "provider.observe", commandId: `terminal-${threadId}`, now: f.options.clock(), observation: { type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation, turn: attempt.turn }, terminalAuthority: "root_attempt", outcome: "completed" } });
+    }
+    f.core.controlService.record({ type: "worker.result", commandId: "canonical-report", now: f.options.clock(), assignmentId: "assignment", workerRunId: "run-worker", resultRef: { threadId: "worker", runId: "run-worker", entryId: "worker-final" }, input: { text: "[workerResult] durable report", artifactIds: [] },
+      prepared: { runtimeMessage: { text: "[workerResult] durable report" }, presentation: { source: "worker_result", routeOrigin: "worker_result", assistantOutputTarget: { kind: "session_transcript", channel: "web" } } } });
+    const report = loadState(f.core.database).runs["assignment:result:run"];
+    await f.options.swarm.applyInput({ commandId: report.commandId, inputId: report.inputId, sessionId: report.threadId, runGeneration: 0, message: report.input, runId: report.runId });
+    f.core.database.prepare("UPDATE effects SET state='claimed',claimed_boot_id='lost-boot',attempt=1 WHERE kind='transcript.append' AND json_extract(payload_json,'$.runId')=?").run(report.runId);
+    expect(report.entryId).toBeUndefined();
+    const dispatched = f.dispatches();
+    await f.core.close();
+    const reboot = await createControlCore(f.options); cores.push(reboot);
+    let firstSnapshotEntry: string | undefined;
+    reboot.eventSink.subscribe(event => { if (event.eventType === "recovery.upsert") firstSnapshotEntry ??= loadState(reboot.database).runs[report.runId].entryId; });
+    await reboot.reconcileOnBoot();
+    expect(firstSnapshotEntry).toBe(report.inputId);
+    expect(loadState(reboot.database).runs[report.runId].entryId).toBe(report.inputId);
+    expect(loadState(reboot.database).transfers["assignment:result"].state).toBe("pending");
+    expect(loadState(reboot.database).recovery!.undeliveredReports).toMatchObject([{ deliveryId: "assignment:result" }]);
+    await reboot.effectWorker.drain();
+    expect(f.dispatches()).toBe(dispatched);
+    expect(loadState(reboot.database).runs[report.runId].state).toBe("queued");
+    const recoveryId = loadState(reboot.database).recovery!.recoveryId;
+    reboot.controlService.record({ type: action === "resume" ? "recovery.resume" : "recovery.dismiss", commandId: "report-decision", now: f.options.clock(), recoveryId, attempts: {}, bindingIds: {} });
+    await reboot.effectWorker.drain();
+    expect(f.dispatches()).toBe(dispatched + (action === "resume" ? 1 : 0));
+    expect(loadState(reboot.database).transfers["assignment:result"].state).toBe(action === "resume" ? "consumed" : "superseded");
+    expect((await readFile(canonicalFile, "utf8")).trim().split("\n")).toHaveLength(1);
+  });
+
   it.each(["acquire", "pending-start", "claimed-start"] as const)("restarts a canonical run before its dispatch mark at %s without replaying a stale effect", async boundary => {
     const f = await fixture(); const scopes: number[] = []; const acquire = f.options.swarm.acquireProvider;
     f.options.swarm.acquireProvider = async (...args) => { scopes.push(args[0].generation); return acquire(...args); };

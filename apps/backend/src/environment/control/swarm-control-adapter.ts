@@ -32,7 +32,12 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
       return { threadId:thread.threadId,bindingId:thread.bindingId!,generation:thread.generation };
     },
     conversation(agentId) { const state=loadState(database); return Object.values(state.bindings).filter(binding => binding.scope.threadId === agentId && binding.scope.bindingId !== state.threads[agentId]?.bindingId).sort((a,b)=>a.scope.generation-b.scope.generation).at(-1)?.conversation; },
-    canRestore(agentId) { return !Object.values(loadState(database).runs).some(run => run.threadId === agentId && run.state === "recovery"); },
+    canRestore(agentId) {
+      const state = loadState(database);
+      return !Object.values(state.runs).some(run => run.threadId === agentId &&
+        (run.state === "recovery" || run.state === "running" && state.attempts[run.activeAttemptId]?.state !== "created")) &&
+        !Object.values(state.transfers).some(transfer => transfer.kind === "worker_result" && transfer.targetThreadId === agentId && !["consumed", "superseded"].includes(transfer.state));
+    },
   });
   swarmManager.installAuthoritativeInputOwner(async (text, options) => {
     if (!options.targetAgentId) throw new Error("Input requires an authoritative thread");
