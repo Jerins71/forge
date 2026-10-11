@@ -16,6 +16,7 @@ import {
 import { getCatalogModelsByFamily } from '@forge/protocol'
 import type { CommandReceipt } from '@forge/protocol/environment-v2'
 import { EnvironmentOutbox } from './ws-client/environment-outbox'
+import { whenSettled } from './settled-request'
 import type { CodexElicitationDecision, CodexElicitationPersistScope, SessionGoalControlAction, SessionProjectAgentInput, WorkModeId } from '@forge/protocol'
 import type { ConversationSubscriptionReason } from './ws-client/types'
 import { applyLoadedModelCacheVisualizationSetting as reduceLoadedModelCacheVisualizationSetting } from './ws-client/model-cache-visualization-state'
@@ -244,20 +245,6 @@ export class ManagerWsClient {
     this.updateState({ lastError: error instanceof Error ? error.message : 'Session state update failed' })
   }
 
-  /**
-   * An environment refuses a change while an earlier one on the same session is still being applied.
-   * That retryable conflict is a short wait, not a failure: the same command is sent again, and only a
-   * conflict that outlasts the wait reaches the caller.
-   */
-  private async whenSettled<T>(send: () => Promise<T>): Promise<T> {
-    for (let attempt = 0; ; attempt++) {
-      try { return await send() } catch (error) {
-        if (attempt >= 5 || !(error instanceof EnvironmentRuntimeError) || error.code !== 'CONFLICT' || !error.retryable) throw error
-        await new Promise(resolve => setTimeout(resolve, 150 * 2 ** attempt))
-      }
-    }
-  }
-
   /** The session whose chat is on screen, or null while another view covers it. */
   setViewedSession(sessionId: string | null): void {
     if (this.viewedSessionId === sessionId) return
@@ -296,7 +283,7 @@ export class ManagerWsClient {
     const key = JSON.stringify([method, input])
     const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
     this.intentCommandIds.set(key, commandId)
-    const receipt = await this.whenSettled(() => client.request(method, { ...input, commandId } as RpcInput<M>))
+    const receipt = await whenSettled(() => client.request(method, { ...input, commandId } as RpcInput<M>))
     this.intentCommandIds.delete(key)
     if (receipt.state !== 'succeeded') throw new Error(receipt.error?.message ?? 'Session state update did not complete')
     return receipt
@@ -538,7 +525,7 @@ export class ManagerWsClient {
     const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
     this.intentCommandIds.set(key, commandId)
     try {
-      let receipt = await this.whenSettled(() => this.environmentClient!.request(method, { ...input, commandId } as RpcInput<M>))
+      let receipt = await whenSettled(() => this.environmentClient!.request(method, { ...input, commandId } as RpcInput<M>))
       const started = Date.now()
       // A stop stays running while the environment waits for the runtime to exit, then succeeds or
       // explains why it could not. Outwait that bound; reporting a slow exit as a failure would be false.
@@ -567,7 +554,7 @@ export class ManagerWsClient {
     const key = JSON.stringify([method, input])
     const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
     this.intentCommandIds.set(key, commandId)
-    const receipt = await this.whenSettled(() => this.environmentClient!.request(method, { ...input, commandId } as RpcInput<M>))
+    const receipt = await whenSettled(() => this.environmentClient!.request(method, { ...input, commandId } as RpcInput<M>))
     this.intentCommandIds.delete(key)
     if (receipt.state !== 'succeeded') throw new Error(receipt.error?.message ?? 'Configuration was interrupted; inspect the current state before retrying')
     return receipt

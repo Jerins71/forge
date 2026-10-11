@@ -4,6 +4,7 @@ import type { CommandReceipt, ProjectRef, WorkspaceStrategy } from '@forge/proto
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 import { describeEnvironmentStatus } from '@/components/settings/environments/environment-status'
 import { isInterruptedReceipt } from '@forge/client-runtime'
+import { whenSettled } from '@/lib/settled-request'
 
 /** Session overrides for the new thread; an absent field starts on the project default. */
 export interface LaunchDelegation {
@@ -94,7 +95,7 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
         }
         artifactIds.push(artifactId)
       }
-      const receipt = await client.request('session.launch', {
+      const receipt = await whenSettled(() => client.request('session.launch', {
         commandId: pending.commandId,
         projectId: target.projectId,
         title: titleFromText(text),
@@ -102,7 +103,7 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
         ...(model ? { model: { provider: model.provider, modelId: model.modelId, ...(model.thinkingLevel ? { thinkingLevel: model.thinkingLevel } : {}) } } : {}),
         ...(overrides ? { delegation: { ...(overrides.managerPosture ? { managerPosture: overrides.managerPosture as 'delegation_first' | 'adaptive' | 'hands_on' } : {}), ...(overrides.rosterId ? { rosterId: overrides.rosterId } : {}) } } : {}),
         initialMessage: { text, artifactIds },
-      })
+      }))
       pendingRef.current = null
       if (isInterruptedReceipt(receipt) || receipt.state === 'failed') {
         // Terminal without a session: never resubmitted automatically; sending again is a new launch.
@@ -147,6 +148,7 @@ function launchErrorMessage(error: unknown): string {
   const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code: unknown }).code) : null
   if (code === 'UNAVAILABLE') return 'The environment is offline. The draft is kept; try again when it reconnects.'
   if (code === 'FORBIDDEN') return 'This device is not allowed to start sessions on that environment.'
-  if (code === 'CONFLICT') return 'The branch or worktree is already in use. Choose another branch.'
+  // A retryable conflict is the project being busy, already waited out; the rest are workspace collisions.
+  if (code === 'CONFLICT') return (error as { retryable?: boolean }).retryable && error instanceof Error ? `${error.message} The draft is kept.` : 'The branch or worktree is already in use. Choose another branch.'
   return error instanceof Error ? error.message : 'Could not start the session.'
 }

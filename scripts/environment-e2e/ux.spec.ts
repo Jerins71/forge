@@ -3,7 +3,7 @@
 // after reload), admission never surfaces a "still settling" error, a running turn can be stopped from
 // the composer, and the session in view stays read and out of "Needs you".
 //   pnpm exec playwright test scripts/environment-e2e/ux.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -222,10 +222,21 @@ test('a spawned worker leaves one result in the manager chat, live and after rel
   expect(renderErrors).toEqual([])
 })
 
-test('changes made right after a launch wait for it to settle instead of being refused', async () => {
+test('a change made while a launch settles is refused retryably in plain words, and succeeds on retry', async () => {
   const { a } = fleet
   const session = await bootstrap(a)
   const rpc = await openFixtureRpc(a.baseUrl, session)
+  // What the UI client does with a retryable admission conflict: send the same command again.
+  const refusals: Array<{ method: string; code: string; retryable: boolean; message: string }> = []
+  const settledCall = async (method: string, input: { commandId: string }) => until(async () => {
+    try { return await rpc.call(method, input) } catch (error) {
+      const refusal = error as { code: string; retryable: boolean; message: string }
+      refusals.push({ method, code: refusal.code, retryable: refusal.retryable, message: refusal.message })
+      expect(refusal).toMatchObject({ code: 'CONFLICT', retryable: true })
+      expect(refusal.message).not.toMatch(/settling|lifecycle|intent/i)
+      return null
+    }
+  }, Boolean, 10_000)
   try {
     const projectId = (await shellSession(a, a.sessionId))!.projectId
     const commandId = randomUUID()
@@ -233,8 +244,8 @@ test('changes made right after a launch wait for it to settle instead of being r
     const launch = await rpc.call('session.launch', { commandId, projectId, title: 'Settle fixture', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Settle fixture turn', artifactIds: [] } })
     expect(launch.sessionId).toBe(sessionId)
     // Sent while the launch's own effects are still pending: what the UI does when it opens the new session.
-    const read = await rpc.call('session.readState.set', { commandId: randomUUID(), sessionId, read: true })
-    const configure = await rpc.call('session.configure', { commandId: randomUUID(), sessionId, delegation: { managerPosture: { mode: 'override', value: 'adaptive' } } })
+    const read = await settledCall('session.readState.set', { commandId: randomUUID(), sessionId, read: true } as never)
+    const configure = await settledCall('session.configure', { commandId: randomUUID(), sessionId, contextMode: 'summary' } as never)
     expect(read.state).toBe('succeeded')
     expect(configure.state).toBe('succeeded')
     const settled = await until(() => fixtureRpcOnce(a.baseUrl, session, 'command.get', { commandId }), receipt => !['accepted', 'running'].includes(receipt.state))
@@ -243,17 +254,19 @@ test('changes made right after a launch wait for it to settle instead of being r
     await until(async () => (await shellSession(a, sessionId))?.status, status => status === 'idle')
     await rpc.call('session.send', { commandId: randomUUID(), sessionId, message: { text: '[fixture:hold] Hold for admission', artifactIds: [] } })
     await until(async () => (await shellSession(a, sessionId))?.status, status => status === 'running')
-    const duringTurn = await rpc.call('session.readState.set', { commandId: randomUUID(), sessionId, read: false })
+    const duringTurn = await settledCall('session.readState.set', { commandId: randomUUID(), sessionId, read: false } as never)
     expect(duringTurn.state).toBe('succeeded')
     const stopId = randomUUID()
     await rpc.call('session.stop', { commandId: stopId, sessionId })
     await until(() => fixtureRpcOnce(a.baseUrl, session, 'command.get', { commandId: stopId }), receipt => !['accepted', 'running'].includes(receipt.state), 60_000)
-    assertions.admission = { launch: settled.state, readState: read.state, configure: configure.state, duringTurn: duringTurn.state }
+    assertions.admission = { launch: settled.state, readState: read.state, configure: configure.state, duringTurn: duringTurn.state, refusals }
   } finally { rpc.close() }
 })
 
 test('a new project opens clean: no settling error and nothing in Needs you', async ({ page }) => {
+  // The scripted Codex peer only runs in a directory that carries its environment's marker.
   const directory = await mkdtemp(join(tmpdir(), 'forge-ux-project-'))
+  await copyFile(join(fixture(fleet.a).checkout, '.fixture-environment.json'), join(directory, '.fixture-environment.json'))
   await page.goto(fleet.uiUrl)
   await page.getByRole('complementary').getByTitle('Create project').filter({ visible: true }).first().click()
   const dialog = page.getByRole('dialog', { name: 'Create project' })

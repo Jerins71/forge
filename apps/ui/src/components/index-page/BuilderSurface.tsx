@@ -361,7 +361,7 @@ export function BuilderSurface({
   }, [clientRef, messageSourceView])
 
   // Only the chat on screen counts as read; a client keeps its last session mounted behind other views.
-  const viewedSessionId = activeView === 'chat' ? (activeAgent?.role === 'worker' ? activeAgent.managerId : activeAgentId) ?? null : null
+  const viewedSessionId = activeView === 'chat' && launchGroupKey === null ? (activeAgent?.role === 'worker' ? activeAgent.managerId : activeAgentId) ?? null : null
   useEffect(() => {
     const client = clientRef.current
     client?.setViewedSession(viewedSessionId)

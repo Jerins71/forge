@@ -2,6 +2,7 @@ import type { ConversationAttachment, ConversationMessageEvent } from '@forge/pr
 import type { CommandReceipt } from '@forge/protocol/environment-v2'
 import { EnvironmentRuntimeError, isInterruptedReceipt, type EnvironmentClient } from '@forge/client-runtime'
 import type { MessageCommandStatus } from '../ws-state'
+import { whenSettled } from '../settled-request'
 
 interface OutboxEntry {
   commandId: string
@@ -144,11 +145,12 @@ export class EnvironmentOutbox {
           entry.uploaded[index] = artifact.artifactId
         }
       }
-      await this.client.request('session.send', {
+      const artifactIds = [...entry.artifactIds, ...entry.uploaded.filter((id): id is string => !!id)]
+      await whenSettled(() => this.client.request('session.send', {
         commandId: entry.commandId,
         sessionId: entry.sessionId,
-        message: { text: entry.text, artifactIds: [...entry.artifactIds, ...entry.uploaded.filter((id): id is string => !!id)] },
-      })
+        message: { text: entry.text, artifactIds },
+      }))
     } catch (error) {
       entry.error = {
         message: error instanceof Error ? error.message : String(error),
