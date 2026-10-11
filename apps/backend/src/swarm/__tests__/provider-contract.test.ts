@@ -28,13 +28,28 @@ describe("provider behavior admission", () => {
     expect(Value.Check(ProviderCapabilitiesSchema, JSON.parse(JSON.stringify(capabilities)))).toBe(true);
     expect(() => assertProviderRequirements(capabilities, { instructionChannel: "developer" })).toThrow(UnsupportedProviderBehaviorError);
   });
-  it("fails before the factory prepares secure state or calls a creator", async () => {
-    const prepare = vi.fn();
+  it("admits actual adapter capabilities and cleans up rejected resources before dispatch", async () => {
+    const prepare = vi.fn(async () => undefined);
+    const terminate = vi.fn(async () => {});
+    const start = vi.fn();
+    const runtime = { providerAdapter: { capabilities: () => capabilities, start }, terminate };
     const factory = new RuntimeFactory({ getSecureRuntimeBinding: prepare } as never);
-    await expect(factory.createRuntimeForDescriptor({ agentId: "actor", role: "worker", managerId: "owner",
-      model: { provider: "cursor-sdk", modelId: "composer-2.5", thinkingLevel: "medium" } } as never,
-      "instructions", 1, { providerRequirements: { nativeFork: true } })).rejects.toMatchObject({ code: "PROVIDER_BEHAVIOR_UNSUPPORTED", behavior: "nativeFork" });
-    expect(prepare).not.toHaveBeenCalled();
+    const creator = (factory as unknown as { cursorSdkRuntimeCreator: { createRuntimeForDescriptor: () => Promise<unknown> } }).cursorSdkRuntimeCreator;
+    const create = vi.spyOn(creator, "createRuntimeForDescriptor").mockResolvedValue(runtime);
+    const descriptor = { agentId: "actor", role: "manager", managerId: "actor",
+      model: { provider: "cursor-sdk", modelId: "composer-2.5", thinkingLevel: "medium" } } as never;
+    await expect(factory.createRuntimeForDescriptor(descriptor, "instructions", 1,
+      { providerRequirements: { nativeFork: true } })).rejects.toMatchObject({ code: "PROVIDER_BEHAVIOR_UNSUPPORTED", provider: "synthetic", behavior: "nativeFork" });
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(terminate).toHaveBeenCalledExactlyOnceWith({ abort: true });
+    expect(start).not.toHaveBeenCalled();
+
+    terminate.mockClear();
+    await expect(factory.createRuntimeForDescriptor(descriptor, "instructions", 2,
+      { providerRequirements: { nativeResume: true, instructionChannel: "system" } })).resolves.toBe(runtime);
+    expect(terminate).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
   });
   it("keeps the adapter surface independent of the legacy lifecycle runtime", () => {
     const methodNames: Array<keyof ProviderAdapter> = ["capabilities", "open", "resume", "start", "steer", "interrupt", "respond", "compact", "fork", "readContext", "close", "drain", "observations"];

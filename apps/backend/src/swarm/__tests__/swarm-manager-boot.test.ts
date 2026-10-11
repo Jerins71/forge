@@ -1,3 +1,6 @@
+import { loadState } from '../../environment/control/orchestration/store.js'
+import type { SessionManager } from '@earendil-works/pi-coding-agent'
+import { createTestEnvironment } from '../../test-support/environment-auth.js'
 import { readFile, writeFile } from 'node:fs/promises';
 
 import { join } from 'node:path';
@@ -36,7 +39,7 @@ vi.mock('../agents/project-agent-analysis.js', async () => {
 
 import type { AgentDescriptor, SwarmConfig } from '../types.js';
 import type { RuntimeCreationOptions, SwarmAgentRuntime } from '../runtime-contracts.js';
-import { FakeRuntime, TestSwarmManager as TestSwarmManagerBase, bootWithDefaultManager } from '../../test-support/index.js'
+import { FakeRuntime, TestSwarmManager as TestSwarmManagerBase, bootWithDefaultManager as bootLegacyManager } from '../../test-support/index.js'
 
 class TestSwarmManager extends TestSwarmManagerBase {
   protected override async createRuntimeForDescriptor(
@@ -292,11 +295,14 @@ describe('SwarmManager', () => {
   it('persists manager conversation history to disk and reloads it on restart', async () => {
     const config = await makeTempConfig()
     const firstBoot = new TestSwarmManager(config)
-    await bootWithDefaultManager(firstBoot, config)
+    const environment = await bootWithDefaultManager(firstBoot, config)
 
     await firstBoot.handleUserMessage('persist this')
+    await vi.waitFor(() => expect(firstBoot.runtimeByAgentId.get('manager')?.sendCalls, JSON.stringify(environment.database.prepare('SELECT receipt_json FROM command_receipts').all())).toHaveLength(1))
     await firstBoot.publishToUser('manager', 'saved reply', 'speak_to_user')
 
+    await firstBoot.stopSession('manager')
+    await environment.stop()
     const secondBoot = new TestSwarmManager(config)
     await bootWithDefaultManager(secondBoot, config)
 
@@ -320,3 +326,20 @@ describe('SwarmManager', () => {
   })
 
 })
+
+async function bootWithDefaultManager(manager: TestSwarmManager, config: Parameters<typeof bootLegacyManager>[1]) {
+  manager.onCreateRuntime = ({ runtime }) => {
+    // Native writer initialization is a provider resource fact, before core transcript append.
+    const native = (runtime as unknown as { sessionManager: SessionManager }).sessionManager
+    native.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'fixture ready' }] } as never)
+  }
+  const { environment } = await createTestEnvironment(manager, { boot: true })
+  if (!manager.getAgent(config.managerId ?? 'manager')) {
+    await manager.createManager(config.managerId ?? 'manager', { name: config.managerDisplayName ?? 'Manager', cwd: config.defaultCwd })
+  }
+  environment.start()
+  await vi.waitFor(() => expect(Object.values(loadState(environment.database).runs).every(run => run.state === 'terminal')).toBe(true))
+  const bootstrap = manager.runtimeByAgentId.get(config.managerId ?? 'manager')
+  if (bootstrap) { bootstrap.sendCalls = []; bootstrap.nextDeliveryId = 0 }
+  return environment
+}
