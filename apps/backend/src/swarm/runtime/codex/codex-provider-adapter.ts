@@ -256,7 +256,15 @@ export class CodexProviderAdapter implements ProviderAdapter {
           input: codexNativeInput(input.input), clientUserMessageId: input.runId });
         if (response?.turnId !== input.turn.nativeId) throw new Error("Codex steer did not acknowledge the expected turn");
         return { status: "accepted", turn: this.turnRef(turn) };
-      } catch (error) { return this.dispatchFailure(turn, error, false); }
+      } catch (error) {
+        if (typeof (error as { code?: unknown })?.code === "number") {
+          // A native rejection can arrive after completion while its canonical projection is queued.
+          // Finish that existing notification lane before deciding whether the target still exists.
+          await s.events;
+          if (turn.ended) throw new ProviderDispatchRejectedError("stale_scope");
+        }
+        return this.dispatchFailure(turn, error, false);
+      }
     })());
   }
 

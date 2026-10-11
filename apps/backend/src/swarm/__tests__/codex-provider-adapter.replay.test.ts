@@ -26,7 +26,7 @@ afterEach(async () => { for (const clean of cleanup.splice(0).reverse()) await c
 const directory = fileURLToPath(new URL("../runtime/codex/", import.meta.url));
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
-async function fixture(scenario: string, options: { persistedPath?: string; codexHome?: string; changedSchema?: boolean; conversation?:ProviderConversationRef; decision?: "accept" | "decline" } = {}) {
+async function fixture(scenario: string, options: { persistedPath?: string; codexHome?: string; changedSchema?: boolean; conversation?:ProviderConversationRef; decision?: "accept" | "decline"; onNotification?: (method: string) => Promise<void>; onSteerRejected?: () => void } = {}) {
   const handle = await createTempConfig({ prefix: "forge-codex-adapter-", port: 0 });
   cleanup.push(handle.cleanup);
   const root = await realpath(handle.tempRootDir);
@@ -52,9 +52,18 @@ async function fixture(scenario: string, options: { persistedPath?: string; code
   const auth = new CodexRuntimeAuth({ config: handle.config, descriptor });
   await auth.initialize();
   const adapter = new CodexProviderAdapter({ codexHome, projectTrusted: false, auth,
-    createClient: handlers => createCodexAppServerClient(handlers, { command: process.execPath,
-      args: [fileURLToPath(new URL("../runtime/codex/codex-scripted-peer.mjs", import.meta.url))],
-      spawnOptions: { cwd: root, env: nativeCodexEnvironment(codexHome) } }) });
+    onNotification: options.onNotification,
+    createClient: handlers => {
+      const client = createCodexAppServerClient(handlers, { command: process.execPath,
+        args: [fileURLToPath(new URL("../runtime/codex/codex-scripted-peer.mjs", import.meta.url))],
+        spawnOptions: { cwd: root, env: nativeCodexEnvironment(codexHome) } });
+      const request = client.request.bind(client);
+      client.request = async <T>(method: string, params?: unknown, timeoutMs?: number) => {
+        try { return await request<T>(method, params, timeoutMs); }
+        catch (error) { if (method === "turn/steer") options.onSteerRejected?.(); throw error; }
+      };
+      return client;
+    } });
   const input = { scope, instructions, toolHost, model: descriptor.model };
   const binding = scenario === "resume" || scenario === "fork" ? await adapter.resume({ ...input, conversation: options.conversation ?? { ...scope, generation: 1, kind: "conversation", nativeId: "native-root" } }) : await adapter.open(input);
   cleanup.push(async () => { await adapter.close(binding); });
@@ -444,6 +453,31 @@ describe("Codex ProviderAdapter over production JSON-RPC and raw replay", () => 
     const target=await fixture("resume",{codexHome:source.codexHome,conversation,persistedPath:forkRollout});
     expect(target.binding.conversation.nativeId).toBe(conversation.nativeId);
     await target.start();await target.release("terminal");await target.wait("terminal:root:completed");await target.evidence();
+  });
+
+  it("drains queued native completion before classifying an explicitly rejected steer", async () => {
+    let enter!: () => void; let release!: () => void; let reject!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; }); const held = new Promise<void>(resolve => { release = resolve; });
+    const rejected = new Promise<void>(resolve => { reject = resolve; });
+    const f = await fixture("steer-terminal-race", {
+      onNotification: async method => { if (method === "turn/started") { enter(); await held; } }, onSteerRejected: reject,
+    });
+    const started = await f.start(); if (started.status !== "accepted") throw new Error("Expected acceptance");
+    await watchdog("held canonical projection", entered);
+    let settled = false;
+    const steer = f.adapter.steer({ binding: f.binding, turn: started.turn, runId: "steer", attemptId: "attempt", input: { text: "Steer" } })
+      .then(value => { settled = true; return value; }, error => { settled = true; return error; });
+    try {
+      await f.release("rejected"); await watchdog("native rejected steer", rejected);
+      await Promise.resolve(); await Promise.resolve();
+      const classifiedBeforeProjection = settled;
+      release();
+      expect(await steer).toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "stale_scope" });
+      expect(classifiedBeforeProjection).toBe(false);
+      await f.wait("terminal:root:completed");
+      expect(f.events.some(event => event.type === "error")).toBe(false);
+      await f.evidence();
+    } finally { release(); }
   });
 
   it("keeps an ambiguous steer receipt unknown even when the root turn was already accepted", async () => {
