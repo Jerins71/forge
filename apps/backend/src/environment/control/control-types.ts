@@ -76,6 +76,7 @@ export interface SwarmControlPort {
     cwd: string;
     cli?: RpcInput<"session.launch">["cli"];
     model?: { provider: string; modelId: string; thinkingLevel?: string };
+    delegation?: RpcInput<"session.launch">["delegation"];
   }): Promise<{ materialized: true }>;
   applyInput(input: {
     commandId: string;

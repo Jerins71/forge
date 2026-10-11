@@ -100,6 +100,8 @@ export const EnvironmentCapabilitiesSchema = O({
   sessionLifecycle: Type.Optional(Type.Boolean()),
   sessionState: Type.Optional(Type.Boolean()),
   contextTransfers: Type.Optional(Type.Boolean()),
+  /** `session.launch` accepts the new session's work mode and roster. */
+  launchDelegation: Type.Optional(Type.Boolean()),
 })
 export type EnvironmentCapabilities = Static<typeof EnvironmentCapabilitiesSchema>
 export const EnvironmentDescriptorSchema = O({
@@ -191,6 +193,7 @@ export const CliInvocationSchema = O({ createdBy: Type.Literal('forge-cli'), run
   invocationCwd: Type.Optional(Type.String({ maxLength: 4096 })), label: Type.Optional(ShortText) })
 // Optional message identity hint. The server derives CLI provenance from the authenticated integration.
 const CliSourceSchema = O({ channel: Type.Literal('cli'), messageId: V2Uuid })
+const Posture = E('delegation_first', 'adaptive', 'hands_on')
 export const LaunchSessionSchema = O({
   commandId: V2Uuid,
   projectId: V2Id,
@@ -199,6 +202,8 @@ export const LaunchSessionSchema = O({
   // Omission freezes the environment project's default in the acceptance transaction.
   model: Type.Optional(O({ provider: ShortText, modelId: ShortText,
     thinkingLevel: Type.Optional(ShortText) })),
+  // Session overrides applied when the session is created; an omitted field inherits the project default.
+  delegation: Type.Optional(Type.Object({ managerPosture: Type.Optional(Posture), rosterId: Type.Optional(V2Id) }, { additionalProperties: false, minProperties: 1 })),
   initialMessage: Type.Optional(MessageInputSchema),
   cli: Type.Optional(CliInvocationSchema),
 })
@@ -213,7 +218,6 @@ export const ChoiceResponseSchema = O({ commandId: V2Uuid, sessionId: V2Id, choi
   answers: Type.Array(ChoiceAnswerSchema, { minItems: 1, maxItems: 20 }) })
 export const StopSessionSchema = O({ commandId: V2Uuid, sessionId: V2Id })
 export const PolicyModelSchema = O({ provider: Type.String({ minLength: 1, maxLength: 256 }), modelId: Type.String({ minLength: 1, maxLength: 256 }), thinkingLevel: Type.Optional(ShortText) })
-const Posture = E('delegation_first', 'adaptive', 'hands_on')
 const ContextMode = E('summary', 'fresh')
 export const ProjectCreateSchema = O({ commandId: V2Uuid, title: Type.String({ minLength: 1, maxLength: 256 }), cwd: Type.String({ minLength: 1, maxLength: 4096 }), model: PolicyModelSchema, secureSessionsEnabled: Type.Optional(Type.Boolean()) })
 export const ProjectUpdateSchema = O({ commandId: V2Uuid, projectId: V2Id, patch: Type.Object({ title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })), modelDefault: Type.Optional(PolicyModelSchema), delegationDefaults: Type.Optional(Type.Object({ managerPosture: Type.Optional(Type.Union([Posture, Type.Null()])), rosterId: Type.Optional(Type.Union([V2Id, Type.Null()])) }, { additionalProperties: false, minProperties: 1 })), contextMode: Type.Optional(ContextMode) }, { additionalProperties: false, minProperties: 1 }) })

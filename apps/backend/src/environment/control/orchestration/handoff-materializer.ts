@@ -13,6 +13,8 @@ function render(entry:ConversationEntryEvent):string|undefined {
   if(entry.type==='conversation_message') {
     if(shouldExcludeConversationMessageFromModelContext(entry) || entry.role==='system') return;
     if(entry.role!=='user' && entry.role!=='assistant') return;
+    // Internal inputs are not the user's words; they stay out of the visible conversation, as before.
+    if(entry.role==='user' && entry.source==='system') return;
     // Context contains visible conversation only. Tool calls/results, private reasoning, runtime
     // grants, approval callbacks and Secure Sessions state are never materialization sources.
     return `${entry.role==='user'?'User':'Assistant'}: ${entry.text}`;

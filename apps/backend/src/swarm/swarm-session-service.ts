@@ -99,11 +99,18 @@ export interface SwarmSessionServiceOptions {
   now: () => string;
 }
 
+/** A session reserved by a control launch. Posture and roster are session overrides; omitted ones inherit the project default. */
+export interface ControlledSessionInput {
+  commandId: string; sessionId: string; projectId: string; title: string; cwd: string;
+  cli?: import("@forge/protocol").CliSessionMetadata; model?: AgentModelDescriptor;
+  managerPosture?: SessionCreationOptions["managerPosture"]; delegationRosterId?: string;
+}
+
 export class SwarmSessionService {
   private readonly controlledEnsures = new Map<string, Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }>>();
   constructor(private readonly options: SwarmSessionServiceOptions) {}
 
-  ensureControlledSession(input: { commandId: string; sessionId: string; projectId: string; title: string; cwd: string; cli?: import("@forge/protocol").CliSessionMetadata; model?: AgentModelDescriptor }): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
+  ensureControlledSession(input: ControlledSessionInput): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
     const active = this.controlledEnsures.get(input.sessionId);
     if (active) return active.then(result => { this.assertControlledOwnership(this.options.getDescriptor?.(input.sessionId) ?? result.sessionAgent, input); return result; });
     const pending = this.ensureControlledSessionOnce(input).finally(() => this.controlledEnsures.delete(input.sessionId));
@@ -116,7 +123,7 @@ export class SwarmSessionService {
     }
   }
 
-  private async ensureControlledSessionOnce(input: { commandId: string; sessionId: string; projectId: string; title: string; cwd: string; cli?: import("@forge/protocol").CliSessionMetadata; model?: AgentModelDescriptor }): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
+  private async ensureControlledSessionOnce(input: ControlledSessionInput): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
     if (input.sessionId !== `v2-${input.commandId}`) throw new Error("Controlled session ID is not reserved for this command.");
     const existing = this.options.getDescriptor?.(input.sessionId);
     if (existing) {
@@ -142,7 +149,7 @@ export class SwarmSessionService {
       }
       reconcileOwnedDirectory = true;
     }
-    return this.createSessionWithOverrides(input.projectId, { sessionAgentId: input.sessionId, label: input.title, cli: input.cli, controlCommandId: input.commandId, reconcileOwnedDirectory }, { cwd: input.cwd, model: input.model });
+    return this.createSessionWithOverrides(input.projectId, { sessionAgentId: input.sessionId, label: input.title, cli: input.cli, controlCommandId: input.commandId, reconcileOwnedDirectory, managerPosture: input.managerPosture, delegationRosterId: input.delegationRosterId }, { cwd: input.cwd, model: input.model });
   }
 
   async createSession(

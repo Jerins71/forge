@@ -8,16 +8,17 @@ import { MessageInput } from '@/components/chat/MessageInput'
 import { RunOnPicker, type RunOnChoice } from '@/components/chat/message-input/RunOnPicker'
 import { GitBranch, Loader2, Server, Sparkles } from 'lucide-react'
 import { LockedWorkspace, WorkspacePicker } from '@/components/chat/message-input/WorkspacePicker'
-import { useLaunchSession } from '@/components/chat/message-input/hooks/use-launch-session'
+import { useLaunchSession, type LaunchDelegation } from '@/components/chat/message-input/hooks/use-launch-session'
 import { cloneUrlForRemote, useRepositoryCheckout } from '@/components/chat/message-input/hooks/use-repository-checkout'
 import { EnvironmentBadge, EnvironmentStatusChip } from '@/components/chat/agent-sidebar/EnvironmentStatusChip'
 import { useEnvironmentLabel } from '@/components/chat/agent-sidebar/hooks/useEnvironmentStatus'
-import { useEnvironmentSelector, useLogicalProjects } from '@/hooks/use-environment-selector'
-import { usePrimaryEnvironmentId } from '@/lib/origin-store/environment-provider'
+import { useEnvironmentCatalog, useEnvironmentSelector, useLogicalProjects } from '@/hooks/use-environment-selector'
+import { useEnvironmentRegistry, usePrimaryEnvironmentId } from '@/lib/origin-store/environment-provider'
 import { originRegistry, useOriginSlice } from '@/lib/origin-store'
 import type { ManagerWsState } from '@/lib/ws-state'
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import { SessionModelPicker } from '@/components/chat/message-input/SessionModelPicker'
+import { SessionCoordinationPicker } from '@/components/chat/message-input/SessionCoordinationPicker'
 
 /** Same column and gutters as MessageInput. */
 const COMPOSER_COLUMN = 'content-frame'
@@ -72,6 +73,11 @@ export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
     setLaunchTarget(target)
   }, [finishedProjectId, setLaunchTarget, setupEnvironmentId])
 
+  // Checkouts of one repository can carry different project names; the thread starts in the chosen one.
+  const targetProjectId = launch.target?.projectId
+  const selectTargetTitle = useCallback((shell: ShellState) => (targetProjectId ? shell.projects.get(targetProjectId)?.title ?? null : null), [targetProjectId])
+  const targetTitle = useEnvironmentSelector(launch.target?.environmentId ?? '', 'shell', selectTargetTitle)
+
   if (!group) {
     return <EmptyState title="Project not found" detail="This project is no longer available on any paired environment." />
   }
@@ -84,7 +90,7 @@ export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
         <div className={COMPOSER_COLUMN}>
           <div className="pb-6 text-center">
             <p className="eyebrow mb-2">New thread</p>
-            <h1 className="truncate text-[30px] font-medium leading-tight tracking-[-0.025em] text-foreground">{group.title}</h1>
+            <h1 className="truncate text-[30px] font-medium leading-tight tracking-[-0.025em] text-foreground">{targetTitle ?? group.title}</h1>
             <p className="mx-auto mt-1.5 max-w-lg text-balance text-[13.5px] text-muted-foreground">Start a new thread. Choose the machine below, then send your first message.</p>
           </div>
           {launch.error ? (
@@ -108,6 +114,7 @@ export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
               <RunOnPicker groupKey={groupKey} value={choice} onChange={setChoice} canSetUp={canSetUp} />
               {launch.target ? <TraySeparator /> : null}
               {launch.target ? <WorkspacePicker target={launch.target} value={launch.workspace} onChange={launch.setWorkspace} /> : null}
+              {launch.target ? <LaunchWorkPicker target={launch.target} delegation={launch.delegation} onChange={launch.setDelegation} /> : null}
               {launch.target ? <LaunchModelPicker target={launch.target} model={launch.model} onChange={launch.setModel} /> : null}
               {launch.target ? <TargetBranch target={launch.target} /> : null}
             </div>
@@ -164,6 +171,61 @@ function SetupCheckoutRow({ environmentId, projectTitle, checkout, onStart }: {
         <Button size="sm" className="h-7" onClick={onStart}>{failed ? 'Try again' : `Set up on ${label}`}</Button>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * The new thread's work mode and roster, from the target machine. The choice travels with the launch,
+ * so a machine that cannot accept it there offers no control rather than a setting it would drop.
+ */
+function LaunchWorkPicker({ target, delegation, onChange }: {
+  target: ProjectRef
+  delegation: LaunchDelegation
+  onChange: (update: (current: LaunchDelegation) => LaunchDelegation) => void
+}) {
+  const registry = useEnvironmentRegistry()
+  const httpClientRef = useRef<SettingsApiClient | null>(null)
+  useEffect(() => {
+    httpClientRef.current = originRegistry.getOrigin(target.environmentId)?.getHttpClient() ?? null
+  }, [target.environmentId])
+  const selectProfile = useCallback(
+    (state: ManagerWsState) => state.profiles.find((profile) => profile.profileId === target.projectId),
+    [target.projectId],
+  )
+  const profile = useOriginSlice(target.environmentId, selectProfile)
+  const registered = useEnvironmentCatalog().has(target.environmentId)
+  const capabilities = registered ? registry.get(target.environmentId).descriptor()?.capabilities : undefined
+  const supported = Boolean(capabilities?.launchDelegation && capabilities.projectPolicy)
+  if (!supported) return null
+  return (
+    <SessionCoordinationPicker config={{
+      originId: target.environmentId,
+      httpClientRef,
+      sessionAgentId: `launch:${target.projectId}`,
+      profileId: target.projectId,
+      managerPosture: delegation.managerPosture,
+      managerPostureOrigin: delegation.managerPosture ? 'session_override' : 'project_default',
+      projectDefaultManagerPosture: profile?.defaultManagerPosture,
+      delegationRosterId: delegation.rosterId,
+      delegationRosterOrigin: delegation.rosterId ? 'session_override' : 'project_default',
+      projectDefaultDelegationRosterId: profile?.defaultDelegationRosterId,
+      showLabel: true,
+      onUpdateSession: (_session, updates) => onChange((current) => ({
+        managerPosture: updates.managerPosture ? (updates.managerPosture.mode === 'override' ? updates.managerPosture.value : undefined) : current.managerPosture,
+        rosterId: updates.delegationRoster ? (updates.delegationRoster.mode === 'override' ? updates.delegationRoster.rosterId : undefined) : current.rosterId,
+      })),
+      onUpdateProjectDefaults: async (projectId, updates) => {
+        const receipt = await registry.get(target.environmentId).request('project.update', {
+          commandId: crypto.randomUUID(),
+          projectId,
+          patch: { delegationDefaults: {
+            ...(updates.managerPosture !== undefined ? { managerPosture: updates.managerPosture as 'delegation_first' | 'adaptive' | 'hands_on' | null } : {}),
+            ...(updates.delegationRosterId !== undefined ? { rosterId: updates.delegationRosterId } : {}),
+          } },
+        })
+        if (receipt.state !== 'succeeded') throw new Error(receipt.error?.message ?? 'The project default was not saved.')
+      },
+    }} />
   )
 }
 

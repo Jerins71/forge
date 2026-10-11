@@ -72,6 +72,17 @@ export function RoomsInbox({
     && sections.recent.length === 0
     && !hasInlineProjects
 
+  // A filter that matches nothing is not an empty Inbox; the sessions are still there.
+  const filter = searchQuery?.trim()
+  if (isEmpty && filter) {
+    return (
+      <section className="flex flex-1 flex-col items-center justify-center gap-1 px-4 py-10 text-center" data-testid="rooms-inbox-no-match">
+        <p className="text-sm font-medium text-sidebar-foreground">No sessions match</p>
+        <p className="max-w-full break-words text-xs text-muted-foreground">“{filter}”</p>
+      </section>
+    )
+  }
+
   if (isEmpty) {
     return (
       <section className="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-10 text-center" data-testid="rooms-inbox-empty">

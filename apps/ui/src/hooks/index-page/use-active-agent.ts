@@ -19,7 +19,7 @@
  * re-subscribe cadence of the original inline effect.
  */
 
-import { useEffect, useMemo, type MutableRefObject } from 'react'
+import { useEffect, useMemo, useRef, type MutableRefObject } from 'react'
 import type { AgentDescriptor } from '@forge/protocol'
 import type { ManagerWsClient } from '@/lib/ws-client'
 import type { ManagerWsState } from '@/lib/ws-state'
@@ -171,6 +171,9 @@ export function useActiveAgent({
     return activeAgent.displayName ?? activeAgentId ?? 'No active agent'
   }, [activeAgent, activeAgentId, activeAgentProfileName, activeAgentSessionLabel])
 
+  const lastRouteAgentIdRef = useRef<string | null>(null)
+  const leadingRouteAgentIdRef = useRef<string | null>(null)
+
   // Keep the subscribed agent aligned with the route.  Reads
   // `fileEditorCoordinatorRef.current` lazily so the coordinator is NOT an
   // effect dependency (its identity churns every render) — this preserves the
@@ -196,7 +199,20 @@ export function useActiveAgent({
 
     const currentAgentId = state.targetAgentId ?? state.subscribedAgentId
     const hasExplicitRouteSelection = routeState.agentId !== DEFAULT_MANAGER_AGENT_ID
-    const clientExplicitSelectionAgentId = clientRef.current?.getExplicitSelectionAgentId() ?? null
+    // A route that changed is the newest intent: a launch, a link or Back names its session in the
+    // URL without subscribing first. It leads until the client shows that session; only then does
+    // the client's own selection lead again (a click subscribes, then navigates). A stale selection
+    // can therefore never hold the pane, and the composer with it, on the previous session.
+    if (lastRouteAgentIdRef.current !== routeState.agentId) {
+      lastRouteAgentIdRef.current = routeState.agentId
+      leadingRouteAgentIdRef.current = hasExplicitRouteSelection ? routeState.agentId : null
+    }
+    const clientSelectionAgentId = clientRef.current?.getExplicitSelectionAgentId() ?? null
+    const leadingRouteAgentId = leadingRouteAgentIdRef.current
+    if (leadingRouteAgentId && (clientSelectionAgentId === leadingRouteAgentId || currentAgentId === leadingRouteAgentId)) {
+      leadingRouteAgentIdRef.current = null
+    }
+    const clientExplicitSelectionAgentId = leadingRouteAgentIdRef.current ? null : clientSelectionAgentId
     const explicitSelectionAgentId =
       clientExplicitSelectionAgentId ??
       (hasExplicitRouteSelection ? routeState.agentId : null)

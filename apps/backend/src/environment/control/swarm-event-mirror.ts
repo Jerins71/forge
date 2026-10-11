@@ -145,6 +145,12 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     // Each finished tool or reasoning row is one activity summary; raw tool-call entries stay in the audit log.
     if (!["conversation_message", "activity_summary", "agent_message"].includes(entry.type)) return null;
     if (entry.type === "conversation_message" && entry.terminal === false) return null;
+    // Each worker message is also copied into its manager's transcript for the legacy All view. The session
+    // detail already carries the worker's own entry, so the copy is not a second item, and not a result.
+    if (entry.type === "conversation_message" && entry.source === "worker_report" && entry.excludeFromModelContext) return null;
+    // An internal input to the manager is already shown as what caused it (the worker result, the peer's
+    // message). A worker's is its assignment: it travels as a user item whose source is `system`.
+    if (entry.type === "conversation_message" && entry.role === "user" && entry.source === "system" && entry.agentId === sessionId) return null;
     const id = entry.timelineEntryId ?? ("id" in entry && typeof entry.id === "string" ? entry.id : undefined);
     if (!id) return null;
     const text = "text" in entry && typeof entry.text === "string" ? entry.text : "displaySummary" in entry && typeof entry.displaySummary === "string" ? entry.displaySummary : "";
@@ -153,7 +159,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const runId="turnId" in entry && entry.turnId && database.prepare("SELECT 1 FROM orchestration_runs WHERE run_id=? AND thread_id=?").get(entry.turnId,entry.agentId) ? entry.turnId:undefined;
     return { itemId: id, ...(runId ? {runId}:{}), userTurnId: user ? entry.id ?? id : userTurns.get(sessionId) ?? ("turnId" in entry ? entry.turnId : undefined) ?? id,
       actorId: workerResult && entry.sourceWorkerId ? entry.sourceWorkerId : "actorAgentId" in entry ? entry.actorAgentId : entry.agentId,
-      kind: workerResult ? "worker_result" : entry.type === "conversation_message" ? user ? "user" : "assistant" : entry.type === "agent_message" ? "worker_result" : "activity",
+      kind: workerResult ? "worker_result" : entry.type === "conversation_message" ? user ? "user" : "assistant" : "activity",
       pinned: swarmManager.getPinnedMessageIds(sessionId)?.has(entry.type === "conversation_message" ? entry.id ?? id : id) ?? false,
       timestamp: entry.timestamp, ...(entry.type === "conversation_message" ? { source: entry.source } : {}), text: text.slice(0, 8192), contentRef: text.length > 8192 || (entry.type === "activity_summary" && activityContent(entry)) ? id : null,
       ...(entry.type === "activity_summary" ? { activity: activityMetadata(entry, sessionId) } : {}),

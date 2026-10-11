@@ -28,6 +28,7 @@ export interface WorkspacePort {
     projectId: string;
     workspaceStrategy: WorkspaceStrategy;
     model?: RpcInput<"session.launch">["model"];
+    delegation?: RpcInput<"session.launch">["delegation"];
   }): Promise<PreparedLaunch>;
   /** Synchronous profile revision check; must perform no I/O under the writer lock. */
   isLaunchCurrent(prepared: PreparedLaunch): boolean;

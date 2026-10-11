@@ -270,7 +270,7 @@ export function CreateManagerDialog({
         }}
         aria-describedby={createManagerError ? 'create-manager-error' : undefined}
       >
-        <DialogHeader>
+        <DialogHeader className="mb-4">
           <DialogTitle>Create project</DialogTitle>
           <DialogDescription>
             {isCloneMode

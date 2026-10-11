@@ -419,7 +419,7 @@ function ToolExecutionLogRow({
         type="button"
         variant="ghost"
         className={cn(
-          'group h-auto w-full items-start justify-start gap-2 rounded-lg px-1 py-1 text-left font-mono text-[12px] font-normal text-subtle-foreground transition-colors duration-150',
+          'group h-auto w-full items-start justify-start gap-2 whitespace-normal rounded-lg px-1 py-1 text-left font-mono text-[12px] font-normal text-subtle-foreground transition-colors duration-150',
           'hover:bg-transparent hover:text-foreground',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
         )}

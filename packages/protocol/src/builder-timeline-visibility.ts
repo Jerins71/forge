@@ -90,7 +90,8 @@ function isVisibleInBuilderWebTimeline(
   }
 
   if (entry.type !== 'conversation_message') return true
-  if (entry.source === 'worker_report') return false
+  // A result delivered to the manager is part of its conversation; per-message worker mirrors stay in All.
+  if (entry.source === 'worker_report') return entry.excludeFromModelContext !== true
   const channel = entry.sourceContext?.channel ?? 'web'
   return channel === 'web' || channel === 'cli'
 }

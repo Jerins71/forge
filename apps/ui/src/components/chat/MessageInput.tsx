@@ -40,6 +40,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     onSend,
     onSubmitted,
     isLoading,
+    onStop,
     disabled = false,
     placeholderOverride,
     agentLabel = 'agent',
@@ -315,6 +316,13 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
       return
     }
 
+    // With no menu to close, Escape stops the running turn.
+    if (event.key === 'Escape' && isLoading && onStop) {
+      event.preventDefault()
+      onStop()
+      return
+    }
+
     // Toggle format mode: Shift+Cmd+X (Mac) / Shift+Ctrl+X (Windows/Linux)
     if (event.key.toLowerCase() === 'x' && event.shiftKey && (event.ctrlKey || event.metaKey)) {
       event.preventDefault()
@@ -519,6 +527,20 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
                   <Mic className="size-4" strokeWidth={1.75} />
                 )}
               </Button>
+
+              {isLoading && onStop ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="ml-1 size-[34px] shrink-0 rounded-[10px] bg-foreground/[0.08] text-foreground transition-colors duration-150 hover:bg-foreground/[0.14] active:scale-95"
+                  onClick={onStop}
+                  aria-label="Stop"
+                  title="Stop (Esc)"
+                >
+                  <Square className="size-3.5 fill-current" />
+                </Button>
+              ) : null}
 
               <Button
                 type="submit"
