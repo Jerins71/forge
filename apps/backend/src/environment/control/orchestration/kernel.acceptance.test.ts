@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { decide, emptyState, evolve } from "./kernel.js";
 import type { CoreCommand, CoreState, Decision } from "./types.js";
-import { getRuntimeProviderCapabilities } from "../../../swarm/runtime/provider-contract.js";
+import { piProviderCapabilities } from "../../../swarm/runtime/pi/pi-provider-adapter.js";
 
 const now = 1_800_000_000_000;
-const caps = getRuntimeProviderCapabilities("codex");
+const caps = piProviderCapabilities();
 function apply(state: CoreState, command: CoreCommand): { state: CoreState; decision: Decision } {
   const frozen = JSON.stringify(state);
   const decision = decide(state, command);
@@ -29,6 +29,15 @@ function fixture() {
 }
 
 describe("authoritative run decisions", () => {
+  it("chooses and retains the native creation scope before input admission", () => {
+    const f=fixture();
+    f.run({ type:"thread.prepare_binding",commandId:"prepare",now,threadId:"manager",bindingId:"prepared-binding" });
+    const first=f.state().threads.manager;
+    f.run({ type:"thread.prepare_binding",commandId:"prepare-again",now,threadId:"manager",bindingId:"ignored-binding" });
+    expect(f.state().threads.manager).toEqual(first);
+    expect(first.bindingId).toBe("prepared-binding");
+  });
+
   it("queues accepted input behind the current root and advances only on its terminal", () => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 1, "accepted");
     const queued = f.submit("two"); f.record("two");
@@ -54,6 +63,19 @@ describe("authoritative run decisions", () => {
     expect(f.observe("attempt-one", 4, "terminal").events).toEqual([]);
     expect(f.observe("attempt-one", 5, "terminal", 99).events).toEqual([]);
     expect(f.state().runs["run-one"].state).toBe("running");
+  });
+  it("quarantines unknown delivery in process until writer drain precedes explicit recovery", () => {
+    const f=fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one");
+    const decision=f.run({type:"attempt.unknown",commandId:"unknown",now,threadId:"manager",attemptId:"attempt-one"});
+    expect(f.state().threads.manager.shutdown).toBe("pending");
+    expect(decision.effects).toContainEqual({kind:"provider.release",threadId:"manager",bindingId:"binding"});
+    const recoveryId=f.state().recovery!.recoveryId;
+    const resume={type:"recovery.resume" as const,commandId:"resume",now,recoveryId,attempts:{"run-one":"retry"},bindingIds:{manager:"replacement"}};
+    expect(()=>f.run(resume)).toThrow("confirmed writer shutdown");
+    f.run({type:"binding.drained",commandId:"drain",now,threadId:"manager",bindingId:"binding",status:"clean"});
+    expect(f.state().runs["run-one"].state).toBe("recovery");
+    expect(f.state().threads.manager.generation).toBe(1);
+    f.run(resume); expect(f.state().attempts.retry.generation).toBe(1);
   });
   it("quarantines a pending drain and permits no replacement writer until confirmed clean", () => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one");

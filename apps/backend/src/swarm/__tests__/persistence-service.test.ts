@@ -45,10 +45,6 @@ function createPersistenceService(
   });
 }
 
-async function writeStore(config: SwarmConfig, agents: unknown[], profiles: ManagerProfile[] = []): Promise<void> {
-  await mkdir(join(config.paths.dataDir, "swarm"), { recursive: true });
-  await writeFile(config.paths.agentsStoreFile, `${JSON.stringify({ agents, profiles }, null, 2)}\n`, "utf8");
-}
 
 describe("PersistenceService", () => {
   it("provisions directories and saves the canonical descriptor store", async () => {
@@ -142,7 +138,7 @@ describe("PersistenceService", () => {
         defaultModel: config.defaultModel,
       },
     ];
-    await writeStore(config, [persisted], profiles);
+    await createPersistenceService(config,[persisted],profiles).saveStore();
 
     const loaded = await createPersistenceService(config).loadStore();
 

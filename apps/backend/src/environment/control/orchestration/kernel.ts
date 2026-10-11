@@ -71,6 +71,10 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
         continue;
       }
       requireRecovery(attempt.attemptId);
+      if (!processLost && owner.shutdown === "clean" && owner.bindingId) {
+        emit({type:"thread.changed",thread:{...owner,shutdown:"pending"}});
+        decision.effects.push({kind:"provider.release",threadId:owner.threadId,bindingId:owner.bindingId});
+      }
       (owner.role === "manager" ? managers : workers).add(owner.threadId);
     }
     if (processLost) for (const owner of Object.values(state.threads)) {
@@ -116,6 +120,11 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     case "thread.create":
       if (state.threads[command.threadId]) break;
       emit({ type: "thread.created", thread: { threadId: command.threadId, role: command.role, projectId: command.projectId, model: command.model, managerId: command.managerId, desired: "running", generation: 0, shutdown: "clean", nextRunSequence: 0 } }); break;
+    case "thread.prepare_binding": {
+      const owner=thread(command.threadId);
+      if (!owner.bindingId) emit({ type:"thread.changed",thread:{ ...owner,bindingId:command.bindingId } });
+      break;
+    }
     case "run.submit": {
       const owner = thread(command.threadId);
       if (owner.desired !== "running" || owner.shutdown !== "clean") throw new Error("Thread shutdown must be confirmed before input admission");
@@ -173,15 +182,17 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     case "provider.observe": observe(command.observation); break;
     case "thread.stop": {
       const owner = thread(command.threadId);
-      emit({ type: "thread.stopped", thread: { ...owner, desired: "stopped", shutdown: owner.bindingId ? "pending" : "clean" } });
+      const needsDrain = !!owner.bindingId && (command.writerPending !== false || !!state.bindings[owner.bindingId]);
+      emit({ type: "thread.stopped", thread: { ...owner, desired: "stopped", shutdown: needsDrain ? "pending" : "clean", ...(!needsDrain ? { bindingId: undefined } : {}) } });
       for (const run of Object.values(state.runs)) if (run.threadId === owner.threadId && run.state === "queued") finish(run, "cancelled");
-      if (owner.bindingId) decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: owner.bindingId }); break;
+      if (needsDrain) decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: owner.bindingId! });
+      else if (owner.activeRunId && state.runs[owner.activeRunId].state !== "terminal") finish(state.runs[owner.activeRunId], "cancelled");
+      break;
     }
     case "binding.drained": {
       const owner = thread(command.threadId); if (owner.bindingId !== command.bindingId) break;
-      emit({ type: "thread.changed", thread: { ...owner, shutdown: command.status === "clean" ? "clean" : "quarantined", ...(command.status === "clean" ? { bindingId: undefined, activeRunId: undefined } : {}) } });
-      if (command.status === "clean" && owner.activeRunId && owner.desired === "stopped") finish(state.runs[owner.activeRunId], "cancelled");
-      if(command.status === "clean" && owner.desired === "running") advance(owner.threadId); break;
+      emit({ type: "thread.changed", thread: { ...owner, shutdown: command.status === "clean" ? "clean" : "quarantined", ...(command.status === "clean" ? { bindingId: undefined, activeRunId: undefined,generation:owner.desired === "running" ? owner.generation+1 : owner.generation } : {}) } });
+      if (command.status === "clean" && owner.activeRunId && owner.desired === "stopped") finish(state.runs[owner.activeRunId], "cancelled"); if(command.status === "clean" && owner.desired === "running") advance(owner.threadId); break;
     }
     case "thread.resume": {
       const owner = thread(command.threadId); if (owner.shutdown !== "clean") throw new Error("Thread shutdown remains quarantined");

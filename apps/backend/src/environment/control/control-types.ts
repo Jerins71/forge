@@ -87,6 +87,7 @@ export interface SwarmControlPort {
     delivery?: RpcInput<"session.send">["delivery"];
     runId: string;
     prepared?: import("./command-service.js").InternalInput["prepared"];
+    userOptions?: import("./command-service.js").InternalInput["userOptions"];
   }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }>;
   acquireProvider(scope: ProviderScope, conversation?: ProviderConversationRef, model?: import("../../swarm/types.js").AgentDescriptor["model"]): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
   /** Returns an unopened target. Only the core may capability-check and invoke native fork. */

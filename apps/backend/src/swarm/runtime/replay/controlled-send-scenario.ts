@@ -12,7 +12,7 @@ import { getNativeCodexHome, getSessionFilePath } from "../../storage/data-paths
 import { canonicalPairingFields, pairingProofMessage } from "../../../environment/access/access-service.js";
 import { createReplayHarness, ReplaySignals, watchdog, type ReplayTranscript } from "./replay-harness.js";
 import type { BackendReplayBoot } from "./backend-child.js";
-import type { SwarmConfig } from "../../types.js";
+import type { SwarmConfig, AgentsStoreFile } from "../../types.js";
 
 type Scenario = "dropped-rpc-receipt" | "lost-provider-acknowledgment" | "append-before-locator";
 const commandId = "11111111-1111-4111-8111-111111111111";
@@ -34,9 +34,9 @@ interface Inspection {
   sequences: { shell: number; detail: number };
   canonical: { agentId: string; sessionFile: string }[];
 }
-async function startBackend(config: SwarmConfig, boot: number, scenario: Scenario) {
+async function startBackend(config: SwarmConfig, boot: number, scenario: Scenario, initialStore?: AgentsStoreFile) {
   const input = resolve(config.paths.rootDir, `boot-${boot}.json`);
-  await writeFile(input, JSON.stringify({ config, boot, crashAfterAppend: scenario === "append-before-locator" && boot === 1 ? commandId : undefined } satisfies BackendReplayBoot));
+  await writeFile(input, JSON.stringify({ config, boot, initialStore, crashAfterAppend: scenario === "append-before-locator" && boot === 1 ? commandId : undefined } satisfies BackendReplayBoot));
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TMP", "TEMP", "LANG", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "APPDATA", "LOCALAPPDATA"].includes(key.toUpperCase())));
   const child = fork(resolve(directory, "backend-child.ts"), [input], { cwd: root, execPath: process.execPath, execArgv: ["--import", resolve(root, "apps/backend/node_modules/tsx/dist/loader.mjs")], env,
     stdio: ["ignore", "pipe", "pipe", "ipc"] });
@@ -151,19 +151,28 @@ export async function runControlledSendReplay(scenario: Scenario) {
   config.cwdAllowlistRoots = [config.defaultCwd];
   const at = "2026-10-10T12:00:00.000Z";
   const sessionFile = getSessionFilePath(config.paths.dataDir, "manager", "manager");
-  await writeFile(config.paths.agentsStoreFile, JSON.stringify({ agents: [{ agentId: "manager", managerId: "manager", profileId: "manager", displayName: "Manager", role: "manager", status: "idle", createdAt: at, updatedAt: at, cwd: config.defaultCwd, model: config.defaultModel, sessionFile }],
-    profiles: [{ profileId: "manager", displayName: "Manager", defaultSessionAgentId: "manager", defaultModel: config.defaultModel, createdAt: at, updatedAt: at }] }));
+  const initialStore: AgentsStoreFile = { agents: [{ agentId: "manager", managerId: "manager", profileId: "manager", displayName: "Manager", role: "manager", status: "idle", createdAt: at, updatedAt: at, cwd: config.defaultCwd, model: config.defaultModel, sessionFile }],
+    profiles: [{ profileId: "manager", displayName: "Manager", defaultSessionAgentId: "manager", defaultModel: config.defaultModel, createdAt: at, updatedAt: at }] };
   const base: ReplayTranscript = JSON.parse(await readFile(resolve(directory, "fixtures/codex-controlled-send.json"), "utf8"));
-  const harness = await createReplayHarness(runtime => { if (runtime !== 1) throw new Error("Recovery created an unexpected provider process"); return { ...structuredClone(base), bindings: { $threadId: `replay-thread-${runtime}` } }; });
+  const harness = await createReplayHarness(runtime => {
+    if (runtime !== 1 && !(scenario === "append-before-locator" && runtime === 2)) throw new Error("Recovery created an unexpected provider process");
+    const transcript=structuredClone(base);
+    if (runtime === 2) {
+      const index=transcript.entries.findIndex(entry => entry.type === "expect_outbound" && entry.label === "provider-start");
+      transcript.entries.splice(index,0,{ type:"expect_outbound",frame:{id:"$any",method:"thread/inject_items",params:{threadId:"$threadId",items:[{type:"message",role:"user",content:[{type:"input_text",text:"$any"}]}]}},capture:{"$rpcId":["id"]} },{type:"emit_inbound",frame:{id:"$rpcId",result:{}}});
+    }
+    return { ...transcript,bindings:{ $threadId:`replay-thread-${runtime}` } };
+  });
   await mkdir(getNativeCodexHome(config.paths.dataDir), { recursive: true });
   await writeFile(resolve(getNativeCodexHome(config.paths.dataDir), "replay-peer.json"), JSON.stringify({ port: harness.port }));
   const backends: Backend[] = [];
   const clients: Awaited<ReturnType<typeof liveClient>>[] = [];
   const sockets: WebSocket[] = [];
   let finding: unknown;
+  let unusedHostReleased: boolean | undefined;
   let assertions: Record<string, boolean> | undefined;
   try {
-    let backend = await startBackend(config, 1, scenario); backends.push(backend);
+    let backend = await startBackend(config, 1, scenario, initialStore); backends.push(backend);
     config.port = Number(new URL(backend.ready.baseUrl).port);
     const pairing = await pair(backend);
     const live = await liveClient(backend, pairing); clients.push(live);
@@ -172,7 +181,14 @@ export async function runControlledSendReplay(scenario: Scenario) {
     // Acceptance comes from a committed event, not receipt arrival or a timeout.
     socket.send(JSON.stringify({ type: "request", requestId: "first-send", method: "session.send", input: command }));
     await watchdog("accepted input", backend.signals.wait("receipt:accepted:pending"));
-    if (scenario === "append-before-locator") await watchdog("post-append crash", backend.signals.wait("exit"));
+    if (scenario === "append-before-locator") {
+      await watchdog("post-append crash", backend.signals.wait("exit"));
+      const pid=await harness.signals.wait("1:connected") as number;
+      await watchdog("unused native host exited",new Promise<void>((resolve,reject) => {
+        const check=()=>{ try { process.kill(pid,0); setTimeout(check,25); } catch(error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") resolve(); else reject(error); } }; check();
+      }), 5_000);
+      unusedHostReleased=true;
+    }
     else {
       await watchdog("outbound provider start", Promise.race([harness.signals.wait("1:provider-start"), harness.signals.wait("failure").then(error => { throw new Error(String(error)); })]));
       await watchdog("start reply barrier", harness.signals.wait("1:start-ack:held"));
@@ -196,12 +212,12 @@ export async function runControlledSendReplay(scenario: Scenario) {
         live.client.supervisor.retryNow();
         await live.waitState(() => live.client.connection.getSnapshot().phase === "online" && live.detail.store.getSnapshot().freshness === "live", "reconnected live streams");
         if (scenario === "append-before-locator" && boot === 2) {
-          await watchdog("reconciled provider start", harness.signals.wait("1:provider-start"));
-          await watchdog("reconciled start barrier", harness.signals.wait("1:start-ack:held"));
-          harness.release("1:start-ack");
+          await watchdog("reconciled provider start", harness.signals.wait("2:provider-start"));
+          await watchdog("reconciled start barrier", harness.signals.wait("2:start-ack:held"));
+          harness.release("2:start-ack");
           await backend.call("drain");
-          await watchdog("reconciled terminal barrier", harness.signals.wait("1:terminal:held"));
-          harness.release("1:terminal");
+          await watchdog("reconciled terminal barrier", harness.signals.wait("2:terminal:held"));
+          harness.release("2:terminal");
           await live.waitState(() => live.client.shell.getSnapshot().sessions.get("manager")?.attention === "result", "reconciled terminal projection");
         } else await backend.call("drain");
         const inspection = await backend.call<Inspection>("inspect");
@@ -223,7 +239,7 @@ export async function runControlledSendReplay(scenario: Scenario) {
       counts: { acceptedInputs: inspection.inputs.length, receipts: inspection.receipts.length, canonicalInputs,
         providerDispatches: harness.trace.filter(t => t.direction === "outbound" && (t.frame as { method?: string }).method === "turn/start").length },
       receipt: JSON.parse(inspection.receipts[0]!.receipt_json) as CommandReceipt,
-      live: live.snapshot(), bootstrap: fresh.snapshot(), recoveryAcrossBoots, recoveryIdsAcrossBoots, crashBoundary,
+      live: live.snapshot(), bootstrap: fresh.snapshot(), recoveryAcrossBoots, recoveryIdsAcrossBoots, crashBoundary,unusedHostReleased,
     };
     if (harness.failures.length) throw new Error(harness.failures.join("\n"));
     assertions = {
@@ -239,7 +255,7 @@ export async function runControlledSendReplay(scenario: Scenario) {
         sameRecoveryAcrossBothBoots: recoveryIdsAcrossBoots.every(id => id !== null) && new Set(recoveryIdsAcrossBoots).size === 1,
         providerStartAcknowledgmentSuppressed: !harness.trace.some(t => t.direction === "inbound" && (t.frame as { result?: { turn?: unknown } }).result?.turn),
       } : {}),
-      ...(scenario === "append-before-locator" ? { exactCrashBoundary: isDeepStrictEqual(crashBoundary, { appendPersisted: true, locatorCommitted: false }) } : {}),
+      ...(scenario === "append-before-locator" ? { unusedHostReleased:unusedHostReleased === true,exactCrashBoundary: isDeepStrictEqual(crashBoundary, { appendPersisted: true, locatorCommitted: false }) } : {}),
     };
     finding = result;
     return result;

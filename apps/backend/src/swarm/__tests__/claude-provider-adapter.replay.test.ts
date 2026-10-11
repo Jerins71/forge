@@ -9,9 +9,12 @@ import { ProviderCapabilitiesSchema, ProviderObservationSchema, type ProviderObs
 import { createReplayHarness, ReplaySignals, watchdog, type ReplayTranscript } from "../runtime/replay/replay-harness.js";
 import { createInstructionBundle } from "../runtime/instruction-bundle.js";
 import { bindRuntimeToolHost } from "../runtime/runtime-tool-plan.js";
-import { ProviderRefreshRequiredError } from "../runtime/provider-contract.js";
+import { ProviderRefreshRequiredError, ProviderDispatchRejectedError } from "../runtime/provider-contract.js";
 import { buildSwarmTools } from "../swarm-tools.js";
-import type { AgentDescriptor } from "../types.js";
+import type { AgentDescriptor, AgentStatus } from "../types.js";
+import type { RuntimeSessionEvent, SwarmAgentRuntime } from "../runtime-contracts.js";
+import { RuntimeEventProjector } from "../runtime/runtime-event-projector.js";
+import { ConversationProjector } from "../session/conversation-projector.js";
 import { ClaudeProviderAdapter } from "../runtime/claude/claude-provider-adapter.js";
 import { createProviderBoundaryFixture } from "./provider-boundary-fixture.js";
 import { ClaudeRuntimeCreator } from "../runtime/claude/claude-runtime-creator.js";
@@ -46,7 +49,7 @@ async function fixture(scenario: string, options: { root?: string; prompt?: stri
   const runtimeOptions = { descriptor, systemPrompt: prompt, tools, host, env: {
     ...process.env, HOME: root, CLAUDE_CONFIG_DIR: join(root, "claude-home"), FORGE_CLAUDE_REPLAY_PORT: String(harness.port),
   }, executable: peerExecutable, projectTrusted: false,
-  callbacks: { onStatusChange: vi.fn(), onSessionEvent: vi.fn(), onAgentEnd, onRuntimeError: vi.fn() } };
+  callbacks: { onStatusChange: vi.fn(), onSessionEvent: vi.fn((_agentId: string, _event: RuntimeSessionEvent) => {}), onAgentEnd, onRuntimeError: vi.fn() } };
   const adapter = new ClaudeProviderAdapter(runtimeOptions);
   const input = { scope: inputScope, model: descriptor.model, instructions, toolHost };
   const observations: ProviderObservation[] = [];
@@ -86,6 +89,148 @@ const start = (f: Awaited<ReturnType<typeof fixture>>, binding: Awaited<ReturnTy
 // compaction mistaken for a user run, native transport loss, MCP identity/cancellation,
 // and cleanup reported clean while an invocation or child process is still alive.
 describe("Claude frozen provider contract through real SDK transport", () => {
+  // Glue failure modes: direct starts bypass native activation, duplicate legacy activation,
+  // missing canonical assistant output or end callbacks, and busy starts implicitly steer/queue.
+  it.each(["adapter", "legacy"] as const)("projects one canonical assistant and one end through creator callbacks for %s dispatch", async dispatch => {
+    const resources = await createProviderBoundaryFixture();
+    const f = await fixture("one-turn", { root: resources.root, matchAnyPrompt: true });
+    const descriptor = { ...resources.descriptor("claude-native"), model: f.descriptor.model };
+    const kernelScope = { ...scope, threadId: descriptor.agentId };
+    const runId = "kernel-run";
+    const statuses: AgentStatus[] = [];
+    const events: RuntimeSessionEvent[] = [];
+    const signals = new ReplaySignals<void>();
+    const runtimes = new Map<string, SwarmAgentRuntime>();
+    resources.descriptors.set(descriptor.agentId, descriptor);
+    const conversationProjector = new ConversationProjector({ descriptors: resources.descriptors, runtimes,
+      conversationEntriesByAgentId: new Map(), now: () => new Date().toISOString(), emitServerEvent: () => {}, logDebug: () => {} });
+    const projector = new RuntimeEventProjector({ config: { debug: false }, descriptors: resources.descriptors,
+      workerStallState: new Map(), workerActivityState: new Map(), runtimeRecoveryState: { markRecoveryAbortedWorkerTurn: () => {} },
+      conversationProjector, now: () => new Date().toISOString(), markSessionActivity: () => {}, maybeRecordModelCapacityBlock: () => {},
+      maybeRecoverWorkerWithSpecialistFallback: async () => false, consumePendingManualManagerStopNoticeIfApplicable: () => false,
+      stripManagerAbortErrorFromEvent: event => event, isRuntimeRecoveryActive: () => false, beginPendingTransientWorkerTerminatedError: () => false,
+      cancelPendingTransientWorkerTerminatedError: () => {}, hasPendingTransientWorkerTerminatedError: () => false, logDebug: () => {},
+      getRuntime: id => runtimes.get(id), getActiveTurnId: () => runId, hasPendingSupersedingUserInput: () => false,
+      isModelCacheVisualizationEnabled: () => false, emitModelCacheObservation: () => {},
+      resolveManagerAssistantFinalOutputTarget: () => ({ kind: "session_transcript", channel: "web" }) });
+    const onAgentEnd = vi.fn(() => { signals.observe("end", undefined); });
+    const prepared = vi.fn();
+    let runtime: SwarmAgentRuntime | undefined;
+    nativeSetup.env = f.runtimeOptions.env; nativeSetup.executable = f.runtimeOptions.executable;
+    try {
+      const instructionBundle = await resources.service.buildInstructionBundle(descriptor);
+      runtime = await new ClaudeRuntimeCreator({ ...resources.deps, host: { ...f.host, searchHistory: vi.fn(), readHistory: vi.fn() } } as never).create({ descriptor,
+        systemPrompt: renderInstructionBundle(instructionBundle), runtimeToken: 3,
+        callbacks: { onStatusChange: (_id, status) => { statuses.push(status); }, onAgentEnd,
+          onSessionEvent: async (agentId, event) => { events.push(event); await projector.projectEvent({ agentId, event }); } },
+        creationOptions: { instructionBundle, providerScope: kernelScope, onProviderPrepared: prepared } });
+      runtimes.set(descriptor.agentId, runtime);
+      // The kernel supplies presentation context; native dispatch must activate its own event projection.
+      projector.activateManagerAssistantOutputTurn(descriptor.agentId, { kind: "session_transcript", channel: "web" }, { turnId: runId, beginUserVisibleObligation: true });
+      const adapter = runtime.providerAdapter!;
+      const inputs = prepared.mock.calls[0]![0];
+      const binding = await adapter.open({ scope: kernelScope, model: descriptor.model, instructions: inputs.instructionBundle, toolHost: inputs.toolHostBinding });
+      expect(runtime.getStatus()).toBe("idle");
+      if (dispatch === "adapter") await adapter.start({ binding, runId, attemptId: "kernel-attempt", input: { text: "work" } });
+      else await runtime.sendMessage({ text: "work" });
+      expect(runtime.getStatus()).toBe("streaming");
+      await f.release("accepted"); await f.release("terminal"); await watchdog("projected end", signals.wait("end"));
+      expect(runtime.getStatus()).toBe("idle");
+      expect(statuses[0]).toBe("streaming"); expect(statuses.at(-1)).toBe("idle");
+      expect(events.filter(event => event.type === "agent_start")).toHaveLength(1);
+      expect(events.filter(event => event.type === "turn_start")).toHaveLength(1);
+      expect(events.filter(event => event.type === "message_start" && event.message.role === "user")).toEqual([{ type: "message_start", message: { role: "user", content: "work" } }]);
+      expect(events.filter(event => event.type === "agent_end")).toHaveLength(1);
+      expect(onAgentEnd).toHaveBeenCalledExactlyOnceWith(descriptor.agentId);
+      const jsonl = await readFile(descriptor.sessionFile, "utf8");
+      const entries = jsonl.trim().split("\n").map(line => JSON.parse(line));
+      const assistant = entries.filter(entry => entry.customType === "swarm_conversation_entry" && entry.data.role === "assistant");
+      expect(assistant).toHaveLength(1);
+      expect(assistant[0].data).toMatchObject({ type: "conversation_message", role: "assistant", text: "Working", turnId: runId, source: "assistant_output" });
+      if (process.env.FORGE_CLAUDE_REPLAY_EVIDENCE_DIR) {
+        const dir = process.env.FORGE_CLAUDE_REPLAY_EVIDENCE_DIR; await mkdir(dir, { recursive: true });
+        await writeFile(join(dir, `projection-${dispatch}.jsonl`), jsonl.replaceAll(resources.root, "<fixture>"));
+        await writeFile(join(dir, `projection-${dispatch}.json`), JSON.stringify({ dispatch, statuses, events, endCount: onAgentEnd.mock.calls.length, assistant: assistant.map(entry => entry.data) }, null, 2));
+      }
+    } finally { await runtime?.terminate(); await f.close(); await resources.cleanup(); }
+  });
+  it("resumes a prior durable conversation during creation under the new scope without opening another session", async () => {
+    const resources = await createProviderBoundaryFixture();
+    const f = await fixture("one-turn", { root: resources.root, matchAnyPrompt: true });
+    const descriptor = { ...resources.descriptor("claude-native"), model: f.descriptor.model };
+    const newScope = { threadId: descriptor.agentId, bindingId: "new-binding", generation: 2 };
+    const prior = { ...newScope, bindingId: "old-binding", generation: 1, kind: "conversation" as const, nativeId: "12345678-1234-4234-8234-123456789012" };
+    const nativeArgsPath = join(f.root, "native-spawn-args.jsonl");
+    const prepared = vi.fn();
+    let runtime: SwarmAgentRuntime | undefined;
+    let reader: Promise<void> = Promise.resolve();
+    const observations: ProviderObservation[] = [];
+    const signals = new ReplaySignals<void>();
+    nativeSetup.env = { ...f.runtimeOptions.env, FORGE_CLAUDE_REPLAY_ARGS_PATH: nativeArgsPath }; nativeSetup.executable = f.runtimeOptions.executable;
+    try {
+      const instructionBundle = await resources.service.buildInstructionBundle(descriptor);
+      runtime = await new ClaudeRuntimeCreator({ ...resources.deps, host: { ...f.host, searchHistory: vi.fn(), readHistory: vi.fn() } } as never).create({ descriptor,
+        systemPrompt: renderInstructionBundle(instructionBundle), runtimeToken: 3, callbacks: { onStatusChange: vi.fn() },
+        creationOptions: { instructionBundle, providerScope: newScope, providerConversation: prior, onProviderPrepared: prepared } });
+      // This persisted native state exists before the later idempotent resume call.
+      expect(runtime.getCustomEntries("swarm_native_claude_state").at(-1)).toMatchObject({ sessionId: prior.nativeId, hasStartedTurn: true });
+      const adapter = runtime.providerAdapter!;
+      const inputs = prepared.mock.calls[0]![0];
+      const request = { scope: newScope, model: descriptor.model, instructions: inputs.instructionBundle, toolHost: inputs.toolHostBinding, conversation: prior };
+      const binding = await adapter.resume(request);
+      expect(await adapter.resume(request)).toBe(binding);
+      const nativeSpawns = (await readFile(nativeArgsPath, "utf8")).trim().split("\n").map(line => JSON.parse(line) as string[]);
+      expect(nativeSpawns).toHaveLength(1);
+      expect(nativeSpawns[0]).toContain(`--resume=${prior.nativeId}`);
+      expect(nativeSpawns[0]!.some(arg => arg.startsWith("--session-id"))).toBe(false);
+      expect(binding.conversation).toEqual({ ...newScope, kind: "conversation", nativeId: prior.nativeId });
+      reader = (async () => { for await (const observation of adapter.observations(binding)) {
+        observations.push(observation);
+        if (observation.type === "terminal") signals.observe("terminal", undefined);
+      } })();
+      await adapter.start({ binding, runId: "new-run", attemptId: "new-attempt", input: { text: "work" } });
+      await f.release("accepted"); await f.release("terminal"); await watchdog("resumed terminal", signals.wait("terminal"));
+      expect(observations.length).toBeGreaterThan(0);
+      const nativeReplies = f.harness.trace.filter(entry => entry.direction === "inbound" && (entry.frame as { session_id?: string }).session_id);
+      expect(nativeReplies).toHaveLength(2);
+      for (const reply of nativeReplies) expect(reply.frame).toMatchObject({ session_id: prior.nativeId });
+      for (const observation of observations) {
+        expect(observation.scope).toEqual(newScope);
+        expect(observation.origin.conversation).toEqual(binding.conversation);
+      }
+      expect(f.harness.trace.filter(entry => entry.direction === "outbound" && (entry.frame as { request?: { subtype?: string } }).request?.subtype === "initialize")).toHaveLength(1);
+      expect(f.harness.trace.filter(entry => entry.direction === "outbound" && (entry.frame as { type?: string }).type === "user")).toHaveLength(1);
+      if (process.env.FORGE_CLAUDE_REPLAY_EVIDENCE_DIR) {
+        const dir = process.env.FORGE_CLAUDE_REPLAY_EVIDENCE_DIR; await mkdir(dir, { recursive: true });
+        await writeFile(join(dir, "creator-resume.json"), JSON.stringify({ prior, binding, nativeSpawns, observations }, null, 2).replaceAll(resources.root, "<fixture>"));
+      }
+    } finally { await runtime?.terminate(); await reader; await f.close(); await resources.cleanup(); }
+  });
+  it("rejects busy adapter starts before and after native acceptance without queueing or implicit steering", async () => {
+    const f = await fixture("one-turn");
+    try {
+      const binding = await f.open();
+      const stale = { ...binding, scope: { ...binding.scope, generation: binding.scope.generation + 1 } };
+      await expect(start(f, stale)).rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "stale_scope", delivery: "not_dispatched" });
+      await start(f, binding);
+      const rejected = () => f.adapter.start({ binding, runId: "second-run", attemptId: "second-attempt", input: { text: "must not dispatch" } });
+      const expectBusy = async () => {
+        const error = await rejected().catch(error => error);
+        expect(error).toBeInstanceOf(ProviderDispatchRejectedError);
+        expect(error).toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "busy", delivery: "not_dispatched" });
+      };
+      await expectBusy();
+      await f.release("accepted"); await f.observed("accepted:");
+      await expectBusy();
+      await f.release("terminal"); await f.observed("terminal:root_attempt");
+      expect(f.observations.every(observation => observation.attemptId === "attempt")).toBe(true);
+      expect(f.runtimeOptions.callbacks.onSessionEvent.mock.calls.filter(([, event]) => event.type === "message_start" && event.message.role === "user")).toHaveLength(1);
+      expect(f.harness.trace.filter(entry => entry.direction === "outbound" && (entry.frame as { type?: string }).type === "user")).toHaveLength(1);
+      expect(f.onAgentEnd).toHaveBeenCalledOnce();
+      await f.adapter.close(binding);
+      await expect(rejected()).rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "closed", delivery: "not_dispatched" });
+    } finally { await f.close(); await f.cleanup(); }
+  });
   it("opens idempotently, declares capabilities and fences immutable turn updates before dispatch", async () => {
     const f = await fixture("idle");
     try {

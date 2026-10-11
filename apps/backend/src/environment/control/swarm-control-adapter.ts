@@ -11,7 +11,7 @@ import { createCoreAgentMessagePort } from "./orchestration/agent-message-port.j
 import { loadState } from "./orchestration/store.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, controlService, workspaceService, artifactService }: {
-  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "getAgentForInternalUse" | "listProfiles" | "releaseControlledWorker" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns"> & Pick<SwarmManager,"installCoreAgentMessagePort">;
+  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "getAgentForInternalUse" | "listProfiles" | "releaseControlledWorker" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner"> & Pick<SwarmManager,"installCoreAgentMessagePort">;
   database: Database;
   eventSink: EventSink;
   controlService: EnvironmentControlService;
@@ -21,13 +21,24 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
   if (eventSink.database !== database) throw new Error("Swarm adapter requires the shared environment database.");
   // Workspace effects run before session effects. This dependency intentionally grants no Git mutation here.
   void workspaceService;
+  swarmManager.installProviderScopeOwner({
+    prepare(descriptor) {
+      if (!loadState(database).threads[descriptor.agentId]) controlService.record({ type:"thread.create",commandId:`thread:${descriptor.agentId}`,now:Date.now(),threadId:descriptor.agentId,role:descriptor.role,projectId:descriptor.profileId ?? descriptor.managerId,managerId:descriptor.role === "worker" ? descriptor.managerId : undefined });
+      controlService.record({ type:"thread.prepare_binding",commandId:`prepare:${crypto.randomUUID()}`,now:Date.now(),threadId:descriptor.agentId,bindingId:crypto.randomUUID() });
+      const thread=loadState(database).threads[descriptor.agentId];
+      return { threadId:thread.threadId,bindingId:thread.bindingId!,generation:thread.generation };
+    },
+    conversation(agentId) { const state=loadState(database); return Object.values(state.bindings).filter(binding => binding.scope.threadId === agentId && binding.scope.bindingId !== state.threads[agentId]?.bindingId).sort((a,b)=>a.scope.generation-b.scope.generation).at(-1)?.conversation; },
+    canRestore(agentId) { return !Object.values(loadState(database).runs).some(run => run.threadId === agentId && run.state === "recovery"); },
+  });
   swarmManager.installAuthoritativeInputOwner(async (text, options) => {
     if (!options.targetAgentId) throw new Error("Input requires an authoritative thread");
     const descriptor = swarmManager.getAgentForInternalUse(options.targetAgentId);
     if (!descriptor) throw new Error("Input target is unavailable");
     const commandId = options.commandId ?? options.clientRequestId ?? `input:${crypto.randomUUID()}`;
     const rows = await artifactService.prepareInternalInput({ commandId,threadId:descriptor.agentId,projectId:descriptor.profileId ?? descriptor.agentId,attachments:options.attachments ?? [] });
-    await controlService.submitInput({ commandId, threadId: options.targetAgentId, message: { text, artifactIds: rows.map(row => row.artifactId) }, artifactRows:rows, source: options.sourceContext, delivery: options.delivery === "steer" ? "steer" : "queue" });
+    const { attachments: _attachments, controlledInput: _controlledInput, ...userOptions } = options;
+    await controlService.submitInput({ commandId, threadId: options.targetAgentId, message: { text, artifactIds: rows.map(row => row.artifactId) }, artifactRows:rows, userOptions, source: options.sourceContext, delivery: options.delivery === "steer" ? "steer" : "queue" });
   }, {
     getSnapshot: () => loadState(database).recovery,
     async decide(action) {
@@ -42,7 +53,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
     return { activeRunId:state.threads[agentId]?.activeRunId,pendingRunIds:Object.values(state.runs).filter(run => run.threadId === agentId && run.state === "queued").sort((a,b)=>a.sequence-b.sequence).map(run=>run.runId) };
   } });
   eventSink.subscribeCommit(() => swarmManager.reflectControlledTurns());
-  const messages = createCoreAgentMessagePort({ controlService,sink:eventSink,artifacts:artifactService,swarm:swarmManager,clock:Date.now,random:crypto.randomUUID });
+  const messages = createCoreAgentMessagePort({ controlService,sink:eventSink,artifacts:artifactService,swarm:swarmManager,clock:Date.now,random:()=>crypto.randomUUID() });
   swarmManager.installCoreAgentMessagePort(messages);
   return {
     resolveSession(agentId) {
@@ -60,13 +71,13 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
       const final=inputEntryId ? swarmManager.extractWorkerRunResult(threadId,runId,inputEntryId) : { resultText:`status: blocked\nsummary: Worker ${threadId} settled without a canonical input.\nfollow-up: Check the worker or retry the assignment.` };
       return final.entryId ? { entryId:final.entryId,resultText:final.resultText } : swarmManager.appendControlledBlockedResult(threadId,runId,final.resultText);
     },
-    acquireProvider: (scope, conversation) => swarmManager.acquireControlledProvider(scope, conversation),
+    acquireProvider: (scope, conversation, model) => swarmManager.acquireControlledProvider(scope, conversation, model),
     async applyInput(input) {
       const attachments = await artifactService.attachmentsForInput(input.inputId);
       const sourceKey = `input:${input.inputId}`;
       const locator = database.prepare("SELECT byte_offset FROM mirror_sources WHERE source_key=?").get(sourceKey) as { byte_offset: number } | undefined;
       return swarmManager.applyControlledInput(input.message.text, {
-        prepared:input.prepared, targetAgentId: input.sessionId, attachments, sourceContext: input.source, delivery: input.delivery, runId: input.runId,
+        ...input.userOptions, prepared:input.prepared, targetAgentId: input.sessionId, attachments, sourceContext: input.userOptions?.sourceContext ?? input.source, delivery: input.userOptions?.delivery ?? input.delivery, runId: input.runId,
         controlledInput: {
           inputId: input.inputId, commandId: input.commandId,
           contentHash: createHash("sha256").update(JSON.stringify({ text: input.message.text, artifactIds: [...input.message.artifactIds].sort() })).digest("hex"),

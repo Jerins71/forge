@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import type { ProviderCapabilities, ProviderObservation } from "@forge/protocol";
-import { assertProviderRequirements, ProviderRefreshRequiredError, UnsupportedProviderBehaviorError, type ProviderAdapter, type ProviderBinding, type ProviderOpenInput,
+import { assertProviderRequirements, ProviderRefreshRequiredError, ProviderDispatchRejectedError, UnsupportedProviderBehaviorError, type ProviderAdapter, type ProviderBinding, type ProviderOpenInput,
   type ProviderResumeInput, type ProviderStartInput, type ProviderSteerInput, type ProviderRespondInput, type ProviderDrainResult, type ToolHostBinding } from "../provider-contract.js";
 import { renderInstructionBundle } from "../instruction-bundle.js";
 import { ClaudeAgentRuntime, type ClaudeRuntimeOptions } from "./claude-agent-runtime.js";
@@ -67,13 +67,15 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
   async start(input: ProviderStartInput) {
     const runtime = this.assertBinding(input.binding); this.assertUpdates(input);
     this.session!.enableObservations();
-    await runtime.sendMessage(input.input, "auto", input.attemptId);
+    await runtime.dispatchProviderTurn(input.input, input.attemptId);
     // Streaming-input queue writes do not prove consumption. Echoes produce accepted observations.
     return { status: "unknown" as const };
   }
   async steer(input: ProviderSteerInput) {
-    this.assertTurn(input.binding, input.turn);
-    return this.start(input);
+    this.assertTurn(input.binding, input.turn); this.assertUpdates(input);
+    this.session!.enableObservations();
+    await this.assertBinding(input.binding).dispatchProviderTurn(input.input, input.attemptId, input.turn);
+    return { status: "unknown" as const };
   }
   async interrupt(input: Parameters<ProviderAdapter["interrupt"]>[0]): Promise<void> {
     this.assertTurn(input.binding, input.turn);
@@ -98,10 +100,15 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     return { status: "clean" };
   }
   /** Legacy creator receives the same runtime owner that exposes this adapter. */
-  async legacyRuntime(input: ProviderOpenInput): Promise<ClaudeAgentRuntime> { await this.open(input); return this.runtime!; }
+  async legacyRuntime(input: ProviderOpenInput): Promise<ClaudeAgentRuntime> {
+    const conversation = this.options.creationOptions?.providerConversation;
+    if (conversation) await this.resume({ ...input, conversation });
+    else await this.open(input);
+    return this.runtime!;
+  }
   private assertBinding(binding: ProviderBinding, allowClosed = false): ClaudeAgentRuntime {
-    if (!this.binding || !sameScope(this.binding.scope, binding.scope) || binding.conversation.nativeId !== this.binding.conversation.nativeId
-      || (this.runtime?.getProviderDrainStatus() !== "open" && !allowClosed)) throw new Error("Claude binding is closed or stale.");
+    if (!this.binding || !sameScope(this.binding.scope, binding.scope) || binding.conversation.nativeId !== this.binding.conversation.nativeId) throw new ProviderDispatchRejectedError("stale_scope");
+    if (this.runtime?.getProviderDrainStatus() !== "open" && !allowClosed) throw new ProviderDispatchRejectedError("closed");
     return this.runtime!;
   }
   private assertTurn(binding: ProviderBinding, turn: ProviderSteerInput["turn"]): void {

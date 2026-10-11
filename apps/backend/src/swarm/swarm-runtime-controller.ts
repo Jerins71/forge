@@ -117,6 +117,7 @@ export interface SwarmRuntimeControllerHost extends SwarmToolHost {
   };
   promptService: {
     buildCursorSdkRuntimeSystemPrompt(descriptor: AgentDescriptor, systemPrompt: string): Promise<string>;
+    buildCursorSdkRuntimeInstructionBundle(descriptor: AgentDescriptor, systemPrompt: import("@forge/protocol").InstructionBundle | string): Promise<import("@forge/protocol").InstructionBundle>;
   };
   secretsEnvService: {
     getCredentialPoolService(): CredentialPoolService;
@@ -266,7 +267,10 @@ export class SwarmRuntimeController {
   private readonly secureRuntimeBindingsByRuntime = new Map<string, SecureRuntimeBinding>();
   private readonly secureRuntimeBindingsByRuntimeObject =
     new WeakMap<SwarmAgentRuntime, SecureRuntimeBinding>();
-  private readonly providerCreationScope = new AsyncLocalStorage<ProviderScope>();
+  private providerScopeOwner?: { prepare(descriptor:AgentDescriptor):ProviderScope; conversation?(agentId:string):ProviderConversationRef|undefined; canRestore(agentId:string):boolean };
+  installProviderScopeOwner(owner:NonNullable<SwarmRuntimeController["providerScopeOwner"]>):void { this.providerScopeOwner=owner; }
+  canRestoreControlledRuntime(agentId:string):boolean { return this.providerScopeOwner?.canRestore(agentId) ?? true; }
+  private readonly providerCreationScope = new AsyncLocalStorage<{scope:ProviderScope;conversation?:ProviderConversationRef}>();
   private readonly preparedProviderInputs = new Map<SwarmAgentRuntime, {
     runtimeToken: number;
     generation?: number;
@@ -325,6 +329,7 @@ export class SwarmRuntimeController {
       getSwarmContextFiles: async (cwd) => this.host.getSwarmContextFiles(cwd),
       resolveProjectExecutableTrustPlan: async (options) =>
         this.host.resolveProjectExecutableTrustPlanForRuntime(options),
+      buildCursorSdkRuntimeInstructionBundle: (descriptor, systemPrompt) => this.host.promptService.buildCursorSdkRuntimeInstructionBundle(descriptor, systemPrompt),
       buildCursorSdkRuntimeSystemPrompt: async (descriptor, systemPrompt) =>
         this.host.promptService.buildCursorSdkRuntimeSystemPrompt(descriptor, systemPrompt),
       mergeRuntimeContextFiles: (baseAgentsFiles, options) =>
@@ -379,13 +384,14 @@ export class SwarmRuntimeController {
   }
 
   /** Executor-only acquisition. Native creators supply their exact final prompt/tool host. */
-  async acquireProvider(scope: ProviderScope, create: () => Promise<SwarmAgentRuntime>, conversation?: ProviderConversationRef): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }> {
-    let runtime = await this.providerCreationScope.run(scope, create);
+  async acquireProvider(scope: ProviderScope, create: () => Promise<SwarmAgentRuntime>, conversation?: ProviderConversationRef, model?: Pick<AgentModelDescriptor,"provider"|"modelId">): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }> {
+    let runtime = await this.providerCreationScope.run({scope,conversation}, create);
     const replace = async () => {
       const result = await this.runRuntimeShutdown(runtime.descriptor, "terminate", { abort:true });
       if (result.status !== "clean") throw new Error("Provider replacement requires confirmed writer shutdown");
-      runtime = await this.providerCreationScope.run(scope, create);
+      runtime = await this.providerCreationScope.run({scope,conversation}, create);
     };
+    if (model && (runtime.descriptor.model.provider !== model.provider || runtime.descriptor.model.modelId !== model.modelId)) await replace();
     if (this.preparedProviderInputs.get(runtime)?.generation !== undefined && this.preparedProviderInputs.get(runtime)?.generation !== scope.generation) await replace();
     const open = async () => {
       const adapter = runtime.providerAdapter;
@@ -514,7 +520,8 @@ export class SwarmRuntimeController {
       const creationOptions: RuntimeCreationOptions = {
         ...options,
         ...(secureRuntimeBinding ? { secureRuntimeBinding } : {}),
-        ...(this.providerCreationScope.getStore() ? { providerScope: this.providerCreationScope.getStore() } : {}),
+        providerScope:this.providerCreationScope.getStore()?.scope ?? this.providerScopeOwner?.prepare(descriptor) ?? options?.providerScope,
+        providerConversation:this.providerCreationScope.getStore()?.conversation ?? this.providerScopeOwner?.conversation?.(descriptor.agentId) ?? options?.providerConversation,
         onProviderPrepared: input => { prepared = input; options?.onProviderPrepared?.(input); },
       };
       const runtime = await this.runtimeFactory.createRuntimeForDescriptor(
@@ -523,7 +530,7 @@ export class SwarmRuntimeController {
         runtimeToken,
         creationOptions,
       );
-      if (prepared) this.preparedProviderInputs.set(runtime, { runtimeToken, prepared });
+      if (prepared) this.preparedProviderInputs.set(runtime, { runtimeToken, prepared,generation:creationOptions.providerScope?.generation });
       if (secureRuntimeBinding) {
         this.secureRuntimeBindingsByRuntimeObject.set(
           runtime,

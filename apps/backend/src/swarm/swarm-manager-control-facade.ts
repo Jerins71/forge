@@ -34,10 +34,12 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
     return this.getFacadeServices().userMessages.applyControlledInput(text, options);
   }
 
-  acquireControlledProvider(scope: ProviderScope, conversation?: ProviderConversationRef) {
+  acquireControlledProvider(scope: ProviderScope, conversation?: ProviderConversationRef, model?: Pick<import("./types.js").AgentModelDescriptor,"provider"|"modelId">) {
     const services = this.getFacadeServices();
-    return services.runtime.controller.acquireProvider(scope, () => services.userMessages.acquireRuntime(scope.threadId), conversation);
+    return services.runtime.controller.acquireProvider(scope, () => services.userMessages.acquireRuntime(scope.threadId, model), conversation, model);
   }
+
+  installProviderScopeOwner(owner:Parameters<import("./swarm-runtime-controller.js").SwarmRuntimeController["installProviderScopeOwner"]>[0]):void { this.getFacadeServices().runtime.controller.installProviderScopeOwner(owner); }
 
   installAuthoritativeInputOwner(submit: Parameters<UserMessageCoordinator["installInputOwner"]>[0], recovery: import("./restart-recovery-coordinator.js").CoreRecoveryPort): void {
     this.getFacadeServices().userMessages.installInputOwner(submit);

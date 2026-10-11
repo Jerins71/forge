@@ -329,9 +329,7 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
 
   extractWorkerRunResult(workerAgentId: string, workerRunId: string, inputEntryId: string): { entryId?: string; resultText: string } { return this.services.messages.extractWorkerRunResult(workerAgentId, workerRunId, inputEntryId); }
 
-  clearSessionConversation(
-    agentId: string,
-  ): ReturnType<SessionLifecycleCoordinator["clearSessionConversation"]> {
+  clearSessionConversation(agentId: string): ReturnType<SessionLifecycleCoordinator["clearSessionConversation"]> {
     return this.services.interactions.clearWorkerAssignments(agentId).then(() => this.services.sessions.clearSessionConversation(agentId));
   }
 

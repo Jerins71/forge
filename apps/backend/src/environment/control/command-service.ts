@@ -131,7 +131,9 @@ export function canonicalRequest(method: string, input: unknown): { normalized: 
 export interface InternalInput {
   commandId: string; threadId: string; message: Run["input"]; source?: Run["source"]; delivery?: Run["delivery"];
   thread?: { role: "manager" | "worker"; projectId: string; managerId?: string; model?: import("../../swarm/types.js").AgentDescriptor["model"] };
-  prepared?: { runtimeMessage: Omit<import("../../swarm/runtime-contracts.js").RuntimeUserMessage, "attachments">;
+  /** Public input metadata; attachment bytes remain in the pinned artifact files. */
+  userOptions?: Omit<import("../../swarm/user-message-coordinator.js").HandleUserMessageOptions, "controlledInput" | "attachments">;
+  prepared?: { runtimeMessage: Pick<import("../../swarm/runtime-contracts.js").RuntimeUserMessage, "text">;
     presentation: import("../../swarm/turn-context-coordinator.js").InboundTurnContextInput; requiresSecureRuntime?: boolean; parentContext?: import("../../swarm/core-agent-message-port.js").CoreAgentMessagePort extends { submit(input:infer I):unknown } ? I extends { parentContext?: infer P } ? P : never : never };
   artifactRows?: readonly import("./effect-types.js").InputArtifact[];
   assignment?: { assignmentId: string; parentThreadId: string; parentRunId: string;
@@ -145,7 +147,7 @@ export interface EnvironmentControlService extends ControlService {
 
   record(command: CoreCommand): void;
 }
-export function createCommandService(sink: EventSink, options: ControlCoreOptions): EnvironmentControlService {
+export function createCommandService(sink: EventSink, options: ControlCoreOptions, drainEffects: () => Promise<void>): EnvironmentControlService {
   const database = sink.database;
   const launches = new Map<string, Promise<unknown>>();
   let closed = false;
@@ -155,14 +157,25 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     const summary=JSON.parse(session.summary_json);
     sink.commitCommand(tx, { type: "thread.create", model:summary.model ? {provider:summary.model.provider,modelId:summary.model.modelId,thinkingLevel:summary.model.thinkingLevel}:undefined, commandId: `thread:${sessionId}`, now: options.clock(), threadId: sessionId, projectId: session.project_id, role: "manager" });
   };
+  const stopThread = (tx: ControlTransaction, sessionId: string, commandId: string) => {
+    ensureThread(tx, sessionId);
+    const session = database.prepare("SELECT launch_command_id,descriptor_json FROM control_sessions WHERE session_id=?").get(sessionId) as { launch_command_id: string | null; descriptor_json: string | null } | undefined;
+    const writerPending = !session?.launch_command_id || !!session.descriptor_json || !!database.prepare("SELECT 1 FROM effects WHERE session_id=? AND kind IN ('session.ensure','runtime.acquire','transcript.append') AND attempt>0").get(sessionId);
+    sink.commitCommand(tx, { type: "thread.stop", commandId, now: options.clock(), threadId: sessionId, writerPending });
+    const pending = database.prepare("SELECT DISTINCT command_id FROM effects WHERE session_id=? AND state='pending' AND kind!='provider.release' AND command_id!=?").all(sessionId, commandId) as { command_id: string }[];
+    for (const command of pending) {
+      const error = { code: "CONFLICT" as const, message: "Superseded by session lifecycle change", retryable: false };
+      if (database.prepare("SELECT 1 FROM command_receipts WHERE command_id=?").get(command.command_id)) cancelCommand(sink, tx, command.command_id, error, options.clock);
+      else database.prepare("UPDATE effects SET state='cancelled' WHERE command_id=? AND state='pending' AND kind!='provider.release'").run(command.command_id);
+    }
+  };
   const lifecycleOperations = new Map<string, Promise<unknown>>();
   // These callbacks have no replayable effect. A lost process may have completed
   // a clear/fork; retain the interrupted claim rather than repeat destructive work.
   sink.transaction(tx => {
     const abandoned = database.prepare("SELECT session_id,payload_json FROM effects WHERE kind='lifecycle.admit' AND state='claimed'").all() as { session_id: string; payload_json: string }[];
     for (const row of abandoned) if (JSON.parse(row.payload_json).intent === "resume" && database.prepare("SELECT 1 FROM control_sessions WHERE session_id=? AND deleted=0").get(row.session_id)) {
-      database.prepare("UPDATE control_sessions SET desired_state='stopped',run_generation=run_generation+1 WHERE session_id=?").run(row.session_id);
-      setSessionStatus(sink, tx, row.session_id, "stopping", options.clock);
+      stopThread(tx, row.session_id, `abandoned-resume:${row.session_id}`);
     }
     const interrupted = database.prepare("SELECT DISTINCT e.command_id,c.method FROM effects e JOIN commands c USING(command_id) WHERE e.kind='lifecycle.admit' AND e.state='claimed'").all() as { command_id: string; method: string }[];
     for (const command of interrupted) {
@@ -240,24 +253,23 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       }
       const lanes = [...sessionIds, ...projectIds.map(id => "project:" + id)];
       for (const [ordinal, lane] of (lanes.length ? lanes : [""]).entries()) {
+        database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,'lifecycle.admit',?,?,'claimed')")
+          .run(input.commandId + ":" + ordinal, input.commandId, lane, ordinal, JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, ambiguousDelivery: input.ambiguousDelivery, ...(ordinal === 0 && input.frozenRequest !== undefined ? { frozenRequest: input.frozenRequest } : {}) }));
+      }
+      for (const lane of lanes) {
         const sessionId = sessionIds.includes(lane) ? lane : "";
         if (sessionId && input.intent === "stop") {
-          database.prepare("UPDATE control_sessions SET desired_state='stopped',run_generation=run_generation+1 WHERE session_id=?").run(sessionId);
-          const pending = database.prepare("SELECT DISTINCT command_id FROM effects WHERE session_id=? AND state='pending'").all(sessionId) as { command_id: string }[];
-          for (const command of pending) cancelCommand(sink, tx, command.command_id, { code: "CONFLICT", message: "Superseded by session lifecycle change", retryable: false }, options.clock);
-          setSessionStatus(sink, tx, sessionId, "stopping", options.clock);
+          stopThread(tx, sessionId, input.commandId);
         }
         if (sessionId && input.intent === "resume") {
           const session = readSession(sink, sessionId);
           if (JSON.parse(session.summary_json).archived) throw new ControlError("CONFLICT", "Archived sessions must be restored before resuming");
           if (session.desired_state === "stopped") {
             if (JSON.parse(session.summary_json).status !== "stopped") throw new ControlError("CONFLICT", "Session shutdown is incomplete", true);
-            database.prepare("UPDATE control_sessions SET desired_state='running',run_generation=run_generation+1 WHERE session_id=?").run(sessionId);
-            setSessionStatus(sink, tx, sessionId, "idle", options.clock);
+            ensureThread(tx, sessionId);
+            sink.commitCommand(tx, { type: "thread.resume", commandId: input.commandId, now: options.clock(), threadId: sessionId });
           }
         }
-        database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,'lifecycle.admit',?,?,'claimed')")
-          .run(input.commandId + ":" + ordinal, input.commandId, lane, ordinal, JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, ambiguousDelivery: input.ambiguousDelivery, ...(ordinal === 0 && input.frozenRequest !== undefined ? { frozenRequest: input.frozenRequest } : {}) }));
       }
     });
     const work = (async () => {
@@ -268,11 +280,16 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           await new Promise(resolve => setTimeout(resolve, 10));
         }
         if (options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Device session was revoked");
+        if (input.intent === "stop") {
+          await drainEffects();
+          if (sessionIds.some(sessionId => loadState(database).threads[sessionId]?.shutdown !== "clean"))
+            throw new ControlError("UNAVAILABLE", "Session writer shutdown remains quarantined", false);
+        }
         const result = await operation();
         const payload = JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, result, ...(input.frozenRequest !== undefined ? { frozenRequest: input.frozenRequest } : {}) });
         if (Buffer.byteLength(payload) > 512 * 1024) throw new ControlError("PAYLOAD_TOO_LARGE", "Lifecycle result exceeds budget");
         sink.transaction(tx => {
-          database.prepare("UPDATE effects SET state='done' WHERE command_id=?").run(input.commandId);
+          database.prepare("UPDATE effects SET state='done' WHERE command_id=? AND kind='lifecycle.admit'").run(input.commandId);
           database.prepare("UPDATE effects SET payload_json=? WHERE command_id=? AND ordinal=0").run(payload, input.commandId);
           if (input.receipt) sink.updateReceipt(tx, input.commandId, { state: "succeeded", result: result as CommandReceipt["result"] });
           if (input.intent === "stop") for (const sessionId of sessionIds) {
@@ -282,12 +299,11 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         return JSON.parse(payload).result as T;
       } catch (error) {
         sink.transaction(tx => {
-          database.prepare("UPDATE effects SET state='interrupted' WHERE command_id=?").run(input.commandId);
+          database.prepare("UPDATE effects SET state='interrupted' WHERE command_id=? AND kind='lifecycle.admit'").run(input.commandId);
           if (input.receipt) sink.updateReceipt(tx, input.commandId, { state: "interrupted", ...(input.ambiguousDelivery ? { delivery: "unknown" as const } : {}), error: { code: "CONFLICT", message: "Policy command interrupted; inspect the resulting configuration before issuing a fresh request", retryable: false } });
           if (input.intent === "resume") for (const sessionId of sessionIds) {
             if (!database.prepare("SELECT 1 FROM control_sessions WHERE session_id=? AND deleted=0").get(sessionId)) continue;
-            database.prepare("UPDATE control_sessions SET desired_state='stopped',run_generation=run_generation+1 WHERE session_id=?").run(sessionId);
-            setSessionStatus(sink, tx, sessionId, "stopping", options.clock);
+            stopThread(tx, sessionId, `${input.commandId}:failed-resume`);
           }
         });
         if (!input.receiptReplay) throw error;
@@ -423,9 +439,6 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           // Only safely stopped sessions can re-enter the existing recovery/admission barrier.
           if (JSON.parse(session!.summary_json).status !== "stopped") throw new ControlError("CONFLICT", "Session is not safely stopped");
           runGeneration++;
-          database
-            .prepare("UPDATE control_sessions SET desired_state = 'running', run_generation = ? WHERE session_id = ?")
-            .run(runGeneration, sessionId);
         }
       } else if (method === "session.choose") {
         const choose = input as RpcInput<"session.choose">;
@@ -452,8 +465,6 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           runtimeGeneration: choice.runtime_generation,
           answers: choose.answers,
         });
-      } else if (target?.workerId) {
-        effects.push({ kind: "session.stop", targetAgentId: target.workerId });
       }
       const inputId = message ? "input-" + commandId : null;
       if (message && inputId) {
@@ -500,10 +511,14 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         const send = method === "session.send" ? input as RpcInput<"session.send"> : undefined;
         sink.commitCommand(tx, { type: "run.submit", commandId, now, threadId: sessionId, inputId, runId: `run-${commandId}`, attemptId: options.random(), bindingId: options.random(), input: message,
           source: send?.source, delivery: send?.delivery === "followUp" ? "queue" : "steer" });
-      } else if ((method === "session.stop" || method === "worker.kill") && !target?.workerId) {
-        sink.commitCommand(tx, { type: "thread.stop", commandId, now, threadId: sessionId });
+      } else if (method === "session.stop" || method === "worker.kill") {
+        if (target?.workerId) {
+          if (!loadState(database).threads[target.workerId]) sink.commitCommand(tx, { type: "thread.create", commandId: `thread:${target.workerId}`, now, threadId: target.workerId, role: "worker", projectId: session!.project_id, managerId: sessionId });
+          sink.commitCommand(tx, { type: "thread.prepare_binding", commandId, now, threadId: target.workerId, bindingId: options.random() });
+          sink.commitCommand(tx, { type: "worker.stop", commandId, now, threadId: target.workerId, managerId: sessionId, authorized: true });
+        } else stopThread(tx, sessionId, commandId);
       }
-      const receipt = sink.updateReceipt(tx, commandId, {});
+      const receipt = sink.updateReceipt(tx, commandId, !inputId && effects.length === 0 && !database.prepare("SELECT 1 FROM effects WHERE command_id=? AND state IN ('pending','claimed')").get(commandId) ? { state: "succeeded" } : {});
       if (inputId)
         database.prepare("UPDATE control_inputs SET updated_sequence = ? WHERE input_id = ?").run(receipt.updatedSequence, inputId);
       return receipt;
@@ -538,10 +553,9 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         if (owner.desired === "stopped") sink.commitCommand(tx, { type:"thread.resume", commandId:input.commandId, now:options.clock(), threadId:input.threadId });
         if (input.assignment) sink.commitCommand(tx, { type:"worker.assign", ...base, ...input.assignment, workerThreadId:input.threadId, workerRunId:runId, authorized:true });
         else sink.commitCommand(tx, { type:"run.submit", ...base, threadId:input.threadId, runId, source:input.source, delivery:input.delivery ?? "queue" });
-        if (input.prepared) {
-          database.prepare("INSERT INTO orchestration_run_inputs (run_id,prepared_json) VALUES (?,?)").run(runId,JSON.stringify(input.prepared));
-          tx.afterCommit(() => options.swarm.enqueuePresentation?.(input.threadId,runId,input.prepared!.presentation));
-        }
+        if (input.prepared || input.userOptions)
+          database.prepare("INSERT INTO orchestration_run_inputs (run_id,prepared_json) VALUES (?,?)").run(runId,JSON.stringify({ ...input.prepared, ...(input.userOptions ? { userOptions: input.userOptions } : {}) }));
+        if (input.prepared) tx.afterCommit(() => options.swarm.enqueuePresentation?.(input.threadId,runId,input.prepared!.presentation));
         options.artifacts.pinInput(inputId, input.artifactRows ?? input.message.artifactIds.map(artifactId => ({ artifactId })));
         return { runId, receipt: readReceipt(sink,input.commandId) };
       });

@@ -40,7 +40,7 @@ export async function createControlCore(options: ControlCoreOptions & { dataDir?
     database.pragma("busy_timeout = 5000");
     await prepareControlDatabase(database, { environmentId: options.random(), streamEpoch: options.random() });
     const eventSink = createEventSink(database, options.clock, options.random);
-    const controlService = createCommandService(eventSink, options);
+    const controlService = createCommandService(eventSink, options, () => effectWorker.drain());
     const effectWorker = createEffectWorker(eventSink, options);
     let closed = false;
     return {

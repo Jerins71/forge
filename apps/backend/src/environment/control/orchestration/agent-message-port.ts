@@ -22,11 +22,13 @@ export function createCoreAgentMessagePort({ controlService,sink,artifacts,swarm
       const commandId = input.call ? `tool:${input.call.agentId}:${sender?.generation ?? 0}:${attemptId}:${input.call.toolCallId}:${input.target.agentId}` : `agent:${random()}`;
       const message = typeof input.message === "string" ? { text:input.message } : input.message;
       const runtimeMessage = { text:message.text };
-      const artifactsRows = await artifacts.prepareInternalInput({ commandId,threadId:input.target.agentId,projectId:input.target.profileId ?? input.sender.profileId ?? input.sender.agentId,attachments:input.attachments });
+      const attachments = [...input.attachments, ...("images" in message ? message.images ?? [] : []).filter(image => !input.attachments.some(attachment => attachment.type === "image" && attachment.mimeType === image.mimeType && attachment.data === image.data)).map(image => ({ ...image, type: "image" as const }))];
+      const artifactsRows = await artifacts.prepareInternalInput({ commandId,threadId:input.target.agentId,projectId:input.target.profileId ?? input.sender.profileId ?? input.sender.agentId,attachments });
       const previous = findWorkerAssignment(loadState(sink.database),input.target.agentId);
-      const assignment = input.sender.role === "manager" && input.target.role === "worker" && !previous?.state.match(/^(assigned|running)$/)
+      const original = sink.database.prepare("SELECT normalized_json FROM commands WHERE command_id=?").get(commandId) as { normalized_json:string } | undefined;
+      const assignment = original ? JSON.parse(original.normalized_json).assignment : input.sender.role === "manager" && input.target.role === "worker" && !previous?.state.match(/^(assigned|running)$/)
         ? { parentContext:input.parentContext,assignmentId:`assignment:${commandId}`,parentThreadId:input.sender.agentId,parentRunId:sender?.activeRunId ?? "",
-          selection:{ provider:input.target.model.provider,modelId:input.target.model.modelId },
+          selection:input.selection ?? { provider:input.target.model.provider,modelId:input.target.model.modelId },
           planStep:input.planAssignment ? { planId:input.planAssignment.planRunId,stepId:input.planAssignment.stepKey } : undefined }
         : undefined;
       const accepted = await controlService.submitInput({ commandId,threadId:input.target.agentId,

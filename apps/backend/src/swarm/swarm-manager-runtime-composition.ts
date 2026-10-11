@@ -859,7 +859,7 @@ export class SwarmManagerRuntimeComposition {
       secureSessions: this.options.secureSessions,
       runtimes: {
         sortedDescriptors: () => services.directory.sortedDescriptors(),
-        shouldRestore: (descriptor) => lifecycle.shouldRestoreRuntimeForDescriptor(descriptor),
+        shouldRestore: (descriptor) => this.runtimeController.canRestoreControlledRuntime(descriptor.agentId) && lifecycle.shouldRestoreRuntimeForDescriptor(descriptor),
         restore: async (descriptor) => {
           await runtimeResources.getOrCreateRuntimeForDescriptor(descriptor);
         },

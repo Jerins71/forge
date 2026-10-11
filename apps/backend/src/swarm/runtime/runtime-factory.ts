@@ -23,7 +23,7 @@ import type {
 import type { CompactionRuntimeSettingsProvider } from "../compaction-runtime-settings-provider.js";
 import { assertForgeRuntimeEligibleDescriptor } from "../external-thread-compatibility.js";
 import { assertSwarmModelIdNotRetired } from "../catalog/model-presets.js";
-import { assertProviderRequirements, getRuntimeProviderCapabilities } from "./provider-contract.js";
+import { assertProviderRequirements } from "./provider-contract.js";
 import { createInstructionBundle, renderInstructionBundle } from "./instruction-bundle.js";
 import { PiRuntimeCreator } from "./pi/pi-runtime-creator.js";
 import { CursorSdkRuntimeCreator } from "./cursor-sdk/cursor-sdk-runtime-creator.js";
@@ -58,6 +58,7 @@ interface RuntimeFactoryDependencies {
     descriptor: AgentDescriptor;
     sessionDescriptor?: AgentDescriptor;
   }) => Promise<ProjectExecutableTrustPlan>;
+  buildCursorSdkRuntimeInstructionBundle?: (descriptor: AgentDescriptor, systemPrompt: InstructionBundle | string) => Promise<InstructionBundle>;
   buildCursorSdkRuntimeSystemPrompt: (descriptor: AgentDescriptor, systemPrompt: string) => Promise<string>;
   mergeRuntimeContextFiles: (
     baseAgentsFiles: Array<{ path: string; content: string }>,
@@ -101,7 +102,16 @@ export class RuntimeFactory {
     this.piRuntimeCreator = new PiRuntimeCreator(deps);
   }
 
-  async createRuntimeForDescriptor(
+  async createRuntimeForDescriptor(descriptor: AgentDescriptor, instructions: InstructionBundle | string, runtimeToken = 0, options?: RuntimeCreationOptions): Promise<SwarmAgentRuntime> {
+    const runtime = await this.create(descriptor, instructions, runtimeToken, options);
+    try {
+      if (!runtime.providerAdapter) throw new Error("Runtime has no provider adapter");
+      assertProviderRequirements(runtime.providerAdapter.capabilities(), { ...options?.providerRequirements, ...(options?.secureRuntimeRequired || options?.secureRuntimeBinding ? { secureSessions:true } : {}) });
+      return runtime;
+    } catch (error) { await runtime.terminate({ abort:true }); throw error; }
+  }
+
+  private async create(
     descriptor: AgentDescriptor,
     instructions: InstructionBundle | string,
     runtimeToken = 0,
@@ -113,12 +123,6 @@ export class RuntimeFactory {
       descriptor.model.modelId,
       "runtime model",
     );
-    const runtimeType = descriptor.model.provider === "codex-native" ? "codex"
-      : descriptor.model.provider === "claude-native" ? "claude"
-      : isCursorSdkModelDescriptor(descriptor.model) ? "cursor-sdk" : "pi";
-    assertProviderRequirements(getRuntimeProviderCapabilities(runtimeType), {
-      ...options?.providerRequirements, ...(options?.secureRuntimeRequired ? { secureSessions: true } : {}),
-    });
     const instructionBundle = typeof instructions === "string"
       ? options?.instructionBundle ?? createInstructionBundle(descriptor, instructions)
       : instructions;
@@ -144,9 +148,6 @@ export class RuntimeFactory {
     }
 
     if (isCursorSdkModelDescriptor(descriptor.model)) {
-      if (secureRuntimeBinding) {
-        assertProviderRequirements(getRuntimeProviderCapabilities(runtimeType), { secureSessions: true });
-      }
       return this.cursorSdkRuntimeCreator.createRuntimeForDescriptor({
         descriptor,
         systemPrompt,

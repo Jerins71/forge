@@ -3,7 +3,7 @@ import type { ProviderAdapter, ProviderBinding } from "../../swarm/runtime/provi
 import type { RuntimeUserMessage } from "../../swarm/runtime-contracts.js";
 import type { ControlCoreOptions, ControlEffect, EffectRow } from "./effect-types.js";
 import type { EventSink } from "./event-sink.js";
-import { cancelCommand, readReceipt, setSessionStatus } from "./command-service.js";
+import { cancelCommand, readReceipt } from "./command-service.js";
 import { loadState, rebuildLifecycleProjections } from "./orchestration/store.js";
 import { isLineageTransfer, planTransferResolution, entryIdentity, resolveSourcePoint, handoffSourcePoints } from "./orchestration/transfers.js";
 import { materializeHandoff, readHandoff } from "./orchestration/handoff-materializer.js";
@@ -153,7 +153,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     const state = loadState(database); const attempt = state.attempts[run.activeAttemptId];
     const row = database.prepare("SELECT prepared_json FROM orchestration_run_inputs WHERE run_id=?").get(run.runId) as { prepared_json:string } | undefined;
     const context = row ? JSON.parse(row.prepared_json) : undefined;
-    const value = await options.swarm.applyInput({ prepared:context, commandId: run.commandId, inputId: run.inputId, sessionId: run.threadId, runGeneration: attempt.generation, message: run.input, source: run.source, delivery: run.delivery === "queue" ? "followUp" : "steer", runId: run.runId });
+    const value = await options.swarm.applyInput({ prepared:context?.runtimeMessage ? context : undefined, userOptions:context?.userOptions, commandId: run.commandId, inputId: run.inputId, sessionId: run.threadId, runGeneration: attempt.generation, message: run.input, source: run.source, delivery: run.delivery === "queue" ? "followUp" : "steer", runId: run.runId });
     prepared.set(run.runId, value.runtimeMessage);
     record({ type: "input.recorded", commandId: `recorded:${run.inputId}`, now: options.clock(), threadId: run.threadId, inputId: run.inputId, entryId: value.entryId });
     return value.runtimeMessage;
@@ -164,11 +164,11 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         LEFT JOIN command_receipts r USING(command_id)
         WHERE e.state='pending' AND e.not_before<=? AND e.kind!='lifecycle.admit'
         AND (e.depends_on IS NULL OR EXISTS(SELECT 1 FROM effects d WHERE d.effect_id=e.depends_on AND d.state='done'))
-        AND NOT EXISTS(SELECT 1 FROM effects a WHERE a.session_id=e.session_id AND a.state='claimed')
+        AND NOT EXISTS(SELECT 1 FROM effects a WHERE a.session_id=e.session_id AND a.state='claimed' AND a.kind!='lifecycle.admit')
         ORDER BY COALESCE(r.accepted_sequence,c.created_at),e.ordinal,e.effect_id LIMIT 1`).get(options.clock()) as EffectRow | undefined;
       if (!row) return;
       const effect: ControlEffect = JSON.parse(row.payload_json);
-      if (!["provider.release", "session.stop", "provider.interrupt"].includes(effect.kind) && !authorized(row.command_id)) {
+      if (!["provider.release", "provider.interrupt"].includes(effect.kind) && !authorized(row.command_id)) {
         if (hasReceipt(row.command_id)) cancelCommand(sink, tx, row.command_id, { code: "FORBIDDEN", message: "Device revoked before effect execution", retryable: false }, options.clock);
         else database.prepare("UPDATE effects SET state='cancelled' WHERE effect_id=?").run(row.effect_id);
         continue;
@@ -266,16 +266,13 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           const choice = database.prepare("SELECT state,runtime_generation FROM control_choices WHERE choice_id=?").get(effect.choiceId) as { state: string; runtime_generation: string } | undefined;
           if (!authorized(row.command_id) || choice?.state !== "pending" || choice.runtime_generation !== effect.runtimeGeneration || await options.swarm.applyChoice({ commandId: row.command_id, sessionId: row.session_id, ...effect }) !== "answered") { settle(row, "interrupted", unavailable); return; } break;
         }
-        case "session.stop": {
-          if (!(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.targetAgentId ?? row.session_id })).stopped) throw new Error("Session shutdown remains quarantined");
-          if (!effect.targetAgentId) sink.transaction(tx => setSessionStatus(sink, tx, row.session_id, "stopped", options.clock)); break;
-        }
       }
       settle(row, "done");
     } catch (error) {
       // Only a provider's explicit proof permits fallback. Error wording is never delivery evidence.
       const provedNotDispatched=(error as {delivery?:string}).delivery === "not_dispatched";
-      if(provedNotDispatched) attemptedNative=false;
+      if(provedNotDispatched || error && typeof error === "object" && "code" in error && error.code === "PROVIDER_DISPATCH_REJECTED") attemptedNative=false;
+      const failure={...unavailable,message:error instanceof Error ? error.message:String(error)};
       const attemptId = "attemptId" in effect ? effect.attemptId : effect.kind === "runtime.acquire" || effect.kind === "transcript.append" ? Object.values(loadState(database).attempts).find(a => a.threadId === row.session_id && a.state !== "terminal")?.attemptId : undefined;
       if (effect.kind === "provider.compact") record({ type: "compaction.completed", ...result(row, "failed"), threadId: effect.threadId, attemptId: effect.attemptId, succeeded: false });
       else if (effect.kind.startsWith("provider.") || effect.kind === "runtime.acquire" || effect.kind === "transcript.append") record({ type: "effect.failed", ...result(row, "failed"), threadId: row.session_id, attemptId, kind: effect.kind as CoreEffect["kind"], delivery: attemptedNative ? "unknown" : "not_dispatched" });
@@ -286,12 +283,13 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
             const model=await options.swarm.selectProviderFallback(effect.threadId,state.threads[effect.threadId].model);
             if(model) {
               const entries=await options.swarm.readTransferEntries(effect.threadId);
-              record({type:"transfer.fallback",...result(row,"fallback"),threadId:effect.threadId,failedAttemptId:attemptId,attemptId:options.random(),bindingId:options.random(),transferId:`fallback:${attemptId}`,targetModel:model,source:resolveSourcePoint(loadState(database),effect.threadId,{kind:"run",runId:run.runId},entries),reason:"Primary provider failed before dispatch; selected configured specialist fallback"});
+              record({type:"transfer.fallback",...result(row,"fallback"),threadId:effect.threadId,failedAttemptId:attemptId,attemptId:options.random(),bindingId:options.random(),transferId:`fallback:${attemptId}`,targetModel:model,source:resolveSourcePoint(loadState(database),effect.threadId,{kind:"run",runId:run.runId},entries),reason:`Primary provider failed before dispatch: ${failure.message.slice(0,3000)}; selected configured specialist fallback`});
             }
           } catch { /* Failed fallback selection remains an explicit terminal failure. */ }
         }
       }
-      settle(row, attemptedNative ? "interrupted" : "failed", unavailable);
+      settle(row, attemptedNative ? "interrupted" : "failed", failure);
+      if(hasReceipt(row.command_id)) sink.transaction(tx=>sink.updateReceipt(tx,row.command_id,{error:failure}));
     }
   };
   const kick = () => { if (started && !stopped) queueMicrotask(() => { void worker.drain().catch(() => { started = false; }); }); };
@@ -319,7 +317,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       record({ type: "environment.recover", commandId: `boot:${bootId}`, now: options.clock(), bootId, recoveryId: options.random(), reports });
       for (const row of database.prepare("SELECT * FROM effects WHERE state='claimed' AND kind!='lifecycle.admit'").all() as EffectRow[]) {
         const effect: ControlEffect = JSON.parse(row.payload_json);
-        const safe = ["runtime.acquire", "transcript.append", "session.ensure", "session.stop", "provider.release"].includes(effect.kind);
+        const safe = ["runtime.acquire", "transcript.append", "session.ensure", "provider.release"].includes(effect.kind);
         if (effect.kind === "workspace.ensure") {
           const value = await options.workspace.reconcile(row.command_id).catch(() => "interrupted" as const);
           sink.transaction(() => database.prepare("UPDATE effects SET state=?,claimed_boot_id=NULL WHERE effect_id=?").run(value === "ready" ? "done" : value === "retry" ? "pending" : "interrupted", row.effect_id));

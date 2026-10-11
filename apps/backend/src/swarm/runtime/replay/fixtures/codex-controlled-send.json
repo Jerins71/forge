@@ -97,40 +97,6 @@
     },
     {
       "type": "expect_outbound",
-      "frame": {
-        "id": "$any",
-        "method": "thread/inject_items",
-        "params": {
-          "threadId": "$threadId",
-          "items": [
-            {
-              "type": "message",
-              "role": "user",
-              "content": [
-                {
-                  "type": "input_text",
-                  "text": "$any"
-                }
-              ]
-            }
-          ]
-        }
-      },
-      "capture": {
-        "$rpcId": [
-          "id"
-        ]
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "frame": {
-        "id": "$rpcId",
-        "result": {}
-      }
-    },
-    {
-      "type": "expect_outbound",
       "label": "provider-start",
       "frame": {
         "id": "$any",

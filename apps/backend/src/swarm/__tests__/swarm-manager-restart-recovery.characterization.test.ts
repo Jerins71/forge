@@ -1,154 +1,31 @@
-import { describe, expect, it } from 'vitest'
-import { createTempConfig, TestSwarmManager, bootWithDefaultManager } from '../../test-support/index.js';
-import { AgentDescriptorStore } from "../agents/agent-descriptor-store.js";
-import type { AgentDescriptor, SwarmConfig } from '../types.js'
-import { SessionPlanStore } from '../planning/session-plan-store.js'
-import {
-  recordRecoveryFact,
-  readRecoveryState,
-  type RecoveryTarget,
-} from '../recovery-state.js'
-
-const NOW = '2026-07-13T12:00:00.000Z'
-
-interface RecoveryFixture {
-  cleanup: () => Promise<void>
-  config: SwarmConfig
-  target: RecoveryTarget
-  workerId: string
-}
-
-async function createRecoveryFixture(options?: { withRunningGraph?: boolean }): Promise<RecoveryFixture> {
-  const handle = await createTempConfig({
-    prefix: 'swarm-manager-restart-recovery-',
-    omitSharedAuthFile: true,
-    omitSharedSecretsFile: true,
-    skipRepoMemorySkillPlaceholder: true,
-  })
-  const manager = new TestSwarmManager(handle.config, { now: () => NOW })
-  await bootWithDefaultManager(manager, handle.config)
-  const worker = await manager.spawnAgent('manager', { agentId: 'Recovery Worker' })
-
-  await persistAgentStatuses(handle.config, new Map([
-    ['manager', 'streaming'],
-    [worker.agentId, 'streaming'],
-  ]))
-  if (options?.withRunningGraph) {
-    const planStore = new SessionPlanStore({
-      dataDir: handle.config.paths.dataDir,
-      profileId: 'manager',
-      sessionAgentId: 'manager',
-    })
-    await planStore.update({
-      coordinationMode: 'graph',
-      plan: [{ step: 'Resume interrupted validation', status: 'in_progress' }],
-      workGraph: {
-        maxConcurrency: 1,
-        nodes: [{
-          id: 'validate',
-          title: 'Resume interrupted validation',
-          task: 'Finish the interrupted validation run.',
-          kind: 'review',
-          status: 'running',
-          dependsOn: [],
-          effort: 'routine',
-          attempts: [{
-            id: 'attempt-before-restart',
-            number: 1,
-            status: 'running',
-            startedAt: NOW,
-            behaviorMode: 'correctness-review',
-            executionPolicy: 'routine',
-            workerId: worker.agentId,
-          }],
-        }],
-      },
-    })
-  }
-
-  const target: RecoveryTarget = {
-    dataDir: handle.config.paths.dataDir,
-    profileId: 'manager',
-    sessionAgentId: 'manager',
-  }
-  await recordRecoveryFact(target, {
-    t: 'turn_dispatched',
-    turnId: 'manager-turn-before-restart',
-    agentId: 'manager',
-    role: 'manager',
-    kind: 'user',
-    at: NOW,
-  })
-  await recordRecoveryFact(target, {
-    t: 'turn_dispatched',
-    turnId: 'worker-turn-before-restart',
-    agentId: worker.agentId,
-    role: 'worker',
-    kind: 'agent_message',
-    at: NOW,
-  })
-
-  return {
-    cleanup: handle.cleanup,
-    config: handle.config,
-    target,
-    workerId: worker.agentId,
-  }
-}
-
-async function persistAgentStatuses(
-  config: SwarmConfig,
-  statuses: ReadonlyMap<string, AgentDescriptor['status']>,
-): Promise<void> {
-  const owner = new AgentDescriptorStore({ dataDir: config.paths.dataDir, storeFilePath: config.paths.agentsStoreFile });
-  const store = await owner.load();
-  store.agents = store.agents.map((agent) => {
-    const status = statuses.get(agent.agentId)
-    return status ? { ...agent, status, updatedAt: NOW } : agent
-  })
-  owner.replace(store); await owner.save();
-}
-
-describe('SwarmManager restart recovery characterization', () => {
-  it('builds an isolated boot snapshot and records interrupted turns once', async () => {
-    const fixture = await createRecoveryFixture()
-    try {
-      const recovered = new TestSwarmManager(fixture.config, { now: () => NOW })
-      await recovered.boot()
-
-      const snapshot = recovered.getRestartRecoverySnapshot()
-      expect(snapshot).toEqual({
-        recoveryId: expect.any(String),
-        bootId: expect.any(String),
-        createdAt: NOW,
-        interruptedManagers: ['manager'],
-        interruptedWorkers: [fixture.workerId],
-        undeliveredReports: [],
-      })
-
-      snapshot!.interruptedManagers.push('mutated-manager')
-      snapshot!.interruptedWorkers.length = 0
-      expect(recovered.getRestartRecoverySnapshot()).toMatchObject({
-        interruptedManagers: ['manager'],
-        interruptedWorkers: [fixture.workerId],
-        undeliveredReports: [],
-      })
-
-      const stateAfterFirstRecovery = await readRecoveryState(fixture.target);
-      expect(stateAfterFirstRecovery.openTurns.has("manager-turn-before-restart")).toBe(true);
-      expect(stateAfterFirstRecovery.openTurns.has("worker-turn-before-restart")).toBe(true);
-      await persistAgentStatuses(fixture.config, new Map([
-        ['manager', 'streaming'],
-        [fixture.workerId, 'streaming'],
-      ]))
-      const recoveredAgain = new TestSwarmManager(fixture.config, { now: () => NOW })
-      await recoveredAgain.boot()
-
-      expect(recoveredAgain.getRestartRecoverySnapshot()?.bootId).toBe(snapshot!.bootId);
-      expect((await readRecoveryState(fixture.target)).openTurns.has("worker-turn-before-restart")).toBe(true);
-
-    } finally {
-      await fixture.cleanup()
-    }
-  })
-})
+import { afterEach, describe,expect,it } from "vitest";
+import { createTempConfig } from "../../test-support/temp-config.js";
+import { createControlCore,type ControlCore } from "../../environment/control/database.js";
+import type { ControlCoreOptions } from "../../environment/control/effect-types.js";
+import { loadState } from "../../environment/control/orchestration/store.js";
+const cleanup:Array<()=>Promise<void>>=[];
+afterEach(async()=>{ for(const close of cleanup.splice(0)) await close(); });
+describe("authoritative restart recovery",()=>{
+  it("retains the union of interrupted turns and undelivered reports across repeated boots",async()=>{
+    const handle=await createTempConfig(); cleanup.push(handle.cleanup);
+    let serial=0;
+    const options:ControlCoreOptions={dataDir:handle.config.paths.dataDir,clock:()=>1800000000000,random:()=>`id-${++serial}`,isDeviceRevoked:()=>false,
+      swarm:{ensureSession:async()=>({materialized:true}),acquireProvider:async()=>{throw new Error("Recovery must not acquire a writer");},applyInput:async()=>{throw new Error("Recovery must not replay input");},stopSession:async()=>({stopped:true}),applyChoice:async()=>"interrupted"},
+      workspace:{prepareLaunch:async()=>{throw new Error("unused");},isLaunchCurrent:()=>true,ensure:async()=>({cwd:handle.config.defaultCwd,branch:null}),reconcile:async()=>"retry"},artifacts:{validateInput:()=>[],pinInput:()=>{}}};
+    const open=async()=>{const core=await createControlCore(options);cleanup.push(()=>core.close());return core;};
+    let core:ControlCore=await open();
+    core.controlService.record({type:"thread.create",commandId:"thread",now:options.clock(),threadId:"manager",role:"manager",projectId:"project"});
+    core.controlService.record({type:"run.submit",commandId:"input",now:options.clock(),threadId:"manager",runId:"run",inputId:"input",attemptId:"attempt",bindingId:"binding",delivery:"queue",input:{text:"authorized work",artifactIds:[]}});
+    core.controlService.record({type:"input.recorded",commandId:"record",now:options.clock(),threadId:"manager",inputId:"input",entryId:"entry"});
+    core.controlService.record({type:"attempt.unknown",commandId:"unknown",now:options.clock(),threadId:"manager",attemptId:"attempt"});
+    const report={deliveryId:"result",fromAgentId:"worker",toAgentId:"manager",assignmentId:"assignment",turnId:"worker-run"};
+    core.controlService.record({type:"environment.recover",commandId:"first-boot",now:options.clock(),bootId:"first-boot",recoveryId:"unused",reports:[report]});
+    const before=loadState(core.database).recovery!; await core.close();
+    core=await open(); await core.reconcileOnBoot();
+    expect(loadState(core.database).recovery).toEqual(before); await core.close();
+    core=await open(); await core.reconcileOnBoot();
+    expect(loadState(core.database).recovery).toEqual(before);
+    expect(before.interruptedManagers).toEqual(["manager"]);
+    expect(before.undeliveredReports).toEqual([report]);
+  });
+});

@@ -115,7 +115,7 @@ export function decideTransfer(initial: CoreState, command: CoreCommand & Transf
       const event:LifecycleEvent={type:'assignment.started',assignment:{...assignment,state:'running',terminalAt:undefined,outcome:undefined},commandId:command.commandId,at:command.now};state=evolve(state,event);decision.events.push(event);
     }
     const nextRun={...run,state:'queued' as const,outcome:undefined,activeAttemptId:command.attemptId,fallbackCount:(run.fallbackCount ?? 0)+1};
-    const nextAttempt={attemptId:command.attemptId,runId:run.runId,threadId:owner.threadId,bindingId:command.bindingId,generation:state.threads[owner.threadId].generation,state:'created' as const,delivery:'pending' as const,lastSequence:-1};
+    const nextAttempt={attemptId:command.attemptId,runId:run.runId,threadId:owner.threadId,bindingId:command.bindingId,generation:state.threads[owner.threadId].generation+(owner.bindingId ? 1:0),state:'created' as const,delivery:'pending' as const,lastSequence:-1};
     for(const fact of [{type:'run.recovery',run:nextRun},{type:'attempt.created',attempt:nextAttempt}] as const) {const event={...fact,commandId:command.commandId,at:command.now} as LifecycleEvent;state=evolve(state,event);decision.events.push(event);}
     if(!owner.bindingId) {emit({type:'thread.changed',thread:{...state.threads[owner.threadId],activeRunId:run.runId,bindingId:command.bindingId}});decision.effects.push({kind:'runtime.acquire',threadId:owner.threadId,bindingId:command.bindingId,generation:nextAttempt.generation});}
     return decision;

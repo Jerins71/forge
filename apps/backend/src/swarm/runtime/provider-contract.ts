@@ -44,6 +44,16 @@ export class ProviderRefreshRequiredError extends Error {
   }
 }
 
+/** Rejected before a native dispatch; the kernel may admit another attempt without unknown-delivery recovery. */
+export class ProviderDispatchRejectedError extends Error {
+  readonly code = "PROVIDER_DISPATCH_REJECTED" as const;
+  readonly delivery = "not_dispatched" as const;
+  constructor(readonly reason: "busy" | "closed" | "stale_scope") {
+    super(`Provider dispatch rejected before delivery: ${reason}.`);
+    this.name = "ProviderDispatchRejectedError";
+  }
+}
+
 /** Admission is explicit. This helper never chooses or dispatches a weaker fallback. */
 export function assertProviderRequirements(capabilities: ProviderCapabilities, requirements: ProviderRequirements = {}): void {
   const support: Record<Exclude<keyof ProviderRequirements, "instructionChannel">, boolean> = {
@@ -147,22 +157,4 @@ export interface ProviderAdapter {
   close(binding: ProviderBinding): Promise<void>;
   /** Clean means callbacks, tools, transports and journal writers are settled. */
   drain(binding: ProviderBinding): Promise<ProviderDrainResult>;
-}
-
-/** Today's production policy. Provider workers must revise snapshots when native behavior changes. */
-export function getRuntimeProviderCapabilities(runtime: "codex" | "claude" | "cursor-sdk" | "pi"): ProviderCapabilities {
-  const nativeCoding = runtime === "codex" || runtime === "claude";
-  return {
-    version: 1, provider: runtime, adapterVersion: "forge-runtime-1",
-    instructions: { channels: runtime === "codex" ? ["developer"] : runtime === "claude" ? ["preset_append"] : runtime === "pi" ? ["system", "resource_loader"] : ["system"],
-      update: runtime === "codex" ? "explicit_refresh" : "on_open", nativeBase: runtime === "claude" ? "preset" : runtime === "codex" ? "preserved" : "none" },
-    tools: { registration: runtime === "pi" ? "refreshable" : "immutable",
-      host: runtime === "codex" ? "dynamic_tools" : runtime === "claude" ? "in_process_mcp" : runtime === "pi" ? "native_tools" : "loopback_mcp",
-      nativeCallIdentity: true, cancellation: "abort_signal", extensionHooks: true },
-    streaming: { text: "delta", reasoning: runtime === "pi" ? "delta" : "none", tools: runtime === "claude" ? "snapshot" : runtime === "cursor-sdk" ? "final" : "delta",
-      usage: "final", terminal: "authoritative" },
-    native: { resume: true, fork: nativeCoding || runtime === "pi", steer: runtime !== "cursor-sdk", compact: runtime !== "cursor-sdk", readContext: runtime !== "cursor-sdk", interrupt: true },
-    approvals: { lifetime: "live_callback", nativeRequestIdentity: nativeCoding, childRequests: nativeCoding },
-    secureSessions: { supported: runtime !== "cursor-sdk", mechanism: nativeCoding ? "secure_bash" : runtime === "pi" ? "guarded_tools" : "none" },
-  };
 }

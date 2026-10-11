@@ -11,7 +11,7 @@ import { createEventSink } from "../event-sink.js";
 import { loadState, replayLifecycle, rebuildLifecycleProjections } from "./store.js";
 import type { CoreCommand } from "./types.js";
 import { findWorkerAssignment, matchAssignmentPlanStep } from "./assignments.js";
-import { getRuntimeProviderCapabilities } from "../../../swarm/runtime/provider-contract.js";
+import { piProviderCapabilities } from "../../../swarm/runtime/pi/pi-provider-adapter.js";
 import { createReplayHarness, ReplaySignals, watchdog } from "../../../swarm/runtime/replay/replay-harness.js";
 
 const now = 1_800_000_000_000;
@@ -43,7 +43,7 @@ async function fixture() {
   const ready = async (runId: string) => {
     await record(runId);
     const entry = state().runs[runId]; const attempt = state().attempts[entry.activeAttemptId];
-    run({ type: "binding.acquired", commandId: `binding-${runId}`, now, threadId: entry.threadId, binding: { scope: { threadId: entry.threadId, bindingId: attempt.bindingId, generation: attempt.generation }, conversation: { threadId: entry.threadId, bindingId: attempt.bindingId, generation: attempt.generation, kind: "conversation", nativeId: `native-${entry.threadId}` }, capabilities: getRuntimeProviderCapabilities("codex"), instructionRevision: "prompt", toolContractRevision: "tools" } });
+    run({ type: "binding.acquired", commandId: `binding-${runId}`, now, threadId: entry.threadId, binding: { scope: { threadId: entry.threadId, bindingId: attempt.bindingId, generation: attempt.generation }, conversation: { threadId: entry.threadId, bindingId: attempt.bindingId, generation: attempt.generation, kind: "conversation", nativeId: `native-${entry.threadId}` }, capabilities: piProviderCapabilities(), instructionRevision: "prompt", toolContractRevision: "tools" } });
   };
   const dispatch = (runId: string) => {
     const entry = state().runs[runId];
