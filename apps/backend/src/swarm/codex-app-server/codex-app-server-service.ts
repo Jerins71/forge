@@ -90,6 +90,11 @@ export class CodexAppServerService {
     }
   }
 
+  /** The catalog for display: cached, single-flight, and never held up by slow MCP status. */
+  browseCodexCatalog(): Promise<CodexCatalogSnapshot> {
+    return this.mcpCatalog.browseCatalog();
+  }
+
   async listCodexMcpTools(): Promise<CodexCatalogSnapshot> {
     const snapshot = await this.mcpCatalog.listCatalog();
     if (snapshot.diagnostics?.mcpToolsError) {
