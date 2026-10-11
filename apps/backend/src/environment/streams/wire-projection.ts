@@ -53,9 +53,9 @@ export function projectDetailItem(item: DetailItem, maxBytes = EVENT_BYTES - 204
 export function recoveryProjection(swarm: Pick<SwarmManager, 'getRestartRecoverySnapshot'>): RecoverySnapshot | null {
   return projectRecoverySnapshot(swarm.getRestartRecoverySnapshot());
 }
-export function projectRecoverySnapshot(snapshot: import('@forge/protocol').RestartRecoverySnapshot | null): RecoverySnapshot | null {
+export function projectRecoverySnapshot(snapshot: RecoverySnapshot | null): RecoverySnapshot | null {
   if (!snapshot) return null;
-  const result = { ...snapshot, recoveryId: snapshot.bootId };
+  const result = { ...snapshot };
   if (!Value.Check(RecoverySnapshotSchema, result)) throw new StreamFault('PAYLOAD_TOO_LARGE', 'Recovery presentation exceeds its bounds');
   return result;
 }

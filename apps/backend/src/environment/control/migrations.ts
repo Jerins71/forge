@@ -1,5 +1,7 @@
 import type { Database } from "better-sqlite3";
 
+const SCHEMA_VERSION = 4;
+
 const INITIAL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS environment_meta (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -197,13 +199,15 @@ export function migrateControlDatabase(database: Database, identity: { environme
   if (existing.length) {
     if (!existing.some(row => row.name === "environment_meta")) throw new Error("Incompatible environment control database; select a fresh data root");
     const meta = database.prepare("SELECT schema_version FROM environment_meta WHERE singleton=1").get() as { schema_version: number } | undefined;
-    if (meta?.schema_version !== 3) throw new Error("Incompatible environment control schema; select a fresh data root");
+    const tables = new Set(existing.map(row => row.name));
+    if (meta?.schema_version !== SCHEMA_VERSION || REQUIRED_TABLES.some(table => !tables.has(table)))
+      throw new Error("Incompatible environment control schema; select a fresh data root");
     return;
   }
   database.transaction(() => {
     database.exec(INITIAL_SCHEMA);
     database.exec(LIFECYCLE_SCHEMA);
-    database.prepare("INSERT INTO environment_meta (singleton,schema_version,environment_id,stream_epoch) VALUES (1,3,?,?)").run(identity.environmentId, identity.streamEpoch);
+    database.prepare("INSERT INTO environment_meta (singleton,schema_version,environment_id,stream_epoch) VALUES (1,?,?,?)").run(SCHEMA_VERSION, identity.environmentId, identity.streamEpoch);
   }).immediate();
 }
 
@@ -233,3 +237,5 @@ CREATE TABLE orchestration_transfers (transfer_id TEXT PRIMARY KEY, assignment_i
 CREATE INDEX orchestration_transfers_target ON orchestration_transfers(target_thread_id);
 CREATE TABLE orchestration_recovery (singleton INTEGER PRIMARY KEY CHECK(singleton=1), snapshot_json TEXT NOT NULL);
 `;
+
+const REQUIRED_TABLES = Array.from(`${INITIAL_SCHEMA}\n${LIFECYCLE_SCHEMA}`.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?(\w+)/g), match => match[1]);

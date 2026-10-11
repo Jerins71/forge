@@ -60,7 +60,7 @@ const database = new Database(getEnvironmentDbPath(config.paths.dataDir));
 const identity = await identityModule.loadEnvironmentIdentity({ dataDir: config.paths.dataDir, installationStateDir: resolve(config.paths.rootDir, "installation"), label: "Codex replay" });
 const workspace = workspaceModule.createWorkspaceService({ database, dataDir: config.paths.dataDir, swarmManager: manager });
 const artifacts = artifactModule.createArtifactService({ database, dataDir: config.paths.dataDir, swarmManager: manager });
-const core = await control.createControlCore({ database, clock: Date.now, random: crypto.randomUUID,
+const core = await control.createControlCore({ database, clock: Date.now, random: () => crypto.randomUUID(),
   swarm: {
     resolveSession: agentId => adapter.resolveSession!(agentId),
     ensureSession: input => adapter.ensureSession(input), applyInput: input => adapter.applyInput(input),

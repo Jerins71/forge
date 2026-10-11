@@ -42,11 +42,11 @@ export class FakeRuntime implements SwarmAgentRuntime {
     start:async input=>{
       await this.sendMessage(input.input,"followUp");
       const turn={...input.binding.scope,kind:"turn" as const,conversationId:input.binding.conversation.nativeId,nativeId:input.attemptId};
-      if (!this.busy) { this.providerFacts.push({type:"terminal",scope:input.binding.scope,attemptId:input.attemptId,sequence:0,origin:{kind:"root",turn},terminalAuthority:"root_attempt",outcome:"completed"});this.wakeProvider?.(); }
+      if (!this.busy) { this.providerFacts.push({type:"terminal",scope:input.binding.scope,attemptId:input.attemptId,sequence:0,origin:{kind:"root",conversation:input.binding.conversation,turn},terminalAuthority:"root_attempt",outcome:"completed"});this.wakeProvider?.(); }
       return {status:"accepted",turn};
     },
     steer:async()=>{throw new Error("Core owns queued fake input");},interrupt:async()=>{},respond:async()=>{},compact:async input=>{await this.compact(input.instructions);},
-    observations:async function*(this:ProviderAdapter,binding:ProviderBinding,signal?:AbortSignal){
+    observations:async function*(this:ProviderAdapter,_binding:ProviderBinding,signal?:AbortSignal){
       const runtime=(this as ProviderAdapter & {runtime:FakeRuntime}).runtime;
       while(!signal?.aborted){
         const fact=runtime.providerFacts.shift();if(fact){yield fact;continue;}
