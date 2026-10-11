@@ -1101,6 +1101,7 @@ test('F4: a newly created and seeded project sends its first message without a t
     expect(seeded.status).toBe(200);
     const resources = await seeded.json() as any;
     expect(resources.snapshot.trust.state).toBe('trusted');
+    expect((await f.detail()).items.some((item: any) => item.text?.includes('Repository executable trust changed'))).toBe(false);
     await controlEnvironment(manifest, f.environment.name, 'stop'); await controlEnvironment(manifest, f.environment.name, 'start');
     const sent = await fixtureRpcOnce(f.environment.baseUrl, sessions[1]!, 'session.send', { commandId: randomUUID(), sessionId: f.sessionId, message: { text: 'First user message', artifactIds: [] } });
     expect(await f.run(sent.commandId)).toMatchObject({ outcome: 'completed' });
@@ -1109,8 +1110,9 @@ test('F4: a newly created and seeded project sends its first message without a t
       const detail = (await until(() => next.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot;
       expect(detail.choices.filter((choice: any) => choice.status === 'pending')).toHaveLength(0);
       expect(detail.items.some((item: any) => item.kind === 'assistant')).toBe(true);
+      expect(detail.items.some((item: any) => item.text?.includes('Repository executable trust changed'))).toBe(false);
     } finally { next.close(); }
-    evidence.createdResourceTrust = { trustedOnCreation: true, persistedAcrossRestart: true, firstMessageCompleted: true, trustDecisions: 0 };
+    evidence.createdResourceTrust = { trustedOnCreation: true, persistedAcrossRestart: true, firstMessageCompleted: true, trustDecisions: 0, trustRestartNotices: 0 };
   } finally { f.rpc.close(); }
 });
 

@@ -480,8 +480,8 @@ describe("Codex ProviderAdapter over production JSON-RPC and raw replay", () => 
     } finally { release(); }
   });
 
-  it("downgrades an unsupported steer for its binding without failing the original turn", async () => {
-    const f = await fixture("steer-unsupported");
+  it.each(["steer-unsupported", "steer-router-unsupported"])("downgrades %s for its binding without failing the original turn", async scenario => {
+    const f = await fixture(scenario);
     const started = await f.start();
     if (started.status !== "accepted") throw new Error("Expected accepted turn");
     await expect(f.adapter.steer({ binding: f.binding, turn: started.turn, runId: "correction", attemptId: "attempt", input: { text: "Steer" } }))

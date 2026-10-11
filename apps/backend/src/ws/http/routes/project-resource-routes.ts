@@ -139,7 +139,6 @@ export function createProjectResourceRoutes(options: { swarmManager: SwarmManage
               const trustKey = await realpath(createdForgeDir);
               if (!(await settingsStore.getTrust(trustKey))) {
                 await settingsStore.setTrust(trustKey, "trust", "forge-created");
-                await swarmManager.applyProjectResourceTrustChange(trustKey);
               }
             }
             const snapshot = await buildSnapshot({ resolver, settingsStore, swarmManager, context });

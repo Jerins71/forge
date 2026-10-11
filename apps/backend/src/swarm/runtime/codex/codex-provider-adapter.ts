@@ -109,7 +109,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
   private opening?: { input: ProviderOpenInput; scope: ProviderScope; promise: Promise<ProviderBinding> };
   constructor(private readonly options: Options) {}
 
-  capabilities(): ProviderCapabilities { return codexProviderCapabilities(); }
+  capabilities(): ProviderCapabilities { return this.state?.binding.capabilities ?? codexProviderCapabilities(); }
 
   /** Transitional native operations (history injection/terminal cleanup), never a second transport. */
   get nativeClient(): CodexAppServerClientPort {
@@ -169,7 +169,15 @@ export class CodexProviderAdapter implements ProviderAdapter {
     const client = (this.options.createClient ?? (handlers => createCodexAppServerClient(handlers, { command: binary!,
       // Codex reads its endpoint from config, not OPENAI_BASE_URL. The key itself goes over stdio at login.
       args: ["app-server", "--listen", "stdio://", "-c", 'cli_auth_credentials_store="ephemeral"',
-        ...(this.options.auth.baseUrl ? ["-c", `openai_base_url=${JSON.stringify(this.options.auth.baseUrl.replace(/\/+$/, ""))}`] : [])],
+        ...(this.options.auth.baseUrl ? [
+          "-c", 'model_provider="forge_router"',
+          "-c", 'model_providers.forge_router.name="Forge router"',
+          "-c", `model_providers.forge_router.base_url=${JSON.stringify(this.options.auth.baseUrl.replace(/\/+$/, ""))}`,
+          "-c", 'model_providers.forge_router.wire_api="responses"',
+          "-c", 'model_providers.forge_router.requires_openai_auth=true',
+          // Custom routers may support HTTP/SSE but reject Responses WebSocket steering.
+          "-c", 'model_providers.forge_router.supports_websockets=false',
+        ] : [])],
       spawnOptions: { cwd: input.instructions.project.cwd, env } })))({
       onNotification: (method, params) => {
         const s = this.state!;
@@ -249,6 +257,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
 
   async steer(input: ProviderSteerInput): Promise<ProviderDispatchResult> {
     const s = this.owned(input.binding);
+    if (!s.binding.capabilities.native.steer) throw new ProviderDispatchRejectedError("unsupported_steer");
     const turn = this.active(input.turn, input.attemptId);
     if (input.instructions && input.instructions.revision !== s.binding.instructionRevision) throw new Error("Codex instructions can only refresh between native turns");
     await this.refresh(input);
@@ -259,6 +268,10 @@ export class CodexProviderAdapter implements ProviderAdapter {
         if (response?.turnId !== input.turn.nativeId) throw new Error("Codex steer did not acknowledge the expected turn");
         return { status: "accepted", turn: this.turnRef(turn) };
       } catch (error) {
+        if (unsupportedSteer(error)) {
+          s.binding.capabilities = { ...s.binding.capabilities, native: { ...s.binding.capabilities.native, steer: false } };
+          throw new ProviderDispatchRejectedError("unsupported_steer");
+        }
         if (typeof (error as { code?: unknown })?.code === "number") {
           // A native rejection can arrive after completion while its canonical projection is queued.
           // Finish that existing notification lane before deciding whether the target still exists.
@@ -602,6 +615,17 @@ export class CodexProviderAdapter implements ProviderAdapter {
 function sameScope(left: ProviderScope, right: ProviderScope): boolean { return left.threadId === right.threadId && left.bindingId === right.bindingId && left.generation === right.generation; }
 function record(value: unknown): Record<string, any> { return value && typeof value === "object" ? value as Record<string, any> : {}; }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+function unsupportedSteer(error: unknown): boolean {
+  // Only a native RPC rejection proves this input was not dispatched. A transport loss stays unknown.
+  const code = record(error).code;
+  if (typeof code !== "number") return false;
+  if (code === -32601) return true;
+  try {
+    const response = record(JSON.parse(message(error)));
+    return response.status === 400 && response.error?.type === "invalid_request_error"
+      && response.error.message === "unsupported websocket request type: response.interrupt";
+  } catch { return false; }
+}
 function toolRevision(value: unknown): string { return createHash("sha256").update(stableToolContract(value) ?? "null").digest("hex"); }
 function json(value: unknown): any { return JSON.parse(JSON.stringify(value ?? null)); }
 async function deadline(operation: Promise<void>): Promise<void> {

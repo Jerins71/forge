@@ -48,7 +48,7 @@ export class ProviderRefreshRequiredError extends Error {
 export class ProviderDispatchRejectedError extends Error {
   readonly code = "PROVIDER_DISPATCH_REJECTED" as const;
   readonly delivery = "not_dispatched" as const;
-  constructor(readonly reason: "busy" | "closed" | "stale_scope") {
+  constructor(readonly reason: "busy" | "closed" | "stale_scope" | "unsupported_steer") {
     super(`Provider dispatch rejected before delivery: ${reason}.`);
     this.name = "ProviderDispatchRejectedError";
   }

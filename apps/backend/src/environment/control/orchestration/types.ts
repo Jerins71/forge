@@ -94,7 +94,7 @@ export type CoreCommand = Envelope & (
   | { type: "environment.recover"; recoveryId: string; bootId: string; reports: RecoverySnapshot["undeliveredReports"] }
   | { type: "recovery.resume"; recoveryId: string; attempts: Record<string, string>; bindingIds: Record<string, string> }
   | { type: "recovery.dismiss"; recoveryId: string }
-  | { type: "effect.failed"; threadId: string; attemptId?: string; requestId?: string; kind: CoreEffect["kind"]; delivery: "not_dispatched" | "unknown"; steerTargetEnded?: boolean; bindingClosed?: boolean }
+  | { type: "effect.failed"; threadId: string; attemptId?: string; requestId?: string; kind: CoreEffect["kind"]; delivery: "not_dispatched" | "unknown"; steerTargetEnded?: boolean; steerUnsupported?: boolean; bindingClosed?: boolean }
 );
 export type LifecycleEvent = { commandId: string; at: number } & (
   | LineageEvent

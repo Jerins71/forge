@@ -179,7 +179,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       const owner = thread(command.threadId); const run = state.runs[attempt.runId];
       if (command.targetAttemptId && command.authorized && owner.desired === "running" && owner.shutdown === "clean" && owner.generation === attempt.generation) {
         const root = owner.activeRunId && state.attempts[state.runs[owner.activeRunId].activeAttemptId];
-        if (!root || root.attemptId !== command.targetAttemptId || root.state !== "accepted" || !root.turn) {
+        if (!root || root.attemptId !== command.targetAttemptId || root.state !== "accepted" || !root.turn || !state.bindings[root.bindingId]?.capabilities.native.steer) {
           // The root ended before dispatch. Preserve the canonical input as a follow-up.
           emit({ type: "run.started", run: { ...run, state: "queued" } }); advance(owner.threadId); break;
         }
@@ -333,8 +333,12 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
           emit({ type: "thread.changed", thread: { ...owner, activeRunId: undefined, shutdown: "pending" } });
           decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: attempt.bindingId });
         }
-        else if (command.kind === "provider.steer" && command.steerTargetEnded && thread(command.threadId).desired === "running" && thread(command.threadId).shutdown === "clean") {
+        else if (command.kind === "provider.steer" && (command.steerTargetEnded || command.steerUnsupported) && thread(command.threadId).desired === "running" && thread(command.threadId).shutdown === "clean") {
           // A proven rejected steer never entered the native turn. Preserve its input as a follow-up.
+          if (command.steerUnsupported) {
+            const binding = state.bindings[attempt.bindingId];
+            if (binding) emit({ type: "binding.acquired", binding: { ...binding, capabilities: { ...binding.capabilities, native: { ...binding.capabilities.native, steer: false } } } });
+          }
           emit({ type: "attempt.created", attempt: { ...attempt, state: "created", delivery: "pending" } });
           emit({ type: "run.started", run: { ...state.runs[attempt.runId], state: "queued", delivery: "queue" } });
           advance(command.threadId);
