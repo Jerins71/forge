@@ -345,6 +345,58 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       expect(f.observations.map(value => value.sequence)).toEqual(f.observations.map((_value, i) => i));
     } finally { await f.close(); await f.cleanup(); }
   });
+  // Failure modes written before implementation: the reply ends while the native still holds the steer,
+  // and the native then runs it as its next turn. Calling that turn ended reports unknown delivery for
+  // input that is about to run; calling it undelivered would send it twice.
+  it("keeps the turn open for a steer the native runs after its reply ended", async () => {
+    const f = await fixture("steer-terminal-race");
+    try {
+      const binding = await f.open(); const dispatched = start(f, binding);
+      await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); const accepted = await f.observed("accepted:");
+      if (accepted.type !== "accepted") throw new Error("Missing native acceptance");
+      const steered = f.adapter.steer({ binding, runId: "run", attemptId: "attempt", input: { text: "steer" }, turn: accepted.turn });
+      await f.release("first-result"); await f.release("steered");
+      expect(await steered).toMatchObject({ status: "accepted", turn: accepted.turn });
+      expect(f.observations.some(value => value.type === "terminal")).toBe(false);
+      await f.release("terminal"); expect(await f.observed("terminal:root_attempt")).toMatchObject({ outcome: "completed", origin: { turn: accepted.turn } });
+      expect(f.observations.filter(value => value.type === "terminal")).toHaveLength(1);
+      expect(f.observations.some(value => value.type === "message" && value.text === "Steer handled")).toBe(true);
+      expect(f.onAgentEnd).toHaveBeenCalledTimes(1);
+    } finally { await f.close(); await f.cleanup(); }
+  });
+  it("ends the turn, stops the native and returns the steer undelivered when the native never runs it", async () => {
+    const f = await fixture("steer-terminal-race");
+    try {
+      const binding = await f.open(); const dispatched = start(f, binding);
+      await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); const accepted = await f.observed("accepted:");
+      if (accepted.type !== "accepted") throw new Error("Missing native acceptance");
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const steered = f.adapter.steer({ binding, runId: "run", attemptId: "attempt", input: { text: "steer" }, turn: accepted.turn }).then(result => result, error => error as unknown);
+      await f.release("first-result");
+      const replyEnded = () => f.runtimeOptions.callbacks.onSessionEvent.mock.calls.some(call => call[1].type === "turn_end");
+      while (!replyEnded()) await new Promise(resolve => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(f.observations.some(value => value.type === "terminal")).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await steered).toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "stale_scope", delivery: "not_dispatched" });
+      expect(await f.observed("terminal:root_attempt")).toMatchObject({ outcome: "completed", origin: { turn: accepted.turn } });
+      // The process that still held the input is gone, so it cannot run later; the next start replaces the binding.
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(start(f, binding, "next")).rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "closed" });
+      expect(await f.adapter.drain(binding)).toEqual({ status: "clean" });
+      expect(f.observations.filter(value => value.type === "terminal")).toHaveLength(1);
+    } finally { vi.useRealTimers(); await f.close(); await f.cleanup(); }
+  });
+  it("rejects a steer for a turn that already ended as proven not dispatched", async () => {
+    const f = await fixture("one-turn");
+    try {
+      const binding = await f.open(); const dispatched = start(f, binding);
+      await f.release("accepted"); const result = await dispatched; if (result.status !== "accepted") throw new Error("Missing native acceptance");
+      await f.release("terminal"); await f.observed("terminal:root_attempt");
+      await expect(f.adapter.steer({ binding, runId: "run", attemptId: "attempt", input: { text: "late" }, turn: result.turn }))
+        .rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "stale_scope", delivery: "not_dispatched" });
+    } finally { await f.close(); await f.cleanup(); }
+  });
   it("uses the existing runtime's per-turn accounting for cumulative native cost", async () => {
     const f = await fixture("repeated-turns");
     try {

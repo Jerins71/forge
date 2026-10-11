@@ -33,7 +33,10 @@ final; approvals are live callbacks; native resume, latest fork, steer, interrup
 and compact are available; native context reading is unavailable. A message-bound
 fork fails with typed unsupported behavior. Forking uses a fresh target binding.
 Queue submission returns unknown delivery until a native UUID echo proves
-consumption. Child terminals carry native_child authority and create no Forge
+consumption. A steer for a turn that already ended is rejected as stale scope before
+any write. A steer the native still holds when its reply ends keeps the turn open until
+the echo; with no echo in 30 seconds the turn ends, the process stops and the steer is
+rejected as stale scope. Child terminals carry native_child authority and create no Forge
 assignments. Native permission policy and authentication remain unchanged.
 
 All files and native-provider homes live under owned temporary roots outside the
