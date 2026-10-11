@@ -299,6 +299,8 @@ describe('provider capability refusals shown before the click', () => {
     const other = getByRole(body(), 'option', { name: /Claude Opus 5/ })
     expect(other.getAttribute('aria-disabled')).toBe('true')
     expect(other.textContent).toContain(REASON)
+    // The row truncates long reasons, so the full text is also its tooltip.
+    expect(other.getAttribute('title')).toBe(REASON)
     click(other)
     expect(queryByText(body(), /Hand off to/)).toBeNull()
     expect(config.onSwitchProvider).not.toHaveBeenCalled()

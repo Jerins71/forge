@@ -306,6 +306,7 @@ function ModelPickerPanel({ rows, currentKey, initialTab, loading, error, onRetr
         role="option"
         aria-selected={selected}
         aria-disabled={Boolean(row.unavailableReason)}
+        title={row.unavailableReason}
         data-model-index={index}
         onMouseEnter={() => setHighlight(index)}
         onClick={() => onSelect(row)}
