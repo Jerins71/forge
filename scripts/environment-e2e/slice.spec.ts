@@ -960,3 +960,111 @@ test('a hung turn that ignores interrupt and SIGTERM is stopped, settled, and th
     evidence.hungStop = { ignoredInterrupts, hungProcessKilled: true, stopReceipt: stopped.state, stopMs, stuckRun: 'cancelled', shutdown: 'clean', nextSend: next!.outcome, replacementProcess: true };
   } finally { rpc.close(); }
 });
+
+
+// QA F7/F4: exercise real RPC admission, native provider dispatch and durable live/replay projections.
+async function busySendFixture(index = 0) {
+  const environment = manifest.environments[index]!;
+  const rpc = await openFixtureRpc(environment.baseUrl, sessions[index]!);
+  const created = await rpc.call('project.create', { commandId: randomUUID(), title: 'Busy send QA', cwd: environment.checkout,
+    model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' }, secureSessionsEnabled: false });
+  const sessionId = created.result.sessionId as string;
+  const state = () => readDb(db => loadState(db), index);
+  await until(async () => (await state()).threads[sessionId]?.activeRunId, value => !value);
+  const run = (commandId: string) => until(async () => (await state()).runs[`run-${commandId}`], value => value?.state === 'terminal');
+  const counters = async () => {
+    const files = await readdir(join(environment.checkout, '.fixture-codex'));
+    const counts = await Promise.all(files.filter(file => /^process-\d+\.json$/.test(file)).map(async file =>
+      JSON.parse(await readFile(join(environment.checkout, '.fixture-codex', file), 'utf8')) as { ownerAgentId: string; turnStarts: number; steers: number; interrupts: number }));
+    return counts.filter(count => count.ownerAgentId === sessionId).reduce((total, count) =>
+      ({ starts: total.starts + count.turnStarts, steers: total.steers + count.steers, interrupts: total.interrupts + count.interrupts }), { starts: 0, steers: 0, interrupts: 0 });
+  };
+  const detail = async () => {
+    const { subscriptionId } = await rpc.call('session.subscribe', { sessionId });
+    return (await until(() => rpc.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot;
+  };
+  const send = (text: string, delivery?: 'auto' | 'followUp' | 'steer') => rpc.call('session.send', {
+    commandId: randomUUID(), sessionId, message: { text, artifactIds: [] }, ...(delivery ? { delivery } : {}) });
+  const slow = async () => {
+    const before = (await counters()).starts;
+    const sent = await send('[fixture:slow] Finish the entire reply.');
+    await until(counters, count => count.starts === before + 1);
+    await until(async () => (await detail()).items, items => items.some((item: any) => item.kind === 'assistant' && item.runId === `run-${sent.commandId}`));
+    return sent;
+  };
+  return { environment, rpc, sessionId, state, run, counters, detail, send, slow };
+}
+const silentNotice = 'The manager completed this turn without a visible response.';
+for (const delivery of [undefined, 'auto', 'followUp'] as const) {
+  test(`F7: busy ${delivery ?? 'composer default'} send queues, preserves the reply and projects pending live/replay`, async () => {
+    const f = await busySendFixture();
+    try {
+      await f.rpc.call('shell.subscribe', {});
+      const first = await f.slow(); const before = await f.counters();
+      const second = await f.send('Queued follow-up while busy', delivery);
+      await until(async () => (await f.state()).runs[`run-${second.commandId}`]?.entryId, Boolean);
+      expect((await f.state()).runs[`run-${second.commandId}`]).toMatchObject({ state: 'queued', delivery: 'queue' });
+      expect(await f.counters()).toEqual(before);
+      await until(() => f.rpc.frames.find(frame => frame.item?.event?.session?.sessionId === f.sessionId && frame.item.event.session.pendingCount === 1), Boolean);
+      expect((await f.detail()).session.pendingCount).toBe(1);
+      expect(await f.run(first.commandId)).toMatchObject({ outcome: 'completed' });
+      expect(await f.run(second.commandId)).toMatchObject({ outcome: 'completed' });
+      expect(await f.counters()).toEqual({ starts: before.starts + 1, interrupts: 0, steers: 0 });
+      const snapshot = await f.detail();
+      expect(snapshot.items.filter((item: any) => item.kind === 'assistant' && [first.commandId, second.commandId].some(id => item.runId === `run-${id}`))).toHaveLength(2);
+      expect(snapshot.items.some((item: any) => item.text === silentNotice)).toBe(false);
+      expect(snapshot.session.pendingCount).toBe(0);
+      evidence[`busySend-${delivery ?? 'default'}`] = { counters: await f.counters(), queuedLive: true, queuedReplay: true, completed: 2, emptyNotices: 0 };
+    } finally { f.rpc.close(); }
+  });
+}
+test('F7: explicit steer uses native steer and does not interrupt or start another turn', async () => {
+  const f = await busySendFixture();
+  try {
+    const first = await f.slow(); const before = await f.counters();
+    const steered = await f.send('Explicit correction during this turn', 'steer');
+    await until(f.counters, count => count.steers === before.steers + 1);
+    expect(await f.counters()).toEqual({ ...before, steers: before.steers + 1 });
+    expect(await settled(steered.commandId, 0)).toMatchObject({ state: 'succeeded', delivery: 'dispatched' });
+    expect(await f.run(first.commandId)).toMatchObject({ outcome: 'completed' });
+    expect(await f.run(steered.commandId)).toMatchObject({ outcome: 'completed' });
+    expect((await f.detail()).items.some((item: any) => item.text === silentNotice)).toBe(false);
+    evidence.explicitSteer = { counters: await f.counters(), emptyNotices: 0 };
+  } finally { f.rpc.close(); }
+});
+test('F7: Stop interrupts and failed turns never gain an empty completion notice', async () => {
+  const f = await busySendFixture();
+  try {
+    const first = await f.slow();
+    const stop = await f.rpc.call('session.stop', { commandId: randomUUID(), sessionId: f.sessionId });
+    expect(await settled(stop.commandId, 0)).toMatchObject({ state: 'succeeded' });
+    expect((await f.counters()).interrupts).toBeGreaterThan(0);
+    expect((await f.run(first.commandId)).outcome).not.toBe('completed');
+    const failed = await f.send('[fixture:error]'); expect(await f.run(failed.commandId)).toMatchObject({ outcome: 'failed' });
+    expect((await f.detail()).items.some((item: any) => item.text === silentNotice)).toBe(false);
+    const empty = await f.send('[fixture:empty]'); expect(await f.run(empty.commandId)).toMatchObject({ outcome: 'completed' });
+    await until(async () => (await f.detail()).items.filter((item: any) => item.text === silentNotice).length, count => count === 1);
+    expect((await f.detail()).items.filter((item: any) => item.text === silentNotice)).toHaveLength(1);
+    evidence.stopAndSilence = { counters: await f.counters(), interruptedNotices: 0, failedNotices: 0, emptyCompletedNotices: 1 };
+  } finally { f.rpc.close(); }
+});
+test('F4: a newly created and seeded project sends its first message without a trust decision, including after restart', async () => {
+  const f = await busySendFixture(2);
+  try {
+    const seeded = await fetch(`${f.environment.baseUrl}/api/settings/project-resources/seed`, { method: 'POST', headers: {
+      Authorization: `Bearer ${sessions[2]!.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: f.sessionId, sessionAgentId: f.sessionId }) });
+    expect(seeded.status).toBe(200);
+    const resources = await seeded.json() as any;
+    expect(resources.snapshot.trust.state).toBe('trusted');
+    await controlEnvironment(manifest, f.environment.name, 'stop'); await controlEnvironment(manifest, f.environment.name, 'start');
+    const sent = await fixtureRpcOnce(f.environment.baseUrl, sessions[2]!, 'session.send', { commandId: randomUUID(), sessionId: f.sessionId, message: { text: 'First user message', artifactIds: [] } });
+    expect(await f.run(sent.commandId)).toMatchObject({ outcome: 'completed' });
+    const next = await openFixtureRpc(f.environment.baseUrl, sessions[2]!);
+    try { const { subscriptionId } = await next.call('session.subscribe', { sessionId: f.sessionId });
+      const detail = (await until(() => next.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot;
+      expect(detail.choices.filter((choice: any) => choice.status === 'pending')).toHaveLength(0);
+      expect(detail.items.some((item: any) => item.kind === 'assistant')).toBe(true);
+    } finally { next.close(); }
+    evidence.createdResourceTrust = { trustedOnCreation: true, persistedAcrossRestart: true, firstMessageCompleted: true, trustDecisions: 0 };
+  } finally { f.rpc.close(); }
+});

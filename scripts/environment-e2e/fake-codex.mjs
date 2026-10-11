@@ -68,6 +68,8 @@ async function runTurn(turn, text) {
   let reply = `fixture:${fixture.instanceId}:assistant reply`;
   try {
     if (text.includes('[fixture:hold]')) return;
+    if (text.includes('[fixture:empty]')) { complete(turn); return; }
+    if (text.includes('[fixture:error]')) throw new Error('Synthetic failed turn');
     if (text.includes('[fixture:hang]')) { hung = true; setInterval(() => {}, 1000); return; }
     if (text.includes('[fixture:detail]')) {
       await dynamicTool(turn, 'update_plan', { plan: [{ step: 'Verify typed detail', status: 'in_progress' }] });
@@ -100,6 +102,7 @@ async function runTurn(turn, text) {
     notify('item/started', { ...context(turn), item });
     const half = Math.floor(reply.length / 2);
     notify('item/agentMessage/delta', { ...context(turn), itemId: item.id, delta: reply.slice(0, half) });
+    if (text.includes('[fixture:slow]')) { await new Promise(resolve => setTimeout(resolve, 2000)); if (turn.done) return; }
     notify('item/agentMessage/delta', { ...context(turn), itemId: item.id, delta: reply.slice(half) });
     notify('item/completed', { ...context(turn), item: { ...item, text: reply } });
     notify('thread/tokenUsage/updated', { threadId: turn.thread.id, turnId: turn.id,
