@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { ProviderScope } from "@forge/protocol";
+import type { ProviderDrainResult, ToolHostBinding } from "../provider-contract.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { CursorSdkMcpServers } from "./cursor-sdk-loader.js";
 
@@ -23,12 +25,22 @@ export interface CursorSdkMcpToolBridgeResult {
   serverName: string;
   mcpServers: CursorSdkMcpServers;
   shutdown: () => Promise<void>;
+  drain: () => Promise<ProviderDrainResult>;
+  cancelPending: () => void;
+  beginTurn: () => void;
 }
 
 export async function createCursorSdkMcpToolBridge(
-  tools: ToolDefinition[],
-  options: { serverName?: string } = {}
+  host: ToolHostBinding | ToolDefinition[],
+  options: {
+    serverName?: string;
+    scope?: ProviderScope;
+    conversationId?: string | (() => string | undefined);
+    turnId?: () => string | undefined;
+  } = {}
 ): Promise<CursorSdkMcpToolBridgeResult> {
+  const binding = Array.isArray(host) ? undefined : host;
+  const tools = Array.isArray(host) ? host : [...host.tools];
   const toolByName = new Map<string, ToolDefinition>();
   for (const tool of tools) {
     toolByName.set(tool.name, tool);
@@ -36,8 +48,46 @@ export async function createCursorSdkMcpToolBridge(
 
   const serverName = options.serverName?.trim() || DEFAULT_SERVER_NAME;
   const sessionId = `forge-cursor-sdk-mcp-${randomUUID()}`;
-  const server = createServer(async (request, response) => {
-    await handleRequest(request, response, toolByName, tools, sessionId, serverName);
+  const controllers = new Map<string, AbortController>();
+  const pending = new Set<Promise<void>>();
+  let closing = false;
+  let accepting = true;
+  const cancelPending = () => {
+    accepting = false;
+    for (const controller of controllers.values()) controller.abort(new Error("Cursor tool call cancelled"));
+  };
+  const call = async (id: JsonRpcId, params: unknown, response: ServerResponse): Promise<McpToolResult> => {
+    if (closing || !accepting) return formatToolError("Cursor tool host is cancelled");
+    const key = `${typeof id}:${id}`;
+    if (id === null || controllers.has(key)) return formatToolError("Invalid or duplicate MCP tool request identity");
+    const controller = new AbortController();
+    controllers.set(key, controller);
+    const disconnected = () => { if (!response.writableEnded) controller.abort(new Error("MCP client disconnected")); };
+    response.once("close", disconnected);
+    try {
+      return await handleToolCall(params, toolByName, async (definition, args) => {
+        let result;
+        if (binding) {
+          const conversationId = typeof options.conversationId === "function" ? options.conversationId() : options.conversationId;
+          const turnId = options.turnId?.();
+          if (!options.scope || !conversationId || !turnId) throw new Error("Cursor native turn is not acknowledged");
+          result = await binding.invoke({ ref: { ...options.scope, kind: "tool_call", conversationId, turnId, nativeId: String(id) },
+            name: definition.name, args, signal: controller.signal, context: undefined as never });
+        } else {
+          result = await definition.execute(String(id), args, controller.signal, undefined, undefined as never);
+        }
+        controller.signal.throwIfAborted();
+        return result;
+      });
+    } finally { controllers.delete(key); response.off("close", disconnected); }
+  };
+  const cancel = (id: unknown) => controllers.get(`${typeof id}:${id}`)?.abort(new Error("MCP request cancelled"));
+  const server = createServer((request, response) => {
+    const operation = handleRequest(request, response, tools, sessionId, serverName, call, cancel).catch(() => {
+      if (!response.writableEnded) response.destroy();
+    });
+    pending.add(operation);
+    void operation.finally(() => pending.delete(operation));
   });
 
   await listenOnLoopback(server);
@@ -59,8 +109,20 @@ export async function createCursorSdkMcpToolBridge(
         headers: {}
       }
     },
+    beginTurn: () => { if (!closing) accepting = true; },
+    cancelPending,
+    drain: async () => ({ status: pending.size > 0 || controllers.size > 0 ? "pending" : "clean" }),
     shutdown: async () => {
-      shutdownPromise ??= closeServer(server);
+      if (!shutdownPromise) {
+        closing = true;
+        cancelPending();
+        shutdownPromise = (async () => {
+          const closed = closeServer(server);
+          server.closeAllConnections();
+          await Promise.all([...pending]);
+          await closed;
+        })();
+      }
       await shutdownPromise;
     }
   };
@@ -69,10 +131,11 @@ export async function createCursorSdkMcpToolBridge(
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  toolByName: Map<string, ToolDefinition>,
   tools: ToolDefinition[],
   sessionId: string,
-  serverName: string
+  serverName: string,
+  call: (id: JsonRpcId, params: unknown, response: ServerResponse) => Promise<McpToolResult>,
+  cancel: (id: unknown) => void,
 ): Promise<void> {
   setMcpSessionIdHeader(response, sessionId);
   const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
@@ -126,6 +189,11 @@ async function handleRequest(
         serverInfo: { name: serverName, version: SERVER_VERSION }
       }, sessionId);
       return;
+    case "notifications/cancelled":
+      if (isPlainObject(body.params)) cancel(body.params.requestId);
+      response.statusCode = 202;
+      response.end();
+      return;
     case "notifications/initialized":
       response.statusCode = 202;
       response.end();
@@ -140,14 +208,14 @@ async function handleRequest(
       }, sessionId);
       return;
     case "tools/call":
-      sendJsonRpcResult(response, id, await handleToolCall(body.params, toolByName), sessionId);
+      sendJsonRpcResult(response, id, await call(id, body.params, response), sessionId);
       return;
     default:
       sendJsonRpcError(response, id, -32601, `Method not found: ${method}`, sessionId, 404);
   }
 }
 
-async function handleToolCall(params: unknown, toolByName: Map<string, ToolDefinition>): Promise<McpToolResult> {
+async function handleToolCall(params: unknown, toolByName: Map<string, ToolDefinition>, invoke: (definition: ToolDefinition, args: Record<string, unknown>) => Promise<unknown>): Promise<McpToolResult> {
   if (!isPlainObject(params) || typeof params.name !== "string") {
     return formatToolError("Invalid tools/call params.");
   }
@@ -158,13 +226,7 @@ async function handleToolCall(params: unknown, toolByName: Map<string, ToolDefin
   }
 
   try {
-    const result = await definition.execute(
-      randomUUID().slice(0, 12),
-      normalizeToolArguments(params.arguments),
-      undefined,
-      undefined,
-      undefined as never
-    );
+    const result = await invoke(definition, normalizeToolArguments(params.arguments));
     return formatToolResult(result, definition.name);
   } catch (error) {
     return formatToolError(`Tool ${definition.name} failed: ${error instanceof Error ? error.message : String(error)}`);

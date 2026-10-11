@@ -152,10 +152,13 @@ export interface RuntimeAcquisitionRequirements {
 }
 
 export interface RuntimeCreationOptions {
+  providerScope?: import("./runtime/provider-contract.js").ProviderOpenInput["scope"];
   /** Prepared by the prompt owner; provider adapters consume this instead of a bare string. */
   instructionBundle?: InstructionBundle;
   /** Ephemeral tool executors, hooks and security authority; never persist this object. */
   toolHostBinding?: ToolHostBinding;
+  /** Final provider inputs remain ephemeral and are reused verbatim by core acquisition. */
+  onProviderPrepared?: (prepared: { instructionBundle: InstructionBundle; toolHostBinding: ToolHostBinding }) => void;
   /** Required behavior is checked before preparation or provider dispatch. */
   providerRequirements?: ProviderRequirements;
   startupRecoveryContext?: RuntimeStartupRecoveryContext;
