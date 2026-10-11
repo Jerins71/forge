@@ -1,0 +1,549 @@
+{
+  "provider": "codex",
+  "protocol": "app-server/stdio-jsonrpc",
+  "version": "0.155.0",
+  "scenario": "lifecycle",
+  "provenance": "Synthetic raw Codex 0.155 app-server frames, never normalized Forge observations. Only process transport is substituted. Real-provider spot check remains necessary.",
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "initialize",
+        "params": {
+          "capabilities": {
+            "experimentalApi": true
+          }
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "userAgent": "codex-cli/0.155.0"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "method": "initialized"
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "account/login/start",
+        "params": {
+          "type": "apiKey",
+          "apiKey": "forge-fixture-inert-not-a-provider-key"
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "type": "apiKey"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "thread/start",
+        "params": {
+          "model": "gpt-6-sol",
+          "cwd": "$cwd",
+          "developerInstructions": "Forge replay contract",
+          "approvalPolicy": "never",
+          "sandbox": "danger-full-access",
+          "allowProviderModelFallback": false,
+          "dynamicTools": "$any",
+          "ephemeral": false
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      },
+      "label": "open"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "thread": {
+            "id": "native-root",
+            "path": "$rollout"
+          },
+          "model": "gpt-6-sol"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "turn/start",
+        "params": {
+          "threadId": "native-root",
+          "input": [
+            {
+              "type": "text",
+              "text": "Work"
+            }
+          ],
+          "model": "gpt-6-sol"
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      },
+      "label": "start"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "turn": {
+            "id": "turn-root",
+            "status": "inProgress",
+            "items": []
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "native-root",
+          "turn": {
+            "id": "turn-root"
+          }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "turn/steer",
+        "params": {
+          "threadId": "native-root",
+          "expectedTurnId": "turn-root",
+          "input": [
+            {
+              "type": "text",
+              "text": "Steer"
+            }
+          ]
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "turnId": "turn-root"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/commandExecution/requestApproval",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root",
+          "itemId": "cmd",
+          "command": "echo replay",
+          "cwd": "$cwd"
+        },
+        "id": 801
+      },
+      "label": "approval"
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": 801,
+        "result": {
+          "decision": "accept"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/started",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root",
+          "item": {
+            "type": "collabAgentToolCall",
+            "id": "spawn",
+            "tool": "spawnAgent",
+            "senderThreadId": "native-root",
+            "receiverThreadIds": [
+              "native-child"
+            ],
+            "status": "inProgress"
+          }
+        }
+      },
+      "label": "child"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "native-child",
+          "turn": {
+            "id": "turn-child"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/permissions/requestApproval",
+        "params": {
+          "threadId": "native-child",
+          "turnId": "turn-child",
+          "itemId": "child-cmd",
+          "permissions": {
+            "fileSystem": {
+              "read": true
+            }
+          }
+        },
+        "id": "child-permission"
+      },
+      "label": "child-approval"
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "child-permission",
+        "result": {
+          "permissions": {},
+          "scope": "turn"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "native-child",
+          "turnId": "turn-child",
+          "itemId": "child-text",
+          "delta": "Child result"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "label": "grandchild",
+      "frame": {
+        "method": "item/started",
+        "params": {
+          "threadId": "native-child",
+          "turnId": "turn-child",
+          "item": {
+            "id": "spawn-grandchild",
+            "type": "collabAgentToolCall",
+            "tool": "spawnAgent",
+            "status": "inProgress",
+            "senderThreadId": "native-child",
+            "receiverThreadIds": [
+              "native-grandchild"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "native-grandchild",
+          "turn": {
+            "id": "turn-grandchild",
+            "status": "inProgress",
+            "items": []
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "native-grandchild",
+          "turn": {
+            "id": "turn-grandchild",
+            "status": "completed",
+            "items": []
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "native-child",
+          "turn": {
+            "id": "turn-child",
+            "status": "completed"
+          }
+        }
+      },
+      "label": "child-terminal"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "unrelated",
+          "turn": {
+            "id": "turn-root",
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root",
+          "itemId": "root-text",
+          "delta": "Done"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/reasoning/textDelta",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root",
+          "itemId": "reason",
+          "delta": "Checking"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "thread/tokenUsage/updated",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root",
+          "tokenUsage": {
+            "total": {
+              "inputTokens": 9,
+              "outputTokens": 3,
+              "totalTokens": 12
+            },
+            "last": {
+              "totalTokens": 12
+            },
+            "modelContextWindow": 100
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "native-root",
+          "turn": {
+            "id": "turn-root",
+            "status": "completed"
+          }
+        }
+      },
+      "label": "terminal"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "native-root",
+          "turn": {
+            "id": "turn-root",
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "thread/compact/start",
+        "params": {
+          "threadId": "native-root"
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {}
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "native-root",
+          "turn": {
+            "id": "compact-turn"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/started",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "compact-turn",
+          "item": {
+            "type": "contextCompaction",
+            "id": "compact"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "compact-turn",
+          "item": {
+            "type": "contextCompaction",
+            "id": "compact"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "native-root",
+          "turn": {
+            "id": "compact-turn",
+            "status": "completed"
+          }
+        }
+      },
+      "label": "compacted"
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "thread/read",
+        "params": {
+          "threadId": "native-root",
+          "includeTurns": true
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "thread": {
+            "id": "native-root",
+            "turns": [
+              {
+                "id": "turn-root",
+                "items": [
+                  {
+                    "type": "userMessage",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "Work"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "agentMessage",
+                    "text": "Done"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

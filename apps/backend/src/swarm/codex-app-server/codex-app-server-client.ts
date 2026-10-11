@@ -42,7 +42,7 @@ export function createCodexAppServerClient(
     },
     onRequest: async (request: JsonRpcRequestMessage) => {
       if (handlers.onRequest) {
-        return handlers.onRequest(request.method, request.params);
+        return handlers.onRequest(request.method, request.params, request.id);
       }
 
       if (isSupportedCodexAppServerServerRequest(request.method)) {
@@ -51,7 +51,7 @@ export function createCodexAppServerClient(
 
       throw new Error(`Unsupported Codex app-server server request: ${request.method}`);
     },
-    onExit: handlers.onExit,
+    onExit: error => { adapter.markExited(); handlers.onExit?.(error); },
     stderrContext: sanitizeCodexStderrLine,
     onStderr: (line) => {
       const sanitized = sanitizeCodexStderrLine(line);
@@ -61,7 +61,8 @@ export function createCodexAppServerClient(
     },
   });
 
-  return new CodexAppServerClientAdapter(rpc);
+  const adapter = new CodexAppServerClientAdapter(rpc);
+  return adapter;
 }
 
 class CodexAppServerClientAdapter implements CodexAppServerClientPort {
@@ -117,6 +118,8 @@ class CodexAppServerClientAdapter implements CodexAppServerClientPort {
     this.connected = false;
     this.rpc.dispose();
   }
+
+  markExited(): void { this.disposed = true; this.connected = false; }
 
   isDisposed(): boolean {
     return this.disposed;
