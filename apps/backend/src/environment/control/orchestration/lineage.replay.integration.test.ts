@@ -61,7 +61,18 @@ async function fixture() {
 }
 
 describe('durable lineage with the real kernel, SQLite store and outbox',()=>{
+  it('keeps the shared environment connection when a handoff data directory is provided',async()=>{
+    const f=await fixture();const borrowed=await createControlCore({...f.options,database:f.core().database,databasePath:undefined});
+    try {borrowed.controlService.record({type:'thread.create',commandId:'shared-thread',now,threadId:'shared',role:'manager',projectId:'project'});expect(f.state().threads.shared.threadId).toBe('shared');}
+    finally {await borrowed.close();}
+    expect(f.core().database.open).toBe(true);
+  });
   it('creates a lazy fork without opening a provider or materializing history',async()=>{const f=await fixture();const r=await f.submit('source','one');f.terminal(r.runId);const before=f.counts();f.fork('fork');expect(f.counts()).toEqual(before);expect(f.state().transfers['fork-fork'].state).toBe('pending');expect(Object.keys(f.state().handoffs)).toHaveLength(0);await f.boot();expect(f.counts()).toEqual(before);});
+  it('keeps a single observation consumer while resolving a handoff and starting its target',async()=>{
+    const f=await fixture();const run=await f.submit('source','one-consumer');f.terminal(run.runId);let consumers=0;
+    f.adapter.observations=async function*(){consumers++;};
+    f.fork('target',f.point('source',{kind:'message',entryId:`input-${run.runId}`}));await f.submit('target','target-consumer');expect(consumers).toBe(1);
+  });
   it('honors a historical native run point and a message-bounded portable point',async()=>{const f=await fixture();const one=await f.submit('source','one');f.terminal(one.runId);const two=await f.submit('source','two');f.terminal(two.runId);f.fork('native',f.point('source',{kind:'run',runId:one.runId}));await f.submit('native','native-input');expect(f.nativeForks[0]).toMatchObject({through:{nativeId:`turn-${one.runId}`}});expect(f.state().transfers['fork-native'].strategy).toBe('native_fork');f.fork('message',f.point('source',{kind:'message',entryId:`input-${one.runId}`}));await f.submit('message','message-input');const text=f.starts.find(s=>s.threadId==='message')!.text;expect(text).toContain('request one');expect(text).not.toContain('answer');expect(text).not.toContain('request two');expect(f.state().transfers['fork-message'].strategy).toBe('portable_context');});
   it('records the source-fork ref before target creation and resumes it across two crashes without another fork',async()=>{
     const f=await fixture();const run=await f.submit('source','seed');f.terminal(run.runId);f.fork('target');
@@ -102,6 +113,9 @@ describe('durable lineage with the real kernel, SQLite store and outbox',()=>{
     const input={commandId:'11111111-1111-4111-8111-111111111111',sessionId:'source',fromItemId:`input-${r.runId}`,sourcePoint:{kind:'message',entryId:`input-${r.runId}`} as const,model:model('claude')};
     const result=await requestHandler(deps,principal,'session.fork',input,new AbortController().signal);expect(result).toMatchObject({state:'succeeded',sessionId:`v2-${input.commandId}`});
     expect(await requestHandler(deps,principal,'session.fork',input,new AbortController().signal)).toEqual(result);expect(provisions).toBe(1);expect(f.core().database.prepare("SELECT 1 FROM events WHERE event_type='lineage.upsert'").get()).toBeTruthy();
+    const invalid={...input,commandId:'44444444-4444-4444-8444-444444444444',sourcePoint:{kind:'message',entryId:'missing'},fromItemId:'missing'} as const;
+    const rejected=await requestHandler(deps,principal,'session.fork',invalid,new AbortController().signal);expect(rejected).toMatchObject({state:'failed',error:{code:'CONFLICT',message:'Transfer source message is unavailable'}});
+    expect(await requestHandler(deps,principal,'session.fork',invalid,new AbortController().signal)).toEqual(rejected);expect(provisions).toBe(1);
     const snapshot=await requestHandler(deps,principal,'session.lineage.get',{sessionId:`v2-${input.commandId}`},new AbortController().signal);expect(snapshot).toMatchObject({lineage:{basePoint:{entryId:`input-${r.runId}`,sequence:1}}});
     const descriptor={agentId:'source',role:'manager',profileId:'project',managerId:'source',model:model()} as import('../../../swarm/types.js').AgentDescriptor;
     const port=createCoreLineagePort(f.core().eventSink,f.core().controlService,{getAgent:id=>id==='source'?descriptor:undefined,readEntries:async id=>f.entries[id]??[],clock:()=>now,random:()=>crypto.randomUUID()});
@@ -130,7 +144,9 @@ describe('durable lineage with the real kernel, SQLite store and outbox',()=>{
   it('keeps merge-back tied to the original fork base',async()=>{const f=await fixture();const original=await f.submit('source','original');f.terminal(original.runId);f.fork('child',f.point(),'claude');const base=f.state().threads.child.lineage!.basePoint;const child=await f.submit('child','child');f.terminal(child.runId);const parent=await f.submit('source','later');f.terminal(parent.runId);f.record({type:'transfer.create',commandId:'merge',now,transferId:'merge',kind:'merge_back',source:f.point('child'),targetThreadId:'source',authorized:true});expect(f.state().transfers.merge.basePoint).toEqual(base);await f.submit('source','merged');expect(f.starts.at(-1)!.text).toContain('request child');expect(f.starts.at(-1)!.text).not.toContain('request original');});
   it('continues a completed worker into a new ordinary conversation',async()=>{const f=await fixture();f.create('worker','worker','source');const r=await f.submit('worker','worker');f.terminal(r.runId);f.record({type:'transfer.create',commandId:'continue',now,transferId:'continue',kind:'fork',source:f.point('worker'),targetThreadId:'conversation',continueWorker:true,targetModel:model(),authorized:true});expect(f.state().threads.conversation).toMatchObject({role:'manager',lineage:{relationship:'continued_worker'}});expect(f.state().threads.conversation.managerId).toBeUndefined();expect(f.state().threads.worker.role).toBe('worker');});
   it('projects canonical message IDs and logical run IDs into live detail and canonical replay with declared transfer capabilities',async()=>{
-    const f=await fixture();const run=await f.submit('source','detail');f.terminal(run.runId);const file=path.join(f.root,'detail.jsonl');
+    const f=await fixture();const run=await f.submit('source','detail');f.terminal(run.runId);
+    const binding=Object.values(f.state().bindings)[0];f.record({type:'binding.acquired',commandId:'legacy-model-omitted',now,threadId:'source',binding:{...binding,model:undefined}});
+    const file=path.join(f.root,'detail.jsonl');
     const stamp=new Date(now).toISOString();const write=()=>writeFile(file,[{type:'session',version:3,id:'source',timestamp:stamp,cwd:f.root},...f.entries.source.map((event,index)=>({type:'custom',id:event.timelineEntryId,parentId:index?f.entries.source[index-1].timelineEntryId:null,timestamp:stamp,customType:'swarm_conversation_entry',data:event}))].map(row=>JSON.stringify(row)).join('\n')+'\n');await write();
     const descriptor={agentId:'source',managerId:'source',profileId:'project',displayName:'Source',role:'manager',status:'idle',createdAt:stamp,updatedAt:stamp,cwd:f.root,model:model(),sessionFile:file} as import('../../../swarm/types.js').AgentDescriptor;
     const manager=Object.assign(new EventEmitter(),{getAgentForInternalUse:()=>descriptor,listAgentsForInternalUse:()=>[descriptor],listProfiles:()=>[{profileId:'project'}],listWorkersForSession:()=>[],getPendingChoiceRequestsForSession:()=>[],getPinnedMessageIds:()=>new Set(),getSessionAttentionSnapshot:()=>({attentions:[]}),observeCatalogDirty:()=>()=>{},isSessionShutdownSafe:()=>true});

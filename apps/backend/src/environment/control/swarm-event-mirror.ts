@@ -11,6 +11,7 @@ import { backfillConversationMessageEntryId, backfillConversationTimelineMetadat
 import { isConversationEntryEvent } from "../../swarm/session/conversation-validators.js";
 import { createConversationHistorySeamCursor, readConversationHistoryPage } from "../../swarm/session/conversation-page-reader.js";
 import { sessionTransferCapabilities } from "./orchestration/transfers.js";
+import { runtimeProviderCapabilities } from "../../swarm/runtime/provider-selection.js";
 import type { ProviderBinding } from "../../swarm/runtime/provider-contract.js";
 import type { Principal } from "./control-types.js";
 import { CONVERSATION_ENTRY_TYPE } from "../../swarm/session/conversation-timeline.js";
@@ -82,7 +83,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const pending = swarmManager.getPendingChoiceRequestsForSession(descriptor.agentId).length > 0 || Boolean(database.prepare("SELECT 1 FROM control_choices WHERE session_id=? AND state='pending' LIMIT 1").get(descriptor.agentId));
     const attention = swarmManager.getSessionAttentionSnapshot().attentions.find(attention => attention.sessionAgentId === descriptor.agentId);
     const row = database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(descriptor.agentId) as { desired_state: string } | undefined;
-    const nativeBinding=(database.prepare("SELECT state_json FROM orchestration_bindings WHERE thread_id=? ORDER BY generation DESC").all(descriptor.agentId) as {state_json:string}[]).map(row=>JSON.parse(row.state_json) as ProviderBinding).find(b=>b.model?.provider===descriptor.model.provider);
+    const nativeBinding=(database.prepare("SELECT state_json FROM orchestration_bindings WHERE thread_id=? ORDER BY generation DESC").all(descriptor.agentId) as {state_json:string}[]).map(row=>JSON.parse(row.state_json) as ProviderBinding).find(b=>b.capabilities.provider===runtimeProviderCapabilities(descriptor.model.provider).provider);
     const lifecycle = database.prepare("SELECT state_json FROM orchestration_threads WHERE thread_id=?").get(descriptor.agentId) as { state_json: string } | undefined;
     const status = lifecycle ? prior?.status ?? "idle" : row?.desired_state === "stopped" ? swarmManager.isSessionShutdownSafe(descriptor.agentId) ? "stopped" : "stopping"
       : descriptor.status === "streaming" ? "running" : descriptor.status === "terminated" ? "stopped"

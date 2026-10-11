@@ -300,7 +300,9 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       } catch (error) {
         sink.transaction(tx => {
           database.prepare("UPDATE effects SET state='interrupted' WHERE command_id=? AND kind='lifecycle.admit'").run(input.commandId);
-          if (input.receipt) sink.updateReceipt(tx, input.commandId, { state: "interrupted", ...(input.ambiguousDelivery ? { delivery: "unknown" as const } : {}), error: { code: "CONFLICT", message: "Policy command interrupted; inspect the resulting configuration before issuing a fresh request", retryable: false } });
+          if (input.receipt) sink.updateReceipt(tx, input.commandId, input.receiptReplay && error instanceof ControlError
+            ? {state:"failed",error:{code:error.code,message:error.message,retryable:error.retryable}}
+            : { state: "interrupted", ...(input.ambiguousDelivery ? { delivery: "unknown" as const } : {}), error: { code: "CONFLICT", message: "Policy command interrupted; inspect the resulting configuration before issuing a fresh request", retryable: false } });
           if (input.intent === "resume") for (const sessionId of sessionIds) {
             if (!database.prepare("SELECT 1 FROM control_sessions WHERE session_id=? AND deleted=0").get(sessionId)) continue;
             stopThread(tx, sessionId, `${input.commandId}:failed-resume`);

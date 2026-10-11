@@ -175,8 +175,8 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     if (resource.binding.scope.threadId !== threadId || resource.binding.scope.bindingId !== bindingId || resource.binding.scope.generation !== generation) throw new Error("Acquired provider scope differs from authoritative scope");
     const previous=Object.values(loadState(database).bindings).find(b=>b.conversation.nativeId===conversation?.nativeId && b.capabilities.provider===resource.binding.capabilities.provider);
     Object.assign(resource.binding,{model:providerModel ?? resource.binding.model,nativeRunIds:nativeFork?.nativeRunIds ?? previous?.nativeRunIds ?? resource.binding.nativeRunIds,contextCoverage:nativeFork?.contextCoverage ?? previous?.contextCoverage ?? resource.binding.contextCoverage});
-    const entry = {...resource,stop:new AbortController()};live.set(bindingId,entry);
-    startObservations(entry.binding,entry.adapter,entry.stop);
+    const entry = existing ?? {...resource,stop:new AbortController()};
+    if(!existing) {live.set(bindingId,entry);startObservations(entry.binding,entry.adapter,entry.stop);}
     record({type:"binding.acquired",commandId:`binding:${bindingId}:${generation}`,now:options.clock(),threadId,binding:entry.binding});
     return entry;
   };

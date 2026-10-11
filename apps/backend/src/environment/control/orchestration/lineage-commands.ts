@@ -39,16 +39,19 @@ export function createLineageCommands(sink:EventSink,options:ControlCoreOptions,
         },
       },async()=>{
         if(!options.swarm.readTransferEntries) throw new ControlError('UNAVAILABLE','Canonical context reader is unavailable');
-        const entries=await options.swarm.readTransferEntries(sourceId);
+        let entries:import('../../../swarm/types.js').ConversationEntryEvent[];
+        try {entries=await options.swarm.readTransferEntries(sourceId);} catch {throw new ControlError('UNAVAILABLE','Canonical source history is unavailable');}
         const selector='sourcePoint' in input && input.sourcePoint ? input.sourcePoint : 'fromItemId' in input && input.fromItemId ? {kind:'message' as const,entryId:input.fromItemId}:{kind:'latest_stable' as const};
         if('fromItemId' in input && input.fromItemId && input.sourcePoint && (input.sourcePoint.kind!=='message' || input.sourcePoint.entryId!==input.fromItemId)) throw new ControlError('INVALID_INPUT','Fork sourcePoint conflicts with fromItemId');
-        const point=resolveSourcePoint(loadState(sink.database),sourceId,selector,entries);
+        let point:ReturnType<typeof resolveSourcePoint>;
+        try {point=resolveSourcePoint(loadState(sink.database),sourceId,selector,entries);} catch(error) {throw new ControlError('CONFLICT',error instanceof Error ? error.message:'Invalid source point');}
         const source=loadState(sink.database).threads[sourceId];
         const model='model' in input && input.model ? {...input.model,thinkingLevel:input.model?.thinkingLevel ?? source?.model?.thinkingLevel ?? 'medium'} : source?.model;
         const kind:'fork'|'provider_switch'|'merge_back'=method==='session.provider.switch' ? 'provider_switch' : method==='session.mergeBack' ? 'merge_back':'fork';
         // Validate the same pure command before creating any file-backed target resources.
         const command={type:'transfer.create' as const,commandId:input.commandId,now:options.clock(),transferId:`transfer:${input.commandId}`,kind,source:point,targetThreadId:targetId,targetModel:model,continueWorker:method==='worker.continue',authorized:true};
-        const {decide}=await import('./kernel.js');decide(loadState(sink.database),command);
+        const {decide}=await import('./kernel.js');
+        try {decide(loadState(sink.database),command);} catch(error) {throw new ControlError('CONFLICT',error instanceof Error ? error.message:'Context transfer is unavailable');}
         if(kind==='fork') {
           if(!options.swarm.prepareLineageSession) throw new ControlError('UNAVAILABLE','Lazy lineage session provisioner is unavailable');
           await options.swarm.prepareLineageSession({kind:method==='worker.continue'?'continued_worker':'fork',commandId:input.commandId,sourceThreadId:sourceId,targetThreadId:targetId,title:'title' in input ? input.title:undefined,sourcePoint:point,historical:!!point.messageBounded || !point.nativeLatest,model,...('purpose' in input ? {purpose:input.purpose}: {})});

@@ -21,8 +21,8 @@ export interface ControlCore {
   reconcileOnBoot(): Promise<void>;
   close(): Promise<void>;
 }
-export async function createControlCore(options: ControlCoreOptions & { dataDir?: string }): Promise<ControlCore> {
-  if (options.database && (options.databasePath || options.dataDir)) throw new Error("Supply a control database or its location, not both");
+export async function createControlCore(options: ControlCoreOptions): Promise<ControlCore> {
+  if (options.database && options.databasePath) throw new Error("Supply a control database or its location, not both");
   let database: Database;
   const owned = !options.database;
   if (options.database) database = options.database;

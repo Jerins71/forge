@@ -1,5 +1,5 @@
 import { createServer, type ServerResponse } from "node:http";
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, cp } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import { Type } from "@sinclair/typebox";
 import { describe, expect, it, vi } from "vitest";
 import { ClaudeAgentRuntime, NATIVE_CLAUDE_STATE } from "../runtime/claude/claude-agent-runtime.js";
 import { resolveClaudeExecutable, claudeRuntimeEnvironment } from "../runtime/claude/claude-runtime-environment.js";
+import type { ProviderConversationRef } from "@forge/protocol";
 import { BROWSER_AUTOMATION_OPERATIONS } from "@forge/protocol";
 import { buildBrowserAutomationTools } from "../browser-automation/browser-automation-tools.js";
 import type { SwarmToolHost } from "../swarm-tool-host.js";
@@ -77,10 +78,10 @@ describe("Claude native process acceptance", () => {
     const descriptor = (id: string): AgentDescriptor => ({ agentId: id, role: "manager", managerId: id, profileId: "fixture", cwd,
       status: "idle", sessionFile: join(root, `${id}.jsonl`), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       model: { provider: "claude-native", modelId: "claude-sonnet-5", thinkingLevel: "high" } });
-    const create = async (id = "owner") => ClaudeAgentRuntime.create({ descriptor: descriptor(id), systemPrompt: "FORGE_APPEND_FIXTURE. Use Forge coordination tools.",
+    const create = async (id = "owner", providerConversation?: ProviderConversationRef) => ClaudeAgentRuntime.create({ descriptor: descriptor(id), systemPrompt: "FORGE_APPEND_FIXTURE. Use Forge coordination tools.",
       env: { ...await claudeRuntimeEnvironment({} as SwarmConfig), PATH: process.env.PATH, HOME: root, USERPROFILE: root, TMPDIR: tmpdir(), CLAUDE_CONFIG_DIR: config, ANTHROPIC_API_KEY: "sk-ant-fake-fixture",
         ANTHROPIC_BASE_URL: `http://127.0.0.1:${address.port}`, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", FIXTURE_CANARY: canary },
-      executable: await resolveClaudeExecutable({}), projectTrusted: false, host: { requestUserChoice }, creationOptions: { secureRuntimeBinding: binding },
+      executable: await resolveClaudeExecutable({}), projectTrusted: false, host: { requestUserChoice }, creationOptions: { secureRuntimeBinding: binding, providerConversation },
       callbacks: { onStatusChange: vi.fn(), onAgentEnd: vi.fn(), onRuntimeError: (_id, error) => { errors.push(error); }, onSessionEvent: (_id, event) => { events.push(event); } },
       tools: [...buildBrowserAutomationTools({ invokeBrowserAutomation } as unknown as SwarmToolHost, descriptor(id)),
         createNativeSecureBashTool(descriptor(id), () => binding), { name: "fixture_tool", label: "Fixture", description: "Fixture Forge tool",
@@ -164,10 +165,9 @@ describe("Claude native process acceptance", () => {
       expect(latestUsage().nativeSessionId).not.toBe(beforeResume.nativeSessionId);
       expect(requests.slice(boundedRequest).some(r => r.raw.includes("CASE_RESUME"))).toBe(false);
       await runtime.stopInFlight({ shutdownTimeoutMs: 10_000 });
-      // A latest-message fork keeps the parent's identity and forks that native
-      // thread: full parent context under a new native session, never the parent's writer.
-      await cp(descriptor("owner").sessionFile, descriptor("fork").sessionFile);
-      runtime = await create("fork");
+      // Only an explicit source-fork locator authorizes SDK resume with forkSession.
+      const forkId = randomUUID();
+      runtime = await create("fork", { kind: "conversation", threadId: "owner", bindingId: "source-binding", generation: 0, nativeId: forkId, forkOnResume: true, forkSource: { nativeId: beforeResume.nativeSessionId! } });
       expect(runtime.getCustomEntries(NATIVE_CLAUDE_STATE).at(-1)).toMatchObject({ ownerAgentId: "fork", forkFrom: beforeResume.nativeSessionId, hasStartedTurn: false });
       const forkRequest = requests.length;
       await send("CASE_FORK New fork work.");
