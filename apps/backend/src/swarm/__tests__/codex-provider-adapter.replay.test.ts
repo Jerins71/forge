@@ -18,7 +18,7 @@ import { createInstructionBundle } from "../runtime/instruction-bundle.js";
 import { bindRuntimeToolHost } from "../runtime/runtime-tool-plan.js";
 import { createReplayHarness, ReplaySignals, watchdog, type ReplayTranscript } from "../runtime/replay/replay-harness.js";
 import { nativeCodexEnvironment, CodexRuntimeAuth } from "../runtime/codex/codex-runtime-auth.js";
-import { ProviderDispatchRejectedError, ProviderRefreshRequiredError } from "../runtime/provider-contract.js";
+import { ProviderDispatchRejectedError, ProviderRefreshRequiredError, ProviderRequestRejectedError } from "../runtime/provider-contract.js";
 import { CodexProviderAdapter } from "../runtime/codex/codex-provider-adapter.js";
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -26,7 +26,7 @@ afterEach(async () => { for (const clean of cleanup.splice(0).reverse()) await c
 const directory = fileURLToPath(new URL("../runtime/codex/", import.meta.url));
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
-async function fixture(scenario: string, options: { persistedPath?: string; codexHome?: string; changedSchema?: boolean; conversation?:ProviderConversationRef } = {}) {
+async function fixture(scenario: string, options: { persistedPath?: string; codexHome?: string; changedSchema?: boolean; conversation?:ProviderConversationRef; decision?: "accept" | "decline" } = {}) {
   const handle = await createTempConfig({ prefix: "forge-codex-adapter-", port: 0 });
   cleanup.push(handle.cleanup);
   const root = await realpath(handle.tempRootDir);
@@ -45,7 +45,8 @@ async function fixture(scenario: string, options: { persistedPath?: string; code
   const toolHost = bindRuntimeToolHost({ descriptor, tools: [tool], mechanism: "dynamic_tools", scope });
   let transcript = JSON.parse(await readFile(join(directory, `fixtures/codex-${scenario}.json`), "utf8")) as ReplayTranscript;
   if(options.conversation) transcript=JSON.parse(JSON.stringify(transcript).replaceAll("native-root",options.conversation.nativeId));
-  const replay = await createReplayHarness(() => ({ ...transcript, bindings: { ...transcript.bindings, $persistedPath: options.persistedPath } }));
+  const replay = await createReplayHarness(() => ({ ...transcript, bindings: { ...transcript.bindings, $persistedPath: options.persistedPath,
+    ...(options.decision ? { $decision: options.decision } : {}) } }));
   cleanup.push(replay.close);
   await writeFile(join(codexHome, "replay-peer.json"), JSON.stringify({ port: replay.port }));
   const auth = new CodexRuntimeAuth({ config: handle.config, descriptor });
@@ -92,6 +93,71 @@ async function fixture(scenario: string, options: { persistedPath?: string; code
 }
 
 describe("Codex ProviderAdapter over production JSON-RPC and raw replay", () => {
+  it("round trips native user-input questions as Forge choice answers", async () => {
+    const f = await fixture("choice-input");
+    await f.start();
+    await f.release("choice");
+    const request = await f.wait("request_opened:root:number:1001");
+    if (request.type !== "request_opened") throw new Error("Expected choice request");
+    expect(request.requestKind).toBe("user_input");
+    expect(request.payload).toMatchObject({ method: "item/tool/requestUserInput", params: { itemId: "choice-item" }, questions: [
+      { id: "color", header: "Color", question: "Choose a color.", options: [
+        { id: "0", label: "Blue", description: "A cool color." }, { id: "1", label: "Green", description: "A natural color." }] },
+      { id: "note", header: "Note", question: "Add a note." },
+    ] });
+    await expect(f.adapter.respond({ binding: f.binding, request: request.request, lifetime: request.lifetime,
+      response: { answers: [] } })).rejects.toThrow(/choice answers/i);
+    const answers = [{ questionId: "color", selectedOptionIds: ["1"] }, { questionId: "note", selectedOptionIds: [], text: "Remember this." }];
+    await f.adapter.respond({ binding: f.binding, request: request.request, lifetime: request.lifetime, response: answers });
+    expect(await f.replay.signals.wait("1:answer")).toEqual({ id: 1001, result: {
+      answers: { color: { answers: ["Green"] }, note: { answers: ["Remember this."] } },
+    } });
+    expect(f.events.filter(event => event.type === "request_resolved")).toHaveLength(1);
+    const duplicate = await f.adapter.respond({ binding: f.binding, request: request.request, lifetime: request.lifetime, response: answers }).catch(error => error);
+    expect(duplicate).toBeInstanceOf(ProviderRequestRejectedError);
+    expect(duplicate).toMatchObject({ code: "PROVIDER_REQUEST_REJECTED", reason: "unknown_request" });
+    await f.release("terminal");
+    await f.wait("terminal:root:completed");
+    await f.evidence();
+  });
+
+  it.each(["accept", "decline"] as const)("converts command approval %s through the existing Codex bridge", async decision => {
+    const f = await fixture("choice-command", { decision });
+    await f.start();
+    await f.release("choice");
+    const request = await f.wait("request_opened:root:number:1001");
+    if (request.type !== "request_opened") throw new Error("Expected approval");
+    expect(request.requestKind).toBe("approval");
+    expect(request.payload).toMatchObject({ method: "item/commandExecution/requestApproval", questions: [{
+      id: "approval", header: "Codex permission", question: expect.stringContaining("echo replay"),
+      options: [{ id: "decline", label: "Deny" }, { id: "accept", label: "Allow once" }],
+    }] });
+    expect(JSON.stringify(request.payload)).toContain("example.test");
+    await f.adapter.respond({ binding: f.binding, request: request.request, lifetime: request.lifetime,
+      response: [{ questionId: "approval", selectedOptionIds: [decision] }] });
+    expect(await f.replay.signals.wait("1:answer")).toEqual({ id: 1001, result: { decision } });
+    await f.release("terminal");
+    await f.wait("terminal:root:completed");
+    await f.evidence();
+  });
+
+  it("projects the complete proposed file change and converts its approval", async () => {
+    const f = await fixture("choice-file");
+    await f.start();
+    await f.release("choice");
+    const request = await f.wait("request_opened:root:number:1001");
+    if (request.type !== "request_opened") throw new Error("Expected file approval");
+    expect(request.payload).toMatchObject({ method: "item/fileChange/requestApproval", params: {
+      forgeFileChanges: expect.stringContaining("-before\\n+after"),
+    }, questions: [{ id: "approval", question: expect.stringContaining("fixture.txt") }] });
+    await f.adapter.respond({ binding: f.binding, request: request.request, lifetime: request.lifetime,
+      response: [{ questionId: "approval", selectedOptionIds: ["accept"] }] });
+    expect(await f.replay.signals.wait("1:answer")).toEqual({ id: 1001, result: { decision: "accept" } });
+    await f.release("terminal");
+    await f.wait("terminal:root:completed");
+    await f.evidence();
+  });
+
   it.each([{ legacy: false, appendCrash: false }, { legacy: true, appendCrash: false }, { legacy: false, appendCrash: true }])(
     "projects canonical output and one end without queueing: %j", async ({ legacy, appendCrash }) => {
     const handle = await createTempConfig({ prefix: "forge-codex-projection-", port: 0,
@@ -259,14 +325,14 @@ describe("Codex ProviderAdapter over production JSON-RPC and raw replay", () => 
     await f.release("approval");
     const approval = await f.wait("request_opened:root:number:801");
     if (approval.type !== "request_opened") throw new Error("Expected request");
-    await expect(f.adapter.respond({ binding: f.binding, request: { ...approval.request, generation: 6 }, lifetime: approval.lifetime, response: { decision: "accept" } })).rejects.toThrow(/stale|scope/i);
-    await f.adapter.respond({ binding: f.binding, request: approval.request, lifetime: approval.lifetime, response: { decision: "accept" } });
-    await expect(f.adapter.respond({ binding: f.binding, request: approval.request, lifetime: approval.lifetime, response: { decision: "accept" } })).rejects.toThrow(/expired|resolved/i);
+    await expect(f.adapter.respond({ binding: f.binding, request: { ...approval.request, generation: 6 }, lifetime: approval.lifetime, response: [{ questionId: "approval", selectedOptionIds: ["accept"] }] })).rejects.toThrow(/stale|scope/i);
+    await f.adapter.respond({ binding: f.binding, request: approval.request, lifetime: approval.lifetime, response: [{ questionId: "approval", selectedOptionIds: ["accept"] }] });
+    await expect(f.adapter.respond({ binding: f.binding, request: approval.request, lifetime: approval.lifetime, response: [{ questionId: "approval", selectedOptionIds: ["accept"] }] })).rejects.toThrow(/expired|resolved/i);
     await f.release("child");
     await f.release("child-approval");
     const childApproval = await f.wait("request_opened:child:string:child-permission");
     if (childApproval.type !== "request_opened") throw new Error("Expected child approval");
-    await f.adapter.respond({ binding: f.binding, request: childApproval.request, lifetime: childApproval.lifetime, response: { permissions: {}, scope: "turn" } });
+    await f.adapter.respond({ binding: f.binding, request: childApproval.request, lifetime: childApproval.lifetime, response: [{ questionId: "approval", selectedOptionIds: ["decline"] }] });
     await f.release("grandchild");
     const grandchild = await f.wait("conversation:native-grandchild:terminal:completed");
     expect(grandchild).toMatchObject({ terminalAuthority: "native_child", origin: { kind: "child", parentTurn: { ...f.scope, nativeId: "turn-child", conversationId: "native-child" } } });
@@ -304,7 +370,7 @@ describe("Codex ProviderAdapter over production JSON-RPC and raw replay", () => 
     await f.adapter.interrupt({ binding: f.binding, attemptId: "attempt", turn: started.turn });
     expect(f.events.some(event => event.type === "terminal")).toBe(false);
     if (approval.type !== "request_opened") throw new Error("Expected request");
-    await expect(f.adapter.respond({ binding: f.binding, request: approval.request, lifetime: approval.lifetime, response: { decision: "accept" } })).rejects.toThrow(/expired|resolved/i);
+    await expect(f.adapter.respond({ binding: f.binding, request: approval.request, lifetime: approval.lifetime, response: [{ questionId: "approval", selectedOptionIds: ["accept"] }] })).rejects.toThrow(/expired|resolved/i);
     await f.release("cancelled-tool");
     await f.release("interrupted");
     await f.wait("terminal:root:interrupted");
@@ -317,7 +383,8 @@ describe("Codex ProviderAdapter over production JSON-RPC and raw replay", () => 
     const started = await first.start();
     if (started.status !== "accepted") throw new Error("Expected acceptance");
     await first.release("pending");
-    await first.wait("request_opened:root:number:903");
+    const oldRequest = await first.wait("request_opened:root:number:903");
+    if (oldRequest.type !== "request_opened") throw new Error("Expected old request");
     await first.adapter.interrupt({ binding: first.binding, attemptId: "attempt", turn: started.turn });
     await first.release("cancelled-tool");
     await first.release("interrupted");
@@ -327,6 +394,14 @@ describe("Codex ProviderAdapter over production JSON-RPC and raw replay", () => 
     // A resumed thread remains in the same isolated native home.
     const handle = await fixture("resume", { persistedPath: path, codexHome: first.codexHome, changedSchema: true });
     await handle.start();
+    const stale = await handle.adapter.respond({ binding: handle.binding, request: oldRequest.request, lifetime: oldRequest.lifetime,
+      response: [{ questionId: "approval", selectedOptionIds: ["accept"] }] }).catch(error => error);
+    expect(stale).toBeInstanceOf(ProviderRequestRejectedError);
+    expect(stale).toMatchObject({ code: "PROVIDER_REQUEST_REJECTED", reason: "stale_scope" });
+    await expect(handle.adapter.respond({ binding: handle.binding, request: { ...oldRequest.request, ...handle.scope },
+      lifetime: { ...oldRequest.lifetime, generation: handle.scope.generation }, response: [] }))
+      .rejects.toMatchObject({ code: "PROVIDER_REQUEST_REJECTED", reason: "unknown_request" });
+    expect(handle.replay.trace.filter(row => row.direction === "outbound" && (row.frame as { id?: unknown }).id === 903)).toEqual([]);
     await handle.release("terminal");
     await handle.wait("terminal:root:completed");
     expect(handle.scope.generation).toBe(2);

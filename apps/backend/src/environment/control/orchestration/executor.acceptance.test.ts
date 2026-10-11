@@ -43,6 +43,35 @@ async function fixture() {
 const principal = { deviceSessionId: "device", scopes: new Set(["session:operate" as const]) };
 
 describe("durable provider outbox", () => {
+  it.each(["pending", "error"] as const)("quarantines %s runtime cleanup and interrupts the stop receipt before adapter close", async mode => {
+    const f = await fixture(); let closes = 0;
+    f.adapter.close = async () => { closes++; };
+    f.options.swarm.stopSession = async () => { if (mode === "error") throw new Error("Runtime cleanup failed"); return { stopped: false }; };
+    await f.core.controlService.submitInput({ commandId: "held", threadId: "manager", message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" }); await f.core.effectWorker.drain();
+    expect(closes).toBe(0); expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "interrupted" });
+    expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "stopped", shutdown: "quarantined" });
+    await expect(f.core.controlService.submitInput({ commandId: "replacement", threadId: "manager", message: { text: "replacement", artifactIds: [] } })).rejects.toThrow(/shutdown/i);
+  });
+  it("settles runtime cleanup before closing the adapter binding", async () => {
+    const f = await fixture(); let nativeClosed = false; const order: string[] = [];
+    f.adapter.close = async () => { nativeClosed = true; order.push("adapter.close"); };
+    f.options.swarm.stopSession = async () => { order.push("runtime.stop"); if (nativeClosed) throw new Error("Runtime cannot interrupt a closed native binding"); return { stopped: true }; };
+    await f.core.controlService.submitInput({ commandId: "held", threadId: "manager", message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" }); await f.core.effectWorker.drain();
+    expect(order).toEqual(["runtime.stop", "adapter.close"]); expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded" });
+    expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "stopped", shutdown: "clean" });
+  });
+  it("stops the manager and its owned worker in one kernel transaction, then releases their resources in order", async () => {
+    const f = await fixture(); const order: string[] = [];
+    await f.core.controlService.submitInput({ commandId: "parent", threadId: "manager", message: { text: "held", artifactIds: [] } });
+    await f.core.controlService.submitInput({ commandId: "child", threadId: "worker", thread: { role: "worker", projectId: "project", managerId: "manager" }, message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    f.options.swarm.stopSession = async input => { order.push(input.sessionId); if (input.sessionId === "manager") expect(loadState(f.core.database).threads.worker.desired).toBe("stopped"); return { stopped: true }; };
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" });
+    expect(loadState(f.core.database).threads.worker.desired).toBe("stopped"); await f.core.effectWorker.drain();
+    expect(order).toEqual(["manager", "worker"]); expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded" });
+    expect(loadState(f.core.database).threads.worker.shutdown).toBe("clean"); expect(loadState(f.core.database).runs["run-child"].state).toBe("terminal");
+  });
   it("rebuilds provider images from pinned prepared-message attachments after restart", async () => {
     const f = await fixture(); const root = path.dirname(f.options.databasePath!);
     const descriptor = { agentId: "manager", role: "manager", status: "idle", profileId: "project" } as AgentDescriptor;
@@ -55,7 +84,7 @@ describe("durable provider outbox", () => {
       turns: { async enqueue() {} },
     } as unknown as UserMessageCoordinatorOptions);
     const acquire = f.options.swarm.acquireProvider;
-    const swarm = { installProviderScopeOwner() {}, installAuthoritativeInputOwner() {}, installControlledTurnProjection() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
+    const swarm = { installProviderScopeOwner() {}, installAuthoritativeInputOwner() {}, installControlledTurnProjection() {}, installControlledChoicePort() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
       getAgentForInternalUse: () => descriptor, acquireControlledProvider: acquire, applyControlledInput: coordinator.applyControlledInput.bind(coordinator),
     } as unknown as Parameters<typeof createSwarmControlAdapter>[0]["swarmManager"];
     const artifactService = createArtifactService({ database: f.core.database, dataDir: root });
@@ -111,7 +140,7 @@ describe("durable provider outbox", () => {
     const delivered: Array<HandleUserMessageOptions> = []; const acquire = f.options.swarm.acquireProvider;
     const descriptor = { agentId: "manager", role: "manager", profileId: "project", managerId: "manager", model: { provider: "pi", modelId: "fixture" } };
     const swarm = {
-      installProviderScopeOwner() {}, installAuthoritativeInputOwner(callback: typeof submit) { submit = callback; }, installControlledTurnProjection() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
+      installProviderScopeOwner() {}, installAuthoritativeInputOwner(callback: typeof submit) { submit = callback; }, installControlledTurnProjection() {}, installControlledChoicePort() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
       getAgentForInternalUse: () => descriptor, acquireControlledProvider: acquire,
       async applyControlledInput(text: string, options: HandleUserMessageOptions) { delivered.push(options); return { entryId: "canonical", runtimeMessage: { text } }; },
     } as unknown as Parameters<typeof createSwarmControlAdapter>[0]["swarmManager"];

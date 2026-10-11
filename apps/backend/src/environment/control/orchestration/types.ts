@@ -89,7 +89,7 @@ export type CoreCommand = Envelope & (
   | { type: "attempt.interrupt_acknowledged"; threadId: string; attemptId: string }
   | { type: "provider.observe"; observation: ProviderObservation }
   | { type: "request.respond"; threadId: string; requestId: string; response: unknown }
-  | { type: "request.cancel" | "request.responded"; threadId: string; requestId: string }
+  | { type: "request.cancel" | "request.expire" | "request.responded"; threadId: string; requestId: string }
   | { type: "thread.compact"; threadId: string; attemptId: string; instructions?: string }
   | { type: "compaction.completed"; threadId: string; attemptId: string; succeeded: boolean }
   | { type: "environment.recover"; recoveryId: string; bootId: string; reports: RecoverySnapshot["undeliveredReports"] }

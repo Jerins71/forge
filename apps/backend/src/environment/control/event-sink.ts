@@ -14,6 +14,7 @@ import { decide } from "./orchestration/kernel.js";
 import { lineageSnapshot,sessionTransferCapabilities } from "./orchestration/transfers.js";
 import { loadState, projectLifecycle } from "./orchestration/store.js";
 import type { CoreCommand, Decision } from "./orchestration/types.js";
+import { requestChoice, requestSession } from "./orchestration/request-projection.js";
 
 type ShellEvent = Extract<ShellStreamItem, { kind: "event" }>["event"];
 type DetailEvent = Extract<DetailStreamItem, { kind: "event" }>["event"];
@@ -274,6 +275,10 @@ export function createEventSink(database: Database, clock: () => number, random:
           }
         }
         projectLifecycle(database, event);
+        if ("request" in event) {
+          const choice = requestChoice(event.request);
+          if (choice) sink.append(tx, { topic: "detail", sessionId: requestSession(loadState(database).threads[event.request.threadId]), event: { type: "choice.upsert", choice } });
+        }
         if (event.type === "input.recorded") database.prepare("UPDATE control_inputs SET canonical_entry_id=?,append_state='recorded' WHERE input_id=?").run(event.run.entryId, event.run.inputId);
         if ("attempt" in event) {
           const run = loadState(database).runs[event.attempt.runId];
@@ -290,8 +295,9 @@ export function createEventSink(database: Database, clock: () => number, random:
       let ordinal = (database.prepare("SELECT COALESCE(MAX(ordinal),-1)+1 ordinal FROM effects WHERE command_id=?").get(command.commandId) as { ordinal: number }).ordinal;
       for (const effect of decision.effects) {
         const effectId = `${command.commandId}:${ordinal}`;
-        database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,?,?,?,'pending')")
-          .run(effectId, command.commandId, effect.threadId, effect.kind, ordinal++, JSON.stringify(effect));
+        const priorRelease = effect.kind === "provider.release" ? database.prepare("SELECT effect_id FROM effects WHERE command_id=? AND kind='provider.release' ORDER BY ordinal DESC LIMIT 1").get(command.commandId) as { effect_id: string } | undefined : undefined;
+        database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,depends_on,payload_json,state) VALUES (?,?,?,?,?,?,?,'pending')")
+          .run(effectId, command.commandId, effect.threadId, effect.kind, ordinal++, priorRelease?.effect_id ?? null, JSON.stringify(effect));
       }
       const state = loadState(database);
       const lineageThreads = new Set(decision.events.flatMap(event=>"transfer" in event ? [event.transfer.source.threadId,event.transfer.targetThreadId] : "handoff" in event ? [] : "thread" in event && event.thread.lineage ? [event.thread.threadId] : []));

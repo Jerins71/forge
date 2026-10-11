@@ -11,10 +11,10 @@ import { createCoreLineagePort } from "./orchestration/lineage-tool-port.js";
 import { createCoreAgentMessagePort } from "./orchestration/agent-message-port.js";
 import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
 import { loadState } from "./orchestration/store.js";
+import { createCoreChoicePort } from "./orchestration/choice-port.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, controlService, workspaceService, artifactService }: {
-  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "getAgentForInternalUse" | "listProfiles" | "releaseControlledWorker" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner"> & Pick<SwarmManager,"installCoreAgentMessagePort"|"installCoreLineagePort"|"getConversationHistory"|"prepareLineageSession"|"resolveSpecialistFallbackModelForDescriptor">;
-
+  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "getAgentForInternalUse" | "listProfiles" | "releaseControlledWorker" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner" | "installControlledChoicePort"> & Pick<SwarmManager,"installCoreAgentMessagePort"|"installCoreLineagePort"|"getConversationHistory"|"prepareLineageSession"|"resolveSpecialistFallbackModelForDescriptor">;
   database: Database;
   eventSink: EventSink;
   controlService: EnvironmentControlService;
@@ -56,6 +56,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
     return { status:projectLifecycleStatus(state,agentId)?.agentStatus,activeRunId:state.threads[agentId]?.activeRunId,pendingRunIds:Object.values(state.runs).filter(run => run.threadId === agentId && run.state === "queued").sort((a,b)=>a.sequence-b.sequence).map(run=>run.runId) };
   } });
   eventSink.subscribeCommit(() => swarmManager.reflectControlledTurns());
+  swarmManager.installControlledChoicePort(createCoreChoicePort({ database, controlService, clock: Date.now, random: () => crypto.randomUUID() }));
   const messages = createCoreAgentMessagePort({ controlService,sink:eventSink,artifacts:artifactService,swarm:swarmManager,clock:Date.now,random:()=>crypto.randomUUID() });
   swarmManager.installCoreAgentMessagePort(messages);
   const readTransferEntries=async (threadId:string)=>swarmManager.getConversationHistory(threadId);

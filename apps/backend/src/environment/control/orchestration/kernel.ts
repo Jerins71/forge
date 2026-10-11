@@ -106,7 +106,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       emit({ type: "request.opened", request: { requestId, threadId: owner.threadId, attemptId: attempt.attemptId, ref: observation.request, lifetime: observation.lifetime, kind: observation.requestKind, state: "pending", payload: observation.payload } });
     } else if (observation.type === "request_resolved") {
       const request = state.requests[`${attempt.bindingId}:${owner.generation}:${observation.request.nativeId}`];
-      if (request) emit({ type: observation.resolution === "expired" ? "request.expired" : "request.resolved", request: { ...request, state: observation.resolution === "expired" ? "expired" : "resolved" } });
+      if (request) emit({ type: observation.resolution === "expired" ? "request.expired" : observation.resolution === "cancelled" ? "request.cancelled" : "request.resolved", request: { ...request, state: observation.resolution === "expired" ? "expired" : observation.resolution === "cancelled" ? "cancelled" : "resolved" } });
     } else if (observation.origin.kind !== "root" || owner.activeRunId !== run.runId || run.activeAttemptId !== attempt.attemptId) { /* This observation has no root terminal authority. */ }
     else if (observation.type === "accepted") emit({ type: "attempt.accepted", attempt: { ...state.attempts[attempt.attemptId], state: "accepted", delivery: "dispatched", turn: observation.turn } });
     else if (observation.type === "terminal" && observation.terminalAuthority === "root_attempt") { finish(state.runs[run.runId], observation.outcome,true); advance(owner.threadId); }
@@ -187,6 +187,11 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       for (const run of Object.values(state.runs)) if (run.threadId === owner.threadId && run.state === "queued") finish(run, "cancelled");
       if (needsDrain) decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: owner.bindingId! });
       else if (owner.activeRunId && state.runs[owner.activeRunId].state !== "terminal") finish(state.runs[owner.activeRunId], "cancelled");
+      if (owner.role === "manager") for (const worker of Object.values(state.threads).filter(candidate => candidate.managerId === owner.threadId && (candidate.desired !== "stopped" || candidate.shutdown !== "clean"))) {
+        const stopped = decide(state, { ...command, threadId: worker.threadId, writerPending: !!worker.bindingId });
+        for (const event of stopped.events) emit(event);
+        decision.effects.push(...stopped.effects);
+      }
       break;
     }
     case "binding.drained": {
@@ -209,9 +214,10 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       emit({ type: "request.responding", request: { ...request, state: "responding" } });
       decision.effects.push({ kind: "provider.respond", threadId: owner.threadId, requestId: request.requestId, response: command.response }); break;
     }
-    case "request.cancel": case "request.responded": {
+    case "request.cancel": case "request.expire": case "request.responded": {
       const request = state.requests[command.requestId]; if (!request || request.threadId !== command.threadId || !["pending", "responding"].includes(request.state)) break;
-      emit({ type: command.type === "request.cancel" ? "request.cancelled" : "request.resolved", request: { ...request, state: command.type === "request.cancel" ? "cancelled" : "resolved" } }); break;
+      const next = command.type === "request.cancel" ? "cancelled" : command.type === "request.expire" ? "expired" : "resolved";
+      emit({ type: next === "cancelled" ? "request.cancelled" : next === "expired" ? "request.expired" : "request.resolved", request: { ...request, state: next } }); break;
     }
     case "thread.compact": {
       const owner = thread(command.threadId); if (owner.activeRunId || owner.compaction || owner.shutdown !== "clean" || !owner.bindingId) throw new Error("Compaction requires an idle acquired thread");
@@ -253,6 +259,12 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       } break;
     }
     default: return isTransferCommand(command) ? decideTransfer(state, command) : decideAssignment(state, command);
+  }
+  for (const request of Object.values(state.requests)) {
+    if (!["pending", "responding"].includes(request.state)) continue;
+    const owner = state.threads[request.threadId];
+    if (owner.desired === "stopped" || state.attempts[request.attemptId]?.state === "terminal") emit({ type: "request.cancelled", request: { ...request, state: "cancelled" } });
+    else if (owner.generation !== request.lifetime.generation) emit({ type: "request.expired", request: { ...request, state: "expired" } });
   }
   return reconcileBindingCoverage(initial, command, reconcileAssignments(initial, command, decision));
 }

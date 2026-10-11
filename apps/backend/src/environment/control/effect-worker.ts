@@ -9,6 +9,7 @@ import { loadState, rebuildLifecycleProjections } from "./orchestration/store.js
 import { isLineageTransfer, planTransferResolution, entryIdentity, resolveSourcePoint, handoffSourcePoints } from "./orchestration/transfers.js";
 import { materializeHandoff, readHandoff } from "./orchestration/handoff-materializer.js";
 import type { CoreCommand, CoreEffect, Run } from "./orchestration/types.js";
+import { requestForChoice } from "./orchestration/request-projection.js";
 
 export interface EffectWorker {
   readonly bootId: string;
@@ -265,12 +266,13 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           record({ type: "request.responded", ...result(row, "responded"), threadId: effect.threadId, requestId: request.requestId }); break;
         }
         case "provider.release": {
+          // Runtime cleanup may need to interrupt its native projection before close.
+          if (!(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.threadId })).stopped) throw new Error("Runtime writer shutdown is incomplete");
           const resource = live.get(effect.bindingId);
           if (resource) { attemptedNative = true; await resource.adapter.close(resource.binding); const drained = await resource.adapter.drain(resource.binding);
             if (drained.status !== "clean") { record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: drained.status }); settle(row, "interrupted", unavailable); return; }
             resource.stop.abort(); live.delete(effect.bindingId);
           }
-          if (!(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.threadId })).stopped) throw new Error("Runtime writer shutdown is incomplete");
           record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: "clean" }); break;
         }
         case "provider.compact": {
@@ -302,6 +304,14 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       }
       settle(row, "done");
     } catch (error) {
+      if (effect.kind === "provider.release") {
+        record({ type: "binding.drained", ...result(row, "drain-failed"), threadId: effect.threadId, bindingId: effect.bindingId, status: "pending" });
+        settle(row, "interrupted", { ...unavailable, message: error instanceof Error ? error.message : String(error) }); return;
+      }
+      if (effect.kind === "provider.respond" && error && typeof error === "object" && "code" in error && error.code === "PROVIDER_REQUEST_REJECTED") {
+        record({ type: "request.expire", ...result(row, "expired"), threadId: effect.threadId, requestId: effect.requestId });
+        settle(row, "interrupted", { code: "CONFLICT", message: "Provider request expired", retryable: false }); return;
+      }
       // Only a provider's explicit proof permits fallback. Error wording is never delivery evidence.
       const provedNotDispatched=(error as {delivery?:string}).delivery === "not_dispatched";
       if(provedNotDispatched || error && typeof error === "object" && "code" in error && error.code === "PROVIDER_DISPATCH_REJECTED") attemptedNative=false;
@@ -349,8 +359,10 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         } else sink.transaction(() => database.prepare("UPDATE effects SET state=?,claimed_boot_id=NULL WHERE effect_id=?").run(safe ? "pending" : "interrupted", row.effect_id));
       }
       sink.transaction(tx => {
-        for (const choice of database.prepare("SELECT choice_id,session_id,choice_json FROM control_choices WHERE state='pending'").all() as { choice_id: string; session_id: string; choice_json: string }[])
+        for (const choice of database.prepare("SELECT choice_id,session_id,choice_json FROM control_choices WHERE state='pending'").all() as { choice_id: string; session_id: string; choice_json: string }[]) {
+          if (requestForChoice(loadState(database), choice.choice_id)) continue;
           sink.append(tx, { topic: "detail", sessionId: choice.session_id, event: { type: "choice.upsert", choice: { ...JSON.parse(choice.choice_json), status: "interrupted" } } });
+        }
       });
       reconciled = true;
     },

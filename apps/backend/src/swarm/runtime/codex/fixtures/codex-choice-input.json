@@ -1,0 +1,222 @@
+{
+  "provider": "codex",
+  "protocol": "app-server/stdio-jsonrpc",
+  "version": "0.155.0",
+  "scenario": "choice-input",
+  "provenance": "Synthetic raw Codex 0.155 app-server frames, never normalized Forge observations. Only process transport is substituted. Real-provider spot check remains necessary.",
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "initialize",
+        "params": {
+          "capabilities": {
+            "experimentalApi": true
+          }
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "userAgent": "codex-cli/0.155.0"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "method": "initialized"
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "account/login/start",
+        "params": {
+          "type": "apiKey",
+          "apiKey": "forge-fixture-inert-not-a-provider-key"
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "type": "apiKey"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "thread/start",
+        "params": {
+          "model": "gpt-6-sol",
+          "cwd": "$cwd",
+          "developerInstructions": "Forge replay contract",
+          "approvalPolicy": "never",
+          "sandbox": "danger-full-access",
+          "allowProviderModelFallback": false,
+          "dynamicTools": "$any",
+          "ephemeral": false
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      },
+      "label": "open"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "thread": {
+            "id": "native-root",
+            "path": "$rollout"
+          },
+          "model": "gpt-6-sol"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "turn/start",
+        "params": {
+          "threadId": "native-root",
+          "input": [
+            {
+              "type": "text",
+              "text": "Work"
+            }
+          ],
+          "model": "gpt-6-sol"
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      },
+      "label": "start"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "turn": {
+            "id": "turn-root",
+            "status": "inProgress",
+            "items": []
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "native-root",
+          "turn": {
+            "id": "turn-root"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "label": "choice",
+      "frame": {
+        "id": 1001,
+        "method": "item/tool/requestUserInput",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root",
+          "itemId": "choice-item",
+          "questions": [
+            {
+              "id": "color",
+              "header": "Color",
+              "question": "Choose a color.",
+              "isSecret": false,
+              "options": [
+                {
+                  "label": "Blue",
+                  "description": "A cool color."
+                },
+                {
+                  "label": "Green",
+                  "description": "A natural color."
+                }
+              ]
+            },
+            {
+              "id": "note",
+              "header": "Note",
+              "question": "Add a note.",
+              "isSecret": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "label": "answer",
+      "frame": {
+        "id": 1001,
+        "result": {
+          "answers": {
+            "color": {
+              "answers": [
+                "Green"
+              ]
+            },
+            "note": {
+              "answers": [
+                "Remember this."
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "label": "terminal",
+      "frame": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "native-root",
+          "turn": {
+            "id": "turn-root",
+            "status": "completed"
+          }
+        }
+      }
+    }
+  ]
+}

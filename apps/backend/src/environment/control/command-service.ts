@@ -16,7 +16,8 @@ import type { ControlMethod, ControlService, LifecycleAdmission, Principal } fro
 import type { ControlCoreOptions, ControlEffect, InputRoutePort, PreparedLaunch } from "./effect-types.js";
 import type { ControlTransaction, EventSink } from "./event-sink.js";
 import { loadState } from "./orchestration/store.js";
-import type { CoreCommand, Run } from "./orchestration/types.js";
+import type { CoreCommand, Run, Request } from "./orchestration/types.js";
+import { requestForChoice, requestSession } from "./orchestration/request-projection.js";
 
 export class ControlError extends Error implements RpcError {
   readonly retryable: boolean;
@@ -251,6 +252,10 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         database.prepare("INSERT INTO command_receipts VALUES (?, 'running', 0, 0, ?)").run(input.commandId, JSON.stringify(receipt));
         sink.updateReceipt(tx, input.commandId, {});
       }
+      if (input.intent === "cancel-choice" && input.choiceId) {
+        const native = requestForChoice(loadState(database), input.choiceId);
+        if (native) sink.commitCommand(tx, { type: "request.cancel", commandId: input.commandId, now: options.clock(), threadId: native.threadId, requestId: native.requestId });
+      }
       const lanes = [...sessionIds, ...projectIds.map(id => "project:" + id)];
       for (const [ordinal, lane] of (lanes.length ? lanes : [""]).entries()) {
         database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,'lifecycle.admit',?,?,'claimed')")
@@ -369,6 +374,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         )
         .run(commandId, principal.deviceSessionId, method, request.hash, request.normalized, sessionId, now);
       const effects: ControlEffect[] = [];
+      let nativeRequest: Request | undefined;
       let message: RpcInput<"session.send">["message"] | undefined;
       let runGeneration = session?.run_generation ?? 0;
       if (method === "session.launch") {
@@ -444,6 +450,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         }
       } else if (method === "session.choose") {
         const choose = input as RpcInput<"session.choose">;
+        nativeRequest = requestForChoice(loadState(database), choose.choiceId);
         const choice = database
           .prepare("SELECT session_id, runtime_generation, state, choice_json, answer_command_id FROM control_choices WHERE choice_id = ?")
           .get(choose.choiceId) as
@@ -457,11 +464,12 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           | undefined;
         if (!choice || choice.session_id !== sessionId) throw new ControlError("NOT_FOUND", "Choice not found");
         if (choice.state !== "pending" || choice.answer_command_id) throw new ControlError("CONFLICT", "Choice is no longer pending");
+        if (nativeRequest && nativeRequest.state !== "pending") throw new ControlError("CONFLICT", "Provider request is no longer pending");
         const summary: Static<typeof ChoiceSummarySchema> = JSON.parse(choice.choice_json);
         const invalid = validateChoiceAnswers(summary.questions, choose.answers);
         if (invalid) throw new ControlError("INVALID_INPUT", invalid);
         database.prepare("UPDATE control_choices SET answer_command_id = ? WHERE choice_id = ?").run(commandId, choose.choiceId);
-        effects.push({
+        if (!nativeRequest) effects.push({
           kind: "choice.apply",
           choiceId: choose.choiceId,
           runtimeGeneration: choice.runtime_generation,
@@ -513,6 +521,8 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         const send = method === "session.send" ? input as RpcInput<"session.send"> : undefined;
         sink.commitCommand(tx, { type: "run.submit", commandId, now, threadId: sessionId, inputId, runId: `run-${commandId}`, attemptId: options.random(), bindingId: options.random(), input: message,
           source: send?.source, delivery: send?.delivery === "followUp" ? "queue" : "steer" });
+      } else if (nativeRequest) {
+        sink.commitCommand(tx, { type: "request.respond", commandId, now, threadId: nativeRequest.threadId, requestId: nativeRequest.requestId, response: (input as RpcInput<"session.choose">).answers });
       } else if (method === "session.stop" || method === "worker.kill") {
         if (target?.workerId) {
           if (!loadState(database).threads[target.workerId]) sink.commitCommand(tx, { type: "thread.create", commandId: `thread:${target.workerId}`, now, threadId: target.workerId, role: "worker", projectId: session!.project_id, managerId: sessionId });
@@ -605,6 +615,17 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       const duplicate = sink.transaction(() => prior(principal, method, normalized.commandId, request.hash));
       if (duplicate) return duplicate;
       if (method !== "session.launch") {
+        if (method === "session.choose") {
+          if (options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Device session was revoked");
+          const choose = normalized as RpcInput<"session.choose">;
+          const expired = sink.transaction(tx => {
+            const state = loadState(database); const native = requestForChoice(state, choose.choiceId);
+            if (!native || requestSession(state.threads[native.threadId]) !== choose.sessionId || native.state !== "pending") return false;
+            if (native.lifetime.generation === state.threads[native.threadId].generation && state.threads[native.threadId].desired === "running" && (!native.lifetime.expiresAt || Date.parse(native.lifetime.expiresAt) > options.clock())) return false;
+            sink.commitCommand(tx, { type: "request.expire", commandId: `expire:${choose.commandId}`, now: options.clock(), threadId: native.threadId, requestId: native.requestId }); return true;
+          });
+          if (expired) throw new ControlError("CONFLICT", "Provider request expired");
+        }
         if (method === "session.send") {
           if (options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Device session was revoked");
           const send = normalized as RpcInput<"session.send">;
