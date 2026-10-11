@@ -155,6 +155,8 @@ describe("Pi provider adapter on the native production path", () => {
   });
 
   it("records pre-migration native prompt and final schema hashes", async () => {
+    // Pi appends a local calendar date; keep that date fixed in every timezone.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 10, 12) });
     vi.spyOn(Date.prototype, "toISOString").mockReturnValue("2026-01-01T00:00:00.000Z");
     const peer = await createPiModelPeer(transcript([]));
     const fixture = await createNativePiFixture(peer.baseUrl);
@@ -163,7 +165,7 @@ describe("Pi provider adapter on the native production path", () => {
       const normalize = (text: string) => text.replaceAll(fixture.root, "<fixture>").replaceAll(fixture.tempRootDir, "<fixture>").replaceAll(process.cwd(), "<backend>");
       expect({ promptSha256: hash(normalize(session.systemPrompt)), schemaSha256: hash(normalize(JSON.stringify(toolHost.snapshot.tools))),
         names: toolHost.snapshot.tools.map(tool => tool.name) }).toMatchSnapshot("native Pi before adapter migration");
-    } finally { await fixture.cleanup(); await peer.close(); vi.restoreAllMocks(); }
+    } finally { await fixture.cleanup(); await peer.close(); vi.restoreAllMocks(); vi.useRealTimers(); }
   });
 
   it.each([false, true])("executes native Forge tools and Forge/Pi hooks with project trust=%s", async trusted => {

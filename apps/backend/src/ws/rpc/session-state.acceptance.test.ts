@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
 import { mkdir, rm } from 'node:fs/promises';
 import { getProfileUnreadStatePath } from '../../swarm/storage/data-paths.js';
 import { afterEach, expect, it, vi } from 'vitest';
-import { makeTempConfig, TestSwarmManager, bootWithDefaultManager } from '../../test-support/index.js';
-import { UnreadTracker } from '../../swarm/session/unread-tracker.js';
-import { createEnvironmentService } from '../../environment/environment-service.js';
-import { createExposurePolicy } from '../../environment/exposure-policy.js';
+import type { SessionManager } from '@earendil-works/pi-coding-agent';
+import { makeTempConfig, TestSwarmManager } from '../../test-support/index.js';
+import { createTestEnvironment } from '../../test-support/environment-auth.js';
+import { loadState } from '../../environment/control/orchestration/store.js';
+import type { UnreadTracker } from '../../swarm/session/unread-tracker.js';
+import type { EnvironmentService } from '../../environment/environment-service.js';
 import { createShellStream } from '../../environment/streams/shell-stream.js';
 
 // Failure scenarios: same-named foreign sessions mutate; lost ack repeats a rename;
@@ -18,12 +19,23 @@ async function fixture() {
   const config = await makeTempConfig({ prefix: 'v2-session-state-', omitSharedAuthFile: true, omitSharedSecretsFile: true });
   let manager: TestSwarmManager;
   let unread: UnreadTracker;
-  let environment: Awaited<ReturnType<typeof createEnvironmentService>>;
+  let environment: EnvironmentService;
   async function open() {
     manager = new TestSwarmManager(config);
-    unread = new UnreadTracker({ dataDir: config.paths.dataDir, getProfileIds: () => manager.listProfiles().map(p => p.profileId), getSessionAgentIds: id => manager.listAgents().filter(a => a.profileId === id).map(a => a.agentId) });
-    environment = await createEnvironmentService({ config, swarmManager: manager, unreadTracker: unread, exposure: createExposurePolicy({ host: config.host, port: config.port }), identityOptions: { installationStateDir: join(config.paths.dataDir, 'installation') } });
-    await bootWithDefaultManager(manager, config); await environment.initialize();
+    manager.onCreateRuntime = ({ runtime }) => {
+      const native = (runtime as unknown as { sessionManager: SessionManager }).sessionManager;
+      native.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'fixture ready' }] } as never);
+    };
+    ({ environment, unreadTracker: unread } = await createTestEnvironment(manager, { boot: true }));
+    const managerId = config.managerId ?? 'manager';
+    if (!manager.getAgent(managerId)) {
+      await manager.createManager(managerId, { name: config.managerDisplayName ?? 'Manager', cwd: config.defaultCwd });
+    }
+    environment.start();
+    await vi.waitFor(() => {
+      expect(Object.values(loadState(environment.database).runs).every(run => run.state === 'terminal')).toBe(true);
+      expect(environment.database.prepare("SELECT effect_id FROM effects WHERE state IN ('pending','claimed')").all()).toEqual([]);
+    });
   }
   async function stop() {
     for (const agent of manager.listAgents().filter(a => a.role === 'manager')) await manager.stopSession(agent.agentId);

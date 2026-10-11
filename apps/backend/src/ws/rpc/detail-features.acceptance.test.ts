@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import { DetailFeatureStreamItemSchema } from '@forge/protocol/environment-v2';
@@ -15,7 +16,7 @@ import { streamFixture, principal, session } from './__tests__/fixtures.js';
 const closes: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of closes.splice(0)) await close(); });
 const commandId = '00000000-0000-4000-8000-000000000001';
-const recovery = { bootId: 'boot', createdAt: '2026-10-09T00:00:00.000Z', interruptedManagers: ['session'], interruptedWorkers: [], undeliveredReports: [] };
+const recovery = { recoveryId: randomUUID(), bootId: 'boot', createdAt: '2026-10-09T00:00:00.000Z', interruptedManagers: ['session'], interruptedWorkers: [], undeliveredReports: [] };
 async function fixture() {
   const streams = await streamFixture(); closes.push(streams.close);
   streams.sink.transaction(tx => streams.sink.append(tx, { topic: 'shell', sessionId: 'session', event: { type: 'session.upsert', session: session() } }));
@@ -36,8 +37,8 @@ async function fixture() {
 describe('detail control acceptance', () => {
   it('publishes environment recovery without selecting a session and deduplicates decisions', async () => {
     const f = await fixture();
-    expect(await f.rpc.execute(principal, 'recovery.get', {})).toEqual({ recovery: { ...recovery, recoveryId: 'boot' } });
-    const input = { commandId, recoveryId: 'boot', action: 'resume' };
+    expect(await f.rpc.execute(principal, 'recovery.get', {})).toEqual({ recovery });
+    const input = { commandId, recoveryId: recovery.recoveryId, action: 'resume' };
     const a = await f.rpc.execute(principal, 'recovery.decide', input);
     const b = await f.rpc.execute(principal, 'recovery.decide', input);
     expect(a).toEqual(b); expect(a).toMatchObject({ method: 'recovery.decide', state: 'succeeded', sessionId: null });
