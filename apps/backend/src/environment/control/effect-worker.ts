@@ -190,11 +190,12 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       }
       settle(row, "done");
     } catch (error) {
+      const deliveryUnknown = attemptedNative && !(error && typeof error === "object" && "code" in error && error.code === "PROVIDER_DISPATCH_REJECTED");
       const failure = { ...unavailable,message:error instanceof Error ? error.message : String(error) };
       const attemptId = "attemptId" in effect ? effect.attemptId : effect.kind === "runtime.acquire" || effect.kind === "transcript.append" ? Object.values(loadState(database).attempts).find(a => a.threadId === row.session_id && a.state !== "terminal")?.attemptId : undefined;
       if (effect.kind === "provider.compact") record({ type: "compaction.completed", ...result(row, "failed"), threadId: effect.threadId, attemptId: effect.attemptId, succeeded: false });
-      else if (effect.kind.startsWith("provider.") || effect.kind === "runtime.acquire" || effect.kind === "transcript.append") record({ type: "effect.failed", ...result(row, "failed"), threadId: row.session_id, attemptId, kind: effect.kind as CoreEffect["kind"], delivery: attemptedNative ? "unknown" : "not_dispatched" });
-      settle(row, attemptedNative ? "interrupted" : "failed", failure);
+      else if (effect.kind.startsWith("provider.") || effect.kind === "runtime.acquire" || effect.kind === "transcript.append") record({ type: "effect.failed", ...result(row, "failed"), threadId: row.session_id, attemptId, kind: effect.kind as CoreEffect["kind"], delivery: deliveryUnknown ? "unknown" : "not_dispatched" });
+      settle(row, deliveryUnknown ? "interrupted" : "failed", failure);
       if (hasReceipt(row.command_id)) sink.transaction(tx => sink.updateReceipt(tx,row.command_id,{ error:failure }));
     }
   };

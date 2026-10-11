@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { createControlCore, type ControlCore } from "../database.js";
 import { piProviderCapabilities } from "../../../swarm/runtime/pi/pi-provider-adapter.js";
-import { type ProviderAdapter, type ProviderBinding } from "../../../swarm/runtime/provider-contract.js";
+import { ProviderDispatchRejectedError, type ProviderAdapter, type ProviderBinding } from "../../../swarm/runtime/provider-contract.js";
 import type { ControlCoreOptions } from "../effect-types.js";
 import { loadState } from "./store.js";
 const roots: string[] = []; const cores: ControlCore[] = [];
@@ -54,6 +54,23 @@ describe("durable provider outbox", () => {
     const second = await f.open(); await second.effectWorker.drain(); expect(loadState(second.database).recovery?.recoveryId).toBe(before.recoveryId); await second.close();
     const third = await f.open(); await third.effectWorker.drain(); expect(loadState(third.database).recovery?.recoveryId).toBe(before.recoveryId);
     expect((await third.controlService.getReceipt(principal, commandId)).delivery).toBe("unknown");
+  });
+  it.each(["busy", "closed", "stale_scope"] as const)("keeps a typed %s pre-dispatch rejection out of unknown recovery", async reason => {
+    const f = await fixture();
+    f.adapter.start = async () => { throw new ProviderDispatchRejectedError(reason); };
+    await f.core.controlService.execute(principal, "session.send", { commandId, sessionId: "manager", message: { text: "rejected", artifactIds: [] } });
+    await f.core.effectWorker.drain();
+    const state = loadState(f.core.database); const run = state.runs[`run-${commandId}`];
+    expect(state.attempts[run.activeAttemptId]).toMatchObject({ state: "terminal", delivery: "pending", outcome: "failed" });
+    expect(run.state).toBe("terminal");
+    expect(state.recovery).toBeNull();
+    expect(state.threads.manager.shutdown).toBe("clean");
+    const receipt = await f.core.controlService.getReceipt(principal, commandId);
+    expect(receipt.state).toBe("failed"); expect(receipt.delivery).toBe("none");
+    await f.core.controlService.execute(principal, "session.send", { commandId: "00000000-0000-4000-8000-000000000002", sessionId: "manager", message: { text: "retry", artifactIds: [] } });
+    f.adapter.start = async input => ({ status: "accepted", turn: { ...input.binding.scope, kind: "turn", conversationId: "native", nativeId: "retry-turn" } });
+    await f.core.effectWorker.drain();
+    expect((await f.core.controlService.getReceipt(principal, "00000000-0000-4000-8000-000000000002")).delivery).toBe("dispatched");
   });
   it("gives internal scoped calls the same durable input, receipt and outbox admission", async () => {
     const f = await fixture();

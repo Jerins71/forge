@@ -44,6 +44,16 @@ export class ProviderRefreshRequiredError extends Error {
   }
 }
 
+/** Rejected before a native dispatch; the kernel may admit another attempt without unknown-delivery recovery. */
+export class ProviderDispatchRejectedError extends Error {
+  readonly code = "PROVIDER_DISPATCH_REJECTED" as const;
+  readonly delivery = "not_dispatched" as const;
+  constructor(readonly reason: "busy" | "closed" | "stale_scope") {
+    super(`Provider dispatch rejected before delivery: ${reason}.`);
+    this.name = "ProviderDispatchRejectedError";
+  }
+}
+
 /** Admission is explicit. This helper never chooses or dispatches a weaker fallback. */
 export function assertProviderRequirements(capabilities: ProviderCapabilities, requirements: ProviderRequirements = {}): void {
   const support: Record<Exclude<keyof ProviderRequirements, "instructionChannel">, boolean> = {
