@@ -55,7 +55,7 @@ describe("durable provider outbox", () => {
       turns: { async enqueue() {} },
     } as unknown as UserMessageCoordinatorOptions);
     const acquire = f.options.swarm.acquireProvider;
-    const swarm = { installProviderScopeOwner() {}, installAuthoritativeInputOwner() {}, installControlledTurnProjection() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
+    const swarm = { installProviderScopeOwner() {}, installAuthoritativeInputOwner() {}, installControlledTurnProjection() {}, installControlledChoicePort() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
       getAgentForInternalUse: () => descriptor, acquireControlledProvider: acquire, applyControlledInput: coordinator.applyControlledInput.bind(coordinator),
     } as unknown as Parameters<typeof createSwarmControlAdapter>[0]["swarmManager"];
     const artifactService = createArtifactService({ database: f.core.database, dataDir: root });
@@ -111,7 +111,7 @@ describe("durable provider outbox", () => {
     const delivered: Array<HandleUserMessageOptions> = []; const acquire = f.options.swarm.acquireProvider;
     const descriptor = { agentId: "manager", role: "manager", profileId: "project", managerId: "manager", model: { provider: "pi", modelId: "fixture" } };
     const swarm = {
-      installProviderScopeOwner() {}, installAuthoritativeInputOwner(callback: typeof submit) { submit = callback; }, installControlledTurnProjection() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
+      installProviderScopeOwner() {}, installAuthoritativeInputOwner(callback: typeof submit) { submit = callback; }, installControlledTurnProjection() {}, installControlledChoicePort() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
       getAgentForInternalUse: () => descriptor, acquireControlledProvider: acquire,
       async applyControlledInput(text: string, options: HandleUserMessageOptions) { delivered.push(options); return { entryId: "canonical", runtimeMessage: { text } }; },
     } as unknown as Parameters<typeof createSwarmControlAdapter>[0]["swarmManager"];

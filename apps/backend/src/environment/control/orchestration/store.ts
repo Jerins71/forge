@@ -1,6 +1,7 @@
 import type { Database } from "better-sqlite3";
 import { emptyState, evolve } from "./kernel.js";
 import type { CoreState, LifecycleEvent } from "./types.js";
+import { projectRequestChoice } from "./request-projection.js";
 
 export function loadState(database: Database): CoreState {
   const state = emptyState();
@@ -29,7 +30,10 @@ export function projectLifecycle(database: Database, event: LifecycleEvent): voi
   }
   else if ("attempt" in event) database.prepare("INSERT INTO orchestration_attempts VALUES (?,?,?,?) ON CONFLICT(attempt_id) DO UPDATE SET state_json=excluded.state_json").run(event.attempt.attemptId, event.attempt.runId, event.attempt.threadId, JSON.stringify(event.attempt));
   else if ("binding" in event) database.prepare("INSERT INTO orchestration_bindings VALUES (?,?,?,?) ON CONFLICT(binding_id) DO UPDATE SET state_json=excluded.state_json").run(event.binding.scope.bindingId, event.binding.scope.threadId, event.binding.scope.generation, JSON.stringify(event.binding));
-  else if ("request" in event) database.prepare("INSERT INTO orchestration_requests VALUES (?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET state_json=excluded.state_json").run(event.request.requestId, event.request.threadId, event.request.attemptId, JSON.stringify(event.request));
+  else if ("request" in event) {
+    database.prepare("INSERT INTO orchestration_requests VALUES (?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET state_json=excluded.state_json").run(event.request.requestId, event.request.threadId, event.request.attemptId, JSON.stringify(event.request));
+    projectRequestChoice(database, event.request);
+  }
   else if ("assignment" in event || "transfer" in event) {
     if ("assignment" in event) database.prepare("INSERT INTO orchestration_assignments VALUES (?,?,?,?,?) ON CONFLICT(assignment_id) DO UPDATE SET state_json=excluded.state_json").run(event.assignment.assignmentId, event.assignment.parentThreadId, event.assignment.parentRunId, event.assignment.workerThreadId, JSON.stringify(event.assignment));
     else database.prepare("INSERT INTO orchestration_transfers VALUES (?,?,?,?,?,?) ON CONFLICT(transfer_id) DO UPDATE SET state_json=excluded.state_json").run(event.transfer.transferId, event.transfer.assignmentId, event.transfer.kind, event.transfer.source.threadId, event.transfer.targetThreadId, JSON.stringify(event.transfer));

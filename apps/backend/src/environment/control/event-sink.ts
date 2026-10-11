@@ -12,6 +12,7 @@ import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js"
 import { decide } from "./orchestration/kernel.js";
 import { loadState, projectLifecycle } from "./orchestration/store.js";
 import type { CoreCommand, Decision } from "./orchestration/types.js";
+import { requestChoice, requestSession } from "./orchestration/request-projection.js";
 
 type ShellEvent = Extract<ShellStreamItem, { kind: "event" }>["event"];
 type DetailEvent = Extract<DetailStreamItem, { kind: "event" }>["event"];
@@ -272,6 +273,10 @@ export function createEventSink(database: Database, clock: () => number, random:
           }
         }
         projectLifecycle(database, event);
+        if ("request" in event) {
+          const choice = requestChoice(event.request);
+          if (choice) sink.append(tx, { topic: "detail", sessionId: requestSession(loadState(database).threads[event.request.threadId]), event: { type: "choice.upsert", choice } });
+        }
         if (event.type === "input.recorded") database.prepare("UPDATE control_inputs SET canonical_entry_id=?,append_state='recorded' WHERE input_id=?").run(event.run.entryId, event.run.inputId);
         if ("attempt" in event) {
           const run = loadState(database).runs[event.attempt.runId];

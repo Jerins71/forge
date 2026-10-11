@@ -1,5 +1,6 @@
 import { loadState } from "./orchestration/store.js";
 import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
+import { requestForChoice } from "./orchestration/request-projection.js";
 import { projectAgentMetadata } from "@forge/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, createReadStream, openSync, readSync, statSync } from "node:fs";
@@ -337,6 +338,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       const pending = database.prepare("SELECT choice_id,session_id,runtime_generation,choice_json FROM control_choices WHERE state='pending'").all() as { choice_id: string; session_id: string; runtime_generation: string; choice_json: string }[];
       eventSink.transaction(tx => {
         for (const row of pending) {
+          if (requestForChoice(loadState(database), row.choice_id)) continue;
           const live = swarmManager.getPendingChoiceRequestsForSession(row.session_id).find(choice => choice.choiceId === row.choice_id);
           if (!live || (live as typeof live & { runtimeGeneration?: string }).runtimeGeneration !== row.runtime_generation) {
             const value = JSON.parse(row.choice_json) as ChoiceSummary; value.status = "interrupted";

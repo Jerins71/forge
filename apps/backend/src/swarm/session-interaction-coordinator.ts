@@ -110,6 +110,7 @@ export interface SessionInteractionCoordinatorOptions {
     | "hasPendingChoicesForSession"
     | "requestUserChoiceWithId"
     | "resolveChoiceRequest"
+    | "installCore"
   >;
   assistantOutput: Pick<
     AssistantOutputRouter,
@@ -417,6 +418,8 @@ export class SessionInteractionCoordinator {
     );
     return pending.promise;
   }
+
+  installCoreChoices(port: import("./swarm-choice-service.js").CoreChoicePort): void { this.options.choices.installCore(port); }
 
   resolveChoiceRequest(choiceId: string, answers: ChoiceAnswer[]): void {
     const owner = this.options.choices.getPendingChoiceOwner(choiceId);

@@ -34,10 +34,18 @@ export interface SwarmChoiceServiceOptions {
   reportAttentionAggregateChange?: (sessionAgentId: string) => void | Promise<void>;
 }
 
+export interface CoreChoicePort {
+  pending(): Array<ChoiceRequestEvent & { sessionAgentId: string }>;
+  respond(choiceId: string, answers: ChoiceAnswer[]): boolean;
+  cancel(choiceId: string, reason: "cancelled" | "expired"): boolean;
+}
+
 export class SwarmChoiceService {
   private readonly pendingChoiceRequests = new Map<string, PendingChoiceRequest>();
+  private core?: CoreChoicePort;
 
   constructor(private readonly options: SwarmChoiceServiceOptions) {}
+  installCore(port: CoreChoicePort): void { this.core = port; }
 
   requestUserChoice(agentId: string, questions: ChoiceQuestion[]): Promise<ChoiceAnswer[]> {
     return this.requestUserChoiceWithId(agentId, questions).promise;
@@ -79,6 +87,7 @@ export class SwarmChoiceService {
   }
 
   resolveChoiceRequest(choiceId: string, answers: ChoiceAnswer[]): void {
+    if (this.core?.respond(choiceId, answers)) return;
     const pending = this.pendingChoiceRequests.get(choiceId);
     if (!pending) {
       return;
@@ -99,6 +108,7 @@ export class SwarmChoiceService {
   }
 
   cancelChoiceRequest(choiceId: string, reason: Extract<ChoiceRequestStatus, "cancelled" | "expired">): void {
+    if (this.core?.cancel(choiceId, reason)) return;
     const pending = this.pendingChoiceRequests.get(choiceId);
     if (!pending) {
       return;
@@ -126,6 +136,7 @@ export class SwarmChoiceService {
   }
 
   hasPendingChoicesForSession(sessionAgentId: string): boolean {
+    if (this.core?.pending().some(choice => choice.sessionAgentId === sessionAgentId)) return true;
     for (const pending of this.pendingChoiceRequests.values()) {
       if (pending.sessionAgentId === sessionAgentId) {
         return true;
@@ -135,7 +146,7 @@ export class SwarmChoiceService {
   }
 
   getPendingChoiceIdsForSession(sessionAgentId: string): string[] {
-    const ids: string[] = [];
+    const ids = this.core?.pending().filter(choice => choice.sessionAgentId === sessionAgentId).map(choice => choice.choiceId) ?? [];
     for (const pending of this.pendingChoiceRequests.values()) {
       if (pending.sessionAgentId === sessionAgentId) {
         ids.push(pending.choiceId);
@@ -145,7 +156,7 @@ export class SwarmChoiceService {
   }
 
   getPendingChoiceRequestsForSession(sessionAgentId: string): ChoiceRequestEvent[] {
-    const pendingChoices: ChoiceRequestEvent[] = [];
+    const pendingChoices: ChoiceRequestEvent[] = this.core?.pending().filter(choice => choice.sessionAgentId === sessionAgentId) ?? [];
     for (const pending of this.pendingChoiceRequests.values()) {
       if (pending.sessionAgentId === sessionAgentId) {
         pendingChoices.push(this.buildChoiceRequestEvent(pending, "pending"));
@@ -155,6 +166,8 @@ export class SwarmChoiceService {
   }
 
   getPendingChoiceOwner(choiceId: string): { agentId: string; sessionAgentId: string } | undefined {
+    const core = this.core?.pending().find(choice => choice.choiceId === choiceId);
+    if (core) return { agentId: core.agentId, sessionAgentId: core.sessionAgentId };
     const pending = this.pendingChoiceRequests.get(choiceId);
     if (!pending) {
       return undefined;
@@ -171,6 +184,8 @@ export class SwarmChoiceService {
     sessionAgentId: string;
     questions: ChoiceQuestion[];
   } | undefined {
+    const core = this.core?.pending().find(choice => choice.choiceId === choiceId);
+    if (core) return { agentId: core.agentId, sessionAgentId: core.sessionAgentId, questions: core.questions };
     const pending = this.pendingChoiceRequests.get(choiceId);
     if (!pending) {
       return undefined;

@@ -6,6 +6,7 @@ import type { EventSink } from "./event-sink.js";
 import { cancelCommand, readReceipt } from "./command-service.js";
 import { loadState, rebuildLifecycleProjections } from "./orchestration/store.js";
 import type { CoreCommand, CoreEffect, Run } from "./orchestration/types.js";
+import { requestForChoice } from "./orchestration/request-projection.js";
 
 export interface EffectWorker {
   readonly bootId: string;
@@ -188,6 +189,10 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       }
       settle(row, "done");
     } catch (error) {
+      if (effect.kind === "provider.respond" && error && typeof error === "object" && "code" in error && error.code === "PROVIDER_REQUEST_REJECTED") {
+        record({ type: "request.expire", ...result(row, "expired"), threadId: effect.threadId, requestId: effect.requestId });
+        settle(row, "interrupted", { code: "CONFLICT", message: "Provider request expired", retryable: false }); return;
+      }
       const deliveryUnknown = attemptedNative && !(error && typeof error === "object" && "code" in error && error.code === "PROVIDER_DISPATCH_REJECTED");
       const failure = { ...unavailable,message:error instanceof Error ? error.message : String(error) };
       const attemptId = "attemptId" in effect ? effect.attemptId : effect.kind === "runtime.acquire" || effect.kind === "transcript.append" ? Object.values(loadState(database).attempts).find(a => a.threadId === row.session_id && a.state !== "terminal")?.attemptId : undefined;
@@ -228,8 +233,10 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         } else sink.transaction(() => database.prepare("UPDATE effects SET state=?,claimed_boot_id=NULL WHERE effect_id=?").run(safe ? "pending" : "interrupted", row.effect_id));
       }
       sink.transaction(tx => {
-        for (const choice of database.prepare("SELECT choice_id,session_id,choice_json FROM control_choices WHERE state='pending'").all() as { choice_id: string; session_id: string; choice_json: string }[])
+        for (const choice of database.prepare("SELECT choice_id,session_id,choice_json FROM control_choices WHERE state='pending'").all() as { choice_id: string; session_id: string; choice_json: string }[]) {
+          if (requestForChoice(loadState(database), choice.choice_id)) continue;
           sink.append(tx, { topic: "detail", sessionId: choice.session_id, event: { type: "choice.upsert", choice: { ...JSON.parse(choice.choice_json), status: "interrupted" } } });
+        }
       });
       reconciled = true;
     },
