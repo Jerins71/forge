@@ -2,7 +2,8 @@ import type { ProviderObservation } from "@forge/protocol";
 import type { ProviderAdapter } from "./provider-contract.js";
 
 export interface ProviderReasoningSink {
-  reasoning(fact: { nativeId: string; phase: "start" | "delta" | "complete"; text: string }): void;
+  /** Streaming text of one provider item: its reasoning, or the assistant reply itself. */
+  text(fact: { channel: "assistant" | "reasoning"; nativeId: string; phase: "start" | "delta" | "complete"; text: string }): void;
   /** The provider is retrying a failed request on its own. */
   retrying(fact: { attempt: number; message: string }): void;
   /** The root attempt ended, with the provider error that ended it when there was one. */
@@ -11,7 +12,7 @@ export interface ProviderReasoningSink {
 
 /**
  * Passes a binding's single observation stream through unchanged and reports its
- * root reasoning, retries and failures to the timeline. Lifecycle authority stays with the stream's consumer.
+ * root reasoning, reply text, retries and failures to the timeline. Lifecycle authority stays with the stream's consumer.
  */
 export function tapProviderReasoning(adapter: ProviderAdapter, sink: ProviderReasoningSink): ProviderAdapter {
   // An error and the failed terminal that follows it describe one failure; report it once per turn.
@@ -19,8 +20,8 @@ export function tapProviderReasoning(adapter: ProviderAdapter, sink: ProviderRea
   const report = (observation: ProviderObservation) => {
     if (observation.origin.kind !== "root") return;
     if (observation.type === "accepted") failureReported = false;
-    if (observation.type === "message" && observation.channel === "reasoning") {
-      sink.reasoning({ nativeId: observation.item.nativeId, phase: observation.phase, text: observation.text });
+    if (observation.type === "message") {
+      sink.text({ channel: observation.channel, nativeId: observation.item.nativeId, phase: observation.phase, text: observation.text });
     } else if (observation.type === "retry") sink.retrying({ attempt: observation.attempt, message: observation.message });
     else if (observation.type === "error" || observation.type === "terminal") {
       const error = observation.type === "error" ? observation.message

@@ -1,7 +1,8 @@
 import { memo, useEffect, useId, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { ACTIVITY_ICONS, ActivityRow, activityRowClassName, type ActivityContentLoader } from './ActivityRow'
+import { ActivityRow, type ActivityContentLoader } from './ActivityRow'
+import { ACTIVITY_ICONS, activityRowClassName } from './activity-style'
 import { formatWorkDuration, groupKind, summarizeActivityGroup, type ActivityRowModel } from './activity-model'
 
 /** "Working for 1m 05s" while the turn runs, "Worked for 2m 10s" once it has finished. */

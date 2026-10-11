@@ -3,6 +3,7 @@ import type { LiveActivityStore } from '@/lib/ws-client/live-activity-store'
 import { ActivityRow, type ActivityContentLoader } from './ActivityRow'
 import { WorkTimer } from './ActivityGroup'
 import { liveActivityRow } from './activity-model'
+import { MarkdownMessage } from '../../MarkdownMessage'
 
 /**
  * The rows still streaming at the live edge of the transcript. This is the only
@@ -25,7 +26,12 @@ export function LiveActivityRows({ store, actorId, expandedIds, onToggle, loadCo
     <div className="mx-auto w-full max-w-[760px] py-0.5 pl-[40px]" data-testid="live-activity">
       {turnStartedAt ? <WorkTimer startedAt={turnStartedAt} /> : null}
       <div className="flex min-w-0 flex-col">
-        {rows.map((row) => (
+        {rows.map((row) => row.kind === 'message' ? (
+          // The reply as it streams, in arrival order with the rows around it.
+          <div key={row.itemId} className="py-1.5 text-foreground" data-testid="live-assistant-text" data-activity-status={row.status}>
+            <MarkdownMessage content={row.content ?? ''} />
+          </div>
+        ) : (
           <ActivityRow key={row.itemId} row={row} expanded={expandedIds.has(row.itemId)} onToggle={onToggle} loadContent={loadContent} />
         ))}
       </div>

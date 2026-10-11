@@ -37,7 +37,7 @@ import {
 } from "./conversation-diagnostics.js";
 import { RuntimeConversationEventMapper, safeJson } from "./runtime-conversation-event-mapper.js";
 import { buildActivitySummary, buildTimelineSummary } from "./activity-summary.js";
-import { ActivityTimelineTracker, type ReasoningFact } from "./activity-timeline.js";
+import { ActivityTimelineTracker, type ProviderTextFact } from "./activity-timeline.js";
 import type { TimelineActivity } from "@forge/protocol";
 import {
   createConversationHistorySeamCursor,
@@ -446,10 +446,13 @@ export class ConversationProjector {
     return this.activity.running(sessionId);
   }
 
-  /** Streams one reasoning fact to its live row and persists the bounded row when it completes. */
-  observeReasoning(fact: Omit<ReasoningFact, "sessionId" | "timestamp">): void {
+  /**
+   * Streams provider text to its live row. Reasoning is persisted, bounded, when it completes;
+   * reply text is live only, because the canonical message is written by its own path.
+   */
+  observeProviderText(fact: Omit<ProviderTextFact, "sessionId" | "timestamp">): void {
     const sessionId = resolveManagerContextId(this.deps.descriptors.get(fact.actorId), fact.actorId);
-    const finished = this.activity.observeReasoning({ ...fact, sessionId, timestamp: this.deps.now() });
+    const finished = this.activity.observeText({ ...fact, sessionId, timestamp: this.deps.now() });
     if (finished) this.emitActivitySummary(buildTimelineSummary(finished));
   }
 

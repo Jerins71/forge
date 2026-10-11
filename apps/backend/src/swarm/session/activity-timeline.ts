@@ -1,6 +1,7 @@
 import {
   ACTIVITY_DETAIL_MAX_CHARS,
   ACTIVITY_INPUT_MAX_CHARS,
+  ACTIVITY_LIVE_MESSAGE_MAX_CHARS,
   ACTIVITY_SUMMARY_MAX_CHARS,
   type PersistedActivityDetail,
   type TimelineActivity,
@@ -12,8 +13,9 @@ const MAX_TRACKED_ITEMS = 256;
 /** Output deltas within this window coalesce into one live upsert per row. */
 const LIVE_UPDATE_INTERVAL_MS = 80;
 
-export interface ReasoningFact {
-  /** Agent that is thinking; its manager's session shows the row. */
+export interface ProviderTextFact {
+  channel: "assistant" | "reasoning";
+  /** Agent that is thinking or replying; its manager's session shows the row. */
   actorId: string;
   sessionId: string;
   nativeId: string;
@@ -79,25 +81,35 @@ export class ActivityTimelineTracker {
     return item;
   }
 
-  /** Returns the finished reasoning row to persist, once, when its provider item completes. */
-  observeReasoning(fact: ReasoningFact): TimelineActivity | undefined {
-    const itemId = `reasoning:${fact.actorId}:${fact.nativeId}`;
+  /**
+   * Streams reasoning or reply text into its row. Returns the finished reasoning row to persist,
+   * once, when its provider item completes; a reply row is never persisted.
+   */
+  observeText(fact: ProviderTextFact): TimelineActivity | undefined {
+    const reply = fact.channel === "assistant";
+    const itemId = `${reply ? "message" : "reasoning"}:${fact.actorId}:${fact.nativeId}`;
     let tracked = this.items.get(itemId);
     if (tracked && tracked.item.status !== "running") return undefined;
+    // A reply item with no text yet, such as one that only calls tools, has nothing to show.
+    if (!tracked && reply && !fact.text) return undefined;
     tracked ??= this.track({
       itemId, sessionId: fact.sessionId, actorId: fact.actorId, ...(fact.runId ? { runId: fact.runId } : {}),
-      kind: "reasoning", status: "running", startedAt: fact.timestamp, summary: "Thinking…",
+      kind: reply ? "message" : "reasoning", status: "running", startedAt: fact.timestamp, summary: reply ? "" : "Thinking…",
     });
     const item = tracked.item;
     // A completed provider item carries the whole text; deltas extend what has streamed so far.
     const text = fact.phase === "delta" ? (item.detail ?? "") + fact.text : fact.text || item.detail || "";
     if (text) {
       delete item.truncated;
-      Object.assign(item, bounded("detail", text, "head"));
-      item.summary = firstLine(text) || "Thinking…";
+      Object.assign(item, text.length > (reply ? ACTIVITY_LIVE_MESSAGE_MAX_CHARS : ACTIVITY_DETAIL_MAX_CHARS)
+        ? { detail: text.slice(0, reply ? ACTIVITY_LIVE_MESSAGE_MAX_CHARS : ACTIVITY_DETAIL_MAX_CHARS), truncated: true } : { detail: text });
+      item.summary = firstLine(text) || (reply ? "" : "Thinking…");
     }
     if (fact.phase !== "complete") { this.publishSoon(tracked); return undefined; }
-    return this.finishReasoning(tracked, fact.timestamp);
+    if (!reply) return this.finishReasoning(tracked, fact.timestamp);
+    item.status = "completed"; item.completedAt = fact.timestamp;
+    this.publishNow(tracked);
+    return undefined;
   }
 
   /** One status row per turn, updated in place while the provider retries a failing request. */
@@ -117,7 +129,10 @@ export class ActivityTimelineTracker {
   settleTurn(fact: { actorId: string; sessionId: string; error?: string; runId?: string; timestamp: string }): TimelineActivity[] {
     const finished: TimelineActivity[] = [];
     for (const tracked of this.items.values()) {
-      if (tracked.item.kind === "reasoning" && tracked.item.actorId === fact.actorId && tracked.item.status === "running") finished.push(this.finishReasoning(tracked, fact.timestamp));
+      if (tracked.item.actorId !== fact.actorId || tracked.item.status !== "running") continue;
+      if (tracked.item.kind === "reasoning") finished.push(this.finishReasoning(tracked, fact.timestamp));
+      // A reply the turn left open is over; its row ends without being persisted.
+      else if (tracked.item.kind === "message") { tracked.item.status = "completed"; tracked.item.completedAt = fact.timestamp; this.publishNow(tracked); }
     }
     const open = this.status.get(fact.actorId);
     if (!open && !fact.error) return finished;

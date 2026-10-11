@@ -1,16 +1,9 @@
 import { memo, useEffect, useId, useState } from 'react'
-import {
-  Brain, ChevronRight, FileText, Globe, PencilLine, RefreshCw, Search, Terminal, Users, Wrench, type LucideIcon,
-} from 'lucide-react'
-import type { TimelineActivityKind } from '@forge/protocol'
+import { ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MarkdownMessage } from '../../MarkdownMessage'
 import type { ActivityRowModel } from './activity-model'
-
-export const ACTIVITY_ICONS: Record<TimelineActivityKind, LucideIcon> = {
-  reasoning: Brain, command: Terminal, file_read: FileText, file_edit: PencilLine,
-  search: Search, web: Globe, agent: Users, tool: Wrench, status: RefreshCw,
-}
+import { ACTIVITY_ICONS, activityRowClassName } from './activity-style'
 
 /** Characters of content rendered before "Show more"; the rest stays out of the DOM. */
 const COLLAPSED_CONTENT_CHARS = 4000
@@ -35,11 +28,6 @@ function useReplayedContent(row: ActivityRowModel, expanded: boolean, load: Acti
   }, [needed, load, row.sessionId, row.contentRef])
   return state
 }
-
-export const activityRowClassName = cn(
-  'group/activity flex min-h-7 w-full min-w-0 items-center gap-2 rounded-md px-1 text-left text-[13px] leading-relaxed text-muted-foreground',
-  'transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60',
-)
 
 /** One compact line with a type icon; a chevron expands it to its full content. */
 export const ActivityRow = memo(function ActivityRow({ row, expanded, onToggle, loadContent }: {

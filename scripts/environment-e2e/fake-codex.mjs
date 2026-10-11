@@ -147,8 +147,17 @@ async function runTurn(turn, text) {
     const item = { id: `${turn.id}-assistant`, type: 'agentMessage', text: '', phase: 'final_answer' };
     notify('item/started', { ...context(turn), item });
     const half = Math.floor(reply.length / 2);
+    if (text.includes('[fixture:stream]')) {
+      // Hold the reply half-written so its partial text can be observed mid-stream.
+      reply = `Streaming partial text arrives first, then the remainder completes the reply for ${fixture.instanceId}.`;
+      notify('item/agentMessage/delta', { ...context(turn), itemId: item.id, delta: reply.slice(0, 36) });
+      while (!turn.done && !existsSync(join(checkout, '.fixture-activity-release'))) await pause(25);
+      if (turn.done) return;
+      notify('item/agentMessage/delta', { ...context(turn), itemId: item.id, delta: reply.slice(36) });
+    } else {
     notify('item/agentMessage/delta', { ...context(turn), itemId: item.id, delta: reply.slice(0, half) });
     notify('item/agentMessage/delta', { ...context(turn), itemId: item.id, delta: reply.slice(half) });
+    }
     notify('item/completed', { ...context(turn), item: { ...item, text: reply } });
     notify('thread/tokenUsage/updated', { threadId: turn.thread.id, turnId: turn.id,
       tokenUsage: { total: { inputTokens: 10, outputTokens: 10, totalTokens: 20 }, last: { totalTokens: 20 }, modelContextWindow: 128000 } });

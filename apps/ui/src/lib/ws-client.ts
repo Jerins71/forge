@@ -860,6 +860,8 @@ export class ManagerWsClient {
  if (event.type === 'timeline_activity') {
    // The durable row supersedes its live one; a late live update must not bring it back.
    if (!this.environmentProjection?.items.some(item => item.activity?.itemId === event.item.itemId)) this.liveActivity.upsert(event.item);
+   // A row that finishes after the timeline last changed still has to give way to its durable form.
+   if (event.item.status !== 'running') this.liveActivity.reconcile(new Set(), this.environmentProjection?.session.status === 'running');
    return;
  }
  if (handleGenerationThroughputEvent(event, { state: this.state, applyGenerationThroughputReduction: reduction => this.applyGenerationThroughputReduction(reduction) })) return;

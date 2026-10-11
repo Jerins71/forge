@@ -153,6 +153,25 @@ test('a worker shows its own activity in the worker view', async ({ page }) => {
   expect(renderErrors).toEqual([])
 })
 
+test('assistant text streams while the turn runs and is replaced by the final message', async ({ page }) => {
+  await rm(releaseFile(), { force: true })
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
+  await expect(transcript(page)).toBeVisible()
+  await send(page, '[fixture:stream] Stream a reply')
+  // Mid-stream: the first part is on screen while the turn is still running; the rest is not.
+  const live = page.getByTestId('live-assistant-text')
+  await expect(live).toHaveText('Streaming partial text arrives first')
+  await expect(live).toHaveAttribute('data-activity-status', 'running')
+  await expect(transcript(page)).not.toContainText('the remainder completes the reply')
+  await shot(page, 'assistant-mid-stream')
+  await writeFile(releaseFile(), 'release')
+  // Done: the canonical message shows the whole reply once and the live copy is gone.
+  await expect(transcript(page).getByText('then the remainder completes the reply')).toHaveCount(1, { timeout: 30_000 })
+  await expect(live).toHaveCount(0)
+  await shot(page, 'assistant-final')
+  assertions.assistantStreaming = { midStream: 'Streaming partial text arrives first', finalOnce: true }
+})
+
 test('provider retries and the final failure show as one status row, live and after reload', async ({ page }) => {
   const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
   await rm(releaseFile(), { force: true })

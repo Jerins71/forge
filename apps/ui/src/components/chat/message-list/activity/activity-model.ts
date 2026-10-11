@@ -51,6 +51,7 @@ const GROUP_LABELS: Record<TimelineActivityKind, (count: number) => string> = {
   tool: (count) => `Used ${plural(count, 'tool', 'tools')}`,
   reasoning: (count) => (count === 1 ? 'Thought' : `Thought ${count} times`),
   status: () => 'Provider status',
+  message: () => 'Replied',
 }
 
 /** The collapsed header for finished rows: "Ran 2 commands, changed 1 file". */

@@ -10,11 +10,15 @@ import { Type, type Static } from '@sinclair/typebox'
 export const ACTIVITY_SUMMARY_MAX_CHARS = 512
 export const ACTIVITY_INPUT_MAX_CHARS = 2048
 export const ACTIVITY_DETAIL_MAX_CHARS = 6000
+/** A streaming assistant reply is live only; its canonical message replaces it, so it may be longer. */
+export const ACTIVITY_LIVE_MESSAGE_MAX_CHARS = 24_000
 
 export const TIMELINE_ACTIVITY_KINDS = [
   'reasoning', 'command', 'file_read', 'file_edit', 'search', 'web', 'agent', 'tool',
   // One row per turn for provider retries and the provider error that ended it.
   'status',
+  // Assistant text while it streams. Live only: the canonical message takes its place.
+  'message',
 ] as const
 export type TimelineActivityKind = (typeof TIMELINE_ACTIVITY_KINDS)[number]
 
@@ -40,7 +44,7 @@ export const TimelineActivitySchema = Type.Object({
   /** What was asked: the full command line or tool arguments. */
   input: Type.Optional(Type.String({ maxLength: ACTIVITY_INPUT_MAX_CHARS })),
   /** What came back: streamed output, tool result, or reasoning text. */
-  detail: Type.Optional(Type.String({ maxLength: ACTIVITY_DETAIL_MAX_CHARS })),
+  detail: Type.Optional(Type.String({ maxLength: ACTIVITY_LIVE_MESSAGE_MAX_CHARS })),
   /** `input` or `detail` was cut to its bound. */
   truncated: Type.Optional(Type.Boolean()),
   /** Reasoning the provider encrypts or withholds: shown as "Thinking…" with no content. */

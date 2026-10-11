@@ -93,8 +93,11 @@ async function provide(request: IncomingMessage, response: ServerResponse) {
   let model = 'claude-sonnet-5';
   try { model = JSON.parse(body).model; } catch { /* The stub reply does not depend on the request. */ }
   sse(response, [{ type: 'message_start', message: { id: `msg_${seen.length}`, type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 100, output_tokens: 0 } } },
-    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Stub reply.' } },
-    { type: 'content_block_stop', index: 0 }, { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 3 } }, { type: 'message_stop' }]);
+    // The real CLI streams this thinking block; Forge must surface it as a reasoning row.
+    { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } }, { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Stub reasoning.' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'c3R1Yg==' } }, { type: 'content_block_stop', index: 0 },
+    { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } }, { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Stub reply.' } },
+    { type: 'content_block_stop', index: 1 }, { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 3 } }, { type: 'message_stop' }]);
 }
 
 /** Every file under `root` that contains `needle`. */
@@ -200,6 +203,13 @@ async function main() {
       await until(() => requests(kind).some(entry => entry.finished), Boolean, 120_000);
       await idle(sessionId);
       assert(requests(kind).every(entry => entry.credential === 'api-key'), `${kind}: only the API key reaches the base URL`);
+      if (kind === 'claude') {
+        // The bundled Claude CLI's own thinking stream becomes one persisted reasoning row.
+        const reasoning = await until<any>(() => rpc.frames.map(frame => frame.item?.event).find(event => event?.type === 'item.upsert' && event.item.activity?.kind === 'reasoning' && event.item.activity.sessionId === sessionId)?.item, Boolean, 30_000);
+        assert.equal(reasoning.text, 'Stub reasoning.');
+        assert.equal((await rpc.call('session.content', { sessionId, contentRef: reasoning.contentRef, offset: 0, maxBytes: 4096 })).text, 'Stub reasoning.');
+        result.reasoningRow = { summary: reasoning.text, status: reasoning.activity.status };
+      }
       assert.equal(requests(kind)[0]!.header, kind === 'codex' ? 'authorization: Bearer' : 'x-api-key');
       if (kind === 'codex') assert.match((await spawns(kind)).at(-1)!, new RegExp(`openai_base_url="${baseUrls.codex}"`));
       result.apiKeyMode = { requests: requests(kind).length, header: requests(kind)[0]!.header, path: requests(kind)[0]!.path, reachedCustomBaseUrl: true };

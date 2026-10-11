@@ -26,7 +26,8 @@ export class LiveActivityStore {
 
   /** Drops rows the durable timeline now shows, and finished rows once nothing is running. */
   reconcile(durableItemIds: ReadonlySet<string>, sessionRunning: boolean): void {
-    const next = this.rows.filter((row) => !durableItemIds.has(row.itemId) && (sessionRunning || row.status === 'running'))
+    // A finished reply row gives way to its canonical message as soon as the timeline changes.
+    const next = this.rows.filter((row) => !durableItemIds.has(row.itemId) && (row.status === 'running' || (sessionRunning && row.kind !== 'message')))
     if (next.length !== this.rows.length) this.set(next)
   }
 
