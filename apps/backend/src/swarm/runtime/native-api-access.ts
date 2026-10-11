@@ -12,6 +12,21 @@ export interface ResolvedNativeApiAccess {
   lockedBy?: string;
 }
 
+// Runtime login results are scoped to this environment and access revision. A
+// late result from an old runtime cannot mark newly configured access as rejected.
+const loginStates = new Map<string, { revision: number; error?: string }>();
+const loginStateKey = (config: Pick<SwarmConfig, "paths">, provider: NativeRuntimeProvider) => `${config.paths.dataDir}:${provider}`;
+export function nativeApiLoginState(config: Pick<SwarmConfig, "paths">, provider: NativeRuntimeProvider): { revision: number; error?: string } {
+  return { ...(loginStates.get(loginStateKey(config, provider)) ?? { revision: 0 }) };
+}
+export function recordNativeApiLogin(config: Pick<SwarmConfig, "paths">, provider: NativeRuntimeProvider, revision: number, error?: string): void {
+  if (nativeApiLoginState(config, provider).revision !== revision) return;
+  loginStates.set(loginStateKey(config, provider), { revision, ...(error ? { error } : {}) });
+}
+function accessChanged(config: Pick<SwarmConfig, "paths">, provider: NativeRuntimeProvider): void {
+  loginStates.set(loginStateKey(config, provider), { revision: nativeApiLoginState(config, provider).revision + 1 });
+}
+
 const LABEL: Record<NativeRuntimeProvider, string> = { "claude-native": "Claude", "codex-native": "Codex" };
 
 /**
@@ -45,8 +60,9 @@ export async function writeNativeApiAccess(config: Pick<SwarmConfig, "paths">, p
   if (update.mode === "api_key" && !key && !update.removeApiKey) throw new Error(`Enter an API key to use ${LABEL[provider]} with an API key.`);
   const baseUrl = update.baseUrl === undefined ? current.baseUrl : update.baseUrl.trim() ? normalizeNativeBaseUrl(update.baseUrl) : undefined;
   const storage = AuthStorage.create(await ensureCanonicalAuthFilePath(config));
-  if (update.mode === "subscription" && !key && !baseUrl) { storage.remove(provider); return; }
+  if (update.mode === "subscription" && !key && !baseUrl) { storage.remove(provider); accessChanged(config, provider); return; }
   storage.set(provider, { type: "api_key", key: key ?? "", mode: update.mode, ...(baseUrl ? { baseUrl } : {}) } as AuthCredential);
+  accessChanged(config, provider);
 }
 
 /** What a settings client may see: never the key. */

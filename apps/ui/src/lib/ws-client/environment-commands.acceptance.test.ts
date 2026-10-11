@@ -21,9 +21,10 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
 })
 
-async function environment() {
+async function environment(resendUndelivered = false) {
   const server = await startFixtureServer(0)
   server.seed.descriptor.capabilities.sessionLifecycle = true
+  server.seed.descriptor.capabilities.resendUndelivered = resendUndelivered
   cleanups.push(() => server.close())
   const registry = createEnvironmentRegistry({
     persistence: createMemoryPersistence(),
@@ -48,6 +49,30 @@ async function environment() {
 const online = (client: EnvironmentClient) => client.connection.getSnapshot().phase === 'online'
 
 describe('environment command identity', () => {
+  it('resends a proved-undelivered message with an explicit canonical reference', async () => {
+    const { server, facade, commandIds } = await environment(true)
+    facade.sendUserMessage('rejected before dispatch', { agentId: 'session-1' })
+    await until(() => commandIds('session.send').size === 1)
+    const [commandId] = commandIds('session.send')
+    const accepted = server.receipts.get(commandId)!
+    const failed: CommandReceipt = { ...accepted, state: 'failed', delivery: 'none', updatedSequence: 50 }
+    server.receipts.set(commandId, failed)
+    server.emit({ kind: 'event', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 50, event: { type: 'receipt.upsert', receipt: failed } }, 'session.subscribe')
+    await until(() => facade.getState().commandStatuses?.[commandId]?.state === 'failed')
+    expect(facade.resendEnvironmentMessage(commandId)).toBe(true)
+    await until(() => commandIds('session.send').size === 2)
+    expect(server.inputs.filter(entry => entry.method === 'session.send').at(-1)!.input).toMatchObject({ resendOfCommandId: commandId })
+  })
+
+  // Sidebar workers can belong to a session whose detail is not mounted.
+  // Delete must use that row's explicit owner, not silently return or target the open session.
+  it('kills an unmounted worker using its explicit owning session', async () => {
+    const { server, facade } = await environment()
+    facade.deleteAgent('background-worker', 'background-session')
+    await until(() => server.inputs.some(entry => entry.method === 'worker.kill'))
+    expect(server.inputs.find(entry => entry.method === 'worker.kill')!.input).toMatchObject({ workerId: 'background-worker', sessionId: 'background-session' })
+  })
+
   it('keeps one command ID for a message across a lost acknowledgment, recovery and retry', async () => {
     const { server, client, facade, commandIds } = await environment()
     server.lostAck = true

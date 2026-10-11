@@ -93,12 +93,16 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
     },
     async applyInput(input) {
       const attachments = await artifactService.attachmentsForInput(input.inputId);
-      const sourceKey = `input:${input.inputId}`;
+      const original = input.resendOfCommandId ? database.prepare("SELECT input_id,command_id,canonical_entry_id FROM control_inputs WHERE command_id=?").get(input.resendOfCommandId) as { input_id: string; command_id: string; canonical_entry_id: string | null } : undefined;
+      const canonical = original?.canonical_entry_id ? database.prepare("SELECT input_id,command_id FROM control_inputs WHERE session_id=? AND canonical_entry_id=? ORDER BY rowid LIMIT 1").get(input.sessionId, original.canonical_entry_id) as { input_id: string; command_id: string } : original;
+      const canonicalInputId = canonical?.input_id ?? input.inputId;
+      const canonicalCommandId = canonical?.command_id ?? input.commandId;
+      const sourceKey = `input:${canonicalInputId}`;
       const locator = database.prepare("SELECT byte_offset FROM mirror_sources WHERE source_key=?").get(sourceKey) as { byte_offset: number } | undefined;
       return swarmManager.applyControlledInput(input.message.text, {
         ...input.userOptions, prepared:input.prepared, targetAgentId: input.sessionId, attachments, sourceContext: input.userOptions?.sourceContext ?? input.source, delivery: input.userOptions?.delivery ?? input.delivery, runId: input.runId,
         controlledInput: {
-          inputId: input.inputId, commandId: input.commandId,
+          inputId: canonicalInputId, commandId: canonicalCommandId,
           contentHash: createHash("sha256").update(JSON.stringify({ text: input.message.text, artifactIds: [...input.message.artifactIds].sort() })).digest("hex"),
           sourceOffset: locator?.byte_offset,
           onLocator(proof) {

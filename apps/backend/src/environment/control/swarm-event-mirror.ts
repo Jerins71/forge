@@ -131,14 +131,16 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const text = "text" in entry && typeof entry.text === "string" ? entry.text : "displaySummary" in entry && typeof entry.displaySummary === "string" ? entry.displaySummary : "";
     const workerResult = entry.type === "conversation_message" && entry.source === "worker_report";
     const user = entry.type === "conversation_message" && entry.role === "user" && !workerResult;
-    const runId="turnId" in entry && entry.turnId && database.prepare("SELECT 1 FROM orchestration_runs WHERE run_id=? AND thread_id=?").get(entry.turnId,entry.agentId) ? entry.turnId:undefined;
+    const resend = user ? database.prepare("SELECT command_id,input_id FROM control_inputs WHERE session_id=? AND canonical_entry_id=? ORDER BY rowid DESC LIMIT 1").get(sessionId, id) as { command_id: string; input_id: string } | undefined : undefined;
+    const currentRun = resend ? database.prepare("SELECT run_id FROM orchestration_runs WHERE input_id=?").get(resend.input_id) as { run_id: string } | undefined : undefined;
+    const runId=currentRun?.run_id ?? ("turnId" in entry && entry.turnId && database.prepare("SELECT 1 FROM orchestration_runs WHERE run_id=? AND thread_id=?").get(entry.turnId,entry.agentId) ? entry.turnId:undefined);
     return { itemId: id, ...(runId ? {runId}:{}), userTurnId: user ? entry.id ?? id : userTurns.get(sessionId) ?? ("turnId" in entry ? entry.turnId : undefined) ?? id,
       actorId: workerResult && entry.sourceWorkerId ? entry.sourceWorkerId : "actorAgentId" in entry ? entry.actorAgentId : entry.agentId,
       kind: workerResult ? "worker_result" : entry.type === "conversation_message" ? user ? "user" : "assistant" : entry.type === "agent_message" ? "worker_result" : entry.type === "agent_tool_call" ? "tool" : "activity",
       pinned: swarmManager.getPinnedMessageIds(sessionId)?.has(entry.type === "conversation_message" ? entry.id ?? id : id) ?? false,
       timestamp: entry.timestamp, ...(entry.type === "conversation_message" ? { source: entry.source } : {}), text: text.slice(0, 8192), contentRef: text.length > 8192 ? id : null,
       artifacts: (wireProjection.artifacts?.(entry, sessionId) ?? []).slice(0, 20),
-      commandId: entry.type === "conversation_message" && entry.controlCommandId ? receiptIdentity(entry.controlCommandId) : null };
+      commandId: resend ? receiptIdentity(resend.command_id) : entry.type === "conversation_message" && entry.controlCommandId ? receiptIdentity(entry.controlCommandId) : null };
   }
   function canonical(tx: ControlTransaction, entry: ConversationEntryEvent, descriptor: AgentDescriptor, evidence: Source, projectedItem?: DetailItem) {
     const sessionId = actors.get(descriptor.agentId) ?? (descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId);

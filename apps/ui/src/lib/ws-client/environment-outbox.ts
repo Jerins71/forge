@@ -13,6 +13,7 @@ interface OutboxEntry {
   /** Uploaded artifact per attachment index; upload IDs derive from the command ID, so retries reuse them. */
   uploaded: Array<string | undefined>
   timestamp: string
+  resendOfCommandId?: string
   inFlight: boolean
   error: { message: string; retryable: boolean } | null
 }
@@ -40,6 +41,7 @@ export class EnvironmentOutbox {
     attachments: readonly ConversationAttachment[],
     artifactIds: readonly string[] = [],
     uploaded: ReadonlyArray<string | undefined> = [],
+    resendOfCommandId?: string,
   ): string {
     const entry: OutboxEntry = {
       commandId: crypto.randomUUID(),
@@ -49,6 +51,7 @@ export class EnvironmentOutbox {
       artifactIds,
       uploaded: [...uploaded],
       timestamp: new Date().toISOString(),
+      ...(resendOfCommandId ? { resendOfCommandId } : {}),
       inFlight: false,
       error: null,
     }
@@ -74,12 +77,15 @@ export class EnvironmentOutbox {
     if (this.resent.has(commandId)) return null
     const entry = this.entries.get(commandId)
     if (!entry && !fallback) return null
+    const receipt = this.client.receipts.getSnapshot().get(commandId)
+    const reuse = receipt?.state === 'failed' && receipt.delivery === 'none' && this.client.descriptor()?.capabilities.resendUndelivered
+      ? commandId : undefined
     this.resent.add(commandId)
     this.entries.delete(commandId)
     // Uploaded artifacts belong to the same environment and are reused; only the command is new.
     return entry
-      ? this.submit(entry.sessionId, entry.text, entry.attachments, entry.artifactIds, entry.uploaded)
-      : this.submit(fallback!.sessionId, fallback!.text, [], fallback!.artifactIds)
+      ? this.submit(entry.sessionId, entry.text, entry.attachments, entry.artifactIds, entry.uploaded, reuse)
+      : this.submit(fallback!.sessionId, fallback!.text, [], fallback!.artifactIds, [], reuse)
   }
 
   statuses(): Record<string, MessageCommandStatus> {
@@ -103,7 +109,7 @@ export class EnvironmentOutbox {
   pendingMessages(sessionId: string, projectedCommandIds: ReadonlySet<string>): ConversationMessageEvent[] {
     const messages: ConversationMessageEvent[] = []
     for (const entry of this.entries.values()) {
-      if (entry.sessionId !== sessionId || projectedCommandIds.has(entry.commandId)) continue
+      if (entry.sessionId !== sessionId || projectedCommandIds.has(entry.commandId) || entry.resendOfCommandId && projectedCommandIds.has(entry.resendOfCommandId)) continue
       messages.push({
         type: 'conversation_message',
         agentId: sessionId,
@@ -147,6 +153,7 @@ export class EnvironmentOutbox {
       await this.client.request('session.send', {
         commandId: entry.commandId,
         sessionId: entry.sessionId,
+        ...(entry.resendOfCommandId ? { resendOfCommandId: entry.resendOfCommandId } : {}),
         message: { text: entry.text, artifactIds: [...entry.artifactIds, ...entry.uploaded.filter((id): id is string => !!id)] },
       })
     } catch (error) {

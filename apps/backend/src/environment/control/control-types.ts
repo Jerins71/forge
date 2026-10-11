@@ -86,6 +86,7 @@ export interface SwarmControlPort {
     source?: import("../../swarm/types.js").MessageSourceContext;
     delivery?: RpcInput<"session.send">["delivery"];
     runId: string;
+    resendOfCommandId?: string;
     prepared?: import("./command-service.js").InternalInput["prepared"];
     userOptions?: import("./command-service.js").InternalInput["userOptions"];
   }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }>;

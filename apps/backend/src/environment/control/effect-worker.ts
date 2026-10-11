@@ -197,7 +197,9 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     const state = loadState(database); const attempt = state.attempts[run.activeAttemptId];
     const row = database.prepare("SELECT prepared_json FROM orchestration_run_inputs WHERE run_id=?").get(run.runId) as { prepared_json:string } | undefined;
     const context = row ? JSON.parse(row.prepared_json) : undefined;
-    const value = await options.swarm.applyInput({ prepared:context?.runtimeMessage ? context : undefined, userOptions:context?.userOptions, commandId: run.commandId, inputId: run.inputId, sessionId: run.threadId, runGeneration: attempt.generation, message: run.input, source: run.source, delivery: run.delivery === "queue" ? "followUp" : "steer", runId: run.runId });
+    const command = database.prepare("SELECT normalized_json FROM commands WHERE command_id=?").get(run.commandId) as { normalized_json: string };
+    const resendOfCommandId = JSON.parse(command.normalized_json).resendOfCommandId as string | undefined;
+    const value = await options.swarm.applyInput({ resendOfCommandId, prepared:context?.runtimeMessage ? context : undefined, userOptions:context?.userOptions, commandId: run.commandId, inputId: run.inputId, sessionId: run.threadId, runGeneration: attempt.generation, message: run.input, source: run.source, delivery: run.delivery === "queue" ? "followUp" : "steer", runId: run.runId });
     prepared.set(run.runId, value.runtimeMessage);
     record({ type: "input.recorded", commandId: `recorded:${run.inputId}`, now: options.clock(), threadId: run.threadId, inputId: run.inputId, entryId: value.entryId });
     return value.runtimeMessage;
@@ -366,7 +368,10 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         else await fallbackSelections.get(attemptId);
       }
       settle(row, attemptedNative ? "interrupted" : "failed", failure);
-      if(hasReceipt(row.command_id)) sink.transaction(tx=>sink.updateReceipt(tx,row.command_id,{error:failure}));
+      // Acquisition/start effects may be created by a core command rather than
+      // the user's command. Preserve the underlying failure on its owning input.
+      const receiptCommandId = attemptId ? state.runs[state.attempts[attemptId]?.runId]?.commandId : row.command_id;
+      if(receiptCommandId && hasReceipt(receiptCommandId)) sink.transaction(tx=>sink.updateReceipt(tx,receiptCommandId,{error:failure}));
     }
   };
   const drainEffects = (kinds?: readonly CoreEffect["kind"][]): Promise<void> => {

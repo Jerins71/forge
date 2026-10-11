@@ -164,6 +164,37 @@ function count(core: Awaited<ReturnType<typeof createControlCore>>, table: strin
 }
 
 describe("durable control acceptance on real SQLite", () => {
+  // Explicit resend may reuse canonical input only after proved non-dispatch.
+  // Unknown delivery and another device/session must never gain this authority.
+  it("resends a proved-undelivered input using its existing canonical entry", async () => {
+    const f = await fixture({ acquireProvider: async () => { throw new Error("Sign-in rejected"); } });
+    const first = await f.core.controlService.execute(principal, "session.launch", launch);
+    await f.core.effectWorker.drain();
+    await expect(f.core.controlService.execute({ ...principal, deviceSessionId: 'device-b' }, "session.send", { commandId: STOP, sessionId: first.sessionId!, message: launch.initialMessage!, resendOfCommandId: COMMAND })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(f.core.controlService.execute(principal, "session.send", { commandId: STOP, sessionId: first.sessionId!, message: { text: 'Changed body', artifactIds: [] }, resendOfCommandId: COMMAND })).rejects.toMatchObject({ code: 'CONFLICT' });
+    const apply = f.swarm.applyInput;
+    const seen: unknown[] = [];
+    f.swarm.applyInput = async input => { seen.push(input); return apply({ ...input, inputId: 'input-' + COMMAND }); };
+    f.swarm.acquireProvider = async scope => ({ adapter: f.provider, binding: { scope, conversation: { ...scope, kind: 'conversation', nativeId: 'native' }, capabilities: f.provider.capabilities(), instructionRevision: 'fixture', toolContractRevision: 'fixture' } });
+    await f.core.controlService.execute(principal, "session.send", { commandId: SEND, sessionId: first.sessionId!, message: launch.initialMessage!, resendOfCommandId: COMMAND });
+    await f.core.effectWorker.drain();
+    expect(await f.core.controlService.getReceipt(principal, SEND)).toMatchObject({ state: "succeeded" });
+    expect(seen).toEqual([expect.objectContaining({ resendOfCommandId: COMMAND })]);
+    expect(f.canonical.size).toBe(1);
+    await expect(f.core.controlService.execute(principal, "session.send", { commandId: STOP, sessionId: first.sessionId!, message: launch.initialMessage!, resendOfCommandId: SEND })).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  // Acquisition effects are owned by a core command; their failure belongs to
+  // the user's run receipt, including after a fresh receipt read/reconnect.
+  it("retains the real sign-in failure on the user's receipt", async () => {
+    const failure = "Codex could not sign in with the saved API key. Check Settings > Authentication.";
+    const f = await fixture({ acquireProvider: async () => { throw new Error(failure); } });
+    await f.core.controlService.execute(principal, "session.launch", launch);
+    await f.core.effectWorker.drain();
+    expect(await f.core.controlService.getReceipt(principal, COMMAND)).toMatchObject({ state: "failed", error: { message: failure } });
+    expect(f.canonical.size).toBe(1);
+  });
+
   // A provider exit can leave a cached binding while Forge still desires a running session.
   // Recovery must preserve the next canonical input, replace only after confirmed drain,
   // resume the native conversation, and never resend the interrupted original turn.

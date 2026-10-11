@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { openaiCodexOAuthProvider, type OAuthCredentials } from "@earendil-works/pi-ai/oauth";
 import type { CodexAuthStatus, CredentialPoolState, NativeApiAccessUpdate, PooledCredentialInfo } from "@forge/protocol";
 import type { SwarmConfig } from "../../types.js";
-import { describeNativeApiAccess, readNativeApiAccess, writeNativeApiAccess } from "../native-api-access.js";
+import { describeNativeApiAccess, readNativeApiAccess, writeNativeApiAccess, nativeApiLoginState } from "../native-api-access.js";
 
 const PROVIDER = "openai-codex";
 /** The ChatGPT OAuth provider's headless method; works for any environment the browser cannot reach. */
@@ -45,7 +45,9 @@ export class CodexAuthService {
     ]);
     const accounts = pool.credentials.filter((credential) => credential.enabled !== false).map((credential) => credential.label || credential.autoLabel || "ChatGPT account");
     const connected = managedByBroker || (access.mode === "api_key" ? access.apiKeyConfigured : accounts.length > 0);
-    return { connected, accounts, managedByBroker, access, ...this.state };
+    const rejected = nativeApiLoginState(this.ports.config, "codex-native").error;
+    return { connected: connected && !rejected, accounts, managedByBroker, access, ...this.state,
+      ...(rejected && this.state.phase === "idle" ? { phase: "error", message: rejected } : {}) };
   }
 
   async configure(update: NativeApiAccessUpdate): Promise<CodexAuthStatus> {

@@ -54,6 +54,7 @@ const capabilities: EnvironmentCapabilities = {
   sessionLifecycle: true,
   projectPolicy: true,
   contextTransfers: true,
+  resendUndelivered: true,
 };
 function describe(file: EnvironmentIdentityFile, options: IdentityOptions): EnvironmentIdentity {
   const descriptor: EnvironmentDescriptor = {

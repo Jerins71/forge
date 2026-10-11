@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { claudeRuntimeEnvironment } from "../runtime/claude/claude-runtime-environment.js";
+import { CodexAuthService } from "../runtime/codex/codex-auth-service.js";
 import { CodexRuntimeAuth } from "../runtime/codex/codex-runtime-auth.js";
 import { describeNativeApiAccess, readNativeApiAccess, writeNativeApiAccess } from "../runtime/native-api-access.js";
 import type { AgentDescriptor, SwarmConfig } from "../types.js";
@@ -26,6 +27,19 @@ const loseKey = async (provider: "claude-native" | "codex-native") => {
 };
 
 describe("native API access", () => {
+  // A saved key is configured, but a proved rejected runtime login is not a
+  // connected account. Settings must show the failure until access changes.
+  it("shows a rejected native login in Auth settings without leaking the provider error", async () => {
+    await writeNativeApiAccess(config, "codex-native", { mode: "api_key", apiKey: "synthetic-key" });
+    const service = new CodexAuthService({ config, listCredentialPool: async () => ({ credentials: [] }) as never, addPooledCredential: async () => { throw new Error("unused"); } });
+    const auth = new CodexRuntimeAuth({ config, descriptor: { agentId: "manager" } as AgentDescriptor });
+    await auth.initialize();
+    await expect(auth.login({ request: async () => { throw new Error("Sensitive provider error"); } } as never)).rejects.toThrow("Settings > Authentication");
+    expect(await service.status()).toMatchObject({ connected: false, phase: "error", message: "Codex could not sign in with the saved API key. Check Settings > Authentication." });
+    await service.configure({ mode: "api_key", apiKey: "replacement-synthetic-key" });
+    expect(await service.status()).toMatchObject({ connected: true, phase: "idle" });
+  });
+
   it("stops Claude with a clear message when API-key mode has no key, and passes only the selected credential", async () => {
     const source = { PATH: "/fixture/bin", ANTHROPIC_API_KEY: "ambient-key-not-used" };
     await writeNativeApiAccess(config, "claude-native", { mode: "api_key", apiKey: "synthetic-claude-key", baseUrl: "http://127.0.0.1:1/router" });

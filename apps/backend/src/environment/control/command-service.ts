@@ -389,6 +389,16 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       if ((method === "session.send" || method === "session.choose") && (JSON.parse(session!.summary_json).status === "stopping" || JSON.parse(session!.summary_json).archived)) {
         throw new ControlError("CONFLICT", "Session shutdown is still in progress");
       }
+      const resend = method === "session.send" ? input as RpcInput<"session.send"> : undefined;
+      if (resend?.resendOfCommandId) {
+        const source = database.prepare("SELECT device_session_id,session_id FROM commands WHERE command_id=?").get(resend.resendOfCommandId) as { device_session_id: string; session_id: string } | undefined;
+        if (!source || source.device_session_id !== principal.deviceSessionId || source.session_id !== sessionId) throw new ControlError("NOT_FOUND", "Original input is unavailable");
+        const state = loadState(database);
+        const original = Object.values(state.runs).find(run => run.commandId === resend.resendOfCommandId);
+        if (!original || original.state !== "terminal" || original.outcome !== "failed" || Object.values(state.attempts).some(attempt => attempt.runId === original.runId && attempt.delivery !== "pending")) throw new ControlError("CONFLICT", "Only a proved-undelivered failed input can reuse its message");
+        if (original.input.text !== resend.message.text || JSON.stringify([...original.input.artifactIds].sort()) !== JSON.stringify([...resend.message.artifactIds].sort())) throw new ControlError("CONFLICT", "Resend must preserve the original message");
+        if (database.prepare("SELECT 1 FROM commands WHERE json_extract(normalized_json,'$.resendOfCommandId')=?").get(resend.resendOfCommandId)) throw new ControlError("CONFLICT", "This input was already resent");
+      }
       database
         .prepare(
           `INSERT INTO commands

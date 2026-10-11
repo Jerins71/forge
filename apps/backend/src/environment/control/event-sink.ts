@@ -279,7 +279,14 @@ export function createEventSink(database: Database, clock: () => number, random:
           const choice = requestChoice(event.request);
           if (choice) sink.append(tx, { topic: "detail", sessionId: requestSession(loadState(database).threads[event.request.threadId]), event: { type: "choice.upsert", choice } });
         }
-        if (event.type === "input.recorded") database.prepare("UPDATE control_inputs SET canonical_entry_id=?,append_state='recorded' WHERE input_id=?").run(event.run.entryId, event.run.inputId);
+        if (event.type === "input.recorded") {
+          database.prepare("UPDATE control_inputs SET canonical_entry_id=?,append_state='recorded' WHERE input_id=?").run(event.run.entryId, event.run.inputId);
+          const priorItem = database.prepare("SELECT item_json FROM detail_items WHERE session_id=? AND item_id=?").get(event.run.threadId, event.run.entryId) as { item_json: string } | undefined;
+          if (priorItem) {
+            const item = JSON.parse(priorItem.item_json);
+            if (item.kind === "user" && item.commandId !== receiptIdentity(event.run.commandId)) sink.append(tx, { topic: "detail", sessionId: event.run.threadId, event: { type: "item.upsert", item: { ...item, commandId: receiptIdentity(event.run.commandId), runId: event.run.runId } } });
+          }
+        }
         if ("attempt" in event) {
           const run = loadState(database).runs[event.attempt.runId];
           const delivery = event.attempt.state === "dispatching" ? "dispatching" : event.attempt.delivery;

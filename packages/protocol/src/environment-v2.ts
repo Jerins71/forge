@@ -98,6 +98,7 @@ export const EnvironmentCapabilitiesSchema = O({
   sessionLifecycle: Type.Optional(Type.Boolean()),
   sessionState: Type.Optional(Type.Boolean()),
   contextTransfers: Type.Optional(Type.Boolean()),
+  resendUndelivered: Type.Optional(Type.Boolean()),
 })
 export type EnvironmentCapabilities = Static<typeof EnvironmentCapabilitiesSchema>
 export const EnvironmentDescriptorSchema = O({
@@ -202,7 +203,8 @@ export const LaunchSessionSchema = O({
 })
 export type LaunchSession = Static<typeof LaunchSessionSchema>
 export const SendMessageSchema = O({ commandId: V2Uuid, sessionId: V2Id, message: MessageInputSchema,
-  source: Type.Optional(CliSourceSchema), delivery: Type.Optional(E('auto', 'followUp', 'steer')) })
+  source: Type.Optional(CliSourceSchema), delivery: Type.Optional(E('auto', 'followUp', 'steer')),
+  resendOfCommandId: Type.Optional(V2Uuid) })
 export const ChoiceAnswerSchema = O({
   questionId: V2Id, selectedOptionIds: Type.Array(V2Id, { uniqueItems: true, maxItems: 50 }),
   text: Type.Optional(Type.String({ maxLength: 32_768 })),

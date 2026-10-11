@@ -9,7 +9,7 @@ import {
 } from "../../openai-auth/openai-auth-broker-runtime-service.js";
 import type { AgentDescriptor, SwarmConfig } from "../../types.js";
 import type { CodexAppServerClientPort } from "../../codex-app-server/types.js";
-import { missingNativeApiKeyMessage, readNativeApiAccess } from "../native-api-access.js";
+import { missingNativeApiKeyMessage, readNativeApiAccess, nativeApiLoginState, recordNativeApiLogin } from "../native-api-access.js";
 
 const PROVIDER = "openai-codex";
 
@@ -21,6 +21,7 @@ export class CodexRuntimeAuth {
   private previousAccess?: string;
   private released = false;
   private apiKey?: string;
+  private accessRevision = 0;
   /** Router or proxy for this runtime's OpenAI requests, in either mode. Not used with the broker. */
   baseUrl?: string;
 
@@ -32,6 +33,7 @@ export class CodexRuntimeAuth {
   }) {}
 
   async initialize(): Promise<void> {
+    this.accessRevision = nativeApiLoginState(this.options.config, "codex-native").revision;
     const { broker, pool } = this.options;
     if (broker && await broker.isBrokerModeActive()) {
       const acquired = await broker.acquireForRuntime(this.options.descriptor);
@@ -69,8 +71,13 @@ export class CodexRuntimeAuth {
     try {
       await client.request("account/login/start", params);
     } catch {
-      throw new Error("Codex native could not accept the selected Forge credential. Check Forge Auth settings.");
+      const message = credential.type === "api_key"
+        ? "Codex could not sign in with the saved API key. Check Settings > Authentication."
+        : "Codex could not sign in with the selected account. Check Settings > Authentication.";
+      recordNativeApiLogin(this.options.config, "codex-native", this.accessRevision, message);
+      throw new Error(message);
     }
+    recordNativeApiLogin(this.options.config, "codex-native", this.accessRevision);
     this.previousAccess = access;
   }
 
