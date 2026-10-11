@@ -6,7 +6,7 @@ import { createControlCore, type ControlCore } from "../database.js";
 import { piProviderCapabilities } from "../../../swarm/runtime/pi/pi-provider-adapter.js";
 import { ProviderDispatchRejectedError, type ProviderAdapter, type ProviderBinding } from "../../../swarm/runtime/provider-contract.js";
 import type { ControlCoreOptions } from "../effect-types.js";
-import { loadState } from "./store.js";
+import { loadState, rebuildLifecycleProjections } from "./store.js";
 import { readReceipt } from "../command-service.js";
 import { createSwarmControlAdapter } from "../swarm-control-adapter.js";
 import { createArtifactService } from "../artifact-service.js";
@@ -77,6 +77,25 @@ describe("durable provider outbox", () => {
     expect(closes).toBe(0); expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "interrupted" });
     expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "stopped", shutdown: "quarantined" });
     await expect(f.core.controlService.submitInput({ commandId: "replacement", threadId: "manager", message: { text: "replacement", artifactIds: [] } })).rejects.toThrow(/shutdown/i);
+  });
+  it("serializes a newer send behind in-process unknown delivery and settles both resumed terminals", async () => {
+    const f = await fixture(); const starts: string[] = [];
+    f.adapter.start = async input => {
+      starts.push(input.runId); return starts.length === 1 ? { status: "unknown" } : { status: "accepted", turn: { ...input.binding.scope, kind: "turn", conversationId: "native", nativeId: input.runId } };
+    };
+    await f.core.controlService.submitInput({ commandId: "first", threadId: "manager", message: { text: "first", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.submitInput({ commandId: "newer", threadId: "manager", message: { text: "newer", artifactIds: [] } }); await f.core.effectWorker.drain();
+    expect(starts).toEqual(["run-first"]); expect(loadState(f.core.database).runs["run-newer"].state).toBe("queued");
+    const recoveryId = loadState(f.core.database).recovery!.recoveryId;
+    f.core.controlService.record({ type: "recovery.resume", commandId: "resume", now: f.options.clock(), recoveryId, attempts: { "run-first": "retry-first" }, bindingIds: { manager: "retry-binding" } }); await f.core.effectWorker.drain();
+    expect(starts).toEqual(["run-first", "run-first"]);
+    for (const runId of ["run-first", "run-newer"]) {
+      const state = loadState(f.core.database); const attempt = state.attempts[state.runs[runId].activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+      f.core.controlService.record({ type: "provider.observe", commandId: `terminal-${runId}`, now: f.options.clock(), observation: { type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: "completed" } }); await f.core.effectWorker.drain();
+      expect(loadState(f.core.database).runs[runId]).toMatchObject({ state: "terminal", outcome: "completed" });
+    }
+    expect(starts).toEqual(["run-first", "run-first", "run-newer"]); expect(readReceipt(f.core.eventSink, "newer")).toMatchObject({ state: "succeeded", delivery: "dispatched" });
+    const before = loadState(f.core.database); rebuildLifecycleProjections(f.core.database); expect(loadState(f.core.database)).toEqual(before);
   });
   it("settles runtime cleanup before closing the adapter binding", async () => {
     const f = await fixture(); let nativeClosed = false; const order: string[] = [];

@@ -39,7 +39,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
   };
   const advance = (id: string) => {
     const owner = thread(id);
-    if (owner.desired !== "running" || owner.shutdown !== "clean" || owner.activeRunId || owner.compaction) return;
+    if (owner.desired !== "running" || owner.shutdown !== "clean" || owner.activeRunId || owner.compaction || Object.values(state.runs).some(run => run.threadId === id && run.state === "recovery")) return;
     const next = Object.values(state.runs).filter(r => r.threadId === id && r.state === "queued").sort((a, b) => a.sequence - b.sequence)[0];
     if (!next?.entryId) return;
     const attempt = state.attempts[next.activeAttemptId];
@@ -255,7 +255,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
           if (!attemptId || !bindingId) throw new Error("Explicit recovery requires new attempt and binding identities");
           emit({ type: "attempt.created", attempt: { attemptId, runId: run.runId, threadId: owner.threadId, bindingId, generation: owner.generation, state: "created", delivery: "pending", lastSequence: -1 } });
           emit({ type: "run.started", run: { ...run, state: "queued", activeAttemptId: attemptId } });
-          emit({ type: "thread.changed", thread: { ...owner, activeRunId: undefined, bindingId: undefined } });
+          if (owner.activeRunId === run.runId) emit({ type: "thread.changed", thread: { ...owner, activeRunId: undefined, bindingId: undefined } });
         }
       }
       for (const report of snapshot.undeliveredReports) {

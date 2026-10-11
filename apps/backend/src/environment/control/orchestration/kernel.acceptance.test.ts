@@ -89,6 +89,25 @@ describe("authoritative run decisions", () => {
     expect(f.state().threads.manager.generation).toBe(1);
     f.run(resume); expect(f.state().attempts.retry.generation).toBe(1);
   });
+  it("holds newer canonical input behind unresolved in-process recovery", () => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one");
+    f.run({ type: "attempt.unknown", commandId: "unknown", now, threadId: "manager", attemptId: "attempt-one" });
+    f.run({ type: "binding.drained", commandId: "drain", now, threadId: "manager", bindingId: "binding", status: "clean" });
+    f.submit("newer"); const queued = f.record("newer");
+    expect(f.state().runs["run-newer"].state).toBe("queued"); expect(queued.effects).toEqual([]);
+    f.run({ type: "recovery.resume", commandId: "resume", now, recoveryId: f.state().recovery!.recoveryId, attempts: { "run-one": "retry" }, bindingIds: { manager: "replacement" } });
+    expect(f.state().threads.manager.activeRunId).toBe("run-one"); expect(f.state().runs["run-newer"].state).toBe("queued");
+  });
+  it("does not clear another active run when resuming a retained recovery run", () => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one");
+    f.run({ type: "attempt.unknown", commandId: "unknown", now, threadId: "manager", attemptId: "attempt-one" });
+    f.run({ type: "binding.drained", commandId: "drain", now, threadId: "manager", bindingId: "binding", status: "clean" });
+    f.submit("newer"); f.record("newer");
+    const state = f.state(); const owner = { ...state.threads.manager, activeRunId: "run-newer", bindingId: "newer-binding" };
+    const live = { ...state, threads: { manager: owner }, runs: { ...state.runs, "run-newer": { ...state.runs["run-newer"], state: "running" as const } } };
+    const result = apply(live, { type: "recovery.resume", commandId: "resume", now, recoveryId: state.recovery!.recoveryId, attempts: { "run-one": "retry" }, bindingIds: { manager: "replacement" } });
+    expect(result.state.threads.manager).toEqual(owner); expect(result.state.runs["run-one"].state).toBe("queued"); expect(result.decision.effects).toEqual([]);
+  });
   it("quarantines a pending drain and permits no replacement writer until confirmed clean", () => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one");
     f.run({ type: "thread.stop", commandId: "stop", now, threadId: "manager" });
