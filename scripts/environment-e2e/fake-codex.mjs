@@ -127,6 +127,15 @@ async function runTurn(turn, text) {
       if (result.success !== true) throw new Error('Fixture worker spawn failed');
       reply = `fixture:${fixture.instanceId}:worker spawned`;
     }
+    if (text.includes('[fixture:spawn-fail]')) {
+      count('workerSpawns');
+      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-fail-worker', customSpecialist: 'fixture-worker',
+        cwd: checkout, initialMessage: '[fixture:fail] Fail this assignment.' });
+      if (result.success !== true) throw new Error('Fixture worker spawn failed');
+      reply = `fixture:${fixture.instanceId}:failing worker spawned`;
+    }
+    // The provider fails the turn outright, with no retries.
+    if (text.includes('[fixture:fail]')) throw new Error('Synthetic provider failure');
     if (text.includes('[fixture:spawn-hold]')) {
       count('workerSpawns');
       const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-hold-worker', customSpecialist: 'fixture-worker',

@@ -1,4 +1,4 @@
-import { Clock3, LoaderCircle, Wrench } from 'lucide-react'
+import { Clock3, LoaderCircle } from 'lucide-react'
 import type { ManagerToolActivityEvent } from '@forge/protocol'
 
 interface ManagerToolActivityIndicatorProps {
@@ -7,8 +7,8 @@ interface ManagerToolActivityIndicatorProps {
 }
 
 /**
- * Shows the latest ephemeral manager-tool activity at the live conversation edge.
- * The payload is deliberately limited to count and normalized tool name.
+ * Shows what is still going on outside the turn's own rows: commands left running in the
+ * background, a scheduled follow-up, and messages the agent has not picked up yet.
  */
 export function ManagerToolActivityIndicator({ activity, pendingCount = 0 }: ManagerToolActivityIndicatorProps) {
   const backgroundCount = activity?.backgroundCount ?? 0
@@ -45,29 +45,6 @@ export function ManagerToolActivityIndicator({ activity, pendingCount = 0 }: Man
       </div>
     )
   }
-  if (!activity || activity.toolCount <= 0) return null
-
-  const toolLabel = `${activity.toolCount} tool${activity.toolCount === 1 ? '' : 's'}`
-  const ariaLabel = `Manager tool activity: ${toolLabel}${activity.currentToolName ? `, ${activity.currentToolName}` : ''}`
-
-  return (
-    <div
-      className="flex shrink-0 items-center gap-1.5 border-y border-hairline bg-foreground/[0.02] content-gutter py-1.5 font-mono text-[11.5px] text-subtle-foreground"
-      data-testid="manager-tool-activity"
-      role="status"
-      aria-live="polite"
-      aria-label={ariaLabel}
-      title={activity.currentToolName
-        ? `${toolLabel} · ${activity.currentToolName}`
-        : toolLabel}
-    >
-      <Wrench className="size-3.5" aria-hidden="true" />
-      <span className="font-medium text-foreground/80">Using tools</span>
-      <span aria-hidden="true">·</span>
-      <span>{toolLabel}</span>
-      {activity.currentToolName ? (
-        <span className="truncate">· {activity.currentToolName}</span>
-      ) : null}
-    </div>
-  )
+  // Tools in use are rows in the activity timeline; this strip only says what the timeline does not.
+  return null
 }

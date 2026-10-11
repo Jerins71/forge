@@ -310,7 +310,10 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
             if (drained.status !== "clean") { retryRelease(row, effect, "Provider binding drain is incomplete"); return; }
             resource.stop.abort(); live.delete(effect.bindingId);
           }
-          record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: "clean" }); break;
+          record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: "clean" });
+          // Once, after the stop is confirmed: a retried release has not recorded the drain yet.
+          if (effect.stoppedTurn) options.swarm.markTurnStopped?.(effect.threadId);
+          break;
         }
         case "provider.compact": {
           const owner = loadState(database).threads[effect.threadId]; const resource = owner.bindingId && live.get(owner.bindingId);
@@ -322,7 +325,10 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           const assignment = loadState(database).assignments[effect.assignmentId];
           if (!assignment || assignment.resultRef || assignment.invalidatedAt !== undefined || loadState(database).runs[effect.workerRunId]?.state!=="terminal") break;
           if (!options.swarm.extractWorkerResult) throw new Error("Canonical worker result extraction is not composed");
-          const final = await options.swarm.extractWorkerResult(effect.threadId,effect.workerRunId,loadState(database).runs[effect.workerRunId].entryId ?? "");
+          // A worker the user stopped has no result of its own; its manager is told it was stopped.
+          const final = assignment.stoppedByUser && options.swarm.recordStoppedWorkerResult
+            ? await options.swarm.recordStoppedWorkerResult(effect.threadId,effect.workerRunId)
+            : await options.swarm.extractWorkerResult(effect.threadId,effect.workerRunId,loadState(database).runs[effect.workerRunId].entryId ?? "");
           if (!options.swarm.prepareWorkerResult) throw new Error("Internal worker result preparation is not composed");
           const prepared = await options.swarm.prepareWorkerResult(assignment, final.resultText);
           record({ type:"worker.result",prepared,...result(row,"result"),assignmentId:effect.assignmentId,workerRunId:effect.workerRunId,

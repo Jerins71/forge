@@ -140,7 +140,19 @@ export interface ConversationReplyTargetInput {
  * error, and must not masquerade as manager prose.
  */
 /** `assignment` is presentation only: a worker's internal input, shown as a card and never persisted. */
-export type SystemNoticeKind = 'worker_outcome_backstop' | 'model_change' | 'worker_stopped' | 'assignment'
+export type SystemNoticeKind = 'worker_outcome_backstop' | 'model_change' | 'worker_stopped' | 'turn_stopped' | 'assignment'
+
+/**
+ * The result a manager receives for a worker the user stopped. The manager model reads it as that
+ * worker's result; clients recognize it and draw the quiet "Stopped by you" marker instead of a result card.
+ */
+const USER_STOPPED_WORKER_RESULT_STATUS = 'status: stopped by the user'
+export function userStoppedWorkerResult(workerName: string): string {
+  return `${USER_STOPPED_WORKER_RESULT_STATUS}\nsummary: ${workerName} was stopped by the user before finishing.\nfollow-up: Do not restart it unless the user asks.`
+}
+export function isUserStoppedWorkerResult(text: string): boolean {
+  return text.trimStart().startsWith(USER_STOPPED_WORKER_RESULT_STATUS)
+}
 
 export interface ConversationMessageEvent {
   type: 'conversation_message'

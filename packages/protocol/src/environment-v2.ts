@@ -160,6 +160,8 @@ export const SessionSummarySchema = O({
   attention: E('none', 'choice', 'approval', 'error', 'result'),
   unread: Type.Integer({ minimum: 0 }),
   workerCount: Type.Integer({ minimum: 0 }),
+  /** Workers of this session that are working right now. */
+  activeWorkerCount: Type.Optional(Type.Integer({ minimum: 0 })),
   pendingCount: Type.Optional(Type.Integer({ minimum: 0 })),
   updatedAt: V2Time, sortKey: ShortText, archived: Type.Boolean(),
   createdAt: Type.Optional(V2Time),

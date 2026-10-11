@@ -1,3 +1,4 @@
+import { userStoppedWorkerResult } from "@forge/protocol";
 import { classifyCodexUserMessage } from "../../swarm/codex-app-server/codex-mention-router.js";
 import { parseCompactSlashCommand } from "../../swarm/swarm-manager-utils.js";
 import { createHash } from "node:crypto";
@@ -14,7 +15,7 @@ import { loadState } from "./orchestration/store.js";
 import { createCoreChoicePort } from "./orchestration/choice-port.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, controlService, workspaceService, artifactService }: {
-  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "releaseControlledProvider" | "getAgentForInternalUse" | "listProfiles" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner" | "installControlledChoicePort"> & Pick<SwarmManager,"installCoreAgentMessagePort"|"installCoreLineagePort"|"getConversationHistory"|"prepareLineageSession"|"resolveSpecialistFallbackModelForDescriptor">;
+  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "releaseControlledProvider" | "markControlledTurnStopped" | "getAgentForInternalUse" | "listProfiles" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner" | "installControlledChoicePort"> & Pick<SwarmManager,"installCoreAgentMessagePort"|"installCoreLineagePort"|"getConversationHistory"|"prepareLineageSession"|"resolveSpecialistFallbackModelForDescriptor">;
   database: Database;
   eventSink: EventSink;
   controlService: EnvironmentControlService;
@@ -83,6 +84,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
       const final=inputEntryId ? swarmManager.extractWorkerRunResult(threadId,runId,inputEntryId) : { resultText:`status: blocked\nsummary: Worker ${threadId} settled without a canonical input.\nfollow-up: Check the worker or retry the assignment.` };
       return final.entryId ? { entryId:final.entryId,resultText:final.resultText } : swarmManager.appendControlledBlockedResult(threadId,runId,final.resultText);
     },
+    recordStoppedWorkerResult: (threadId,runId) => swarmManager.appendControlledBlockedResult(threadId,runId,userStoppedWorkerResult(swarmManager.getAgentForInternalUse(threadId)?.displayName || threadId)),
     acquireProvider: (scope, conversation,model) => swarmManager.acquireControlledProvider(scope, conversation,model),
     readTransferEntries,
     prepareLineageSession: input=>swarmManager.prepareLineageSession(input),
@@ -119,6 +121,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
       // this owned binding; recovery and provider handoffs leave healthy workers alive.
       return { stopped: await swarmManager.releaseControlledProvider(input.sessionId) };
     },
+    markTurnStopped: sessionId => swarmManager.markControlledTurnStopped(sessionId),
   };
 }
 

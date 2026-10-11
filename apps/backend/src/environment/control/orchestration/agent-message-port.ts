@@ -49,7 +49,7 @@ export function createCoreAgentMessagePort({ controlService,sink,artifacts,swarm
       return receiptFor(assignment.parentThreadId,assignment.resultTransferId ?? `${assignment.assignmentId}:result`);
     },
     readAssignment(workerAgentId) { return findWorkerAssignment(loadState(sink.database),workerAgentId); },
-    async cancelWorkerAssignment(input) { controlService.record({ type:"worker.assignment.cancel",commandId:`cancel:${random()}`,now:clock(),managerId:input.managerId,threadId:input.workerId,authorized:true }); },
+    async noteWorkerStoppedByUser(input) { controlService.record({ type:"worker.stopped_by_user",commandId:`user-stop:${random()}`,now:clock(),managerId:input.managerId,threadId:input.workerId,authorized:true }); },
     async stopWorker(input) { controlService.record({ type:"worker.stop",commandId:`stop:${random()}`,now:clock(),managerId:input.managerId,threadId:input.workerId,authorized:true }); },
     async clearAssignments(managerId) { controlService.record({ type:"assignments.clear",commandId:`clear:${random()}`,now:clock(),threadId:managerId,authorized:true }); },
   };

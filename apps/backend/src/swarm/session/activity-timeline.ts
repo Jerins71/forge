@@ -161,6 +161,11 @@ export class ActivityTimelineTracker {
     return finished;
   }
 
+  /** The failure is already in the transcript; a later report of it for the same turn adds nothing. */
+  noteFailureReported(actorId: string, runId?: string): void {
+    this.failedAt.set(actorId, { at: this.now(), runId });
+  }
+
   /** A failure already reported for this actor's turn. A known different run is always a new failure. */
   hasRecentFailure(actorId: string, runId?: string): boolean {
     const last = this.failedAt.get(actorId);
