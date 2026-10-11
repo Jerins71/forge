@@ -1379,7 +1379,8 @@ export class SwarmAgentLifecycleService {
 
     let managerStopped = false;
     let managerShutdownIncomplete = false;
-    if (!isNonRunningAgentStatus(target.status) || target.status === "stopped") {
+    if (!isNonRunningAgentStatus(target.status) || target.status === "stopped"
+      || this.options.isRuntimeShutdownQuarantined(target.agentId)) {
       if (shouldAllowManualStopMessageEnd) {
         this.options.markPendingManualManagerStopNotice(target.agentId);
         this.options.allowInvalidatedManualStopMessageEnd(target.agentId, invalidatedManagerRuntime.runtimeToken);

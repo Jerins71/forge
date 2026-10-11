@@ -105,12 +105,15 @@ describe("Native Codex manager", () => {
   });
 
   it("reports one useful process-exit error for a running turn", async () => {
+    const order: string[] = [];
     const error = vi.fn();
-    const f = await fixture({ onRuntimeError: error });
+    const f = await fixture({ onRuntimeError: async (...args) => { order.push("error"); error(...args); },
+      onEvent: event => { if (event.type === "agent_end") order.push("agent_end"); } });
     await f.runtime.sendMessage("Run a short task");
     f.exit();
     await vi.waitFor(() => expect(error).toHaveBeenCalledOnce());
     expect(error.mock.calls[0]![1].details.userFacingMessage).toBe("Codex stopped unexpectedly. Send another message to restart it.");
+    expect(order.indexOf("error")).toBeLessThan(order.indexOf("agent_end"));
     await f.runtime.terminate();
   });
 

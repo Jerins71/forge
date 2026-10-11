@@ -456,22 +456,28 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
   private async fail(error: unknown, terminal = false): Promise<void> {
     const active = this.active;
     active?.abort.abort();
-    if (terminal) {
-      this.active = undefined;
-      if (active) {
-        for (const event of active.mapper.finish()) await this.emit(event);
-        await this.emit({ type: "agent_end" });
-        active.settle();
-      }
-    }
     if (active) active.failed = true;
     // A dead binding has no running turn. In particular an idle exit cannot
     // manufacture the forbidden idle -> error lifecycle transition.
     this.status = terminal ? "idle" : "error";
-    if (!terminal || active) await this.options.callbacks.onRuntimeError?.(this.descriptor.agentId, {
-      ...normalizeRuntimeError(error), phase: "prompt_start",
-      ...(terminal ? { details: { userFacingMessage: "Codex stopped unexpectedly. Send another message to restart it." } } : {}),
-    });
+    // Classify failure before any completion event can arm the empty-turn
+    // backstop. Release the held turn even when a projection callback rejects.
+    try {
+      if (!terminal || active) await this.options.callbacks.onRuntimeError?.(this.descriptor.agentId, {
+        ...normalizeRuntimeError(error), phase: "prompt_start",
+        ...(terminal ? { details: { userFacingMessage: "Codex stopped unexpectedly. Send another message to restart it." } } : {}),
+      });
+    } finally {
+      if (terminal) {
+        this.active = undefined;
+        if (active) {
+          try {
+            for (const event of active.mapper.finish()) await this.emit(event);
+            await this.emit({ type: "agent_end" });
+          } finally { active.settle(); }
+        }
+      }
+    }
     await this.publishStatus();
     if (terminal && active) await this.options.callbacks.onAgentEnd?.(this.descriptor.agentId);
   }

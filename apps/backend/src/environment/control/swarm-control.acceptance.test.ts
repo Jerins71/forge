@@ -713,3 +713,24 @@ it("releases a manager binding without stopping its healthy worker", async () =>
   });
   expect(child.terminateCalls).toHaveLength(0);
 });
+
+it("completes Stop all after native termination callbacks release the session's bindings", async () => {
+  const f = await fixture();
+  f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true;
+  await f.core.controlService.execute(f.paired.principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "Hold this turn", artifactIds: [] } });
+  await f.core.effectWorker.drain();
+  const worker = await f.manager.spawnAgent(f.sessionId, { agentId: "stop-all-worker" });
+  await f.core.effectWorker.drain();
+  for (const agentId of [f.sessionId, worker.agentId]) {
+    const runtime = f.manager.runtimeByAgentId.get(agentId)!;
+    const terminate = runtime.terminate.bind(runtime);
+    runtime.terminate = async options => {
+      await f.manager.handleRuntimeStatus(f.runtimeTokens.get(agentId)!, agentId, "terminated", 0);
+      await terminate(options);
+    };
+  }
+  const lifecycle = createSessionLifecycleRpc({ control: f.core.controlService, swarmManager: f.manager });
+  const receipt = await lifecycle.execute(f.paired.principal, "session.stopAll", { commandId: randomUUID(), sessionId: f.sessionId });
+  expect(receipt, JSON.stringify(receipt)).toMatchObject({ state: "succeeded" });
+  expect(f.manager.isSessionShutdownSafe(f.sessionId)).toBe(true);
+});
