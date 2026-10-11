@@ -5,6 +5,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { SettingsApiClient } from './settings-api-client'
 import { NativeApiAccessFields } from './NativeApiAccessFields'
+import { apiKeyConnection } from './native-api-access-display'
 
 const endpoint = '/api/settings/codex-native'
 
@@ -56,6 +57,9 @@ export function CodexNativeAuth({ apiClient }: { apiClient: SettingsApiClient })
   const configure = (access: NativeApiAccessUpdate) => void request({
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'configure', access }),
   })
+  const test = () => void request({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'test' }) })
+  // With an API key the check mark means the last connection test passed, not that a key is saved.
+  const keyConnection = apiKeyConnection(status?.access)
   const usesApiKey = !status?.managedByBroker && status?.access?.mode === 'api_key'
 
   const copy = async (kind: 'code' | 'link') => {
@@ -74,9 +78,9 @@ export function CodexNativeAuth({ apiClient }: { apiClient: SettingsApiClient })
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0 space-y-0.5">
           <p className="flex items-center gap-1.5 text-sm">
-            {status?.connected ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" /> : null}
+            {(usesApiKey ? keyConnection.ok : status?.connected) ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" /> : null}
             {status?.managedByBroker ? 'Managed by the Forge Auth broker'
-              : usesApiKey ? (status?.connected ? 'Using an API key' : 'API key needed')
+              : usesApiKey ? keyConnection.label
                 : status?.connected ? `Signed in · ${status.accounts.join(', ')}`
                   : status ? 'Not signed in' : 'Checking…'}
           </p>
@@ -120,7 +124,7 @@ export function CodexNativeAuth({ apiClient }: { apiClient: SettingsApiClient })
         </p>
       ) : null}
       {status?.access && !status.managedByBroker && !active ? (
-        <NativeApiAccessFields runtime="Codex" access={status.access} busy={busy} onSave={configure} />
+        <NativeApiAccessFields runtime="Codex" access={status.access} busy={busy} onSave={configure} onTest={test} />
       ) : null}
       {error || status?.message ? <p role="alert" className="max-w-prose break-words text-sm text-foreground">{error ?? status?.message}</p> : null}
     </div>

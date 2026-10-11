@@ -10,6 +10,21 @@ export interface NativeApiAccess {
   baseUrl?: string
   /** An environment variable on the backend fixes these settings; they cannot be edited here. */
   lockedBy?: string
+  /** The last connection test run from this environment with the saved settings. Absent until one has run. */
+  probe?: NativeApiProbe
+}
+
+/** Result of one request sent from the environment to the provider endpoint its runtime will use. */
+export interface NativeApiProbe {
+  outcome: 'ok' | 'bad_key' | 'wrong_path' | 'unreachable' | 'error'
+  /** What happened and what to do about it. Never contains the key. */
+  message: string
+  /** The URL that was requested. */
+  endpoint: string
+  status?: number
+  /** A base URL that answered where the saved one did not. */
+  suggestedBaseUrl?: string
+  checkedAt: string
 }
 
 /** Omit `apiKey` to keep the saved key. An empty `baseUrl` restores the provider's own endpoint. */

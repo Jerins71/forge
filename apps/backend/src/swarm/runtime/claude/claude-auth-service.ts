@@ -2,10 +2,10 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import type { ClaudeAuthStatus, NativeApiAccessUpdate } from "@forge/protocol";
+import type { ClaudeAuthStatus, NativeApiAccessUpdate, NativeApiProbe } from "@forge/protocol";
 import type { SwarmConfig } from "../../types.js";
 import { claudeRuntimeEnvironment, isClaudeSignedIn, resolveClaudeApiAccess, resolveClaudeExecutable } from "./claude-runtime-environment.js";
-import { describeNativeApiAccess, writeNativeApiAccess } from "../native-api-access.js";
+import { describeNativeApiAccess, probeNativeApiAccess, writeNativeApiAccess } from "../native-api-access.js";
 
 interface LoginFlow {
   id: string;
@@ -19,6 +19,8 @@ interface LoginFlow {
 export class ClaudeAuthService {
   private flow?: LoginFlow;
   private disposed = false;
+  /** Last connection test for the saved settings. Memory only; cleared when they change. */
+  private probe?: NativeApiProbe;
   private state: ClaudeAuthStatus = { connected: false, mode: "subscription", phase: "idle" };
 
   constructor(private readonly config: SwarmConfig, private readonly onConnected?: () => Promise<void>) {}
@@ -30,9 +32,18 @@ export class ClaudeAuthService {
       throw new Error("FORGE_CLAUDE_AUTH_MODE on this environment controls how Claude connects. Remove it to change this here.");
     }
     await writeNativeApiAccess(this.config, "claude-native", update);
+    this.probe = undefined;
     this.state = { connected: false, mode: update.mode, phase: "idle" };
     try { await this.onConnected?.(); }
     catch { throw new Error("Saved, but an existing Claude session could not refresh. Stop that session and retry your message to use the new setting."); }
+    // Saved settings are tested at once, so the card shows whether they work rather than that they exist.
+    const saved = await resolveClaudeApiAccess(this.config);
+    return saved.apiKey && saved.mode === "api_key" || saved.baseUrl ? this.test() : this.status();
+  }
+
+  /** Ask the endpoint Claude will use, from this environment, with the saved key. */
+  async test(): Promise<ClaudeAuthStatus> {
+    this.probe = await probeNativeApiAccess("claude-native", await resolveClaudeApiAccess(this.config));
     return this.status();
   }
 
@@ -40,7 +51,7 @@ export class ClaudeAuthService {
     if (this.flow) return { ...this.state };
     let access: ClaudeAuthStatus["access"];
     try {
-      access = describeNativeApiAccess(await resolveClaudeApiAccess(this.config));
+      access = { ...describeNativeApiAccess(await resolveClaudeApiAccess(this.config)), ...(this.probe ? { probe: this.probe } : {}) };
       const env = await claudeRuntimeEnvironment(this.config);
       const connected = await isClaudeSignedIn(await resolveClaudeExecutable(process.env, process.platform, process.arch, this.config.paths.dataDir), env);
       // A flow may have started while this check was in flight.

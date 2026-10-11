@@ -5,6 +5,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { SettingsApiClient } from './settings-api-client'
 import { NativeApiAccessFields } from './NativeApiAccessFields'
+import { apiKeyConnection } from './native-api-access-display'
 
 const endpoint = '/api/settings/claude-native'
 
@@ -79,6 +80,9 @@ export function ClaudeNativeAuth({ apiClient, inConversation = false, embedded =
   const configure = (access: NativeApiAccessUpdate) => void request({
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'configure', access }),
   })
+  const test = () => void request({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'test' }) })
+  // With an API key the check mark means the last connection test passed, not that a key is saved.
+  const keyConnection = apiKeyConnection(status?.access)
   const usesApiKey = status?.mode === 'api_key'
 
   return (
@@ -88,8 +92,9 @@ export function ClaudeNativeAuth({ apiClient, inConversation = false, embedded =
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <h3 className="flex items-center gap-2 text-sm font-medium">
-            {status?.connected ? <Check className="size-4 text-success" aria-hidden="true" /> : null}
-            {status?.connected ? (usesApiKey ? 'Using an API key' : embedded ? 'Signed in' : 'Claude connected') : inConversation ? 'Connect Claude to continue' : embedded ? (status ? (usesApiKey ? 'API key needed' : 'Not signed in') : 'Checking…') : 'Claude native'}
+            {(embedded && usesApiKey ? keyConnection.ok : status?.connected) ? <Check className="size-4 text-success" aria-hidden="true" /> : null}
+            {embedded && usesApiKey ? keyConnection.label
+              : status?.connected ? (usesApiKey ? 'Using an API key' : embedded ? 'Signed in' : 'Claude connected') : inConversation ? 'Connect Claude to continue' : embedded ? (status ? 'Not signed in' : 'Checking…') : 'Claude native'}
           </h3>
           <p className="max-w-prose text-xs text-muted-foreground">
             {status?.connected
@@ -135,7 +140,7 @@ export function ClaudeNativeAuth({ apiClient, inConversation = false, embedded =
         </div>
       ) : null}
       {embedded && status?.access && !active ? (
-        <NativeApiAccessFields runtime="Claude" access={status.access} busy={busy} onSave={configure} />
+        <NativeApiAccessFields runtime="Claude" access={status.access} busy={busy} onSave={configure} onTest={test} />
       ) : null}
       {error || status?.message ? <p role="alert" className="mt-3 max-w-prose break-words text-sm text-foreground">{error ?? status?.message}</p> : null}
       {active && !status?.message ? <p role="status" className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">

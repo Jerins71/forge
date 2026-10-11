@@ -9,6 +9,7 @@
 //   Pairing request bodies and traces are excluded from artifacts.
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { expect, type BrowserContext, type Page, type Request } from '@playwright/test'
 import { test as base } from './fixtures/test.js'
@@ -693,15 +694,15 @@ test('Claude native API key is saved on the picked environment only, masked afte
   await expect(form.getByRole('radio', { name: 'Subscription' })).toHaveAttribute('aria-checked', 'true')
   await form.getByRole('radio', { name: 'API key' }).click()
   // API-key mode cannot be saved without a key.
-  await expect(form.getByRole('button', { name: 'Save' })).toBeDisabled()
+  await expect(form.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
   await form.getByLabel('Anthropic API key').fill(key)
   await form.getByLabel('Base URL (optional)').fill('http://user:pass@router.invalid')
-  await form.getByRole('button', { name: 'Save' }).click()
+  await form.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByTestId('native-agent-claude').getByRole('alert')).toContainText('without embedded credentials')
   await form.getByRole('radio', { name: 'API key' }).click()
   await form.getByLabel('Anthropic API key').fill(key)
   await form.getByLabel('Base URL (optional)').fill('http://127.0.0.1:9/router')
-  await form.getByRole('button', { name: 'Save' }).click()
+  await form.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(form.getByLabel('Anthropic API key (saved)')).toHaveValue(/^•+$/)
   await expect(form.getByRole('button', { name: 'Replace' })).toBeVisible()
   await expect(form.getByLabel('Base URL (optional)')).toHaveValue('http://127.0.0.1:9/router')
@@ -725,8 +726,8 @@ test('Claude native API key is saved on the picked environment only, masked afte
   // Back to Subscription for the tests that follow.
   await form.getByRole('radio', { name: 'Subscription' }).click()
   await form.getByLabel('Base URL (optional)').fill('')
-  await form.getByRole('button', { name: 'Save' }).click()
-  await expect(form.getByRole('button', { name: 'Save' })).toBeDisabled()
+  await form.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(form.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
   await expect(form.getByRole('radio', { name: 'Subscription' })).toHaveAttribute('aria-checked', 'true')
   assertions.nativeApiKey = { environmentId: a.environmentId, masked: true, replaceOffered: true, keyInPage: false, malformedUrlRejected: true, otherEnvironmentUnchanged: true }
 })
@@ -757,9 +758,11 @@ test('remote Codex native: without "Change settings" the card says how to get ac
   await form.getByRole('radio', { name: 'API key' }).click()
   await form.getByLabel('OpenAI API key').fill(key)
   await form.getByLabel('Base URL (optional)').fill(baseUrl)
-  await form.getByRole('button', { name: 'Save' }).click()
+  await form.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(form.getByLabel('OpenAI API key (saved)')).toHaveValue(/^•+$/)
-  await expect(page.getByTestId('native-agent-codex')).toContainText('Using an API key')
+  // Saving tests the connection from C itself; nothing listens at this address.
+  await expect(page.getByTestId('native-agent-codex')).toContainText('Router unreachable')
+  await expect(page.getByRole('status', { name: 'Codex connection test' })).toHaveAttribute('data-outcome', 'unreachable')
   expect(await page.content()).not.toContain(key)
   const writes = featureRequests.slice(start).filter(request => request.path === '/api/settings/codex-native' && request.method === 'POST')
   expect(writes.map(request => request.environmentId)).toEqual([c.environmentId])
@@ -784,10 +787,90 @@ test('remote Codex native: without "Change settings" the card says how to get ac
   // Leave C on Subscription with no base URL.
   await form.getByRole('radio', { name: 'Subscription' }).click()
   await form.getByLabel('Base URL (optional)').fill('')
-  await form.getByRole('button', { name: 'Save' }).click()
-  await expect(form.getByRole('button', { name: 'Save' })).toBeDisabled()
+  await form.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(form.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
   await expect(page.getByTestId('native-agent-codex')).not.toContainText('API key needed')
   assertions.remoteNativeApiKey = { deniedEnvironmentId: b.environmentId, environmentId: c.environmentId, savedFromUi: true, runtimeStartedWithBaseUrl: true, keyRemoved: true, blockedMessage: true }
+})
+
+test('base URL: per-provider hint, path correction, and Test connection against a router', async ({ page }) => {
+  test.setTimeout(60_000)
+  const key = `synthetic-router-key-${randomUUID()}`
+  const requests: string[] = []
+  // A router at the root of its port: Anthropic at /v1/messages, OpenAI at /v1/responses.
+  const router = createServer((request, response) => {
+    request.resume()
+    const presented = typeof request.headers['x-api-key'] === 'string' ? request.headers['x-api-key'] : request.headers.authorization?.replace(/^Bearer /, '')
+    const known = request.method === 'POST' && ['/v1/messages', '/v1/responses'].includes(request.url ?? '')
+    requests.push(`${request.url} ${!known ? 404 : presented !== key ? 401 : 400}`)
+    response.writeHead(!known ? 404 : presented !== key ? 401 : 400, { 'content-type': 'application/json' }).end('{"error":{"message":"stub"}}')
+  })
+  await new Promise<void>(resolve => router.listen(0, '127.0.0.1', resolve))
+  const origin = `http://127.0.0.1:${(router.address() as { port: number }).port}`
+  try {
+    await page.goto(`${fleet!.uiUrl}/?view=settings&settingsTab=auth`)
+    const codexCard = page.getByTestId('native-agent-codex'), codex = page.getByRole('form', { name: 'Codex connection method' })
+    const codexTest = page.getByRole('status', { name: 'Codex connection test' })
+    await expect(codex.getByText('Include /v1 — e.g. https://router.example.com/v1')).toBeVisible()
+    await codex.getByRole('radio', { name: 'API key' }).click()
+    await codex.getByLabel('OpenAI API key').fill(key)
+    // The mistake QA reproduced: a Codex base URL with no path.
+    await codex.getByLabel('Base URL (optional)').fill(`${origin}/`)
+    await expect(codex.getByRole('alert')).toContainText('without /v1 every request gets a 404')
+    await expect(codex.getByRole('button', { name: 'Add /v1' })).toBeVisible()
+    // Saved as typed, it is tested at once and shown as broken, with the address that does answer.
+    await codex.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(codexTest).toHaveAttribute('data-outcome', 'wrong_path')
+    await expect(codexTest).toContainText('must include /v1')
+    await expect(codexCard).toContainText('Wrong base URL path')
+    await shot(page, 'codex-base-url-wrong-path')
+    await codexTest.getByRole('button', { name: `Use ${origin}/v1` }).click()
+    await expect(codexTest).toHaveAttribute('data-outcome', 'ok')
+    await expect(codex.getByLabel('Base URL (optional)')).toHaveValue(`${origin}/v1`)
+    await expect(codexCard).toContainText('Connected with an API key')
+    await expect(codex.getByRole('alert')).toHaveCount(0)
+    const before = requests.length
+    await codex.getByRole('button', { name: 'Test connection' }).click()
+    await expect.poll(() => requests.slice(before)).toEqual(['/v1/responses 400'])
+    await expect(codexTest).toHaveAttribute('data-outcome', 'ok')
+    await shot(page, 'codex-base-url-connected')
+    // A key the router rejects is a key problem, not a path problem.
+    await codex.getByRole('button', { name: 'Replace' }).click()
+    await codex.getByLabel('OpenAI API key').fill('synthetic-wrong-key')
+    await codex.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(codexTest).toHaveAttribute('data-outcome', 'bad_key')
+    await expect(codexCard).toContainText('API key rejected')
+    expect(await page.content()).not.toContain(key)
+
+    // Claude: the opposite mistake. The trailing /v1 is removed on save.
+    const claudeCard = page.getByTestId('native-agent-claude'), claude = page.getByRole('form', { name: 'Claude connection method' })
+    const claudeTest = page.getByRole('status', { name: 'Claude connection test' })
+    await expect(claude.getByText('Router root, without /v1 — e.g. https://router.example.com')).toBeVisible()
+    await claude.getByRole('radio', { name: 'API key' }).click()
+    // An earlier test left a key saved on this environment.
+    await claude.getByRole('button', { name: 'Replace' }).click()
+    await claude.getByLabel('Anthropic API key').fill(key)
+    await claude.getByLabel('Base URL (optional)').fill(`${origin}/v1`)
+    await expect(claude.getByRole('alert')).toContainText('It will be saved without /v1')
+    await claude.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(claudeTest).toHaveAttribute('data-outcome', 'ok')
+    await expect(claude.getByLabel('Base URL (optional)')).toHaveValue(`${origin}/`)
+    await expect(claudeCard).toContainText('Connected with an API key')
+    expect(requests.at(-1)).toBe('/v1/messages 400')
+    expect(await page.content()).not.toContain(key)
+
+    // Back to Subscription with nothing saved, for the tests that follow.
+    for (const form of [codex, claude]) {
+      await form.getByRole('button', { name: 'Remove key' }).click()
+      await expect(form.getByRole('button', { name: 'Remove key' })).toHaveCount(0)
+      await form.getByRole('radio', { name: 'Subscription' }).click()
+      await form.getByLabel('Base URL (optional)').fill('')
+      await form.getByRole('button', { name: 'Save', exact: true }).click()
+      await expect(form.getByRole('radio', { name: 'Subscription' })).toHaveAttribute('aria-checked', 'true')
+      await expect(form.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    }
+    assertions.baseUrlCheck = { hints: true, codexWrongPathFlagged: true, suggestionApplied: true, testButton: true, badKey: true, claudeV1Stripped: true }
+  } finally { router.closeAllConnections(); await new Promise(resolve => router.close(resolve)) }
 })
 
 test('embedded Browser: a forged renderer and device grant confer no Desktop authority; remote sessions get a disabled state', async ({ page }) => {
