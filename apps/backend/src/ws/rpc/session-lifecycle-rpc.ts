@@ -5,7 +5,7 @@ import type { SwarmManager } from '../../swarm/swarm-manager.js';
 import { requireNonSystemSessionProfile } from '../../swarm/system-profile-guards.js';
 import { StreamFault } from '../../environment/streams/stream-budget.js';
 
-export const lifecycleMethods = ['session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill'] as const;
+export const lifecycleMethods = ['session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill', 'worker.delete'] as const;
 export type SessionLifecycleMethod = typeof lifecycleMethods[number];
 /** Native producers share the existing admission/effect lanes and domain policy. */
 export function createSessionLifecycleRpc({ swarmManager: swarm, control }: { swarmManager: SwarmManager; control: ControlService }) {
@@ -26,13 +26,13 @@ export function createSessionLifecycleRpc({ swarmManager: swarm, control }: { sw
         return control.execute(principal, method, kill);
       }
       const projectId = target?.profileId ?? input.sessionId;
-      const stop = method === 'session.archive' || method === 'session.clear' || method === 'session.delete' || method === 'session.stopAll';
+      const stop = method === 'session.archive' || method === 'session.clear' || method === 'session.delete' || method === 'session.stopAll' || method === 'worker.delete';
       const sessionIds = [input.sessionId];
       if (method === 'session.delete')
         sessionIds.push(...swarm.listAgents().filter(d => d.role === 'manager' && d.sideChatSourceAgentId === input.sessionId).map(d => d.agentId));
       await control.admitLifecycle(principal, {
         commandId: input.commandId, command: method, request: input,
-        sessionIds, intent: stop ? 'stop' : method === 'session.resume' ? 'resume' : method === 'session.choice.cancel' ? 'cancel-choice' : 'inspect',
+        sessionIds, ...(method === 'worker.delete' ? { workerId: (input as RpcInput<'worker.delete'>).workerId } : {}), intent: stop ? 'stop' : method === 'session.resume' ? 'resume' : method === 'session.choice.cancel' ? 'cancel-choice' : 'inspect',
         ...('choiceId' in input ? { choiceId: input.choiceId } : {}),
         receipt: { method, sessionId: input.sessionId, projectId }, receiptReplay: true, requiredScope: rpcScopes[method],
         preflight() {
@@ -61,9 +61,10 @@ export function createSessionLifecycleRpc({ swarmManager: swarm, control }: { sw
           case 'session.choice.cancel': swarm.cancelChoiceRequest((input as RpcInput<'session.choice.cancel'>).choiceId, 'cancelled'); break;
           case 'session.stopAll': result = { ...result, ...await swarm.stopAllAgents(input.sessionId, input.sessionId) }; break;
           case 'worker.stop': await swarm.stopWorker((input as RpcInput<'worker.stop'>).workerId); break;
+          case 'worker.delete': await swarm.deleteControlledWorker(input.sessionId, (input as RpcInput<'worker.delete'>).workerId); break;
           case 'worker.resume': await swarm.resumeWorker((input as RpcInput<'worker.resume'>).workerId); break;
         }
-        if (stop && sessionIds.some(id => !swarm.isSessionShutdownSafe(id))) throw new StreamFault('UNAVAILABLE', 'Session shutdown is still settling');
+        if (stop && method !== 'worker.delete' && sessionIds.some(id => !swarm.isSessionShutdownSafe(id))) throw new StreamFault('UNAVAILABLE', 'Session shutdown is still settling');
         // Keep receipts bounded: domain return values can include full descriptors.
         return { projectId: result.projectId, sessionId: result.sessionId,
           ...(result.stoppedWorkerIds ? { stoppedWorkerIds: result.stoppedWorkerIds } : {}),

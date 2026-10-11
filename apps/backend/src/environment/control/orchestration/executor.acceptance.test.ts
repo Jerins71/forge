@@ -565,7 +565,7 @@ describe("durable provider outbox", () => {
     expect(await outcome).toEqual({ value: { completed: true } });
     expect(f.dispatches()).toBe(0);
     expect(loadState(f.core.database).threads.manager.desired).toBe("running");
-    expect((await f.core.controlService.getReceipt(principal, commandId))).toMatchObject({ state: "interrupted", delivery: "none" });
+    expect((readReceipt(f.core.eventSink, commandId))).toMatchObject({ state: "interrupted", delivery: "none" });
   });
   it.each(["session.stop", "worker.kill"] as const)("%s stops the worker in the kernel while preserving its manager", async method => {
     const f = await fixture(); const stopped: string[] = [];

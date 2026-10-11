@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { isCodexAppServerExternalThreadDescriptor } from '@forge/protocol'
 import { CodexExternalThreadIcon, HighlightedText } from './shared'
 import { WorkerHighlightOutline } from '../WorkGraphWorkerHighlight'
+import { DeleteSessionDialog } from './dialogs/DeleteSessionDialog'
 import type { WorkerRowProps } from './types'
 
 export const WorkerRow = React.memo(function WorkerRow({
@@ -22,6 +23,7 @@ export const WorkerRow = React.memo(function WorkerRow({
   continueDisabledReason,
   highlightQuery,
 }: WorkerRowProps) {
+  const [deleting, setDeleting] = React.useState(false)
   const name = agent.displayName || agent.agentId
   const tooltipLines = [
     name,
@@ -100,6 +102,7 @@ export const WorkerRow = React.memo(function WorkerRow({
   if (!onDelete && !onStop && !onResume && !onContinue) return row
 
   return (
+    <>
     <ContextMenu>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
       <ContextMenuContent>
@@ -126,12 +129,15 @@ export const WorkerRow = React.memo(function WorkerRow({
         ) : null}
         {onDelete && (hasLifecycleAction || canContinue) ? <ContextMenuSeparator /> : null}
         {onDelete ? (
-          <ContextMenuItem variant="destructive" onClick={() => onDelete()}>
+          <ContextMenuItem variant="destructive" onSelect={() => setDeleting(true)}>
             <Trash2 className="mr-2 size-3.5" />
             Delete
           </ContextMenuItem>
         ) : null}
       </ContextMenuContent>
     </ContextMenu>
+    {deleting && onDelete ? <DeleteSessionDialog worker agentId={agent.agentId} sessionLabel={name}
+      onConfirm={() => { setDeleting(false); onDelete() }} onClose={() => setDeleting(false)} /> : null}
+    </>
   )
 })

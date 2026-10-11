@@ -43,6 +43,8 @@ export interface LifecycleAdmission {
   requiredScope?: Scope;
   receipt?: { method: ControlMethod; projectId?: string; sessionId?: string };
   sessionIds: readonly string[];
+  /** A worker deletion fences only this child, preserving its manager and queued inputs. */
+  workerId?: string;
   /** Profile teardown also fences launches not yet materialized in the swarm. */
   projectIds?: readonly string[];
   intent: "stop" | "resume" | "inspect" | "cancel-choice";

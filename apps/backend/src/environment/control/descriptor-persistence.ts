@@ -43,12 +43,17 @@ export function createControlDescriptorPersistence(options: { database: Database
       database.prepare("UPDATE control_sessions SET descriptor_json=?,deleted=0 WHERE session_id=?").run(JSON.stringify(descriptor), descriptor.agentId);
       database.prepare("UPDATE control_sessions SET descriptor_version=2 WHERE session_id=?").run(descriptor.agentId);
     }
-    for (const row of database.prepare("SELECT session_id,agent_id FROM control_workers WHERE descriptor_json IS NOT NULL").all() as { session_id: string; agent_id: string }[]) if (!agents.has(row.agent_id)) database.prepare("UPDATE control_workers SET deleted=1,descriptor_json=NULL WHERE session_id=? AND agent_id=?").run(row.session_id, row.agent_id);
+    for (const row of database.prepare("SELECT session_id,agent_id,deleted FROM control_workers WHERE descriptor_json IS NOT NULL").all() as { session_id: string; agent_id: string; deleted: number }[]) if (!agents.has(row.agent_id)) {
+      // Publish removal in the same transaction that forgets the descriptor: a later snapshot
+      // cannot discover a live row after it has already been tombstoned.
+      if (!row.deleted) eventSink.append(tx, { topic: "detail", sessionId: row.session_id, event: { type: "worker.remove", agentId: row.agent_id } });
+      database.prepare("UPDATE control_workers SET deleted=1,descriptor_json=NULL WHERE session_id=? AND agent_id=?").run(row.session_id, row.agent_id);
+    }
   });
   return {
     async load() {
       const profiles = (database.prepare("SELECT profile_json FROM control_projects WHERE deleted=0 AND profile_json IS NOT NULL").all() as { profile_json: string }[]).map(row => JSON.parse(row.profile_json) as ManagerProfile);
-      const agents = [...(database.prepare("SELECT descriptor_json FROM control_sessions WHERE deleted=0 AND descriptor_json IS NOT NULL").all() as { descriptor_json: string }[]), ...(database.prepare("SELECT descriptor_json FROM control_workers WHERE descriptor_json IS NOT NULL").all() as { descriptor_json: string }[])].map(row => JSON.parse(row.descriptor_json) as AgentDescriptor);
+      const agents = [...(database.prepare("SELECT descriptor_json FROM control_sessions WHERE deleted=0 AND descriptor_json IS NOT NULL").all() as { descriptor_json: string }[]), ...(database.prepare("SELECT descriptor_json FROM control_workers WHERE deleted=0 AND descriptor_json IS NOT NULL").all() as { descriptor_json: string }[])].map(row => JSON.parse(row.descriptor_json) as AgentDescriptor);
       return { agents, profiles };
     },
     async save(store) { persist(store); },

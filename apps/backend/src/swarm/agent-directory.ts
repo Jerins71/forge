@@ -419,10 +419,12 @@ export class AgentDirectory {
   }
 
   private generateUniqueId(base: string): string {
-    if (!this.options.descriptors.has(base)) return base;
+    // Removed descriptors still have retained run/transfer identities in the lifecycle owner.
+    const used = (agentId: string) => this.options.descriptors.has(agentId) || this.readLifecycleStatus?.(agentId) !== undefined;
+    if (!used(base)) return base;
 
     let index = 2;
-    while (this.options.descriptors.has(`${base}-${index}`)) index += 1;
+    while (used(`${base}-${index}`)) index += 1;
     return `${base}-${index}`;
   }
 }

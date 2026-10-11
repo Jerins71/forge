@@ -37,7 +37,7 @@ const CachedProjectsSchema = Type.Array(ProjectSummarySchema)
 const CachedSessionsSchema = Type.Array(SessionSummarySchema)
 function requiresProjectPolicy(method: string): boolean { return (method.startsWith('project.') && method !== 'project.readState.clear') || method === 'session.configure' || method.startsWith('workspace.directories.') || method === 'settings.recommendedDefaults.apply' }
 const sessionStateMethods = new Set(['session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'])
-const sessionLifecycleMethods = new Set(['session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.fork', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill'])
+const sessionLifecycleMethods = new Set(['session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.fork', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill', 'worker.delete'])
 const contextTransferMethods = new Set(['session.provider.switch', 'session.mergeBack', 'worker.continue', 'session.lineage.get'])
 /** A fork transfers context only when it selects a source point or a model; a plain fork stays a lifecycle command. */
 function requiresContextTransfers(method: string, input: unknown): boolean { return contextTransferMethods.has(method) || (method === 'session.fork' && !!input && typeof input === 'object' && ('sourcePoint' in input || 'model' in input)) }
@@ -243,6 +243,7 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
           rpcRegistry[command.method as PendingCommand['method']].receipt &&
           (!requiresProjectPolicy(command.method) || descriptor.capabilities.projectPolicy) &&
           (!sessionLifecycleMethods.has(command.method) || descriptor.capabilities.sessionLifecycle) &&
+          (command.method !== 'worker.delete' || descriptor.capabilities.workerDelete) &&
           (!requiresContextTransfers(command.method, command.input) || descriptor.capabilities.contextTransfers) &&
           Value.Check(
             rpcRegistry[command.method as PendingCommand['method']].input,
@@ -259,6 +260,7 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
     input: RpcInput<M>,
     options?: { signal?: AbortSignal },
   ): Promise<RpcOutput<M>> {
+    if (method === 'worker.delete' && !this.descriptor()?.capabilities.workerDelete) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to delete workers')
     if (sessionLifecycleMethods.has(method) && !this.descriptor()?.capabilities.sessionLifecycle) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to control session lifecycle')
     if (sessionStateMethods.has(method) && !this.descriptor()?.capabilities.sessionState) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to use session state controls')
     if (requiresProjectPolicy(method) && !this.descriptor()?.capabilities.projectPolicy) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to use project policy controls')
@@ -371,6 +373,7 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
     this.recovering = true
     try {
       for (const command of this.pending.values()) {
+        if (command.method === 'worker.delete' && !this.descriptor()?.capabilities.workerDelete) continue
         if (sessionLifecycleMethods.has(command.method) && !this.descriptor()?.capabilities.sessionLifecycle) continue
         if (sessionStateMethods.has(command.method) && !this.descriptor()?.capabilities.sessionState) continue
         if (requiresProjectPolicy(command.method) && !this.descriptor()?.capabilities.projectPolicy) continue

@@ -1280,6 +1280,11 @@ test('F15/F16: a native choice reaches Needs You and a background worker can be 
   // The selection remains on the other chat throughout the background delete.
   expect(new URL(page.url()).searchParams.get('agent')).toBe(a.sessionId)
   await shot(page, 'background-worker-deleted')
+  // Retained transfer/run identities cannot become a new worker owned by a different turn/session.
+  await send(launched.sessionId, '[fixture:spawn-choice]')
+  const replacementWorker = await until<any>(async () => (await detail()).workers[0], Boolean)
+  expect(replacementWorker.agentId).not.toBe(worker.agentId)
+  await until<any>(async () => (await detail()).choices.find((choice: any) => choice.agentId === replacementWorker.agentId && choice.status === 'pending'), Boolean)
   const choice = await send(a.sessionId, '[fixture:choice]')
   await until(async () => { const rpc = await openFixtureRpc(a.baseUrl, principal); try { const { subscriptionId } = await rpc.call('session.subscribe', { sessionId: a.sessionId }); return (await until(() => rpc.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot.session.attentionOccurrence } finally { rpc.close() } }, Boolean)
   await page.goto(`${fleet!.uiUrl}/?view=inbox`)

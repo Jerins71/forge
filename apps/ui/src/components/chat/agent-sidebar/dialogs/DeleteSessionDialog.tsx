@@ -6,19 +6,23 @@ export function DeleteSessionDialog({
   sessionLabel,
   onConfirm,
   onClose,
+  worker = false,
 }: {
   agentId: string
   sessionLabel: string
   onConfirm: (agentId: string) => void
   onClose: () => void
+  worker?: boolean
 }) {
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="max-w-sm p-4">
         <DialogHeader className="mb-3">
-          <DialogTitle>Delete Session</DialogTitle>
+          <DialogTitle>{worker ? 'Delete Worker' : 'Delete Session'}</DialogTitle>
           <DialogDescription>
-            Delete &ldquo;{sessionLabel}&rdquo;? This will permanently remove the session history and memory. This cannot be undone.
+            Delete &ldquo;{sessionLabel}&rdquo;? {worker
+              ? 'This removes the worker conversation. Results already sent to the manager stay in the manager’s history.'
+              : 'This will permanently remove the session history and memory. This cannot be undone.'}
           </DialogDescription>
         </DialogHeader>
         <div className="flex items-center justify-end gap-2">
@@ -30,7 +34,7 @@ export function DeleteSessionDialog({
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             onClick={() => onConfirm(agentId)}
           >
-            Delete session
+            {worker ? 'Delete worker' : 'Delete session'}
           </Button>
         </div>
       </DialogContent>

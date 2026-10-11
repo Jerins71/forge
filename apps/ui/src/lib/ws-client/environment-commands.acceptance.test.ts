@@ -80,7 +80,7 @@ describe('environment command identity', () => {
     const { server, client, facade } = await environment()
     Object.assign(client.descriptor()!.capabilities, { workerDelete: false })
     facade.deleteAgent('worker-1', 'session-1')
-    await until(() => facade.getState().lastError?.includes('Update this environment'))
+    await until(() => Boolean(facade.getState().lastError?.includes('Update this environment')))
     expect(server.inputs.some(entry => entry.method === 'worker.delete')).toBe(false)
   })
 
