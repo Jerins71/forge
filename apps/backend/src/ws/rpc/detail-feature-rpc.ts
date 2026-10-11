@@ -78,6 +78,7 @@ export function projectDetailFeature(raw: unknown): DetailFeatureEvent | undefin
   let event: unknown;
   switch (e.type) {
     case 'manager_tool_activity': event = { type: 'tool.activity', activity: e }; break;
+    case 'timeline_activity': event = { type: 'activity.upsert', item: e.item }; break;
     case 'generation_throughput': event = { type: 'throughput.upsert', measurement: e.measurement, summary: e.sessionSummary }; break;
     case 'generation_throughput_snapshot': event = { type: 'throughput.snapshot', measurements: e.measurements, summary: e.sessionSummary }; break;
     case 'secure_session_snapshot': event = { type: 'secure.upsert', snapshot: e }; break;

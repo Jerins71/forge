@@ -39,6 +39,11 @@ import {
   resolveToolExecutionEventActorAgentId,
 } from './message-list/tool-display-utils'
 import { ToolLogRow } from './message-list/ToolLogRow'
+import { ActivityGroup } from './message-list/activity/ActivityGroup'
+import { LiveActivityRows } from './message-list/activity/LiveActivityRows'
+import type { ActivityContentLoader } from './message-list/activity/ActivityRow'
+import { replayedActivityRow, type ActivityRowModel } from './message-list/activity/activity-model'
+import type { LiveActivityStore } from '@/lib/ws-client/live-activity-store'
 import { useOlderHistoryAutoLoad } from './message-list/useOlderHistoryAutoLoad'
 import { SecureOutputQuarantineNotice } from './secure-session/SecureOutputQuarantineNotice'
 import type { SecureSessionRequestConfig } from './secure-session/types'
@@ -112,6 +117,8 @@ export interface MessageListProps {
   hasStalePresentation?: boolean
   bootstrapErrorMessage?: string
   onRetryBootstrap?: () => void
+  /** Tool and reasoning rows still streaming for the mounted session. */
+  liveActivity?: LiveActivityStore
   /** Delivery state per command ID for user messages sent to a V2 environment. */
   commandStatuses?: Record<string, MessageCommandStatus>
   /** Retries an unacknowledged message with its original command. */
@@ -186,6 +193,16 @@ type DisplayEntry =
       id: string
       entry: Extract<ConversationEntry, { type: 'plan_summary' }>
     }
+  | {
+      /** A run of consecutive tool and reasoning rows between two messages. */
+      type: 'activity_group'
+      id: string
+      rows: ActivityRowModel[]
+      /** Counts user messages, so the newest turn can be told apart while it runs. */
+      turnIndex: number
+      /** On the first run of a turn: when the turn started and when its last entry arrived. */
+      turn?: { startedAt: string; endedAt: string }
+    }
 
 function isNearBottom(container: HTMLElement, threshold = AUTO_SCROLL_THRESHOLD_PX): boolean {
   const distanceFromBottom =
@@ -225,8 +242,38 @@ function buildDisplayEntries(messages: ConversationEntry[]): DisplayEntry[] {
   const planSummaryIndexById = new Map<string, number>()
   const toolEntriesByCallId = new Map<string, ToolExecutionDisplayEntry>()
   const choiceEntriesByChoiceId = new Map<string, ChoiceRequestDisplayEntry>()
+  let turnIndex = 0
+  let turnStartedAt: string | undefined
+  let turnTimer: { startedAt: string; endedAt: string } | undefined
 
   for (const [index, message] of normalizePlanSummaryEntries(messages).entries()) {
+    if (message.type === 'conversation_message' && message.role === 'user') {
+      turnIndex += 1
+      turnStartedAt = message.timestamp
+      turnTimer = undefined
+    } else if (turnTimer && message.timestamp > turnTimer.endedAt) {
+      turnTimer.endedAt = message.timestamp
+    }
+
+    if (message.type === 'activity_summary' && message.activity) {
+      const row = replayedActivityRow(message as EnvironmentActivityEntry & { type: 'activity_summary' })
+      const previous = displayEntries.at(-1)
+      if (previous?.type === 'activity_group') {
+        previous.rows.push(row)
+      } else {
+        const turn = !turnTimer && turnStartedAt ? { startedAt: turnStartedAt, endedAt: message.timestamp } : undefined
+        turnTimer ??= turn
+        displayEntries.push({
+          type: 'activity_group',
+          id: `activity-${message.timelineEntryId ?? message.itemId}`,
+          rows: [row],
+          turnIndex,
+          ...(turn ? { turn } : {}),
+        })
+      }
+      continue
+    }
+
     if (message.type === 'conversation_message') {
       const targetId = resolveConversationMessageTargetId(message)
       displayEntries.push({
@@ -472,6 +519,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
   hasStalePresentation = false,
   bootstrapErrorMessage,
   onRetryBootstrap,
+  liveActivity,
   commandStatuses,
   onRetryCommand,
   onResendCommand,
@@ -522,6 +570,44 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
   const rowCountRef = useRef(0)
 
   const displayEntries = useMemo(() => buildDisplayEntries(messages), [messages])
+  // The newest turn: where the live rows continue, and whether its timer is already on screen.
+  const liveTurn = useMemo(() => {
+    let index = 0
+    let startedAt: string | undefined
+    for (const message of messages) {
+      if (message.type !== 'conversation_message' || message.role !== 'user') continue
+      index += 1
+      startedAt = message.timestamp
+    }
+    const hasActivity = displayEntries.some((entry) => entry.type === 'activity_group' && entry.turnIndex === index)
+    return { index, startedAt, hasActivity }
+  }, [displayEntries, messages])
+  const [expandedActivityIds, setExpandedActivityIds] = useState<ReadonlySet<string>>(() => new Set())
+  const toggleActivity = useCallback((id: string) => {
+    setExpandedActivityIds((current) => {
+      const next = new Set(current)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
+  }, [])
+  useEffect(() => { setExpandedActivityIds(new Set()) }, [activeAgentId])
+  // Expanded rows read their persisted content once per session; a failed read can be retried.
+  const loadActivityContent = useMemo<ActivityContentLoader | undefined>(() => {
+    if (!environmentClient) return undefined
+    const cache = new Map<string, ReturnType<ActivityContentLoader>>()
+    return (sessionId, contentRef) => {
+      const key = `${sessionId}:${contentRef}`
+      let pending = cache.get(key)
+      if (!pending) {
+        pending = environmentClient
+          .request('session.content', { sessionId, contentRef, offset: 0, maxBytes: TOOL_CONTENT_MAX_BYTES })
+          .then((page) => ({ text: page.text, truncated: page.nextOffset !== null }))
+        cache.set(key, pending)
+        pending.catch(() => cache.delete(key))
+      }
+      return pending
+    }
+  }, [environmentClient])
   const pendingSecureRequests = useMemo(
     () => secureSessionRequests?.requests.filter((request) => request.status === 'pending') ?? [],
     [secureSessionRequests?.requests],
@@ -1213,7 +1299,21 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
     }
 
     if (row.kind === 'loading') {
-      return <LoadingIndicator streamingStartedAt={streamingStartedAt} />
+      return (
+        <>
+          {liveActivity && activeAgentId ? (
+            <LiveActivityRows
+              store={liveActivity}
+              actorId={activeAgentId}
+              expandedIds={expandedActivityIds}
+              onToggle={toggleActivity}
+              loadContent={loadActivityContent}
+              turnStartedAt={liveTurn.hasActivity ? undefined : liveTurn.startedAt}
+            />
+          ) : null}
+          <LoadingIndicator streamingStartedAt={streamingStartedAt} />
+        </>
+      )
     }
 
     const entry = row.entry
@@ -1325,6 +1425,22 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
 
     if (entry.type === 'plan_summary') {
       return <PlanSummaryRow summary={entry.entry} currentSnapshot={planSnapshot} />
+    }
+
+    if (entry.type === 'activity_group') {
+      // While the newest turn runs, its timer keeps counting and its latest run stays listed.
+      const inLiveTurn = isLoading && entry.turnIndex === liveTurn.index
+      return (
+        <ActivityGroup
+          groupId={entry.id}
+          rows={entry.rows}
+          open={inLiveTurn && displayEntries.at(-1) === entry}
+          expandedIds={expandedActivityIds}
+          onToggle={toggleActivity}
+          loadContent={loadActivityContent}
+          turn={entry.turn ? { startedAt: entry.turn.startedAt, ...(inLiveTurn ? {} : { endedAt: entry.turn.endedAt }) } : undefined}
+        />
+      )
     }
 
     return (

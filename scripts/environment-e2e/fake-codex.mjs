@@ -60,6 +60,35 @@ async function dynamicTool(turn, tool, args) {
   count('toolCalls');
   return ask('item/tool/call', { ...context(turn), callId: `${turn.id}-tool-${counters.toolCalls}`, namespace: 'forge', tool, arguments: args });
 }
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+function reasoning(turn, id, text) {
+  const item = { id: `${turn.id}-${id}`, type: 'reasoning', summary: [], content: [] };
+  notify('item/started', { ...context(turn), item });
+  const half = Math.floor(text.length / 2);
+  for (const delta of text ? [text.slice(0, half), text.slice(half)] : []) notify('item/reasoning/summaryTextDelta', { ...context(turn), itemId: item.id, delta });
+  // Encrypted reasoning completes with no readable summary.
+  notify('item/completed', { ...context(turn), item: { ...item, summary: text ? [text] : [] } });
+}
+async function command(turn, id, line, output, exitCode = 0, hold = false) {
+  const item = { id: `${turn.id}-${id}`, type: 'commandExecution', command: line, cwd: checkout, status: 'inProgress' };
+  notify('item/started', { ...context(turn), item });
+  for (const delta of output) { notify('item/commandExecution/outputDelta', { ...context(turn), itemId: item.id, delta }); await pause(20); }
+  // A held command stays running until the test releases it, so its live row can be observed.
+  while (hold && !turn.done && !existsSync(join(checkout, '.fixture-activity-release'))) await pause(25);
+  if (turn.done) return;
+  notify('item/completed', { ...context(turn), item: { ...item, status: exitCode ? 'failed' : 'completed', exitCode, aggregatedOutput: output.join('') } });
+}
+/** Reasoning, streamed command output, a failure, a file change and hidden reasoning, in a fixed order. */
+async function activity(turn, hold) {
+  reasoning(turn, 'reasoning-1', '**Inspecting the workspace**\n\nList the checkout before changing anything, then confirm the marker file.');
+  await command(turn, 'command-1', 'ls -la', ['total 8\n', 'fixture-provider-marker.txt\n', 'README.md\n']);
+  await command(turn, 'command-2', 'cat missing-fixture-file.txt', ['cat: missing-fixture-file.txt: No such file or directory\n'], 1);
+  reasoning(turn, 'reasoning-2', '');
+  const change = { id: `${turn.id}-file-1`, type: 'fileChange', status: 'inProgress', changes: [{ path: 'README.md', kind: 'update', diff: '@@ -1 +1,2 @@\n fixture\n+activity timeline\n' }] };
+  notify('item/started', { ...context(turn), item: change });
+  notify('item/completed', { ...context(turn), item: { ...change, status: 'completed' } });
+  await command(turn, 'command-3', 'printf synthetic-line; sleep 1', Array.from({ length: 40 }, (_, index) => `synthetic-line-${index + 1}\n`), 0, hold);
+}
 async function runTurn(turn, text) {
   if (turn.done) return;
   notify('turn/started', { threadId: turn.thread.id, turn: { id: turn.id, status: 'inProgress', items: [] } });
@@ -86,11 +115,19 @@ async function runTurn(turn, text) {
       if (result.success !== true) throw new Error('Fixture worker spawn failed');
       reply = `fixture:${fixture.instanceId}:worker spawned`;
     }
+    if (text.includes('[fixture:spawn-activity]')) {
+      count('workerSpawns');
+      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-activity-worker', customSpecialist: 'fixture-worker',
+        cwd: checkout, initialMessage: '[fixture:worker] [fixture:activity] Return the synthetic worker result after some work.' });
+      if (result.success !== true) throw new Error('Fixture worker spawn failed');
+      reply = `fixture:${fixture.instanceId}:activity worker spawned`;
+    }
     if (text.includes('[fixture:worker]')) reply = `fixture:${fixture.instanceId}:worker result`;
     if (text.includes('[fixture:long-tool]')) {
       await dynamicTool(turn, 'notes', { op: 'write', path: 'fixture-output.txt', text: 'synthetic-output '.repeat(3000) });
       await dynamicTool(turn, 'notes', { op: 'read', path: 'fixture-output.txt', maxChars: 16000 });
     }
+    if (text.includes('[fixture:activity')) await activity(turn, text.includes('[fixture:activity-hold]'));
     if (turn.done) return;
     write(join(checkout, 'fixture-provider-marker.txt'), `${fixture.instanceId}:turns=${counters.turnStarts}\n`);
     const item = { id: `${turn.id}-assistant`, type: 'agentMessage', text: '', phase: 'final_answer' };

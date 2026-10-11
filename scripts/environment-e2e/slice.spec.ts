@@ -240,7 +240,9 @@ test('9.2.4 real manager choice, lost answer ack, conflict and native worker res
     const older = await rpc.call('session.history', { sessionId: launchedSessionId, turns: 4, before: history.nextCursor });
     expect(older.items.length).toBeGreaterThan(0); expect(new Set([...history.items, ...older.items].map((item: any) => item.itemId)).size).toBe(history.items.length + older.items.length);
     await rpc.call('session.send', { commandId: randomUUID(), sessionId: launchedSessionId, message: { text: '[fixture:long-tool]', artifactIds: [] } });
-    const tool = await until<any>(() => rpc.frames.map(frame => frame.item?.event).find(event => event?.type === 'item.upsert' && event.item.kind === 'tool' && event.item.contentRef)?.item, Boolean);
+    // The write and then the read each become one activity row; the read returns the long output.
+    const tool = await until<any>(() => rpc.frames.map(frame => frame.item?.event).filter(event => event?.type === 'item.upsert' && event.item.kind === 'activity' && event.item.contentRef)[1]?.item, Boolean);
+    expect(tool.activity).toMatchObject({ kind: 'tool', status: 'completed', truncated: true });
     expect(tool.text.length).toBeLessThanOrEqual(8192);
     let offset = 0; let content = ''; let pages = 0;
     do { const chunk = await rpc.call('session.content', { sessionId: launchedSessionId, contentRef: tool.contentRef, offset, maxBytes: 4096 }); content += chunk.text; pages++; offset = chunk.nextOffset; } while (offset !== null);

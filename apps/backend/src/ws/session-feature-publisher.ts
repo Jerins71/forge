@@ -85,6 +85,8 @@ export class SessionFeaturePublisher {
             const activity = this.swarmManager.getManagerToolActivitySnapshot(ownerId);
             if (activity)
                 initial.push(activity);
+            for (const item of this.swarmManager.getRunningTimelineActivity(ownerId))
+                initial.push({ type: "timeline_activity", sessionAgentId: ownerId, item });
             initial.push(await this.swarmManager.getGenerationThroughputSnapshot(ownerId));
             for (const snapshot of await this.swarmManager.listSecureSessionTeamSnapshots(ownerId))
                 initial.push({ type: "secure_session_snapshot", ...snapshot });

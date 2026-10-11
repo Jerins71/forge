@@ -115,7 +115,7 @@ export interface SwarmManagerFacadeServices extends SwarmManagerSessionFacadeSer
     history: Pick<HistorySearchService, "search" | "read" | "sessions" | "items" | "windows" | "startFromRegistry" | "dispose" | "getIndexStatus" | "setIndexPaused">;
     projector: Pick<
       ConversationProjector,
-      "getConversationHistory" | "getConversationHistoryWithDiagnostics" | "getConversationHistoryPage"
+      "getConversationHistory" | "getConversationHistoryWithDiagnostics" | "getConversationHistoryPage" | "getRunningActivity"
     >;
     sidebarPerf: SidebarPerfRecorder;
   };

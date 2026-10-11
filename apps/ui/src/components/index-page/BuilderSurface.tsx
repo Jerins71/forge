@@ -2597,6 +2597,7 @@ export function BuilderSurface({
                   hasStalePresentation: transcript.hasStaleConversationPresentation,
                   bootstrapErrorMessage: transcript.conversationBootstrap?.errorMessage,
                   onRetryBootstrap: () => clientRef.current?.retryConversationBootstrap(),
+                  liveActivity: localClient?.liveActivity,
                   commandStatuses: state.commandStatuses,
                   onRetryCommand: handleRetryEnvironmentMessage,
                   onResendCommand: handleResendEnvironmentMessage,

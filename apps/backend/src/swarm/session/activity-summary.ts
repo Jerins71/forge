@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { TimelineActivity } from "@forge/protocol";
+import { persistedActivityDetail } from "./activity-timeline.js";
 import type {
   ActivitySummaryEvent,
   AgentToolCallEvent,
@@ -7,7 +9,7 @@ import type {
 
 export function buildActivitySummary(
   event: ConversationLogEvent | AgentToolCallEvent,
-  options?: { status?: ActivitySummaryEvent["status"] },
+  options?: { status?: ActivitySummaryEvent["status"]; activity?: TimelineActivity },
 ): ActivitySummaryEvent | undefined {
   if (event.kind !== "tool_execution_end") return undefined;
 
@@ -29,8 +31,26 @@ export function buildActivitySummary(
     status,
     ...(toolName ? { toolName } : {}),
     ...(correlationId ? { correlationId } : {}),
-    displaySummary: summarizeToolActivity(toolName, status),
+    displaySummary: options?.activity?.summary || summarizeToolActivity(toolName, status),
     ...(isError || status !== "completed" ? { isError: true } : {}),
+    ...(options?.activity ? { activity: persistedActivityDetail(options.activity) } : {}),
+  };
+}
+
+/** A finished reasoning row, persisted in its actor's own history with bounded text. */
+export function buildReasoningSummary(item: TimelineActivity): ActivitySummaryEvent {
+  return {
+    type: "activity_summary",
+    schemaVersion: 1,
+    itemId: item.itemId,
+    agentId: item.actorId,
+    actorAgentId: item.actorId,
+    ...(item.runId ? { turnId: item.runId } : {}),
+    timestamp: item.completedAt ?? item.startedAt,
+    kind: "tool_activity",
+    status: "completed",
+    displaySummary: item.summary,
+    activity: persistedActivityDetail(item),
   };
 }
 

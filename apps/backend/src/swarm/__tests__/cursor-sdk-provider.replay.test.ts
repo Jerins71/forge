@@ -129,6 +129,9 @@ describe("Cursor ProviderAdapter with SDK transport replay", () => {
     expect(s.events.some(event => event.type === "terminal" && event.terminalAuthority === "native_child")).toBe(true);
     expect(s.events.filter(event => event.type === "terminal" && event.terminalAuthority === "root_attempt")).toHaveLength(1);
     expect(s.events).toContainEqual(expect.objectContaining({ type: "message", phase: "delta", text: "Hello" }));
+    expect(s.events.filter(event => event.type === "message" && event.channel === "reasoning").map(event => event.type === "message" && [event.phase, event.text, event.item.nativeId]))
+      .toEqual([["start", "Plan the read", "cursor-run:thinking:0"], ["complete", "", "cursor-run:thinking:0"]]);
+    expect(s.adapter.capabilities().streaming).toMatchObject({ reasoning: "snapshot", tools: "snapshot" });
     expect(s.events).toContainEqual(expect.objectContaining({ type: "tool", phase: "complete", call: expect.objectContaining({ nativeId: "native-tool" }) }));
     expect(s.events).toContainEqual(expect.objectContaining({ type: "usage", usage: { input: 10, output: 5, cacheRead: 2, cacheWrite: 1, total: 18 } }));
     expect(s.events.every(event => Value.Check(ProviderObservationSchema, event))).toBe(true);

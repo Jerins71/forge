@@ -409,6 +409,7 @@ export interface ActivitySummaryEvent extends ConversationTimelineEntryMetadata 
   correlationId?: string;
   displaySummary: string;
   isError?: boolean;
+  activity?: import("@forge/protocol").PersistedActivityDetail;
 }
 
 export interface ModelCacheObservationEvent {

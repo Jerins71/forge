@@ -188,6 +188,11 @@ export class ClaudeProviderSession {
           channel: block.type === "text" ? "assistant" as const : "reasoning" as const };
         this.blocks.set(`${prefix}:${event.index}`, value);
         this.message(value, currentOrigin, turn, "start", value.text);
+      } else if (event.type === "content_block_start" && event.content_block.type === "redacted_thinking") {
+        // Encrypted reasoning has no readable text; it is still a reasoning item, shown without content.
+        const value = { id: `${this.messages.get(prefix) || frame.uuid}:${event.index}`, text: "", channel: "reasoning" as const };
+        this.blocks.set(`${prefix}:${event.index}`, value);
+        this.message(value, currentOrigin, turn, "start", "");
       } else if (event.type === "content_block_delta" && (event.delta.type === "text_delta" || event.delta.type === "thinking_delta")) {
         const value = this.blocks.get(`${prefix}:${event.index}`);
         if (value) { const text = event.delta.type === "text_delta" ? event.delta.text : event.delta.thinking; value.text += text; this.message(value, currentOrigin, turn, "delta", text); }
@@ -200,6 +205,8 @@ export class ClaudeProviderSession {
       for (const [index, block] of frame.message.content.entries()) {
         if (block.type === "text" || block.type === "thinking") {
           if (!this.blocks.has(`${parent ?? "root"}:${index}`)) this.message({ id: `${frame.message.id}:${index}`, channel: block.type === "text" ? "assistant" : "reasoning" }, currentOrigin, turn, "complete", block.type === "text" ? block.text : block.thinking);
+        } else if (block.type === "redacted_thinking") {
+          if (!this.blocks.has(`${parent ?? "root"}:${index}`)) this.message({ id: `${frame.message.id}:${index}`, channel: "reasoning" }, currentOrigin, turn, "complete", "");
         } else if (block.type === "tool_use") {
           const name = block.name.replace(/^mcp__forge__/, "");
           if (!this.tools.has(block.id)) this.publish({ type: "tool", origin: currentOrigin,

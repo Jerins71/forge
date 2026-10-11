@@ -6,10 +6,12 @@ import {
   MODEL_CACHE_PROVIDERS,
   MODEL_CACHE_STATUSES,
   MODEL_CACHE_TOKEN_NORMALIZATIONS,
+  PersistedActivityDetailSchema,
   type ConversationReplyTarget,
   type ModelCacheObservationEvent,
   type PlanSummaryEvent,
 } from "@forge/protocol";
+import { Value } from "@sinclair/typebox/value";
 import {
   areModelCacheTokenFactsConsistent,
   isModelCacheClassificationConsistent,
@@ -79,6 +81,7 @@ function isActivitySummaryEvent(value: unknown): value is ActivitySummaryEvent {
   if (maybe.correlationId !== undefined && !isNonEmptyString(maybe.correlationId)) return false;
   if (!isNonEmptyString(maybe.displaySummary) || maybe.displaySummary.length > 512) return false;
   if (maybe.isError !== undefined && typeof maybe.isError !== "boolean") return false;
+  if (maybe.activity !== undefined && !Value.Check(PersistedActivityDetailSchema, maybe.activity)) return false;
   return true;
 }
 

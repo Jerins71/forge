@@ -16,7 +16,14 @@ export function createDetailStream(deps: StreamDependencies) {
     return JSON.parse(row.summary_json) as SessionSummary;
   }
 
-  async function* detail(_principal: Principal, input: RpcInput<"session.subscribe">, signal: AbortSignal): AsyncGenerator<DetailStreamItem> {
+  /** A worker is read through the session that owns it; its rows carry the worker as their actor. */
+  function ownedBySession<T extends { sessionId: string }>(input: T): T {
+    const owner = deps.database.prepare("SELECT session_id FROM control_workers WHERE agent_id = ? AND deleted=0").get(input.sessionId) as { session_id: string } | undefined;
+    return owner ? { ...input, sessionId: owner.session_id } : input;
+  }
+
+  async function* detail(_principal: Principal, request: RpcInput<"session.subscribe">, signal: AbortSignal): AsyncGenerator<DetailStreamItem> {
+    const input = ownedBySession(request);
     const initialized = await deps.ensureDetailInitialized?.(input.sessionId);
     if (signal.aborted) return;
     const queue = new StreamQueue<DetailStreamItem>();
@@ -103,13 +110,15 @@ export function createDetailStream(deps: StreamDependencies) {
     });
   }
 
-  async function history(principal: Principal, input: RpcInput<"session.history">): Promise<RpcOutput<"session.history">> {
+  async function history(principal: Principal, request: RpcInput<"session.history">): Promise<RpcOutput<"session.history">> {
+    const input = ownedBySession(request);
     requireSession(input.sessionId);
     if (!deps.readHistory) throw new StreamFault("UNAVAILABLE", "Canonical history reader is unavailable.");
     return deps.readHistory(principal, input);
   }
 
-  async function content(principal: Principal, input: RpcInput<"session.content">): Promise<RpcOutput<"session.content">> {
+  async function content(principal: Principal, request: RpcInput<"session.content">): Promise<RpcOutput<"session.content">> {
+    const input = ownedBySession(request);
     requireSession(input.sessionId);
     if (!deps.readContent) throw new StreamFault("UNAVAILABLE", "Canonical content reader is unavailable.");
     return deps.readContent(principal, input);

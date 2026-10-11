@@ -16,8 +16,10 @@ export class CursorSdkObservationMapper {
   private terminalStatus?: string;
   private usageEmitted = false;
   private childTerminals = new Set<string>();
+  private thinkingOpen = false;
+  private thinkingIndex = 0;
   constructor(private readonly binding: ProviderBinding, private readonly emit: (observation: ProviderObservation) => void) {}
-  begin(attemptId: string): void { this.attemptId = attemptId; this.turn = undefined; this.text = ""; this.interrupted = false; this.itemIndex++; this.childTerminals.clear(); this.terminalStatus = undefined; this.usageEmitted = false; }
+  begin(attemptId: string): void { this.attemptId = attemptId; this.turn = undefined; this.text = ""; this.interrupted = false; this.itemIndex++; this.thinkingOpen = false; this.childTerminals.clear(); this.terminalStatus = undefined; this.usageEmitted = false; }
   interrupt(): void { this.interrupted = true; }
   accepted(turn: ProviderTurnRef): void { this.turn = turn; this.push({ type: "accepted", turn }); }
   error(message: string, delivery: "accepted" | "unknown"): void { this.push({ type: "error", code: "CURSOR_SDK_FAILURE", message, delivery }); }
@@ -63,6 +65,7 @@ export class CursorSdkObservationMapper {
     }
     if (!child) {
       if (message.type === "status" && ["FINISHED", "CANCELLED", "ERROR", "EXPIRED"].includes(String(message.status))) this.terminalStatus = String(message.status);
+      this.reasoning(message);
       return false;
     }
     const origin = { kind: "child" as const, conversation: { ...this.binding.scope, kind: "conversation" as const, nativeId: agentId }, parentTurn: this.turn, nativeAgentId: agentId };
@@ -80,6 +83,21 @@ export class CursorSdkObservationMapper {
         phase: message.status === "running" ? "start" : "complete", payload: json(message.status === "running" ? message.args : message.result), isError: message.status === "error" }, origin);
     }
     return true;
+  }
+  /** Root thinking messages extend one reasoning item until its duration or the next other message ends it. */
+  private reasoning(message: Record<string, unknown>): void {
+    const turn = this.turn!;
+    const item = () => ({ ...this.binding.scope, kind: "item" as const, conversationId: turn.conversationId, turnId: turn.nativeId, nativeId: `${turn.nativeId}:thinking:${this.thinkingIndex}` });
+    if (message.type === "thinking") {
+      const text = typeof message.text === "string" ? message.text : "";
+      this.push({ type: "message", item: item(), phase: this.thinkingOpen ? "delta" : "start", channel: "reasoning", text });
+      this.thinkingOpen = true;
+      if (typeof message.thinking_duration_ms !== "number") return;
+    }
+    if (!this.thinkingOpen) return;
+    // An empty completion keeps the text streamed so far.
+    this.push({ type: "message", item: item(), phase: "complete", channel: "reasoning", text: "" });
+    this.thinkingOpen = false; this.thinkingIndex++;
   }
   private push(event: Observation, origin?: ProviderObservation["origin"]): void {
     this.emit({ ...event, scope: this.binding.scope, sequence: this.sequence++, attemptId: this.attemptId,

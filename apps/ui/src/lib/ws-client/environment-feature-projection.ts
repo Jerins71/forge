@@ -5,6 +5,7 @@ import type { ServerEvent } from '@forge/protocol'
 export function projectFeatureEvent(event: DetailFeatureEvent): ServerEvent {
   switch (event.type) {
     case 'tool.activity': return { type: 'manager_tool_activity', ...event.activity }
+    case 'activity.upsert': return { type: 'timeline_activity', sessionAgentId: event.item.sessionId, item: event.item }
     case 'throughput.upsert': return { type: 'generation_throughput', measurement: event.measurement, sessionSummary: event.summary }
     case 'throughput.snapshot': return { type: 'generation_throughput_snapshot', sessionAgentId: event.summary.sessionAgentId, measurements: event.measurements, sessionSummary: event.summary }
     case 'secure.upsert': return { type: 'secure_session_snapshot', ...event.snapshot }

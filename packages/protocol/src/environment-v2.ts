@@ -14,6 +14,8 @@ export * from './browser-v2.js'
 import { ContextSourceSelectorSchema, ThreadLineageSchema, SessionLineageSnapshotSchema } from './lineage-v2.js'
 export * from './lineage-v2.js'
 import { SESSION_ATTENTION_REASONS } from './session-attention.js'
+import { TimelineActivitySchema } from './activity-timeline.js'
+export * from './activity-timeline.js'
 
 export const ENVIRONMENT_PROTOCOL_VERSION = 2 as const
 export const ENVIRONMENT_PROTOCOL_HEADER = 'x-forge-environment-protocol'
@@ -280,6 +282,8 @@ export const DetailItemSchema = O({
   contentRef: Type.Union([V2Id, Type.Null()]), // fetch full text/tool arguments/output by ID
   artifacts: Type.Array(ArtifactRefSchema, { maxItems: 20 }),
   commandId: Type.Union([V2Uuid, Type.Null()]),
+  /** Tool and reasoning rows: metadata only; persisted content is fetched through `contentRef`. */
+  activity: Type.Optional(Type.Omit(TimelineActivitySchema, ['input', 'detail'])),
 })
 export const DetailSnapshotSchema = O({
   lineage: Type.Optional(SessionLineageSnapshotSchema),

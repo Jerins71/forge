@@ -250,6 +250,8 @@ describe("Pi provider adapter on the native production path", () => {
       expect(collected.observations).toEqual(expect.arrayContaining([
         expect.objectContaining({ type: "message", channel: "assistant", phase: "delta", text: "Steered response." }),
         expect.objectContaining({ type: "message", channel: "reasoning", phase: "delta", text: "Native reasoning." }),
+        expect.objectContaining({ type: "message", channel: "reasoning", phase: "start", item: expect.objectContaining({ nativeId: expect.stringContaining(":thinking:") }) }),
+        expect.objectContaining({ type: "message", channel: "reasoning", phase: "complete", text: "Native reasoning." }),
       ]));
       await adapter.close(binding); await collected.done;
       expect(peer.failures).toEqual([]);

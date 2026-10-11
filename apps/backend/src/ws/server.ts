@@ -248,6 +248,13 @@ export class SwarmWebSocketServer {
     this.sessionFeatures.publishToolActivity(event);
   };
 
+  private readonly onTimelineActivity = (event: ServerEvent): void => {
+    if (event.type !== "timeline_activity") return;
+    this.sessionFeatures.publishForSession(event.sessionAgentId, event);
+    // A mounted worker view subscribes under the worker's own ID.
+    if (event.item.actorId !== event.sessionAgentId) this.sessionFeatures.publishForSession(event.item.actorId, event);
+  };
+
   private readonly onProfilesSnapshot = (event: ServerEvent): void => {
     if (event.type !== "profiles_snapshot") return;
     void this.remoteUpdateAwarenessService?.reconcileProjects().catch((error) => {
@@ -717,6 +724,7 @@ export class SwarmWebSocketServer {
     this.swarmManager.on("codex_elicitation_dismissed", this.onCodexElicitation);
     this.swarmManager.on("generation_throughput", this.onGenerationThroughput);
     this.swarmManager.on("manager_tool_activity", this.onManagerToolActivity);
+    this.swarmManager.on("timeline_activity", this.onTimelineActivity);
     this.swarmManager.on("profiles_snapshot", this.onProfilesSnapshot);
     this.swarmManager.on("secure_session_snapshot", this.onSecureSessionSnapshot);
     this.swarmManager.on(
@@ -784,6 +792,7 @@ export class SwarmWebSocketServer {
     this.swarmManager.off("codex_elicitation_dismissed", this.onCodexElicitation);
     this.swarmManager.off("generation_throughput", this.onGenerationThroughput);
     this.swarmManager.off("manager_tool_activity", this.onManagerToolActivity);
+    this.swarmManager.off("timeline_activity", this.onTimelineActivity);
     this.swarmManager.off("profiles_snapshot", this.onProfilesSnapshot);
     this.swarmManager.off("secure_session_snapshot", this.onSecureSessionSnapshot);
     this.swarmManager.off(

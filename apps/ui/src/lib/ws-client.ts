@@ -6,13 +6,12 @@ import { EnvironmentRuntimeError, type EnvironmentClient, type DetailState } fro
 import {
   projectShell,
   projectSession,
-  projectDetailMessages,
-  projectDetailActivity,
   projectItems,
   projectActivityItems,
   projectWorker,
   projectSessionWorkers,
 } from './ws-client/environment-projection'
+import { LiveActivityStore } from './ws-client/live-activity-store'
 import { getCatalogModelsByFamily } from '@forge/protocol'
 import type { CommandReceipt } from '@forge/protocol/environment-v2'
 import { EnvironmentOutbox } from './ws-client/environment-outbox'
@@ -108,6 +107,8 @@ export interface ManagerWsClientOptions {
 }
 
 export class ManagerWsClient {
+  /** Live tool and reasoning rows of the mounted session; updated per frame, outside `state`. */
+  readonly liveActivity = new LiveActivityStore()
   private readonly environmentClient?: EnvironmentClient
   private readonly environmentDetach: Array<() => void> = []
   private detailLease: ReturnType<EnvironmentClient['acquireDetail']> | null =
@@ -842,9 +843,11 @@ export class ManagerWsClient {
  this.updateState({ conversationPageLoading: true, lastError: null });
  try {
  const page = await this.environmentClient.request('session.history', { sessionId: agentId, before: cursor, turns: Math.min(20, Math.max(1, limit ?? 20)) });
- const messages = projectItems(page.items, agentId);
+ const ownerId = this.environmentProjection?.session.sessionId ?? agentId;
+ const items = page.items.filter(item => ownerId === agentId || item.actorId === agentId);
+ const messages = projectItems(items, ownerId);
  const result: ConversationPageResult = { agentId, messages, page: { hasOlder: !!page.nextCursor, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}), completeness: 'complete', source: 'canonical' } };
- if (this.state.targetAgentId === agentId) this.updateState({ messages: [...messages, ...this.state.messages], activityMessages: [...projectActivityItems(page.items, agentId), ...this.state.activityMessages], conversationPage: result.page, conversationPageLoading: false, conversationHistoryMutation: { revision: (this.state.conversationHistoryMutation?.revision ?? 0) + 1, kind: 'prepend' } });
+ if (this.state.targetAgentId === agentId) this.updateState({ messages: [...messages, ...this.state.messages], activityMessages: [...projectActivityItems(items, ownerId), ...this.state.activityMessages], conversationPage: result.page, conversationPageLoading: false, conversationHistoryMutation: { revision: (this.state.conversationHistoryMutation?.revision ?? 0) + 1, kind: 'prepend' } });
  return result;
  } catch (error) { if (this.state.targetAgentId === agentId) this.updateState({ conversationPageLoading: false, lastError: error instanceof Error ? error.message : String(error) }); throw error; }
  }
@@ -854,6 +857,11 @@ export class ManagerWsClient {
 
   private handleServerEvent(parsed: unknown): void {
  const event = parsed as ServerEvent;
+ if (event.type === 'timeline_activity') {
+   // The durable row supersedes its live one; a late live update must not bring it back.
+   if (!this.environmentProjection?.items.some(item => item.activity?.itemId === event.item.itemId)) this.liveActivity.upsert(event.item);
+   return;
+ }
  if (handleGenerationThroughputEvent(event, { state: this.state, applyGenerationThroughputReduction: reduction => this.applyGenerationThroughputReduction(reduction) })) return;
  if (handleTerminalEvent(event, { state: this.state, updateState: patch => this.updateState(patch) })) return;
  applyDetailFeature(event, { state: this.state, updateState: patch => this.updateState(patch) });
@@ -903,9 +911,10 @@ export class ManagerWsClient {
     if (!this.environmentClient) return
     this.detailDetach?.()
     this.detailLease?.release()
+    this.liveActivity.clear()
     this.desiredAgentId = sessionId
-    if (this.environmentClient.deviceSession()?.scopes.includes('session:operate') && this.environmentClient.descriptor()?.capabilities.sessionState)
-      void this.sessionState('session.readState.set', { sessionId, read: true }).catch(error => this.reportSessionStateError(error))
+    // Read state belongs to a session; a worker view learns its owning session from the detail.
+    let readMarked = false
     this.detailLease = this.environmentClient.acquireDetail(sessionId)
     const store = this.detailLease.store
     // Lineage belongs to one session; never present the previous session's while this one loads.
@@ -917,6 +926,14 @@ export class ManagerWsClient {
       if (detail.projection !== projection) {
         projection = detail.projection
         this.environmentProjection = projection
+        // A worker is mounted through its owning session and shows only its own rows.
+        const ownerId = projection?.session.sessionId ?? sessionId
+        const items = (projection?.items ?? []).filter(item => ownerId === sessionId || item.actorId === sessionId)
+        if (projection && !readMarked && ownerId === sessionId) {
+          readMarked = true
+          if (this.environmentClient!.deviceSession()?.scopes.includes('session:operate') && this.environmentClient!.descriptor()?.capabilities.sessionState)
+            void this.sessionState('session.readState.set', { sessionId, read: true }).catch(error => this.reportSessionStateError(error))
+        }
         if (projection?.plan) this.handleServerEvent({ type: 'session_plan_snapshot', sessionAgentId: sessionId, profileId: projection.session.projectId, ...projection.plan })
         if (projection?.goal) this.handleServerEvent({ type: 'session_goal_snapshot', sessionAgentId: sessionId, profileId: projection.session.projectId, ...projection.goal })
         if (projection?.recovery !== undefined) this.updateState({ restartRecovery: projection.recovery })
@@ -926,17 +943,18 @@ export class ManagerWsClient {
           // The same declaration keeps its identity so consumers do not re-render on every detail tick.
           sessionTransferCapabilities: capabilities && previous && JSON.stringify(capabilities) === JSON.stringify(previous) ? previous : capabilities,
         })
-        const projectedMessages = projectDetailMessages(detail)
+        this.liveActivity.reconcile(new Set((projection?.items ?? []).flatMap(item => item.activity ? [item.activity.itemId] : [])), projection?.session.status === 'running')
+        const projectedMessages = projectItems(items, ownerId)
         const echoes = this.outbox?.pendingMessages(sessionId, projectedCommandIds(projection)) ?? []
         this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))
         this.updateState({
           messages: [...projectedMessages,...echoes,...(projection?.choices??[]).filter(c=>c.status!=='answered').map(c=>({type:'choice_request' as const,agentId:c.agentId,choiceId:c.choiceId,status:c.status==='interrupted'?'expired' as const:c.status,questions:c.questions,timestamp:projection!.session.updatedAt}))],
           commandStatuses: this.outbox?.statuses(),
           pendingChoiceIds:new Set((projection?.choices??[]).filter(c=>c.status==='pending').map(c=>c.choiceId)),
-          agents: projectSessionWorkers(this.state.agents, projection?.workers ?? [], sessionId, this.environmentClient!.shell.getSnapshot()),
+          agents: projectSessionWorkers(this.state.agents, projection?.workers ?? [], ownerId, this.environmentClient!.shell.getSnapshot()),
           conversationPage:projection?{hasOlder:!!projection.historyCursor,...(projection.historyCursor?{nextCursor:projection.historyCursor}:{}),completeness:'complete',source:'canonical'}:null,
           conversationPageLoading:false,
-          activityMessages: projectDetailActivity(detail),
+          activityMessages: projectActivityItems(items, ownerId),
           conversationHistoryMutation: {
             revision:
               (this.state.conversationHistoryMutation?.revision ?? 0) + 1,

@@ -152,23 +152,24 @@ export function projectActivityItems(
     .map((i) => ({
       type: 'activity_summary',
       schemaVersion: ACTIVITY_SUMMARY_SCHEMA_VERSION,
-      itemId: i.itemId,
+      // The activity's stable ID matches its live row; the detail item ID orders and keys the durable row.
+      itemId: i.activity?.itemId ?? i.itemId,
+      timelineEntryId: i.itemId,
       agentId: sessionId,
       actorAgentId: i.actorId,
       turnId: i.userTurnId,
       timestamp: i.timestamp,
       kind: 'tool_activity',
-      status: 'completed',
+      status: i.activity?.status === 'failed' ? 'failed' : 'completed',
+      ...(i.activity?.toolName ? { toolName: i.activity.toolName } : {}),
       displaySummary: i.text,
       contentRef: i.contentRef,
+      ...(i.activity ? { activity: {
+        kind: i.activity.kind, startedAt: i.activity.startedAt,
+        ...(i.activity.truncated ? { truncated: true } : {}), ...(i.activity.hidden ? { hidden: true } : {}),
+        ...(i.activity.exitCode !== undefined ? { exitCode: i.activity.exitCode } : {}),
+      } } : {}),
     }))
-}
-
-export function projectDetailActivity(state: DetailState): EnvironmentActivityEntry[] {
-  return projectActivityItems(
-    state.projection?.items ?? [],
-    state.projection?.session.sessionId ?? '',
-  )
 }
 
 const ARTIFACT_FILE_REF_PREFIX = 'artifact:'
@@ -189,14 +190,6 @@ export function artifactIdFromFileRef(fileRef: string): string | null {
   return fileRef.startsWith(ARTIFACT_FILE_REF_PREFIX) ? fileRef.slice(ARTIFACT_FILE_REF_PREFIX.length) : null
 }
 
-export function projectDetailMessages(
-  state: DetailState,
-): ConversationMessageEvent[] {
-  return projectItems(
-    state.projection?.items ?? [],
-    state.projection?.session.sessionId ?? '',
-  )
-}
 /** Replaces one session's workers with its detail projection, reusing unchanged descriptors and the list itself. */
 export function projectSessionWorkers(
   agents: AgentDescriptor[],

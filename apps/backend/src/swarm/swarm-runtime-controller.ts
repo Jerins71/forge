@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ProviderScope, ProviderConversationRef } from "@forge/protocol";
 import type { ProviderAdapter, ProviderBinding } from "./runtime/provider-contract.js";
+import { tapProviderReasoning } from "./runtime/provider-reasoning-tap.js";
 import type {
   AgentRuntimeExtensionSnapshot,
   GenerationThroughputEvent,
@@ -111,6 +112,8 @@ export interface SwarmRuntimeControllerHost extends SwarmToolHost {
   conversationProjector: {
     captureConversationEventFromRuntime(agentId: string, event: RuntimeSessionEvent, options?: { turnId?: string }): void;
     emitConversationMessage(event: ConversationMessageEvent, options?: { routingReceipt?: MessageRoutingReceiptRecord }): void;
+    observeReasoning(fact: { actorId: string; nativeId: string; phase: "start" | "delta" | "complete"; text: string; runId?: string }): void;
+    settleReasoning(actorId: string): void;
   };
   promptService: {
     buildCursorSdkRuntimeSystemPrompt(descriptor: AgentDescriptor, systemPrompt: string): Promise<string>;
@@ -375,7 +378,11 @@ export class SwarmRuntimeController {
       const input = { scope, model:runtime.descriptor.model, instructions:record.prepared.instructionBundle, toolHost:record.prepared.toolHostBinding };
       const binding = conversation ? await adapter.resume({ ...input, conversation }) : await adapter.open(input);
       record.generation = scope.generation;
-      return { adapter,binding };
+      const actorId = scope.threadId;
+      return { binding, adapter: tapProviderReasoning(adapter, {
+        reasoning: fact => this.host.conversationProjector.observeReasoning({ ...fact, actorId, runId: this.host.getActiveTurnId?.(actorId) }),
+        settled: () => this.host.conversationProjector.settleReasoning(actorId),
+      }) };
     };
     try { return await open(); } catch (error) {
       if (!(error && typeof error === "object" && "code" in error && error.code === "PROVIDER_REFRESH_REQUIRED")) throw error;
