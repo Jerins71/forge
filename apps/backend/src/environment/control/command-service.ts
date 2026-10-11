@@ -259,6 +259,15 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,'lifecycle.admit',?,?,'claimed')")
           .run(input.commandId + ":" + ordinal, input.commandId, lane, ordinal, JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, ambiguousDelivery: input.ambiguousDelivery, ...(ordinal === 0 && input.frozenRequest !== undefined ? { frozenRequest: input.frozenRequest } : {}) }));
       }
+      if (input.command === "recovery.decide") {
+        const decision = input.request as RpcInput<"recovery.decide">;
+        const state = loadState(database);
+        if (state.recovery?.recoveryId !== decision.recoveryId) throw new ControlError("CONFLICT", "Recovery occurrence is no longer current");
+        const base = { commandId: input.commandId, now: options.clock(), recoveryId: decision.recoveryId };
+        sink.commitCommand(tx, decision.action === "dismiss" ? { ...base, type: "recovery.dismiss" } : { ...base, type: "recovery.resume",
+          attempts: Object.fromEntries(Object.values(state.runs).filter(run => run.state === "recovery").map(run => [run.runId, options.random()])),
+          bindingIds: Object.fromEntries(Object.keys(state.threads).map(id => [id, options.random()])) });
+      }
       for (const lane of lanes) {
         const sessionId = sessionIds.includes(lane) ? lane : "";
         if (sessionId && input.intent === "stop") {

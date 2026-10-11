@@ -9,6 +9,8 @@ import type { RpcDependencies } from "../rpc-handlers.js";
 import { StreamFault } from "../../../environment/streams/stream-budget.js";
 import { loadConfiguredSqliteDatabaseConstructor } from "../../../sqlite-database-loader.js";
 import { migrateControlDatabase } from "../../../environment/control/migrations.js";
+import type { ProviderAdapter } from "../../../swarm/runtime/provider-contract.js";
+import { piProviderCapabilities } from "../../../swarm/runtime/pi/pi-provider-adapter.js";
 import { createControlCore } from "../../../environment/control/database.js";
 import { createShellStream } from "../../../environment/streams/shell-stream.js";
 import { createDetailStream } from "../../../environment/streams/detail-stream.js";
@@ -38,9 +40,18 @@ export async function streamFixture() {
   const Constructor = await loadConfiguredSqliteDatabaseConstructor();
   const database = new Constructor(":memory:");
   migrateControlDatabase(database, descriptor);
+  const capabilities = piProviderCapabilities();
+  const adapter: ProviderAdapter = {
+    capabilities: () => capabilities,
+    open: async () => { throw new Error("Fixture acquisition supplies the binding"); }, resume: async () => { throw new Error("unused"); },
+    start: async input => ({ status: "accepted", turn: { ...input.binding.scope, kind: "turn", conversationId: input.binding.conversation.nativeId, nativeId: input.attemptId } }),
+    steer: async () => { throw new Error("The kernel queues fixture input"); }, interrupt: async () => {}, respond: async () => {}, compact: async () => {},
+    async *observations() {}, close: async () => {}, drain: async () => ({ status: "clean" }),
+  };
   const core = await createControlCore({ database, clock: () => Date.parse("2026-10-04T00:00:00.000Z"), random: randomUUID, isDeviceRevoked: () => false,
     swarm: { ensureSession: async () => ({ materialized: true }), stopSession: async () => ({ stopped: true }), applyChoice: async () => "answered",
-      applyInput: async input => { await input.onCanonicalAppend(input.inputId); if (await input.beforeDispatch() === "dispatch") await input.onDispatchAccepted(); return { delivery: "dispatched" }; } },
+      applyInput: async input => ({ entryId: input.inputId, runtimeMessage: { text: input.message.text } }),
+      acquireProvider: async scope => ({ adapter, binding: { scope, conversation: { ...scope, kind: "conversation", nativeId: "fixture" }, capabilities, instructionRevision: "fixture", toolContractRevision: "fixture" } }) },
     workspace: { prepareLaunch: async input => ({ project: { projectId: "project", title: "Project", cwd: "/test", repository: null, isGit: false, defaultBranch: null, updatedAt: "2026-10-04T00:00:00.000Z", sortKey: "project", archived: false },
       revision: "1", cwd: "/test", reservation: { reservationId: input.commandId, repositoryRoot: "/test", repositoryCommonDir: "/test", kind: "current_checkout", path: "/test", pathKey: "/test", branch: null, baseCommit: null, owned: false } }),
       isLaunchCurrent: () => true, ensure: async () => ({ cwd: "/test", branch: null }), reconcile: async () => "ready" },

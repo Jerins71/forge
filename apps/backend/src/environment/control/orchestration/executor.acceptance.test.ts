@@ -90,6 +90,26 @@ describe("durable provider outbox", () => {
     expect(readReceipt(reboot.eventSink, "continued-child")).toMatchObject({ state: "succeeded", delivery: "dispatched" });
     expect(loadState(reboot.database).runs[continuation.runId].state).toBe("running"); expect(f.dispatches()).toBe(4);
   });
+  it.each(["resume", "dismiss"] as const)("commits recovery %s facts with the submitted receipt and outbox before presentation", async action => {
+    const f = await fixture();
+    await f.core.controlService.submitInput({ commandId: "interrupted", threadId: "manager", message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.close(); const reboot = await f.open();
+    const snapshot = loadState(reboot.database).recovery!; let publications = 0;
+    reboot.eventSink.subscribe(event => {
+      if (event.event.type !== "recovery.upsert" || !event.event.recovery[ action === "resume" ? "resumedAt" : "dismissedAt" ]) return;
+      expect(reboot.database.inTransaction).toBe(false); expect(readReceipt(reboot.eventSink, commandId).state).toBe("running"); publications++;
+      const facts = reboot.database.prepare("SELECT event_json FROM lifecycle_events WHERE command_id=? AND event_type='recovery.resolved'").all(commandId) as { event_json: string }[];
+      expect(facts).toHaveLength(1);
+    });
+    const input = { commandId, command: "recovery.decide", request: { commandId, recoveryId: snapshot.recoveryId, action }, sessionIds: ["manager"], intent: "inspect" as const, receipt: { method: "recovery.decide" as const }, receiptReplay: true };
+    let presentations = 0;
+    const present = async () => { presentations++; expect(loadState(reboot.database).recovery?.[action === "resume" ? "resumedAt" : "dismissedAt"]).toBeTruthy(); return {}; };
+    await reboot.controlService.admitLifecycle(principal, input, present); await reboot.controlService.admitLifecycle(principal, input, present);
+    expect(presentations).toBe(1); expect(publications).toBe(1); expect(readReceipt(reboot.eventSink, commandId).state).toBe("succeeded");
+    const resumed = loadState(reboot.database).runs["run-interrupted"];
+    expect(resumed.state).toBe(action === "resume" ? "running" : "terminal");
+    if (action === "resume") expect(reboot.database.prepare("SELECT COUNT(*) n FROM effects WHERE command_id=? AND kind='runtime.acquire'").get(commandId)).toEqual({ n: 1 });
+  });
   it("session deletion terminates retained workers in the same lifecycle transaction", async () => {
     const f = await fixture();
     await f.core.controlService.submitInput({ commandId: "child", threadId: "worker", thread: { role: "worker", projectId: "project", managerId: "manager" }, message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
