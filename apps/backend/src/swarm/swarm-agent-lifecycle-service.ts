@@ -59,6 +59,7 @@ import {
   shouldRetrySpecialistSpawnWithFallback
 } from "./swarm-manager-utils.js";
 import { resolveExactManagerModelSelection } from "./catalog/manager-model-selection.js";
+import { resolveModelCredentialProvider } from "./secrets-env-service.js";
 import { modelCatalogService } from "./catalog/model-catalog-service.js";
 import {
   getTierAttributionId,
@@ -1934,7 +1935,7 @@ export class SwarmAgentLifecycleService {
       // Pure policy receives the ordered conjunction of availability/capacity/security facts.
       candidates: models.map(model => ({ provider: model.provider, modelId: model.modelId,
         available: specialist?.enabled !== false && specialist?.availabilityCode !== "invalid_model"
-          && availability.get(model.provider) === true && !this.getActiveModelCapacityBlock(model.provider, model.modelId)
+          && availability.get(resolveModelCredentialProvider(model)) === true && !this.getActiveModelCapacityBlock(model.provider, model.modelId)
           && (!requiresSecureRuntime || supportsSecureRuntimeProvider(model.provider)),
       })),
     };
