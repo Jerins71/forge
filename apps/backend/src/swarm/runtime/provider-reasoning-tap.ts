@@ -31,12 +31,37 @@ export function tapProviderReasoning(adapter: ProviderAdapter, sink: ProviderRea
       failureReported ||= error !== undefined;
     }
   };
-  const observations: ProviderAdapter["observations"] = async function* (binding, signal) {
-    for await (const observation of adapter.observations(binding, signal)) {
-      // Presentation must never interrupt the provider stream.
-      try { report(observation); } catch { /* The row is lost; the turn continues. */ }
-      yield observation;
-    }
+  // The lifecycle consumer commits every observation before taking the next, so under streaming load it
+  // runs seconds behind. Rows must appear when the provider speaks: read the stream as it arrives, report
+  // at once, and hand the consumer the same observations in the same order at its own pace.
+  const observations: ProviderAdapter["observations"] = (binding, signal) => {
+    const source = adapter.observations(binding, signal)[Symbol.asyncIterator]();
+    const pending: ProviderObservation[] = [];
+    let ended = false; let failure: unknown; let wake: (() => void) | undefined;
+    void (async () => {
+      try {
+        for (;;) {
+          const next = await source.next();
+          if (next.done) break;
+          // Presentation must never interrupt the provider stream.
+          try { report(next.value); } catch { /* The row is lost; the turn continues. */ }
+          pending.push(next.value); wake?.();
+        }
+      } catch (error) { failure = error; }
+      finally { ended = true; wake?.(); }
+    })();
+    return (async function* () {
+      try {
+        for (;;) {
+          if (pending.length) { yield pending.shift()!; continue; }
+          if (failure !== undefined) throw failure;
+          if (ended) return;
+          await new Promise<void>(resolve => { wake = resolve; });
+          wake = undefined;
+        }
+      // The reader may be waiting on the provider; ask it to stop without waiting for it. The abort signal ends the source.
+      } finally { if (!ended) void Promise.resolve(source.return?.(undefined)).catch(() => undefined); }
+    })();
   };
   return new Proxy(adapter, {
     get(target, property) {
