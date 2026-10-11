@@ -548,6 +548,25 @@ describe("durable provider outbox", () => {
     expect((await f.core.controlService.getReceipt(principal, commandId))).toMatchObject({ state: "interrupted", delivery: "none" });
     expect(loadState(f.core.database).runs[`run-${commandId}`].state).toBe("terminal");
   });
+  it("worker.delete fences its claimed canonical append without stopping the manager", async () => {
+    const f = await fixture(); let entered!: () => void; let release!: () => void; let mutated = false;
+    const enteredAppend = new Promise<void>(resolve => { entered = resolve; }); const heldAppend = new Promise<void>(resolve => { release = resolve; });
+    f.core.controlService.record({ type: "thread.create", commandId: "worker-thread", now: f.options.clock(), threadId: "worker", role: "worker", projectId: "project", managerId: "manager" });
+    f.options.swarm.applyInput = async input => { entered(); await heldAppend; return { entryId: input.inputId, runtimeMessage: { text: input.message.text } }; };
+    await f.core.controlService.submitInput({ commandId, threadId: "worker", message: { text: "held worker append", artifactIds: [] } });
+    const drain = f.core.effectWorker.drain(); await enteredAppend;
+    const mutation = f.core.controlService.admitLifecycle(principal, { commandId: "00000000-0000-4000-8000-000000000002", command: "worker.delete", sessionIds: ["manager"], workerId: "worker", intent: "stop", request: { workerId: "worker" } }, async () => {
+      expect(loadState(f.core.database).threads.worker.shutdown).toBe("clean"); mutated = true; return { completed: true };
+    });
+    const outcome = mutation.then(value => ({ value }), error => ({ error }));
+    const desired = loadState(f.core.database).threads.worker.desired; const mutatedBeforeRelease = mutated;
+    release(); await drain;
+    expect(desired).toBe("stopped"); expect(mutatedBeforeRelease).toBe(false);
+    expect(await outcome).toEqual({ value: { completed: true } });
+    expect(f.dispatches()).toBe(0);
+    expect(loadState(f.core.database).threads.manager.desired).toBe("running");
+    expect((await f.core.controlService.getReceipt(principal, commandId))).toMatchObject({ state: "interrupted", delivery: "none" });
+  });
   it.each(["session.stop", "worker.kill"] as const)("%s stops the worker in the kernel while preserving its manager", async method => {
     const f = await fixture(); const stopped: string[] = [];
     f.options.swarm.resolveSession = agentId => agentId === "worker" ? { sessionId: "manager", workerId: "worker" } : { sessionId: agentId };

@@ -664,6 +664,50 @@ it.each(["stopped", "error", "queued"] as const)("native worker.kill under %s ma
   } finally { mirror.dispose(); await core.close(); }
 });
 
+it.each(["running", "stopped", "error", "queued"] as const)("worker.delete under %s manager removes only its fenced worker and replays after persistence", async state => {
+  const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
+  const { core } = await makeCore(f); core.effectWorker.start();
+  const principal = f.paired.principal;
+  const lifecycle = createSessionLifecycleRpc({ swarmManager: f.manager, control: core.controlService });
+  try {
+    const worker = await f.manager.spawnAgent(f.sessionId, { agentId: "delete-worker" });
+    const workerRuntime = f.manager.runtimeByAgentId.get(worker.agentId)!;
+    workerRuntime.busy = true;
+    await core.controlService.submitInput({ commandId: randomUUID(), threadId: worker.agentId, message: { text: "Work until deleted", artifactIds: [] } });
+    await core.effectWorker.drain();
+    expect(loadState(f.database).threads[worker.agentId].activeRunId).toBeDefined();
+    const queuedId = randomUUID();
+    if (state === "queued") await core.controlService.execute(principal, "session.send", { commandId: queuedId, sessionId: f.sessionId, message: { text: "Preserve the manager input", artifactIds: [] } });
+    else if (state === "stopped") {
+      await core.controlService.execute(principal, "session.stop", { commandId: randomUUID(), sessionId: f.sessionId });
+      await core.effectWorker.drain();
+    } else if (state === "error") {
+      f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true;
+      await core.controlService.execute(principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "Unknown manager transport", artifactIds: [] } });
+      await core.effectWorker.drain();
+      const current = loadState(f.database); const run = current.runs[current.threads[f.sessionId].activeRunId!];
+      core.controlService.record({ type: "attempt.unknown", commandId: randomUUID(), now: Date.now(), threadId: f.sessionId, attemptId: run.activeAttemptId });
+      await core.effectWorker.drain();
+    }
+    const input = { commandId: randomUUID(), sessionId: f.sessionId, workerId: worker.agentId };
+    await expect(lifecycle.execute(principal, "worker.delete", { ...input, commandId: randomUUID(), sessionId: "manager" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const receipt = await lifecycle.execute(principal, "worker.delete", input);
+    expect(receipt).toMatchObject({ state: "succeeded", method: "worker.delete" });
+    expect(f.manager.getAgent(worker.agentId)).toBeUndefined();
+    expect(workerRuntime.terminateCalls).toHaveLength(1);
+    expect(loadState(f.database).threads[worker.agentId]).toMatchObject({ desired: "stopped", shutdown: "clean" });
+    expect(f.database.prepare("SELECT deleted,descriptor_json FROM control_workers WHERE agent_id=?").get(worker.agentId)).toEqual({ deleted: 1, descriptor_json: null });
+    const detail = createDetailStream({ database: f.database, getDescriptor: () => f.environment.descriptor(), subscribeCommitted: listener => core.eventSink.subscribe(listener), withReadBarrier: fn => core.eventSink.readBarrier(fn).value });
+    expect((await detail.workers(principal, { sessionId: f.sessionId })).workers.some(row => row.agentId === worker.agentId)).toBe(false);
+    await expect(detail.detail(principal, { sessionId: worker.agentId }, new AbortController().signal).next()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const persisted = await createControlDescriptorPersistence({ database: f.database, eventSink: core.eventSink, dataDir: f.config.paths.dataDir, storeFilePath: f.config.paths.agentsStoreFile }).load();
+    expect(persisted.agents.some(agent => agent.agentId === worker.agentId)).toBe(false);
+    expect(f.database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(f.sessionId)).toEqual({ desired_state: state === "stopped" ? "stopped" : "running" });
+    if (state === "queued") expect(await core.controlService.getReceipt(principal, queuedId)).toMatchObject({ state: "succeeded", delivery: "dispatched" });
+    expect(await lifecycle.execute(principal, "worker.delete", input)).toEqual(receipt);
+  } finally { mirror.dispose(); await core.close(); }
+}, 15_000);
+
 it.each([false, true])("durable send provenance derives CLI integration (%s), ignores client source and survives replay", async cli => {
   const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
   const { core } = await makeCore(f);
