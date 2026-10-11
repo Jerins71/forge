@@ -104,6 +104,8 @@ export async function startFixtureServer(index = 0) {
   const httpRequests: string[] = []
   const inputs: Array<{ method: Method; input: unknown }> = []
   const receipts = new Map<string, CommandReceipt>()
+  // Refusals answered to the next receipt-backed commands, before anything is accepted.
+  const refusals: Array<{ code: string; message: string; retryable: boolean }> = []
   let browserGeneration = 0
   let raceBrowserHydration = false
   const browserSnapshot = { schemaVersion: 2, sessionAgentId: 'session-1', profileId: 'forge', hostingState: 'hosted', revision: 1, tabs: [], activeTabId: null, defaultTabId: null, panelVisible: false, recentActions: [], createdAt: '2026-10-09T00:00:00.000Z', updatedAt: '2026-10-09T00:00:00.000Z' }
@@ -165,6 +167,11 @@ export async function startFixtureServer(index = 0) {
           return
         }
         const data = input as { commandId: string; sessionId?: string }
+        const refusal = receipts.has(data.commandId) ? undefined : refusals.shift()
+        if (refusal) {
+          send(socket, { type: 'error', requestId, error: refusal })
+          return
+        }
         const r = receipts.get(data.commandId) ?? {
           commandId: data.commandId,
           method: method as CommandReceipt['method'],
@@ -317,6 +324,7 @@ export async function startFixtureServer(index = 0) {
     httpRequests,
     inputs,
     receipts,
+    refuseNext: (...errors: Array<{ code: string; message: string; retryable: boolean }>) => { refusals.push(...errors) },
     browserHostCommands,
     raceBrowserHydration: () => { raceBrowserHydration = true },
     subscriptions,

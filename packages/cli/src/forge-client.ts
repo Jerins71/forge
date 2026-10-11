@@ -358,19 +358,32 @@ export class ForgeClient implements ForgeClientLike {
   }
   private async control<M extends CommandReceipt['method']>(client: EnvironmentClient, method: M, input: RpcInput<M>): Promise<CommandReceipt> {
     const commandId = (input as { commandId: string }).commandId
-    const deadline = Date.now() + 10_000
     let receipt: CommandReceipt | undefined
-    try { receipt = await client.request(method, input, { signal: AbortSignal.timeout(10_000) }) }
-    catch (error) {
-      if (!(error instanceof EnvironmentRuntimeError) || !error.retryable) throw error
-      await this.online(client)
-      try { receipt = await client.request('command.get', { commandId }) }
-      catch (lookup) {
-        if (!(lookup instanceof EnvironmentRuntimeError) || lookup.code !== 'NOT_FOUND') throw lookup
-        // Receipt recovery may already be retrying; both producers use the same ID.
-        receipt = await client.request(method, input, { signal: AbortSignal.timeout(10_000) })
+    let recovered = false
+    for (let attempt = 0; !receipt; attempt++) {
+      try { receipt = await client.request(method, input, { signal: AbortSignal.timeout(10_000) }) }
+      catch (error) {
+        if (!(error instanceof EnvironmentRuntimeError) || !error.retryable) throw error
+        if (error.code === 'CONFLICT') {
+          // The environment is still applying an earlier change to this session. Nothing was
+          // accepted, so the same command is sent again after a short wait, for about ten seconds.
+          if (attempt >= 7) throw error
+          await new Promise(resolve => setTimeout(resolve, Math.min(2400, 150 * 2 ** attempt)))
+          continue
+        }
+        // A lost connection: the command may have been accepted. Look for its receipt once.
+        if (recovered) throw error
+        recovered = true
+        await this.online(client)
+        try { receipt = await client.request('command.get', { commandId }) }
+        catch (lookup) {
+          if (!(lookup instanceof EnvironmentRuntimeError) || lookup.code !== 'NOT_FOUND') throw lookup
+          // Receipt recovery may already be retrying; both producers use the same ID.
+        }
       }
     }
+    // Time spent waiting to be admitted does not count against the accepted command.
+    const deadline = Date.now() + 10_000
     while (receipt.state === 'accepted' || receipt.state === 'running') {
       if (Date.now() >= deadline) throw new CliError(`Command ${commandId} was accepted and is still pending.`, { exitCode: EXIT_CODES.connection, code: 'command_pending', details: { commandId } })
       await new Promise(resolve => setTimeout(resolve, 25))
