@@ -462,9 +462,9 @@ export class ManagerWsClient {
     void this.sessionState('session.pins.clear', { sessionId: agentId }).catch(error => this.reportSessionStateError(error))
   }
 
-  deleteAgent(agentId: string): void {
+  deleteAgent(agentId: string, ownerSessionId?: string): void {
     const workerId = agentId.trim()
-    const sessionId = this.state.agents.find(agent => agent.agentId === workerId)?.managerId ?? this.environmentProjection?.session.sessionId ?? this.desiredAgentId
+    const sessionId = ownerSessionId ?? this.state.agents.find(agent => agent.agentId === workerId)?.managerId ?? this.environmentProjection?.session.sessionId ?? this.desiredAgentId
     if (!workerId || !sessionId) return
     void this.lifecycle('worker.kill', { sessionId, workerId }).catch(error => this.updateState({ lastError: error instanceof Error ? error.message : 'Worker kill failed' }))
   }

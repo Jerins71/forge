@@ -45,7 +45,7 @@ export interface AgentSidebarProps {
   onMobileClose?: () => void
   onAddManager: () => void
   onSelectAgent: (agentId: string) => void
-  onDeleteAgent: (agentId: string) => void
+  onDeleteAgent: (agentId: string, ownerSessionId?: string) => void
   onDeleteManager: (managerId: string) => void
   onOpenSettings: () => void
   onOpenProjectSettings?: (profileId: string) => void
@@ -149,7 +149,7 @@ export interface SessionRowItemProps {
   onToggleCollapse: () => void
   onToggleWorkerListExpanded: () => void
   onSelect: (agentId: string) => void
-  onDeleteAgent: (agentId: string) => void
+  onDeleteAgent: (agentId: string, ownerSessionId?: string) => void
   onStop?: () => void
   onResume?: () => void
   onDelete?: () => void
@@ -196,7 +196,7 @@ export interface ProfileGroupProps {
   onShowLessSessions: (profileId: string) => void
   onToggleWorkerListExpanded: (sessionId: string) => void
   onSelect: (agentId: string) => void
-  onDeleteAgent: (agentId: string) => void
+  onDeleteAgent: (agentId: string, ownerSessionId?: string) => void
   onDeleteManager: (managerId: string) => void
   onOpenSettings: () => void
   onOpenProjectSettings?: (profileId: string) => void

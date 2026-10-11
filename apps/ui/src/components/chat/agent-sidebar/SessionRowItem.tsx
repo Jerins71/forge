@@ -365,7 +365,7 @@ export const SessionRowItem = React.memo(function SessionRowItem({
                           roomsV2={roomsV2}
                           isSelected={workerIsSelected}
                           onSelect={() => onSelect(worker.agentId)}
-                          onDelete={() => onDeleteAgent(worker.agentId)}
+                          onDelete={() => onDeleteAgent(worker.agentId, worker.managerId)}
                           onStop={onStopWorker ? () => onStopWorker(worker.agentId) : undefined}
                           onResume={onResumeWorker ? () => onResumeWorker(worker.agentId) : undefined}
                           onContinue={workerContinuation ? () => workerContinuation.onContinue(worker.agentId) : undefined}

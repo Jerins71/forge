@@ -759,9 +759,9 @@ export function useSessionActions({
     return client.requestProjectAgentRecommendations(agentId)
   }, [clientRef])
 
-  const handleDeleteAgent = (agentId: string) => {
+  const handleDeleteAgent = (agentId: string, ownerSessionId?: string) => {
     const agent = state.agents.find((entry) => entry.agentId === agentId)
-    if (!agent || agent.role !== 'worker') {
+    if (agent?.role === 'manager' || (!agent && !ownerSessionId)) {
       return
     }
 
@@ -775,7 +775,7 @@ export function useSessionActions({
         }
       }
 
-      clientRef.current?.deleteAgent(agentId)
+      clientRef.current?.deleteAgent(agentId, ownerSessionId ?? agent?.managerId)
     }
 
     if (activeAgentId === agentId) {
