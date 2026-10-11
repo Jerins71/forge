@@ -323,6 +323,15 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
         const attempt = state.attempts[command.attemptId];
         if (attempt.state === "terminal" || attempt.state === "unknown" || state.runs[attempt.runId].activeAttemptId !== attempt.attemptId) break;
         if (command.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); }
+        else if (command.kind === "provider.start" && command.bindingClosed && thread(command.threadId).desired === "running" && thread(command.threadId).shutdown === "clean") {
+          // The closed binding proves this input was never dispatched. Drain its
+          // remaining callbacks/auth before replacing it and sending this same input.
+          emit({ type: "attempt.created", attempt: { ...attempt, state: "created", delivery: "pending" } });
+          emit({ type: "run.started", run: { ...state.runs[attempt.runId], state: "queued" } });
+          const owner = thread(command.threadId);
+          emit({ type: "thread.changed", thread: { ...owner, activeRunId: undefined, shutdown: "pending" } });
+          decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: attempt.bindingId });
+        }
         else if (command.kind === "provider.steer" && command.steerTargetEnded && thread(command.threadId).desired === "running" && thread(command.threadId).shutdown === "clean") {
           // A proven rejected steer never entered the native turn. Preserve its input as a follow-up.
           emit({ type: "attempt.created", attempt: { ...attempt, state: "created", delivery: "pending" } });

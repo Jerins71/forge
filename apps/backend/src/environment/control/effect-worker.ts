@@ -347,6 +347,8 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       // Only a provider's explicit proof permits fallback. Error wording is never delivery evidence.
       const provedNotDispatched=(error as {delivery?:string}).delivery === "not_dispatched";
       if(provedNotDispatched || error && typeof error === "object" && "code" in error && error.code === "PROVIDER_DISPATCH_REJECTED") attemptedNative=false;
+      const bindingClosed = effect.kind === "provider.start" && !attemptedNative &&
+        (error as { code?: string; reason?: string }).code === "PROVIDER_DISPATCH_REJECTED" && (error as { reason?: string }).reason === "closed";
       const failure={...unavailable,message:error instanceof Error ? error.message:String(error)};
       const state = loadState(database);
       const steerTargetEnded = effect.kind === "provider.steer" && !attemptedNative &&
@@ -354,7 +356,8 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       const runId = effect.kind === "transcript.append" ? effect.runId : state.threads[row.session_id]?.activeRunId;
       const attemptId = "attemptId" in effect ? effect.attemptId : effect.kind === "runtime.acquire" || effect.kind === "transcript.append" ? state.runs[runId ?? ""]?.activeAttemptId : undefined;
       if (effect.kind === "provider.compact") record({ type: "compaction.completed", ...result(row, "failed"), threadId: effect.threadId, attemptId: effect.attemptId, succeeded: false });
-      else if (effect.kind.startsWith("provider.") || effect.kind === "runtime.acquire" || effect.kind === "transcript.append") record({ type: "effect.failed", ...result(row, "failed"), threadId: row.session_id, attemptId, requestId: effect.kind === "provider.respond" ? effect.requestId : undefined, kind: effect.kind as CoreEffect["kind"], delivery: attemptedNative ? "unknown" : "not_dispatched", steerTargetEnded });
+      else if (effect.kind.startsWith("provider.") || effect.kind === "runtime.acquire" || effect.kind === "transcript.append") record({ type: "effect.failed", ...result(row, "failed"), threadId: row.session_id, attemptId, requestId: effect.kind === "provider.respond" ? effect.requestId : undefined, kind: effect.kind as CoreEffect["kind"], delivery: attemptedNative ? "unknown" : "not_dispatched", steerTargetEnded, bindingClosed });
+      if (bindingClosed) { settle(row, "done"); return; }
       if (effect.kind === "provider.steer" && !attemptedNative && loadState(database).attempts[effect.attemptId]?.state === "created") {
         settle(row, "done"); return;
       }

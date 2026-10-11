@@ -1,4 +1,4 @@
-import type { ProviderAdapter } from '../../swarm/runtime/provider-contract.js';
+import { ProviderDispatchRejectedError, type ProviderAdapter } from '../../swarm/runtime/provider-contract.js';
 import { piProviderCapabilities } from '../../swarm/runtime/pi/pi-provider-adapter.js';
 import { loadState } from './orchestration/store.js';
 import { mkdtemp, rm } from "node:fs/promises";
@@ -164,6 +164,48 @@ function count(core: Awaited<ReturnType<typeof createControlCore>>, table: strin
 }
 
 describe("durable control acceptance on real SQLite", () => {
+  // A provider exit can leave a cached binding while Forge still desires a running session.
+  // Recovery must preserve the next canonical input, replace only after confirmed drain,
+  // resume the native conversation, and never resend the interrupted original turn.
+  it.each(["idle", "working"])("replaces a dead %s binding and delivers the next input once", async status => {
+    const f = await fixture();
+    if (status === "working") f.holdNativeTurns();
+    const first = await f.core.controlService.execute(principal, "session.launch", launch);
+    await f.core.effectWorker.drain();
+    const before = loadState(f.core.database);
+    const owner = before.threads[first.sessionId!];
+    const original = Object.values(before.runs)[0]!;
+    const deadBinding = owner.bindingId!;
+    const calls: string[] = [];
+    const start = f.provider.start;
+    f.provider.start = async input => {
+      if (input.binding.scope.bindingId === deadBinding) throw new ProviderDispatchRejectedError("closed");
+      calls.push(input.runId);
+      return start(input);
+    };
+    if (status === "working") {
+      const attempt = before.attempts[original.activeAttemptId];
+      const binding = before.bindings[deadBinding];
+      f.core.controlService.record({ type: "provider.observe", commandId: "native-exit", now: f.options.clock(),
+        observation: { type: "error", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1,
+          origin: { kind: "root", conversation: binding.conversation }, code: "CODEX_TRANSPORT", message: "Provider stopped", delivery: "accepted" } });
+    }
+    const next = await f.core.controlService.execute(principal, "session.send", {
+      commandId: SEND, sessionId: first.sessionId!, message: { text: "Continue after the exit", artifactIds: [] }, delivery: "followUp",
+    });
+    await f.core.effectWorker.drain();
+    const state = loadState(f.core.database);
+    const nextRun = Object.values(state.runs).find(run => run.commandId === next.commandId)!;
+    expect(calls).toEqual([nextRun.runId]);
+    expect(f.counts()).toMatchObject({ stops: 1, canonical: 2, dispatchCount: 2 });
+    expect(state.threads[first.sessionId!]).toMatchObject({ desired: "running", shutdown: "clean", generation: owner.generation + 1 });
+    expect(state.runs[original.runId].outcome).toBe(status === "working" ? "failed" : "completed");
+    expect(state.runs[nextRun.runId].state).toBe(status === "working" ? "running" : "terminal");
+    expect(state.bindings[state.attempts[state.runs[nextRun.runId].activeAttemptId].bindingId].conversation.nativeId)
+      .toBe(before.bindings[deadBinding].conversation.nativeId);
+    expect(f.canonical.size).toBe(2);
+  });
+
   it("rolls back acceptance before COMMIT without publishing or executing anything", async () => {
     const f = await fixture();
     const published: number[] = [];

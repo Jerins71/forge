@@ -104,6 +104,16 @@ describe("Native Codex manager", () => {
     } finally { process.off("unhandledRejection", listener); }
   });
 
+  it("reports one useful process-exit error for a running turn", async () => {
+    const error = vi.fn();
+    const f = await fixture({ onRuntimeError: error });
+    await f.runtime.sendMessage("Run a short task");
+    f.exit();
+    await vi.waitFor(() => expect(error).toHaveBeenCalledOnce());
+    expect(error.mock.calls[0]![1].details.userFacingMessage).toBe("Codex stopped unexpectedly. Send another message to restart it.");
+    await f.runtime.terminate();
+  });
+
   it("stops an acknowledged controlled turn before its turn-start notification arrives", async () => {
     const open = vi.spyOn(CodexProviderAdapter.prototype, "open");
     const f = await fixture();

@@ -468,7 +468,10 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     // A dead binding has no running turn. In particular an idle exit cannot
     // manufacture the forbidden idle -> error lifecycle transition.
     this.status = terminal ? "idle" : "error";
-    await this.options.callbacks.onRuntimeError?.(this.descriptor.agentId, { ...normalizeRuntimeError(error), phase: "prompt_start" });
+    if (!terminal || active) await this.options.callbacks.onRuntimeError?.(this.descriptor.agentId, {
+      ...normalizeRuntimeError(error), phase: "prompt_start",
+      ...(terminal ? { details: { userFacingMessage: "Codex stopped unexpectedly. Send another message to restart it." } } : {}),
+    });
     await this.publishStatus();
     if (terminal && active) await this.options.callbacks.onAgentEnd?.(this.descriptor.agentId);
   }
