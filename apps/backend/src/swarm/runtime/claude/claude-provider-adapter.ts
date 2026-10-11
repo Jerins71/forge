@@ -96,6 +96,10 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     }
     this.session!.respond(input);
   }
+  async decline(input: Omit<ProviderRespondInput, "response">): Promise<void> {
+    this.assertBinding(input.binding);
+    this.session!.decline(input);
+  }
   async compact(input: Parameters<ProviderAdapter["compact"]>[0]): Promise<void> { this.session?.enableObservations(); await this.assertBinding(input.binding).compact(input.instructions, input.attemptId); }
   observations(binding: ProviderBinding, signal?: AbortSignal): AsyncIterable<ProviderObservation> {
     this.assertBinding(binding, true); this.session!.enableObservations(); return this.session!.observations(signal);

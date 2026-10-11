@@ -145,6 +145,15 @@ export class ClaudeProviderSession {
     if (fallback && !this.current.managed) void fallback().then(answers => this.requests.get(request.nativeId)?.resolve(answers), remove);
     return result;
   }
+  /** The user skipped the question: the pending callback rejects and the tool returns as declined. */
+  decline(input: Omit<ProviderRespondInput, "response">): void {
+    const { request } = input;
+    if (request.threadId !== this.binding.scope.threadId || request.bindingId !== this.binding.scope.bindingId
+      || request.generation !== this.binding.scope.generation || request.conversationId !== this.binding.conversation.nativeId) throw new ProviderRequestRejectedError("stale_scope");
+    const pending = this.requests.get(request.nativeId);
+    if (!pending) throw new ProviderRequestRejectedError("unknown_request");
+    pending.cancel();
+  }
   respond(input: ProviderRespondInput): void {
     const { request, lifetime } = input;
     if (request.threadId !== this.binding.scope.threadId || request.bindingId !== this.binding.scope.bindingId

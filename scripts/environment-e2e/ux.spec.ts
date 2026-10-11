@@ -573,6 +573,44 @@ test('the session in view stays read and out of Needs you across turns', async (
   expect(renderErrors).toEqual([])
 })
 
+test('skipping a choice ends the turn, and a message sent while it was open is delivered, with no recovery', async ({ page }) => {
+  const { a } = fleet
+  const session = await bootstrap(a)
+  const projectId = (await shellSession(a, a.sessionId))!.projectId
+  const commandId = randomUUID()
+  const launched = await fixtureRpcOnce(a.baseUrl, session, 'session.launch', { commandId, projectId, title: 'Skip a choice', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:choice] Ask before continuing', artifactIds: [] } })
+  const sessionId = launched.sessionId as string
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(sessionId)}`)
+  const skip = page.getByRole('button', { name: 'Skip', exact: true })
+  await expect(skip).toBeVisible({ timeout: 30_000 })
+  const recovery = page.getByText(/Restart interrupted/)
+
+  // A message arrives while the turn waits on the answer. It must neither be lost nor read as a crash.
+  const sendId = randomUUID()
+  await fixtureRpcOnce(a.baseUrl, session, 'session.send', { commandId: sendId, sessionId, message: { text: 'Sent while the choice was open', artifactIds: [] } })
+  await page.waitForTimeout(2_000)
+  await expect(recovery).toHaveCount(0)
+  await expect(skip).toBeVisible()
+
+  await skip.click()
+  await expect(transcript(page)).toContainText('You skipped this question')
+  // The provider hears the skip, finishes that turn, then takes the waiting message.
+  await expect(transcript(page)).toContainText('choice skipped', { timeout: 30_000 })
+  await expect.poll(async () => (await fixtureRpcOnce(a.baseUrl, session, 'command.get', { commandId: sendId })).state, { timeout: 30_000 }).toBe('succeeded')
+  await expect.poll(async () => (await shellSession(a, sessionId))?.status, { timeout: 30_000 }).toBe('idle')
+  await expect(transcript(page)).toContainText('Sent while the choice was open')
+  await expect(recovery).toHaveCount(0)
+  await expect(page.getByRole('alert')).toHaveCount(0)
+
+  // And the session simply takes the next message.
+  await send(page, 'After the skipped choice')
+  await expect.poll(async () => ((await transcript(page).innerText()).match(/assistant reply/g) ?? []).length, { timeout: 30_000 }).toBeGreaterThan(0)
+  await expect(recovery).toHaveCount(0)
+  await shot(page, 'choice-skipped')
+  assertions.choiceSkip = { sessionId, turnEnded: true, heldMessageDelivered: true, recovery: 0 }
+  expect(renderErrors).toEqual([])
+})
+
 test('Archive all sessions archives every session but each checkout\'s own, here and on the paired machine', async ({ page }) => {
   const { a, b } = fleet
   const all = async (environment: UiEnvironment) => {

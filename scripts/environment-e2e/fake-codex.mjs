@@ -113,8 +113,8 @@ async function runTurn(turn, text) {
         id: 'fixture-choice', header: 'Fixture choice', question: 'Which synthetic option?', isSecret: false,
         options: [{ label: 'Continue', description: 'Complete this fixture turn.' }, { label: 'Wait', description: 'Alternate synthetic option.' }],
       }] });
-      if (!result.answers?.['fixture-choice']) throw new Error('Fixture choice response missing');
-      reply = `fixture:${fixture.instanceId}:choice answered`;
+      // A skipped question comes back with no answer for it; the turn still finishes.
+      reply = result.answers?.['fixture-choice'] ? `fixture:${fixture.instanceId}:choice answered` : `fixture:${fixture.instanceId}:choice skipped`;
     }
     if (text.includes('[fixture:spawn]') || text.includes('[fixture:spawn-choice]')) {
       count('workerSpawns');
