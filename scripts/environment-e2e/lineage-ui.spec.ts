@@ -19,7 +19,9 @@ const assertions: Record<string, unknown> = {}
 const renderErrors: string[] = []
 const observed: Array<{ method: string; input: Record<string, any> }> = []
 const receipts = new Map<string, CommandReceipt>()
-const METHODS = new Set(['session.fork', 'session.provider.switch', 'session.mergeBack', 'worker.continue', 'session.configure'])
+const requestCommands = new Map<string, string>()
+const rejectedCommands = new Map<string, { code: string; message: string }>()
+const METHODS = new Set(['session.fork', 'session.provider.switch', 'session.mergeBack', 'worker.continue', 'session.configure', 'session.send'])
 let fleet: UiFleet
 let manifest: FleetManifest
 let context: BrowserContext
@@ -49,12 +51,18 @@ async function detail(sessionId: string, client = rpc): Promise<DetailSnapshot> 
 }
 const lineage = (sessionId: string) => rpc.call<SessionLineageSnapshot>('session.lineage.get', { sessionId })
 async function sendMessage(page: Page, text: string, reply = 'assistant reply') {
+  const before = calls('session.send').length
   await page.getByRole('combobox', { name: /^(Message |Send another message to )/ }).fill(text)
   await page.keyboard.press('Enter')
   await expect(transcript(page)).toContainText(text)
-  await expect(transcript(page)).toContainText(reply, { timeout: 30_000 })
+  const receipt = await successful('session.send', before)
   const sessionId = new URL(page.url()).searchParams.get('agent')!
-  await until(() => detail(sessionId, new URL(page.url()).searchParams.get('env') === fleet.c.environmentId ? legacyRpc : rpc), snapshot => snapshot.session.status === 'idle')
+  const client = new URL(page.url()).searchParams.get('env') === fleet.c.environmentId ? legacyRpc : rpc
+  // An old identical provider reply and the idle window before acquisition do
+  // not prove this input consumed its handoff or completed its own run.
+  await until(() => detail(sessionId, client), snapshot => snapshot.session.status === 'idle'
+    && snapshot.items.some(item => item.kind === 'assistant' && item.runId === `run-${receipt.commandId}` && item.text?.includes(reply)))
+  await expect(transcript(page)).toContainText(reply, { timeout: 30_000 })
 }
 async function selectModel(page: Page, query: string) {
   await page.getByRole('button', { name: /Change session model/ }).click()
@@ -64,7 +72,11 @@ async function selectModel(page: Page, query: string) {
 async function successful(method: string, index: number): Promise<CommandReceipt> {
   await expect.poll(() => calls(method).length).toBeGreaterThan(index)
   const commandId = calls(method)[index]!.commandId
-  const receipt = await until(() => receipts.get(commandId), receipt => Boolean(receipt && !['accepted', 'running'].includes(receipt.state)))
+  const receipt = await until(() => {
+    const rejected = rejectedCommands.get(commandId)
+    if (rejected) throw new Error(`Browser command rejected: ${JSON.stringify(rejected)}`)
+    return receipts.get(commandId)
+  }, receipt => Boolean(receipt && !['accepted', 'running'].includes(receipt.state)))
   if (!receipt) throw new Error('Missing browser command receipt')
   expect(receipt.state, JSON.stringify(receipt.error)).toBe('succeeded')
   receipts.set(commandId, receipt); return receipt
@@ -84,12 +96,14 @@ test.beforeAll(async ({ browser, environmentManifest }) => {
   // Observe requests without intercepting, changing or supplying any response.
   sharedPage.on('websocket', socket => {
     socket.on('framesent', event => {
-      try { const frame = JSON.parse(String(event.payload)); if (frame.type === 'request' && METHODS.has(frame.method)) observed.push({ method: frame.method, input: frame.input }) }
+      try { const frame = JSON.parse(String(event.payload)); if (frame.type === 'request' && METHODS.has(frame.method)) { observed.push({ method: frame.method, input: frame.input }); requestCommands.set(frame.requestId, frame.input.commandId) } }
       catch { /* Non-JSON frames are outside the selected command evidence. */ }
     })
     socket.on('framereceived', event => {
       try {
         const frame = JSON.parse(String(event.payload))
+        const commandId = requestCommands.get(frame.requestId)
+        if (frame.type === 'error' && commandId) rejectedCommands.set(commandId, frame.error)
         const receipt = frame.type === 'result' ? frame.output : frame.item?.event?.type === 'receipt.upsert' ? frame.item.event.receipt : null
         if (receipt?.commandId && METHODS.has(receipt.method)) receipts.set(receipt.commandId, receipt)
       } catch { /* Observe only typed receipts; retain no other frames. */ }
