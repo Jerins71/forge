@@ -511,7 +511,7 @@ export class ManagerWsClient {
     const workerId = agentId.trim()
     const sessionId = ownerSessionId ?? this.state.agents.find(agent => agent.agentId === workerId)?.managerId ?? this.environmentProjection?.session.sessionId ?? this.desiredAgentId
     if (!workerId || !sessionId) return
-    void this.lifecycle('worker.kill', { sessionId, workerId }).catch(error => this.updateState({ lastError: error instanceof Error ? error.message : 'Worker kill failed' }))
+    void this.lifecycle('worker.kill', { sessionId, workerId }).then(() => this.getSessionWorkers(sessionId)).catch(error => this.updateState({ lastError: error instanceof Error ? error.message : 'Worker kill failed' }))
   }
   async stopAllAgents(managerId: string): Promise<{ managerId: string; stoppedWorkerIds: string[]; managerStopped: boolean }> {
     const receipt = await this.lifecycle('session.stopAll', { sessionId: managerId })
@@ -885,6 +885,8 @@ export class ManagerWsClient {
   async getSessionWorkers(sessionAgentId: string): Promise<SessionWorkersResult> {
  if (!this.environmentClient) throw new Error('Paired environment is required');
  const output = await this.environmentClient.request('session.workers', { sessionId: sessionAgentId });
+ this.updateState({ agents: projectSessionWorkers(this.state.agents, output.workers, sessionAgentId, this.environmentClient.shell.getSnapshot()),
+   workerMetadataSessionIds: new Set(this.state.workerMetadataSessionIds).add(sessionAgentId) });
  return { sessionAgentId, workers: output.workers.map(worker => projectWorker(worker, sessionAgentId, this.environmentClient!.shell.getSnapshot())) };
  }
 

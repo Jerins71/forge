@@ -68,9 +68,19 @@ describe('environment command identity', () => {
   // Delete must use that row's explicit owner, not silently return or target the open session.
   it('kills an unmounted worker using its explicit owning session', async () => {
     const { server, facade } = await environment()
+    server.seed.details!['background-session'] = { ...server.seed.details!['session-1']!, workers: [{ agentId: 'background-worker', title: 'Background worker', status: 'terminated' }] }
     facade.deleteAgent('background-worker', 'background-session')
     await until(() => server.inputs.some(entry => entry.method === 'worker.kill'))
     expect(server.inputs.find(entry => entry.method === 'worker.kill')!.input).toMatchObject({ workerId: 'background-worker', sessionId: 'background-session' })
+    await until(() => facade.getState().agents.some(agent => agent.agentId === 'background-worker' && agent.status === 'terminated'))
+  })
+
+  it('hydrates an unmounted session worker list through the existing native projection', async () => {
+    const { server, facade } = await environment()
+    server.seed.details!['background-session'] = { ...server.seed.details!['session-1']!, workers: [{ agentId: 'background-worker', title: 'Background worker', status: 'idle' }] }
+    await facade.getSessionWorkers('background-session')
+    expect(facade.getState().agents.find(agent => agent.agentId === 'background-worker')).toMatchObject({ managerId: 'background-session', status: 'idle' })
+    expect(facade.getState().workerMetadataSessionIds.has('background-session')).toBe(true)
   })
 
   it('keeps one command ID for a message across a lost acknowledgment, recovery and retry', async () => {
