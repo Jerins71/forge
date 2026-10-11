@@ -10,6 +10,7 @@ import { loadState, rebuildLifecycleProjections } from "./store.js";
 import type { ChoiceQuestion, ProviderObservation } from "@forge/protocol";
 import { SwarmChoiceService } from "../../../swarm/swarm-choice-service.js";
 import { createCoreChoicePort } from "./choice-port.js";
+import { createDetailStream } from "../../streams/detail-stream.js";
 import { requestChoiceId } from "./request-projection.js";
 
 const roots: string[] = []; const cores: ControlCore[] = [];
@@ -46,9 +47,17 @@ async function fixture() {
       lifetime: { kind: "live_callback", generation: binding.scope.generation, ...(expiresAt ? { expiresAt } : {}) }, requestKind: kind, payload: { questions } };
   }
   function publish(value: ProviderObservation) { core.controlService.record({ type: "provider.observe", commandId: `observation-${++serial}`, now, observation: value }); return Object.values(loadState(core.database).requests).at(-1)!; }
-  return { core, open, adapter, responses, observation, publish, advance: () => { now += 60_000; } };
+  return { core, options, open, adapter, responses, observation, publish, advance: () => { now += 60_000; } };
 }
 function choice(core: ControlCore, requestId: string) { const row = core.database.prepare("SELECT choice_json FROM control_choices WHERE choice_id=?").get(requestId) as { choice_json: string } | undefined; return row && JSON.parse(row.choice_json); }
+
+async function snapshotChoices(core: ControlCore) {
+  const abort = new AbortController();
+  const stream = createDetailStream({ database: core.database, subscribeCommitted: listener => core.eventSink.subscribe(listener),
+    getDescriptor: () => { throw new Error("Detail snapshot does not read the descriptor"); }, withReadBarrier: fn => core.eventSink.readBarrier(fn).value }).detail(principal, { sessionId: "manager" }, abort.signal);
+  try { const frame = (await stream.next()).value; if (frame?.kind !== "snapshot") throw new Error("Expected fresh detail snapshot"); return frame.snapshot.choices; }
+  finally { abort.abort(); await stream.return(undefined); }
+}
 
 describe("authoritative native choices", () => {
   it.each(["approval", "user_input"] as const)("projects and answers %s through the retained request and outbox", async kind => {
@@ -70,19 +79,43 @@ describe("authoritative native choices", () => {
     expect(() => f.core.eventSink.transaction(tx => { f.core.eventSink.commitCommand(tx, { type: "provider.observe", commandId: "rollback", now: 1_800_000_000_000, observation }); throw new Error("rollback"); })).toThrow("rollback");
     expect(loadState(f.core.database).requests).toEqual({}); expect(f.core.database.prepare("SELECT COUNT(*) n FROM control_choices").get()).toEqual({ n: 0 }); expect(f.core.eventSink.highWater).toBe(count);
   });
-  it("expires a callback on reboot and rebuilds the same non-answerable choice from retained facts", async () => {
-    const f = await fixture(); const request = f.publish(f.observation("user_input"));
+  it.each(["approval", "user_input"] as const)("expires %s on reboot and bootstraps the retained non-answerable question", async kind => {
+    const f = await fixture(); const request = f.publish(f.observation(kind));
+    expect(await snapshotChoices(f.core)).toEqual([choice(f.core, request.requestId)]);
     expect(choice(f.core, request.requestId)?.status).toBe("pending"); await f.core.close(); const reboot = await f.open();
     expect(loadState(reboot.database).requests[request.requestId].state).toBe("expired"); expect(choice(reboot, request.requestId).status).toBe("expired");
     const before = choice(reboot, request.requestId); reboot.database.prepare("DELETE FROM control_choices WHERE choice_id=?").run(request.requestId); rebuildLifecycleProjections(reboot.database);
     expect(choice(reboot, request.requestId)).toEqual(before);
+    expect(await snapshotChoices(reboot)).toEqual([before]);
     await expect(reboot.controlService.execute(principal, "session.choose", { commandId: answerId, sessionId: "manager", choiceId: request.requestId, answers })).rejects.toMatchObject({ code: "CONFLICT" });
     await reboot.effectWorker.drain(); expect(f.responses).toEqual([]);
+  });
+  it("bounds closed choice history while retaining every pending choice in a fresh snapshot", async () => {
+    const f = await fixture(); const closed: string[] = [];
+    for (let index = 0; index < 21; index++) {
+      const observation = f.observation("user_input"); observation.request.nativeId = `closed-${index}`;
+      const request = f.publish(observation); closed.push(request.requestId);
+      f.core.controlService.record({ type: "request.expire", commandId: `expire-${index}`, now: 1_800_000_000_000, threadId: "manager", requestId: request.requestId });
+    }
+    const pending = f.publish(f.observation("approval")); const choices = await snapshotChoices(f.core);
+    expect(choices).toHaveLength(20); expect(choices).toContainEqual(choice(f.core, pending.requestId));
+    expect(choices.some(choice => choice.choiceId === closed[0])).toBe(false);
+    expect(Object.values(loadState(f.core.database).requests)).toHaveLength(22);
   });
   it("rejects an expired answer and settles the projection without calling the provider", async () => {
     const f = await fixture(); const request = f.publish(f.observation("approval", new Date(1_800_000_030_000).toISOString())); f.advance();
     await expect(f.core.controlService.execute(principal, "session.choose", { commandId: answerId, sessionId: "manager", choiceId: request.requestId, answers })).rejects.toMatchObject({ code: "CONFLICT" });
     expect(loadState(f.core.database).requests[request.requestId].state).toBe("expired"); expect(choice(f.core, request.requestId).status).toBe("expired"); expect(f.responses).toEqual([]);
+  });
+  it("rejects an answer that expires between preflight and admission after committing its expired projection", async () => {
+    const f = await fixture(); const request = f.publish(f.observation("approval", new Date(1_800_000_030_000).toISOString()));
+    const clock = f.options.clock; let reads = 0; f.options.clock = () => clock() + (++reads === 1 ? 0 : 60_000);
+    const input = { commandId: answerId, sessionId: "manager", choiceId: request.requestId, answers };
+    await expect(f.core.controlService.execute(principal, "session.choose", input)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(loadState(f.core.database).requests[request.requestId].state).toBe("expired"); expect(choice(f.core, request.requestId).status).toBe("expired");
+    expect(await f.core.controlService.getReceipt(principal, answerId)).toMatchObject({ state: "interrupted", error: { code: "CONFLICT" } });
+    await expect(f.core.controlService.execute(principal, "session.choose", input)).rejects.toMatchObject({ code: "CONFLICT" });
+    await f.core.effectWorker.drain(); expect(f.responses).toEqual([]); expect(f.core.database.prepare("SELECT 1 FROM effects WHERE command_id=? AND kind='provider.respond'").get(answerId)).toBeUndefined();
   });
   it("settles pending callbacks and the choice projection on stop before releasing the provider", async () => {
     const f = await fixture(); const request = f.publish(f.observation("approval"));
@@ -114,6 +147,25 @@ describe("authoritative native choices", () => {
     expect(loadState(f.core.database).requests[request.requestId].state).toBe("expired"); expect(choice(f.core, request.requestId).status).toBe("expired");
     expect(await f.core.controlService.getReceipt(principal, answerId)).toMatchObject({ state: "interrupted", error: { code: "CONFLICT", retryable: false } });
     expect(loadState(f.core.database).recovery).toBeNull(); expect(loadState(f.core.database).runs["run-initial"].state).toBe("running");
+  });
+  it.each(["approval", "user_input"] as const)("restores a live %s after an ordinary response failure and permits one retry", async kind => {
+    const f = await fixture(); const request = f.publish(f.observation(kind)); const respond = f.adapter.respond;
+    f.adapter.respond = async () => { throw new Error("Transient response transport failure"); };
+    await f.core.controlService.execute(principal, "session.choose", { commandId: answerId, sessionId: "manager", choiceId: request.requestId, answers }); await f.core.effectWorker.drain();
+    expect(loadState(f.core.database).requests[request.requestId].state).toBe("pending"); expect(choice(f.core, request.requestId).status).toBe("pending");
+    expect(f.core.database.prepare("SELECT answer_command_id FROM control_choices WHERE choice_id=?").get(request.requestId)).toEqual({ answer_command_id: null });
+    expect(loadState(f.core.database).recovery).toBeNull(); expect(loadState(f.core.database).runs["run-initial"].state).toBe("running");
+    f.adapter.respond = respond;
+    await f.core.controlService.execute(principal, "session.choose", { commandId: "00000000-0000-4000-8000-000000000002", sessionId: "manager", choiceId: request.requestId, answers }); await f.core.effectWorker.drain();
+    expect(f.responses).toHaveLength(1); expect(loadState(f.core.database).requests[request.requestId].state).toBe("resolved");
+  });
+  it.each(["approval", "user_input"] as const)("expires %s if its callback lifetime ends during an ordinary response failure", async kind => {
+    const f = await fixture(); const request = f.publish(f.observation(kind, new Date(1_800_000_030_000).toISOString()));
+    f.adapter.respond = async () => { f.advance(); throw new Error("Response transport closed"); };
+    await f.core.controlService.execute(principal, "session.choose", { commandId: answerId, sessionId: "manager", choiceId: request.requestId, answers }); await f.core.effectWorker.drain();
+    expect(loadState(f.core.database).requests[request.requestId].state).toBe("expired"); expect(choice(f.core, request.requestId).status).toBe("expired"); expect(f.responses).toEqual([]);
+    const before = loadState(f.core.database); rebuildLifecycleProjections(f.core.database); expect(loadState(f.core.database)).toEqual(before);
+    await f.core.close(); const reboot = await f.open(); await reboot.effectWorker.drain(); expect(choice(reboot, request.requestId).status).toBe("expired"); expect(f.responses).toEqual([]);
   });
   it("projects native cancellation as cancelled rather than answered", async () => {
     const f = await fixture(); const opened = f.observation("user_input"); const request = f.publish(opened);

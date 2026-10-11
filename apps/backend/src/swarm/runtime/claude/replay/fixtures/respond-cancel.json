@@ -1,0 +1,153 @@
+{
+  "provider": "claude",
+  "protocol": "agent-sdk/stdio-control",
+  "version": "0.3.280",
+  "scenario": "respond-cancel",
+  "provenance": "Synthetic raw frames from the installed SDK wire contract; not captured from a real account. The real SDK, runtime and MCP server parse these frames.",
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "type": "control_request",
+        "request": {
+          "subtype": "initialize",
+          "sdkMcpServers": [
+            "forge"
+          ],
+          "appendSystemPrompt": "$prompt"
+        }
+      },
+      "capture": {
+        "$initId": [
+          "request_id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "$initId",
+          "response": {
+            "commands": [],
+            "models": [],
+            "agents": []
+          }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "type": "user",
+        "uuid": "$any",
+        "parent_tool_use_id": null,
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "work"
+            }
+          ]
+        }
+      },
+      "capture": {
+        "$inputId": [
+          "uuid"
+        ]
+      },
+      "label": "input"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "assistant",
+        "uuid": "assistant-envelope",
+        "session_id": "$sessionId",
+        "parent_tool_use_id": null,
+        "message": {
+          "id": "message-1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-opus-5-5",
+          "content": [
+            {
+              "type": "text",
+              "text": "Working"
+            }
+          ],
+          "stop_reason": "end_turn",
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 1
+          }
+        },
+        "user_message_uuid": "$inputId"
+      },
+      "label": "accepted"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "control_request",
+        "request_id": "race-1",
+        "request": {
+          "subtype": "can_use_tool",
+          "tool_name": "Bash",
+          "input": {
+            "command": "echo hello"
+          },
+          "tool_use_id": "permission-call"
+        }
+      },
+      "label": "approval"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "control_cancel_request",
+        "request_id": "race-1"
+      },
+      "label": "cancel"
+    },
+    {
+      "type": "expect_outbound",
+      "label": "race-1-response",
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "race-1",
+          "response": "$permissionResponse"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "result": "Done",
+        "duration_ms": 3,
+        "duration_api_ms": 2,
+        "num_turns": 1,
+        "total_cost_usd": 0.001,
+        "usage": {
+          "input_tokens": 11,
+          "output_tokens": 2,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        },
+        "modelUsage": {},
+        "permission_denials": [],
+        "uuid": "result-1",
+        "session_id": "$sessionId"
+      },
+      "label": "terminal"
+    }
+  ]
+}

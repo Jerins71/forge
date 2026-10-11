@@ -134,6 +134,27 @@ describe("authoritative assignment replay", () => {
     if (expected === "pending") { await f.record(resultRun); const lines = (await readFile(path.join(f.root, "manager.jsonl"), "utf8")).trim().split("\n"); expect(lines.filter(line => JSON.parse(line).id === "entry-one:result:input")).toHaveLength(1); }
     if (expected === "unknown") expect(f.state().attempts["one:result:attempt"].delivery).toBe("unknown");
   });
+  it.each(["provider-switch", "fallback"])("delivers a worker result once after the parent %s changes generation twice", async change => {
+    const f = await fixture(); f.assign("one"); await f.ready("run-one"); f.dispatch("run-one"); f.observe("run-one", "accepted");
+    f.observe("parent", "terminal");
+    for (let index = 0; index < 2; index++) {
+      const owner = f.state().threads.manager;
+      if (!owner.bindingId) f.run({ type: "thread.prepare_binding", commandId: `prepare-${index}`, now, threadId: "manager", bindingId: `switched-${index}` });
+      f.run({ type: "binding.drained", commandId: `model-drain-${index}`, now, threadId: "manager", bindingId: f.state().threads.manager.bindingId!, status: "clean" });
+    }
+    const owner = f.state().threads.manager; const scope = { threadId: "manager", bindingId: change, generation: owner.generation };
+    f.run({ type: "thread.prepare_binding", commandId: "prepare-model", now, threadId: "manager", bindingId: scope.bindingId });
+    f.run({ type: "binding.acquired", commandId: "model-acquired", now, threadId: "manager", binding: { scope, conversation: { ...scope, kind: "conversation", nativeId: change }, capabilities: { ...piProviderCapabilities(), provider: change === "provider-switch" ? "claude" : "codex" }, instructionRevision: change, toolContractRevision: "tools" } });
+    expect(f.state().threads.manager.generation).toBe(2); expect(f.state().assignments.one.parentGeneration).toBe(0);
+    f.observe("run-one", "terminal"); const delivery = f.result("one"); const resultRun = "one:result:run";
+    expect(f.state().runs[resultRun]).toBeDefined(); expect(delivery.effects.map(effect => effect.kind)).toContain("transcript.append");
+    expect(f.state().assignments.one.parentGeneration).toBe(2); expect(f.state().transfers["one:result"].targetGeneration).toBe(2);
+    await f.record(resultRun); f.dispatch(resultRun); f.observe(resultRun, "accepted");
+    expect(f.state().transfers["one:result"]).toMatchObject({ state: "consumed", consumingAttemptId: f.state().runs[resultRun].activeAttemptId });
+    expect(f.run({ type: "assignment.deliver", commandId: "duplicate-delivery", now, assignmentId: "one", authorized: true }).effects).toEqual([]);
+    expect(f.result("one").effects).toEqual([]); expect(Object.values(f.state().runs).filter(run => run.runId === resultRun)).toHaveLength(1);
+    expect(replayLifecycle(f.db())).toEqual(f.state());
+  });
   it("records a late result after stop without admission, and supersedes results after clear", async () => {
     const f = await fixture(); f.assign("one"); await f.ready("run-one"); f.dispatch("run-one"); f.observe("run-one", "accepted"); f.observe("run-one", "terminal");
     f.run({ type: "thread.stop", commandId: "stop", now, threadId: "manager" }); f.result("one");

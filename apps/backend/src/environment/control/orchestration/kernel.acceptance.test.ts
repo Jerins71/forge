@@ -38,6 +38,18 @@ describe("authoritative run decisions", () => {
     expect(first.bindingId).toBe("prepared-binding");
   });
 
+  it.each([false, true])("restarts canonical pre-dispatch work with acquired=%s and fences its old attempt", acquired => {
+    const f = fixture(); f.submit("one"); f.record("one"); if (acquired) f.acquire();
+    const oldAttempt = f.state().runs["run-one"].activeAttemptId;
+    const reboot = f.run({ type: "environment.recover", commandId: "reboot", now, recoveryId: "reboot", bootId: "reboot", reports: [] });
+    const run = f.state().runs["run-one"]; const owner = f.state().threads.manager;
+    expect(owner.activeRunId).toBe(run.runId); expect(run.state).toBe("running"); expect(run.activeAttemptId).not.toBe(oldAttempt);
+    expect(reboot.effects).toContainEqual({ kind: "runtime.acquire", threadId: "manager", bindingId: owner.bindingId, generation: owner.generation });
+    expect(f.state().recovery).toBeNull();
+    expect(f.run({ type: "attempt.dispatch", commandId: "stale-dispatch", now, threadId: "manager", attemptId: oldAttempt, authorized: true }).events).toEqual([]);
+    expect(f.state().runs["run-one"].state).toBe("running");
+  });
+
   it("queues accepted input behind the current root and advances only on its terminal", () => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 1, "accepted");
     const queued = f.submit("two"); f.record("two");
@@ -77,6 +89,25 @@ describe("authoritative run decisions", () => {
     expect(f.state().threads.manager.generation).toBe(1);
     f.run(resume); expect(f.state().attempts.retry.generation).toBe(1);
   });
+  it("holds newer canonical input behind unresolved in-process recovery", () => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one");
+    f.run({ type: "attempt.unknown", commandId: "unknown", now, threadId: "manager", attemptId: "attempt-one" });
+    f.run({ type: "binding.drained", commandId: "drain", now, threadId: "manager", bindingId: "binding", status: "clean" });
+    f.submit("newer"); const queued = f.record("newer");
+    expect(f.state().runs["run-newer"].state).toBe("queued"); expect(queued.effects).toEqual([]);
+    f.run({ type: "recovery.resume", commandId: "resume", now, recoveryId: f.state().recovery!.recoveryId, attempts: { "run-one": "retry" }, bindingIds: { manager: "replacement" } });
+    expect(f.state().threads.manager.activeRunId).toBe("run-one"); expect(f.state().runs["run-newer"].state).toBe("queued");
+  });
+  it("does not clear another active run when resuming a retained recovery run", () => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one");
+    f.run({ type: "attempt.unknown", commandId: "unknown", now, threadId: "manager", attemptId: "attempt-one" });
+    f.run({ type: "binding.drained", commandId: "drain", now, threadId: "manager", bindingId: "binding", status: "clean" });
+    f.submit("newer"); f.record("newer");
+    const state = f.state(); const owner = { ...state.threads.manager, activeRunId: "run-newer", bindingId: "newer-binding" };
+    const live = { ...state, threads: { manager: owner }, runs: { ...state.runs, "run-newer": { ...state.runs["run-newer"], state: "running" as const } } };
+    const result = apply(live, { type: "recovery.resume", commandId: "resume", now, recoveryId: state.recovery!.recoveryId, attempts: { "run-one": "retry" }, bindingIds: { manager: "replacement" } });
+    expect(result.state.threads.manager).toEqual(owner); expect(result.state.runs["run-one"].state).toBe("queued"); expect(result.decision.effects).toEqual([]);
+  });
   it("quarantines a pending drain and permits no replacement writer until confirmed clean", () => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one");
     f.run({ type: "thread.stop", commandId: "stop", now, threadId: "manager" });
@@ -85,6 +116,17 @@ describe("authoritative run decisions", () => {
     f.run({ type: "binding.drained", commandId: "clean", now, threadId: "manager", bindingId: "binding", status: "clean" });
     f.run({ type: "thread.resume", commandId: "resume", now, threadId: "manager" });
     expect(f.state().threads.manager.generation).toBe(1);
+  });
+  it("admits canonical input during a switch drain and advances it in the replacement scope", () => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 1, "terminal");
+    const state = f.state(); const pending = { ...state, threads: { manager: { ...state.threads.manager, shutdown: "pending" as const } } };
+    const admitted = apply(pending, { type: "run.submit", commandId: "during-drain", now, threadId: "manager", runId: "queued", inputId: "queued-input", attemptId: "queued-attempt", bindingId: "ignored", input: { text: "queued", artifactIds: [] }, delivery: "queue" });
+    const recorded = apply(admitted.state, { type: "input.recorded", commandId: "record-queued", now, threadId: "manager", inputId: "queued-input", entryId: "queued-entry" });
+    expect(recorded.state.runs.queued.state).toBe("queued"); expect(recorded.decision.effects).toEqual([]);
+    const drained = apply(recorded.state, { type: "binding.drained", commandId: "switch-drained", now, threadId: "manager", bindingId: "binding", status: "clean" });
+    expect(drained.state.threads.manager.activeRunId).toBe("queued"); expect(drained.state.runs.queued.state).toBe("running");
+    const attempt = drained.state.attempts[drained.state.runs.queued.activeAttemptId]; expect(attempt.generation).toBe(1); expect(attempt.bindingId).not.toBe("binding");
+    expect(drained.decision.effects).toContainEqual({ kind: "runtime.acquire", threadId: "manager", bindingId: attempt.bindingId, generation: 1 });
   });
   it("rechecks revocation immediately before provider dispatch", () => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire();

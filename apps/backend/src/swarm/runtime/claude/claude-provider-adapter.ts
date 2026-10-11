@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import type { ProviderCapabilities, ProviderConversationRef, ProviderObservation } from "@forge/protocol";
-import { assertProviderRequirements, ProviderRefreshRequiredError, ProviderDispatchRejectedError, UnsupportedProviderBehaviorError, type ProviderAdapter, type ProviderBinding, type ProviderOpenInput,
+import { assertProviderRequirements, ProviderRefreshRequiredError, ProviderDispatchRejectedError, ProviderRequestRejectedError, UnsupportedProviderBehaviorError, type ProviderAdapter, type ProviderBinding, type ProviderOpenInput,
   type ProviderResumeInput, type ProviderStartInput, type ProviderSteerInput, type ProviderRespondInput, type ProviderDrainResult, type ToolHostBinding } from "../provider-contract.js";
 import { renderInstructionBundle } from "../instruction-bundle.js";
 import { ClaudeAgentRuntime, type ClaudeRuntimeOptions } from "./claude-agent-runtime.js";
@@ -88,7 +88,14 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     this.session!.assertTurn(input.turn, input.attemptId);
     this.session!.interrupt(); await this.assertBinding(input.binding).interruptProvider();
   }
-  async respond(input: ProviderRespondInput): Promise<void> { this.assertBinding(input.binding); this.session!.respond(input); }
+  async respond(input: ProviderRespondInput): Promise<void> {
+    try { this.assertBinding(input.binding); }
+    catch (error) {
+      if (error instanceof ProviderDispatchRejectedError) throw new ProviderRequestRejectedError(error.reason === "stale_scope" ? "stale_scope" : "expired");
+      throw error;
+    }
+    this.session!.respond(input);
+  }
   async compact(input: Parameters<ProviderAdapter["compact"]>[0]): Promise<void> { this.session?.enableObservations(); await this.assertBinding(input.binding).compact(input.instructions, input.attemptId); }
   observations(binding: ProviderBinding, signal?: AbortSignal): AsyncIterable<ProviderObservation> {
     this.assertBinding(binding, true); this.session!.enableObservations(); return this.session!.observations(signal);

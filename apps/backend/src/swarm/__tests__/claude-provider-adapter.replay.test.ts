@@ -1,5 +1,5 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
@@ -9,12 +9,13 @@ import { ProviderCapabilitiesSchema, ProviderObservationSchema, type ProviderObs
 import { createReplayHarness, ReplaySignals, watchdog, type ReplayTranscript } from "../runtime/replay/replay-harness.js";
 import { createInstructionBundle } from "../runtime/instruction-bundle.js";
 import { bindRuntimeToolHost } from "../runtime/runtime-tool-plan.js";
-import { ProviderRefreshRequiredError, ProviderDispatchRejectedError } from "../runtime/provider-contract.js";
+import { ProviderRefreshRequiredError, ProviderDispatchRejectedError, ProviderRequestRejectedError } from "../runtime/provider-contract.js";
 import { buildSwarmTools } from "../swarm-tools.js";
 import type { AgentDescriptor, AgentStatus } from "../types.js";
 import type { RuntimeSessionEvent, SwarmAgentRuntime } from "../runtime-contracts.js";
 import { RuntimeEventProjector } from "../runtime/runtime-event-projector.js";
 import { ConversationProjector } from "../session/conversation-projector.js";
+import { getConversationHistoryCacheFilePath } from "../session/conversation-history-cache.js";
 import { ClaudeProviderAdapter } from "../runtime/claude/claude-provider-adapter.js";
 import { createProviderBoundaryFixture } from "./provider-boundary-fixture.js";
 import { ClaudeRuntimeCreator } from "../runtime/claude/claude-runtime-creator.js";
@@ -29,7 +30,7 @@ vi.mock("../runtime/claude/claude-runtime-environment.js", () => ({
 const here = fileURLToPath(new URL("../runtime/claude/", import.meta.url));
 const peerExecutable = fileURLToPath(new URL("../runtime/claude/replay/claude-peer.mjs", import.meta.url));
 const scope = { threadId: "owner", bindingId: "binding", generation: 7 };
-async function fixture(scenario: string, options: { root?: string; prompt?: string; tools?: boolean; matchAnyPrompt?: boolean; unrelatedEcho?: boolean; scope?: ProviderScope } = {}) {
+async function fixture(scenario: string, options: { root?: string; prompt?: string; tools?: boolean; matchAnyPrompt?: boolean; unrelatedEcho?: boolean; scope?: ProviderScope; cancelOutcome?: "answered" | "cancelled" } = {}) {
   const root = options.root ?? await mkdtemp(join(tmpdir(), "forge-claude-provider-"));
   const transcript = JSON.parse(await readFile(join(here, "replay/fixtures", `${scenario}.json`), "utf8")) as ReplayTranscript;
   if (options.unrelatedEcho) {
@@ -48,7 +49,9 @@ async function fixture(scenario: string, options: { root?: string; prompt?: stri
   const tools = options.tools ? realTools : [];
   const instructions = createInstructionBundle(descriptor, prompt);
   const toolHost = bindRuntimeToolHost({ descriptor, tools, mechanism: "in_process_mcp", scope: inputScope });
-  transcript.bindings = { $prompt: options.matchAnyPrompt ? "$any" : prompt, $toolResult: JSON.stringify({ status: "answered", answers: [{ questionId: "q", selectedOptions: [], text: "chosen" }] }) };
+  transcript.bindings = { $prompt: options.matchAnyPrompt ? "$any" : prompt, $toolResult: JSON.stringify({ status: "answered", answers: [{ questionId: "q", selectedOptions: [], text: "chosen" }] }),
+    $permissionResponse: options.cancelOutcome === "answered" ? { behavior: "allow", updatedInput: { command: "echo hello" }, toolUseID: "permission-call" }
+      : { behavior: "deny", message: "Question cancelled or unavailable.", toolUseID: "permission-call" } };
   const harness = await createReplayHarness(() => transcript);
   const onAgentEnd = vi.fn();
   const runtimeOptions = { descriptor, systemPrompt: prompt, tools, host, env: {
@@ -198,12 +201,26 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       const assistant = entries.filter(entry => entry.customType === "swarm_conversation_entry" && entry.data.role === "assistant");
       expect(assistant).toHaveLength(1);
       expect(assistant[0].data).toMatchObject({ type: "conversation_message", role: "assistant", text: "Working", turnId: runId, source: "assistant_output" });
+      // The adapter settles its native process, tools, callbacks and canonical journal.
+      await adapter.close(binding);
+      expect(await adapter.drain(binding)).toEqual({ status: "clean" });
+      // This fixture owns the projector's derived cache writer separately.
+      await conversationProjector.flushPendingHistoryCacheWrites();
+      const cacheFile = getConversationHistoryCacheFilePath(descriptor.sessionFile);
+      const closedFiles = (await readdir(resources.root, { recursive: true })).sort();
+      expect(closedFiles).toContain(relative(resources.root, cacheFile));
+      const closedCache = await readFile(cacheFile, "utf8");
+      // Once both owners settle, no files or bytes change on another writer join.
+      await conversationProjector.flushPendingHistoryCacheWrites();
+      expect((await readdir(resources.root, { recursive: true })).sort()).toEqual(closedFiles);
+      expect(await readFile(cacheFile, "utf8")).toBe(closedCache);
+      expect(await readFile(descriptor.sessionFile, "utf8")).toBe(jsonl);
       if (process.env.FORGE_CLAUDE_REPLAY_EVIDENCE_DIR) {
         const dir = process.env.FORGE_CLAUDE_REPLAY_EVIDENCE_DIR; await mkdir(dir, { recursive: true });
         await writeFile(join(dir, `projection-${dispatch}.jsonl`), jsonl.replaceAll(resources.root, "<fixture>"));
         await writeFile(join(dir, `projection-${dispatch}.json`), JSON.stringify({ dispatch, statuses, events, endCount: onAgentEnd.mock.calls.length, assistant: assistant.map(entry => entry.data) }, null, 2));
       }
-    } finally { await runtime?.terminate(); await f.close(); await resources.cleanup(); }
+    } finally { await runtime?.terminate(); await f.close(); await conversationProjector.flushPendingHistoryCacheWrites(); await resources.cleanup(); }
   });
   it("resumes a prior durable conversation during creation under the new scope without opening another session", async () => {
     const resources = await createProviderBoundaryFixture();
@@ -362,8 +379,81 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       const binding = await f.open(); const dispatched = start(f, binding); await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); await f.release("approval");
       const request = await f.observed("expired-1"); if (request.type !== "request_opened") throw new Error("Missing request");
       await f.release("cancel"); await f.observed("expired-1:cancelled");
-      await expect(f.adapter.respond({ binding, request: request.request, lifetime: request.lifetime, response: [] })).rejects.toThrow();
+      const error = await f.adapter.respond({ binding, request: request.request, lifetime: request.lifetime, response: [] }).catch(error => error);
+      expect(error).toBeInstanceOf(ProviderRequestRejectedError);
+      expect(error).toMatchObject({ code: "PROVIDER_REQUEST_REJECTED", reason: "unknown_request" });
       await f.release("terminal"); await f.observed("terminal:root_attempt");
+    } finally { await f.close(); await f.cleanup(); }
+  });
+  // Rejection must be typed, leave a live request unanswered, and settle a
+  // respond/cancel race exactly once without reviving the cancelled callback.
+  it("rejects stale request scopes and bindings without consuming the live approval", async () => {
+    const f = await fixture("expired-approval");
+    try {
+      const binding = await f.open(); const dispatched = start(f, binding); await f.release("accepted"); await dispatched; await f.release("approval");
+      const request = await f.observed("expired-1"); if (request.type !== "request_opened") throw new Error("Missing request");
+      const input = { binding, request: request.request, lifetime: request.lifetime, response: [{ questionId: "permission", selectedOptionIds: ["allow"] }] };
+      for (const stale of [
+        { ...input, request: { ...request.request, generation: scope.generation - 1 } },
+        { ...input, request: { ...request.request, turnId: "stale-turn" } },
+        { ...input, lifetime: { ...request.lifetime, generation: scope.generation - 1 } },
+        { ...input, binding: { ...binding, scope: { ...scope, bindingId: "stale-binding" } } },
+      ]) {
+        const error = await f.adapter.respond(stale).catch(error => error);
+        expect(error).toBeInstanceOf(ProviderRequestRejectedError);
+        expect(error).toMatchObject({ code: "PROVIDER_REQUEST_REJECTED", reason: "stale_scope" });
+      }
+      expect(f.observations.filter(value => value.type === "request_resolved")).toEqual([]);
+      await f.release("cancel"); await f.observed("expired-1:cancelled");
+      await watchdog("cancel response", f.harness.signals.wait("1:expired-1-response"));
+      await f.release("terminal"); await f.observed("terminal:root_attempt");
+    } finally { await f.close(); await f.cleanup(); }
+  });
+  it("rejects expired callback lifetimes and closed callbacks with the shared request error", async () => {
+    const f = await fixture("expired-approval");
+    try {
+      const binding = await f.open(); const dispatched = start(f, binding); await f.release("accepted"); await dispatched; await f.release("approval");
+      const request = await f.observed("expired-1"); if (request.type !== "request_opened") throw new Error("Missing request");
+      const input = { binding, request: request.request, lifetime: request.lifetime, response: [{ questionId: "permission", selectedOptionIds: ["allow"] }] };
+      for (const expiresAt of [new Date(Date.now() - 1).toISOString(), "invalid-date"]) {
+        const error = await f.adapter.respond({ ...input, lifetime: { ...request.lifetime, expiresAt } }).catch(error => error);
+        expect(error).toBeInstanceOf(ProviderRequestRejectedError);
+        expect(error).toMatchObject({ code: "PROVIDER_REQUEST_REJECTED", reason: "expired" });
+      }
+      expect(f.observations.filter(value => value.type === "request_resolved")).toEqual([]);
+      await f.release("cancel"); await f.observed("expired-1:cancelled");
+      await watchdog("cancel response", f.harness.signals.wait("1:expired-1-response"));
+      await f.release("terminal"); await f.observed("terminal:root_attempt");
+      await f.adapter.close(binding);
+      const error = await f.adapter.respond(input).catch(error => error);
+      expect(error).toBeInstanceOf(ProviderRequestRejectedError);
+      expect(error).toMatchObject({ code: "PROVIDER_REQUEST_REJECTED", reason: "expired" });
+    } finally { await f.close(); await f.cleanup(); }
+  });
+  it.each(["answered", "cancelled"] as const)("settles respond racing a native cancel exactly once when %s wins", async cancelOutcome => {
+    const f = await fixture("respond-cancel", { cancelOutcome });
+    try {
+      const binding = await f.open(); const dispatched = start(f, binding); await f.release("accepted"); await dispatched; await f.release("approval");
+      const request = await f.observed("race-1"); if (request.type !== "request_opened") throw new Error("Missing request");
+      const input = { binding, request: request.request, lifetime: request.lifetime, response: [{ questionId: "permission", selectedOptionIds: ["allow"] }] };
+      // The native cancel is in flight. Answer before the real SDK reads it,
+      // or wait for the SDK's cancellation callback to win the race.
+      await f.release("cancel");
+      if (cancelOutcome === "answered") await f.adapter.respond(input);
+      else {
+        await f.observed("race-1:cancelled");
+        const error = await f.adapter.respond(input).catch(error => error);
+        expect(error).toBeInstanceOf(ProviderRequestRejectedError);
+        expect(error).toMatchObject({ code: "PROVIDER_REQUEST_REJECTED", reason: "unknown_request" });
+      }
+      await f.observed(`race-1:${cancelOutcome}`);
+      await watchdog("racing response", f.harness.signals.wait("1:race-1-response"));
+      await f.release("terminal"); await f.observed("terminal:root_attempt");
+      expect(f.observations.filter(value => value.type === "request_resolved")).toMatchObject([{ request: request.request, resolution: cancelOutcome }]);
+      expect(f.harness.trace.filter(entry => entry.direction === "outbound" && (entry.frame as { response?: { request_id?: string } }).response?.request_id === "race-1")).toHaveLength(1);
+      const error = await f.adapter.respond(input).catch(error => error);
+      expect(error).toBeInstanceOf(ProviderRequestRejectedError);
+      expect(error).toMatchObject({ code: "PROVIDER_REQUEST_REJECTED", reason: "unknown_request" });
     } finally { await f.close(); await f.cleanup(); }
   });
   it("resumes native identity with changed instruction and tool bundles after clean shutdown", async () => {

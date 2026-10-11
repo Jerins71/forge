@@ -6,7 +6,7 @@ import { createControlCore, type ControlCore } from "../database.js";
 import { piProviderCapabilities } from "../../../swarm/runtime/pi/pi-provider-adapter.js";
 import { ProviderDispatchRejectedError, type ProviderAdapter, type ProviderBinding } from "../../../swarm/runtime/provider-contract.js";
 import type { ControlCoreOptions } from "../effect-types.js";
-import { loadState } from "./store.js";
+import { loadState, projectLifecycle, replayLifecycle, rebuildLifecycleProjections } from "./store.js";
 import { readReceipt } from "../command-service.js";
 import { createSwarmControlAdapter } from "../swarm-control-adapter.js";
 import { createArtifactService } from "../artifact-service.js";
@@ -44,6 +44,30 @@ async function fixture() {
 const principal = { deviceSessionId: "device", scopes: new Set(["session:operate" as const]) };
 
 describe("durable provider outbox", () => {
+  it.each(["acquire", "pending-start", "claimed-start"] as const)("restarts a canonical run before its dispatch mark at %s without replaying a stale effect", async boundary => {
+    const f = await fixture(); const scopes: number[] = []; const acquire = f.options.swarm.acquireProvider;
+    f.options.swarm.acquireProvider = async (...args) => { scopes.push(args[0].generation); return acquire(...args); };
+    await f.core.controlService.execute(principal, "session.send", { commandId, sessionId: "manager", message: { text: "canonical", artifactIds: [] } });
+    const before = loadState(f.core.database); const oldAttempt = before.attempts[before.runs[`run-${commandId}`].activeAttemptId];
+    const run = before.runs[oldAttempt.runId];
+    await f.options.swarm.applyInput({ commandId, inputId: run.inputId, sessionId: "manager", runGeneration: 0, message: run.input, runId: run.runId });
+    f.core.controlService.record({ type: "input.recorded", commandId: "canonical-recorded", now: f.options.clock(), threadId: "manager", inputId: run.inputId, entryId: run.inputId });
+    if (boundary !== "acquire") {
+      const prepared = await acquire({ threadId: "manager", bindingId: oldAttempt.bindingId, generation: 0 });
+      f.core.controlService.record({ type: "binding.acquired", commandId: "native-prepared", now: f.options.clock(), threadId: "manager", binding: prepared.binding });
+    }
+    f.core.eventSink.transaction(tx => {
+      f.core.database.prepare("UPDATE effects SET state='done' WHERE kind='transcript.append' OR (? != 'acquire' AND kind='runtime.acquire')").run(boundary);
+      if (boundary === "claimed-start") f.core.database.prepare("UPDATE effects SET state='claimed',claimed_boot_id='previous-process' WHERE kind='provider.start'").run();
+      f.core.eventSink.updateReceipt(tx, commandId, { state: "running" });
+    });
+    await f.core.close(); const reboot = await f.open(); await reboot.effectWorker.drain();
+    expect(f.dispatches()).toBe(1); expect(scopes).toEqual([1]); expect(f.canonical.size).toBe(1);
+    expect(await reboot.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded", delivery: "dispatched", error: null });
+    const state = loadState(reboot.database); expect(state.threads.manager.activeRunId).toBe(run.runId);
+    expect(state.runs[run.runId].state).toBe("running"); expect(state.runs[run.runId].activeAttemptId).not.toBe(oldAttempt.attemptId); expect(state.recovery).toBeNull();
+  });
+
   it.each(["pending", "error"] as const)("quarantines %s runtime cleanup and interrupts the stop receipt before adapter close", async mode => {
     const f = await fixture(); let closes = 0;
     f.adapter.close = async () => { closes++; };
@@ -53,6 +77,62 @@ describe("durable provider outbox", () => {
     expect(closes).toBe(0); expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "interrupted" });
     expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "stopped", shutdown: "quarantined" });
     await expect(f.core.controlService.submitInput({ commandId: "replacement", threadId: "manager", message: { text: "replacement", artifactIds: [] } })).rejects.toThrow(/shutdown/i);
+  });
+  it("serializes a newer send behind in-process unknown delivery and settles both resumed terminals", async () => {
+    const f = await fixture(); const starts: string[] = [];
+    f.adapter.start = async input => {
+      starts.push(input.runId); return starts.length === 1 ? { status: "unknown" } : { status: "accepted", turn: { ...input.binding.scope, kind: "turn", conversationId: "native", nativeId: input.runId } };
+    };
+    await f.core.controlService.submitInput({ commandId: "first", threadId: "manager", message: { text: "first", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.submitInput({ commandId: "newer", threadId: "manager", message: { text: "newer", artifactIds: [] } }); await f.core.effectWorker.drain();
+    expect(starts).toEqual(["run-first"]); expect(loadState(f.core.database).runs["run-newer"].state).toBe("queued");
+    const recoveryId = loadState(f.core.database).recovery!.recoveryId;
+    f.core.controlService.record({ type: "recovery.resume", commandId: "resume", now: f.options.clock(), recoveryId, attempts: { "run-first": "retry-first" }, bindingIds: { manager: "retry-binding" } }); await f.core.effectWorker.drain();
+    expect(starts).toEqual(["run-first", "run-first"]);
+    for (const runId of ["run-first", "run-newer"]) {
+      const state = loadState(f.core.database); const attempt = state.attempts[state.runs[runId].activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+      f.core.controlService.record({ type: "provider.observe", commandId: `terminal-${runId}`, now: f.options.clock(), observation: { type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: "completed" } }); await f.core.effectWorker.drain();
+      expect(loadState(f.core.database).runs[runId]).toMatchObject({ state: "terminal", outcome: "completed" });
+    }
+    expect(starts).toEqual(["run-first", "run-first", "run-newer"]); expect(readReceipt(f.core.eventSink, "newer")).toMatchObject({ state: "succeeded", delivery: "dispatched" });
+    const before = loadState(f.core.database); rebuildLifecycleProjections(f.core.database); expect(loadState(f.core.database)).toEqual(before);
+  });
+  it("queues an immediate send after a configure receipt while its provider release is pending", async () => {
+    const f = await fixture(); let release!: () => void; const shutdown = new Promise<void>(resolve => { release = resolve; });
+    f.options.swarm.stopSession = async () => { await shutdown; return { stopped: true }; };
+    const generations: number[] = []; const acquire = f.options.swarm.acquireProvider;
+    f.options.swarm.acquireProvider = async (...args) => { generations.push(args[0].generation); return acquire(...args); };
+    try {
+      await f.core.controlService.submitInput({ commandId: "before-configure", threadId: "manager", message: { text: "before", artifactIds: [] } }); await f.core.effectWorker.drain();
+      const state = loadState(f.core.database); const attempt = state.attempts[state.runs["run-before-configure"].activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+      f.core.controlService.record({ type: "provider.observe", commandId: "first-terminal", now: f.options.clock(), observation: { type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: "completed" } });
+      f.options.policy = { prepare: async (_method, input) => ({ sessionIds: ["manager"], projectIds: ["project"], intent: "inspect", frozen: input }), read: async () => { throw new Error("unused"); }, apply: async (_method, input) => {
+        // Seed the settings owner's retained handoff boundary without importing Phase 5 policy.
+        f.core.eventSink.transaction(() => {
+          const owner = loadState(f.core.database).threads.manager;
+          const event = { type: "thread.changed" as const, commandId: input.commandId, at: f.options.clock(), thread: { ...owner, shutdown: "pending" as const } };
+          f.core.database.prepare("INSERT INTO lifecycle_events(event_id,command_id,thread_id,event_type,event_json,created_at) VALUES (?,?,?,?,?,?)").run("handoff-fact", input.commandId, "manager", event.type, JSON.stringify(event), event.at); projectLifecycle(f.core.database, event);
+          const ordinal = (f.core.database.prepare("SELECT MAX(ordinal)+1 n FROM effects WHERE command_id=?").get(input.commandId) as { n: number }).n;
+          f.core.database.prepare("INSERT INTO effects(effect_id,command_id,session_id,kind,ordinal,payload_json,state,not_before) VALUES (?,?,'manager','provider.release',?,?,'pending',?)").run("handoff-release", input.commandId, ordinal, JSON.stringify({ kind: "provider.release", threadId: "manager", bindingId: owner.bindingId }), f.options.clock() + 60_000);
+        });
+        return {};
+      } };
+      const configured = await f.core.controlService.execute(principal, "session.configure", { commandId: "00000000-0000-4000-8000-000000000002", sessionId: "manager", contextMode: "fresh" });
+      expect(configured.state).toBe("succeeded"); expect(loadState(f.core.database).threads.manager.shutdown).toBe("pending");
+      const sent = await f.core.controlService.execute(principal, "session.send", { commandId, sessionId: "manager", message: { text: "immediate", artifactIds: [] } });
+      expect(sent.state).toBe("accepted"); expect(loadState(f.core.database).runs[`run-${commandId}`].state).toBe("queued");
+      await f.core.effectWorker.drain(); expect(generations).toEqual([0]); expect(f.canonical.size).toBe(1); expect(f.dispatches()).toBe(1);
+      f.core.database.prepare("UPDATE effects SET not_before=0 WHERE effect_id='handoff-release'").run(); release(); await f.core.effectWorker.drain();
+      expect(generations).toEqual([0, 1]); expect(f.dispatches()).toBe(2); expect(f.canonical.size).toBe(2);
+      expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded", delivery: "dispatched" });
+      expect(loadState(f.core.database).threads.manager).toMatchObject({ shutdown: "clean", activeRunId: `run-${commandId}` }); expect(replayLifecycle(f.core.database)).toEqual(loadState(f.core.database));
+    } finally { release(); }
+  });
+  it("returns typed conflicts for quarantined RPC and internal input admission", async () => {
+    const f = await fixture(); await f.core.controlService.submitInput({ commandId: "before", threadId: "manager", message: { text: "before", artifactIds: [] } }); await f.core.effectWorker.drain();
+    f.core.controlService.record({ type: "binding.drained", commandId: "unsafe", now: f.options.clock(), threadId: "manager", bindingId: loadState(f.core.database).threads.manager.bindingId!, status: "pending" });
+    await expect(f.core.controlService.execute(principal, "session.send", { commandId, sessionId: "manager", message: { text: "unsafe", artifactIds: [] } })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(f.core.controlService.submitInput({ commandId: "unsafe-internal", threadId: "manager", message: { text: "unsafe", artifactIds: [] } })).rejects.toMatchObject({ code: "CONFLICT" });
   });
   it("settles runtime cleanup before closing the adapter binding", async () => {
     const f = await fixture(); let nativeClosed = false; const order: string[] = [];
@@ -89,6 +169,26 @@ describe("durable provider outbox", () => {
       assignment: { assignmentId: "second", parentThreadId: "manager", parentRunId: "run-resumed-parent", selection: { provider: "pi", modelId: "fixture" } } }); await reboot.effectWorker.drain();
     expect(readReceipt(reboot.eventSink, "continued-child")).toMatchObject({ state: "succeeded", delivery: "dispatched" });
     expect(loadState(reboot.database).runs[continuation.runId].state).toBe("running"); expect(f.dispatches()).toBe(4);
+  });
+  it.each(["resume", "dismiss"] as const)("commits recovery %s facts with the submitted receipt and outbox before presentation", async action => {
+    const f = await fixture();
+    await f.core.controlService.submitInput({ commandId: "interrupted", threadId: "manager", message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.close(); const reboot = await f.open();
+    const snapshot = loadState(reboot.database).recovery!; let publications = 0;
+    reboot.eventSink.subscribe(event => {
+      if (event.event.type !== "recovery.upsert" || !event.event.recovery[ action === "resume" ? "resumedAt" : "dismissedAt" ]) return;
+      expect(reboot.database.inTransaction).toBe(false); expect(readReceipt(reboot.eventSink, commandId).state).toBe("running"); publications++;
+      const facts = reboot.database.prepare("SELECT event_json FROM lifecycle_events WHERE command_id=? AND event_type='recovery.resolved'").all(commandId) as { event_json: string }[];
+      expect(facts).toHaveLength(1);
+    });
+    const input = { commandId, command: "recovery.decide", request: { commandId, recoveryId: snapshot.recoveryId, action }, sessionIds: ["manager"], intent: "inspect" as const, receipt: { method: "recovery.decide" as const }, receiptReplay: true };
+    let presentations = 0;
+    const present = async () => { presentations++; expect(loadState(reboot.database).recovery?.[action === "resume" ? "resumedAt" : "dismissedAt"]).toBeTruthy(); return {}; };
+    await reboot.controlService.admitLifecycle(principal, input, present); await reboot.controlService.admitLifecycle(principal, input, present);
+    expect(presentations).toBe(1); expect(publications).toBe(1); expect(readReceipt(reboot.eventSink, commandId).state).toBe("succeeded");
+    const resumed = loadState(reboot.database).runs["run-interrupted"];
+    expect(resumed.state).toBe(action === "resume" ? "running" : "terminal");
+    if (action === "resume") expect(reboot.database.prepare("SELECT COUNT(*) n FROM effects WHERE command_id=? AND kind='runtime.acquire'").get(commandId)).toEqual({ n: 1 });
   });
   it("session deletion terminates retained workers in the same lifecycle transaction", async () => {
     const f = await fixture();

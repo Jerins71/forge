@@ -45,7 +45,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
   }, {
     getSnapshot: () => loadState(database).recovery,
     async decide(action) {
-      const state = loadState(database); if (!state.recovery) return;
+      const state = loadState(database); if (!state.recovery || state.recovery.resumedAt || state.recovery.dismissedAt) return;
       const base = { commandId: `recovery:${state.recovery.recoveryId}:${action}`, now: Date.now(), recoveryId: state.recovery.recoveryId };
       if (action === "dismiss") controlService.record({ ...base, type: "recovery.dismiss" });
       else controlService.record({ ...base, type: "recovery.resume", attempts: Object.fromEntries(Object.values(state.runs).filter(run => run.state === "recovery").map(run => [run.runId, crypto.randomUUID()])), bindingIds: Object.fromEntries(Object.values(state.threads).map(thread => [thread.threadId, crypto.randomUUID()])) });

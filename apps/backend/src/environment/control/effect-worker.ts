@@ -192,6 +192,8 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       const row = database.prepare(`SELECT e.* FROM effects e JOIN commands c USING(command_id)
         LEFT JOIN command_receipts r USING(command_id)
         WHERE e.state='pending' AND e.not_before<=? AND e.kind!='lifecycle.admit'
+        AND (e.kind NOT IN ('runtime.acquire','transcript.append','provider.start') OR NOT EXISTS(
+          SELECT 1 FROM orchestration_threads t WHERE t.thread_id=e.session_id AND json_extract(t.state_json,'$.shutdown')!='clean'))
         AND (e.depends_on IS NULL OR EXISTS(SELECT 1 FROM effects d WHERE d.effect_id=e.depends_on AND d.state='done'))
         AND NOT EXISTS(SELECT 1 FROM effects a WHERE a.session_id=e.session_id AND a.state='claimed' AND a.kind!='lifecycle.admit')
         ORDER BY COALESCE(r.accepted_sequence,c.created_at),e.ordinal,e.effect_id LIMIT 1`).get(options.clock()) as EffectRow | undefined;
@@ -216,8 +218,9 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         case "session.ensure": await options.swarm.ensureSession(effect.input); break;
         case "runtime.acquire": {
           const owner = loadState(database).threads[effect.threadId];
-          if (owner?.desired !== "running" || owner.shutdown !== "clean") { settle(row, "cancelled"); return; }
-          await acquire(owner.threadId, owner.bindingId ?? effect.bindingId, owner.generation); break;
+          if (owner?.generation !== effect.generation || owner.bindingId !== effect.bindingId) { settle(row, "done"); return; }
+          if (owner.desired !== "running" || owner.shutdown !== "clean") { settle(row, "cancelled"); return; }
+          await acquire(owner.threadId, effect.bindingId, effect.generation); break;
         }
         case "transcript.append": {
           const run = loadState(database).runs[effect.runId];
@@ -226,8 +229,10 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         }
         case "provider.start": {
           let state = loadState(database); const attempt = state.attempts[effect.attemptId];
-          if (!attempt || attempt.state !== "created") { settle(row, "cancelled"); return; }
+          if (!attempt) { settle(row, "cancelled"); return; }
           const run = state.runs[attempt.runId];
+          if (run.activeAttemptId !== attempt.attemptId || state.threads[effect.threadId]?.generation !== attempt.generation) { settle(row, "done"); return; }
+          if (attempt.state !== "created") { settle(row, "cancelled"); return; }
           const resource = await acquire(effect.threadId, attempt.bindingId, attempt.generation);
           let input = prepared.get(run.runId) ?? await append(run);
           const transfer=Object.values(loadState(database).transfers).find(t=>isLineageTransfer(t) && t.targetThreadId===run.threadId && t.targetRunId===run.runId && t.state==="resolved");
@@ -315,7 +320,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       const failure={...unavailable,message:error instanceof Error ? error.message:String(error)};
       const attemptId = "attemptId" in effect ? effect.attemptId : effect.kind === "runtime.acquire" || effect.kind === "transcript.append" ? Object.values(loadState(database).attempts).find(a => a.threadId === row.session_id && a.state !== "terminal")?.attemptId : undefined;
       if (effect.kind === "provider.compact") record({ type: "compaction.completed", ...result(row, "failed"), threadId: effect.threadId, attemptId: effect.attemptId, succeeded: false });
-      else if (effect.kind.startsWith("provider.") || effect.kind === "runtime.acquire" || effect.kind === "transcript.append") record({ type: "effect.failed", ...result(row, "failed"), threadId: row.session_id, attemptId, kind: effect.kind as CoreEffect["kind"], delivery: attemptedNative ? "unknown" : "not_dispatched" });
+      else if (effect.kind.startsWith("provider.") || effect.kind === "runtime.acquire" || effect.kind === "transcript.append") record({ type: "effect.failed", ...result(row, "failed"), threadId: row.session_id, attemptId, requestId: effect.kind === "provider.respond" ? effect.requestId : undefined, kind: effect.kind as CoreEffect["kind"], delivery: attemptedNative ? "unknown" : "not_dispatched" });
       if(effect.kind==="provider.start" && attemptId) {
         if(provedNotDispatched) await selectFallback(effect.threadId,attemptId,failure.message);
         else await fallbackSelections.get(attemptId);

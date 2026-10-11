@@ -8,6 +8,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { createAgentHttpRoutes } from '../http/routes/agent-http-routes.js';
 import { bindHttpPrincipal } from './http-principal.js';
+import { loadState } from '../../environment/control/orchestration/store.js';
 import { streamFixture, principal, session } from './__tests__/fixtures.js';
 
 // Failure cases: duplicate/lost acknowledgements repeat compaction or recovery;
@@ -22,8 +23,8 @@ async function fixture() {
   streams.sink.transaction(tx => streams.sink.append(tx, { topic: 'shell', sessionId: 'session', event: { type: 'session.upsert', session: session() } }));
   const swarm = {
     getAgent: () => ({ agentId: 'session', role: 'manager', profileId: 'project' }), listProfiles: () => [],
-    getRestartRecoverySnapshot: () => recovery,
-    resumeRestartRecovery: vi.fn(async () => ({ ...recovery, resumedAt: recovery.createdAt })), dismissRestartRecovery: vi.fn(async () => ({ ...recovery, dismissedAt: recovery.createdAt })),
+    getRestartRecoverySnapshot: () => loadState(streams.database).recovery,
+    resumeRestartRecovery: vi.fn(async () => loadState(streams.database).recovery), dismissRestartRecovery: vi.fn(async () => loadState(streams.database).recovery),
     emit: vi.fn(),
     controlSessionGoal: vi.fn(async () => ({ revision: 1, goal: null })),
     compactAgentContext: vi.fn(async () => undefined), smartCompactAgentContext: vi.fn(async () => ({ compacted: true })),
@@ -37,13 +38,15 @@ async function fixture() {
 describe('detail control acceptance', () => {
   it('publishes environment recovery without selecting a session and deduplicates decisions', async () => {
     const f = await fixture();
+    await f.core.controlService.execute(principal, 'session.send', { commandId: randomUUID(), sessionId: 'session', message: { text: 'Interrupted fixture turn', artifactIds: [] } }); await f.core.effectWorker.drain();
+    f.core.controlService.record({ type: 'environment.recover', commandId: 'fixture-boot', now: Date.parse(recovery.createdAt), recoveryId: recovery.recoveryId, bootId: recovery.bootId, reports: [] });
     expect(await f.rpc.execute(principal, 'recovery.get', {})).toEqual({ recovery });
     const input = { commandId, recoveryId: recovery.recoveryId, action: 'resume' };
     const a = await f.rpc.execute(principal, 'recovery.decide', input);
     const b = await f.rpc.execute(principal, 'recovery.decide', input);
     expect(a).toEqual(b); expect(a).toMatchObject({ method: 'recovery.decide', state: 'succeeded', sessionId: null });
     expect(f.swarm.resumeRestartRecovery).toHaveBeenCalledTimes(1);
-    expect(f.swarm.emit).toHaveBeenCalledExactlyOnceWith('restart_recovery_snapshot', { type: 'restart_recovery_snapshot', snapshot: { ...recovery, resumedAt: recovery.createdAt } });
+    expect(f.swarm.emit).toHaveBeenCalledExactlyOnceWith('restart_recovery_snapshot', { type: 'restart_recovery_snapshot', snapshot: { ...recovery, resumedAt: expect.any(String) } });
     await expect(f.rpc.execute(principal, 'recovery.decide', { ...input, recoveryId: 'old' })).rejects.toMatchObject({ code: 'CONFLICT' });
   });
   it('moves goal control into the existing receipt admission owner', async () => {

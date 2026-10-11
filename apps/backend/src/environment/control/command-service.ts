@@ -16,7 +16,7 @@ import type { ControlMethod, ControlService, LifecycleAdmission, Principal } fro
 import type { ControlCoreOptions, ControlEffect, InputRoutePort, PreparedLaunch } from "./effect-types.js";
 import type { ControlTransaction, EventSink } from "./event-sink.js";
 import { loadState } from "./orchestration/store.js";
-import type { CoreCommand, Run, Request } from "./orchestration/types.js";
+import type { CoreCommand, Run, Request, Thread } from "./orchestration/types.js";
 import { requestForChoice, requestSession } from "./orchestration/request-projection.js";
 
 export class ControlError extends Error implements RpcError {
@@ -73,6 +73,10 @@ export function readReceipt(sink: EventSink, commandId: string): CommandReceipt 
     { receipt_json: string } | undefined;
   if (!row) throw new ControlError("NOT_FOUND", "Command not found");
   return JSON.parse(row.receipt_json);
+}
+function assertInputShutdown(owner: Thread): void {
+  if (owner.shutdown === "quarantined" || (owner.desired === "stopped" && owner.shutdown !== "clean"))
+    throw new ControlError("CONFLICT", "Thread shutdown must be confirmed before input admission", true);
 }
 export function cancelCommand(sink: EventSink, tx: ControlTransaction, commandId: string, error: RpcError, clock: () => number): void {
   sink.database
@@ -261,6 +265,15 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,'lifecycle.admit',?,?,'claimed')")
           .run(input.commandId + ":" + ordinal, input.commandId, lane, ordinal, JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, ambiguousDelivery: input.ambiguousDelivery, ...(ordinal === 0 && input.frozenRequest !== undefined ? { frozenRequest: input.frozenRequest } : {}) }));
       }
+      if (input.command === "recovery.decide") {
+        const decision = input.request as RpcInput<"recovery.decide">;
+        const state = loadState(database);
+        if (state.recovery?.recoveryId !== decision.recoveryId) throw new ControlError("CONFLICT", "Recovery occurrence is no longer current");
+        const base = { commandId: input.commandId, now: options.clock(), recoveryId: decision.recoveryId };
+        sink.commitCommand(tx, decision.action === "dismiss" ? { ...base, type: "recovery.dismiss" } : { ...base, type: "recovery.resume",
+          attempts: Object.fromEntries(Object.values(state.runs).filter(run => run.state === "recovery").map(run => [run.runId, options.random()])),
+          bindingIds: Object.fromEntries(Object.keys(state.threads).map(id => [id, options.random()])) });
+      }
       for (const lane of lanes) {
         const sessionId = sessionIds.includes(lane) ? lane : "";
         if (sessionId && input.intent === "stop") {
@@ -341,6 +354,10 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     }
     return readReceipt(sink, commandId);
   };
+  const acceptedReceipt = (receipt: CommandReceipt): CommandReceipt => {
+    if (receipt.method === "session.choose" && receipt.error?.code === "CONFLICT") throw new ControlError("CONFLICT", receipt.error.message);
+    return receipt;
+  };
   const accept = (
     principal: Principal,
     method: "session.launch" | "session.send" | "session.choose" | "session.stop" | "worker.kill",
@@ -348,7 +365,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     prepared?: PreparedLaunch,
   ): CommandReceipt => {
     const request = canonicalRequest(method, input);
-    return sink.transaction((tx) => {
+    return acceptedReceipt(sink.transaction((tx) => {
       const duplicate = prior(principal, method, input.commandId, request.hash);
       if (duplicate) return duplicate;
       if (closed) throw new ControlError("UNAVAILABLE", "Control service is shutting down", true);
@@ -517,12 +534,16 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       ensureThread(tx, sessionId);
       if (message && inputId) {
         const owner = loadState(database).threads[sessionId];
+        assertInputShutdown(owner);
         if (owner.desired === "stopped") sink.commitCommand(tx, { type: "thread.resume", commandId, now, threadId: sessionId });
         const send = method === "session.send" ? input as RpcInput<"session.send"> : undefined;
         sink.commitCommand(tx, { type: "run.submit", commandId, now, threadId: sessionId, inputId, runId: `run-${commandId}`, attemptId: options.random(), bindingId: options.random(), input: message,
           source: send?.source, delivery: send?.delivery === "followUp" ? "queue" : "steer" });
       } else if (nativeRequest) {
-        sink.commitCommand(tx, { type: "request.respond", commandId, now, threadId: nativeRequest.threadId, requestId: nativeRequest.requestId, response: (input as RpcInput<"session.choose">).answers });
+        const response = sink.commitCommand(tx, { type: "request.respond", commandId, now, threadId: nativeRequest.threadId, requestId: nativeRequest.requestId, response: (input as RpcInput<"session.choose">).answers });
+        if (!response.effects.some(effect => effect.kind === "provider.respond")) return sink.updateReceipt(tx, commandId, {
+          state: "interrupted", error: { code: "CONFLICT", message: "Provider request expired", retryable: false },
+        });
       } else if (method === "session.stop" || method === "worker.kill") {
         if (target?.workerId) {
           if (!loadState(database).threads[target.workerId]) sink.commitCommand(tx, { type: "thread.create", commandId: `thread:${target.workerId}`, now, threadId: target.workerId, role: "worker", projectId: session!.project_id, managerId: sessionId });
@@ -534,7 +555,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       if (inputId)
         database.prepare("UPDATE control_inputs SET updated_sequence = ? WHERE input_id = ?").run(receipt.updatedSequence, inputId);
       return receipt;
-    });
+    }));
   };
   const readAuthorizedReceipt = (principal:Principal,commandId:string) => {
     const row=database.prepare("SELECT device_session_id FROM commands WHERE command_id=?").get(commandId) as {device_session_id:string}|undefined;
@@ -562,6 +583,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         const inputId = `input-${input.commandId}`;
         const base = { commandId:input.commandId, now:options.clock(), inputId, attemptId:options.random(), bindingId:options.random(), input:input.message };
         const owner = loadState(database).threads[input.threadId];
+        assertInputShutdown(owner);
         if (owner.desired === "stopped") sink.commitCommand(tx, { type:"thread.resume", commandId:input.commandId, now:options.clock(), threadId:input.threadId });
         if (input.assignment) sink.commitCommand(tx, { type:"worker.assign", ...base, ...input.assignment, workerThreadId:input.threadId, workerRunId:runId, authorized:true });
         else sink.commitCommand(tx, { type:"run.submit", ...base, threadId:input.threadId, runId, source:input.source, delivery:input.delivery ?? "queue" });
@@ -613,7 +635,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       const request = canonicalRequest(method, effective);
       const normalized: RpcInput<"session.launch" | "session.send" | "session.choose" | "session.stop" | "worker.kill"> = JSON.parse(request.normalized);
       const duplicate = sink.transaction(() => prior(principal, method, normalized.commandId, request.hash));
-      if (duplicate) return duplicate;
+      if (duplicate) return acceptedReceipt(duplicate);
       if (method !== "session.launch") {
         if (method === "session.choose") {
           if (options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Device session was revoked");
