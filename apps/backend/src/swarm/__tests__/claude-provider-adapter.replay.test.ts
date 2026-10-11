@@ -1,5 +1,5 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
@@ -15,6 +15,7 @@ import type { AgentDescriptor, AgentStatus } from "../types.js";
 import type { RuntimeSessionEvent, SwarmAgentRuntime } from "../runtime-contracts.js";
 import { RuntimeEventProjector } from "../runtime/runtime-event-projector.js";
 import { ConversationProjector } from "../session/conversation-projector.js";
+import { getConversationHistoryCacheFilePath } from "../session/conversation-history-cache.js";
 import { ClaudeProviderAdapter } from "../runtime/claude/claude-provider-adapter.js";
 import { createProviderBoundaryFixture } from "./provider-boundary-fixture.js";
 import { ClaudeRuntimeCreator } from "../runtime/claude/claude-runtime-creator.js";
@@ -184,12 +185,26 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       const assistant = entries.filter(entry => entry.customType === "swarm_conversation_entry" && entry.data.role === "assistant");
       expect(assistant).toHaveLength(1);
       expect(assistant[0].data).toMatchObject({ type: "conversation_message", role: "assistant", text: "Working", turnId: runId, source: "assistant_output" });
+      // The adapter settles its native process, tools, callbacks and canonical journal.
+      await adapter.close(binding);
+      expect(await adapter.drain(binding)).toEqual({ status: "clean" });
+      // This fixture owns the projector's derived cache writer separately.
+      await conversationProjector.flushPendingHistoryCacheWrites();
+      const cacheFile = getConversationHistoryCacheFilePath(descriptor.sessionFile);
+      const closedFiles = (await readdir(resources.root, { recursive: true })).sort();
+      expect(closedFiles).toContain(relative(resources.root, cacheFile));
+      const closedCache = await readFile(cacheFile, "utf8");
+      // Once both owners settle, no files or bytes change on another writer join.
+      await conversationProjector.flushPendingHistoryCacheWrites();
+      expect((await readdir(resources.root, { recursive: true })).sort()).toEqual(closedFiles);
+      expect(await readFile(cacheFile, "utf8")).toBe(closedCache);
+      expect(await readFile(descriptor.sessionFile, "utf8")).toBe(jsonl);
       if (process.env.FORGE_CLAUDE_REPLAY_EVIDENCE_DIR) {
         const dir = process.env.FORGE_CLAUDE_REPLAY_EVIDENCE_DIR; await mkdir(dir, { recursive: true });
         await writeFile(join(dir, `projection-${dispatch}.jsonl`), jsonl.replaceAll(resources.root, "<fixture>"));
         await writeFile(join(dir, `projection-${dispatch}.json`), JSON.stringify({ dispatch, statuses, events, endCount: onAgentEnd.mock.calls.length, assistant: assistant.map(entry => entry.data) }, null, 2));
       }
-    } finally { await runtime?.terminate(); await f.close(); await resources.cleanup(); }
+    } finally { await runtime?.terminate(); await f.close(); await conversationProjector.flushPendingHistoryCacheWrites(); await resources.cleanup(); }
   });
   it("resumes a prior durable conversation during creation under the new scope without opening another session", async () => {
     const resources = await createProviderBoundaryFixture();
