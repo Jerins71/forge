@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import { formatReasoningLevel } from '@/lib/reasoning-level-labels'
 import { compareModelPickerRows, toModelPickerRow, type ModelPickerRow, type ModelPickerTab } from './model-picker-catalog'
 import { ClaudeIcon, OpenAIIcon } from './provider-icons'
+import { ProviderHandoffDialog } from './ProviderHandoffDialog'
 import type { SessionModelPickerConfig } from './types'
 
 const FAVORITES_KEY = 'forge.modelPicker.favorites'
@@ -62,6 +63,7 @@ export function SessionModelPicker({ config }: { config: SessionModelPickerConfi
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [updateError, setUpdateError] = useState<string | null>(null)
+  const [pendingHandoff, setPendingHandoff] = useState<ModelPickerRow | null>(null)
   const { catalog, loading, error: loadError, refetch } = useManagerSelectionCatalog({
     originId: config.originId,
     httpClientRef: config.httpClientRef,
@@ -73,6 +75,7 @@ export function SessionModelPicker({ config }: { config: SessionModelPickerConfi
   useEffect(() => {
     setOpen(false)
     setUpdateError(null)
+    setPendingHandoff(null)
   }, [config.originId, config.sessionAgentId])
 
   const currentKey = encodeManagerModelValue(config.currentModel.provider, config.currentModel.modelId)
@@ -118,7 +121,21 @@ export function SessionModelPicker({ config }: { config: SessionModelPickerConfi
     if (!selection || row.unavailableReason) return
     setOpen(false)
     if (row.key === currentKey) return
+    // Another provider cannot resume this provider's thread: the context is handed off, with consent.
+    if (config.onSwitchProvider && selection.provider !== config.currentModel.provider) {
+      setUpdateError(null)
+      setPendingHandoff(row)
+      return
+    }
     void runUpdate(() => config.onUpdate(config.sessionAgentId, 'override', selection, row.defaultReasoningLevel))
+  }
+
+  const confirmHandoff = () => {
+    const row = pendingHandoff
+    const selection = row && decodeManagerModelValue(row.key)
+    setPendingHandoff(null)
+    if (!row || !selection) return
+    void runUpdate(() => config.onSwitchProvider?.(config.sessionAgentId, selection, row.defaultReasoningLevel))
   }
 
   const selectReasoning = (value: string) => {
@@ -196,6 +213,17 @@ export function SessionModelPicker({ config }: { config: SessionModelPickerConfi
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {pendingHandoff ? (
+        <ProviderHandoffDialog
+          sessionLabel={config.sessionLabel}
+          fromLabel={currentName}
+          toLabel={pendingHandoff.name}
+          toProviderLabel={pendingHandoff.providerLabel}
+          onConfirm={confirmHandoff}
+          onClose={() => setPendingHandoff(null)}
+        />
+      ) : null}
     </div>
   )
 }

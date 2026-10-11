@@ -62,6 +62,7 @@ export interface AgentSidebarProps {
   onPinSession?: (agentId: string, pinned: boolean) => void
   onRenameProfile?: (profileId: string, displayName: string) => void
   onForkSession?: (sourceAgentId: string, name?: string) => void
+  workerContinuation?: WorkerContinuation
   onMarkUnread?: (agentId: string) => void
   onMarkAllRead?: (profileId: string) => void
   onUpdateManagerModel?: (profileId: string, modelSelection: ManagerExactModelSelection, reasoningLevel?: ManagerReasoningLevel) => void
@@ -97,10 +98,21 @@ export interface WorkerRowProps {
   onDelete?: () => void
   onStop?: () => void
   onResume?: () => void
+  /** Continue a finished worker as a normal conversation. */
+  onContinue?: () => void
+  /** Why continuing is refused; the action stays visible, disabled, with this text. */
+  continueDisabledReason?: string
   highlightQuery?: string
 }
 
+/** Continuing a finished worker as a normal conversation, or the reason it is refused. */
+export interface WorkerContinuation {
+  onContinue: (workerId: string) => void
+  disabledReason?: string
+}
+
 export interface SessionContextMenuActionSource {
+  workerContinuation?: WorkerContinuation
   onStopSession?: (agentId: string) => void
   onResumeSession?: (agentId: string) => void
   onDeleteSession?: (agentId: string) => void
@@ -145,6 +157,7 @@ export interface SessionRowItemProps {
   onMarkUnread?: () => void
   onStopWorker?: (agentId: string) => void
   onResumeWorker?: (agentId: string) => void
+  workerContinuation?: WorkerContinuation
   highlightQuery?: string
   onPinSession?: (agentId: string, pinned: boolean) => void
   onPromoteToProjectAgent?: () => void
@@ -193,6 +206,7 @@ export interface ProfileGroupProps {
   onRequestRenameSession?: (agentId: string) => void
   onRequestRenameProfile?: (profileId: string) => void
   onForkSession?: (sourceAgentId: string) => void
+  workerContinuation?: WorkerContinuation
   onMarkUnread?: (agentId: string) => void
   onMarkAllRead?: (profileId: string) => void
   onChangeModel?: (profileId: string) => void

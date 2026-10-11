@@ -1,4 +1,4 @@
-import { Pause, Play, Trash2 } from 'lucide-react'
+import { MessageSquarePlus, Pause, Play, Trash2 } from 'lucide-react'
 import React from 'react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -18,6 +18,8 @@ export const WorkerRow = React.memo(function WorkerRow({
   onDelete,
   onStop,
   onResume,
+  onContinue,
+  continueDisabledReason,
   highlightQuery,
 }: WorkerRowProps) {
   const name = agent.displayName || agent.agentId
@@ -91,7 +93,11 @@ export const WorkerRow = React.memo(function WorkerRow({
         </div>
   )
 
-  if (!onDelete && !onStop && !onResume) return row
+  // A worker that is no longer producing output can carry on as a normal conversation.
+  const canContinue = Boolean(onContinue) && !isActive
+  const hasLifecycleAction = (isRunning && Boolean(onStop)) || (isStopped && Boolean(onResume))
+
+  if (!onDelete && !onStop && !onResume && !onContinue) return row
 
   return (
     <ContextMenu>
@@ -109,7 +115,16 @@ export const WorkerRow = React.memo(function WorkerRow({
             Resume
           </ContextMenuItem>
         ) : null}
-        {onDelete && ((isRunning && onStop) || (isStopped && onResume)) ? <ContextMenuSeparator /> : null}
+        {canContinue ? (
+          <ContextMenuItem disabled={Boolean(continueDisabledReason)} onSelect={() => onContinue?.()} className="items-start">
+            <MessageSquarePlus className="mr-2 mt-0.5 size-3.5" />
+            <span className="flex min-w-0 flex-col">
+              <span>Continue as conversation</span>
+              {continueDisabledReason ? <span className="max-w-56 whitespace-normal text-[11px] text-muted-foreground">{continueDisabledReason}</span> : null}
+            </span>
+          </ContextMenuItem>
+        ) : null}
+        {onDelete && (hasLifecycleAction || canContinue) ? <ContextMenuSeparator /> : null}
         {onDelete ? (
           <ContextMenuItem variant="destructive" onClick={() => onDelete()}>
             <Trash2 className="mr-2 size-3.5" />

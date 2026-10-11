@@ -45,6 +45,15 @@ export interface SessionModelPickerConfig {
     modelSelection?: ManagerExactModelSelection,
     reasoningLevel?: ManagerReasoningLevel,
   ) => void | Promise<void>
+  /**
+   * Present when the environment can transfer context. Choosing a model on another provider then
+   * hands the same session off after confirmation instead of overriding its model.
+   */
+  onSwitchProvider?: (
+    sessionAgentId: string,
+    modelSelection: ManagerExactModelSelection,
+    reasoningLevel?: ManagerReasoningLevel,
+  ) => void | Promise<void>
 }
 
 export interface SessionCoordinationPickerConfig {

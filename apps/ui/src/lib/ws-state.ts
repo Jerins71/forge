@@ -20,6 +20,7 @@ import type {
   ManagerToolActivityEvent,
   SessionAttention,
 } from '@forge/protocol'
+import type { SessionLineageSnapshot } from '@forge/protocol/environment-v2'
 import type { ConversationSubscriptionReason } from './ws-client/types'
 
 export type ConversationHistoryEntry = Extract<
@@ -136,6 +137,8 @@ export interface ManagerWsState {
   /** Secure execution authority keyed by manager session id. */
   secureSessionSnapshots: Record<string, SecureSessionSnapshot>
   restartRecovery: RestartRecoverySnapshot | null
+  /** Lineage, transfers and handoffs of the mounted session; null until its environment reports them. */
+  sessionLineage: SessionLineageSnapshot | null
   /** Session whose cached plan snapshot is suppressed until a fresh bootstrap/live snapshot arrives. */
   planSnapshotLoadingSessionId: string | null
   goalSnapshotLoadingSessionId: string | null
@@ -220,6 +223,7 @@ export function createInitialManagerWsState(targetAgentId: string | null): Manag
     goalSnapshots: {},
     secureSessionSnapshots: {},
     restartRecovery: null,
+    sessionLineage: null,
     planSnapshotLoadingSessionId: null,
     goalSnapshotLoadingSessionId: null,
     secureSessionSnapshotLoadingSessionId: null,

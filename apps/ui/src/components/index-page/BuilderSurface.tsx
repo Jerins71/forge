@@ -31,6 +31,8 @@ import {
   secureOutputQuarantineConfigFields,
 } from '@/components/chat/secure-session/output-quarantine'
 import { isSessionModelPickerEligible } from '@/components/chat/message-input/session-model-picker-eligibility'
+import { mergeBackUnsupportedReason } from '@/components/chat/lineage/lineage-presentation'
+import { contextTransferAvailability } from '@/lib/ws-client/context-transfers'
 import { isSecureSessionRuntimeSupported } from '@/components/index-page/secure-session-runtime-eligibility'
 import { shouldShowSecureSessionPicker } from '@/components/index-page/secure-session-picker-visibility'
 import { type MessageListHandle } from '@/components/chat/MessageList'
@@ -1828,6 +1830,24 @@ export function BuilderSurface({
     state.connected,
   ])
 
+  // Fork points, provider handoff, merge-back and worker continuation share one capability and one reason.
+  const selectedContextTransfers = contextTransferAvailability(environmentClient)
+  const contextTransferUnavailableReason = selectedContextTransfers.available ? undefined : selectedContextTransfers.reason
+  const sessionLineage = isActiveManager ? state.sessionLineage : null
+  const resolveSessionLabel = (sessionId: string) => {
+    const agent = state.agents.find((candidate) => candidate.agentId === sessionId)
+    return agent ? agent.sessionLabel || agent.displayName || undefined : undefined
+  }
+  const lineageParentId = sessionLineage?.lineage?.relationship === 'fork' ? sessionLineage.lineage.parentThreadId : null
+  const mergeBack = lineageParentId && activeAgentId
+    ? {
+        parentLabel: resolveSessionLabel(lineageParentId) ?? lineageParentId,
+        onMergeBack: () => session.handleMergeBack(activeAgentId),
+        inProgress: session.mergeBackSessionId === activeAgentId,
+        disabledReason: contextTransferUnavailableReason ?? mergeBackUnsupportedReason(sessionLineage) ?? undefined,
+      }
+    : null
+
   const sessionModelPicker =
     isActiveManager && isSessionModelPickerEligible(activeAgent, activeAgentProfile)
       ? {
@@ -1842,6 +1862,7 @@ export function BuilderSurface({
           modelConfigChangeKey: state.modelConfigChangeKey,
           connectionEpoch: state.connectionEpoch,
           onUpdate: session.handleUpdateSessionModel,
+          onSwitchProvider: contextTransferUnavailableReason ? undefined : session.handleSwitchSessionProvider,
         }
       : undefined
 
@@ -1900,6 +1921,14 @@ export function BuilderSurface({
     messageListRef,
   })
   const { replyTarget, setReplyTarget, messageForkTarget, setMessageForkTarget } = session
+  // The sidebar tree belongs to the primary environment, so its capability decides worker continuation.
+  const primaryContextTransfers = contextTransferAvailability(primary.client.getEnvironmentClient() ?? null)
+  const primaryContextTransferReason = primaryContextTransfers.available ? undefined : primaryContextTransfers.reason
+  const handleContinueSidebarWorker = localSidebarSession.handleContinueWorker
+  const workerContinuation = useMemo(
+    () => ({ onContinue: handleContinueSidebarWorker, disabledReason: primaryContextTransferReason }),
+    [handleContinueSidebarWorker, primaryContextTransferReason],
+  )
   const sideChatPanelProps = {
     environmentId: selectedEnvironmentId ?? '',
     sideChatAgentId: sideChat.sideChatAgentId,
@@ -2159,6 +2188,7 @@ export function BuilderSurface({
         onPinSession={localSidebarSession.handlePinSession}
         onRenameProfile={localSidebarSession.handleRenameProfile}
         onForkSession={localSidebarSession.handleForkSession}
+        workerContinuation={workerContinuation}
         onMarkUnread={localSidebarSession.handleMarkUnread}
         onMarkAllRead={localSidebarSession.handleMarkAllRead}
         onUpdateManagerModel={localSidebarSession.handleUpdateManagerModel}
@@ -2408,6 +2438,10 @@ export function BuilderSurface({
                   activeAgentRole: activeAgent?.role ?? null,
                   activeAgentCreatedAt: activeAgent?.createdAt ?? null,
                   activeAgentUpdatedAt: activeAgent?.updatedAt ?? null,
+                  lineage: sessionLineage,
+                  resolveSessionLabel,
+                  onOpenLineageSession: (sessionId) => panels.handleSelectAgent(sessionId, selectedEnvironmentId ?? undefined),
+                  mergeBack,
                   channelView: messageSourceView,
                   onChannelViewChange: setMessageSourceView,
                   contextWindowUsage: transcript.contextWindowUsage,
@@ -2806,6 +2840,12 @@ export function BuilderSurface({
                 fromMessageTimestamp: messageForkTarget.messageTimestamp
                   ? new Date(messageForkTarget.messageTimestamp).toLocaleString()
                   : undefined,
+                sourcePoints: [
+                  { id: 'message', label: 'This message', description: 'Later messages are left out of the fork.', selector: { kind: 'message', entryId: messageForkTarget.messageId } },
+                  { id: 'latest', label: 'Latest stable point', description: 'Everything settled in this session so far.', selector: { kind: 'latest_stable' } },
+                ],
+                modelPicker: sessionModelPicker,
+                transferUnavailableReason: contextTransferUnavailableReason,
               }
             : null
         }

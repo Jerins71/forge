@@ -71,6 +71,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
   onRequestRenameSession,
   onRequestRenameProfile,
   onForkSession,
+  workerContinuation,
   onMarkUnread,
   onMarkAllRead,
   onChangeModel,
@@ -107,12 +108,12 @@ export const ProfileGroup = React.memo(function ProfileGroup({
     onStopSession, onResumeSession, onDeleteSession, onArchiveSession, onRequestRenameSession, onForkSession,
     onMarkUnread, onPinSession, onPromoteToProjectAgent, onOpenProjectAgentSharing, onOpenProjectAgentSettings,
     onDemoteProjectAgent, onChangeSessionModel, onUseProjectDefault, mutedAgents, onToggleMute, hideCliSessions,
-    onToggleHideCliSessions,
+    onToggleHideCliSessions, workerContinuation,
   }), [
     onStopSession, onResumeSession, onDeleteSession, onArchiveSession, onRequestRenameSession, onForkSession,
     onMarkUnread, onPinSession, onPromoteToProjectAgent, onOpenProjectAgentSharing, onOpenProjectAgentSettings,
     onDemoteProjectAgent, onChangeSessionModel, onUseProjectDefault, mutedAgents, onToggleMute, hideCliSessions,
-    onToggleHideCliSessions,
+    onToggleHideCliSessions, workerContinuation,
   ])
   const hasAnySessions = sessions.length > 0 || inactiveRepoProjectAgents.length > 0 || remoteSessions.length > 0
   const defaultSession = sessions.find((s) => s.isDefault)
@@ -576,6 +577,7 @@ const ProfileSessionRow = React.memo(function ProfileSessionRow({
       onMarkUnread={menuActions.onMarkUnread}
       onStopWorker={actionSource.onStopSession}
       onResumeWorker={actionSource.onResumeSession}
+      workerContinuation={actionSource.workerContinuation}
       highlightQuery={highlightQuery}
       onPinSession={menuActions.onPinSession}
       onPromoteToProjectAgent={menuActions.onPromoteToProjectAgent}
