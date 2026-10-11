@@ -14,7 +14,7 @@ import type {
   RequestedDeliveryMode,
   SendMessageReceipt
 } from "./types.js";
-import type { ProviderRequirements, ToolHostBinding } from "./runtime/provider-contract.js";
+import type { ProviderAdapter, ProviderRequirements, ToolHostBinding } from "./runtime/provider-contract.js";
 import type { SecureRuntimeBinding } from "./secure-sessions/runtime/secure-runtime-binding.js";
 
 export interface RuntimeImageAttachment {
@@ -300,6 +300,7 @@ export interface SetPinnedContentOptions {
 export interface SwarmAgentRuntime {
   readonly descriptor: AgentDescriptor;
   readonly runtimeType?: "pi" | "cursor-sdk" | "codex" | "claude";
+  readonly providerAdapter?: ProviderAdapter;
 
   getStatus(): AgentStatus;
   getPendingCount(): number;
