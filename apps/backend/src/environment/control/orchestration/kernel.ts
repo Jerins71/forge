@@ -115,7 +115,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
   switch (command.type) {
     case "thread.create":
       if (state.threads[command.threadId]) break;
-      emit({ type: "thread.created", thread: { threadId: command.threadId, role: command.role, projectId: command.projectId, managerId: command.managerId, desired: "running", generation: 0, shutdown: "clean", nextRunSequence: 0 } }); break;
+      emit({ type: "thread.created", thread: { threadId: command.threadId, role: command.role, projectId: command.projectId, model: command.model, managerId: command.managerId, desired: "running", generation: 0, shutdown: "clean", nextRunSequence: 0 } }); break;
     case "run.submit": {
       const owner = thread(command.threadId);
       if (owner.desired !== "running" || owner.shutdown !== "clean") throw new Error("Thread shutdown must be confirmed before input admission");
@@ -180,7 +180,8 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     case "binding.drained": {
       const owner = thread(command.threadId); if (owner.bindingId !== command.bindingId) break;
       emit({ type: "thread.changed", thread: { ...owner, shutdown: command.status === "clean" ? "clean" : "quarantined", ...(command.status === "clean" ? { bindingId: undefined, activeRunId: undefined } : {}) } });
-      if (command.status === "clean" && owner.activeRunId && owner.desired === "stopped") finish(state.runs[owner.activeRunId], "cancelled"); break;
+      if (command.status === "clean" && owner.activeRunId && owner.desired === "stopped") finish(state.runs[owner.activeRunId], "cancelled");
+      if(command.status === "clean" && owner.desired === "running") advance(owner.threadId); break;
     }
     case "thread.resume": {
       const owner = thread(command.threadId); if (owner.shutdown !== "clean") throw new Error("Thread shutdown remains quarantined");

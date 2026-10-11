@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ContextHandoff } from '@forge/protocol/environment-v2';
+import type { ContextHandoff, ContextSourcePoint } from '@forge/protocol/environment-v2';
 import type { ConversationEntryEvent } from '../../../swarm/types.js';
 import { getEnvironmentHandoffDir } from '../../../swarm/storage/data-paths.js';
 import { shouldExcludeConversationMessageFromModelContext } from '../../../swarm/external-threads.js';
@@ -19,16 +19,21 @@ function render(entry:ConversationEntryEvent):string|undefined {
   }
   if(entry.type==='agent_message') return `Agent ${entry.fromAgentId ?? 'user'}: ${entry.text}`;
   if(entry.type==='activity_summary') return `Activity: ${entry.displaySummary}`;
-  return;
 }
-export async function materializeHandoff(input:{dataDir:string;transfer:LineageTransfer;entries:readonly ConversationEntryEvent[];coveredEntryIds:readonly string[];maxChars?:number;now:number}):Promise<{metadata:ContextHandoff;text:string}> {
+export async function materializeHandoff(input:{dataDir:string;transfer:LineageTransfer;entries:readonly ConversationEntryEvent[];sources?:readonly {sourcePoint:ContextSourcePoint;entries:readonly ConversationEntryEvent[];coveredEntryIds:readonly string[]}[];coveredEntryIds:readonly string[];maxChars?:number;now:number}):Promise<{metadata:ContextHandoff;text:string}> {
   const maxChars=input.maxChars ?? 32_000;if(!Number.isInteger(maxChars) || maxChars<128) throw new Error('Portable context budget must be at least 128 characters');
   const {transfer}=input;
-  // The cutoff is a count of canonical entries, independent of renderability and native turns.
-  const bounded=input.entries.slice(0,transfer.source.sequence);
-  if(transfer.source.entryId && (bounded.length ? entryIdentity(bounded[bounded.length-1]) : undefined)!==transfer.source.entryId) throw new Error('Canonical source cutoff changed or is unavailable');
-  const covered=new Set(input.coveredEntryIds);
-  const candidates=bounded.flatMap(e=>{const id=entryIdentity(e),text=render(e);return id && text && !covered.has(id)?[{id,text}]:[];});
+  // Every contributing canonical source is frozen separately; copied transcript prefixes are absent.
+  const sources=input.sources ?? [{sourcePoint:transfer.source,entries:input.entries,coveredEntryIds:input.coveredEntryIds}];
+  const seen=new Set<string>();
+  const perSource=sources.map(source=>{
+    const bounded=source.entries.slice(0,source.sourcePoint.sequence);
+    if(bounded.length!==source.sourcePoint.sequence || source.sourcePoint.entryId && entryIdentity(bounded.at(-1)!)!==source.sourcePoint.entryId) throw new Error('Canonical source cutoff changed or is unavailable');
+    const covered=new Set(source.coveredEntryIds);
+    const candidates=bounded.flatMap(e=>{const id=entryIdentity(e),text=render(e);if(!id || !text || covered.has(id) || seen.has(id)) return [];seen.add(id);return [{id,text}];});
+    return {sourcePoint:source.sourcePoint,candidates};
+  });
+  const candidates=perSource.flatMap(source=>source.candidates);
   const requested=candidates.map(e=>e.id);const selected:{id:string;text:string;partial:boolean}[]=[];
   const header=`Forge context transfer ${transfer.transferId} (${transfer.kind}). Historical context; credentials and tool grants excluded.\n`;
   const omission='[Earlier context omitted by the handoff budget.]\n';
@@ -44,7 +49,7 @@ export async function materializeHandoff(input:{dataDir:string;transfer:LineageT
   const sha256=digest(text),artifactRef=`${sha256}.json`;
   const metadata:ContextHandoff={handoffId:`handoff:${digest(transfer.transferId+':'+sha256)}`,transferId:transfer.transferId,artifactRef,sha256,createdAt:input.now,
     provenance:{source:'canonical_jsonl',renderer:'forge-portable-v1',credentials:'excluded',toolGrants:'excluded'},
-    coverage:{sourceThreadId:transfer.source.threadId,requestedEntryIds:requested,includedEntryIds:included,omittedEntryIds:omitted,partialEntryIds:partial},budget:{maxChars,usedChars:text.length,truncated}};
+    coverage:{sourceThreadId:transfer.source.threadId,requestedEntryIds:requested,includedEntryIds:included,omittedEntryIds:omitted,partialEntryIds:partial,sources:perSource.map(source=>{const requestedEntryIds=source.candidates.map(e=>e.id);return {sourcePoint:source.sourcePoint,requestedEntryIds,includedEntryIds:requestedEntryIds.filter(id=>included.includes(id)),omittedEntryIds:requestedEntryIds.filter(id=>omitted.includes(id)),partialEntryIds:requestedEntryIds.filter(id=>partial.includes(id))};})},budget:{maxChars,usedChars:text.length,truncated}};
   const dir=getEnvironmentHandoffDir(input.dataDir);await mkdir(dir,{recursive:true,mode:0o700});
   // Transfer identity participates in the payload address, so equal text from separate transfers
   // cannot accidentally share another transfer's immutable metadata.

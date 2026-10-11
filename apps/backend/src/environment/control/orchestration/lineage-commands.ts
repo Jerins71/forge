@@ -5,7 +5,7 @@ import type { EventSink } from '../event-sink.js';
 import type { ControlService, Principal } from '../control-types.js';
 import { loadState } from './store.js';
 import { lineageSnapshot, resolveSourcePoint } from './transfers.js';
-import { ControlError } from '../command-service.js';
+import { ControlError, readSession } from '../command-service.js';
 
 export const lineageMethods=['session.fork','session.provider.switch','session.mergeBack','worker.continue'] as const;
 export type LineageMethod=typeof lineageMethods[number];
@@ -17,7 +17,7 @@ export function createLineageCommands(sink:EventSink,options:ControlCoreOptions,
   };
   return {
     read(principal:Principal,input:RpcInput<'session.lineage.get'>):SessionLineageSnapshot {
-      check(principal,'session.lineage.get',input);const state=loadState(sink.database);if(!state.threads[input.sessionId]) throw new ControlError('NOT_FOUND','Conversation not found');return lineageSnapshot(state,input.sessionId);
+      check(principal,'session.lineage.get',input);const state=loadState(sink.database);if(!state.threads[input.sessionId]) readSession(sink,input.sessionId);return lineageSnapshot(state,input.sessionId);
     },
     async execute(principal:Principal,method:LineageMethod,input:RpcInput<LineageMethod>):Promise<CommandReceipt> {
       check(principal,method,input);
@@ -27,8 +27,12 @@ export function createLineageCommands(sink:EventSink,options:ControlCoreOptions,
       // Admission owns duplicate handling and receipt replay before this callback reads/materializes.
       const state=loadState(sink.database);const source=state.threads[sourceId];
       const projectId=source?.projectId;
-      await admit(principal,{commandId:input.commandId,command:method,request:input,sessionIds:[...new Set([input.sessionId,sourceId,targetId])],intent:'inspect',requiredScope:rpcScopes[method],receipt:{method,sessionId:targetId,projectId},receiptReplay:true,
+      await admit(principal,{commandId:input.commandId,command:method,request:input,sessionIds:[...new Set([input.sessionId,sourceId,targetId])].filter(id=>!!sink.database.prepare('SELECT 1 FROM control_sessions WHERE session_id=?').get(id)),intent:'inspect',requiredScope:rpcScopes[method],receipt:{method,sessionId:targetId,projectId},receiptReplay:true,
         preflight(){
+          if(!loadState(sink.database).threads[sourceId] && method!=='worker.continue') {
+            const row=readSession(sink,sourceId);const summary=JSON.parse(row.summary_json);
+            sink.transaction(tx=>sink.commitCommand(tx,{type:'thread.create',commandId:`lineage-source:${input.commandId}`,now:options.clock(),threadId:sourceId,role:'manager',projectId:row.project_id,model:summary.model}));
+          }
           const live=loadState(sink.database).threads[sourceId];
           if(!live) throw new ControlError('NOT_FOUND','Source conversation not found');
           if(method==='worker.continue' && (live.role!=='worker' || live.managerId!==input.sessionId || live.activeRunId)) throw new ControlError('CONFLICT','Continue requires a completed worker owned by this session');
@@ -39,6 +43,7 @@ export function createLineageCommands(sink:EventSink,options:ControlCoreOptions,
         const selector='sourcePoint' in input && input.sourcePoint ? input.sourcePoint : 'fromItemId' in input && input.fromItemId ? {kind:'message' as const,entryId:input.fromItemId}:{kind:'latest_stable' as const};
         if('fromItemId' in input && input.fromItemId && input.sourcePoint && (input.sourcePoint.kind!=='message' || input.sourcePoint.entryId!==input.fromItemId)) throw new ControlError('INVALID_INPUT','Fork sourcePoint conflicts with fromItemId');
         const point=resolveSourcePoint(loadState(sink.database),sourceId,selector,entries);
+        const source=loadState(sink.database).threads[sourceId];
         const model='model' in input && input.model ? {...input.model,thinkingLevel:input.model?.thinkingLevel ?? source?.model?.thinkingLevel ?? 'medium'} : source?.model;
         const kind:'fork'|'provider_switch'|'merge_back'=method==='session.provider.switch' ? 'provider_switch' : method==='session.mergeBack' ? 'merge_back':'fork';
         // Validate the same pure command before creating any file-backed target resources.
@@ -46,10 +51,10 @@ export function createLineageCommands(sink:EventSink,options:ControlCoreOptions,
         const {decide}=await import('./kernel.js');decide(loadState(sink.database),command);
         if(kind==='fork') {
           if(!options.swarm.prepareLineageSession) throw new ControlError('UNAVAILABLE','Lazy lineage session provisioner is unavailable');
-          await options.swarm.prepareLineageSession({kind:method==='worker.continue'?'continued_worker':'fork',commandId:input.commandId,sourceThreadId:sourceId,targetThreadId:targetId,title:'title' in input ? input.title:undefined,sourcePoint:point,model,...('purpose' in input ? {purpose:input.purpose}: {})});
+          await options.swarm.prepareLineageSession({kind:method==='worker.continue'?'continued_worker':'fork',commandId:input.commandId,sourceThreadId:sourceId,targetThreadId:targetId,title:'title' in input ? input.title:undefined,sourcePoint:point,historical:!!point.messageBounded || !point.nativeLatest,model,...('purpose' in input ? {purpose:input.purpose}: {})});
         }
         sink.transaction(tx=>sink.commitCommand(tx,command));
-        return {sessionId:targetId,projectId,transferId:command.transferId};
+        return {sessionId:targetId,projectId};
       });
       return getReceipt(principal,input.commandId);
     },

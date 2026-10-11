@@ -28,8 +28,10 @@ export type Transfer = WorkerTransfer | LineageTransfer;
 export type TransferEvent = { type: 'transfer.created' | 'transfer.resolving' | 'transfer.resolved' | 'transfer.failed' | 'transfer.dispatch_marked' | 'transfer.consumed' | 'transfer.unknown' | 'transfer.superseded'; transfer: Transfer };
 export type LineageEvent = TransferEvent | { type: 'handoff.recorded'; handoff: ContextHandoff };
 export type TransferCommand =
+  | { type:'transfer.fallback'; threadId:string; failedAttemptId:string; attemptId:string; bindingId:string; transferId:string; targetModel:AgentDescriptor['model']; source:ResolvedSourcePoint; reason:string }
   | { type: 'transfer.create'; transferId: string; kind: LineageTransfer['kind']; source: ResolvedSourcePoint; targetThreadId: string; targetModel?: AgentDescriptor['model']; continueWorker?: boolean; authorized: boolean }
-  | { type: 'transfer.resolve'; transferId: string; attemptId: string }
+  | { type: 'transfer.resolve'; transferId: string; attemptId: string; strategy?:'native_fork'|'portable_context'|'delta_context'; error?:ContextTransfer['error'] }
+  | {type:'transfer.interrupted';transferId:string}
   | { type: 'transfer.resolved'; transferId: string; attemptId: string; strategy: 'native_fork' | 'portable_context' | 'delta_context'; handoff?: ContextHandoff; binding?: ProviderBinding }
   | { type: 'transfer.failed'; transferId: string; attemptId: string; error: NonNullable<ContextTransfer['error']> }
   | { type: 'transfer.consume'; transferId: string; attemptId: string };
@@ -66,15 +68,36 @@ export function resolveSourcePoint(state: CoreState, threadId: string, selector:
     ...(attempt && state.bindings[attempt.bindingId] ? {bindingId:attempt.bindingId,turn:attempt.turn} : {}),
     ...(selector.kind === 'message' ? {messageBounded:true} : {}), nativeLatest:latest };
 }
-export function planTransferResolution(state: CoreState, transfer: LineageTransfer, capabilities: ProviderCapabilities): { strategy:'native_fork'|'portable_context'|'delta_context'; prior?: ProviderBinding; coveredEntryIds:string[]; coveredRunIds:string[]; through?:ProviderTurnRef } {
-  const bindings = Object.values(state.bindings).filter(b => b.scope.threadId === transfer.targetThreadId && b.capabilities.provider === capabilities.provider && (!transfer.targetModel || !b.model || b.model.modelId === transfer.targetModel.modelId));
+export function planTransferResolution(state: CoreState, transfer: LineageTransfer, capabilities?: ProviderCapabilities): { strategy:'native_fork'|'portable_context'|'delta_context'; prior?: ProviderBinding; coveredEntryIds:string[]; coveredRunIds:string[]; through?:ProviderTurnRef } {
+  const bindings = Object.values(state.bindings).filter(b => b.scope.threadId === transfer.targetThreadId && (capabilities ? b.capabilities.provider === capabilities.provider : transfer.targetModel && b.model?.provider === transfer.targetModel.provider) && (!transfer.targetModel || b.model?.modelId === transfer.targetModel.modelId));
   const prior = bindings.sort((a,b) => a.scope.generation-b.scope.generation).at(-1);
   const sourceBinding = transfer.source.bindingId ? state.bindings[transfer.source.bindingId] : undefined;
   // Exact turns are expressible by the adapter. Latest-only adapters may explicitly reject `through`.
-  const native = transfer.kind === 'fork' && !transfer.source.messageBounded && sourceBinding?.capabilities.provider === capabilities.provider && capabilities.native.fork && (transfer.source.turn || transfer.source.nativeLatest);
+  const native = capabilities && transfer.kind === 'fork' && !transfer.source.messageBounded && sourceBinding?.capabilities.provider === capabilities.provider && capabilities.native.fork && (transfer.source.turn || transfer.source.nativeLatest);
   return { strategy:native ? 'native_fork' : transfer.kind === 'merge_back' || prior ? 'delta_context' : 'portable_context', prior,
     coveredEntryIds:prior?.contextCoverage?.[transfer.source.threadId] ?? [], coveredRunIds:prior?.nativeRunIds ?? [],
     ...(native && transfer.source.turn ? {through:transfer.source.turn} : {}) };
+}
+
+/** Effective context retains immutable ancestor cutoffs and accepted merge deltas. */
+export function handoffSourcePoints(state:CoreState,transfer:LineageTransfer):ContextSourcePoint[] {
+  const points=new Map<string,ContextSourcePoint>();const visiting=new Set<string>();
+  const collect=(point:ContextSourcePoint,inherit:boolean)=>{
+    if(points.size>=1000) throw new Error('Context ancestry exceeds the explicit source budget');
+    if(visiting.has(point.threadId)) return;
+    const prior=points.get(point.threadId);if(prior && prior.sequence>=point.sequence) return;
+    visiting.add(point.threadId);
+    if(inherit) {
+      const lineage=state.threads[point.threadId]?.lineage;if(lineage) collect(lineage.basePoint,true);
+      const run=point.runId && state.runs[point.runId];
+      for(const incoming of Object.values(state.transfers)) if(isLineageTransfer(incoming) && incoming.kind==='merge_back' && incoming.targetThreadId===point.threadId && incoming.state==='consumed') {
+        const target=incoming.targetRunId && state.runs[incoming.targetRunId];
+        if(run && target && target.sequence<=run.sequence) collect(incoming.source,false);
+      }
+    }
+    visiting.delete(point.threadId);points.set(point.threadId,publicPoint(point));
+  };
+  collect(transfer.source,transfer.kind!=='merge_back');return [...points.values()];
 }
 
 /** Policy only. The existing kernel retains all run, dispatch and shutdown ownership. */
@@ -82,6 +105,21 @@ export function decideTransfer(initial: CoreState, command: CoreCommand & Transf
   let state=initial; const decision:Decision={events:[],effects:[]};
   const emit=(fact:Omit<TransferEvent,'commandId'|'at'> | {type:'handoff.recorded';handoff:ContextHandoff} | {type:'thread.changed';thread:CoreState['threads'][string]})=>{const event={...fact,commandId:command.commandId,at:command.now} as LifecycleEvent;state=evolve(state,event);decision.events.push(event);};
   const apply=(nested:CoreCommand)=>{const next=decide(state,nested);state=next.events.reduce(evolve,state);decision.events.push(...next.events);decision.effects.push(...next.effects);};
+  if(command.type==='transfer.fallback') {
+    const failed=state.attempts[command.failedAttemptId];const run=failed && state.runs[failed.runId];const owner=state.threads[command.threadId];
+    if(!failed || !run || !owner || run.activeAttemptId!==failed.attemptId || failed.generation!==owner.generation || failed.state!=='terminal' || failed.delivery!=='pending' || run.outcome!=='failed' || (run.fallbackCount ?? 0)>=1) return decision;
+    apply({type:'transfer.create',commandId:command.commandId,now:command.now,transferId:command.transferId,kind:'provider_switch',source:command.source,targetThreadId:owner.threadId,targetModel:command.targetModel,authorized:true});
+    const transfer=state.transfers[command.transferId];
+    if(isLineageTransfer(transfer)) emit({type:'transfer.created',transfer:{...transfer,sourceProvider:state.bindings[failed.bindingId]?.capabilities.provider,error:{code:'SOURCE_UNAVAILABLE',message:command.reason}}});
+    for(const assignment of Object.values(state.assignments)) if(assignment.workerRunId===run.runId && !assignment.resultRef) {
+      const event:LifecycleEvent={type:'assignment.started',assignment:{...assignment,state:'running',terminalAt:undefined,outcome:undefined},commandId:command.commandId,at:command.now};state=evolve(state,event);decision.events.push(event);
+    }
+    const nextRun={...run,state:'queued' as const,outcome:undefined,activeAttemptId:command.attemptId,fallbackCount:(run.fallbackCount ?? 0)+1};
+    const nextAttempt={attemptId:command.attemptId,runId:run.runId,threadId:owner.threadId,bindingId:command.bindingId,generation:state.threads[owner.threadId].generation,state:'created' as const,delivery:'pending' as const,lastSequence:-1};
+    for(const fact of [{type:'run.recovery',run:nextRun},{type:'attempt.created',attempt:nextAttempt}] as const) {const event={...fact,commandId:command.commandId,at:command.now} as LifecycleEvent;state=evolve(state,event);decision.events.push(event);}
+    if(!owner.bindingId) {emit({type:'thread.changed',thread:{...state.threads[owner.threadId],activeRunId:run.runId,bindingId:command.bindingId}});decision.effects.push({kind:'runtime.acquire',threadId:owner.threadId,bindingId:command.bindingId,generation:nextAttempt.generation});}
+    return decision;
+  }
   if(command.type==='transfer.create') {
     if(!command.authorized) throw new Error('Authorized context transfer required');
     const existing=state.transfers[command.transferId];
@@ -107,19 +145,23 @@ export function decideTransfer(initial: CoreState, command: CoreCommand & Transf
     }
     target=state.threads[command.targetThreadId];
     if(Object.values(state.transfers).some(t=>isLineageTransfer(t) && t.targetThreadId===target.threadId && !['consumed','superseded','failed'].includes(t.state))) throw new Error('Target has an unresolved context transfer');
-    emit({type:'transfer.created',transfer:{transferId:command.transferId,kind:command.kind,source:command.source,basePoint,targetThreadId:target.threadId,targetGeneration:target.generation,targetModel:command.targetModel ?? target.model,sourceProvider:command.source.bindingId ? state.bindings[command.source.bindingId]?.capabilities.provider:undefined,targetProvider:command.targetModel?.provider ?? target.model?.provider,strategy:'unresolved',state:'pending',createdAt:command.now}});
+    emit({type:'transfer.created',transfer:{transferId:command.transferId,kind:command.kind,source:command.source,basePoint,targetThreadId:target.threadId,targetGeneration:target.generation,targetModel:command.targetModel ?? target.model,sourceProvider:command.source.bindingId ? state.bindings[command.source.bindingId]?.capabilities.provider : source.model?.provider,targetProvider:command.targetModel?.provider ?? target.model?.provider,strategy:'unresolved',state:'pending',createdAt:command.now}});
     return decision;
   }
   const transfer=state.transfers[command.transferId];if(!transfer || !isLineageTransfer(transfer)) throw new Error('Unknown lineage transfer');
+  if(command.type==='transfer.interrupted') {
+    if(transfer.state==='resolving') emit({type:transfer.strategy==='native_fork'?'transfer.unknown':'transfer.created',transfer:{...transfer,state:transfer.strategy==='native_fork'?'unknown':'pending',resolutionAttemptId:undefined,...(transfer.strategy==='native_fork'?{error:{code:'DELIVERY_UNKNOWN' as const,message:'Native fork resolution was interrupted; inspect before retrying'}}:{})}});
+    return decision;
+  }
   const owner=state.threads[transfer.targetThreadId];const attempt=state.attempts[command.attemptId];
   if(command.type==='transfer.consume') {
     const event=reconcileTransfer(state,transfer,command.commandId,command.now);if(event) decision.events.push(event);return decision;
   }
   if(!attempt || attempt.threadId!==transfer.targetThreadId || owner.generation!==attempt.generation || attempt.state!=='created' || owner.desired!=='running') return decision;
   if(command.type==='transfer.resolve') {
-    if(transfer.state!=='pending' && transfer.state!=='resolved') return decision;
-    emit({type:'transfer.resolving',transfer:{...transfer,state:'resolving',targetGeneration:attempt.generation,targetBindingId:attempt.bindingId,targetRunId:attempt.runId,resolutionAttemptId:attempt.attemptId}});
-  } else if(transfer.resolutionAttemptId===command.attemptId && transfer.state==='resolving') {
+    if(transfer.state!=='pending' && transfer.state!=='resolved' && !(transfer.state==='resolving' && transfer.resolutionAttemptId===command.attemptId)) return decision;
+    emit({type:'transfer.resolving',transfer:{...transfer,state:'resolving',strategy:command.strategy ?? transfer.strategy,error:command.error ?? transfer.error,targetGeneration:attempt.generation,targetBindingId:attempt.bindingId,targetRunId:attempt.runId,resolutionAttemptId:attempt.attemptId}});
+  } else if((transfer.resolutionAttemptId===command.attemptId && transfer.state==='resolving') || command.type==='transfer.failed' && transfer.state==='pending') {
     if(command.type==='transfer.failed') emit({type:command.error.code==='DELIVERY_UNKNOWN'?'transfer.unknown':'transfer.failed',transfer:{...transfer,state:command.error.code==='DELIVERY_UNKNOWN'?'unknown':'failed',error:command.error}});
     else {
       if(command.strategy==='native_fork' && !command.binding || command.strategy!=='native_fork' && !command.handoff) throw new Error('Transfer resolution artifact is missing');
@@ -158,7 +200,12 @@ export function reconcileBindingCoverage(initial:CoreState,command:CoreCommand,d
     if(event.type==='run.terminal') {const attempt=state.attempts[event.run.activeAttemptId];const binding=attempt && state.bindings[attempt.bindingId];if(binding && attempt.delivery==='dispatched' && !(binding.nativeRunIds ?? []).includes(event.run.runId)) update({...binding,nativeRunIds:[...(binding.nativeRunIds ?? []),event.run.runId]});}
     if(event.type==='transfer.consumed' && isLineageTransfer(event.transfer)) {
       const t=event.transfer;const binding=t.consumingAttemptId && state.bindings[state.attempts[t.consumingAttemptId].bindingId];const handoff=t.handoffId && state.handoffs[t.handoffId];
-      if(binding && handoff) {const covered=handoff.coverage.includedEntryIds.filter(id=>!handoff.coverage.partialEntryIds.includes(id));update({...binding,contextCoverage:{...binding.contextCoverage,[handoff.coverage.sourceThreadId]:[...new Set([...(binding.contextCoverage?.[handoff.coverage.sourceThreadId] ?? []),...covered])]}});}
+      if(binding && handoff) {
+        const contextCoverage={...binding.contextCoverage};
+        const sources=handoff.coverage.sources ?? [{sourcePoint:{threadId:handoff.coverage.sourceThreadId,sequence:0},...handoff.coverage}];
+        for(const source of sources) {const covered=source.includedEntryIds.filter(id=>!source.partialEntryIds.includes(id));const id=source.sourcePoint.threadId;contextCoverage[id]=[...new Set([...(contextCoverage[id] ?? []),...covered])];}
+        update({...binding,contextCoverage});
+      }
     }
   }
   return decision;

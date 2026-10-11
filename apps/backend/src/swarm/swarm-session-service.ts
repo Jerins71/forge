@@ -84,15 +84,11 @@ export interface SwarmSessionServiceOptions {
   ) => Promise<void>;
   clearSessionPlan: (descriptor: ProvisionedSessionDescriptor) => Promise<void>;
   clearSessionGoal: (descriptor: ProvisionedSessionDescriptor) => Promise<void>;
-  copySessionHistoryForFork: (
-    sourceSessionFile: string,
-    targetSessionFile: string,
-    fromMessageId?: string
-  ) => Promise<void>;
   copySecureAccessForFork?: (sourceId: string, forkId: string) => Promise<() => Promise<void>>;
   copyPinnedMessagesForFork: (
     sourceDescriptor: ProvisionedSessionDescriptor,
-    forkedDescriptor: ProvisionedSessionDescriptor
+    forkedDescriptor: ProvisionedSessionDescriptor,
+    sourcePoint?: import("@forge/protocol/environment-v2").ContextSourcePoint
   ) => Promise<void>;
   writeForkedSessionMemoryHeader: (
     sourceDescriptor: AgentDescriptor,
@@ -134,7 +130,7 @@ export class SwarmSessionService {
       const profile = this.options.profiles.get(input.projectId); if (!profile) throw new Error("Controlled project is missing.");
       // Existing admission checks reject unsafe/pending cleanup; getOrCreate never installs a competing writer.
       await this.options.provisioner.provisionSession({ descriptor: existing as ProvisionedSessionDescriptor, retainOnError: true,
-        initializeRuntime: async () => { if (existing.status !== "stopped") await this.options.getOrCreateRuntimeForDescriptor(existing); } });
+        initializeRuntime: undefined });
       await this.options.saveStore(); return { profile: { ...profile }, sessionAgent: cloneDescriptor(existing) };
     }
     const dataDir = this.options.dataDir; if (!dataDir) throw new Error("Controlled session data directory is missing.");
@@ -190,7 +186,7 @@ export class SwarmSessionService {
       descriptor: sessionDescriptor,
       retainOnError: Boolean(sessionDescriptor.controlCommandId),
       beforeRuntime: sessionDescriptor.controlCommandId ? this.options.saveStore : undefined,
-      initializeRuntime: async () => {
+      initializeRuntime: sessionDescriptor.controlCommandId ? undefined : async () => {
         const runtime = await this.options.getOrCreateRuntimeForDescriptor(sessionDescriptor);
         sessionDescriptor.contextUsage = runtime.getContextUsage();
       }
@@ -350,10 +346,11 @@ export class SwarmSessionService {
 
   async forkSession(
     sourceAgentId: string,
-    options?: { label?: string; sessionAgentId?: string; fromMessageId?: string; sessionPurpose?: AgentDescriptor["sessionPurpose"] }
+    options?: { label?: string; sessionAgentId?: string; fromMessageId?: string; sessionPurpose?: AgentDescriptor["sessionPurpose"]; sourcePoint?: import("@forge/protocol/environment-v2").ContextSourcePoint; historical?: boolean; model?: AgentDescriptor["model"]; controlCommandId?: string; continueWorker?: boolean }
   ): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
-    const sourceDescriptor = this.options.getRequiredSessionDescriptor(sourceAgentId);
-    const profile = this.options.profiles.get(sourceDescriptor.profileId);
+    const sourceDescriptor = options?.continueWorker ? this.options.getDescriptor?.(sourceAgentId) : this.options.getRequiredSessionDescriptor(sourceAgentId);
+    if (!sourceDescriptor) throw new Error("Unknown lineage source");
+    const profile = this.options.profiles.get(sourceDescriptor.profileId ?? sourceDescriptor.managerId);
     const normalizedFromMessageId = options?.fromMessageId?.trim() || undefined;
     if (!profile) {
       throw new Error(`Unknown profile: ${sourceDescriptor.profileId}`);
@@ -363,13 +360,14 @@ export class SwarmSessionService {
       label: options?.label,
       sessionAgentId: options?.sessionAgentId,
       name: options?.label,
-      sessionPurpose: options?.sessionPurpose
+      sessionPurpose: options?.sessionPurpose,
+      controlCommandId: options?.controlCommandId
     });
     const forkedDescriptor = prepared.sessionDescriptor as ProvisionedSessionDescriptor;
     if (options?.sessionPurpose === "side_chat") {
       forkedDescriptor.sideChatSourceAgentId = sourceDescriptor.agentId;
     }
-    forkedDescriptor.model = { ...sourceDescriptor.model };
+    forkedDescriptor.model = { ...(options?.model ?? sourceDescriptor.model) };
     forkedDescriptor.modelOrigin = sourceDescriptor.modelOrigin;
     forkedDescriptor.managerPosture = sourceDescriptor.managerPosture ?? DEFAULT_MANAGER_POSTURE;
     forkedDescriptor.managerPostureOrigin =
@@ -389,7 +387,7 @@ export class SwarmSessionService {
     // current notes because they cannot establish the requested earlier boundary.
     const notesStore = this.options.dataDir ? new TaskNotesStore({ dataDir: this.options.dataDir }) : undefined;
     const sourceNotes = await notesStore?.forActor({
-      profileId: sourceDescriptor.profileId, sessionAgentId: sourceDescriptor.agentId,
+      profileId: forkedDescriptor.profileId, sessionAgentId: sourceDescriptor.role === "worker" ? sourceDescriptor.managerId : sourceDescriptor.agentId,
       actorAgentId: sourceDescriptor.agentId,
     }).snapshot();
     let rollbackSecureAccess: (() => Promise<void>) | undefined;
@@ -398,31 +396,23 @@ export class SwarmSessionService {
       ensureSessionMemoryFile: false,
       ensureProfileMemoryFile: false,
       beforeRuntime: async () => {
-        rollbackSecureAccess = await this.options.copySecureAccessForFork?.(sourceDescriptor.agentId, forkedDescriptor.agentId);
-        await this.options.copySessionHistoryForFork(
-          sourceDescriptor.sessionFile,
-          forkedDescriptor.sessionFile,
-          normalizedFromMessageId
-        );
+        if (sourceDescriptor.role === "manager") rollbackSecureAccess = await this.options.copySecureAccessForFork?.(sourceDescriptor.agentId, forkedDescriptor.agentId);
         if (notesStore && sourceNotes) {
           await notesStore.forActor({ profileId: forkedDescriptor.profileId,
             sessionAgentId: forkedDescriptor.agentId, actorAgentId: forkedDescriptor.agentId,
-          }).restoreFork(sourceNotes, { fromMessageId: normalizedFromMessageId });
+          }).restoreFork(sourceNotes, { fromMessageId: normalizedFromMessageId ?? (options?.historical ? options.sourcePoint?.entryId : undefined) });
         }
-        await this.options.copyPinnedMessagesForFork(sourceDescriptor, forkedDescriptor);
+        if (sourceDescriptor.role === "manager") await this.options.copyPinnedMessagesForFork(sourceDescriptor as ProvisionedSessionDescriptor, forkedDescriptor, options?.sourcePoint);
         await this.options.writeForkedSessionMemoryHeader(
           sourceDescriptor,
           forkedDescriptor.agentId,
-          normalizedFromMessageId
+          normalizedFromMessageId ?? (options?.historical ? options.sourcePoint?.entryId : undefined)
         );
       },
       beforeRollbackRemoval: async () => {
         await rollbackSecureAccess?.();
       },
-      initializeRuntime: async () => {
-        const runtime = await this.options.getOrCreateRuntimeForDescriptor(forkedDescriptor);
-        forkedDescriptor.contextUsage = runtime.getContextUsage();
-      }
+
     });
 
     await this.options.saveStore();
@@ -440,6 +430,15 @@ export class SwarmSessionService {
       profile: { ...profile },
       sessionAgent: cloneDescriptor(forkedDescriptor)
     };
+  }
+
+  async prepareLineageSession(input: { kind: "fork" | "continued_worker"; sourceThreadId: string; targetThreadId: string; commandId: string; title?: string; sourcePoint: import("@forge/protocol/environment-v2").ContextSourcePoint; historical?: boolean; model?: AgentDescriptor["model"]; purpose?: "side_chat" }): Promise<void> {
+    const existing=this.options.getDescriptor?.(input.targetThreadId);
+    if(existing) {
+      if(existing.controlCommandId!==input.commandId) throw new Error("Lineage target ownership conflicts");
+      return;
+    }
+    await this.forkSession(input.sourceThreadId,{sessionAgentId:input.targetThreadId,label:input.title,sourcePoint:input.sourcePoint,historical:input.historical,fromMessageId:input.historical ? input.sourcePoint.entryId : undefined,model:input.model,controlCommandId:input.commandId,sessionPurpose:input.purpose,continueWorker:input.kind==="continued_worker"});
   }
 
   private async ensureEffectiveDelegationRoster(

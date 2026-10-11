@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { getSessionDir } from "./data-paths.js";
 import {
   clearAllPins as clearAllSessionPins,
@@ -173,6 +174,7 @@ export class SessionPinCoordinator {
   async copyPinsForFork(
     sourceDescriptor: SessionPinOwner,
     forkedDescriptor: SessionPinOwner,
+    sourcePoint?: import("@forge/protocol/environment-v2").ContextSourcePoint,
   ): Promise<void> {
     const sourceRegistry = await loadPins(this.getSessionDir(sourceDescriptor));
     if (Object.keys(sourceRegistry.pins).length === 0) {
@@ -180,7 +182,7 @@ export class SessionPinCoordinator {
       return;
     }
 
-    const forkedMessageIds = await collectConversationMessageIdsFromSessionFile(forkedDescriptor.sessionFile);
+    const forkedMessageIds = sourcePoint ? await this.sourceMessageIdsAtPoint(sourceDescriptor,sourcePoint) : await collectConversationMessageIdsFromSessionFile(forkedDescriptor.sessionFile);
     const filteredRegistry: PinRegistry = {
       version: 1,
       pins: Object.fromEntries(
@@ -192,6 +194,14 @@ export class SessionPinCoordinator {
       await savePins(this.getSessionDir(forkedDescriptor), filteredRegistry);
     }
     this.setRegistry(forkedDescriptor.agentId, filteredRegistry);
+  }
+
+  private async sourceMessageIdsAtPoint(source:SessionPinOwner,point:import("@forge/protocol/environment-v2").ContextSourcePoint):Promise<Set<string>> {
+    if(point.threadId!==source.agentId) throw new Error("Pin fork source conflicts");
+    const entries=(await readFile(source.sessionFile,"utf8")).split("\n").filter(Boolean).map(line=>JSON.parse(line) as {id?:string;customType?:string;data?:{type?:string;id?:string}}).filter(e=>e.customType==="swarm_conversation_entry");
+    const bounded=entries.slice(0,point.sequence);
+    if(point.entryId && bounded.at(-1)?.id!==point.entryId) throw new Error("Pin source cutoff is unavailable");
+    return new Set(bounded.flatMap(e=>e.data?.type==="conversation_message" ? [e.data.id ?? e.id!]:[]));
   }
 
   async pinSession(agentId: string, pinned: boolean): Promise<{ pinnedAt: string | null }> {

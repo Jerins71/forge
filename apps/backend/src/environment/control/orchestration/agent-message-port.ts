@@ -30,7 +30,7 @@ export function createCoreAgentMessagePort({ controlService,sink,artifacts,swarm
           planStep:input.planAssignment ? { planId:input.planAssignment.planRunId,stepId:input.planAssignment.stepKey } : undefined }
         : undefined;
       const accepted = await controlService.submitInput({ commandId,threadId:input.target.agentId,
-        thread:{ role:input.target.role,projectId:input.target.profileId ?? input.sender.profileId ?? input.sender.agentId,...(input.target.role === "worker" ? { managerId:input.target.managerId } : {}) },
+        thread:{ role:input.target.role,model:input.target.model,projectId:input.target.profileId ?? input.sender.profileId ?? input.sender.agentId,...(input.target.role === "worker" ? { managerId:input.target.managerId } : {}) },
         message:{ text:message.text,artifactIds:artifactsRows.map(row => row.artifactId) },delivery:input.delivery === "steer" ? "steer" : "queue",artifactRows:artifactsRows,
         prepared:{ runtimeMessage,presentation:input.presentation,requiresSecureRuntime:input.requiresSecureRuntime,parentContext:input.parentContext },assignment });
       return { runId:accepted.runId,receipt:receiptFor(input.target.agentId,accepted.receipt.commandId),assignment:findWorkerAssignment(loadState(sink.database),input.target.agentId) };

@@ -18,6 +18,7 @@ describe('durable context transfer contract', () => {
       coverage: { sourceThreadId: 's', requestedEntryIds: ['a','b'], includedEntryIds: ['b'], omittedEntryIds: ['a'], partialEntryIds: [] },
       budget: { maxChars: 1024, usedChars: 256, truncated: true } }
     expect(Value.Check(ContextHandoffSchema, handoff)).toBe(true)
+    expect(Value.Check(ContextHandoffSchema, { ...handoff, coverage: { ...handoff.coverage, sources: [{ sourcePoint: { threadId: 'ancestor', sequence: 2, entryId: 'b' }, requestedEntryIds: ['a','b'], includedEntryIds: ['b'], omittedEntryIds: ['a'], partialEntryIds: [] }] } })).toBe(true)
     expect(Value.Check(ContextHandoffSchema, { ...handoff, provenance: { ...handoff.provenance, credentials: 'inherited' } })).toBe(false)
   })
 })

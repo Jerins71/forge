@@ -3,8 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { CONVERSATION_ENTRY_TYPE, ConversationTimeline, copySessionHistoryForFork } from "../session/conversation-timeline.js";
+import { CONVERSATION_ENTRY_TYPE, ConversationTimeline } from "../session/conversation-timeline.js";
 import type { ConversationMessageEvent } from "../types.js";
 
 const createdDirs: string[] = [];
@@ -142,56 +141,4 @@ describe("ConversationTimeline", () => {
     expect(appended.parentId).toBe("prior-runtime-entry");
   });
 
-  it("copies full session history for forks while preserving malformed, blank, and non-JSON lines", async () => {
-    const root = await createTempDir("conversation-timeline-");
-    const sourceSessionFile = join(root, "source.jsonl");
-    const targetSessionFile = join(root, "nested", "target.jsonl");
-    const lines = [
-      buildSessionHeader(root),
-      buildConversationEntry("message-1"),
-      "not-json",
-      "",
-      JSON.stringify({ type: "message", id: "runtime-entry" }),
-      buildConversationEntry("message-2")
-    ];
-    writeFileSync(sourceSessionFile, `${lines.join("\n")}\n`, "utf8");
-
-    await copySessionHistoryForFork({ sourceSessionFile, targetSessionFile });
-
-    const sourceLines = readFileSync(sourceSessionFile, "utf8").split("\n");
-    const targetLines = readFileSync(targetSessionFile, "utf8").split("\n");
-    const sourceHeader = JSON.parse(sourceLines[0] ?? "{}") as { id?: string };
-    const targetHeader = JSON.parse(targetLines[0] ?? "{}") as { id?: string };
-    expect(targetHeader.id).toBeTruthy();
-    expect(targetHeader.id).not.toBe(sourceHeader.id);
-    expect(targetLines.slice(1)).toEqual(sourceLines.slice(1));
-  });
-
-  it("assigns a new Pi/provider session identity to copied fork history", async () => {
-    const root = await createTempDir("conversation-timeline-");
-    const sourceSessionFile = join(root, "source.jsonl");
-    const targetSessionFile = join(root, "target.jsonl");
-    const partialTargetSessionFile = join(root, "partial-target.jsonl");
-    writeFileSync(
-      sourceSessionFile,
-      [buildSessionHeader(root, "source-session-id"), buildConversationEntry("message-1")].join("\n") + "\n",
-      "utf8"
-    );
-
-    await copySessionHistoryForFork({ sourceSessionFile, targetSessionFile });
-    await copySessionHistoryForFork({
-      sourceSessionFile,
-      targetSessionFile: partialTargetSessionFile,
-      fromMessageId: "message-1",
-    });
-
-    const sourceSession = SessionManager.open(sourceSessionFile);
-    const forkedSession = SessionManager.open(targetSessionFile);
-    const partialForkedSession = SessionManager.open(partialTargetSessionFile);
-    expect(sourceSession.getSessionId()).toBe("source-session-id");
-    expect(forkedSession.getSessionId()).not.toBe(sourceSession.getSessionId());
-    expect(partialForkedSession.getSessionId()).not.toBe(sourceSession.getSessionId());
-    expect(partialForkedSession.getSessionId()).not.toBe(forkedSession.getSessionId());
-    expect(readFileSync(targetSessionFile, "utf8")).toContain("message-1");
-  });
 });

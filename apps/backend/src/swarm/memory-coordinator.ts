@@ -205,8 +205,8 @@ export class MemoryCoordinator {
     const sourceLabel = sourceDescriptor.sessionLabel ?? sourceDescriptor.agentId;
     const profileId = sourceDescriptor.profileId ?? sourceDescriptor.agentId;
     const forkHistoryNote = fromMessageId
-      ? `Parent session conversation history was copied through message ${fromMessageId} at fork time.`
-      : "Parent session conversation history was duplicated at fork time.";
+      ? `A durable context transfer references parent history through message ${fromMessageId} at fork time.`
+      : "A durable context transfer references the parent conversation at its stable fork point.";
     const headerTemplate = await this.options.resolvePromptWithFallback(
       "operational",
       "forked-session-header",

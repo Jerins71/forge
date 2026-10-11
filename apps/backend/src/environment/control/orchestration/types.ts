@@ -32,6 +32,7 @@ export interface Run {
   state: "queued" | "running" | "terminal" | "recovery";
   activeAttemptId: string;
   entryId?: string;
+  fallbackCount?: number;
   outcome?: "completed" | "interrupted" | "cancelled" | "failed" | "dismissed";
 }
 export interface Attempt {
@@ -73,7 +74,7 @@ type Envelope = { commandId: string; now: number };
 export type CoreCommand = Envelope & (
   | TransferCommand
   | AssignmentCommand
-  | { type: "thread.create"; threadId: string; role: Thread["role"]; projectId: string; managerId?: string }
+  | { type: "thread.create"; threadId: string; role: Thread["role"]; projectId: string; managerId?: string; model?: Thread["model"] }
   | { type: "thread.stop" | "thread.resume"; threadId: string }
   | { type: "run.submit"; threadId: string; runId: string; inputId: string; attemptId: string; bindingId: string; input: Run["input"]; source?: Run["source"]; delivery: Run["delivery"] }
   | { type:"run.cancel"; threadId:string; runId:string }

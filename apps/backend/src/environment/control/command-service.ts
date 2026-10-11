@@ -130,7 +130,7 @@ export function canonicalRequest(method: string, input: unknown): { normalized: 
 
 export interface InternalInput {
   commandId: string; threadId: string; message: Run["input"]; source?: Run["source"]; delivery?: Run["delivery"];
-  thread?: { role: "manager" | "worker"; projectId: string; managerId?: string };
+  thread?: { role: "manager" | "worker"; projectId: string; managerId?: string; model?: import("../../swarm/types.js").AgentDescriptor["model"] };
   prepared?: { runtimeMessage: Omit<import("../../swarm/runtime-contracts.js").RuntimeUserMessage, "attachments">;
     presentation: import("../../swarm/turn-context-coordinator.js").InboundTurnContextInput; requiresSecureRuntime?: boolean; parentContext?: import("../../swarm/core-agent-message-port.js").CoreAgentMessagePort extends { submit(input:infer I):unknown } ? I extends { parentContext?: infer P } ? P : never : never };
   artifactRows?: readonly import("./effect-types.js").InputArtifact[];
@@ -152,7 +152,8 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
   const ensureThread = (tx: ControlTransaction, sessionId: string) => {
     if (loadState(database).threads[sessionId]) return;
     const session = readSession(sink, sessionId);
-    sink.commitCommand(tx, { type: "thread.create", commandId: `thread:${sessionId}`, now: options.clock(), threadId: sessionId, projectId: session.project_id, role: "manager" });
+    const summary=JSON.parse(session.summary_json);
+    sink.commitCommand(tx, { type: "thread.create", model:summary.model ? {provider:summary.model.provider,modelId:summary.model.modelId,thinkingLevel:summary.model.thinkingLevel}:undefined, commandId: `thread:${sessionId}`, now: options.clock(), threadId: sessionId, projectId: session.project_id, role: "manager" });
   };
   const lifecycleOperations = new Map<string, Promise<unknown>>();
   // These callbacks have no replayable effect. A lost process may have completed

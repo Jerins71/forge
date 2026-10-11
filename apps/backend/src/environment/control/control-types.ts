@@ -90,10 +90,11 @@ export interface SwarmControlPort {
   }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }>;
   acquireProvider(scope: ProviderScope, conversation?: ProviderConversationRef, model?: import("../../swarm/types.js").AgentDescriptor["model"]): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
   /** Returns an unopened target. Only the core may capability-check and invoke native fork. */
+  selectProviderFallback?(threadId: string, currentModel?: import("../../swarm/types.js").AgentDescriptor["model"]): Promise<import("../../swarm/types.js").AgentDescriptor["model"] | undefined>;
   prepareProvider?(scope: ProviderScope, model?: import("../../swarm/types.js").AgentDescriptor["model"]): Promise<{ adapter: ProviderAdapter; input: ProviderOpenInput }>;
   readTransferEntries?(threadId: string): Promise<import("../../swarm/types.js").ConversationEntryEvent[]>;
   /** Descriptor/resources only: no provider, credential, or implicit tool-grant acquisition. */
-  prepareLineageSession?(input: { kind: "fork" | "continued_worker"; sourceThreadId: string; targetThreadId: string; commandId: string; title?: string; sourcePoint: import("@forge/protocol/environment-v2").ContextSourcePoint; model?: import("../../swarm/types.js").AgentDescriptor["model"]; purpose?: "side_chat" }): Promise<void>;
+  prepareLineageSession?(input: { kind: "fork" | "continued_worker"; sourceThreadId: string; targetThreadId: string; commandId: string; title?: string; historical?: boolean; sourcePoint: import("@forge/protocol/environment-v2").ContextSourcePoint; model?: import("../../swarm/types.js").AgentDescriptor["model"]; purpose?: "side_chat" }): Promise<void>;
   enqueuePresentation?(threadId:string,runId:string,presentation:import("../../swarm/turn-context-coordinator.js").InboundTurnContextInput):void;
   extractWorkerResult?(threadId:string,runId:string,inputEntryId:string):Promise<{ entryId:string; resultText:string }>;
   applyChoice(input: {

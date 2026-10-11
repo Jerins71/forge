@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync, closeSync, existsSync, openSync, readSync, statSync, writeFileSync } from "node:fs";
-import { mkdir, open as openFile, writeFile } from "node:fs/promises";
+import { mkdir, open as openFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { ConversationEntryEvent } from "../types.js";
 import { isEnoentError } from "../../utils/fs-errors.js";
@@ -41,13 +41,6 @@ export interface ImmediateCustomEntryTimelineResult {
   entryId: string;
   parentId: string | null;
   headerCreated: boolean;
-}
-
-export interface CopySessionHistoryForForkOptions {
-  sourceSessionFile: string;
-  targetSessionFile: string;
-  fromMessageId?: string;
-  omittedCustomTypes?: readonly string[];
 }
 
 export class ConversationTimeline {
@@ -159,54 +152,6 @@ export class ConversationTimeline {
 
 }
 
-export async function copySessionHistoryForFork(options: CopySessionHistoryForForkOptions): Promise<void> {
-  await mkdir(dirname(options.targetSessionFile), { recursive: true });
-
-  const sourceHandle = await openFile(options.sourceSessionFile, "r").catch((error: unknown) => {
-    if (isEnoentError(error)) {
-      return undefined;
-    }
-    throw error;
-  });
-
-  if (!sourceHandle) {
-    if (options.fromMessageId) {
-      throw new Error("Message not found in session history");
-    }
-
-    await writeFile(options.targetSessionFile, "", "utf8");
-    return;
-  }
-
-  const omittedCustomTypes = new Set(options.omittedCustomTypes ?? []);
-  const droppedEntryParentIdMap = new Map<string, string | null>();
-  const targetHandle = await openFile(options.targetSessionFile, "w");
-  let foundForkPoint = !options.fromMessageId;
-
-  try {
-    for await (const line of sourceHandle.readLines()) {
-      const reachedForkPoint =
-        options.fromMessageId !== undefined && isForkTargetConversationEntryLine(line, options.fromMessageId);
-      const forkLine = buildForkSessionHistoryLine(line, omittedCustomTypes, droppedEntryParentIdMap);
-
-      if (forkLine !== undefined) {
-        await targetHandle.write(`${forkLine}\n`);
-      }
-
-      if (reachedForkPoint) {
-        foundForkPoint = true;
-        break;
-      }
-    }
-  } finally {
-    await Promise.allSettled([sourceHandle.close(), targetHandle.close()]);
-  }
-
-  if (!foundForkPoint) {
-    throw new Error("Message not found in session history");
-  }
-}
-
 export async function collectConversationMessageIdsFromSessionFile(sessionFile: string): Promise<Set<string>> {
   const messageIds = new Set<string>();
 
@@ -270,153 +215,6 @@ export function parseConversationMessageEntryLine(line: string): { id?: string }
   }
 
   return undefined;
-}
-
-function buildForkSessionHistoryLine(
-  line: string,
-  omittedCustomTypes: ReadonlySet<string>,
-  droppedEntryParentIdMap: Map<string, string | null>
-): string | undefined {
-  const trimmedLine = line.trim();
-  if (trimmedLine.length === 0) {
-    return line;
-  }
-
-  let parsedEntry: unknown;
-  try {
-    parsedEntry = JSON.parse(trimmedLine);
-  } catch {
-    return line;
-  }
-
-  if (isRecordLike(parsedEntry) && parsedEntry.type === "session") {
-    // A fork inherits conversation history, not the source runtime identity.
-    // Pi forwards this ID as provider session-id and x-client-request-id, so
-    // copying it lets concurrently running branches share request identity.
-    return JSON.stringify({ ...parsedEntry, id: randomUUID() });
-  }
-
-  if (shouldDropSessionHistoryLineForFork(parsedEntry, omittedCustomTypes)) {
-    const entryLink = parseSessionEntryLink(parsedEntry);
-    if (entryLink?.id) {
-      const survivingParentId = resolveForkParentId(entryLink.parentId, droppedEntryParentIdMap);
-      droppedEntryParentIdMap.set(entryLink.id, survivingParentId ?? null);
-    }
-    return undefined;
-  }
-
-  const rewrittenEntry = rewriteForkParentIdForRetainedEntry(parsedEntry, droppedEntryParentIdMap);
-  return rewrittenEntry ? JSON.stringify(rewrittenEntry) : line;
-}
-
-function shouldDropSessionHistoryLineForFork(parsedEntry: unknown, omittedCustomTypes: ReadonlySet<string>): boolean {
-  if (
-    isRecordLike(parsedEntry) &&
-    parsedEntry.type === "custom" &&
-    typeof parsedEntry.customType === "string" &&
-    omittedCustomTypes.has(parsedEntry.customType)
-  ) {
-    return true;
-  }
-
-  return isForkExcludedCodexParentCardEntry(parsedEntry);
-}
-
-function isForkExcludedCodexParentCardEntry(parsedEntry: unknown): boolean {
-  if (
-    !isRecordLike(parsedEntry) ||
-    parsedEntry.type !== "custom" ||
-    parsedEntry.customType !== CONVERSATION_ENTRY_TYPE
-  ) {
-    return false;
-  }
-
-  const data = parsedEntry.data;
-  if (!isRecordLike(data) || data.type !== "conversation_message" || data.role !== "system") {
-    return false;
-  }
-
-  const externalThreadContext = data.externalThreadContext;
-  return (
-    isRecordLike(externalThreadContext) &&
-    externalThreadContext.type === "codex_app_server" &&
-    externalThreadContext.excludeFromModelContext === true
-  );
-}
-
-function rewriteForkParentIdForRetainedEntry(
-  parsedEntry: unknown,
-  droppedEntryParentIdMap: ReadonlyMap<string, string | null>
-): Record<string, unknown> | undefined {
-  const entryLink = parseSessionEntryLink(parsedEntry);
-  if (!entryLink || entryLink.parentId === undefined) {
-    return undefined;
-  }
-
-  const resolvedParentId = resolveForkParentId(entryLink.parentId, droppedEntryParentIdMap);
-  if (resolvedParentId === entryLink.parentId) {
-    return undefined;
-  }
-
-  return {
-    ...entryLink.entry,
-    parentId: resolvedParentId,
-  };
-}
-
-function parseSessionEntryLink(parsedEntry: unknown):
-  | { entry: Record<string, unknown>; id?: string; parentId?: string | null }
-  | undefined {
-  if (!isRecordLike(parsedEntry)) {
-    return undefined;
-  }
-
-  const id =
-    typeof parsedEntry.id === "string" && parsedEntry.id.trim().length > 0 ? parsedEntry.id : undefined;
-  const parentId =
-    parsedEntry.parentId === null
-      ? null
-      : typeof parsedEntry.parentId === "string" && parsedEntry.parentId.trim().length > 0
-        ? parsedEntry.parentId
-        : undefined;
-
-  if (id === undefined && parentId === undefined) {
-    return undefined;
-  }
-
-  return { entry: parsedEntry, id, parentId };
-}
-
-function resolveForkParentId(
-  parentId: string | null | undefined,
-  droppedEntryParentIdMap: ReadonlyMap<string, string | null>
-): string | null | undefined {
-  if (parentId === undefined || parentId === null) {
-    return parentId;
-  }
-
-  let resolvedParentId: string | null = parentId;
-  const visitedParentIds = new Set<string>();
-
-  while (resolvedParentId !== null && droppedEntryParentIdMap.has(resolvedParentId)) {
-    if (visitedParentIds.has(resolvedParentId)) {
-      break;
-    }
-
-    visitedParentIds.add(resolvedParentId);
-    resolvedParentId = droppedEntryParentIdMap.get(resolvedParentId) ?? null;
-  }
-
-  return resolvedParentId;
-}
-
-function isForkTargetConversationEntryLine(line: string, fromMessageId: string): boolean {
-  const conversationEntry = parseConversationMessageEntryLine(line);
-  if (!conversationEntry) {
-    return false;
-  }
-
-  return conversationEntry.id === fromMessageId;
 }
 
 export async function appendImmediateCustomEntryViaTimeline(

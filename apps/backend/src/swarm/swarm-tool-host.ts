@@ -52,6 +52,7 @@ export interface SwarmToolSideEffectEvent {
 }
 
 export interface SwarmToolHost extends HistoryRecallToolHost {
+  lineage?: import("./lineage-tools.js").CoreLineagePort;
   isSecureSessionsEnabledForAgent?(agentId: string): boolean;
   listAgents(): AgentDescriptor[];
   getContextMode(callerAgentId: string): ContextMode;

@@ -1,3 +1,4 @@
+import { buildLineageTools } from "./lineage-tools.js";
 import { buildHistoryRecallTools } from "./history-recall-tool.js";
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -403,6 +404,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
   }
 
   const managerOnly: ToolDefinition[] = [
+    ...buildLineageTools(host.lineage, descriptor),
     buildUpdateWorkGraphTool(host, descriptor),
     buildAcceptWorkGraphNodeTool(host, descriptor),
     buildUpdatePlanTool(host, descriptor),

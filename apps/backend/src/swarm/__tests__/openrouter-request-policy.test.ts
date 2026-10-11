@@ -1,4 +1,4 @@
-import { SwarmSpecialistFallbackManager } from "../swarm-specialist-fallback-manager.js";
+import { SpecialistFallbackPolicy } from "../specialist-fallback-policy.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { installPiProviderContextImageResize } from "../runtime/pi/pi-runtime-creator.js";
 import type { SecureRuntimeBinding } from "../secure-sessions/runtime/secure-runtime-binding.js";
@@ -111,14 +111,10 @@ describe("OpenRouter request boundary (real Pi HTTP serialization, synthetic tra
     expect(shouldRetrySpecialistSpawnWithFallback(new Error("429 rate limit"), { provider: "openrouter", modelId: model.id })).toBe(false);
     expect(shouldRetrySpecialistSpawnWithFallback(new Error("invalid api key"), { provider: "openrouter", modelId: model.id })).toBe(false);
     expect(shouldRetrySpecialistSpawnWithFallback(new Error("429 rate limit"), { provider: "openai", modelId: "gpt-4.1" })).toBe(true);
-    const getRuntime = vi.fn();
-    const fallback = new SwarmSpecialistFallbackManager({
-      descriptors: new Map([["worker", { role: "worker", model: { provider: "openrouter", modelId: model.id } }]]), getRuntime,
-    } as never);
-    expect(await fallback.maybeRecoverWorkerWithSpecialistFallback({
-      agentId: "worker", errorMessage: "429 rate limit", sourcePhase: "prompt_dispatch",
-      handleRuntimeStatus: async () => {}, handleRuntimeAgentEnd: async () => {},
-    })).toBe(false);
-    expect(getRuntime).not.toHaveBeenCalled();
+    const capacity=vi.fn(model=>model);
+    const worker={role:'worker',model:{provider:'openrouter',modelId:model.id},delegationFallbackModel:{provider:'openai',modelId:'gpt-4.1'}} as import('../types.js').AgentDescriptor;
+    const fallback = new SpecialistFallbackPolicy({descriptors:new Map(),resolveSpecialistRosterForProfile:async()=>[],resolveSpawnModelWithCapacityFallback:capacity});
+    expect(await fallback.resolveSpecialistFallbackModelForDescriptor(worker)).toBeUndefined();expect(capacity).not.toHaveBeenCalled();
+
   });
 });

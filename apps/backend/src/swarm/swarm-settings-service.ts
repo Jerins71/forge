@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { AuthCredential } from "@earendil-works/pi-coding-agent";
 import {
   type OpenAIBrokerInviteRedeemResponse,
@@ -44,13 +43,6 @@ import { pickDirectory as pickNativeDirectory } from "./directory-picker.js";
 import { ProjectResourceSettingsStore } from "./project-resource-settings.js";
 import { ProjectWorkspaceResolver } from "./project-workspace-resolver.js";
 import { normalizeThinkingLevelForModelDescriptor, resolveModelDescriptorFromPreset } from "./catalog/model-presets.js";
-import {
-  appendModelChangeContinuityRequest,
-  createModelChangeContinuityRequest,
-  findLatestUnappliedModelChangeContinuityRequestForSession,
-  inferModelChangeContinuityRuntimeKind,
-  loadModelChangeContinuityState
-} from "./runtime/model-change-continuity.js";
 import { SECURE_RUNTIME_PROVIDER_UNSUPPORTED_MESSAGE } from "./secure-sessions/runtime/secure-runtime-binding.js";
 import {
   getManagedModelProviderCredentialAvailability,
@@ -99,6 +91,9 @@ type ManagerRuntimeRecycleDisposition = "recycled" | "deferred" | "none";
 type SessionDescriptor = AgentDescriptor & { role: "manager"; profileId: string };
 
 export interface SwarmSettingsServiceOptions {
+  /** Core records the provider transition and fences the old binding before metadata changes. */
+  canUseSecureModel?: (model: AgentDescriptor["model"]) => boolean;
+  switchProviderContext?: (agentId: string, model: AgentDescriptor["model"]) => Promise<void>;
   config: SwarmConfig;
   profiles: Map<string, ManagerProfile>;
   skillMetadataService: SkillMetadataService;
@@ -1511,7 +1506,7 @@ export class SwarmSettingsService {
     for (const mutation of effectiveModelMutations) {
       if (
         this.options.hasActiveSecureSession(mutation.session.agentId)
-        && inferModelChangeContinuityRuntimeKind(mutation.targetModel) !== "pi"
+        && !this.options.canUseSecureModel?.(mutation.targetModel)
       ) {
         throw new Error(SECURE_RUNTIME_PROVIDER_UNSUPPORTED_MESSAGE);
       }
@@ -1521,39 +1516,9 @@ export class SwarmSettingsService {
       model: { ...mutation.session.model },
       modelOrigin: mutation.session.modelOrigin
     }));
-    const now = getNow(this.options.now);
-    const continuityWrites = await Promise.all(
-      effectiveModelMutations.map(async (mutation) => {
-        const continuityState = await loadModelChangeContinuityState(mutation.session.sessionFile);
-        const latestPendingRequest = findLatestUnappliedModelChangeContinuityRequestForSession({
-          sessionAgentId: mutation.session.agentId,
-          requests: continuityState.requests,
-          applied: continuityState.applied
-        });
-        const createdAt = now();
-        return {
-          session: mutation.session,
-          sourceModel: cloneModelDescriptor(mutation.session.model),
-          targetModel: cloneModelDescriptor(mutation.targetModel),
-          request: createModelChangeContinuityRequest({
-            requestId: randomUUID(),
-            createdAt,
-            sessionAgentId: mutation.session.agentId,
-            sourceModel: latestPendingRequest?.sourceModel ?? mutation.session.model,
-            targetModel: mutation.targetModel
-          })
-        };
-      })
-    );
-
-    for (const pendingWrite of continuityWrites) {
-      await appendModelChangeContinuityRequest({
-        sessionFile: pendingWrite.session.sessionFile,
-        cwd: pendingWrite.session.cwd,
-        request: pendingWrite.request,
-        now: this.options.now
-      });
-    }
+    const continuityWrites = effectiveModelMutations.map(mutation=>({session:mutation.session,sourceModel:cloneModelDescriptor(mutation.session.model),targetModel:cloneModelDescriptor(mutation.targetModel)}));
+    if(continuityWrites.length && !this.options.switchProviderContext) throw new Error("Durable model context transfer service is not composed");
+    for(const change of continuityWrites) await this.options.switchProviderContext!(change.session.agentId,change.targetModel);
 
     const recycledSessions: string[] = [];
     const deferredSessions: string[] = [];
@@ -1594,25 +1559,8 @@ export class SwarmSettingsService {
       );
     }
 
-    for (const pendingWrite of continuityWrites) {
-      try {
-        const recycleDisposition = await this.options.applyManagerRuntimeRecyclePolicy(
-          pendingWrite.session.agentId,
-          "model_change"
-        );
-        if (recycleDisposition === "recycled") {
-          recycledSessions.push(pendingWrite.session.agentId);
-        } else if (recycleDisposition === "deferred") {
-          deferredSessions.push(pendingWrite.session.agentId);
-        }
-      } catch (error) {
-        deferredSessions.push(pendingWrite.session.agentId);
-        recycleFailures.push({
-          agentId: pendingWrite.session.agentId,
-          error: errorToMessage(error)
-        });
-      }
-    }
+    // The core owns binding shutdown/acquisition. Metadata changes never recycle a second runtime.
+    deferredSessions.push(...continuityWrites.map(change=>change.session.agentId));
 
     if (recycleFailures.length > 0) {
       this.options.logDebug("manager:model_change:recycle_failed", {

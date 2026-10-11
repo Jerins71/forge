@@ -16,7 +16,6 @@ async function setup() {
   const notes = (actorAgentId = source.agentId, sessionAgentId = source.agentId) => store.forActor({ profileId: 'project', sessionAgentId, actorAgentId })
   await notes().write({ path: 'checkpoint.md', text: 'accepted source state' })
   await writeFile(source.sessionFile, 'canonical transcript')
-  const copySessionHistoryForFork = vi.fn(async () => { await notes().write({ path: 'checkpoint.md', text: 'later source state' }) })
   const options = {
     withRuntimeShutdownBarrier: async (_id: string, operation: () => Promise<unknown>) => operation(),
     stopSessionInternal: vi.fn(async () => ({ terminatedWorkerIds: [], unsafeShutdownAgentIds: [] })),
@@ -26,7 +25,7 @@ async function setup() {
     provisioner: { provisionSession: async (input: { beforeRuntime: () => Promise<void>; initializeRuntime: () => Promise<void> }) => { await input.beforeRuntime(); await input.initializeRuntime() } },
     getOrCreateRuntimeForDescriptor: async () => ({ getContextUsage: () => undefined }),
     resolveGlobalDelegationRosterId: async () => 'balanced',
-    copySessionHistoryForFork, copyPinnedMessagesForFork: vi.fn(async () => undefined),
+    copyPinnedMessagesForFork: vi.fn(async () => undefined),
     writeForkedSessionMemoryHeader: vi.fn(async () => undefined), saveStore: vi.fn(async () => undefined),
     emitSessionLifecycle: vi.fn(), emitAgentsSnapshot: vi.fn(), emitProfilesSnapshot: vi.fn(),
     cancelAllPendingChoicesForAgent: vi.fn(), clearSessionGoal: vi.fn(async () => undefined),
