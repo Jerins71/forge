@@ -1,5 +1,8 @@
+import type { ProviderObservation, ProviderTurnRef } from "@forge/protocol";
 import type { RuntimeSessionEvent, RuntimeSessionMessage } from "../../runtime-contracts.js";
 import { buildCodexItemDisplayPayload, redactCodexMcpSensitiveText, resolveCodexDetailToolName } from "../../codex-app-server/codex-app-server-event-normalizer.js";
+
+type ProviderFact = ProviderObservation extends infer O ? O extends ProviderObservation ? Omit<O, "sequence" | "scope" | "attemptId"> : never : never;
 
 /** Projects native items through the same live/persisted Forge event path as other runtimes. */
 export class CodexRuntimeEvents {
@@ -65,6 +68,63 @@ export class CodexRuntimeEvents {
         partialResult: { output: redactCodexMcpSensitiveText(String(params.delta ?? "")).slice(-16_000) } }];
     }
     return [];
+  }
+
+  /** The same item mapper supplies legacy rendering and the scoped provider boundary. */
+  mapProvider(method: string, params: Record<string, any>, origin: ProviderObservation["origin"], turn: ProviderTurnRef): ProviderFact[] {
+    const item = params.item;
+    const id = String(item?.id ?? params.itemId ?? "");
+    if (!id || this.completed.has(id)) return [];
+    if (method === "item/reasoning/textDelta" || method === "item/reasoning/summaryTextDelta") {
+      const previous = this.messages.get(id);
+      const delta = String(params.delta ?? "");
+      this.messages.set(id, { text: (previous?.text ?? "") + delta, phase: "reasoning" });
+      return [{ type: "message", origin, item: { ...turn, kind: "item", turnId: turn.nativeId, nativeId: id },
+        channel: "reasoning", phase: previous ? "delta" : "start", text: delta }];
+    }
+    if (item?.type === "reasoning") {
+      const previous = this.messages.get(id);
+      const text = [...(item.summary ?? []), ...(item.content ?? [])].filter(value => typeof value === "string").join("\n") || previous?.text || "";
+      this.messages.set(id, { text, phase: "reasoning" });
+      if (method === "item/completed") this.completed.add(id);
+      return [{ type: "message", origin, item: { ...turn, kind: "item", turnId: turn.nativeId, nativeId: id },
+        channel: "reasoning", phase: method === "item/completed" ? "complete" : "start", text }];
+    }
+    return this.providerEvents(this.map(method, params), id, origin, turn, params.delta).map(fact =>
+      fact.type === "message" && item ? { ...fact, content: JSON.parse(JSON.stringify(item)) } : fact);
+  }
+
+  finishProvider(origin: ProviderObservation["origin"], turn: ProviderTurnRef): ProviderFact[] {
+    const facts: ProviderFact[] = [];
+    for (const id of this.messages.keys()) {
+      if (!this.completed.has(id)) {
+        facts.push(...this.providerEvents([this.messageEvent("message_end", id)], id, origin, turn));
+        this.completed.add(id);
+      }
+    }
+    return facts;
+  }
+
+  private providerEvents(events: RuntimeSessionEvent[], id: string, origin: ProviderObservation["origin"], turn: ProviderTurnRef, delta?: unknown): ProviderFact[] {
+    const facts: ProviderFact[] = [];
+    for (const event of events) {
+      if (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") {
+        const value = this.messages.get(id)!;
+        facts.push({ type: "message", origin, item: { ...turn, kind: "item", turnId: turn.nativeId, nativeId: id },
+          channel: value.phase === "reasoning" ? "reasoning" : "assistant",
+          phase: event.type === "message_start" ? "start" : event.type === "message_update" ? "delta" : "complete",
+          text: event.type === "message_update" && typeof delta === "string" ? delta : value.text });
+      }
+      if (event.type === "tool_execution_start" || event.type === "tool_execution_update" || event.type === "tool_execution_end") {
+        facts.push({ type: "tool", origin, call: { ...turn, kind: "tool_call", turnId: turn.nativeId, nativeId: id }, name: event.toolName,
+          phase: event.type === "tool_execution_start" ? "start" : event.type === "tool_execution_update" ? "update" : "complete",
+          payload: JSON.parse(JSON.stringify(event.type === "tool_execution_start" ? event.args : event.type === "tool_execution_update" ? event.partialResult : event.result)),
+          ...(event.type === "tool_execution_end" ? { isError: event.isError } : {}) });
+      }
+      if (event.type === "auto_compaction_start" || event.type === "auto_compaction_end") facts.push({ type: "compaction", origin,
+        phase: event.type === "auto_compaction_start" ? "started" : "completed" });
+    }
+    return facts;
   }
 
   finish(): RuntimeSessionEvent[] {

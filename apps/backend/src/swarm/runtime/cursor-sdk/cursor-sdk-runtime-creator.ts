@@ -1,4 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import type { InstructionBundle, ProviderScope } from "@forge/protocol";
+import { createInstructionBundle, renderInstructionBundle } from "../instruction-bundle.js";
+import { assertProviderRequirements } from "../provider-contract.js";
+import { CursorSdkProviderAdapter } from "./cursor-sdk-provider-adapter.js";
 import type { ObservabilityFacade } from "../../../observability/observability-types.js";
 import type { ForgeExtensionHost } from "../../forge-extension-host.js";
 import { modelCatalogService } from "../../catalog/model-catalog-service.js";
@@ -15,11 +19,9 @@ import type { AgentContextUsage, AgentDescriptor, AgentStatus, SwarmConfig } fro
 import type { SkillMetadata } from "../../skills/skill-metadata-service.js";
 import { recordRuntimePromptAndCreation, summarizeRuntimeTools } from "../runtime-observability-capture.js";
 import { planCursorSdkRuntimePrompt } from "../runtime-prompt-plan.js";
-import { planRuntimeTools } from "../runtime-tool-plan.js";
-import { CursorSdkAgentRuntime, getDefaultCursorSdkStateRoot } from "./cursor-sdk-agent-runtime.js";
+import { bindRuntimeToolHost, planRuntimeTools } from "../runtime-tool-plan.js";
+import { getPersistedCursorSdkConversationId, getDefaultCursorSdkStateRoot } from "./cursor-sdk-agent-runtime.js";
 import { loadCursorSdkModule } from "./cursor-sdk-loader.js";
-import { createCursorSdkMcpToolBridge } from "./cursor-sdk-mcp-tool-bridge.js";
-import { toCursorSdkModelSelection } from "./cursor-sdk-model-selection.js";
 
 
 interface CursorSdkRuntimeCreatorDependencies {
@@ -38,7 +40,9 @@ interface CursorSdkRuntimeCreatorDependencies {
     descriptor: AgentDescriptor;
     sessionDescriptor?: AgentDescriptor;
   }) => Promise<ProjectExecutableTrustPlan>;
-  buildCursorSdkRuntimeSystemPrompt: (descriptor: AgentDescriptor, systemPrompt: string) => Promise<string>;
+  buildCursorSdkRuntimeInstructionBundle?: (descriptor: AgentDescriptor, instructions: InstructionBundle | string) => Promise<InstructionBundle>;
+  /** Removed by the manager's composition cutover; supports the independently runnable frozen base. */
+  buildCursorSdkRuntimeSystemPrompt?: (descriptor: AgentDescriptor, systemPrompt: string) => Promise<string>;
   callbacks: {
     onStatusChange: (
       runtimeToken: number,
@@ -85,14 +89,30 @@ export class CursorSdkRuntimeCreator {
 
     const sdk = await loadCursorSdkModule();
     const auth = await resolveCursorSdkApiKey(this.deps.config);
-    const cursorSystemPrompt = await this.deps.buildCursorSdkRuntimeSystemPrompt(descriptor, systemPrompt);
+    const baseInstructions = creationOptions?.instructionBundle ?? createInstructionBundle(descriptor, systemPrompt);
+    const instructionBundle = this.deps.buildCursorSdkRuntimeInstructionBundle
+      ? await this.deps.buildCursorSdkRuntimeInstructionBundle(descriptor, baseInstructions)
+      : createInstructionBundle(descriptor, await this.deps.buildCursorSdkRuntimeSystemPrompt!(descriptor, renderInstructionBundle(baseInstructions)));
+    const cursorSystemPrompt = renderInstructionBundle(instructionBundle);
     const promptPlan = planCursorSdkRuntimePrompt({
       systemPrompt: cursorSystemPrompt,
       startupRecoveryContext: creationOptions?.startupRecoveryContext,
     });
     const stateRoot = getDefaultCursorSdkStateRoot(descriptor);
-    const model = toCursorSdkModelSelection(descriptor.model);
-    const mcpBridge = await createCursorSdkMcpToolBridge(swarmTools, { serverName: `forge-swarm-${descriptor.agentId}` });
+    const scope: ProviderScope = creationOptions?.providerScope ?? { threadId: descriptor.agentId, bindingId: randomUUID(), generation: 0 };
+    const toolHost = creationOptions?.toolHostBinding ?? bindRuntimeToolHost({ descriptor, tools: swarmTools, scope,
+      forgeExtensionHost: this.deps.forgeExtensionHost, preparedForgeBindings, mechanism: "loopback_mcp" });
+    const adapter = new CursorSdkProviderAdapter({ descriptor: structuredClone(descriptor), sdk, apiKey: auth.apiKey, stateRoot, now: this.deps.now,
+      startupSystemPromptOverride: promptPlan.startupSystemPromptOverride,
+      onStartupRecoveryConsumed: creationOptions?.onStartupRecoveryConsumed,
+      callbacks: {
+        onStatusChange: (agentId, status, pendingCount, contextUsage) => this.deps.callbacks.onStatusChange(runtimeToken, agentId, status, pendingCount, contextUsage),
+        onSessionEvent: (agentId, event) => this.deps.callbacks.onSessionEvent(runtimeToken, agentId, event),
+        onAgentEnd: agentId => this.deps.callbacks.onAgentEnd(runtimeToken, agentId),
+        onRuntimeError: (agentId, error) => this.deps.callbacks.onRuntimeError(runtimeToken, agentId, error),
+      },
+    });
+    assertProviderRequirements(adapter.capabilities(), { ...creationOptions?.providerRequirements, secureSessions: creationOptions?.secureRuntimeRequired || creationOptions?.providerRequirements?.secureSessions });
 
     this.deps.logDebug("runtime:create:start", {
       runtime: "cursor-sdk",
@@ -101,53 +121,29 @@ export class CursorSdkRuntimeCreator {
       model: descriptor.model,
       cwd: descriptor.cwd,
       authSource: auth.source,
-      mcpServer: mcpBridge.serverName,
+      mcpServer: `forge-swarm-${descriptor.agentId}`,
       modelContextWindow: modelCatalogService.getEffectiveContextWindow(descriptor.model.modelId, descriptor.model.provider)
     });
 
-    let runtime: SwarmAgentRuntime;
+    let runtime: SwarmAgentRuntime | undefined;
     try {
-      runtime = await CursorSdkAgentRuntime.create({
-        descriptor: structuredClone(descriptor),
-        callbacks: {
-          onStatusChange: async (agentId, status, pendingCount, contextUsage) => {
-            await this.deps.callbacks.onStatusChange(runtimeToken, agentId, status, pendingCount, contextUsage);
-          },
-          onSessionEvent: async (agentId, event) => {
-            await this.deps.callbacks.onSessionEvent(runtimeToken, agentId, event);
-          },
-          onAgentEnd: async (agentId) => {
-            await this.deps.callbacks.onAgentEnd(runtimeToken, agentId);
-          },
-          onRuntimeError: async (agentId, error) => {
-            await this.deps.callbacks.onRuntimeError(runtimeToken, agentId, error);
-          }
-        },
-        now: this.deps.now,
-        sdk,
-        apiKey: auth.apiKey,
-        model,
-        systemPrompt: cursorSystemPrompt,
-        startupSystemPromptOverride: promptPlan.startupSystemPromptOverride,
-        skipInitialSessionResume: promptPlan.skipInitialSessionResume,
-        onStartupRecoveryConsumed: creationOptions?.onStartupRecoveryConsumed,
-        mcpServers: mcpBridge.mcpServers,
-        stateRoot,
-        promptHash: hashPrompt(cursorSystemPrompt)
-      });
+      const input = { scope, model: descriptor.model, instructions: instructionBundle, toolHost, required: creationOptions?.providerRequirements };
+      const nativeId = promptPlan.skipInitialSessionResume ? undefined : getPersistedCursorSdkConversationId(descriptor.sessionFile);
+      if (nativeId) await adapter.resume({ ...input, conversation: { ...scope, kind: "conversation", nativeId } });
+      else await adapter.open(input);
+      runtime = adapter.getRuntime();
+      creationOptions?.onProviderPrepared?.({ instructionBundle, toolHostBinding: toolHost });
     } catch (error) {
-      await mcpBridge.shutdown().catch(() => undefined);
+      await runtime?.terminate().catch(() => undefined);
       this.deps.logDebug("runtime:create:cursor_sdk:failed", sanitizeRuntimeErrorForLog(error));
       throw error;
     }
-
-    bindBridgeCleanup(runtime, () => mcpBridge.shutdown());
 
     this.deps.logDebug("runtime:create:ready", {
       runtime: "cursor-sdk",
       agentId: descriptor.agentId,
       activeTools: swarmTools.map((tool) => tool.name),
-      mcpServer: mcpBridge.serverName,
+      mcpServer: `forge-swarm-${descriptor.agentId}`,
       stateRoot
     });
 
@@ -160,7 +156,7 @@ export class CursorSdkRuntimeCreator {
       finalSystemPrompt: cursorSystemPrompt,
       startupSystemPromptOverride: promptPlan.startupSystemPromptOverride,
       activeTools: summarizeRuntimeTools(swarmTools),
-      mcpServers: [mcpBridge.serverName],
+      mcpServers: [`forge-swarm-${descriptor.agentId}`],
       metadata: {
         authSource: auth.source,
         stateRoot,
@@ -175,25 +171,6 @@ export class CursorSdkRuntimeCreator {
     }
 
     return runtime;
-  }
-}
-
-function bindBridgeCleanup(runtime: SwarmAgentRuntime, cleanup: () => Promise<void>): void {
-  let cleanupPromise: Promise<void> | undefined;
-  const runCleanup = async () => {
-    cleanupPromise ??= cleanup();
-    await cleanupPromise;
-  };
-
-  for (const methodName of ["terminate", "shutdownForReplacement", "recycle"] as const) {
-    const original = runtime[methodName].bind(runtime) as (...args: any[]) => Promise<void>;
-    runtime[methodName] = (async (...args: any[]) => {
-      try {
-        await original(...args);
-      } finally {
-        await runCleanup();
-      }
-    }) as typeof runtime[typeof methodName];
   }
 }
 

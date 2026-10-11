@@ -1,0 +1,22 @@
+{
+  "provider": "cursor-sdk",
+  "protocol": "Cursor SDK Agent/Run API and SDKMessage v1",
+  "version": "1.0.13",
+  "scenario": "create, send, native child, terminal and close",
+  "provenance": "Synthetic, checked against installed @cursor/sdk 1.0.13 messages.d.ts. No real-provider capture or credentials.",
+  "entries": [
+    { "type": "expect_outbound", "frame": { "method": "agent/create", "settingSources": [], "model": { "id": "composer-2.5" } }, "label": "create" },
+    { "type": "emit_inbound", "frame": { "agentId": "cursor-agent" } },
+    { "type": "expect_outbound", "frame": { "method": "agent/send", "promptSha256": "$any" }, "label": "send" },
+    { "type": "emit_inbound", "frame": { "run": { "id": "cursor-run", "agentId": "cursor-agent" } } },
+    { "type": "emit_inbound", "frame": { "message": { "type": "assistant", "agent_id": "cursor-agent", "run_id": "cursor-run", "message": { "role": "assistant", "content": [{ "type": "text", "text": "Hello" }] } } } },
+    { "type": "emit_inbound", "frame": { "message": { "type": "tool_call", "agent_id": "cursor-agent", "run_id": "cursor-run", "call_id": "native-tool", "name": "read", "status": "completed", "args": { "path": "synthetic.txt" }, "result": { "content": "read result" } } } },
+    { "type": "emit_inbound", "frame": { "message": { "type": "status", "agent_id": "native-child", "run_id": "child-run", "status": "FINISHED" } } },
+    { "type": "emit_inbound", "frame": { "delta": { "type": "turn-ended", "usage": { "inputTokens": 10, "outputTokens": 5, "cacheReadTokens": 2, "cacheWriteTokens": 1 } } } },
+    { "type": "emit_inbound", "frame": { "message": { "type": "status", "agent_id": "cursor-agent", "run_id": "cursor-run", "status": "FINISHED" } } },
+    { "type": "emit_inbound", "frame": { "streamEnd": true } },
+    { "type": "expect_outbound", "frame": { "method": "run/wait", "runId": "cursor-run" } },
+    { "type": "emit_inbound", "frame": { "result": { "status": "finished" } } },
+    { "type": "expect_outbound", "frame": { "method": "agent/close", "agentId": "cursor-agent" } }
+  ]
+}

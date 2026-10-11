@@ -1,0 +1,307 @@
+{
+  "provider": "codex",
+  "protocol": "app-server/stdio-jsonrpc",
+  "version": "0.155.0",
+  "scenario": "tools",
+  "provenance": "Synthetic raw Codex 0.155 app-server frames, never normalized Forge observations. Only process transport is substituted. Real-provider spot check remains necessary.",
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "initialize",
+        "params": {
+          "capabilities": {
+            "experimentalApi": true
+          }
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "userAgent": "codex-cli/0.155.0"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "method": "initialized"
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "account/login/start",
+        "params": {
+          "type": "apiKey",
+          "apiKey": "forge-fixture-inert-not-a-provider-key"
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "type": "apiKey"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "thread/start",
+        "params": {
+          "model": "gpt-6-sol",
+          "cwd": "$cwd",
+          "developerInstructions": "Forge replay contract",
+          "approvalPolicy": "never",
+          "sandbox": "danger-full-access",
+          "allowProviderModelFallback": false,
+          "dynamicTools": "$any",
+          "ephemeral": false
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      },
+      "label": "open"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "thread": {
+            "id": "native-root",
+            "path": "$rollout"
+          },
+          "model": "gpt-6-sol"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "turn/start",
+        "params": {
+          "threadId": "native-root",
+          "input": [
+            {
+              "type": "text",
+              "text": "Work"
+            }
+          ],
+          "model": "gpt-6-sol"
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      },
+      "label": "start"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {
+          "turn": {
+            "id": "turn-root",
+            "status": "inProgress",
+            "items": []
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "native-root",
+          "turn": {
+            "id": "turn-root"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/tool/call",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root",
+          "namespace": "forge",
+          "tool": "notes",
+          "callId": "native-write",
+          "arguments": {
+            "op": "write",
+            "path": "checkpoint.md",
+            "text": "Persisted through dynamicTools"
+          }
+        },
+        "id": 901
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": 901,
+        "result": {
+          "success": true,
+          "contentItems": [
+            {
+              "type": "inputText",
+              "text": "$any"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/tool/call",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root",
+          "namespace": "forge",
+          "tool": "notes",
+          "callId": "native-read",
+          "arguments": {
+            "op": "read",
+            "path": "checkpoint.md"
+          }
+        },
+        "id": 902
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": 902,
+        "result": {
+          "success": true,
+          "contentItems": [
+            {
+              "type": "inputText",
+              "text": "$any"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/commandExecution/requestApproval",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root",
+          "itemId": "pending",
+          "command": "echo pending"
+        },
+        "id": 903
+      },
+      "label": "pending"
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": "$any",
+        "method": "turn/interrupt",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root"
+        }
+      },
+      "capture": {
+        "$rpcId": [
+          "id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "id": "$rpcId",
+        "result": {}
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": 903,
+        "result": {
+          "decision": "decline"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "item/tool/call",
+        "params": {
+          "threadId": "native-root",
+          "turnId": "turn-root",
+          "namespace": "forge",
+          "tool": "notes",
+          "callId": "cancelled-write",
+          "arguments": {
+            "op": "write",
+            "path": "cancelled.md",
+            "text": "Must not be written"
+          }
+        },
+        "id": 904
+      },
+      "label": "cancelled-tool"
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "id": 904,
+        "error": {
+          "code": -32000,
+          "message": "Codex turn was stopped"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "native-root",
+          "turn": {
+            "id": "turn-root",
+            "status": "interrupted"
+          }
+        }
+      },
+      "label": "interrupted"
+    }
+  ]
+}

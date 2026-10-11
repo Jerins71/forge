@@ -139,7 +139,7 @@ async function liveClient(backend: Backend, pairing: PairingExchangeResult) {
   }
   return { client, detail, waitState, snapshot() {
     const shell = client.shell.getSnapshot();
-    return JSON.parse(JSON.stringify({ shell: { sessions: [...shell.sessions.values()], recovery: shell.recovery }, detail: detail.store.getSnapshot().projection }));
+    return JSON.parse(JSON.stringify({ shell: { projects: [...shell.projects.values()], sessions: [...shell.sessions.values()], recovery: shell.recovery }, detail: detail.store.getSnapshot().projection }));
   }, async close() { detail.release(); await client.dispose(); } };
 }
 

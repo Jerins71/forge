@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { capturePiInstructionResources } from "./pi-instruction-resources.js";
+import { createInstructionBundle, renderInstructionBundle } from "../instruction-bundle.js";
+import { assertProviderRequirements } from "../provider-contract.js";
+import { piProviderCapabilities } from "./pi-provider-adapter.js";
 import { createPiBrowserDiscovery, installPiProjectToolPolicy } from "./pi-tool-discovery.js";
 import { installOpenRouterRequestPolicy } from "./openrouter-request-policy.js";
 import { PiBashProcesses } from "./pi-bash-processes.js";
@@ -5,6 +10,8 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
   type AgentRuntimeExtensionSnapshot,
   type RuntimeExtensionMetadata,
+  type ProviderScope,
+  type InstructionBundle,
   type RuntimeExtensionSource
 } from "@forge/protocol";
 import type { Model, Transport } from "../../pi/pi-ai-compat.js";
@@ -76,7 +83,7 @@ import { planPiResourceLoaderOptions, planRuntimeResourcePaths } from "../runtim
 import type { CompactionRuntimeSettingsProvider } from "../../compaction-runtime-settings-provider.js";
 import { buildForgePiCompactionFailureScopeKey } from "../../compaction/forge-pi-compaction-extension.js";
 import { recordRuntimePromptAndCreation, summarizeRuntimeTools } from "../runtime-observability-capture.js";
-import { planForgePiToolBridgeFactory, planPiExtensionFactories, planRuntimeTools } from "../runtime-tool-plan.js";
+import { planForgePiToolBridgeFactory, planPiExtensionFactories, planRuntimeTools, bindRuntimeToolHost } from "../runtime-tool-plan.js";
 import { wrapForgeToolsWithExtensionHooks } from "../../forge-instrumented-tools.js";
 import {
   applySecurePiResourcePolicy,
@@ -274,6 +281,9 @@ export class PiRuntimeCreator {
     creationOptions?: RuntimeCreationOptions;
   }): Promise<SwarmAgentRuntime> {
     const { descriptor, systemPrompt, runtimeToken, sessionDescriptor, creationOptions } = options;
+    assertProviderRequirements(piProviderCapabilities(), creationOptions?.providerRequirements);
+    const providerScope = creationOptions?.providerScope ?? { threadId: descriptor.agentId, bindingId: randomUUID(), generation: 0 };
+    let instructionBundle = creationOptions?.instructionBundle ?? createInstructionBundle(descriptor, systemPrompt);
     const secureRuntimeBinding = creationOptions?.secureRuntimeBinding;
     const projectExecutableTrustPlan = await this.deps.resolveProjectExecutableTrustPlan({
       descriptor,
@@ -482,9 +492,15 @@ export class PiRuntimeCreator {
       : resourcePlan;
     const resourceLoader = new DefaultResourceLoader({
       ...effectiveResourcePlan,
+      systemPromptOverride: () => renderInstructionBundle(instructionBundle),
       settingsManager
     });
 
+    // Every native reload goes through the same Forge trust decision as initial creation.
+    const reloadResources = resourceLoader.reload.bind(resourceLoader);
+    resourceLoader.reload = (reloadOptions) => reloadResources({
+      ...reloadOptions, resolveProjectTrust: async () => projectExecutableTrustPlan.trusted,
+    });
     try {
       await resourceLoader.reload({
         resolveProjectTrust: async () => projectExecutableTrustPlan.trusted,
@@ -697,10 +713,60 @@ export class PiRuntimeCreator {
       },
     });
 
+    // Bind after native built-ins, Pi extensions, guards, Forge hooks and output budgets are final.
+    const bindTools = (scope: ProviderScope) => bindRuntimeToolHost({
+      descriptor, scope, mechanism: "native_tools", forgeExtensionHost: this.deps.forgeExtensionHost,
+      preparedForgeBindings, secureRuntimeBinding,
+      tools: session.getActiveToolNames().map(name => {
+        const tool = session.getToolDefinition(name);
+        if (!tool) throw new Error(`Pi active tool is missing its native definition: ${name}`);
+        return tool;
+      }),
+    });
+    instructionBundle = await capturePiInstructionResources(instructionBundle, session, preparedForgeBindings);
+    const toolHostBinding = bindTools(providerScope);
+    const refreshProvider = async (input: { scope: ProviderScope; instructions?: InstructionBundle; toolHost?: import("../provider-contract.js").ToolHostBinding }) => {
+      const currentTools = bindTools(input.scope);
+      const instructionsChanged = input.instructions && input.instructions.revision !== instructionBundle.revision;
+      const toolsChanged = input.toolHost && JSON.stringify(input.toolHost.snapshot) !== JSON.stringify(currentTools.snapshot);
+      if (instructionsChanged || toolsChanged) {
+        if (!session.isIdle || session.isCompacting) throw new Error("Pi provider refresh requires an idle native session.");
+        const previousInstructions = instructionBundle;
+        const previousCustomTools = [...runtimeCustomTools];
+        const previousActiveNames = session.getActiveToolNames();
+        try {
+          if (input.instructions) instructionBundle = input.instructions;
+          if (toolsChanged && input.toolHost) {
+            const tools = input.toolHost.tools.map(tool => {
+              const current = session.getToolDefinition(tool.name);
+              if (current && current.description === tool.description && JSON.stringify(current.parameters) === JSON.stringify(tool.parameters)) return current;
+              const guarded = secureRuntimeBinding ? guardSecureRuntimeTools([tool], secureRuntimeBinding) : [tool];
+              return preparedForgeBindings && [...secureBaseSwarmTools, ...contextTools].some(original => original.name === tool.name) ? wrapForgeToolsWithExtensionHooks({ tools: guarded,
+                forgeExtensionHost: this.deps.forgeExtensionHost, bindingToken: preparedForgeBindings.bindingToken,
+                host: this.deps.host, descriptor })[0]! : guarded[0]!;
+            });
+            toolOutputBudget.augmentToolDefinitions(tools);
+            // AgentSession retains this custom-tool array and rebuilds its registry on native reload.
+            runtimeCustomTools.splice(0, runtimeCustomTools.length, ...tools);
+          }
+          await session.reload();
+          if (input.toolHost) session.setActiveToolsByName(input.toolHost.tools.map(tool => tool.name));
+          instructionBundle = await capturePiInstructionResources(instructionBundle, session, preparedForgeBindings);
+        } catch (error) {
+          instructionBundle = previousInstructions;
+          runtimeCustomTools.splice(0, runtimeCustomTools.length, ...previousCustomTools);
+          await session.reload();
+          session.setActiveToolsByName(previousActiveNames);
+          throw error;
+        }
+      }
+      return { instructions: instructionBundle, toolHost: bindTools(input.scope) };
+    };
     const runtime = new AgentRuntime({
       descriptor: cloneRuntimeDescriptor(descriptor),
       session: session as AgentSession,
       systemPrompt,
+      providerPreparation: { instructions: instructionBundle, toolHost: toolHostBinding, refresh: refreshProvider, bindTools },
       compactionRuntimeSettingsProvider: this.deps.getCompactionRuntimeSettingsProvider(),
       compactionFailureScopeKey,
       generationTelemetry,
@@ -719,6 +785,10 @@ export class PiRuntimeCreator {
         return this.deps.host.getContextMode(descriptor.agentId);
       },
     });
+
+    await runtime.providerAdapter!.open({ scope: providerScope, model: descriptor.model, instructions: instructionBundle, toolHost: toolHostBinding,
+      required: creationOptions?.providerRequirements });
+    creationOptions?.onProviderPrepared?.({ instructionBundle, toolHostBinding });
 
     if (pooledCredentialId) {
       runtime.pooledCredentialId = pooledCredentialId;

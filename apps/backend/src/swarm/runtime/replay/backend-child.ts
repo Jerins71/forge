@@ -1,6 +1,7 @@
 /** Private replay composition: same production owners and startup order as EnvironmentService. */
 import crypto from "node:crypto";
-import { ChildProcess } from "node:child_process";
+import { ChildProcess, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { syncBuiltinESMExports } from "node:module";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -86,11 +87,24 @@ const unread = new unreadModule.UnreadTracker({ dataDir: config.paths.dataDir,
 });
 const mirror = mirrorModule.createSwarmEventMirror({ swarmManager: manager, database, eventSink: core.eventSink,
   wireProjection: {
-    project: async profile => ({ projectId: profile.profileId, title: profile.displayName, cwd: config.defaultCwd,
-      repository: await workspace.getRepositoryIdentity(config.defaultCwd), isGit: false, defaultBranch: null,
-      updatedAt: profile.updatedAt, sortKey: String(profile.sortOrder ?? profile.createdAt), archived: Boolean(profile.archivedAt),
-      defaultSessionId: profile.defaultSessionAgentId }),
+    project: async profile => {
+      const cwd = manager.getAgentForInternalUse(profile.defaultSessionAgentId)?.cwd ?? config.defaultCwd;
+      const repository = await workspace.getRepositoryIdentity(cwd);
+      let isGit = false;
+      let defaultBranch: string | null = null;
+      try {
+        isGit = (await promisify(execFile)("git", ["rev-parse", "--is-inside-work-tree"], { cwd, windowsHide: true })).stdout.trim() === "true";
+        defaultBranch = (await promisify(execFile)("git", ["symbolic-ref", "--short", "HEAD"], { cwd, windowsHide: true })).stdout.trim();
+      } catch { /* Non-Git and detached projects remain selectable, as in EnvironmentService. */ }
+      return { projectId: profile.profileId, title: profile.displayName, cwd, repository, isGit, defaultBranch,
+        updatedAt: profile.updatedAt, sortKey: String(profile.sortOrder ?? profile.createdAt), archived: Boolean(profile.archivedAt),
+        defaultSessionId: profile.defaultSessionAgentId,
+        delegationDefaults: { managerPosture: profile.defaultManagerPosture, rosterId: profile.defaultDelegationRosterId },
+        contextMode: profile.defaultContextMode ?? "summary",
+        defaultModel: { provider: profile.defaultModel.provider, modelId: profile.defaultModel.modelId, thinkingLevel: profile.defaultModel.thinkingLevel } };
+    },
     unread: (sessionId, projectId) => unread.getCount(projectId, sessionId),
+    observeUnread: listener => unread.observe(listener),
     artifacts: (entry, sessionId) => artifacts.refsForEntry(sessionId, entry),
     prepareArtifacts: (sessionId, entries) => artifacts.prepareHistoricalArtifacts(sessionId, entries),
   },

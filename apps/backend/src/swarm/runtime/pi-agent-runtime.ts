@@ -84,6 +84,7 @@ import {
 } from "./manager-assistant-final-message.js";
 import { PiGenerationTelemetryAdapter } from "./generation-telemetry.js";
 import type { PiBashProcesses } from "./pi/pi-bash-processes.js";
+import { PiProviderAdapter, type PiProviderPreparation } from "./pi/pi-provider-adapter.js";
 import {
   detectManagerOutputRunaway,
   type ManagerOutputRunawayDetection,
@@ -207,6 +208,7 @@ export type { RuntimeImageAttachment, RuntimeUserMessage, RuntimeUserMessageInpu
 export class AgentRuntime implements SwarmAgentRuntime {
   readonly descriptor: AgentDescriptor;
   readonly runtimeType = "pi" as const;
+  readonly providerAdapter: PiProviderAdapter | undefined;
 
   /** Credential pool fields for multi-account failover */
   pooledCredentialId: string | undefined;
@@ -304,6 +306,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
     bashProcesses?: PiBashProcesses;
     getContextMode?: () => ContextMode;
     dataDir?: string;
+    providerPreparation?: PiProviderPreparation;
   }) {
     this.descriptor = options.descriptor;
     this.session = options.session;
@@ -319,6 +322,8 @@ export class AgentRuntime implements SwarmAgentRuntime {
     this.dataDir = options.dataDir;
     this.status = options.descriptor.status;
 
+    this.providerAdapter = options.providerPreparation
+      ? new PiProviderAdapter(this, this.session, options.providerPreparation) : undefined;
     clearForgePiCompactionFailure(this.compactionFailureScopeKey);
     this.session.setFreshContextHandler?.((request) => this.handleFreshContextRequest(request));
     this.session.setFreshContextBoundaryHandler?.((signal) => this.prepareFreshContextBoundary(signal));
@@ -784,6 +789,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
         this.logRuntimeError("interrupt", error, { stage: "agent_settled_on_agent_end_failed" });
       }
     }
+    await this.providerAdapter?.observeSettlement();
     this.lastAgentEndWillRetry = false;
     this.settledAssistantMessage = undefined;
   }
@@ -806,6 +812,13 @@ export class AgentRuntime implements SwarmAgentRuntime {
     }
 
     return undefined;
+  }
+
+  /** Resource drain includes yielded shells, callbacks and native retry/compaction work. */
+  hasPendingProviderWork(): boolean {
+    return this.hasPendingInputDispatch() || this.inFlightPrompts.size > 0 || this.awaitingAgentSettlement
+      || !this.session.isIdle || this.isContextRecoveryInProgress() || this.getPendingCount() > 0
+      || this.recoveryBufferedMessages.length > 0 || (this.bashProcesses?.hasRunningProcesses() ?? false);
   }
 
   /** @internal Drain the serialized Pi session event queue (tests). */
@@ -885,6 +898,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
       this.unsubscribe?.();
       this.unsubscribe = undefined;
       this.session.dispose();
+      this.providerAdapter?.dispose();
     } catch (error) {
       this.logRuntimeError("interrupt", error, {
         stage: "dispose_session_dispose_failed"
@@ -1528,6 +1542,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
       .finally(() => {
         this.promptDispatchPending = false;
         this.inFlightPrompts.delete(run);
+        return this.providerAdapter?.observePromptCompletion();
       });
 
     this.inFlightPrompts.add(run);
@@ -1717,6 +1732,8 @@ export class AgentRuntime implements SwarmAgentRuntime {
         if (this.status !== "terminated") {
           await this.updateStatus("idle");
         }
+        // The legacy projection remains suppressed, but native settlement still drains the adapter.
+        await this.providerAdapter?.observeSettlement();
       } else if (Date.now() >= this.suppressSessionEventsUntilIdle.expiresAt) {
         this.suppressSessionEventsUntilIdle = null;
         this.awaitingAgentSettlement = false;
@@ -2450,6 +2467,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
       }
     }
     this.awaitingAgentSettlement = false;
+    await this.providerAdapter?.observeDispatchFailure(error);
 
     return "failed";
   }
