@@ -118,7 +118,8 @@ export class ClaudeRuntimeEvents {
       this.text = fallback;
       events.push(this.textEvent("message_start", false));
     }
-    events.push(...this.flush(success));
+    // Text already streamed when the host stops the turn is the reply the user saw, not discarded progress.
+    events.push(...this.flush(success || stopping));
     for (const [toolCallId, toolName] of this.tools) {
       if (!stopping && this.background.has(toolCallId)) continue;
       events.push({ type: "tool_execution_end", toolName, toolCallId,

@@ -357,6 +357,33 @@ test('a turn the user stopped says so, live and after reload', async ({ page }) 
   assertions.stoppedTurn = { sessionId, markers: 2, order: live, replayMatches: true }
 })
 
+test('a reply stopped mid-stream keeps the text already shown, then says it was stopped, live and after reload', async ({ page }) => {
+  const sessionId = await launch('Polish stopped reply', 'Say hello first')
+  await open(page, sessionId)
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  const partial = 'Streaming partial text arrives first'
+  const notice = 'without a visible response'
+  await send(page, '[fixture:stream] Stream a reply and hold it half-written')
+  await expect(transcript(page)).toContainText(partial, { timeout: 30_000 })
+  await page.getByRole('button', { name: 'Stop', exact: true }).click()
+  await expect.poll(async () => (await shellSession(sessionId))?.status, { timeout: 30_000 }).not.toBe('running')
+  await expect(marker(page, 'turn_stopped')).toHaveCount(1, { timeout: 15_000 })
+  const check = async () => {
+    await expect(transcript(page)).toContainText(partial)
+    await expect(transcript(page)).not.toContainText('then the remainder completes')
+    await expect(transcript(page)).not.toContainText(notice)
+    // The stopped row closes the turn, below the text it cut short.
+    expect(await rowIndex(marker(page, 'turn_stopped'))).toBeGreaterThan(await rowIndex(textRow(page, partial)))
+  }
+  await check()
+  await shot(page, 'reply-stopped-live')
+  await page.reload()
+  await expect(marker(page, 'turn_stopped')).toHaveCount(1, { timeout: 30_000 })
+  await check()
+  await shot(page, 'reply-stopped-reload')
+  assertions.stoppedReply = { sessionId, partialKept: true, emptyCompletionNotice: false, replayMatches: true }
+})
+
 test('a worker\'s provider failure is one failed row in the worker view, and the manager\'s card names it', async ({ page }) => {
   const sessionId = await launch('Polish worker failure', '[fixture:spawn-fail] Start a worker whose provider fails')
   await open(page, sessionId)
