@@ -15,6 +15,15 @@ scope, immutable instruction/tool revisions, and shutdown/drain. A real Forge
 result and cancellation signal. Equivalent open/resume inputs retain the original
 host; mismatches throw the shared ProviderRefreshRequiredError. Creator coverage
 checks the exact final prepared bundle and host, including native tool additions.
+Adapter starts and explicit steering share the existing native submission projection;
+busy, closed and stale-scope starts throw the shared ProviderDispatchRejectedError
+before submission instead of implicitly steering or queueing.
+The real creator and conversation projectors verify canonical assistant JSONL,
+streaming/idle status and exactly one end for both adapter and legacy dispatch.
+Creation with a durable providerConversation locator resumes it under the new scope;
+a later same-scope resume is idempotent. The process peer records actual SDK spawn
+arguments to prove one `--resume` invocation and no new session. These synthetic
+arguments and JSONL projections can be saved with the other replay evidence.
 The existing prompt/schema parity snapshots are asserted unchanged.
 
 `ClaudeProviderAdapter.capabilities()` is the declaration used by this boundary:

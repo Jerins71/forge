@@ -7,8 +7,8 @@ import { dirname } from "node:path";
 import { query, type Options as QueryOptions, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { SessionManager, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { getCatalogContextWindow } from "@forge/protocol";
-import type { ProviderScope } from "@forge/protocol";
-import type { ProviderBinding, ProviderOpenInput } from "../provider-contract.js";
+import type { ProviderScope, ProviderTurnRef } from "@forge/protocol";
+import { ProviderDispatchRejectedError, type ProviderBinding, type ProviderOpenInput } from "../provider-contract.js";
 import { createInstructionBundle, renderProviderInstructions } from "../instruction-bundle.js";
 import { bindRuntimeToolHost } from "../runtime-tool-plan.js";
 import { ClaudeProviderAdapter } from "./claude-provider-adapter.js";
@@ -190,24 +190,37 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   getCustomEntries(type: string): unknown[] { return this.session.getEntries().filter(e => e.type === "custom" && e.customType === type).map(e => (e as { data: unknown }).data); }
   appendCustomEntry(type: string, data?: unknown): string { return this.session.appendCustomEntry(type, data); }
 
-  async sendMessage(input: RuntimeUserMessageInput, mode: RequestedDeliveryMode = "auto", attemptId?: string): Promise<SendMessageReceipt> {
+  async sendMessage(input: RuntimeUserMessageInput, mode: RequestedDeliveryMode = "auto"): Promise<SendMessageReceipt> {
     return this.serialize(async () => {
       this.assertOpen();
-      const value: Input = { id: randomUUID(), message: normalizeRuntimeUserMessage(input), activated: false, attemptId };
+      const value: Input = { id: randomUUID(), message: normalizeRuntimeUserMessage(input), activated: false };
       const busy = this.turnOpen || this.sent.size > 0;
       if (busy && mode === "followUp") { this.followUps.push(value); await this.publishStatus(); }
       else {
         await this.submit(value);
-        if (busy) {
-          // Never wait for a control response in the serialized reader/admission
-          // queue. A silent/just-started Bash may not be registered yet; the
-          // foreground budget handles that case without interrupts or replay.
-          for (const id of this.mapper.foregroundCommands()) void this.native.backgroundTasks(id).catch(() => undefined);
-        }
+        if (busy) this.backgroundForegroundCommands();
       }
       return { targetAgentId: this.descriptor.agentId, deliveryId: value.id,
         acceptedMode: busy ? mode === "followUp" ? "followUp" : "steer" : "prompt" };
     });
+  }
+
+  /** Kernel admission is explicit; only the legacy sendMessage path makes queue decisions. */
+  async dispatchProviderTurn(input: RuntimeUserMessage, attemptId: string, turn?: ProviderTurnRef): Promise<void> {
+    await this.serialize(async () => {
+      if (this.getProviderDrainStatus() !== "open") throw new ProviderDispatchRejectedError("closed");
+      if (turn) this.options.providerSession!.assertTurn(turn);
+      else if (this.turnOpen || this.sent.size || this.followUps.length) throw new ProviderDispatchRejectedError("busy");
+      // Reuse the creator-prepared native projection exactly once for either path.
+      await this.submit({ id: randomUUID(), message: normalizeRuntimeUserMessage(input), activated: false, attemptId });
+      if (turn) this.backgroundForegroundCommands();
+    });
+  }
+
+  private backgroundForegroundCommands(): void {
+    // Never wait for a control response in the serialized reader/admission queue.
+    // A silent/just-started Bash may not be registered yet; its budget handles it.
+    for (const id of this.mapper.foregroundCommands()) void this.native.backgroundTasks(id).catch(() => undefined);
   }
 
   async interruptProvider(): Promise<void> { this.assertOpen(); await this.native.interrupt(); }
@@ -407,7 +420,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     await this.publishStatus();
   }
   private serialize<T>(work: () => Promise<T>): Promise<T> { const result = this.operations.then(work); this.operations = result.catch(() => undefined); return result; }
-  private assertOpen(): void { if (this.closed || this.stopping || this.status === "error") throw new Error("Claude native is stopped or unavailable. Settle the previous runtime before continuing."); }
+  private assertOpen(): void { if (this.getProviderDrainStatus() !== "open") throw new Error("Claude native is stopped or unavailable. Settle the previous runtime before continuing."); }
 }
 
 class ClaudeInputQueue implements AsyncIterableIterator<SDKUserMessage> {
