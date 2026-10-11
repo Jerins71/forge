@@ -118,15 +118,18 @@ export function SessionContextMenu({
             Mark as unread
           </ContextMenuItem>
         ) : null}
-        <ContextMenuItem
-          onClick={() => {
-            const sessionDir = sessionAgent.sessionFile.replace(/\/[^/]+$/, '')
-            navigator.clipboard.writeText(sessionDir)
-          }}
-        >
-          <Copy className="mr-2 size-3.5" />
-          Copy session data path
-        </ContextMenuItem>
+        {/* A session on another machine has no path on this one. */}
+        {sessionAgent.sessionFile ? (
+          <ContextMenuItem
+            onClick={() => {
+              const sessionDir = sessionAgent.sessionFile.replace(/\/[^/]+$/, '')
+              navigator.clipboard.writeText(sessionDir)
+            }}
+          >
+            <Copy className="mr-2 size-3.5" />
+            Copy session data path
+          </ContextMenuItem>
+        ) : null}
         {onPinSession && sessionAgent.profileId ? (
           <ContextMenuItem onClick={() => onPinSession(sessionAgent.agentId, !isPinned)}>
             <Pin className="mr-2 size-3.5" />

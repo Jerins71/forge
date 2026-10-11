@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useMemo, useState } from 'react'
-import { Archive, ChevronDown, ChevronRight, ChevronUp, Monitor, MoreHorizontal, Plus, Server, Pin, Edit3, EyeOff, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronUp, Monitor, MoreHorizontal, Plus, Server, Pin } from 'lucide-react'
 import type { ProjectRef, SessionRef, SessionSummary } from '@forge/protocol/environment-v2'
 import type { LogicalProjectGroup as LogicalProjectGroupModel, ShellState } from '@forge/client-runtime'
 import {
@@ -15,9 +15,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useEnvironmentSelector, useSelectorStore } from '@/hooks/use-environment-selector'
 import { useEnvironmentRegistry, usePrimaryEnvironmentId } from '@/lib/origin-store/environment-provider'
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
-import { RenameSessionDialog } from './dialogs/RenameSessionDialog'
-import { DeleteSessionDialog } from './dialogs/DeleteSessionDialog'
+import { RemoteSessionMenu } from './RemoteSessionMenu'
+import { ArchiveAllSessionsDialog } from './dialogs/ArchiveAllSessionsDialog'
 import { cn } from '@/lib/utils'
 import { EnvironmentBadge } from './EnvironmentStatusChip'
 import { useEnvironmentLabel, useEnvironmentStatus } from './hooks/useEnvironmentStatus'
@@ -31,12 +30,6 @@ export interface EnvironmentSessionNavigation {
   onSelectSession: (session: SessionRef) => void
   /** Opens the launch composer for this logical project; Run on chooses the member. */
   onNewSession?: (groupKey: string) => void
-  onRenameSession?: (session: SessionRef, title: string) => Promise<void>
-  onPinSession?: (session: SessionRef, pinned: boolean) => Promise<void>
-  onMarkUnread?: (session: SessionRef) => void
-  /** Run on the session's own environment, with this device's permissions there. */
-  onArchiveSession?: (session: SessionRef) => Promise<void>
-  onDeleteSession?: (session: SessionRef) => Promise<void>
 }
 
 /** Machines beyond this many collapse into a "+N" count. */
@@ -91,7 +84,11 @@ function MachineLabel({ environmentId, hidden }: { environmentId: string; hidden
 }
 
 /** Split and merge a logical project's checkouts across machines. */
-export function ProjectGroupMenu({ group }: { group: LogicalProjectGroupModel }) {
+export function ProjectGroupMenu({ group, onArchiveAll }: {
+  group: LogicalProjectGroupModel
+  /** Offered on rows that have no other project menu (a project with no checkout on this machine). */
+  onArchiveAll?: () => void
+}) {
   const registry = useEnvironmentRegistry()
   const groups = useSelectorStore(registry.logicalProjects, identity)
   const others = useMemo(() => [...groups.values()].filter((other) => other.key !== group.key), [groups, group.key])
@@ -135,6 +132,12 @@ export function ProjectGroupMenu({ group }: { group: LogicalProjectGroupModel })
           <>
             <DropdownMenuSeparator />
             <p className="px-2 py-1.5 text-xs text-subtle-foreground">No other projects to group with.</p>
+          </>
+        ) : null}
+        {onArchiveAll ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onArchiveAll}>Archive all sessions…</DropdownMenuItem>
           </>
         ) : null}
       </DropdownMenuContent>
@@ -184,6 +187,7 @@ export const RemoteProjectGroup = memo(function RemoteProjectGroup({
 }) {
   const group = useLogicalProject(groupKey)
   const sessions = useRemoteSessions(group?.members)
+  const [archivingAll, setArchivingAll] = useState(false)
   if (!group) return null
   const { visible, hiddenCount } = limitVisibleSessions(
     sessions,
@@ -222,7 +226,8 @@ export const RemoteProjectGroup = memo(function RemoteProjectGroup({
           <span className={cn('min-w-0 flex-1 truncate leading-5', roomsV2 ? 'text-[13px] font-medium' : 'text-sm font-semibold')}>{group.title}</span>
           <ProjectMachineChips members={group.members} />
         </button>
-        <ProjectGroupMenu group={group} />
+        <ProjectGroupMenu group={group} onArchiveAll={() => setArchivingAll(true)} />
+        {archivingAll ? <ArchiveAllSessionsDialog projectTitle={group.title} members={group.members} onClose={() => setArchivingAll(false)} /> : null}
         {navigation.onNewSession ? (
           <button
             type="button"
@@ -251,7 +256,6 @@ export const RemoteProjectGroup = memo(function RemoteProjectGroup({
                 roomsV2={roomsV2}
                 selected={isSelectedRemoteSession(entry, navigation.selectedSession)}
                 onSelect={navigation.onSelectSession}
-                navigation={navigation}
               />
             ))}
           </ul>
@@ -314,34 +318,15 @@ export const EnvironmentSessionRow = memo(function EnvironmentSessionRow({
   roomsV2 = false,
   selected,
   onSelect,
-  navigation,
 }: {
   environmentId: string
   sessionId: string
   roomsV2?: boolean
   selected: boolean
   onSelect: (session: SessionRef) => void
-  navigation?: EnvironmentSessionNavigation
 }) {
-  const [renaming, setRenaming] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   recordEnvironmentRow(environmentId, sessionId)
   const label = useEnvironmentLabel(environmentId)
-  const run = (operation: Promise<void>) => {
-    setError(null)
-    void operation.then(() => setRenaming(false)).catch(e => setError(
-      // The machine decides what this device may do; say so instead of repeating its protocol wording.
-      (e as { code?: unknown })?.code === 'FORBIDDEN'
-        ? `This device is not allowed to change sessions on ${label}. Pair it again with permission to operate sessions.`
-        : e instanceof Error ? e.message : 'Session update failed'))
-  }
-  // A project's own session is removed with the project, as on this machine.
-  const selectIsDefault = useCallback((shell: ShellState) => {
-    const projectId = shell.sessions.get(sessionId)?.projectId
-    return projectId ? shell.projects.get(projectId)?.defaultSessionId === sessionId : false
-  }, [sessionId])
-  const isDefault = useEnvironmentSelector(environmentId, 'shell', selectIsDefault)
   const sessionKeys = useMemo(() => [`session:${sessionId}`], [sessionId])
   const selectSession = useCallback((shell: ShellState) => shell.sessions.get(sessionId), [sessionId])
   const session = useEnvironmentSelector(environmentId, 'shell', selectSession, sessionKeys)
@@ -349,8 +334,7 @@ export const EnvironmentSessionRow = memo(function EnvironmentSessionRow({
   const needsAttention = session.attention !== 'none' && session.attention !== 'result'
   return (
     <li>
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
+      <RemoteSessionMenu environmentId={environmentId} sessionId={sessionId}>
           <div className={cn(
             roomsV2 ? 'sidebar-room-row' : 'relative flex items-center rounded-md transition-colors',
             roomsV2
@@ -385,19 +369,7 @@ export const EnvironmentSessionRow = memo(function EnvironmentSessionRow({
               <EnvironmentBadge label={label} />
             </button>
           </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          {navigation?.onRenameSession ? <ContextMenuItem onClick={() => { setError(null); setRenaming(true) }}><Edit3 className="mr-2 size-3.5" />Rename</ContextMenuItem> : null}
-          {navigation?.onPinSession ? <ContextMenuItem onClick={() => run(navigation.onPinSession!({ environmentId, sessionId }, !session.pinnedAt))}><Pin className="mr-2 size-3.5" />{session.pinnedAt ? 'Unpin' : 'Pin'}</ContextMenuItem> : null}
-          {navigation?.onMarkUnread ? <ContextMenuItem onClick={() => navigation.onMarkUnread!({ environmentId, sessionId })}><EyeOff className="mr-2 size-3.5" />Mark as unread</ContextMenuItem> : null}
-          {navigation?.onArchiveSession || (!isDefault && navigation?.onDeleteSession) ? <ContextMenuSeparator /> : null}
-          {navigation?.onArchiveSession ? <ContextMenuItem onClick={() => run(navigation.onArchiveSession!({ environmentId, sessionId }))}><Archive className="mr-2 size-3.5" />Archive</ContextMenuItem> : null}
-          {!isDefault && navigation?.onDeleteSession ? <ContextMenuItem variant="destructive" onClick={() => { setError(null); setDeleting(true) }}><Trash2 className="mr-2 size-3.5" />Delete</ContextMenuItem> : null}
-        </ContextMenuContent>
-      </ContextMenu>
-      {renaming ? <RenameSessionDialog agentId={sessionId} currentLabel={session.title} onConfirm={(_id, title) => run(navigation!.onRenameSession!({ environmentId, sessionId }, title))} onClose={() => setRenaming(false)} /> : null}
-      {deleting ? <DeleteSessionDialog agentId={sessionId} sessionLabel={session.title} onConfirm={() => { setDeleting(false); run(navigation!.onDeleteSession!({ environmentId, sessionId })) }} onClose={() => setDeleting(false)} /> : null}
-      {error ? <p role="alert" className="px-3 text-xs text-danger">{error}</p> : null}
+      </RemoteSessionMenu>
     </li>
   )
 })
