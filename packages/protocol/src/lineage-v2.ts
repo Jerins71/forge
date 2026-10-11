@@ -17,7 +17,9 @@ export const ContextSourcePointSchema = O({ threadId: id, sequence: ordinal, run
 export type ContextSourcePoint = Static<typeof ContextSourcePointSchema>
 export const ThreadLineageSchema = O({ parentThreadId: id, rootThreadId: id, relationship: E('fork', 'continued_worker'), transferId: id, basePoint: ContextSourcePointSchema })
 export type ThreadLineage = Static<typeof ThreadLineageSchema>
-export const ContextCoverageSchema = O({ sourceThreadId: id, requestedEntryIds: ids, includedEntryIds: ids, omittedEntryIds: ids, partialEntryIds: ids })
+export const ContextCoverageSourceSchema = O({ sourcePoint: ContextSourcePointSchema, requestedEntryIds: ids, includedEntryIds: ids, omittedEntryIds: ids, partialEntryIds: ids })
+export type ContextCoverageSource = Static<typeof ContextCoverageSourceSchema>
+export const ContextCoverageSchema = O({ sourceThreadId: id, requestedEntryIds: ids, includedEntryIds: ids, omittedEntryIds: ids, partialEntryIds: ids, sources: Type.Optional(Type.Array(ContextCoverageSourceSchema, { maxItems: 1000 })) })
 export type ContextCoverage = Static<typeof ContextCoverageSchema>
 /** Metadata only. Payloads are private immutable files, never credentials or grants. */
 export const ContextHandoffSchema = O({
