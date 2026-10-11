@@ -311,7 +311,7 @@ export class PiRuntimeCreator {
     const runtimeAgentDir = pathsPlan.runtimeAgentDir;
     const memoryResources = await this.deps.getMemoryRuntimeResources(descriptor);
     const promptPlan = planPiRuntimePrompt({
-      systemPrompt,
+      systemPrompt, instructionBundle: creationOptions?.instructionBundle,
       cwd: descriptor.cwd,
       startupRecoveryContext: creationOptions?.startupRecoveryContext
     });

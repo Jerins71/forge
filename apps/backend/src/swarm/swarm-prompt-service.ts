@@ -1,13 +1,15 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-import { isRepoProjectAgentSource, type PromptPreviewResponse, type PromptPreviewSection, type TierConfig } from "@forge/protocol";
-import { assembleRuntimePrompt, discoverAgentsMd } from "./runtime-prompt-assembler.js";
+import { isRepoProjectAgentSource, type PromptPreviewResponse, type PromptPreviewSection, type TierConfig, type InstructionBundle, type InstructionSource } from "@forge/protocol";
+import { assembleRuntimeInstructionBundle, discoverAgentsMd } from "./runtime-prompt-assembler.js";
+import { appendInstructionParts, createInstructionBundle, instructionSource, renderInstructionBundle, reviseInstructionBundle } from "./runtime/instruction-bundle.js";
 import { isSessionAgentDescriptor } from "./agent-directory.js";
 import {
   getCommonKnowledgePath,
   getProfileMemoryPath,
   getProjectAgentPromptPath,
+  getProjectAgentReferenceDir,
 } from "./data-paths.js";
 import { modelCatalogService } from "./catalog/model-catalog-service.js";
 import { getOnboardingSnapshot } from "./onboarding-state.js";
@@ -42,7 +44,7 @@ import {
   isEnoentError,
   normalizeOptionalAgentId,
 } from "./swarm-manager-utils.js";
-import { composeBuiltinModeSystemPrompt, WORKER_MODE_SYSTEM_PROMPT_CORE } from "./worker-mode-prompt.js";
+import { composeBuiltinModeSystemPrompt, isBuiltinModePromptId, WORKER_MODE_SYSTEM_PROMPT_CORE } from "./worker-mode-prompt.js";
 import { buildManagerPostureBlock } from "./prompts/manager-posture.js";
 
 const CURSOR_SDK_RUNTIME_GUIDANCE_BLOCK = `## Cursor SDK Runtime
@@ -86,7 +88,7 @@ const FORGE_ROUTING_FOOTER = `# Non-Negotiable Forge Routing Contract
 - Worker results require disposition but are not automatic user or peer updates. Never duplicate a reply through two paths or use \`NO_REPLY\` to skip an unanswered direct request.`;
 
 export type ProjectAgentPromptSource =
-  | { kind: "project_agent_base"; sourcePath?: string; fallback?: boolean }
+  | { kind: "project_agent_base"; sourcePath?: string; promptId?: string; fallback?: boolean }
   | { kind: "session_system_prompt"; agentId: string }
   | { kind: "repo_prompt"; sourcePath: string; definitionId: string }
   | { kind: "profile_prompt"; sourcePath: string; handle: string }
@@ -97,10 +99,12 @@ export interface ProjectAgentPromptComposition {
   content: string;
   rolePrompt?: string;
   sources: ProjectAgentPromptSource[];
+  parts: Array<{ source: ProjectAgentPromptSource; content: string }>;
 }
 
 interface ResolvedSpecialistDefinitionLike {
   specialistId: string;
+  sourcePath?: string;
   promptBody?: string;
 }
 
@@ -114,6 +118,7 @@ interface MemoryRuntimeResources {
   memoryContextFile: { path: string; content: string };
   additionalSkillPaths: string[];
   skillMetadata: SkillMetadata[];
+  sources: InstructionSource[];
 }
 
 export interface SwarmPromptServiceOptions {
@@ -239,6 +244,7 @@ export class SwarmPromptService {
   async buildResolvedManagerPrompt(
     descriptor: AgentDescriptor,
     options?: { ignoreProjectAgentSystemPrompt?: boolean },
+    sources?: InstructionSource[],
   ): Promise<string> {
     const profileId = descriptor.profileId ?? descriptor.agentId;
     const managerArchetypeId = descriptor.archetypeId
@@ -256,12 +262,23 @@ export class SwarmPromptService {
         : normalizedSessionSystemPrompt
           ? Promise.resolve(normalizedSessionSystemPrompt)
           : this.resolveManagerArchetypeEntry(managerArchetypeId, profileId, descriptor)
-            .then(entry => entry?.content ?? this.options.promptRegistry.resolve("archetype", managerArchetypeId, profileId)),
+            .then(entry => {
+              if (entry) sources?.push(instructionSource("archetype", entry.promptId, entry.content, entry.sourcePath));
+              return entry?.content ?? this.options.promptRegistry.resolve("archetype", managerArchetypeId, profileId);
+            }),
       this.resolveSpecialistRosterForDescriptor(descriptor, specialistRegistry),
       specialistRegistry.resolveTierConfigs(),
     ]);
 
+    if (projectAgentComposition) {
+      for (const part of projectAgentComposition.parts) sources?.push(instructionSource(part.source.kind, JSON.stringify(part.source),
+        part.content, "sourcePath" in part.source ? part.source.sourcePath : undefined));
+    } else if (normalizedSessionSystemPrompt) {
+      sources?.push(instructionSource("session_prompt", descriptor.agentId, normalizedSessionSystemPrompt));
+    }
     const delegationBlock = specialistRegistry.generateRosterBlock(roster, tierConfigs);
+    for (const specialist of roster) sources?.push(instructionSource("specialist", specialist.specialistId, specialist.promptBody ?? "", specialist.sourcePath));
+    sources?.push(instructionSource("specialist_roster", profileId, delegationBlock));
     const projectAgentDirectoryEntries = await this.resolveProjectAgentDirectoryEntries(
       profileId,
       descriptor,
@@ -276,9 +293,13 @@ export class SwarmPromptService {
     const delegationContextBlock = `${delegationBlock}\n\n${projectAgentDirectoryBlock}${createSessionCapabilityNote}`;
     let prompt = resolvePromptVariables(promptTemplate, this.buildStandardPromptVariables(descriptor));
     const managerPostureBlock = buildManagerPostureBlock(descriptor.managerPosture);
+    sources?.push(instructionSource("manager_posture", descriptor.agentId, managerPostureBlock));
+    sources?.push(instructionSource("project_agent_directory", profileId, projectAgentDirectoryBlock));
     prompt = composeManagerPosture(prompt, managerPostureBlock);
 
     const projectAgentReferenceDocs = await this.resolveProjectAgentReferenceDocs(descriptor, profileId);
+    for (const doc of projectAgentReferenceDocs) sources?.push(instructionSource("project_agent_reference", doc.path, doc.content,
+      doc.sourcePath));
     if (projectAgentReferenceDocs.length > 0) {
       prompt = `${prompt.trimEnd()}\n\n<agent_reference_docs>\n${projectAgentReferenceDocs.map((doc) => `## ${doc.path}\n${doc.content}`).join("\n\n")}\n</agent_reference_docs>`;
     }
@@ -301,6 +322,7 @@ export class SwarmPromptService {
         descriptor.model.modelId,
         descriptor.model.provider,
       );
+      if (effectiveModelSpecificInstructions) sources?.push(instructionSource("model_addition", `${descriptor.model.provider}:${descriptor.model.modelId}`, effectiveModelSpecificInstructions));
       const modelSpecificInstructionsBlock = effectiveModelSpecificInstructions
         ? `# Model-Specific Instructions\n${effectiveModelSpecificInstructions}`
         : "";
@@ -309,21 +331,52 @@ export class SwarmPromptService {
       }
     }
 
-    prompt = await this.appendRepositoryReferenceInventory(prompt, descriptor);
+    prompt = await this.appendRepositoryReferenceInventory(prompt, descriptor, sources);
 
     if (projectAgentComposition || managerArchetypeId === MANAGER_ARCHETYPE_ID) {
+      sources?.push(instructionSource("builtin_guidance", "visualizations", USER_FACING_VISUALIZATION_GUIDANCE));
       prompt = `${prompt.trimEnd()}\n\n${USER_FACING_VISUALIZATION_GUIDANCE}`;
     }
 
     if (projectAgentComposition || managerArchetypeId === MANAGER_ARCHETYPE_ID) {
+      sources?.push(instructionSource("builtin_guidance", "routing", FORGE_ROUTING_FOOTER));
       prompt = `${prompt.trimEnd()}\n\n${FORGE_ROUTING_FOOTER}`;
     }
 
     if (descriptor.sessionPurpose === "side_chat") {
+      sources?.push(instructionSource("builtin_guidance", "side_chat", SIDE_CHAT_GUIDANCE));
       prompt = `${prompt.trimEnd()}\n\n${SIDE_CHAT_GUIDANCE}`;
     }
 
     return prompt;
+  }
+
+  /** The same owners resolve instructions and provenance; no preview-only reconstruction. */
+  async buildInstructionBundle(descriptor: AgentDescriptor, options?: Pick<InstructionBundle, "pins" | "approvedHandoff">): Promise<InstructionBundle> {
+    const sources: InstructionSource[] = [];
+    const text = await this.resolveSystemPromptForDescriptor(descriptor, sources);
+    const base = createInstructionBundle(descriptor, text, sources.length ? sources : undefined);
+    const identity = this.injectWorkerIdentityContext(descriptor, "");
+    if (identity) base.parts.push({ kind: "actor_identity", text: identity, separator: "",
+      sources: [instructionSource("actor_identity", descriptor.agentId, identity)] });
+    const memory = await this.getMemoryRuntimeResources(descriptor);
+    base.memory = { ...memory.memoryContextFile, sources: memory.sources };
+    base.skills = memory.skillMetadata.map(skill => ({ name: skill.skillName, path: skill.path,
+      ...(skill.description ? { description: skill.description } : {}),
+      source: instructionSource("skill_inventory", skill.skillId, JSON.stringify({ name: skill.skillName, description: skill.description, path: skill.path }), skill.path) }));
+    base.references = sources.filter(source => source.kind === "repository_reference" || source.kind === "project_agent_reference")
+      .map(source => ({ name: source.id, path: source.path ?? source.id, source }));
+    const manager = descriptor.role === "manager" ? descriptor : this.options.descriptors.get(descriptor.managerId);
+    const workspace = await new ProjectWorkspaceResolver({ dataDir: this.options.config.paths.dataDir,
+      settingsStore: new ProjectResourceSettingsStore(this.options.config.paths.dataDir) }).resolvePassive({
+        profileId: manager?.profileId ?? descriptor.profileId ?? descriptor.agentId,
+        sessionAgentId: manager?.agentId ?? descriptor.managerId, cwd: manager?.cwd ?? descriptor.cwd,
+      });
+    base.project = { ...base.project, workspaceKey: workspace.workspaceKey,
+      ...(workspace.effectiveForgeDirRealpath ? { forgeDir: workspace.effectiveForgeDirRealpath } : {}) };
+    if (options?.pins) base.pins = options.pins;
+    if (options?.approvedHandoff) base.approvedHandoff = options.approvedHandoff;
+    return reviseInstructionBundle(base);
   }
 
   private async resolveProjectAgentDirectoryEntries(
@@ -411,11 +464,11 @@ export class SwarmPromptService {
     }
   }
 
-  async resolveSystemPromptForDescriptor(descriptor: AgentDescriptor): Promise<string> {
+  async resolveSystemPromptForDescriptor(descriptor: AgentDescriptor, sources?: InstructionSource[]): Promise<string> {
     const profileId = descriptor.profileId ?? descriptor.agentId;
 
     if (descriptor.role === "manager") {
-      return this.buildResolvedManagerPrompt(descriptor);
+      return this.buildResolvedManagerPrompt(descriptor, undefined, sources);
     }
 
     const requiredBehaviorPromptId = normalizeOptionalAgentId(descriptor.specialistLens)?.toLowerCase();
@@ -433,9 +486,11 @@ export class SwarmPromptService {
         const specialist = roster.find((entry) => entry.specialistId === specialistId);
         const specialistPrompt = specialist?.promptBody?.trim();
         if (specialistPrompt) {
+          if (isBuiltinModePromptId(specialistId)) sources?.push(instructionSource("builtin_guidance", "worker_core", WORKER_MODE_SYSTEM_PROMPT_CORE));
+          sources?.push(instructionSource("specialist", specialistId, specialist!.promptBody!, specialist!.sourcePath));
           return this.appendRepositoryReferenceInventory(
             composeBuiltinModeSystemPrompt(specialistId, specialistPrompt),
-            descriptor,
+            descriptor, sources,
           );
         }
       } catch (error) {
@@ -469,16 +524,17 @@ export class SwarmPromptService {
           profileId,
         );
         if (archetypePrompt) {
-          return this.appendRepositoryReferenceInventory(archetypePrompt.content, descriptor);
+          sources?.push(instructionSource("archetype", normalizedArchetypeId, archetypePrompt.content, archetypePrompt.sourcePath));
+          return this.appendRepositoryReferenceInventory(archetypePrompt.content, descriptor, sources);
         }
       }
     }
 
     try {
-      return this.appendRepositoryReferenceInventory(
-        await this.options.promptRegistry.resolve("archetype", "worker", profileId),
-        descriptor
-      );
+      const entry = await this.options.promptRegistry.resolveEntry("archetype", "worker", profileId);
+      const prompt = entry?.content ?? await this.options.promptRegistry.resolve("archetype", "worker", profileId);
+      sources?.push(instructionSource("archetype", "worker", prompt, entry?.sourcePath));
+      return this.appendRepositoryReferenceInventory(prompt, descriptor, sources);
     } catch (error) {
       this.options.logDebug("prompt:resolve:fallback", {
         category: "archetype",
@@ -486,11 +542,12 @@ export class SwarmPromptService {
         profileId,
         message: error instanceof Error ? error.message : String(error),
       });
-      return this.appendRepositoryReferenceInventory(WORKER_MODE_SYSTEM_PROMPT_CORE, descriptor);
+      sources?.push(instructionSource("builtin_guidance", "worker_fallback", WORKER_MODE_SYSTEM_PROMPT_CORE));
+      return this.appendRepositoryReferenceInventory(WORKER_MODE_SYSTEM_PROMPT_CORE, descriptor, sources);
     }
   }
 
-  private async appendRepositoryReferenceInventory(systemPrompt: string, descriptor: AgentDescriptor): Promise<string> {
+  private async appendRepositoryReferenceInventory(systemPrompt: string, descriptor: AgentDescriptor, sources?: InstructionSource[]): Promise<string> {
     const managerDescriptor = descriptor.role === "manager"
       ? descriptor
       : this.options.descriptors.get(descriptor.managerId);
@@ -514,6 +571,7 @@ export class SwarmPromptService {
       if (inventory.files.length === 0) {
         return systemPrompt;
       }
+      for (const file of inventory.files) sources?.push(instructionSource("repository_reference", file, file, join(inventory.rootDir, file)));
       const lines = [
         "",
         "# Repository Reference Documents",
@@ -590,6 +648,7 @@ export class SwarmPromptService {
     }
 
     const sessionMemoryContent = await readFile(memoryFilePath, "utf8");
+    const sources = [instructionSource("session_memory", memoryOwnerAgentId, sessionMemoryContent, memoryFilePath)];
     let memoryContent = `# Session Memory (durable facts — update only on an explicit user memory request)\n\n${sessionMemoryContent.trimEnd()}`;
 
     const profileMemoryOwnerId = this.options.resolveSessionProfileId(memoryOwnerAgentId);
@@ -597,6 +656,7 @@ export class SwarmPromptService {
       const profileMemoryPath = getProfileMemoryPath(this.options.config.paths.dataDir, profileMemoryOwnerId);
       await this.options.ensureAgentMemoryFile(profileMemoryPath, profileMemoryOwnerId);
       const profileMemoryContent = await readFile(profileMemoryPath, "utf8");
+      sources.unshift(instructionSource("profile_memory", profileMemoryOwnerId, profileMemoryContent, profileMemoryPath));
       memoryContent = buildSessionMemoryRuntimeView(profileMemoryContent, sessionMemoryContent);
     }
 
@@ -604,6 +664,7 @@ export class SwarmPromptService {
     try {
       const commonKnowledgeContent = (await readFile(commonKnowledgePath, "utf8")).trim();
       if (commonKnowledgeContent.length > 0) {
+        sources.push(instructionSource("common_knowledge", "common", commonKnowledgeContent, commonKnowledgePath));
         memoryContent = [
           memoryContent.trimEnd(),
           "",
@@ -623,6 +684,7 @@ export class SwarmPromptService {
     if (descriptor.role === "manager") {
       const onboardingSnapshot = await getOnboardingSnapshot(this.options.config.paths.dataDir);
       if (shouldInjectOnboardingSnapshot(onboardingSnapshot)) {
+        sources.push(instructionSource("onboarding", "snapshot", JSON.stringify(onboardingSnapshot)));
         memoryContent = [
           memoryContent.trimEnd(),
           "",
@@ -647,7 +709,7 @@ export class SwarmPromptService {
         content: memoryContent,
       },
       additionalSkillPaths: skillMetadata.map((skill) => skill.path),
-      skillMetadata,
+      skillMetadata, sources,
     };
   }
 
@@ -699,6 +761,12 @@ export class SwarmPromptService {
     descriptor: AgentDescriptor,
     systemPrompt: string,
   ): Promise<string> {
+    return renderInstructionBundle(await this.buildCursorSdkRuntimeInstructionBundle(descriptor, systemPrompt));
+  }
+
+  async buildCursorSdkRuntimeInstructionBundle(descriptor: AgentDescriptor, instructions: InstructionBundle | string): Promise<InstructionBundle> {
+    const base = typeof instructions === "string" ? createInstructionBundle(descriptor, instructions) : instructions;
+    const systemPrompt = renderInstructionBundle(base);
     const runtimeMemoryFilePath = this.options.getAgentMemoryPath(descriptor.agentId);
     const resolvedBasePrompt = resolvePromptVariables(
       systemPrompt,
@@ -710,7 +778,8 @@ export class SwarmPromptService {
       this.getSwarmContextFiles(descriptor.cwd),
     ]);
 
-    const assembledPrompt = await assembleRuntimePrompt({
+    const assembled = await assembleRuntimeInstructionBundle({
+      instructionBundle: { ...base, memory: { ...memoryResources.memoryContextFile, sources: memoryResources.sources } },
       basePrompt: resolvedBasePrompt,
       memoryContextFile: memoryResources.memoryContextFile,
       agentsMdPaths: [...agentsMdPaths, ...swarmContextFiles.map((entry) => entry.path)],
@@ -724,7 +793,8 @@ export class SwarmPromptService {
       cwd: descriptor.cwd,
     });
 
-    return [assembledPrompt, CURSOR_SDK_RUNTIME_GUIDANCE_BLOCK].filter((section) => section.trim().length > 0).join("\n\n");
+    return appendInstructionParts(assembled, [{ kind: "native_integration", text: CURSOR_SDK_RUNTIME_GUIDANCE_BLOCK, separator: "\n\n",
+      sources: [instructionSource("native_integration", "cursor-sdk", CURSOR_SDK_RUNTIME_GUIDANCE_BLOCK)] }]);
   }
 
   private buildStandardPromptVariables(descriptor: AgentDescriptor): Record<string, string> {
@@ -750,6 +820,7 @@ export class SwarmPromptService {
 
     const base = await this.resolveProjectAgentBasePrompt(descriptor);
     const sources: ProjectAgentPromptSource[] = [base.source];
+    const parts = [{ source: base.source, content: base.content }];
     let rolePrompt: string | undefined;
 
     if (!options?.ignoreProjectAgentSystemPrompt) {
@@ -770,14 +841,15 @@ export class SwarmPromptService {
       sources.push({ kind: "base_only" });
       return {
         content: base.content.trimEnd(),
-        sources,
+        sources, parts,
       };
     }
 
+    parts.push({ source: sources.at(-1)!, content: rolePrompt });
     return {
       content: `${base.content.trimEnd()}\n\n# Project Agent Role Instructions\n\n${rolePrompt.trim()}`,
       rolePrompt,
-      sources,
+      sources, parts,
     };
   }
 
@@ -811,7 +883,7 @@ export class SwarmPromptService {
     if (["codex-native", "claude-native"].includes(descriptor.model.provider)) {
       const content = await this.options.promptRegistry.resolveAtLayer("archetype", descriptor.model.provider === "claude-native" ? "claude-manager" : "codex-manager", "builtin");
       if (!content?.trim()) throw new Error("Native integration prompt is missing");
-      return { content, source: { kind: "project_agent_base" } };
+      return { content, source: { kind: "project_agent_base", promptId: descriptor.model.provider === "claude-native" ? "archetype/claude-manager" : "archetype/codex-manager" } };
     }
     try {
       const content = await this.options.promptRegistry.resolveAtLayer(
@@ -822,7 +894,7 @@ export class SwarmPromptService {
       if (content?.trim()) {
         return {
           content,
-          source: { kind: "project_agent_base" },
+          source: { kind: "project_agent_base", promptId: `operational/${PROJECT_AGENT_BASE_PROMPT_ID}` },
         };
       }
     } catch (error) {
@@ -833,7 +905,7 @@ export class SwarmPromptService {
 
     return {
       content: PROJECT_AGENT_BASE_FALLBACK,
-      source: { kind: "project_agent_base", fallback: true },
+      source: { kind: "project_agent_base", promptId: `operational/${PROJECT_AGENT_BASE_PROMPT_ID}`, fallback: true },
     };
   }
 
@@ -901,7 +973,7 @@ export class SwarmPromptService {
   private async resolveProjectAgentReferenceDocs(
     descriptor: AgentDescriptor,
     profileId: string,
-  ): Promise<Array<{ path: string; content: string }>> {
+  ): Promise<Array<{ path: string; content: string; sourcePath: string }>> {
     if (!descriptor.projectAgent?.handle) {
       return [];
     }
@@ -910,7 +982,7 @@ export class SwarmPromptService {
       const scope = this.buildProjectAgentReferenceScope(descriptor);
       const resolution = await resolveRepoProjectAgentSource(scope, { dataDir: this.options.config.paths.dataDir });
       const definition = assertRepoProjectAgentSourceAvailable(resolution);
-      return definition.referenceDocs.map((doc) => ({ path: doc.path, content: doc.content }));
+      return definition.referenceDocs.map((doc) => ({ path: doc.path, content: doc.content, sourcePath: join(definition.dirPath, "reference", doc.path) }));
     }
 
     const projectAgentRecord = await this.readOwnedProjectAgentRecord(descriptor, profileId);
@@ -923,7 +995,7 @@ export class SwarmPromptService {
       profileId,
       projectAgentRecord.config.handle,
     );
-    const refContents: Array<{ path: string; content: string }> = [];
+    const refContents: Array<{ path: string; content: string; sourcePath: string }> = [];
     for (const fileName of refDocFiles) {
       const content = await readProjectAgentReferenceDoc(
         this.options.config.paths.dataDir,
@@ -932,7 +1004,7 @@ export class SwarmPromptService {
         fileName,
       );
       if (content) {
-        refContents.push({ path: fileName, content });
+        refContents.push({ path: fileName, content, sourcePath: join(getProjectAgentReferenceDir(this.options.config.paths.dataDir, profileId, projectAgentRecord.config.handle), fileName) });
       }
     }
 

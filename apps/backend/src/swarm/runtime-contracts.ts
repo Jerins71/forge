@@ -1,5 +1,8 @@
 import type {
   AgentToolCallEvent,
+  InstructionBundle,
+  ProviderTokenUsage,
+  ProviderCostUsd,
   GenerationMeasurementScope,
   GenerationOutcome,
   GenerationProviderAttemptScope,
@@ -11,6 +14,7 @@ import type {
   RequestedDeliveryMode,
   SendMessageReceipt
 } from "./types.js";
+import type { ProviderRequirements, ToolHostBinding } from "./runtime/provider-contract.js";
 import type { SecureRuntimeBinding } from "./secure-sessions/runtime/secure-runtime-binding.js";
 
 export interface RuntimeImageAttachment {
@@ -30,22 +34,8 @@ export interface RuntimeSessionMessage {
   content: unknown;
 }
 
-export interface RuntimeTokenUsageMeta {
-  input?: number;
-  output?: number;
-  cacheRead?: number;
-  cacheWrite?: number;
-  reasoning?: number;
-  total?: number;
-}
-
-export interface RuntimeCostUsdMeta {
-  input?: number;
-  output?: number;
-  cacheRead?: number;
-  cacheWrite?: number;
-  total?: number;
-}
+export type RuntimeTokenUsageMeta = ProviderTokenUsage;
+export type RuntimeCostUsdMeta = ProviderCostUsd;
 
 export type RuntimeRequestPayloadFidelity = "full" | "partial" | "delta_only" | "unavailable";
 
@@ -162,6 +152,12 @@ export interface RuntimeAcquisitionRequirements {
 }
 
 export interface RuntimeCreationOptions {
+  /** Prepared by the prompt owner; provider adapters consume this instead of a bare string. */
+  instructionBundle?: InstructionBundle;
+  /** Ephemeral tool executors, hooks and security authority; never persist this object. */
+  toolHostBinding?: ToolHostBinding;
+  /** Required behavior is checked before preparation or provider dispatch. */
+  providerRequirements?: ProviderRequirements;
   startupRecoveryContext?: RuntimeStartupRecoveryContext;
   /** Invoked after startup recovery context is committed on the first accepted prompt dispatch. */
   onStartupRecoveryConsumed?: () => void | Promise<void>;

@@ -1,4 +1,6 @@
-import { getCatalogProvider } from "@forge/protocol";
+import { getCatalogProvider, type ProviderScope, type ProviderToolHostMechanism } from "@forge/protocol";
+import type { ToolHostBinding } from "./provider-contract.js";
+import type { SecureRuntimeBinding } from "../secure-sessions/runtime/secure-runtime-binding.js";
 import { Clone } from "@sinclair/typebox";
 import type { ExtensionFactory, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { CompactionRuntimeSettingsProvider } from "../compaction-runtime-settings-provider.js";
@@ -46,6 +48,44 @@ export function planRuntimeTools(options: PlanRuntimeToolsOptions): RuntimeToolP
     : baseSwarmTools;
 
   return { baseSwarmTools, swarmTools };
+}
+
+/** Binds the final active tool set; provider-specific schema conversion remains in its native host. */
+export function bindRuntimeToolHost(options: {
+  descriptor: AgentDescriptor;
+  tools: readonly ToolDefinition[];
+  forgeExtensionHost?: ForgeExtensionHost;
+  preparedForgeBindings?: ForgePreparedRuntimeBindings | null;
+  secureRuntimeBinding?: SecureRuntimeBinding;
+  mechanism?: ProviderToolHostMechanism;
+  scope?: ProviderScope;
+}): ToolHostBinding {
+  const tools = new Map(options.tools.map(tool => [tool.name, tool]));
+  return {
+    snapshot: { version: 1, actorAgentId: options.descriptor.agentId,
+      ...(options.mechanism ? { mechanism: options.mechanism } : {}),
+      tools: options.tools.map(tool => ({ name: tool.name, description: tool.description,
+        inputSchema: JSON.parse(JSON.stringify(tool.parameters)) })),
+      eligibility: { browser: isBrowserAutomationEligible(options.descriptor), internalSession: isInternalSessionPurpose(options.descriptor), role: options.descriptor.role },
+    },
+    tools: options.tools,
+    ...(options.forgeExtensionHost && options.preparedForgeBindings ? { extensionHooks: {
+      host: options.forgeExtensionHost, bindingToken: options.preparedForgeBindings.bindingToken,
+    } } : {}),
+    ...(options.secureRuntimeBinding ? { security: options.secureRuntimeBinding } : {}),
+    async invoke(call) {
+      call.signal?.throwIfAborted();
+      if (call.ref.threadId !== options.descriptor.agentId) throw new Error("Tool call actor does not match its host binding.");
+      if (options.scope && (call.ref.bindingId !== options.scope.bindingId || call.ref.generation !== options.scope.generation)) {
+        throw new Error("Tool call binding or generation is stale.");
+      }
+      const tool = tools.get(call.name);
+      if (!tool) throw new Error("Unknown Forge tool");
+      return tool.execute(call.ref.nativeId, call.args, call.signal, call.onUpdate, call.context);
+    },
+    // Accidental JSONL/SQLite/diagnostic serialization must fail, including when no grant is active.
+    toJSON() { throw new Error("ToolHostBinding is ephemeral; serialize only its snapshot."); },
+  };
 }
 
 export function planForgePiToolBridgeFactory(options: {

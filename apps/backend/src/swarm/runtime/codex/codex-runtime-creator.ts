@@ -1,3 +1,5 @@
+import { assembleNativeInstructionBundle } from "../../runtime-prompt-assembler.js";
+import { renderInstructionBundle } from "../instruction-bundle.js";
 import { createNativeSecureBashTool } from "../../secure-sessions/runtime/native-secure-bash-tool.js";
 import { mkdir } from "node:fs/promises";
 import type { ForgeExtensionHost } from "../../forge-extension-host.js";
@@ -9,7 +11,7 @@ import type { CredentialPoolService } from "../../credential-pool.js";
 import type { OpenAIAuthBrokerRuntimeService } from "../../openai-auth/openai-auth-broker-runtime-service.js";
 import type { SkillMetadata } from "../../skills/skill-metadata-service.js";
 import { getNativeCodexHome } from "../../data-paths.js";
-import { isInternalSessionPurpose, planRuntimeTools } from "../runtime-tool-plan.js";
+import { isInternalSessionPurpose, planRuntimeTools, bindRuntimeToolHost } from "../runtime-tool-plan.js";
 import { CodexRuntimeAuth } from "./codex-runtime-auth.js";
 import { CodexAgentRuntime } from "./codex-agent-runtime.js";
 import { TaskNotesStore } from "../../task-notes-store.js";
@@ -59,20 +61,15 @@ export class CodexRuntimeCreator {
     const [memory, contextFiles] = await Promise.all([
       this.deps.getMemoryRuntimeResources(descriptor), this.deps.getSwarmContextFiles(descriptor.cwd),
     ]);
-    const skills = memory.skillMetadata.map(skill => `- ${skill.skillName}: ${skill.description ?? ""} (file: ${skill.path})`).join("\n");
     const secureSessionsEnabled = this.deps.host.isSecureSessionsEnabledForAgent?.(descriptor.agentId) !== false;
-    const systemPrompt = [options.systemPrompt,
-      "Forge integration tools are in the forge namespace. Keep native coding tools and native context management.",
-      descriptor.role === "worker"
-        ? "Return your result to the owning Forge manager. Follow the assigned specialist instructions; do not start another coordination system."
-        : "Use Forge workers for the configured roster; do not start a second coordination system.",
-      secureSessionsEnabled
-        ? "For credentialed work, when the Secure Sessions tools are available, inspect forge.secure_session_status and use forge.secure_bash with the exact granted aliases. Forge delivers values privately to that command and filters its output. Never ask for values in chat, copy them into files in the workspace, or use native shell/read tools to inspect credential material. Ordinary coding remains on native tools. For SSH password login use an SSH_ASKPASS binding; for a password needed after login, use a separate environment or stdin binding and pipe it to the remote program (such as sudo -S), keeping values out of command text. Browser login delivery is not supported. Older threads without the secure tools can continue ordinary work; a new or forked session is needed for secret delivery."
-        : "Secure Sessions are disabled for this project. Use native tools and the normal host SSH configuration and authentication for authorized SSH, SCP, Git, and other host commands. Do not require Secure Sessions, secret grants, or secure_bash for that work. The Secure Sessions tool definitions remain registered for native thread compatibility, but they do not indicate availability or impose a requirement to use them. Do not call them while the project setting is disabled. Never print credential material or ask for secret values in chat.",
-      memory.memoryContextFile.content ? `<forge_memory path=${JSON.stringify(memory.memoryContextFile.path)}>\n${memory.memoryContextFile.content}\n</forge_memory>` : "",
-      ...contextFiles.map(file => `<forge_project_context path=${JSON.stringify(file.path)}>\n${file.content}\n</forge_project_context>`),
-      skills ? `<forge_skills>\nRead a relevant skill's file before using it.\n${skills}\n</forge_skills>` : "",
-    ].filter(Boolean).join("\n\n");
+    const instructionBundle = await assembleNativeInstructionBundle({
+      runtime: "codex", descriptor, instructions: options.creationOptions?.instructionBundle ?? options.systemPrompt,
+      memory, contextFiles, secureSessionsEnabled,
+    });
+    const systemPrompt = renderInstructionBundle(instructionBundle);
+    const toolHostBinding = bindRuntimeToolHost({ descriptor, tools, forgeExtensionHost: this.deps.forgeExtensionHost,
+      preparedForgeBindings: prepared, secureRuntimeBinding: options.creationOptions?.secureRuntimeBinding, mechanism: "dynamic_tools" });
+    const creationOptions = { ...options.creationOptions, instructionBundle, toolHostBinding };
     const codexHome = getNativeCodexHome(this.deps.config.paths.dataDir);
     await mkdir(codexHome, { recursive: true, mode: 0o700 });
     const auth = new CodexRuntimeAuth({ config: this.deps.config, descriptor,
@@ -81,7 +78,7 @@ export class CodexRuntimeCreator {
       await auth.initialize();
       const runtime = await CodexAgentRuntime.create({ descriptor: structuredClone(descriptor),
         callbacks: options.callbacks, systemPrompt, codexHome, dataDir: this.deps.config.paths.dataDir, projectTrusted: trust.trusted,
-        auth, tools, host: this.deps.host, creationOptions: options.creationOptions });
+        auth, tools, host: this.deps.host, creationOptions });
       if (prepared) this.deps.forgeExtensionHost.activateRuntimeBindings(prepared);
       recordRuntimePromptAndCreation({ observability: this.deps.observability, descriptor,
         runtimeToken: options.runtimeToken, runtimeType: "codex", forgeResolvedPrompt: options.systemPrompt,

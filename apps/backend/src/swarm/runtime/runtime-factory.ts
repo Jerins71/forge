@@ -1,4 +1,4 @@
-import { type AgentRuntimeExtensionSnapshot } from "@forge/protocol";
+import { type AgentRuntimeExtensionSnapshot, type InstructionBundle } from "@forge/protocol";
 import type { ObservabilityFacade } from "../../observability/observability-types.js";
 import type { CredentialPoolService } from "../credential-pool.js";
 import type { OpenAIAuthBrokerRuntimeService } from "../openai-auth/openai-auth-broker-runtime-service.js";
@@ -23,13 +23,14 @@ import type {
 import type { CompactionRuntimeSettingsProvider } from "../compaction-runtime-settings-provider.js";
 import { assertForgeRuntimeEligibleDescriptor } from "../external-thread-compatibility.js";
 import { assertSwarmModelIdNotRetired } from "../catalog/model-presets.js";
+import { assertProviderRequirements, getRuntimeProviderCapabilities } from "./provider-contract.js";
+import { createInstructionBundle, renderInstructionBundle } from "./instruction-bundle.js";
 import { PiRuntimeCreator } from "./pi/pi-runtime-creator.js";
 import { CursorSdkRuntimeCreator } from "./cursor-sdk/cursor-sdk-runtime-creator.js";
 import { ClaudeRuntimeCreator } from "./claude/claude-runtime-creator.js";
 import { CodexRuntimeCreator } from "./codex/codex-runtime-creator.js";
 import {
   SECURE_RUNTIME_BINDING_UNAVAILABLE_MESSAGE,
-  SECURE_RUNTIME_PROVIDER_UNSUPPORTED_MESSAGE,
   type GetSecureRuntimeBinding,
 } from "../secure-sessions/runtime/secure-runtime-binding.js";
 
@@ -102,7 +103,7 @@ export class RuntimeFactory {
 
   async createRuntimeForDescriptor(
     descriptor: AgentDescriptor,
-    systemPrompt: string,
+    instructions: InstructionBundle | string,
     runtimeToken = 0,
     options?: RuntimeCreationOptions
   ): Promise<SwarmAgentRuntime> {
@@ -112,15 +113,23 @@ export class RuntimeFactory {
       descriptor.model.modelId,
       "runtime model",
     );
+    const runtimeType = descriptor.model.provider === "codex-native" ? "codex"
+      : descriptor.model.provider === "claude-native" ? "claude"
+      : isCursorSdkModelDescriptor(descriptor.model) ? "cursor-sdk" : "pi";
+    assertProviderRequirements(getRuntimeProviderCapabilities(runtimeType), {
+      ...options?.providerRequirements, ...(options?.secureRuntimeRequired ? { secureSessions: true } : {}),
+    });
+    const instructionBundle = typeof instructions === "string"
+      ? options?.instructionBundle ?? createInstructionBundle(descriptor, instructions)
+      : instructions;
+    const systemPrompt = renderInstructionBundle(instructionBundle);
     const secureRuntimeBinding =
       options?.secureRuntimeBinding ??
       await this.resolveSecureRuntimeBinding(descriptor, runtimeToken);
     if (options?.secureRuntimeRequired && !secureRuntimeBinding) {
       throw new Error(SECURE_RUNTIME_BINDING_UNAVAILABLE_MESSAGE);
     }
-    const creationOptions = secureRuntimeBinding
-      ? { ...options, secureRuntimeBinding }
-      : options;
+    const creationOptions = { ...options, instructionBundle, ...(secureRuntimeBinding ? { secureRuntimeBinding } : {}) };
 
     if (["codex-native", "claude-native"].includes(descriptor.model.provider)) {
       const creator = descriptor.model.provider === "codex-native" ? new CodexRuntimeCreator(this.deps) : new ClaudeRuntimeCreator(this.deps);
@@ -136,7 +145,7 @@ export class RuntimeFactory {
 
     if (isCursorSdkModelDescriptor(descriptor.model)) {
       if (secureRuntimeBinding) {
-        throw new Error(SECURE_RUNTIME_PROVIDER_UNSUPPORTED_MESSAGE);
+        assertProviderRequirements(getRuntimeProviderCapabilities(runtimeType), { secureSessions: true });
       }
       return this.cursorSdkRuntimeCreator.createRuntimeForDescriptor({
         descriptor,

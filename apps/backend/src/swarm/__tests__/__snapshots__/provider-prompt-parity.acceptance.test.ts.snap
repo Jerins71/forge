@@ -1,0 +1,335 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`production prompt and tool boundary baseline > retains claude request bytes for archetype, specialist and project agent sources > claude:archetype 1`] = `
+{
+  "promptSha256": "c5e3a028deb798f378af12a8966f4cfcadfde92065f2ca38c4354af7a015303d",
+  "toolNames": [
+    "list_agents",
+    "send_message_to_agent",
+    "update_work_graph",
+    "accept_work_graph_node",
+    "update_plan",
+    "create_goal",
+    "get_goal",
+    "update_goal",
+    "spawn_agent",
+    "delegate_codex_plugin",
+    "retry_codex_plugin_worker",
+    "kill_agent",
+    "speak_to_user",
+    "present_choices",
+    "browser_status",
+    "browser_open",
+    "browser_navigate",
+    "browser_resize",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_press",
+    "browser_scroll",
+    "browser_evaluate",
+    "browser_wait_for",
+    "browser_recording_start",
+    "browser_recording_stop",
+    "secure_bash",
+  ],
+  "toolSchemasSha256": "30ffa82a1e6be1ea8f95c726186ca682ebaad12f8bf9f5c5e10bf78cdd508dcb",
+}
+`;
+
+exports[`production prompt and tool boundary baseline > retains claude request bytes for archetype, specialist and project agent sources > claude:project-agent 1`] = `
+{
+  "promptSha256": "6452350a77027a0bae98edf3ee23ceab7338425d37534a91f79f738fe713fbd8",
+  "toolNames": [
+    "list_agents",
+    "send_message_to_agent",
+    "update_work_graph",
+    "accept_work_graph_node",
+    "update_plan",
+    "create_goal",
+    "get_goal",
+    "update_goal",
+    "spawn_agent",
+    "delegate_codex_plugin",
+    "retry_codex_plugin_worker",
+    "kill_agent",
+    "speak_to_user",
+    "present_choices",
+    "browser_status",
+    "browser_open",
+    "browser_navigate",
+    "browser_resize",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_press",
+    "browser_scroll",
+    "browser_evaluate",
+    "browser_wait_for",
+    "browser_recording_start",
+    "browser_recording_stop",
+    "secure_bash",
+  ],
+  "toolSchemasSha256": "30ffa82a1e6be1ea8f95c726186ca682ebaad12f8bf9f5c5e10bf78cdd508dcb",
+}
+`;
+
+exports[`production prompt and tool boundary baseline > retains claude request bytes for archetype, specialist and project agent sources > claude:specialist 1`] = `
+{
+  "promptSha256": "54dd06ccc0929661c181625086d9719aa250737e928470f0292e164d8c2511f6",
+  "toolNames": [
+    "send_message_to_agent",
+    "secure_bash",
+  ],
+  "toolSchemasSha256": "fc7ce1aace6db6f37553ba9a331e42e97f4c88497e29851161508f41087298f2",
+}
+`;
+
+exports[`production prompt and tool boundary baseline > retains codex request bytes for archetype, specialist and project agent sources > codex:archetype 1`] = `
+{
+  "promptSha256": "5ee757897190c6ecd88b618f15ac267cd9cbe7c36f61738fb48fcca03f1e0e61",
+  "toolNames": [
+    "list_agents",
+    "send_message_to_agent",
+    "update_work_graph",
+    "accept_work_graph_node",
+    "update_plan",
+    "create_goal",
+    "get_goal",
+    "update_goal",
+    "spawn_agent",
+    "delegate_codex_plugin",
+    "retry_codex_plugin_worker",
+    "kill_agent",
+    "speak_to_user",
+    "present_choices",
+    "browser_status",
+    "browser_open",
+    "browser_navigate",
+    "browser_resize",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_press",
+    "browser_scroll",
+    "browser_evaluate",
+    "browser_wait_for",
+    "browser_recording_start",
+    "browser_recording_stop",
+    "secure_bash",
+  ],
+  "toolSchemasSha256": "30ffa82a1e6be1ea8f95c726186ca682ebaad12f8bf9f5c5e10bf78cdd508dcb",
+}
+`;
+
+exports[`production prompt and tool boundary baseline > retains codex request bytes for archetype, specialist and project agent sources > codex:project-agent 1`] = `
+{
+  "promptSha256": "9b48e776880aae5e863e2d270e201a6c65035568c7b0482aceb937126508b2f3",
+  "toolNames": [
+    "list_agents",
+    "send_message_to_agent",
+    "update_work_graph",
+    "accept_work_graph_node",
+    "update_plan",
+    "create_goal",
+    "get_goal",
+    "update_goal",
+    "spawn_agent",
+    "delegate_codex_plugin",
+    "retry_codex_plugin_worker",
+    "kill_agent",
+    "speak_to_user",
+    "present_choices",
+    "browser_status",
+    "browser_open",
+    "browser_navigate",
+    "browser_resize",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_press",
+    "browser_scroll",
+    "browser_evaluate",
+    "browser_wait_for",
+    "browser_recording_start",
+    "browser_recording_stop",
+    "secure_bash",
+  ],
+  "toolSchemasSha256": "30ffa82a1e6be1ea8f95c726186ca682ebaad12f8bf9f5c5e10bf78cdd508dcb",
+}
+`;
+
+exports[`production prompt and tool boundary baseline > retains codex request bytes for archetype, specialist and project agent sources > codex:specialist 1`] = `
+{
+  "promptSha256": "685772a15f926e7e7c7699dd17aab39f2829536779b1eff1b9dfbb25a3c5116e",
+  "toolNames": [
+    "send_message_to_agent",
+    "secure_bash",
+  ],
+  "toolSchemasSha256": "fc7ce1aace6db6f37553ba9a331e42e97f4c88497e29851161508f41087298f2",
+}
+`;
+
+exports[`production prompt and tool boundary baseline > retains cursor-sdk request bytes for archetype, specialist and project agent sources > cursor-sdk:archetype 1`] = `
+{
+  "promptSha256": "4c728ebd1dcd28a1ef2f82ebde1d478a835be657eec4f25d1a62a8999c8be292",
+  "toolNames": [
+    "list_agents",
+    "send_message_to_agent",
+    "update_work_graph",
+    "accept_work_graph_node",
+    "update_plan",
+    "create_goal",
+    "get_goal",
+    "update_goal",
+    "spawn_agent",
+    "delegate_codex_plugin",
+    "retry_codex_plugin_worker",
+    "kill_agent",
+    "speak_to_user",
+    "present_choices",
+    "browser_status",
+    "browser_open",
+    "browser_navigate",
+    "browser_resize",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_press",
+    "browser_scroll",
+    "browser_evaluate",
+    "browser_wait_for",
+    "browser_recording_start",
+    "browser_recording_stop",
+  ],
+  "toolSchemasSha256": "858b84de371459b7baf883acfbb3d307003180885fdeb3f061c7dc4346d30174",
+}
+`;
+
+exports[`production prompt and tool boundary baseline > retains cursor-sdk request bytes for archetype, specialist and project agent sources > cursor-sdk:project-agent 1`] = `
+{
+  "promptSha256": "e426382530234c9164f2c7fb1d20447864b3addf49788c7812423b1125019852",
+  "toolNames": [
+    "list_agents",
+    "send_message_to_agent",
+    "update_work_graph",
+    "accept_work_graph_node",
+    "update_plan",
+    "create_goal",
+    "get_goal",
+    "update_goal",
+    "spawn_agent",
+    "delegate_codex_plugin",
+    "retry_codex_plugin_worker",
+    "kill_agent",
+    "speak_to_user",
+    "present_choices",
+    "browser_status",
+    "browser_open",
+    "browser_navigate",
+    "browser_resize",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_press",
+    "browser_scroll",
+    "browser_evaluate",
+    "browser_wait_for",
+    "browser_recording_start",
+    "browser_recording_stop",
+  ],
+  "toolSchemasSha256": "858b84de371459b7baf883acfbb3d307003180885fdeb3f061c7dc4346d30174",
+}
+`;
+
+exports[`production prompt and tool boundary baseline > retains cursor-sdk request bytes for archetype, specialist and project agent sources > cursor-sdk:specialist 1`] = `
+{
+  "promptSha256": "6d71ed80fa8239f71fbe8f9e7e247533f7e4336d46d6a57c85d8a7808c3d268e",
+  "toolNames": [
+    "send_message_to_agent",
+  ],
+  "toolSchemasSha256": "8661b607fd38471d1f0e9ee7a665efb1f6e29d7859cc5a5ee22e6cac589e93a9",
+}
+`;
+
+exports[`production prompt and tool boundary baseline > retains pi request bytes for archetype, specialist and project agent sources > pi:archetype 1`] = `
+{
+  "promptSha256": "87ef758c6476e1620f68e2da09edde0dc538e24d43d1ae192e6c258c75b7f14a",
+  "toolNames": [
+    "list_agents",
+    "send_message_to_agent",
+    "update_work_graph",
+    "accept_work_graph_node",
+    "update_plan",
+    "create_goal",
+    "get_goal",
+    "update_goal",
+    "spawn_agent",
+    "delegate_codex_plugin",
+    "retry_codex_plugin_worker",
+    "kill_agent",
+    "speak_to_user",
+    "present_choices",
+    "browser_status",
+    "browser_open",
+    "browser_navigate",
+    "browser_resize",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_press",
+    "browser_scroll",
+    "browser_evaluate",
+    "browser_wait_for",
+    "browser_recording_start",
+    "browser_recording_stop",
+  ],
+  "toolSchemasSha256": "858b84de371459b7baf883acfbb3d307003180885fdeb3f061c7dc4346d30174",
+}
+`;
+
+exports[`production prompt and tool boundary baseline > retains pi request bytes for archetype, specialist and project agent sources > pi:project-agent 1`] = `
+{
+  "promptSha256": "a7113508d8d43e430f51a787273ecb01daf9f8dcc3f277f3879fabb4de4b637f",
+  "toolNames": [
+    "list_agents",
+    "send_message_to_agent",
+    "update_work_graph",
+    "accept_work_graph_node",
+    "update_plan",
+    "create_goal",
+    "get_goal",
+    "update_goal",
+    "spawn_agent",
+    "delegate_codex_plugin",
+    "retry_codex_plugin_worker",
+    "kill_agent",
+    "speak_to_user",
+    "present_choices",
+    "browser_status",
+    "browser_open",
+    "browser_navigate",
+    "browser_resize",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_press",
+    "browser_scroll",
+    "browser_evaluate",
+    "browser_wait_for",
+    "browser_recording_start",
+    "browser_recording_stop",
+  ],
+  "toolSchemasSha256": "858b84de371459b7baf883acfbb3d307003180885fdeb3f061c7dc4346d30174",
+}
+`;
+
+exports[`production prompt and tool boundary baseline > retains pi request bytes for archetype, specialist and project agent sources > pi:specialist 1`] = `
+{
+  "promptSha256": "face7fcff6fd30538aa3928157163282367adbe3d912d9902afaab4950fdbc70",
+  "toolNames": [
+    "send_message_to_agent",
+  ],
+  "toolSchemasSha256": "8661b607fd38471d1f0e9ee7a665efb1f6e29d7859cc5a5ee22e6cac589e93a9",
+}
+`;

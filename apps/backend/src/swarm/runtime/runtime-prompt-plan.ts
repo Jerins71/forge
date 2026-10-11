@@ -1,3 +1,5 @@
+import type { InstructionBundle } from "@forge/protocol";
+import { renderInstructionBundle } from "./instruction-bundle.js";
 import { join } from "node:path";
 import type { RuntimeStartupRecoveryContext } from "../runtime-contracts.js";
 
@@ -9,6 +11,7 @@ export interface PiRuntimePromptPlan {
 
 export interface PlanPiRuntimePromptOptions {
   systemPrompt: string;
+  instructionBundle?: InstructionBundle;
   cwd: string;
   startupRecoveryContext?: RuntimeStartupRecoveryContext;
 }
@@ -22,7 +25,7 @@ export function planPiRuntimePrompt(options: PlanPiRuntimePromptOptions): PiRunt
     : undefined;
 
   return {
-    systemPrompt: options.systemPrompt,
+    systemPrompt: options.instructionBundle ? renderInstructionBundle(options.instructionBundle) : options.systemPrompt,
     appendSystemPromptOverride: () => [],
     ...(startupRecoveryContextFile ? { startupRecoveryContextFile } : {}),
   };

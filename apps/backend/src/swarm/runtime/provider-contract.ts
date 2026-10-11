@@ -1,0 +1,155 @@
+import type {
+  InstructionBundle, ProviderCapabilities, ProviderConversationRef, ProviderInstructionChannel,
+  ProviderObservation, ProviderRequestLifetime, ProviderRequestRef, ProviderScope, ProviderToolCallRef,
+  ProviderTurnRef, ToolHostSnapshot,
+} from "@forge/protocol";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ForgeExtensionHost } from "../forge-extension-host.js";
+import type { SecureRuntimeBinding } from "../secure-sessions/runtime/secure-runtime-binding.js";
+import type { RuntimeUserMessage } from "../runtime-contracts.js";
+import type { AgentModelDescriptor } from "../types.js";
+
+export interface ProviderRequirements {
+  instructionChannel?: ProviderInstructionChannel;
+  instructionRefresh?: boolean;
+  toolRefresh?: boolean;
+  nativeResume?: boolean;
+  nativeFork?: boolean;
+  nativeSteer?: boolean;
+  nativeCompact?: boolean;
+  readContext?: boolean;
+  interrupt?: boolean;
+  persistentApprovals?: boolean;
+  secureSessions?: boolean;
+  textDeltas?: boolean;
+  reasoningDeltas?: boolean;
+  toolDeltas?: boolean;
+  authoritativeTerminal?: boolean;
+}
+
+export class UnsupportedProviderBehaviorError extends Error {
+  readonly code = "PROVIDER_BEHAVIOR_UNSUPPORTED" as const;
+  constructor(readonly provider: string, readonly behavior: keyof ProviderRequirements) {
+    super(`Provider ${provider} does not support required behavior: ${behavior}.`);
+    this.name = "UnsupportedProviderBehaviorError";
+  }
+}
+
+/** Admission is explicit. This helper never chooses or dispatches a weaker fallback. */
+export function assertProviderRequirements(capabilities: ProviderCapabilities, requirements: ProviderRequirements = {}): void {
+  const support: Record<Exclude<keyof ProviderRequirements, "instructionChannel">, boolean> = {
+    instructionRefresh: capabilities.instructions.update !== "on_open",
+    toolRefresh: capabilities.tools.registration === "refreshable",
+    nativeResume: capabilities.native.resume, nativeFork: capabilities.native.fork,
+    nativeSteer: capabilities.native.steer, nativeCompact: capabilities.native.compact,
+    readContext: capabilities.native.readContext, interrupt: capabilities.native.interrupt,
+    persistentApprovals: capabilities.approvals.lifetime === "resumable",
+    secureSessions: capabilities.secureSessions.supported,
+    textDeltas: capabilities.streaming.text === "delta", reasoningDeltas: capabilities.streaming.reasoning === "delta",
+    toolDeltas: capabilities.streaming.tools === "delta", authoritativeTerminal: capabilities.streaming.terminal === "authoritative",
+  };
+  if (requirements.instructionChannel && !capabilities.instructions.channels.includes(requirements.instructionChannel)) {
+    throw new UnsupportedProviderBehaviorError(capabilities.provider, "instructionChannel");
+  }
+  for (const behavior of Object.keys(support) as Array<keyof typeof support>) {
+    if (requirements[behavior] && !support[behavior]) throw new UnsupportedProviderBehaviorError(capabilities.provider, behavior);
+  }
+}
+
+/** Live object; never serialize this binding. Use snapshot for durable schema metadata. */
+export interface ToolHostBinding {
+  readonly snapshot: ToolHostSnapshot;
+  readonly tools: readonly ToolDefinition[];
+  readonly extensionHooks?: { host: ForgeExtensionHost; bindingToken: string };
+  readonly security?: SecureRuntimeBinding;
+  toJSON(): never;
+  /** Passes the native call ID, cancellation signal and updates unchanged to the existing tool owner. */
+  invoke(call: {
+    ref: ProviderToolCallRef;
+    name: string;
+    args: unknown;
+    signal?: AbortSignal;
+    onUpdate?: Parameters<ToolDefinition["execute"]>[3];
+    context: Parameters<ToolDefinition["execute"]>[4];
+  }): ReturnType<ToolDefinition["execute"]>;
+}
+
+export interface ProviderOpenInput {
+  scope: ProviderScope;
+  model: AgentModelDescriptor;
+  instructions: InstructionBundle;
+  toolHost: ToolHostBinding;
+  required?: ProviderRequirements;
+}
+export interface ProviderBinding {
+  scope: ProviderScope;
+  conversation: ProviderConversationRef;
+  capabilities: ProviderCapabilities;
+  instructionRevision: string;
+  toolContractRevision: string;
+}
+export interface ProviderResumeInput extends ProviderOpenInput { conversation: ProviderConversationRef; }
+export interface ProviderStartInput {
+  binding: ProviderBinding;
+  runId: string;
+  attemptId: string;
+  input: RuntimeUserMessage;
+  /** Present only when capability policy permits updates at the turn boundary. */
+  instructions?: InstructionBundle;
+  /** Only refreshable registration may accept a changed host at the next dispatch boundary. */
+  toolHost?: ToolHostBinding;
+}
+export interface ProviderSteerInput extends ProviderStartInput { turn: ProviderTurnRef; }
+export interface ProviderRespondInput {
+  binding: ProviderBinding;
+  request: ProviderRequestRef;
+  lifetime: ProviderRequestLifetime;
+  response: unknown;
+}
+export interface ProviderContext {
+  conversation: ProviderConversationRef;
+  coveredThrough?: ProviderTurnRef;
+  messages: ReadonlyArray<{ role: "user" | "assistant" | "system"; content: unknown }>;
+}
+export type ProviderDispatchResult =
+  | { status: "accepted"; turn: ProviderTurnRef }
+  | { status: "unknown" };
+export type ProviderDrainResult = { status: "clean" } | { status: "pending" };
+
+/** Providers own native correlation; Forge's current lifecycle owner still owns runs and queues. */
+export interface ProviderAdapter {
+  capabilities(): ProviderCapabilities;
+  open(input: ProviderOpenInput): Promise<ProviderBinding>;
+  resume(input: ProviderResumeInput): Promise<ProviderBinding>;
+  start(input: ProviderStartInput): Promise<ProviderDispatchResult>;
+  steer(input: ProviderSteerInput): Promise<ProviderDispatchResult>;
+  /** Resolving interrupt is an acknowledgment, not a terminal observation. */
+  interrupt(input: { binding: ProviderBinding; attemptId: string; turn: ProviderTurnRef }): Promise<void>;
+  respond(input: ProviderRespondInput): Promise<void>;
+  compact(input: { binding: ProviderBinding; attemptId: string; instructions?: string }): Promise<void>;
+  fork?(input: ProviderOpenInput & { source: ProviderConversationRef; through?: ProviderTurnRef }): Promise<ProviderBinding>;
+  readContext?(input: { binding: ProviderBinding; through?: ProviderTurnRef }): Promise<ProviderContext>;
+  /** A single ordered stream per binding. The adapter cannot assign children to Forge workers. */
+  observations(binding: ProviderBinding, signal?: AbortSignal): AsyncIterable<ProviderObservation>;
+  close(binding: ProviderBinding): Promise<void>;
+  /** Clean means callbacks, tools, transports and journal writers are settled. */
+  drain(binding: ProviderBinding): Promise<ProviderDrainResult>;
+}
+
+/** Today's production policy. Provider workers must revise snapshots when native behavior changes. */
+export function getRuntimeProviderCapabilities(runtime: "codex" | "claude" | "cursor-sdk" | "pi"): ProviderCapabilities {
+  const nativeCoding = runtime === "codex" || runtime === "claude";
+  return {
+    version: 1, provider: runtime, adapterVersion: "forge-runtime-1",
+    instructions: { channels: runtime === "codex" ? ["developer"] : runtime === "claude" ? ["preset_append"] : runtime === "pi" ? ["system", "resource_loader"] : ["system"],
+      update: runtime === "codex" ? "explicit_refresh" : "on_open", nativeBase: runtime === "claude" ? "preset" : runtime === "codex" ? "preserved" : "none" },
+    tools: { registration: runtime === "pi" ? "refreshable" : "immutable",
+      host: runtime === "codex" ? "dynamic_tools" : runtime === "claude" ? "in_process_mcp" : runtime === "pi" ? "native_tools" : "loopback_mcp",
+      nativeCallIdentity: true, cancellation: "abort_signal", extensionHooks: true },
+    streaming: { text: "delta", reasoning: runtime === "pi" ? "delta" : "none", tools: runtime === "claude" ? "snapshot" : runtime === "cursor-sdk" ? "final" : "delta",
+      usage: "final", terminal: "authoritative" },
+    native: { resume: true, fork: nativeCoding || runtime === "pi", steer: runtime !== "cursor-sdk", compact: runtime !== "cursor-sdk", readContext: runtime !== "cursor-sdk", interrupt: true },
+    approvals: { lifetime: "live_callback", nativeRequestIdentity: nativeCoding, childRequests: nativeCoding },
+    secureSessions: { supported: runtime !== "cursor-sdk", mechanism: nativeCoding ? "secure_bash" : runtime === "pi" ? "guarded_tools" : "none" },
+  };
+}

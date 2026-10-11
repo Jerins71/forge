@@ -1,3 +1,7 @@
+import type { InstructionBundle, InstructionPart, InstructionSource } from "@forge/protocol";
+import type { AgentDescriptor } from "./types.js";
+import type { SkillMetadata } from "./skills/skill-metadata-service.js";
+import { createInstructionBundle, instructionSource, renderInstructionBundle, reviseInstructionBundle } from "./runtime/instruction-bundle.js";
 import { dirname, join, resolve } from "node:path";
 import { readFile } from "node:fs/promises";
 import { isEnoentError } from "../utils/fs-errors.js";
@@ -10,6 +14,7 @@ const SESSION_MEMORY_HEADER = "# Session Memory (durable facts — update only o
 export interface RuntimePromptAssemblerOptions {
   // Base prompt (archetype or specialist)
   basePrompt: string;
+  instructionBundle?: InstructionBundle;
 
   // Memory
   profileMemoryPath?: string;
@@ -41,21 +46,27 @@ interface LoadedContextFile {
   content: string;
 }
 
-export async function assembleRuntimePrompt(options: RuntimePromptAssemblerOptions): Promise<string> {
-  const sections: string[] = [];
+export async function assembleRuntimeInstructionBundle(options: RuntimePromptAssemblerOptions): Promise<InstructionBundle> {
+  const bundle = options.instructionBundle ?? createInstructionBundle({ agentId: options.agentId, role: options.role,
+    managerId: options.agentId, cwd: resolveAssemblerCwd(options) }, options.basePrompt);
+  const parts: InstructionPart[] = [];
+  let memoryView = bundle.memory;
+  const add = (kind: string, text: string, sources: InstructionSource[]) => {
+    if (text.trim().length > 0) parts.push({ kind, text, separator: parts.length ? "\n\n" : "", sources });
+  };
   const trimmedBasePrompt = options.basePrompt.trim();
   if (trimmedBasePrompt.length > 0) {
-    sections.push(trimmedBasePrompt);
+    add("forge_prompt", trimmedBasePrompt, bundle.parts.flatMap(part => part.sources));
   }
 
   const trimmedReferenceDocs = options.referenceDocs?.trim();
   if (trimmedReferenceDocs) {
-    sections.push(trimmedReferenceDocs);
+    add("reference_docs", trimmedReferenceDocs, [instructionSource("reference_docs", options.agentId, trimmedReferenceDocs)]);
   }
 
   const trimmedProjectAgentDirectory = options.projectAgentDirectory?.trim();
   if (options.role === "manager" && trimmedProjectAgentDirectory) {
-    sections.push(trimmedProjectAgentDirectory);
+    add("project_agent_directory", trimmedProjectAgentDirectory, [instructionSource("project_agent_directory", options.agentId, trimmedProjectAgentDirectory)]);
   }
 
   const [agentsFiles, swarmFile, memoryComposite] = await Promise.all([
@@ -69,13 +80,13 @@ export async function assembleRuntimePrompt(options: RuntimePromptAssemblerOptio
         })
   ]);
 
-  const projectContextEntries: string[] = [];
+  add("project_context_header", "# Project Context", [instructionSource("builtin_guidance", "project_context_header", "# Project Context")]);
   for (const contextFile of agentsFiles) {
-    projectContextEntries.push(renderProjectContextFile(contextFile));
+    add("project_context", renderProjectContextFile(contextFile), [instructionSource("project_context", contextFile.path, contextFile.content, contextFile.path)]);
   }
 
   if (swarmFile) {
-    projectContextEntries.push(renderProjectContextFile(swarmFile));
+    add("project_context", renderProjectContextFile(swarmFile), [instructionSource("project_context", swarmFile.path, swarmFile.content, swarmFile.path)]);
   }
 
   const trimmedMemoryComposite = memoryComposite.trim();
@@ -84,26 +95,29 @@ export async function assembleRuntimePrompt(options: RuntimePromptAssemblerOptio
       normalizeOptionalPath(options.memoryContextFile?.path) ??
       normalizeOptionalPath(options.sessionMemoryPath) ??
       "memory.md";
-    projectContextEntries.push(renderProjectContextFile({ path: memoryPathLabel, content: trimmedMemoryComposite }));
+    add("memory", renderProjectContextFile({ path: memoryPathLabel, content: trimmedMemoryComposite }),
+      bundle.memory?.sources ?? [instructionSource("memory_view", options.agentId, memoryComposite, memoryPathLabel)]);
+    memoryView = { path: memoryPathLabel, content: memoryComposite, sources: parts.at(-1)!.sources };
   }
 
   const trimmedOnboardingSnapshot = options.onboardingSnapshot?.trim();
   if (trimmedOnboardingSnapshot) {
-    projectContextEntries.push(trimmedOnboardingSnapshot);
+    add("onboarding", trimmedOnboardingSnapshot, [instructionSource("onboarding", options.agentId, trimmedOnboardingSnapshot)]);
   }
-
-  const projectContextBlock = ["# Project Context", ...projectContextEntries].join("\n\n");
-  sections.push(projectContextBlock);
 
   const skillsBlock = buildSkillsBlock(options.availableSkills ?? []);
   if (skillsBlock) {
-    sections.push(skillsBlock);
+    add("skills", skillsBlock, [instructionSource("skill_inventory", options.agentId, skillsBlock)]);
   }
 
-  sections.push(`Current date: ${new Date().toISOString().slice(0, 10)}`);
-  sections.push(`Current working directory: ${resolveAssemblerCwd(options)}`);
-
-  return sections.filter((section) => section.trim().length > 0).join("\n\n").trimEnd();
+  const footer = `Current date: ${new Date().toISOString().slice(0, 10)}\n\nCurrent working directory: ${resolveAssemblerCwd(options)}`;
+  add("runtime_context", footer, [instructionSource("runtime_context", options.agentId, footer)]);
+  return reviseInstructionBundle({ ...bundle, parts, ...(memoryView ? { memory: memoryView } : {}),
+    skills: (options.availableSkills ?? []).filter(skill => skill.name.trim() && skill.location.trim()).map(skill => ({
+      name: skill.name.trim(), path: skill.location.trim(), ...(skill.description.trim() ? { description: skill.description.trim() } : {}),
+      source: instructionSource("skill_inventory", skill.name, JSON.stringify(skill), skill.location),
+    })),
+  });
 }
 
 /**
@@ -285,4 +299,62 @@ function escapeXml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/\"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+export interface NativeInstructionBundleOptions {
+  runtime: "codex" | "claude";
+  descriptor: AgentDescriptor;
+  instructions: InstructionBundle | string;
+  memory: { memoryContextFile: { path: string; content: string }; skillMetadata: SkillMetadata[]; sources?: InstructionSource[] };
+  contextFiles: Array<{ path: string; content: string }>;
+  secureSessionsEnabled: boolean;
+}
+
+export async function assembleNativeInstructionBundle(options: NativeInstructionBundleOptions): Promise<InstructionBundle> {
+  const { descriptor, memory, contextFiles, secureSessionsEnabled } = options;
+  const bundle = typeof options.instructions === "string" ? createInstructionBundle(descriptor, options.instructions) : options.instructions;
+  const skills = memory.skillMetadata.map(skill => `- ${skill.skillName}: ${skill.description ?? ""} (file: ${skill.path})`).join("\n");
+  const namespaceGuidance = options.runtime === "codex" ? "Forge integration tools are in the forge namespace. Keep native coding tools and native context management." : "Forge integration tools are in the mcp__forge__ tool namespace. Keep native coding tools and native context management.";
+  const secureGuidance = secureSessionsEnabled
+    ? options.runtime === "codex" ? "For credentialed work, when the Secure Sessions tools are available, inspect forge.secure_session_status and use forge.secure_bash with the exact granted aliases. Forge delivers values privately to that command and filters its output. Never ask for values in chat, copy them into files in the workspace, or use native shell/read tools to inspect credential material. Ordinary coding remains on native tools. For SSH password login use an SSH_ASKPASS binding; for a password needed after login, use a separate environment or stdin binding and pipe it to the remote program (such as sudo -S), keeping values out of command text. Browser login delivery is not supported. Older threads without the secure tools can continue ordinary work; a new or forked session is needed for secret delivery." : "For credentialed work, when the Secure Sessions tools are available, inspect mcp__forge__secure_session_status and use mcp__forge__secure_bash with the exact granted aliases. Forge delivers values privately to that command and filters its output. Never ask for values in chat, copy them into files in the workspace, or use native shell/read tools to inspect credential material. Ordinary coding remains on native tools. For SSH password login use an SSH_ASKPASS binding; for a password needed after login, use a separate environment or stdin binding and pipe it to the remote program (such as sudo -S), keeping values out of command text. Browser login delivery is not supported."
+    : options.runtime === "codex" ? "Secure Sessions are disabled for this project. Use native tools and the normal host SSH configuration and authentication for authorized SSH, SCP, Git, and other host commands. Do not require Secure Sessions, secret grants, or secure_bash for that work. The Secure Sessions tool definitions remain registered for native thread compatibility, but they do not indicate availability or impose a requirement to use them. Do not call them while the project setting is disabled. Never print credential material or ask for secret values in chat." : "Secure Sessions are disabled for this project. Use native tools and the normal host SSH configuration and authentication for authorized SSH, SCP, Git, and other host commands. Do not require Secure Sessions, secret grants, or secure_bash for that work. The Secure Sessions tool definitions remain registered for native runtime compatibility, but they do not indicate availability or impose a requirement to use them. Do not call them while the project setting is disabled. Never print credential material or ask for secret values in chat.";
+  const agentsFiles = options.runtime === "claude" ? await readNativeAgentInstructions(descriptor.cwd) : [];
+  const roleGuidance = descriptor.role === "worker"
+    ? "Return your result to the owning Forge manager. Follow the assigned specialist instructions; do not start another coordination system."
+    : "Use Forge workers for the configured roster; do not start a second coordination system.";
+  const extra: Array<{ kind: string; text: string; sources: InstructionSource[] }> = [
+    { kind: "native_integration", text: namespaceGuidance, sources: [instructionSource("native_integration", options.runtime, namespaceGuidance)] },
+    { kind: "coordination", text: roleGuidance, sources: [instructionSource("coordination", descriptor.role, roleGuidance)] },
+    { kind: "secure_sessions_policy", text: secureGuidance, sources: [instructionSource("secure_sessions_policy", options.runtime, secureGuidance)] },
+    { kind: "memory", text: memory.memoryContextFile.content ? `<forge_memory path=${JSON.stringify(memory.memoryContextFile.path)}>\n${memory.memoryContextFile.content}\n</forge_memory>` : "",
+      sources: memory.sources ?? [instructionSource("memory_view", descriptor.agentId, memory.memoryContextFile.content, memory.memoryContextFile.path)] },
+    ...[...agentsFiles, ...contextFiles].map(file => ({ kind: "project_context", text: `<forge_project_context path=${JSON.stringify(file.path)}>\n${file.content}\n</forge_project_context>`,
+      sources: [instructionSource("project_context", file.path, file.content, file.path)] })),
+    { kind: "skills", text: skills ? `<forge_skills>\nRead a relevant skill's file before using it.\n${skills}\n</forge_skills>` : "",
+      sources: [instructionSource("skill_inventory", descriptor.agentId, skills)] },
+  ];
+  const parts = extra.filter(part => Boolean(part.text)).map(part => ({ ...part, separator: "\n\n" }));
+  // The legacy native arrays filtered an empty base before joining.
+  const baseParts = renderInstructionBundle(bundle) ? bundle.parts : [];
+  if (baseParts.length === 0 && parts[0]) parts[0].separator = "";
+  return reviseInstructionBundle({ ...bundle, parts: [...baseParts, ...parts],
+    memory: { ...memory.memoryContextFile, sources: memory.sources ?? extra.find(part => part.kind === "memory")!.sources },
+    skills: memory.skillMetadata.map(skill => ({ name: skill.skillName, path: skill.path,
+      ...(skill.description ? { description: skill.description } : {}), source: instructionSource("skill_inventory", skill.skillId, JSON.stringify({ name: skill.skillName, description: skill.description, path: skill.path }), skill.path) })),
+  });
+}
+
+/** Claude discovers CLAUDE.md itself; Forge also honors the AGENTS.md contract. */
+async function readNativeAgentInstructions(cwd: string): Promise<Array<{ path: string; content: string }>> {
+  const result: Array<{ path: string; content: string }> = [];
+  let directory = cwd;
+  while (true) {
+    const path = join(directory, "AGENTS.md");
+    try { result.unshift({ path, content: await readFile(path, "utf8") }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  return result;
 }
