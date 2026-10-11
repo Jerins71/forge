@@ -99,6 +99,8 @@ export interface SwarmControlPort {
   enqueuePresentation?(threadId:string,runId:string,presentation:import("../../swarm/turn-context-coordinator.js").InboundTurnContextInput):void;
   prepareWorkerResult?(assignment: import("./orchestration/assignments.js").WorkerAssignment, resultText: string): Promise<NonNullable<import("./command-service.js").InternalInput["prepared"]>>;
   extractWorkerResult?(threadId:string,runId:string,inputEntryId:string):Promise<{ entryId:string; resultText:string }>;
+  /** Writes the "stopped by the user" result into the worker's transcript and returns it for delivery to the manager. */
+  recordStoppedWorkerResult?(threadId:string,runId:string):Promise<{ entryId:string; resultText:string }>;
   applyChoice(input: {
     commandId: string;
     sessionId: string;
@@ -107,6 +109,8 @@ export interface SwarmControlPort {
     answers: RpcInput<"session.choose">["answers"];
   }): Promise<"answered" | "interrupted">;
   stopSession(input: { commandId: string; sessionId: string }): Promise<{ stopped: boolean }>;
+  /** Leaves the "Stopped by you" marker on a turn the user stopped while it was running. */
+  markTurnStopped?(sessionId: string): void;
 }
 
 export interface EnvironmentAccessPort {

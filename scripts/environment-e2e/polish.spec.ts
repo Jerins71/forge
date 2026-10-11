@@ -6,6 +6,9 @@
 //   - a sign-in change writes nothing into the transcript and raises no lineage chip, and a model change
 //     is one quiet "Switched to …" marker;
 //   - a plan card sits on the transcript column's edge within the shared width tokens.
+//   - a turn the user stopped says "Stopped by you";
+//   - a worker's provider failure is one failed row in the worker view, and the manager's card names it;
+//   - a manager waiting inside its turn receives its worker's result there and finishes.
 //   pnpm exec playwright test scripts/environment-e2e/polish.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
 import { mkdir, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
@@ -32,7 +35,7 @@ test.use({ environmentSuite: 'polish', screenshot: 'off', actionTimeout: 10_000 
 const transcript = (page: Page) => page.locator('[data-chat-transcript-surface]').filter({ visible: true }).first()
 const composer = (page: Page) => page.getByRole('combobox', { name: /^(Message |Send another message to )/ })
 const lineageChip = (page: Page) => page.getByRole('button', { name: /^Lineage: / })
-const marker = (page: Page, kind: 'model_change' | 'worker_stopped') => transcript(page).locator(`[data-system-marker="${kind}"]`)
+const marker = (page: Page, kind: 'model_change' | 'worker_stopped' | 'turn_stopped') => transcript(page).locator(`[data-system-marker="${kind}"]`)
 async function shot(page: Page, name: string) {
   const path = join(evidenceRoot, `${name}.png`)
   await page.screenshot({ path }); assertions[`screenshot:${name}`] = path
@@ -53,6 +56,13 @@ async function launch(title: string, text: string): Promise<string> {
   const launched = await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', { commandId, projectId: fleet.a.sessionId, title,
     workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text, artifactIds: [] } })
   await until(() => fixtureRpcOnce(fleet.a.baseUrl, admin, 'command.get', { commandId }), receipt => receipt.state === 'succeeded', 30_000)
+  return launched.sessionId!
+}
+/** A session whose first turn stays open: accepted, but not waited on to finish. */
+async function launchRunning(title: string, text: string): Promise<string> {
+  const commandId = randomUUID()
+  const launched = await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', { commandId, projectId: fleet.a.sessionId, title,
+    workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text, artifactIds: [] } })
   return launched.sessionId!
 }
 async function shellSession(sessionId: string): Promise<SessionSummary | undefined> {
@@ -168,12 +178,32 @@ test('a worker the user stopped is a neutral marker, not a blocked result, and i
   const worker = page.locator('[data-worker-row]').filter({ hasText: /hold/i }).first()
   if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
   await expect(worker).toBeVisible()
+  // The sidebar counts the worker that is running, and the timeline is the only activity display.
+  await expect.poll(async () => (await shellSession(sessionId))?.activeWorkerCount, { timeout: 15_000 }).toBe(1)
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
+  await expect(page.locator('[data-inbox-section="active"]')).toContainText('1 worker')
+  await expect(page.getByTestId('manager-tool-activity')).toHaveCount(0)
+  await shot(page, 'worker-running-sidebar-count')
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Projects/ }).click()
   await worker.click({ button: 'right' })
   await shot(page, 'worker-running-menu')
   await page.getByRole('menuitem', { name: 'Stop', exact: true }).click()
 
   await expect(marker(page, 'worker_stopped')).toHaveCount(1, { timeout: 30_000 })
   await expect(marker(page, 'worker_stopped')).toContainText('Stopped by you')
+  // The manager is told, so it is not left waiting for a result: it answers and the session comes to rest.
+  const stoppedResults = async () => {
+    const rpc = await openFixtureRpc(fleet.a.baseUrl, admin)
+    try {
+      await rpc.call('session.subscribe', { sessionId })
+      const snapshot = await until<any>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
+      return snapshot.items.filter((item: any) => item.kind === 'worker_result' && /stopped by the user/.test(item.text)).length
+    } finally { rpc.close() }
+  }
+  await expect.poll(stoppedResults, { timeout: 30_000 }).toBe(1)
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  await expect.poll(async () => (await shellSession(sessionId))?.status, { timeout: 30_000 }).toBe('idle')
+  await expect.poll(async () => (await shellSession(sessionId))?.activeWorkerCount, { timeout: 15_000 }).toBe(0)
   const quiet = async () => {
     await expect(transcript(page)).not.toContainText('settled without returning a final result')
     await expect(transcript(page)).not.toContainText('status: blocked')
@@ -194,13 +224,15 @@ test('a worker the user stopped is a neutral marker, not a blocked result, and i
   await page.keyboard.press('Escape')
 
   await page.reload()
+  // One marker, live and replayed: the result the manager received is that marker, not a second row.
   await expect(marker(page, 'worker_stopped')).toHaveCount(1)
   await quiet()
   await shot(page, 'worker-stopped-reload')
   // The manager still takes the next message.
+  const replies = ((await transcript(page).innerText()).match(/assistant reply/g) ?? []).length
   await send(page, 'Carry on without that worker')
-  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
-  assertions.workerStop = { sessionId, marker: 'Stopped by you', blockedResult: false, stopOffered: false }
+  await expect.poll(async () => ((await transcript(page).innerText()).match(/assistant reply/g) ?? []).length, { timeout: 30_000 }).toBe(replies + 1)
+  assertions.workerStop = { sessionId, marker: 'Stopped by you', managerTold: true, blockedResult: false, stopOffered: false }
 })
 
 test('a sign-in change writes nothing into the transcript, and a model change is one quiet marker', async ({ page }) => {
@@ -269,4 +301,120 @@ test('a sign-in change writes nothing into the transcript, and a model change is
   await form.getByRole('radio', { name: 'Subscription' }).click()
   await form.getByRole('button', { name: 'Save', exact: true }).click()
   assertions.modelChange = { sessionId, signInChange: { transcriptUnchanged: true, lineageChip: false }, marker: 'Switched to GPT-6 Luna', sessionStopped: false }
+})
+
+test('the new-thread model chip shows the model\'s name', async ({ page }) => {
+  await page.goto(fleet.uiUrl)
+  const groupKey = await page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first().getAttribute('data-logical-project')
+  await page.goto(`${fleet.uiUrl}/?launch=${encodeURIComponent(groupKey!)}`)
+  const chip = page.getByTestId('launch-workspace').getByRole('button', { name: /^Session model: / })
+  await expect(chip).toBeVisible()
+  await expect(chip).toContainText('GPT-6 Sol')
+  await expect(chip).not.toContainText('gpt-6-sol')
+  // It is right on first paint, not only after the picker has been opened.
+  await page.reload()
+  await expect(chip).toContainText('GPT-6 Sol')
+  await shot(page, 'new-thread-model-chip')
+  assertions.launchModelChip = await chip.innerText()
+})
+
+test('a turn the user stopped says so, live and after reload', async ({ page }) => {
+  const sessionId = await launch('Polish stopped turn', 'Say hello first')
+  await open(page, sessionId)
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  const stop = page.getByRole('button', { name: 'Stop', exact: true })
+  const status = async () => (await shellSession(sessionId))?.status
+  await expect(marker(page, 'turn_stopped')).toHaveCount(0)
+
+  // Stopped with the composer button.
+  await send(page, '[fixture:hold] Hold this turn open')
+  await expect.poll(status, { timeout: 15_000 }).toBe('running')
+  await stop.click()
+  await expect.poll(status, { timeout: 30_000 }).not.toBe('running')
+  await expect(marker(page, 'turn_stopped')).toHaveCount(1, { timeout: 15_000 })
+  await expect(marker(page, 'turn_stopped')).toContainText('Stopped by you')
+  // It sits under the turn it ended, below that turn's message.
+  expect(await rowIndex(marker(page, 'turn_stopped'))).toBeGreaterThan(await rowIndex(textRow(page, '[fixture:hold] Hold this turn open')))
+  await shot(page, 'turn-stopped-live')
+
+  // Stopped with Escape; each stopped turn has its own marker, and a finished turn has none.
+  await send(page, '[fixture:hold] Hold this turn open again')
+  await expect.poll(status, { timeout: 15_000 }).toBe('running')
+  await composer(page).focus()
+  await page.keyboard.press('Escape')
+  await expect.poll(status, { timeout: 30_000 }).not.toBe('running')
+  await expect(marker(page, 'turn_stopped')).toHaveCount(2, { timeout: 15_000 })
+  await send(page, 'Finish this one normally')
+  await expect.poll(async () => ((await transcript(page).innerText()).match(/assistant reply/g) ?? []).length, { timeout: 30_000 }).toBe(2)
+  await expect(marker(page, 'turn_stopped')).toHaveCount(2)
+  await expect(transcript(page)).not.toContainText('Session stopped')
+  const live = { first: await rowIndex(marker(page, 'turn_stopped').first()), second: await rowIndex(marker(page, 'turn_stopped').last()) }
+
+  await page.reload()
+  await expect(marker(page, 'turn_stopped')).toHaveCount(2, { timeout: 30_000 })
+  expect({ first: await rowIndex(marker(page, 'turn_stopped').first()), second: await rowIndex(marker(page, 'turn_stopped').last()) }).toEqual(live)
+  await shot(page, 'turn-stopped-reload')
+  assertions.stoppedTurn = { sessionId, markers: 2, order: live, replayMatches: true }
+})
+
+test('a worker\'s provider failure is one failed row in the worker view, and the manager\'s card names it', async ({ page }) => {
+  const sessionId = await launch('Polish worker failure', '[fixture:spawn-fail] Start a worker whose provider fails')
+  await open(page, sessionId)
+  // The manager is told once, with the provider and model that failed.
+  const card = transcript(page).locator('[data-worker-result-source]')
+  await expect(card).toHaveCount(1, { timeout: 30_000 })
+  await expect(card).toContainText('codex-native/gpt-6-sol: Synthetic fixture scenario failed')
+  await expect(card).not.toContainText('settled without returning a final result')
+  await shot(page, 'worker-failure-manager-card')
+
+  const worker = page.locator('[data-worker-row]').filter({ hasText: /fail/i }).first()
+  if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
+  await worker.click()
+  await expect(transcript(page)).toContainText('Fail this assignment', { timeout: 15_000 })
+  const failed = transcript(page).locator('[data-testid="activity-row"][data-activity-kind="status"]')
+  const once = async () => {
+    await page.getByRole('button', { name: 'All', exact: true }).click()
+    await expect(failed).toHaveCount(1, { timeout: 15_000 })
+    await expect(failed).toHaveAttribute('data-activity-status', 'failed')
+    // The row names the provider and model that failed, never the client library's generic label.
+    await expect(failed).toContainText('Failed: codex-native/gpt-6-sol: Synthetic fixture scenario failed')
+    // That row is the whole story: no second error message and no separate result record under it.
+    await expect(transcript(page)).not.toContainText('Agent error')
+    await expect(transcript(page)).not.toContainText('status: blocked')
+    await expect(transcript(page)).not.toContainText('settled without returning a final result')
+    await expect(transcript(page)).not.toContainText('OpenAI API error')
+    expect(((await transcript(page).innerText()).match(/Synthetic fixture scenario failed/g) ?? []).length).toBe(1)
+  }
+  await once()
+  await shot(page, 'worker-failure-worker-view')
+  await page.reload()
+  await expect(transcript(page)).toContainText('Fail this assignment', { timeout: 30_000 })
+  await once()
+  await shot(page, 'worker-failure-worker-view-reload')
+  assertions.workerFailure = { sessionId, rowsInWorkerView: 1, named: 'codex-native/gpt-6-sol' }
+})
+
+test('a manager waiting inside its turn receives its worker\'s result and finishes', async ({ page }) => {
+  const sessionId = await launchRunning('Polish waiting manager', '[fixture:spawn-wait] Delegate, then wait for the result')
+  await open(page, sessionId)
+  // The worker finishes while the manager's turn is still open.
+  await expect(transcript(page).locator('[data-worker-result-source]')).toHaveCount(1, { timeout: 30_000 })
+  // The result reaches that turn, so the manager answers and the session comes to rest.
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  await expect.poll(async () => (await shellSession(sessionId))?.status, { timeout: 30_000 }).toBe('idle')
+  // It arrived as a steer into the one turn, not as a second turn after it.
+  const turns = async () => {
+    const rpc = await openFixtureRpc(fleet.a.baseUrl, admin)
+    try {
+      await rpc.call('session.subscribe', { sessionId })
+      const snapshot = await until<any>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
+      return snapshot.items.filter((item: any) => item.kind === 'worker_result').length
+    } finally { rpc.close() }
+  }
+  expect(await turns()).toBe(1)
+  await shot(page, 'waiting-manager-finished')
+  await page.reload()
+  await expect(transcript(page).locator('[data-worker-result-source]')).toHaveCount(1, { timeout: 30_000 })
+  await expect(transcript(page)).toContainText('assistant reply')
+  assertions.waitingManager = { sessionId, resultCards: 1, finished: true }
 })

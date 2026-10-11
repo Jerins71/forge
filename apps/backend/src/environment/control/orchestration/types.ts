@@ -94,7 +94,7 @@ export type CoreCommand = Envelope & (
   | { type: "environment.recover"; recoveryId: string; bootId: string; reports: RecoverySnapshot["undeliveredReports"] }
   | { type: "recovery.resume"; recoveryId: string; attempts: Record<string, string>; bindingIds: Record<string, string> }
   | { type: "recovery.dismiss"; recoveryId: string }
-  | { type: "effect.failed"; threadId: string; attemptId?: string; requestId?: string; kind: CoreEffect["kind"]; delivery: "not_dispatched" | "unknown"; steerTargetEnded?: boolean; bindingClosed?: boolean }
+  | { type: "effect.failed"; threadId: string; attemptId?: string; requestId?: string; kind: CoreEffect["kind"]; delivery: "not_dispatched" | "unknown"; steerTargetEnded?: boolean; steerUnsupported?: boolean; bindingClosed?: boolean }
 );
 export type LifecycleEvent = { commandId: string; at: number } & (
   | LineageEvent
@@ -113,7 +113,8 @@ export type CoreEffect =
   | { kind: "provider.start"; threadId: string; attemptId: string }
   | { kind: "provider.steer"; threadId: string; attemptId: string; targetAttemptId: string }
   | { kind: "provider.respond"; threadId: string; requestId: string; response: unknown }
-  | { kind: "provider.release"; threadId: string; bindingId: string }
+  | { kind: "provider.decline"; threadId: string; requestId: string }
+  | { kind: "provider.release"; threadId: string; bindingId: string; /** The user stopped the session while a turn was running. */ stoppedTurn?: boolean }
   | { kind: "provider.compact"; threadId: string; attemptId: string; instructions?: string }
   | { kind: "recovery.deliver"; threadId: string; recoveryId: string; deliveryId: string };
 export interface Decision { events: LifecycleEvent[]; effects: CoreEffect[]; }

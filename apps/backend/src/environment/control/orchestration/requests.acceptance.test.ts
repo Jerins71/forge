@@ -23,11 +23,12 @@ const answers = [{ questionId: "permission", selectedOptionIds: ["allow"] }];
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "forge-core-requests-")); roots.push(root);
   let serial = 0; let now = 1_800_000_000_000;
-  const responses: unknown[] = []; const caps = piProviderCapabilities();
+  const responses: unknown[] = []; const declines: unknown[] = []; const steers: unknown[] = []; const caps = piProviderCapabilities();
   const adapter: ProviderAdapter = {
     capabilities: () => caps, open: async () => { throw new Error("port supplies binding"); }, resume: async () => { throw new Error("unused"); },
     start: async input => ({ status: "accepted", turn: { ...input.binding.scope, kind: "turn", conversationId: "native", nativeId: "turn" } }),
-    steer: async () => { throw new Error("unused"); }, interrupt: async () => {}, respond: async input => { responses.push(input); }, compact: async () => {},
+    steer: async input => { steers.push(input); return { status: "accepted", turn: input.turn }; }, interrupt: async () => {},
+    respond: async input => { responses.push(input); }, decline: async input => { declines.push(input); }, compact: async () => {},
     async *observations() {}, close: async () => {}, drain: async () => ({ status: "clean" }),
   };
   const options: ControlCoreOptions = { databasePath: path.join(root, "control.sqlite"), clock: () => now, random: () => `00000000-0000-4000-8000-${String(++serial).padStart(12, "0")}`, isDeviceRevoked: () => false,
@@ -47,7 +48,7 @@ async function fixture() {
       lifetime: { kind: "live_callback", generation: binding.scope.generation, ...(expiresAt ? { expiresAt } : {}) }, requestKind: kind, payload: { questions } };
   }
   function publish(value: ProviderObservation) { core.controlService.record({ type: "provider.observe", commandId: `observation-${++serial}`, now, observation: value }); return Object.values(loadState(core.database).requests).at(-1)!; }
-  return { core, options, open, adapter, responses, observation, publish, advance: () => { now += 60_000; } };
+  return { core, options, open, adapter, responses, declines, steers, observation, publish, advance: () => { now += 60_000; } };
 }
 function choice(core: ControlCore, requestId: string) { const row = core.database.prepare("SELECT choice_json FROM control_choices WHERE choice_id=?").get(requestId) as { choice_json: string } | undefined; return row && JSON.parse(row.choice_json); }
 
@@ -164,6 +165,35 @@ describe("authoritative native choices", () => {
     });
     expect(choice(f.core, request.requestId).status).toBe("cancelled"); expect(f.responses).toEqual([]);
   });
+  it("tells the provider that a cancelled choice was declined, so its turn can continue", async () => {
+    const f = await fixture(); const request = f.publish(f.observation("user_input"));
+    await f.core.controlService.admitLifecycle(principal, { commandId: answerId, command: "session.choice.cancel", sessionIds: ["manager"], intent: "cancel-choice", choiceId: request.requestId, request: {}, receipt: { method: "session.choice.cancel", sessionId: "manager" } }, async () => ({}));
+    await f.core.effectWorker.drain();
+    expect(f.declines).toHaveLength(1);
+    expect(f.declines[0]).toMatchObject({ request: { kind: "request", nativeId: "user_input" }, lifetime: { kind: "live_callback" } });
+    expect(f.responses).toEqual([]);
+    expect(loadState(f.core.database).requests[request.requestId].state).toBe("cancelled");
+  });
+
+  it("keeps a message sent while the turn waits on a choice as a follow-up, never steering it into that turn", async () => {
+    const f = await fixture(); const request = f.publish(f.observation("user_input"));
+    await f.core.controlService.submitInput({ commandId: "while-waiting", threadId: "manager", message: { text: "sent while the choice is open", artifactIds: [] }, delivery: "steer" });
+    await f.core.effectWorker.drain();
+    const held = () => Object.values(loadState(f.core.database).runs).find(run => run.commandId === "while-waiting")!;
+    // The provider cannot take input while it waits for the answer; nothing is dispatched and nothing is in doubt.
+    expect(f.steers).toEqual([]);
+    expect(held()).toMatchObject({ state: "queued", delivery: "queue" });
+    expect(loadState(f.core.database).recovery ?? null).toBeNull();
+    await f.core.controlService.execute(principal, "session.choose", { commandId: answerId, sessionId: "manager", choiceId: requestChoiceId(request.requestId), answers });
+    await f.core.effectWorker.drain();
+    // Settling the choice does not push the message into a turn that may be ending; it waits its turn.
+    expect(f.responses).toHaveLength(1);
+    expect(f.steers).toEqual([]);
+    expect(held()).toMatchObject({ state: "queued", delivery: "queue" });
+    expect(Object.values(loadState(f.core.database).runs).filter(run => run.state === "recovery")).toEqual([]);
+    expect(loadState(f.core.database).recovery ?? null).toBeNull();
+  });
+
   it("maps a native stale-callback rejection to an expired choice and typed receipt error", async () => {
     const f = await fixture(); const request = f.publish(f.observation("approval"));
     f.adapter.respond = async () => { throw Object.assign(new Error("Provider callback expired"), { code: "PROVIDER_REQUEST_REJECTED" }); };

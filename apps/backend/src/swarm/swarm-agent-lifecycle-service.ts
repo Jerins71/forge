@@ -42,6 +42,7 @@ import type {
 import {
   formatWorkerStopIncompleteNotice,
   MANUAL_MANAGER_STOP_INCOMPLETE_NOTICE,
+  STOPPED_TURN_NOTICE,
 } from "./manual-stop-notice.js";
 import {
   SECURE_RUNTIME_BINDING_UNAVAILABLE_MESSAGE,
@@ -248,7 +249,8 @@ export interface SwarmAgentLifecycleServiceOptions {
   clearIntentionalStopRuntimeCallbackSuppression: (agentId: string, runtimeToken?: number) => void;
   allowInvalidatedManualStopMessageEnd: (agentId: string, runtimeToken?: number) => void;
   markPendingManualManagerStopNotice: (agentId: string) => void;
-  emitImmediateManualManagerStopNotice: (agentId: string, text?: string, systemNoticeKind?: "worker_stopped") => void;
+  emitImmediateManualManagerStopNotice: (agentId: string, text?: string, systemNoticeKind?: "worker_stopped" | "turn_stopped") => void;
+  settlePendingManualManagerStopNotice: (agentId: string) => void;
   cancelAllPendingChoicesForAgent: (agentId: string) => void;
   runRuntimeShutdown: (
     descriptor: AgentDescriptor,
@@ -479,6 +481,12 @@ export class SwarmAgentLifecycleService {
       this.clearWorkerTeardownState(descriptor.agentId);
       this.options.clearIntentionalStopRuntimeCallbackSuppression(descriptor.agentId, runtimeToken);
     }
+  }
+
+  /** One quiet marker on the turn the user stopped; the turn's own rows do not say why it ended. */
+  markTurnStoppedByUser(agentId: string): void {
+    if (this.options.descriptors.get(agentId)?.role !== "manager") return;
+    this.options.emitImmediateManualManagerStopNotice(agentId, STOPPED_TURN_NOTICE, "turn_stopped");
   }
 
   async stopSession(agentId: string, options?: { manualStopNotice?: boolean }): Promise<{ terminatedWorkerIds: string[] }> {
@@ -1140,24 +1148,17 @@ export class SwarmAgentLifecycleService {
   }
 
   /**
-   * The user stopped this worker. Its unfinished assignment is cancelled before the runtime goes away,
-   * so the manager is told the worker was stopped rather than handed a "blocked" result to act on.
+   * The user stopped this worker. The core is told before the runtime goes away, so when the
+   * worker's run ends its manager receives "stopped by the user" as the result, instead of a
+   * "blocked" result to act on or no result at all.
    */
   async stopWorkerByUser(agentId: string): Promise<void> {
     const descriptor = this.options.descriptors.get(agentId);
     const assignment = descriptor?.role === "worker" ? this.core?.readAssignment(agentId) : undefined;
-    const working = !!assignment && ["assigned", "running"].includes(assignment.state);
-    if (descriptor?.role === "worker" && working) {
-      await this.core!.cancelWorkerAssignment({ managerId: descriptor.managerId, workerId: agentId });
+    if (descriptor?.role === "worker" && assignment && ["assigned", "running"].includes(assignment.state)) {
+      await this.core!.noteWorkerStoppedByUser({ managerId: descriptor.managerId, workerId: agentId });
     }
     await this.stopWorker(agentId);
-    if (descriptor?.role === "worker" && working) {
-      this.options.emitImmediateManualManagerStopNotice(
-        descriptor.managerId,
-        `${descriptor.displayName || agentId} · Stopped by you`,
-        "worker_stopped",
-      );
-    }
   }
 
   /** Stops asked for while one is under way join it: a user stop and the core's release of the same worker are one shutdown. */
@@ -1425,6 +1426,8 @@ export class SwarmAgentLifecycleService {
           target.agentId,
           MANUAL_MANAGER_STOP_INCOMPLETE_NOTICE,
         );
+      } else if (shouldAllowManualStopMessageEnd) {
+        this.options.settlePendingManualManagerStopNotice(target.agentId);
       }
 
       target.status = managerShutdownIncomplete
@@ -2081,6 +2084,7 @@ export class SwarmAgentLifecycleService {
       invalidatedManagerRuntime,
     );
     this.clearPendingManagerRuntimeRecycle(agentId);
+    if (shouldAllowManualStopMessageEnd && !managerShutdownIncomplete) this.options.settlePendingManualManagerStopNotice(agentId);
 
     if (!managerShutdownIncomplete) {
       await this.options.reconcileStoppedManagerRuntime({

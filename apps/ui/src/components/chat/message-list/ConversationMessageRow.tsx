@@ -278,7 +278,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
     }
 
     // Quiet one-line markers: something changed, nothing needs the user.
-    if (message.systemNoticeKind === 'model_change' || message.systemNoticeKind === 'worker_stopped') {
+    if (message.systemNoticeKind === 'model_change' || message.systemNoticeKind === 'worker_stopped' || message.systemNoticeKind === 'turn_stopped') {
       const MarkerIcon = message.systemNoticeKind === 'model_change' ? ArrowLeftRight : CircleStop
       return (
         <div data-system-marker={message.systemNoticeKind} className="flex items-center gap-2 py-1 text-[13px] text-subtle-foreground">

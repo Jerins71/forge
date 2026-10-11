@@ -299,6 +299,14 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           attemptedNative = true; await resource.adapter.respond({ binding: resource.binding, request: request.ref, lifetime: request.lifetime, response: effect.response });
           record({ type: "request.responded", ...result(row, "responded"), threadId: effect.threadId, requestId: request.requestId }); break;
         }
+        case "provider.decline": {
+          // Best effort: the request is already cancelled in the core. A provider that is gone or has
+          // already closed the callback has nothing left to hear.
+          const state = loadState(database); const request = state.requests[effect.requestId]; const owner = state.threads[effect.threadId];
+          const resource = request && owner?.desired === "running" && owner.generation === request.ref.generation ? live.get(request.ref.bindingId) : undefined;
+          try { await resource?.adapter.decline?.({ binding: resource.binding, request: request.ref, lifetime: request.lifetime }); } catch { /* Declining twice or late is not an error. */ }
+          break;
+        }
         case "provider.release": {
           // A drain owed to an earlier binding was already settled; never stop the thread's newer runtime for it.
           const owner = loadState(database).threads[effect.threadId];
@@ -310,7 +318,10 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
             if (drained.status !== "clean") { retryRelease(row, effect, "Provider binding drain is incomplete"); return; }
             resource.stop.abort(); live.delete(effect.bindingId);
           }
-          record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: "clean" }); break;
+          record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: "clean" });
+          // Once, after the stop is confirmed: a retried release has not recorded the drain yet.
+          if (effect.stoppedTurn) options.swarm.markTurnStopped?.(effect.threadId);
+          break;
         }
         case "provider.compact": {
           const owner = loadState(database).threads[effect.threadId]; const resource = owner.bindingId && live.get(owner.bindingId);
@@ -322,7 +333,10 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           const assignment = loadState(database).assignments[effect.assignmentId];
           if (!assignment || assignment.resultRef || assignment.invalidatedAt !== undefined || loadState(database).runs[effect.workerRunId]?.state!=="terminal") break;
           if (!options.swarm.extractWorkerResult) throw new Error("Canonical worker result extraction is not composed");
-          const final = await options.swarm.extractWorkerResult(effect.threadId,effect.workerRunId,loadState(database).runs[effect.workerRunId].entryId ?? "");
+          // A worker the user stopped has no result of its own; its manager is told it was stopped.
+          const final = assignment.stoppedByUser && options.swarm.recordStoppedWorkerResult
+            ? await options.swarm.recordStoppedWorkerResult(effect.threadId,effect.workerRunId)
+            : await options.swarm.extractWorkerResult(effect.threadId,effect.workerRunId,loadState(database).runs[effect.workerRunId].entryId ?? "");
           if (!options.swarm.prepareWorkerResult) throw new Error("Internal worker result preparation is not composed");
           const prepared = await options.swarm.prepareWorkerResult(assignment, final.resultText);
           record({ type:"worker.result",prepared,...result(row,"result"),assignmentId:effect.assignmentId,workerRunId:effect.workerRunId,
@@ -355,10 +369,11 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       const state = loadState(database);
       const steerTargetEnded = effect.kind === "provider.steer" && !attemptedNative &&
         ((error as { reason?: string }).reason === "stale_scope" || state.attempts[effect.targetAttemptId]?.state === "terminal");
+      const steerUnsupported = effect.kind === "provider.steer" && !attemptedNative && (error as { reason?: string }).reason === "unsupported_steer";
       const runId = effect.kind === "transcript.append" ? effect.runId : state.threads[row.session_id]?.activeRunId;
       const attemptId = "attemptId" in effect ? effect.attemptId : effect.kind === "runtime.acquire" || effect.kind === "transcript.append" ? state.runs[runId ?? ""]?.activeAttemptId : undefined;
       if (effect.kind === "provider.compact") record({ type: "compaction.completed", ...result(row, "failed"), threadId: effect.threadId, attemptId: effect.attemptId, succeeded: false });
-      else if (effect.kind.startsWith("provider.") || effect.kind === "runtime.acquire" || effect.kind === "transcript.append") record({ type: "effect.failed", ...result(row, "failed"), threadId: row.session_id, attemptId, requestId: effect.kind === "provider.respond" ? effect.requestId : undefined, kind: effect.kind as CoreEffect["kind"], delivery: attemptedNative ? "unknown" : "not_dispatched", steerTargetEnded, bindingClosed });
+      else if (effect.kind.startsWith("provider.") || effect.kind === "runtime.acquire" || effect.kind === "transcript.append") record({ type: "effect.failed", ...result(row, "failed"), threadId: row.session_id, attemptId, requestId: effect.kind === "provider.respond" ? effect.requestId : undefined, kind: effect.kind as CoreEffect["kind"], delivery: attemptedNative ? "unknown" : "not_dispatched", steerTargetEnded, steerUnsupported, bindingClosed });
       if (bindingClosed && attemptId && loadState(database).runs[state.attempts[attemptId]?.runId]?.state === "queued") { settle(row, "done"); return; }
       if (effect.kind === "provider.steer" && !attemptedNative && loadState(database).attempts[effect.attemptId]?.state === "created") {
         settle(row, "done"); return;

@@ -67,8 +67,10 @@ describe("project resource routes", () => {
     const seed = () => fetch(`${harness.baseUrl}/api/settings/project-resources/seed`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ profileId: "profile-a", sessionAgentId: "session-a" }) });
     const created = await seed(); expect(created.status).toBe(200);
     expect(((await created.json()) as ProjectResourceMutationResponse).snapshot.trust.state).toBe("trusted");
+    expect(harness.trustChanges).toEqual([]);
     const block = await fetch(`${harness.baseUrl}/api/settings/project-resources/trust`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ profileId: "profile-a", sessionAgentId: "session-a", action: "block" }) });
     expect(block.status).toBe(200);
+    expect(harness.trustChanges).toHaveLength(1);
     const reseeded = await seed(); expect(reseeded.status).toBe(200);
     expect(((await reseeded.json()) as ProjectResourceMutationResponse).snapshot.trust.state).toBe("blocked");
   });
@@ -91,7 +93,8 @@ describe("project resource routes", () => {
   });
 });
 
-async function createHarness(options: { missingCwd?: boolean; missingForge?: boolean; nonGitWorkspace?: boolean } = {}): Promise<{ baseUrl: string; workspaceDir: string; dataDir: string }> {
+async function createHarness(options: { missingCwd?: boolean; missingForge?: boolean; nonGitWorkspace?: boolean } = {}): Promise<{ baseUrl: string; workspaceDir: string; dataDir: string; trustChanges: string[] }> {
+  const trustChanges: string[] = [];
   const dataDir = await makeTempDir("forge-route-data-");
   const workspaceDir = options.missingCwd ? join(await makeTempDir("forge-route-missing-parent-"), "deleted") : await makeTempDir("forge-route-workspace-");
   if (!options.missingCwd) {
@@ -131,7 +134,7 @@ async function createHarness(options: { missingCwd?: boolean; missingForge?: boo
       activatedAgents.push(agent);
       return { profileId: "profile-a", agentId: agent.agentId, projectAgent: agent.projectAgent! };
     },
-    applyProjectResourceTrustChange: async () => undefined,
+    applyProjectResourceTrustChange: async (key: string) => { trustChanges.push(key); },
     applyProjectResourceWorkspaceChange: async () => undefined
   } as unknown as SwarmManager;
   const routes = createProjectResourceRoutes({ swarmManager });
@@ -151,7 +154,7 @@ async function createHarness(options: { missingCwd?: boolean; missingForge?: boo
     throw new Error("Unable to bind test server");
   }
   servers.push({ close: () => new Promise((resolveClose) => server.close(() => resolveClose())) });
-  return { baseUrl: `http://127.0.0.1:${address.port}`, workspaceDir, dataDir };
+  return { baseUrl: `http://127.0.0.1:${address.port}`, workspaceDir, dataDir, trustChanges };
 }
 
 function createDescriptor(cwd: string): AgentDescriptor {

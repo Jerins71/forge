@@ -35,7 +35,7 @@ import {
   recordConversationHistoryDiagnostics,
   sumOptionalNumbers
 } from "./conversation-diagnostics.js";
-import { RuntimeConversationEventMapper, managerReplyFailure, safeJson } from "./runtime-conversation-event-mapper.js";
+import { RuntimeConversationEventMapper, isWorkerFailureNotice, managerReplyFailure, nameActualProvider, safeJson } from "./runtime-conversation-event-mapper.js";
 import { buildActivitySummary, buildTimelineSummary } from "./activity-summary.js";
 import { ActivityTimelineTracker, type ProviderTextFact } from "./activity-timeline.js";
 import type { TimelineActivity } from "@forge/protocol";
@@ -398,6 +398,8 @@ export class ConversationProjector {
   }
 
   emitConversationMessage(event: ConversationMessageEvent, options?: { routingReceipt?: MessageRoutingReceiptRecord }): void {
+    // A worker's failure message is the failure's one row; the provider's report of the same failure adds no status row.
+    if (isWorkerFailureNotice(event)) this.activity.noteFailureReported(event.agentId, event.turnId);
     this.emitConversationEntry(event, options);
     this.deps.emitServerEvent("conversation_message", event satisfies ServerEvent);
     if (event.role === "assistant") this.pendingReplyMarkers.get(event.agentId)?.();
@@ -466,8 +468,11 @@ export class ConversationProjector {
 
   /** Closes the rows a finished turn left open and persists them, including its retry or failure status. */
   settleProviderTurn(actorId: string, end: { error?: string; stopped?: boolean; runId?: string } = {}): void {
-    const sessionId = resolveManagerContextId(this.deps.descriptors.get(actorId), actorId);
-    const { finished, replyInterrupted } = this.activity.settleTurn({ actorId, sessionId, ...end, timestamp: this.deps.now() });
+    const descriptor = this.deps.descriptors.get(actorId);
+    const sessionId = resolveManagerContextId(descriptor, actorId);
+    // The row names the provider and model that failed, as the failure message does.
+    const settled = { ...end, ...(end.error ? { error: nameActualProvider(end.error, descriptor) } : {}) };
+    const { finished, replyInterrupted } = this.activity.settleTurn({ actorId, sessionId, ...settled, timestamp: this.deps.now() });
     for (const item of finished) {
       if (replyInterrupted && item.kind === "status") this.markReplyInterrupted(actorId, item);
       else this.emitActivitySummary(buildTimelineSummary(item));
@@ -488,6 +493,11 @@ export class ConversationProjector {
       this.pendingReplyMarkers.delete(actorId);
       this.emitActivitySummary(buildTimelineSummary(item, this.deps.now()));
     });
+  }
+
+  /** Whether this actor's turn already ended in a failed status row. */
+  hasReportedProviderFailure(actorId: string, runId?: string): boolean {
+    return this.activity.hasRecentFailure(actorId, runId);
   }
 
   emitAgentToolCall(event: AgentToolCallEvent): void {

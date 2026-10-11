@@ -22,6 +22,14 @@ describe("readable provider errors", () => {
       .toBe("The provider rejected the request (426): Your Grok CLI version (0.2.112) is outdated.");
   });
 
+  it("keeps the name of the provider and model that failed when the error carries one", () => {
+    expect(readableProviderError('xai/grok-4.6 API error (426): 426 "Your Grok CLI version (0.2.112) is outdated."'))
+      .toBe("xai/grok-4.6 rejected the request (426): Your Grok CLI version (0.2.112) is outdated.");
+    expect(readableProviderError('codex-native/gpt-6.1-sol: {"type":"error","status":400,"error":{"message":"unsupported request"}}'))
+      .toBe("codex-native/gpt-6.1-sol rejected the request (400): unsupported request.");
+    expect(readableProviderError("codex-native/gpt-6.1-sol: Codex app-server exited (code=1, signal=null)")).toBe("The provider process stopped unexpectedly.");
+  });
+
   it("cleans and bounds an unrecognised error", () => {
     expect(readableProviderError("something odd happened..  ")).toBe("something odd happened.");
     expect(readableProviderError("x".repeat(900)).length).toBeLessThanOrEqual(241);

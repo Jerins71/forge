@@ -21,9 +21,13 @@ const stateDir = dirname(nativeHome);
 mkdirSync(stateDir, { recursive: true });
 const counterPath = join(stateDir, `process-${process.pid}.json`);
 // The endpoint Forge passed, if any. Not a credential.
-const baseUrlArgument = process.argv.find(value => value.startsWith('openai_base_url='));
+const configValue = key => {
+  const argument = process.argv.find(value => value.startsWith(`${key}=`));
+  return argument ? JSON.parse(argument.slice(key.length + 1)) : null;
+};
 const counters = { formatVersion: 1, instanceId: fixture.instanceId, pid: process.pid, ownerAgentId: null, threadId: null,
-  openaiBaseUrl: baseUrlArgument ? JSON.parse(baseUrlArgument.slice('openai_base_url='.length)) : null,
+  openaiBaseUrl: configValue('model_providers.forge_router.base_url') ?? configValue('openai_base_url'),
+  modelProvider: configValue('model_provider'), supportsWebsockets: configValue('model_providers.forge_router.supports_websockets'),
   initialize: 0, threadStarts: 0, turnStarts: 0, compactions: 0, steers: 0, interrupts: 0, toolCalls: 0, choices: 0, workerSpawns: 0, workerResults: 0 };
 const threads = new Map();
 const pending = new Map();
@@ -118,8 +122,8 @@ async function runTurn(turn, text) {
         id: 'fixture-choice', header: 'Fixture choice', question: 'Which synthetic option?', isSecret: false,
         options: [{ label: 'Continue', description: 'Complete this fixture turn.' }, { label: 'Wait', description: 'Alternate synthetic option.' }],
       }] });
-      if (!result.answers?.['fixture-choice']) throw new Error('Fixture choice response missing');
-      reply = `fixture:${fixture.instanceId}:choice answered`;
+      // A skipped question comes back with no answer for it; the turn still finishes.
+      reply = result.answers?.['fixture-choice'] ? `fixture:${fixture.instanceId}:choice answered` : `fixture:${fixture.instanceId}:choice skipped`;
     }
     if (text.includes('[fixture:spawn]') || text.includes('[fixture:spawn-choice]')) {
       count('workerSpawns');
@@ -127,6 +131,23 @@ async function runTurn(turn, text) {
         cwd: checkout, initialMessage: text.includes('[fixture:spawn-choice]') ? '[fixture:choice] Request the synthetic worker choice.' : '[fixture:worker] Return the synthetic worker result.' });
       if (result.success !== true) throw new Error('Fixture worker spawn failed');
       reply = `fixture:${fixture.instanceId}:worker spawned`;
+    }
+    if (text.includes('[fixture:spawn-fail]')) {
+      count('workerSpawns');
+      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-fail-worker', customSpecialist: 'fixture-worker',
+        cwd: checkout, initialMessage: '[fixture:fail] Fail this assignment.' });
+      if (result.success !== true) throw new Error('Fixture worker spawn failed');
+      reply = `fixture:${fixture.instanceId}:failing worker spawned`;
+    }
+    // The provider fails the turn outright, with no retries.
+    if (text.includes('[fixture:fail]')) throw new Error('Synthetic provider failure');
+    // The manager delegates and then waits inside this turn; only input steered into the turn moves it on.
+    if (text.includes('[fixture:spawn-wait]')) {
+      count('workerSpawns');
+      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-wait-worker', customSpecialist: 'fixture-worker',
+        cwd: checkout, initialMessage: '[fixture:worker] Return the synthetic worker result.' });
+      if (result.success !== true) throw new Error('Fixture worker spawn failed');
+      turn.holding = true; return;
     }
     if (text.includes('[fixture:spawn-hold]')) {
       count('workerSpawns');

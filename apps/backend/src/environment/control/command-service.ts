@@ -296,14 +296,15 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         database.prepare("INSERT INTO command_receipts VALUES (?, 'running', 0, 0, ?)").run(input.commandId, JSON.stringify(receipt));
         sink.updateReceipt(tx, input.commandId, {});
       }
-      if (input.intent === "cancel-choice" && input.choiceId) {
-        const native = requestForChoice(loadState(database), input.choiceId);
-        if (native) sink.commitCommand(tx, { type: "request.cancel", commandId: input.commandId, now: options.clock(), threadId: native.threadId, requestId: native.requestId });
-      }
       const lanes = [...sessionIds, ...projectIds.map(id => "project:" + id)];
       for (const [ordinal, lane] of (lanes.length ? lanes : [""]).entries()) {
         database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,'lifecycle.admit',?,?,'claimed')")
           .run(input.commandId + ":" + ordinal, input.commandId, lane, ordinal, JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, ambiguousDelivery: input.ambiguousDelivery, ...(ordinal === 0 && input.frozenRequest !== undefined ? { frozenRequest: input.frozenRequest } : {}) }));
+      }
+      // After the admission rows: the cancellation's own effect (telling the provider) takes the next ordinal.
+      if (input.intent === "cancel-choice" && input.choiceId) {
+        const native = requestForChoice(loadState(database), input.choiceId);
+        if (native) sink.commitCommand(tx, { type: "request.cancel", commandId: input.commandId, now: options.clock(), threadId: native.threadId, requestId: native.requestId });
       }
       if (input.command === "recovery.decide") {
         const decision = input.request as RpcInput<"recovery.decide">;

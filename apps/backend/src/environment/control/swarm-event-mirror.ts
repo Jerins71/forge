@@ -23,7 +23,7 @@ import { receiptIdentity } from "./event-sink.js";
 
 type DetailItem = Extract<Extract<DetailStreamItem, { kind: "event" }>["event"], { type: "item.upsert" }>["item"];
 /** A model switch or a user-stopped worker travels as an ordinary item whose source tells clients to draw a marker, not a reply. */
-const MARKER_NOTICE_KINDS = new Set(["model_change", "worker_stopped"]);
+const MARKER_NOTICE_KINDS = new Set(["model_change", "worker_stopped", "turn_stopped"]);
 type ChoiceSummary = Extract<Extract<DetailStreamItem, { kind: "event" }>["event"], { type: "choice.upsert" }>["choice"];
 export interface MirrorWireProjection {
   project(profile: ManagerProfile): Promise<ProjectSummary>;
@@ -123,6 +123,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       unread: wireProjection.unread(descriptor.agentId, descriptor.profileId ?? descriptor.agentId),
       pendingCount: prior?.pendingCount ?? 0,
       workerCount: descriptor.workerCount ?? swarmManager.listWorkersForSession(descriptor.agentId).length,
+      activeWorkerCount: swarmManager.listWorkersForSession(descriptor.agentId).filter(worker => (projectLifecycleStatus(state, worker.agentId)?.agentStatus ?? worker.status) === "streaming").length,
       createdAt: descriptor.createdAt, pinnedAt: descriptor.pinnedAt ?? null, lastUsedAt: descriptor.lastUserMessageAt ?? null,
       updatedAt: descriptor.updatedAt, sortKey: descriptor.createdAt, archived: Boolean(descriptor.archivedAt),
       workspace: { ...(prior?.workspace ?? { kind: "current_checkout", branch: null }), cwd: descriptor.cwd },

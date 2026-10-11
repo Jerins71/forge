@@ -202,7 +202,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   async dispatchProviderTurn(input: RuntimeUserMessage, attemptId: string, turn?: ProviderTurnRef): Promise<string> {
     return this.serialize(async () => {
       if (this.getProviderDrainStatus() !== "open") throw new ProviderDispatchRejectedError("closed");
-      if (turn) this.options.providerSession!.assertTurn(turn);
+      if (turn) { if (!this.options.providerSession!.turnActive(turn)) throw new ProviderDispatchRejectedError("stale_scope"); }
       else if (this.turnOpen || this.sent.size || this.followUps.length) throw new ProviderDispatchRejectedError("busy");
       // Reuse the creator-prepared native projection exactly once for either path.
       const id = randomUUID();
@@ -384,7 +384,11 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     // Claude's result closes a model reply, not necessarily the work. Keep the
     // Forge turn active until tracked commands/wakeups settle and Claude handles their
     // notifications. Steering stays available; worker completion must wait too.
-    if (this.mapper.hasBackgroundWork()) {
+    // Input the native has not consumed yet is not lost when a reply ends: the native
+    // runs it next. That reply belongs to this turn, so the steer is accepted rather than unknown.
+    const queued = success ? [...this.sent.values()].filter(input => input.attemptId !== undefined).map(input => input.id) : [];
+    if (this.mapper.hasBackgroundWork() || queued.length) {
+      if (queued.length) this.boundQueuedInputs(queued);
       await this.publishStatus();
       return;
     }
@@ -393,6 +397,26 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     await this.emit({ type: "agent_end" }); await this.publishStatus();
     await this.options.callbacks.onAgentEnd?.(this.descriptor.agentId);
     if (!this.stopping && !this.sent.size && this.followUps.length) await this.submit(this.followUps.shift()!);
+  }
+
+  /** A queued input the native never echoes must not hold the turn open or run later unseen. */
+  private boundQueuedInputs(ids: string[]): void {
+    this.options.providerSession!.holdDispatches(ids);
+    setTimeout(() => void (async () => {
+      const lost = await this.serialize(async () => {
+        const lost = ids.filter(id => this.sent.has(id));
+        if (this.stopping || !lost.length) return false;
+        // Refuse further frames first: stopping the process is what proves these inputs never ran.
+        this.stopping = true;
+        this.options.providerSession!.rejectDispatches(lost);
+        for (const id of lost) this.sent.delete(id);
+        this.turnOpen = false; this.status = "idle";
+        await this.emit({ type: "agent_end" });
+        await this.options.callbacks.onAgentEnd?.(this.descriptor.agentId);
+        return true;
+      });
+      if (lost) await this.stopInFlight();
+    })().catch(() => undefined), 30_000).unref();
   }
 
   private guard<T>(value: T): T {

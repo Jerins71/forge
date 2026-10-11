@@ -115,6 +115,7 @@ export interface SwarmRuntimeControllerHost extends SwarmToolHost {
     observeProviderText(fact: { actorId: string; channel: "assistant" | "reasoning"; nativeId: string; phase: "start" | "delta" | "complete"; text: string; runId?: string }): void;
     observeProviderRetry(fact: { actorId: string; attempt: number; message: string; runId?: string }): void;
     settleProviderTurn(actorId: string, end?: { error?: string; stopped?: boolean; runId?: string }): void;
+    hasReportedProviderFailure(actorId: string, runId?: string): boolean;
   };
   promptService: {
     buildCursorSdkRuntimeSystemPrompt(descriptor: AgentDescriptor, systemPrompt: string): Promise<string>;
@@ -822,6 +823,7 @@ export class SwarmRuntimeController {
           this.host.patchDescriptorFromRuntimeStatus(agentId, patch),
         emitConversationMessage: (event) => this.host.emitConversationMessage(event),
         reportProviderFailure: (agentId, message) => this.host.conversationProjector.settleProviderTurn(agentId, { error: message, runId: this.host.getActiveTurnId?.(agentId) }),
+        providerFailureReported: (agentId) => this.host.conversationProjector.hasReportedProviderFailure(agentId, this.host.getActiveTurnId?.(agentId)),
         logDebug: (message, details) => this.logDebug(message, details)
       });
     }

@@ -16,7 +16,7 @@ import type { SwarmRuntimeControllerHost } from "./swarm-runtime-controller.js";
 import type { SwarmWorkerHealthService } from "./swarm-worker-health-service.js";
 import { ManagerTurnWatchdog } from "./manager-turn-watchdog.js";
 import { shouldPreserveActiveTurnForRuntimeError } from "./runtime-error-lifecycle-policy.js";
-import { MANUAL_MANAGER_STOP_NOTICE } from "./manual-stop-notice.js";
+import { MANUAL_MANAGER_STOP_NOTICE, STOPPED_TURN_NOTICE } from "./manual-stop-notice.js";
 import {
   extractMessageErrorMessage,
   extractMessageStopReason,
@@ -513,7 +513,7 @@ export class SwarmRuntimeLifecycleCoordinator {
   emitImmediateManualManagerStopNotice(
     agentId: string,
     text = MANUAL_MANAGER_STOP_NOTICE,
-    systemNoticeKind?: "worker_stopped",
+    systemNoticeKind?: "worker_stopped" | "turn_stopped",
   ): void {
     this.clearPendingManualManagerStopNotice(agentId);
     this.options.controller.clearInvalidatedManualStopMessageEndAllowance(agentId);
@@ -526,6 +526,14 @@ export class SwarmRuntimeLifecycleCoordinator {
       source: "system",
       ...(systemNoticeKind ? { systemNoticeKind } : {}),
     });
+  }
+
+  /**
+   * The stopped turn's runtime is gone. A runtime that ends its turn with an abort message has
+   * already left the marker; one that just stops (a native provider) gets it here.
+   */
+  settlePendingManualManagerStopNotice(agentId: string): void {
+    if (this.pendingManualStopNoticeTimers.has(agentId)) this.emitImmediateManualManagerStopNotice(agentId, STOPPED_TURN_NOTICE, "turn_stopped");
   }
 
   consumePendingManualManagerStopNoticeIfApplicable(agentId: string, event: RuntimeSessionEvent): boolean {

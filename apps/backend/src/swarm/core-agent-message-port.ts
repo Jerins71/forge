@@ -35,8 +35,8 @@ export interface CoreAgentMessagePort {
   }): Promise<SendMessageReceipt>;
   /** Read the authoritative projection, including terminal assignments retained on reuse. */
   readAssignment(workerAgentId: string): WorkerAssignment | undefined;
-  /** The user stopped a working worker: cancel what it was doing, so no result is reported for it. The worker stays resumable. */
-  cancelWorkerAssignment(input: { managerId: string; workerId: string }): Promise<void>;
+  /** The user stopped a working worker: when its run ends, its manager is told so instead of being left waiting. The worker stays resumable. */
+  noteWorkerStoppedByUser(input: { managerId: string; workerId: string }): Promise<void>;
   /** Authorized user control remains available after a manager's root stops. */
   stopWorker(input: { managerId: string; workerId: string }): Promise<void>;
   /** Fence late results before resetting conversation content. No unknown delivery retries. */

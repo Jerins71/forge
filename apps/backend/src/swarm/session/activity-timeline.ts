@@ -166,6 +166,11 @@ export class ActivityTimelineTracker {
     return { finished, replyInterrupted: replyInterrupted && item.status === "failed" };
   }
 
+  /** The failure is already in the transcript; a later report of it for the same turn adds nothing. */
+  noteFailureReported(actorId: string, runId?: string): void {
+    this.failedAt.set(actorId, { at: this.now(), runId });
+  }
+
   /** A failure already reported for this actor's turn. A known different run is always a new failure. */
   hasRecentFailure(actorId: string, runId?: string): boolean {
     const last = this.failedAt.get(actorId);
@@ -344,7 +349,7 @@ function bounded(field: "input" | "detail", text: string, keep: "head" | "tail")
 
 /** One readable sentence for a provider failure; the raw text stays in the row's details. */
 export function readableProviderError(raw: string): string {
-  const { message, status } = providerErrorParts(raw);
+  const { message, status, who } = providerErrorParts(raw);
   const text = oneLine(message).replace(/[.\s]+$/, "");
   const code = status ?? /\b([45]\d\d)\b/.exec(text)?.[1];
   if (code === "401" || /unauthori[sz]ed|(invalid|incorrect) api key|authentication/i.test(text)) return "The provider rejected the API key (401). Check the key in Settings → Authentication.";
@@ -353,27 +358,33 @@ export function readableProviderError(raw: string): string {
   if (/exited \(code=|process exited|app-server exited/i.test(text)) return "The provider process stopped unexpectedly.";
   if (/^5\d\d$/.test(code ?? "") || /overloaded|unavailable/i.test(text)) return "The provider is unavailable right now. Try again shortly.";
   // The provider's own explanation is the useful part; say whose it is and keep it short.
-  if (status) return `The provider ${status.startsWith("4") ? "rejected the request" : "returned an error"} (${status}): ${text.slice(0, 240)}.`;
-  return `${text.slice(0, 240)}.`;
+  if (status) return `${who ?? "The provider"} ${status.startsWith("4") ? "rejected the request" : "returned an error"} (${status}): ${text.slice(0, 240)}.`;
+  return `${who ? `${who}: ` : ""}${text.slice(0, 240)}.`;
 }
 
 /**
- * The provider's own message and HTTP status, out of the two wrappings they arrive in: a JSON error
- * body, or a client library's "<Vendor> API error (status): status "message"" line, whose vendor is
- * the library's and not necessarily the provider in use.
+ * The provider's own message and HTTP status, out of the wrappings they arrive in: a leading
+ * "provider/model:" naming who failed, a JSON error body, or a client library's
+ * "<Vendor> API error (status): status "message"" line. A bare "OpenAI" there is the library's name,
+ * not necessarily the provider in use, so it is not repeated.
  */
-function providerErrorParts(raw: string): { message: string; status?: string } {
-  const trimmed = raw.trim();
-  if (trimmed.startsWith("{")) {
+function providerErrorParts(raw: string): { message: string; status?: string; who?: string } {
+  let text = raw.trim();
+  let who = /^([\w.-]+\/[\w.:-]+):\s+/.exec(text)?.[1];
+  if (who) text = text.slice(text.indexOf(":") + 1).trim();
+  if (text.startsWith("{")) {
     try {
-      const body = JSON.parse(trimmed) as { status?: unknown; message?: unknown; error?: { message?: unknown } | string };
+      const body = JSON.parse(text) as { status?: unknown; message?: unknown; error?: { message?: unknown } | string };
       const message = typeof body.error === "string" ? body.error : body.error?.message ?? body.message;
-      if (typeof message === "string" && message) return { message, ...(typeof body.status === "number" ? { status: String(body.status) } : {}) };
+      if (typeof message === "string" && message) return { message, who, ...(typeof body.status === "number" ? { status: String(body.status) } : {}) };
     } catch { /* Not JSON after all; read it as text. */ }
   }
-  const labelled = /^[\w .-]*API error \((\d{3})\):\s*(?:\1\s*)?"?(.*?)"?$/s.exec(trimmed);
-  if (labelled) return { message: labelled[2]!, status: labelled[1]! };
-  return { message: trimmed };
+  const labelled = /^([\w ./:-]*?)\s*API error \((\d{3})\):\s*(?:\2\s*)?"?(.*?)"?$/s.exec(text);
+  if (labelled) {
+    if (labelled[1] && !/^openai$/i.test(labelled[1])) who ??= labelled[1];
+    return { message: labelled[3]!, status: labelled[2]!, who };
+  }
+  return { message: text, who };
 }
 
 function oneLine(text: string): string {

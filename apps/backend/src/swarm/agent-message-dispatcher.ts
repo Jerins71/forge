@@ -1,4 +1,4 @@
-import { buildWorkerResult, selectWorkerRunFinal } from "./worker-result-extraction.js";
+import { buildWorkerFailureResult, buildWorkerResult, selectWorkerRunFailure, selectWorkerRunFinal } from "./worker-result-extraction.js";
 import type { AssignmentSelection } from "../environment/control/orchestration/assignments.js";
 import type { CoreAgentMessagePort } from "./core-agent-message-port.js";
 import { isRepoProjectAgentSource } from "@forge/protocol";
@@ -246,7 +246,11 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
   readAssignment(workerAgentId: string) { return this.core?.readAssignment(workerAgentId); }
 
   extractWorkerRunResult(workerAgentId: string, workerRunId: string, inputEntryId: string): { entryId?: string; resultText: string } {
-    const final = selectWorkerRunFinal(this.options.getConversationHistory(workerAgentId), workerRunId, inputEntryId);
+    const history = this.options.getConversationHistory(workerAgentId);
+    const final = selectWorkerRunFinal(history, workerRunId, inputEntryId);
+    // A provider failure that left no reply is the result: the worker's one failed row, worded as that row is.
+    const failure = final?.role === "assistant" ? undefined : selectWorkerRunFailure(history, workerRunId, inputEntryId);
+    if (failure) return { entryId: failure.timelineEntryId, resultText: buildWorkerFailureResult(workerAgentId, failure) };
     return { entryId: final?.id, resultText: buildWorkerResult(workerAgentId, final) };
   }
 

@@ -78,6 +78,9 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     return this.session!.waitForAcceptance(input.attemptId);
   }
   async steer(input: ProviderSteerInput) {
+    this.assertBinding(input.binding);
+    // Nothing has been written for a turn that already ended, so the core may deliver this input as a follow-up.
+    if (!this.session!.turnActive(input.turn)) throw new ProviderDispatchRejectedError("stale_scope");
     this.assertTurn(input.binding, input.turn); this.assertUpdates(input);
     this.session!.enableObservations();
     const id = await this.assertBinding(input.binding).dispatchProviderTurn(input.input, input.attemptId, input.turn);
@@ -95,6 +98,10 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
       throw error;
     }
     this.session!.respond(input);
+  }
+  async decline(input: Omit<ProviderRespondInput, "response">): Promise<void> {
+    this.assertBinding(input.binding);
+    this.session!.decline(input);
   }
   async compact(input: Parameters<ProviderAdapter["compact"]>[0]): Promise<void> { this.session?.enableObservations(); await this.assertBinding(input.binding).compact(input.instructions, input.attemptId); }
   observations(binding: ProviderBinding, signal?: AbortSignal): AsyncIterable<ProviderObservation> {

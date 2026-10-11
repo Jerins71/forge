@@ -777,6 +777,8 @@ test('remote Codex native: without "Change settings" the card says how to get ac
   const processes = () => readdir(stateDir).then(files => Promise.all(files.filter(file => /^process-\d+\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(stateDir, file), 'utf8')))))
   const used = await until<any>(async () => (await processes()).find(value => value.openaiBaseUrl === baseUrl && value.turnStarts > 0), Boolean, 30_000)
   expect(used.instanceId).toBe('env-c')
+  expect(used.modelProvider).toBe('forge_router')
+  expect(used.supportsWebsockets).toBe(false)
 
   // Remove key: API-key mode is then blocked with the reason, for this machine only.
   await form.getByRole('button', { name: 'Remove key' }).click()

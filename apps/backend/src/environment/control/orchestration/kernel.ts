@@ -47,6 +47,13 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     if (owner.activeRunId) {
       const root = state.attempts[state.runs[owner.activeRunId].activeAttemptId];
       if (!root.turn || root.state !== "accepted" || !state.bindings[root.bindingId]?.capabilities.native.steer) return;
+      // A turn waiting on the user's answer cannot take input: steering it would go unacknowledged and
+      // read as lost. Such a message becomes a follow-up, delivered after this turn; it is not steered
+      // in once the request settles either, because the turn may already be ending.
+      if (Object.values(state.requests).some(request => request.attemptId === root.attemptId && ["pending", "responding"].includes(request.state))) {
+        for (const held of queued.filter(run => run.delivery === "steer")) emit({ type: "run.started", run: { ...held, delivery: "queue" } });
+        return;
+      }
       for (const steer of queued.filter(run => run.delivery === "steer" && run.entryId)) {
         emit({ type: "run.started", run: { ...steer, state: "running" } });
         decision.effects.push({ kind: "provider.steer", threadId: id, attemptId: steer.activeAttemptId, targetAttemptId: root.attemptId });
@@ -127,6 +134,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     } else if (observation.type === "request_resolved") {
       const request = state.requests[`${attempt.bindingId}:${owner.generation}:${observation.request.nativeId}`];
       if (request) emit({ type: observation.resolution === "expired" ? "request.expired" : observation.resolution === "cancelled" ? "request.cancelled" : "request.resolved", request: { ...request, state: observation.resolution === "expired" ? "expired" : observation.resolution === "cancelled" ? "cancelled" : "resolved" } });
+      advance(owner.threadId);
     } else if (observation.origin.kind !== "root" || owner.activeRunId !== run.runId || run.activeAttemptId !== attempt.attemptId) { /* This observation has no root terminal authority. */ }
     else if (observation.type === "accepted") { emit({ type: "attempt.accepted", attempt: { ...state.attempts[attempt.attemptId], state: "accepted", delivery: "dispatched", turn: observation.turn } }); advance(owner.threadId); }
     else if (observation.type === "terminal" && observation.terminalAuthority === "root_attempt") { finish(state.runs[run.runId], observation.outcome,true); advance(owner.threadId); }
@@ -179,7 +187,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       const owner = thread(command.threadId); const run = state.runs[attempt.runId];
       if (command.targetAttemptId && command.authorized && owner.desired === "running" && owner.shutdown === "clean" && owner.generation === attempt.generation) {
         const root = owner.activeRunId && state.attempts[state.runs[owner.activeRunId].activeAttemptId];
-        if (!root || root.attemptId !== command.targetAttemptId || root.state !== "accepted" || !root.turn) {
+        if (!root || root.attemptId !== command.targetAttemptId || root.state !== "accepted" || !root.turn || !state.bindings[root.bindingId]?.capabilities.native.steer) {
           // The root ended before dispatch. Preserve the canonical input as a follow-up.
           emit({ type: "run.started", run: { ...run, state: "queued" } }); advance(owner.threadId); break;
         }
@@ -210,7 +218,9 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
           emit({ type: "assignment.cancelled", assignment: { ...assignment, state: "cancelled", terminalAt: command.now, outcome: "cancelled" } });
         if (owner.activeRunId && state.runs[owner.activeRunId].state !== "terminal") finish(state.runs[owner.activeRunId], "cancelled");
       }
-      if (needsDrain) decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: owner.bindingId! });
+      // A session stopped in the middle of a turn: the release carries that, so the transcript can say so.
+      const stoppedTurn = owner.role === "manager" && !!owner.activeRunId && state.runs[owner.activeRunId].state !== "terminal";
+      if (needsDrain) decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: owner.bindingId!, ...(stoppedTurn ? { stoppedTurn } : {}) });
       else if (owner.activeRunId && state.runs[owner.activeRunId].state !== "terminal") finish(state.runs[owner.activeRunId], "cancelled");
       if (owner.role === "manager") for (const worker of Object.values(state.threads).filter(candidate => candidate.managerId === owner.threadId && (candidate.desired !== "stopped" || candidate.shutdown !== "clean"))) {
         const stopped = decide(state, { ...command, threadId: worker.threadId, writerPending: !!worker.bindingId, retain: !command.terminateChildren });
@@ -256,7 +266,10 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     case "request.cancel": case "request.expire": case "request.responded": {
       const request = state.requests[command.requestId]; if (!request || request.threadId !== command.threadId || !["pending", "responding"].includes(request.state)) break;
       const next = command.type === "request.cancel" ? "cancelled" : command.type === "request.expire" ? "expired" : "resolved";
-      emit({ type: next === "cancelled" ? "request.cancelled" : next === "expired" ? "request.expired" : "request.resolved", request: { ...request, state: next } }); break;
+      emit({ type: next === "cancelled" ? "request.cancelled" : next === "expired" ? "request.expired" : "request.resolved", request: { ...request, state: next } });
+      // A request the user skipped is still open in the provider: its callback has to hear "declined".
+      if (command.type === "request.cancel" && request.state === "pending") decision.effects.push({ kind: "provider.decline", threadId: request.threadId, requestId: request.requestId });
+      advance(request.threadId); break;
     }
     case "thread.compact": {
       const owner = thread(command.threadId); if (owner.activeRunId || owner.compaction || owner.shutdown !== "clean" || !owner.bindingId) throw new Error("Compaction requires an idle acquired thread");
@@ -333,8 +346,12 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
           emit({ type: "thread.changed", thread: { ...owner, activeRunId: undefined, shutdown: "pending" } });
           decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: attempt.bindingId });
         }
-        else if (command.kind === "provider.steer" && command.steerTargetEnded && thread(command.threadId).desired === "running" && thread(command.threadId).shutdown === "clean") {
+        else if (command.kind === "provider.steer" && (command.steerTargetEnded || command.steerUnsupported) && thread(command.threadId).desired === "running" && thread(command.threadId).shutdown === "clean") {
           // A proven rejected steer never entered the native turn. Preserve its input as a follow-up.
+          if (command.steerUnsupported) {
+            const binding = state.bindings[attempt.bindingId];
+            if (binding) emit({ type: "binding.acquired", binding: { ...binding, capabilities: { ...binding.capabilities, native: { ...binding.capabilities.native, steer: false } } } });
+          }
           emit({ type: "attempt.created", attempt: { ...attempt, state: "created", delivery: "pending" } });
           emit({ type: "run.started", run: { ...state.runs[attempt.runId], state: "queued", delivery: "queue" } });
           advance(command.threadId);
