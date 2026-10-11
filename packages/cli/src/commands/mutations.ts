@@ -2,7 +2,7 @@ import type { CliChoiceRouteResult, CliSessionCompactionResult, CliSessionCreate
 
 import { CliError, formatObject, writeHuman, writeJson } from '../output.js'
 import { EXIT_CODES } from '../version.js'
-import { parseAnswersJson, parsePinned, parseTimeoutMs, readMessageInput } from './input.js'
+import { parseAnswersJson, parseModelSelection, parsePinned, parseSourcePoint, parseTimeoutMs, readMessageInput } from './input.js'
 import { exitCodeForRunResult, writeDispatchResult, writeRunResult } from './run.js'
 import type { CommandContext } from './types.js'
 
@@ -71,15 +71,34 @@ export async function handleSessionsMutationCommand(context: CommandContext): Pr
     }
     case 'fork': {
       const sourceAgentId = requireArg(arg, 'agentId')
+      const sourcePoint = parseSourcePoint(context.args.options.source)
+      const model = parseModelSelection(context.args.options.model, context.args.options.reasoning)
       const client = await context.createClient()
       const result = await client.forkSession(sourceAgentId, {
         label: context.args.options.label,
         fromMessageId: context.args.options.fromMessageId,
+        ...(sourcePoint ? { sourcePoint } : {}),
+        ...(model ? { model } : {}),
       })
       writeMutationResult(context, 'fork', sourceAgentId, result, {
         label: context.args.options.label,
         fromMessageId: context.args.options.fromMessageId,
+        sourcePoint,
+        model,
       })
+      return EXIT_CODES.success
+    }
+    case 'switch': {
+      const agentId = requireArg(arg, 'agentId')
+      const model = parseModelSelection(requireOption(context.args.options.model, '--model <provider>/<modelId>'), context.args.options.reasoning)!
+      return mutateSession(context, agentId, 'switch', (client) => client.switchSessionModel(agentId, model), { model })
+    }
+    case 'merge-back': {
+      const agentId = requireArg(arg, 'agentId')
+      const sourcePoint = parseSourcePoint(context.args.options.source)
+      const client = await context.createClient()
+      const result = await client.mergeBackSession(agentId, sourcePoint ? { sourcePoint } : {})
+      writeMutationResult(context, 'merge-back', agentId, result, { targetAgentId: result.targetAgentId, sourcePoint })
       return EXIT_CODES.success
     }
     case 'compact': {
@@ -99,8 +118,20 @@ export async function handleSessionsMutationCommand(context: CommandContext): Pr
       return EXIT_CODES.success
     }
     default:
-      throw usage('Usage: forge sessions create|send|wait|stop|resume|fork|compact|smart-compact|rename|pin|unpin|clear|delete ...')
+      throw usage('Usage: forge sessions create|send|wait|stop|resume|fork|switch|merge-back|compact|smart-compact|rename|pin|unpin|clear|delete ...')
   }
+}
+
+export async function handleWorkersMutationCommand(context: CommandContext): Promise<number> {
+  const [, action, arg] = context.args.positionals
+  if (action !== 'continue') throw usage('Usage: forge workers continue <workerId> [--session <agentId>] [--label <label>]')
+  const workerId = requireArg(arg, 'workerId')
+  const client = await context.createClient()
+  const result = await client.continueWorker(workerId, { sessionAgentId: context.args.options.session, label: context.args.options.label })
+  const summary = { status: 'ok', action: 'continue', workerId, sessionAgentId: result.sessionAgentId }
+  if (context.args.options.json) writeJson(context.io, { ...summary, result })
+  else writeHuman(context.io, context.args.options, formatObject({ ...summary, label: context.args.options.label }))
+  return EXIT_CODES.success
 }
 
 export async function handleProjectAgentsMutationCommand(context: CommandContext): Promise<number> {

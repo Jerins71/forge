@@ -6,6 +6,7 @@ import type {
   CliStatusResponse,
   ManagerProfile,
 } from '@forge/protocol'
+import type { SessionLineageSnapshot } from '@forge/protocol/environment-v2'
 
 import { assertSupportedCapabilities } from '../forge-client.js'
 import { CliError, formatObject, formatTable, writeHuman, writeJson } from '../output.js'
@@ -96,7 +97,15 @@ export async function handleSessionsCommand(context: CommandContext): Promise<nu
     else writeHuman(context.io, context.args.options, formatTranscript(response))
     return EXIT_CODES.success
   }
-  throw usage('Usage: forge sessions list --profile <profileId> | forge sessions show <agentId> | forge sessions transcript <agentId> [--include-worker-updates] [--limit <n>] [--offset <n>]')
+  if (action === 'lineage') {
+    const id = requireArg(agentId, 'agentId')
+    const client = await context.createClient()
+    const response = await client.getSessionLineage(id)
+    if (context.args.options.json) writeJson(context.io, response)
+    else writeHuman(context.io, context.args.options, formatLineage(response))
+    return EXIT_CODES.success
+  }
+  throw usage('Usage: forge sessions list --profile <profileId> | forge sessions show <agentId> | forge sessions transcript <agentId> [--include-worker-updates] [--limit <n>] [--offset <n>] | forge sessions lineage <agentId>')
 }
 
 export async function handleAgentsCommand(context: CommandContext): Promise<number> {
@@ -313,4 +322,29 @@ function requireOption(value: string | undefined, name: string): string {
 
 function usage(message: string): CliError {
   return new CliError(message, { exitCode: EXIT_CODES.usage, code: 'usage_error' })
+}
+
+function formatLineage(snapshot: SessionLineageSnapshot): string {
+  const lineage = snapshot.lineage
+  const header = formatObject({
+    session: snapshot.threadId,
+    relationship: lineage?.relationship ?? 'none',
+    parent: lineage?.parentThreadId,
+    root: lineage?.rootThreadId,
+    basePoint: lineage ? `${lineage.basePoint.threadId}@${lineage.basePoint.sequence}${lineage.basePoint.entryId ? ` (${lineage.basePoint.entryId})` : ''}` : undefined,
+  })
+  if (snapshot.transfers.length === 0) return header
+  const handoffs = new Map(snapshot.handoffs.map((handoff) => [handoff.transferId, handoff]))
+  const table = formatTable(snapshot.transfers, [
+    { header: 'TRANSFER', value: (transfer) => transfer.transferId },
+    { header: 'KIND', value: (transfer) => transfer.kind },
+    { header: 'STRATEGY', value: (transfer) => transfer.strategy },
+    { header: 'STATE', value: (transfer) => transfer.error ? `${transfer.state}: ${transfer.error.code} ${transfer.error.message}` : transfer.state },
+    { header: 'PROVIDERS', value: (transfer) => transfer.sourceProvider || transfer.targetProvider ? `${transfer.sourceProvider ?? '?'} -> ${transfer.targetProvider ?? '?'}` : '' },
+    { header: 'INCLUDED', value: (transfer) => { const coverage = handoffs.get(transfer.transferId)?.coverage; return coverage ? `${coverage.includedEntryIds.length}/${coverage.requestedEntryIds.length}` : '' } },
+    { header: 'OMITTED', value: (transfer) => handoffs.get(transfer.transferId)?.coverage.omittedEntryIds.length },
+    { header: 'TRUNCATED', value: (transfer) => handoffs.get(transfer.transferId)?.coverage.partialEntryIds.length },
+    { header: 'BUDGET', value: (transfer) => { const budget = handoffs.get(transfer.transferId)?.budget; return budget ? `${budget.usedChars}/${budget.maxChars} chars${budget.truncated ? ' truncated' : ''}` : '' } },
+  ])
+  return `${header}\n\n${table}`
 }

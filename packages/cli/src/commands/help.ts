@@ -28,6 +28,11 @@ Commands:
   sessions compact <agentId> [--instructions <text>]
   sessions smart-compact <agentId> [--instructions <text>]
   sessions create|send|wait|stop|resume|fork|rename|pin|unpin|clear|delete ...
+  sessions fork <agentId> [--label <label>] [--source latest|run:<runId>|message:<entryId>] [--model <provider>/<modelId> [--reasoning <level>]]
+  sessions switch <agentId> --model <provider>/<modelId> [--reasoning <level>]
+  sessions merge-back <agentId> [--source latest|run:<runId>|message:<entryId>]
+  sessions lineage <agentId>
+  workers continue <workerId> [--session <agentId>] [--label <label>]
   agents list [--profile <profileId>]
   agents show <agentId>
   project-agents list --profile <profileId>
@@ -58,7 +63,9 @@ export function commandHelp(command: string | undefined): string {
     case 'profiles':
       return 'Usage: forge profiles list | forge profiles show <profileId>'
     case 'sessions':
-      return 'Usage: forge sessions list --profile <profileId> | show <agentId> | transcript <agentId> [--include-worker-updates] [--limit <n>] [--offset <n>] | create --profile <profileId> [--label <label>] [--name <name>] | send <agentId> --message <text|@file> | wait <agentId> [--timeout <duration>] [--stop-on-timeout] | stop|resume <agentId> | fork <agentId> [--label <label>] [--from-message-id <messageId>] | compact <agentId> [--instructions <text>] | smart-compact <agentId> [--instructions <text>] | rename <agentId> --label <label> | pin|unpin <agentId> [--pinned true|false] | clear|delete <agentId> --yes\n\nTranscript defaults to user-facing messages only. Add --include-worker-updates for worker results. Compact commands use paired native session controls and wait for the backend compaction receipt to finish or fail. Smart compaction may skip or report not_reduced when the runtime decides compaction is unnecessary. Destructive session commands require --yes.'
+      return 'Usage: forge sessions list --profile <profileId> | show <agentId> | transcript <agentId> [--include-worker-updates] [--limit <n>] [--offset <n>] | create --profile <profileId> [--label <label>] [--name <name>] | send <agentId> --message <text|@file> | wait <agentId> [--timeout <duration>] [--stop-on-timeout] | stop|resume <agentId> | fork <agentId> [--label <label>] [--from-message-id <messageId>] [--source latest|run:<runId>|message:<entryId>] [--model <provider>/<modelId> [--reasoning <level>]] | switch <agentId> --model <provider>/<modelId> [--reasoning <level>] | merge-back <agentId> [--source latest|run:<runId>|message:<entryId>] | lineage <agentId> | compact <agentId> [--instructions <text>] | smart-compact <agentId> [--instructions <text>] | rename <agentId> --label <label> | pin|unpin <agentId> [--pinned true|false] | clear|delete <agentId> --yes\n\nTranscript defaults to user-facing messages only. Add --include-worker-updates for worker results. Compact commands use paired native session controls and wait for the backend compaction receipt to finish or fail. Smart compaction may skip or report not_reduced when the runtime decides compaction is unnecessary. Destructive session commands require --yes. Switch hands the same session off to another provider or model. Merge-back returns a fork to its lineage parent. Fork points, switch, merge-back and lineage need an environment that advertises context transfers.'
+    case 'workers':
+      return 'Usage: forge workers continue <workerId> [--session <agentId>] [--label <label>]\n\nContinues a finished worker as a normal conversation and reports the new session. The owning session is resolved from the worker unless --session is given.'
     case 'agents':
       return 'Usage: forge agents list [--profile <profileId>] | forge agents show <agentId>'
     case 'project-agents':

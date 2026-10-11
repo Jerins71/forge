@@ -1,7 +1,7 @@
 import { ENVIRONMENT_PROTOCOL_VERSION } from '../../protocol/src/environment-v2.js';
 import { randomUUID, webcrypto } from 'node:crypto'
 import type { ChoiceAnswer, CliAgentShowResponse, CliAgentsListResponse, CliChoiceRouteResult, CliChoiceShowResponse, CliChoicesListResponse, CliHttpErrorResponse, CliMessageDispatchResult, CliProfileShowResponse, CliProfilesListResponse, CliProjectAgentShowResponse, CliProjectAgentsListResponse, CliRunResult, CliSessionCompactionResult, CliSessionCreatedResult, CliSessionShowResponse, CliSessionsListResponse, CliSessionTranscriptResponse, CliStatusResponse } from '@forge/protocol'
-import type { CommandReceipt, RpcInput } from '@forge/protocol/environment-v2'
+import type { CommandReceipt, ContextSourceSelector, RpcInput, SessionLineageSnapshot } from '@forge/protocol/environment-v2'
 import { createEnvironmentRegistry, createMemoryCredentialStore, createMemoryPersistence, EnvironmentRuntimeError, type EnvironmentClient } from '../../client-runtime/src/index.js'
 import { WebSocket } from 'ws'
 import { CliError } from './output.js'
@@ -56,6 +56,15 @@ export interface ClientSessionTranscriptOptions {
   offset?: number
 }
 
+export interface ClientModelSelection { provider: string; modelId: string; thinkingLevel?: string }
+
+export interface ClientForkOptions {
+  label?: string
+  fromMessageId?: string
+  sourcePoint?: ContextSourceSelector
+  model?: ClientModelSelection
+}
+
 export interface ForgeClientLike {
   getStatus(): Promise<CliStatusResponse>
   listProfiles(): Promise<CliProfilesListResponse>
@@ -81,7 +90,13 @@ export interface ForgeClientLike {
   deleteSession(agentId: string): Promise<unknown>
   renameSession(agentId: string, label: string): Promise<unknown>
   pinSession(agentId: string, pinned: boolean): Promise<unknown>
-  forkSession(sourceAgentId: string, options?: { label?: string; fromMessageId?: string }): Promise<unknown>
+  forkSession(sourceAgentId: string, options?: ClientForkOptions): Promise<unknown>
+  /** Hands the same session off to another provider or model; never a new conversation. */
+  switchSessionModel(agentId: string, model: ClientModelSelection): Promise<unknown>
+  /** The target is the session's lineage parent. */
+  mergeBackSession(agentId: string, options?: { sourcePoint?: ContextSourceSelector }): Promise<{ agentId: string; targetAgentId: string }>
+  getSessionLineage(agentId: string): Promise<SessionLineageSnapshot>
+  continueWorker(workerId: string, options?: { sessionAgentId?: string; label?: string }): Promise<{ workerId: string; sourceSessionAgentId: string; sessionAgentId: string }>
   compactSession(agentId: string, options?: ClientCompactionOptions): Promise<CliSessionCompactionResult>
   smartCompactSession(agentId: string, options?: ClientCompactionOptions): Promise<CliSessionCompactionResult>
   answerChoice(choiceId: string, answers: ChoiceAnswer[], sessionAgentId?: string): Promise<CliChoiceRouteResult>
@@ -257,12 +272,38 @@ export class ForgeClient implements ForgeClientLike {
       return { agentId, ...(patch.title !== undefined ? { label: patch.title } : { pinned: patch.pinned, pinnedAt: session.pinnedAt ?? null }) }
     })
   }
-  async forkSession(sourceAgentId: string, options: { label?: string; fromMessageId?: string } = {}): Promise<unknown> {
+  async forkSession(sourceAgentId: string, options: ClientForkOptions = {}): Promise<unknown> {
     return this.withEnvironment(async client => {
-      const receipt = await this.control(client, 'session.fork', { commandId: randomUUID(), sessionId: sourceAgentId, ...(options.label ? { title: options.label } : {}), ...(options.fromMessageId ? { fromItemId: options.fromMessageId } : {}) })
+      const receipt = await this.control(client, 'session.fork', { commandId: randomUUID(), sessionId: sourceAgentId, ...(options.label ? { title: options.label } : {}), ...(options.fromMessageId ? { fromItemId: options.fromMessageId } : {}), ...(options.sourcePoint ? { sourcePoint: options.sourcePoint } : {}), ...(options.model ? { model: options.model } : {}) })
       const sessionId = receipt.result?.sessionId ?? receipt.sessionId!
       const created = await this.showSession(sessionId)
       return { sourceAgentId, session: created.session, profile: (await this.showProfile(created.session.profileId!)).profile, ...(options.fromMessageId ? { fromMessageId: options.fromMessageId } : {}) }
+    })
+  }
+  async switchSessionModel(agentId: string, model: ClientModelSelection): Promise<unknown> {
+    return this.withEnvironment(async client => {
+      await this.control(client, 'session.provider.switch', { commandId: randomUUID(), sessionId: agentId, model })
+      return { agentId, model }
+    })
+  }
+  async mergeBackSession(agentId: string, options: { sourcePoint?: ContextSourceSelector } = {}): Promise<{ agentId: string; targetAgentId: string }> {
+    return this.withEnvironment(async client => {
+      const targetAgentId = (await client.request('session.lineage.get', { sessionId: agentId })).lineage?.parentThreadId
+      if (!targetAgentId) throw new CliError(`Session ${agentId} has no lineage parent to merge back into.`, { exitCode: EXIT_CODES.usage, code: 'no_lineage_parent' })
+      await this.control(client, 'session.mergeBack', { commandId: randomUUID(), sessionId: agentId, ...(options.sourcePoint ? { sourcePoint: options.sourcePoint } : {}) })
+      return { agentId, targetAgentId }
+    })
+  }
+  getSessionLineage(agentId: string): Promise<SessionLineageSnapshot> {
+    return this.withEnvironment(client => client.request('session.lineage.get', { sessionId: agentId }))
+  }
+  async continueWorker(workerId: string, options: { sessionAgentId?: string; label?: string } = {}): Promise<{ workerId: string; sourceSessionAgentId: string; sessionAgentId: string }> {
+    return this.withEnvironment(async client => {
+      const sourceSessionAgentId = options.sessionAgentId ?? (await this.showAgent(workerId)).agent.managerId
+      const receipt = await this.control(client, 'worker.continue', { commandId: randomUUID(), sessionId: sourceSessionAgentId, workerId, ...(options.label ? { title: options.label } : {}) })
+      const sessionAgentId = receipt.result?.sessionId
+      if (!sessionAgentId) throw new CliError(`Command ${receipt.commandId} succeeded without a continued conversation identity.`, { exitCode: EXIT_CODES.connection, code: 'missing_session_identity', details: { commandId: receipt.commandId } })
+      return { workerId, sourceSessionAgentId, sessionAgentId }
     })
   }
   compactSession(agentId: string, options: ClientCompactionOptions = {}): Promise<CliSessionCompactionResult> { return this.compact(agentId, 'manual', options) }

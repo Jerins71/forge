@@ -13,3 +13,5 @@ export class EnvironmentRuntimeError extends Error {
 }
 export const unavailable = () =>
   new EnvironmentRuntimeError('UNAVAILABLE', 'Environment is offline', true)
+/** Shown wherever a fork point, provider switch, merge-back or worker continuation is refused for a missing `contextTransfers` capability. */
+export const CONTEXT_TRANSFERS_UNAVAILABLE = 'Update this environment to transfer context between conversations'

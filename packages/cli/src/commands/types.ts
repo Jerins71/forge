@@ -30,6 +30,9 @@ export interface ParsedArgs {
     limit?: string
     offset?: string
     fromMessageId?: string
+    source?: string
+    model?: string
+    reasoning?: string
     instructions?: string
     answers?: string
     pinned?: string

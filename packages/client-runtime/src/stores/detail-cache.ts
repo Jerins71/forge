@@ -135,6 +135,7 @@ export class DetailCache {
         const event = item.event,
           projection = state.projection
         switch (event.type) {
+          case 'lineage.upsert': state = { ...state, projection: { ...projection, lineage: event.snapshot } }; break
           case 'plan.upsert': state = { ...state, projection: { ...projection, plan: event.snapshot } }; break
           case 'goal.upsert': state = { ...state, projection: { ...projection, goal: event.snapshot } }; break
           case 'recovery.upsert': state = { ...state, projection: { ...projection, recovery: event.recovery } }; break
