@@ -24,16 +24,17 @@ async function fixture(auth = false) {
   const manager = new TestSwarmManager(config); await bootWithDefaultManager(manager, config);
   const Database = await loadConfiguredSqliteDatabaseConstructor(); const database = new Database(`${config.paths.dataDir}/control.sqlite`);
   migrateControlDatabase(database, { environmentId: randomUUID(), streamEpoch: randomUUID() });
-  const eventSink = createEventSink(database, Date.now, randomUUID);
-  const artifactService = { attachmentsForInput: async () => [] };
-  const adapter = createSwarmControlAdapter({ swarmManager: manager, database, eventSink, workspaceService: { ensure: async () => ({ cwd: config.defaultCwd, branch: null }) }, artifactService });
+  const {core,adapter}=await makeCore({config,manager,database} as Awaited<ReturnType<typeof fixture>>);
+  const eventSink=core.eventSink;
+  await core.reconcileOnBoot();
+  cleanup.push(()=>core.close());
   const commandId = randomUUID(); const sessionId = `v2-${commandId}`;
   await adapter.ensureSession({ commandId, sessionId, projectId: "manager", title: "Controlled", cwd: config.defaultCwd });
   cleanup.push(async () => { for (const agent of manager.listAgents().filter(agent => agent.role === "manager")) await manager.stopSession(agent.agentId); await manager.disposeHistoryRecall(); eventSink.close(); if (database.open) database.close(); await rm(config.paths.dataDir, { recursive: true, force: true }); });
   const inputId = `input-${randomUUID()}`;
   const input: Parameters<SwarmControlPort["applyInput"]>[0] = {
     commandId: randomUUID(), inputId, sessionId, runGeneration: 1, message: { text: "durable fixture input", artifactIds: [] },
-    onCanonicalAppend: vi.fn(async () => {}), beforeDispatch: vi.fn(async () => "dispatch" as const), onDispatchAccepted: vi.fn(async () => {}),
+    runId:`run-${inputId}`,
   };
   return { config, manager, database, eventSink, adapter, input, sessionId, commandId };
 }
@@ -47,9 +48,9 @@ async function makeCore(f: Awaited<ReturnType<typeof fixture>>, manager = f.mana
   const workspace = createWorkspaceService({ database, dataDir: f.config.paths.dataDir, swarmManager: manager });
   const artifacts = createArtifactService({ database, dataDir: f.config.paths.dataDir, swarmManager: manager });
   const core = await createControlCore({ database, clock: Date.now, random: randomUUID,
-    swarm: { resolveSession: id => adapter.resolveSession!(id), ensureSession: input => adapter.ensureSession(input), applyInput: input => adapter.applyInput(input), applyChoice: input => adapter.applyChoice(input), stopSession: input => adapter.stopSession(input) },
+    swarm: { resolveSession: id => adapter.resolveSession!(id), ensureSession: input => adapter.ensureSession(input), applyInput: input => adapter.applyInput(input), acquireProvider:(scope,conversation,model)=>adapter.acquireProvider(scope,conversation,model),enqueuePresentation:(threadId,runId,presentation)=>adapter.enqueuePresentation!(threadId,runId,presentation),extractWorkerResult:(threadId,runId,entryId)=>adapter.extractWorkerResult!(threadId,runId,entryId), applyChoice: input => adapter.applyChoice(input), stopSession: input => adapter.stopSession(input) },
     policy: createProjectPolicy(manager), workspace, artifacts, isDeviceRevoked: () => false, inputRoute: createControlledInputRoutePreflight({ swarmManager: manager }) });
-  const adapter = createSwarmControlAdapter({ swarmManager: manager, database, eventSink: core.eventSink, workspaceService: workspace, artifactService: artifacts });
+  const adapter = createSwarmControlAdapter({ swarmManager: manager, database, eventSink: core.eventSink, controlService:core.controlService,workspaceService: workspace, artifactService: artifacts });
   return { core, adapter, artifacts };
 }
 async function countInputs(file: string, inputId: string) {

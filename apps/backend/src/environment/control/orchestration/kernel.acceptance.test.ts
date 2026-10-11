@@ -64,6 +64,19 @@ describe("authoritative run decisions", () => {
     expect(f.observe("attempt-one", 5, "terminal", 99).events).toEqual([]);
     expect(f.state().runs["run-one"].state).toBe("running");
   });
+  it("quarantines unknown delivery in process until writer drain precedes explicit recovery", () => {
+    const f=fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one");
+    const decision=f.run({type:"attempt.unknown",commandId:"unknown",now,threadId:"manager",attemptId:"attempt-one"});
+    expect(f.state().threads.manager.shutdown).toBe("pending");
+    expect(decision.effects).toContainEqual({kind:"provider.release",threadId:"manager",bindingId:"binding"});
+    const recoveryId=f.state().recovery!.recoveryId;
+    const resume={type:"recovery.resume" as const,commandId:"resume",now,recoveryId,attempts:{"run-one":"retry"},bindingIds:{manager:"replacement"}};
+    expect(()=>f.run(resume)).toThrow("confirmed writer shutdown");
+    f.run({type:"binding.drained",commandId:"drain",now,threadId:"manager",bindingId:"binding",status:"clean"});
+    expect(f.state().runs["run-one"].state).toBe("recovery");
+    expect(f.state().threads.manager.generation).toBe(1);
+    f.run(resume); expect(f.state().attempts.retry.generation).toBe(1);
+  });
   it("quarantines a pending drain and permits no replacement writer until confirmed clean", () => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one");
     f.run({ type: "thread.stop", commandId: "stop", now, threadId: "manager" });

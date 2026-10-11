@@ -1,3 +1,6 @@
+import type { ProviderScope,ProviderConversationRef,ProviderObservation } from "@forge/protocol";
+import type { ProviderAdapter,ProviderBinding } from "../swarm/runtime/provider-contract.js";
+import { piProviderCapabilities } from "../swarm/runtime/pi/pi-provider-adapter.js";
 import { SessionManager } from '@earendil-works/pi-coding-agent'
 import type {
   RuntimeCreationOptions,
@@ -30,6 +33,32 @@ import type {
 
 export class FakeRuntime implements SwarmAgentRuntime {
   readonly runtimeType = 'pi' as const
+  private providerBinding?:ProviderBinding;
+  private providerFacts:ProviderObservation[]=[];
+  private wakeProvider?:()=>void;
+  readonly providerAdapter:ProviderAdapter={
+    capabilities:()=>piProviderCapabilities(),
+    open:async input=>this.bindProvider(input.scope),resume:async input=>this.bindProvider(input.scope,input.conversation),
+    start:async input=>{
+      await this.sendMessage(input.input,"followUp");
+      const turn={...input.binding.scope,kind:"turn" as const,conversationId:input.binding.conversation.nativeId,nativeId:input.attemptId};
+      if (!this.busy) { this.providerFacts.push({type:"terminal",scope:input.binding.scope,attemptId:input.attemptId,sequence:0,origin:{kind:"root",turn},terminalAuthority:"root_attempt",outcome:"completed"});this.wakeProvider?.(); }
+      return {status:"accepted",turn};
+    },
+    steer:async()=>{throw new Error("Core owns queued fake input");},interrupt:async()=>{},respond:async()=>{},compact:async input=>{await this.compact(input.instructions);},
+    observations:async function*(this:ProviderAdapter,binding:ProviderBinding,signal?:AbortSignal){
+      const runtime=(this as ProviderAdapter & {runtime:FakeRuntime}).runtime;
+      while(!signal?.aborted){
+        const fact=runtime.providerFacts.shift();if(fact){yield fact;continue;}
+        await new Promise<void>(resolve=>{ const done=()=>{signal?.removeEventListener("abort",done);runtime.wakeProvider=undefined;resolve();};runtime.wakeProvider=done;signal?.addEventListener("abort",done,{once:true}); });
+      }
+    },close:async()=>{},drain:async()=>({status:"clean"}),
+  };
+  bindProvider(scope:ProviderScope,conversation?:ProviderConversationRef):ProviderBinding {
+    this.providerBinding={scope,conversation:{...scope,kind:"conversation",nativeId:conversation?.nativeId ?? `fake:${scope.threadId}`},capabilities:this.providerAdapter.capabilities(),instructionRevision:"fixture",toolContractRevision:"fixture"};
+    return this.providerBinding;
+  }
+
   readonly descriptor: AgentDescriptor
   private readonly sessionManager: SessionManager
   private readonly systemPrompt: string
@@ -56,6 +85,7 @@ export class FakeRuntime implements SwarmAgentRuntime {
 
   constructor(descriptor: AgentDescriptor, systemPrompt = '') {
     this.descriptor = descriptor
+    Object.assign(this.providerAdapter,{runtime:this});
     this.systemPrompt = systemPrompt
     this.sessionManager = SessionManager.open(descriptor.sessionFile)
   }
@@ -193,6 +223,11 @@ export class TestSwarmManager extends SwarmManager {
   onCreateRuntime:
     | ((options: { descriptor: AgentDescriptor; runtime: FakeRuntime; creationCount: number; runtimeToken?: number }) => Promise<void> | void)
     | undefined
+
+  override async acquireControlledProvider(scope:ProviderScope,conversation?:ProviderConversationRef,model?:Pick<AgentDescriptor["model"],"provider"|"modelId">) {
+    const runtime=await this.getFacadeServices().userMessages.acquireRuntime(scope.threadId,model) as FakeRuntime;
+    return {adapter:runtime.providerAdapter,binding:runtime.bindProvider(scope,conversation)};
+  }
 
   private get runtimeLifecycleForTest(): SwarmRuntimeLifecycleCoordinator {
     return (this as unknown as {

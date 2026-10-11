@@ -69,6 +69,10 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
         continue;
       }
       requireRecovery(attempt.attemptId);
+      if (!processLost && owner.shutdown === "clean" && owner.bindingId) {
+        emit({type:"thread.changed",thread:{...owner,shutdown:"pending"}});
+        decision.effects.push({kind:"provider.release",threadId:owner.threadId,bindingId:owner.bindingId});
+      }
       (owner.role === "manager" ? managers : workers).add(owner.threadId);
     }
     if (processLost) for (const owner of Object.values(state.threads)) {
@@ -183,7 +187,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     }
     case "binding.drained": {
       const owner = thread(command.threadId); if (owner.bindingId !== command.bindingId) break;
-      emit({ type: "thread.changed", thread: { ...owner, shutdown: command.status === "clean" ? "clean" : "quarantined", ...(command.status === "clean" ? { bindingId: undefined, activeRunId: undefined } : {}) } });
+      emit({ type: "thread.changed", thread: { ...owner, shutdown: command.status === "clean" ? "clean" : "quarantined", ...(command.status === "clean" ? { bindingId: undefined, activeRunId: undefined,generation:owner.desired === "running" ? owner.generation+1 : owner.generation } : {}) } });
       if (command.status === "clean" && owner.activeRunId && owner.desired === "stopped") finish(state.runs[owner.activeRunId], "cancelled"); break;
     }
     case "thread.resume": {
