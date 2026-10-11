@@ -78,6 +78,9 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     return this.session!.waitForAcceptance(input.attemptId);
   }
   async steer(input: ProviderSteerInput) {
+    this.assertBinding(input.binding);
+    // Nothing has been written for a turn that already ended, so the core may deliver this input as a follow-up.
+    if (!this.session!.turnActive(input.turn)) throw new ProviderDispatchRejectedError("stale_scope");
     this.assertTurn(input.binding, input.turn); this.assertUpdates(input);
     this.session!.enableObservations();
     const id = await this.assertBinding(input.binding).dispatchProviderTurn(input.input, input.attemptId, input.turn);

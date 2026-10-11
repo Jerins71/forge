@@ -1,6 +1,6 @@
 import type { CanUseTool, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ChoiceAnswer, ChoiceQuestion, ProviderObservation, ProviderRequestRef, ProviderTurnRef } from "@forge/protocol";
-import { ProviderRequestRejectedError, type ProviderBinding, type ProviderDispatchResult, type ProviderRespondInput } from "../provider-contract.js";
+import { ProviderDispatchRejectedError, ProviderRequestRejectedError, type ProviderBinding, type ProviderDispatchResult, type ProviderRespondInput } from "../provider-contract.js";
 
 type Fact = ProviderObservation extends infer O ? O extends ProviderObservation ? Omit<O, "scope" | "attemptId" | "sequence"> : never : never;
 type Origin = ProviderObservation["origin"];
@@ -15,7 +15,7 @@ export class ClaudeProviderSession {
   private wake?: () => void;
   private ended = false;
   private reading = false;
-  private readonly inputs = new Map<string, { attemptId: string; accepted: boolean; managed: boolean; unknown?: boolean; dispatch?: { promise: Promise<ProviderDispatchResult>; resolve(result: ProviderDispatchResult): void; timer: ReturnType<typeof setTimeout> } }>();
+  private readonly inputs = new Map<string, { attemptId: string; accepted: boolean; managed: boolean; unknown?: boolean; dispatch?: { promise: Promise<ProviderDispatchResult>; resolve(result: ProviderDispatchResult): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> } }>();
   private current?: { attemptId: string; turn: ProviderTurnRef; accepted: boolean; managed: boolean };
   private readonly tools = new Map<string, { name: string; origin: Origin; turn: ProviderTurnRef }>();
   private readonly tasks = new Map<string, { parent: ProviderTurnRef; agent: boolean; toolId?: string }>();
@@ -49,15 +49,24 @@ export class ClaudeProviderSession {
     if (entry.accepted) return Promise.resolve({ status: "accepted", turn: this.current?.turn ?? turn });
     if (entry.unknown || this.ended || this.terminalSeen || this.interrupted) return Promise.resolve({ status: "unknown" });
     if (!entry.dispatch) {
-      let resolve!: (result: ProviderDispatchResult) => void;
-      const promise = new Promise<ProviderDispatchResult>(done => { resolve = done; });
+      let resolve!: (result: ProviderDispatchResult) => void; let reject!: (error: Error) => void;
+      const promise = new Promise<ProviderDispatchResult>((done, fail) => { resolve = done; reject = fail; });
       const timer = setTimeout(() => {
         const pending = entry.dispatch; entry.dispatch = undefined; entry.unknown = true;
         pending?.resolve({ status: "unknown" });
       }, 30_000);
-      entry.dispatch = { promise, resolve, timer };
+      entry.dispatch = { promise, resolve, reject, timer };
     }
     return entry.dispatch.promise;
+  }
+  /** The reply ended while the native still holds these inputs. It runs them next, so the runtime bounds that wait instead. */
+  holdDispatches(ids: readonly string[]): void { for (const id of ids) clearTimeout(this.inputs.get(id)?.dispatch?.timer); }
+  /** The native never consumed these inputs and is being stopped, which proves they will not run. */
+  rejectDispatches(ids: readonly string[]): void {
+    for (const id of ids) {
+      const pending = this.inputs.get(id)?.dispatch; this.inputs.delete(id);
+      pending?.reject(new ProviderDispatchRejectedError("stale_scope"));
+    }
   }
   private settleDispatches(): void {
     for (const entry of this.inputs.values()) {
@@ -66,9 +75,12 @@ export class ClaudeProviderSession {
       if (pending) { clearTimeout(pending.timer); pending.resolve({ status: "unknown" }); }
     }
   }
+  turnActive(turn: ProviderTurnRef, attemptId?: string): boolean {
+    return !!this.current && !this.terminalSeen && turn.nativeId === this.current.turn.nativeId
+      && (attemptId === undefined || attemptId === this.current.attemptId);
+  }
   assertTurn(turn: ProviderTurnRef, attemptId?: string): void {
-    if (!this.current || this.terminalSeen || turn.nativeId !== this.current.turn.nativeId
-      || (attemptId !== undefined && attemptId !== this.current.attemptId)) throw new Error("Claude turn or attempt is no longer active.");
+    if (!this.turnActive(turn, attemptId)) throw new Error("Claude turn or attempt is no longer active.");
   }
   toolRef(id: string) {
     if (!this.current) throw new Error("Claude tool invocation has no active native input.");
