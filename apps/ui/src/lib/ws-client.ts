@@ -727,6 +727,10 @@ export class ManagerWsClient {
     return { sourceAgentId, newSessionAgent: projectSession(summary, shell) }
   }
 
+  /** The run a mounted detail item belongs to, when the environment reports it. */
+  itemRunId(itemId: string): string | undefined {
+    return this.environmentProjection?.items.find(item => item.itemId === itemId)?.runId
+  }
   private requireContextTransfers(): void {
     const availability = contextTransferAvailability(this.environmentClient)
     if (!availability.available) throw new Error(availability.reason)
@@ -905,7 +909,7 @@ export class ManagerWsClient {
     this.detailLease = this.environmentClient.acquireDetail(sessionId)
     const store = this.detailLease.store
     // Lineage belongs to one session; never present the previous session's while this one loads.
-    this.updateState({ sessionLineage: null })
+    this.updateState({ sessionLineage: null, sessionTransferCapabilities: null })
     let projection: DetailState['projection'] = null
     let transient: DetailState['transient'] = new Map()
     const apply = () => {
@@ -916,7 +920,12 @@ export class ManagerWsClient {
         if (projection?.plan) this.handleServerEvent({ type: 'session_plan_snapshot', sessionAgentId: sessionId, profileId: projection.session.projectId, ...projection.plan })
         if (projection?.goal) this.handleServerEvent({ type: 'session_goal_snapshot', sessionAgentId: sessionId, profileId: projection.session.projectId, ...projection.goal })
         if (projection?.recovery !== undefined) this.updateState({ restartRecovery: projection.recovery })
-        this.updateState({ sessionLineage: projection?.lineage ?? null })
+        const capabilities = projection?.session.transferCapabilities ?? null, previous = this.state.sessionTransferCapabilities
+        this.updateState({
+          sessionLineage: projection?.lineage ?? null,
+          // The same declaration keeps its identity so consumers do not re-render on every detail tick.
+          sessionTransferCapabilities: capabilities && previous && JSON.stringify(capabilities) === JSON.stringify(previous) ? previous : capabilities,
+        })
         const projectedMessages = projectDetailMessages(detail)
         const echoes = this.outbox?.pendingMessages(sessionId, projectedCommandIds(projection)) ?? []
         this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))

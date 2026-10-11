@@ -62,6 +62,7 @@ export interface MessageListProps {
   onSuggestionClick?: (suggestion: string) => void
   onArtifactClick?: (artifact: ArtifactReference) => void
   onForkFromMessage?: (messageId: string) => void
+  forkDisabledReason?: string
   onPinMessage?: (messageId: string, pinned: boolean) => void
   onStopExternalThread?: (sidecarAgentId: string) => void
   onReplyToMessage?: (target: ConversationReplyTargetInput) => void
@@ -438,6 +439,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
   onSuggestionClick,
   onArtifactClick,
   onForkFromMessage,
+  forkDisabledReason,
   onPinMessage,
   onStopExternalThread,
   onReplyToMessage,
@@ -1244,6 +1246,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
             feedbackLegacyTargetId={feedbackLegacyTargetId}
             onArtifactClick={onArtifactClick}
             onForkFromMessage={entry.message.role !== 'system' ? onForkFromMessage : undefined}
+            forkDisabledReason={forkDisabledReason}
             onPinMessage={entry.message.role !== 'system' ? onPinMessage : undefined}
             onStopExternalThread={onStopExternalThread}
             onReplyToMessage={

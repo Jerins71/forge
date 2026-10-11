@@ -18,7 +18,7 @@ import {
   Terminal,
   Trash2,
 } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { isSessionRunning } from '@/lib/agent-hierarchy'
 import type { SessionRow } from '@/lib/agent-hierarchy'
@@ -31,6 +31,8 @@ export interface SessionContextMenuActions {
   archiveDisabledReason?: string
   onRename?: () => void
   onFork?: () => void
+  /** Why this session cannot be forked, read when the menu opens; Fork stays visible, disabled, with this tooltip. */
+  getForkDisabledReason?: () => string | undefined
   onMarkUnread?: () => void
   onPinSession?: (agentId: string, pinned: boolean) => void
   onPromoteToProjectAgent?: () => void
@@ -57,6 +59,8 @@ export function SessionContextMenu({
 }) {
   const { sessionAgent, isDefault } = session
   const running = isSessionRunning(sessionAgent)
+  // A provider's declaration can change without the row re-rendering, so it is read on open.
+  const [forkDisabledReason, setForkDisabledReason] = useState<string | undefined>(undefined)
   const isProjectAgent = Boolean(sessionAgent.projectAgent)
   const isRepoSourcedAgent = sessionAgent.projectAgent?.sourceKind === 'repo' || sessionAgent.projectAgent?.source?.type === 'repo'
   const isPinned = Boolean(sessionAgent.pinnedAt)
@@ -69,6 +73,7 @@ export function SessionContextMenu({
     archiveDisabledReason,
     onRename,
     onFork,
+    getForkDisabledReason,
     onMarkUnread,
     onPinSession,
     onPromoteToProjectAgent,
@@ -101,7 +106,7 @@ export function SessionContextMenu({
   )
 
   return (
-    <ContextMenu>
+    <ContextMenu onOpenChange={(open) => { if (open) setForkDisabledReason(getForkDisabledReason?.()) }}>
       <ContextMenuTrigger asChild>
         {children}
       </ContextMenuTrigger>
@@ -150,7 +155,7 @@ export function SessionContextMenu({
           </ContextMenuItem>
         ) : null}
         {onFork && sessionAgent.sessionPurpose !== 'agent_creator' ? (
-          <ContextMenuItem onClick={() => onFork()}>
+          <ContextMenuItem onSelect={() => onFork()} disabled={Boolean(forkDisabledReason)} title={forkDisabledReason}>
             <GitFork className="mr-2 size-3.5" />
             Fork
           </ContextMenuItem>

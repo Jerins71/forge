@@ -72,6 +72,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
   onRequestRenameProfile,
   onForkSession,
   workerContinuation,
+  forkDisabledReasonFor,
   onMarkUnread,
   onMarkAllRead,
   onChangeModel,
@@ -108,12 +109,12 @@ export const ProfileGroup = React.memo(function ProfileGroup({
     onStopSession, onResumeSession, onDeleteSession, onArchiveSession, onRequestRenameSession, onForkSession,
     onMarkUnread, onPinSession, onPromoteToProjectAgent, onOpenProjectAgentSharing, onOpenProjectAgentSettings,
     onDemoteProjectAgent, onChangeSessionModel, onUseProjectDefault, mutedAgents, onToggleMute, hideCliSessions,
-    onToggleHideCliSessions, workerContinuation,
+    onToggleHideCliSessions, workerContinuation, forkDisabledReasonFor,
   }), [
     onStopSession, onResumeSession, onDeleteSession, onArchiveSession, onRequestRenameSession, onForkSession,
     onMarkUnread, onPinSession, onPromoteToProjectAgent, onOpenProjectAgentSharing, onOpenProjectAgentSettings,
     onDemoteProjectAgent, onChangeSessionModel, onUseProjectDefault, mutedAgents, onToggleMute, hideCliSessions,
-    onToggleHideCliSessions, workerContinuation,
+    onToggleHideCliSessions, workerContinuation, forkDisabledReasonFor,
   ])
   const hasAnySessions = sessions.length > 0 || inactiveRepoProjectAgents.length > 0 || remoteSessions.length > 0
   const defaultSession = sessions.find((s) => s.isDefault)
@@ -574,6 +575,7 @@ const ProfileSessionRow = React.memo(function ProfileSessionRow({
       archiveDisabledReason={menuActions.archiveDisabledReason}
       onRename={menuActions.onRename}
       onFork={menuActions.onFork}
+      getForkDisabledReason={menuActions.getForkDisabledReason}
       onMarkUnread={menuActions.onMarkUnread}
       onStopWorker={actionSource.onStopSession}
       onResumeWorker={actionSource.onResumeSession}

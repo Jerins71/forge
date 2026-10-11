@@ -16,12 +16,15 @@ import type { UiFleet } from './fixtures/ui-fleet.js'
 const evidenceRoot = join(repositoryRoot, '.internal/core/evidence')
 const UNAVAILABLE = 'Update this environment to transfer context between conversations'
 const WORKER = { agentId: 'lineage-fixture-worker', title: 'Lineage researcher', status: 'terminated' as const }
+const RUN_ITEM = { itemId: 'lineage-fixture-item', userTurnId: 'lineage-fixture-turn', kind: 'assistant' as const, text: 'Fixture reply that closes a run.', contentRef: null, artifacts: [], commandId: null, runId: 'run-fixture-7' }
 const TRANSFER_METHODS = new Set(['session.provider.switch', 'session.mergeBack', 'worker.continue'])
 
 /** The backend half of the contract, held in the test process. */
 const contract = {
   contextTransfers: true,
   lineage: new Map<string, SessionLineageSnapshot>(),
+  /** What each session's provider declares it can transfer; absent means it reports nothing. */
+  capabilities: new Map<string, { fork: boolean; nativeFork: boolean; throughTurnFork: boolean; providerSwitch: boolean }>(),
   calls: [] as Array<{ method: string; input: Record<string, any> }>,
   /** A typed refusal for the next command of this method. */
   refuse: new Map<string, CommandReceipt['error']>(),
@@ -78,6 +81,12 @@ function withProviderSwitch(snapshot: SessionLineageSnapshot, targetProvider: st
     }],
   }
 }
+/** Drops the browser's cached shell so the next load bootstraps every session summary afresh. */
+async function resetShellCache(page: Page) {
+  await page.goto('about:blank')
+  const response = await page.request.post(`${fleet.uiUrl}/__forge_e2e_platform`, { headers: { origin: fleet.uiUrl }, data: { operation: 'clear', input: { environmentId: fleet.a.environmentId } } })
+  expect((await response.json()).ok).toBe(true)
+}
 /** Publishes the session's lineage on its live detail stream, as `lineage.upsert`. */
 function publishLineage(sessionId: string) {
   const snapshot = contract.lineage.get(sessionId)
@@ -132,8 +141,10 @@ async function installContract(page: Page, baseUrl: string) {
       server.send(message)
     })
     // The sidebar lists a session's workers only when its summary counts them.
-    const countWorker = (session: { sessionId?: string; workerCount?: number } | undefined) => {
+    const countWorker = (session: { sessionId?: string; workerCount?: number; transferCapabilities?: unknown } | undefined) => {
       if (session?.sessionId === fleet.a.sessionId) session.workerCount = Math.max(session.workerCount ?? 0, 1)
+      const capabilities = session?.sessionId ? contract.capabilities.get(session.sessionId) : undefined
+      if (session && capabilities) session.transferCapabilities = capabilities
     }
     server.onMessage(message => {
       const frame = JSON.parse(String(message))
@@ -152,7 +163,11 @@ async function installContract(page: Page, baseUrl: string) {
         if (frame.item.kind === 'snapshot') {
           const lineage = contract.lineage.get(stream.sessionId)
           if (lineage) frame.item.snapshot.lineage = lineage
-          if (stream.sessionId === fleet.a.sessionId) frame.item.snapshot.workers = [...frame.item.snapshot.workers, WORKER]
+          if (stream.sessionId === fleet.a.sessionId) {
+            frame.item.snapshot.workers = [...frame.item.snapshot.workers, WORKER]
+            // One settled item that reports its run, so a run fork point can be offered.
+            frame.item.snapshot.items = [...frame.item.snapshot.items, { ...RUN_ITEM, actorId: stream.sessionId, timestamp: frame.item.snapshot.session.updatedAt }]
+          }
         }
       }
       if (frame.type === 'result' && Array.isArray(frame.output?.workers) && contract.streams.size) {
@@ -367,6 +382,63 @@ test('a finished worker continues as a normal conversation from its sidebar row'
   await expect(page.getByRole('combobox', { name: /^(Message |Send another message to )/ })).toBeEnabled()
   await shot(page, '13-continued-worker-conversation')
   assertions.continueWorker = { input: calls('worker.continue')[0], openedSessionId: forkSessionId }
+})
+
+test('a run fork point is offered, and a provider that declares it cannot fork or hand off is refused before the click', async ({ page }) => {
+  const { a } = fleet
+  await openSession(page, a.sessionId)
+  await expect(transcript(page)).toContainText(RUN_ITEM.text)
+  const sent = calls('session.fork').length
+  await page.getByRole('button', { name: 'Fork from this message' }).last().click({ force: true })
+  const dialog = page.getByRole('dialog', { name: 'Fork Session' })
+  await dialog.getByRole('radio', { name: /End of this run/ }).click()
+  await shot(page, '17-fork-dialog-run-point')
+  await dialog.getByPlaceholder('Session name (optional)').fill('Run fork')
+  await dialog.getByRole('button', { name: 'Fork', exact: true }).click()
+  await expect.poll(() => calls('session.fork').length).toBe(sent + 1)
+  expect(calls('session.fork').at(-1)).toMatchObject({ sessionId: a.sessionId, title: 'Run fork', sourcePoint: { kind: 'run', runId: RUN_ITEM.runId } })
+  expect(calls('session.fork').at(-1)).not.toHaveProperty('fromItemId')
+
+  // The parent's provider now declares it can neither fork nor hand off.
+  contract.capabilities.set(a.sessionId, { fork: false, nativeFork: false, throughTurnFork: false, providerSwitch: false })
+  contract.capabilities.set(forkSessionId, { fork: false, nativeFork: false, throughTurnFork: false, providerSwitch: true })
+  const before = contract.calls.length
+  await resetShellCache(page)
+  await openSession(page, a.sessionId)
+  const fork = page.getByRole('button', { name: 'Fork from this message' }).last()
+  await expect(fork).toBeDisabled()
+  await expect(fork).toHaveAttribute('title', "This session's provider cannot fork")
+  await page.getByRole('button', { name: /Change session model/ }).click()
+  await page.getByLabel('Search models').fill('Opus')
+  const other = page.getByRole('option').filter({ hasText: 'Opus' }).first()
+  await expect(other).toHaveAttribute('aria-disabled', 'true')
+  await expect(other).toContainText("This session's provider cannot hand off to another provider")
+  await shot(page, '18-provider-switch-declared-unsupported')
+  await other.click({ force: true })
+  await expect(page.getByRole('dialog', { name: /^Hand off to / })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  // The sidebar reads the same declaration from each session's summary.
+  await page.getByRole('complementary').getByText('Lineage fork', { exact: true }).last().click({ button: 'right' })
+  const item = page.getByRole('menuitem', { name: 'Fork', exact: true })
+  await expect(item).toBeDisabled()
+  await expect(item).toHaveAttribute('title', "This session's provider cannot fork")
+  await shot(page, '19-fork-declared-unsupported')
+  await page.keyboard.press('Escape')
+
+  // A fork whose provider cannot fork cannot hand its work back either.
+  const lineage = contract.lineage.get(forkSessionId)!
+  contract.lineage.set(forkSessionId, { ...lineage, transfers: lineage.transfers.filter(transfer => transfer.kind !== 'merge_back') })
+  await openSession(page, forkSessionId)
+  await page.getByRole('button', { name: 'More actions' }).click()
+  const merge = page.getByRole('menuitem', { name: /^Merge back into / })
+  await expect(merge).toBeDisabled()
+  await expect(merge).toContainText("This session's provider cannot fork")
+  await shot(page, '20-merge-back-declared-unsupported')
+  await page.keyboard.press('Escape')
+  expect(contract.calls.slice(before)).toEqual([])
+  contract.capabilities.clear()
+  await resetShellCache(page)
+  assertions.capabilities = { runForkInput: calls('session.fork').at(-1), forkDisabled: true, providerSwitchDisabled: true, sidebarForkDisabled: true, mergeBackDisabled: true, commandsSent: 0 }
 })
 
 test('without contextTransfers every action is disabled with its reason and nothing falls back', async ({ page }) => {

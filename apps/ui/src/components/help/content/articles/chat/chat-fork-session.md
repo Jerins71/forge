@@ -20,7 +20,7 @@ Either way, the fork copies the source session's stored model. Later project-def
 
 On an environment that supports context transfers, the fork dialog opened from a message adds two choices:
 
-- **Fork from** selects where the fork's context ends: **This message**, or the **Latest stable point** of the session.
+- **Fork from** selects where the fork's context ends: **This message**, the **End of this run** when the message belongs to a known run, or the **Latest stable point** of the session.
 - **Model** starts the fork on a different provider or model. Leave it as **Same as this session** to keep the source model.
 
 On an environment that has not been updated, both choices are disabled with the reason, and the fork copies history up to the selected message as before.
@@ -41,7 +41,7 @@ Right-click a worker that is no longer running and choose **Continue as conversa
 
 A session that was forked, continued from a worker, or handed to another provider shows a lineage marker next to its title, such as "Forked from Builder at message …" or "Switched from codex-native". Select it to see each context handoff: how many entries were included, omitted or truncated, how much of the context budget was used, and how the handoff was rendered.
 
-Merge back, worker continuation and provider handoff are disabled with the reason when the environment or the provider cannot perform them. Forge never substitutes a different action.
+Fork, merge back, worker continuation and provider handoff are disabled with the reason when the environment or the session's provider cannot perform them. A provider that cannot hand off lists models on other providers as unavailable. Forge never substitutes a different action.
 
 ## What gets copied
 

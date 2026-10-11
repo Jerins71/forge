@@ -96,8 +96,13 @@ export function SessionModelPicker({ config }: { config: SessionModelPickerConfi
     const withCurrent = available.some((row) => row.key === currentKey)
       ? available
       : [buildCatalogCurrentModelFallbackRow(catalog, config.currentModel.provider, config.currentModel.modelId, config.currentModel.thinkingLevel), ...available]
-    return withCurrent.map(toModelPickerRow).sort(compareModelPickerRows)
-  }, [catalog, config.currentModel.modelId, config.currentModel.provider, config.currentModel.thinkingLevel, currentKey])
+    return withCurrent.map(toModelPickerRow).sort(compareModelPickerRows).map((row) => (
+      // The provider declared it cannot hand off, so another provider's model is refused before the click.
+      config.switchDisabledReason && !row.unavailableReason && decodeManagerModelValue(row.key)?.provider !== config.currentModel.provider
+        ? { ...row, unavailableReason: config.switchDisabledReason }
+        : row
+    ))
+  }, [catalog, config.currentModel.modelId, config.currentModel.provider, config.currentModel.thinkingLevel, config.switchDisabledReason, currentKey])
 
   const currentRow = rows.find((row) => row.key === currentKey)
   const currentName = currentRow?.name ?? modelLabel.replace(/\s*\((?:Claude|Codex) native\)$/, '')

@@ -39,7 +39,7 @@ export function ForkSessionDialog({
   /** Where the fork's context ends; the first option is the default. */
   sourcePoints?: ForkSourcePointOption[]
   /** The source session's model picker, used to start the fork on another provider or model. */
-  modelPicker?: Omit<SessionModelPickerConfig, 'onUpdate' | 'onSwitchProvider'>
+  modelPicker?: Omit<SessionModelPickerConfig, 'onUpdate' | 'onSwitchProvider' | 'switchDisabledReason'>
   /** Set when the environment cannot transfer context; the fork then copies the session the existing way. */
   transferUnavailableReason?: string
 }) {
@@ -138,6 +138,7 @@ export function ForkSessionDialog({
                     disabled: modelPicker.disabled || transferDisabled,
                     // Choosing the fork's model never hands the source session off.
                     onSwitchProvider: undefined,
+                    switchDisabledReason: undefined,
                     onUpdate: (_sessionAgentId, _mode, selection, reasoningLevel) => {
                       const source = modelPicker.currentModel
                       const { provider, modelId } = selection ?? model ?? source

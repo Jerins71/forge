@@ -13,7 +13,9 @@ import type { SessionLineageSnapshot } from '@forge/protocol/environment-v2'
 import { makeManagerSelectionCatalog } from '@/lib/manager-selection-catalog.fixture'
 import { ChatHeader } from '../ChatHeader'
 import { ForkSessionDialog } from '../ForkSessionDialog'
+import { SessionContextMenu } from '../agent-sidebar/SessionContextMenu'
 import { WorkerRow } from '../agent-sidebar/WorkerRow'
+import { ForkButton } from '../message-list/ForkButton'
 import { SessionModelPicker } from '../message-input/SessionModelPicker'
 import type { SessionModelPickerConfig } from '../message-input/types'
 import { LineageIndicator } from './LineageIndicator'
@@ -280,6 +282,64 @@ describe('SessionModelPicker provider handoff', () => {
     choose('Claude Opus 5')
     expect(queryByText(body(), /Hand off to/)).toBeNull()
     expect(config.onUpdate).toHaveBeenCalledWith('session-1', 'override', { provider: 'anthropic', modelId: 'claude-opus-5' }, expect.any(String))
+  })
+})
+
+describe('provider capability refusals shown before the click', () => {
+  const REASON = 'This session\'s provider cannot hand off to another provider'
+  it('lists models on other providers as unavailable with the reason and keeps same-provider models selectable', () => {
+    const config: SessionModelPickerConfig = {
+      originId: 'env', httpClientRef: createRef(), sessionAgentId: 'session-1', sessionLabel: 'Builder',
+      currentModel: { provider: 'openai-codex', modelId: 'gpt-5.5', thinkingLevel: 'xhigh' },
+      onUpdate: vi.fn(), onSwitchProvider: vi.fn(), switchDisabledReason: REASON,
+    }
+    render(createElement(SessionModelPicker, { config }))
+    click(getByRole(body(), 'button', { name: /Change session model/ }))
+    act(() => { fireEvent.change(getByLabelText(body(), 'Search models'), { target: { value: 'Claude Opus 5' } }) })
+    const other = getByRole(body(), 'option', { name: /Claude Opus 5/ })
+    expect(other.getAttribute('aria-disabled')).toBe('true')
+    expect(other.textContent).toContain(REASON)
+    click(other)
+    expect(queryByText(body(), /Hand off to/)).toBeNull()
+    expect(config.onSwitchProvider).not.toHaveBeenCalled()
+    expect(config.onUpdate).not.toHaveBeenCalled()
+
+    act(() => { fireEvent.change(getByLabelText(body(), 'Search models'), { target: { value: 'GPT-6 Astra' } }) })
+    const same = getByRole(body(), 'option', { name: /GPT-6 Astra/ })
+    expect(same.getAttribute('aria-disabled')).toBe('false')
+    click(same)
+    expect(config.onUpdate).toHaveBeenCalledTimes(1)
+  })
+  it('offers the end of the run as a fork point only when the message has a run', () => {
+    const onConfirm = vi.fn()
+    const sourcePoints = [
+      { id: 'message', label: 'This message', description: 'Later messages are left out.', selector: { kind: 'message' as const, entryId: 'item-1' } },
+      { id: 'run', label: 'End of this run', description: 'Everything through the run this message belongs to.', selector: { kind: 'run' as const, runId: 'run-7' } },
+    ]
+    render(createElement(ForkSessionDialog, { onConfirm, onClose: () => {}, sourcePoints }))
+    click(getByRole(body(), 'radio', { name: /End of this run/ }))
+    click(getByRole(body(), 'button', { name: 'Fork' }))
+    expect(onConfirm).toHaveBeenCalledWith(undefined, { sourcePoint: { kind: 'run', runId: 'run-7' } })
+  })
+  it('disables the sidebar Fork item with the reason', () => {
+    const onFork = vi.fn()
+    const sessionAgent = { agentId: 's', managerId: 's', displayName: 'S', role: 'manager', status: 'idle', createdAt: '', updatedAt: '', cwd: '', model: { provider: 'p', modelId: 'm', thinkingLevel: '' }, sessionFile: '' } as AgentDescriptor
+    render(createElement(SessionContextMenu, { session: { sessionAgent, isDefault: false, workers: [] } as unknown as ComponentProps<typeof SessionContextMenu>['session'], actions: { onFork, getForkDisabledReason: () => 'This session\'s provider cannot fork' }, children: createElement('div', { 'data-row': true }, 'row') }))
+    act(() => { fireEvent.contextMenu(container.querySelector('[data-row]')!) })
+    const item = getByRole(body(), 'menuitem', { name: /Fork/ })
+    expect(item.getAttribute('aria-disabled')).toBe('true')
+    expect(item.getAttribute('title')).toBe('This session\'s provider cannot fork')
+    click(item)
+    expect(onFork).not.toHaveBeenCalled()
+  })
+  it('disables the message fork button with the reason as its tooltip', () => {
+    const onClick = vi.fn()
+    render(createElement(ForkButton, { onClick, disabledReason: 'This session\'s provider cannot fork' }))
+    const button = getByRole(container, 'button', { name: 'Fork from this message' }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(button.title).toBe('This session\'s provider cannot fork')
+    click(button)
+    expect(onClick).not.toHaveBeenCalled()
   })
 })
 

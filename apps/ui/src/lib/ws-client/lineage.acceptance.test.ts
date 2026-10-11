@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createEnvironmentRegistry, createMemoryCredentialStore, createMemoryPersistence, type EnvironmentClient } from '@forge/client-runtime'
 import { fixtureWebSocket, lineageSnapshotFixture, startFixtureServer, until } from '../../../../../packages/client-runtime/src/__tests__/fixture-server'
 import { ManagerWsClient } from '../ws-client'
-import { contextTransferAvailability } from './context-transfers'
+import { contextTransferAvailability, transferCapabilityReasons } from './context-transfers'
 
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
@@ -70,6 +70,46 @@ describe('session lineage presentation state', () => {
     cleanups.push(() => reloaded.destroy())
     await until(() => reloaded.getState().conversationBootstrap.phase === 'ready')
     expect(reloaded.getState().sessionLineage).toEqual(lineageSnapshotFixture())
+  })
+})
+
+describe('provider transfer capabilities', () => {
+  it('follows the mounted session summary from bootstrap and a live update, and clears on session switch', async () => {
+    const { server, facade } = await environment()
+    // An environment that reports nothing restricts nothing.
+    expect(facade.getState().sessionTransferCapabilities).toBeNull()
+    const session = { ...server.seed.shell!.sessions[0]!, transferCapabilities: { fork: true, nativeFork: false, throughTurnFork: false, providerSwitch: false } }
+    server.emit({ kind: 'event', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 5, event: { type: 'session.upsert', session } }, 'session.subscribe')
+    await until(() => facade.getState().sessionTransferCapabilities !== null)
+    expect(facade.getState().sessionTransferCapabilities).toEqual(session.transferCapabilities)
+
+    server.seed.details!['session-1'].session = { ...session, transferCapabilities: { ...session.transferCapabilities, fork: false } }
+    server.emit({ kind: 'event', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 6, event: { type: 'detail.reset' } }, 'session.subscribe')
+    await until(() => facade.getState().sessionTransferCapabilities?.fork === false)
+
+    facade.subscribeToAgent('fork-1')
+    expect(facade.getState().sessionTransferCapabilities).toBeNull()
+  })
+
+  it('turns each missing capability into a short reason and stays silent when the provider reports none', () => {
+    expect(transferCapabilityReasons(null)).toEqual({})
+    expect(transferCapabilityReasons(undefined)).toEqual({})
+    expect(transferCapabilityReasons({ fork: true, nativeFork: true, throughTurnFork: true, providerSwitch: true })).toEqual({})
+    // Native and through-turn forks are how a fork is made, not whether it can be: they never disable it.
+    expect(transferCapabilityReasons({ fork: true, nativeFork: false, throughTurnFork: false, providerSwitch: true })).toEqual({})
+    expect(transferCapabilityReasons({ fork: false, nativeFork: false, throughTurnFork: false, providerSwitch: false })).toEqual({
+      fork: 'This session\'s provider cannot fork',
+      providerSwitch: 'This session\'s provider cannot hand off to another provider',
+    })
+  })
+
+  it('resolves the run a detail item belongs to, when the environment reports it', async () => {
+    const { server, facade } = await environment()
+    expect(facade.itemRunId('item-1')).toBeUndefined()
+    server.seed.details!['session-1'].items = [{ ...server.seed.details!['session-1'].items[0]!, runId: 'run-7' }]
+    server.emit({ kind: 'event', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 5, event: { type: 'detail.reset' } }, 'session.subscribe')
+    await until(() => facade.itemRunId('item-1') === 'run-7')
+    expect(facade.itemRunId('missing')).toBeUndefined()
   })
 })
 

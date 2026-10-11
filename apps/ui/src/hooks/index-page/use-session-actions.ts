@@ -99,7 +99,7 @@ export function useSessionActions({
   messageListRef,
 }: UseSessionActionsOptions) {
   const [replyTarget, setReplyTarget] = useState<ConversationReplyTargetInput | null>(null)
-  const [messageForkTarget, setMessageForkTarget] = useState<{ messageId: string; messageTimestamp?: string } | null>(null)
+  const [messageForkTarget, setMessageForkTarget] = useState<{ messageId: string; messageTimestamp?: string; runId?: string } | null>(null)
 
   useEffect(() => {
     setReplyTarget(null)
@@ -504,8 +504,8 @@ export function useSessionActions({
       (m) => m.type === 'conversation_message' && ((m.id?.trim() || m.timestamp) === messageId),
     )
     const timestamp = msg?.timestamp
-    setMessageForkTarget({ messageId, messageTimestamp: timestamp })
-  }, [activeAgentId, visibleMessages])
+    setMessageForkTarget({ messageId, messageTimestamp: timestamp, runId: clientRef.current?.itemRunId(messageId) })
+  }, [activeAgentId, clientRef, visibleMessages])
 
   const handleConfirmMessageFork = useCallback((name?: string, transfer?: ForkTransferSelection) => {
     const client = clientRef.current

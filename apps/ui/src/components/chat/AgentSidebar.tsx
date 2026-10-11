@@ -96,6 +96,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   onRenameProfile,
   onForkSession,
   workerContinuation,
+  forkDisabledReasonFor,
   onMarkUnread,
   onMarkAllRead,
   onUpdateManagerModel,
@@ -704,6 +705,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       onRequestRenameProfile={onRenameProfile ? handleRequestRenameProfile : undefined}
       onForkSession={onForkSession ? handleForkSetTarget : undefined}
       workerContinuation={workerContinuation}
+      forkDisabledReasonFor={forkDisabledReasonFor}
       onMarkUnread={onMarkUnread}
       onMarkAllRead={onMarkAllRead}
       onChangeModel={onUpdateManagerModel ? handleRequestChangeModel : undefined}
@@ -742,7 +744,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     onCreateSession, handleRequestCreateSession, onStopSession, onResumeSession, handleRequestDelete,
     onArchiveSession, onArchiveProfile,
     handleRequestRename, onRenameProfile, handleRequestRenameProfile, onForkSession, handleForkSetTarget,
-    workerContinuation,
+    workerContinuation, forkDisabledReasonFor,
     onMarkUnread, onMarkAllRead, onUpdateManagerModel, handleRequestChangeModel,
     onUpdateSessionModel, handleRequestSessionModelChange, handleUseProjectDefault,
     onUpdateManagerCwd, handleRequestChangeCwd, showModelIcons, parsedSearch.term,
@@ -932,6 +934,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
               onArchiveSession,
               onRequestRenameSession: handleRequestRename,
               onForkSession: onForkSession ? handleForkSetTarget : undefined,
+              forkDisabledReasonFor,
               onMarkUnread,
               onPinSession,
               onPromoteToProjectAgent: onSetSessionProjectAgent ? handlePromoteToProjectAgent : undefined,

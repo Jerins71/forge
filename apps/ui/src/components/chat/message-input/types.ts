@@ -49,6 +49,8 @@ export interface SessionModelPickerConfig {
    * Present when the environment can transfer context. Choosing a model on another provider then
    * hands the same session off after confirmation instead of overriding its model.
    */
+  /** Why this session cannot be handed to another provider; models on other providers are then listed as unavailable. */
+  switchDisabledReason?: string
   onSwitchProvider?: (
     sessionAgentId: string,
     modelSelection: ManagerExactModelSelection,

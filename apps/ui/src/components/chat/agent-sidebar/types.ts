@@ -62,6 +62,7 @@ export interface AgentSidebarProps {
   onPinSession?: (agentId: string, pinned: boolean) => void
   onRenameProfile?: (profileId: string, displayName: string) => void
   onForkSession?: (sourceAgentId: string, name?: string) => void
+  forkDisabledReasonFor?: (agentId: string) => string | undefined
   workerContinuation?: WorkerContinuation
   onMarkUnread?: (agentId: string) => void
   onMarkAllRead?: (profileId: string) => void
@@ -112,6 +113,8 @@ export interface WorkerContinuation {
 }
 
 export interface SessionContextMenuActionSource {
+  /** Why a session cannot be forked, from what its provider declares. */
+  forkDisabledReasonFor?: (agentId: string) => string | undefined
   workerContinuation?: WorkerContinuation
   onStopSession?: (agentId: string) => void
   onResumeSession?: (agentId: string) => void
@@ -154,6 +157,7 @@ export interface SessionRowItemProps {
   archiveDisabledReason?: string
   onRename?: () => void
   onFork?: () => void
+  getForkDisabledReason?: () => string | undefined
   onMarkUnread?: () => void
   onStopWorker?: (agentId: string) => void
   onResumeWorker?: (agentId: string) => void
@@ -206,6 +210,7 @@ export interface ProfileGroupProps {
   onRequestRenameSession?: (agentId: string) => void
   onRequestRenameProfile?: (profileId: string) => void
   onForkSession?: (sourceAgentId: string) => void
+  forkDisabledReasonFor?: (agentId: string) => string | undefined
   workerContinuation?: WorkerContinuation
   onMarkUnread?: (agentId: string) => void
   onMarkAllRead?: (profileId: string) => void
