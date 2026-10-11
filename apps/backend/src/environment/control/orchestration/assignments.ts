@@ -87,7 +87,9 @@ export function decideAssignment(initial: CoreState, command: CoreCommand & Assi
     const transfer = state.transfers[assignment.resultTransferId ?? ""];
     const parent = state.threads[assignment.parentThreadId];
     if (!transfer || transfer.state !== "pending" || !assignment.resultInput || assignment.invalidatedAt !== undefined ||
-      !parent || parent.desired !== "running" || parent.shutdown !== "clean" || parent.generation !== assignment.parentGeneration || state.runs[transfer.targetRunId]) return;
+      !parent || parent.desired !== "running" || parent.shutdown !== "clean" || state.runs[transfer.targetRunId]) return;
+    if (assignment.parentGeneration !== parent.generation) emit({ type: "assignment.result_recorded", assignment: { ...assignment, parentGeneration: parent.generation } });
+    if (transfer.targetGeneration !== parent.generation) emit({ type: "transfer.created", transfer: { ...transfer, targetGeneration: parent.generation } });
     apply({ type: "run.submit", commandId: command.commandId, now: command.now, threadId: parent.threadId,
       runId: transfer.targetRunId, inputId: `${assignment.assignmentId}:result:input`, attemptId: `${assignment.assignmentId}:result:attempt`,
       bindingId: parent.bindingId ?? `${assignment.assignmentId}:result:binding`, delivery: "queue", input: assignment.resultInput });
