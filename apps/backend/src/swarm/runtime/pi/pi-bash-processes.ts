@@ -114,6 +114,10 @@ export class PiBashProcesses {
     },
   };
 
+  hasRunningProcesses(): boolean {
+    return [...this.processes.values()].some(process => process.completedAt === undefined);
+  }
+
   /** Call before releasing runtime ownership. A caller's existing shutdown deadline bounds this wait. */
   async stopAll(): Promise<void> {
     const processes = [...this.processes.values()];

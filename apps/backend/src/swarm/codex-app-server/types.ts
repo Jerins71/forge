@@ -88,7 +88,7 @@ export interface CodexSidecarParentTurnContext {
 
 export interface CodexAppServerClientHandlers {
   onNotification?: (method: string, params?: unknown) => void | Promise<void>;
-  onRequest?: (method: string, params?: unknown) => Promise<unknown>;
+  onRequest?: (method: string, params?: unknown, requestId?: string | number) => Promise<unknown>;
   onExit?: (error: Error) => void;
   onStderr?: (line: string) => void;
 }

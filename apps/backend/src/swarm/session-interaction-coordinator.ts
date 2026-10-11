@@ -149,6 +149,8 @@ export class SessionInteractionCoordinator {
   installCoreAgentMessages(core: CoreAgentMessagePort): void { this.core = core; }
 
   async clearWorkerAssignments(managerId: string): Promise<void> {
+    const manager = this.options.directory.getRequiredManagerDescriptor(managerId);
+    this.options.directory.assertDescriptorNotEffectivelyArchived(manager);
     if (!this.core) throw new Error("Core assignment control is unavailable");
     await this.core.clearAssignments(managerId);
   }

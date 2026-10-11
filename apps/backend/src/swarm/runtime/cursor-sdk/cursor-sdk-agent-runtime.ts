@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { UnsupportedProviderBehaviorError, type ProviderAdapter } from "../provider-contract.js";
+
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { openSessionManagerWithSizeGuard } from "../../session/session-file-guard.js";
@@ -49,9 +51,15 @@ import {
   extractCursorSdkUsageFromDelta
 } from "../../../utils/cursor-sdk-usage-records.js";
 
+export interface CursorSdkProviderHooks {
+  accepted(run: CursorSdkRun): void;
+  rawMessage(message: unknown): boolean;
+  interrupted(): void;
+  settled(outcome: CursorSdkUsageOutcome, run?: CursorSdkRun, meta?: RuntimeTurnMeta): void;
+}
 export const CURSOR_SDK_RUNTIME_STATE_ENTRY_TYPE = "swarm_cursor_sdk_runtime_state";
 const SESSION_HEADER_VERSION = 3;
-const MAX_PRE_OUTPUT_CURSOR_FAILURE_RETRIES = 1;
+const MAX_PRE_OUTPUT_CURSOR_FAILURE_RETRIES = 0;
 
 interface CursorSdkRuntimeState {
   version: 1;
@@ -99,6 +107,7 @@ interface PreparedSendPayload {
 export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
   readonly descriptor: AgentDescriptor;
   readonly runtimeType = "cursor-sdk" as const;
+  readonly providerAdapter?: ProviderAdapter;
 
   private readonly callbacks: SwarmRuntimeCallbacks;
   private readonly now: () => string;
@@ -123,6 +132,10 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
   private nextPromptToken = 0;
   private currentTurnReplayMessage: RuntimeUserMessage | undefined;
   private lastSessionEntryId: string | null = null;
+  private readonly dispatches = new Set<Promise<void>>();
+  private readonly pendingSends = new Set<Promise<CursorSdkRun>>();
+  private readonly providerHooks?: CursorSdkProviderHooks;
+  private closed = false;
 
   private constructor(options: {
     descriptor: AgentDescriptor;
@@ -138,6 +151,8 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     mcpServers: CursorSdkMcpServers;
     stateRoot: string;
     promptHash?: string;
+    providerAdapter?: ProviderAdapter;
+    providerHooks?: CursorSdkProviderHooks;
   }) {
     this.descriptor = options.descriptor;
     this.callbacks = options.callbacks;
@@ -150,6 +165,8 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     this.mcpServers = options.mcpServers;
     this.stateRoot = options.stateRoot;
     this.promptHash = options.promptHash;
+    this.providerAdapter = options.providerAdapter;
+    this.providerHooks = options.providerHooks;
     this.status = options.descriptor.status;
     this.eventMapper = new CursorSdkEventMapper({
       debug: process.env.FORGE_DEBUG === "true",
@@ -188,6 +205,9 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     mcpServers: CursorSdkMcpServers;
     stateRoot: string;
     promptHash?: string;
+    providerAdapter?: ProviderAdapter;
+    providerHooks?: CursorSdkProviderHooks;
+    resumeAgentId?: string;
   }): Promise<CursorSdkAgentRuntime> {
     if (!options.stateRoot.trim()) {
       throw new Error("Cursor SDK runtime requires a Forge-owned stateRoot.");
@@ -204,34 +224,45 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     };
 
     let sdkAgent: CursorSdkAgent;
-    if (persisted?.sdkAgentId) {
-      try {
-        sdkAgent = await options.sdk.Agent.resume(persisted.sdkAgentId, agentOptions);
-      } catch {
-        sdkAgent = await options.sdk.Agent.create(agentOptions);
-      }
+    if (options.resumeAgentId) {
+      sdkAgent = await options.sdk.Agent.resume(options.resumeAgentId, agentOptions);
+    } else if (persisted?.sdkAgentId) {
+      sdkAgent = await options.sdk.Agent.resume(persisted.sdkAgentId, agentOptions);
     } else {
       sdkAgent = await options.sdk.Agent.create(agentOptions);
     }
 
-    const runtime = new CursorSdkAgentRuntime({
-      descriptor: options.descriptor,
-      callbacks: options.callbacks,
-      now: options.now,
-      sdk: options.sdk,
-      sdkAgent,
-      apiKey: options.apiKey,
-      model: options.model,
-      systemPrompt: options.systemPrompt,
-      startupSystemPromptOverride: options.startupSystemPromptOverride,
-      onStartupRecoveryConsumed: options.onStartupRecoveryConsumed,
-      mcpServers: options.mcpServers,
-      stateRoot: options.stateRoot,
-      promptHash: options.promptHash,
-    });
-    runtime.persistRuntimeState();
-    return runtime;
+    try {
+      const runtime = new CursorSdkAgentRuntime({
+        descriptor: options.descriptor,
+        callbacks: options.callbacks,
+        now: options.now,
+        sdk: options.sdk,
+        sdkAgent,
+        apiKey: options.apiKey,
+        model: options.model,
+        systemPrompt: options.systemPrompt,
+        startupSystemPromptOverride: options.startupSystemPromptOverride,
+        onStartupRecoveryConsumed: options.onStartupRecoveryConsumed,
+        mcpServers: options.mcpServers,
+        stateRoot: options.stateRoot,
+        promptHash: options.promptHash,
+        providerAdapter: options.providerAdapter,
+        providerHooks: options.providerHooks,
+      });
+      runtime.persistRuntimeState();
+      return runtime;
+    } catch (error) {
+      try { sdkAgent.close(); } catch { /* Preserve the acquisition failure. */ }
+      throw error;
+    }
   }
+
+  getNativeConversationId(): string { return this.sdkAgent.agentId; }
+
+  hasUnsettledDispatches(): boolean { return this.dispatches.size > 0 || this.pendingSends.size > 0; }
+
+  async settleDispatches(): Promise<void> { await Promise.all(this.dispatches); await Promise.allSettled(this.pendingSends); }
 
   getStatus(): AgentStatus {
     return this.status;
@@ -265,8 +296,9 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     // Replay snapshots are non-destructive.
   }
 
-  async sendMessage(input: RuntimeUserMessageInput, _requestedMode: RequestedDeliveryMode = "auto"): Promise<SendMessageReceipt> {
+  async sendMessage(input: RuntimeUserMessageInput, requestedMode: RequestedDeliveryMode = "auto"): Promise<SendMessageReceipt> {
     this.ensureNotTerminated();
+    if (requestedMode === "steer") throw new UnsupportedProviderBehaviorError("cursor-sdk", "nativeSteer");
     const message = normalizeRuntimeUserMessage(input);
     const deliveryId = randomUUID();
 
@@ -284,12 +316,12 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
 
   async compact(): Promise<unknown> {
     this.ensureNotTerminated();
-    throw new Error(`Agent ${this.descriptor.agentId} does not support manual compaction`);
+    throw new UnsupportedProviderBehaviorError("cursor-sdk", "nativeCompact");
   }
 
   async smartCompact(_customInstructions?: string, _options?: SmartCompactOptions): Promise<SmartCompactResult> {
     this.ensureNotTerminated();
-    throw new Error(`Agent ${this.descriptor.agentId} does not support smart compaction`);
+    throw new UnsupportedProviderBehaviorError("cursor-sdk", "nativeCompact");
   }
 
   async stopInFlight(): Promise<void> {
@@ -297,14 +329,13 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     this.currentTurnReplayMessage = undefined;
     const active = this.activePrompt;
     if (active) {
+      if (active.run) await active.run.cancel();
       active.cancelled = true;
+      this.providerHooks?.interrupted();
       if (active.pendingSendTracker) {
         active.pendingSendTracker.cancelOnResolve = true;
       }
       active.backgroundScope?.markCancelled();
-      if (active.run) {
-        await active.run.cancel().catch(() => undefined);
-      }
       if (active.pendingSendTracker?.run && active.pendingSendTracker.run !== active.run) {
         await active.pendingSendTracker.run.cancel().catch(() => undefined);
       }
@@ -322,7 +353,9 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     if (options?.abort ?? true) {
       await this.stopInFlight();
     }
-    this.sdkAgent.close();
+    this.closeSdkAgent();
+    this.closed = true;
+    await this.settleDispatches();
     this.status = transitionAgentStatus(this.status, "terminated");
     this.descriptor.status = this.status;
     this.descriptor.updatedAt = this.now();
@@ -331,12 +364,14 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
 
   async shutdownForReplacement(): Promise<void> {
     this.assertIdleForReplacementShutdown();
-    this.sdkAgent.close();
+    this.closeSdkAgent();
+    await this.settleDispatches();
   }
 
   async recycle(): Promise<void> {
     this.assertIdleForReplacementShutdown();
-    this.sdkAgent.close();
+    this.closeSdkAgent();
+    await this.settleDispatches();
   }
 
   getCustomEntries(customType: string): unknown[] {
@@ -385,7 +420,7 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     this.currentTurnReplayMessage = cloneRuntimeUserMessage(message);
 
     const preparedPayload = this.prepareSendPayload(message);
-    let attemptIndex = 0;
+    const attemptIndex = 0;
     let promptInjectionCommitted = false;
 
     try {
@@ -404,7 +439,7 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
       }
 
       this.promptDispatchPending = false;
-      while (attemptIndex <= MAX_PRE_OUTPUT_CURSOR_FAILURE_RETRIES) {
+      {
         active.attemptIndex = attemptIndex;
         const backgroundScope = createCursorSdkBackgroundScope({
           agentId: this.descriptor.agentId,
@@ -440,6 +475,7 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
             }))
           ));
           active.run = run;
+          this.providerHooks?.accepted(run);
           backgroundScope.update({ sdkAgentId: run.agentId ?? this.sdkAgent.agentId, runId: run.id });
           if (this.shouldAbortPromptBeforeSend(active, token)) {
             await run.cancel().catch(() => undefined);
@@ -469,41 +505,14 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
               this.emitPromptSessionEvents(active, this.eventMapper.completePrompt(this.buildCursorTurnMeta(active)))
             ));
           }
-          break;
         } catch (error) {
           this.captureCursorRunStatuses(active);
           await this.cancelActiveRun(active);
-          const failureDecision = classifyCursorSdkRuntimeFailure(error, active, this.sdkAgent.agentId, attemptIndex);
-          if (this.shouldRetryPreOutputCursorFailure(failureDecision)) {
-            this.logDebug("cursor_sdk:background_error_retrying", {
-              agentId: this.descriptor.agentId,
-              promptToken: token,
-              runId: failureDecision.evidence.runId,
-              sdkAgentId: failureDecision.evidence.sdkAgentId,
-              errorName: failureDecision.evidence.errorName,
-              errorCode: failureDecision.evidence.errorCode,
-              source: error instanceof CursorSdkContainedBackgroundError ? "cursor_sdk_background" : "cursor_sdk_awaited",
-              family: failureDecision.family,
-              bucket: failureDecision.bucket,
-              connectCode: failureDecision.evidence.connectCode,
-              connectCodeName: failureDecision.evidence.connectCodeName,
-              nodeCodes: failureDecision.evidence.nodeCodes,
-              h2ResetCodes: failureDecision.evidence.h2ResetCodes,
-              providerErrorNames: failureDecision.evidence.providerErrorNames,
-              preOutput: true,
-              attempt: `${attemptIndex + 1}/${MAX_PRE_OUTPUT_CURSOR_FAILURE_RETRIES}`
-            });
-            attemptIndex += 1;
-            this.resetRetryablePromptAttempt(active);
-            continue;
-          }
-
           freezeCursorUsageOutcome(active, active.cancelled ? undefined : "error");
           if (!active.cancelled) {
             await this.safeEmitRuntimeError(error, active);
             await this.safeEmitFailedPromptEnd();
           }
-          break;
         } finally {
           backgroundScope.close();
           if (active.backgroundScope === backgroundScope) {
@@ -520,10 +529,12 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
       }
       this.promptDispatchPending = false;
       this.currentTurnReplayMessage = undefined;
-      if (!this.isTerminated()) {
-        await this.updateStatus("idle");
-        await this.dispatchQueuedPrompts();
-      }
+      try {
+        if (!this.isTerminated()) {
+          await this.updateStatus("idle");
+          await this.dispatchQueuedPrompts();
+        }
+      } finally { this.providerHooks?.settled(active.outcome ?? "unknown", active.run, this.buildCursorTurnMeta(active)); }
     }
   }
 
@@ -650,13 +661,14 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
       if (active.cancelled || this.activePrompt?.token !== token) {
         break;
       }
+      if (this.providerHooks?.rawMessage(sdkMessage)) continue;
       await this.emitPromptSessionEvents(active, this.eventMapper.mapSdkMessage(sdkMessage));
     }
   }
 
   private trackPendingSendRun(tracker: PendingCursorSendTracker, sendPromise: Promise<CursorSdkRun>): Promise<CursorSdkRun> {
     tracker.run = undefined;
-    return sendPromise.then(async (run) => {
+    const pending = sendPromise.then(async (run) => {
       tracker.run = run;
       if (tracker.cancelOnResolve) {
         await run.cancel().catch(() => undefined);
@@ -666,6 +678,9 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
       tracker.run = undefined;
       throw error;
     });
+    this.pendingSends.add(pending);
+    void pending.then(() => this.pendingSends.delete(pending), () => this.pendingSends.delete(pending));
+    return pending;
   }
 
   private async cancelActiveRun(active: ActivePromptState): Promise<void> {
@@ -678,25 +693,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     if (active.pendingSendTracker?.run && active.pendingSendTracker.run !== active.run) {
       await active.pendingSendTracker.run.cancel().catch(() => undefined);
     }
-  }
-
-  private resetRetryablePromptAttempt(active: ActivePromptState): void {
-    active.attemptIndex += 1;
-    active.run = undefined;
-    active.pendingSendTracker = undefined;
-    active.cursorUsage = undefined;
-    active.usageRecorded = false;
-    active.providerStatus = undefined;
-    active.runStatus = undefined;
-    active.waitStatus = undefined;
-    active.terminalStatus = undefined;
-    active.outcome = undefined;
-    active.visibleOutputEmitted = false;
-    this.eventMapper.reset();
-  }
-
-  private shouldRetryPreOutputCursorFailure(decision: CursorSdkFailureDecision): boolean {
-    return !this.isTerminated() && decision.retryPreOutput;
   }
 
   private async raceContainedBackgroundFailure<T>(scope: CursorSdkBackgroundScope, task: Promise<T>): Promise<T> {
@@ -748,7 +744,7 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
   }
 
   private schedulePromptDispatch(message: RuntimeUserMessage): void {
-    void this.dispatchPrompt(message).catch(async (error) => {
+    const dispatch = this.dispatchPrompt(message).catch(async (error) => {
       await this.safeEmitRuntimeError(error);
       if (this.activePrompt === undefined) {
         this.promptDispatchPending = false;
@@ -759,6 +755,14 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
         }
       }
     });
+    this.dispatches.add(dispatch);
+    void dispatch.then(() => this.dispatches.delete(dispatch), () => this.dispatches.delete(dispatch));
+  }
+
+  private closeSdkAgent(): void {
+    if (this.closed) return;
+    this.sdkAgent.close();
+    this.closed = true;
   }
 
   private persistRuntimeState(): void {
@@ -847,7 +851,7 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
   }
 
   private isTerminated(): boolean {
-    return this.status === "terminated";
+    return this.closed || this.status === "terminated";
   }
 
   private logDebug(message: string, details?: unknown): void {
@@ -1085,4 +1089,8 @@ function hasValidSessionHeader(sessionFile: string): boolean {
 
 export function getDefaultCursorSdkStateRoot(descriptor: AgentDescriptor): string {
   return join(dirname(descriptor.sessionFile), "cursor-sdk-state", descriptor.agentId);
+}
+
+export function getPersistedCursorSdkConversationId(sessionFile: string): string | undefined {
+  return readLatestRuntimeState(sessionFile)?.sdkAgentId;
 }

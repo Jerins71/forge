@@ -9,6 +9,9 @@ describe("production Codex controlled-send replay", () => {
     expect(result.counts).toEqual({ acceptedInputs: 1, receipts: 1, canonicalInputs: 1, providerDispatches: 1 });
     expect(result.receipt.delivery).toBe("dispatched");
     expect(result.live).toEqual(result.bootstrap);
+    expect(result.bootstrap.shell.projects).toEqual([expect.objectContaining({
+      contextMode: "summary", defaultModel: { provider: "codex-native", modelId: "gpt-6-sol", thinkingLevel: "high" },
+    })]);
   }, 60_000);
 
   it("retains unresolved recovery after a lost provider-start acknowledgment and two boots", async () => {

@@ -68,7 +68,7 @@ export class CodexRuntimeCreator {
     });
     const systemPrompt = renderInstructionBundle(instructionBundle);
     const toolHostBinding = bindRuntimeToolHost({ descriptor, tools, forgeExtensionHost: this.deps.forgeExtensionHost,
-      preparedForgeBindings: prepared, secureRuntimeBinding: options.creationOptions?.secureRuntimeBinding, mechanism: "dynamic_tools" });
+      preparedForgeBindings: prepared, secureRuntimeBinding: options.creationOptions?.secureRuntimeBinding, mechanism: "dynamic_tools", scope: options.creationOptions?.providerScope });
     const creationOptions = { ...options.creationOptions, instructionBundle, toolHostBinding };
     const codexHome = getNativeCodexHome(this.deps.config.paths.dataDir);
     await mkdir(codexHome, { recursive: true, mode: 0o700 });
@@ -79,6 +79,7 @@ export class CodexRuntimeCreator {
       const runtime = await CodexAgentRuntime.create({ descriptor: structuredClone(descriptor),
         callbacks: options.callbacks, systemPrompt, codexHome, dataDir: this.deps.config.paths.dataDir, projectTrusted: trust.trusted,
         auth, tools, host: this.deps.host, creationOptions });
+      options.creationOptions?.onProviderPrepared?.({ instructionBundle, toolHostBinding });
       if (prepared) this.deps.forgeExtensionHost.activateRuntimeBindings(prepared);
       recordRuntimePromptAndCreation({ observability: this.deps.observability, descriptor,
         runtimeToken: options.runtimeToken, runtimeType: "codex", forgeResolvedPrompt: options.systemPrompt,

@@ -473,12 +473,13 @@ export class SwarmWorkerHealthService {
     const elapsedText = this.formatDuration(elapsedMs);
     const managerMessage = `SYSTEM: ⚠️ [WORKER STALL DETECTED]\nWorker \`${agentId}\` has made no progress for ${elapsedText}.\nIt may be stuck in a long-running tool call or hung process.\nConsider: send_message_to_agent to check on it, or kill_agent(\"${agentId}\") to terminate.`;
 
+    // Observation deadlines advance before ingress; a lost receipt never retries input.
+    stallState.nudgeSent = true;
+    stallState.nudgeSentAt = this.nowMs();
+    stallState.lastDetailedReportAt = null;
+    this.workerStallState.set(agentId, stallState);
     try {
       await this.options.sendMessage(managerId, managerId, managerMessage, "auto", { origin: "internal" });
-      stallState.nudgeSent = true;
-      stallState.nudgeSentAt = this.nowMs();
-      stallState.lastDetailedReportAt = null;
-      this.workerStallState.set(agentId, stallState);
     } catch (error) {
       this.options.logDebug("stall:nudge:send_message:error", {
         agentId,
@@ -547,10 +548,10 @@ export class SwarmWorkerHealthService {
       `If this looks like a hung process, terminate with: kill_agent(\"${agentId}\")\n` +
       "If it's a legitimate long-running operation, no action needed — auto-termination will occur at 30 minutes total.";
 
+    stallState.lastDetailedReportAt = this.nowMs();
+    this.workerStallState.set(agentId, stallState);
     try {
       await this.options.sendMessage(managerId, managerId, managerMessage, "auto", { origin: "internal" });
-      stallState.lastDetailedReportAt = this.nowMs();
-      this.workerStallState.set(agentId, stallState);
     } catch (error) {
       this.options.logDebug("stall:detailed_report:send_message:error", {
         agentId,
