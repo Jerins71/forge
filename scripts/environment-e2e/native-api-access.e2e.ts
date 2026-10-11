@@ -47,6 +47,8 @@ const models: Record<Kind, object> = {
 };
 
 const seen: Seen[] = [];
+/** Connection tests the backend made against the stub; kept apart from the turns the CLIs ran. */
+const probes: Seen[] = [];
 let upgradeStatus = '426 Upgrade Required';
 let upgrades = 0;
 let hold: { kind: Kind; release: Promise<void>; open(): void } | undefined;
@@ -80,6 +82,13 @@ async function provide(request: IncomingMessage, response: ServerResponse) {
   const entry: Seen = { kind, path, body, aborted: false, finished: false, account: Boolean(request.headers['chatgpt-account-id']),
     header: typeof apiKey === 'string' ? 'x-api-key' : bearer ? 'authorization: Bearer' : 'none',
     credential: value === keys[kind] ? 'api-key' : value === subscription[kind] ? 'subscription' : 'other' };
+  // A connection test posts an empty object: a provider refuses it before any model runs. It is not a turn.
+  if (body.trim() === '{}') {
+    probes.push(entry);
+    response.writeHead(400, { 'Content-Type': 'application/json' });
+    response.end('{"error":{"message":"Empty request","type":"invalid_request_error"}}');
+    return;
+  }
   seen.push(entry);
   response.on('close', () => { entry.aborted = !entry.finished; });
   if (hold?.kind === kind) { const held = hold; hold = undefined; await held.release; }
@@ -101,6 +110,12 @@ async function provide(request: IncomingMessage, response: ServerResponse) {
 }
 
 /** Every file under `root` that contains `needle`. */
+/** What is saved, apart from the latest connection-test result, which is asserted where a test is expected. */
+function savedAccess(access: CodexAuthStatus['access']) {
+  if (!access) return access;
+  const { probe: _probe, ...saved } = access;
+  return saved;
+}
 async function filesContaining(root: string, needle: string, found: string[] = []): Promise<string[]> {
   for (const entry of await readdir(root, { withFileTypes: true }).catch(() => [])) {
     const path = join(root, entry.name);
@@ -175,7 +190,7 @@ async function main() {
       const result: Record<string, unknown> = {};
       evidence[kind] = result;
       const initial = await settings<CodexAuthStatus>(kind);
-      assert.deepEqual(initial.body.access, { mode: 'subscription', apiKeyConfigured: false }, `${kind}: subscription is the default`);
+      assert.deepEqual(savedAccess(initial.body.access), { mode: 'subscription', apiKeyConfigured: false }, `${kind}: subscription is the default`);
 
       // 7. Settings reject what cannot work, with a message a person can act on.
       const noKey = await configure(kind, { mode: 'api_key', baseUrl: baseUrls[kind] });
@@ -186,19 +201,26 @@ async function main() {
         assert.equal(malformed.status, 400, `${kind}: ${baseUrl} is rejected`);
         assert.match(malformed.body.error!, /base URL must be/i);
       }
-      assert.deepEqual((await settings<CodexAuthStatus>(kind)).body.access, { mode: 'subscription', apiKeyConfigured: false }, `${kind}: rejected settings save nothing`);
+      assert.deepEqual(savedAccess((await settings<CodexAuthStatus>(kind)).body.access), { mode: 'subscription', apiKeyConfigured: false }, `${kind}: rejected settings save nothing`);
       result.validation = { apiKeyRequired: noKey.body.error, malformedUrlRejected: true };
 
       // 1, 2. API-key mode: the custom base URL receives the key in the provider's header.
       const saved = await configure(kind, { mode: 'api_key', apiKey: keys[kind], baseUrl: baseUrls[kind] });
       assert.equal(saved.status, 200, JSON.stringify(saved.body));
-      assert.deepEqual(saved.body.access, { mode: 'api_key', apiKeyConfigured: true, baseUrl: baseUrls[kind] });
+      assert.deepEqual(savedAccess(saved.body.access), { mode: 'api_key', apiKeyConfigured: true, baseUrl: baseUrls[kind] });
+      // Saving a key tests the connection: the stub answers at the provider's path under the saved base URL.
+      assert.equal(saved.body.access?.probe?.outcome, 'ok', JSON.stringify(saved.body.access?.probe));
+      assert.ok(saved.body.access?.probe?.endpoint?.startsWith(baseUrls[kind]), `${kind}: the connection test used the saved base URL`);
+      assert.equal(probes.filter(entry => entry.kind === kind).at(-1)?.credential, 'api-key', `${kind}: the connection test carried the saved key`);
       assert.equal(saved.body.connected, true);
       const project = await rpc.call('project.create', { commandId: randomUUID(), title: `API access ${kind}`, cwd: environment.checkout, model: models[kind], secureSessionsEnabled: false }, randomUUID(), 60_000);
       assert.equal(project.state, 'succeeded');
       const sessionId = project.result.sessionId as string;
       await rpc.call('session.subscribe', { sessionId });
       const send = async (text: string) => (await rpc.call('session.send', { commandId: randomUUID(), sessionId, message: { text, artifactIds: [] } })).commandId as string;
+      // The project's hidden onboarding turn runs first; this check is about access, not about sending across it.
+      await until(() => requests(kind).some(entry => entry.finished), Boolean, 120_000);
+      await idle(sessionId);
       await succeeded(await send('First message, with an API key.'));
       await until(() => requests(kind).some(entry => entry.finished), Boolean, 120_000);
       await idle(sessionId);
@@ -221,7 +243,7 @@ async function main() {
       const held = await until(() => requests(kind)[before.requests], Boolean, 120_000);
       const switched = await configure(kind, { mode: 'subscription' });
       assert.equal(switched.status, 200, JSON.stringify(switched.body));
-      assert.deepEqual(switched.body.access, { mode: 'subscription', apiKeyConfigured: true, baseUrl: baseUrls[kind] });
+      assert.deepEqual(savedAccess(switched.body.access), { mode: 'subscription', apiKeyConfigured: true, baseUrl: baseUrls[kind] });
       // 9. While the CLI is running with the key, it is not in any process's arguments.
       const processList = execFileSync('ps', ['-Ao', 'args'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       assert(!processList.includes(keys[kind]), `${kind}: the key is not in process arguments`);
@@ -255,7 +277,7 @@ async function main() {
 
       // And back, keeping the saved key without sending it again.
       const back = await configure(kind, { mode: 'api_key' });
-      assert.deepEqual(back.body.access, { mode: 'api_key', apiKeyConfigured: true, baseUrl: baseUrls[kind] });
+      assert.deepEqual(savedAccess(back.body.access), { mode: 'api_key', apiKeyConfigured: true, baseUrl: baseUrls[kind] });
       const afterBack = requests(kind).length;
       await succeeded(await send('Fourth message, with the saved key again.'));
       await until(() => requests(kind).slice(afterBack).some(entry => entry.finished), Boolean, 120_000);
@@ -267,7 +289,7 @@ async function main() {
       // borrows the subscription login.
       const removed = await configure(kind, { mode: 'api_key', removeApiKey: true });
       assert.equal(removed.status, 200, JSON.stringify(removed.body));
-      assert.deepEqual(removed.body.access, { mode: 'api_key', apiKeyConfigured: false, baseUrl: baseUrls[kind] });
+      assert.deepEqual(savedAccess(removed.body.access), { mode: 'api_key', apiKeyConfigured: false, baseUrl: baseUrls[kind] });
       assert.equal(removed.body.connected, false);
       assert.deepEqual(await filesContaining(environment.dataDir, keys[kind]), [], `${kind}: the removed key is gone from disk`);
       const clear = new RegExp(`${kind === 'codex' ? 'Codex' : 'Claude'} is set to use an API key, but no key is saved on this environment`);

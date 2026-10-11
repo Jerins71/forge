@@ -275,6 +275,8 @@ function addWorkspaceChecks(checks, areas, mode) {
   }
   if (mode === 'typecheck') {
     if (wantsAll || areas.has('backend')) add({ id: 'typecheck:backend', label: 'Backend production typecheck', command: [pnpm, ['--filter', '@forge/backend', 'typecheck']] });
+    // The environment E2E specs and fixtures compile against backend, protocol and client sources; a root script change routes here as `all`.
+    if (wantsAll || areas.has('backend') || areas.has('protocol')) add({ id: 'typecheck:e2e', label: 'Environment E2E typecheck', command: [pnpm, ['typecheck:e2e']] });
     if (wantsAll || areas.has('ui')) add({ id: 'typecheck:ui', label: 'UI typecheck', command: [pnpm, ['--filter', '@forge/ui', 'typecheck']] });
     if (wantsAll || areas.has('protocol')) add({ id: 'typecheck:protocol', label: 'Protocol typecheck', command: [pnpm, ['--filter', '@forge/protocol', 'typecheck']] });
     if (wantsAll || areas.has('cli')) add({ id: 'typecheck:cli', label: 'CLI typecheck', command: [pnpm, ['--filter', '@forge/cli', 'typecheck']] });

@@ -272,7 +272,7 @@ test('the worker view shows the worker\'s own transcript and status, read-only',
   await expect(assignment).toContainText('Assignment')
   await expect(assignment).toContainText('Return the synthetic worker result')
   await expect(assignment).not.toContainText('SYSTEM:')
-  expect(await transcript(page).evaluate(node => node.innerText.indexOf('Return the synthetic worker result') < node.innerText.indexOf(':worker result'))).toBe(true)
+  expect(await transcript(page).evaluate(node => { const text = (node as HTMLElement).innerText; return text.indexOf('Return the synthetic worker result') < text.indexOf(':worker result') })).toBe(true)
   const text = await transcript(page).innerText()
   expect(text).not.toContain('worker spawned')
   expect(text).not.toContain('Delegate the fixture task')
@@ -304,7 +304,7 @@ test('a change made while a launch settles is refused retryably in plain words, 
   const rpc = await openFixtureRpc(a.baseUrl, session)
   // What the UI client does with a retryable admission conflict: send the same command again.
   const refusals: Array<{ method: string; code: string; retryable: boolean; message: string }> = []
-  const settledCall = async (method: string, input: { commandId: string }) => until(async () => {
+  const settledCall = async (method: string, input: { commandId: string }) => until<any>(async () => {
     try { return await rpc.call(method, input) } catch (error) {
       const refusal = error as { code: string; retryable: boolean; message: string }
       refusals.push({ method, code: refusal.code, retryable: refusal.retryable, message: refusal.message })
