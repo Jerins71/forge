@@ -170,12 +170,32 @@ test('a worker the user stopped is a neutral marker, not a blocked result, and i
   const worker = page.locator('[data-worker-row]').filter({ hasText: /hold/i }).first()
   if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
   await expect(worker).toBeVisible()
+  // The sidebar counts the worker that is running, and the timeline is the only activity display.
+  await expect.poll(async () => (await shellSession(sessionId))?.activeWorkerCount, { timeout: 15_000 }).toBe(1)
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
+  await expect(page.locator('[data-inbox-section="active"]')).toContainText('1 worker')
+  await expect(page.getByTestId('manager-tool-activity')).toHaveCount(0)
+  await shot(page, 'worker-running-sidebar-count')
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Projects/ }).click()
   await worker.click({ button: 'right' })
   await shot(page, 'worker-running-menu')
   await page.getByRole('menuitem', { name: 'Stop', exact: true }).click()
 
   await expect(marker(page, 'worker_stopped')).toHaveCount(1, { timeout: 30_000 })
   await expect(marker(page, 'worker_stopped')).toContainText('Stopped by you')
+  // The manager is told, so it is not left waiting for a result: it answers and the session comes to rest.
+  const stoppedResults = async () => {
+    const rpc = await openFixtureRpc(fleet.a.baseUrl, admin)
+    try {
+      await rpc.call('session.subscribe', { sessionId })
+      const snapshot = await until<any>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
+      return snapshot.items.filter((item: any) => item.kind === 'worker_result' && /stopped by the user/.test(item.text)).length
+    } finally { rpc.close() }
+  }
+  await expect.poll(stoppedResults, { timeout: 30_000 }).toBe(1)
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  await expect.poll(async () => (await shellSession(sessionId))?.status, { timeout: 30_000 }).toBe('idle')
+  await expect.poll(async () => (await shellSession(sessionId))?.activeWorkerCount, { timeout: 15_000 }).toBe(0)
   const quiet = async () => {
     await expect(transcript(page)).not.toContainText('settled without returning a final result')
     await expect(transcript(page)).not.toContainText('status: blocked')
@@ -196,13 +216,15 @@ test('a worker the user stopped is a neutral marker, not a blocked result, and i
   await page.keyboard.press('Escape')
 
   await page.reload()
+  // One marker, live and replayed: the result the manager received is that marker, not a second row.
   await expect(marker(page, 'worker_stopped')).toHaveCount(1)
   await quiet()
   await shot(page, 'worker-stopped-reload')
   // The manager still takes the next message.
+  const replies = ((await transcript(page).innerText()).match(/assistant reply/g) ?? []).length
   await send(page, 'Carry on without that worker')
-  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
-  assertions.workerStop = { sessionId, marker: 'Stopped by you', blockedResult: false, stopOffered: false }
+  await expect.poll(async () => ((await transcript(page).innerText()).match(/assistant reply/g) ?? []).length, { timeout: 30_000 }).toBe(replies + 1)
+  assertions.workerStop = { sessionId, marker: 'Stopped by you', managerTold: true, blockedResult: false, stopOffered: false }
 })
 
 test('a sign-in change writes nothing into the transcript, and a model change is one quiet marker', async ({ page }) => {
@@ -271,6 +293,21 @@ test('a sign-in change writes nothing into the transcript, and a model change is
   await form.getByRole('radio', { name: 'Subscription' }).click()
   await form.getByRole('button', { name: 'Save', exact: true }).click()
   assertions.modelChange = { sessionId, signInChange: { transcriptUnchanged: true, lineageChip: false }, marker: 'Switched to GPT-6 Luna', sessionStopped: false }
+})
+
+test('the new-thread model chip shows the model\'s name', async ({ page }) => {
+  await page.goto(fleet.uiUrl)
+  const groupKey = await page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first().getAttribute('data-logical-project')
+  await page.goto(`${fleet.uiUrl}/?launch=${encodeURIComponent(groupKey!)}`)
+  const chip = page.getByTestId('launch-workspace').getByRole('button', { name: /^Session model: / })
+  await expect(chip).toBeVisible()
+  await expect(chip).toContainText('GPT-6 Sol')
+  await expect(chip).not.toContainText('gpt-6-sol')
+  // It is right on first paint, not only after the picker has been opened.
+  await page.reload()
+  await expect(chip).toContainText('GPT-6 Sol')
+  await shot(page, 'new-thread-model-chip')
+  assertions.launchModelChip = await chip.innerText()
 })
 
 test('a turn the user stopped says so, live and after reload', async ({ page }) => {

@@ -1148,24 +1148,17 @@ export class SwarmAgentLifecycleService {
   }
 
   /**
-   * The user stopped this worker. Its unfinished assignment is cancelled before the runtime goes away,
-   * so the manager is told the worker was stopped rather than handed a "blocked" result to act on.
+   * The user stopped this worker. The core is told before the runtime goes away, so when the
+   * worker's run ends its manager receives "stopped by the user" as the result, instead of a
+   * "blocked" result to act on or no result at all.
    */
   async stopWorkerByUser(agentId: string): Promise<void> {
     const descriptor = this.options.descriptors.get(agentId);
     const assignment = descriptor?.role === "worker" ? this.core?.readAssignment(agentId) : undefined;
-    const working = !!assignment && ["assigned", "running"].includes(assignment.state);
-    if (descriptor?.role === "worker" && working) {
-      await this.core!.cancelWorkerAssignment({ managerId: descriptor.managerId, workerId: agentId });
+    if (descriptor?.role === "worker" && assignment && ["assigned", "running"].includes(assignment.state)) {
+      await this.core!.noteWorkerStoppedByUser({ managerId: descriptor.managerId, workerId: agentId });
     }
     await this.stopWorker(agentId);
-    if (descriptor?.role === "worker" && working) {
-      this.options.emitImmediateManualManagerStopNotice(
-        descriptor.managerId,
-        `${descriptor.displayName || agentId} · Stopped by you`,
-        "worker_stopped",
-      );
-    }
   }
 
   /** Stops asked for while one is under way join it: a user stop and the core's release of the same worker are one shutdown. */

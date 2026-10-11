@@ -4,6 +4,7 @@ import {
   MANAGER_SELECTION_CATALOG_LIMITS,
   MANAGER_SELECTION_CATALOG_VERSION,
   WORK_MODE_UNAVAILABLE_REASONS,
+  getCatalogModel,
   isWorkModeId,
   type ManagerModelOption,
   type ManagerModelSurface,
@@ -181,7 +182,8 @@ export function catalogModelLabel(
   provider: string,
   modelId: string,
 ): string {
-  return findCatalogModel(catalog, provider, modelId)?.label ?? modelId
+  // Before the environment's catalog has loaded, the built-in catalog still knows the model's name.
+  return findCatalogModel(catalog, provider, modelId)?.label ?? getCatalogModel(modelId, provider)?.displayName ?? modelId
 }
 
 export function catalogReasoningLevels(

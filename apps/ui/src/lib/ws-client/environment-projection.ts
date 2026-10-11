@@ -1,6 +1,7 @@
 import type { SessionAttention } from '@forge/protocol'
 import {
   ACTIVITY_SUMMARY_SCHEMA_VERSION,
+  isUserStoppedWorkerResult,
   type AgentDescriptor,
   type ConversationAttachmentMetadata,
   type ConversationMessageEvent,
@@ -56,6 +57,7 @@ export function projectSession(
     contextModeOverride: session.contextMode?.override,
     sessionFile: previous?.sessionFile ?? '',
     workerCount: session.workerCount,
+    activeWorkerCount: session.activeWorkerCount ?? previous?.activeWorkerCount,
     ...(session.archived
       ? { archivedAt: session.updatedAt }
       : { archivedAt: undefined }),
@@ -154,16 +156,18 @@ export function projectItems(
       id: i.itemId,
       agentId,
       turnId: i.userTurnId,
-      ...(i.kind === 'worker_result' ? { sourceWorkerId: i.actorId } : {}),
+      ...(i.kind === 'worker_result' && !isUserStoppedWorkerResult(i.text) ? { sourceWorkerId: i.actorId } : {}),
       // An internal input is never the user's bubble: in a worker's view it is the assignment card.
-      ...(isInternalInput(i) ? { role: 'system', source: 'system', systemNoticeKind: 'assignment' }
+      // The result that told the manager its worker was stopped is the quiet marker, not a result card.
+      ...(i.kind === 'worker_result' && isUserStoppedWorkerResult(i.text) ? { role: 'system', source: 'system', systemNoticeKind: 'worker_stopped' }
+        : isInternalInput(i) ? { role: 'system', source: 'system', systemNoticeKind: 'assignment' }
         // A model switch, or a turn or worker the user stopped, is a marker in the timeline, not something the assistant said.
         : i.kind === 'assistant' && i.source && i.source in MARKER_SOURCES
           ? { role: 'system', source: 'system', systemNoticeKind: MARKER_SOURCES[i.source as keyof typeof MARKER_SOURCES] } : {
         role: i.kind === 'user' ? 'user' : i.kind === 'worker_result' ? 'system' : 'assistant',
         source: i.kind === 'user' ? 'user_input' : i.kind === 'worker_result' ? 'worker_report' : 'assistant',
       }),
-      text: i.text,
+      text: i.kind === 'worker_result' && isUserStoppedWorkerResult(i.text) ? `${i.actorId} · Stopped by you` : i.text,
       timestamp: i.timestamp,
       pinned: i.pinned ?? false,
       ...(i.commandId && !isInternalInput(i) ? { clientRequestId: i.commandId } : {}),

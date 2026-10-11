@@ -34,17 +34,19 @@ export interface WorkerAssignment {
   resultPrepared?: import("../command-service.js").InternalInput["prepared"];
   parentContext?: WorkerParentContext;
   invalidatedAt?: number;
+  /** The user stopped the worker while it was doing this; the result delivered to the manager says so. */
+  stoppedByUser?: boolean;
 }
 export type AssignmentCommand =
   | { type: "worker.assign"; assignmentId: string; parentThreadId: string; parentRunId: string; workerThreadId: string; workerRunId: string; inputId: string; attemptId: string; bindingId: string; input: Run["input"]; authorized: boolean; selection: AssignmentSelection; planStep?: WorkerAssignment["planStep"]; parentContext?: Pick<WorkerParentContext, "outputTarget" | "rootTurnId" | "parentRootTurnId"> }
   | { type: "worker.stop"; threadId: string; managerId: string; authorized: boolean }
-  /** The user stopped the worker: its unfinished work is cancelled, and the worker itself stays resumable. */
-  | { type: "worker.assignment.cancel"; threadId: string; managerId: string; authorized: boolean }
+  /** The user stopped the worker. Its manager is still owed a result saying so; the worker itself stays resumable. */
+  | { type: "worker.stopped_by_user"; threadId: string; managerId: string; authorized: boolean }
   | { type: "worker.result"; assignmentId: string; workerRunId: string; resultRef: TransferPoint; input: Run["input"]; prepared?: WorkerAssignment["resultPrepared"] }
   | { type: "assignment.deliver"; assignmentId: string; authorized: boolean }
   | { type: "assignments.clear"; threadId: string; authorized: boolean };
 export type AssignmentEvent =
-  | { type: "assignment.created" | "assignment.started" | "assignment.terminal" | "assignment.cancelled" | "assignment.result_recorded" | "assignment.invalidated"; assignment: WorkerAssignment }
+  | { type: "assignment.created" | "assignment.started" | "assignment.stopped_by_user" | "assignment.terminal" | "assignment.cancelled" | "assignment.result_recorded" | "assignment.invalidated"; assignment: WorkerAssignment }
   | TransferEvent;
 export type AssignmentEffect = { kind: "assignment.result.extract"; threadId: string; assignmentId: string; workerRunId: string };
 
@@ -94,7 +96,9 @@ export function decideAssignment(initial: CoreState, command: CoreCommand & Assi
     if (transfer.targetGeneration !== parent.generation) emit({ type: "transfer.created", transfer: { ...transfer, targetGeneration: parent.generation } });
     apply({ type: "run.submit", commandId: command.commandId, now: command.now, threadId: parent.threadId,
       runId: transfer.targetRunId, inputId: `${assignment.assignmentId}:result:input`, attemptId: `${assignment.assignmentId}:result:attempt`,
-      bindingId: parent.bindingId ?? `${assignment.assignmentId}:result:binding`, delivery: "queue", input: assignment.resultInput });
+      bindingId: parent.bindingId ?? `${assignment.assignmentId}:result:binding`,
+      // A manager waiting inside its turn for a worker the user stopped would wait forever behind a queue: it is told now.
+      delivery: assignment.stoppedByUser ? "steer" : "queue", input: assignment.resultInput });
   };
   switch (command.type) {
     case "worker.assign": {
@@ -120,11 +124,14 @@ export function decideAssignment(initial: CoreState, command: CoreCommand & Assi
         attemptId: command.attemptId, bindingId: command.bindingId, input: command.input, delivery: "queue" });
       break;
     }
-    case "worker.stop": case "worker.assignment.cancel": {
+    case "worker.stop": case "worker.stopped_by_user": {
       const worker = state.threads[command.threadId]; const manager = state.threads[command.managerId];
       if (!command.authorized || !manager || manager.role !== "manager" || !worker || worker.role !== "worker" || worker.managerId !== manager.threadId) throw new Error("Authorized worker owner required");
-      for (const assignment of Object.values(state.assignments)) if (assignment.workerThreadId === worker.threadId && ["assigned", "running"].includes(assignment.state))
-        emit({ type: "assignment.cancelled", assignment: { ...assignment, state: "cancelled", terminalAt: command.now, outcome: "cancelled" } });
+      for (const assignment of Object.values(state.assignments)) if (assignment.workerThreadId === worker.threadId && ["assigned", "running"].includes(assignment.state)) {
+        // A user stop is not a cancellation: the assignment ends with its run, and its result tells the manager why.
+        if (command.type === "worker.stopped_by_user") emit({ type: "assignment.stopped_by_user", assignment: { ...assignment, stoppedByUser: true } });
+        else emit({ type: "assignment.cancelled", assignment: { ...assignment, state: "cancelled", terminalAt: command.now, outcome: "cancelled" } });
+      }
       if (command.type === "worker.stop") apply({ type: "thread.stop", commandId: command.commandId, now: command.now, threadId: worker.threadId });
       break;
     }

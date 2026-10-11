@@ -123,6 +123,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       unread: wireProjection.unread(descriptor.agentId, descriptor.profileId ?? descriptor.agentId),
       pendingCount: prior?.pendingCount ?? 0,
       workerCount: descriptor.workerCount ?? swarmManager.listWorkersForSession(descriptor.agentId).length,
+      activeWorkerCount: swarmManager.listWorkersForSession(descriptor.agentId).filter(worker => (projectLifecycleStatus(state, worker.agentId)?.agentStatus ?? worker.status) === "streaming").length,
       createdAt: descriptor.createdAt, pinnedAt: descriptor.pinnedAt ?? null, lastUsedAt: descriptor.lastUserMessageAt ?? null,
       updatedAt: descriptor.updatedAt, sortKey: descriptor.createdAt, archived: Boolean(descriptor.archivedAt),
       workspace: { ...(prior?.workspace ?? { kind: "current_checkout", branch: null }), cwd: descriptor.cwd },
