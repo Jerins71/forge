@@ -152,3 +152,43 @@ test('a worker shows its own activity in the worker view', async ({ page }) => {
   assertions.workerRows = first
   expect(renderErrors).toEqual([])
 })
+
+test('provider retries and the final failure show as one status row, live and after reload', async ({ page }) => {
+  const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
+  await rm(releaseFile(), { force: true })
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
+  await expect(transcript(page)).toBeVisible()
+
+  // Recovered: three rejected attempts update one live row in place, then the turn completes.
+  await send(page, '[fixture:retry] Ride out a rejected key')
+  await expect(status().last()).toHaveAttribute('data-activity-status', 'running')
+  await expect(status().last()).toContainText('Retrying: unexpected status 401 Unauthorized: Invalid API key (attempt 3)')
+  const before = await status().count()
+  await status().last().getByRole('button').click()
+  await expect(status().last().getByTestId('activity-detail')).toContainText('Attempt 3')
+  await shot(page, 'retrying')
+  await status().last().getByRole('button').click()
+  await writeFile(releaseFile(), 'release')
+  await expect(status().last()).toHaveAttribute('data-activity-status', 'completed', { timeout: 30_000 })
+  await expect(status().last()).toContainText('Recovered after 3 retries')
+  expect(await status().count()).toBe(before)
+
+  // Failed: the provider gives up; the row turns into the failure with the retry count.
+  await rm(releaseFile(), { force: true })
+  await send(page, '[fixture:retry-fail] Give up on a rejected key')
+  await expect(status().last()).toContainText('Retrying: unexpected status 401 Unauthorized: Invalid API key (attempt 3)')
+  await writeFile(releaseFile(), 'release')
+  await expect(status().last()).toHaveAttribute('data-activity-status', 'failed', { timeout: 30_000 })
+  await expect(status().last()).toContainText('Failed: unexpected status 401 Unauthorized: Invalid API key (after 3 retries)')
+  expect(await status().count()).toBe(before + 1)
+  const live = await status().allTextContents()
+  await shot(page, 'retry-failed')
+
+  await page.reload()
+  await expect(status().last()).toContainText('Failed: unexpected status 401', { timeout: 30_000 })
+  expect(await status().allTextContents()).toEqual(live)
+  await status().last().getByRole('button').click()
+  await expect(status().last().getByTestId('activity-detail')).toContainText('Retried 3 times')
+  await shot(page, 'retry-failed-replayed')
+  assertions.statusRows = live
+})

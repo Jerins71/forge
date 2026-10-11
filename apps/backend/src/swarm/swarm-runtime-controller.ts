@@ -113,7 +113,8 @@ export interface SwarmRuntimeControllerHost extends SwarmToolHost {
     captureConversationEventFromRuntime(agentId: string, event: RuntimeSessionEvent, options?: { turnId?: string }): void;
     emitConversationMessage(event: ConversationMessageEvent, options?: { routingReceipt?: MessageRoutingReceiptRecord }): void;
     observeReasoning(fact: { actorId: string; nativeId: string; phase: "start" | "delta" | "complete"; text: string; runId?: string }): void;
-    settleReasoning(actorId: string): void;
+    observeProviderRetry(fact: { actorId: string; attempt: number; message: string; runId?: string }): void;
+    settleProviderTurn(actorId: string, error?: string): void;
   };
   promptService: {
     buildCursorSdkRuntimeSystemPrompt(descriptor: AgentDescriptor, systemPrompt: string): Promise<string>;
@@ -381,7 +382,8 @@ export class SwarmRuntimeController {
       const actorId = scope.threadId;
       return { binding, adapter: tapProviderReasoning(adapter, {
         reasoning: fact => this.host.conversationProjector.observeReasoning({ ...fact, actorId, runId: this.host.getActiveTurnId?.(actorId) }),
-        settled: () => this.host.conversationProjector.settleReasoning(actorId),
+        retrying: fact => this.host.conversationProjector.observeProviderRetry({ ...fact, actorId, runId: this.host.getActiveTurnId?.(actorId) }),
+        settled: error => this.host.conversationProjector.settleProviderTurn(actorId, error),
       }) };
     };
     try { return await open(); } catch (error) {

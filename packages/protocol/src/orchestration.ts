@@ -117,6 +117,9 @@ export const ProviderObservationSchema = Type.Union([
   }, strict)),
   Type.Object({ ...observationFields, type: Type.Literal("error"), origin, code: id, message: Type.String(),
     delivery: values(["not_dispatched", "accepted", "unknown"] as const) }, strict),
+  /** Display only: the provider is retrying a failed request itself. Never a terminal or delivery fact. */
+  Type.Object({ ...observationFields, type: Type.Literal("retry"), origin, attempt: Type.Integer({ minimum: 1 }), message: Type.String(),
+    maxAttempts: Type.Optional(Type.Integer({ minimum: 1 })), delayMs: Type.Optional(Type.Number({ minimum: 0 })) }, strict),
   Type.Object({ ...observationFields, type: Type.Literal("compaction"), origin,
     phase: values(["started", "completed", "failed"] as const), payload: Type.Optional(jsonValue) }, strict),
 ]);

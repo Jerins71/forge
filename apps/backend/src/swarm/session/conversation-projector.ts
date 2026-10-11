@@ -36,7 +36,7 @@ import {
   sumOptionalNumbers
 } from "./conversation-diagnostics.js";
 import { RuntimeConversationEventMapper, safeJson } from "./runtime-conversation-event-mapper.js";
-import { buildActivitySummary, buildReasoningSummary } from "./activity-summary.js";
+import { buildActivitySummary, buildTimelineSummary } from "./activity-summary.js";
 import { ActivityTimelineTracker, type ReasoningFact } from "./activity-timeline.js";
 import type { TimelineActivity } from "@forge/protocol";
 import {
@@ -450,12 +450,19 @@ export class ConversationProjector {
   observeReasoning(fact: Omit<ReasoningFact, "sessionId" | "timestamp">): void {
     const sessionId = resolveManagerContextId(this.deps.descriptors.get(fact.actorId), fact.actorId);
     const finished = this.activity.observeReasoning({ ...fact, sessionId, timestamp: this.deps.now() });
-    if (finished) this.emitActivitySummary(buildReasoningSummary(finished));
+    if (finished) this.emitActivitySummary(buildTimelineSummary(finished));
   }
 
-  /** Closes reasoning rows a finished turn left open. */
-  settleReasoning(actorId: string): void {
-    for (const finished of this.activity.settleReasoning(actorId, this.deps.now())) this.emitActivitySummary(buildReasoningSummary(finished));
+  /** Updates the turn's one status row in place: "Retrying: 401 Invalid API key (attempt 3)". */
+  observeProviderRetry(fact: { actorId: string; attempt: number; message: string; runId?: string }): void {
+    const sessionId = resolveManagerContextId(this.deps.descriptors.get(fact.actorId), fact.actorId);
+    this.activity.observeRetry({ ...fact, sessionId, timestamp: this.deps.now() });
+  }
+
+  /** Closes the rows a finished turn left open and persists them, including its retry or failure status. */
+  settleProviderTurn(actorId: string, error?: string): void {
+    const sessionId = resolveManagerContextId(this.deps.descriptors.get(actorId), actorId);
+    for (const finished of this.activity.settleTurn({ actorId, sessionId, error, timestamp: this.deps.now() })) this.emitActivitySummary(buildTimelineSummary(finished));
   }
 
   emitAgentToolCall(event: AgentToolCallEvent): void {

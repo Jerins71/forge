@@ -13,6 +13,8 @@ export const ACTIVITY_DETAIL_MAX_CHARS = 6000
 
 export const TIMELINE_ACTIVITY_KINDS = [
   'reasoning', 'command', 'file_read', 'file_edit', 'search', 'web', 'agent', 'tool',
+  // One row per turn for provider retries and the provider error that ended it.
+  'status',
 ] as const
 export type TimelineActivityKind = (typeof TIMELINE_ACTIVITY_KINDS)[number]
 

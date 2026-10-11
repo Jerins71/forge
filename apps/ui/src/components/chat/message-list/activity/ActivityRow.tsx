@@ -1,6 +1,6 @@
 import { memo, useEffect, useId, useState } from 'react'
 import {
-  Brain, ChevronRight, FileText, Globe, PencilLine, Search, Terminal, Users, Wrench, type LucideIcon,
+  Brain, ChevronRight, FileText, Globe, PencilLine, RefreshCw, Search, Terminal, Users, Wrench, type LucideIcon,
 } from 'lucide-react'
 import type { TimelineActivityKind } from '@forge/protocol'
 import { cn } from '@/lib/utils'
@@ -9,7 +9,7 @@ import type { ActivityRowModel } from './activity-model'
 
 export const ACTIVITY_ICONS: Record<TimelineActivityKind, LucideIcon> = {
   reasoning: Brain, command: Terminal, file_read: FileText, file_edit: PencilLine,
-  search: Search, web: Globe, agent: Users, tool: Wrench,
+  search: Search, web: Globe, agent: Users, tool: Wrench, status: RefreshCw,
 }
 
 /** Characters of content rendered before "Show more"; the rest stays out of the DOM. */
@@ -68,10 +68,10 @@ export const ActivityRow = memo(function ActivityRow({ row, expanded, onToggle, 
       <span className="flex size-5 shrink-0 items-center justify-center">
         <Icon className={cn('size-3.5', row.status === 'failed' ? 'text-danger' : 'text-subtle-foreground')} strokeWidth={1.75} aria-hidden="true" />
       </span>
-      <span className={cn('min-w-0 flex-1 truncate', row.kind !== 'reasoning' && 'font-mono text-[12px]', running && 'activity-shimmer')} data-activity-shimmer={running ? 'true' : undefined}>
+      <span className={cn('min-w-0 flex-1 truncate', row.kind !== 'reasoning' && row.kind !== 'status' && 'font-mono text-[12px]', running && 'activity-shimmer')} data-activity-shimmer={running ? 'true' : undefined}>
         {label}
       </span>
-      {row.status === 'failed' ? <span className="shrink-0 text-[11px] text-danger">{row.exitCode !== undefined ? `exit ${row.exitCode}` : 'failed'}</span> : null}
+      {row.status === 'failed' && row.kind !== 'status' ? <span className="shrink-0 text-[11px] text-danger">{row.exitCode !== undefined ? `exit ${row.exitCode}` : 'failed'}</span> : null}
       {expandable ? (
         <ChevronRight className={cn('size-3.5 shrink-0 text-subtle-foreground transition-transform duration-150', expanded && 'rotate-90')} strokeWidth={2} aria-hidden="true" />
       ) : null}

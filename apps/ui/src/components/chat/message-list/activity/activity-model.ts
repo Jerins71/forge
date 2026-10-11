@@ -50,6 +50,7 @@ const GROUP_LABELS: Record<TimelineActivityKind, (count: number) => string> = {
   agent: (count) => `Made ${plural(count, 'agent call', 'agent calls')}`,
   tool: (count) => `Used ${plural(count, 'tool', 'tools')}`,
   reasoning: (count) => (count === 1 ? 'Thought' : `Thought ${count} times`),
+  status: () => 'Provider status',
 }
 
 /** The collapsed header for finished rows: "Ran 2 commands, changed 1 file". */

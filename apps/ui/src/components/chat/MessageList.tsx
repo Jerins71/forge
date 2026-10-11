@@ -258,7 +258,8 @@ function buildDisplayEntries(messages: ConversationEntry[]): DisplayEntry[] {
     if (message.type === 'activity_summary' && message.activity) {
       const row = replayedActivityRow(message as EnvironmentActivityEntry & { type: 'activity_summary' })
       const previous = displayEntries.at(-1)
-      if (previous?.type === 'activity_group') {
+      // A retry or failure status stands on its own line; it never folds into a run of work.
+      if (previous?.type === 'activity_group' && row.kind !== 'status' && previous.rows[0]?.kind !== 'status') {
         previous.rows.push(row)
       } else {
         const turn = !turnTimer && turnStartedAt ? { startedAt: turnStartedAt, endedAt: message.timestamp } : undefined
@@ -1434,7 +1435,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
         <ActivityGroup
           groupId={entry.id}
           rows={entry.rows}
-          open={inLiveTurn && displayEntries.at(-1) === entry}
+          open={entry.rows[0]?.kind === 'status' || (inLiveTurn && displayEntries.at(-1) === entry)}
           expandedIds={expandedActivityIds}
           onToggle={toggleActivity}
           loadContent={loadActivityContent}

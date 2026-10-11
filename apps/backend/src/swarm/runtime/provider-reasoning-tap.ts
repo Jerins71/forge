@@ -3,20 +3,31 @@ import type { ProviderAdapter } from "./provider-contract.js";
 
 export interface ProviderReasoningSink {
   reasoning(fact: { nativeId: string; phase: "start" | "delta" | "complete"; text: string }): void;
-  /** The root attempt ended; reasoning it left open is complete. */
-  settled(): void;
+  /** The provider is retrying a failed request on its own. */
+  retrying(fact: { attempt: number; message: string }): void;
+  /** The root attempt ended, with the provider error that ended it when there was one. */
+  settled(error?: string): void;
 }
 
 /**
  * Passes a binding's single observation stream through unchanged and reports its
- * root reasoning to the timeline. Lifecycle authority stays with the stream's consumer.
+ * root reasoning, retries and failures to the timeline. Lifecycle authority stays with the stream's consumer.
  */
 export function tapProviderReasoning(adapter: ProviderAdapter, sink: ProviderReasoningSink): ProviderAdapter {
+  // An error and the failed terminal that follows it describe one failure; report it once per turn.
+  let failureReported = false;
   const report = (observation: ProviderObservation) => {
     if (observation.origin.kind !== "root") return;
+    if (observation.type === "accepted") failureReported = false;
     if (observation.type === "message" && observation.channel === "reasoning") {
       sink.reasoning({ nativeId: observation.item.nativeId, phase: observation.phase, text: observation.text });
-    } else if (observation.type === "terminal") sink.settled();
+    } else if (observation.type === "retry") sink.retrying({ attempt: observation.attempt, message: observation.message });
+    else if (observation.type === "error" || observation.type === "terminal") {
+      const error = observation.type === "error" ? observation.message
+        : observation.outcome === "failed" ? observation.error?.message ?? "The provider turn failed." : undefined;
+      sink.settled(failureReported ? undefined : error);
+      failureReported ||= error !== undefined;
+    }
   };
   const observations: ProviderAdapter["observations"] = async function* (binding, signal) {
     for await (const observation of adapter.observations(binding, signal)) {

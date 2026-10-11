@@ -31,6 +31,9 @@ interface Tracked { item: TimelineActivity; streamed: boolean; publishedAt: numb
  */
 export class ActivityTimelineTracker {
   private readonly items = new Map<string, Tracked>();
+  /** The open status row of each actor's current turn, and the retries it has counted. */
+  private readonly status = new Map<string, Tracked>();
+  private readonly attempts = new Map<string, number>();
 
   constructor(private readonly publish: (item: TimelineActivity) => void, private readonly now: () => number = Date.now) {}
 
@@ -97,13 +100,55 @@ export class ActivityTimelineTracker {
     return this.finishReasoning(tracked, fact.timestamp);
   }
 
-  /** Completes reasoning that a finished turn left open, for example after an interrupt. */
-  settleReasoning(actorId: string, timestamp: string): TimelineActivity[] {
+  /** One status row per turn, updated in place while the provider retries a failing request. */
+  observeRetry(fact: { actorId: string; sessionId: string; attempt: number; message: string; runId?: string; timestamp: string }): void {
+    const tracked = this.statusRow(fact);
+    const message = oneLine(fact.message);
+    Object.assign(tracked.item, bounded("detail", `Attempt ${fact.attempt}\n${fact.message}`, "head"));
+    tracked.item.summary = `Retrying: ${message} (attempt ${fact.attempt})`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
+    this.attempts.set(tracked.item.itemId, fact.attempt);
+    this.publishNow(tracked);
+  }
+
+  /**
+   * Ends the turn's open rows: reasoning an interrupt left running, and the status row, which
+   * fails with the provider error or records the retries the turn recovered from.
+   */
+  settleTurn(fact: { actorId: string; sessionId: string; error?: string; runId?: string; timestamp: string }): TimelineActivity[] {
     const finished: TimelineActivity[] = [];
     for (const tracked of this.items.values()) {
-      if (tracked.item.kind === "reasoning" && tracked.item.actorId === actorId && tracked.item.status === "running") finished.push(this.finishReasoning(tracked, timestamp));
+      if (tracked.item.kind === "reasoning" && tracked.item.actorId === fact.actorId && tracked.item.status === "running") finished.push(this.finishReasoning(tracked, fact.timestamp));
     }
+    const open = this.status.get(fact.actorId);
+    if (!open && !fact.error) return finished;
+    const tracked = open ?? this.statusRow(fact);
+    const item = tracked.item;
+    const attempts = this.attempts.get(item.itemId);
+    this.status.delete(fact.actorId); this.attempts.delete(item.itemId);
+    if (fact.error) {
+      item.status = "failed";
+      item.summary = `Failed: ${oneLine(fact.error)}${attempts ? ` (after ${attempts} ${attempts === 1 ? "retry" : "retries"})` : ""}`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
+      Object.assign(item, bounded("detail", `${attempts ? `Retried ${attempts} ${attempts === 1 ? "time" : "times"}\n` : ""}${fact.error}`, "head"));
+    } else {
+      item.status = "completed";
+      item.summary = `Recovered after ${attempts} ${attempts === 1 ? "retry" : "retries"}: ${oneLine((item.detail ?? "").split("\n").slice(1).join(" "))}`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
+    }
+    item.completedAt = fact.timestamp;
+    this.publishNow(tracked);
+    finished.push(item);
     return finished;
+  }
+
+  private statusRow(fact: { actorId: string; sessionId: string; runId?: string; timestamp: string }): Tracked {
+    let tracked = this.status.get(fact.actorId);
+    if (!tracked) {
+      tracked = this.track({
+        itemId: `status:${fact.actorId}:${fact.runId ?? fact.timestamp}`, sessionId: fact.sessionId, actorId: fact.actorId,
+        ...(fact.runId ? { runId: fact.runId } : {}), kind: "status", status: "running", startedAt: fact.timestamp, summary: "Retrying…",
+      });
+      this.status.set(fact.actorId, tracked);
+    }
+    return tracked;
   }
 
   /** The row for a finished tool call, used once by its canonical summary. */
@@ -121,7 +166,9 @@ export class ActivityTimelineTracker {
     for (const [id, tracked] of this.items) {
       if (tracked.item.sessionId !== agentId && tracked.item.actorId !== agentId) continue;
       clearTimeout(tracked.timer); this.items.delete(id);
+      this.attempts.delete(id);
     }
+    this.status.delete(agentId);
   }
 
   private finishReasoning(tracked: Tracked, timestamp: string): TimelineActivity {
@@ -258,6 +305,10 @@ function bounded(field: "input" | "detail", text: string, keep: "head" | "tail")
   const max = field === "input" ? ACTIVITY_INPUT_MAX_CHARS : ACTIVITY_DETAIL_MAX_CHARS;
   if (text.length <= max) return { [field]: text };
   return { [field]: keep === "head" ? text.slice(0, max) : text.slice(-max), truncated: true };
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 function firstLine(text: string): string {

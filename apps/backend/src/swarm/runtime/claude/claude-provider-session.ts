@@ -224,6 +224,8 @@ export class ClaudeProviderSession {
     }
     if (frame.type === "system") {
       if (frame.subtype === "status" && frame.status === "compacting") this.compactionStarted();
+      if (frame.subtype === "api_retry") this.publish({ type: "retry", origin: currentOrigin, attempt: Math.max(1, frame.attempt), maxAttempts: Math.max(1, frame.max_retries), delayMs: frame.retry_delay_ms,
+        message: [frame.error_status, String(frame.error ?? "request failed").replaceAll("_", " ")].filter(Boolean).join(" ") });
       if (frame.subtype === "compact_boundary") {
         this.compacting = false; this.publish({ type: "compaction", origin: currentOrigin, phase: "completed", payload: JSON.parse(JSON.stringify(frame.compact_metadata)) });
       }

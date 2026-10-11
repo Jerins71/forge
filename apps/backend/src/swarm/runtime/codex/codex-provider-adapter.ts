@@ -32,6 +32,7 @@ interface NativeTurn {
   compact: boolean;
   compactionCompleted: boolean;
   pendingTools: number;
+  retries: number;
 }
 interface PendingRequest {
   turn: NativeTurn;
@@ -444,6 +445,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
       if (typeof tokens === "number" && typeof contextWindow === "number") this.emit(turn, { type: "context_usage", origin: this.origin(turn), tokens, contextWindow, percent: contextWindow ? tokens / contextWindow * 100 : 0 });
     }
     // Codex reports its own reconnect attempts as errors that it will retry; the turn is still running.
+    if (method === "error" && params.willRetry === true) this.emit(turn, { type: "retry", origin: this.origin(turn), attempt: ++turn.retries, message: String(params.error?.message ?? "Provider request failed") });
     if (method === "error" && params.willRetry !== true) this.emit(turn, { type: "error", origin: this.origin(turn), code: "CODEX_PROVIDER", message: String(params.error?.message ?? "Provider request failed"), delivery: turn.accepted ? "accepted" : "unknown" });
     if (method === "turn/completed") {
       const outcome = params.turn?.status;
@@ -525,7 +527,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
     if (turn) this.emit(turn, { type: "error", origin: this.origin(turn), code: "CODEX_PROTOCOL", message: message(error), delivery: turn.accepted ? "accepted" : "unknown" });
   }
   private begin(conversation: ProviderConversationRef, attemptId: string, compact = false): NativeTurn {
-    return { conversation, attemptId, abort: new AbortController(), mapper: new CodexRuntimeEvents(), accepted: false, ended: false, compact, compactionCompleted: false, pendingTools: 0 };
+    return { conversation, attemptId, abort: new AbortController(), mapper: new CodexRuntimeEvents(), accepted: false, ended: false, compact, compactionCompleted: false, pendingTools: 0, retries: 0 };
   }
   private releaseTurn(turn: NativeTurn): void {
     if (!turn.ended || !turn.id || turn.pendingTools) return;

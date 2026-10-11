@@ -37,8 +37,8 @@ export function buildActivitySummary(
   };
 }
 
-/** A finished reasoning row, persisted in its actor's own history with bounded text. */
-export function buildReasoningSummary(item: TimelineActivity): ActivitySummaryEvent {
+/** A finished reasoning or status row, persisted in its actor's own history with bounded text. */
+export function buildTimelineSummary(item: TimelineActivity): ActivitySummaryEvent {
   return {
     type: "activity_summary",
     schemaVersion: 1,
@@ -46,10 +46,12 @@ export function buildReasoningSummary(item: TimelineActivity): ActivitySummaryEv
     agentId: item.actorId,
     actorAgentId: item.actorId,
     ...(item.runId ? { turnId: item.runId } : {}),
-    timestamp: item.completedAt ?? item.startedAt,
+    // A status row is written when the turn ends but belongs where the trouble began, above the reply.
+    timestamp: item.kind === "status" ? item.startedAt : item.completedAt ?? item.startedAt,
     kind: "tool_activity",
-    status: "completed",
+    status: item.status === "failed" ? "failed" : "completed",
     displaySummary: item.summary,
+    ...(item.status === "failed" ? { isError: true } : {}),
     activity: persistedActivityDetail(item),
   };
 }
