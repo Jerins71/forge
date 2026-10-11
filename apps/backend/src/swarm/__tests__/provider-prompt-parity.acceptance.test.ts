@@ -22,6 +22,8 @@ const digest = (text: string) => createHash("sha256").update(text).digest("hex")
 describe("production prompt and tool boundary baseline", () => {
   it.each(["codex", "claude", "cursor-sdk", "pi"])("retains %s request bytes for archetype, specialist and project agent sources", async provider => {
     const fixture = await createProviderBoundaryFixture();
+    // Pi appends a local calendar date; keep that date fixed in every timezone.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 10, 12) });
     vi.spyOn(Date.prototype, "toISOString").mockReturnValue("2026-01-01T00:00:00.000Z");
     const captured: Array<{ systemPrompt: string; tools: Array<{ name: string; description: string; parameters: unknown }> }> = [];
     const codexCreate = CodexAgentRuntime.create.bind(CodexAgentRuntime);
@@ -114,6 +116,6 @@ describe("production prompt and tool boundary baseline", () => {
         expect({ promptSha256: digest(normalize(rendered)), toolSchemasSha256: digest(normalize(JSON.stringify(tools.map(({ name, description, parameters }) => ({ name, description, parameters }))))),
           toolNames: tools.map(tool => tool.name) }).toMatchSnapshot(`${provider}:${variant}`);
       }
-    } finally { await Promise.all(runtimes.map(runtime => runtime.terminate())); vi.restoreAllMocks(); await fixture.cleanup(); }
+    } finally { await Promise.all(runtimes.map(runtime => runtime.terminate())); vi.restoreAllMocks(); vi.useRealTimers(); await fixture.cleanup(); }
   });
 });

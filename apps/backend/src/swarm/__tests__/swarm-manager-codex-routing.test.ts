@@ -1,3 +1,4 @@
+import { findWorkerAssignment } from "../../environment/control/orchestration/assignments.js";
 import { loadState } from '../../environment/control/orchestration/store.js'
 import type { SessionManager } from '@earendil-works/pi-coding-agent'
 import { createTestEnvironment } from '../../test-support/environment-auth.js'
@@ -164,6 +165,7 @@ function findInternalCodexPluginWorker(
 
 async function completeWorker(
   manager: TestSwarmManager,
+  environment: Awaited<ReturnType<typeof bootWithDefaultManager>>,
   workerAgentId: string,
   text: string,
 ): Promise<void> {
@@ -171,7 +173,30 @@ async function completeWorker(
     type: "message_end",
     message: { role: "assistant", content: text, stopReason: "stop" },
   });
-  await manager.handleRuntimeAgentEnd(workerAgentId);
+  await observeTerminal(environment, workerAgentId);
+}
+
+async function observeTerminal(environment: Awaited<ReturnType<typeof bootWithDefaultManager>>, agentId: string): Promise<void> {
+  await vi.waitFor(() => {
+    const state = loadState(environment.database);
+    const run = state.runs[state.threads[agentId].activeRunId!];
+    expect(run).toBeDefined();
+    expect(state.attempts[run.activeAttemptId].state).toBe("accepted");
+  });
+  const state = loadState(environment.database);
+  const run = state.runs[state.threads[agentId].activeRunId!];
+  const attempt = state.attempts[run.activeAttemptId];
+  const binding = state.bindings[attempt.bindingId];
+  environment.control.record({ type: "provider.observe", commandId: `terminal:${attempt.attemptId}`, now: Date.now(), observation: {
+    type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: attempt.lastSequence + 1,
+    origin: { kind: "root", conversation: binding.conversation, turn: attempt.turn! }, terminalAuthority: "root_attempt", outcome: "completed",
+  } });
+  expect(loadState(environment.database).runs[run.runId]).toMatchObject({ state: "terminal", outcome: "completed" });
+}
+
+function lastRuntimeText(manager: TestSwarmManager, agentId: string): string {
+  const message = manager.runtimeByAgentId.get(agentId)?.sendCalls.at(-1)?.message;
+  return typeof message === "string" ? message : message?.text ?? "";
 }
 
 describe("SwarmManager Codex mention routing", () => {
@@ -247,9 +272,14 @@ describe("SwarmManager Codex mention routing", () => {
       }),
     ).rejects.toThrow(/scoped to the active Codex Plugin specialist worker/i);
 
+    // The first native turn settles before the owner starts a new scoped assignment.
+    await completeWorker(manager, environment, worker!.agentId, "Initial scoped plugin findings.");
+    await observeTerminal(environment, "manager");
+    await vi.waitFor(() => expect(lastRuntimeText(manager, "manager")).toContain("[workerResult]"));
+    expect(manager.getCodexPluginScopeForWorker(worker!.agentId)).toBeDefined();
     const followUpReceipt = await manager.sendMessage("manager", worker!.agentId, "follow up within active scope");
     expect(followUpReceipt.targetAgentId).toBe(worker!.agentId);
-    expect(workerRuntime?.sendCalls.length ?? 0).toBe(sendCountBefore + 1);
+    await vi.waitFor(() => expect(workerRuntime?.sendCalls.length ?? 0).toBe(sendCountBefore + 1));
 
     await expect(
       manager.sendMessage("manager", worker!.agentId, "follow-up with attachment", "auto", {
@@ -278,16 +308,27 @@ describe("SwarmManager Codex mention routing", () => {
     expect(workerRuntime?.sendCalls.length ?? 0).toBe(sendCountBefore + 1);
     expect(manager.getCodexPluginScopeForWorker(worker!.agentId)).toBeDefined();
 
-    const parentBeforeFeedback = structuredClone(worker!.workerParentContext);
+    const parentBeforeFeedback = structuredClone(findWorkerAssignment(loadState(environment.database), worker!.agentId)?.parentContext);
+    expect(parentBeforeFeedback).toMatchObject({ managerId: "manager", assignmentId: expect.any(String) });
     const managerRuntime = manager.runtimeByAgentId.get("manager");
     await manager.sendMessage(worker!.agentId, "manager", "Found the requested meetings; checking dates.");
-    expect(String(managerRuntime?.sendCalls.at(-1)?.message)).toContain(`Message from worker ${worker!.agentId}:`);
-    expect(worker!.workerParentContext).toEqual(parentBeforeFeedback);
+    await observeTerminal(environment, "manager");
+    await vi.waitFor(() => expect(lastRuntimeText(manager, "manager")).toContain(`Message from worker ${worker!.agentId}:`));
+    expect(findWorkerAssignment(loadState(environment.database), worker!.agentId)?.parentContext).toEqual(parentBeforeFeedback);
     expect(manager.getCodexPluginScopeForWorker(worker!.agentId)).toBeDefined();
     const managerSendCountBeforeResult = managerRuntime?.sendCalls.length ?? 0;
-    await completeWorker(manager, worker!.agentId, "Scoped plugin result.");
-    expect(managerRuntime?.sendCalls.length ?? 0).toBe(managerSendCountBeforeResult + 1);
-    expect(String(managerRuntime?.sendCalls.at(-1)?.message)).toContain("[workerResult]");
+    await completeWorker(manager, environment, worker!.agentId, "Scoped plugin result.");
+    managerRuntime!.busy = false;
+    await observeTerminal(environment, "manager");
+    await vi.waitFor(() => expect(managerRuntime?.sendCalls.length ?? 0).toBe(managerSendCountBeforeResult + 1));
+    expect(lastRuntimeText(manager, "manager")).toContain("[workerResult]");
+    expect(lastRuntimeText(manager, "manager")).toContain("Scoped plugin result.");
+    expect(manager.getConversationHistory("manager").find(entry => entry.type === "conversation_message" && entry.source === "worker_report" && entry.text.includes("Scoped plugin result."))).toMatchObject({
+      role: "system",
+      source: "worker_report",
+      sourceWorkerId: worker!.agentId,
+      text: expect.stringContaining("Scoped plugin result."),
+    });
 
     expect(
       manager

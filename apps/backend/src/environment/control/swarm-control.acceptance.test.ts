@@ -590,7 +590,20 @@ it.each(["stopped", "error", "queued"] as const)("native worker.kill under %s ma
     const worker = await f.manager.spawnAgent(f.sessionId, { agentId: "review-worker" });
     const queuedId = randomUUID();
     if (state === "queued") await core.controlService.execute(principal, "session.send", { commandId: queuedId, sessionId: f.sessionId, message: { text: "keep this manager input", artifactIds: [] } });
-    else { (f.manager as unknown as { descriptors: Map<string, { status: typeof state }> }).descriptors.get(f.sessionId)!.status = state; expect(f.manager.getAgent(f.sessionId)?.status).toBe(state); }
+    else if (state === "stopped") {
+      await core.controlService.execute(principal, "session.stop", { commandId: randomUUID(), sessionId: f.sessionId });
+      await core.effectWorker.drain();
+      expect(f.manager.getAgent(f.sessionId)?.status).toBe("stopped");
+    } else {
+      f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true;
+      await core.controlService.execute(principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "manager transport becomes unknown", artifactIds: [] } });
+      await core.effectWorker.drain();
+      const current = loadState(f.database); const run = current.runs[current.threads[f.sessionId].activeRunId!];
+      core.controlService.record({ type: "attempt.unknown", commandId: randomUUID(), now: Date.now(), threadId: f.sessionId, attemptId: run.activeAttemptId });
+      await core.effectWorker.drain();
+      expect(loadState(f.database).runs[run.runId].state, JSON.stringify(loadState(f.database).threads[f.sessionId])).toBe("recovery");
+      expect(f.manager.getAgent(f.sessionId)?.status).toBe("error");
+    }
     const input = { commandId: randomUUID(), sessionId: f.sessionId, workerId: worker.agentId };
     await expect(lifecycle.execute(principal, "worker.kill", { ...input, commandId: randomUUID(), sessionId: "manager" })).rejects.toMatchObject({ code: "NOT_FOUND" });
     const receipt = await lifecycle.execute(principal, "worker.kill", input);
@@ -607,7 +620,10 @@ it.each(["stopped", "error", "queued"] as const)("native worker.kill under %s ma
     });
     expect(f.manager.isSessionShutdownSafe(worker.agentId)).toBe(true);
     expect(f.manager.runtimeByAgentId.get(worker.agentId)?.terminateCalls).toHaveLength(1);
-    expect(f.database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(f.sessionId)).toEqual({ desired_state: "running" });
+    expect(f.database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(f.sessionId)).toEqual({ desired_state: state === "stopped" ? "stopped" : "running" });
+    const parentSummary = f.database.prepare("SELECT summary_json FROM control_sessions WHERE session_id=?").get(f.sessionId) as { summary_json: string };
+    expect(JSON.parse(parentSummary.summary_json).status).toBe(state === "stopped" ? "stopped" : state === "error" ? "interrupted" : "idle");
+    expect(f.manager.getAgent(f.sessionId)?.status).toBe(state === "error" ? "error" : state === "stopped" ? "stopped" : "idle");
     if (state === "queued") expect(await core.controlService.getReceipt(principal, queuedId)).toMatchObject({ state: "succeeded", delivery: "dispatched" });
     expect(await lifecycle.execute(principal, "worker.kill", input)).toMatchObject({ state: "succeeded" });
   } finally { mirror.dispose(); await core.close(); }
