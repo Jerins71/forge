@@ -210,7 +210,9 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
           emit({ type: "assignment.cancelled", assignment: { ...assignment, state: "cancelled", terminalAt: command.now, outcome: "cancelled" } });
         if (owner.activeRunId && state.runs[owner.activeRunId].state !== "terminal") finish(state.runs[owner.activeRunId], "cancelled");
       }
-      if (needsDrain) decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: owner.bindingId! });
+      // A session stopped in the middle of a turn: the release carries that, so the transcript can say so.
+      const stoppedTurn = owner.role === "manager" && !!owner.activeRunId && state.runs[owner.activeRunId].state !== "terminal";
+      if (needsDrain) decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: owner.bindingId!, ...(stoppedTurn ? { stoppedTurn } : {}) });
       else if (owner.activeRunId && state.runs[owner.activeRunId].state !== "terminal") finish(state.runs[owner.activeRunId], "cancelled");
       if (owner.role === "manager") for (const worker of Object.values(state.threads).filter(candidate => candidate.managerId === owner.threadId && (candidate.desired !== "stopped" || candidate.shutdown !== "clean"))) {
         const stopped = decide(state, { ...command, threadId: worker.threadId, writerPending: !!worker.bindingId, retain: !command.terminateChildren });

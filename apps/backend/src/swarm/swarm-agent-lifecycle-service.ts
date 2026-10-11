@@ -42,6 +42,7 @@ import type {
 import {
   formatWorkerStopIncompleteNotice,
   MANUAL_MANAGER_STOP_INCOMPLETE_NOTICE,
+  STOPPED_TURN_NOTICE,
 } from "./manual-stop-notice.js";
 import {
   SECURE_RUNTIME_BINDING_UNAVAILABLE_MESSAGE,
@@ -248,7 +249,8 @@ export interface SwarmAgentLifecycleServiceOptions {
   clearIntentionalStopRuntimeCallbackSuppression: (agentId: string, runtimeToken?: number) => void;
   allowInvalidatedManualStopMessageEnd: (agentId: string, runtimeToken?: number) => void;
   markPendingManualManagerStopNotice: (agentId: string) => void;
-  emitImmediateManualManagerStopNotice: (agentId: string, text?: string, systemNoticeKind?: "worker_stopped") => void;
+  emitImmediateManualManagerStopNotice: (agentId: string, text?: string, systemNoticeKind?: "worker_stopped" | "turn_stopped") => void;
+  settlePendingManualManagerStopNotice: (agentId: string) => void;
   cancelAllPendingChoicesForAgent: (agentId: string) => void;
   runRuntimeShutdown: (
     descriptor: AgentDescriptor,
@@ -479,6 +481,12 @@ export class SwarmAgentLifecycleService {
       this.clearWorkerTeardownState(descriptor.agentId);
       this.options.clearIntentionalStopRuntimeCallbackSuppression(descriptor.agentId, runtimeToken);
     }
+  }
+
+  /** One quiet marker on the turn the user stopped; the turn's own rows do not say why it ended. */
+  markTurnStoppedByUser(agentId: string): void {
+    if (this.options.descriptors.get(agentId)?.role !== "manager") return;
+    this.options.emitImmediateManualManagerStopNotice(agentId, STOPPED_TURN_NOTICE, "turn_stopped");
   }
 
   async stopSession(agentId: string, options?: { manualStopNotice?: boolean }): Promise<{ terminatedWorkerIds: string[] }> {
@@ -1425,6 +1433,8 @@ export class SwarmAgentLifecycleService {
           target.agentId,
           MANUAL_MANAGER_STOP_INCOMPLETE_NOTICE,
         );
+      } else if (shouldAllowManualStopMessageEnd) {
+        this.options.settlePendingManualManagerStopNotice(target.agentId);
       }
 
       target.status = managerShutdownIncomplete
@@ -2081,6 +2091,7 @@ export class SwarmAgentLifecycleService {
       invalidatedManagerRuntime,
     );
     this.clearPendingManagerRuntimeRecycle(agentId);
+    if (shouldAllowManualStopMessageEnd && !managerShutdownIncomplete) this.options.settlePendingManualManagerStopNotice(agentId);
 
     if (!managerShutdownIncomplete) {
       await this.options.reconcileStoppedManagerRuntime({

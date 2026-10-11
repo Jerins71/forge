@@ -28,6 +28,9 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
     return !services.runtime.runtimes.has(agentId) && !services.runtime.controller.isRuntimeShutdownQuarantined(agentId);
   }
 
+  /** The user stopped this session while a turn was running: its transcript says so. */
+  markControlledTurnStopped(sessionId: string): void { this.getFacadeServices().agents.markTurnStoppedByUser(sessionId); }
+
   killControlledWorker(managerId: string, workerId: string): Promise<void> {
     return this.getFacadeServices().agents.killControlledWorker(managerId, workerId);
   }

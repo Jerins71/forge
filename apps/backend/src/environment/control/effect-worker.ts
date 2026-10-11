@@ -310,7 +310,10 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
             if (drained.status !== "clean") { retryRelease(row, effect, "Provider binding drain is incomplete"); return; }
             resource.stop.abort(); live.delete(effect.bindingId);
           }
-          record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: "clean" }); break;
+          record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: "clean" });
+          // Once, after the stop is confirmed: a retried release has not recorded the drain yet.
+          if (effect.stoppedTurn) options.swarm.markTurnStopped?.(effect.threadId);
+          break;
         }
         case "provider.compact": {
           const owner = loadState(database).threads[effect.threadId]; const resource = owner.bindingId && live.get(owner.bindingId);

@@ -35,7 +35,7 @@ import {
   recordConversationHistoryDiagnostics,
   sumOptionalNumbers
 } from "./conversation-diagnostics.js";
-import { RuntimeConversationEventMapper, safeJson } from "./runtime-conversation-event-mapper.js";
+import { RuntimeConversationEventMapper, isWorkerFailureNotice, nameActualProvider, safeJson } from "./runtime-conversation-event-mapper.js";
 import { buildActivitySummary, buildTimelineSummary } from "./activity-summary.js";
 import { ActivityTimelineTracker, type ProviderTextFact } from "./activity-timeline.js";
 import type { TimelineActivity } from "@forge/protocol";
@@ -397,6 +397,8 @@ export class ConversationProjector {
   }
 
   emitConversationMessage(event: ConversationMessageEvent, options?: { routingReceipt?: MessageRoutingReceiptRecord }): void {
+    // A worker's failure message is the failure's one row; the provider's report of the same failure adds no status row.
+    if (isWorkerFailureNotice(event)) this.activity.noteFailureReported(event.agentId, event.turnId);
     this.emitConversationEntry(event, options);
     this.deps.emitServerEvent("conversation_message", event satisfies ServerEvent);
   }
@@ -464,8 +466,11 @@ export class ConversationProjector {
 
   /** Closes the rows a finished turn left open and persists them, including its retry or failure status. */
   settleProviderTurn(actorId: string, end: { error?: string; stopped?: boolean; runId?: string } = {}): void {
-    const sessionId = resolveManagerContextId(this.deps.descriptors.get(actorId), actorId);
-    for (const finished of this.activity.settleTurn({ actorId, sessionId, ...end, timestamp: this.deps.now() })) this.emitActivitySummary(buildTimelineSummary(finished));
+    const descriptor = this.deps.descriptors.get(actorId);
+    const sessionId = resolveManagerContextId(descriptor, actorId);
+    // The row names the provider and model that failed, as the failure message does.
+    const settled = { ...end, ...(end.error ? { error: nameActualProvider(end.error, descriptor) } : {}) };
+    for (const finished of this.activity.settleTurn({ actorId, sessionId, ...settled, timestamp: this.deps.now() })) this.emitActivitySummary(buildTimelineSummary(finished));
   }
 
   emitAgentToolCall(event: AgentToolCallEvent): void {

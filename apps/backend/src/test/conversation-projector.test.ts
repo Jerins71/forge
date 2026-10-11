@@ -404,3 +404,40 @@ describe('ConversationProjector session tree continuity', () => {
     })
   })
 })
+
+// Failure cases: a worker's provider failure is shown twice (its message and a status row); the status
+// row keeps the OpenAI-compatible client's generic "OpenAI API error" label for another provider's model.
+describe('ConversationProjector provider failure rows', () => {
+  const failure = 'OpenAI API error (426): 426 "Your Grok CLI version is outdated."'
+  const grok = { provider: 'xai', modelId: 'grok-4.6', thinkingLevel: 'medium' }
+  async function settle(descriptor: AgentDescriptor, notice?: string) {
+    const emitted: ServerEvent[] = []
+    const projector = new ConversationProjector({
+      descriptors: new Map([[descriptor.agentId, descriptor], ['manager', { ...descriptor, agentId: 'manager', role: 'manager', managerId: 'manager' }]]),
+      runtimes: new Map(), conversationEntriesByAgentId: new Map(), now: () => FIXED_NOW,
+      emitServerEvent: (_eventName, event) => emitted.push(event), logDebug: () => {},
+    })
+    // A runtime that writes its failure into the transcript does so before its provider reports the turn failed.
+    if (notice) projector.emitConversationMessage({ type: 'conversation_message', agentId: descriptor.agentId, turnId: 'run-1', role: 'system', source: 'system', timestamp: FIXED_NOW, text: notice })
+    projector.settleProviderTurn(descriptor.agentId, { error: failure, runId: 'run-1' })
+    return emitted.filter(event => event.type === 'activity_summary')
+  }
+
+  it('shows a worker failure once: its message when it left one, otherwise one named status row', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'forge-projector-failure-'))
+    const worker = { ...makeDescriptor(join(root, 'worker.jsonl'), root), agentId: 'worker', role: 'worker' as const, managerId: 'manager', model: grok }
+    expect(await settle(worker, '⚠️ Worker reply failed: xai/grok-4.6 API error (426): 426 "Your Grok CLI version is outdated."')).toEqual([])
+    // A worker whose runtime leaves no message still shows the failure, named the same way.
+    const rows = await settle({ ...worker, sessionFile: join(root, 'worker-2.jsonl') })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ status: 'failed', displaySummary: expect.stringContaining('Failed: xai/grok-4.6 API error (426)') })
+  })
+
+  it('names the provider and model that failed on a manager status row', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'forge-projector-failure-'))
+    const rows = await settle({ ...makeDescriptor(join(root, 'manager.jsonl'), root), model: grok })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ status: 'failed', displaySummary: expect.stringContaining('Failed: xai/grok-4.6 API error (426)') })
+    expect(JSON.stringify(rows[0])).not.toContain('OpenAI API error')
+  })
+})

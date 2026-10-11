@@ -571,23 +571,30 @@ function isManyImageDimensionError(errorMessage: string | undefined): errorMessa
   return Boolean(errorMessage && /image dimensions?\s+exceeds?[\s\S]*many-image/i.test(errorMessage));
 }
 
+const WORKER_ERROR_PREFIX = "⚠️ Worker reply failed";
+
+/** The message a worker leaves when its provider fails; its manager reads it as the worker's result. */
+export function isWorkerFailureNotice(event: ConversationMessageEvent): boolean {
+  return event.role === "system" && event.source === "system" && event.text.startsWith(WORKER_ERROR_PREFIX);
+}
+
 function buildWorkerErrorConversationText(options: {
   errorMessage?: string;
   isContextOverflow: boolean;
 }): string {
   if (options.isContextOverflow) {
     if (options.errorMessage) {
-      return `⚠️ Worker reply failed because the prompt exceeded the model context window (${options.errorMessage}). ${WORKER_ERROR_CONTEXT_HINT}`;
+      return `${WORKER_ERROR_PREFIX} because the prompt exceeded the model context window (${options.errorMessage}). ${WORKER_ERROR_CONTEXT_HINT}`;
     }
 
-    return `⚠️ Worker reply failed because the prompt exceeded the model context window. ${WORKER_ERROR_CONTEXT_HINT}`;
+    return `${WORKER_ERROR_PREFIX} because the prompt exceeded the model context window. ${WORKER_ERROR_CONTEXT_HINT}`;
   }
 
   if (options.errorMessage) {
-    return `⚠️ Worker reply failed: ${formatManagerErrorMessage(options.errorMessage)}${genericWorkerErrorHintSuffix(options.errorMessage)}`;
+    return `${WORKER_ERROR_PREFIX}: ${formatManagerErrorMessage(options.errorMessage)}${genericWorkerErrorHintSuffix(options.errorMessage)}`;
   }
 
-  return `⚠️ Worker reply failed. ${WORKER_ERROR_GENERIC_HINT}`;
+  return `${WORKER_ERROR_PREFIX}. ${WORKER_ERROR_GENERIC_HINT}`;
 }
 
 function formatManagerErrorMessage(errorMessage: string): string {
@@ -616,7 +623,7 @@ function isAuthOrLimitError(errorMessage: string): boolean {
  * The OpenAI-compatible client labels every failure "OpenAI API error". Name the provider
  * and model that actually failed instead.
  */
-function nameActualProvider(errorMessage: string | undefined, descriptor?: AgentDescriptor): string | undefined {
+export function nameActualProvider(errorMessage: string | undefined, descriptor?: AgentDescriptor): string | undefined {
   if (!errorMessage || !descriptor) return errorMessage;
   const actual = `${descriptor.model.provider}/${descriptor.model.modelId}`;
   return /^OpenAI API error/i.test(errorMessage)

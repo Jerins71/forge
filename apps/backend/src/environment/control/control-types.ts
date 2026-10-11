@@ -107,6 +107,8 @@ export interface SwarmControlPort {
     answers: RpcInput<"session.choose">["answers"];
   }): Promise<"answered" | "interrupted">;
   stopSession(input: { commandId: string; sessionId: string }): Promise<{ stopped: boolean }>;
+  /** Leaves the "Stopped by you" marker on a turn the user stopped while it was running. */
+  markTurnStopped?(sessionId: string): void;
 }
 
 export interface EnvironmentAccessPort {

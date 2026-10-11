@@ -6,6 +6,8 @@
 //   - a sign-in change writes nothing into the transcript and raises no lineage chip, and a model change
 //     is one quiet "Switched to …" marker;
 //   - a plan card sits on the transcript column's edge within the shared width tokens.
+//   - a turn the user stopped says "Stopped by you";
+//   - a worker's provider failure is one status row in the worker view that names the provider and model.
 //   pnpm exec playwright test scripts/environment-e2e/polish.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
 import { mkdir, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
@@ -32,7 +34,7 @@ test.use({ environmentSuite: 'polish', screenshot: 'off', actionTimeout: 10_000 
 const transcript = (page: Page) => page.locator('[data-chat-transcript-surface]').filter({ visible: true }).first()
 const composer = (page: Page) => page.getByRole('combobox', { name: /^(Message |Send another message to )/ })
 const lineageChip = (page: Page) => page.getByRole('button', { name: /^Lineage: / })
-const marker = (page: Page, kind: 'model_change' | 'worker_stopped') => transcript(page).locator(`[data-system-marker="${kind}"]`)
+const marker = (page: Page, kind: 'model_change' | 'worker_stopped' | 'turn_stopped') => transcript(page).locator(`[data-system-marker="${kind}"]`)
 async function shot(page: Page, name: string) {
   const path = join(evidenceRoot, `${name}.png`)
   await page.screenshot({ path }); assertions[`screenshot:${name}`] = path
@@ -269,4 +271,75 @@ test('a sign-in change writes nothing into the transcript, and a model change is
   await form.getByRole('radio', { name: 'Subscription' }).click()
   await form.getByRole('button', { name: 'Save', exact: true }).click()
   assertions.modelChange = { sessionId, signInChange: { transcriptUnchanged: true, lineageChip: false }, marker: 'Switched to GPT-6 Luna', sessionStopped: false }
+})
+
+test('a turn the user stopped says so, live and after reload', async ({ page }) => {
+  const sessionId = await launch('Polish stopped turn', 'Say hello first')
+  await open(page, sessionId)
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  const stop = page.getByRole('button', { name: 'Stop', exact: true })
+  const status = async () => (await shellSession(sessionId))?.status
+  await expect(marker(page, 'turn_stopped')).toHaveCount(0)
+
+  // Stopped with the composer button.
+  await send(page, '[fixture:hold] Hold this turn open')
+  await expect.poll(status, { timeout: 15_000 }).toBe('running')
+  await stop.click()
+  await expect.poll(status, { timeout: 30_000 }).not.toBe('running')
+  await expect(marker(page, 'turn_stopped')).toHaveCount(1, { timeout: 15_000 })
+  await expect(marker(page, 'turn_stopped')).toContainText('Stopped by you')
+  // It sits under the turn it ended, below that turn's message.
+  expect(await rowIndex(marker(page, 'turn_stopped'))).toBeGreaterThan(await rowIndex(textRow(page, '[fixture:hold] Hold this turn open')))
+  await shot(page, 'turn-stopped-live')
+
+  // Stopped with Escape; each stopped turn has its own marker, and a finished turn has none.
+  await send(page, '[fixture:hold] Hold this turn open again')
+  await expect.poll(status, { timeout: 15_000 }).toBe('running')
+  await composer(page).focus()
+  await page.keyboard.press('Escape')
+  await expect.poll(status, { timeout: 30_000 }).not.toBe('running')
+  await expect(marker(page, 'turn_stopped')).toHaveCount(2, { timeout: 15_000 })
+  await send(page, 'Finish this one normally')
+  await expect.poll(async () => ((await transcript(page).innerText()).match(/assistant reply/g) ?? []).length, { timeout: 30_000 }).toBe(2)
+  await expect(marker(page, 'turn_stopped')).toHaveCount(2)
+  await expect(transcript(page)).not.toContainText('Session stopped')
+  const live = { first: await rowIndex(marker(page, 'turn_stopped').first()), second: await rowIndex(marker(page, 'turn_stopped').last()) }
+
+  await page.reload()
+  await expect(marker(page, 'turn_stopped')).toHaveCount(2, { timeout: 30_000 })
+  expect({ first: await rowIndex(marker(page, 'turn_stopped').first()), second: await rowIndex(marker(page, 'turn_stopped').last()) }).toEqual(live)
+  await shot(page, 'turn-stopped-reload')
+  assertions.stoppedTurn = { sessionId, markers: 2, order: live, replayMatches: true }
+})
+
+test('a worker\'s provider failure is one status row that names the provider and model', async ({ page }) => {
+  const sessionId = await launch('Polish worker failure', '[fixture:spawn-fail] Start a worker whose provider fails')
+  await open(page, sessionId)
+  // The manager is told once that the worker came back with nothing.
+  await expect(transcript(page).locator('[data-worker-result-source]')).toHaveCount(1, { timeout: 30_000 })
+  await shot(page, 'worker-failure-manager-card')
+
+  const worker = page.locator('[data-worker-row]').filter({ hasText: /fail/i }).first()
+  if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
+  await worker.click()
+  await expect(transcript(page)).toContainText('Fail this assignment', { timeout: 15_000 })
+  const failed = transcript(page).locator('[data-testid="activity-row"][data-activity-kind="status"]')
+  const failures = async () => ((await transcript(page).innerText()).match(/Synthetic fixture scenario failed/g) ?? []).length
+  const once = async () => {
+    await page.getByRole('button', { name: 'All', exact: true }).click()
+    await expect(failed).toHaveCount(1, { timeout: 15_000 })
+    await expect(failed).toHaveAttribute('data-activity-status', 'failed')
+    // The row names the provider and model that failed, never the client library's generic label.
+    await expect(failed).toContainText('Failed: codex-native/gpt-6-sol: Synthetic fixture scenario failed')
+    expect(await failures()).toBe(1)
+    await expect(transcript(page)).not.toContainText('OpenAI API error')
+    await expect(transcript(page)).not.toContainText('Worker reply failed')
+  }
+  await once()
+  await shot(page, 'worker-failure-worker-view')
+  await page.reload()
+  await expect(transcript(page)).toContainText('Fail this assignment', { timeout: 30_000 })
+  await once()
+  await shot(page, 'worker-failure-worker-view-reload')
+  assertions.workerFailure = { sessionId, failedRowsInWorkerView: 1, named: 'codex-native/gpt-6-sol' }
 })

@@ -14,7 +14,7 @@ import { loadState } from "./orchestration/store.js";
 import { createCoreChoicePort } from "./orchestration/choice-port.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, controlService, workspaceService, artifactService }: {
-  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "releaseControlledProvider" | "getAgentForInternalUse" | "listProfiles" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner" | "installControlledChoicePort"> & Pick<SwarmManager,"installCoreAgentMessagePort"|"installCoreLineagePort"|"getConversationHistory"|"prepareLineageSession"|"resolveSpecialistFallbackModelForDescriptor">;
+  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "releaseControlledProvider" | "markControlledTurnStopped" | "getAgentForInternalUse" | "listProfiles" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner" | "installControlledChoicePort"> & Pick<SwarmManager,"installCoreAgentMessagePort"|"installCoreLineagePort"|"getConversationHistory"|"prepareLineageSession"|"resolveSpecialistFallbackModelForDescriptor">;
   database: Database;
   eventSink: EventSink;
   controlService: EnvironmentControlService;
@@ -119,6 +119,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
       // this owned binding; recovery and provider handoffs leave healthy workers alive.
       return { stopped: await swarmManager.releaseControlledProvider(input.sessionId) };
     },
+    markTurnStopped: sessionId => swarmManager.markControlledTurnStopped(sessionId),
   };
 }
 

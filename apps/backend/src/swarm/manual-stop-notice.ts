@@ -1,4 +1,6 @@
 export const MANUAL_MANAGER_STOP_NOTICE = "Session stopped.";
+/** Left on a turn the user stopped while it was running, so the transcript says why it ended. */
+export const STOPPED_TURN_NOTICE = "Stopped by you";
 
 export const MANUAL_MANAGER_STOP_INCOMPLETE_NOTICE =
   "Forge could not confirm this session stopped cleanly. Send a new message or choose Stop all to retry cleanup. New work will start only after cleanup succeeds.";

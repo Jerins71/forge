@@ -23,7 +23,7 @@ import { receiptIdentity } from "./event-sink.js";
 
 type DetailItem = Extract<Extract<DetailStreamItem, { kind: "event" }>["event"], { type: "item.upsert" }>["item"];
 /** A model switch or a user-stopped worker travels as an ordinary item whose source tells clients to draw a marker, not a reply. */
-const MARKER_NOTICE_KINDS = new Set(["model_change", "worker_stopped"]);
+const MARKER_NOTICE_KINDS = new Set(["model_change", "worker_stopped", "turn_stopped"]);
 type ChoiceSummary = Extract<Extract<DetailStreamItem, { kind: "event" }>["event"], { type: "choice.upsert" }>["choice"];
 export interface MirrorWireProjection {
   project(profile: ManagerProfile): Promise<ProjectSummary>;
