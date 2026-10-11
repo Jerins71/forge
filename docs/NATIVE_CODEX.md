@@ -55,6 +55,13 @@ An optional **Base URL** sends Codex's requests through a router or proxy.
 - In API-key mode Forge logs the app-server in with the saved key over stdio and uses
   no ChatGPT account. A missing key stops the session with a message instead of
   falling back. Forge Auth broker mode, when active, takes precedence over both.
+- The base URL must include `/v1` (for example `https://router.example.com/v1`): Codex
+  adds `/responses` to it. Settings warns about an address with no path and offers to
+  add `/v1`.
+- **Test connection** sends one empty request from that environment to
+  `<base URL>/responses` with the saved key and reports connected, key rejected (401),
+  wrong path (404, with the address that does answer when there is one), or
+  unreachable. Saving runs the same test, and the card's check mark shows its result.
 - The base URL is passed as Codex's `openai_base_url` setting; Codex does not read
   `OPENAI_BASE_URL`. It applies in both modes. With Subscription the proxy receives the
   ChatGPT access token and account header and must forward them to ChatGPT's Codex
