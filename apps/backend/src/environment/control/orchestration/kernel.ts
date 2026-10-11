@@ -241,7 +241,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       if (request.lifetime.generation !== owner.generation || owner.desired !== "running" || (expires && Date.parse(expires) <= command.now)) {
         emit({ type: "request.expired", request: { ...request, state: "expired" } }); break;
       }
-      emit({ type: "request.responding", request: { ...request, state: "responding" } });
+      emit({ type: "request.responding", request: { ...request, state: "responding", response: command.response } });
       decision.effects.push({ kind: "provider.respond", threadId: owner.threadId, requestId: request.requestId, response: command.response }); break;
     }
     case "request.cancel": case "request.expire": case "request.responded": {

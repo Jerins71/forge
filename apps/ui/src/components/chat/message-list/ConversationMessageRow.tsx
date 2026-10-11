@@ -2,7 +2,7 @@ import { isClaudeSignInRequired } from '@forge/protocol'
 import type { EnvironmentClient } from '@forge/client-runtime'
 import { memo, useState, useCallback } from 'react'
 import { isUserVisibleAssistantConversationMessage } from '@forge/protocol'
-import { Copy, Check, Pin, Reply, Layers, CircleCheck, Sparkles } from 'lucide-react'
+import { ArrowLeftRight, CircleStop, Copy, Check, Pin, Reply, Layers, CircleCheck, Sparkles } from 'lucide-react'
 import { ForkButton } from './ForkButton'
 import { MarkdownMessage } from '@/components/chat/MarkdownMessage'
 import type { ArtifactReference } from '@/lib/artifacts'
@@ -277,22 +277,15 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
       )
     }
 
-    const isModelChangeNotice = message.systemNoticeKind === 'model_change'
-    if (isModelChangeNotice) {
+    // Quiet one-line markers: something changed, nothing needs the user.
+    if (message.systemNoticeKind === 'model_change' || message.systemNoticeKind === 'worker_stopped') {
+      const MarkerIcon = message.systemNoticeKind === 'model_change' ? ArrowLeftRight : CircleStop
       return (
-        <div className="glass-inset rise-in rounded-xl px-3.5 py-2.5 text-sm text-foreground/90">
-          <div className="eyebrow">
-            Model change
-          </div>
-          {hasText ? (
-            <p className="mt-1 whitespace-pre-wrap break-words leading-relaxed">
-              {normalizedText}
-            </p>
-          ) : null}
+        <div data-system-marker={message.systemNoticeKind} className="flex items-center gap-2 py-1 text-[13px] text-subtle-foreground">
+          <MarkerIcon className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 break-words">{normalizedText}</span>
           {timestampLabel ? (
-            <div className="mt-1 font-mono text-[11px] text-subtle-foreground">
-              <span>{timestampLabel}</span>
-            </div>
+            <time dateTime={message.timestamp} className="shrink-0 font-mono text-[11px]">{timestampLabel}</time>
           ) : null}
         </div>
       )

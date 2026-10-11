@@ -114,7 +114,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
       const descriptor = swarmManager.getAgentForInternalUse(input.sessionId);
       if (!descriptor) return { stopped: true }; // An unmaterialized launch has no runtime to stop.
       if (descriptor.role === "worker") await swarmManager.releaseControlledWorker(descriptor.agentId);
-      else await swarmManager.stopSession(input.sessionId);
+      else await swarmManager.stopSession(input.sessionId, input.quiet ? { manualStopNotice: false } : undefined);
       return { stopped: swarmManager.isSessionShutdownSafe(input.sessionId) }; // Legacy stop can return while its writer remains quarantined.
     },
   };

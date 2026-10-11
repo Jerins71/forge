@@ -247,7 +247,7 @@ export interface SwarmAgentLifecycleServiceOptions {
   clearIntentionalStopRuntimeCallbackSuppression: (agentId: string, runtimeToken?: number) => void;
   allowInvalidatedManualStopMessageEnd: (agentId: string, runtimeToken?: number) => void;
   markPendingManualManagerStopNotice: (agentId: string) => void;
-  emitImmediateManualManagerStopNotice: (agentId: string, text?: string) => void;
+  emitImmediateManualManagerStopNotice: (agentId: string, text?: string, systemNoticeKind?: "worker_stopped") => void;
   cancelAllPendingChoicesForAgent: (agentId: string) => void;
   runRuntimeShutdown: (
     descriptor: AgentDescriptor,
@@ -480,10 +480,11 @@ export class SwarmAgentLifecycleService {
     }
   }
 
-  async stopSession(agentId: string): Promise<{ terminatedWorkerIds: string[] }> {
+  async stopSession(agentId: string, options?: { manualStopNotice?: boolean }): Promise<{ terminatedWorkerIds: string[] }> {
     const { terminatedWorkerIds } = await this.stopSessionInternal(agentId, {
       saveStore: true,
-      emitSnapshots: true
+      emitSnapshots: true,
+      ...(options?.manualStopNotice === false ? { manualStopNotice: false } : {}),
     });
 
     return { terminatedWorkerIds };
@@ -1137,15 +1138,43 @@ export class SwarmAgentLifecycleService {
     await this.core.stopWorker({ managerId: manager.agentId, workerId: targetAgentId });
   }
 
+  /**
+   * The user stopped this worker. Its unfinished assignment is cancelled before the runtime goes away,
+   * so the manager is told the worker was stopped rather than handed a "blocked" result to act on.
+   */
+  async stopWorkerByUser(agentId: string): Promise<void> {
+    const descriptor = this.options.descriptors.get(agentId);
+    const assignment = descriptor?.role === "worker" ? this.core?.readAssignment(agentId) : undefined;
+    const working = !!assignment && ["assigned", "running"].includes(assignment.state);
+    if (descriptor?.role === "worker" && working) {
+      await this.core!.cancelWorkerAssignment({ managerId: descriptor.managerId, workerId: agentId });
+    }
+    await this.stopWorker(agentId);
+    if (descriptor?.role === "worker" && working) {
+      this.options.emitImmediateManualManagerStopNotice(
+        descriptor.managerId,
+        `${descriptor.displayName || agentId} · Stopped by you`,
+        "worker_stopped",
+      );
+    }
+  }
+
+  /** Stops asked for while one is under way join it: a user stop and the core's release of the same worker are one shutdown. */
+  private readonly workerStopsInFlight = new Map<string, Promise<void>>();
+
   async stopWorker(agentId: string): Promise<void> {
     const descriptor = this.options.descriptors.get(agentId);
     if (!descriptor || descriptor.role !== "worker") {
       throw new Error(`Unknown worker agent: ${agentId}`);
     }
 
-    await this.stopWorkerRuntime(
+    const inFlight = this.workerStopsInFlight.get(agentId);
+    if (inFlight) return inFlight;
+    const stop = this.stopWorkerRuntime(
       descriptor as AgentDescriptor & { role: "worker" },
-    );
+    ).finally(() => this.workerStopsInFlight.delete(agentId));
+    this.workerStopsInFlight.set(agentId, stop);
+    return stop;
   }
 
   private async stopWorkerRuntime(

@@ -83,12 +83,17 @@ describe("authoritative native choices", () => {
     const f = await fixture(); const published: unknown[] = [];
     f.core.eventSink.subscribe(event => { if (event.event.type === "choice.upsert") { expect(f.core.database.inTransaction).toBe(false); published.push(event.event.choice); } });
     const request = f.publish(f.observation(kind));
-    expect(choice(f.core, request.requestId)).toEqual({ choiceId: request.requestId, agentId: "manager", status: "pending", questions });
-    expect(published).toHaveLength(1);
+    const asked = choice(f.core, request.requestId);
+    expect(asked).toEqual({ choiceId: request.requestId, agentId: "manager", status: "pending", questions, requestedAt: expect.stringMatching(/Z$/) });
+    // The stream carries the same projection, including when the question was asked.
+    expect(published).toEqual([asked]);
     const input = { commandId: answerId, sessionId: "manager", choiceId: request.requestId, answers };
     await f.core.controlService.execute(principal, "session.choose", input); await f.core.effectWorker.drain();
     expect(f.responses).toEqual([expect.objectContaining({ request: request.ref, lifetime: request.lifetime, response: answers })]);
     expect(loadState(f.core.database).requests[request.requestId].state).toBe("resolved"); expect(choice(f.core, request.requestId).status).toBe("answered");
+    // The settled choice records what was chosen, keeps the time it was asked and gains the time it was answered.
+    expect(choice(f.core, request.requestId)).toEqual({ ...asked, status: "answered", answers, settledAt: expect.stringMatching(/Z$/) });
+    expect(published.at(-1)).toEqual(choice(f.core, request.requestId));
     expect((await f.core.controlService.execute(principal, "session.choose", input)).state).toBe("succeeded"); expect(f.responses).toHaveLength(1);
     await expect(f.core.controlService.execute(principal, "session.choose", { ...input, commandId: "00000000-0000-4000-8000-000000000002" })).rejects.toMatchObject({ code: "CONFLICT" });
     expect(f.core.database.prepare("SELECT 1 FROM effects WHERE kind='choice.apply'").get()).toBeUndefined();

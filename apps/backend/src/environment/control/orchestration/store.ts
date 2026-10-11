@@ -32,7 +32,7 @@ export function projectLifecycle(database: Database, event: LifecycleEvent): voi
   else if ("binding" in event) database.prepare("INSERT INTO orchestration_bindings VALUES (?,?,?,?) ON CONFLICT(binding_id) DO UPDATE SET state_json=excluded.state_json").run(event.binding.scope.bindingId, event.binding.scope.threadId, event.binding.scope.generation, JSON.stringify(event.binding));
   else if ("request" in event) {
     database.prepare("INSERT INTO orchestration_requests VALUES (?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET state_json=excluded.state_json").run(event.request.requestId, event.request.threadId, event.request.attemptId, JSON.stringify(event.request));
-    projectRequestChoice(database, event.request);
+    projectRequestChoice(database, event.request, event.at);
   }
   else if ("handoff" in event) database.prepare("INSERT INTO orchestration_handoffs VALUES (?,?) ON CONFLICT(handoff_id) DO UPDATE SET state_json=excluded.state_json").run(event.handoff.handoffId, JSON.stringify(event.handoff));
   else if ("assignment" in event || "transfer" in event) {

@@ -70,7 +70,7 @@ import { SwarmSessionService } from "./swarm-session-service.js";
 import { ProjectAgentSharingService } from "./project-agent-sharing-service.js";
 import { SessionPlanCoordinator } from "./planning/session-plan-coordinator.js";
 import { SessionActiveToolsState } from "./session-active-tools.js"; import { ManagerToolActivityState } from "./manager-tool-activity.js";
-import { createModelChangeNoticeEvent } from "./runtime/model-change-continuity.js";
+import { createModelChangeNoticeEvent, replaceModelWithNotice } from "./runtime/model-change-continuity.js";
 import { ConversationAttachmentService } from "./conversation-attachment-service.js";
 import { InboundConversationAppender, UserMessageCoordinator } from "./user-message-coordinator.js";
 import { AssistantOutputRouter } from "./assistant-output-router.js";
@@ -154,7 +154,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
     const descriptor=this.descriptors.get(threadId);if(!descriptor) throw new Error("Provider target is unavailable");
     if(model && (descriptor.model.provider!==model.provider || descriptor.model.modelId!==model.modelId || model.thinkingLevel!==undefined && descriptor.model.thinkingLevel!==model.thinkingLevel)) {
       if(this.runtimes.has(threadId)) throw new Error("Model replacement requires confirmed provider shutdown");
-      const updated = await this.descriptorStoreAdapter.patchDescriptor(threadId,{model:{...descriptor.model,...model},status:descriptor.status==="stopped"?"idle":descriptor.status});
+      const updated = await replaceModelWithNotice(this.conversationProjector, descriptor, () => this.descriptorStoreAdapter.patchDescriptor(threadId,{model:{...descriptor.model,...model},status:descriptor.status==="stopped"?"idle":descriptor.status}), this.now());
       if (descriptor.role === "worker") {
         const manager = this.descriptors.get(descriptor.managerId);
         if (manager?.profileId) await this.sessionPlanCoordinator.recordWorkGraphWorkerModelReroute({agentId:manager.agentId,profileId:manager.profileId},threadId,updated.model);

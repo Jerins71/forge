@@ -1851,7 +1851,7 @@ export function BuilderSurface({
   const lineageParentId = sessionLineage?.lineage?.relationship === 'fork' ? sessionLineage.lineage.parentThreadId : null
   const mergeBack = lineageParentId && activeAgentId
     ? {
-        parentLabel: resolveSessionLabel(lineageParentId) ?? lineageParentId,
+        parentLabel: resolveSessionLabel(lineageParentId) ?? 'the original conversation',
         onMergeBack: () => session.handleMergeBack(activeAgentId),
         inProgress: session.mergeBackSessionId === activeAgentId,
         disabledReason: contextTransferUnavailableReason ?? mergeBackUnsupportedReason(sessionLineage) ?? undefined,
