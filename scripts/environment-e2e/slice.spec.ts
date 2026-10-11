@@ -281,6 +281,7 @@ test('9.2.6 small-gap shell/detail resume and restart preserve epoch', async () 
   rpc.close();
   const sent = await fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.send', { commandId: randomUUID(), sessionId: launchedSessionId, message: { text: 'small reconnect gap', artifactIds: [] } });
   await settled(sent.commandId);
+  await until(() => readDb(db => db.prepare("SELECT json_extract(state_json,'$.state') state FROM orchestration_runs WHERE run_id=?").get(`run-${sent.commandId}`)), row => (row as { state: string }).state === 'terminal');
   await controlEnvironment(manifest, b().name, 'stop'); await controlEnvironment(manifest, b().name, 'start');
   const resumed = await openFixtureRpc(b().baseUrl, sessions[1]!);
   try {
