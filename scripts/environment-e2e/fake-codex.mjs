@@ -170,19 +170,30 @@ async function runTurn(turn, text) {
     }
     // The provider process dies mid-turn.
     if (text.includes('[fixture:crash]')) process.exit(1);
+    // The error shapes below are what Codex 0.x sends against an endpoint answering 429 or 401.
     if (text.includes('[fixture:retry')) {
-      // The provider keeps rejecting the request and retries on its own; the turn is still running.
+      // The endpoint rate limits the request and Codex retries on its own; the turn is still running.
       for (let attempt = 1; attempt <= 3; attempt++) {
-        notify('error', { ...context(turn), error: { message: 'unexpected status 401 Unauthorized: Invalid API key' }, willRetry: true });
+        notify('error', { ...context(turn), error: { message: `Reconnecting... ${attempt}/5`, codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 429 } },
+          additionalDetails: 'exceeded retry limit, last status: 429 Too Many Requests' }, willRetry: true });
         await pause(40);
       }
       while (!turn.done && !existsSync(join(checkout, '.fixture-activity-release'))) await pause(25);
       if (turn.done) return;
       if (text.includes('[fixture:retry-fail]')) {
-        notify('error', { ...context(turn), error: { message: 'unexpected status 401 Unauthorized: Invalid API key' }, willRetry: false });
+        notify('error', { ...context(turn), error: { message: 'exceeded retry limit, last status: 429 Too Many Requests', codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 429 } }, additionalDetails: null }, willRetry: false });
         complete(turn, 'failed');
         return;
       }
+    }
+    if (text.includes('[fixture:reject]')) {
+      // The endpoint rejects the key, and Codex would keep retrying a request that cannot succeed.
+      for (let attempt = 1; !turn.done; attempt++) {
+        notify('error', { ...context(turn), error: { message: `Reconnecting... ${Math.min(attempt, 5)}/5`, codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 401 } },
+          additionalDetails: 'unexpected status 401 Unauthorized: Incorrect API key provided., url: http://127.0.0.1:1/v1/responses' }, willRetry: true });
+        await pause(200);
+      }
+      return;
     }
     if (text.includes('[fixture:activity')) await activity(turn, text.includes('[fixture:activity-hold]'));
     if (turn.done) return;

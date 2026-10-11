@@ -460,7 +460,7 @@ export class ConversationProjector {
     if (finished) this.emitActivitySummary(buildTimelineSummary(finished));
   }
 
-  /** Updates the turn's one status row in place: "Retrying: 401 Invalid API key (attempt 3)". */
+  /** Updates the turn's one status row in place: "Rate limited by the provider (429). Retrying (attempt 3)". */
   observeProviderRetry(fact: { actorId: string; attempt: number; message: string; runId?: string }): void {
     const sessionId = resolveManagerContextId(this.deps.descriptors.get(fact.actorId), fact.actorId);
     this.activity.observeRetry({ ...fact, sessionId, timestamp: this.deps.now() });

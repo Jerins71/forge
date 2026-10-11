@@ -16,7 +16,7 @@ export interface NativeApiAccess {
 
 /** Result of one request sent from the environment to the provider endpoint its runtime will use. */
 export interface NativeApiProbe {
-  outcome: 'ok' | 'bad_key' | 'wrong_path' | 'unreachable' | 'error'
+  outcome: 'ok' | 'bad_key' | 'rate_limited' | 'wrong_path' | 'unreachable' | 'error'
   /** What happened and what to do about it. Never contains the key. */
   message: string
   /** The URL that was requested. */

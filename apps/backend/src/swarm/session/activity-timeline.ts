@@ -121,7 +121,8 @@ export class ActivityTimelineTracker {
     const tracked = this.statusRow(fact);
     const message = oneLine(fact.message);
     Object.assign(tracked.item, bounded("detail", `Attempt ${fact.attempt}\n${fact.message}`, "head"));
-    tracked.item.summary = `Retrying: ${message} (attempt ${fact.attempt})`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
+    const reason = retryReason(message);
+    tracked.item.summary = (reason ? `${reason}. Retrying (attempt ${fact.attempt})` : `Retrying: ${message} (attempt ${fact.attempt})`).slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
     this.attempts.set(tracked.item.itemId, fact.attempt);
     this.publishNow(tracked);
   }
@@ -158,7 +159,8 @@ export class ActivityTimelineTracker {
       Object.assign(item, bounded("detail", `${attempts ? `Retried ${attempts} ${attempts === 1 ? "time" : "times"}\n` : ""}${fact.error}`, "head"));
     } else {
       item.status = "completed";
-      item.summary = `${fact.stopped ? "Stopped" : "Recovered"} after ${attempts} ${attempts === 1 ? "retry" : "retries"}: ${oneLine((item.detail ?? "").split("\n").slice(1).join(" "))}`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
+      const last = oneLine((item.detail ?? "").split("\n").slice(1).join(" "));
+      item.summary = `${fact.stopped ? "Stopped" : "Recovered"} after ${attempts} ${attempts === 1 ? "retry" : "retries"}: ${retryReason(last) ?? last}`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
     }
     item.completedAt = fact.timestamp;
     this.publishNow(tracked);
@@ -345,6 +347,13 @@ function bounded(field: "input" | "detail", text: string, keep: "head" | "tail")
   const max = field === "input" ? ACTIVITY_INPUT_MAX_CHARS : ACTIVITY_DETAIL_MAX_CHARS;
   if (text.length <= max) return { [field]: text };
   return { [field]: keep === "head" ? text.slice(0, max) : text.slice(-max), truncated: true };
+}
+
+/** Why the provider is retrying, when the reason is one worth naming; the raw text stays in the row's details. */
+function retryReason(message: string): string | undefined {
+  if (/\b429\b|rate.?limit|too many requests/i.test(message)) return "Rate limited by the provider (429)";
+  if (/\b(500|502|503|504|529)\b|overloaded|unavailable/i.test(message)) return "The provider is unavailable right now";
+  return undefined;
 }
 
 /** One readable sentence for a provider failure; the raw text stays in the row's details. */

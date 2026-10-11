@@ -180,10 +180,12 @@ test('provider retries and the final failure show as one status row, live and af
   await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
   await expect(transcript(page)).toBeVisible()
 
-  // Recovered: three rejected attempts update one live row in place, then the turn completes.
-  await send(page, '[fixture:retry] Ride out a rejected key')
+  // Recovered: three rate-limited attempts update one live row in place, then the turn completes.
+  await send(page, '[fixture:retry] Ride out a rate limit')
   await expect(status().last()).toHaveAttribute('data-activity-status', 'running')
-  await expect(status().last()).toContainText('Retrying: unexpected status 401 Unauthorized: Invalid API key (attempt 3)')
+  // The row says why it is retrying, not Codex's own "Reconnecting... 3/5".
+  await expect(status().last()).toContainText('Rate limited by the provider (429). Retrying (attempt 3)')
+  await expect(status().last()).not.toContainText('Reconnecting')
   const before = await status().count()
   await status().last().getByRole('button').click()
   await expect(status().last().getByTestId('activity-detail')).toContainText('Attempt 3')
@@ -196,11 +198,11 @@ test('provider retries and the final failure show as one status row, live and af
 
   // Failed: the provider gives up; the row turns into the failure with the retry count.
   await rm(releaseFile(), { force: true })
-  await send(page, '[fixture:retry-fail] Give up on a rejected key')
-  await expect(status().last()).toContainText('Retrying: unexpected status 401 Unauthorized: Invalid API key (attempt 3)')
+  await send(page, '[fixture:retry-fail] Give up on a rate limit')
+  await expect(status().last()).toContainText('Rate limited by the provider (429). Retrying (attempt 3)')
   await writeFile(releaseFile(), 'release')
   await expect(status().last()).toHaveAttribute('data-activity-status', 'failed', { timeout: 30_000 })
-  await expect(status().last()).toContainText('Failed: The provider rejected the API key (401). Check the key in Settings → Authentication. (after 3 retries)')
+  await expect(status().last()).toContainText('Failed: The provider is rate limiting requests (429). Wait a moment, then send again. (after 3 retries)')
   // Retries and the failure are that one row, not transcript messages.
   await expect(transcript(page)).not.toContainText('Agent error')
   await expect(transcript(page)).not.toContainText('Message may need to be resent')
@@ -209,20 +211,33 @@ test('provider retries and the final failure show as one status row, live and af
   await shot(page, 'retry-failed')
 
   await page.reload()
-  await expect(status().last()).toContainText('Failed: The provider rejected the API key (401)', { timeout: 30_000 })
+  await expect(status().last()).toContainText('Failed: The provider is rate limiting requests (429)', { timeout: 30_000 })
   expect(await status().allTextContents()).toEqual(live)
   await status().last().getByRole('button').click()
   await expect(status().last().getByTestId('activity-detail')).toContainText('Retried 3 times')
   // The raw provider text stays available in the details.
-  await expect(status().last().getByTestId('activity-detail')).toContainText('unexpected status 401 Unauthorized: Invalid API key')
+  await expect(status().last().getByTestId('activity-detail')).toContainText('exceeded retry limit, last status: 429 Too Many Requests')
   await shot(page, 'retry-failed-replayed')
   assertions.statusRows = live
+
+  // A rejected key cannot start working on a retry: the turn fails at once instead of riding out Codex's retries.
+  const rows = await status().count()
+  await send(page, '[fixture:reject] Use a key the endpoint rejects')
+  await expect(status().last()).toContainText('Failed: The provider rejected the API key (401). Check the key in Settings → Authentication.', { timeout: 10_000 })
+  await expect(status().last()).toHaveAttribute('data-activity-status', 'failed')
+  await expect(status().last()).not.toContainText('retr')
+  expect(await status().count()).toBe(rows + 1)
+  await expect(transcript(page)).not.toContainText('Session stopped.')
+  // The session is usable again straight away.
+  await send(page, 'Reply after the rejected key')
+  await expect.poll(async () => { const text = await transcript(page).innerText(); return text.lastIndexOf('assistant reply') > text.lastIndexOf('Reply after the rejected key') }, { timeout: 30_000 }).toBe(true)
+  assertions.rejectedKeyRow = await status().last().textContent()
 })
 
-test('a new project whose resources are seeded mid-turn settles and accepts its first message', async () => {
-  // As the create dialog does it: create the project, then seed its .forge resources. Seeding changes
-  // repository trust, which restarts the manager runtime while the provider is still inside the hidden
-  // onboarding turn, on an endpoint that ignores interrupts (as a real router did).
+test('a session restarted by a trust change mid-turn settles to idle and accepts its next message', async () => {
+  // Create the project and seed its .forge resources as the create dialog does (seeding no longer restarts
+  // anything), then change the repository's trust. That restarts the manager runtime while the provider is
+  // still inside the hidden onboarding turn, on an endpoint that ignores interrupts (as a real router did).
   const environment = manifest.environments[2]!
   const session = await controlEnvironment<BootstrapSession>(manifest, environment.name, 'bootstrap')
   const turnDelay = join(environment.checkout, '.fixture-turn-delay-ms')
@@ -245,9 +260,18 @@ test('a new project whose resources are seeded mid-turn settles and accepts its 
     const seeded = await fetch(`${environment.baseUrl}/api/settings/project-resources/seed`, { method: 'POST',
       headers: { Authorization: `Bearer ${session.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: project.result.projectId, sessionAgentId: sessionId }) })
     expect(seeded.status).toBe(200)
+    // Creation alone leaves the session working.
+    expect(await status(sessionId)).toBe('running')
+    const blocked = await fetch(`${environment.baseUrl}/api/settings/project-resources/trust`, { method: 'PUT',
+      headers: { Authorization: `Bearer ${session.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: project.result.projectId, sessionAgentId: sessionId, action: 'block' }) })
+    expect(blocked.status).toBe(200)
     await rm(turnDelay, { force: true })
-    // The session must not stay "running" on a provider that is gone: the restart settles it as stopped.
-    await expect.poll(() => status(sessionId), { timeout: 30_000 }).toBe('stopped')
+    // The session must not stay "running" on a provider that is gone, and nobody stopped it: it settles to idle.
+    await expect.poll(() => status(sessionId), { timeout: 30_000 }).toBe('idle')
+    await rpc.call('session.subscribe', { sessionId })
+    const transcriptText = async () => (await until<any>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot' && frame.item.snapshot.session.sessionId === sessionId)?.item.snapshot, Boolean)).items.map((item: any) => item.text)
+    // The restart was not a user stop and must not be presented as one.
+    expect((await transcriptText()).join('\n')).not.toContain('Session stopped.')
     await rm(ignoreInterrupt, { force: true })
     const commandId = randomUUID()
     await rpc.call('session.send', { commandId, sessionId, message: { text: 'First message', artifactIds: [] } })

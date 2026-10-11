@@ -33,6 +33,8 @@ interface NativeTurn {
   compactionCompleted: boolean;
   pendingTools: number;
   retries: number;
+  /** The endpoint refused the credentials: the turn was cut short and ends as this failure. */
+  rejected?: string;
 }
 interface PendingRequest {
   turn: NativeTurn;
@@ -477,11 +479,22 @@ export class CodexProviderAdapter implements ProviderAdapter {
       if (typeof tokens === "number" && typeof contextWindow === "number") this.emit(turn, { type: "context_usage", origin: this.origin(turn), tokens, contextWindow, percent: contextWindow ? tokens / contextWindow * 100 : 0 });
     }
     // Codex reports its own reconnect attempts as errors that it will retry; the turn is still running.
-    if (method === "error" && params.willRetry === true) this.emit(turn, { type: "retry", origin: this.origin(turn), attempt: ++turn.retries, message: String(params.error?.message ?? "Provider request failed") });
+    if (method === "error" && params.willRetry === true && !turn.rejected) {
+      // Codex's own message is only "Reconnecting... 2/5"; the reason it is retrying is in the details.
+      const reason = String(params.error?.additionalDetails || params.error?.message || "Provider request failed");
+      const status = Object.values(record(params.error?.codexErrorInfo)).map(info => record(info).httpStatusCode).find(code => typeof code === "number");
+      if (status === 401 || status === 403) {
+        // No retry can make a refused key work, so the turn ends now instead of after every attempt.
+        turn.rejected = reason;
+        this.emit(turn, { type: "error", origin: this.origin(turn), code: "CODEX_PROVIDER", message: reason, delivery: turn.accepted ? "accepted" : "unknown" });
+        void this.track(s.client.request("turn/interrupt", { threadId: params.threadId, turnId: params.turnId })).catch(() => undefined);
+      } else this.emit(turn, { type: "retry", origin: this.origin(turn), attempt: ++turn.retries, message: reason });
+    }
     if (method === "error" && params.willRetry !== true) this.emit(turn, { type: "error", origin: this.origin(turn), code: "CODEX_PROVIDER", message: String(params.error?.message ?? "Provider request failed"), delivery: turn.accepted ? "accepted" : "unknown" });
     if (method === "turn/completed") {
-      const outcome = params.turn?.status;
-      if (!["completed", "interrupted", "cancelled", "failed"].includes(outcome)) throw new Error("Codex terminal has no authoritative outcome");
+      if (!["completed", "interrupted", "cancelled", "failed"].includes(params.turn?.status)) throw new Error("Codex terminal has no authoritative outcome");
+      // A turn this adapter cut short over refused credentials failed; nobody interrupted it.
+      const outcome = turn.rejected && params.turn.status !== "completed" ? "failed" : params.turn.status;
       if (turn.compact && (!turn.compactionCompleted || outcome !== "completed")) this.emit(turn, { type: "compaction", origin: this.origin(turn), phase: outcome === "completed" ? "completed" : "failed" });
       for (const fact of turn.mapper.finishProvider(this.origin(turn), this.turnRef(turn))) this.emit(turn, fact);
       turn.ended = true;
@@ -490,7 +503,8 @@ export class CodexProviderAdapter implements ProviderAdapter {
       // activate a queued successor and replace its output obligation.
       if (!turn.parentTurn) await this.options.onNotification?.(method, params);
       const origin = this.origin(turn);
-      const error = params.turn.error ? { code: "CODEX_TURN_FAILED", message: String(params.turn.error.message ?? "Native Codex turn failed") } : undefined;
+      const failure = params.turn.error?.message ?? (outcome === "failed" ? turn.rejected : undefined);
+      const error = params.turn.error || failure ? { code: "CODEX_TURN_FAILED", message: String(failure ?? "Native Codex turn failed") } : undefined;
       if (origin.kind === "child") this.emit(turn, { type: "terminal", origin, terminalAuthority: "native_child", outcome, ...(error ? { error } : {}) });
       else this.emit(turn, { type: "terminal", origin, terminalAuthority: "root_attempt", outcome, ...(error ? { error } : {}) });
       this.releaseTurn(turn);

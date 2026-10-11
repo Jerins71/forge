@@ -112,7 +112,7 @@ export function describeBasePoint(point: { sequence: number }): string {
   return `message ${point.sequence}`
 }
 
-/** One line for the session header: where this conversation came from, then a switch from another provider. */
+/** One line for the session header: where this conversation came from, a switch from another provider, then a merge-back it received. */
 export function summarizeLineage(
   snapshot: SessionLineageSnapshot | null | undefined,
   resolveSessionLabel?: ResolveSessionLabel,
@@ -121,7 +121,10 @@ export function summarizeLineage(
   const lineage = snapshot.lineage
   // A model or sign-in change on the same provider leaves the conversation where it was; only a move between providers is worth the header.
   const switched = transfersNewestFirst(snapshot).find((transfer) => providerChange(transfer) === 'provider' && transfer.state !== 'superseded')
-  if (!lineage && !switched) return null
+  // The parent of a fork has no origin of its own to show; a merge-back that arrived is its one sign of it.
+  const merged = transfersNewestFirst(snapshot).find((transfer) => transfer.kind === 'merge_back' && transfer.targetThreadId === snapshot.threadId && transfer.source.threadId !== snapshot.threadId)
+  const arrived = merged && merged.state !== 'failed' && merged.state !== 'superseded' ? merged : undefined
+  if (!lineage && !switched && !arrived) return null
   const parent = lineage ? resolveSessionLabel?.(lineage.parentThreadId) : undefined
   const origin = !lineage
     ? null
@@ -131,7 +134,9 @@ export function summarizeLineage(
   const from = switched ? providerName(switched.sourceModel?.provider ?? switched.sourceProvider) ?? 'another provider' : null
   const failed = switched?.state === 'failed'
   const provider = !switched ? null : failed ? `switch from ${from} failed` : `switched from ${from}`
-  const label = [origin, provider].filter((part): part is string => Boolean(part)).join(' · ')
+  const fork = arrived ? resolveSessionLabel?.(arrived.source.threadId) ?? 'a fork' : null
+  const merge = !arrived ? null : arrived.state === 'consumed' ? `merged back from ${fork}` : `merge back from ${fork} · applies on your next message`
+  const label = [origin, provider, merge].filter((part): part is string => Boolean(part)).join(' · ')
   return { label: label.charAt(0).toUpperCase() + label.slice(1), tone: failed ? 'warning' : 'neutral' }
 }
 

@@ -430,14 +430,14 @@ describe('ConversationProjector provider failure rows', () => {
     // A worker whose runtime leaves no message still shows the failure, named the same way.
     const rows = await settle({ ...worker, sessionFile: join(root, 'worker-2.jsonl') })
     expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({ status: 'failed', displaySummary: expect.stringContaining('Failed: xai/grok-4.6 API error (426)') })
+    expect(rows[0]).toMatchObject({ status: 'failed', displaySummary: expect.stringContaining('Failed: xai/grok-4.6 rejected the request (426)') })
   })
 
   it('names the provider and model that failed on a manager status row', async () => {
     const root = await mkdtemp(join(tmpdir(), 'forge-projector-failure-'))
     const rows = await settle({ ...makeDescriptor(join(root, 'manager.jsonl'), root), model: grok })
     expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({ status: 'failed', displaySummary: expect.stringContaining('Failed: xai/grok-4.6 API error (426)') })
+    expect(rows[0]).toMatchObject({ status: 'failed', displaySummary: expect.stringContaining('Failed: xai/grok-4.6 rejected the request (426)') })
     expect(JSON.stringify(rows[0])).not.toContain('OpenAI API error')
   })
 })
