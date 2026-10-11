@@ -243,7 +243,8 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           if(transfer && isLineageTransfer(transfer) && transfer.handoffId) {
             if(!options.dataDir) throw new Error("Handoff root missing");
             const handoff=await readHandoff(options.dataDir,loadState(database).handoffs[transfer.handoffId]);
-            input={...input,text:handoff.text+"\n\nCurrent input:\n"+input.text};
+            // A resumed native conversation that already covers everything gets its input unchanged.
+            if(handoff.metadata.coverage.requestedEntryIds.length) input={...input,text:handoff.text+"\n\nCurrent input:\n"+input.text};
           }
           // No await between this committed fence and calling the provider method.
           record({ type: "attempt.dispatch", ...result(row, "dispatch"), threadId: effect.threadId, attemptId: effect.attemptId, authorized: authorized(run.commandId) });

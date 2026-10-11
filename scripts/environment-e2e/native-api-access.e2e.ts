@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { gunzipSync, zstdDecompressSync } from 'node:zlib';
 import { join, relative } from 'node:path';
 import type { ClaudeAuthStatus, CodexAuthStatus, NativeApiAccessUpdate } from '@forge/protocol';
 import { resolveClaudeExecutable } from '../../apps/backend/src/swarm/runtime/claude/claude-runtime-environment.js';
@@ -30,7 +31,7 @@ import { launchFleet, repositoryRoot } from './launch.js';
 
 type Kind = 'codex' | 'claude';
 type Credential = 'api-key' | 'subscription' | 'other';
-interface Seen { kind: Kind; path: string; credential: Credential; header: string; account: boolean; aborted: boolean; finished: boolean }
+interface Seen { kind: Kind; path: string; credential: Credential; header: string; account: boolean; aborted: boolean; finished: boolean; body: string }
 
 const keys: Record<Kind, string> = { codex: `sk-forge-e2e-${randomUUID()}`, claude: `sk-ant-forge-e2e-${randomUUID()}` };
 // Stand-ins for a saved subscription login: a ChatGPT access token and a Claude OAuth token.
@@ -56,8 +57,11 @@ function sse(response: ServerResponse, events: Array<Record<string, unknown>>) {
   response.end();
 }
 async function provide(request: IncomingMessage, response: ServerResponse) {
-  let body = '';
-  for await (const chunk of request) body += chunk;
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(chunk as Buffer);
+  // Codex compresses requests made with a ChatGPT login.
+  const raw = Buffer.concat(chunks), encoding = request.headers['content-encoding'];
+  const body = (encoding === 'zstd' ? zstdDecompressSync(raw) : encoding === 'gzip' ? gunzipSync(raw) : raw).toString('utf8');
   const path = request.url ?? '';
   const kind: Kind | undefined = request.method === 'POST' && path.startsWith('/v1/responses') ? 'codex'
     : request.method === 'POST' && path.startsWith('/v1/messages') && !path.includes('count_tokens') ? 'claude' : undefined;
@@ -69,7 +73,7 @@ async function provide(request: IncomingMessage, response: ServerResponse) {
   const bearer = request.headers.authorization?.replace(/^Bearer /, '');
   const apiKey = request.headers['x-api-key'];
   const value = typeof apiKey === 'string' ? apiKey : bearer;
-  const entry: Seen = { kind, path, aborted: false, finished: false, account: Boolean(request.headers['chatgpt-account-id']),
+  const entry: Seen = { kind, path, body, aborted: false, finished: false, account: Boolean(request.headers['chatgpt-account-id']),
     header: typeof apiKey === 'string' ? 'x-api-key' : bearer ? 'authorization: Bearer' : 'none',
     credential: value === keys[kind] ? 'api-key' : value === subscription[kind] ? 'subscription' : 'other' };
   seen.push(entry);
@@ -225,8 +229,15 @@ async function main() {
       assert(onSubscription.every(entry => entry.credential === 'subscription' && entry.header === 'authorization: Bearer'), `${kind}: subscription mode sends only the subscription login`);
       if (kind === 'codex') assert(onSubscription.every(entry => entry.account), 'codex: ChatGPT account header accompanies the login');
       assert((await spawns(kind)).length > before.spawns, `${kind}: the runtime was replaced at the idle boundary`);
+      // The replacement resumes the same native conversation: earlier turns reach the provider once, from
+      // native history, and nothing is injected in their place.
+      const resumed = onSubscription[0]!.body;
+      const count = (text: string) => resumed.split(text).length - 1;
+      assert.deepEqual([count('First message, with an API key.'), count('Second message, held open while the mode changes.'), count('Third message, on the subscription.')], [1, 1, 1], `${kind}: history is resumed natively, not duplicated`);
+      assert.equal(count('Forge context transfer'), 0, `${kind}: no handoff text is injected for a credential change`);
       result.switchAtIdle = { runningTurnAborted: false, processesDuringTurn: before.spawns, processesAfterIdle: (await spawns(kind)).length,
-        subscriptionRequests: onSubscription.length, subscriptionHeader: onSubscription[0]!.header, baseUrlAppliesToSubscription: true };
+        subscriptionRequests: onSubscription.length, subscriptionHeader: onSubscription[0]!.header, baseUrlAppliesToSubscription: true,
+        nativeConversationResumed: true, earlierTurnsInRequest: 'once each', handoffTextInjected: false };
 
       // And back, keeping the saved key without sending it again.
       const back = await configure(kind, { mode: 'api_key' });

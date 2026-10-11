@@ -19,16 +19,22 @@ export function createCoreLineagePort(sink:EventSink,control:EnvironmentControlS
   };
   // Threads whose credentials changed while they were working. Memory only: a restart starts every provider afresh.
   const refreshes=new Set<string>();
+  const working=(state:ReturnType<typeof loadState>,threadId:string)=>{const thread=state.threads[threadId];
+    return !!thread && (!!thread.activeRunId || !!thread.compaction || thread.shutdown!=='clean' || Object.values(state.runs).some(run=>run.threadId===threadId && run.state==='queued')
+      || Object.values(state.transfers).some(transfer=>isLineageTransfer(transfer) && transfer.targetThreadId===threadId && !['consumed','superseded','failed'].includes(transfer.state)));};
   const applyRefreshes=async () => {
     for(const threadId of [...refreshes]) {
       const state=loadState(sink.database),thread=state.threads[threadId],model=thread?.model ?? options.getAgent(threadId)?.model;
       // Without a live binding the next acquisition already starts a fresh provider.
       if(!thread?.bindingId || !state.bindings[thread.bindingId] || thread.desired!=='running' || !model) {refreshes.delete(threadId);continue;}
-      if(thread.activeRunId || thread.compaction || thread.shutdown!=='clean' || Object.values(state.runs).some(run=>run.threadId===threadId && run.state==='queued')
-        || Object.values(state.transfers).some(transfer=>isLineageTransfer(transfer) && transfer.targetThreadId===threadId && !['consumed','superseded','failed'].includes(transfer.state))) continue;
+      if(working(state,threadId)) continue;
       refreshes.delete(threadId);
-      // Work admitted while history was read keeps its binding; the next idle boundary retries.
-      try {await switchContext(threadId,model);} catch {refreshes.add(threadId);}
+      try {await switchContext(threadId,model);} catch(error) {
+        // Work admitted while history was read keeps its binding until the next idle boundary.
+        // Any other failure would fail again on every commit, so it is reported once and dropped.
+        if(working(loadState(sink.database),threadId)) refreshes.add(threadId);
+        else console.warn(`[control] Could not replace the provider for ${threadId} after a credential change; it keeps its current provider until it restarts. ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   };
   sink.subscribeCommit(() => { if(refreshes.size) void applyRefreshes(); });

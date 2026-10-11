@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createControlCore } from './database.js';
 import { createCoreLineagePort } from './orchestration/lineage-tool-port.js';
 import { loadState } from './orchestration/store.js';
@@ -20,10 +20,13 @@ import { SwarmAgentLifecycleService } from '../../swarm/swarm-agent-lifecycle-se
 //  - a working thread's refresh is forgotten once its turn ends;
 //  - the replacement binding starts a new native conversation instead of resuming the same one;
 //  - input sent after the refresh is lost instead of running on the replacement.
-async function fixture(model: AgentDescriptor['model'], capabilities: ProviderBinding['capabilities']) {
+//  - a worker thread, or one with no finished turn, cannot be refreshed;
+//  - a refresh that cannot succeed is retried on every commit forever.
+async function fixture(model: AgentDescriptor['model'], capabilities: ProviderBinding['capabilities'], role: 'manager' | 'worker' = 'manager') {
   const root = await mkdtemp(path.join(os.tmpdir(), 'forge-provider-refresh-'));
   const now = Date.now();
   const entries: ConversationEntryEvent[] = [];
+  const history = { reads: 0, fail: false };
   const starts: Array<{ runId: string; bindingId: string; conversation: string }> = [];
   const acquired: ProviderBinding[] = [];
   const closed: string[] = [];
@@ -66,8 +69,8 @@ async function fixture(model: AgentDescriptor['model'], capabilities: ProviderBi
   const descriptor = { agentId: 'source', role: 'manager', profileId: 'project', model } as AgentDescriptor;
   const summary = { sessionId: 'source', projectId: 'project', title: 'Source', status: 'idle', attention: 'none', unread: 0, workerCount: 0, updatedAt: new Date(now).toISOString(), sortKey: 'source', archived: false, workspace: { kind: 'current_checkout', cwd: root, branch: null }, model: { ...model, origin: 'session_override' } };
   core.database.prepare("INSERT INTO control_sessions(session_id,project_id,desired_state,summary_json,updated_sequence) VALUES ('source','project','running',?,0)").run(JSON.stringify(summary));
-  core.controlService.record({ type: 'thread.create', commandId: randomUUID(), now, threadId: 'source', role: 'manager', projectId: 'project', model });
-  const port = createCoreLineagePort(core.eventSink, core.controlService, { getAgent: () => descriptor, readEntries: async () => entries, clock: () => now, random: randomUUID });
+  core.controlService.record({ type: 'thread.create', commandId: randomUUID(), now, threadId: 'source', role, projectId: 'project', model, ...(role === 'worker' ? { managerId: 'owner' } : {}) });
+  const port = createCoreLineagePort(core.eventSink, core.controlService, { getAgent: () => descriptor, readEntries: async () => { history.reads++; if (history.fail) throw new Error('History is unreadable'); return entries; }, clock: () => now, random: randomUUID });
   const send = async (text: string) => { const run = await core.controlService.submitInput({ commandId: randomUUID(), threadId: 'source', message: { text, artifactIds: [] } }); await core.effectWorker.drain(); return run.runId; };
   const complete = (runId: string) => {
     const state = loadState(core.database); const attempt = state.attempts[state.runs[runId].activeAttemptId]; const binding = state.bindings[attempt.bindingId];
@@ -76,7 +79,7 @@ async function fixture(model: AgentDescriptor['model'], capabilities: ProviderBi
   const thread = () => loadState(core.database).threads.source;
   // The deferred refresh reads history before recording its transfer.
   const settle = async () => { for (let turn = 0; turn < 5; turn++) await new Promise(resolve => setImmediate(resolve)); await core.effectWorker.drain(); };
-  return { core, port, descriptor, send, complete, thread, settle, starts, acquired, closed, close: async () => { await core.close(); await rm(root, { recursive: true, force: true }); } };
+  return { core, port, descriptor, history, send, complete, thread, settle, starts, acquired, closed, close: async () => { await core.close(); await rm(root, { recursive: true, force: true }); } };
 }
 const codex = { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'low' };
 
@@ -147,4 +150,30 @@ it('sends Claude "Switch account" through the same binding replacement, never a 
     expect(f.starts.at(-1)).toMatchObject({ runId: next, conversation: f.acquired[0]!.conversation.nativeId });
     expect(f.acquired).toHaveLength(2);
   } finally { await f.close(); }
+});
+
+it('refreshes a worker thread, and reports once then drops a refresh that cannot succeed', async () => {
+  const f = await fixture(codex, new CodexProviderAdapter({} as never).capabilities(), 'worker');
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    f.complete(await f.send('Worker assignment'));
+    const before = f.thread();
+    await f.port.refreshContext('source');
+    await f.settle();
+    expect(f.closed).toEqual([before.bindingId]);
+    const next = await f.send('Follow-up for the worker');
+    expect(f.starts.at(-1)).toMatchObject({ runId: next, conversation: f.acquired[0]!.conversation.nativeId });
+    f.complete(next);
+    await f.settle();
+    f.history.fail = true;
+    const reads = f.history.reads;
+    await f.port.refreshContext('source');
+    // Later commits must not retry it.
+    f.complete(await f.send('Another turn')); await f.settle();
+    f.complete(await f.send('And another')); await f.settle();
+    expect(f.history.reads).toBe(reads + 1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toContain('History is unreadable');
+    expect(f.closed).toHaveLength(1);
+  } finally { warn.mockRestore(); await f.close(); }
 });
