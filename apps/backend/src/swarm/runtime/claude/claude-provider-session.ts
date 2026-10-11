@@ -1,6 +1,6 @@
 import type { CanUseTool, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ChoiceAnswer, ChoiceQuestion, ProviderObservation, ProviderRequestRef, ProviderTurnRef } from "@forge/protocol";
-import type { ProviderBinding, ProviderDispatchResult, ProviderRespondInput } from "../provider-contract.js";
+import { ProviderRequestRejectedError, type ProviderBinding, type ProviderDispatchResult, type ProviderRespondInput } from "../provider-contract.js";
 
 type Fact = ProviderObservation extends infer O ? O extends ProviderObservation ? Omit<O, "scope" | "attemptId" | "sequence"> : never : never;
 type Origin = ProviderObservation["origin"];
@@ -143,12 +143,13 @@ export class ClaudeProviderSession {
   }
   respond(input: ProviderRespondInput): void {
     const { request, lifetime } = input;
+    if (request.threadId !== this.binding.scope.threadId || request.bindingId !== this.binding.scope.bindingId
+      || request.generation !== this.binding.scope.generation || request.conversationId !== this.binding.conversation.nativeId) throw new ProviderRequestRejectedError("stale_scope");
     const pending = this.requests.get(request.nativeId);
-    if (!pending || (request.threadId !== pending.ref.threadId || request.bindingId !== pending.ref.bindingId
-        || request.generation !== pending.ref.generation || request.kind !== pending.ref.kind
-        || request.conversationId !== pending.ref.conversationId || request.turnId !== pending.ref.turnId)
-      || lifetime.kind !== "live_callback" || lifetime.generation !== this.binding.scope.generation
-      || (lifetime.expiresAt && (!Number.isFinite(Date.parse(lifetime.expiresAt)) || Date.parse(lifetime.expiresAt) <= Date.now()))) throw new Error("Claude request is expired or belongs to another binding/generation.");
+    if (!pending) throw new ProviderRequestRejectedError("unknown_request");
+    if (request.kind !== pending.ref.kind || request.turnId !== pending.ref.turnId
+      || lifetime.kind !== "live_callback" || lifetime.generation !== this.binding.scope.generation) throw new ProviderRequestRejectedError("stale_scope");
+    if (lifetime.expiresAt && (!Number.isFinite(Date.parse(lifetime.expiresAt)) || Date.parse(lifetime.expiresAt) <= Date.now())) throw new ProviderRequestRejectedError("expired");
     if (!Array.isArray(input.response) || !input.response.every(answer => answer && typeof answer.questionId === "string"
       && Array.isArray(answer.selectedOptionIds) && answer.selectedOptionIds.every((id: unknown) => typeof id === "string")
       && (answer.text === undefined || typeof answer.text === "string"))) throw new Error("Claude response must contain choice answers.");
