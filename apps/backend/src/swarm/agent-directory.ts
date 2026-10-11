@@ -51,6 +51,15 @@ export interface ProfileSortOrderAssignment {
  * persistence or mutate either registry.
  */
 export class AgentDirectory {
+  private readLifecycleStatus?: (agentId: string) => AgentDescriptor["status"] | undefined;
+
+  installLifecycleStatus(read: (agentId: string) => AgentDescriptor["status"] | undefined): void { this.readLifecycleStatus = read; }
+
+  private projectDescriptor(descriptor: AgentDescriptor): AgentDescriptor {
+    const status = this.readLifecycleStatus?.(descriptor.agentId);
+    return status ? { ...descriptor, status } : descriptor;
+  }
+
   private readonly configuredManagerId: string | undefined;
 
   constructor(private readonly options: AgentDirectoryOptions) {
@@ -58,7 +67,7 @@ export class AgentDirectory {
   }
 
   listAgents(): AgentDescriptor[] {
-    return this.sortedDescriptors().map((descriptor) => cloneDescriptor(descriptor));
+    return this.sortedDescriptors().map((descriptor) => cloneDescriptor(this.projectDescriptor(descriptor)));
   }
 
   getConfiguredManagerId(): string | undefined {
@@ -66,17 +75,17 @@ export class AgentDirectory {
   }
 
   listAgentsForInternalUse(): AgentDescriptor[] {
-    return this.sortedDescriptors().map((descriptor) => cloneDescriptorForPersistence(descriptor));
+    return this.sortedDescriptors().map((descriptor) => cloneDescriptorForPersistence(this.projectDescriptor(descriptor)));
   }
 
   getAgent(agentId: string): AgentDescriptor | undefined {
     const descriptor = this.options.descriptors.get(agentId);
-    return descriptor ? cloneDescriptor(descriptor) : undefined;
+    return descriptor ? cloneDescriptor(this.projectDescriptor(descriptor)) : undefined;
   }
 
   getAgentForInternalUse(agentId: string): AgentDescriptor | undefined {
     const descriptor = this.options.descriptors.get(agentId);
-    return descriptor ? cloneDescriptorForPersistence(descriptor) : undefined;
+    return descriptor ? cloneDescriptorForPersistence(this.projectDescriptor(descriptor)) : undefined;
   }
 
   listProfiles(): ManagerProfile[] {
@@ -109,7 +118,7 @@ export class AgentDirectory {
   listWorkersForSession(sessionAgentId: string): AgentDescriptor[] {
     const grouped = this.buildWorkerVisibilityGroups();
     return (grouped.workersByManagerId.get(sessionAgentId) ?? []).map((descriptor) =>
-      cloneDescriptor(descriptor),
+      cloneDescriptor(this.projectDescriptor(descriptor)),
     );
   }
 
@@ -355,7 +364,7 @@ export class AgentDirectory {
     if (!descriptor || descriptor.role !== "manager") {
       throw new Error(`Only manager can ${action}`);
     }
-    if (isNonRunningAgentStatus(descriptor.status)) {
+    if (isNonRunningAgentStatus(this.projectDescriptor(descriptor).status)) {
       throw new Error(`Manager is not running: ${agentId}`);
     }
     return descriptor;
@@ -364,7 +373,7 @@ export class AgentDirectory {
   hasRunningManagers(): boolean {
     for (const descriptor of this.options.descriptors.values()) {
       if (descriptor.role !== "manager") continue;
-      if (!isNonRunningAgentStatus(descriptor.status)) return true;
+      if (!isNonRunningAgentStatus(this.projectDescriptor(descriptor).status)) return true;
     }
     return false;
   }
@@ -391,9 +400,9 @@ export class AgentDirectory {
     descriptor: AgentDescriptor,
     workers: AgentDescriptor[],
   ): AgentDescriptor {
-    const clone = cloneDescriptor(descriptor);
+    const clone = cloneDescriptor(this.projectDescriptor(descriptor));
     clone.workerCount = workers.length;
-    clone.activeWorkerCount = workers.filter((worker) => worker.status === "streaming").length;
+    clone.activeWorkerCount = workers.filter((worker) => this.projectDescriptor(worker).status === "streaming").length;
     clone.pendingChoiceCount = this.options.getPendingChoiceCount(clone.agentId);
     return clone;
   }
@@ -404,8 +413,9 @@ export class AgentDirectory {
   ): boolean {
     if (descriptor.role !== "manager") return false;
     if (this.isDescriptorEffectivelyArchived(descriptor)) return false;
-    if (descriptor.status === "terminated" || descriptor.status === "error") return false;
-    return includeStoppedOnRestart || descriptor.status !== "stopped";
+    const { status } = this.projectDescriptor(descriptor);
+    if (status === "terminated" || status === "error") return false;
+    return includeStoppedOnRestart || status !== "stopped";
   }
 
   private generateUniqueId(base: string): string {

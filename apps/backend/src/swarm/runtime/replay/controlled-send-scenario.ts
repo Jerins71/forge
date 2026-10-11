@@ -158,10 +158,11 @@ export async function runControlledSendReplay(scenario: Scenario) {
     if (runtime !== 1 && !(scenario === "append-before-locator" && runtime === 2)) throw new Error("Recovery created an unexpected provider process");
     const transcript=structuredClone(base);
     if (runtime === 2) {
-      const index=transcript.entries.findIndex(entry => entry.type === "expect_outbound" && entry.label === "provider-start");
-      transcript.entries.splice(index,0,{ type:"expect_outbound",frame:{id:"$any",method:"thread/inject_items",params:{threadId:"$threadId",items:[{type:"message",role:"user",content:[{type:"input_text",text:"$any"}]}]}},capture:{"$rpcId":["id"]} },{type:"emit_inbound",frame:{id:"$rpcId",result:{}}});
+      const open = transcript.entries.find(entry => entry.type === "expect_outbound" && (entry.frame as { method?: string }).method === "thread/start");
+      if (!open || open.type !== "expect_outbound") throw new Error("Replay native open frame is missing");
+      open.frame = { id: "$any", method: "thread/resume", params: { cwd: "$cwd", model: "gpt-6-sol", approvalPolicy: "never", sandbox: "danger-full-access", allowProviderModelFallback: false, threadId: "$threadId" } };
     }
-    return { ...transcript,bindings:{ $threadId:`replay-thread-${runtime}` } };
+    return { ...transcript,bindings:{ $threadId:"replay-thread-1" } };
   });
   await mkdir(getNativeCodexHome(config.paths.dataDir), { recursive: true });
   await writeFile(resolve(getNativeCodexHome(config.paths.dataDir), "replay-peer.json"), JSON.stringify({ port: harness.port }));

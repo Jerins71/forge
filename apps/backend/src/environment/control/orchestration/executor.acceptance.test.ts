@@ -11,6 +11,7 @@ import { createSwarmControlAdapter } from "../swarm-control-adapter.js";
 import { createArtifactService } from "../artifact-service.js";
 import { UserMessageCoordinator, type HandleUserMessageOptions, type UserMessageCoordinatorOptions } from "../../../swarm/user-message-coordinator.js";
 import { ConversationAttachmentService } from "../../../swarm/conversation-attachment-service.js";
+import { AgentDirectory } from "../../../swarm/agent-directory.js";
 import type { AgentDescriptor } from "../../../swarm/types.js";
 const roots: string[] = []; const cores: ControlCore[] = [];
 afterEach(async () => { for (const core of cores.splice(0)) await core.close(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -131,6 +132,7 @@ describe("durable provider outbox", () => {
     const f = await fixture(); const stopped: string[] = [];
     f.options.swarm.resolveSession = agentId => agentId === "worker" ? { sessionId: "manager", workerId: "worker" } : { sessionId: agentId };
     f.options.swarm.stopSession = async input => { stopped.push(input.sessionId); return { stopped: true }; };
+    f.core.eventSink.transaction(tx => f.core.eventSink.append(tx, { topic: "detail", sessionId: "manager", event: { type: "worker.upsert", worker: { agentId: "worker", title: "Worker", status: "idle" } } }));
     await f.core.controlService.submitInput({ commandId: "worker-input", threadId: "worker", thread: { role: "worker", projectId: "project", managerId: "manager" }, message: { text: "worker", artifactIds: [] } });
     await f.core.effectWorker.drain();
     await f.core.controlService.execute(principal, method, method === "worker.kill" ? { commandId, sessionId: "manager", workerId: "worker" } : { commandId, sessionId: "worker" });
@@ -139,7 +141,11 @@ describe("durable provider outbox", () => {
     expect(state.threads.worker).toMatchObject({ desired: "stopped", shutdown: "clean" });
     expect(state.threads.manager.desired).toBe("running");
     expect(stopped).toEqual(["worker"]);
-    expect((await f.core.controlService.getReceipt(principal, commandId)).state).toBe("succeeded");
+    const row = f.core.database.prepare("SELECT worker_json FROM control_workers WHERE agent_id='worker'").get() as { worker_json: string };
+    expect(JSON.parse(row.worker_json).status).toBe("terminated");
+    await f.core.close(); const reboot = await f.open();
+    expect(JSON.parse((reboot.database.prepare("SELECT worker_json FROM control_workers WHERE agent_id='worker'").get() as typeof row).worker_json).status).toBe("terminated");
+    expect((await reboot.controlService.getReceipt(principal, commandId)).state).toBe("succeeded");
   });
   it("accepts and dispatches an input once while receipt completion is independent of run completion", async () => {
     const f = await fixture(); const input = { commandId, sessionId: "manager", message: { text: "fixture", artifactIds: [] } };
@@ -219,4 +225,17 @@ describe("durable provider outbox", () => {
     expect(loadState(f.core.database).assignments.assignment.selection.modelId).toBe("selected-fallback");
   });
 
+});
+
+it("projects authoritative worker status across all directory reads without changing the descriptor", () => {
+  const manager = { agentId: "manager", role: "manager", status: "idle", createdAt: "2026-01-01", updatedAt: "2026-01-01", model: { provider: "pi", modelId: "fixture" } } as AgentDescriptor;
+  const worker = { ...manager, agentId: "worker", managerId: "manager", role: "worker" } as AgentDescriptor;
+  const directory = new AgentDirectory({ descriptors: new Map([["manager", manager], ["worker", worker]]), profiles: new Map(), getPendingChoiceCount: () => 0 });
+  directory.installLifecycleStatus(id => id === "worker" ? "terminated" : undefined);
+  expect(directory.getAgent("worker")?.status).toBe("terminated");
+  expect(directory.getAgentForInternalUse("worker")?.status).toBe("terminated");
+  expect(directory.listAgents().find(agent => agent.agentId === "worker")?.status).toBe("terminated");
+  expect(directory.listAgentsForInternalUse().find(agent => agent.agentId === "worker")?.status).toBe("terminated");
+  expect(directory.listWorkersForSession("manager")[0].status).toBe("terminated");
+  expect(worker.status).toBe("idle");
 });
