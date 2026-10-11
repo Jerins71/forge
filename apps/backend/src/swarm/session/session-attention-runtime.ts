@@ -30,7 +30,7 @@ interface SessionAttentionRuntimeOptions {
   profiles: ReadonlyMap<string, ManagerProfile>;
   workers: Pick<AgentDirectory, "getWorkersForManager">;
   choices: Pick<SwarmChoiceService, "getPendingChoiceIdsForSession">;
-  turns: { getPendingContextCount(sessionAgentId: string): number };
+  turns: { getPendingContextCount(sessionAgentId: string): number; getActiveTurnSource(sessionAgentId: string): ReturnType<NonNullable<ConstructorParameters<typeof SessionAttentionReporter>[0]["getActiveTurnSource"]>> };
   plans: Pick<SessionPlanCoordinator, "getAttentionReason">;
   onChange: NonNullable<SessionAttentionCoordinatorOptions["onChange"]>;
   log: NonNullable<SessionAttentionCoordinatorOptions["log"]>;
@@ -72,6 +72,7 @@ export class SessionAttentionRuntime implements SessionAttentionRuntimeHooks {
         options.choices.getPendingChoiceIdsForSession(sessionAgentId).length,
       getPendingTurnContextCount: (sessionAgentId) =>
         options.turns.getPendingContextCount(sessionAgentId),
+      getActiveTurnSource: (sessionAgentId) => options.turns.getActiveTurnSource(sessionAgentId),
     });
     this.facade = {
       initialize: async () => {

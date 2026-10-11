@@ -73,8 +73,8 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
     },
     async ensureSession(input) {
       const defaultModel = swarmManager.listProfiles().find(profile => profile.profileId === input.projectId)?.defaultModel;
-      const { model, ...identity } = input;
-      await swarmManager.ensureControlledSession({ ...identity, ...(model ? { model: { ...model, thinkingLevel: model.thinkingLevel ?? defaultModel?.thinkingLevel ?? "medium" } } : {}) });
+      const { model, delegation, ...identity } = input;
+      await swarmManager.ensureControlledSession({ ...identity, ...(delegation?.managerPosture ? { managerPosture: delegation.managerPosture } : {}), ...(delegation?.rosterId ? { delegationRosterId: delegation.rosterId } : {}), ...(model ? { model: { ...model, thinkingLevel: model.thinkingLevel ?? defaultModel?.thinkingLevel ?? "medium" } } : {}) });
       return { materialized: true };
     },
     enqueuePresentation:(threadId,runId,presentation) => swarmManager.enqueueControlledPresentation(threadId,runId,presentation),

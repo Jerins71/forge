@@ -29,8 +29,8 @@ import { EnvironmentsSettings } from '@/components/settings/environments/Environ
 import type { AgentDescriptor, ManagerProfile } from '@forge/protocol'
 
 function getSettingsContentWidthClassName(activeTab: SettingsTab): string | undefined {
-  if (activeTab === 'skills') return 'max-w-full'
-  if (activeTab === 'specialists') return 'max-w-[96rem]'
+  if (activeTab === 'skills') return '[--content-max:100%]'
+  if (activeTab === 'specialists') return '[--content-max:96rem]'
   return undefined
 }
 

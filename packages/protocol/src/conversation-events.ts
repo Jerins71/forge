@@ -138,7 +138,8 @@ export interface ConversationReplyTargetInput {
  * final outcome when the manager did not summarize it — informational, not an
  * error, and must not masquerade as manager prose.
  */
-export type SystemNoticeKind = 'worker_outcome_backstop' | 'model_change'
+/** `assignment` is presentation only: a worker's internal input, shown as a card and never persisted. */
+export type SystemNoticeKind = 'worker_outcome_backstop' | 'model_change' | 'assignment'
 
 export interface ConversationMessageEvent {
   type: 'conversation_message'

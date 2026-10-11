@@ -48,6 +48,13 @@ that environment: **Subscription** (the default, described above) or **API key**
 optional **Base URL** sends Claude's requests through a router or proxy; it applies in
 both modes, so with Subscription the proxy must pass the Claude sign-in through.
 
+- The base URL is the router's root, without `/v1` (for example
+  `https://router.example.com`): Claude adds `/v1/messages` to it. A trailing `/v1` is
+  removed when saving.
+- **Test connection** sends one empty request from that environment to
+  `<base URL>/v1/messages` with the saved key and reports connected, key rejected (401),
+  wrong path (404), or unreachable. Saving runs the same test, and the card's check
+  mark shows its result.
 - In API-key mode the runtime receives `ANTHROPIC_API_KEY`, which Claude Code prefers
   over a saved login. In Subscription mode it receives no key. The selected mode is the
   only one used; a missing key stops the session with a message instead of falling back.

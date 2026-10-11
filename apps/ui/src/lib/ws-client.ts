@@ -6,8 +6,6 @@ import { EnvironmentRuntimeError, type EnvironmentClient, type DetailState } fro
 import {
   projectShell,
   projectSession,
-  projectDetailMessages,
-  projectDetailActivity,
   projectItems,
   projectActivityItems,
   projectWorker,
@@ -16,6 +14,7 @@ import {
 import { getCatalogModelsByFamily } from '@forge/protocol'
 import type { CommandReceipt } from '@forge/protocol/environment-v2'
 import { EnvironmentOutbox } from './ws-client/environment-outbox'
+import { whenSettled } from './settled-request'
 import type { CodexElicitationDecision, CodexElicitationPersistScope, SessionGoalControlAction, SessionProjectAgentInput, WorkModeId } from '@forge/protocol'
 import type { ConversationSubscriptionReason } from './ws-client/types'
 import { applyLoadedModelCacheVisualizationSetting as reduceLoadedModelCacheVisualizationSetting } from './ws-client/model-cache-visualization-state'
@@ -110,6 +109,10 @@ export interface ManagerWsClientOptions {
 export class ManagerWsClient {
   private readonly environmentClient?: EnvironmentClient
   private readonly environmentDetach: Array<() => void> = []
+  /** In-flight read and attention upkeep for the session in view, keyed per intent. */
+  private readonly viewedSessionRequests = new Set<string>()
+  private keptUnreadSessionId: string | null = null
+  private viewedSessionId: string | null = null
   private detailLease: ReturnType<EnvironmentClient['acquireDetail']> | null =
     null
   private detailDetach: (() => void) | null = null
@@ -157,6 +160,7 @@ export class ManagerWsClient {
       const updateShell = () => {
         const shell = client.shell.getSnapshot();
         this.updateState({ ...projectShell(shell, this.state.agents, this.state.profiles, this.state.unreadCounts, this.state.sessionAttentions), restartRecovery: shell.recovery ?? null });
+        this.keepViewedSessionRead()
       }
       updateShell()
       this.environmentDetach.push(
@@ -177,6 +181,13 @@ export class ManagerWsClient {
       this.environmentDetach.push(
         client.connection.subscribe((s) => s, updateConnection),
       )
+      if (typeof window !== 'undefined') {
+        // Coming back to the window is when a reply that arrived meanwhile gets read.
+        const onAttention = () => this.keepViewedSessionRead()
+        window.addEventListener('focus', onAttention)
+        document.addEventListener('visibilitychange', onAttention)
+        this.environmentDetach.push(() => { window.removeEventListener('focus', onAttention); document.removeEventListener('visibilitychange', onAttention) })
+      }
       if (normalizedInitialAgentId)
         this.subscribeToAgent(normalizedInitialAgentId)
     }
@@ -212,6 +223,8 @@ export class ManagerWsClient {
   }
 
   markUnread(agentId: string): void {
+    // An explicit "mark unread" on the session in view holds until it is opened again.
+    this.keptUnreadSessionId = agentId
     void this.sessionState('session.readState.set', { sessionId: agentId, read: false }).catch(error => this.reportSessionStateError(error))
   }
 
@@ -230,13 +243,45 @@ export class ManagerWsClient {
     this.updateState({ lastError: error instanceof Error ? error.message : 'Session state update failed' })
   }
 
+  /** The session whose chat is on screen, or null while another view covers it. */
+  setViewedSession(sessionId: string | null): void {
+    if (this.viewedSessionId === sessionId) return
+    this.viewedSessionId = sessionId
+    this.keptUnreadSessionId = null
+    this.keepViewedSessionRead()
+  }
+
+  /**
+   * The session on screen is being read. While the page is visible and focused, its unread count and
+   * its "work finished" attention are cleared as they appear; streams never mark anything read.
+   * A decision or failure keeps its attention until the user acts on it.
+   */
+  private keepViewedSessionRead(): void {
+    const client = this.environmentClient
+    const sessionId = this.viewedSessionId
+    if (!client || !sessionId || sessionId !== this.environmentProjection?.session.sessionId || typeof document === 'undefined' || document.visibilityState !== 'visible' || !document.hasFocus()) return
+    if (!client.deviceSession()?.scopes.includes('session:operate') || !client.descriptor()?.capabilities.sessionState) return
+    const summary = client.shell.getSnapshot().sessions.get(sessionId)
+    if (!summary) return
+    const clear = (key: string, send: () => Promise<unknown>) => {
+      if (this.viewedSessionRequests.has(key)) return
+      this.viewedSessionRequests.add(key)
+      // Background upkeep: a failure is retried by the next shell change, never shown as a session error.
+      void send().then(() => true, () => false).then(done => { this.viewedSessionRequests.delete(key); if (done) this.keepViewedSessionRead() })
+    }
+    if (summary.unread > 0 && this.keptUnreadSessionId !== sessionId) clear(`read:${sessionId}`, () => this.sessionState('session.readState.set', { sessionId, read: true }))
+    const occurrence = summary.attentionOccurrence
+    if (occurrence && ['work_settled', 'plan_completed', 'work_graph_completed'].includes(occurrence.reason))
+      clear(`attention:${occurrence.attentionId}`, () => this.sessionState('session.attention.dismiss', { occurrenceIds: [occurrence.attentionId] }))
+  }
+
   private async sessionState<M extends 'session.update' | 'session.message.pin' | 'session.pins.clear' | 'session.readState.set' | 'project.readState.clear' | 'session.attention.dismiss'>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<CommandReceipt> {
     const client = this.environmentClient
     if (!client?.descriptor()?.capabilities.sessionState) throw new Error('Update this environment to manage pins and read state')
     const key = JSON.stringify([method, input])
     const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
     this.intentCommandIds.set(key, commandId)
-    const receipt = await client.request(method, { ...input, commandId } as RpcInput<M>)
+    const receipt = await whenSettled(() => client.request(method, { ...input, commandId } as RpcInput<M>))
     this.intentCommandIds.delete(key)
     if (receipt.state !== 'succeeded') throw new Error(receipt.error?.message ?? 'Session state update did not complete')
     return receipt
@@ -478,7 +523,7 @@ export class ManagerWsClient {
     const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
     this.intentCommandIds.set(key, commandId)
     try {
-      let receipt = await this.environmentClient.request(method, { ...input, commandId } as RpcInput<M>)
+      let receipt = await whenSettled(() => this.environmentClient!.request(method, { ...input, commandId } as RpcInput<M>))
       const started = Date.now()
       // A stop stays running while the environment waits for the runtime to exit, then succeeds or
       // explains why it could not. Outwait that bound; reporting a slow exit as a failure would be false.
@@ -507,7 +552,7 @@ export class ManagerWsClient {
     const key = JSON.stringify([method, input])
     const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
     this.intentCommandIds.set(key, commandId)
-    const receipt = await this.environmentClient!.request(method, { ...input, commandId } as RpcInput<M>)
+    const receipt = await whenSettled(() => this.environmentClient!.request(method, { ...input, commandId } as RpcInput<M>))
     this.intentCommandIds.delete(key)
     if (receipt.state !== 'succeeded') throw new Error(receipt.error?.message ?? 'Configuration was interrupted; inspect the current state before retrying')
     return receipt
@@ -850,9 +895,11 @@ export class ManagerWsClient {
  this.updateState({ conversationPageLoading: true, lastError: null });
  try {
  const page = await this.environmentClient.request('session.history', { sessionId: agentId, before: cursor, turns: Math.min(20, Math.max(1, limit ?? 20)) });
- const messages = projectItems(page.items, agentId);
+ const ownerId = this.environmentProjection?.session.sessionId ?? agentId;
+ const items = page.items.filter(item => ownerId === agentId || item.actorId === agentId);
+ const messages = projectItems(items, agentId, ownerId);
  const result: ConversationPageResult = { agentId, messages, page: { hasOlder: !!page.nextCursor, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}), completeness: 'complete', source: 'canonical' } };
- if (this.state.targetAgentId === agentId) this.updateState({ messages: [...messages, ...this.state.messages], activityMessages: [...projectActivityItems(page.items, agentId), ...this.state.activityMessages], conversationPage: result.page, conversationPageLoading: false, conversationHistoryMutation: { revision: (this.state.conversationHistoryMutation?.revision ?? 0) + 1, kind: 'prepend' } });
+ if (this.state.targetAgentId === agentId) this.updateState({ messages: [...messages, ...this.state.messages], activityMessages: [...projectActivityItems(items, ownerId), ...this.state.activityMessages], conversationPage: result.page, conversationPageLoading: false, conversationHistoryMutation: { revision: (this.state.conversationHistoryMutation?.revision ?? 0) + 1, kind: 'prepend' } });
  return result;
  } catch (error) { if (this.state.targetAgentId === agentId) this.updateState({ conversationPageLoading: false, lastError: error instanceof Error ? error.message : String(error) }); throw error; }
  }
@@ -912,8 +959,6 @@ export class ManagerWsClient {
     this.detailDetach?.()
     this.detailLease?.release()
     this.desiredAgentId = sessionId
-    if (this.environmentClient.deviceSession()?.scopes.includes('session:operate') && this.environmentClient.descriptor()?.capabilities.sessionState)
-      void this.sessionState('session.readState.set', { sessionId, read: true }).catch(error => this.reportSessionStateError(error))
     this.detailLease = this.environmentClient.acquireDetail(sessionId)
     const store = this.detailLease.store
     // Lineage and a reported error belong to one session; never present the previous session's on this one.
@@ -925,6 +970,7 @@ export class ManagerWsClient {
       if (detail.projection !== projection) {
         projection = detail.projection
         this.environmentProjection = projection
+        this.keepViewedSessionRead()
         if (projection?.plan) this.handleServerEvent({ type: 'session_plan_snapshot', sessionAgentId: sessionId, profileId: projection.session.projectId, ...projection.plan })
         if (projection?.goal) this.handleServerEvent({ type: 'session_goal_snapshot', sessionAgentId: sessionId, profileId: projection.session.projectId, ...projection.goal })
         if (projection?.recovery !== undefined) this.updateState({ restartRecovery: projection.recovery })
@@ -934,17 +980,20 @@ export class ManagerWsClient {
           // The same declaration keeps its identity so consumers do not re-render on every detail tick.
           sessionTransferCapabilities: capabilities && previous && JSON.stringify(capabilities) === JSON.stringify(previous) ? previous : capabilities,
         })
-        const projectedMessages = projectDetailMessages(detail)
+        // A worker is mounted through its owning session and shows only its own rows.
+        const ownerId = projection?.session.sessionId ?? sessionId
+        const items = (projection?.items ?? []).filter(item => ownerId === sessionId || item.actorId === sessionId)
+        const projectedMessages = projectItems(items, sessionId, ownerId)
         const echoes = this.outbox?.pendingMessages(sessionId, projectedCommandIds(projection)) ?? []
         this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))
         this.updateState({
           messages: [...projectedMessages,...echoes,...(projection?.choices??[]).filter(c=>c.status!=='answered').map(c=>({type:'choice_request' as const,agentId:c.agentId,choiceId:c.choiceId,status:c.status==='interrupted'?'expired' as const:c.status,questions:c.questions,timestamp:projection!.session.updatedAt}))],
           commandStatuses: this.outbox?.statuses(),
           pendingChoiceIds:new Set((projection?.choices??[]).filter(c=>c.status==='pending').map(c=>c.choiceId)),
-          agents: projectSessionWorkers(this.state.agents, projection?.workers ?? [], sessionId, this.environmentClient!.shell.getSnapshot()),
+          agents: projectSessionWorkers(this.state.agents, projection?.workers ?? [], ownerId, this.environmentClient!.shell.getSnapshot()),
           conversationPage:projection?{hasOlder:!!projection.historyCursor,...(projection.historyCursor?{nextCursor:projection.historyCursor}:{}),completeness:'complete',source:'canonical'}:null,
           conversationPageLoading:false,
-          activityMessages: projectDetailActivity(detail),
+          activityMessages: projectActivityItems(items, ownerId),
           conversationHistoryMutation: {
             revision:
               (this.state.conversationHistoryMutation?.revision ?? 0) + 1,

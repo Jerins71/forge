@@ -78,8 +78,8 @@ export function GoalBar({
 
   return (
     <div className="relative z-20 h-0 shrink-0">
-      <div className="absolute inset-x-0 top-1.5 px-3">
-        <div className="mx-auto max-w-5xl rounded-lg border border-border/70 bg-card/90 shadow-sm backdrop-blur-sm">
+      <div className="content-gutter absolute inset-x-0 top-1.5">
+        <div className="content-column rounded-lg border border-border/70 bg-card/90 shadow-sm backdrop-blur-sm">
         <div className="flex min-h-9 items-center gap-2 px-2.5 py-1.5">
           <Target className={cn(
             'size-3.5 shrink-0',

@@ -204,7 +204,12 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
   });
   const assertAdmissionAvailable = (sessionId: string): void => {
     if (database.prepare("SELECT 1 FROM effects WHERE session_id=? AND kind='lifecycle.admit' AND state='claimed' LIMIT 1").get(sessionId))
-      throw new ControlError("CONFLICT", "Session lifecycle operation is still settling", true);
+      throw new ControlError("CONFLICT", "Another change to this session is still being applied. Try again in a moment.", true);
+  };
+  /** A change must not run across a launch, input or stop the session accepted and has not finished applying. */
+  const assertSettled = (sessionId: string): void => {
+    if (database.prepare("SELECT 1 FROM effects WHERE session_id=? AND state IN ('pending','claimed') LIMIT 1").get(sessionId))
+      throw new ControlError("CONFLICT", "This session is still working on an earlier request. Try again in a moment.", true);
   };
   const admitLifecycle = async <T>(principal: Principal, input: LifecycleAdmission, operation: () => Promise<T>): Promise<T> => {
     if (closed) throw new ControlError("UNAVAILABLE", "Control service is shutting down", true);
@@ -228,10 +233,13 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       if (row.state === "done") return { value: JSON.parse(row.payload_json).result as T };
       const active = lifecycleOperations.get(input.commandId);
       if (active) return { active };
-      if (row.state === "claimed") throw new ControlError("CONFLICT", "Lifecycle command is still settling", true);
+      if (row.state === "claimed") throw new ControlError("CONFLICT", "This change is still being applied. Try again in a moment.", true);
       throw new ControlError("CONFLICT", "Lifecycle command was interrupted; inspect its outcome before issuing a new request", false);
     });
     if (duplicate) return ("active" in duplicate ? await duplicate.active : duplicate.value) as T;
+    // A session that is still being launched does not exist for the preflight yet: answer that it is
+    // busy, which callers retry, rather than that it is missing.
+    if (input.intent !== "stop") for (const sessionId of sessionIds) { assertAdmissionAvailable(sessionId); assertSettled(sessionId); }
     input.preflight?.();
     sink.transaction(tx => {
       for (const projectId of projectIds) assertAdmissionAvailable("project:" + projectId);
@@ -239,8 +247,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         assertAdmissionAvailable(sessionId);
         const session = readSession(sink, sessionId);
         assertAdmissionAvailable("project:" + session.project_id);
-        if (input.intent !== "stop" && database.prepare("SELECT 1 FROM effects WHERE session_id=? AND state IN ('pending','claimed') LIMIT 1").get(sessionId))
-          throw new ControlError("CONFLICT", "Accepted session intent is still settling", true);
+        if (input.intent !== "stop") assertSettled(sessionId);
       }
       if (input.intent === "cancel-choice") {
         const choice = database.prepare("SELECT session_id,state,answer_command_id FROM control_choices WHERE choice_id=?").get(input.choiceId) as
@@ -387,7 +394,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       assertAdmissionAvailable("project:" + (prepared?.project.projectId ?? session!.project_id));
       if (prepared && !options.workspace.isLaunchCurrent(prepared)) throw new ProfileChanged();
       if ((method === "session.send" || method === "session.choose") && (JSON.parse(session!.summary_json).status === "stopping" || JSON.parse(session!.summary_json).archived)) {
-        throw new ControlError("CONFLICT", "Session shutdown is still in progress");
+        throw new ControlError("CONFLICT", "Session shutdown is still in progress", true);
       }
       const resend = method === "session.send" ? input as RpcInput<"session.send"> : undefined;
       if (resend?.resendOfCommandId) {
@@ -465,6 +472,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
               title: launch.title,
               cwd: prepared.cwd,
               model: prepared.model,
+              ...(launch.delegation ? { delegation: launch.delegation } : {}),
               ...(launch.cli ? { cli: launch.cli } : {}),
             },
           },
@@ -626,6 +634,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         if (duplicate && !["running", "accepted"].includes(duplicate.state)) return duplicate;
         if (!options.policy) throw new ControlError("UNAVAILABLE", "Project policy is not composed");
         const normalized = JSON.parse(request.normalized) as RpcInput<import("./project-policy.js").PolicyMethod>;
+        if (!duplicate && "sessionId" in normalized) { assertAdmissionAvailable(normalized.sessionId); assertSettled(normalized.sessionId); }
         const prepared = duplicate ? { sessionIds: [], projectIds: [], intent: "inspect" as const, frozen: normalized } : await options.policy.prepare(method as import("./project-policy.js").PolicyMethod, normalized);
         await admitLifecycle(principal, { ...prepared, commandId: input.commandId, command: method, request: normalized, frozenRequest: prepared.frozen, requiredScope: rpcScopes[method], receipt: { method, ...("projectId" in prepared ? { projectId: prepared.projectId } : {}), ...("sessionId" in prepared ? { sessionId: prepared.sessionId } : {}) } }, () => options.policy!.apply(method as import("./project-policy.js").PolicyMethod, prepared.frozen));
         return readReceipt(sink, input.commandId);

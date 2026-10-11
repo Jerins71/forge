@@ -73,7 +73,7 @@ interface SettingsLayoutProps {
   onTabChange: (tab: SettingsTab) => void
   onBack?: () => void
   children: React.ReactNode
-  /** Override the max-width class on the content area. Defaults to 'max-w-3xl'. */
+  /** Class that sets `--content-max` for the content area. Defaults to the form measure. */
   contentWidthClassName?: string
   /** Filter nav items to only these tabs. When omitted, all tabs are shown. */
   availableTabs?: SettingsTab[]
@@ -125,9 +125,9 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
   }, [onBack])
 
   return (
-    <div className="app-canvas flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+    <div className="app-canvas @container/settings-shell flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       {/* Mobile: compact header + horizontal scrolling tab bar */}
-      <header className="flex h-12 shrink-0 items-center gap-1 px-2 md:hidden">
+      <header className="flex h-12 shrink-0 items-center gap-1 px-2 @3xl/settings-shell:hidden">
         {onBack ? (
           <Button
             type="button"
@@ -147,7 +147,7 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
         {headerAccessory}
         <HelpTrigger contextKey={`settings.${activeTab}`} size="sm" variant="ghost" />
       </header>
-      <nav aria-label="Settings sections" className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline px-2 pb-1.5 md:hidden">
+      <nav aria-label="Settings sections" className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline px-2 pb-1.5 @3xl/settings-shell:hidden">
         {visibleItems.map((item) => {
           const isActive = activeTab === item.id
           return (
@@ -171,11 +171,11 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
         })}
       </nav>
 
-      <div className="flex min-h-0 flex-1 gap-3 overflow-hidden md:p-3">
+      <div className="flex min-h-0 flex-1 gap-3 overflow-hidden @3xl/settings-shell:p-3">
         {/* Desktop: glass nav column */}
         <nav
           aria-label="Settings sections"
-          className="glass hidden w-[248px] shrink-0 flex-col gap-0.5 overflow-y-auto rounded-2xl px-2.5 py-3 md:flex"
+          className="glass hidden w-[248px] shrink-0 flex-col gap-0.5 overflow-y-auto rounded-2xl px-2.5 py-3 @3xl/settings-shell:flex"
         >
           {onBack ? (
             <button
@@ -238,7 +238,7 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
         {/* Content area */}
         <div
           className={cn(
-            'min-h-0 flex-1',
+            '@container/settings min-h-0 flex-1',
             fillHeight
               ? 'flex flex-col overflow-hidden'
               : cn(
@@ -252,9 +252,9 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
         >
           <div
             className={cn(
-              'mx-auto w-full px-4 pb-10 pt-5 md:px-4 md:pt-7',
+              'content-frame pb-10 pt-5 @3xl/settings-shell:pt-7',
               fillHeight ? 'flex min-h-0 flex-1 flex-col' : null,
-              contentWidthClassName || 'max-w-[760px]',
+              contentWidthClassName || 'content-form',
             )}
           >
             <div className="mb-5 flex shrink-0 items-start justify-between gap-3">
@@ -266,7 +266,7 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
                   <p className="text-[13.5px] text-muted-foreground">{activeItem.description}</p>
                 ) : null}
               </div>
-              <div className="hidden shrink-0 items-center gap-2 pt-1.5 md:flex">
+              <div className="hidden shrink-0 items-center gap-2 pt-1.5 @3xl/settings-shell:flex">
                 {targetLabel ? (
                   <Badge variant="outline" className="font-mono text-[11px] font-normal text-subtle-foreground">
                     {targetLabel}

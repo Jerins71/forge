@@ -115,29 +115,51 @@ export function projectShell(shell: ShellState, previous: AgentDescriptor[], pre
 function sameItems<T>(next: readonly T[], previous: readonly T[]): boolean {
   return next.length === previous.length && next.every((item, index) => item === previous[index])
 }
+type DetailItem = NonNullable<DetailState['projection']>['items'][number]
+
+/**
+ * A result the environment delivered to the manager as input. The delivering command is what marks
+ * it: earlier environments also sent each worker message and manager-to-worker assignment as
+ * `worker_result`, and those carry none.
+ */
+function isDeliveredWorkerResult(item: DetailItem): boolean {
+  return item.kind === 'worker_result' && item.source === 'worker_report' && item.commandId !== null
+}
+
+/** What the core delivered to an agent as its turn input (a worker's assignment); not something the user typed. */
+function isInternalInput(item: DetailItem): boolean {
+  return item.kind === 'user' && item.source === 'system'
+}
+
+/**
+ * The chat of one agent. A session's detail also carries its workers' own messages, under the worker
+ * as actor, and a worker is read through its session's detail. So only `agentId`'s messages are
+ * projected: the manager's chat adds the results delivered to it, a worker's chat is the worker alone.
+ */
 export function projectItems(
   items: NonNullable<DetailState['projection']>['items'],
-  sessionId: string,
+  agentId: string,
+  sessionId: string = agentId,
 ): ConversationMessageEvent[] {
   return items
-    .filter(
-      (i) =>
-        i.kind === 'user' ||
-        i.kind === 'assistant' ||
-        i.kind === 'worker_result',
-    )
+    .filter((i) => i.kind === 'worker_result'
+      ? agentId === sessionId && isDeliveredWorkerResult(i)
+      : (i.kind === 'user' || i.kind === 'assistant') && i.actorId === agentId && !(isInternalInput(i) && agentId === sessionId))
     .map((i) => ({
       type: 'conversation_message',
       id: i.itemId,
-      agentId: sessionId,
+      agentId,
       turnId: i.userTurnId,
       ...(i.kind === 'worker_result' ? { sourceWorkerId: i.actorId } : {}),
-      role: i.kind === 'user' ? 'user' : 'assistant',
+      // An internal input is never the user's bubble: in a worker's view it is the assignment card.
+      ...(isInternalInput(i) ? { role: 'system', source: 'system', systemNoticeKind: 'assignment' } : {
+        role: i.kind === 'user' ? 'user' : i.kind === 'worker_result' ? 'system' : 'assistant',
+        source: i.kind === 'user' ? 'user_input' : i.kind === 'worker_result' ? 'worker_report' : 'assistant',
+      }),
       text: i.text,
       timestamp: i.timestamp,
       pinned: i.pinned ?? false,
-      source: i.kind === 'user' ? 'user_input' : 'assistant',
-      ...(i.commandId ? { clientRequestId: i.commandId } : {}),
+      ...(i.commandId && !isInternalInput(i) ? { clientRequestId: i.commandId } : {}),
       ...(i.artifacts.length ? { attachments: i.artifacts.map(artifactAttachment) } : {}),
     })) as ConversationMessageEvent[]
 }
@@ -164,13 +186,6 @@ export function projectActivityItems(
     }))
 }
 
-export function projectDetailActivity(state: DetailState): EnvironmentActivityEntry[] {
-  return projectActivityItems(
-    state.projection?.items ?? [],
-    state.projection?.session.sessionId ?? '',
-  )
-}
-
 const ARTIFACT_FILE_REF_PREFIX = 'artifact:'
 
 /** V2 artifacts travel as attachment metadata whose file reference names the environment artifact. */
@@ -189,14 +204,6 @@ export function artifactIdFromFileRef(fileRef: string): string | null {
   return fileRef.startsWith(ARTIFACT_FILE_REF_PREFIX) ? fileRef.slice(ARTIFACT_FILE_REF_PREFIX.length) : null
 }
 
-export function projectDetailMessages(
-  state: DetailState,
-): ConversationMessageEvent[] {
-  return projectItems(
-    state.projection?.items ?? [],
-    state.projection?.session.sessionId ?? '',
-  )
-}
 /** Replaces one session's workers with its detail projection, reusing unchanged descriptors and the list itself. */
 export function projectSessionWorkers(
   agents: AgentDescriptor[],

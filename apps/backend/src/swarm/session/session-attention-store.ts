@@ -38,6 +38,11 @@ export interface PersistedSessionAttentionRecord {
    * release.
    */
   awaitingContinuation?: boolean;
+  /**
+   * The epoch exists only because a turn the user did not send needed them (a decision or a
+   * failure). It settles without "work finished" attention unless the user sends a turn into it.
+   */
+  internal?: boolean;
   attention?: PersistedSessionAttention;
 }
 
@@ -188,6 +193,7 @@ function parseRecord(value: unknown): PersistedSessionAttentionRecord {
   const awaitingContinuation = record.awaitingContinuation === undefined
     ? undefined
     : requiredBoolean(record.awaitingContinuation, "session attention awaitingContinuation");
+  const internal = record.internal === undefined ? undefined : requiredBoolean(record.internal, "session attention internal");
 
   if (record.phase === "working") {
     const attention = record.attention === undefined ? undefined : parseAttention(record.attention);
@@ -203,6 +209,7 @@ function parseRecord(value: unknown): PersistedSessionAttentionRecord {
       // Preserved across restart: a continuation barrier must survive a crash,
       // otherwise boot could settle an epoch whose continuation never ran.
       ...(awaitingContinuation ? { awaitingContinuation: true } : {}),
+      ...(internal ? { internal: true } : {}),
       ...(attention ? { attention } : {}),
     };
   }

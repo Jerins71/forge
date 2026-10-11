@@ -360,6 +360,14 @@ export function BuilderSurface({
     clientRef.current?.setConversationView(messageSourceView)
   }, [clientRef, messageSourceView])
 
+  // Only the chat on screen counts as read; a client keeps its last session mounted behind other views.
+  const viewedSessionId = activeView === 'chat' && launchGroupKey === null ? (activeAgent?.role === 'worker' ? activeAgent.managerId : activeAgentId) ?? null : null
+  useEffect(() => {
+    const client = clientRef.current
+    client?.setViewedSession(viewedSessionId)
+    return () => client?.setViewedSession(null)
+  }, [clientRef, localClient, viewedSessionId])
+
   const planSnapshot = isActiveManager && activeAgentId && state.planSnapshotLoadingSessionId !== activeAgentId
     ? state.planSnapshots[activeAgentId] ?? null
     : null
@@ -2671,10 +2679,14 @@ export function BuilderSurface({
                   onSend: session.handleSend,
                   onSubmitted: session.handleMessageInputSubmitted,
                   isLoading,
-                  disabled: !state.connected || !activeAgentId || hasActivePendingChoice || !conversationActionsEnabled,
+                  onStop: activeAgentId && conversationActionsEnabled ? () => session.handleStopSession(activeAgentId) : undefined,
+                  // A worker takes its input from its manager; its own view is for reading.
+                  disabled: !state.connected || !activeAgentId || hasActivePendingChoice || !conversationActionsEnabled || activeAgent?.role === 'worker',
                   placeholderOverride: hasActivePendingChoice
                     ? 'Respond to the choice above or click Skip…'
-                    : undefined,
+                    : activeAgent?.role === 'worker' && state.connected
+                      ? 'Workers are read-only. Message the manager, or continue this worker as a conversation.'
+                      : undefined,
                   allowWhileLoading: true,
                   agentLabel: activeAgentLabel,
                   environmentClient,

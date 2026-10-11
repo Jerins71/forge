@@ -12,7 +12,7 @@ export const test = base.extend<{ environmentFailure: void }, { environmentSuite
       await use(process.env.FORGE_E2E_MANIFEST);
       return; // Explicit attachment never takes ownership of another launcher's fleet.
     }
-    if (!['slice', 'ui', 'lineage-ui', 'load', 'cli'].includes(environmentSuite)) throw new Error('Environment suite must select its fleet');
+    if (!['slice', 'ui', 'lineage-ui', 'ux', 'load', 'cli'].includes(environmentSuite)) throw new Error('Environment suite must select its fleet');
     const out = join(repositoryRoot, `.internal/forge-v2-remote/e2e-manifest-${process.env.FORGE_E2E_RUN_ID}-${worker.workerIndex}-${environmentSuite}.json`);
     const fleet = await launchFleet({ environments: Number(process.env.FORGE_E2E_ENVIRONMENTS ?? (environmentSuite === 'load' ? 8 : 3)), out, ...(environmentSuite === 'lineage-ui' ? { backendEntry: join(repositoryRoot, 'scripts/environment-e2e/fixtures/lineage-backend-process.ts') } : {}) });
     process.env.FORGE_E2E_MANIFEST = fleet.manifestPath;

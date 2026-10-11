@@ -5,7 +5,7 @@ import type { HttpRoute } from "../shared/http-route.js";
 import type { NativeApiAccessUpdate } from "@forge/protocol";
 import { isRecord } from "../../../utils/normalize.js";
 
-export function createClaudeAuthRoutes(service: Pick<ClaudeAuthService, "status" | "start" | "cancel" | "submitCode" | "configure">): HttpRoute[] {
+export function createClaudeAuthRoutes(service: Pick<ClaudeAuthService, "status" | "start" | "cancel" | "submitCode" | "configure" | "test">): HttpRoute[] {
   const path = "/api/settings/claude-native";
   const methods = "GET, POST, DELETE, OPTIONS";
   return withEnvironmentRouteAccess([{ methods, matches: pathname => pathname === path, handle: async (request, response) => {
@@ -22,6 +22,8 @@ export function createClaudeAuthRoutes(service: Pick<ClaudeAuthService, "status"
         await service.cancel(body.flowId);
       } else if (body?.action === "configure" && isRecord(body.access) && request.method === "POST") {
         sendJson(response, 200, { ...await service.configure(body.access as unknown as NativeApiAccessUpdate) }); return;
+      } else if (body?.action === "test" && request.method === "POST") {
+        sendJson(response, 200, { ...await service.test() }); return;
       } else if (body?.action === "start" && request.method === "POST") {
         sendJson(response, 200, { ...await service.start() }); return;
       } else if (body?.action === "code" && typeof body.flowId === "string" && typeof body.code === "string" && request.method === "POST") {

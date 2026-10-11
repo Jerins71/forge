@@ -433,7 +433,7 @@ export function useManagerActions({
     const name = newManagerName.trim()
 
     if (!name) {
-      setCreateManagerError('Manager name is required.')
+      setCreateManagerError('Name is required.')
       return
     }
 
