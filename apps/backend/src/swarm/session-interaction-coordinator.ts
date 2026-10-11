@@ -1,3 +1,4 @@
+import type { CoreAgentMessagePort } from "./core-agent-message-port.js";
 import type { ChoiceRequestEvent, SessionPlanSnapshotEvent } from "@forge/protocol";
 import { isNonRunningAgentStatus } from "./agent-state-machine.js";
 import type { AgentDirectory } from "./agent-directory.js";
@@ -143,6 +144,15 @@ export interface SessionInteractionCoordinatorOptions {
  * spawn/kill, speak_to_user, and conversation reset.
  */
 export class SessionInteractionCoordinator {
+  private core: CoreAgentMessagePort | undefined;
+
+  installCoreAgentMessages(core: CoreAgentMessagePort): void { this.core = core; }
+
+  async clearWorkerAssignments(managerId: string): Promise<void> {
+    if (!this.core) throw new Error("Core assignment control is unavailable");
+    await this.core.clearAssignments(managerId);
+  }
+
   constructor(private readonly options: SessionInteractionCoordinatorOptions) {}
 
   async getSessionPlanSnapshot(
@@ -459,9 +469,7 @@ export class SessionInteractionCoordinator {
 
   private async spawnAdmittedAgent(callerAgentId: string, input: SpawnAgentInput): Promise<AgentDescriptor> {
     this.assertExternalProjectAgentTurnCapabilityAllowed(callerAgentId, "spawn_agent");
-    const planAssignment = input.planStep
-      ? await this.resolvePlanStepAssignment(callerAgentId, input.planStep)
-      : undefined;
+    if (input.planStep) await this.resolvePlanStepAssignment(callerAgentId, input.planStep);
     const requestedSpecialistId = input.specialist
       ? normalizeSpecialistHandle(input.specialist)
       : "";
@@ -469,15 +477,6 @@ export class SessionInteractionCoordinator {
       requestedSpecialistId === CODEX_PLUGIN_SPECIALIST_ID
         ? await this.options.codexPlugin.spawnSpecialistWorker(callerAgentId, input)
         : await this.options.lifecycle.spawnAgent(callerAgentId, input);
-    const assignmentRecordedByInitialDelivery =
-      requestedSpecialistId === CODEX_PLUGIN_SPECIALIST_ID ||
-      Boolean(input.initialMessage?.trim());
-    if (planAssignment && !assignmentRecordedByInitialDelivery) {
-      await this.recordWorkerPlanAssignment(planAssignment.descriptor, planAssignment.assignment, {
-        workerId: spawned.agentId,
-        source: "spawn_agent",
-      });
-    }
     return spawned;
   }
 

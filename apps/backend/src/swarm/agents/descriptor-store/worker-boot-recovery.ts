@@ -1,12 +1,10 @@
-import { readdir } from "node:fs/promises";
+import { withEnvironmentDatabase } from "../../../environment/control/database.js";
+import { loadState } from "../../../environment/control/orchestration/store.js";
+import { findWorkerAssignment } from "../../../environment/control/orchestration/assignments.js";
 import {
-  getWorkerIdFromCanonicalTranscriptFileName,
   isWorkerTranscriptSidecarAgentId,
   isWorkerTranscriptSidecarSessionFile,
 } from "../../session/worker-transcript-files.js";
-import { getWorkersDir, getWorkerSessionFilePath } from "../../data-paths.js";
-import { normalizePersistedSwarmModelDescriptor } from "../../catalog/model-presets.js";
-import { readFileHead } from "../../swarm-manager-utils.js";
 import type { AgentDescriptor, AgentsStoreFile } from "../../types.js";
 
 export interface WorkerBootRecoveryOptions {
@@ -40,127 +38,42 @@ export function prunePersistedWorkerSidecars(
   };
 }
 
-/** Reconstructs terminated worker descriptors from canonical transcript files. */
+/** Hydrates worker shells and assignment presentation from durable control projections. */
 export class WorkerBootRecovery {
   constructor(private readonly options: WorkerBootRecoveryOptions) {}
 
   async recoverMissingDescriptors(): Promise<string[]> {
-    const recoveredIds: string[] = [];
-    const knownWorkerIds = new Set(
-      [...this.options.descriptors.values()]
-        .filter((descriptor) => descriptor.role === "worker")
-        .map((descriptor) => descriptor.agentId),
-    );
-
-    for (const manager of this.options.descriptors.values()) {
-      if (manager.role !== "manager" || !manager.profileId) continue;
-      const workersDir = getWorkersDir(
-        this.options.dataDir,
-        manager.profileId,
-        manager.agentId,
-      );
-      let workerFiles: string[];
-      try {
-        workerFiles = await readdir(workersDir);
-      } catch {
-        continue;
-      }
-
-      for (const filename of workerFiles) {
-        const workerId = getWorkerIdFromCanonicalTranscriptFileName(filename);
-        if (!workerId || knownWorkerIds.has(workerId)) continue;
-        const sessionFile = getWorkerSessionFilePath(
-          this.options.dataDir,
-          manager.profileId,
-          manager.agentId,
-          workerId,
-        );
-        try {
-          const header = await readWorkerHeader(sessionFile);
-          const descriptor: AgentDescriptor = {
-            agentId: workerId,
-            displayName: workerId,
-            role: "worker",
-            managerId: manager.agentId,
-            profileId: manager.profileId,
-            status: "terminated",
-            createdAt: header.createdAt ?? manager.createdAt,
-            updatedAt: header.updatedAt ?? manager.updatedAt,
-            cwd: header.cwd ?? manager.cwd,
-            model: header.model ?? manager.model,
-            sessionFile,
-          };
-          this.options.upsertDescriptor(descriptor);
-          knownWorkerIds.add(workerId);
-          recoveredIds.push(workerId);
-        } catch {
-          // An unreadable transcript is not a boot blocker.
+    return withEnvironmentDatabase(this.options.dataDir, async database => {
+      const state = loadState(database);
+      const recoveredIds: string[] = [];
+      const rows = database.prepare("SELECT agent_id,descriptor_json FROM control_workers WHERE deleted=0 AND descriptor_json IS NOT NULL ORDER BY agent_id").all() as { agent_id: string; descriptor_json: string }[];
+      for (const row of rows) {
+        const thread = state.threads[row.agent_id];
+        if (!thread || thread.role !== "worker") continue;
+        const persisted = JSON.parse(row.descriptor_json) as AgentDescriptor;
+        if (persisted.role !== "worker" || persisted.agentId !== thread.threadId || persisted.managerId !== thread.managerId) {
+          this.options.logDebug("boot:worker_descriptor:owner_conflict", { workerId: row.agent_id });
+          continue;
         }
+        const manager = this.options.descriptors.get(persisted.managerId);
+        if (!manager || manager.role !== "manager") continue;
+        const known = this.options.descriptors.get(row.agent_id);
+        const descriptor = { ...(known ?? persisted) };
+        const assignment = findWorkerAssignment(state, row.agent_id);
+        delete descriptor.workerParentContext;
+        if (assignment) descriptor.workerParentContext = {
+          ...(assignment.parentContext ?? { schemaVersion: 1, outputTarget: { kind: "internal_only", reason: "missing_assignment_output_target" } }),
+          schemaVersion: 1, assignmentId: assignment.assignmentId, managerId: assignment.parentThreadId,
+          assignedAt: new Date(assignment.assignedAt).toISOString(),
+          ...(assignment.terminalAt !== undefined ? { completedAt: new Date(assignment.terminalAt).toISOString() } : {}),
+        };
+        // A durable run requiring recovery is not a live runtime after process loss.
+        descriptor.status = thread.desired === "stopped" || thread.activeRunId ? "stopped" : "idle";
+        this.options.upsertDescriptor(descriptor);
+        if (!known) recoveredIds.push(descriptor.agentId);
       }
-    }
-
-    if (recoveredIds.length > 0) {
-      this.options.logDebug("boot:recover_missing_workers", {
-        recoveredCount: recoveredIds.length,
-        recoveredIds: recoveredIds.slice(0, 20),
-        truncated: recoveredIds.length > 20,
-      });
-    }
-    return recoveredIds;
+      if (recoveredIds.length) this.options.logDebug("boot:recover_missing_workers", { recoveredCount: recoveredIds.length, recoveredIds: recoveredIds.slice(0, 20), truncated: recoveredIds.length > 20 });
+      return recoveredIds;
+    });
   }
-}
-
-interface WorkerHeader {
-  createdAt: string | null;
-  updatedAt: string | null;
-  cwd: string | null;
-  model: AgentDescriptor["model"] | null;
-}
-
-export async function readWorkerHeader(filePath: string): Promise<WorkerHeader> {
-  const lines = (await readFileHead(filePath, 4096))
-    .split("\n")
-    .filter((line) => line.trim())
-    .slice(0, 10);
-  let createdAt: string | null = null;
-  let updatedAt: string | null = null;
-  let cwd: string | null = null;
-  let model: AgentDescriptor["model"] | null = null;
-
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line) as Record<string, unknown>;
-      if (entry.type === "session") {
-        createdAt = typeof entry.timestamp === "string" ? entry.timestamp : null;
-        cwd = typeof entry.cwd === "string" ? entry.cwd : null;
-      }
-      if (entry.type === "model_change") {
-        const provider = typeof entry.provider === "string" ? entry.provider : null;
-        const modelId = typeof entry.modelId === "string" ? entry.modelId : null;
-        if (provider && modelId) {
-          model = normalizePersistedSwarmModelDescriptor({
-            provider,
-            modelId,
-            thinkingLevel: "none",
-          }) ?? { provider, modelId, thinkingLevel: "none" };
-        }
-        if (!updatedAt && typeof entry.timestamp === "string") {
-          updatedAt = entry.timestamp;
-        }
-      }
-      if (entry.type === "thinking_level_change" && model) {
-        const thinkingLevel =
-          typeof entry.thinkingLevel === "string" ? entry.thinkingLevel : undefined;
-        if (thinkingLevel) {
-          model = normalizePersistedSwarmModelDescriptor({
-            ...model,
-            thinkingLevel,
-          }) ?? { ...model, thinkingLevel };
-        }
-      }
-    } catch {
-      // Ignore malformed header lines; later valid entries remain useful.
-    }
-  }
-  return { createdAt, updatedAt: updatedAt ?? createdAt, cwd, model };
 }

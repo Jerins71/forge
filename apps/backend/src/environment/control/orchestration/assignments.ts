@@ -1,3 +1,4 @@
+import type { WorkerParentContext } from "../../../swarm/types.js";
 import { decide, evolve } from "./kernel.js";
 import { reconcileTransfer, type TransferEvent, type TransferPoint, type WorkerTransfer } from "./transfers.js";
 import type { CoreCommand, CoreState, Decision, LifecycleEvent, Run } from "./types.js";
@@ -30,10 +31,11 @@ export interface WorkerAssignment {
   resultTransferId?: string;
   resultRef?: TransferPoint;
   resultInput?: Run["input"];
+  parentContext?: WorkerParentContext;
   invalidatedAt?: number;
 }
 export type AssignmentCommand =
-  | { type: "worker.assign"; assignmentId: string; parentThreadId: string; parentRunId: string; workerThreadId: string; workerRunId: string; inputId: string; attemptId: string; bindingId: string; input: Run["input"]; authorized: boolean; selection: AssignmentSelection; planStep?: WorkerAssignment["planStep"] }
+  | { type: "worker.assign"; assignmentId: string; parentThreadId: string; parentRunId: string; workerThreadId: string; workerRunId: string; inputId: string; attemptId: string; bindingId: string; input: Run["input"]; authorized: boolean; selection: AssignmentSelection; planStep?: WorkerAssignment["planStep"]; parentContext?: Pick<WorkerParentContext, "outputTarget" | "rootTurnId" | "parentRootTurnId"> }
   | { type: "worker.stop"; threadId: string; managerId: string; authorized: boolean }
   | { type: "worker.result"; assignmentId: string; workerRunId: string; resultRef: TransferPoint; input: Run["input"] }
   | { type: "assignment.deliver"; assignmentId: string; authorized: boolean }
@@ -85,7 +87,7 @@ export function decideAssignment(initial: CoreState, command: CoreCommand & Assi
     const parent = state.threads[assignment.parentThreadId];
     if (!transfer || transfer.state !== "pending" || !assignment.resultInput || assignment.invalidatedAt !== undefined ||
       !parent || parent.desired !== "running" || parent.shutdown !== "clean" || parent.generation !== assignment.parentGeneration || state.runs[transfer.targetRunId]) return;
-    apply({ type: "run.submit", commandId: `${assignment.assignmentId}:result:submit`, now: command.now, threadId: parent.threadId,
+    apply({ type: "run.submit", commandId: command.commandId, now: command.now, threadId: parent.threadId,
       runId: transfer.targetRunId, inputId: `${assignment.assignmentId}:result:input`, attemptId: `${assignment.assignmentId}:result:attempt`,
       bindingId: parent.bindingId ?? `${assignment.assignmentId}:result:binding`, delivery: "queue", input: assignment.resultInput });
   };
@@ -104,7 +106,7 @@ export function decideAssignment(initial: CoreState, command: CoreCommand & Assi
       if (state.runs[command.workerRunId] || state.attempts[command.attemptId] || Object.values(state.runs).some(r => r.inputId === command.inputId)) throw new Error("Assignment run identity conflicts");
       const assignment: WorkerAssignment = { assignmentId: command.assignmentId, parentThreadId: parent.threadId, parentRunId: parentRun.runId, parentGeneration: parent.generation,
         workerThreadId: worker.threadId, workerRunId: command.workerRunId, selection: chooseSelection(state, command), planStep: command.planStep,
-        state: "assigned", assignedAt: command.now, inputTransferId: `${command.assignmentId}:input` };
+        state: "assigned", assignedAt: command.now, ...(command.parentContext ? { parentContext: { ...command.parentContext, schemaVersion: 1 as const, managerId: parent.threadId, assignmentId: command.assignmentId, assignedAt: new Date(command.now).toISOString() } } : {}), inputTransferId: `${command.assignmentId}:input` };
       emit({ type: "assignment.created", assignment });
       emit({ type: "transfer.created", transfer: { transferId: assignment.inputTransferId, assignmentId: assignment.assignmentId, kind: "worker_input",
         source: { threadId: parent.threadId, runId: parentRun.runId, entryId: parentRun.entryId }, targetThreadId: worker.threadId, targetGeneration: worker.generation,

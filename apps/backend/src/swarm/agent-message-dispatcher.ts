@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { buildWorkerResult, selectWorkerRunFinal } from "./worker-result-extraction.js";
+import type { CoreAgentMessagePort } from "./core-agent-message-port.js";
 import { isRepoProjectAgentSource } from "@forge/protocol";
 import type {
   ObservabilityRootSource,
@@ -9,9 +10,7 @@ import { isSessionAgentDescriptor } from "./agent-directory.js";
 import type {
   AgentMessageOutputInput,
   AssistantOutputRouter,
-  WorkerResultOutputInput,
 } from "./assistant-output-router.js";
-import { cloneAssistantOutputTarget } from "./assistant-output-target.js";
 import {
   deliverProjectAgentMessage,
   formatProjectAgentRuntimeMessage,
@@ -23,20 +22,15 @@ import type { PlanStepAssignment } from "./planning/plan-usage-tracker.js";
 import type { SecureWorkerLifecyclePort } from "./secure-sessions/secure-session-lifecycle-port.js";
 import { SECURE_RUNTIME_BINDING_UNAVAILABLE_MESSAGE } from "./secure-sessions/runtime/secure-runtime-binding.js";
 import type {
-  RuntimeAcquisitionRequirements,
   RuntimeImageAttachment,
   RuntimeUserMessage,
-  SwarmAgentRuntime,
 } from "./runtime-contracts.js";
 import type { ObservabilityParentTool } from "./swarm-observability-coordinator.js";
 import {
   extractRuntimeMessageText,
-  errorToMessage,
   previewForLog,
 } from "./swarm-manager-utils.js";
 import type {
-  InboundTurnContextInput,
-  QueuedInboundTurnHandle,
   ActiveWorkerParentContext,
 } from "./turn-context-coordinator.js";
 import type {
@@ -44,10 +38,10 @@ import type {
   AgentMessageEvent,
   ConversationAttachment,
   ConversationMessageEvent,
+  ConversationEntryEvent,
   ManagerProfile,
   RequestedDeliveryMode,
   SendMessageReceipt,
-  WorkerParentContext,
 } from "./types.js";
 
 const INTERNAL_MODEL_MESSAGE_PREFIX = "SYSTEM: ";
@@ -67,7 +61,6 @@ export interface AgentMessageSendOptions {
   attachments?: ConversationAttachment[];
   internalDeliveryKind?: AgentMessageInternalDeliveryKind;
   observabilityParentTool?: ObservabilityParentTool;
-  skipRecoveryTracking?: boolean;
   planStep?: string;
   planAssignmentSource?: "spawn_agent" | "send_message_to_agent";
   requiresSecureRuntime?: boolean;
@@ -81,40 +74,13 @@ export interface AgentMessageAttachmentPort {
   ): Promise<{ images: RuntimeImageAttachment[]; attachmentMessage: string }>;
 }
 
-export interface AgentMessageTurnPort<TCodexGate> {
-  enqueue(
-    agentId: string,
-    context: Omit<
-      InboundTurnContextInput<TCodexGate>,
-      "codexPluginDelegationContext" | "codexPluginRetryAuthorizationContext"
-    >,
-  ): Promise<QueuedInboundTurnHandle>;
+export interface AgentMessageTurnPort {
   getActiveTurnId(agentId: string): string | undefined;
   getActiveWorkerParentContext(agentId: string): ActiveWorkerParentContext | undefined;
   getActiveExternalProjectAgentTurn(agentId: string): {
     fromAgentId: string;
     fromDisplayName: string;
   } | undefined;
-}
-
-export interface AgentMessageLedgerPort {
-  hasSessionTarget(agentId: string): boolean;
-  recordDeliveryPending(input: {
-    sessionAgentId: string;
-    turnId?: string;
-    deliveryId: string;
-    fromAgentId: string;
-    targetAgentId: string;
-    message: string;
-    assignmentId?: string;
-    at: string;
-  }): Promise<void>;
-  claimDelivery?(input: { sessionAgentId: string; deliveryId: string }): Promise<void>;
-  recordDeliveryAcked(input: {
-    sessionAgentId: string;
-    deliveryId: string;
-    at: string;
-  }): Promise<void>;
 }
 
 export interface AgentMessageObservabilityPort {
@@ -228,9 +194,8 @@ export interface AgentMessageDispatcherOptions<TCodexGate> {
   profiles: Map<string, ManagerProfile>;
   assertMutable(descriptor: AgentDescriptor): void;
   attachments: AgentMessageAttachmentPort;
-  turns: AgentMessageTurnPort<TCodexGate>;
+  turns: AgentMessageTurnPort;
   output: AssistantOutputRouter;
-  ledger: AgentMessageLedgerPort;
   observability: AgentMessageObservabilityPort;
   plans: AgentMessagePlanPort;
   goals: AgentMessageGoalPort;
@@ -238,10 +203,6 @@ export interface AgentMessageDispatcherOptions<TCodexGate> {
   projectAgents: AgentMessageProjectAgentPort;
   codex: AgentMessageCodexPort<TCodexGate>;
   secureWorkers: SecureWorkerLifecyclePort;
-  getOrCreateRuntime(
-    descriptor: AgentDescriptor,
-    requirements?: RuntimeAcquisitionRequirements,
-  ): Promise<SwarmAgentRuntime>;
   appendProjectAgentConversation(
     target: AgentDescriptor,
     payload: {
@@ -251,10 +212,10 @@ export interface AgentMessageDispatcherOptions<TCodexGate> {
       projectAgentContext: ConversationMessageEvent["projectAgentContext"];
     },
   ): Promise<void>;
+  getConversationHistory(agentId: string): ConversationEntryEvent[];
   emitAgentMessage(event: AgentMessageEvent): void;
   saveStore(): Promise<void>;
   now(): string;
-  createDeliveryNonce?(): string;
   logDebug(message: string, details?: unknown): void;
 }
 
@@ -271,20 +232,26 @@ interface ResolvedPlanAssignment {
   assignment: PlanStepAssignment;
 }
 
-interface WorkerAssignmentTransaction {
-  worker: AgentDescriptor & { role: "worker" };
-  assignmentId: string;
-  previous?: WorkerParentContext;
-}
-
 /**
- * Owns the accepted agent-message transaction from descriptor validation to
- * post-dispatch projection. Routing, turn selection, health, ledger, and
- * observability policy stay in their focused owners and are invoked here in a
- * single explicit order.
+ * Validates/prepares agent input and projects accepted core receipts. The core
+ * owns assignments, run identities, delivery certainty, and the outbox.
  */
 export class AgentMessageDispatcher<TCodexGate = unknown> {
-  private readonly workerResultDeliveries = new Map<string, Promise<SendMessageReceipt>>();
+  private core: CoreAgentMessagePort | undefined;
+
+  installCoreAgentMessages(core: CoreAgentMessagePort): void { this.core = core; }
+
+  readAssignment(workerAgentId: string) { return this.core?.readAssignment(workerAgentId); }
+
+  extractWorkerRunResult(workerAgentId: string, workerRunId: string, inputEntryId: string): { entryId?: string; resultText: string } {
+    const final = selectWorkerRunFinal(this.options.getConversationHistory(workerAgentId), workerRunId, inputEntryId);
+    return { entryId: final?.id, resultText: buildWorkerResult(workerAgentId, final) };
+  }
+
+  private requireCore(): CoreAgentMessagePort {
+    if (!this.core) throw new Error("Core agent-message ingress is unavailable");
+    return this.core;
+  }
 
   constructor(private readonly options: AgentMessageDispatcherOptions<TCodexGate>) {}
 
@@ -301,16 +268,6 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
     if (sender.role === "manager" && target.role === "worker" && target.managerId !== sender.agentId) {
       throw new Error(`Manager ${sender.agentId} does not own worker ${targetAgentId}`);
     }
-    if (
-      sender.role === "manager" &&
-      target.role === "worker" &&
-      target.workerParentContext?.completedAt
-    ) {
-      throw new Error(
-        `Worker ${targetAgentId} completed its current assignment and is waiting for result delivery.`,
-      );
-    }
-
     if (sendOptions?.planStep && (sender.role !== "manager" || target.role !== "worker")) {
       throw new Error("planStep can only accompany a manager assignment to one of its workers.");
     }
@@ -360,94 +317,8 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
     });
   }
 
-  sendWorkerResult(
-    workerAgentId: string,
-    resultText: string,
-    expectedAssignmentId: string,
-  ): Promise<SendMessageReceipt> {
-    const deliveryKey = `${workerAgentId}:${expectedAssignmentId}`;
-    const existing = this.workerResultDeliveries.get(deliveryKey);
-    if (existing) {
-      return existing;
-    }
-
-    const trackedDelivery = this.deliverWorkerResult(
-      workerAgentId,
-      resultText,
-      expectedAssignmentId,
-    );
-    const clearTrackedDelivery = () => {
-      if (this.workerResultDeliveries.get(deliveryKey) === trackedDelivery) {
-        this.workerResultDeliveries.delete(deliveryKey);
-      }
-    };
-    this.workerResultDeliveries.set(deliveryKey, trackedDelivery);
-    void trackedDelivery.then(clearTrackedDelivery, clearTrackedDelivery);
-    return trackedDelivery;
-  }
-
-  private async deliverWorkerResult(
-    workerAgentId: string,
-    resultText: string,
-    expectedAssignmentId: string,
-  ): Promise<SendMessageReceipt> {
-    const worker = this.options.descriptors.get(workerAgentId);
-    if (!worker || worker.role !== "worker") {
-      throw new Error(`Worker result source is not a worker: ${workerAgentId}`);
-    }
-    this.options.assertMutable(worker);
-    const target = this.requireTarget(worker.managerId);
-    if (target.role !== "manager") {
-      throw new Error(`Worker ${workerAgentId} does not have a valid owning manager`);
-    }
-
-    const persistedParent = worker.workerParentContext;
-    if (!persistedParent || persistedParent.assignmentId !== expectedAssignmentId) {
-      throw new Error(
-        `Worker result assignment changed before delivery: ${workerAgentId}`,
-      );
-    }
-    const parentContext = persistedParent;
-    if (this.options.output.isRecoveredRetiredWorkerResult(parentContext)) {
-      delete worker.workerParentContext;
-      try {
-        await this.options.saveStore();
-      } catch (error) {
-        worker.workerParentContext = cloneWorkerParentContext(persistedParent);
-        throw error;
-      }
-      this.options.output.emitRecoveredRetiredWorkerResultDiagnostic(target.agentId);
-      return {
-        targetAgentId: target.agentId,
-        deliveryId: "retired-worker-result-discarded",
-        acceptedMode: "prompt",
-      };
-    }
-
-    const message = formatWorkerResultMessage(worker.agentId, parentContext.assignmentId, resultText);
-    const receipt = await this.sendRuntimeMessage({
-      sender: worker,
-      target,
-      message,
-      delivery: "auto",
-      origin: "internal",
-      attachments: [],
-      workerResult: { parentContext },
-      ledgerMessage: resultText,
-    });
-
-    if (persistedParent && worker.workerParentContext?.assignmentId === persistedParent.assignmentId) {
-      delete worker.workerParentContext;
-      await this.options.saveStore().catch((error) => {
-        worker.workerParentContext = cloneWorkerParentContext(persistedParent);
-        this.options.logDebug("worker_result:clear_parent:error", {
-          workerAgentId,
-          assignmentId: persistedParent.assignmentId,
-          message: errorToMessage(error),
-        });
-      });
-    }
-    return receipt;
+  sendWorkerResult(workerAgentId: string, resultText: string, expectedAssignmentId: string): Promise<SendMessageReceipt> {
+    return this.requireCore().recordWorkerResult({ workerAgentId, resultText, assignmentId: expectedAssignmentId });
   }
 
   private async sendProjectAgentMessage(input: {
@@ -496,23 +367,27 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
         projectAgentExternal: external,
       },
     });
-    const { rollback } = await this.options.turns.enqueue(target.agentId, {
-      source: "project_agent_input",
-      routeOrigin: "internal",
+    const presentation = {
+      source: "project_agent_input" as const,
+      routeOrigin: "internal" as const,
       rootTurnId: observabilityInput?.rootTurnId,
       parentRootTurnId,
       runtimeMessageText: runtimeText,
       codexMcpToolGate: this.options.codex.buildProjectAgentTurnGate(target, input.message),
       projectAgentContext,
       assistantOutputTarget: outputTarget,
-    });
+    };
 
     let result;
     try {
       result = await deliverProjectAgentMessage(
         {
           now: this.options.now,
-          getOrCreateRuntimeForDescriptor: (descriptor) => this.options.getOrCreateRuntime(descriptor),
+          submitMessage: async (descriptor, preparedMessage, requestedDelivery) => {
+            const { receipt } = await this.requireCore().submit({ sender, target: descriptor, message: preparedMessage, attachments: [], delivery: requestedDelivery,
+              ...(input.sendOptions?.observabilityParentTool ? { call: { agentId: input.sendOptions.observabilityParentTool.agentId, toolCallId: input.sendOptions.observabilityParentTool.toolCallId } } : {}), presentation });
+            return receipt;
+          },
           rateLimitBuckets: this.options.projectAgents.rateLimitBuckets,
         },
         {
@@ -529,7 +404,6 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
         },
       );
     } catch (error) {
-      rollback();
       this.options.observability.cancelRuntimeInput(observabilityInput, "project_agent_dispatch_failed");
       throw error;
     }
@@ -581,12 +455,10 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
     attachments: ConversationAttachment[];
     planAssignment?: ResolvedPlanAssignment;
     sendOptions?: AgentMessageSendOptions;
-    workerResult?: { parentContext: WorkerParentContext };
-    ledgerMessage?: string;
   }): Promise<SendMessageReceipt> {
     const workerAssignmentExpectation =
       input.sender.role === "manager" && input.target.role === "worker"
-        ? input.target.workerParentContext?.assignmentId ?? null
+        ? this.requireCore().readAssignment(input.target.agentId)?.assignmentId ?? null
         : undefined;
     const managerContextIds = resolveActivityManagerContextIds(input.sender, input.target);
     const secureWorkerPrepared =
@@ -603,7 +475,7 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
     // Runtime guidance must not replace the authored message in the audit trail.
     const runtimeText = typeof workerAssignmentExpectation === "string"
       ? `${input.message}\n\n${WORKER_FOLLOWUP_REMINDER}`
-      : input.sender.role === "worker" && !input.workerResult
+      : input.sender.role === "worker"
         ? `Message from worker ${input.sender.agentId}:\n${input.message}`
         : input.message;
     let modelMessage = await this.prepareModelInboundMessage(
@@ -618,14 +490,7 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
       sendMessageToolContinuation:
         input.sendOptions?.observabilityParentTool?.toolName === "send_message_to_agent",
     };
-    const output = input.workerResult
-      ? this.options.output.prepareWorkerResult({
-          worker: input.sender as AgentDescriptor & { role: "worker" },
-          target: input.target as AgentDescriptor & { role: "manager" },
-          parentContext: input.workerResult.parentContext,
-          modelMessage,
-        } satisfies WorkerResultOutputInput)
-      : this.options.output.prepareAgentMessage(outputInput);
+    const output = this.options.output.prepareAgentMessage(outputInput);
     modelMessage = output.modelMessage;
 
     const rootSource = classifyObservabilityRootSource({
@@ -635,7 +500,6 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
       internalDeliveryKind: input.sendOptions?.internalDeliveryKind,
     });
     const parentRootTurnId =
-      input.workerResult?.parentContext.rootTurnId ??
       this.options.observability.getActiveRootTurnId(input.sender.agentId);
     const observabilityInput = this.options.observability.beginRuntimeInput({
       target: input.target,
@@ -657,9 +521,11 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
         output.projectionTarget.kind !== "internal_only" ||
         output.inputTarget.kind !== "internal_only"
       );
-    const queuedTurn = await this.options.turns.enqueue(input.target.agentId, {
-      source: input.workerResult ? "worker_result" : "agent_message",
-      routeOrigin: input.workerResult ? "worker_result" : input.origin,
+    const activeParent = input.sender.role === "manager" && input.target.role === "worker"
+      ? this.options.turns.getActiveWorkerParentContext(input.sender.agentId) : undefined;
+    const presentation = {
+      source: "agent_message" as const,
+      routeOrigin: input.origin,
       internalDeliveryKind: input.sendOptions?.internalDeliveryKind,
       sourceWorkerId: output.sourceWorkerId,
       requiresVisibleResponse: output.requiresVisibleResponse,
@@ -669,158 +535,23 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
       assistantOutputTarget: output.inputTarget,
       assistantOutputProjectionTarget: output.projectionTarget,
       activationEligible,
-      skipRecoveryTracking: input.sendOptions?.skipRecoveryTracking,
-    });
-    const { rollback, turnId: managerTurnId } = queuedTurn;
-
-    let assignmentTransaction: WorkerAssignmentTransaction | undefined;
-    let secureAssignmentId: string | undefined;
-    try {
-      assignmentTransaction = await this.persistWorkerAssignment(
-        input.sender,
-        input.target,
-        workerAssignmentExpectation,
-      );
-      secureAssignmentId =
-        assignmentTransaction?.assignmentId ??
-        (workerAssignmentExpectation === null
-          ? undefined
-          : workerAssignmentExpectation);
-      if (secureWorkerPrepared && secureAssignmentId) {
-        await this.options.secureWorkers.advanceWorkerSecureAssignment(
-          input.target.agentId,
-          secureAssignmentId,
-        );
-      }
-    } catch (error) {
-      rollback();
-      this.options.observability.cancelRuntimeInput(observabilityInput, "worker_assignment_persist_failed");
-      await this.rollbackWorkerAssignment(assignmentTransaction);
-      throw error;
-    }
-    const expectedWorkerAssignmentId =
-      assignmentTransaction?.assignmentId ??
-      (workerAssignmentExpectation === null ? undefined : workerAssignmentExpectation);
-
-    const assignmentErrorBeforeRuntime =
-      this.getWorkerAssignmentDispatchError(
-        input.target,
-        expectedWorkerAssignmentId,
-      );
-    if (assignmentErrorBeforeRuntime) {
-      rollback();
-      this.options.observability.cancelRuntimeInput(
-        observabilityInput,
-        "worker_assignment_completed_before_dispatch",
-      );
-      await this.rollbackWorkerAssignment(assignmentTransaction);
-      throw assignmentErrorBeforeRuntime;
-    }
-
-    let runtime: SwarmAgentRuntime;
-    try {
-      runtime = await this.options.getOrCreateRuntime(
-        input.target,
-        secureWorkerPrepared ? { secureRuntimeRequired: true } : undefined,
-      );
-    } catch (error) {
-      rollback();
-      this.options.observability.cancelRuntimeInput(
-        observabilityInput,
-        "runtime_creation_failed",
-      );
-      await this.rollbackWorkerAssignment(assignmentTransaction);
-      throw error;
-    }
-
-    const assignmentErrorAfterRuntime =
-      this.getWorkerAssignmentDispatchError(
-        input.target,
-        expectedWorkerAssignmentId,
-      );
-    if (assignmentErrorAfterRuntime) {
-      rollback();
-      this.options.observability.cancelRuntimeInput(
-        observabilityInput,
-        "worker_assignment_completed_before_dispatch",
-      );
-      await this.rollbackWorkerAssignment(assignmentTransaction);
-      throw assignmentErrorAfterRuntime;
-    }
-
-    const deliveryId = [
-      input.workerResult ? "worker-result" : "agent-message",
-      input.sender.agentId,
-      managerTurnId ?? "unknown",
-      this.createDeliveryNonce(),
-    ].join(":");
-    const hasDeliveryLedger =
-      input.sendOptions?.skipRecoveryTracking !== true &&
-      this.options.ledger.hasSessionTarget(input.target.agentId);
-    if (hasDeliveryLedger) {
-      await this.options.ledger.recordDeliveryPending({
-        sessionAgentId: input.target.agentId,
-        ...(managerTurnId ? { turnId: managerTurnId } : {}),
-        deliveryId,
-        fromAgentId: input.sender.agentId,
-        targetAgentId: input.target.agentId,
-        message: input.ledgerMessage ?? input.message,
-        ...(input.workerResult
-          ? { assignmentId: input.workerResult.parentContext.assignmentId }
-          : {}),
-        at: this.options.now(),
-      });
-    }
-
-    const assignmentErrorBeforeSend =
-      this.getWorkerAssignmentDispatchError(
-        input.target,
-        expectedWorkerAssignmentId,
-      );
-    if (assignmentErrorBeforeSend) {
-      rollback();
-      this.options.observability.cancelRuntimeInput(
-        observabilityInput,
-        "worker_assignment_completed_before_dispatch",
-      );
-      await this.rollbackWorkerAssignment(assignmentTransaction);
-      if (hasDeliveryLedger) {
-        await this.options.ledger.recordDeliveryAcked({
-          sessionAgentId: input.target.agentId,
-          deliveryId,
-          at: this.options.now(),
-        }).catch((error) => {
-          this.options.logDebug("turn_ledger:delivery_acked:error", {
-            deliveryId,
-            message: errorToMessage(error),
-          });
-        });
-      }
-      throw assignmentErrorBeforeSend;
-    }
-
+    };
     let receipt: SendMessageReceipt;
     try {
-      if (hasDeliveryLedger) await this.options.ledger.claimDelivery?.({ sessionAgentId: input.target.agentId, deliveryId });
-      receipt = await runtime.sendMessage(modelMessage, input.delivery);
+      ({ receipt } = await this.requireCore().submit({
+        sender: input.sender, target: input.target, message: modelMessage, attachments: input.attachments, delivery: input.delivery,
+        ...(input.sendOptions?.observabilityParentTool ? { call: { agentId: input.sendOptions.observabilityParentTool.agentId, toolCallId: input.sendOptions.observabilityParentTool.toolCallId } } : {}),
+        ...(input.planAssignment ? { planAssignment: input.planAssignment.assignment } : {}),
+        requiresSecureRuntime: secureWorkerPrepared || input.sendOptions?.requiresSecureRuntime,
+        ...(input.sender.role === "manager" && input.target.role === "worker" ? { parentContext: {
+          outputTarget: this.options.output.resolveWorkerParentOutputTarget(input.sender.agentId, activeParent?.outputTarget),
+          rootTurnId: activeParent?.rootTurnId, parentRootTurnId: activeParent?.parentRootTurnId,
+        } } : {}),
+        presentation,
+      }));
     } catch (error) {
-      rollback();
-      this.options.observability.cancelRuntimeInput(observabilityInput, "runtime_send_message_failed");
-      await this.rollbackWorkerAssignment(assignmentTransaction);
+      this.options.observability.cancelRuntimeInput(observabilityInput, "core_input_admission_failed");
       throw error;
-    }
-
-    if (hasDeliveryLedger) {
-      await this.options.ledger.recordDeliveryAcked({
-        sessionAgentId: input.target.agentId,
-        deliveryId,
-        at: this.options.now(),
-      }).catch((error) => {
-        this.options.logDebug("turn_ledger:delivery_acked:error", {
-          deliveryId,
-          message: errorToMessage(error),
-        });
-      });
     }
 
     this.options.observability.completeRuntimeInput(observabilityInput, receipt, {
@@ -865,118 +596,6 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
       (input.sender.projectAgent !== undefined || input.target.projectAgent !== undefined);
     this.emitAgentToAgentMessage(input, receipt, managerContextIds, projectAgentExchange);
     return receipt;
-  }
-
-  private async persistWorkerAssignment(
-    sender: AgentDescriptor,
-    target: AgentDescriptor,
-    expectedAssignmentId: string | null | undefined,
-  ): Promise<WorkerAssignmentTransaction | undefined> {
-    if (
-      sender.role !== "manager" ||
-      target.role !== "worker" ||
-      target.managerId !== sender.agentId
-    ) {
-      return undefined;
-    }
-
-    if (expectedAssignmentId !== null) {
-      if (
-        expectedAssignmentId === undefined ||
-        target.workerParentContext?.assignmentId !== expectedAssignmentId ||
-        target.workerParentContext?.completedAt
-      ) {
-        throw new Error(
-          `Worker ${target.agentId} assignment changed before this message could be dispatched. Retry the message.`,
-        );
-      }
-      return undefined;
-    }
-
-    if (target.workerParentContext) {
-      throw new Error(
-        `Worker ${target.agentId} received another assignment before this message could be dispatched. Retry the message.`,
-      );
-    }
-
-    const previous = cloneWorkerParentContext(target.workerParentContext);
-    const activeParent = this.options.turns.getActiveWorkerParentContext(sender.agentId);
-    const assignmentId = `assignment:${target.agentId}:${this.createDeliveryNonce()}`;
-    target.workerParentContext = {
-      schemaVersion: 1,
-      assignmentId,
-      managerId: sender.agentId,
-      assignedAt: this.options.now(),
-      outputTarget: this.options.output.resolveWorkerParentOutputTarget(
-        sender.agentId,
-        activeParent?.outputTarget,
-      ),
-      ...(activeParent?.rootTurnId ? { rootTurnId: activeParent.rootTurnId } : {}),
-      ...(activeParent?.parentRootTurnId
-        ? { parentRootTurnId: activeParent.parentRootTurnId }
-        : {}),
-    };
-
-    try {
-      await this.options.saveStore();
-    } catch (error) {
-      if (previous) {
-        target.workerParentContext = previous;
-      } else {
-        delete target.workerParentContext;
-      }
-      throw error;
-    }
-
-    return {
-      worker: target as AgentDescriptor & { role: "worker" },
-      assignmentId,
-      ...(previous ? { previous } : {}),
-    };
-  }
-
-  private async rollbackWorkerAssignment(
-    transaction: WorkerAssignmentTransaction | undefined,
-  ): Promise<void> {
-    if (
-      !transaction ||
-      transaction.worker.workerParentContext?.assignmentId !== transaction.assignmentId
-    ) {
-      return;
-    }
-    if (transaction.previous) {
-      transaction.worker.workerParentContext = cloneWorkerParentContext(transaction.previous);
-    } else {
-      delete transaction.worker.workerParentContext;
-    }
-    await this.options.saveStore().catch((error) => {
-      this.options.logDebug("worker_assignment:rollback:error", {
-        workerAgentId: transaction.worker.agentId,
-        assignmentId: transaction.assignmentId,
-        message: errorToMessage(error),
-      });
-    });
-  }
-
-  private getWorkerAssignmentDispatchError(
-    target: AgentDescriptor,
-    expectedAssignmentId: string | undefined,
-  ): Error | undefined {
-    if (!expectedAssignmentId) return undefined;
-    if (
-      target.role !== "worker" ||
-      target.workerParentContext?.assignmentId !== expectedAssignmentId
-    ) {
-      return new Error(
-        `Worker ${target.agentId} assignment changed before this message could be dispatched. Retry the message.`,
-      );
-    }
-    if (target.workerParentContext.completedAt) {
-      return new Error(
-        `Worker ${target.agentId} completed its assignment before this message could be dispatched. Retry the message.`,
-      );
-    }
-    return undefined;
   }
 
   private requireSender(agentId: string): AgentDescriptor {
@@ -1179,9 +798,6 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
     }
   }
 
-  private createDeliveryNonce(): string {
-    return this.options.createDeliveryNonce?.() ?? randomUUID();
-  }
 }
 
 function resolveActivityManagerContextIds(...agents: AgentDescriptor[]): string[] {
@@ -1211,28 +827,3 @@ function classifyObservabilityRootSource(input: {
     : "internal_agent_message";
 }
 
-function cloneWorkerParentContext(
-  context: WorkerParentContext | undefined,
-): WorkerParentContext | undefined {
-  return context
-    ? {
-        schemaVersion: 1,
-        assignmentId: context.assignmentId,
-        managerId: context.managerId,
-        assignedAt: context.assignedAt,
-        ...(context.completedAt ? { completedAt: context.completedAt } : {}),
-        outputTarget: cloneAssistantOutputTarget(context.outputTarget),
-        ...(context.rootTurnId ? { rootTurnId: context.rootTurnId } : {}),
-        ...(context.parentRootTurnId ? { parentRootTurnId: context.parentRootTurnId } : {}),
-      }
-    : undefined;
-}
-
-function formatWorkerResultMessage(
-  workerAgentId: string,
-  assignmentId: string,
-  resultText: string,
-): string {
-  const body = resultText.trim() || "Worker completed without a final text result.";
-  return `[workerResult] ${JSON.stringify({ workerAgentId, assignmentId })}\n${body}`;
-}
