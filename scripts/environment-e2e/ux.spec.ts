@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
-import type { SessionSummary } from '@forge/protocol/environment-v2'
+import type { SessionSummary, CommandReceipt } from '@forge/protocol/environment-v2'
 import { test as base } from './fixtures/test.js'
 import { controlEnvironment, readManifest, repositoryRoot, type BootstrapSession, type FleetManifest } from './launch.js'
 import { openUiFleet, type UiEnvironment, type UiFleet } from './fixtures/ui-fleet.js'
@@ -272,7 +272,7 @@ test('the worker view shows the worker\'s own transcript and status, read-only',
   await expect(assignment).toContainText('Assignment')
   await expect(assignment).toContainText('Return the synthetic worker result')
   await expect(assignment).not.toContainText('SYSTEM:')
-  expect(await transcript(page).evaluate(node => node.innerText.indexOf('Return the synthetic worker result') < node.innerText.indexOf(':worker result'))).toBe(true)
+  expect(await transcript(page).evaluate(node => (node.textContent ?? '').indexOf('Return the synthetic worker result') < (node.textContent ?? '').indexOf(':worker result'))).toBe(true)
   const text = await transcript(page).innerText()
   expect(text).not.toContain('worker spawned')
   expect(text).not.toContain('Delegate the fixture task')
@@ -304,15 +304,19 @@ test('a change made while a launch settles is refused retryably in plain words, 
   const rpc = await openFixtureRpc(a.baseUrl, session)
   // What the UI client does with a retryable admission conflict: send the same command again.
   const refusals: Array<{ method: string; code: string; retryable: boolean; message: string }> = []
-  const settledCall = async (method: string, input: { commandId: string }) => until(async () => {
-    try { return await rpc.call(method, input) } catch (error) {
-      const refusal = error as { code: string; retryable: boolean; message: string }
-      refusals.push({ method, code: refusal.code, retryable: refusal.retryable, message: refusal.message })
-      expect(refusal).toMatchObject({ code: 'CONFLICT', retryable: true })
-      expect(refusal.message).not.toMatch(/settling|lifecycle|intent/i)
-      return null
-    }
-  }, Boolean, 10_000)
+  const settledCall = async (method: string, input: { commandId: string }): Promise<CommandReceipt> => {
+    const receipt = await until<CommandReceipt | null>(async () => {
+      try { return await rpc.call(method, input) } catch (error) {
+        const refusal = error as { code: string; retryable: boolean; message: string }
+        refusals.push({ method, code: refusal.code, retryable: refusal.retryable, message: refusal.message })
+        expect(refusal).toMatchObject({ code: 'CONFLICT', retryable: true })
+        expect(refusal.message).not.toMatch(/settling|lifecycle|intent/i)
+        return null
+      }
+    }, Boolean, 10_000)
+    if (!receipt) throw new Error('Settled command has no receipt')
+    return receipt
+  }
   try {
     const projectId = (await shellSession(a, a.sessionId))!.projectId
     const commandId = randomUUID()
