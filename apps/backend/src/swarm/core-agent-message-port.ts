@@ -24,7 +24,7 @@ export interface CoreAgentMessagePort {
     planAssignment?: PlanStepAssignment;
     requiresSecureRuntime?: boolean;
     parentContext?: Pick<WorkerParentContext, "outputTarget" | "rootTurnId" | "parentRootTurnId">;
-    presentation: Omit<InboundTurnContextInput<unknown>, "skipRecoveryTracking">;
+    presentation: InboundTurnContextInput<unknown>;
   }): Promise<{ runId: string; receipt: SendMessageReceipt; assignment?: WorkerAssignment }>;
   /** Record/extract the canonical final for this exact terminal run, then worker.result. */
   recordWorkerResult(input: {

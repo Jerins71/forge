@@ -1,3 +1,4 @@
+import type { CoreAgentMessagePort } from "./core-agent-message-port.js";
 import type { HistorySearchService } from "./history-recall/index.js";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -10,7 +11,7 @@ import { RestartRecoveryCoordinator } from "./restart-recovery-coordinator.js";
 import { SwarmBootCoordinator } from "./swarm-boot-coordinator.js";
 import { SwarmObservabilityCoordinator } from "./swarm-observability-coordinator.js";
 import { SwarmEventCoordinator } from "./swarm-event-coordinator.js";
-import { AgentMessageDispatcher, type AgentMessageLedgerPort } from "./agent-message-dispatcher.js";
+import { AgentMessageDispatcher } from "./agent-message-dispatcher.js";
 import { SwarmCompactionCoordinator } from "./swarm-compaction-coordinator.js";
 import { AgentDescriptorStore } from "./agents/agent-descriptor-store.js";
 import type { DescriptorStoreAdapter } from "./agents/descriptor-store/live-map-adapter.js";
@@ -38,7 +39,6 @@ import { RuntimeRecoveryState } from "./runtime/runtime-recovery-state.js";
 import { SwarmRuntimeController } from "./swarm-runtime-controller.js";
 import { SwarmRuntimeLifecycleCoordinator } from "./swarm-runtime-lifecycle-coordinator.js";
 import { SwarmSpecialistFallbackManager } from "./swarm-specialist-fallback-manager.js";
-import { appendRecoveryDeliveryContent, claimRecoveryDelivery, recordRecoveryFact } from "./recovery-state.js";
 import {
   getManagedModelProviderCredentialAvailability,
   SecretsEnvService
@@ -146,6 +146,12 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private readonly userMessageCoordinator: UserMessageCoordinator;
   private readonly sessionPlanCoordinator: SessionPlanCoordinator;
   private readonly compactionCoordinator: SwarmCompactionCoordinator;
+  installCoreAgentMessagePort(port: CoreAgentMessagePort): void {
+    this.agentMessageDispatcher.installCoreAgentMessages(port);
+    this.lifecycleService.installCoreAgentMessages(port);
+    this.sessionInteractionCoordinator.installCoreAgentMessages(port);
+    this.runtimeLifecycleCoordinator.installCoreAgentMessages(port);
+  }
   installDescriptorPersistence(persistence: import("./agents/agent-descriptor-store.js").AgentDescriptorPersistence): void { this.descriptorStore.setPersistence(persistence); }
   private readonly descriptorStore: AgentDescriptorStore;
   private readonly descriptorStoreAdapter: DescriptorStoreAdapter;
@@ -289,7 +295,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       },
       sessionPlan: {
         emitSnapshot: (event) => this.emit("session_plan_snapshot", event),
-        isWorkerActive: (workerId) => isWorkGraphWorkerActive(this.descriptors, workerId),
+        isWorkerActive: (workerId) => isWorkGraphWorkerActive(this.descriptors, workerId, this.agentMessageDispatcher?.readAssignment(workerId)),
       },
     });
     this.managerBootstrapCoordinator = coreServices.managerBootstrapCoordinator;
@@ -445,7 +451,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       },
       trust: this.projectExecutableTrustCoordinator,
       observability: this.observabilityCoordinator,
-      persistence: this.sessionMetaService,
+      persistence: this.conversationProjector,
       extensions: this.forgeExtensionHost,
       host: {
         config: this.config,
@@ -1057,41 +1063,14 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
     });
   }
   private createAgentMessageDispatcher(goals: ReturnType<typeof createSwarmManagerRuntimeComposition>["goals"]): AgentMessageDispatcher<CodexMcpToolGateEvaluation> {
-    const ledger = {
-      hasSessionTarget: (agentId) =>
-        Boolean(this.runtimeLifecycleCoordinator.getRecoveryTarget(agentId)),
-      recordDeliveryPending: async (input) => {
-        const target = this.runtimeLifecycleCoordinator.getRecoveryTarget(input.sessionAgentId);
-        if (!target) return;
-        await recordRecoveryFact(target, {
-          t: "delivery_pending",
-          ...(input.turnId ? { turnId: input.turnId } : {}),
-          deliveryId: input.deliveryId,
-          from: input.fromAgentId,
-          to: input.targetAgentId,
-          contentRef: appendRecoveryDeliveryContent(this.runtimeLifecycleCoordinator.runtimes.get(input.targetAgentId), this.descriptors.get(input.targetAgentId)?.sessionFile, input),
-          ...(input.assignmentId ? { assignmentId: input.assignmentId } : {}),
-          at: input.at,
-        });
-      },
-      claimDelivery: async (input) => {
-        const target = this.runtimeLifecycleCoordinator.getRecoveryTarget(input.sessionAgentId);
-        if (!target || !await claimRecoveryDelivery(target, input.deliveryId)) throw new Error("Delivery has already crossed its dispatch boundary");
-      },
-      recordDeliveryAcked: async (input) => {
-        const target = this.runtimeLifecycleCoordinator.getRecoveryTarget(input.sessionAgentId);
-        if (!target) return;
-        await recordRecoveryFact(target, { t: "delivery_acked", deliveryId: input.deliveryId, at: input.at });
-      },
-    } satisfies AgentMessageLedgerPort;
     return new AgentMessageDispatcher({
+      getConversationHistory: (agentId) => this.getConversationHistory(agentId),
       descriptors: this.descriptors,
       profiles: this.profiles,
       assertMutable: (descriptor) => this.agentDirectory.assertDescriptorNotEffectivelyArchived(descriptor),
       attachments: this.conversationAttachmentService,
       turns: this.turnContextCoordinator,
       output: this.assistantOutputRouter,
-      ledger,
       observability: this.observabilityCoordinator,
       plans: {
         resolveAssignment: (owner, requestedStep) =>
@@ -1134,7 +1113,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       secureWorkers: createSecureSessionLifecyclePort(
         this.secureSessionsService,
       ),
-      getOrCreateRuntime: (descriptor, options) => this.getOrCreateRuntimeForDescriptor(descriptor, options),
       appendProjectAgentConversation: (target, payload) =>
         this.inboundConversationAppender.appendProjectAgentConversation(target, payload),
       emitAgentMessage: (event) => this.eventCoordinator.emitAgentMessage(event),

@@ -4,7 +4,7 @@ import type { ChoiceAnswer } from "./types.js";
 import type { SessionLifecycleCoordinator } from "./session-lifecycle-coordinator.js";
 import type { SwarmSessionService } from "./swarm-session-service.js";
 import type { UserMessageCoordinator } from "./user-message-coordinator.js";
-import type { ProviderScope } from "@forge/protocol";
+import type { ProviderScope, ProviderConversationRef } from "@forge/protocol";
 import { SwarmManagerSessionAttentionFacade } from "./swarm-manager-session-attention-facade.js";
 
 /** Stateless internal primitives for the durable control owner; domain tools retain their existing facade. */
@@ -19,6 +19,8 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
     return Boolean(descriptor) && (!services.runtime.runtimes.has(sessionId) || existsSync(descriptor!.sessionFile));
   }
 
+  releaseControlledWorker(workerId:string):Promise<void> { return this.getFacadeServices().agents.stopWorker(workerId); }
+
   killControlledWorker(managerId: string, workerId: string): Promise<void> {
     return this.getFacadeServices().agents.killControlledWorker(managerId, workerId);
   }
@@ -28,17 +30,13 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
     return ids.every(id => !this.getFacadeServices().runtime.runtimes.has(id) && !this.getFacadeServices().runtime.controller.isRuntimeShutdownQuarantined(id));
   }
 
-  setControlledRecoveryPolicy(policy: (sessionId: string, activity?: "turn" | "worker" | "delivery") => boolean): void {
-    this.getFacadeServices().recovery.setControlledRecoveryPolicy(policy);
-  }
-
   applyControlledInput(text: string, options: Parameters<UserMessageCoordinator["applyControlledInput"]>[1]): ReturnType<UserMessageCoordinator["applyControlledInput"]> {
     return this.getFacadeServices().userMessages.applyControlledInput(text, options);
   }
 
-  acquireControlledProvider(scope: ProviderScope) {
+  acquireControlledProvider(scope: ProviderScope, conversation?: ProviderConversationRef) {
     const services = this.getFacadeServices();
-    return services.runtime.controller.acquireProvider(scope, () => services.userMessages.acquireRuntime(scope.threadId));
+    return services.runtime.controller.acquireProvider(scope, () => services.userMessages.acquireRuntime(scope.threadId), conversation);
   }
 
   installAuthoritativeInputOwner(submit: Parameters<UserMessageCoordinator["installInputOwner"]>[0], recovery: import("./restart-recovery-coordinator.js").CoreRecoveryPort): void {
@@ -46,8 +44,15 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
     this.getFacadeServices().recovery.installCore(recovery);
   }
 
-  deliverControlledRecoveredResult(deliveryId: string): Promise<void> {
-    return this.getFacadeServices().recovery.deliverReport(deliveryId);
+  installControlledTurnProjection(port:import("./turn-context-coordinator.js").CoreTurnProjectionPort): void {
+    this.getFacadeServices().runtime.turns.installCore(port);
+  }
+  reflectControlledTurns(): void { this.getFacadeServices().runtime.turns.reflectCore(); }
+  enqueueControlledPresentation(agentId:string,runId:string,context:import("./turn-context-coordinator.js").InboundTurnContextInput): void {
+    this.getFacadeServices().runtime.turns.register(agentId,{ ...context,turnId:runId });
+  }
+  appendControlledBlockedResult(threadId:string,runId:string,resultText:string):Promise<{entryId:string;resultText:string}> {
+    return this.getFacadeServices().userMessages.appendBlockedResult(threadId,runId,resultText);
   }
 
   applyControlledChoice(input: { sessionId: string; choiceId: string; runtimeGeneration: string; answers: ChoiceAnswer[] }): "answered" | "interrupted" {

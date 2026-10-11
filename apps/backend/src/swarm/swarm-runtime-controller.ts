@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ProviderScope } from "@forge/protocol";
+import type { ProviderScope, ProviderConversationRef } from "@forge/protocol";
 import type { ProviderAdapter, ProviderBinding } from "./runtime/provider-contract.js";
 import type {
   AgentRuntimeExtensionSnapshot,
@@ -379,18 +379,27 @@ export class SwarmRuntimeController {
   }
 
   /** Executor-only acquisition. Native creators supply their exact final prompt/tool host. */
-  async acquireProvider(scope: ProviderScope, create: () => Promise<SwarmAgentRuntime>): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }> {
-    const runtime = await this.providerCreationScope.run(scope, create);
-    const adapter = runtime.providerAdapter;
-    const record = this.preparedProviderInputs.get(runtime);
-    if (!adapter || !record || record.runtimeToken !== this.getRuntimeToken(scope.threadId)) {
-      throw new Error("Runtime has no prepared provider adapter");
+  async acquireProvider(scope: ProviderScope, create: () => Promise<SwarmAgentRuntime>, conversation?: ProviderConversationRef): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }> {
+    let runtime = await this.providerCreationScope.run(scope, create);
+    const replace = async () => {
+      const result = await this.runRuntimeShutdown(runtime.descriptor, "terminate", { abort:true });
+      if (result.status !== "clean") throw new Error("Provider replacement requires confirmed writer shutdown");
+      runtime = await this.providerCreationScope.run(scope, create);
+    };
+    if (this.preparedProviderInputs.get(runtime)?.generation !== undefined && this.preparedProviderInputs.get(runtime)?.generation !== scope.generation) await replace();
+    const open = async () => {
+      const adapter = runtime.providerAdapter;
+      const record = this.preparedProviderInputs.get(runtime);
+      if (!adapter || !record || record.runtimeToken !== this.getRuntimeToken(scope.threadId)) throw new Error("Runtime has no prepared provider adapter");
+      const input = { scope, model:runtime.descriptor.model, instructions:record.prepared.instructionBundle, toolHost:record.prepared.toolHostBinding };
+      const binding = conversation ? await adapter.resume({ ...input, conversation }) : await adapter.open(input);
+      record.generation = scope.generation;
+      return { adapter,binding };
+    };
+    try { return await open(); } catch (error) {
+      if (!(error && typeof error === "object" && "code" in error && error.code === "PROVIDER_REFRESH_REQUIRED")) throw error;
+      await replace(); return open();
     }
-    if (record.generation !== undefined && record.generation !== scope.generation) throw new Error("Provider generation requires confirmed runtime replacement");
-    record.generation = scope.generation;
-    const input = { scope, model: runtime.descriptor.model, instructions: record.prepared.instructionBundle, toolHost: record.prepared.toolHostBinding };
-    const binding = await adapter.open(input);
-    return { adapter, binding };
   }
 
   hasRuntime(agentId: string): boolean {

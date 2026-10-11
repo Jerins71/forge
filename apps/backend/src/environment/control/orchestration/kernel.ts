@@ -28,9 +28,9 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
   const thread = (id: string) => {
     const value = state.threads[id]; if (!value) throw new Error("Unknown orchestration thread"); return value;
   };
-  const finish = (run: Run, outcome: NonNullable<Run["outcome"]>) => {
+  const finish = (run: Run, outcome: NonNullable<Run["outcome"]>, delivered = false) => {
     const attempt = state.attempts[run.activeAttemptId];
-    emit({ type: "attempt.terminal", attempt: { ...attempt, state: "terminal", outcome, delivery: attempt.state === "dispatching" && outcome === "completed" ? "dispatched" : attempt.delivery } });
+    emit({ type: "attempt.terminal", attempt: { ...attempt, state: "terminal", outcome, delivery: attempt.state === "dispatching" && delivered ? "dispatched" : attempt.delivery } });
     emit({ type: "run.terminal", run: { ...run, state: "terminal", outcome } });
     for (const request of Object.values(state.requests)) if (request.attemptId === attempt.attemptId && ["pending", "responding"].includes(request.state))
       emit({ type: "request.expired", request: { ...request, state: "expired" } });
@@ -103,10 +103,10 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       if (request) emit({ type: observation.resolution === "expired" ? "request.expired" : "request.resolved", request: { ...request, state: observation.resolution === "expired" ? "expired" : "resolved" } });
     } else if (observation.origin.kind !== "root" || owner.activeRunId !== run.runId || run.activeAttemptId !== attempt.attemptId) { /* This observation has no root terminal authority. */ }
     else if (observation.type === "accepted") emit({ type: "attempt.accepted", attempt: { ...state.attempts[attempt.attemptId], state: "accepted", delivery: "dispatched", turn: observation.turn } });
-    else if (observation.type === "terminal" && observation.terminalAuthority === "root_attempt") { finish(state.runs[run.runId], observation.outcome); advance(owner.threadId); }
+    else if (observation.type === "terminal" && observation.terminalAuthority === "root_attempt") { finish(state.runs[run.runId], observation.outcome,true); advance(owner.threadId); }
     else if (observation.type === "error") {
       if (observation.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); }
-      else { finish(state.runs[run.runId], "failed"); advance(owner.threadId); }
+      else { finish(state.runs[run.runId], "failed",observation.delivery === "accepted"); advance(owner.threadId); }
     }
   };
 
@@ -130,6 +130,11 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
           decision.effects.push({ kind: "provider.interrupt", threadId: owner.threadId, attemptId: active.attemptId });
         }
       }
+      break;
+    }
+    case "run.cancel": {
+      const run=state.runs[command.runId];
+      if (run?.threadId === command.threadId && state.attempts[run.activeAttemptId].state === "created") { finish(run,"cancelled"); advance(run.threadId); }
       break;
     }
     case "input.recorded": {

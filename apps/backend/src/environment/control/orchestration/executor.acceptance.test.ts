@@ -54,4 +54,32 @@ describe("durable provider outbox", () => {
     const third = await f.open(); await third.effectWorker.drain(); expect(loadState(third.database).recovery?.recoveryId).toBe(before.recoveryId);
     expect((await third.controlService.getReceipt(principal, commandId)).delivery).toBe("unknown");
   });
+  it("gives internal scoped calls the same durable input, receipt and outbox admission", async () => {
+    const f = await fixture();
+    const input = { commandId: "tool:manager:attempt:call-1:manager", threadId: "manager", message: { text: "tool input", artifactIds: [] } };
+    const first = await f.core.controlService.submitInput(input);
+    const second = await f.core.controlService.submitInput(input);
+    expect(second.runId).toBe(first.runId);
+    expect(second.receipt.acceptedSequence).toBe(first.receipt.acceptedSequence);
+    expect(f.core.database.prepare("SELECT COUNT(*) n FROM control_inputs").get()).toEqual({ n: 1 });
+    await f.core.effectWorker.drain();
+    expect(f.dispatches()).toBe(1);
+    expect(JSON.parse((f.core.database.prepare("SELECT receipt_json FROM command_receipts WHERE command_id=?").get(input.commandId) as {receipt_json:string}).receipt_json).delivery).toBe("dispatched");
+  });
+  it("resumes with the retained conversation locator and a new generation scope", async () => {
+    const f = await fixture();
+    const acquired: Array<{ scope: import("@forge/protocol").ProviderScope; conversation?: import("@forge/protocol").ProviderConversationRef }> = [];
+    const original = f.options.swarm.acquireProvider;
+    f.options.swarm.acquireProvider = async (scope, conversation) => { acquired.push({ scope, conversation }); return original(scope, conversation); };
+    await f.core.controlService.execute(principal, "session.send", { commandId, sessionId: "manager", message: { text: "fixture", artifactIds: [] } });
+    await f.core.effectWorker.drain();
+    const old = acquired[0]; await f.core.close();
+    const second = await f.open(); const state = loadState(second.database);
+    second.controlService.record({ type:"recovery.resume", commandId:"resume", now:f.options.clock(), recoveryId:state.recovery!.recoveryId,
+      attempts:{[`run-${commandId}`]:"new-attempt"}, bindingIds:{manager:"new-binding"} });
+    await second.effectWorker.drain();
+    expect(acquired.at(-1)?.conversation).toEqual({ ...old.scope, kind:"conversation", nativeId:"native" });
+    expect(acquired.at(-1)?.scope).toEqual({ threadId:"manager", bindingId:"new-binding", generation:old.scope.generation+1 });
+  });
+
 });

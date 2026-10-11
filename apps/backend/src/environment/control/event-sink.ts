@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Database } from "better-sqlite3";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
 import {
@@ -37,6 +38,7 @@ export interface AppendEvent {
 /** A token issued only by this sink's synchronous writer transaction. */
 export interface ControlTransaction {
   readonly database: Database;
+  afterCommit(callback:()=>void):void;
 }
 export interface EventSink {
   readonly database: Database;
@@ -149,7 +151,7 @@ export function createEventSink(database: Database, clock: () => number, random:
       .prepare("UPDATE events SET event_type = ?, payload_json = ?, payload_bytes = ? WHERE sequence = ?")
       .run(event.type, payload, payloadBytes, sequence);
     database.prepare("UPDATE environment_meta SET high_water_sequence = ? WHERE singleton = 1").run(sequence);
-    project(database, input.sessionId, event, sequence, input.sourceKey);
+    project(database, input.sessionId, event, sequence, input.sourceKey, input.commandId);
     pending.push({
       sequence,
       eventId,
@@ -176,7 +178,8 @@ export function createEventSink(database: Database, clock: () => number, random:
     transaction(write) {
       if (closed) throw new Error("Control event sink is closed");
       if (active || database.inTransaction) throw new Error("Nested control transactions are forbidden");
-      const tx = { database };
+      const afterCommit: Array<()=>void> = [];
+      const tx = { database,afterCommit(callback:()=>void) { afterCommit.push(callback); } };
       const beforeChanges = (database.prepare("SELECT total_changes() count").get() as { count: number }).count;
       pending = [];
       let result: ReturnType<typeof write>;
@@ -208,6 +211,7 @@ export function createEventSink(database: Database, clock: () => number, random:
         journalCount += pending.length;
         journalBytes += pending.reduce((sum, event) => sum + event.payloadBytes, 0);
       }
+      for (const callback of afterCommit) callback();
       committed.push(...pending);
       pending = [];
       if (!publishing) {
@@ -250,6 +254,22 @@ export function createEventSink(database: Database, clock: () => number, random:
         const generation = "thread" in event ? event.thread.generation : "attempt" in event ? event.attempt.generation : "binding" in event ? event.binding.scope.generation : null;
         database.prepare("INSERT INTO lifecycle_events (event_id,command_id,thread_id,generation,event_type,event_json,created_at) VALUES (?,?,?,?,?,?,?)")
           .run(random(), command.commandId, threadId, generation, event.type, JSON.stringify(event), command.now);
+        if (event.type === "input.accepted") {
+          // Nested assignment delivery and every ingress materialize the same durable input.
+          const run = event.run;
+          database.prepare("INSERT OR IGNORE INTO commands VALUES (?, 'core', 'run.submit', ?, ?, ?, ?)")
+            .run(run.commandId, run.commandId, JSON.stringify(run), run.threadId, command.now);
+          const generation = loadState(database).threads[run.threadId].generation;
+          database.prepare("INSERT OR IGNORE INTO control_inputs (input_id,command_id,session_id,message_json,append_state,delivery_state,run_generation,updated_sequence) VALUES (?,?,?,?,'pending','pending',?,0)")
+            .run(run.inputId, run.commandId, run.threadId, JSON.stringify(run.input), generation);
+          if (!database.prepare("SELECT 1 FROM command_receipts WHERE command_id=?").get(run.commandId)) {
+            const at = new Date(command.now).toISOString();
+            const receipt: CommandReceipt = { commandId: receiptIdentity(run.commandId), method: "session.send", sessionId: run.threadId,
+              state: "accepted", acceptedSequence: 0, updatedSequence: 0, acceptedAt: at, updatedAt: at, inputId: run.inputId, delivery: "pending", error: null };
+            database.prepare("INSERT INTO command_receipts VALUES (?, 'accepted', 0, 0, ?)").run(run.commandId, JSON.stringify(receipt));
+            sink.updateReceipt(tx, run.commandId, {});
+          }
+        }
         projectLifecycle(database, event);
         if (event.type === "input.recorded") database.prepare("UPDATE control_inputs SET canonical_entry_id=?,append_state='recorded' WHERE input_id=?").run(event.run.entryId, event.run.inputId);
         if ("attempt" in event) {
@@ -341,7 +361,7 @@ function hasPendingReceipt(database: Database, commandId: string): boolean {
   return Boolean(database.prepare("SELECT 1 FROM command_receipts WHERE command_id=? AND state IN ('accepted','running')").get(commandId));
 }
 
-function project(database: Database, sessionId: string | null, event: ControlEvent, sequence: number, sourceKey?: string | null): void {
+function project(database: Database, sessionId: string | null, event: ControlEvent, sequence: number, sourceKey?: string | null, commandId?:string|null): void {
   switch (event.type) {
     case "project.upsert":
       database
@@ -387,7 +407,7 @@ function project(database: Database, sessionId: string | null, event: ControlEve
           event.receipt.acceptedSequence,
           event.receipt.updatedSequence,
           JSON.stringify(event.receipt),
-          event.receipt.commandId,
+          commandId ?? event.receipt.commandId,
         );
       break;
     case "item.upsert": {
@@ -441,4 +461,11 @@ function project(database: Database, sessionId: string | null, event: ControlEve
       database.prepare("DELETE FROM detail_items WHERE session_id = ?").run(sessionId);
       break;
   }
+}
+
+/** Internal producer IDs remain scoped; their existing wire receipt uses a deterministic UUID. */
+export function receiptIdentity(commandId: string): string {
+  if (/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(commandId)) return commandId;
+  const hash = createHash("sha256").update(commandId).digest("hex");
+  return `${hash.slice(0,8)}-${hash.slice(8,12)}-4${hash.slice(13,16)}-8${hash.slice(17,20)}-${hash.slice(20,32)}`;
 }

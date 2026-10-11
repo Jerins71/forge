@@ -1,4 +1,4 @@
-import { extractMessageText, extractRole } from "./session/message-utils.js";
+import { extractRole } from "./session/message-utils.js";
 import type {
   MessageRouteInternalDeliveryKind,
   MessageRouteOrigin,
@@ -7,7 +7,6 @@ import { cloneAssistantOutputTarget } from "./assistant-output-target.js";
 import { isCleanManagerAssistantFinalMessage } from "./runtime/manager-assistant-final-message.js";
 import type {
   RuntimeSessionEvent,
-  RuntimeSessionMessage,
 } from "./runtime-contracts.js";
 import type {
   AgentDescriptor,
@@ -15,7 +14,6 @@ import type {
   ConversationMessageEvent,
   MessageSourceContext,
 } from "./types.js";
-import type { RecoveryInboundKind } from "./recovery-state.js";
 
 export type InboundTurnSource =
   | "user_input"
@@ -119,17 +117,8 @@ export interface CodexTurnScopePort<
   clearForRuntimeReset(agentId: string): void;
 }
 
-export interface TurnDispatchLedgerInput {
-  turnId: string;
-  agentId: string;
-  role: AgentDescriptor["role"];
-  kind: RecoveryInboundKind;
-}
-
-export interface TurnContextLedgerPort {
-  mintTurnId(descriptor: AgentDescriptor): Promise<string>;
-  recordTurnDispatched(input: TurnDispatchLedgerInput): Promise<void>;
-}
+export interface CoreTurnProjection { activeRunId?:string; pendingRunIds:readonly string[]; }
+export interface CoreTurnProjectionPort { read(agentId:string):CoreTurnProjection; }
 
 export interface QueuedInboundTurnHandle {
   turnId: string;
@@ -165,7 +154,6 @@ export interface TurnContextCoordinatorOptions<
   descriptors: Map<string, AgentDescriptor>;
   attention: TurnContextAttentionPort;
   getRuntimeToken(agentId: string): number | undefined;
-  ledger: TurnContextLedgerPort;
   output: ManagerOutputTurnPort;
   codex: CodexTurnScopePort<TCodexGate, TCodexDelegation, TCodexRetryAuthorization>;
   observability: TurnContextObservabilityPort;
@@ -190,294 +178,80 @@ export interface ActiveWorkerParentContext {
 }
 
 /**
- * Owns the ordered inbound-turn queue and its runtime-event lifecycle.
+ * Projects committed run identity into output, authorization and observability.
  *
  * Surface routing, Codex authorization, and observability projection remain in
- * their respective owners. This coordinator only determines when those owners
- * activate or clear as a provider selects and completes queued runtime input.
+ * their respective owners. Only the core projection selects and completes a run.
  */
-export class TurnContextCoordinator<
-  TCodexGate = unknown,
-  TCodexDelegation = unknown,
-  TCodexRetryAuthorization = unknown,
-> {
-  private readonly pendingByAgentId = new Map<
-    string,
-    Array<QueuedInboundTurnContext<TCodexGate, TCodexDelegation, TCodexRetryAuthorization>>
-  >();
-  private readonly activatedByAgentId = new Set<string>();
-  private readonly activeTurnByAgentId = new Map<string, ActiveTurnContext>();
-  private readonly activeExternalTurnByAgentId = new Map<string, ActiveExternalProjectAgentTurn>();
-  private nextSequence = 0;
-
-  constructor(
-    private readonly options: TurnContextCoordinatorOptions<
-      TCodexGate,
-      TCodexDelegation,
-      TCodexRetryAuthorization
-    >,
-  ) {}
-
-  getActiveTurnId(agentId: string, runtimeToken?: number): string | undefined {
-    const activeTurn = this.activeTurnByAgentId.get(agentId);
-    if (!activeTurn) {
-      return undefined;
-    }
-
-    if (
-      runtimeToken !== undefined &&
-      activeTurn.runtimeToken !== undefined &&
-      activeTurn.runtimeToken !== runtimeToken
-    ) {
-      return undefined;
-    }
-
-    return activeTurn.turnId;
-  }
-
-  getPendingContextCount(agentId: string): number {
-    return this.pendingByAgentId.get(agentId)?.length ?? 0;
-  }
-
-  getActiveWorkerParentContext(agentId: string): ActiveWorkerParentContext | undefined {
-    const parentContext = this.activeTurnByAgentId.get(agentId)?.parentContext;
-    return parentContext
-      ? {
-          outputTarget: cloneAssistantOutputTarget(parentContext.outputTarget),
-          ...(parentContext.rootTurnId ? { rootTurnId: parentContext.rootTurnId } : {}),
-          ...(parentContext.parentRootTurnId
-            ? { parentRootTurnId: parentContext.parentRootTurnId }
-            : {}),
-        }
-      : undefined;
-  }
-
-  hasPendingSupersedingUserInput(agentId: string, activeTurnId?: string): boolean {
-    if (!this.activatedByAgentId.has(agentId)) return false;
-    const active = this.activeTurnByAgentId.get(agentId);
-    const activeSequence = active && active.turnId === activeTurnId ? active.sequence : undefined;
-    return Boolean(this.pendingByAgentId.get(agentId)?.some(
-      (context) =>
-        context.source === "user_input" &&
-        context.turnId !== activeTurnId &&
-        (activeSequence === undefined || context.sequence > activeSequence),
-    ));
-  }
-
-  markProviderCycleActivated(agentId: string): void {
-    this.activatedByAgentId.add(agentId);
-  }
-
-  getActiveExternalProjectAgentTurn(agentId: string): ActiveExternalProjectAgentTurn | undefined {
-    const active = this.activeExternalTurnByAgentId.get(agentId);
-    return active ? { ...active } : undefined;
-  }
-
-  async enqueue(
-    agentId: string,
-    context: InboundTurnContextInput<TCodexGate, TCodexDelegation, TCodexRetryAuthorization>,
-  ): Promise<QueuedInboundTurnHandle> {
-    const descriptor = this.options.descriptors.get(agentId);
-    if (!descriptor) {
-      throw new Error(`Cannot mint turn id for unknown agent: ${agentId}`);
-    }
-
-    const runtimeToken = this.options.getRuntimeToken(agentId);
-    const sequence = ++this.nextSequence;
-    const queuedContext: QueuedInboundTurnContext<
-      TCodexGate,
-      TCodexDelegation,
-      TCodexRetryAuthorization
-    > = {
-      ...context,
-      activationEligible: context.activationEligible ?? true,
-      turnId: context.turnId ?? await this.options.ledger.mintTurnId(descriptor),
-      sequence,
-      ...(runtimeToken !== undefined ? { runtimeToken } : {}),
-    };
-
-
-    const queue = this.pendingByAgentId.get(agentId) ?? [];
-    queue.push(queuedContext);
-    this.pendingByAgentId.set(agentId, queue);
-    if (!this.activeTurnByAgentId.has(agentId)) {
-      this.setActiveTurnFromContext(agentId, queuedContext);
-    }
-
-    // Await this barrier before returning the handle. The caller may send the
-    // accepted input immediately; latching fire-and-forget would race the
-    // provider's user message_start dequeue and recreate the false raise.
-    await this.options.attention.observePendingQueueChange(agentId);
-
-    return {
-      turnId: queuedContext.turnId,
-      rollback: () => {
-        const currentQueue = this.pendingByAgentId.get(agentId);
-        let removed = false;
-        if (currentQueue) {
-          const index = currentQueue.lastIndexOf(queuedContext);
-          if (index >= 0) {
-            currentQueue.splice(index, 1);
-            removed = true;
-          }
-          if (currentQueue.length === 0) {
-            this.pendingByAgentId.delete(agentId);
-          }
-        }
-
-        if (this.activeTurnByAgentId.get(agentId)?.turnId === queuedContext.turnId) {
-          const nextContext = currentQueue?.[0];
-          if (nextContext) {
-            this.setActiveTurnFromContext(agentId, nextContext);
-          } else {
-            this.activeTurnByAgentId.delete(agentId);
-          }
-        }
-        if (removed) {
-          void this.options.attention.releaseContinuationBarrier(agentId);
-        }
-      },
-    };
-  }
-
-  beforeRuntimeEventProjection(
-    agentId: string,
-    _runtimeToken: number | undefined,
-    event: RuntimeSessionEvent,
-  ): void {
-    this.applyRuntimeEvent(agentId, event, "before_projection");
-  }
-
-  afterRuntimeEventProjection(
-    agentId: string,
-    runtimeToken: number | undefined,
-    event: RuntimeSessionEvent,
-  ): void {
-    this.applyRuntimeEvent(agentId, event, "after_projection");
-    this.options.observability.recordRuntimeSessionEvent(agentId, runtimeToken, event);
-  }
-
-  handleRuntimeError(agentId: string): void {
-    const descriptor = this.options.descriptors.get(agentId);
-    if (descriptor?.role === "manager") {
-      this.pendingByAgentId.delete(agentId);
-      this.activatedByAgentId.delete(agentId);
-      this.activeTurnByAgentId.delete(agentId);
-      this.options.managerToolActivity?.clearManagerTurn(agentId);
-      void this.options.attention.releaseContinuationBarrier(agentId);
-    }
-    this.options.output.handleRuntimeError(agentId, descriptor);
-    this.options.codex.handleRuntimeError(agentId, descriptor);
-  }
-
-  discard(agentId: string): void {
-    const isManager = this.options.descriptors.get(agentId)?.role === "manager";
-    if (isManager) {
-      this.options.managerToolActivity?.clearManagerTurn(agentId);
-    }
-    this.pendingByAgentId.delete(agentId);
-    this.activatedByAgentId.delete(agentId);
-    this.activeTurnByAgentId.delete(agentId);
-    this.options.output.clearForRuntimeReset(agentId);
-    this.options.codex.clearForRuntimeReset(agentId);
-    if (isManager) {
-      void this.options.attention.releaseContinuationBarrier(agentId);
-    }
-  }
-
-  clearAgentState(agentId: string): void {
-    this.discard(agentId);
-    this.activeExternalTurnByAgentId.delete(agentId);
-    this.options.observability.clearRoot(agentId);
-  }
-
-  private applyRuntimeEvent(
-    agentId: string,
-    event: RuntimeSessionEvent,
-    phase: "before_projection" | "after_projection",
-  ): void {
-    const descriptor = this.options.descriptors.get(agentId);
-
-    if (
-      phase === "before_projection" &&
-      event.type === "message_start" &&
-      extractRole(event.message) === "user"
-    ) {
-      this.options.codex.noteRuntimeUserMessageStarted(agentId, descriptor);
-    }
-
-    if (phase === "before_projection" && event.type === "turn_start") {
-      return;
-    }
-
-    if (
-      phase === "before_projection" &&
-      (
-        event.type === "message_start" ||
-        (event.type === "message_end" && !this.activatedByAgentId.has(agentId))
-      ) &&
-      extractRole(event.message) === "user"
-    ) {
-      const nextContext = this.dequeueForRuntimeMessage(agentId, event.message);
-      if (nextContext) {
-        this.activatedByAgentId.add(agentId);
-        this.activateDequeuedContext(agentId, descriptor, nextContext);
-        // In-turn steer is consumed while descriptor.status is already
-        // streaming (Pi and Cursor). That is not a new continuation, so the
-        // fence must clear without waiting for a nonstreaming→streaming edge.
-        // Pi's next-cycle user message_start can still precede
-        // updateStatus("streaming"); idle matches must not release.
-        const manager = descriptor ?? this.options.descriptors.get(agentId);
-        if (manager?.role === "manager" && manager.status === "streaming") {
-          void this.options.attention.releaseContinuationBarrier(agentId);
-        }
-      } else if (!this.activatedByAgentId.has(agentId)) {
-        this.activateContext(agentId, descriptor, undefined);
-      }
-      return;
-    }
-
-    if (phase === "after_projection" && event.type === "turn_end") {
-      this.consumeActivePendingContext(agentId);
-      // Project-agent reply restrictions are scoped to the provider turn. The
-      // output route may stay alive until agent_end for providers that emit a
-      // trailing final, but those capability restrictions must not leak into
-      // the next turn.
-      this.activeExternalTurnByAgentId.delete(agentId);
-      this.options.output.completeProviderCycle(agentId, {
-        pendingTargets: this.pendingOutputTargets(agentId),
-      });
-      this.options.codex.completeProviderCycle(agentId);
-      if (descriptor?.role !== "manager") {
-        this.activatedByAgentId.delete(agentId);
-        this.activeTurnByAgentId.delete(agentId);
-        this.options.observability.clearRoot(agentId);
-      }
-      return;
-    }
-
-    if (phase === "after_projection" && event.type === "agent_end") {
-      this.discardStalePendingContexts(agentId);
-      if (descriptor?.role === "manager") {
+export class TurnContextCoordinator<TCodexGate=unknown,TCodexDelegation=unknown,TCodexRetryAuthorization=unknown> {
+  private readonly contexts = new Map<string,Map<string,QueuedInboundTurnContext<TCodexGate,TCodexDelegation,TCodexRetryAuthorization>>>();
+  private core?:CoreTurnProjectionPort;
+  private readonly activeTurnByAgentId = new Map<string,ActiveTurnContext>();
+  private readonly activeExternalTurnByAgentId = new Map<string,ActiveExternalProjectAgentTurn>();
+  constructor(private readonly options:TurnContextCoordinatorOptions<TCodexGate,TCodexDelegation,TCodexRetryAuthorization>) {}
+  installCore(port:CoreTurnProjectionPort):void { this.core=port; this.reflectCore(); }
+  reflectCore():void {
+    if (!this.core) return;
+    for (const agentId of new Set([...this.contexts.keys(),...this.activeTurnByAgentId.keys()])) {
+      const projection=this.core.read(agentId); const previous=this.activeTurnByAgentId.get(agentId);
+      if (previous?.turnId===projection.activeRunId) continue;
+      if (previous) {
+        this.options.output.completeAgentTurn(agentId); this.options.codex.completeAgentTurn(agentId);
         this.options.managerToolActivity?.clearManagerTurn(agentId);
+        this.activeTurnByAgentId.delete(agentId); this.activeExternalTurnByAgentId.delete(agentId); this.options.observability.clearRoot(agentId);
+        void this.options.attention.releaseContinuationBarrier(agentId);
       }
-      this.activatedByAgentId.delete(agentId);
-      this.activeTurnByAgentId.delete(agentId);
-      this.activeExternalTurnByAgentId.delete(agentId);
-      this.options.observability.clearRoot(agentId);
-      this.options.output.completeAgentTurn(agentId);
-      this.options.codex.completeAgentTurn(agentId);
-      return;
-    }
-
-    if (phase === "after_projection" && isCleanManagerAssistantFinalMessage(event)) {
-      this.activatedByAgentId.delete(agentId);
-      this.options.output.acceptCleanManagerFinal(agentId, {
-        pendingTargets: this.pendingOutputTargets(agentId),
-      });
+      const context=projection.activeRunId && this.contexts.get(agentId)?.get(projection.activeRunId);
+      if (context) this.activateDequeuedContext(agentId,this.options.descriptors.get(agentId),context);
     }
   }
-
+  register(agentId:string,context:InboundTurnContextInput<TCodexGate,TCodexDelegation,TCodexRetryAuthorization>):void {
+    if (!context.turnId) throw new Error("Presentation requires an authoritative run id");
+    const contexts=this.contexts.get(agentId) ?? new Map();
+    contexts.set(context.turnId,{ ...context,turnId:context.turnId,sequence:0,activationEligible:context.activationEligible ?? true,runtimeToken:this.options.getRuntimeToken(agentId) });
+    this.contexts.set(agentId,contexts); this.reflectCore();
+  }
+  getActiveTurnId(agentId:string,runtimeToken?:number):string|undefined {
+    const active=this.activeTurnByAgentId.get(agentId);
+    if (runtimeToken!==undefined && active?.runtimeToken!==undefined && runtimeToken!==active.runtimeToken) return undefined;
+    return this.core?.read(agentId).activeRunId;
+  }
+  getPendingContextCount(agentId:string):number { return this.core?.read(agentId).pendingRunIds.length ?? 0; }
+  getActiveWorkerParentContext(agentId:string):ActiveWorkerParentContext|undefined {
+    const context=this.activeTurnByAgentId.get(agentId)?.parentContext;
+    return context ? { ...context,outputTarget:cloneAssistantOutputTarget(context.outputTarget) } : undefined;
+  }
+  hasPendingSupersedingUserInput(agentId:string,activeTurnId?:string):boolean {
+    return Boolean(this.core?.read(agentId).pendingRunIds.some(id=>id!==activeTurnId && this.contexts.get(agentId)?.get(id)?.source==="user_input"));
+  }
+  markProviderCycleActivated(_agentId:string):void {}
+  getActiveExternalProjectAgentTurn(agentId:string):ActiveExternalProjectAgentTurn|undefined {
+    const active=this.activeExternalTurnByAgentId.get(agentId); return active ? { ...active } : undefined;
+  }
+  async enqueue(agentId:string,context:InboundTurnContextInput<TCodexGate,TCodexDelegation,TCodexRetryAuthorization>):Promise<QueuedInboundTurnHandle> {
+    this.register(agentId,context); await this.options.attention.observePendingQueueChange(agentId);
+    return { turnId:context.turnId!,rollback:()=>{ this.contexts.get(agentId)?.delete(context.turnId!); } };
+  }
+  beforeRuntimeEventProjection(agentId:string,_runtimeToken:number|undefined,event:RuntimeSessionEvent):void { this.applyRuntimeEvent(agentId,event,"before_projection"); }
+  afterRuntimeEventProjection(agentId:string,runtimeToken:number|undefined,event:RuntimeSessionEvent):void {
+    this.applyRuntimeEvent(agentId,event,"after_projection"); this.options.observability.recordRuntimeSessionEvent(agentId,runtimeToken,event);
+  }
+  handleRuntimeError(agentId:string):void {
+    const descriptor=this.options.descriptors.get(agentId); this.options.output.handleRuntimeError(agentId,descriptor); this.options.codex.handleRuntimeError(agentId,descriptor);
+  }
+  discard(agentId:string):void {
+    this.contexts.delete(agentId); this.activeTurnByAgentId.delete(agentId); this.activeExternalTurnByAgentId.delete(agentId);
+    this.options.managerToolActivity?.clearManagerTurn(agentId); this.options.output.clearForRuntimeReset(agentId); this.options.codex.clearForRuntimeReset(agentId);
+    void this.options.attention.releaseContinuationBarrier(agentId);
+  }
+  clearAgentState(agentId:string):void { this.discard(agentId); this.options.observability.clearRoot(agentId); }
+  private applyRuntimeEvent(agentId:string,event:RuntimeSessionEvent,phase:"before_projection"|"after_projection"):void {
+    const descriptor=this.options.descriptors.get(agentId);
+    if (phase==="before_projection" && event.type==="message_start" && extractRole(event.message)==="user") this.options.codex.noteRuntimeUserMessageStarted(agentId,descriptor);
+    this.reflectCore();
+    if (phase==="after_projection" && event.type==="turn_end") { this.options.output.completeProviderCycle(agentId,{ pendingTargets:this.pendingOutputTargets(agentId) }); this.options.codex.completeProviderCycle(agentId); }
+    if (phase==="after_projection" && isCleanManagerAssistantFinalMessage(event)) this.options.output.acceptCleanManagerFinal(agentId,{ pendingTargets:this.pendingOutputTargets(agentId) });
+  }
   private activateDequeuedContext(
     agentId: string,
     descriptor: AgentDescriptor | undefined,
@@ -602,91 +376,11 @@ export class TurnContextCoordinator<
     });
   }
 
-  private dequeueForRuntimeMessage(
-    agentId: string,
-    message: RuntimeSessionMessage,
-  ): QueuedInboundTurnContext<TCodexGate, TCodexDelegation, TCodexRetryAuthorization> | undefined {
-    const queue = this.pendingByAgentId.get(agentId);
-    if (!queue?.[0]) {
-      return undefined;
-    }
-
-    const messageText = extractMessageText(message);
-    const contextIndex = queue.findIndex((context) =>
-      context.runtimeMessageText !== undefined &&
-      Boolean(messageText && runtimeMessageTextMatches(context.runtimeMessageText, messageText)),
-    );
-    if (contextIndex < 0) {
-      return undefined;
-    }
-
-    const [matchedContext] = queue.splice(contextIndex, 1);
-    if (queue.length === 0) {
-      this.pendingByAgentId.delete(agentId);
-    }
-    return matchedContext;
-  }
-
-  private dequeueNext(
-    agentId: string,
-  ): QueuedInboundTurnContext<TCodexGate, TCodexDelegation, TCodexRetryAuthorization> | undefined {
-    const queue = this.pendingByAgentId.get(agentId);
-    const nextContext = queue?.shift();
-    if (!queue || !nextContext) {
-      return undefined;
-    }
-    if (queue.length === 0) {
-      this.pendingByAgentId.delete(agentId);
-    }
-    // dequeueNext is used only when the provider never matched/activated this
-    // accepted input. Matched message_start releases only while already
-    // streaming; idle dequeue-before-first-streaming still does not release.
-    void this.options.attention.releaseContinuationBarrier(agentId);
-    return nextContext;
-  }
-
-  private consumeActivePendingContext(agentId: string): void {
-    if (this.activatedByAgentId.has(agentId)) {
-      return;
-    }
-    const activeTurnId = this.activeTurnByAgentId.get(agentId)?.turnId;
-    const firstPending = this.pendingByAgentId.get(agentId)?.[0];
-    if (!activeTurnId) {
-      this.dequeueNext(agentId);
-      return;
-    }
-    if (activeTurnId && firstPending?.turnId === activeTurnId) {
-      this.dequeueNext(agentId);
-    }
-  }
-
-  private discardStalePendingContexts(agentId: string): void {
-    const activeSequence = this.activeTurnByAgentId.get(agentId)?.sequence;
-    const queue = this.pendingByAgentId.get(agentId);
-    if (activeSequence === undefined || !queue) {
-      return;
-    }
-
-    const remaining = queue.filter((context) => context.sequence > activeSequence);
-    if (remaining.length === 0) {
-      this.pendingByAgentId.delete(agentId);
-      return;
-    }
-    this.pendingByAgentId.set(agentId, remaining);
-  }
-
-  private pendingOutputTargets(agentId: string): AssistantOutputTarget[] {
-    return (this.pendingByAgentId.get(agentId) ?? []).flatMap((context) => {
-      const target = context.assistantOutputProjectionTarget ?? context.assistantOutputTarget;
+  private pendingOutputTargets(agentId:string): AssistantOutputTarget[] {
+    return (this.core?.read(agentId).pendingRunIds ?? []).flatMap(id => {
+      const context = this.contexts.get(agentId)?.get(id);
+      const target = context?.assistantOutputProjectionTarget ?? context?.assistantOutputTarget;
       return target ? [target] : [];
     });
   }
-}
-
-function runtimeMessageTextMatches(expected: string, actual: string): boolean {
-  return normalizeRuntimeMessageText(expected) === normalizeRuntimeMessageText(actual);
-}
-
-function normalizeRuntimeMessageText(value: string): string {
-  return value.replace(/\r\n/g, "\n").trim();
 }

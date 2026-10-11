@@ -60,7 +60,9 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
   };
   const acquire = async (threadId: string, bindingId: string, generation: number) => {
     const existing = live.get(bindingId); if (existing) return existing;
-    const resource = await options.swarm.acquireProvider({ threadId, bindingId, generation });
+    const prior = Object.values(loadState(database).bindings).filter(value => value.scope.threadId === threadId && value.scope.bindingId !== bindingId)
+      .sort((a,b) => a.scope.generation - b.scope.generation).at(-1)?.conversation;
+    const resource = await options.swarm.acquireProvider({ threadId, bindingId, generation }, prior);
     if (resource.binding.scope.threadId !== threadId || resource.binding.scope.bindingId !== bindingId || resource.binding.scope.generation !== generation) throw new Error("Acquired provider scope differs from authoritative scope");
     const entry = { ...resource, stop: new AbortController() }; live.set(bindingId, entry);
     startObservations(entry.binding, entry.adapter, entry.stop);
@@ -70,7 +72,9 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
   const append = async (run: Run) => {
     const state = loadState(database); const attempt = state.attempts[run.activeAttemptId];
     await acquire(run.threadId, attempt.bindingId, attempt.generation);
-    const value = await options.swarm.applyInput({ commandId: run.commandId, inputId: run.inputId, sessionId: run.threadId, runGeneration: attempt.generation, message: run.input, source: run.source, delivery: run.delivery === "queue" ? "followUp" : "steer", runId: run.runId });
+    const row = database.prepare("SELECT prepared_json FROM orchestration_run_inputs WHERE run_id=?").get(run.runId) as { prepared_json:string } | undefined;
+    const context = row ? JSON.parse(row.prepared_json) : undefined;
+    const value = await options.swarm.applyInput({ prepared:context, commandId: run.commandId, inputId: run.inputId, sessionId: run.threadId, runGeneration: attempt.generation, message: run.input, source: run.source, delivery: run.delivery === "queue" ? "followUp" : "steer", runId: run.runId });
     prepared.set(run.runId, value.runtimeMessage);
     record({ type: "input.recorded", commandId: `recorded:${run.inputId}`, now: options.clock(), threadId: run.threadId, inputId: run.inputId, entryId: value.entryId });
     return value.runtimeMessage;
@@ -159,9 +163,20 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           attemptedNative = true; await resource.adapter.compact({ binding: resource.binding, attemptId: effect.attemptId, instructions: effect.instructions });
           record({ type: "compaction.completed", ...result(row, "compact"), threadId: effect.threadId, attemptId: effect.attemptId, succeeded: true }); break;
         }
-        case "recovery.deliver":
-          if (!options.swarm.deliverRecoveredResult) throw new Error("Assignment result recovery is not composed");
-          attemptedNative = true; await options.swarm.deliverRecoveredResult(effect.deliveryId); break;
+        case "assignment.result.extract": {
+          const assignment = loadState(database).assignments[effect.assignmentId];
+          if (!assignment || assignment.resultRef || assignment.invalidatedAt !== undefined) break;
+          if (!options.swarm.extractWorkerResult) throw new Error("Canonical worker result extraction is not composed");
+          const final = await options.swarm.extractWorkerResult(effect.threadId,effect.workerRunId,loadState(database).runs[effect.workerRunId].entryId ?? "");
+          record({ type:"worker.result",...result(row,"result"),assignmentId:effect.assignmentId,workerRunId:effect.workerRunId,
+            resultRef:{ threadId:effect.threadId,runId:effect.workerRunId,entryId:final.entryId },input:{ text:final.resultText,artifactIds:[] } });
+          break;
+        }
+        case "recovery.deliver": {
+          const transfer=loadState(database).transfers[effect.deliveryId];
+          if (transfer?.state === "pending") record({ type:"assignment.deliver",...result(row,"deliver"),assignmentId:transfer.assignmentId,authorized:authorized(row.command_id) });
+          break;
+        }
         case "choice.apply": {
           const choice = database.prepare("SELECT state,runtime_generation FROM control_choices WHERE choice_id=?").get(effect.choiceId) as { state: string; runtime_generation: string } | undefined;
           if (!authorized(row.command_id) || choice?.state !== "pending" || choice.runtime_generation !== effect.runtimeGeneration || await options.swarm.applyChoice({ commandId: row.command_id, sessionId: row.session_id, ...effect }) !== "answered") { settle(row, "interrupted", unavailable); return; } break;
@@ -198,8 +213,9 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     async reconcileOnBoot() {
       if (reconciled) return; if (started || draining) throw new Error("Boot reconciliation precedes execution");
       rebuildLifecycleProjections(database);
-      const reports = database.prepare("SELECT delivery_id,from_agent_id,to_agent_id,turn_id,assignment_id FROM control_deliveries WHERE state!='acked'").all() as { delivery_id: string; from_agent_id: string; to_agent_id: string; turn_id: string | null; assignment_id: string | null }[];
-      record({ type: "environment.recover", commandId: `boot:${bootId}`, now: options.clock(), bootId, recoveryId: options.random(), reports: reports.map(r => ({ deliveryId: r.delivery_id, fromAgentId: r.from_agent_id, toAgentId: r.to_agent_id, ...(r.turn_id ? { turnId: r.turn_id } : {}), ...(r.assignment_id ? { assignmentId: r.assignment_id } : {}) })) });
+      const state=loadState(database);
+      const reports=Object.values(state.transfers).filter(transfer => transfer.kind === "worker_result" && !["consumed","superseded"].includes(transfer.state)).map(transfer => ({ deliveryId:transfer.transferId,fromAgentId:transfer.source.threadId,toAgentId:transfer.targetThreadId,turnId:transfer.source.runId,assignmentId:transfer.assignmentId }));
+      record({ type: "environment.recover", commandId: `boot:${bootId}`, now: options.clock(), bootId, recoveryId: options.random(), reports });
       for (const row of database.prepare("SELECT * FROM effects WHERE state='claimed' AND kind!='lifecycle.admit'").all() as EffectRow[]) {
         const effect: ControlEffect = JSON.parse(row.payload_json);
         const safe = ["runtime.acquire", "transcript.append", "session.ensure", "session.stop", "provider.release"].includes(effect.kind);

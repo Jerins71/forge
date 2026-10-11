@@ -1,6 +1,5 @@
 import { blocksOpenRouterFallback } from "./runtime/pi/openrouter-request-policy.js";
 import { createHash } from "node:crypto";
-import { open } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { isEnoentError } from "../utils/fs-errors.js";
 import { errorToMessage, isRecord } from "../utils/normalize.js";
@@ -1425,17 +1424,6 @@ function normalizeOptionalMetadataValue(value: string | undefined): string | und
 }
 
 
-
-export async function readFileHead(filePath: string, bytes: number): Promise<string> {
-  const handle = await open(filePath, "r");
-  try {
-    const buf = Buffer.alloc(bytes);
-    const { bytesRead } = await handle.read(buf, 0, bytes, 0);
-    return buf.subarray(0, bytesRead).toString("utf8");
-  } finally {
-    await handle.close();
-  }
-}
 
 export function createDeferred<T>(): {
   promise: Promise<T>;

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   ConversationReplyTarget,
   ConversationReplyTargetInput,
@@ -94,12 +95,15 @@ export interface PreparedInboundConversationPayload {
   text: string;
   runtimeText?: string;
   timestamp?: string;
-  source: "user_input" | "project_agent_input";
+  source: "user_input" | "project_agent_input" | "system" | "worker_report";
   sourceContext?: MessageSourceContext;
   clientRequestId?: string;
   /** Internal control effect context; external parsers never populate this. */
   controlledInput?: ControlledInputContext;
   projectAgentContext?: ConversationMessageEvent["projectAgentContext"];
+  turnId?: string;
+  role?: "user" | "assistant" | "system";
+  sourceWorkerId?: string;
   attachments?: ConversationAttachment[];
   replyTo?: ConversationReplyTarget;
 }
@@ -133,17 +137,19 @@ export class InboundConversationAppender {
   ): Promise<AppendPreparedInboundConversationPayloadResult> {
     const { attachmentMetadata, persistedAttachments, runtimeAttachments } =
       await this.options.attachments.prepareConversation(
-        payload.source === "user_input" ? payload.attachments : undefined,
+        payload.attachments,
       );
     const timestamp = payload.timestamp ?? this.options.now();
     let event: ConversationMessageEvent = {
       type: "conversation_message",
       agentId: target.agentId,
-      role: "user",
+      role: payload.role ?? "user",
       text: payload.text,
       attachments: attachmentMetadata.length > 0 ? attachmentMetadata : undefined,
       timestamp,
       source: payload.source,
+      turnId:payload.turnId,
+      sourceWorkerId:payload.sourceWorkerId,
       sourceContext: payload.source === "user_input" ? payload.sourceContext : undefined,
       clientRequestId: payload.source === "user_input" ? payload.clientRequestId : undefined,
       projectAgentContext:
@@ -274,14 +280,30 @@ export class UserMessageCoordinator {
     return this.options.runtime.getOrCreateRuntime(this.resolveTarget(agentId, true));
   }
 
+  async appendBlockedResult(threadId:string,runId:string,resultText:string):Promise<{ entryId:string;resultText:string }> {
+    const target=this.resolveTarget(threadId,true);
+    const appended=await this.options.inboundConversation.append(target,{ text:resultText,source:"system",role:"system",turnId:runId,
+      controlledInput:{ inputId:`blocked-result:${runId}`,commandId:`blocked-result:${runId}`,contentHash:createHash("sha256").update(resultText).digest("hex") } });
+    return { entryId:appended.event.timelineEntryId ?? appended.event.id!,resultText };
+  }
+
   /** Resource/presentation preparation only. The decision kernel owns provider dispatch. */
-  async applyControlledInput(text: string, options: HandleUserMessageOptions & { targetAgentId: string; controlledInput: ControlledInputContext; runId?: string }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }> {
+  async applyControlledInput(text: string, options: HandleUserMessageOptions & { targetAgentId: string; controlledInput: ControlledInputContext; runId?: string; prepared?: import("../environment/control/command-service.js").InternalInput["prepared"] }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }> {
     const target = this.resolveTarget(options.targetAgentId, true);
     const sourceContext = normalizeMessageSourceContext(options.sourceContext ?? { channel: "web" });
     const attachments = this.options.attachments.normalize(options.attachments);
     this.options.codex.plugin.assertWorkerNotUserTargetable(target);
     await this.options.projectAgents.preflightRuntime(target);
     return this.options.runtime.withRuntimeAdmission(target.agentId, async () => {
+      if (options.prepared) {
+        const { presentation,runtimeMessage } = options.prepared;
+        const appended = await this.options.inboundConversation.append(target, { text, attachments,
+          source:presentation.source === "project_agent_input" ? "project_agent_input" : presentation.source === "user_input" ? "user_input" : presentation.source === "worker_result" ? "worker_report" : "system",
+          projectAgentContext:presentation.projectAgentContext, sourceContext:presentation.sourceContext, turnId:options.runId,
+          sourceWorkerId:presentation.sourceWorkerId, controlledInput:options.controlledInput });
+        await this.options.turns.enqueue(target.agentId,{ ...presentation,turnId:options.runId } as Parameters<UserMessageCoordinatorOptions["turns"]["enqueue"]>[1]);
+        return { entryId:appended.event.timelineEntryId ?? appended.event.id!, runtimeMessage:{ ...runtimeMessage, attachments:appended.runtimeAttachments } };
+      }
       const replyTo = options.replyTo ? resolveConversationReplyTarget(this.options.targeting.getConversationHistory(target.agentId), options.replyTo) : undefined;
       const classification = target.role === "manager" ? this.options.codex.plugin.classifyAndPreflightUserTurn(target as ManagerDescriptor, text, sourceContext) : { kind: "none" } as const;
       await this.options.goals.noteUserTurn(target);
@@ -580,7 +602,7 @@ export class UserMessageCoordinator {
       attachmentCount: input.persistedAttachmentCount,
     });
     const event: AgentMessageEvent = {
-      type: "agent_message",
+      type:"agent_message",
       agentId: managerContextId,
       timestamp: this.options.now(),
       source: "user_to_agent",

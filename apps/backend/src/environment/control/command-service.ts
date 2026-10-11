@@ -87,6 +87,10 @@ export function cancelCommand(sink: EventSink, tx: ControlTransaction, commandId
       : input?.delivery_state === "dispatching" || input?.delivery_state === "unknown"
         ? "unknown"
         : "none";
+  if (delivery === "none") {
+    const run=Object.values(loadState(sink.database).runs).find(run=>run.commandId===commandId);
+    if (run) sink.commitCommand(tx,{ type:"run.cancel",commandId:`cancel:${commandId}`,now:clock(),threadId:run.threadId,runId:run.runId });
+  }
   sink.updateReceipt(tx, commandId, { state: "interrupted", delivery, error });
   if (receipt.sessionId && receipt.method === "session.launch") {
     const session = readSession(sink, receipt.sessionId);
@@ -123,10 +127,21 @@ export function canonicalRequest(method: string, input: unknown): { normalized: 
   };
 }
 
+export interface InternalInput {
+  commandId: string; threadId: string; message: Run["input"]; source?: Run["source"]; delivery?: Run["delivery"];
+  thread?: { role: "manager" | "worker"; projectId: string; managerId?: string };
+  prepared?: { runtimeMessage: Omit<import("../../swarm/runtime-contracts.js").RuntimeUserMessage, "attachments">;
+    presentation: import("../../swarm/turn-context-coordinator.js").InboundTurnContextInput; requiresSecureRuntime?: boolean; parentContext?: import("../../swarm/core-agent-message-port.js").CoreAgentMessagePort extends { submit(input:infer I):unknown } ? I extends { parentContext?: infer P } ? P : never : never };
+  artifactRows?: readonly import("./effect-types.js").InputArtifact[];
+  assignment?: { assignmentId: string; parentThreadId: string; parentRunId: string;
+    selection: import("./orchestration/assignments.js").AssignmentSelection; planStep?: import("./orchestration/assignments.js").WorkerAssignment["planStep"]; parentContext?: import("../../swarm/core-agent-message-port.js").CoreAgentMessagePort extends {submit(input:infer I):unknown} ? I extends {parentContext?:infer P} ? P : never : never };
+}
+
 export interface EnvironmentControlService extends ControlService {
   admitLifecycle<T>(principal: Principal, input: LifecycleAdmission, operation: () => Promise<T>): Promise<T>;
   close(): Promise<void>;
-  submitInput(input: { commandId: string; threadId: string; message: Run["input"]; source?: Run["source"]; delivery?: Run["delivery"] }): Promise<void>;
+  submitInput(input: InternalInput): Promise<{ runId: string; receipt: CommandReceipt }>;
+
   record(command: CoreCommand): void;
 }
 export function createCommandService(sink: EventSink, options: ControlCoreOptions): EnvironmentControlService {
@@ -437,26 +452,6 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         });
       } else if (target?.workerId) {
         effects.push({ kind: "session.stop", targetAgentId: target.workerId });
-      } else {
-        database
-          .prepare("UPDATE control_sessions SET desired_state = 'stopped', run_generation = run_generation + 1 WHERE session_id = ?")
-          .run(sessionId);
-        const cancelled = database
-          .prepare(
-            `SELECT DISTINCT command_id FROM effects WHERE session_id = ? AND state = 'pending'
-          AND kind IN ('input.apply', 'workspace.ensure', 'session.ensure', 'choice.apply')`,
-          )
-          .all(sessionId) as { command_id: string }[];
-        for (const command of cancelled)
-          cancelCommand(
-            sink,
-            tx,
-            command.command_id,
-            { code: "CONFLICT", message: "Superseded by session stop", retryable: false },
-            options.clock,
-          );
-        effects.push({ kind: "session.stop" });
-        setSessionStatus(sink, tx, sessionId, "stopping", options.clock);
       }
       const inputId = message ? "input-" + commandId : null;
       if (message && inputId) {
@@ -518,16 +513,30 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     async submitInput(input) {
       if (closed) throw new ControlError("UNAVAILABLE", "Control service is shutting down", true);
       const request = canonicalRequest("run.submit", input);
-      sink.transaction(tx => {
+      return sink.transaction(tx => {
         const prior = database.prepare("SELECT request_hash FROM commands WHERE command_id=?").get(input.commandId) as { request_hash: string } | undefined;
-        if (prior) { if (prior.request_hash !== request.hash) throw new ControlError("CONFLICT", "Input identity conflicts"); return; }
-        ensureThread(tx, input.threadId);
+        const runId = `run-${input.commandId}`;
+        if (prior) {
+          if (prior.request_hash !== request.hash) throw new ControlError("CONFLICT", "Input identity conflicts");
+          return { runId, receipt: readReceipt(sink, input.commandId) };
+        }
+        if (!loadState(database).threads[input.threadId]) {
+          if (input.thread) sink.commitCommand(tx, { type:"thread.create", commandId:`thread:${input.threadId}`, now:options.clock(), threadId:input.threadId, ...input.thread });
+          else ensureThread(tx, input.threadId);
+        }
         database.prepare("INSERT INTO commands VALUES (?, 'core', 'run.submit', ?, ?, ?, ?)").run(input.commandId, request.hash, request.normalized, input.threadId, options.clock());
         const inputId = `input-${input.commandId}`;
+        const base = { commandId:input.commandId, now:options.clock(), inputId, attemptId:options.random(), bindingId:options.random(), input:input.message };
         const owner = loadState(database).threads[input.threadId];
-        database.prepare("INSERT INTO control_inputs (input_id,command_id,session_id,message_json,append_state,delivery_state,run_generation,updated_sequence) VALUES (?,?,?,?,'pending','pending',?,0)")
-          .run(inputId, input.commandId, input.threadId, JSON.stringify(input.message), owner.generation);
-        sink.commitCommand(tx, { type: "run.submit", commandId: input.commandId, now: options.clock(), threadId: input.threadId, inputId, runId: `run-${input.commandId}`, attemptId: options.random(), bindingId: options.random(), input: input.message, source: input.source, delivery: input.delivery ?? "queue" });
+        if (owner.desired === "stopped") sink.commitCommand(tx, { type:"thread.resume", commandId:input.commandId, now:options.clock(), threadId:input.threadId });
+        if (input.assignment) sink.commitCommand(tx, { type:"worker.assign", ...base, ...input.assignment, workerThreadId:input.threadId, workerRunId:runId, authorized:true });
+        else sink.commitCommand(tx, { type:"run.submit", ...base, threadId:input.threadId, runId, source:input.source, delivery:input.delivery ?? "queue" });
+        if (input.prepared) {
+          database.prepare("INSERT INTO orchestration_run_inputs (run_id,prepared_json) VALUES (?,?)").run(runId,JSON.stringify(input.prepared));
+          tx.afterCommit(() => options.swarm.enqueuePresentation?.(input.threadId,runId,input.prepared!.presentation));
+        }
+        options.artifacts.pinInput(inputId, input.artifactRows ?? input.message.artifactIds.map(artifactId => ({ artifactId })));
+        return { runId, receipt: readReceipt(sink,input.commandId) };
       });
     },
     async readWorkspace(principal, method, input) {

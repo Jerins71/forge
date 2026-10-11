@@ -63,8 +63,7 @@ const core = await control.createControlCore({ database, clock: Date.now, random
   swarm: {
     resolveSession: agentId => adapter.resolveSession!(agentId),
     ensureSession: input => adapter.ensureSession(input), applyInput: input => adapter.applyInput(input),
-    acquireProvider: scope => adapter.acquireProvider(scope),
-    deliverRecoveredResult: id => adapter.deliverRecoveredResult!(id),
+    acquireProvider: (scope,conversation) => adapter.acquireProvider(scope,conversation),
     applyChoice: input => adapter.applyChoice(input), stopSession: input => adapter.stopSession(input),
   }, workspace, artifacts, policy: createProjectPolicy(manager),
   inputRoute: adapterModule.createControlledInputRoutePreflight({ swarmManager: manager }),

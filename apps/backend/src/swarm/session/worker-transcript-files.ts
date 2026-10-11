@@ -18,11 +18,3 @@ export function isWorkerTranscriptSidecarSessionFile(sessionFile: string): boole
 export function isCanonicalWorkerTranscriptFileName(filename: string): boolean {
   return filename.endsWith(WORKER_TRANSCRIPT_SUFFIX) && !isWorkerTranscriptSidecarSessionFile(filename);
 }
-
-export function getWorkerIdFromCanonicalTranscriptFileName(filename: string): string | null {
-  if (!isCanonicalWorkerTranscriptFileName(filename)) {
-    return null;
-  }
-
-  return filename.slice(0, -WORKER_TRANSCRIPT_SUFFIX.length);
-}

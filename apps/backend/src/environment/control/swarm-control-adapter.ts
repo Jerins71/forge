@@ -3,28 +3,31 @@ import { parseCompactSlashCommand } from "../../swarm/swarm-manager-utils.js";
 import { createHash } from "node:crypto";
 import type { Database } from "better-sqlite3";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
-import type { ConversationAttachment } from "../../swarm/types.js";
 import type { SwarmControlPort } from "./control-types.js";
 import type { EventSink } from "./event-sink.js";
 import type { InputRoutePort, WorkspacePort } from "./effect-types.js";
 import type { EnvironmentControlService } from "./command-service.js";
+import { createCoreAgentMessagePort } from "./orchestration/agent-message-port.js";
 import { loadState } from "./orchestration/store.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, controlService, workspaceService, artifactService }: {
-  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "setControlledRecoveryPolicy" | "getAgentForInternalUse" | "listProfiles" | "killControlledWorker" | "installAuthoritativeInputOwner" | "deliverControlledRecoveredResult">;
+  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "getAgentForInternalUse" | "listProfiles" | "releaseControlledWorker" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns"> & Pick<SwarmManager,"installCoreAgentMessagePort">;
   database: Database;
   eventSink: EventSink;
   controlService: EnvironmentControlService;
   workspaceService: Pick<WorkspacePort, "ensure">;
-  artifactService: { attachmentsForInput(inputId: string): Promise<ConversationAttachment[]> };
+  artifactService: Pick<import("./artifact-service.js").ArtifactService,"attachmentsForInput"|"prepareInternalInput">;
 }): SwarmControlPort {
   if (eventSink.database !== database) throw new Error("Swarm adapter requires the shared environment database.");
   // Workspace effects run before session effects. This dependency intentionally grants no Git mutation here.
   void workspaceService;
   swarmManager.installAuthoritativeInputOwner(async (text, options) => {
     if (!options.targetAgentId) throw new Error("Input requires an authoritative thread");
-    if (options.attachments?.length) throw new Error("Internal inputs require durable artifact references");
-    await controlService.submitInput({ commandId: options.commandId ?? options.clientRequestId ?? `input:${crypto.randomUUID()}`, threadId: options.targetAgentId, message: { text, artifactIds: [] }, source: options.sourceContext, delivery: options.delivery === "steer" ? "steer" : "queue" });
+    const descriptor = swarmManager.getAgentForInternalUse(options.targetAgentId);
+    if (!descriptor) throw new Error("Input target is unavailable");
+    const commandId = options.commandId ?? options.clientRequestId ?? `input:${crypto.randomUUID()}`;
+    const rows = await artifactService.prepareInternalInput({ commandId,threadId:descriptor.agentId,projectId:descriptor.profileId ?? descriptor.agentId,attachments:options.attachments ?? [] });
+    await controlService.submitInput({ commandId, threadId: options.targetAgentId, message: { text, artifactIds: rows.map(row => row.artifactId) }, artifactRows:rows, source: options.sourceContext, delivery: options.delivery === "steer" ? "steer" : "queue" });
   }, {
     getSnapshot: () => loadState(database).recovery,
     async decide(action) {
@@ -34,10 +37,13 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
       else controlService.record({ ...base, type: "recovery.resume", attempts: Object.fromEntries(Object.values(state.runs).filter(run => run.state === "recovery").map(run => [run.runId, crypto.randomUUID()])), bindingIds: Object.fromEntries(Object.values(state.threads).map(thread => [thread.threadId, crypto.randomUUID()])) });
     },
   });
-  swarmManager.setControlledRecoveryPolicy((sessionId, activity) => {
-    const row = database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(sessionId) as { desired_state: string } | undefined;
-    return row?.desired_state === "stopped" || activity === "turn" && Boolean(database.prepare("SELECT 1 FROM control_inputs WHERE session_id=? AND delivery_state IN ('dispatching','unknown') LIMIT 1").get(sessionId));
-  });
+  swarmManager.installControlledTurnProjection({ read(agentId) {
+    const state = loadState(database);
+    return { activeRunId:state.threads[agentId]?.activeRunId,pendingRunIds:Object.values(state.runs).filter(run => run.threadId === agentId && run.state === "queued").sort((a,b)=>a.sequence-b.sequence).map(run=>run.runId) };
+  } });
+  eventSink.subscribeCommit(() => swarmManager.reflectControlledTurns());
+  const messages = createCoreAgentMessagePort({ controlService,sink:eventSink,artifacts:artifactService,swarm:swarmManager,clock:Date.now,random:crypto.randomUUID });
+  swarmManager.installCoreAgentMessagePort(messages);
   return {
     resolveSession(agentId) {
       const descriptor = swarmManager.getAgentForInternalUse(agentId);
@@ -49,14 +55,18 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
       await swarmManager.ensureControlledSession({ ...identity, ...(model ? { model: { ...model, thinkingLevel: model.thinkingLevel ?? defaultModel?.thinkingLevel ?? "medium" } } : {}) });
       return { materialized: true };
     },
-    acquireProvider: scope => swarmManager.acquireControlledProvider(scope),
-    deliverRecoveredResult: id => swarmManager.deliverControlledRecoveredResult(id),
+    enqueuePresentation:(threadId,runId,presentation) => swarmManager.enqueueControlledPresentation(threadId,runId,presentation),
+    async extractWorkerResult(threadId,runId,inputEntryId) {
+      const final=inputEntryId ? swarmManager.extractWorkerRunResult(threadId,runId,inputEntryId) : { resultText:`status: blocked\nsummary: Worker ${threadId} settled without a canonical input.\nfollow-up: Check the worker or retry the assignment.` };
+      return final.entryId ? { entryId:final.entryId,resultText:final.resultText } : swarmManager.appendControlledBlockedResult(threadId,runId,final.resultText);
+    },
+    acquireProvider: (scope, conversation) => swarmManager.acquireControlledProvider(scope, conversation),
     async applyInput(input) {
       const attachments = await artifactService.attachmentsForInput(input.inputId);
       const sourceKey = `input:${input.inputId}`;
       const locator = database.prepare("SELECT byte_offset FROM mirror_sources WHERE source_key=?").get(sourceKey) as { byte_offset: number } | undefined;
       return swarmManager.applyControlledInput(input.message.text, {
-        targetAgentId: input.sessionId, attachments, sourceContext: input.source, delivery: input.delivery, runId: input.runId,
+        prepared:input.prepared, targetAgentId: input.sessionId, attachments, sourceContext: input.source, delivery: input.delivery, runId: input.runId,
         controlledInput: {
           inputId: input.inputId, commandId: input.commandId,
           contentHash: createHash("sha256").update(JSON.stringify({ text: input.message.text, artifactIds: [...input.message.artifactIds].sort() })).digest("hex"),
@@ -73,7 +83,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
     async stopSession(input) {
       const descriptor = swarmManager.getAgentForInternalUse(input.sessionId);
       if (!descriptor) return { stopped: true }; // An unmaterialized launch has no runtime to stop.
-      if (descriptor.role === "worker") await swarmManager.killControlledWorker(descriptor.managerId, descriptor.agentId);
+      if (descriptor.role === "worker") await swarmManager.releaseControlledWorker(descriptor.agentId);
       else await swarmManager.stopSession(input.sessionId);
       return { stopped: swarmManager.isSessionShutdownSafe(input.sessionId) }; // Legacy stop can return while its writer remains quarantined.
     },

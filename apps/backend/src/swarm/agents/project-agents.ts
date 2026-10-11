@@ -1,4 +1,3 @@
-import type { SwarmAgentRuntime } from "../runtime-contracts.js";
 import type {
   AgentDescriptor,
   ProjectAgentMessageContext,
@@ -104,7 +103,7 @@ const PROJECT_AGENT_RATE_LIMIT_ERROR =
 
 interface DeliverProjectAgentMessageDependencies {
   now: () => string;
-  getOrCreateRuntimeForDescriptor: (descriptor: AgentDescriptor) => Promise<SwarmAgentRuntime>;
+  submitMessage: (descriptor: AgentDescriptor, message: string, delivery: RequestedDeliveryMode) => Promise<SendMessageReceipt>;
   rateLimitBuckets: Map<string, number[]>;
 }
 
@@ -170,8 +169,7 @@ export async function deliverProjectAgentMessage(
   };
 
   const runtimeText = options.runtimeMessageText ?? formatProjectAgentRuntimeMessage(projectAgentContext, options.message);
-  const runtime = await deps.getOrCreateRuntimeForDescriptor(target);
-  const receipt = await runtime.sendMessage(runtimeText, options.delivery);
+  const receipt = await deps.submitMessage(target, runtimeText, options.delivery);
 
   return {
     receipt,

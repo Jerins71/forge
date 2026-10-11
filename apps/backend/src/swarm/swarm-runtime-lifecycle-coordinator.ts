@@ -1,3 +1,4 @@
+import type { CoreAgentMessagePort } from "./core-agent-message-port.js";
 import type { AgentToolCallEvent, ConversationMessageEvent } from "./types.js";
 import type {
   AgentContextUsage,
@@ -25,9 +26,7 @@ import {
   isAbortLikeErrorMessage,
   normalizeProviderErrorMessage,
 } from "./session/message-utils.js";
-import {
-  type RecoveryTarget,
-} from "./recovery-state.js";
+
 import { isRuntimeRecoveryActiveForRuntime } from "./runtime/runtime-recovery-state.js";
 import { reconcileInterruptedManagerToolCalls } from "./interrupted-tool-reconciliation.js";
 import type { SecureSessionCoordinatorPort } from "./secure-sessions/secure-session-lifecycle-port.js";
@@ -205,6 +204,8 @@ export function createRuntimeLifecycleControllerHostCallbacks(
  * service.
  */
 export class SwarmRuntimeLifecycleCoordinator {
+  installCoreAgentMessages(core: CoreAgentMessagePort): void { this.options.workerHealth.installCoreAgentMessages(core); }
+
   private readonly managerTurnWatchdog: ManagerTurnWatchdog;
   private readonly pendingManualStopNoticeTimers = new Map<string, NodeJS.Timeout>();
   /** Keep an exhausted goal-backed manager idle until new work explicitly starts. */
@@ -215,7 +216,6 @@ export class SwarmRuntimeLifecycleCoordinator {
       dataDir: options.dataDir,
       descriptors: options.descriptors,
       now: options.now,
-      getSessionTarget: (agentId) => this.getRecoveryTarget(agentId),
       getActiveTurnId: (agentId, runtimeToken) => options.turnContext.getActiveTurnId(agentId, runtimeToken),
       hasPendingChoicesForSession: (sessionAgentId) =>
         options.choices.hasPendingChoicesForSession(sessionAgentId),
@@ -229,24 +229,6 @@ export class SwarmRuntimeLifecycleCoordinator {
     return this.options.controller.runtimes;
   }
 
-  getRecoveryTarget(agentId: string): RecoveryTarget | null {
-    const descriptor = this.options.descriptors.get(agentId);
-    if (!descriptor) return null;
-
-    const manager = descriptor.role === "manager"
-      ? descriptor
-      : this.options.descriptors.get(descriptor.managerId);
-    if (!manager || manager.role !== "manager") return null;
-
-    const actors = [...this.options.descriptors.values()].filter(actor => actor.agentId === manager.agentId || actor.role === "worker" && actor.managerId === manager.agentId);
-    return {
-      dataDir: this.options.dataDir,
-      profileId: manager.profileId ?? manager.agentId,
-      sessionAgentId: manager.agentId,
-      canonicalFiles: actors.map(actor => actor.sessionFile),
-      actorIds: actors.map(actor => actor.agentId),
-    };
-  }
 
   allocateRuntimeToken(agentId: string): number {
     return this.options.controller.allocateRuntimeToken(agentId);

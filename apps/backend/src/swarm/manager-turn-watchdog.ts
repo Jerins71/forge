@@ -2,9 +2,7 @@ import type { AgentStatus } from "./agent-state-machine.js";
 import type { RuntimeErrorEvent, RuntimeSessionEvent } from "./runtime-contracts.js";
 import type { AgentDescriptor, ConversationMessageEvent } from "./types.js";
 import { extractMessageText } from "./session/message-utils.js";
-import {
-  type RecoveryTarget,
-} from "./recovery-state.js";
+
 
 export const MANAGER_TURN_NOTICE_MS = 30_000;
 export const MANAGER_TURN_ESCALATE_MS = 5 * 60_000;
@@ -15,7 +13,6 @@ export interface ManagerTurnWatchdogOptions {
   dataDir: string;
   now(): string;
   descriptors: Map<string, AgentDescriptor>;
-  getSessionTarget(agentId: string): RecoveryTarget | null;
   getActiveTurnId(agentId: string, runtimeToken?: number): string | undefined;
   hasPendingChoicesForSession(sessionAgentId: string): boolean;
   isRuntimeRecoveryActive(agentId: string): boolean;

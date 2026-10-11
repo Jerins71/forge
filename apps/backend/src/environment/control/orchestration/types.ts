@@ -72,6 +72,7 @@ export type CoreCommand = Envelope & (
   | { type: "thread.create"; threadId: string; role: Thread["role"]; projectId: string; managerId?: string }
   | { type: "thread.stop" | "thread.resume"; threadId: string }
   | { type: "run.submit"; threadId: string; runId: string; inputId: string; attemptId: string; bindingId: string; input: Run["input"]; source?: Run["source"]; delivery: Run["delivery"] }
+  | { type:"run.cancel"; threadId:string; runId:string }
   | { type: "input.recorded"; threadId: string; inputId: string; entryId: string }
   | { type: "binding.acquired"; threadId: string; binding: ProviderBinding }
   | { type: "binding.drained"; threadId: string; bindingId: string; status: "clean" | "pending" }

@@ -22,6 +22,7 @@ function error(code: string, message: string): Error & { code: string; retryable
 function ref(row: ArtifactRow): ArtifactRef { return { artifactId: row.artifact_id, fileName: row.file_name, mimeType: row.mime_type, sizeBytes: row.size_bytes }; }
 export interface ArtifactService extends ArtifactPort {
   upload(input: { principal: Principal; projectId: string; uploadId: string; fileName: string; mimeType: string; sizeBytes?: number; body: AsyncIterable<Uint8Array>; signal?: AbortSignal }): Promise<ArtifactRef>;
+  prepareInternalInput(input: { commandId:string; threadId:string; projectId:string; attachments:readonly ConversationAttachment[] }): Promise<InputArtifact[]>;
   attachmentsForInput(inputId: string): Promise<ConversationAttachment[]>;
   prepareHistoricalArtifacts(sessionId: string, entries: readonly ConversationEntryEvent[]): Promise<void>;
   refsForEntry(sessionId: string, entry: ConversationEntryEvent): ArtifactRef[];
@@ -145,6 +146,32 @@ export function createArtifactService({ database, dataDir, swarmManager }: { dat
           } finally { if (!committed) await rm(path, { force: true }); }
         }
       }
+    },
+    async prepareInternalInput(input) {
+      if (input.attachments.length > 20) throw error("PAYLOAD_TOO_LARGE", "A command accepts at most 20 attachments.");
+      await mkdir(directory, { recursive:true }); let total = 0;
+      const result: InputArtifact[] = [];
+      for (const [index, attachment] of input.attachments.entries()) {
+        const bytes = attachment.type === "text" ? Buffer.from(attachment.text) : Buffer.from(attachment.data,"base64");
+        total += bytes.length;
+        if (bytes.length > MAX_FILE || total > MAX_COMMAND) throw error("PAYLOAD_TOO_LARGE", "Command attachments exceed their byte budget.");
+        const hash = createHash("sha256").update(bytes).digest("hex");
+        const owner = `internal:${input.threadId}`; const uploadId = `${input.commandId}:${index}`;
+        const prior = database.prepare("SELECT * FROM artifacts WHERE device_session_id=? AND upload_id=?").get(owner,uploadId) as ArtifactRow | undefined;
+        if (prior) {
+          if (prior.sha256 !== hash || prior.project_id !== input.projectId || prior.mime_type !== attachment.mimeType || prior.file_name !== (attachment.fileName ?? "attachment")) throw error("CONFLICT","Scoped attachment identity conflicts.");
+          result.push({ artifactId:prior.artifact_id }); continue;
+        }
+        const row: ArtifactRow = { artifact_id:randomUUID(), upload_id:uploadId, device_session_id:owner, project_id:input.projectId,
+          file_name:attachment.fileName ?? "attachment", mime_type:attachment.mimeType, size_bytes:bytes.length, sha256:hash, storage_name:randomUUID(), created_at:Date.now() };
+        let committed = false;
+        try {
+          await writeFileAtomic(storagePath(row),bytes,{ durable:true,mode:0o600 });
+          database.prepare("INSERT INTO artifacts (artifact_id,upload_id,device_session_id,project_id,file_name,mime_type,size_bytes,sha256,storage_name,created_at) VALUES (@artifact_id,@upload_id,@device_session_id,@project_id,@file_name,@mime_type,@size_bytes,@sha256,@storage_name,@created_at)").run(row);
+          committed = true; result.push({ artifactId:row.artifact_id });
+        } finally { if (!committed) await rm(storagePath(row),{ force:true }); }
+      }
+      return result;
     },
     async attachmentsForInput(inputId) {
       const rows = database.prepare("SELECT a.* FROM artifacts a JOIN input_artifacts i ON i.artifact_id=a.artifact_id WHERE i.input_id=? ORDER BY a.artifact_id").all(inputId) as ArtifactRow[];

@@ -192,7 +192,7 @@ import type {
  */
 export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
   protected abstract getFacadeServices(): SwarmManagerFacadeServices;
-  flushPendingPersistence(): Promise<void> { return this.services.persistence.flushPendingTurnSeqPersists(); }
+  flushPendingPersistence(): Promise<void> { return this.services.persistence.flushPendingHistoryCacheWrites(); }
   getSessionPlanSnapshot(
     sessionAgentId: string,
     requestId?: string,
@@ -327,10 +327,12 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
     return this.services.pins.clearAllPins(agentId);
   }
 
+  extractWorkerRunResult(workerAgentId: string, workerRunId: string, inputEntryId: string): { entryId?: string; resultText: string } { return this.services.messages.extractWorkerRunResult(workerAgentId, workerRunId, inputEntryId); }
+
   clearSessionConversation(
     agentId: string,
   ): ReturnType<SessionLifecycleCoordinator["clearSessionConversation"]> {
-    return this.services.sessions.clearSessionConversation(agentId);
+    return this.services.interactions.clearWorkerAssignments(agentId).then(() => this.services.sessions.clearSessionConversation(agentId));
   }
 
   pinSession(

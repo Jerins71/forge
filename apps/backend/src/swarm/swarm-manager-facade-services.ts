@@ -25,7 +25,6 @@ import type { SwarmEventCoordinator } from "./swarm-event-coordinator.js";
 import type { SwarmObservabilityCoordinator } from "./swarm-observability-coordinator.js";
 import type { SwarmRuntimeController } from "./swarm-runtime-controller.js";
 import type { SwarmRuntimeLifecycleCoordinator } from "./swarm-runtime-lifecycle-coordinator.js";
-import type { SwarmSessionMetaService } from "./swarm-session-meta-service.js";
 import type { SwarmSpecialistFallbackManager } from "./swarm-specialist-fallback-manager.js";
 import type { TurnContextCoordinator } from "./turn-context-coordinator.js";
 import type { UserMessageCoordinator } from "./user-message-coordinator.js";
@@ -57,7 +56,7 @@ export interface SwarmManagerFacadeRuntimeServices {
   >;
   turns: Pick<
     TurnContextCoordinator<unknown, unknown, unknown>,
-    "afterRuntimeEventProjection" | "beforeRuntimeEventProjection" | "getActiveTurnId"
+    "afterRuntimeEventProjection" | "beforeRuntimeEventProjection" | "getActiveTurnId" | "register" | "reflectCore" | "installCore"
   >;
   assistantOutput: Pick<
     AssistantOutputRouter,
@@ -90,7 +89,7 @@ export interface SwarmManagerSessionFacadeServices {
     "notifySpecialistRosterChanged" | "notifyClaudeNativeAuthChanged" | "resumeWorker" | "stopWorker" | "killControlledWorker"
   >;
   codexPlugin: CodexPluginDelegationCoordinator;
-  messages: Pick<AgentMessageDispatcher<unknown>, "sendMessage" | "sendWorkerResult">;
+  messages: Pick<AgentMessageDispatcher<unknown>, "sendMessage" | "sendWorkerResult" | "extractWorkerRunResult">;
   userMessages: UserMessageCoordinator;
 }
 
@@ -102,7 +101,7 @@ export interface SwarmManagerFacadeServices extends SwarmManagerSessionFacadeSer
     SessionAttentionCoordinator,
     "initialize" | "getSnapshot" | "dismissAttentionIds"
   >;
-  recovery: Pick<RestartRecoveryCoordinator, "dismiss" | "getSnapshot" | "resume" | "setControlledRecoveryPolicy" | "installCore" | "deliverReport">;
+  recovery: Pick<RestartRecoveryCoordinator, "dismiss" | "getSnapshot" | "resume" | "installCore">;
   configuration: SwarmConfigurationCoordinator;
   registry: {
     directory: AgentDirectory;
@@ -122,7 +121,7 @@ export interface SwarmManagerFacadeServices extends SwarmManagerSessionFacadeSer
   };
   trust: ProjectExecutableTrustCoordinator;
   observability: SwarmObservabilityCoordinator;
-  persistence: Pick<SwarmSessionMetaService, "flushPendingTurnSeqPersists">;
+  persistence: Pick<ConversationProjector, "flushPendingHistoryCacheWrites">;
   extensions: Pick<
     ForgeExtensionHost,
     "buildSettingsSnapshot"

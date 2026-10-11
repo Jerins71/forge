@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS control_sessions (
 CREATE TABLE IF NOT EXISTS control_inputs (
   input_id TEXT PRIMARY KEY,
   command_id TEXT NOT NULL UNIQUE REFERENCES commands(command_id),
-  session_id TEXT NOT NULL REFERENCES control_sessions(session_id),
+  session_id TEXT NOT NULL,
   message_json TEXT NOT NULL,
   canonical_entry_id TEXT,
   append_state TEXT NOT NULL CHECK (append_state IN ('pending','recorded')),
@@ -157,30 +157,6 @@ CREATE TABLE IF NOT EXISTS input_artifacts (
   PRIMARY KEY(input_id, artifact_id)
 );
 
-CREATE TABLE IF NOT EXISTS control_turns (
-  session_id TEXT NOT NULL,
-  turn_id TEXT NOT NULL,
-  agent_id TEXT,
-  role TEXT,
-  inbound_kind TEXT,
-  inbound_id TEXT,
-  dispatched_at TEXT,
-  terminal_outcome TEXT,
-  terminal_at TEXT,
-  stalled_tier INTEGER,
-  stalled_at TEXT,
-  recovery_note TEXT,
-  recovery_at TEXT,
-  recovery_id TEXT,
-  PRIMARY KEY(session_id, turn_id)
-);
-CREATE TABLE IF NOT EXISTS control_recovery (
-  recovery_id TEXT PRIMARY KEY,
-  snapshot_json TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  decision_applied INTEGER NOT NULL DEFAULT 0
-);
-
 CREATE TABLE IF NOT EXISTS pairing_grants (
   grant_id TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('link','code','bootstrap')),
@@ -249,6 +225,7 @@ CREATE INDEX orchestration_runs_thread ON orchestration_runs(thread_id);
 CREATE TABLE orchestration_attempts (attempt_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, thread_id TEXT NOT NULL, state_json TEXT NOT NULL);
 CREATE TABLE orchestration_bindings (binding_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, generation INTEGER NOT NULL, state_json TEXT NOT NULL);
 CREATE TABLE orchestration_requests (request_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, attempt_id TEXT NOT NULL, state_json TEXT NOT NULL);
+CREATE TABLE orchestration_run_inputs (run_id TEXT PRIMARY KEY, prepared_json TEXT NOT NULL);
 CREATE TABLE orchestration_assignments (assignment_id TEXT PRIMARY KEY, parent_thread_id TEXT NOT NULL, parent_run_id TEXT NOT NULL, worker_thread_id TEXT NOT NULL, state_json TEXT NOT NULL);
 CREATE INDEX orchestration_assignments_parent ON orchestration_assignments(parent_thread_id,parent_run_id);
 CREATE INDEX orchestration_assignments_worker ON orchestration_assignments(worker_thread_id);

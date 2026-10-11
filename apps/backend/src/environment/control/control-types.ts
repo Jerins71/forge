@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import type { ProviderScope } from "@forge/protocol";
+import type { ProviderScope, ProviderConversationRef } from "@forge/protocol";
 import type { ProviderAdapter, ProviderBinding } from "../../swarm/runtime/provider-contract.js";
 import type { RuntimeUserMessage } from "../../swarm/runtime-contracts.js";
 import type {
@@ -85,10 +85,11 @@ export interface SwarmControlPort {
     source?: import("../../swarm/types.js").MessageSourceContext;
     delivery?: RpcInput<"session.send">["delivery"];
     runId: string;
+    prepared?: import("./command-service.js").InternalInput["prepared"];
   }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }>;
-  acquireProvider(scope: ProviderScope): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
-  /** Phase 4 retains assignment result delivery until its transfer cutover. */
-  deliverRecoveredResult?(deliveryId: string): Promise<void>;
+  acquireProvider(scope: ProviderScope, conversation?: ProviderConversationRef): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
+  enqueuePresentation?(threadId:string,runId:string,presentation:import("../../swarm/turn-context-coordinator.js").InboundTurnContextInput):void;
+  extractWorkerResult?(threadId:string,runId:string,inputEntryId:string):Promise<{ entryId:string; resultText:string }>;
   applyChoice(input: {
     commandId: string;
     sessionId: string;
