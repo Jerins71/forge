@@ -45,6 +45,9 @@ export function createDetailStream(deps: StreamDependencies) {
           const workers = workersPage(input.sessionId, 0);
           const choices = (deps.database.prepare("SELECT choice_json FROM control_choices WHERE session_id = ? AND state = 'pending' ORDER BY choice_id LIMIT 21").all(input.sessionId) as { choice_json: string }[]).map(row => JSON.parse(row.choice_json) as ChoiceSummary);
           if (choices.length > 20) throw new StreamFault("PAYLOAD_TOO_LARGE", "Too many pending choices.");
+          const pendingChoices = choices.length;
+          choices.push(...(deps.database.prepare("SELECT choice_json FROM control_choices WHERE session_id = ? AND state IN ('expired','cancelled','interrupted') ORDER BY updated_sequence DESC,choice_id LIMIT ?")
+            .all(input.sessionId, 20 - pendingChoices) as { choice_json: string }[]).map(row => JSON.parse(row.choice_json) as ChoiceSummary));
           const feature = (type: "plan.upsert" | "goal.upsert") => {
             const row = deps.database.prepare("SELECT payload_json FROM events WHERE session_id=? AND event_type=? ORDER BY sequence DESC LIMIT 1").get(input.sessionId, type) as { payload_json: string } | undefined;
             return row ? JSON.parse(row.payload_json).snapshot : undefined;
@@ -54,6 +57,8 @@ export function createDetailStream(deps: StreamDependencies) {
             session: requireSession(input.sessionId), items: recentItems(deps.database, input.sessionId).map(item => projectDetailItem(item)),
             workers: workers.workers, choices, historyCursor: initialized?.historyCursor ?? null, workersCursor: workers.nextPage,
           };
+          // Keep closed question history within the existing metadata budget; pending requests stay mandatory.
+          while (choices.length > pendingChoices && encodedBytes({ ...snapshot, items: snapshot.items.map(item => ({ ...item, text: "" })) }) > SNAPSHOT_BYTES - 1024) choices.pop();
           // Metadata is mandatory; content previews can shrink to content references.
           if (encodedBytes({ ...snapshot, items: snapshot.items.map(item => ({ ...item, text: "" })) }) > SNAPSHOT_BYTES - 1024) {
             throw new StreamFault("PAYLOAD_TOO_LARGE", "Detail metadata exceeds snapshot budget.");

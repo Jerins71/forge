@@ -10,6 +10,7 @@ import { loadState, rebuildLifecycleProjections } from "./store.js";
 import type { ChoiceQuestion, ProviderObservation } from "@forge/protocol";
 import { SwarmChoiceService } from "../../../swarm/swarm-choice-service.js";
 import { createCoreChoicePort } from "./choice-port.js";
+import { createDetailStream } from "../../streams/detail-stream.js";
 import { requestChoiceId } from "./request-projection.js";
 
 const roots: string[] = []; const cores: ControlCore[] = [];
@@ -50,6 +51,14 @@ async function fixture() {
 }
 function choice(core: ControlCore, requestId: string) { const row = core.database.prepare("SELECT choice_json FROM control_choices WHERE choice_id=?").get(requestId) as { choice_json: string } | undefined; return row && JSON.parse(row.choice_json); }
 
+async function snapshotChoices(core: ControlCore) {
+  const abort = new AbortController();
+  const stream = createDetailStream({ database: core.database, subscribeCommitted: listener => core.eventSink.subscribe(listener),
+    getDescriptor: () => { throw new Error("Detail snapshot does not read the descriptor"); }, withReadBarrier: fn => core.eventSink.readBarrier(fn).value }).detail(principal, { sessionId: "manager" }, abort.signal);
+  try { const frame = (await stream.next()).value; if (frame?.kind !== "snapshot") throw new Error("Expected fresh detail snapshot"); return frame.snapshot.choices; }
+  finally { abort.abort(); await stream.return(undefined); }
+}
+
 describe("authoritative native choices", () => {
   it.each(["approval", "user_input"] as const)("projects and answers %s through the retained request and outbox", async kind => {
     const f = await fixture(); const published: unknown[] = [];
@@ -70,14 +79,28 @@ describe("authoritative native choices", () => {
     expect(() => f.core.eventSink.transaction(tx => { f.core.eventSink.commitCommand(tx, { type: "provider.observe", commandId: "rollback", now: 1_800_000_000_000, observation }); throw new Error("rollback"); })).toThrow("rollback");
     expect(loadState(f.core.database).requests).toEqual({}); expect(f.core.database.prepare("SELECT COUNT(*) n FROM control_choices").get()).toEqual({ n: 0 }); expect(f.core.eventSink.highWater).toBe(count);
   });
-  it("expires a callback on reboot and rebuilds the same non-answerable choice from retained facts", async () => {
-    const f = await fixture(); const request = f.publish(f.observation("user_input"));
+  it.each(["approval", "user_input"] as const)("expires %s on reboot and bootstraps the retained non-answerable question", async kind => {
+    const f = await fixture(); const request = f.publish(f.observation(kind));
+    expect(await snapshotChoices(f.core)).toEqual([choice(f.core, request.requestId)]);
     expect(choice(f.core, request.requestId)?.status).toBe("pending"); await f.core.close(); const reboot = await f.open();
     expect(loadState(reboot.database).requests[request.requestId].state).toBe("expired"); expect(choice(reboot, request.requestId).status).toBe("expired");
     const before = choice(reboot, request.requestId); reboot.database.prepare("DELETE FROM control_choices WHERE choice_id=?").run(request.requestId); rebuildLifecycleProjections(reboot.database);
     expect(choice(reboot, request.requestId)).toEqual(before);
+    expect(await snapshotChoices(reboot)).toEqual([before]);
     await expect(reboot.controlService.execute(principal, "session.choose", { commandId: answerId, sessionId: "manager", choiceId: request.requestId, answers })).rejects.toMatchObject({ code: "CONFLICT" });
     await reboot.effectWorker.drain(); expect(f.responses).toEqual([]);
+  });
+  it("bounds closed choice history while retaining every pending choice in a fresh snapshot", async () => {
+    const f = await fixture(); const closed: string[] = [];
+    for (let index = 0; index < 21; index++) {
+      const observation = f.observation("user_input"); observation.request.nativeId = `closed-${index}`;
+      const request = f.publish(observation); closed.push(request.requestId);
+      f.core.controlService.record({ type: "request.expire", commandId: `expire-${index}`, now: 1_800_000_000_000, threadId: "manager", requestId: request.requestId });
+    }
+    const pending = f.publish(f.observation("approval")); const choices = await snapshotChoices(f.core);
+    expect(choices).toHaveLength(20); expect(choices).toContainEqual(choice(f.core, pending.requestId));
+    expect(choices.some(choice => choice.choiceId === closed[0])).toBe(false);
+    expect(Object.values(loadState(f.core.database).requests)).toHaveLength(22);
   });
   it("rejects an expired answer and settles the projection without calling the provider", async () => {
     const f = await fixture(); const request = f.publish(f.observation("approval", new Date(1_800_000_030_000).toISOString())); f.advance();
