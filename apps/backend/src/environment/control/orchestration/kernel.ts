@@ -181,9 +181,12 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     case "provider.observe": observe(command.observation); break;
     case "thread.stop": {
       const owner = thread(command.threadId);
-      emit({ type: "thread.stopped", thread: { ...owner, desired: "stopped", shutdown: owner.bindingId ? "pending" : "clean" } });
+      const needsDrain = !!owner.bindingId && (command.writerPending !== false || !!state.bindings[owner.bindingId]);
+      emit({ type: "thread.stopped", thread: { ...owner, desired: "stopped", shutdown: needsDrain ? "pending" : "clean", ...(!needsDrain ? { bindingId: undefined } : {}) } });
       for (const run of Object.values(state.runs)) if (run.threadId === owner.threadId && run.state === "queued") finish(run, "cancelled");
-      if (owner.bindingId) decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: owner.bindingId }); break;
+      if (needsDrain) decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: owner.bindingId! });
+      else if (owner.activeRunId && state.runs[owner.activeRunId].state !== "terminal") finish(state.runs[owner.activeRunId], "cancelled");
+      break;
     }
     case "binding.drained": {
       const owner = thread(command.threadId); if (owner.bindingId !== command.bindingId) break;
