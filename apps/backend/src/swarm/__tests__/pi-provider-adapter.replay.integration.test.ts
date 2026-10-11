@@ -1,14 +1,17 @@
 import { createHash } from "node:crypto";
+import { createServer, type ServerResponse } from "node:http";
+import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { ProviderCapabilitiesSchema, ProviderObservationSchema } from "@forge/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { createNativePiFixture, collectPiObservations } from "../runtime/pi/replay/native-fixture.js";
+import { createNativePiFixture, collectPiObservations } from "../runtime/pi/replay/__tests__/native-fixture.js";
 import { createPiModelPeer } from "../runtime/pi/replay/model-peer.js";
-import { watchdog, type ReplayEntry, type ReplayTranscript } from "../runtime/replay/replay-harness.js";
-import { appendInstructionParts, instructionSource } from "../runtime/instruction-bundle.js";
+import { ReplaySignals, watchdog, type ReplayEntry, type ReplayTranscript } from "../runtime/replay/replay-harness.js";
+import { appendInstructionParts, instructionSource, renderInstructionBundle } from "../runtime/instruction-bundle.js";
 import { bindRuntimeToolHost } from "../runtime/runtime-tool-plan.js";
+import { ProviderRefreshRequiredError } from "../runtime/provider-contract.js";
 import type { ProviderBinding } from "../runtime/provider-contract.js";
 
 const raw = JSON.parse(await readFile(new URL("../runtime/pi/replay/pi-model-transport.json", import.meta.url), "utf8")) as ReplayTranscript;
@@ -21,11 +24,11 @@ const reply = (text: string, label?: string): ReplayEntry[] => [
 ];
 const transcript = (entries: ReplayEntry[]): ReplayTranscript => ({ ...raw, entries });
 const scope = { threadId: "manager", bindingId: "pi-binding", generation: 7 };
-async function open(fixture: Awaited<ReturnType<typeof createNativePiFixture>>) {
-  const native = await fixture.create();
+async function open(fixture: Awaited<ReturnType<typeof createNativePiFixture>>, bindingScope = scope) {
+  const native = await fixture.create(fixture.instructions, bindingScope);
   expect(native.runtime.providerAdapter, "production creator must expose its Pi adapter").toBeDefined();
   const adapter = native.runtime.providerAdapter!;
-  const input = { scope, model: fixture.descriptor.model, instructions: fixture.instructions, toolHost: native.toolHost };
+  const input = { scope: bindingScope, model: fixture.descriptor.model, instructions: native.instructions, toolHost: native.toolHost };
   const binding = await adapter.open(input);
   return { ...native, adapter, input, binding };
 }
@@ -53,22 +56,40 @@ describe("Pi provider adapter on the native production path", () => {
     const peer = await createPiModelPeer(structuredClone(raw));
     const fixture = await createNativePiFixture(peer.baseUrl, trusted);
     try {
-      const { adapter, binding, input, session, toolHost } = await open(fixture);
+      const { adapter, binding, input, session, toolHost, preparedCount } = await open(fixture);
+      expect(preparedCount).toBe(1);
+      expect(renderInstructionBundle(input.instructions)).toBe(session.resourceLoader.getSystemPrompt());
+      expect(input.instructions.parts.find(part => part.kind === "pi_resource_loader")?.sources).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "pi_context_file" }), expect.objectContaining({ kind: "pi_extension" })]));
       expect(Value.Check(ProviderCapabilitiesSchema, adapter.capabilities())).toBe(true);
       expect(adapter.capabilities()).toMatchObject({ instructions: { channels: ["system", "resource_loader"], nativeBase: "preserved" },
         tools: { host: "native_tools", nativeCallIdentity: true, cancellation: "abort_signal", extensionHooks: true }, approvals: { lifetime: "none" } });
+      const reload = vi.spyOn(session, "reload");
       expect(await adapter.open(input)).toBe(binding);
+      const equivalentHost = bindRuntimeToolHost({ descriptor: fixture.descriptor, mechanism: "native_tools", tools: [...toolHost.tools] });
+      expect(await adapter.open({ ...input, toolHost: equivalentHost })).toBe(binding);
+      expect(reload).not.toHaveBeenCalled();
       expect(await adapter.resume({ ...input, conversation: binding.conversation })).toBe(binding);
+      const changed = appendInstructionParts(input.instructions, [{ kind: "change", text: "Changed.", separator: "", sources: [instructionSource("change", "test", "Changed.")] }]);
+      await expect(adapter.open({ ...input, instructions: changed })).rejects.toBeInstanceOf(ProviderRefreshRequiredError);
+      await expect(adapter.open({ ...input, instructions: changed })).rejects.toMatchObject({ code: "PROVIDER_REFRESH_REQUIRED", changed: "instructions" });
+      const changedHost = bindRuntimeToolHost({ descriptor: fixture.descriptor, tools: [] });
+      await expect(adapter.open({ ...input, instructions: changed, toolHost: changedHost })).rejects.toMatchObject({ code: "PROVIDER_REFRESH_REQUIRED", changed: "both" });
+      await expect(adapter.resume({ ...input, toolHost: changedHost, conversation: binding.conversation })).rejects.toMatchObject({ code: "PROVIDER_REFRESH_REQUIRED", changed: "tools" });
       const collected = collectPiObservations(adapter.observations(binding));
       const turn = await start(adapter, binding, "native-tools", "Write the checkpoint with the Forge notes tool.");
       expect(session.sessionManager.getEntry(turn.nativeId)?.type).toBe("message");
       await watchdog("raw request", peer.signals.wait("1:start"));
       await watchdog("tool barrier", peer.signals.wait("1:tool:held"));
+      const firstRequest = peer.requests[0]!;
+      expect((firstRequest.messages as Array<{ content: string }>)[0]!.content).toBe(session.systemPrompt);
+      expect((firstRequest.tools as Array<{ function: { name: string; description: string; parameters: unknown } }>).map(tool => ({
+        name: tool.function.name, description: tool.function.description, inputSchema: tool.function.parameters,
+      }))).toEqual(toolHost.snapshot.tools);
       peer.release("1:tool");
       const terminal = await collected.wait("native-tools:terminal");
       expect(terminal).toMatchObject({ type: "terminal", terminalAuthority: "root_attempt", outcome: "completed" });
       const tools = collected.observations.filter(event => event.type === "tool");
-      expect(tools).toMatchObject([{ phase: "start", call: { nativeId: "native-notes-1" }, name: "notes" }, { phase: "complete", name: "notes", isError: false }]);
+      expect(tools.filter(event => event.type === "tool" && event.phase !== "update")).toMatchObject([{ phase: "start", call: { nativeId: "native-notes-1" }, name: "notes" }, { phase: "complete", name: "notes", isError: false }]);
       expect(JSON.stringify(peer.requests[1]?.messages)).toContain("Native Forge notes result");
       expect(JSON.stringify(session.sessionManager.getEntries())).toContain("native-notes-1");
       expect(toolHost.snapshot.tools).toEqual(session.getActiveToolNames().map(name => {
@@ -110,27 +131,32 @@ describe("Pi provider adapter on the native production path", () => {
       expect(JSON.stringify(peer.requests[1]?.messages)).toContain("Native steering input.");
       expect(collected.observations.filter(event => event.type === "terminal")).toHaveLength(1);
       expect(session.messages.filter(message => message.role === "user")).toHaveLength(2);
+      expect(collected.observations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: "message", channel: "assistant", phase: "delta", text: "Steered response." }),
+        expect.objectContaining({ type: "message", channel: "reasoning", phase: "delta", text: "Native reasoning." }),
+      ]));
       await adapter.close(binding); await collected.done;
       expect(peer.failures).toEqual([]);
     } finally { await fixture.cleanup(); await peer.close(); }
   });
 
-  it("resumes the native journal with changed instructions and tool schemas at an idle refresh", async () => {
+  it("resumes a generation-1 journal under generation-2 scope with changed instructions and tools", async () => {
     const peer = await createPiModelPeer(transcript([request("first"), ...reply("First persisted result."), request("resumed"), ...reply("Resumed result.")]));
     const fixture = await createNativePiFixture(peer.baseUrl);
     try {
-      const initial = await open(fixture);
+      const initial = await open(fixture, { ...scope, generation: 1 });
       const first = collectPiObservations(initial.adapter.observations(initial.binding));
       await start(initial.adapter, initial.binding, "first", "Persist the native session.");
       await first.wait("first:terminal");
       await initial.adapter.close(initial.binding); await first.done;
       const revised = appendInstructionParts(fixture.instructions, [{ kind: "model_addition", separator: "\n\n", text: "Changed native instructions.",
         sources: [instructionSource("model_addition", "test", "Changed native instructions.")] }]);
-      const native = await fixture.create(revised);
+      const native = await fixture.create(revised, { ...scope, generation: 2 });
       const adapter = native.runtime.providerAdapter!;
-      const input = { ...initial.input, scope: { ...scope, generation: 8 }, instructions: revised, toolHost: native.toolHost, conversation: { ...initial.binding.conversation, generation: 8 } };
+      const input = { ...initial.input, scope: { ...scope, generation: 2 }, instructions: native.instructions, toolHost: native.toolHost, conversation: initial.binding.conversation };
       const binding = await adapter.resume(input);
       expect(binding.conversation.nativeId).toBe(initial.binding.conversation.nativeId);
+      expect(binding.conversation).toMatchObject(input.scope);
       expect(binding.instructionRevision).not.toBe(initial.binding.instructionRevision);
       expect(await adapter.resume(input)).toBe(binding);
       const changedTools = bindRuntimeToolHost({ descriptor: fixture.descriptor, mechanism: "native_tools", tools: [...native.toolHost.tools, {
@@ -139,13 +165,30 @@ describe("Pi provider adapter on the native production path", () => {
       }] });
       const collected = collectPiObservations(adapter.observations(binding));
       const oldRevision = binding.toolContractRevision;
-      const accepted = await adapter.start({ binding, runId: "run-resume", attemptId: "resume", input: { text: "Continue." }, toolHost: changedTools });
+      const turnInstructions = appendInstructionParts(native.instructions, [{ kind: "turn_addition", separator: "\n\n", text: "Explicit native refresh.",
+        sources: [instructionSource("turn_addition", "test", "Explicit native refresh.")] }]);
+      const accepted = await adapter.start({ binding, runId: "run-resume", attemptId: "resume", input: { text: "Continue." }, instructions: turnInstructions, toolHost: changedTools });
       expect(accepted.status).toBe("accepted");
       await collected.wait("resume:terminal");
       expect(JSON.stringify(peer.requests[1]?.messages)).toContain("First persisted result.");
       expect(JSON.stringify(peer.requests[1]?.messages)).toContain("Changed native instructions.");
+      expect(JSON.stringify(peer.requests[1]?.messages)).toContain("Explicit native refresh.");
       expect(JSON.stringify(peer.requests[1]?.tools)).toContain("changed_native_tool");
       expect(binding.toolContractRevision).not.toBe(oldRevision);
+      expect(collected.observations.length).toBeGreaterThan(0);
+      for (const event of collected.observations) {
+        expect(event.scope).toEqual(input.scope);
+        if (event.origin.kind === "root") {
+          expect(event.origin.conversation).toMatchObject(input.scope);
+          if (event.origin.turn) expect(event.origin.turn).toMatchObject(input.scope);
+        }
+        if (event.type === "accepted") expect(event.turn).toMatchObject(input.scope);
+        if (event.type === "message") expect(event.item).toMatchObject(input.scope);
+        if (event.type === "tool") expect(event.call).toMatchObject(input.scope);
+      }
+      await expect(adapter.readContext!({ binding, through: { ...initial.binding.conversation, kind: "turn", conversationId: initial.binding.conversation.nativeId, nativeId: "old-turn" } })).rejects.toThrow(/stale/i);
+      await expect(adapter.respond({ binding, request: { ...initial.binding.conversation, kind: "request", conversationId: initial.binding.conversation.nativeId, nativeId: "old-request" },
+        lifetime: { kind: "binding", generation: 1 }, response: {} })).rejects.toThrow(/stale/i);
       await expect(adapter.start({ binding: initial.binding, runId: "stale", attemptId: "stale", input: { text: "Stale scope" } })).rejects.toThrow(/stale|binding/i);
       await adapter.close(binding); await collected.done;
       expect(peer.failures).toEqual([]);
@@ -153,13 +196,15 @@ describe("Pi provider adapter on the native production path", () => {
   });
 
   it("runs production compaction and Fresh context without replacing AgentSession", async () => {
-    const peer = await createPiModelPeer(transcript([request("first"), ...reply("First persisted result."), request("summary"), ...reply("## Summary\nPreserved native work.")]));
+    const peer = await createPiModelPeer(transcript([request("first"), ...reply("First persisted result."), request("second"), ...reply("Second native turn."), request("summary"), ...reply("## Summary\nPreserved native work."), request("prefix"), ...reply("Preserved turn prefix.")]));
     const fixture = await createNativePiFixture(peer.baseUrl);
     try {
       const { adapter, binding, session } = await open(fixture);
       const collected = collectPiObservations(adapter.observations(binding));
       await start(adapter, binding, "first", "Remember the native work.");
       await collected.wait("first:terminal");
+      await start(adapter, binding, "second", "Record a second turn before compacting.");
+      await collected.wait("second:terminal");
       await watchdog("summary compact", adapter.compact({ binding, attemptId: "compact", instructions: "Keep native work." }));
       expect(collected.observations.filter(event => event.type === "compaction" && event.attemptId === "compact").map(event => event.phase)).toEqual(["started", "completed"]);
       expect(session.sessionManager.getEntries().some(entry => entry.type === "compaction")).toBe(true);
@@ -173,6 +218,12 @@ describe("Pi provider adapter on the native production path", () => {
       await fixture.evidence("pi-context.json", { observations: collected.observations.filter(event => event.type === "compaction"),
         nativeEntryTypes: session.sessionManager.getEntries().map(entry => entry.type), assertions: "summary compaction durable, Fresh durable, same native session, context read", failures: peer.failures });
       await adapter.close(binding); await collected.done;
+      const reopened = await fixture.create(fixture.instructions, { ...scope, generation: 9 });
+      const recovered = await reopened.runtime.providerAdapter!.resume({ scope: { ...scope, generation: 9 }, model: fixture.descriptor.model,
+        instructions: reopened.instructions, toolHost: reopened.toolHost, conversation: { ...binding.conversation, generation: 9 } });
+      expect(recovered.conversation.nativeId).toBe(binding.conversation.nativeId);
+      expect(JSON.stringify((await reopened.runtime.providerAdapter!.readContext({ binding: recovered })).messages)).not.toContain("First persisted result.");
+      await reopened.runtime.providerAdapter!.close(recovered);
       expect(peer.failures).toEqual([]);
     } finally { await fixture.cleanup(); await peer.close(); }
   });
@@ -187,23 +238,62 @@ describe("Pi provider adapter on the native production path", () => {
     const peer = await createPiModelPeer(cancellation);
     const fixture = await createNativePiFixture(peer.baseUrl);
     try {
-      // A Node child holding stdin open is portable and blocks until the tool signal aborts it.
-      call.function.arguments = JSON.stringify({ command: `"${process.execPath}" -e "process.stdin.resume()"`, yieldMs: 300000 });
+      // This real child emits a readiness marker, then stays live until the native signal aborts it.
+      call.function.arguments = JSON.stringify({ command: `"${process.execPath}" -e "process.stdout.write('native-ready');setInterval(()=>{},60000)"`, yield_ms: 30000, timeout: 60 });
       // The peer owns the transcript object, so this updates the raw frame before release.
       const { adapter, binding } = await open(fixture);
       const collected = collectPiObservations(adapter.observations(binding));
       const turn = await start(adapter, binding, "cancel", "Run the cancellable native bash tool.");
       await watchdog("tool held", peer.signals.wait("1:tool:held")); peer.release("1:tool");
-      await collected.wait("cancel:tool");
+      await collected.wait("cancel:tool-ready");
       expect(await adapter.drain(binding)).toEqual({ status: "pending" });
       await adapter.interrupt({ binding, attemptId: "cancel", turn });
       const terminal = await collected.wait("cancel:terminal");
       expect(terminal).toMatchObject({ type: "terminal", outcome: "interrupted" });
       expect(collected.observations).toEqual(expect.arrayContaining([expect.objectContaining({ type: "tool", phase: "complete", call: expect.objectContaining({ nativeId: "native-bash-cancel" }) })]));
       expect(await adapter.drain(binding)).toEqual({ status: "clean" });
+      await fixture.evidence("pi-cancellation.json", { observations: collected.observations, hooks: await fixture.extensionEvents(), assertions: "real bash child emitted readiness, native signal cancellation, result, interrupted terminal, clean drain", failures: peer.failures });
       await adapter.close(binding); await collected.done;
       expect(peer.failures).toEqual([]);
     } finally { await fixture.cleanup(); await peer.close(); }
+  });
+
+  it("observes eventual native settlement after an abort timeout without duplicating legacy callbacks", async () => {
+    const signals = new ReplaySignals<void>();
+    let heldResponse: ServerResponse | undefined;
+    const gate = createServer((_request, response) => { heldResponse = response; signals.observe("extension-held", undefined); });
+    await new Promise<void>(resolve => gate.listen(0, "127.0.0.1", resolve));
+    const peer = await createPiModelPeer(transcript(structuredClone(raw.entries.slice(0, 4))));
+    const fixture = await createNativePiFixture(peer.baseUrl);
+    try {
+      // A real extension can take longer to return than the caller's shutdown deadline.
+      const extensionPath = join(fixture.config.paths.dataDir, "profiles/profile/pi/extensions/index.ts");
+      const gateUrl = `http://127.0.0.1:${(gate.address() as { port: number }).port}/release`;
+      const hooks = await fixture.read(extensionPath);
+      await fixture.put(extensionPath, hooks.replace("export default pi => {", `export default pi => {
+pi.on('tool_result', async () => { await fetch(${JSON.stringify(gateUrl)}); });`));
+      const { adapter, binding, runtime } = await open(fixture);
+      const collected = collectPiObservations(adapter.observations(binding));
+      await start(adapter, binding, "late-settle", "Write the native checkpoint.");
+      await watchdog("tool held", peer.signals.wait("1:tool:held")); peer.release("1:tool");
+      await watchdog("native extension held", signals.wait("extension-held"));
+      await expect(runtime.stopInFlight({ shutdownTimeoutMs: 1 })).rejects.toThrow(/timed out/);
+      expect(collected.observations.filter(event => event.type === "terminal")).toHaveLength(0);
+      expect(await adapter.drain(binding)).toEqual({ status: "pending" });
+      heldResponse!.end("released");
+      expect(await collected.wait("late-settle:terminal", 2000)).toMatchObject({ type: "terminal", terminalAuthority: "root_attempt" });
+      expect(collected.observations.filter(event => event.type === "terminal")).toHaveLength(1);
+      expect(fixture.legacySettlements).toEqual([]);
+      expect(await adapter.drain(binding)).toEqual({ status: "clean" });
+      await fixture.evidence("pi-cancellation-timeout.json", { observations: collected.observations,
+        hooks: await fixture.extensionEvents(), assertions: "real Pi extension delays native tool result; timeout is no terminal; eventual native settlement drains", failures: peer.failures });
+      await adapter.close(binding); await collected.done;
+      expect(peer.failures).toEqual([]);
+    } finally {
+      heldResponse?.end("released"); gate.closeAllConnections();
+      await fixture.cleanup(); await peer.close();
+      await new Promise<void>(resolve => gate.close(() => resolve()));
+    }
   });
 
   it("reports model transport failure honestly and rejects stale provider requests", async () => {
