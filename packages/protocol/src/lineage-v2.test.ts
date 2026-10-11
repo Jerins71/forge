@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Value } from '@sinclair/typebox/value'
-import { rpcSchemas, rpcScopes, ContextHandoffSchema, DetailItemSchema, SessionSummarySchema } from './environment-v2.js'
+import { rpcSchemas, rpcScopes, ContextHandoffSchema, SessionLineageSnapshotSchema, DetailItemSchema, SessionSummarySchema } from './environment-v2.js'
 
 import { ProviderConversationRefSchema } from './orchestration.js'
 
@@ -18,6 +18,7 @@ describe('durable context transfer contract', () => {
     const ref = {threadId:'source',bindingId:'b',generation:1,kind:'conversation',nativeId:'fork-target',forkOnResume:true,forkSource:{nativeId:'source-native'}}
     expect(Value.Check(ProviderConversationRefSchema, ref)).toBe(true)
     expect(Value.Check(ProviderConversationRefSchema, {...ref, forkSource:{nativeId:'source-native',credentials:true}})).toBe(false)
+    expect('truncated' in SessionLineageSnapshotSchema.properties).toBe(true)
     expect('runId' in DetailItemSchema.properties).toBe(true)
     expect('transferCapabilities' in SessionSummarySchema.properties).toBe(true)
   })

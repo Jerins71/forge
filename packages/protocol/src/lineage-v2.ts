@@ -39,5 +39,5 @@ export const ContextTransferSchema = O({
   error: Type.Optional(O({ code: E('UNSUPPORTED', 'SOURCE_UNAVAILABLE', 'MATERIALIZATION_FAILED', 'DELIVERY_UNKNOWN', 'STALE_TARGET'), message: Type.String({ maxLength: 4096 }) })),
 })
 export type ContextTransfer = Static<typeof ContextTransferSchema>
-export const SessionLineageSnapshotSchema = O({ threadId: id, lineage: Type.Union([ThreadLineageSchema, Type.Null()]), transfers: Type.Array(ContextTransferSchema, { maxItems: 1000 }), handoffs: Type.Array(ContextHandoffSchema, { maxItems: 1000 }) })
+export const SessionLineageSnapshotSchema = O({ truncated: Type.Optional(Type.Boolean()), threadId: id, lineage: Type.Union([ThreadLineageSchema, Type.Null()]), transfers: Type.Array(ContextTransferSchema, { maxItems: 1000 }), handoffs: Type.Array(ContextHandoffSchema, { maxItems: 1000 }) })
 export type SessionLineageSnapshot = Static<typeof SessionLineageSnapshotSchema>
