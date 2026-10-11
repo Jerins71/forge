@@ -364,28 +364,70 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       expect(f.onAgentEnd).toHaveBeenCalledTimes(1);
     } finally { await f.close(); await f.cleanup(); }
   });
-  it("ends the turn, stops the native and returns the steer undelivered when the native never runs it", async () => {
+  it("reports unknown delivery and stops the native when it never runs a steer it still held after its reply", async () => {
     const f = await fixture("steer-terminal-race");
     try {
       const binding = await f.open(); const dispatched = start(f, binding);
       await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); const accepted = await f.observed("accepted:");
       if (accepted.type !== "accepted") throw new Error("Missing native acceptance");
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-      const steered = f.adapter.steer({ binding, runId: "run", attemptId: "attempt", input: { text: "steer" }, turn: accepted.turn }).then(result => result, error => error as unknown);
+      expect(await f.adapter.steer({ binding, runId: "run", attemptId: "attempt", input: { text: "steer" }, turn: accepted.turn })).toMatchObject({ status: "accepted" });
       await f.release("first-result");
       const replyEnded = () => f.runtimeOptions.callbacks.onSessionEvent.mock.calls.some(call => call[1].type === "turn_end");
       while (!replyEnded()) await new Promise(resolve => setImmediate(resolve));
       await vi.advanceTimersByTimeAsync(29_000);
-      expect(f.observations.some(value => value.type === "terminal")).toBe(false);
+      expect(f.observations.some(value => value.type === "terminal" || value.type === "error")).toBe(false);
       await vi.advanceTimersByTimeAsync(1_000);
-      expect(await steered).toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "stale_scope", delivery: "not_dispatched" });
-      expect(await f.observed("terminal:root_attempt")).toMatchObject({ outcome: "completed", origin: { turn: accepted.turn } });
-      // The process that still held the input is gone, so it cannot run later; the next start replaces the binding.
+      expect(await f.observed("error:")).toMatchObject({ delivery: "unknown" });
+      // The process that still held the input is gone, so it cannot run later.
       await vi.advanceTimersByTimeAsync(5_000);
       await expect(start(f, binding, "next")).rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "closed" });
       expect(await f.adapter.drain(binding)).toEqual({ status: "clean" });
-      expect(f.observations.filter(value => value.type === "terminal")).toHaveLength(1);
+      expect(f.observations.some(value => value.type === "terminal" && value.outcome === "completed")).toBe(false);
     } finally { vi.useRealTimers(); await f.close(); await f.cleanup(); }
+  });
+  // Failure modes written before implementation: a long reply with no boundary must not time the steer out,
+  // a process that dies holding it must not look delivered, and Stop must not leave it to run later unseen.
+  it("accepts a steer once it is written, however long the native takes to fold it in", async () => {
+    const f = await fixture("start-steer-children");
+    try {
+      const binding = await f.open(); const dispatched = start(f, binding);
+      await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); const accepted = await f.observed("accepted:");
+      if (accepted.type !== "accepted") throw new Error("Missing native acceptance");
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const steered = f.adapter.steer({ binding, runId: "run", attemptId: "attempt", input: { text: "steer" }, turn: accepted.turn });
+      await f.harness.signals.wait("1:steered:held");
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(await steered).toMatchObject({ status: "accepted", turn: accepted.turn });
+      expect(f.observations.some(value => value.type === "terminal" || value.type === "error")).toBe(false);
+      vi.useRealTimers();
+      await f.release("steered"); await f.release("child"); await f.release("terminal");
+      expect(await f.observed("terminal:root_attempt")).toMatchObject({ outcome: "completed" });
+    } finally { vi.useRealTimers(); await f.close(); await f.cleanup(); }
+  });
+  it("reports unknown delivery when the native dies holding a steer it never consumed", async () => {
+    const f = await fixture("steer-failure");
+    try {
+      const binding = await f.open(); const dispatched = start(f, binding);
+      await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); const accepted = await f.observed("accepted:");
+      if (accepted.type !== "accepted") throw new Error("Missing native acceptance");
+      expect(await f.adapter.steer({ binding, runId: "run", attemptId: "attempt", input: { text: "steer" }, turn: accepted.turn })).toMatchObject({ status: "accepted" });
+      await f.release("failure"); expect(await f.observed("error:")).toMatchObject({ delivery: "unknown", code: "CLAUDE_TRANSPORT_ERROR" });
+    } finally { await f.close(); await f.cleanup(); }
+  });
+  it("stops the native after an interrupt that leaves a steer queued, so it cannot run later", async () => {
+    const f = await fixture("steer-interrupt");
+    try {
+      const binding = await f.open(); const dispatched = start(f, binding);
+      await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); const accepted = await f.observed("accepted:");
+      if (accepted.type !== "accepted") throw new Error("Missing native acceptance");
+      expect(await f.adapter.steer({ binding, runId: "run", attemptId: "attempt", input: { text: "steer" }, turn: accepted.turn })).toMatchObject({ status: "accepted" });
+      await f.adapter.interrupt({ binding, attemptId: "attempt", turn: accepted.turn });
+      await f.release("terminal"); expect(await f.observed("terminal:root_attempt")).toMatchObject({ outcome: "interrupted" });
+      await vi.waitFor(async () => expect(await f.adapter.drain(binding)).toEqual({ status: "clean" }), { timeout: 10_000 });
+      await expect(start(f, binding, "next")).rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "closed" });
+      expect(f.observations.filter(value => value.type === "terminal")).toHaveLength(1);
+    } finally { await f.close(); await f.cleanup(); }
   });
   it("rejects a steer for a turn that already ended as proven not dispatched", async () => {
     const f = await fixture("one-turn");

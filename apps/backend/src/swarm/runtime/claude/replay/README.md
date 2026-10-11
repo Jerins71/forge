@@ -32,11 +32,13 @@ immutable; text and reasoning stream as deltas; tools are snapshots and usage is
 final; approvals are live callbacks; native resume, latest fork, steer, interrupt
 and compact are available; native context reading is unavailable. A message-bound
 fork fails with typed unsupported behavior. Forking uses a fresh target binding.
-Queue submission returns unknown delivery until a native UUID echo proves
-consumption. A steer for a turn that already ended is rejected as stale scope before
-any write. A steer the native still holds when its reply ends keeps the turn open until
-the echo; with no echo in 30 seconds the turn ends, the process stops and the steer is
-rejected as stale scope. Child terminals carry native_child authority and create no Forge
+A start returns unknown delivery until a native UUID echo proves consumption. A steer
+written to a live process is accepted without waiting for its echo; a steer for a turn
+that already ended is rejected as stale scope before any write. A steer the native still
+holds when a clean reply ends keeps the turn open until the echo; with no echo in 30
+seconds, or when the process fails first, delivery is reported unknown and the process
+stops. A stopped or failed reply that leaves a steer queued also stops the process, so
+that input cannot run later. Child terminals carry native_child authority and create no Forge
 assignments. Native permission policy and authentication remain unchanged.
 
 All files and native-provider homes live under owned temporary roots outside the
