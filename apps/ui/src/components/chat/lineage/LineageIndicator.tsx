@@ -35,7 +35,7 @@ export function LineageIndicator({ lineage: snapshot, resolveSessionLabel, onOpe
           aria-label={`Lineage: ${summary.label}`}
           title={summary.label}
           className={cn(
-            'inline-flex h-5 min-w-0 max-w-56 shrink items-center gap-1 rounded-md border px-1.5 text-[10px] font-medium transition-colors',
+            'inline-flex h-5 min-w-0 max-w-56 shrink items-center gap-1 rounded-md border px-1.5 text-[10px] font-medium transition-colors lg:max-w-80',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
             summary.tone === 'warning'
               ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 hover:bg-amber-500/15 dark:text-amber-400'
@@ -102,13 +102,13 @@ function TransferRow({ transfer, handoff, resolveSessionLabel }: {
   return (
     <li className="space-y-1">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="min-w-0 truncate font-medium text-foreground">
-          {kind}
-          {providers ? <span className="font-mono font-normal text-muted-foreground"> · {providers}</span> : null}
-        </span>
+        <span className="min-w-0 truncate font-medium text-foreground">{kind}</span>
         <span className="shrink-0 font-mono text-[11px] text-subtle-foreground">{transfer.state.replace('_', ' ')}</span>
       </div>
-      <p className="text-[11px] text-muted-foreground">{TRANSFER_STRATEGY_LABELS[transfer.strategy]}</p>
+      <p className="text-[11px] text-muted-foreground">
+        {TRANSFER_STRATEGY_LABELS[transfer.strategy]}
+        {providers ? <span className="font-mono"> · {providers}</span> : null}
+      </p>
       {transfer.error ? (
         <p role="alert" className="text-[11px] text-destructive">{transfer.error.code}: {transfer.error.message}</p>
       ) : null}
