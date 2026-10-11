@@ -44,6 +44,33 @@ async function fixture() {
 const principal = { deviceSessionId: "device", scopes: new Set(["session:operate" as const]) };
 
 describe("durable provider outbox", () => {
+  it("queues a proved unsupported steer and remembers that binding cannot steer", async () => {
+    const f = await fixture(); let steers = 0; let interrupts = 0;
+    f.adapter.steer = async () => { steers++; throw new ProviderDispatchRejectedError("unsupported_steer"); };
+    f.adapter.interrupt = async () => { interrupts++; };
+    await f.core.controlService.submitInput({ commandId: "root", threadId: "manager", message: { text: "root", artifactIds: [] } });
+    await f.core.effectWorker.drain();
+    const initial = loadState(f.core.database); const rootAttempt = initial.attempts[initial.runs["run-root"].activeAttemptId];
+    const binding = initial.bindings[rootAttempt.bindingId];
+    await f.core.controlService.submitInput({ commandId: "correction", threadId: "manager", message: { text: "correction", artifactIds: [] }, delivery: "steer" });
+    await f.core.effectWorker.drain();
+    expect(loadState(f.core.database).runs["run-root"]).toMatchObject({ state: "running" });
+    expect(loadState(f.core.database).runs["run-correction"]).toMatchObject({ state: "queued", delivery: "queue" });
+    expect(loadState(f.core.database).bindings[binding.scope.bindingId].capabilities.native.steer).toBe(false);
+    await f.core.controlService.submitInput({ commandId: "later", threadId: "manager", message: { text: "later", artifactIds: [] }, delivery: "steer" });
+    await f.core.effectWorker.drain();
+    expect(steers).toBe(1); expect(interrupts).toBe(0); expect(f.dispatches()).toBe(1);
+    expect(f.canonical.size).toBe(3);
+    expect(replayLifecycle(f.core.database).bindings[binding.scope.bindingId].capabilities.native.steer).toBe(false);
+    for (const runId of ["run-root", "run-correction", "run-later"]) {
+      const state = loadState(f.core.database); const attempt = state.attempts[state.runs[runId].activeAttemptId];
+      f.core.controlService.record({ type: "provider.observe", commandId: `finish:${runId}`, now: f.options.clock(), observation: { type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: "completed" } });
+      await f.core.effectWorker.drain();
+    }
+    expect(f.dispatches()).toBe(3); expect(interrupts).toBe(0);
+    for (const runId of ["run-root", "run-correction", "run-later"]) expect(loadState(f.core.database).runs[runId]).toMatchObject({ state: "terminal", outcome: "completed" });
+  });
+
   it.each(["append", "dispatch"] as const)("waits for the internal worker-result %s before admitting a context mutation", async boundary => {
     const f = await fixture();
     await f.core.controlService.submitInput({ commandId: "parent", threadId: "manager", message: { text: "parent", artifactIds: [] } });

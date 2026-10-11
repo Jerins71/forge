@@ -480,6 +480,20 @@ describe("Codex ProviderAdapter over production JSON-RPC and raw replay", () => 
     } finally { release(); }
   });
 
+  it("downgrades an unsupported steer for its binding without failing the original turn", async () => {
+    const f = await fixture("steer-unsupported");
+    const started = await f.start();
+    if (started.status !== "accepted") throw new Error("Expected accepted turn");
+    await expect(f.adapter.steer({ binding: f.binding, turn: started.turn, runId: "correction", attemptId: "attempt", input: { text: "Steer" } }))
+      .rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "unsupported_steer", delivery: "not_dispatched" });
+    expect(f.binding.capabilities.native.steer).toBe(false);
+    expect(f.adapter.capabilities().native.steer).toBe(false);
+    expect(f.events.filter(event => event.type === "error" || event.type === "terminal")).toEqual([]);
+    await f.release("finish");
+    expect(await f.wait("terminal:root:completed")).toMatchObject({ outcome: "completed" });
+    await f.evidence();
+  });
+
   it("keeps an ambiguous steer receipt unknown even when the root turn was already accepted", async () => {
     const f = await fixture("steer-unknown");
     const started = await f.start();
