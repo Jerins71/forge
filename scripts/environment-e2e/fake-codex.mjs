@@ -68,6 +68,7 @@ async function runTurn(turn, text) {
   let reply = `fixture:${fixture.instanceId}:assistant reply`;
   try {
     if (text.includes('[fixture:hold]')) { turn.holding = true; return; }
+    if (text.includes('[fixture:crash]')) { process.exit(1); }
     if (text.includes('[fixture:empty]')) { complete(turn); return; }
     if (text.includes('[fixture:error]')) throw new Error('Synthetic failed turn');
     if (text.includes('[fixture:hang]')) { hung = true; setInterval(() => {}, 1000); return; }

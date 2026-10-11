@@ -1150,3 +1150,45 @@ async function logicalGroupKey(page: Page, _environment: UiEnvironment): Promise
   const projectRow = page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first()
   return (await projectRow.getAttribute('data-logical-project'))!
 }
+
+
+test('F15/F16: a native choice reaches Needs You and a background worker can be deleted from another chat', async ({ page }) => {
+  const { a } = fleet!
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  const principal = await controlEnvironment<BootstrapSession>(manifest, 'env-a', 'bootstrap')
+  const send = (sessionId: string, text: string) => fixtureRpcOnce(a.baseUrl, principal, 'session.send', { commandId: randomUUID(), sessionId, message: { text, artifactIds: [] } })
+  const launched = await fixtureRpcOnce(a.baseUrl, principal, 'session.launch', { commandId: randomUUID(), projectId: a.sessionId,
+    title: 'Background worker QA', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:spawn-choice]', artifactIds: [] } })
+  const detail = async () => { const rpc = await openFixtureRpc(a.baseUrl, principal); try { const { subscriptionId } = await rpc.call('session.subscribe', { sessionId: launched.sessionId }); return (await until(() => rpc.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot } finally { rpc.close() } }
+  const worker = await until<any>(async () => (await detail()).workers[0], Boolean)
+  await until<any>(async () => (await detail()).choices.find((choice: any) => choice.agentId === worker.agentId && choice.status === 'pending'), Boolean)
+  await page.goto(`${fleet!.uiUrl}/?agent=${a.sessionId}`)
+  const row = page.getByRole('complementary').locator(`[data-session-ref="${a.environmentId}:${launched.sessionId}"]`).filter({ visible: true }).first()
+  await expect(row).toBeVisible()
+  const sessionLi = row.locator('xpath=ancestor::li[1]')
+  const expand = sessionLi.getByRole('button', { name: 'Expand session workers', exact: true })
+  if (await expand.count()) await expand.click()
+  const workerRow = sessionLi.getByRole('button').filter({ hasText: worker.title }).first()
+  await expect(workerRow).toBeVisible()
+  await workerRow.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
+  await until(detail, snapshot => snapshot.workers.find((entry: any) => entry.agentId === worker.agentId)?.status === 'terminated')
+  await workerRow.click({ button: 'right' })
+  await expect(page.getByRole('menuitem', { name: 'Resume', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  // The selection remains on the other chat throughout the background delete.
+  expect(new URL(page.url()).searchParams.get('agent')).toBe(a.sessionId)
+  await shot(page, 'background-worker-deleted')
+  const choice = await send(a.sessionId, '[fixture:choice]')
+  await until(async () => { const rpc = await openFixtureRpc(a.baseUrl, principal); try { const { subscriptionId } = await rpc.call('session.subscribe', { sessionId: a.sessionId }); return (await until(() => rpc.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot.session.attentionOccurrence } finally { rpc.close() } }, Boolean)
+  await page.goto(`${fleet!.uiUrl}/?view=inbox`)
+  await openInbox(page)
+  await expect(page.getByTestId('rooms-inbox')).toBeVisible()
+  await expect(page.locator('[data-inbox-section="needs-you"]').filter({ visible: true }).getByText(a.projectTitle, { exact: true })).toBeVisible()
+  await shot(page, 'native-choice-needs-you')
+  await page.reload()
+  await expect(page.locator('[data-inbox-section="needs-you"]').filter({ visible: true }).getByText(a.projectTitle, { exact: true })).toBeVisible()
+  await fixtureRpcOnce(a.baseUrl, principal, 'session.stop', { commandId: randomUUID(), sessionId: a.sessionId })
+  assertions.backgroundWorkerAndAttention = { deletedFromOtherChat: true, correctOwnerSession: true, nativeChoiceCommand: choice.commandId, needsYouLive: true, needsYouAfterReload: true }
+})

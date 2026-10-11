@@ -1088,3 +1088,100 @@ test('F4: a newly created and seeded project sends its first message without a t
     evidence.createdResourceTrust = { trustedOnCreation: true, persistedAcrossRestart: true, firstMessageCompleted: true, trustDecisions: 0 };
   } finally { f.rpc.close(); }
 });
+
+
+// Next-batch QA: native exits, blocked choice attention, frozen context and retry ownership.
+test('F18/R6: idle and active Codex exits stay contained, a new input recovers once and healthy workers survive', async () => {
+  const f = await busySendFixture();
+  try {
+    const ready = await f.send('Initial native reply'); expect(await f.run(ready.commandId)).toMatchObject({ outcome: 'completed' });
+    const processes = async () => {
+      const files = await readdir(join(f.environment.checkout, '.fixture-codex'));
+      const rows = await Promise.all(files.filter(file => /^process-\d+\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(f.environment.checkout, '.fixture-codex', file), 'utf8'))));
+      const ids = new Set(Object.values((await f.state()).bindings).filter(binding => binding.scope.threadId === f.sessionId).map(binding => binding.conversation.nativeId));
+      return rows.filter(row => ids.has(row.threadId));
+    };
+    // These PIDs were launched by this owned fleet and are qualified by its native binding.
+    const idle = (await processes()).at(-1)!; process.kill(idle.pid, 'SIGTERM');
+    await until(() => { try { process.kill(idle.pid, 0); return false; } catch { return true; } }, Boolean);
+    await verifyFleetHealth(manifest);
+    const recovered = await f.send('Recover after the idle exit'); expect(await f.run(recovered.commandId)).toMatchObject({ outcome: 'completed' });
+    const spawn = await f.send('[fixture:spawn-choice]'); expect(await f.run(spawn.commandId)).toMatchObject({ outcome: 'completed' });
+    const blockedWorker = await until<any>(async () => (await f.detail()).choices.find((choice: any) => choice.agentId !== f.sessionId && choice.status === 'pending'), Boolean);
+    const crashed = await f.send('[fixture:crash]'); expect(await f.run(crashed.commandId)).toMatchObject({ outcome: 'failed' });
+    await until(async () => (await f.detail()).items.some((item: any) => item.text?.includes('Codex stopped unexpectedly. Send another message to restart it.')), Boolean);
+    const next = await f.send('Recover after the active exit'); expect(await f.run(next.commandId)).toMatchObject({ outcome: 'completed' });
+    const snapshot = await f.detail();
+    expect(snapshot.choices.some((choice: any) => choice.choiceId === blockedWorker.choiceId && choice.status === 'pending')).toBe(true);
+    expect(snapshot.items.filter((item: any) => item.kind === 'user' && item.text === 'Recover after the active exit')).toHaveLength(1);
+    expect(snapshot.items.some((item: any) => item.text === silentNotice)).toBe(false);
+    expect(snapshot.items.some((item: any) => item.text?.includes('manually stopped by the user'))).toBe(false);
+    await verifyFleetHealth(manifest);
+    evidence.nativeExitRecovery = { idleExitContained: true, activeExitContained: true, nextInputCompletedOnce: true, healthyWorkerPreserved: true, workerSpawnedFromDefaultManager: true };
+  } finally { f.rpc.close(); }
+});
+
+test('F16/F22: native choice has stable Needs You attention and a lazy fork shows its frozen context', async () => {
+  const f = await busySendFixture();
+  try {
+    await f.rpc.call('shell.subscribe', {});
+    const waiting = await f.send('[fixture:choice]');
+    const choice = await until<any>(async () => (await f.detail()).choices.find((choice: any) => choice.status === 'pending'), Boolean);
+    const first = (await f.detail()).session;
+    expect(first.status).toBe('waiting'); expect(first.attentionOccurrence?.attentionId).toBe(`native-choice:${choice.choiceId}`);
+    expect((await f.detail()).session.attentionOccurrence).toEqual(first.attentionOccurrence);
+    expect(f.rpc.frames.some(frame => frame.item?.event?.type === 'session.upsert' && frame.item.event.session.sessionId === f.sessionId && frame.item.event.session.attentionOccurrence?.attentionId === first.attentionOccurrence.attentionId)).toBe(true);
+    const answer = await f.rpc.call('session.choose', { commandId: randomUUID(), sessionId: f.sessionId, choiceId: choice.choiceId,
+      answers: [{ questionId: choice.questions[0].id, selectedOptionIds: [choice.questions[0].options[0].id] }] });
+    expect((await settled(answer.commandId, 0)).state).toBe('succeeded'); expect(await f.run(waiting.commandId)).toMatchObject({ outcome: 'completed' });
+    await until(async () => (await f.detail()).session.attentionOccurrence, value => !value);
+    const fork = await f.rpc.call('session.fork', { commandId: randomUUID(), sessionId: f.sessionId, title: 'Frozen context QA' });
+    const forkReceipt = await settled(fork.commandId, 0); expect(forkReceipt.state).toBe('succeeded');
+    const forkId = (forkReceipt.result as any).sessionId as string;
+    const snapshot = async (rpc: typeof f.rpc) => { const { subscriptionId } = await rpc.call('session.subscribe', { sessionId: forkId }); return (await until(() => rpc.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot; };
+    const notice = (await snapshot(f.rpc)).items.find((item: any) => item.text?.includes('earlier conversation item'));
+    expect(notice?.text).toContain('Send a message to continue.');
+    expect(Object.values((await f.state()).bindings).some(binding => binding.scope.threadId === forkId)).toBe(false);
+    const spawned = await f.send('[fixture:spawn]'); expect(await f.run(spawned.commandId)).toMatchObject({ outcome: 'completed' });
+    const worker = await until<any>(async () => (await f.detail()).workers[0], Boolean);
+    await until(async () => (await f.state()).threads[worker.agentId]?.activeRunId, value => !value);
+    const continued = await f.rpc.call('worker.continue', { commandId: randomUUID(), sessionId: f.sessionId, workerId: worker.agentId, title: 'Continued context QA' });
+    const continuedReceipt = await settled(continued.commandId, 0); expect(continuedReceipt.state).toBe('succeeded');
+    const { subscriptionId: continuedSubscription } = await f.rpc.call('session.subscribe', { sessionId: (continuedReceipt.result as any).sessionId });
+    const continuedSnapshot = (await until(() => f.rpc.frames.find(frame => frame.subscriptionId === continuedSubscription && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot;
+    expect(continuedSnapshot.items.some((item: any) => item.text?.includes('earlier conversation item'))).toBe(true);
+    await controlEnvironment(manifest, f.environment.name, 'stop'); await controlEnvironment(manifest, f.environment.name, 'start');
+    const replay = await openFixtureRpc(f.environment.baseUrl, sessions[0]!);
+    try { expect((await snapshot(replay)).items.find((item: any) => item.itemId === notice.itemId)?.text).toBe(notice.text); }
+    finally { replay.close(); }
+    evidence.choiceAndLazyContext = { liveNeedsYou: true, stableAttention: true, clearsWhenAnswered: true, frozenContextVisible: true, noProviderBeforeSend: true, replayAfterRestart: true };
+  } finally { f.rpc.close(); }
+});
+
+test('F20: rejected login disconnects auth status and explicit resend retains one canonical message through restart', async () => {
+  const f = await busySendFixture();
+  const headers = { Authorization: `Bearer ${sessions[0]!.bearer}`, 'Content-Type': 'application/json' };
+  const authUrl = `${f.environment.baseUrl}/api/settings/codex-native`;
+  const configure = async (apiKey: string) => { const response = await fetch(authUrl, { method: 'POST', headers, body: JSON.stringify({ action: 'configure', access: { mode: 'api_key', apiKey } }) }); expect(response.status).toBe(200); };
+  try {
+    await configure('forge-fixture-rejected-inert-key');
+    const message = { text: 'Message waiting for a valid connection', artifactIds: [] };
+    const failed = await f.rpc.call('session.send', { commandId: randomUUID(), sessionId: f.sessionId, message });
+    const receipt = await settled(failed.commandId, 0);
+    expect(receipt).toMatchObject({ state: 'failed', delivery: 'none' });
+    expect(receipt.error?.message).toContain('Check Settings > Authentication');
+    const disconnected = await (await fetch(authUrl, { headers })).json(); expect(disconnected).toMatchObject({ connected: false, phase: 'error' });
+    await configure('forge-fixture-inert-not-a-provider-key');
+    const resend = await f.rpc.call('session.send', { commandId: randomUUID(), sessionId: f.sessionId, message, resendOfCommandId: failed.commandId });
+    expect(await f.run(resend.commandId)).toMatchObject({ outcome: 'completed' });
+    const rows = (await f.detail()).items.filter((item: any) => item.kind === 'user' && item.text === message.text);
+    expect(rows).toHaveLength(1); expect(rows[0].commandId).toBe(resend.commandId);
+    await controlEnvironment(manifest, f.environment.name, 'stop'); await controlEnvironment(manifest, f.environment.name, 'start');
+    const replay = await openFixtureRpc(f.environment.baseUrl, sessions[0]!);
+    try { const { subscriptionId } = await replay.call('session.subscribe', { sessionId: f.sessionId }); const snapshot = (await until(() => replay.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot;
+      expect(snapshot.items.filter((item: any) => item.kind === 'user' && item.text === message.text)).toHaveLength(1);
+      expect(snapshot.items.find((item: any) => item.kind === 'user' && item.text === message.text).commandId).toBe(resend.commandId);
+    } finally { replay.close(); }
+    evidence.loginFailureAndResend = { authDisconnectedAfterRejection: true, actionableReceipt: true, provenUndeliveredResend: true, canonicalMessages: 1, replayAfterRestart: true };
+  } finally { f.rpc.close(); }
+});
