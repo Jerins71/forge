@@ -11,15 +11,20 @@ import { createReplayHarness, watchdog, type ReplayTranscript } from "../runtime
 import { cursorReplayTransport } from "../runtime/replay/fixtures/cursor-sdk/transport.js";
 import { bindRuntimeToolHost, planRuntimeTools } from "../runtime/runtime-tool-plan.js";
 import { createInstructionBundle, renderInstructionBundle } from "../runtime/instruction-bundle.js";
-import { ProviderRefreshRequiredError, UnsupportedProviderBehaviorError } from "../runtime/provider-contract.js";
+import { ProviderDispatchRejectedError, ProviderRefreshRequiredError, UnsupportedProviderBehaviorError } from "../runtime/provider-contract.js";
 import { createProviderBoundaryFixture } from "./provider-boundary-fixture.js";
+import { ConversationProjector } from "../session/conversation-projector.js";
+import { RuntimeEventProjector } from "../runtime/runtime-event-projector.js";
+import { RuntimeStatusProjector } from "../runtime/runtime-status-projector.js";
+import type { RuntimeSessionEvent, SwarmAgentRuntime } from "../runtime-contracts.js";
+import type { AgentStatus } from "../types.js";
 
 const cleanups: Array<() => Promise<unknown> | void> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 const lifecyclePath = new URL("../runtime/replay/fixtures/cursor-sdk/lifecycle.json", import.meta.url);
 
-async function setup(modify?: (transcript: ReplayTranscript) => void, resume = false, creator = false) {
+async function setup(modify?: (transcript: ReplayTranscript) => void, resume = false, creator = false, project = false) {
   vi.spyOn(Date.prototype, "toISOString").mockReturnValue("2026-01-01T00:00:00.000Z");
   const fixture = await createProviderBoundaryFixture();
   cleanups.push(fixture.cleanup);
@@ -36,8 +41,39 @@ async function setup(modify?: (transcript: ReplayTranscript) => void, resume = f
   const instructions = await fixture.service.buildCursorSdkRuntimeInstructionBundle(descriptor, await fixture.service.buildInstructionBundle(descriptor));
   const plan = planRuntimeTools({ ...fixture.deps, descriptor } as never);
   const toolHost = bindRuntimeToolHost({ descriptor, tools: plan.swarmTools, scope, mechanism: "loopback_mcp" });
+  const runtimes = new Map<string, SwarmAgentRuntime>();
+  const descriptors = new Map([[descriptor.agentId, descriptor]]);
+  const onAgentEnd = vi.fn(async () => {});
+  const statuses: AgentStatus[] = [];
+  let eventProjector: RuntimeEventProjector | undefined;
+  let statusProjector: RuntimeStatusProjector | undefined;
+  let conversationProjector: ConversationProjector | undefined;
+  if (project) {
+    conversationProjector = new ConversationProjector({ descriptors, runtimes, conversationEntriesByAgentId: new Map(),
+      now: () => "2026-01-01T00:00:00.000Z", emitServerEvent: () => {}, logDebug: () => {} });
+    cleanups.push(() => conversationProjector!.flushPendingHistoryCacheWrites());
+    eventProjector = new RuntimeEventProjector({ config: fixture.config, descriptors, workerStallState: new Map(), workerActivityState: new Map(),
+      runtimeRecoveryState: { markRecoveryAbortedWorkerTurn: () => {} }, now: () => "2026-01-01T00:00:00.000Z", conversationProjector,
+      markSessionActivity: () => {}, maybeRecordModelCapacityBlock: () => {}, maybeRecoverWorkerWithSpecialistFallback: async () => false,
+      consumePendingManualManagerStopNoticeIfApplicable: () => false, stripManagerAbortErrorFromEvent: event => event,
+      isRuntimeRecoveryActive: () => false, beginPendingTransientWorkerTerminatedError: () => false,
+      cancelPendingTransientWorkerTerminatedError: () => {}, hasPendingTransientWorkerTerminatedError: () => false,
+      logDebug: () => {}, getRuntime: id => runtimes.get(id), getActiveTurnId: () => "forge-run", hasPendingSupersedingUserInput: () => false,
+      isModelCacheVisualizationEnabled: () => false, emitModelCacheObservation: () => {},
+      resolveManagerAssistantFinalOutputTarget: () => ({ kind: "session_transcript", agentId: descriptor.agentId, channel: "web" }),
+    });
+    statusProjector = new RuntimeStatusProjector({ descriptors, workerStallState: new Map(), workerActivityState: new Map(),
+      now: () => "2026-01-01T00:00:00.000Z", patchDescriptorFromRuntimeStatus: async (id, patch) => Object.assign(descriptors.get(id)!, patch),
+      updateSessionMetaForWorkerDescriptor: async () => {}, refreshSessionMetaStatsBySessionId: async () => {},
+      refreshSessionMetaStats: async () => {}, saveStore: async () => {}, emitStatus: () => {}, logDebug: () => {} });
+  }
+  const onSessionEvent = vi.fn(async (agentId: string, event: RuntimeSessionEvent) => { await eventProjector?.projectEvent({ agentId, runtimeToken: 5, event }); });
+  const onStatusChange = async (agentId: string, status: AgentStatus, pendingCount: number) => {
+    statuses.push(status);
+    await statusProjector?.projectStatus({ agentId, status, pendingCount });
+  };
   let adapter = new CursorSdkProviderAdapter({ descriptor, sdk: transport.sdk, apiKey: "synthetic-test-only", stateRoot: resolve(fixture.root, "cursor-state"),
-    callbacks: { onStatusChange: async () => {} }, now: () => "2026-01-01T00:00:00.000Z" });
+    callbacks: { onStatusChange, onSessionEvent, onAgentEnd }, now: () => "2026-01-01T00:00:00.000Z" });
   let input = { scope, model: descriptor.model, instructions, toolHost };
   const prepared = vi.fn();
   if (creator) {
@@ -45,14 +81,17 @@ async function setup(modify?: (transcript: ReplayTranscript) => void, resume = f
     vi.stubEnv("CURSOR_API_KEY", "synthetic-local-key");
     const runtime = await new CursorSdkRuntimeCreator({ ...fixture.deps, now: () => "2026-01-01T00:00:00.000Z", logDebug: () => {},
       buildCursorSdkRuntimeInstructionBundle: (actor, base) => fixture.service.buildCursorSdkRuntimeInstructionBundle(actor, base),
-      callbacks: { onStatusChange: async () => {}, onSessionEvent: async () => {}, onAgentEnd: async () => {}, onRuntimeError: async () => {} },
+      callbacks: { onStatusChange: (_token, id, status, pending) => onStatusChange(id, status, pending),
+        onSessionEvent: (_token, id, event) => onSessionEvent(id, event), onAgentEnd, onRuntimeError: async () => {} },
     } as ConstructorParameters<typeof CursorSdkRuntimeCreator>[0]).createRuntimeForDescriptor({ descriptor, systemPrompt: "unused legacy string", runtimeToken: 5, sessionDescriptor: undefined,
-      creationOptions: { instructionBundle: await fixture.service.buildInstructionBundle(descriptor), providerScope: scope, onProviderPrepared: prepared } });
+      creationOptions: { instructionBundle: await fixture.service.buildInstructionBundle(descriptor), providerScope: scope, onProviderPrepared: prepared,
+        providerConversation: resume ? { ...scope, bindingId: "old-cursor-binding", generation: 1, kind: "conversation", nativeId: "cursor-agent" } : undefined } });
     adapter = runtime.providerAdapter as CursorSdkProviderAdapter;
     const record = prepared.mock.calls[0]![0];
     input = { ...input, instructions: record.instructionBundle, toolHost: record.toolHostBinding };
   }
   const binding = await watchdog("open", resume ? adapter.resume({ ...input, conversation: { ...scope, bindingId: "old-cursor-binding", generation: 1, kind: "conversation", nativeId: "cursor-agent" } }) : adapter.open(input));
+  runtimes.set(descriptor.agentId, adapter.getRuntime());
   const signal = new AbortController();
   const terminal = Promise.withResolvers<ProviderObservation>();
   const consumption = (async () => {
@@ -62,7 +101,7 @@ async function setup(modify?: (transcript: ReplayTranscript) => void, resume = f
     }
   })();
   cleanups.push(async () => { signal.abort(); await consumption; transport.close(); await adapter.close(binding).catch(() => {}); });
-  return { fixture, descriptor, harness, transport, adapter, binding, input, instructions, toolHost, events, prepared, terminal: terminal.promise };
+  return { fixture, descriptor, harness, transport, adapter, binding, input, instructions, toolHost, events, prepared, onAgentEnd, onSessionEvent, statuses, conversationProjector, terminal: terminal.promise };
 }
 const start = (s: Awaited<ReturnType<typeof setup>>) => s.adapter.start({ binding: s.binding, runId: "forge-run", attemptId: "forge-attempt", input: { text: "hello", images: [] } });
 
@@ -118,7 +157,7 @@ describe("Cursor ProviderAdapter with SDK transport replay", () => {
 
 
   it("exposes the adapter and exact prepared bundles from the production creator and preserves legacy sends", async () => {
-    const s = await setup(undefined, false, true);
+    const s = await setup(undefined, false, true, true);
     expect(s.prepared).toHaveBeenCalledTimes(1);
     const prepared = s.prepared.mock.calls[0]![0];
     expect(prepared.instructionBundle).toEqual(s.instructions);
@@ -128,7 +167,76 @@ describe("Cursor ProviderAdapter with SDK transport replay", () => {
     expect(await s.adapter.open({ ...s.input, instructions: prepared.instructionBundle, toolHost: prepared.toolHostBinding })).toBe(s.binding);
     await s.adapter.getRuntime().sendMessage("hello");
     await watchdog("legacy terminal", s.terminal);
+    expect(s.onSessionEvent.mock.calls.filter(([, event]) => event.type === "agent_start")).toHaveLength(1);
+    expect(s.onSessionEvent.mock.calls.filter(([, event]) => event.type === "agent_end")).toHaveLength(1);
+    expect(s.onAgentEnd).toHaveBeenCalledTimes(1);
+    expect(s.statuses).toEqual(["streaming", "idle"]);
+    const records = (await readFile(s.descriptor.sessionFile, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    expect(records.filter(record => record.customType === "swarm_conversation_entry" && record.data.role === "assistant")).toHaveLength(1);
     await finish(s);
+  });
+
+  it("resumes the creator's durable locator before idempotent acquisition without opening another session", async () => {
+    const s = await setup(t => {
+      t.entries[0] = { type: "expect_outbound", frame: { method: "agent/resume", agentId: "cursor-agent", settingSources: [] } };
+    }, true, true, true);
+    expect(s.prepared).toHaveBeenCalledTimes(1);
+    expect(s.binding.conversation).toEqual({ ...s.input.scope, kind: "conversation", nativeId: "cursor-agent" });
+    expect(await s.adapter.resume({ ...s.input, conversation: { ...s.input.scope, bindingId: "old-cursor-binding", generation: 1, kind: "conversation", nativeId: "cursor-agent" } })).toBe(s.binding);
+    await start(s); await watchdog("creator resumed terminal", s.terminal);
+    expect(s.events.every(event => event.scope.generation === 2 && event.origin.conversation.generation === 2)).toBe(true);
+    expect(s.onAgentEnd).toHaveBeenCalledTimes(1);
+    expect(s.transport.payloads).toHaveLength(1);
+    await finish(s);
+  });
+
+  it("projects a creator-exposed adapter start into canonical assistant JSONL, status and one end", async () => {
+    const s = await setup(undefined, false, true, true);
+    const result = await watchdog("adapter projection start", start(s));
+    expect(result).toMatchObject({ status: "accepted" });
+    await watchdog("adapter projection terminal", s.terminal);
+    const projected = s.onSessionEvent.mock.calls.map(([, event]) => event);
+    for (const type of ["agent_start", "turn_start", "turn_end", "agent_end"]) expect(projected.filter(event => event.type === type)).toHaveLength(1);
+    expect(projected.filter(event => event.type === "message_start" && event.message.role === "user")).toHaveLength(1);
+    expect(s.onAgentEnd).toHaveBeenCalledTimes(1);
+    expect(s.statuses).toEqual(["streaming", "idle"]);
+    expect(s.descriptor.status).toBe("idle");
+    const records = (await readFile(s.descriptor.sessionFile, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    const assistant = records.filter(record => record.customType === "swarm_conversation_entry" && record.data.role === "assistant");
+    expect(assistant).toHaveLength(1);
+    expect(assistant[0].data).toMatchObject({ type: "conversation_message", role: "assistant", text: "Hello", turnId: "forge-run" });
+    expect(s.events.filter(event => event.type === "terminal" && event.terminalAuthority === "root_attempt")).toEqual([expect.objectContaining({ attemptId: "forge-attempt" })]);
+    expect(s.conversationProjector!.getConversationHistory(s.descriptor.agentId)).toContainEqual(expect.objectContaining({ role: "assistant", text: "Hello", turnId: "forge-run" }));
+    const statuses = [...s.statuses];
+    await finish(s);
+    const evidence = resolve(process.cwd(), "../../.internal/core/evidence/cursor-glue-projection.json");
+    await mkdir(resolve(evidence, ".."), { recursive: true });
+    await writeFile(evidence, JSON.stringify({ provenance: "Creator-bound production event/status/conversation projections; SDK transport substituted only", trace: s.harness.trace,
+      canonicalAssistant: { role: assistant[0].data.role, text: assistant[0].data.text, turnId: assistant[0].data.turnId }, statuses,
+      assertions: { assistantRecords: assistant.length, endCallbacks: s.onAgentEnd.mock.calls.length, agentStartProjections: projected.filter(event => event.type === "agent_start").length, agentEndProjections: projected.filter(event => event.type === "agent_end").length },
+      rerun: "pnpm --dir apps/backend exec vitest run src/swarm/__tests__/cursor-sdk-provider.replay.test.ts" }, null, 2));
+  });
+
+  it.each(["adapter", "legacy"] as const)("rejects adapter starts during a %s dispatch without entering the native queue", async mode => {
+    const s = await setup(t => {
+      t.entries[3] = { ...t.entries[3], label: "hold-ack" };
+      t.entries[4] = { ...t.entries[4], label: "hold-output" };
+    }, false, true);
+    const first = mode === "adapter" ? start(s) : s.adapter.getRuntime().sendMessage("hello");
+    await watchdog("native acknowledgment held", s.harness.signals.wait("1:hold-ack:held"));
+    const rejected = start(s);
+    await expect(rejected).rejects.toBeInstanceOf(ProviderDispatchRejectedError);
+    await expect(rejected).rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", delivery: "not_dispatched", reason: "busy" });
+    expect(s.adapter.getRuntime().getPendingCount()).toBe(0);
+    s.harness.release("1:hold-ack"); await first;
+    await watchdog("native output held", s.harness.signals.wait("1:hold-output:held"));
+    const rejectedWhileStreaming = start(s);
+    await expect(rejectedWhileStreaming).rejects.toBeInstanceOf(ProviderDispatchRejectedError);
+    await expect(rejectedWhileStreaming).rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", delivery: "not_dispatched", reason: "busy" });
+    expect(s.adapter.getRuntime().getPendingCount()).toBe(0);
+    expect(s.transport.payloads).toHaveLength(1);
+    s.harness.release("1:hold-output");
+    await watchdog("busy first terminal", s.terminal); await finish(s);
   });
 
   it("keeps failed native resume explicit and tears down its bridge", async () => {
@@ -221,7 +329,7 @@ describe("Cursor ProviderAdapter with SDK transport replay", () => {
       { type: "emit_inbound", label: "finish-cancel", frame: { streamEnd: true } }); });
     const result = await start(s);
     if (result.status !== "accepted") throw new Error("Expected native acknowledgment");
-    await expect(s.adapter.getRuntime().shutdownForReplacement()).rejects.toMatchObject({ code: "CURSOR_DISPATCH_BUSY" });
+    await expect(s.adapter.getRuntime().shutdownForReplacement()).rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", delivery: "not_dispatched", reason: "busy" });
     expect((await fetch(s.transport.mcpUrls[0]!)).status).toBe(405);
     await expect(s.adapter.interrupt({ binding: s.binding, attemptId: "forge-attempt", turn: { ...result.turn, generation: 1 } })).rejects.toMatchObject({ code: "CURSOR_BINDING_STALE" });
     s.transport.failNextCancel();

@@ -128,9 +128,13 @@ export class CursorSdkRuntimeCreator {
     let runtime: SwarmAgentRuntime | undefined;
     try {
       const input = { scope, model: descriptor.model, instructions: instructionBundle, toolHost, required: creationOptions?.providerRequirements };
-      const nativeId = promptPlan.skipInitialSessionResume ? undefined : getPersistedCursorSdkConversationId(descriptor.sessionFile);
-      if (nativeId) await adapter.resume({ ...input, conversation: { ...scope, kind: "conversation", nativeId } });
-      else await adapter.open(input);
+      if (creationOptions?.providerConversation) {
+        await adapter.resume({ ...input, conversation: creationOptions.providerConversation });
+      } else {
+        const nativeId = promptPlan.skipInitialSessionResume ? undefined : getPersistedCursorSdkConversationId(descriptor.sessionFile);
+        if (nativeId) await adapter.resume({ ...input, conversation: { ...scope, kind: "conversation", nativeId } });
+        else await adapter.open(input);
+      }
       runtime = adapter.getRuntime();
       creationOptions?.onProviderPrepared?.({ instructionBundle, toolHostBinding: toolHost });
     } catch (error) {
