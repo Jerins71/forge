@@ -240,7 +240,9 @@ test('9.2.4 real manager choice, lost answer ack, conflict and native worker res
     const older = await rpc.call('session.history', { sessionId: launchedSessionId, turns: 4, before: history.nextCursor });
     expect(older.items.length).toBeGreaterThan(0); expect(new Set([...history.items, ...older.items].map((item: any) => item.itemId)).size).toBe(history.items.length + older.items.length);
     await rpc.call('session.send', { commandId: randomUUID(), sessionId: launchedSessionId, message: { text: '[fixture:long-tool]', artifactIds: [] } });
-    const tool = await until<any>(() => rpc.frames.map(frame => frame.item?.event).find(event => event?.type === 'item.upsert' && event.item.kind === 'tool' && event.item.contentRef)?.item, Boolean);
+    // The write and then the read each become one activity row; the read returns the long output.
+    const tool = await until<any>(() => rpc.frames.map(frame => frame.item?.event).filter(event => event?.type === 'item.upsert' && event.item.kind === 'activity' && event.item.activity?.toolName === 'notes' && event.item.contentRef)[1]?.item, Boolean);
+    expect(tool.activity).toMatchObject({ kind: 'tool', status: 'completed', truncated: true });
     expect(tool.text.length).toBeLessThanOrEqual(8192);
     let offset = 0; let content = ''; let pages = 0;
     do { const chunk = await rpc.call('session.content', { sessionId: launchedSessionId, contentRef: tool.contentRef, offset, maxBytes: 4096 }); content += chunk.text; pages++; offset = chunk.nextOffset; } while (offset !== null);
@@ -1109,7 +1111,7 @@ test('F18/R6: idle and active Codex exits stay contained, a new input recovers o
     const spawn = await f.send('[fixture:spawn-choice]'); expect(await f.run(spawn.commandId)).toMatchObject({ outcome: 'completed' });
     const blockedWorker = await until<any>(async () => (await f.detail()).choices.find((choice: any) => choice.agentId !== f.sessionId && choice.status === 'pending'), Boolean);
     const crashed = await f.send('[fixture:crash]'); expect(await f.run(crashed.commandId)).toMatchObject({ outcome: 'failed' });
-    await until(async () => (await f.detail()).items.some((item: any) => item.text?.includes('Codex stopped unexpectedly. Send another message to restart it.')), Boolean);
+    await until(async () => (await f.detail()).items.some((item: any) => item.activity?.kind === 'status' && item.activity?.status === 'failed'), Boolean);
     const next = await f.send('Recover after the active exit'); expect(await f.run(next.commandId)).toMatchObject({ outcome: 'completed' });
     const snapshot = await f.detail();
     expect(snapshot.choices.some((choice: any) => choice.choiceId === blockedWorker.choiceId && choice.status === 'pending')).toBe(true);

@@ -1136,6 +1136,7 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
     this.services.registry.directory.getRequiredSessionDescriptor(sessionAgentId);
     return this.services.runtime.activeTools.buildSnapshotEvent(sessionAgentId);
   }
+  getRunningTimelineActivity(sessionAgentId: string) { return this.services.conversation.projector.getRunningActivity(sessionAgentId); }
   getManagerToolActivitySnapshot(sessionAgentId: string) { this.services.registry.directory.getRequiredSessionDescriptor(sessionAgentId); return this.services.runtime.managerToolActivity.buildSnapshotEvent(sessionAgentId); }
   async getGenerationThroughputSnapshot(sessionAgentId: string): Promise<GenerationThroughputSnapshotEvent> {
     this.services.registry.directory.getRequiredSessionDescriptor(sessionAgentId);

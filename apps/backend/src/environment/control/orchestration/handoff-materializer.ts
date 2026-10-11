@@ -20,7 +20,7 @@ function render(entry:ConversationEntryEvent):string|undefined {
     return `${entry.role==='user'?'User':'Assistant'}: ${entry.text}`;
   }
   if(entry.type==='agent_message') return `Agent ${entry.fromAgentId ?? 'user'}: ${entry.text}`;
-  if(entry.type==='activity_summary') return `Activity: ${entry.displaySummary}`;
+  if(entry.type==='activity_summary') return entry.activity?.kind==='reasoning' ? undefined : `Activity: ${entry.displaySummary}`;
 }
 export async function materializeHandoff(input:{dataDir:string;transfer:LineageTransfer;entries:readonly ConversationEntryEvent[];sources?:readonly {sourcePoint:ContextSourcePoint;entries:readonly ConversationEntryEvent[];coveredEntryIds:readonly string[]}[];coveredEntryIds:readonly string[];maxChars?:number;now:number}):Promise<{metadata:ContextHandoff;text:string}> {
   const maxChars=input.maxChars ?? 32_000;if(!Number.isInteger(maxChars) || maxChars<128) throw new Error('Portable context budget must be at least 128 characters');

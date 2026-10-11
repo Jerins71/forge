@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ProviderScope, ProviderConversationRef } from "@forge/protocol";
 import type { ProviderAdapter, ProviderBinding } from "./runtime/provider-contract.js";
+import { tapProviderReasoning } from "./runtime/provider-reasoning-tap.js";
 import type {
   AgentRuntimeExtensionSnapshot,
   GenerationThroughputEvent,
@@ -111,6 +112,9 @@ export interface SwarmRuntimeControllerHost extends SwarmToolHost {
   conversationProjector: {
     captureConversationEventFromRuntime(agentId: string, event: RuntimeSessionEvent, options?: { turnId?: string }): void;
     emitConversationMessage(event: ConversationMessageEvent, options?: { routingReceipt?: MessageRoutingReceiptRecord }): void;
+    observeProviderText(fact: { actorId: string; channel: "assistant" | "reasoning"; nativeId: string; phase: "start" | "delta" | "complete"; text: string; runId?: string }): void;
+    observeProviderRetry(fact: { actorId: string; attempt: number; message: string; runId?: string }): void;
+    settleProviderTurn(actorId: string, end?: { error?: string; stopped?: boolean; runId?: string }): void;
   };
   promptService: {
     buildCursorSdkRuntimeSystemPrompt(descriptor: AgentDescriptor, systemPrompt: string): Promise<string>;
@@ -375,7 +379,12 @@ export class SwarmRuntimeController {
       const input = { scope, model:runtime.descriptor.model, instructions:record.prepared.instructionBundle, toolHost:record.prepared.toolHostBinding };
       const binding = conversation ? await adapter.resume({ ...input, conversation }) : await adapter.open(input);
       record.generation = scope.generation;
-      return { adapter,binding };
+      const actorId = scope.threadId;
+      return { binding, adapter: tapProviderReasoning(adapter, {
+        text: fact => this.host.conversationProjector.observeProviderText({ ...fact, actorId, runId: this.host.getActiveTurnId?.(actorId) }),
+        retrying: fact => this.host.conversationProjector.observeProviderRetry({ ...fact, actorId, runId: this.host.getActiveTurnId?.(actorId) }),
+        settled: end => this.host.conversationProjector.settleProviderTurn(actorId, { ...end, runId: this.host.getActiveTurnId?.(actorId) }),
+      }) };
     };
     try { return await open(); } catch (error) {
       if (!(error && typeof error === "object" && "code" in error && error.code === "PROVIDER_REFRESH_REQUIRED")) throw error;
@@ -807,6 +816,7 @@ export class SwarmRuntimeController {
         patchDescriptorFromRuntimeStatus: (agentId, patch) =>
           this.host.patchDescriptorFromRuntimeStatus(agentId, patch),
         emitConversationMessage: (event) => this.host.emitConversationMessage(event),
+        reportProviderFailure: (agentId, message) => this.host.conversationProjector.settleProviderTurn(agentId, { error: message, runId: this.host.getActiveTurnId?.(agentId) }),
         logDebug: (message, details) => this.logDebug(message, details)
       });
     }
@@ -1014,6 +1024,7 @@ export class SwarmRuntimeController {
     const preserveActiveTurn = shouldPreserveActiveTurnForRuntimeError(guardedError);
     if (!preserveActiveTurn) {
       this.host.recordManagerTurnWatchdogRuntimeError?.(agentId, runtimeToken, guardedError);
+      this.getRuntimeEventProjector().markManagerTurnIncomplete(agentId);
       this.clearManagerAssistantOutputTurn(agentId);
     }
     this.recordObservabilityRuntimeError(agentId, runtimeToken, guardedError);

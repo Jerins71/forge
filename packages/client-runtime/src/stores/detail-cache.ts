@@ -285,6 +285,7 @@ export class DetailCache {
             : event.type === 'terminal.upsert' ? `terminal:${event.terminal.terminalId}`
             : event.type === 'terminal.closed' ? `terminal:${event.terminalId}`
             : event.type === 'throughput.upsert' ? `throughput:${event.measurement.agentId}`
+            : event.type === 'activity.upsert' ? `activity:${event.item.itemId}`
             : event.type === 'secure.upsert' ? `secure:${event.snapshot.sessionAgentId}` : event.type
           transientBatch.set(key, event)
           if (!entry.cancelBatch) entry.cancelBatch = this.ports.scheduleBatch?.(flush) ?? schedule(flush)

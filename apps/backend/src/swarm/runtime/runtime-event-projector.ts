@@ -215,6 +215,11 @@ export class RuntimeEventProjector {
     this.managerAssistantOutputTracker.activateTurn(agentId, target, options);
   }
 
+  markManagerTurnIncomplete(agentId: string): void {
+    this.incompleteManagerAgentIds.add(agentId);
+    this.pendingSilentManagerNotices.delete(agentId);
+  }
+
   clearManagerAssistantOutputTurn(agentId: string): void {
     this.managerAssistantOutputTracker.clearTurn(agentId);
   }
@@ -359,8 +364,7 @@ export class RuntimeEventProjector {
     if (descriptor?.role === "manager" && (shouldSurfaceManualStopNotice || isContextRecoveryAbort ||
       managerStopReason === "error" || managerStopReason === "aborted" || managerErrorMessage !== undefined ||
       event.type === "turn_end" && event.meta?.outcome !== undefined && !["completed", "success"].includes(event.meta.outcome))) {
-      this.incompleteManagerAgentIds.add(agentId);
-      this.pendingSilentManagerNotices.delete(agentId);
+      this.markManagerTurnIncomplete(agentId);
     }
 
     const effectiveEvent = (shouldSurfaceManualStopNotice || isContextRecoveryAbort)

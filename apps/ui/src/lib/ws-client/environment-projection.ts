@@ -174,15 +174,23 @@ export function projectActivityItems(
     .map((i) => ({
       type: 'activity_summary',
       schemaVersion: ACTIVITY_SUMMARY_SCHEMA_VERSION,
-      itemId: i.itemId,
+      // The activity's stable ID matches its live row; the detail item ID orders and keys the durable row.
+      itemId: i.activity?.itemId ?? i.itemId,
+      timelineEntryId: i.itemId,
       agentId: sessionId,
       actorAgentId: i.actorId,
       turnId: i.userTurnId,
       timestamp: i.timestamp,
       kind: 'tool_activity',
-      status: 'completed',
+      status: i.activity?.status === 'failed' ? 'failed' : 'completed',
+      ...(i.activity?.toolName ? { toolName: i.activity.toolName } : {}),
       displaySummary: i.text,
       contentRef: i.contentRef,
+      ...(i.activity ? { activity: {
+        kind: i.activity.kind, startedAt: i.activity.startedAt,
+        ...(i.activity.truncated ? { truncated: true } : {}), ...(i.activity.hidden ? { hidden: true } : {}),
+        ...(i.activity.exitCode !== undefined ? { exitCode: i.activity.exitCode } : {}),
+      } } : {}),
     }))
 }
 

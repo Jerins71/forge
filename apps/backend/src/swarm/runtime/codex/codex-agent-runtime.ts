@@ -464,8 +464,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     // backstop. Release the held turn even when a projection callback rejects.
     try {
       if (!terminal || active) await this.options.callbacks.onRuntimeError?.(this.descriptor.agentId, {
-        ...normalizeRuntimeError(error), phase: "prompt_start",
-        ...(terminal ? { details: { userFacingMessage: "Codex stopped unexpectedly. Send another message to restart it." } } : {}),
+        ...normalizeRuntimeError(error), phase: terminal ? "runtime_exit" : "prompt_start",
       });
     } finally {
       if (terminal) {

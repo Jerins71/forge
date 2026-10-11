@@ -9,6 +9,7 @@
     { "type": "emit_inbound", "frame": { "agentId": "cursor-agent" } },
     { "type": "expect_outbound", "frame": { "method": "agent/send", "promptSha256": "$any" }, "label": "send" },
     { "type": "emit_inbound", "frame": { "run": { "id": "cursor-run", "agentId": "cursor-agent" } } },
+    { "type": "emit_inbound", "frame": { "message": { "type": "thinking", "agent_id": "cursor-agent", "run_id": "cursor-run", "text": "Plan the read", "thinking_duration_ms": 12 } } },
     { "type": "emit_inbound", "frame": { "message": { "type": "assistant", "agent_id": "cursor-agent", "run_id": "cursor-run", "message": { "role": "assistant", "content": [{ "type": "text", "text": "Hello" }] } } } },
     { "type": "emit_inbound", "frame": { "message": { "type": "tool_call", "agent_id": "cursor-agent", "run_id": "cursor-run", "call_id": "native-tool", "name": "read", "status": "completed", "args": { "path": "synthetic.txt" }, "result": { "content": "read result" } } } },
     { "type": "emit_inbound", "frame": { "message": { "type": "status", "agent_id": "native-child", "run_id": "child-run", "status": "FINISHED" } } },

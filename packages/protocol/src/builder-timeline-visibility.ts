@@ -71,7 +71,12 @@ function isVisibleInBuilderWebTimeline(
   context: BuilderTimelineProjectionContext,
   agentsById: ReadonlyMap<string, BuilderTimelineAgentRef>,
 ): boolean {
-  if (entry.type === 'conversation_log' || entry.type === 'agent_tool_call' || entry.type === 'activity_summary') {
+  // An agent's own tool and reasoning rows belong to its timeline; rows without timeline detail stay in All.
+  if (entry.type === 'activity_summary') {
+    return entry.activity !== undefined && entry.actorAgentId === context.activeAgentId
+  }
+
+  if (entry.type === 'conversation_log' || entry.type === 'agent_tool_call') {
     return false
   }
 

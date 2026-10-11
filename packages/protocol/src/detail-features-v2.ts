@@ -1,5 +1,6 @@
 /** Bounded typed presentation. No secret values, tool arguments or provider locators. */
 import { Type, type Static, type TSchema } from '@sinclair/typebox'
+import { TimelineActivitySchema } from './activity-timeline.js'
 const O = <P extends Record<string, TSchema>>(p: P) => Type.Object(p, { additionalProperties: false })
 const E = <T extends string>(...v: T[]) => Type.Union(v.map(x => Type.Literal(x)))
 const id = Type.String({ minLength: 1, maxLength: 256 })
@@ -79,6 +80,7 @@ export const ElicitationRespondV2Schema = O({ sessionId: id, elicitationId: id, 
   persistScope: Type.Optional(E('session','always')) })
 export const DetailFeatureEventSchema = Type.Union([
   O({ type: Type.Literal('tool.activity'), activity: ToolActivityV2Schema }),
+  O({ type: Type.Literal('activity.upsert'), item: TimelineActivitySchema }),
   O({ type: Type.Literal('throughput.upsert'), measurement: ThroughputMeasurementV2Schema, summary: Type.Optional(ThroughputSummaryV2Schema) }),
   O({ type: Type.Literal('throughput.snapshot'), measurements: Type.Array(ThroughputMeasurementV2Schema, { maxItems: 100 }), summary: ThroughputSummaryV2Schema }),
   O({ type: Type.Literal('secure.upsert'), snapshot: SecureSessionV2Schema }), O({ type: Type.Literal('secure.catalog.changed'), revision: n }),

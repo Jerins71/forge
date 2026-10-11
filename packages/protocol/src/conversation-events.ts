@@ -10,6 +10,7 @@ import type {
 } from './shared-types.js'
 import type { ModelCacheObservationEvent } from './model-cache.js'
 import type { PlanSummaryEvent } from './plans.js'
+import type { PersistedActivityDetail } from './activity-timeline.js'
 
 export type {
   ModelCacheClassification,
@@ -239,8 +240,8 @@ export type ActivitySummaryStatus = 'completed' | 'failed' | 'interrupted'
 
 /**
  * Compact, provider-neutral activity that is safe to keep in canonical session
- * history. Streaming updates and raw tool output deliberately stay out of this
- * record; the stable itemId lets live and replayed rows converge.
+ * history. Streaming updates stay out of this record; `activity` keeps only
+ * bounded, truncated content. The stable itemId lets live and replayed rows converge.
  */
 export interface ActivitySummaryEvent {
   type: 'activity_summary'
@@ -259,6 +260,8 @@ export interface ActivitySummaryEvent {
   /** Bounded collapsed-row copy; never contains raw tool output. */
   displaySummary: string
   isError?: boolean
+  /** Kind, timing and bounded expandable content of the row; absent on older records. */
+  activity?: PersistedActivityDetail
 }
 
 /**

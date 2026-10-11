@@ -276,7 +276,10 @@ export class PiProviderAdapter implements ProviderAdapter {
     if (event.type === "message_update" && event.message.role === "assistant") {
       const delta = event.assistantMessageEvent;
       if (delta.type === "text_delta") this.publishMessage("delta", "assistant", delta.delta);
-      if (delta.type === "thinking_delta") this.publishMessage("delta", "reasoning", delta.delta);
+      // Each thinking block is its own reasoning item, so it starts and completes apart from the reply text.
+      if (delta.type === "thinking_start") this.publishMessage("start", "reasoning", "", undefined, delta.contentIndex);
+      if (delta.type === "thinking_delta") this.publishMessage("delta", "reasoning", delta.delta, undefined, delta.contentIndex);
+      if (delta.type === "thinking_end") this.publishMessage("complete", "reasoning", delta.content, undefined, delta.contentIndex);
       if (delta.type === "toolcall_delta") this.publishMessage("delta", "assistant", "", jsonValue(delta.partial.content));
     }
     if (event.type === "message_end" && event.message.role === "assistant") {
@@ -303,10 +306,11 @@ export class PiProviderAdapter implements ProviderAdapter {
     }
   }
 
-  private publishMessage(phase: "start" | "delta" | "complete", channel: "assistant" | "reasoning", text: string, content?: ReturnType<typeof jsonValue>): void {
+  private publishMessage(phase: "start" | "delta" | "complete", channel: "assistant" | "reasoning", text: string, content?: ReturnType<typeof jsonValue>, thinkingIndex?: number): void {
     if (!this.itemId || !this.binding || !this.active?.turn) return;
     this.publish({ type: "message", phase, channel, text,
-      item: { ...this.binding.scope, kind: "item", conversationId: this.session.sessionId, turnId: this.active.turn.nativeId, nativeId: this.itemId },
+      item: { ...this.binding.scope, kind: "item", conversationId: this.session.sessionId, turnId: this.active.turn.nativeId,
+        nativeId: thinkingIndex === undefined ? this.itemId : `${this.itemId}:thinking:${thinkingIndex}` },
       ...(content !== undefined ? { content } : {}) });
   }
 

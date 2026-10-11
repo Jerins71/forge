@@ -1,7 +1,7 @@
 import { loadState } from "./orchestration/store.js";
 import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
 import { requestForChoice, requestAttention } from "./orchestration/request-projection.js";
-import { projectAgentMetadata } from "@forge/protocol";
+import { formatActivityContent, projectAgentMetadata } from "@forge/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, createReadStream, openSync, readSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -9,9 +9,10 @@ import type { Database } from "better-sqlite3";
 import { decodeEnvironmentValue, PlanSnapshotV2Schema, GoalSnapshotV2Schema } from "@forge/protocol/environment-v2";
 import type { ArtifactRef, ProjectSummary, SessionSummary, DetailStreamItem, RpcInput, RpcOutput } from "@forge/protocol/environment-v2";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
-import type { AgentDescriptor, ConversationEntryEvent, ManagerProfile, ChoiceRequestEvent } from "../../swarm/types.js";
+import type { ActivitySummaryEvent, AgentDescriptor, ConversationEntryEvent, ManagerProfile, ChoiceRequestEvent } from "../../swarm/types.js";
 import { backfillConversationMessageEntryId, backfillConversationTimelineMetadata } from "../../swarm/session/conversation-entry-id.js";
 import { isConversationEntryEvent } from "../../swarm/session/conversation-validators.js";
+import { toolResultText } from "../../swarm/session/activity-timeline.js";
 import { createConversationHistorySeamCursor, readConversationHistoryPage } from "../../swarm/session/conversation-page-reader.js";
 import { sessionTransferCapabilities } from "./orchestration/transfers.js";
 import { runtimeProviderCapabilities } from "../../swarm/runtime/provider-selection.js";
@@ -44,6 +45,25 @@ interface HistoryState { sessionId: string; sources: { agentId: string; cursor: 
 interface CanonicalRow { actor: AgentDescriptor; entry: ConversationEntryEvent; projected: DetailItem }
 interface Source { generation: string; size: number }
 interface Checkpoint { file_generation: string; byte_offset: number; last_entry_id: string | null }
+/** Row metadata for the wire; the bounded content stays behind the item's content reference. */
+function activityMetadata(entry: ActivitySummaryEvent, sessionId: string): NonNullable<DetailItem["activity"]> {
+  const activity = entry.activity;
+  return {
+    // The activity's own stable ID, shared with its live row; the detail item keeps the timeline entry ID.
+    itemId: entry.itemId, sessionId, actorId: entry.actorAgentId, ...(entry.turnId ? { runId: entry.turnId } : {}),
+    kind: activity?.kind ?? "tool", status: entry.status === "completed" ? "completed" : "failed",
+    startedAt: activity?.startedAt ?? entry.timestamp, completedAt: entry.timestamp, summary: entry.displaySummary,
+    ...(entry.toolName ? { toolName: entry.toolName.slice(0, 128) } : {}),
+    ...(activity?.truncated ? { truncated: true } : {}), ...(activity?.hidden ? { hidden: true } : {}),
+    ...(activity?.exitCode !== undefined ? { exitCode: activity.exitCode } : {}),
+  };
+}
+/** The row's expandable text. A truncated tool row reads its fuller result from the raw entry already in history. */
+function activityContent(entry: ActivitySummaryEvent, rawResult?: string): string {
+  if (!entry.activity) return "";
+  const full = rawResult && entry.activity.truncated ? toolResultText(rawResult) : "";
+  return formatActivityContent(full.length > (entry.activity.detail?.length ?? 0) ? { ...entry.activity, detail: full } : entry.activity);
+}
 function source(file: string): Source {
   try {
     const info = statSync(file); const fd = openSync(file, "r"); const buffer = Buffer.alloc(Math.min(info.size, 4096));
@@ -123,8 +143,8 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     if (JSON.stringify(worker) !== prior?.worker_json) eventSink.append(tx, { topic: "detail", sessionId: descriptor.managerId, event: { type: "worker.upsert", worker } });
   }
   function item(entry: ConversationEntryEvent, sessionId: string): DetailItem | null {
-    if (!["conversation_message", "activity_summary", "agent_message", "agent_tool_call"].includes(entry.type)) return null;
-    if (entry.type === "agent_tool_call" && entry.kind !== "tool_execution_end") return null;
+    // Each finished tool or reasoning row is one activity summary; raw tool-call entries stay in the audit log.
+    if (!["conversation_message", "activity_summary", "agent_message"].includes(entry.type)) return null;
     if (entry.type === "conversation_message" && entry.terminal === false) return null;
     // Each worker message is also copied into its manager's transcript for the legacy All view. The session
     // detail already carries the worker's own entry, so the copy is not a second item, and not a result.
@@ -142,9 +162,10 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const runId=currentRun?.run_id ?? ("turnId" in entry && entry.turnId && database.prepare("SELECT 1 FROM orchestration_runs WHERE run_id=? AND thread_id=?").get(entry.turnId,entry.agentId) ? entry.turnId:undefined);
     return { itemId: id, ...(runId ? {runId}:{}), userTurnId: user ? entry.id ?? id : userTurns.get(sessionId) ?? ("turnId" in entry ? entry.turnId : undefined) ?? id,
       actorId: workerResult && entry.sourceWorkerId ? entry.sourceWorkerId : "actorAgentId" in entry ? entry.actorAgentId : entry.agentId,
-      kind: workerResult ? "worker_result" : entry.type === "conversation_message" ? user ? "user" : "assistant" : entry.type === "agent_tool_call" ? "tool" : "activity",
+      kind: workerResult ? "worker_result" : entry.type === "conversation_message" ? user ? "user" : "assistant" : "activity",
       pinned: swarmManager.getPinnedMessageIds(sessionId)?.has(entry.type === "conversation_message" ? entry.id ?? id : id) ?? false,
-      timestamp: entry.timestamp, ...(entry.type === "conversation_message" ? { source: entry.source } : {}), text: text.slice(0, 8192), contentRef: text.length > 8192 ? id : null,
+      timestamp: entry.timestamp, ...(entry.type === "conversation_message" ? { source: entry.source } : {}), text: text.slice(0, 8192), contentRef: text.length > 8192 || (entry.type === "activity_summary" && activityContent(entry)) ? id : null,
+      ...(entry.type === "activity_summary" ? { activity: activityMetadata(entry, sessionId) } : {}),
       artifacts: (wireProjection.artifacts?.(entry, sessionId) ?? []).slice(0, 20),
       commandId: resend ? receiptIdentity(resend.command_id) : entry.type === "conversation_message" && entry.controlCommandId ? receiptIdentity(entry.controlCommandId) : null };
   }
@@ -328,7 +349,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       if (attached || disposed) return; attached = true;
       listen("session_plan_snapshot", (event: { sessionAgentId: string }) => detailFeature(event.sessionAgentId, "plan.upsert", event));
       listen("session_goal_snapshot", (event: { sessionAgentId: string }) => detailFeature(event.sessionAgentId, "goal.upsert", event));
-      for (const name of ["conversation_message", "activity_summary", "agent_message", "agent_tool_call"]) listen(name, observeCanonical);
+      for (const name of ["conversation_message", "activity_summary", "agent_message"]) listen(name, observeCanonical);
       listen("choice_request", (event: ChoiceRequestEvent) => { eventSink.transaction(tx => choice(tx, event)); });
       listen("agent_status", (event: { agentId: string; pendingCount: number }) => { const descriptor = swarmManager.getAgentForInternalUse(event.agentId); if (!descriptor) return; eventSink.transaction(tx => { if (descriptor.role === "worker") upsertWorker(tx, descriptor); upsertSession(tx, descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId, descriptor.role === "manager" ? event.pendingCount : undefined); }); });
       listen("session_workers_snapshot", (event: { sessionAgentId: string; workers: AgentDescriptor[] }) => {
@@ -415,6 +436,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
         // Content is resolved from the canonical row, including rows too large for bounded history pages.
         const stream = createReadStream(actor.sessionFile, { end: evidence.size - 1 });
         const lines = createInterface({ input: stream, crlfDelay: Infinity }); let count = 0;
+        let rawToolEnd: { toolCallId?: string; text: string } | undefined;
         try {
           for await (const line of lines) {
             if (++count % 256 === 0) authorizeRead(principal, input.sessionId);
@@ -422,8 +444,12 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
             try { raw = JSON.parse(line) as typeof raw; } catch { continue; }
             if (raw.customType !== CONVERSATION_ENTRY_TYPE || !isConversationEntryEvent(raw.data)) continue;
             const entry = backfillConversationTimelineMetadata(backfillConversationMessageEntryId(raw.data, raw.id), raw.id, 0);
+            // A tool's raw result is written just before its summary, in the same source.
+            if ((entry.type === "agent_tool_call" || entry.type === "conversation_log") && entry.kind === "tool_execution_end") rawToolEnd = entry;
             if (entry.timelineEntryId !== input.contentRef && !("id" in entry && entry.id === input.contentRef)) continue;
-            const text = "text" in entry && typeof entry.text === "string" ? entry.text : "displaySummary" in entry && typeof entry.displaySummary === "string" ? entry.displaySummary : "";
+            const text = entry.type === "activity_summary"
+              ? activityContent(entry, rawToolEnd?.toolCallId && rawToolEnd.toolCallId === entry.correlationId ? rawToolEnd.text : undefined) || entry.displaySummary
+              : "text" in entry && typeof entry.text === "string" ? entry.text : "";
             const bytes = Buffer.from(text, "utf8");
             if (input.offset > bytes.length || (input.offset < bytes.length && (bytes[input.offset]! & 0xc0) === 0x80)) throw rpcFailure("INVALID_INPUT", "Content offset is not a UTF-8 boundary.");
             let end = Math.min(bytes.length, input.offset + input.maxBytes);

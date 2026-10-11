@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { TimelineActivity } from "@forge/protocol";
+import { persistedActivityDetail } from "./activity-timeline.js";
 import type {
   ActivitySummaryEvent,
   AgentToolCallEvent,
@@ -7,7 +9,7 @@ import type {
 
 export function buildActivitySummary(
   event: ConversationLogEvent | AgentToolCallEvent,
-  options?: { status?: ActivitySummaryEvent["status"] },
+  options?: { status?: ActivitySummaryEvent["status"]; activity?: TimelineActivity },
 ): ActivitySummaryEvent | undefined {
   if (event.kind !== "tool_execution_end") return undefined;
 
@@ -29,8 +31,28 @@ export function buildActivitySummary(
     status,
     ...(toolName ? { toolName } : {}),
     ...(correlationId ? { correlationId } : {}),
-    displaySummary: summarizeToolActivity(toolName, status),
+    displaySummary: options?.activity?.summary || summarizeToolActivity(toolName, status),
     ...(isError || status !== "completed" ? { isError: true } : {}),
+    ...(options?.activity ? { activity: persistedActivityDetail(options.activity) } : {}),
+  };
+}
+
+/** A finished reasoning or status row, persisted in its actor's own history with bounded text. */
+export function buildTimelineSummary(item: TimelineActivity): ActivitySummaryEvent {
+  return {
+    type: "activity_summary",
+    schemaVersion: 1,
+    itemId: item.itemId,
+    agentId: item.actorId,
+    actorAgentId: item.actorId,
+    ...(item.runId ? { turnId: item.runId } : {}),
+    // A status row is written when the turn ends but belongs where the trouble began, above the reply.
+    timestamp: item.kind === "status" ? item.startedAt : item.completedAt ?? item.startedAt,
+    kind: "tool_activity",
+    status: item.status === "failed" ? "failed" : "completed",
+    displaySummary: item.summary,
+    ...(item.status === "failed" ? { isError: true } : {}),
+    activity: persistedActivityDetail(item),
   };
 }
 

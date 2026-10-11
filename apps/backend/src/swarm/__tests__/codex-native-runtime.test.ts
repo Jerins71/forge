@@ -113,7 +113,8 @@ describe("Native Codex manager", () => {
     f.exit();
     await vi.waitFor(() => expect(error).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(order).toContain("agent_end"));
-    expect(error.mock.calls[0]![1].details.userFacingMessage).toBe("Codex stopped unexpectedly. Send another message to restart it.");
+    expect(error.mock.calls[0]![1]).toMatchObject({ phase: "runtime_exit" });
+    expect(error.mock.calls[0]![1].details?.userFacingMessage).toBeUndefined();
     expect(order.indexOf("error")).toBeLessThan(order.indexOf("agent_end"));
     expect(f.events.find(event => event.type === "turn_end")).toMatchObject({ type: "turn_end", meta: { outcome: "failed" } });
     await f.runtime.terminate();

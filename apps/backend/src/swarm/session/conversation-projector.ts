@@ -36,7 +36,9 @@ import {
   sumOptionalNumbers
 } from "./conversation-diagnostics.js";
 import { RuntimeConversationEventMapper, safeJson } from "./runtime-conversation-event-mapper.js";
-import { buildActivitySummary } from "./activity-summary.js";
+import { buildActivitySummary, buildTimelineSummary } from "./activity-summary.js";
+import { ActivityTimelineTracker, type ProviderTextFact } from "./activity-timeline.js";
+import type { TimelineActivity } from "@forge/protocol";
 import {
   createConversationHistorySeamCursor,
   DEFAULT_CONVERSATION_PAGE_ITEMS,
@@ -64,6 +66,7 @@ type ConversationEventName =
   | "activity_summary"
   | "agent_message"
   | "agent_tool_call"
+  | "timeline_activity"
   | "conversation_reset"
   | "choice_request"
   | "plan_summary"
@@ -129,6 +132,8 @@ export class ConversationProjector {
   private readonly loadedFromDisk = new Set<string>();
   private readonly nextTimelineSequenceBySource = new Map<string, number>();
   private readonly canonicalPrefixMayExistByAgentId = new Set<string>();
+  private readonly activity = new ActivityTimelineTracker(item =>
+    this.deps.emitServerEvent("timeline_activity", { type: "timeline_activity", sessionAgentId: item.sessionId, item }));
 
   constructor(private readonly deps: ConversationProjectorDependencies) {
     this.timeline = new ConversationTimeline({
@@ -306,6 +311,7 @@ export class ConversationProjector {
   }
 
   resetConversationHistory(agentId: string, sessionFile?: string): void {
+    this.activity.forget(agentId);
     this.deps.conversationEntriesByAgentId.set(agentId, []);
     this.loadedFromDisk.add(agentId);
     this.canonicalPrefixMayExistByAgentId.delete(agentId);
@@ -322,6 +328,7 @@ export class ConversationProjector {
   }
 
   deleteConversationHistory(agentId: string, sessionFile?: string): void {
+    this.activity.forget(agentId);
     this.deps.conversationEntriesByAgentId.delete(agentId);
     this.loadedFromDisk.delete(agentId);
     this.canonicalPrefixMayExistByAgentId.delete(agentId);
@@ -396,7 +403,7 @@ export class ConversationProjector {
 
   emitConversationLog(event: ConversationLogEvent): void {
     this.emitConversationEntry(event);
-    const activitySummary = buildActivitySummary(event);
+    const activitySummary = buildActivitySummary(event, { activity: event.toolCallId ? this.activity.completedTool(event.agentId, event.toolCallId.trim()) : undefined });
     if (activitySummary) {
       // Persist the safe terminal representation before any corresponding raw
       // live event is observable. A crash can then leave extra raw detail, but
@@ -434,13 +441,42 @@ export class ConversationProjector {
     this.deps.emitServerEvent("model_cache_observation", event satisfies ServerEvent);
   }
 
+  /** Live rows of a session that are still running, for a client that subscribes mid-turn. */
+  getRunningActivity(sessionId: string): TimelineActivity[] {
+    return this.activity.running(sessionId);
+  }
+
+  /**
+   * Streams provider text to its live row. Reasoning is persisted, bounded, when it completes;
+   * reply text is live only, because the canonical message is written by its own path.
+   */
+  observeProviderText(fact: Omit<ProviderTextFact, "sessionId" | "timestamp">): void {
+    const sessionId = resolveManagerContextId(this.deps.descriptors.get(fact.actorId), fact.actorId);
+    const finished = this.activity.observeText({ ...fact, sessionId, timestamp: this.deps.now() });
+    if (finished) this.emitActivitySummary(buildTimelineSummary(finished));
+  }
+
+  /** Updates the turn's one status row in place: "Retrying: 401 Invalid API key (attempt 3)". */
+  observeProviderRetry(fact: { actorId: string; attempt: number; message: string; runId?: string }): void {
+    const sessionId = resolveManagerContextId(this.deps.descriptors.get(fact.actorId), fact.actorId);
+    this.activity.observeRetry({ ...fact, sessionId, timestamp: this.deps.now() });
+  }
+
+  /** Closes the rows a finished turn left open and persists them, including its retry or failure status. */
+  settleProviderTurn(actorId: string, end: { error?: string; stopped?: boolean; runId?: string } = {}): void {
+    const sessionId = resolveManagerContextId(this.deps.descriptors.get(actorId), actorId);
+    for (const finished of this.activity.settleTurn({ actorId, sessionId, ...end, timestamp: this.deps.now() })) this.emitActivitySummary(buildTimelineSummary(finished));
+  }
+
   emitAgentToolCall(event: AgentToolCallEvent): void {
+    // The live row updates before the canonical entry, so a finished row is ready for its summary.
+    const activity = this.activity.observeTool(event);
     this.emitConversationEntry(event);
     // A worker's agent_tool_call is projected into its manager's timeline in
     // addition to the worker-local conversation_log. Only summarize the
     // self-owned event here so each timeline gets one terminal summary.
     if (event.agentId === event.actorAgentId) {
-      const activitySummary = buildActivitySummary(event);
+      const activitySummary = buildActivitySummary(event, { activity });
       if (activitySummary) {
         this.emitConversationEntry(activitySummary);
         this.deps.emitServerEvent("agent_tool_call", event satisfies ServerEvent);

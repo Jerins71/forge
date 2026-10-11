@@ -30,7 +30,7 @@ export function cursorProviderCapabilities(): ProviderCapabilities {
       // The SDK has no system-prompt parameter: the logical system bundle is wrapped in the first user payload.
       instructions: { channels: ["system"], update: "on_open", nativeBase: "preserved" },
       tools: { registration: "immutable", host: "loopback_mcp", nativeCallIdentity: false, cancellation: "abort_signal", extensionHooks: true },
-      streaming: { text: "delta", reasoning: "none", tools: "snapshot", usage: "final", terminal: "authoritative" },
+      streaming: { text: "delta", reasoning: "snapshot", tools: "snapshot", usage: "final", terminal: "authoritative" },
       native: { resume: true, fork: false, steer: false, compact: false, readContext: false, interrupt: true },
       approvals: { lifetime: "none", nativeRequestIdentity: false, childRequests: false },
       secureSessions: { supported: false, mechanism: "none" },

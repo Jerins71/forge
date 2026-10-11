@@ -11,6 +11,7 @@ import {
   projectWorker,
   projectSessionWorkers,
 } from './ws-client/environment-projection'
+import { LiveActivityStore } from './ws-client/live-activity-store'
 import { getCatalogModelsByFamily } from '@forge/protocol'
 import type { CommandReceipt } from '@forge/protocol/environment-v2'
 import { EnvironmentOutbox } from './ws-client/environment-outbox'
@@ -107,6 +108,8 @@ export interface ManagerWsClientOptions {
 }
 
 export class ManagerWsClient {
+  /** Live tool and reasoning rows of the mounted session; updated per frame, outside `state`. */
+  readonly liveActivity = new LiveActivityStore()
   private readonly environmentClient?: EnvironmentClient
   private readonly environmentDetach: Array<() => void> = []
   /** In-flight read and attention upkeep for the session in view, keyed per intent. */
@@ -911,6 +914,13 @@ export class ManagerWsClient {
 
   private handleServerEvent(parsed: unknown): void {
  const event = parsed as ServerEvent;
+ if (event.type === 'timeline_activity') {
+   // The durable row supersedes its live one; a late live update must not bring it back.
+   if (!this.environmentProjection?.items.some(item => item.activity?.itemId === event.item.itemId)) this.liveActivity.upsert(event.item);
+   // A row that finishes after the timeline last changed still has to give way to its durable form.
+   if (event.item.status !== 'running') this.liveActivity.reconcile(new Set(), this.environmentProjection?.session.status === 'running');
+   return;
+ }
  if (handleGenerationThroughputEvent(event, { state: this.state, applyGenerationThroughputReduction: reduction => this.applyGenerationThroughputReduction(reduction) })) return;
  if (handleTerminalEvent(event, { state: this.state, updateState: patch => this.updateState(patch) })) return;
  applyDetailFeature(event, { state: this.state, updateState: patch => this.updateState(patch) });
@@ -960,6 +970,7 @@ export class ManagerWsClient {
     if (!this.environmentClient) return
     this.detailDetach?.()
     this.detailLease?.release()
+    this.liveActivity.clear()
     this.desiredAgentId = sessionId
     this.detailLease = this.environmentClient.acquireDetail(sessionId)
     const store = this.detailLease.store
@@ -982,6 +993,7 @@ export class ManagerWsClient {
           // The same declaration keeps its identity so consumers do not re-render on every detail tick.
           sessionTransferCapabilities: capabilities && previous && JSON.stringify(capabilities) === JSON.stringify(previous) ? previous : capabilities,
         })
+        this.liveActivity.reconcile(new Set((projection?.items ?? []).flatMap(item => item.activity ? [item.activity.itemId] : [])), projection?.session.status === 'running')
         // A worker is mounted through its owning session and shows only its own rows.
         const ownerId = projection?.session.sessionId ?? sessionId
         const items = (projection?.items ?? []).filter(item => ownerId === sessionId || item.actorId === sessionId)
