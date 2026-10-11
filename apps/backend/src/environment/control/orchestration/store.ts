@@ -8,6 +8,7 @@ export function loadState(database: Database): CoreState {
     ["threads", "orchestration_threads", "thread_id"], ["runs", "orchestration_runs", "run_id"],
     ["attempts", "orchestration_attempts", "attempt_id"], ["bindings", "orchestration_bindings", "binding_id"],
     ["requests", "orchestration_requests", "request_id"],
+    ["assignments", "orchestration_assignments", "assignment_id"], ["transfers", "orchestration_transfers", "transfer_id"],
   ] as const;
   for (const [key, table, identity] of entities) for (const row of database.prepare(`SELECT ${identity} AS id,state_json FROM ${table}`).all() as { id: string; state_json: string }[]) {
     (state[key] as Record<string, unknown>)[row.id] = JSON.parse(row.state_json);
@@ -23,13 +24,17 @@ export function projectLifecycle(database: Database, event: LifecycleEvent): voi
   else if ("attempt" in event) database.prepare("INSERT INTO orchestration_attempts VALUES (?,?,?,?) ON CONFLICT(attempt_id) DO UPDATE SET state_json=excluded.state_json").run(event.attempt.attemptId, event.attempt.runId, event.attempt.threadId, JSON.stringify(event.attempt));
   else if ("binding" in event) database.prepare("INSERT INTO orchestration_bindings VALUES (?,?,?,?) ON CONFLICT(binding_id) DO UPDATE SET state_json=excluded.state_json").run(event.binding.scope.bindingId, event.binding.scope.threadId, event.binding.scope.generation, JSON.stringify(event.binding));
   else if ("request" in event) database.prepare("INSERT INTO orchestration_requests VALUES (?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET state_json=excluded.state_json").run(event.request.requestId, event.request.threadId, event.request.attemptId, JSON.stringify(event.request));
+  else if ("assignment" in event || "transfer" in event) {
+    if ("assignment" in event) database.prepare("INSERT INTO orchestration_assignments VALUES (?,?,?,?,?) ON CONFLICT(assignment_id) DO UPDATE SET state_json=excluded.state_json").run(event.assignment.assignmentId, event.assignment.parentThreadId, event.assignment.parentRunId, event.assignment.workerThreadId, JSON.stringify(event.assignment));
+    else database.prepare("INSERT INTO orchestration_transfers VALUES (?,?,?,?,?,?) ON CONFLICT(transfer_id) DO UPDATE SET state_json=excluded.state_json").run(event.transfer.transferId, event.transfer.assignmentId, event.transfer.kind, event.transfer.source.threadId, event.transfer.targetThreadId, JSON.stringify(event.transfer));
+  }
   else database.prepare("INSERT INTO orchestration_recovery VALUES (1,?) ON CONFLICT(singleton) DO UPDATE SET snapshot_json=excluded.snapshot_json").run(JSON.stringify(event.recovery));
 }
 
 /** Rebuild only projections. Receipts, external-effect markers and JSONL never replay. */
 export function rebuildLifecycleProjections(database: Database): void {
   database.transaction(() => {
-    for (const table of ["orchestration_threads", "orchestration_runs", "orchestration_attempts", "orchestration_bindings", "orchestration_requests", "orchestration_recovery"]) database.prepare(`DELETE FROM ${table}`).run();
+    for (const table of ["orchestration_threads", "orchestration_runs", "orchestration_attempts", "orchestration_bindings", "orchestration_requests", "orchestration_recovery", "orchestration_assignments", "orchestration_transfers"]) database.prepare(`DELETE FROM ${table}`).run();
     for (const row of database.prepare("SELECT event_json FROM lifecycle_events ORDER BY sequence").all() as { event_json: string }[]) projectLifecycle(database, JSON.parse(row.event_json));
   }).immediate();
 }

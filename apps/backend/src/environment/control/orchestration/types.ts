@@ -1,3 +1,5 @@
+import type { AssignmentCommand, AssignmentEvent, AssignmentEffect, WorkerAssignment } from "./assignments.js";
+import type { WorkerTransfer } from "./transfers.js";
 import type { ProviderObservation, ProviderRequestLifetime, ProviderRequestRef, ProviderTurnRef } from "@forge/protocol";
 import type { RecoverySnapshot } from "@forge/protocol/environment-v2";
 import type { ProviderBinding } from "../../../swarm/runtime/provider-contract.js";
@@ -61,9 +63,12 @@ export interface CoreState {
   bindings: Record<string, ProviderBinding>;
   requests: Record<string, Request>;
   recovery: RecoverySnapshot | null;
+  assignments: Record<string, WorkerAssignment>;
+  transfers: Record<string, WorkerTransfer>;
 }
 type Envelope = { commandId: string; now: number };
 export type CoreCommand = Envelope & (
+  | AssignmentCommand
   | { type: "thread.create"; threadId: string; role: Thread["role"]; projectId: string; managerId?: string }
   | { type: "thread.stop" | "thread.resume"; threadId: string }
   | { type: "run.submit"; threadId: string; runId: string; inputId: string; attemptId: string; bindingId: string; input: Run["input"]; source?: Run["source"]; delivery: Run["delivery"] }
@@ -85,6 +90,7 @@ export type CoreCommand = Envelope & (
   | { type: "effect.failed"; threadId: string; attemptId?: string; kind: CoreEffect["kind"]; delivery: "not_dispatched" | "unknown" }
 );
 export type LifecycleEvent = { commandId: string; at: number } & (
+  | AssignmentEvent
   | { type: "thread.created" | "thread.stopped" | "thread.resumed" | "thread.changed" | "compaction.requested" | "compaction.completed" | "compaction.failed"; thread: Thread }
   | { type: "input.accepted" | "input.recorded" | "run.started" | "run.terminal" | "run.recovery"; run: Run }
   | { type: "attempt.created" | "attempt.dispatch_marked" | "attempt.accepted" | "attempt.terminal" | "attempt.unknown" | "attempt.observed" | "attempt.interrupted"; attempt: Attempt }
@@ -93,6 +99,7 @@ export type LifecycleEvent = { commandId: string; at: number } & (
   | { type: "recovery.required" | "recovery.resolved"; recovery: RecoverySnapshot }
 );
 export type CoreEffect =
+  | AssignmentEffect
   | { kind: "transcript.append"; threadId: string; inputId: string; runId: string }
   | { kind: "runtime.acquire"; threadId: string; bindingId: string; generation: number }
   | { kind: "provider.start"; threadId: string; attemptId: string }
