@@ -541,7 +541,12 @@ describe("durable provider outbox", () => {
   });
   it.each(["busy", "closed", "stale_scope"] as const)("keeps a typed %s pre-dispatch rejection out of unknown recovery", async reason => {
     const f = await fixture();
-    f.adapter.start = async () => { throw new ProviderDispatchRejectedError(reason); };
+    let starts = 0;
+    f.adapter.start = async () => {
+      // Make an unbounded recovery fail decisively instead of starving timers.
+      if (++starts > 2) throw new Error("Fixture exhausted the binding replacement budget");
+      throw new ProviderDispatchRejectedError(reason);
+    };
     await f.core.controlService.execute(principal, "session.send", { commandId, sessionId: "manager", message: { text: "rejected", artifactIds: [] } });
     await f.core.effectWorker.drain();
     const state = loadState(f.core.database); const run = state.runs[`run-${commandId}`];
@@ -549,6 +554,7 @@ describe("durable provider outbox", () => {
     expect(run.state).toBe("terminal");
     expect(state.recovery).toBeNull();
     expect(state.threads.manager.shutdown).toBe("clean");
+    expect(starts).toBe(reason === "closed" ? 2 : 1);
     const receipt = await f.core.controlService.getReceipt(principal, commandId);
     expect(receipt.state).toBe("failed"); expect(receipt.delivery).toBe("none");
     await f.core.controlService.execute(principal, "session.send", { commandId: "00000000-0000-4000-8000-000000000002", sessionId: "manager", message: { text: "retry", artifactIds: [] } });

@@ -323,9 +323,10 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
         const attempt = state.attempts[command.attemptId];
         if (attempt.state === "terminal" || attempt.state === "unknown" || state.runs[attempt.runId].activeAttemptId !== attempt.attemptId) break;
         if (command.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); }
-        else if (command.kind === "provider.start" && command.bindingClosed && thread(command.threadId).desired === "running" && thread(command.threadId).shutdown === "clean") {
+        else if (command.kind === "provider.start" && command.bindingClosed && thread(command.threadId).desired === "running" && thread(command.threadId).shutdown === "clean"
+          && Object.values(state.attempts).filter(previous => previous.runId === attempt.runId).length < 2) {
           // The closed binding proves this input was never dispatched. Drain its
-          // remaining callbacks/auth before replacing it and sending this same input.
+          // remaining callbacks/auth before replacing it once for this input.
           emit({ type: "attempt.created", attempt: { ...attempt, state: "created", delivery: "pending" } });
           emit({ type: "run.started", run: { ...state.runs[attempt.runId], state: "queued" } });
           const owner = thread(command.threadId);
