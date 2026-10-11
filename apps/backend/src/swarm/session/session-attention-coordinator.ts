@@ -277,6 +277,25 @@ export class SessionAttentionCoordinator {
     }));
   }
 
+  /** Only final logical failures latch the epoch; provider retries are not terminal outcomes. */
+  async observeRunOutcome(session: SessionAttentionSessionSnapshot, outcome: "completed" | "failed"): Promise<void> {
+    await this.runNatural(async () => this.applyMutation(async state => {
+      const sessionAgentId = session.manager.agentId;
+      if (!this.sessionIsEligible(session)) return retireFromState(state, sessionAgentId);
+      const current = state.sessions[sessionAgentId];
+      if (!current || current.phase !== "working") {
+        return outcome === "failed" ? this.raiseForInternalTurn(state, session, true) : { value: undefined };
+      }
+      const record = { ...current, ...(outcome === "failed" ? { hadError: true } : {}) };
+      if (normalizeCount(session.pendingTurnContextCount) === 0) delete record.awaitingContinuation;
+      const progressed = await this.progressWorkingEpoch(session, record);
+      if (!progressed && record.hadError === current.hadError && record.awaitingContinuation === current.awaitingContinuation) return { value: undefined };
+      const next = cloneSessionAttentionState(state);
+      next.sessions[sessionAgentId] = progressed?.record ?? record;
+      return { value: undefined, state: next, changes: progressed?.changes ?? [] };
+    }));
+  }
+
   /**
    * Choice, worker-ownership, and accepted-turn-queue producers call this only
    * after their own committed mutation. It cannot arm an epoch, but a newly
@@ -438,6 +457,11 @@ export class SessionAttentionCoordinator {
         changes,
       };
     }, { retryOnFailure: false }));
+  }
+
+  /** The environment's existing shutdown boundary drains all accepted attention writes. */
+  async flush(): Promise<void> {
+    await this.enqueue(async () => { if (this.initialized) await this.flushPendingCommit(); });
   }
 
   /** Durable, visible projection only; an undurable pending write is never exposed. */

@@ -1,3 +1,4 @@
+import { SessionAttentionStore } from "../../swarm/session/session-attention-store.js";
 import { createDetailStream } from "../streams/detail-stream.js";
 import { createControlDescriptorPersistence } from './descriptor-persistence.js';
 import { createTestEnvironment } from '../../test-support/environment-auth.js';
@@ -774,6 +775,29 @@ it.each(["failed", "completed"] as const)("worker outcome %s feeds its owning ma
   } });
   await f.manager.handleRuntimeStatus(token, worker.agentId, "idle", 0);
   await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe(outcome === "failed" ? "work_failed" : "work_settled"));
+});
+
+it("environment persistence flush waits for committed terminal attention to reach disk", async () => {
+  const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true; const commandId = randomUUID();
+  await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "Durable failed attention", artifactIds: [] } });
+  await f.core.effectWorker.drain(); await f.manager.handleRuntimeStatus(f.runtimeTokens.get(f.sessionId)!, f.sessionId, "streaming", 0);
+  let entered!: () => void; let release!: () => void; let flushed = false;
+  const saving = new Promise<void>(resolve => { entered = resolve; }); const held = new Promise<void>(resolve => { release = resolve; });
+  const original = SessionAttentionStore.prototype.save;
+  const save = vi.spyOn(SessionAttentionStore.prototype, "save").mockImplementation(async function (this: SessionAttentionStore, state) { entered(); await held; return original.call(this, state); });
+  try {
+    const state = loadState(f.database); const run = state.runs[`run-${commandId}`]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+    f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+      type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: "failed",
+    } });
+    await saving;
+    const flushing = f.manager.flushPendingPersistence().then(() => { flushed = true; });
+    await new Promise(resolve => setTimeout(resolve, 10)); const flushedBeforeRelease = flushed;
+    release(); await flushing;
+    expect(flushedBeforeRelease).toBe(false);
+    const durable = await new SessionAttentionStore({ dataDir: f.config.paths.dataDir }).load();
+    expect(durable.sessions[f.sessionId].attention?.reason).toBe("work_failed");
+  } finally { release(); save.mockRestore(); }
 });
 
 it("a new successful turn replaces prior failure attention with work_settled", async () => {

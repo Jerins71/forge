@@ -60,7 +60,8 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
     const state = loadState(database);
     return { status:projectLifecycleStatus(state,agentId)?.agentStatus,activeRunId:state.threads[agentId]?.activeRunId,pendingRunIds:Object.values(state.runs).filter(run => run.threadId === agentId && run.state === "queued").sort((a,b)=>a.sequence-b.sequence).map(run=>run.runId) };
   } });
-  eventSink.subscribeCommit(() => swarmManager.reflectControlledTurns());
+  eventSink.subscribeCommit(terminalRuns => swarmManager.reflectControlledTurns(terminalRuns.flatMap(run =>
+    run.outcome === "completed" || run.outcome === "failed" ? [{ agentId: run.threadId, outcome: run.outcome }] : [])));
   swarmManager.installControlledChoicePort(createCoreChoicePort({ database, controlService, clock: Date.now, random: () => crypto.randomUUID() }));
   const messages = createCoreAgentMessagePort({ controlService,sink:eventSink,artifacts:artifactService,swarm:swarmManager,clock:Date.now,random:()=>crypto.randomUUID() });
   swarmManager.installCoreAgentMessagePort(messages);

@@ -21,6 +21,7 @@ export interface SessionAttentionRuntimeHooks {
   suppressWorkingEpoch(sessionAgentId: string): Promise<void>;
   retireSession(sessionAgentId: string): Promise<void>;
   reportPendingTurn(agentId: string): Promise<void>;
+  reportRunOutcome(agentId: string, outcome: "completed" | "failed"): Promise<void>;
   reportContinuationAbandoned(agentId: string): Promise<void>;
 }
 
@@ -30,7 +31,7 @@ interface SessionAttentionRuntimeOptions {
   profiles: ReadonlyMap<string, ManagerProfile>;
   workers: Pick<AgentDirectory, "getWorkersForManager">;
   choices: Pick<SwarmChoiceService, "getPendingChoiceIdsForSession">;
-  turns: { getPendingContextCount(sessionAgentId: string): number; getActiveTurnSource(sessionAgentId: string): ReturnType<NonNullable<ConstructorParameters<typeof SessionAttentionReporter>[0]["getActiveTurnSource"]>> };
+  turns: { getProjectedStatus(agentId: string): AgentStatus | undefined; getPendingContextCount(sessionAgentId: string): number; getActiveTurnSource(sessionAgentId: string): ReturnType<NonNullable<ConstructorParameters<typeof SessionAttentionReporter>[0]["getActiveTurnSource"]>> };
   plans: Pick<SessionPlanCoordinator, "getAttentionReason">;
   onChange: NonNullable<SessionAttentionCoordinatorOptions["onChange"]>;
   log: NonNullable<SessionAttentionCoordinatorOptions["log"]>;
@@ -44,6 +45,7 @@ export class SessionAttentionRuntime implements SessionAttentionRuntimeHooks {
 
   readonly facade: {
     initialize(): Promise<void>;
+    flush(): Promise<void>;
     getSnapshot: SessionAttentionCoordinator["getSnapshot"];
     dismissAttentionIds: SessionAttentionCoordinator["dismissAttentionIds"];
   };
@@ -59,7 +61,12 @@ export class SessionAttentionRuntime implements SessionAttentionRuntimeHooks {
     });
     this.reporter = new SessionAttentionReporter({
       coordinator: this.coordinator,
-      getDescriptor: (agentId) => options.descriptors.get(agentId),
+      getDescriptor: (agentId) => {
+        const descriptor = options.descriptors.get(agentId);
+        const status = options.turns.getProjectedStatus(agentId);
+        return descriptor && status ? { ...descriptor, status } : descriptor;
+      },
+      getProjectedStatus: (agentId) => options.turns.getProjectedStatus(agentId),
       getDescriptors: () => options.descriptors.values(),
       getProfile: (profileId) => options.profiles.get(profileId),
       getActiveWorkerCount: (sessionAgentId) =>
@@ -79,6 +86,7 @@ export class SessionAttentionRuntime implements SessionAttentionRuntimeHooks {
         await this.coordinator.initialize();
         await this.coordinator.reconcileAfterBoot(this.reporter.listSessionSnapshots());
       },
+      flush: () => this.coordinator.flush(),
       getSnapshot: () => this.coordinator.getSnapshot(),
       dismissAttentionIds: (attentionIds) => this.coordinator.dismissAttentionIds(attentionIds),
     };
@@ -98,6 +106,10 @@ export class SessionAttentionRuntime implements SessionAttentionRuntimeHooks {
 
   retireSession(sessionAgentId: string) {
     return this.reporter.reportSessionRetired(sessionAgentId);
+  }
+
+  reportRunOutcome(agentId: string, outcome: "completed" | "failed") {
+    return this.reporter.reportRunOutcome(agentId, outcome);
   }
 
   reportPendingTurn(agentId: string) {
@@ -128,6 +140,7 @@ export function createLazySessionAttentionRuntimeHooks(
     suppressWorkingEpoch: (agentId) => getRuntime()?.suppressWorkingEpoch(agentId) ?? Promise.resolve(),
     retireSession: (agentId) => getRuntime()?.retireSession(agentId) ?? Promise.resolve(),
     reportPendingTurn: (agentId) => getRuntime()?.reportPendingTurn(agentId) ?? Promise.resolve(),
+    reportRunOutcome: (agentId, outcome) => getRuntime()?.reportRunOutcome(agentId, outcome) ?? Promise.resolve(),
     reportContinuationAbandoned: (agentId) =>
       getRuntime()?.reportContinuationAbandoned(agentId) ?? Promise.resolve(),
   };

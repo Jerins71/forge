@@ -65,7 +65,7 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
     this.getFacadeServices().runtime.turns.installCore(port);
     this.getFacadeServices().registry.directory.installLifecycleStatus(agentId => port.read(agentId).status);
   }
-  reflectControlledTurns(): void { this.getFacadeServices().runtime.turns.reflectCore(); }
+  reflectControlledTurns(outcomes: readonly import("./turn-context-coordinator.js").CoreTurnOutcome[] = []): void { this.getFacadeServices().runtime.turns.reflectCore(outcomes); }
   installControlledChoicePort(port: import("./swarm-choice-service.js").CoreChoicePort): void { this.getFacadeServices().interactions.installCoreChoices(port); }
   enqueueControlledPresentation(agentId:string,runId:string,context:import("./turn-context-coordinator.js").InboundTurnContextInput): void {
     this.getFacadeServices().runtime.turns.register(agentId,{ ...context,turnId:runId });

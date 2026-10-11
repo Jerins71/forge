@@ -117,6 +117,7 @@ export interface CodexTurnScopePort<
   clearForRuntimeReset(agentId: string): void;
 }
 
+export interface CoreTurnOutcome { agentId: string; outcome: "completed" | "failed"; }
 export interface CoreTurnProjection { status?: AgentDescriptor["status"]; activeRunId?:string; pendingRunIds:readonly string[]; }
 export interface CoreTurnProjectionPort { read(agentId:string):CoreTurnProjection; }
 
@@ -139,6 +140,7 @@ export interface TurnContextObservabilityPort {
 export interface TurnContextAttentionPort {
   /** Called after accepted input is durably represented in the pending queue. */
   observePendingQueueChange(agentId: string): Promise<void>;
+  observeRunOutcome(outcome: CoreTurnOutcome): Promise<void>;
   /**
    * Called when accepted input is removed without a new continuation, or when
    * matched consume happens during an already-streaming manager run.
@@ -190,8 +192,11 @@ export class TurnContextCoordinator<TCodexGate=unknown,TCodexDelegation=unknown,
   private readonly activeExternalTurnByAgentId = new Map<string,ActiveExternalProjectAgentTurn>();
   constructor(private readonly options:TurnContextCoordinatorOptions<TCodexGate,TCodexDelegation,TCodexRetryAuthorization>) {}
   installCore(port:CoreTurnProjectionPort):void { this.core=port; this.reflectCore(); }
-  reflectCore():void {
+  getProjectedStatus(agentId: string): AgentDescriptor["status"] | undefined { return this.core?.read(agentId).status; }
+  reflectCore(outcomes: readonly CoreTurnOutcome[] = []):void {
     if (!this.core) return;
+    // The logical outcome is committed before presentation teardown releases its attention barrier.
+    for (const outcome of outcomes) void this.options.attention.observeRunOutcome(outcome);
     for (const agentId of new Set([...this.contexts.keys(),...this.activeTurnByAgentId.keys()])) {
       const projection=this.core.read(agentId); const previous=this.activeTurnByAgentId.get(agentId);
       if (previous?.turnId===projection.activeRunId) continue;
