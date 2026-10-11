@@ -148,6 +148,7 @@ export const WorkspaceStrategySchema = Type.Union([
 export type WorkspaceStrategy = Static<typeof WorkspaceStrategySchema>
 export const SessionSummarySchema = O({
   lineage: Type.Optional(ThreadLineageSchema),
+  transferCapabilities: Type.Optional(O({ fork: Type.Boolean(), nativeFork: Type.Boolean(), throughTurnFork: Type.Boolean(), providerSwitch: Type.Boolean() })),
   sessionId: V2Id, projectId: V2Id, title: ShortText,
   projectAgent: Type.Optional(Type.Union([ProjectAgentInfoV2Schema, Type.Null()])),
   status: E('preparing', 'idle', 'running', 'waiting', 'stopping', 'stopped', 'error', 'interrupted'),
@@ -271,6 +272,7 @@ export const WorkerSummarySchema = O({
 })
 export const DetailItemSchema = O({
   itemId: V2Id, userTurnId: V2Id, actorId: V2Id,
+  runId: Type.Optional(V2Id),
   pinned: Type.Optional(Type.Boolean()),
   kind: E('user', 'assistant', 'worker_result', 'tool', 'activity'),
   source: Type.Optional(Type.String({ maxLength: 128 })),

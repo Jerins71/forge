@@ -30,7 +30,7 @@ export const ProviderCapabilitiesSchema = Type.Object({
     terminal: values(["authoritative", "inferred", "none"] as const),
   }, strict),
   native: Type.Object({
-    resume: Type.Boolean(), fork: Type.Boolean(), steer: Type.Boolean(), compact: Type.Boolean(),
+    resume: Type.Boolean(), fork: Type.Boolean(), forkThroughTurn: Type.Optional(Type.Boolean()), steer: Type.Boolean(), compact: Type.Boolean(),
     readContext: Type.Boolean(), interrupt: Type.Boolean(),
   }, strict),
   approvals: Type.Object({
@@ -49,8 +49,12 @@ export type ProviderToolHostMechanism = ProviderCapabilities["tools"]["host"];
 export const ProviderScopeSchema = Type.Object({ threadId: id, bindingId: id, generation: Type.Integer({ minimum: 0 }) }, strict);
 export type ProviderScope = Static<typeof ProviderScopeSchema>;
 const scopeFields = ProviderScopeSchema.properties;
-export const ProviderConversationRefSchema = Type.Object({ ...scopeFields, kind: Type.Literal("conversation"), nativeId: id }, strict);
 export const ProviderTurnRefSchema = Type.Object({ ...scopeFields, kind: Type.Literal("turn"), conversationId: id, nativeId: id }, strict);
+/** Fork locators contain public native identities only. Claude defers its fork until SDK resume. */
+export const ProviderConversationRefSchema = Type.Object({ ...scopeFields, kind: Type.Literal("conversation"), nativeId: id,
+  forkOnResume: Type.Optional(Type.Literal(true)),
+  forkSource: Type.Optional(Type.Object({ nativeId: id, through: Type.Optional(ProviderTurnRefSchema) }, strict)),
+}, strict);
 export const ProviderItemRefSchema = Type.Object({ ...scopeFields, kind: Type.Literal("item"), conversationId: id, turnId: id, nativeId: id }, strict);
 export const ProviderRequestRefSchema = Type.Object({ ...scopeFields, kind: Type.Literal("request"), conversationId: id, turnId: Type.Optional(id), nativeId: id }, strict);
 export const ProviderToolCallRefSchema = Type.Object({ ...scopeFields, kind: Type.Literal("tool_call"), conversationId: id, turnId: id, nativeId: id }, strict);
