@@ -11,6 +11,7 @@ import { createSwarmControlAdapter } from "../swarm-control-adapter.js";
 import { createArtifactService } from "../artifact-service.js";
 import { UserMessageCoordinator, type HandleUserMessageOptions, type UserMessageCoordinatorOptions } from "../../../swarm/user-message-coordinator.js";
 import { ConversationAttachmentService } from "../../../swarm/conversation-attachment-service.js";
+import { projectLifecycleStatus } from "./lifecycle-projection.js";
 import { AgentDirectory } from "../../../swarm/agent-directory.js";
 import type { AgentDescriptor } from "../../../swarm/types.js";
 const roots: string[] = []; const cores: ControlCore[] = [];
@@ -47,14 +48,13 @@ describe("durable provider outbox", () => {
     const attachments = new ConversationAttachmentService({ dataDir: root, uploadsDir: path.join(root, "uploads") });
     const coordinator = new UserMessageCoordinator({
       targeting: { descriptors: new Map([["manager", descriptor]]), assertDescriptorNotEffectivelyArchived() {} }, attachments,
-      codex: { plugin: { assertWorkerNotUserTargetable() {} } }, projectAgents: { async preflightRuntime() {} },
+      codex: { plugin: { assertWorkerNotUserTargetable() { throw new Error("Internal prepared inputs are user-gated"); } } }, projectAgents: { async preflightRuntime() {} },
       runtime: { withRuntimeAdmission: async (_id: string, work: () => Promise<unknown>) => work() },
       inboundConversation: { async append(_target: unknown, input: { attachments: import("../../../swarm/types.js").ConversationAttachment[] }) { return { event: { id: "canonical", timelineEntryId: "canonical" }, runtimeAttachments: input.attachments }; } },
       turns: { async enqueue() {} },
     } as unknown as UserMessageCoordinatorOptions);
-    let submit!: (text: string, options: HandleUserMessageOptions) => Promise<void>;
     const acquire = f.options.swarm.acquireProvider;
-    const swarm = { installProviderScopeOwner() {}, installAuthoritativeInputOwner(callback: typeof submit) { submit = callback; }, installControlledTurnProjection() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
+    const swarm = { installProviderScopeOwner() {}, installAuthoritativeInputOwner() {}, installControlledTurnProjection() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
       getAgentForInternalUse: () => descriptor, acquireControlledProvider: acquire, applyControlledInput: coordinator.applyControlledInput.bind(coordinator),
     } as unknown as Parameters<typeof createSwarmControlAdapter>[0]["swarmManager"];
     const artifactService = createArtifactService({ database: f.core.database, dataDir: root });
@@ -162,6 +162,11 @@ describe("durable provider outbox", () => {
   it("retains a marked unknown dispatch through two restarts without invoking the provider again", async () => {
     const f = await fixture(); f.adapter.start = async () => { throw new Error("lost acknowledgment"); };
     await f.core.controlService.execute(principal, "session.send", { commandId, sessionId: "manager", message: { text: "fixture", artifactIds: [] } }); await f.core.effectWorker.drain();
+    const drained = loadState(f.core.database);
+    expect(drained.threads.manager.activeRunId).toBeUndefined();
+    expect(drained.runs[`run-${commandId}`].state).toBe("recovery");
+    expect(projectLifecycleStatus(drained, "manager")).toEqual({ agentStatus: "error", sessionStatus: "interrupted" });
+    expect(JSON.parse((f.core.database.prepare("SELECT summary_json FROM control_sessions WHERE session_id='manager'").get() as { summary_json: string }).summary_json).status).toBe("interrupted");
     const before = loadState(f.core.database).recovery!; expect(before).not.toBeNull(); await f.core.close();
     const second = await f.open(); await second.effectWorker.drain(); expect(loadState(second.database).recovery?.recoveryId).toBe(before.recoveryId); await second.close();
     const third = await f.open(); await third.effectWorker.drain(); expect(loadState(third.database).recovery?.recoveryId).toBe(before.recoveryId);

@@ -105,13 +105,14 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
 
 /** Runs outside acceptance; unsupported routes cannot leave an accepted but unsendable input. */
 export function createControlledInputRoutePreflight({ swarmManager }: {
-  swarmManager: Pick<SwarmManager, "getAgentForInternalUse" | "listProfiles" | "isControlledInputPersistenceReady">;
+  swarmManager: Pick<SwarmManager, "getAgentForInternalUse" | "listProfiles" | "isControlledInputPersistenceReady" | "assertControlledUserInputTargetable">;
 }): InputRoutePort {
   return {
     async preflight(input) {
       const profile = input.projectId ? swarmManager.listProfiles().find(profile => profile.profileId === input.projectId) : undefined;
       const sessionId = input.sessionId ?? profile?.defaultSessionAgentId;
       const descriptor = sessionId ? swarmManager.getAgentForInternalUse(sessionId) : undefined;
+      if (descriptor) swarmManager.assertControlledUserInputTargetable(descriptor.agentId);
       const unsupported = parseCompactSlashCommand(input.message.text) || classifyCodexUserMessage(input.message.text).kind === "sidecar" || descriptor?.externalThread;
       const buffering = Boolean(input.sessionId && !swarmManager.isControlledInputPersistenceReady(input.sessionId));
       if (unsupported || buffering) return { ok: false, error: { code: "UNAVAILABLE", message: buffering ? "This new session has no persisted conversation yet. Start a new session or wait for its first response before sending." : "This input route cannot acknowledge durable control delivery.", retryable: false } };

@@ -1302,9 +1302,8 @@ export class SwarmAgentLifecycleService {
     managerTerminated: boolean;
   }> {
     const caller = this.options.descriptors.get(callerAgentId);
-    const manager = caller?.role === "manager" && caller.status === "stopped"
-      ? caller
-      : this.options.assertManager(callerAgentId, "stop all agents");
+    if (!caller || caller.role !== "manager") throw new Error("Only manager can stop all agents");
+    const manager = caller;
 
     const target = this.options.descriptors.get(targetManagerId);
     if (!target || target.role !== "manager") {

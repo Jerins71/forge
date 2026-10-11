@@ -294,7 +294,6 @@ export class UserMessageCoordinator {
     const target = this.resolveTarget(options.targetAgentId, true);
     const sourceContext = normalizeMessageSourceContext(options.sourceContext ?? { channel: "web" });
     const attachments = this.options.attachments.normalize(options.attachments);
-    this.options.codex.plugin.assertWorkerNotUserTargetable(target);
     await this.options.projectAgents.preflightRuntime(target);
     return this.options.runtime.withRuntimeAdmission(target.agentId, async () => {
       if (options.prepared) {
@@ -378,12 +377,15 @@ export class UserMessageCoordinator {
     });
   }
 
+  assertUserInputTargetable(agentId: string): void { this.options.codex.plugin.assertWorkerNotUserTargetable(this.resolveTarget(agentId, true)); }
+
   async handleUserMessage(text: string, options?: HandleUserMessageOptions): Promise<void> {
     const trimmed = text.trim();
     const attachments = this.options.attachments.normalize(options?.attachments);
     if (!trimmed && attachments.length === 0) return;
     if (this.submitAuthoritativeInput && !options?.controlledInput) {
       const target = this.resolveTarget(options?.targetAgentId, true);
+      this.options.codex.plugin.assertWorkerNotUserTargetable(target);
       if (!isExternalThreadDescriptor(target) && !parseCompactSlashCommand(trimmed) && classifyCodexUserMessage(trimmed).kind !== "sidecar") {
         await this.submitAuthoritativeInput(trimmed, { ...options, targetAgentId: target.agentId });
         return;

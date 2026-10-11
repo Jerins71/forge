@@ -14,7 +14,7 @@ export function projectLifecycleStatus(state: CoreState, threadId: string): {
     sessionStatus: thread.shutdown === "clean" ? "stopped" : "stopping",
   };
   const run = thread.activeRunId ? state.runs[thread.activeRunId] : undefined;
-  if (run?.state === "recovery") return { agentStatus: "error", sessionStatus: "interrupted" };
+  if (Object.values(state.runs).some(candidate => candidate.threadId === threadId && candidate.state === "recovery")) return { agentStatus: "error", sessionStatus: "interrupted" };
   if (run || thread.compaction) return { agentStatus: "streaming", sessionStatus: "running" };
   const pending = Object.values(state.requests).some(request => request.threadId === threadId && request.state === "pending");
   return { agentStatus: "idle", sessionStatus: pending ? "waiting" : "idle" };

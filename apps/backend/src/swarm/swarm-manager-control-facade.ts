@@ -30,6 +30,8 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
     return ids.every(id => !this.getFacadeServices().runtime.runtimes.has(id) && !this.getFacadeServices().runtime.controller.isRuntimeShutdownQuarantined(id));
   }
 
+  assertControlledUserInputTargetable(agentId: string): void { this.getFacadeServices().userMessages.assertUserInputTargetable(agentId); }
+
   applyControlledInput(text: string, options: Parameters<UserMessageCoordinator["applyControlledInput"]>[1]): ReturnType<UserMessageCoordinator["applyControlledInput"]> {
     return this.getFacadeServices().userMessages.applyControlledInput(text, options);
   }
