@@ -1014,6 +1014,9 @@ test('a session shows the shell status after its detail view is released', async
   await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'burst', sessionId: b.sessionId, count: 1 })
   const streaming = inboxRow(page, b).getByLabel('Manager streaming')
   await expect(streaming).toHaveCount(1)
+  // The older target may be below Recent's initial five rows.
+  const moreRecent = page.locator('[data-inbox-section="recent"]').filter({ visible: true }).getByRole('button', { name: /^Show \d+ more$/ })
+  if (await moreRecent.count()) await moreRecent.click()
   // The same environment now shows another session; the first one settles in the background.
   await inboxRow(page, b, launchedId).first().click()
   await expect(page).toHaveURL(new RegExp(`agent=${launchedId}`))
