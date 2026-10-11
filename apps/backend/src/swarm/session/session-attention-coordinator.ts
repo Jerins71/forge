@@ -50,6 +50,11 @@ export interface SessionAttentionSessionSnapshot {
 export interface SessionAttentionStatusObservation extends SessionAttentionSessionSnapshot {
   agentId: string;
   source: "manager" | "owned_worker";
+  /**
+   * Who started the manager turn behind this transition. Work the user did not ask for (project
+   * onboarding, a peer's message, a late worker result) never asks for their attention by itself.
+   */
+  turnInitiator?: "user" | "internal";
   previousStatus: AgentStatus;
   nextStatus: AgentStatus;
   /** Timestamp committed by the descriptor producer, before coordinator queueing. */
@@ -221,6 +226,7 @@ export class SessionAttentionCoordinator {
           resumed.sessions[sessionAgentId] = record;
           return { value: undefined, state: resumed, changes: [] };
         }
+        if (observation.source === "manager" && observation.turnInitiator === "internal") return { value: undefined };
         const started = startEpoch(state, observation, observation.transitionedAt);
         const startedRecord = started.state?.sessions[sessionAgentId];
         if (!started.state || !startedRecord) return started;

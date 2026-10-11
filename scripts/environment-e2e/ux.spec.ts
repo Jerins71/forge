@@ -339,6 +339,36 @@ test('a change made while a launch settles is refused retryably in plain words, 
   } finally { rpc.close() }
 })
 
+test('a turn the user did not send raises no attention; a turn they sent still does', async () => {
+  const { a } = fleet
+  const session = await bootstrap(a)
+  const directory = await mkdtemp(join(tmpdir(), 'forge-ux-unviewed-'))
+  await copyFile(join(fixture(a).checkout, '.fixture-environment.json'), join(directory, '.fixture-environment.json'))
+  const commandId = randomUUID()
+  // Created over RPC and never opened: nothing in the UI can dismiss attention for it.
+  const created = await fixtureRpcOnce(a.baseUrl, session, 'project.create', { commandId, title: 'UX Unviewed', cwd: directory, model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' }, secureSessionsEnabled: false })
+  expect(created.state).toBe('succeeded')
+  const sessionId = created.result.sessionId as string
+  const runs = async () => {
+    const Constructor = await loadConfiguredSqliteDatabaseConstructor()
+    const database = new Constructor(getEnvironmentDbPath(fixture(a).dataDir), { readonly: true })
+    try { return (database.prepare("SELECT json_extract(state_json,'$.state') AS state FROM orchestration_runs WHERE thread_id=?").all(sessionId) as { state: string }[]).map(row => row.state) } finally { database.close() }
+  }
+  const attention = async () => (await shellSession(a, sessionId))?.attentionOccurrence ?? null
+  // The hidden onboarding turn runs to completion on the provider.
+  await expect.poll(runs, { timeout: 30_000 }).toEqual(['terminal'])
+  await expect.poll(async () => (await shellSession(a, sessionId))?.status, { timeout: 15_000 }).toBe('idle')
+  // Attention is raised once the session is quiet; give it the time a real one takes, then require none.
+  await new Promise(resolve => setTimeout(resolve, 3_000))
+  expect(await attention()).toBeNull()
+
+  // Control: the same unviewed session does ask for attention after a turn the user sent.
+  const sendId = randomUUID()
+  await fixtureRpcOnce(a.baseUrl, session, 'session.send', { commandId: sendId, sessionId, message: { text: 'A turn the user sent', artifactIds: [] } })
+  await expect.poll(async () => (await attention())?.reason ?? null, { timeout: 30_000 }).toBe('work_settled')
+  assertions.internalTurnAttention = { sessionId, afterOnboarding: null, afterUserTurn: (await attention())?.reason }
+})
+
 test('a new project opens clean: no settling error and nothing in Needs you', async ({ page }) => {
   // The scripted Codex peer only runs in a directory that carries its environment's marker.
   const directory = await mkdtemp(join(tmpdir(), 'forge-ux-project-'))
