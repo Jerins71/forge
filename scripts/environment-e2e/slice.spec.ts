@@ -984,7 +984,8 @@ async function busySendFixture(index = 0, waitForOnboarding = true) {
   };
   const detail = async () => {
     const { subscriptionId } = await rpc.call('session.subscribe', { sessionId });
-    return (await until(() => rpc.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot;
+    try { return (await until(() => rpc.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot; }
+    finally { rpc.socket.send(JSON.stringify({ type: 'unsubscribe', subscriptionId })); }
   };
   const send = (text: string, delivery?: 'auto' | 'followUp' | 'steer') => rpc.call('session.send', {
     commandId: randomUUID(), sessionId, message: { text, artifactIds: [] }, ...(delivery ? { delivery } : {}) });
@@ -1162,7 +1163,11 @@ test('F16/F22: native choice has stable Needs You attention and a lazy fork show
     const fork = await f.rpc.call('session.fork', { commandId: randomUUID(), sessionId: f.sessionId, title: 'Frozen context QA' });
     const forkReceipt = await settled(fork.commandId, 0); expect(forkReceipt.state).toBe('succeeded');
     const forkId = (forkReceipt.result as any).sessionId as string;
-    const snapshot = async (rpc: typeof f.rpc) => { const { subscriptionId } = await rpc.call('session.subscribe', { sessionId: forkId }); return (await until(() => rpc.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot; };
+    const snapshot = async (rpc: typeof f.rpc) => {
+      const { subscriptionId } = await rpc.call('session.subscribe', { sessionId: forkId });
+      try { return (await until(() => rpc.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot; }
+      finally { rpc.socket.send(JSON.stringify({ type: 'unsubscribe', subscriptionId })); }
+    };
     const notice = (await snapshot(f.rpc)).items.find((item: any) => item.text?.includes('earlier conversation item'));
     expect(notice?.text).toContain('Send a message to continue.');
     expect(Object.values((await f.state()).bindings).some(binding => binding.scope.threadId === forkId)).toBe(false);
