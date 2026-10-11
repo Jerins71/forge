@@ -87,7 +87,7 @@ export interface SwarmControlPort {
     runId: string;
     prepared?: import("./command-service.js").InternalInput["prepared"];
   }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }>;
-  acquireProvider(scope: ProviderScope, conversation?: ProviderConversationRef): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
+  acquireProvider(scope: ProviderScope, conversation?: ProviderConversationRef, model?: Pick<import("../../swarm/types.js").AgentModelDescriptor, "provider" | "modelId">): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
   enqueuePresentation?(threadId:string,runId:string,presentation:import("../../swarm/turn-context-coordinator.js").InboundTurnContextInput):void;
   extractWorkerResult?(threadId:string,runId:string,inputEntryId:string):Promise<{ entryId:string; resultText:string }>;
   applyChoice(input: {

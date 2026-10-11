@@ -3,7 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createControlCore, type ControlCore } from "../database.js";
-import { getRuntimeProviderCapabilities, type ProviderAdapter, type ProviderBinding } from "../../../swarm/runtime/provider-contract.js";
+import { piProviderCapabilities } from "../../../swarm/runtime/pi/pi-provider-adapter.js";
+import { type ProviderAdapter, type ProviderBinding } from "../../../swarm/runtime/provider-contract.js";
 import type { ControlCoreOptions } from "../effect-types.js";
 import { loadState } from "./store.js";
 const roots: string[] = []; const cores: ControlCore[] = [];
@@ -12,7 +13,7 @@ const commandId = "00000000-0000-4000-8000-000000000001";
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "forge-core-executor-")); roots.push(root);
   let serial = 0; let revoked = false; let dispatches = 0;
-  const canonical = new Set<string>(); const caps = getRuntimeProviderCapabilities("codex");
+  const canonical = new Set<string>(); const caps = piProviderCapabilities();
   const adapter: ProviderAdapter = {
     capabilities: () => caps,
     open: async () => { throw new Error("fixture port supplies binding"); }, resume: async () => { throw new Error("unused"); },
@@ -80,6 +81,19 @@ describe("durable provider outbox", () => {
     await second.effectWorker.drain();
     expect(acquired.at(-1)?.conversation).toEqual({ ...old.scope, kind:"conversation", nativeId:"native" });
     expect(acquired.at(-1)?.scope).toEqual({ threadId:"manager", bindingId:"new-binding", generation:old.scope.generation+1 });
+  });
+
+  it("acquires the fallback model selected in the assignment transaction", async () => {
+    const f=await fixture(); const models:Array<{threadId:string;model?: {provider:string;modelId:string}}>=[]; const original=f.options.swarm.acquireProvider;
+    f.options.swarm.acquireProvider=async (scope,conversation,model)=>{ models.push({ threadId:scope.threadId,model }); return original(scope,conversation,model); };
+    await f.core.controlService.execute(principal,"session.send",{ commandId,sessionId:"manager",message:{ text:"parent",artifactIds:[] } });
+    await f.core.effectWorker.drain();
+    await f.core.controlService.submitInput({ commandId:"assign-call",threadId:"worker",thread:{ role:"worker",projectId:"project",managerId:"manager" },message:{ text:"assignment",artifactIds:[] },
+      assignment:{ assignmentId:"assignment",parentThreadId:"manager",parentRunId:`run-${commandId}`,selection:{ specialistId:"specialist",provider:"codex",modelId:"unavailable",maxConcurrent:1,
+        candidates:[{ provider:"codex",modelId:"unavailable",available:false },{ provider:"codex",modelId:"selected-fallback",available:true }] } } });
+    await f.core.effectWorker.drain();
+    expect(models.find(value=>value.threadId === "worker")).toEqual({ threadId:"worker",model:{ provider:"codex",modelId:"selected-fallback" } });
+    expect(loadState(f.core.database).assignments.assignment.selection.modelId).toBe("selected-fallback");
   });
 
 });

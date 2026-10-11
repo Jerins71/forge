@@ -276,8 +276,9 @@ export class UserMessageCoordinator {
     this.submitAuthoritativeInput = submit;
   }
 
-  async acquireRuntime(agentId: string): Promise<SwarmAgentRuntime> {
-    return this.options.runtime.getOrCreateRuntime(this.resolveTarget(agentId, true));
+  async acquireRuntime(agentId: string, model?: Pick<import("./types.js").AgentModelDescriptor,"provider"|"modelId">): Promise<SwarmAgentRuntime> {
+    const descriptor = this.resolveTarget(agentId, true);
+    return this.options.runtime.getOrCreateRuntime(model ? { ...descriptor,model:{ ...descriptor.model,...model } } : descriptor);
   }
 
   async appendBlockedResult(threadId:string,runId:string,resultText:string):Promise<{ entryId:string;resultText:string }> {

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { makeTempConfig } from "../../test-support/index.js";
 import { loadConfiguredSqliteDatabaseConstructor } from "../../sqlite-database-loader.js";
-import { getEnvironmentDbPath, getProjectAgentPromptPath } from "../../swarm/storage/data-paths.js";
+import { getEnvironmentDbPath } from "../../swarm/storage/data-paths.js";
 import type { AgentDescriptor, AgentsStoreFile } from "../../swarm/types.js";
 import { AgentDescriptorStore } from "../../swarm/agents/agent-descriptor-store.js";
 import { createControlDescriptorPersistence } from "./descriptor-persistence.js";
@@ -32,45 +32,35 @@ async function fixture() {
   };
   return { config, original, store, resource, open };
 }
-describe("descriptor authority migration", () => {
-  it("backs up, imports once, writes/reads/restarts, and retains source/user files and tombstones", async () => {
-    const f = await fixture(); let owner = await f.open();
-    const imported = await owner.persistence.load();
-    expect(imported.agents).toHaveLength(2); expect(imported.profiles?.[0]?.archivedAt).toBeDefined();
-    expect(imported.agents[0]?.projectAgent).not.toHaveProperty("systemPrompt");
-    expect(await readFile(getProjectAgentPromptPath(f.config.paths.dataDir, "project", "fixture"), "utf8")).toBe("deprecated inline content");
-    expect(await readFile(`${f.config.paths.agentsStoreFile}.v2-before-policy-adoption`, "utf8")).toBe(f.original);
-    imported.agents[0]!.displayName = "Changed"; await owner.persistence.save(imported);
-    const counts = owner.database.prepare("SELECT (SELECT COUNT(*) FROM control_sessions) sessions,(SELECT COUNT(*) FROM control_workers WHERE descriptor_json IS NOT NULL) workers,(SELECT COUNT(*) FROM control_projects) projects").get();
-    expect(counts).toEqual({ sessions: 1, workers: 1, projects: 1 }); owner.close();
-    owner = await f.open(); expect((await owner.persistence.load()).agents.find(a => a.agentId === "manager")?.displayName).toBe("Changed");
-    await owner.persistence.save({ agents: [], profiles: [] }); owner.close();
-    owner = await f.open(); expect(await owner.persistence.load()).toEqual({ agents: [], profiles: [] }); owner.close();
-    expect(await readFile(f.config.paths.agentsStoreFile, "utf8")).toBe(f.original);
-    expect(await readFile(f.resource, "utf8")).toBe("  user prose\n");
+describe("fresh descriptor authority", () => {
+  it("starts empty, writes/reads/restarts and preserves source and user files", async () => {
+    const f=await fixture(); let owner=await f.open();
+    expect(await owner.persistence.load()).toEqual({agents:[],profiles:[]});
+    await owner.persistence.save(f.store);
+    const saved=await owner.persistence.load();
+    expect(saved.agents).toHaveLength(2);
+    expect(saved.agents[0]?.projectAgent).not.toHaveProperty("systemPrompt");
+    saved.agents[0]!.displayName="Changed";
+    await owner.persistence.save(saved); owner.close();
+    owner=await f.open(); expect((await owner.persistence.load()).agents.find(a=>a.agentId === "manager")?.displayName).toBe("Changed");
+    await owner.persistence.save({agents:[],profiles:[]}); owner.close();
+    owner=await f.open(); expect(await owner.persistence.load()).toEqual({agents:[],profiles:[]}); owner.close();
+    expect(await readFile(f.config.paths.agentsStoreFile,"utf8")).toBe(f.original);
+    expect(await readFile(f.resource,"utf8")).toBe("  user prose\n");
   });
-  it("gates invalid partial import before runtime can read and retains exact source backup", async () => {
-    const f = await fixture(); const raw = JSON.stringify({ agents: [...f.store.agents, { agentId: "invalid" }], profiles: f.store.profiles });
-    await writeFile(f.config.paths.agentsStoreFile, raw); const owner = await f.open();
-    await expect(owner.persistence.load()).rejects.toThrow();
-    expect(owner.database.prepare("SELECT descriptors_imported FROM environment_meta").get()).toEqual({ descriptors_imported: 0 });
-    expect(owner.database.prepare("SELECT COUNT(*) count FROM control_sessions").get()).toEqual({ count: 0 });
-    expect(await readFile(f.config.paths.agentsStoreFile, "utf8")).toBe(raw);
-    expect(await readFile(`${f.config.paths.agentsStoreFile}.v2-before-policy-adoption`, "utf8")).toBe(raw); owner.close();
+  it("ignores even invalid legacy input and never changes or backs it up", async () => {
+    const f=await fixture(); const raw="invalid legacy JSON preserved verbatim";
+    await writeFile(f.config.paths.agentsStoreFile,raw);
+    const owner=await f.open(); expect(await owner.persistence.load()).toEqual({agents:[],profiles:[]}); owner.close();
+    expect(await readFile(f.config.paths.agentsStoreFile,"utf8")).toBe(raw);
+    await expect(readFile(`${f.config.paths.agentsStoreFile}.v2-before-policy-adoption`)).rejects.toMatchObject({code:"ENOENT"});
   });
-  it("keeps already-V2 descriptors authoritative and strips deprecated inline content on adoption", async () => {
-    const f = await fixture(); const owner = await f.open(); await owner.persistence.load();
-    const descriptor = { ...f.store.agents[0]!, displayName: "V2", projectAgent: { handle: "fixture", whenToUse: "fixture", systemPrompt: "old V2 inline" } };
-    owner.database.prepare("UPDATE control_sessions SET descriptor_json=? WHERE session_id='manager'").run(JSON.stringify(descriptor)); owner.database.prepare("UPDATE environment_meta SET descriptor_version=1").run(); owner.close();
-    const restarted = await f.open(); const loaded = await restarted.persistence.load();
-    expect(loaded.agents.find(a => a.agentId === "manager")?.displayName).toBe("V2");
-    expect(loaded.agents.find(a => a.agentId === "manager")?.projectAgent).not.toHaveProperty("systemPrompt"); restarted.close();
-  });
-  it("the standalone store has no agents.json save fallback", async () => {
-    const f = await fixture(); const owner = new AgentDescriptorStore({ dataDir: f.config.paths.dataDir, storeFilePath: f.config.paths.agentsStoreFile });
-    await owner.load(); await owner.transaction(store => store.patchDescriptor("manager", { displayName: "Saved through DB" }));
-    expect(await readFile(f.config.paths.agentsStoreFile, "utf8")).toBe(f.original);
-    const restarted = new AgentDescriptorStore({ dataDir: f.config.paths.dataDir, storeFilePath: f.config.paths.agentsStoreFile });
-    expect((await restarted.load()).agents.find(a => a.agentId === "manager")?.displayName).toBe("Saved through DB");
+  it("the standalone store persists through DB without an agents.json fallback", async () => {
+    const f=await fixture(); const seed=await f.open(); await seed.persistence.save(f.store); seed.close();
+    const owner=new AgentDescriptorStore({dataDir:f.config.paths.dataDir,storeFilePath:f.config.paths.agentsStoreFile});
+    await owner.load(); await owner.transaction(store=>store.patchDescriptor("manager",{displayName:"Saved through DB"}));
+    const restarted=new AgentDescriptorStore({dataDir:f.config.paths.dataDir,storeFilePath:f.config.paths.agentsStoreFile});
+    expect((await restarted.load()).agents.find(a=>a.agentId === "manager")?.displayName).toBe("Saved through DB");
+    expect(await readFile(f.config.paths.agentsStoreFile,"utf8")).toBe(f.original);
   });
 });

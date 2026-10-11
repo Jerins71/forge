@@ -180,6 +180,7 @@ export async function createEnvironmentService(options: {
     swarmManager.installDescriptorPersistence(descriptorPersistence);
     mirror.attach();
     const projectAgents = new ProjectAgentRpc(swarmManager, core.controlService, database);
+    await core.reconcileOnBoot();
     const owner = core;
     const source = mirror;
     const auth = access;

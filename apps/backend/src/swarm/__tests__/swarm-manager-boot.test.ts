@@ -157,6 +157,7 @@ describe('SwarmManager', () => {
 
     const first = new TestSwarmManager(config)
     await first.boot()
+    await first.createManager('manager', { name:'Manager', cwd:config.defaultCwd })
     await expectHiddenAndRetained(first)
 
     // A Builder mutation commits to the DB; historical JSON remains unchanged.
@@ -273,6 +274,7 @@ describe('SwarmManager', () => {
 
     const first = new TestSwarmManager(config)
     await first.boot()
+    await first.createManager('manager', { name:'Manager', cwd:config.defaultCwd })
     await expectHiddenAndRetained(first)
     // Common knowledge is plain user memory now; boot never seeds it.
     await expect(readFile(getCommonKnowledgePath(config.paths.dataDir), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })

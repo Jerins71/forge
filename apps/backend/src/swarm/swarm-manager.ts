@@ -1064,6 +1064,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   }
   private createAgentMessageDispatcher(goals: ReturnType<typeof createSwarmManagerRuntimeComposition>["goals"]): AgentMessageDispatcher<CodexMcpToolGateEvaluation> {
     return new AgentMessageDispatcher({
+      resolveWorkerAssignmentSelection: (worker,secure) => this.lifecycleService.resolveWorkerAssignmentSelection(worker,secure),
       getConversationHistory: (agentId) => this.getConversationHistory(agentId),
       descriptors: this.descriptors,
       profiles: this.profiles,

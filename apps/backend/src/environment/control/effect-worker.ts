@@ -62,7 +62,9 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     const existing = live.get(bindingId); if (existing) return existing;
     const prior = Object.values(loadState(database).bindings).filter(value => value.scope.threadId === threadId && value.scope.bindingId !== bindingId)
       .sort((a,b) => a.scope.generation - b.scope.generation).at(-1)?.conversation;
-    const resource = await options.swarm.acquireProvider({ threadId, bindingId, generation }, prior);
+    const assignment = Object.values(loadState(database).assignments).find(value => value.workerThreadId === threadId && ["assigned", "running"].includes(value.state));
+    const model = assignment ? { provider:assignment.selection.provider, modelId:assignment.selection.modelId } : undefined;
+    const resource = await options.swarm.acquireProvider({ threadId, bindingId, generation }, prior, model);
     if (resource.binding.scope.threadId !== threadId || resource.binding.scope.bindingId !== bindingId || resource.binding.scope.generation !== generation) throw new Error("Acquired provider scope differs from authoritative scope");
     const entry = { ...resource, stop: new AbortController() }; live.set(bindingId, entry);
     startObservations(entry.binding, entry.adapter, entry.stop);
@@ -187,11 +189,13 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         }
       }
       settle(row, "done");
-    } catch {
+    } catch (error) {
+      const failure = { ...unavailable,message:error instanceof Error ? error.message : String(error) };
       const attemptId = "attemptId" in effect ? effect.attemptId : effect.kind === "runtime.acquire" || effect.kind === "transcript.append" ? Object.values(loadState(database).attempts).find(a => a.threadId === row.session_id && a.state !== "terminal")?.attemptId : undefined;
       if (effect.kind === "provider.compact") record({ type: "compaction.completed", ...result(row, "failed"), threadId: effect.threadId, attemptId: effect.attemptId, succeeded: false });
       else if (effect.kind.startsWith("provider.") || effect.kind === "runtime.acquire" || effect.kind === "transcript.append") record({ type: "effect.failed", ...result(row, "failed"), threadId: row.session_id, attemptId, kind: effect.kind as CoreEffect["kind"], delivery: attemptedNative ? "unknown" : "not_dispatched" });
-      settle(row, attemptedNative ? "interrupted" : "failed", unavailable);
+      settle(row, attemptedNative ? "interrupted" : "failed", failure);
+      if (hasReceipt(row.command_id)) sink.transaction(tx => sink.updateReceipt(tx,row.command_id,{ error:failure }));
     }
   };
   const kick = () => { if (started && !stopped) queueMicrotask(() => { void worker.drain().catch(() => { started = false; }); }); };

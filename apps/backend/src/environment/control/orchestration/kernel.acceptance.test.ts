@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { decide, emptyState, evolve } from "./kernel.js";
 import type { CoreCommand, CoreState, Decision } from "./types.js";
-import { getRuntimeProviderCapabilities } from "../../../swarm/runtime/provider-contract.js";
+import { piProviderCapabilities } from "../../../swarm/runtime/pi/pi-provider-adapter.js";
 
 const now = 1_800_000_000_000;
-const caps = getRuntimeProviderCapabilities("codex");
+const caps = piProviderCapabilities();
 function apply(state: CoreState, command: CoreCommand): { state: CoreState; decision: Decision } {
   const frozen = JSON.stringify(state);
   const decision = decide(state, command);
@@ -29,6 +29,15 @@ function fixture() {
 }
 
 describe("authoritative run decisions", () => {
+  it("chooses and retains the native creation scope before input admission", () => {
+    const f=fixture();
+    f.run({ type:"thread.prepare_binding",commandId:"prepare",now,threadId:"manager",bindingId:"prepared-binding" });
+    const first=f.state().threads.manager;
+    f.run({ type:"thread.prepare_binding",commandId:"prepare-again",now,threadId:"manager",bindingId:"ignored-binding" });
+    expect(f.state().threads.manager).toEqual(first);
+    expect(first.bindingId).toBe("prepared-binding");
+  });
+
   it("queues accepted input behind the current root and advances only on its terminal", () => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 1, "accepted");
     const queued = f.submit("two"); f.record("two");

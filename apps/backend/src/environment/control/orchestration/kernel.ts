@@ -114,6 +114,11 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     case "thread.create":
       if (state.threads[command.threadId]) break;
       emit({ type: "thread.created", thread: { threadId: command.threadId, role: command.role, projectId: command.projectId, managerId: command.managerId, desired: "running", generation: 0, shutdown: "clean", nextRunSequence: 0 } }); break;
+    case "thread.prepare_binding": {
+      const owner=thread(command.threadId);
+      if (!owner.bindingId) emit({ type:"thread.changed",thread:{ ...owner,bindingId:command.bindingId } });
+      break;
+    }
     case "run.submit": {
       const owner = thread(command.threadId);
       if (owner.desired !== "running" || owner.shutdown !== "clean") throw new Error("Thread shutdown must be confirmed before input admission");

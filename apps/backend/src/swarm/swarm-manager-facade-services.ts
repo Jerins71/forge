@@ -40,7 +40,7 @@ export interface TerminalArchiveHooks {
 export interface SwarmManagerFacadeRuntimeServices {
   controller: Pick<
     SwarmRuntimeController,
-    "getGenerationThroughputSnapshot" | "listRuntimeExtensionSnapshots" | "isRuntimeShutdownQuarantined" | "acquireProvider"
+    "getGenerationThroughputSnapshot" | "listRuntimeExtensionSnapshots" | "isRuntimeShutdownQuarantined" | "acquireProvider" | "installProviderScopeOwner"
   >;
   lifecycle: Pick<
     SwarmRuntimeLifecycleCoordinator,

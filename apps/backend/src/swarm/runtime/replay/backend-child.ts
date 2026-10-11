@@ -127,6 +127,7 @@ manager.applyControlledInput = (text, input) => apply(text, { ...input, controll
     input.controlledInput.onLocator?.(locator);
   },
 } });
+await core.reconcileOnBoot();
 await manager.boot();
 if (!manager.listAgents().length) await manager.createManager("manager", { name: "Manager", cwd: config.defaultCwd });
 await descriptors.load();
