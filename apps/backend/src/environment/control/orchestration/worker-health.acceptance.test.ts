@@ -10,6 +10,7 @@ import { loadState } from "./store.js";
 import { findWorkerAssignment } from "./assignments.js";
 import type { CoreAgentMessagePort } from "../../../swarm/core-agent-message-port.js";
 import { SwarmWorkerHealthService } from "../../../swarm/swarm-worker-health-service.js";
+import { SwarmAgentLifecycleService, type SwarmAgentLifecycleServiceOptions } from "../../../swarm/swarm-agent-lifecycle-service.js";
 import { WorkerBootRecovery } from "../../../swarm/agents/descriptor-store/worker-boot-recovery.js";
 import type { AgentDescriptor } from "../../../swarm/types.js";
 
@@ -56,6 +57,21 @@ it("observes controlled health deadlines without reconciling or retrying results
   await writeFile(path.join(evidenceDir, "worker-health.json"), JSON.stringify({ warningAtMs: 5 * 60_000, stopAtMs: 30 * 60_000, messages, terminations, parentState: loadState(f.db).runs.parent.state }, null, 2));
 });
 
+it("never retries a possibly delivered health advisory after the sender loses its acknowledgement", async () => {
+  const f = await fixture(); let attemptedMessages = 0;
+  const health = new SwarmWorkerHealthService({ descriptors: f.descriptors, runtimes: new Map(),
+    sendMessage: async () => { attemptedMessages++; throw new Error("acceptance acknowledgement lost"); }, publishToUser: async () => {},
+    saveStore: async () => {}, reportAttentionStatusTransition: async () => {}, emitAgentsSnapshot: () => {},
+    isRuntimeInContextRecovery: () => false, now: () => new Date(f.now()).toISOString(), logDebug: () => {},
+  });
+  health.installCoreAgentMessages(f.port);
+  health.workerStallState.set("worker", { lastProgressAt: f.now(), nudgeSent: false, nudgeSentAt: null, lastToolName: null, lastToolInput: null, lastToolOutput: null, lastDetailedReportAt: null });
+  f.advance(5 * 60_000); await health.checkForStalledWorkers(); await health.checkForStalledWorkers();
+  expect(attemptedMessages).toBe(1);
+  f.advance(5 * 60_000); await health.checkForStalledWorkers(); await health.checkForStalledWorkers();
+  expect(attemptedMessages).toBe(2);
+});
+
 it("recovers worker identity and assignment from durable rows while ignoring orphan transcripts", async () => {
   const f = await fixture();
   // The production location is resolved by the data-path owner; use its database path.
@@ -70,4 +86,27 @@ it("recovers worker identity and assignment from durable rows while ignoring orp
   expect(await recovery.recoverMissingDescriptors()).toEqual(["worker"]);
   expect(f.descriptors.get("worker")?.workerParentContext?.assignmentId).toBe("assignment");
   expect(f.descriptors.has("orphan")).toBe(false);
+});
+
+it("preflights worker selection facts and lets the transaction enforce specialist capacity", async () => {
+  const f = await fixture();
+  f.worker.specialistId = "builder"; f.worker.delegationRosterId = "roster";
+  f.worker.delegationRosterRevision = 3; f.worker.delegationRouteId = "implement";
+  f.worker.model = { provider: "openai-codex", modelId: "gpt-5.4", thinkingLevel: "high" };
+  f.worker.delegationFallbackModel = { provider: "cursor-sdk", modelId: "fixture-cursor", thinkingLevel: "high" };
+  const service = new SwarmAgentLifecycleService({ descriptors: f.descriptors,
+    modelCapacityBlocks: new Map(), now: () => new Date(f.now()).toISOString(),
+    getManagedModelProviderAvailability: async () => new Map([["openai-codex", false], ["cursor-sdk", true]]),
+    resolveSpecialistRosterForManager: async () => [], logDebug: () => {},
+  } as unknown as SwarmAgentLifecycleServiceOptions);
+  const selection = await service.resolveWorkerAssignmentSelection(f.worker, false, 1);
+  expect(selection).toMatchObject({ specialistId: "builder", rosterId: "roster", rosterRevision: 3, routeId: "implement", maxConcurrent: 1,
+    candidates: [{ provider: "openai-codex", modelId: "gpt-5.4", available: false }, { provider: "cursor-sdk", modelId: "fixture-cursor", available: true }] });
+  let event = 0; const sink = createEventSink(f.db, f.now, () => `selection-event-${++event}`);
+  sink.transaction(tx => sink.commitCommand(tx, { type: "worker.stop", commandId: "settle-worker", now: f.now(), threadId: "worker", managerId: "manager", authorized: true }));
+  sink.transaction(tx => sink.commitCommand(tx, { type: "thread.resume", commandId: "resume-selected-worker", now: f.now(), threadId: "worker" }));
+  sink.transaction(tx => sink.commitCommand(tx, { type: "worker.assign", commandId: "selected-assignment", now: f.now(), assignmentId: "selected", parentThreadId: "manager", parentRunId: "parent", workerThreadId: "worker", workerRunId: "selected-run", inputId: "selected-input", attemptId: "selected-attempt", bindingId: "selected-binding", input: { text: "selection fixture", artifactIds: [] }, authorized: true, selection }));
+  expect(loadState(f.db).assignments.selected.selection).toMatchObject({ provider: "cursor-sdk", rosterId: "roster", rosterRevision: 3 });
+  const secureSelection = await service.resolveWorkerAssignmentSelection(f.worker, true, 1);
+  expect(secureSelection.candidates?.[1].available).toBe(false);
 });

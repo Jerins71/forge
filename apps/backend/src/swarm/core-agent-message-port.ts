@@ -1,4 +1,4 @@
-import type { WorkerAssignment } from "../environment/control/orchestration/assignments.js";
+import type { AssignmentSelection, WorkerAssignment } from "../environment/control/orchestration/assignments.js";
 import type { PlanStepAssignment } from "./planning/plan-usage-tracker.js";
 import type { RuntimeUserMessage } from "./runtime-contracts.js";
 import type { AgentDescriptor, ConversationAttachment, RequestedDeliveryMode, SendMessageReceipt, WorkerParentContext } from "./types.js";
@@ -22,6 +22,7 @@ export interface CoreAgentMessagePort {
     delivery: RequestedDeliveryMode;
     call?: { agentId: string; toolCallId: string };
     planAssignment?: PlanStepAssignment;
+    selection?: AssignmentSelection;
     requiresSecureRuntime?: boolean;
     parentContext?: Pick<WorkerParentContext, "outputTarget" | "rootTurnId" | "parentRootTurnId">;
     presentation: Omit<InboundTurnContextInput<unknown>, "skipRecoveryTracking">;
