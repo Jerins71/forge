@@ -223,11 +223,14 @@ describe('durable lineage with the real kernel, SQLite store and outbox',()=>{
     const f=await fixture();const original=f.adapter.start;let starts=0;let selections=0;
     f.options.swarm.selectProviderFallback=async()=>{selections++;return model('claude');};
     f.adapter.start=async input=>{starts++;if(starts===1)throw Object.assign(new Error('primary unavailable before dispatch'),{delivery:'not_dispatched'});return original(input);};
-    const run=await f.submit('source','fallback');const state=f.state();const attempts=Object.values(state.attempts).filter(a=>a.runId===run.runId);expect(attempts).toHaveLength(2);expect(attempts.map(a=>a.delivery)).toEqual(['pending','dispatched']);
+    const run=await f.submit('source','fallback');const state=f.state();const attempts=Object.values(state.attempts).filter(a=>a.runId===run.runId);const active=state.attempts[state.runs[run.runId].activeAttemptId];
+    // Draining the old binding fences the queued fallback attempt and gives its
+    // replacement the new generation. Only two native starts are permitted.
+    expect(starts).toBe(2);expect(state.runs[run.runId].fallbackCount).toBe(1);expect(active.delivery).toBe('dispatched');expect(attempts.filter(a=>a.delivery==='dispatched')).toEqual([active]);
     const transfer=Object.values(state.transfers).find(t=>t.kind==='provider_switch')!;expect(transfer).toMatchObject({sourceProvider:'codex',targetProvider:'claude-native',state:'consumed',error:{message:expect.stringContaining('before dispatch')}});expect(selections).toBe(1);
-    const old=attempts[0];f.record({type:'provider.observe',commandId:'late-primary-end',now,observation:{type:'terminal',scope:{threadId:'source',bindingId:old.bindingId,generation:old.generation},attemptId:old.attemptId,sequence:100,origin:{kind:'root',conversation:state.bindings[old.bindingId].conversation},terminalAuthority:'root_attempt',outcome:'completed'}});expect(f.state().runs[run.runId].state).toBe('running');expect(f.state().runs[run.runId].activeAttemptId).toBe(attempts[1].attemptId);
+    const old=attempts.find(a=>a.state==='terminal' && a.outcome==='failed')!;f.record({type:'provider.observe',commandId:'late-primary-end',now,observation:{type:'terminal',scope:{threadId:'source',bindingId:old.bindingId,generation:old.generation},attemptId:old.attemptId,sequence:100,origin:{kind:'root',conversation:state.bindings[old.bindingId].conversation},terminalAuthority:'root_attempt',outcome:'completed'}});expect(f.state().runs[run.runId].state).toBe('running');expect(f.state().runs[run.runId].activeAttemptId).toBe(active.attemptId);
     f.adapter.start=async()=>{throw Object.assign(new Error('fallback unavailable before dispatch'),{delivery:'not_dispatched'});};
-    f.record({type:'effect.failed',commandId:'secondary-failure',now,threadId:'source',attemptId:attempts[1].attemptId,kind:'provider.start',delivery:'not_dispatched'});
+    f.record({type:'effect.failed',commandId:'secondary-failure',now,threadId:'source',attemptId:active.attemptId,kind:'provider.start',delivery:'not_dispatched'});
     expect(f.state().runs[run.runId].outcome).toBe('failed');expect(selections).toBe(1);expect(Object.values(f.state().runs)).toHaveLength(1);
   });
   it('uses a proved not-dispatched observation when a provider throws a raw protocol error and fences the fallback selection race',async()=>{

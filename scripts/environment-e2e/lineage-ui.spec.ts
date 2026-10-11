@@ -269,7 +269,16 @@ test('run fork points use real run IDs and portable merge remains available with
 })
 
 test('forking an older Codex run after switching to Claude preserves the source next send', async ({ page }) => {
-  const sourceId = fleet.a.sessionId
+  // Keep this source independent of earlier synthetic tool-command scenarios.
+  // Their fixture tokens inside historical context would trigger the fake peer.
+  const launched = await rpc.call<CommandReceipt>('session.launch', {
+    commandId: randomUUID(), projectId: (await detail(fleet.a.sessionId)).session.projectId,
+    title: 'Historical fork source', workspaceStrategy: { kind: 'current_checkout' },
+    model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'low' },
+  })
+  const created = await until(() => rpc.call<CommandReceipt>('command.get', { commandId: launched.commandId }), receipt => !['accepted', 'running'].includes(receipt.state))
+  expect(created.state, JSON.stringify(created.error)).toBe('succeeded')
+  const sourceId = launched.sessionId!
   await openSession(page, sourceId)
   await sendMessage(page, 'Native source seed before provider switch')
   const source = await detail(sourceId)
