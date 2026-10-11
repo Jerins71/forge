@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeTempConfig, TestSwarmManager, bootWithDefaultManager } from "../../test-support/index.js";
 import { loadConfiguredSqliteDatabaseConstructor } from "../../sqlite-database-loader.js";
 import { migrateControlDatabase } from "./migrations.js";
-import { createEventSink } from "./event-sink.js";
 import { createSwarmEventMirror } from "./swarm-event-mirror.js";
 import { createProjectPolicy } from "./project-policy.js";
 import { createControlCore } from "./database.js";
