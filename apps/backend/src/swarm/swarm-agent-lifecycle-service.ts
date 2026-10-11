@@ -1,3 +1,4 @@
+import type { AssignmentSelection } from "../environment/control/orchestration/assignments.js";
 import type { CoreAgentMessagePort } from "./core-agent-message-port.js";
 import { blocksOpenRouterFallback } from "./runtime/pi/openrouter-request-policy.js";
 import type {
@@ -1912,6 +1913,31 @@ export class SwarmAgentLifecycleService {
     descriptor.thinkingLevel = normalizeThinkingLevelForModelDescriptor(descriptor);
 
     return descriptor;
+  }
+
+  async resolveWorkerAssignmentSelection(worker: AgentDescriptor, requiresSecureRuntime: boolean, maxConcurrent?: number): Promise<AssignmentSelection> {
+    const manager = this.options.descriptors.get(worker.managerId);
+    if (worker.role !== "worker" || !manager || manager.role !== "manager") throw new Error("Assignment worker owner conflicts");
+    const roster = this.options.resolveSpecialistRosterForManager
+      ? await this.options.resolveSpecialistRosterForManager(manager)
+      : await this.options.resolveSpecialistRosterForProfile(manager.profileId ?? manager.agentId);
+    const specialist = roster.find(entry => entry.specialistId === (worker.specialistLens ?? worker.specialistId));
+    const tier = worker.specialistTier ? await resolveTierConfig(this.options.dataDir, worker.specialistTier) : undefined;
+    const fallbackId = specialist?.fallbackModelId ?? tier?.fallbackModelId;
+    const fallbackProvider = specialist?.fallbackProvider ?? tier?.fallbackProvider ?? (fallbackId ? inferProviderFromModelId(fallbackId) : undefined);
+    const fallback = worker.delegationFallbackModel ?? (fallbackId && fallbackProvider ? { provider: fallbackProvider, modelId: fallbackId } : undefined);
+    const availability = await this.options.getManagedModelProviderAvailability();
+    const models = [worker.model, ...(fallback && !blocksOpenRouterFallback(worker.model) ? [fallback] : [])];
+    return {
+      specialistId: worker.specialistId, rosterId: worker.delegationRosterId, rosterRevision: worker.delegationRosterRevision,
+      routeId: worker.delegationRouteId, provider: worker.model.provider, modelId: worker.model.modelId, maxConcurrent,
+      // Pure policy receives the ordered conjunction of availability/capacity/security facts.
+      candidates: models.map(model => ({ provider: model.provider, modelId: model.modelId,
+        available: specialist?.enabled !== false && specialist?.availabilityCode !== "invalid_model"
+          && availability.get(model.provider) === true && !this.getActiveModelCapacityBlock(model.provider, model.modelId)
+          && (!requiresSecureRuntime || supportsSecureRuntimeProvider(model.provider)),
+      })),
+    };
   }
 
   resolveSpawnModelWithCapacityFallback(model: AgentModelDescriptor): AgentModelDescriptor {

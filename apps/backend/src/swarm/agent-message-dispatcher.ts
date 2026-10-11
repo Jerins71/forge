@@ -1,4 +1,5 @@
 import { buildWorkerResult, selectWorkerRunFinal } from "./worker-result-extraction.js";
+import type { AssignmentSelection } from "../environment/control/orchestration/assignments.js";
 import type { CoreAgentMessagePort } from "./core-agent-message-port.js";
 import { isRepoProjectAgentSource } from "@forge/protocol";
 import type {
@@ -203,6 +204,7 @@ export interface AgentMessageDispatcherOptions<TCodexGate> {
   projectAgents: AgentMessageProjectAgentPort;
   codex: AgentMessageCodexPort<TCodexGate>;
   secureWorkers: SecureWorkerLifecyclePort;
+  resolveWorkerAssignmentSelection(target: AgentDescriptor, requiresSecureRuntime: boolean): Promise<AssignmentSelection>;
   appendProjectAgentConversation(
     target: AgentDescriptor,
     payload: {
@@ -472,6 +474,8 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
     if (input.sendOptions?.requiresSecureRuntime && !secureWorkerPrepared) {
       throw new Error(SECURE_RUNTIME_BINDING_UNAVAILABLE_MESSAGE);
     }
+    const selection = input.sender.role === "manager" && input.target.role === "worker"
+      ? await this.options.resolveWorkerAssignmentSelection(input.target, secureWorkerPrepared || input.sendOptions?.requiresSecureRuntime === true) : undefined;
     // Runtime guidance must not replace the authored message in the audit trail.
     const runtimeText = typeof workerAssignmentExpectation === "string"
       ? `${input.message}\n\n${WORKER_FOLLOWUP_REMINDER}`
@@ -543,6 +547,7 @@ export class AgentMessageDispatcher<TCodexGate = unknown> {
         ...(input.sendOptions?.observabilityParentTool ? { call: { agentId: input.sendOptions.observabilityParentTool.agentId, toolCallId: input.sendOptions.observabilityParentTool.toolCallId } } : {}),
         ...(input.planAssignment ? { planAssignment: input.planAssignment.assignment } : {}),
         requiresSecureRuntime: secureWorkerPrepared || input.sendOptions?.requiresSecureRuntime,
+        selection,
         ...(input.sender.role === "manager" && input.target.role === "worker" ? { parentContext: {
           outputTarget: this.options.output.resolveWorkerParentOutputTarget(input.sender.agentId, activeParent?.outputTarget),
           rootTurnId: activeParent?.rootTurnId, parentRootTurnId: activeParent?.parentRootTurnId,
@@ -826,4 +831,3 @@ function classifyObservabilityRootSource(input: {
     ? "internal_self_send"
     : "internal_agent_message";
 }
-
