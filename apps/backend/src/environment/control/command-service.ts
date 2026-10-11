@@ -268,7 +268,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       if (input.command === "recovery.decide") {
         const decision = input.request as RpcInput<"recovery.decide">;
         const state = loadState(database);
-        if (state.recovery?.recoveryId !== decision.recoveryId) throw new ControlError("CONFLICT", "Recovery occurrence is no longer current");
+        if (state.recovery?.recoveryId !== decision.recoveryId || state.recovery.resumedAt || state.recovery.dismissedAt) throw new ControlError("CONFLICT", "Recovery occurrence is no longer pending");
         const base = { commandId: input.commandId, now: options.clock(), recoveryId: decision.recoveryId };
         sink.commitCommand(tx, decision.action === "dismiss" ? { ...base, type: "recovery.dismiss" } : { ...base, type: "recovery.resume",
           attempts: Object.fromEntries(Object.values(state.runs).filter(run => run.state === "recovery").map(run => [run.runId, options.random()])),

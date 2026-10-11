@@ -155,6 +155,20 @@ describe("authoritative assignment replay", () => {
     expect(f.result("one").effects).toEqual([]); expect(Object.values(f.state().runs).filter(run => run.runId === resultRun)).toHaveLength(1);
     expect(replayLifecycle(f.db())).toEqual(f.state());
   });
+  it("queues a worker report during a provider drain and delivers it once in-process after binding.drained", async () => {
+    const f = await fixture(); f.assign("one"); await f.ready("run-one"); f.dispatch("run-one"); f.observe("run-one", "accepted"); f.observe("parent", "terminal");
+    f.run({ type: "transfer.create", commandId: "switch", now, transferId: "switch", kind: "provider_switch", source: { threadId: "manager", runId: "parent", sequence: 0, entryId: f.state().runs.parent.entryId }, targetThreadId: "manager", targetModel: { provider: "claude", modelId: "claude-sonnet-4-6", thinkingLevel: "high" }, authorized: true });
+    expect(f.state().threads.manager.shutdown).toBe("pending");
+    f.observe("run-one", "terminal"); const delivery = f.result("one"), resultRun = "one:result:run";
+    expect(f.state().runs[resultRun]).toMatchObject({ state: "queued" });
+    expect(delivery.effects.map(effect => effect.kind)).toContain("transcript.append");
+    await f.record(resultRun); expect(f.state().runs[resultRun].state).toBe("queued");
+    const drained = f.run({ type: "binding.drained", commandId: "drained", now, threadId: "manager", bindingId: f.state().threads.manager.bindingId!, status: "clean" });
+    expect(f.state().runs[resultRun].state).toBe("running"); expect(drained.effects.map(effect => effect.kind)).toContain("runtime.acquire");
+    await f.ready(resultRun); f.dispatch(resultRun); f.observe(resultRun, "accepted"); f.observe(resultRun, "terminal");
+    expect(f.state().transfers["one:result"].state).toBe("consumed"); expect(f.result("one").effects).toEqual([]);
+    await f.boot("report-reboot"); expect(f.state().transfers["one:result"].state).toBe("consumed");
+  });
   it("records a late result after stop without admission, and supersedes results after clear", async () => {
     const f = await fixture(); f.assign("one"); await f.ready("run-one"); f.dispatch("run-one"); f.observe("run-one", "accepted"); f.observe("run-one", "terminal");
     f.run({ type: "thread.stop", commandId: "stop", now, threadId: "manager" }); f.result("one");

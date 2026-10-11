@@ -87,7 +87,7 @@ export function decideAssignment(initial: CoreState, command: CoreCommand & Assi
     const transfer = state.transfers[assignment.resultTransferId ?? ""];
     const parent = state.threads[assignment.parentThreadId];
     if (!transfer || isLineageTransfer(transfer) || transfer.state !== "pending" || !assignment.resultInput || assignment.invalidatedAt !== undefined ||
-      !parent || parent.desired !== "running" || parent.shutdown !== "clean" || state.runs[transfer.targetRunId]) return;
+      !parent || parent.desired !== "running" || parent.shutdown === "quarantined" || state.runs[transfer.targetRunId]) return;
     if (assignment.parentGeneration !== parent.generation) emit({ type: "assignment.result_recorded", assignment: { ...assignment, parentGeneration: parent.generation } });
     if (transfer.targetGeneration !== parent.generation) emit({ type: "transfer.created", transfer: { ...transfer, targetGeneration: parent.generation } });
     apply({ type: "run.submit", commandId: command.commandId, now: command.now, threadId: parent.threadId,
@@ -138,7 +138,7 @@ export function decideAssignment(initial: CoreState, command: CoreCommand & Assi
       emit({ type: "assignment.result_recorded", assignment: recorded });
       const transfer: WorkerTransfer = { transferId: recorded.resultTransferId, assignmentId: assignment.assignmentId, kind: "worker_result", source: command.resultRef,
         targetThreadId: assignment.parentThreadId, targetGeneration: assignment.parentGeneration, targetRunId: `${assignment.assignmentId}:result:run`, strategy: "canonical_input",
-        state: assignment.invalidatedAt !== undefined ? "superseded" : "pending", createdAt: command.now };
+        state: assignment.invalidatedAt !== undefined || assignment.state === "cancelled" ? "superseded" : "pending", createdAt: command.now };
       emit({ type: transfer.state === "superseded" ? "transfer.superseded" : "transfer.created", transfer });
       deliver(recorded); break;
     }

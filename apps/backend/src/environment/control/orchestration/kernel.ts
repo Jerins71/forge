@@ -310,7 +310,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
         }
       } else if (command.attemptId && state.attempts[command.attemptId]) {
         const attempt = state.attempts[command.attemptId];
-        if (attempt.state === "terminal") break;
+        if (attempt.state === "terminal" || attempt.state === "unknown" || state.runs[attempt.runId].activeAttemptId !== attempt.attemptId) break;
         if (command.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); }
         else { finish(state.runs[attempt.runId], "failed"); advance(command.threadId); }
       } else if (command.kind === "provider.release") {

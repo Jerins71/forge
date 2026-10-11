@@ -144,6 +144,55 @@ describe("durable provider outbox", () => {
     expect(starts).toEqual(["run-first", "run-first", "run-newer"]); expect(readReceipt(f.core.eventSink, "newer")).toMatchObject({ state: "succeeded", delivery: "dispatched" });
     const before = loadState(f.core.database); rebuildLifecycleProjections(f.core.database); expect(loadState(f.core.database)).toEqual(before);
   });
+  it.each(["runtime.acquire", "stale.effect"] as const)("fences historical unknown attempts from a later %s failure", async boundary => {
+    const f = await fixture(); let starts = 0;
+    f.adapter.start = async input => ++starts === 1 ? { status: "unknown" } : { status: "accepted", turn: { ...input.binding.scope, kind: "turn", conversationId: "native", nativeId: input.runId } };
+    await f.core.controlService.submitInput({ commandId: "first", threadId: "manager", message: { text: "first", artifactIds: [] } }); await f.core.effectWorker.drain();
+    const originalAttemptId = loadState(f.core.database).runs["run-first"].activeAttemptId;
+    await f.core.controlService.submitInput({ commandId: "newer", threadId: "manager", message: { text: "newer", artifactIds: [] } }); await f.core.effectWorker.drain();
+    const recoveryId = loadState(f.core.database).recovery!.recoveryId;
+    f.core.controlService.record({ type: "recovery.resume", commandId: "resume", now: f.options.clock(), recoveryId, attempts: { "run-first": "retry-first" }, bindingIds: { manager: "retry-binding" } }); await f.core.effectWorker.drain();
+    const state = loadState(f.core.database), attempt = state.attempts[state.runs["run-first"].activeAttemptId], binding = state.bindings[attempt.bindingId];
+    f.core.controlService.record({ type: "provider.observe", commandId: "first-completed", now: f.options.clock(), observation: { type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: "completed" } });
+    if (boundary === "runtime.acquire") f.options.swarm.acquireProvider = async () => { throw new Error("Newer provider acquisition failed"); };
+    else f.core.controlService.record({ type: "effect.failed", commandId: "late-old-failure", now: f.options.clock(), threadId: "manager", attemptId: originalAttemptId, kind: "provider.start", delivery: "not_dispatched" });
+    await f.core.effectWorker.drain();
+    const after = loadState(f.core.database);
+    expect(after.runs["run-first"]).toMatchObject({ state: "terminal", outcome: "completed" });
+    expect(after.attempts[originalAttemptId]).toMatchObject({ state: "unknown", delivery: "unknown" });
+    if (boundary === "runtime.acquire") {
+      expect(after.runs["run-newer"]).toMatchObject({ state: "terminal", outcome: "failed" });
+      expect(after.threads.manager.activeRunId).toBeUndefined();
+      expect(readReceipt(f.core.eventSink, "newer")).toMatchObject({ state: "failed", delivery: "none" });
+    } else expect(after.runs["run-newer"].state).toBe("running");
+    const before = loadState(f.core.database); rebuildLifecycleProjections(f.core.database); expect(loadState(f.core.database)).toEqual(before);
+  });
+  it("attributes a queued canonical append failure to its run instead of the historical unknown attempt", async () => {
+    const f = await fixture(); f.adapter.start = async () => ({ status: "unknown" });
+    await f.core.controlService.submitInput({ commandId: "first", threadId: "manager", message: { text: "first", artifactIds: [] } }); await f.core.effectWorker.drain();
+    const before = loadState(f.core.database), originalAttemptId = before.runs["run-first"].activeAttemptId;
+    f.options.swarm.applyInput = async () => { throw new Error("Newer canonical append failed"); };
+    await f.core.controlService.submitInput({ commandId: "newer", threadId: "manager", message: { text: "newer", artifactIds: [] } }); await f.core.effectWorker.drain();
+    const after = loadState(f.core.database);
+    expect(after.runs["run-first"]).toEqual(before.runs["run-first"]);
+    expect(after.attempts[originalAttemptId]).toEqual(before.attempts[originalAttemptId]);
+    expect(after.runs["run-newer"]).toMatchObject({ state: "terminal", outcome: "failed" });
+  });
+  it("keeps a cancelled retained worker's late report readable without queuing or recovering delivery", async () => {
+    const f = await fixture();
+    await f.core.controlService.submitInput({ commandId: "parent", threadId: "manager", message: { text: "parent", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.submitInput({ commandId: "child", threadId: "worker", thread: { role: "worker", managerId: "manager", projectId: "project" }, message: { text: "child", artifactIds: [] }, assignment: { assignmentId: "assignment", parentThreadId: "manager", parentRunId: "run-parent", selection: { provider: "pi", modelId: "fixture" } } }); await f.core.effectWorker.drain();
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" }); await f.core.effectWorker.drain();
+    expect(loadState(f.core.database).assignments.assignment.state).toBe("cancelled");
+    f.core.controlService.record({ type: "worker.result", commandId: "late-result", now: f.options.clock(), assignmentId: "assignment", workerRunId: "run-child", resultRef: { threadId: "worker", runId: "run-child", entryId: "readable-final" }, input: { text: "Readable cancelled work", artifactIds: [] } });
+    await f.core.close(); const reboot = await f.open(); await reboot.effectWorker.drain();
+    const after = loadState(reboot.database);
+    expect(after.assignments.assignment).toMatchObject({ resultRef: { entryId: "readable-final" }, resultInput: { text: "Readable cancelled work" } });
+    expect(after.transfers["assignment:result"].state).toBe("superseded");
+    expect(after.runs["assignment:result:run"]).toBeUndefined();
+    expect(after.recovery?.undeliveredReports ?? []).toEqual([]);
+    expect(after.threads.worker.desired).toBe("running"); expect(f.dispatches()).toBe(2);
+  });
   it("queues an immediate send after a configure receipt while its provider release is pending", async () => {
     const f = await fixture(); let release!: () => void; const shutdown = new Promise<void>(resolve => { release = resolve; });
     f.options.swarm.stopSession = async () => { await shutdown; return { stopped: true }; };
@@ -233,6 +282,10 @@ describe("durable provider outbox", () => {
     const present = async () => { presentations++; expect(loadState(reboot.database).recovery?.[action === "resume" ? "resumedAt" : "dismissedAt"]).toBeTruthy(); return {}; };
     await reboot.controlService.admitLifecycle(principal, input, present); await reboot.controlService.admitLifecycle(principal, input, present);
     expect(presentations).toBe(1); expect(publications).toBe(1); expect(readReceipt(reboot.eventSink, commandId).state).toBe("succeeded");
+    await reboot.effectWorker.drain();
+    const nextCommandId = "00000000-0000-4000-8000-000000000002";
+    await expect(reboot.controlService.admitLifecycle(principal, { ...input, commandId: nextCommandId, request: { ...input.request, commandId: nextCommandId } }, present)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(presentations).toBe(1); expect(publications).toBe(1);
     const resumed = loadState(reboot.database).runs["run-interrupted"];
     expect(resumed.state).toBe(action === "resume" ? "running" : "terminal");
     if (action === "resume") expect(reboot.database.prepare("SELECT COUNT(*) n FROM effects WHERE command_id=? AND kind='runtime.acquire'").get(commandId)).toEqual({ n: 1 });
