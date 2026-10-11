@@ -1159,7 +1159,9 @@ test('F16/F22: native choice has stable Needs You attention and a lazy fork show
     const answer = await f.rpc.call('session.choose', { commandId: randomUUID(), sessionId: f.sessionId, choiceId: choice.choiceId,
       answers: [{ questionId: choice.questions[0].id, selectedOptionIds: [choice.questions[0].options[0].id] }] });
     expect((await settled(answer.commandId, 0)).state).toBe('succeeded'); expect(await f.run(waiting.commandId)).toMatchObject({ outcome: 'completed' });
-    await until(async () => (await f.detail()).session.attentionOccurrence, value => !value);
+    const postAnswer = await until(f.detail, snapshot => snapshot.session.attentionOccurrence?.attentionId !== first.attentionOccurrence.attentionId
+      && snapshot.session.attentionOccurrence?.reason !== 'decision_waiting');
+    expect(postAnswer.choices.some((row: any) => row.choiceId === choice.choiceId && row.status === 'pending')).toBe(false);
     const fork = await f.rpc.call('session.fork', { commandId: randomUUID(), sessionId: f.sessionId, title: 'Frozen context QA' });
     const forkReceipt = await settled(fork.commandId, 0); expect(forkReceipt.state).toBe('succeeded');
     const forkId = (forkReceipt.result as any).sessionId as string;
@@ -1183,7 +1185,7 @@ test('F16/F22: native choice has stable Needs You attention and a lazy fork show
     const replay = await openFixtureRpc(f.environment.baseUrl, sessions[0]!);
     try { expect((await snapshot(replay)).items.find((item: any) => item.itemId === notice.itemId)?.text).toBe(notice.text); }
     finally { replay.close(); }
-    evidence.choiceAndLazyContext = { liveNeedsYou: true, stableAttention: true, clearsWhenAnswered: true, frozenContextVisible: true, noProviderBeforeSend: true, replayAfterRestart: true };
+    evidence.choiceAndLazyContext = { liveNeedsYou: true, stableAttention: true, clearsWhenAnswered: true, subsequentAttentionReason: postAnswer.session.attentionOccurrence?.reason ?? null, frozenContextVisible: true, noProviderBeforeSend: true, replayAfterRestart: true };
   } finally { f.rpc.close(); }
 });
 
