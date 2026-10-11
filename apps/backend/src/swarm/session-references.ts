@@ -45,14 +45,18 @@ export async function linkSessionReferences(
     return undefined;
   }
 
-  const previous = sender.sessionReferenceAgentIds;
+  // Admission may pass an authoritative projection. Persist the peer link on
+  // this owner's stored descriptor, rather than mutating that read-only copy.
+  const storedSender = deps.descriptors.get(sender.agentId);
+  if (!storedSender) return undefined;
+  const previous = storedSender.sessionReferenceAgentIds;
   const next = [...new Set([...(previous ?? []), ...targets.map((target) => target.agentId)])];
   if (next.length !== previous?.length) {
-    sender.sessionReferenceAgentIds = next;
+    storedSender.sessionReferenceAgentIds = next;
     try {
       await deps.saveStore();
     } catch (error) {
-      sender.sessionReferenceAgentIds = previous;
+      storedSender.sessionReferenceAgentIds = previous;
       throw error;
     }
   }
