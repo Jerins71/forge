@@ -307,7 +307,7 @@ describe("Pi provider adapter on the native production path", () => {
       await expect(adapter.readContext!({ binding, through: { ...initial.binding.conversation, kind: "turn", conversationId: initial.binding.conversation.nativeId, nativeId: "old-turn" } })).rejects.toThrow(/stale/i);
       await expect(adapter.respond({ binding, request: { ...initial.binding.conversation, kind: "request", conversationId: initial.binding.conversation.nativeId, nativeId: "old-request" },
         lifetime: { kind: "binding", generation: 1 }, response: {} })).rejects.toThrow(/stale/i);
-      await expect(adapter.start({ binding: initial.binding, runId: "stale", attemptId: "stale", input: { text: "Stale scope" } })).rejects.toThrow(/stale|binding/i);
+      await expect(adapter.start({ binding: initial.binding, runId: "stale", attemptId: "stale", input: { text: "Stale scope" } })).rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "stale_scope", delivery: "not_dispatched" });
       await adapter.close(binding); await collected.done;
       expect(peer.failures).toEqual([]);
     } finally { await fixture.cleanup(); await peer.close(); }
