@@ -634,6 +634,7 @@ export class SwarmManagerRuntimeComposition {
         detachRuntime: (agentId, token) => runtimeLifecycle.detachRuntime(agentId, token),
         upsertDescriptorInLiveMaps: descriptors.upsertDescriptor,
         emitStatus: events.emitStatus,
+        stopOwnedProvider: (agentId) => this.runtimeController.stopOwnedProvider(agentId),
         emitTrustRuntimeRestartMessage: (agentId, timestamp) =>
           events.emitConversationMessage({
             type: "conversation_message",

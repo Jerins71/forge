@@ -106,6 +106,19 @@ describe('lineage summary', () => {
     expect(summarizeLineage(lineage({ lineage: null, transfers: [], handoffs: [] }), labels)).toBeNull()
     expect(summarizeLineage(null, labels)).toBeNull()
   })
+  it('shows the parent that a merge-back arrived, and whether the model has received it yet', () => {
+    // Ways this can fail: the parent shows nothing; the fork claims to have received its own merge; a failed or replaced merge is announced.
+    const merge = { ...lineage().transfers[0]!, transferId: 'm1', kind: 'merge_back' as const, state: 'resolved' as const, createdAt: 9, targetThreadId: 'parent-session', source: { threadId: 'session-1', sequence: 7, entryId: 'entry-7' } }
+    const parent = (state: typeof merge.state | 'consumed' | 'failed' | 'superseded') => lineage({ threadId: 'parent-session', lineage: null, handoffs: [], transfers: [{ ...merge, state }] })
+    const names = (id: string) => id === 'session-1' ? 'Fix the parser' : labels(id)
+    expect(summarizeLineage(parent('resolved'), names)).toEqual({ label: 'Merge back from Fix the parser · applies on your next message', tone: 'neutral' })
+    expect(summarizeLineage(parent('consumed'), names)?.label).toBe('Merged back from Fix the parser')
+    expect(summarizeLineage(parent('consumed'), () => undefined)?.label).toBe('Merged back from a fork')
+    expect(summarizeLineage(parent('failed'), names)).toBeNull()
+    expect(summarizeLineage(parent('superseded'), names)).toBeNull()
+    // The fork's own header keeps saying where it came from.
+    expect(summarizeLineage(lineage({ transfers: [merge], handoffs: [] }), names)?.label).toBe('Forked from Builder')
+  })
   it('warns when the latest transfer failed', () => {
     const failed = lineage({ lineage: null, handoffs: [], transfers: [{ ...lineage().transfers[0]!, state: 'failed', error: { code: 'UNSUPPORTED', message: 'cursor does not accept portable context' } }] })
     expect(summarizeLineage(failed, labels)).toEqual({ label: 'Switch from Codex failed', tone: 'warning' })

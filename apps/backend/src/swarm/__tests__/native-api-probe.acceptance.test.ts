@@ -16,6 +16,7 @@ import type { SwarmConfig } from "../types.js";
 //  - the hint names the wrong fix, or offers a URL that does not answer either;
 //  - a rejected key is reported as a wrong path;
 //  - an address nothing listens on hangs or is reported as working;
+//  - a rate-limited endpoint (429) is reported as connected, though it says nothing about the key;
 //  - Claude's base URL keeps a trailing /v1 after saving;
 //  - the result of an earlier test survives a change of key or URL;
 //  - the key appears in a response.
@@ -37,6 +38,7 @@ beforeAll(async () => {
     const key = typeof request.headers["x-api-key"] === "string" ? request.headers["x-api-key"] : bearer;
     seen.push({ url: request.url ?? "", key });
     request.resume();
+    if (request.url?.startsWith("/limited/")) { response.writeHead(429, { "content-type": "application/json", "retry-after": "20" }).end(JSON.stringify({ error: { message: "Rate limit reached" } })); return; }
     const known = request.method === "POST" && ["/router/v1/messages", "/router/v1/responses"].includes(request.url ?? "");
     response.writeHead(!known ? 404 : key !== KEY ? 401 : 400, { "content-type": "application/json" });
     response.end(JSON.stringify({ error: { message: !known ? "Not found" : key !== KEY ? "Invalid key" : "Missing required fields" } }));
@@ -124,6 +126,13 @@ describe("Test connection", () => {
     const status = await save<CodexAuthStatus>(runtime, dead);
     expect(status.access!.probe!.outcome).toBe("unreachable");
     expect(status.access!.probe!.status).toBeUndefined();
+  });
+
+  it.each(["claude", "codex"] as const)("%s: a rate-limited endpoint is not reported as connected", async runtime => {
+    const status = await save<CodexAuthStatus>(runtime, runtime === "claude" ? `${origin}/limited` : `${origin}/limited/v1`);
+    expect(status.access!.probe).toMatchObject({ outcome: "rate_limited", status: 429 });
+    expect(status.access!.probe!.message).toContain("rate limit");
+    expect(status.access!.probe!.message).not.toContain("Connected");
   });
 
   it("Subscription with a base URL tests the path without sending the saved key", async () => {

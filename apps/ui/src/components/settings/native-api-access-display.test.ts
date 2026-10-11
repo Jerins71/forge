@@ -12,6 +12,7 @@ describe('native API connection signals', () => {
   })
   it('retains a failed probe without a native login failure', () => {
     expect(apiKeyConnection({ ...access, probe: { ...access.probe!, outcome: 'bad_key' } })).toEqual({ ok: false, label: 'API key rejected' })
+    expect(apiKeyConnection({ ...access, probe: { ...access.probe!, outcome: 'rate_limited' } })).toEqual({ ok: false, label: 'Rate limited' })
   })
   it('shows the connection when both signals permit it', () => {
     expect(apiKeyConnection(access)).toEqual({ ok: true, label: 'Connected with an API key' })

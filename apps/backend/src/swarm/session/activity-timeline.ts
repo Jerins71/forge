@@ -121,7 +121,8 @@ export class ActivityTimelineTracker {
     const tracked = this.statusRow(fact);
     const message = oneLine(fact.message);
     Object.assign(tracked.item, bounded("detail", `Attempt ${fact.attempt}\n${fact.message}`, "head"));
-    tracked.item.summary = `Retrying: ${message} (attempt ${fact.attempt})`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
+    const reason = retryReason(message);
+    tracked.item.summary = (reason ? `${reason}. Retrying (attempt ${fact.attempt})` : `Retrying: ${message} (attempt ${fact.attempt})`).slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
     this.attempts.set(tracked.item.itemId, fact.attempt);
     this.publishNow(tracked);
   }
@@ -130,18 +131,23 @@ export class ActivityTimelineTracker {
    * Ends the turn's open rows: reasoning an interrupt left running, and the status row, which
    * fails with the provider error or records the retries the turn recovered from.
    */
-  settleTurn(fact: { actorId: string; sessionId: string; error?: string; stopped?: boolean; runId?: string; timestamp: string }): TimelineActivity[] {
+  settleTurn(fact: { actorId: string; sessionId: string; error?: string; stopped?: boolean; runId?: string; timestamp: string }): { finished: TimelineActivity[]; replyInterrupted: boolean } {
     const finished: TimelineActivity[] = [];
+    // A reply still streaming when the turn fails was cut off: its text is partial.
+    let replyInterrupted = false;
     for (const tracked of this.items.values()) {
       if (tracked.item.actorId !== fact.actorId || tracked.item.status !== "running") continue;
       if (tracked.item.kind === "reasoning") finished.push(this.finishReasoning(tracked, fact.timestamp));
       // A reply the turn left open is over; its row ends without being persisted.
-      else if (tracked.item.kind === "message") { tracked.item.status = "completed"; tracked.item.completedAt = fact.timestamp; this.publishNow(tracked); }
+      else if (tracked.item.kind === "message") {
+        replyInterrupted ||= Boolean(fact.error && tracked.item.detail);
+        tracked.item.status = "completed"; tracked.item.completedAt = fact.timestamp; this.publishNow(tracked);
+      }
     }
     const open = this.status.get(fact.actorId);
-    if (!open && !fact.error) return finished;
+    if (!open && !fact.error) return { finished, replyInterrupted: false };
     // The adapter and the runtime can both report one failure; the first report is the row.
-    if (fact.error && this.hasRecentFailure(fact.actorId, fact.runId)) return finished;
+    if (fact.error && this.hasRecentFailure(fact.actorId, fact.runId)) return { finished, replyInterrupted: false };
     if (fact.error) this.failedAt.set(fact.actorId, { at: this.now(), runId: fact.runId });
     const tracked = open ?? this.statusRow(fact);
     const item = tracked.item;
@@ -149,16 +155,17 @@ export class ActivityTimelineTracker {
     this.status.delete(fact.actorId); this.attempts.delete(item.itemId);
     if (fact.error) {
       item.status = "failed";
-      item.summary = `Failed: ${readableProviderError(fact.error)}${attempts ? ` (after ${attempts} ${attempts === 1 ? "retry" : "retries"})` : ""}`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
+      item.summary = `${replyInterrupted ? "Reply interrupted" : "Failed"}: ${readableProviderError(fact.error)}${attempts ? ` (after ${attempts} ${attempts === 1 ? "retry" : "retries"})` : ""}`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
       Object.assign(item, bounded("detail", `${attempts ? `Retried ${attempts} ${attempts === 1 ? "time" : "times"}\n` : ""}${fact.error}`, "head"));
     } else {
       item.status = "completed";
-      item.summary = `${fact.stopped ? "Stopped" : "Recovered"} after ${attempts} ${attempts === 1 ? "retry" : "retries"}: ${oneLine((item.detail ?? "").split("\n").slice(1).join(" "))}`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
+      const last = oneLine((item.detail ?? "").split("\n").slice(1).join(" "));
+      item.summary = `${fact.stopped ? "Stopped" : "Recovered"} after ${attempts} ${attempts === 1 ? "retry" : "retries"}: ${retryReason(last) ?? last}`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
     }
     item.completedAt = fact.timestamp;
     this.publishNow(tracked);
     finished.push(item);
-    return finished;
+    return { finished, replyInterrupted: replyInterrupted && item.status === "failed" };
   }
 
   /** The failure is already in the transcript; a later report of it for the same turn adds nothing. */
@@ -342,15 +349,51 @@ function bounded(field: "input" | "detail", text: string, keep: "head" | "tail")
   return { [field]: keep === "head" ? text.slice(0, max) : text.slice(-max), truncated: true };
 }
 
+/** Why the provider is retrying, when the reason is one worth naming; the raw text stays in the row's details. */
+function retryReason(message: string): string | undefined {
+  if (/\b429\b|rate.?limit|too many requests/i.test(message)) return "Rate limited by the provider (429)";
+  if (/\b(500|502|503|504|529)\b|overloaded|unavailable/i.test(message)) return "The provider is unavailable right now";
+  return undefined;
+}
+
 /** One readable sentence for a provider failure; the raw text stays in the row's details. */
 export function readableProviderError(raw: string): string {
-  const text = oneLine(raw).replace(/[.\s]+$/, "");
-  if (/\b401\b|unauthori[sz]ed|(invalid|incorrect) api key|authentication/i.test(text)) return "The provider rejected the API key (401). Check the key in Settings → Authentication.";
-  if (/\b429\b|rate.?limit|too many requests/i.test(text)) return "The provider is rate limiting requests (429). Wait a moment, then send again.";
-  if (/\b404\b|not found/i.test(text)) return "The provider endpoint was not found (404). Check the base URL in Settings → Authentication.";
+  const { message, status, who } = providerErrorParts(raw);
+  const text = oneLine(message).replace(/[.\s]+$/, "");
+  const code = status ?? /\b([45]\d\d)\b/.exec(text)?.[1];
+  if (code === "401" || /unauthori[sz]ed|(invalid|incorrect) api key|authentication/i.test(text)) return "The provider rejected the API key (401). Check the key in Settings → Authentication.";
+  if (code === "429" || /rate.?limit|too many requests/i.test(text)) return "The provider is rate limiting requests (429). Wait a moment, then send again.";
+  if (code === "404" || /\bnot found\b/i.test(text)) return "The provider endpoint was not found (404). Check the base URL in Settings → Authentication.";
   if (/exited \(code=|process exited|app-server exited/i.test(text)) return "The provider process stopped unexpectedly.";
-  if (/\b5\d\d\b|overloaded|unavailable/i.test(text)) return "The provider is unavailable right now. Try again shortly.";
-  return `${text.slice(0, 240)}.`;
+  if (/^5\d\d$/.test(code ?? "") || /overloaded|unavailable/i.test(text)) return "The provider is unavailable right now. Try again shortly.";
+  // The provider's own explanation is the useful part; say whose it is and keep it short.
+  if (status) return `${who ?? "The provider"} ${status.startsWith("4") ? "rejected the request" : "returned an error"} (${status}): ${text.slice(0, 240)}.`;
+  return `${who ? `${who}: ` : ""}${text.slice(0, 240)}.`;
+}
+
+/**
+ * The provider's own message and HTTP status, out of the wrappings they arrive in: a leading
+ * "provider/model:" naming who failed, a JSON error body, or a client library's
+ * "<Vendor> API error (status): status "message"" line. A bare "OpenAI" there is the library's name,
+ * not necessarily the provider in use, so it is not repeated.
+ */
+function providerErrorParts(raw: string): { message: string; status?: string; who?: string } {
+  let text = raw.trim();
+  let who = /^([\w.-]+\/[\w.:-]+):\s+/.exec(text)?.[1];
+  if (who) text = text.slice(text.indexOf(":") + 1).trim();
+  if (text.startsWith("{")) {
+    try {
+      const body = JSON.parse(text) as { status?: unknown; message?: unknown; error?: { message?: unknown } | string };
+      const message = typeof body.error === "string" ? body.error : body.error?.message ?? body.message;
+      if (typeof message === "string" && message) return { message, who, ...(typeof body.status === "number" ? { status: String(body.status) } : {}) };
+    } catch { /* Not JSON after all; read it as text. */ }
+  }
+  const labelled = /^([\w ./:-]*?)\s*API error \((\d{3})\):\s*(?:\2\s*)?"?(.*?)"?$/s.exec(text);
+  if (labelled) {
+    if (labelled[1] && !/^openai$/i.test(labelled[1])) who ??= labelled[1];
+    return { message: labelled[3]!, status: labelled[2]!, who };
+  }
+  return { message: text, who };
 }
 
 function oneLine(text: string): string {

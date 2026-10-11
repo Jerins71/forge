@@ -49,7 +49,11 @@ export class ProviderDispatchRejectedError extends Error {
   readonly code = "PROVIDER_DISPATCH_REJECTED" as const;
   readonly delivery = "not_dispatched" as const;
   constructor(readonly reason: "busy" | "closed" | "stale_scope" | "unsupported_steer") {
-    super(`Provider dispatch rejected before delivery: ${reason}.`);
+    // Nothing reached the provider, so sending again is safe; say so in the user's terms.
+    super(reason === "busy" ? "The session was still finishing its previous turn, so this message was not sent. Send it again in a moment."
+      : reason === "closed" ? "The session's connection to its provider had closed, so this message was not sent. Send it again."
+      : reason === "unsupported_steer" ? "This provider cannot take a new message while it is working, so this one was not sent. Send it again when the turn has finished."
+      : "The session changed while this message was being sent, so it was not delivered. Send it again.");
     this.name = "ProviderDispatchRejectedError";
   }
 }

@@ -52,7 +52,8 @@ export class RuntimeConversationEventMapper {
     }
 
     if (descriptor?.role === "manager") {
-      const managerErrorProjection = mapManagerRuntimeErrorConversationEvent(agentId, event, timestamp, turnId, descriptor);
+      // An ordinary provider failure is reported on the turn's status row instead (see managerReplyFailure).
+      const managerErrorProjection = managerReplyFailure(event) ? undefined : mapManagerRuntimeErrorConversationEvent(agentId, event, timestamp, turnId, descriptor);
       if (managerErrorProjection) {
         projections.push(managerErrorProjection);
       }
@@ -208,6 +209,18 @@ function mapNonManagerRuntimeEvent(
     case "auto_retry_end":
       return [];
   }
+}
+
+/**
+ * The provider's error text when a manager's model reply failed for an ordinary provider reason. Context
+ * overflow and image-limit failures are excluded: those keep their own message, which says what to do.
+ */
+export function managerReplyFailure(event: RuntimeSessionEvent): string | undefined {
+  if (event.type !== "message_end" || extractRole(event.message) !== "assistant") return undefined;
+  if (extractMessageStopReason(event.message) !== "error" && !hasMessageErrorMessageField(event.message)) return undefined;
+  const error = normalizeProviderErrorMessage(extractMessageErrorMessage(event.message) ?? extractMessageText(event.message));
+  if (!error || isStrictContextOverflowMessage(error) || isManyImageDimensionError(error)) return undefined;
+  return error;
 }
 
 function mapManagerRuntimeErrorConversationEvent(

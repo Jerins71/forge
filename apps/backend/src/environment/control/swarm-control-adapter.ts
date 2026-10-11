@@ -33,6 +33,31 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
       return { threadId:thread.threadId,bindingId:thread.bindingId!,generation:thread.generation };
     },
     conversation(agentId) { const state=loadState(database); return Object.values(state.bindings).filter(binding => binding.scope.threadId === agentId && binding.scope.bindingId !== state.threads[agentId]?.bindingId).sort((a,b)=>a.scope.generation-b.scope.generation).at(-1)?.conversation; },
+    async stop(agentId) {
+      const thread = loadState(database).threads[agentId];
+      // Nothing of the core's to strand: no binding and no run. The caller ends the runtime itself.
+      if (!thread || thread.desired !== "running" || (!thread.bindingId && !thread.activeRunId)) return false;
+      // The backend's own decision, not a device's: the same stop a user's Stop commits, without a receipt.
+      controlService.record({ type: "thread.stop", commandId: `runtime-stop:${crypto.randomUUID()}`, now: Date.now(), threadId: agentId, writerPending: true });
+      // Nobody asked for this session to stop. Once the old binding has drained, set it running again so it
+      // settles to idle on a fresh binding instead of reading "Stopped".
+      let finished = false;
+      const finish = () => { if (finished) return; finished = true; unsubscribe(); clearTimeout(giveUp); };
+      const resume = () => {
+        if (finished) return;
+        const current = loadState(database).threads[agentId];
+        if (!current || current.desired !== "stopped") { finish(); return; }
+        if (current.shutdown !== "clean") return;
+        finish();
+        controlService.record({ type: "thread.resume", commandId: `runtime-resume:${crypto.randomUUID()}`, now: Date.now(), threadId: agentId });
+      };
+      // Outside the committing transaction: a commit listener must not start another one.
+      const unsubscribe = eventSink.subscribeCommit(() => { setImmediate(resume); });
+      const giveUp = setTimeout(finish, 60_000);
+      giveUp.unref?.();
+      setImmediate(resume);
+      return true;
+    },
     canRestore(agentId) {
       const state = loadState(database);
       return !Object.values(state.runs).some(run => run.threadId === agentId &&

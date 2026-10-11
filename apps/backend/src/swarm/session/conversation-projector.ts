@@ -35,7 +35,7 @@ import {
   recordConversationHistoryDiagnostics,
   sumOptionalNumbers
 } from "./conversation-diagnostics.js";
-import { RuntimeConversationEventMapper, isWorkerFailureNotice, nameActualProvider, safeJson } from "./runtime-conversation-event-mapper.js";
+import { RuntimeConversationEventMapper, isWorkerFailureNotice, managerReplyFailure, nameActualProvider, safeJson } from "./runtime-conversation-event-mapper.js";
 import { buildActivitySummary, buildTimelineSummary } from "./activity-summary.js";
 import { ActivityTimelineTracker, type ProviderTextFact } from "./activity-timeline.js";
 import type { TimelineActivity } from "@forge/protocol";
@@ -132,6 +132,7 @@ export class ConversationProjector {
   private readonly loadedFromDisk = new Set<string>();
   private readonly nextTimelineSequenceBySource = new Map<string, number>();
   private readonly canonicalPrefixMayExistByAgentId = new Set<string>();
+  private readonly pendingReplyMarkers = new Map<string, () => void>();
   private readonly activity = new ActivityTimelineTracker(item =>
     this.deps.emitServerEvent("timeline_activity", { type: "timeline_activity", sessionAgentId: item.sessionId, item }));
 
@@ -401,6 +402,7 @@ export class ConversationProjector {
     if (isWorkerFailureNotice(event)) this.activity.noteFailureReported(event.agentId, event.turnId);
     this.emitConversationEntry(event, options);
     this.deps.emitServerEvent("conversation_message", event satisfies ServerEvent);
+    if (event.role === "assistant") this.pendingReplyMarkers.get(event.agentId)?.();
   }
 
   emitConversationLog(event: ConversationLogEvent): void {
@@ -458,7 +460,7 @@ export class ConversationProjector {
     if (finished) this.emitActivitySummary(buildTimelineSummary(finished));
   }
 
-  /** Updates the turn's one status row in place: "Retrying: 401 Invalid API key (attempt 3)". */
+  /** Updates the turn's one status row in place: "Rate limited by the provider (429). Retrying (attempt 3)". */
   observeProviderRetry(fact: { actorId: string; attempt: number; message: string; runId?: string }): void {
     const sessionId = resolveManagerContextId(this.deps.descriptors.get(fact.actorId), fact.actorId);
     this.activity.observeRetry({ ...fact, sessionId, timestamp: this.deps.now() });
@@ -470,7 +472,27 @@ export class ConversationProjector {
     const sessionId = resolveManagerContextId(descriptor, actorId);
     // The row names the provider and model that failed, as the failure message does.
     const settled = { ...end, ...(end.error ? { error: nameActualProvider(end.error, descriptor) } : {}) };
-    for (const finished of this.activity.settleTurn({ actorId, sessionId, ...settled, timestamp: this.deps.now() })) this.emitActivitySummary(buildTimelineSummary(finished));
+    const { finished, replyInterrupted } = this.activity.settleTurn({ actorId, sessionId, ...settled, timestamp: this.deps.now() });
+    for (const item of finished) {
+      if (replyInterrupted && item.kind === "status") this.markReplyInterrupted(actorId, item);
+      else this.emitActivitySummary(buildTimelineSummary(item));
+    }
+  }
+
+  /**
+   * The cut-off text is written after the failure is reported. Its marker is held until that message
+   * lands, so it sits directly under the partial reply, live and on replay. If no message follows, it
+   * is written anyway.
+   */
+  private markReplyInterrupted(actorId: string, item: TimelineActivity): void {
+    this.pendingReplyMarkers.get(actorId)?.();
+    const timer = setTimeout(() => this.pendingReplyMarkers.get(actorId)?.(), 2_000);
+    timer.unref?.();
+    this.pendingReplyMarkers.set(actorId, () => {
+      clearTimeout(timer);
+      this.pendingReplyMarkers.delete(actorId);
+      this.emitActivitySummary(buildTimelineSummary(item, this.deps.now()));
+    });
   }
 
   /** Whether this actor's turn already ended in a failed status row. */
@@ -529,6 +551,11 @@ export class ConversationProjector {
   }
 
   captureConversationEventFromRuntime(agentId: string, event: RuntimeSessionEvent, options?: { turnId?: string }): void {
+    // A manager's failed model reply is the turn's failed status row: a readable line, the raw text in its details.
+    if (this.deps.descriptors.get(agentId)?.role === "manager") {
+      const failure = managerReplyFailure(event);
+      if (failure) this.settleProviderTurn(agentId, { error: failure, runId: options?.turnId });
+    }
     const projections = this.runtimeConversationEventMapper.mapRuntimeEvent({
       agentId,
       event,
