@@ -84,6 +84,7 @@ import {
 } from "./manager-assistant-final-message.js";
 import { PiGenerationTelemetryAdapter } from "./generation-telemetry.js";
 import type { PiBashProcesses } from "./pi/pi-bash-processes.js";
+import { ProviderDispatchRejectedError } from "./provider-contract.js";
 import { PiProviderAdapter, type PiProviderPreparation } from "./pi/pi-provider-adapter.js";
 import {
   detectManagerOutputRunaway,
@@ -492,9 +493,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
         };
       }
 
-      this.managerOutputRetryDeliveryId = undefined;
-      this.currentTurnReplayMessages = [cloneRuntimeUserMessage(message) ?? message];
-      this.dispatchPrompt(message);
+      this.dispatchPreparedPrompt(message);
 
       return {
         targetAgentId: this.descriptor.agentId,
@@ -504,6 +503,39 @@ export class AgentRuntime implements SwarmAgentRuntime {
     } finally {
       this.inputDispatchesInProgress = Math.max(0, this.inputDispatchesInProgress - 1);
     }
+  }
+
+  /** @internal Native dispatch boundary; adapter starts never enter legacy queue/recovery delivery policy. */
+  async dispatchProviderTurn(input: RuntimeUserMessageInput, onDispatch: () => void): Promise<void> {
+    this.assertProviderDispatchIdle();
+    this.inputDispatchesInProgress += 1;
+    try {
+      const message = await prepareRuntimeUserMessageForDispatch(input);
+      // Preparation can await image conversion. Recheck before accepting native ownership.
+      this.assertProviderDispatchIdle(1);
+      this.invalidateFreshContextRequest();
+      this.suppressSessionEventsUntilIdle = null;
+      onDispatch();
+      this.dispatchPreparedPrompt(message);
+    } finally {
+      this.inputDispatchesInProgress = Math.max(0, this.inputDispatchesInProgress - 1);
+    }
+  }
+
+  private assertProviderDispatchIdle(ownDispatches = 0): void {
+    if (this.status === "terminated" || this.lifecycleInterruptionInProgress) throw new ProviderDispatchRejectedError("closed");
+    if (!this.session.isIdle || this.promptDispatchPending || this.awaitingAgentSettlement
+      || this.isContextRecoveryInProgress() || this.inputDispatchesInProgress > ownDispatches
+      || this.getPendingCount() > 0 || this.recoveryBufferedMessages.length > 0) {
+      throw new ProviderDispatchRejectedError("busy");
+    }
+  }
+
+  private dispatchPreparedPrompt(message: RuntimeUserMessage): void {
+    this.managerOutputRetryDeliveryId = undefined;
+    this.currentTurnReplayMessages = [cloneRuntimeUserMessage(message) ?? message];
+    // Native agent_start activates the creator-prepared canonical/status/end projection once.
+    this.dispatchPrompt(message);
   }
 
   async terminate(options?: RuntimeShutdownOptions): Promise<void> {

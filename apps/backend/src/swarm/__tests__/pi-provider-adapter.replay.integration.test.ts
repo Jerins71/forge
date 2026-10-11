@@ -2,16 +2,19 @@ import { createHash } from "node:crypto";
 import { createServer, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { PiProviderAdapter } from "../runtime/pi/pi-provider-adapter.js";
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { ProviderCapabilitiesSchema, ProviderObservationSchema } from "@forge/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { createNativePiFixture, collectPiObservations } from "../runtime/pi/replay/__tests__/native-fixture.js";
+import { createPiProjectionFixture } from "../runtime/pi/replay/__tests__/projection-fixture.js";
 import { createPiModelPeer } from "../runtime/pi/replay/model-peer.js";
 import { ReplaySignals, watchdog, type ReplayEntry, type ReplayTranscript } from "../runtime/replay/replay-harness.js";
 import { appendInstructionParts, instructionSource, renderInstructionBundle } from "../runtime/instruction-bundle.js";
 import { bindRuntimeToolHost } from "../runtime/runtime-tool-plan.js";
-import { ProviderRefreshRequiredError } from "../runtime/provider-contract.js";
+import { ProviderDispatchRejectedError, ProviderRefreshRequiredError } from "../runtime/provider-contract.js";
 import type { ProviderBinding } from "../runtime/provider-contract.js";
 
 const raw = JSON.parse(await readFile(new URL("../runtime/pi/replay/pi-model-transport.json", import.meta.url), "utf8")) as ReplayTranscript;
@@ -40,6 +43,117 @@ async function start(adapter: NonNullable<Awaited<ReturnType<typeof open>>["adap
 }
 
 describe("Pi provider adapter on the native production path", () => {
+  it("projects a core-driven adapter start into canonical JSONL, statuses and exactly one end", async () => {
+    const peer = await createPiModelPeer(transcript([request("core-start"), ...reply("Canonical adapter output.", "hold-core")]));
+    const fixture = await createPiProjectionFixture(peer.baseUrl);
+    const end = vi.spyOn(fixture.controller, "handleRuntimeAgentEnd");
+    const sessionEvent = vi.spyOn(fixture.controller, "handleRuntimeSessionEvent");
+    const nativeOpen = vi.spyOn(SessionManager, "open");
+    const legacyDispatch = vi.spyOn((await import("../runtime/pi-agent-runtime.js")).AgentRuntime.prototype, "sendMessage");
+    try {
+      const commandId = "22222222-2222-4222-8222-222222222222";
+      await fixture.send(commandId, "Produce canonical adapter output.");
+      await watchdog("model hold", peer.signals.wait("1:hold-core:held"));
+      const runtime = fixture.controller.getRuntime("manager")!;
+      expect(runtime.runtimeType).toBe("pi");
+      expect(runtime.providerAdapter).toBeDefined();
+      const nativeJournal = nativeOpen.mock.results.map(result => result.value as SessionManager)
+        .find(journal => journal?.getSessionFile() === fixture.sessionFile)!;
+      expect(nativeJournal).toBeDefined();
+      const beforeOutput = await fixture.canonical();
+      expect(beforeOutput[0]).toEqual(nativeJournal.getHeader());
+      expect(beforeOutput.filter(entry => entry.type === "session")).toHaveLength(1);
+      expect(beforeOutput.filter(entry => entry.data?.controlCommandId === commandId && entry.data?.role === "user")).toHaveLength(1);
+      peer.release("1:hold-core");
+      await fixture.waitTerminal(commandId);
+      await fixture.manager.flushPendingPersistence();
+      const canonical = await fixture.canonical();
+      const projected = canonical.filter(entry => entry.customType === "swarm_conversation_entry");
+      const assistant = projected.filter(entry => entry.data?.type === "conversation_message" && entry.data?.role === "assistant" && entry.data?.text === "Canonical adapter output.");
+      expect(assistant).toHaveLength(1);
+      const run = Object.values(fixture.state().runs).find(run => run.commandId === commandId)!;
+      expect(assistant[0].data.turnId).toBe(run.runId);
+      expect(run.state).toBe("terminal");
+      expect(fixture.statuses).toContain("streaming");
+      expect(fixture.statuses.at(-1)).toBe("idle");
+      expect(end).toHaveBeenCalledTimes(1);
+      expect(sessionEvent.mock.calls.filter(call => call[2]?.type === "agent_start")).toHaveLength(1);
+      expect(sessionEvent.mock.calls.filter(call => call[2]?.type === "agent_end")).toHaveLength(1);
+      expect(peer.requests).toHaveLength(1);
+      expect(legacyDispatch).not.toHaveBeenCalled();
+      await fixture.evidence({ canonical, statuses: fixture.statuses, endProjections: end.mock.calls.length, trace: peer.trace,
+        assertions: "Phase 3 adapter start, one canonical assistant output, streaming/idle, one native start and end projection", failures: peer.failures });
+    } finally { await fixture.cleanup(); await peer.close(); vi.restoreAllMocks(); }
+  }, 30000);
+
+  it("rejects an adapter start during an active native turn with a typed conflict and never queues", async () => {
+    const peer = await createPiModelPeer(transcript([request("active"), ...reply("Only the active turn.", "hold-active")]));
+    const fixture = await createNativePiFixture(peer.baseUrl);
+    try {
+      const { adapter, binding, runtime, session } = await open(fixture);
+      const collected = collectPiObservations(adapter.observations(binding));
+      const legacyDispatch = vi.spyOn(runtime, "sendMessage");
+      await start(adapter, binding, "active", "First native input.");
+      await watchdog("model hold", peer.signals.wait("1:hold-active:held"));
+      const rejected = adapter.start({ binding, runId: "second-run", attemptId: "second-attempt", input: { text: "Must not enqueue." } });
+      await expect(rejected).rejects.toBeInstanceOf(ProviderDispatchRejectedError);
+      await expect(rejected).rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", delivery: "not_dispatched", reason: "busy" });
+      expect(runtime.getPendingCount()).toBe(0);
+      expect(collected.observations.some(event => event.attemptId === "second-attempt")).toBe(false);
+      peer.release("1:hold-active"); await collected.wait("active:terminal");
+      expect(session.messages.filter(message => message.role === "user")).toHaveLength(1);
+      expect(peer.requests).toHaveLength(1);
+      expect(fixture.legacySettlements).toHaveLength(1);
+      expect(legacyDispatch).not.toHaveBeenCalled();
+      await adapter.close(binding); await collected.done;
+    } finally { await fixture.cleanup(); await peer.close(); vi.restoreAllMocks(); }
+  });
+
+  it("creates a resumed native journal under the new scope and never opens a second session", async () => {
+    const peer = await createPiModelPeer(transcript([request("persist-locator"), ...reply("Prior native conversation.")]));
+    const fixture = await createNativePiFixture(peer.baseUrl);
+    try {
+      const prior = await open(fixture, { ...scope, generation: 1 });
+      const first = collectPiObservations(prior.adapter.observations(prior.binding));
+      await start(prior.adapter, prior.binding, "prior", "Persist the durable locator.");
+      await first.wait("prior:terminal");
+      await prior.adapter.close(prior.binding); await first.done;
+      const journalBefore = await fixture.read(fixture.descriptor.sessionFile);
+      const newScope = { ...scope, bindingId: "resumed-binding", generation: 2 };
+      // A wrong locator must fail before a native session or its extension hooks are created.
+      const startsBefore = (await fixture.extensionEvents()).filter(event => event.event === "session_start").length;
+      const journalFile = fixture.descriptor.sessionFile;
+      const missingJournal = join(fixture.root, "missing-native-journal.jsonl");
+      for (const [file, locator] of [[journalFile, { ...prior.binding.conversation, nativeId: "missing-locator" }], [missingJournal, prior.binding.conversation]] as const) {
+        let locatorError: unknown;
+        fixture.descriptor.sessionFile = file;
+        try { await fixture.create(fixture.instructions, newScope, locator); } catch (error) { locatorError = error; }
+        finally { fixture.descriptor.sessionFile = journalFile; }
+        expect(locatorError).toBeInstanceOf(Error);
+        expect(String(locatorError)).toMatch(/journal|conversation|locator/i);
+        expect((await fixture.extensionEvents()).filter(event => event.event === "session_start")).toHaveLength(startsBefore);
+        expect(await fixture.read(journalFile)).toBe(journalBefore);
+      }
+      await expect(fixture.read(missingJournal)).rejects.toMatchObject({ code: "ENOENT" });
+      const nativeOpen = vi.spyOn(SessionManager, "open");
+      const nativeResume = vi.spyOn(PiProviderAdapter.prototype, "resume");
+      const native = await fixture.create(fixture.instructions, newScope, prior.binding.conversation);
+      const adapter = native.runtime.providerAdapter!;
+      expect(nativeResume).toHaveBeenCalledWith(expect.objectContaining({ scope: newScope, conversation: prior.binding.conversation }));
+      expect(native.session.sessionId).toBe(prior.binding.conversation.nativeId);
+      expect(JSON.stringify(native.session.messages)).toContain("Prior native conversation.");
+      const reload = vi.spyOn(native.session, "reload");
+      const input = { scope: newScope, model: fixture.descriptor.model, instructions: native.instructions, toolHost: native.toolHost, conversation: prior.binding.conversation };
+      const binding = await adapter.resume(input);
+      expect(await adapter.resume(input)).toBe(binding);
+      expect(binding.conversation).toMatchObject(newScope);
+      expect(nativeOpen).toHaveBeenCalledTimes(1);
+      expect(reload).not.toHaveBeenCalled();
+      expect(peer.requests).toHaveLength(1);
+      await adapter.close(binding);
+    } finally { await fixture.cleanup(); await peer.close(); vi.restoreAllMocks(); }
+  });
+
   it("records pre-migration native prompt and final schema hashes", async () => {
     vi.spyOn(Date.prototype, "toISOString").mockReturnValue("2026-01-01T00:00:00.000Z");
     const peer = await createPiModelPeer(transcript([]));

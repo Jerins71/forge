@@ -2,7 +2,7 @@ import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-
 import type { InstructionBundle, ProviderCapabilities, ProviderObservation, ProviderScope, ProviderTurnRef } from "@forge/protocol";
 import { instructionRevision } from "../instruction-bundle.js";
 import {
-  assertProviderRequirements, ProviderRefreshRequiredError,
+  assertProviderRequirements, ProviderRefreshRequiredError, ProviderDispatchRejectedError,
   type ProviderAdapter, type ProviderBinding, type ProviderContext, type ProviderDispatchResult,
   type ProviderOpenInput, type ProviderResumeInput, type ProviderStartInput, type ProviderSteerInput,
   type ProviderRespondInput, type ToolHostBinding,
@@ -29,12 +29,13 @@ interface AttemptCorrelation {
   entryOffset: number;
 }
 
-/** Observes native facts. AgentRuntime remains the sole lifecycle/recovery owner until the core cutover. */
+/** Maps native facts; the kernel owns admission and terminal decisions. */
 export class PiProviderAdapter implements ProviderAdapter {
   private binding: ProviderBinding | undefined;
   private closed = false;
   private closing = false;
   private active: AttemptCorrelation | undefined;
+  private startPreparing = false;
   private compactionAttemptId: string | undefined;
   private sequence = 0;
   private readonly events: ProviderObservation[] = [];
@@ -94,22 +95,27 @@ export class PiProviderAdapter implements ProviderAdapter {
   }
 
   async start(input: ProviderStartInput): Promise<ProviderDispatchResult> {
-    this.assertBinding(input.binding);
-    if (this.active || !this.session.isIdle || this.runtime.hasPendingInputDispatch() || this.runtime.isContextRecoveryInProgress()) {
-      throw new Error("Pi already has an active native attempt; use steer.");
+    this.assertDispatchBinding(input.binding);
+    if (this.active || this.startPreparing || !this.session.isIdle || this.runtime.hasPendingInputDispatch() || this.runtime.isContextRecoveryInProgress()) {
+      throw new ProviderDispatchRejectedError("busy");
     }
-    await this.refresh(input.binding.scope, input.instructions, input.toolHost);
-    if (this.active) throw new Error("Pi already has an active native attempt; use steer.");
-    const accepted = new Promise<ProviderDispatchResult>(resolveAcceptance => {
-      this.active = { id: input.attemptId, interrupted: false, resolveAcceptance, entryOffset: this.session.sessionManager.getEntries().length };
-    });
+    this.startPreparing = true;
     try {
-      await this.runtime.sendMessage(input.input);
+      await this.refresh(input.binding.scope, input.instructions, input.toolHost);
+      this.assertDispatchBinding(input.binding);
+      let resolveAcceptance!: (result: ProviderDispatchResult) => void;
+      const accepted = new Promise<ProviderDispatchResult>(resolve => { resolveAcceptance = resolve; });
+      await this.runtime.dispatchProviderTurn(input.input, () => {
+        // Install correlation at the synchronous native boundary, after all asynchronous preparation.
+        this.active = { id: input.attemptId, interrupted: false, resolveAcceptance, entryOffset: this.session.sessionManager.getEntries().length };
+      });
+      return accepted;
     } catch (error) {
-      await this.observeDispatchFailure(error);
+      if (!(error instanceof ProviderDispatchRejectedError)) await this.observeDispatchFailure(error);
       throw error;
+    } finally {
+      this.startPreparing = false;
     }
-    return accepted;
   }
 
   async steer(input: ProviderSteerInput): Promise<ProviderDispatchResult> {
@@ -323,6 +329,12 @@ export class PiProviderAdapter implements ProviderAdapter {
 
   private assertBindingScope(scope: ProviderScope): void {
     if (!this.binding || !sameScope(this.binding.scope, scope)) throw new Error("Pi provider binding scope is stale.");
+  }
+  private assertDispatchBinding(binding: ProviderBinding): void {
+    if (this.closed || this.closing) throw new ProviderDispatchRejectedError("closed");
+    if (!this.binding || binding !== this.binding || !sameScope(this.binding.scope, binding.scope)) {
+      throw new ProviderDispatchRejectedError("stale_scope");
+    }
   }
   private assertBinding(binding: ProviderBinding, allowClosed = false): void {
     this.assertBindingScope(binding.scope);

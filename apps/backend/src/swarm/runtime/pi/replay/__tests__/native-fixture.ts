@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { AgentRuntimeExtensionSnapshot, ContextMode, InstructionBundle, ProviderObservation, ProviderScope } from "@forge/protocol";
+import type { AgentRuntimeExtensionSnapshot, ContextMode, InstructionBundle, ProviderObservation, ProviderScope, ProviderConversationRef } from "@forge/protocol";
 import { createProviderBoundaryFixture } from "../../../../__tests__/provider-boundary-fixture.js";
 import { ForgeExtensionHost } from "../../../../forge-extension-host.js";
 import { createStaticCompactionRuntimeSettingsProvider } from "../../../../compaction-runtime-settings-provider.js";
@@ -56,11 +56,11 @@ export default forge => forge.on('tool:before', e => {appendFileSync(${JSON.stri
     now: () => new Date().toISOString(), logDebug: () => {}, callbacks,
   } as unknown as ConstructorParameters<typeof PiRuntimeCreator>[0]);
   const runtimes: AgentRuntime[] = [];
-  const create = async (bundle: InstructionBundle = instructions, scope: ProviderScope = { threadId: descriptor.agentId, bindingId: "pi-binding", generation: 7 }) => {
+  const create = async (bundle: InstructionBundle = instructions, scope: ProviderScope = { threadId: descriptor.agentId, bindingId: "pi-binding", generation: 7 }, conversation?: ProviderConversationRef) => {
     let prepared: Parameters<NonNullable<RuntimeCreationOptions["onProviderPrepared"]>>[0] | undefined;
     let preparedCount = 0;
     const runtime = await creator.createRuntimeForDescriptor({ descriptor, systemPrompt: bundle.parts.map(p => p.separator + p.text).join(""),
-      runtimeToken: runtimes.length + 1, sessionDescriptor: descriptor, creationOptions: { instructionBundle: bundle, providerScope: scope, onProviderPrepared: value => { prepared = value; preparedCount++; } },
+      runtimeToken: runtimes.length + 1, sessionDescriptor: descriptor, creationOptions: { instructionBundle: bundle, providerScope: scope, providerConversation: conversation, onProviderPrepared: value => { prepared = value; preparedCount++; } },
     }) as AgentRuntime;
     runtimes.push(runtime);
     const session = (runtime as unknown as { session: AgentSession }).session;

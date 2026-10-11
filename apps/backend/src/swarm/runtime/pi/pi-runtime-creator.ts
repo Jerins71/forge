@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { preparePiSessionJournal } from "./pi-session-journal.js";
 import { capturePiInstructionResources } from "./pi-instruction-resources.js";
 import { createInstructionBundle, renderInstructionBundle } from "../instruction-bundle.js";
 import { assertProviderRequirements } from "../provider-contract.js";
@@ -285,6 +286,8 @@ export class PiRuntimeCreator {
     const providerScope = creationOptions?.providerScope ?? { threadId: descriptor.agentId, bindingId: randomUUID(), generation: 0 };
     let instructionBundle = creationOptions?.instructionBundle ?? createInstructionBundle(descriptor, systemPrompt);
     const secureRuntimeBinding = creationOptions?.secureRuntimeBinding;
+    const conversation = creationOptions?.providerConversation;
+    await preparePiSessionJournal(descriptor.sessionFile, conversation);
     const projectExecutableTrustPlan = await this.deps.resolveProjectExecutableTrustPlan({
       descriptor,
       sessionDescriptor
@@ -514,7 +517,7 @@ export class PiRuntimeCreator {
 
     const sessionManager = openSessionManagerWithSizeGuard(descriptor.sessionFile, {
       context: `runtime:create:pi:${descriptor.agentId}`,
-      rotateOversizedFile: true,
+      rotateOversizedFile: !conversation,
       logWarning: (message, details) => {
         this.deps.logDebug(message, details);
 
@@ -531,6 +534,10 @@ export class PiRuntimeCreator {
     });
     if (!sessionManager) {
       throw new Error(`Unable to open session file for agent ${descriptor.agentId}: ${descriptor.sessionFile}`);
+    }
+
+    if (conversation && sessionManager.getSessionId() !== conversation.nativeId) {
+      throw new Error("Pi conversation locator changed before the native journal could be resumed.");
     }
 
     const { session, extensionsResult } = await createAgentSession({
@@ -786,8 +793,10 @@ export class PiRuntimeCreator {
       },
     });
 
-    await runtime.providerAdapter!.open({ scope: providerScope, model: descriptor.model, instructions: instructionBundle, toolHost: toolHostBinding,
-      required: creationOptions?.providerRequirements });
+    const providerInput = { scope: providerScope, model: descriptor.model, instructions: instructionBundle, toolHost: toolHostBinding,
+      required: creationOptions?.providerRequirements };
+    if (conversation) await runtime.providerAdapter!.resume({ ...providerInput, conversation });
+    else await runtime.providerAdapter!.open(providerInput);
     creationOptions?.onProviderPrepared?.({ instructionBundle, toolHostBinding });
 
     if (pooledCredentialId) {
