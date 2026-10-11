@@ -538,6 +538,9 @@ describe("Claude frozen provider contract through real SDK transport", () => {
         { channel: "reasoning", text: "Reasoning", item: { nativeId: "stream-message:0" } },
         { channel: "assistant", text: "Streaming answer", item: { nativeId: "stream-message:1" } },
       ]);
+      // The CLI sends the finished thinking block before its stream stop: the streamed item completes once, under its own ID.
+      expect(f.observations.filter(value => value.type === "message" && value.channel === "reasoning" && value.item.nativeId === "stream-message:0").map(value => value.type === "message" && [value.phase, value.text]))
+        .toEqual([["start", ""], ["delta", "Reasoning"], ["complete", "Reasoning"]]);
       // The SDK's own request retry is a display fact; it is neither an error nor a terminal.
       expect(f.observations.filter(value => value.type === "retry")).toMatchObject([{ attempt: 2, maxAttempts: 10, delayMs: 500, message: "401 authentication failed", origin: { kind: "root" } }]);
       expect(f.observations.some(value => value.type === "error")).toBe(false);
