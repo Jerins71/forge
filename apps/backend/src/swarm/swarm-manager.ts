@@ -1153,7 +1153,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private createUserMessageCoordinator(goals: ReturnType<typeof createSwarmManagerRuntimeComposition>["goals"]): UserMessageCoordinator {
     return new UserMessageCoordinator({
       targeting: {
-        descriptors: this.descriptors,
+        getAgentForInternalUse: (agentId) => this.agentDirectory.getAgentForInternalUse(agentId),
         resolvePreferredManagerId: () => this.agentDirectory.resolvePreferredManagerId(),
         assertDescriptorNotEffectivelyArchived: (descriptor) =>
           this.agentDirectory.assertDescriptorNotEffectivelyArchived(descriptor),

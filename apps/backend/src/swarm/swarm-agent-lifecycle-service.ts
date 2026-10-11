@@ -160,6 +160,7 @@ export type ExternalThreadTerminateCleanupCallback = (agentId: string) => Promis
 export interface SwarmAgentLifecycleServiceOptions {
   dataDir: string;
   descriptors: Map<string, AgentDescriptor>;
+  getAgentForInternalUse: (agentId: string) => AgentDescriptor | undefined;
   profiles: Map<string, ManagerProfile>;
   runtimes: Map<string, SwarmAgentRuntime>;
   runtimeCreationPromisesByAgentId?: Map<string, Promise<SwarmAgentRuntime>>;
@@ -2486,7 +2487,7 @@ export class SwarmAgentLifecycleService {
     }
     const persistedSystemPrompt = runtime.getSystemPrompt?.() ?? systemPrompt;
 
-    const latestDescriptor = this.options.descriptors.get(descriptor.agentId);
+    const latestDescriptor = this.options.getAgentForInternalUse(descriptor.agentId);
     if (!latestDescriptor || isNonRunningAgentStatus(latestDescriptor.status)) {
       await runtime.terminate({
         abort: true,
@@ -2506,7 +2507,7 @@ export class SwarmAgentLifecycleService {
       return concurrentRuntime;
     }
 
-    let attachDescriptor = this.options.descriptors.get(descriptor.agentId);
+    let attachDescriptor = this.options.getAgentForInternalUse(descriptor.agentId);
     if (!attachDescriptor || isNonRunningAgentStatus(attachDescriptor.status)) {
       await runtime.terminate({
         abort: true,
@@ -2539,7 +2540,7 @@ export class SwarmAgentLifecycleService {
       throw new Error(`Runtime token is stale for agent: ${descriptor.agentId}`);
     }
 
-    const postWriteDescriptor = this.options.descriptors.get(descriptor.agentId);
+    const postWriteDescriptor = this.options.getAgentForInternalUse(descriptor.agentId);
     if (!postWriteDescriptor || isNonRunningAgentStatus(postWriteDescriptor.status)) {
       this.options.logDebug("manager:model_change_continuity:post_write_attach_rejected", {
         agentId: descriptor.agentId,

@@ -42,7 +42,9 @@ async function createFixtureEnvironment(manager: TestSwarmManager) {
 async function fixture(auth = false) {
   const config = await makeTempConfig({ prefix: "v2-swarm-", omitSharedAuthFile: !auth, ...(auth ? { sharedAuthContent: { "openai-codex": { type: "api_key", key: "forge-fixture-inert-not-a-provider-key" } } } : {}), omitSharedSecretsFile: true });
   const manager = new TestSwarmManager(config);
-  manager.onCreateRuntime = ({ runtime }) => {
+  const runtimeTokens = new Map<string, number>();
+  manager.onCreateRuntime = ({ descriptor, runtime, runtimeToken }) => {
+    if (runtimeToken !== undefined) runtimeTokens.set(descriptor.agentId, runtimeToken);
     const native = (runtime as unknown as { sessionManager: SessionManager }).sessionManager;
     native.appendMessage({ role: "assistant", content: [{ type: "text", text: "fixture ready" }] } as never);
   };
@@ -65,7 +67,7 @@ async function fixture(auth = false) {
     commandId: randomUUID(), inputId, sessionId, runGeneration: 1, message: { text: "durable fixture input", artifactIds: [] },
     runId:`run-${inputId}`,
   };
-  return { config, manager, database, eventSink, adapter, input, sessionId, commandId, core, artifacts, environment, paired, get coreClosed() { return coreClosed; } };
+  return { config, manager, database, eventSink, adapter, input, sessionId, commandId, core, artifacts, environment, paired, runtimeTokens, get coreClosed() { return coreClosed; } };
 }
 function makeMirror(f: Awaited<ReturnType<typeof fixture>>, unread: () => number = () => 0) {
   return createSwarmEventMirror({ swarmManager: f.manager, database: f.database, eventSink: f.eventSink, wireProjection: {
@@ -688,10 +690,26 @@ it("releases a manager binding without stopping its healthy worker", async () =>
   await f.core.effectWorker.drain();
   const child = f.manager.runtimeByAgentId.get(worker.agentId)!;
   const parent = f.manager.runtimeByAgentId.get(f.sessionId)!;
+  const terminate = parent.terminate.bind(parent);
+  parent.terminate = async options => {
+    await f.manager.handleRuntimeStatus(f.runtimeTokens.get(f.sessionId)!, f.sessionId, "terminated", 0);
+    await terminate(options);
+  };
   const before = (await f.manager.getConversationHistory(f.sessionId)).length;
   expect(await f.adapter.stopSession({ commandId: randomUUID(), sessionId: f.sessionId })).toEqual({ stopped: true });
   expect(parent.terminateCalls).toHaveLength(1);
   expect(child.terminateCalls).toHaveLength(0);
   expect(f.manager.runtimeByAgentId.has(worker.agentId)).toBe(true);
   expect(await f.manager.getConversationHistory(f.sessionId)).toHaveLength(before);
+  // Native termination releases a binding; the core still owns the session's
+  // running lifecycle and permits the next input to acquire its replacement.
+  const commandId = randomUUID();
+  await expect(f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "Recover the released binding", artifactIds: [] } })).resolves.toMatchObject({ commandId });
+  await f.core.effectWorker.drain();
+  await vi.waitFor(async () => {
+    await f.core.effectWorker.drain();
+    const receipt = await f.core.controlService.getReceipt(f.paired.principal, commandId);
+    expect(receipt, JSON.stringify(receipt)).toMatchObject({ state: "succeeded" });
+  });
+  expect(child.terminateCalls).toHaveLength(0);
 });

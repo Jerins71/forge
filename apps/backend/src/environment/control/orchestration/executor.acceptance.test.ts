@@ -379,7 +379,7 @@ describe("durable provider outbox", () => {
     const descriptor = { agentId: "manager", role: "manager", status: "idle", profileId: "project" } as AgentDescriptor;
     const attachments = new ConversationAttachmentService({ dataDir: root, uploadsDir: path.join(root, "uploads") });
     const coordinator = new UserMessageCoordinator({
-      targeting: { descriptors: new Map([["manager", descriptor]]), assertDescriptorNotEffectivelyArchived() {} }, attachments,
+      targeting: { getAgentForInternalUse: () => descriptor, assertDescriptorNotEffectivelyArchived() {} }, attachments,
       codex: { plugin: { assertWorkerNotUserTargetable() { throw new Error("Internal prepared inputs are user-gated"); } } }, projectAgents: { async preflightRuntime() {} },
       runtime: { withRuntimeAdmission: async (_id: string, work: () => Promise<unknown>) => work() },
       inboundConversation: { async append(_target: unknown, input: { attachments: import("../../../swarm/types.js").ConversationAttachment[] }) { return { event: { id: "canonical", timelineEntryId: "canonical" }, runtimeAttachments: input.attachments }; } },
@@ -407,7 +407,7 @@ describe("durable provider outbox", () => {
     const manager = { agentId: "manager", role: "manager", status: "idle", profileId: "project" } as AgentDescriptor;
     const worker = { ...manager, agentId: "worker", managerId: "manager", role: "worker", displayName: "Fixture Worker" } as AgentDescriptor;
     const canonical: Array<Record<string, unknown>> = [];
-    const coordinator = new UserMessageCoordinator({ targeting: { descriptors: new Map([["manager", manager], ["worker", worker]]), assertDescriptorNotEffectivelyArchived() {} },
+    const coordinator = new UserMessageCoordinator({ targeting: { getAgentForInternalUse: (id: string) => new Map([["manager", manager], ["worker", worker]]).get(id), assertDescriptorNotEffectivelyArchived() {} },
       attachments: new ConversationAttachmentService({ dataDir: root, uploadsDir: path.join(root, "uploads") }),
       codex: { plugin: { assertWorkerNotUserTargetable() { throw new Error("Internal result must bypass the user gate"); } } },
       projectAgents: { async preflightRuntime() {} }, runtime: { withRuntimeAdmission: async (_id: string, work: () => Promise<unknown>) => work() },

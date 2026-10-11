@@ -492,6 +492,7 @@ export class SwarmManagerRuntimeComposition {
     return new SwarmAgentLifecycleService({
       dataDir: state.config.paths.dataDir,
       descriptors: state.descriptors,
+      getAgentForInternalUse: (agentId) => services.directory.getAgentForInternalUse(agentId),
       profiles: state.profiles,
       runtimes: this.runtimeController.runtimes,
       getRuntime: (agentId) => this.runtimeController.getRuntime(agentId),

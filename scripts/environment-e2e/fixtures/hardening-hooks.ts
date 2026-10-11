@@ -178,8 +178,8 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
     }
     await originalSave.call(this);
   };
-  const originalStop = SwarmManager.prototype.stopSession;
-  SwarmManager.prototype.stopSession = function (...args) {
+  const originalStop = SwarmManager.prototype.releaseControlledProvider;
+  SwarmManager.prototype.releaseControlledProvider = function (...args) {
     if (armed) hit('stop-runtime', armed.commandId);
     return originalStop.apply(this, args);
   };

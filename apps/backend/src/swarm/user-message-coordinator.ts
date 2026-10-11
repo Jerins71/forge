@@ -185,7 +185,7 @@ export class InboundConversationAppender {
 }
 
 export interface UserMessageTargetingPort {
-  descriptors: ReadonlyMap<string, AgentDescriptor>;
+  getAgentForInternalUse(agentId: string): AgentDescriptor | undefined;
   resolvePreferredManagerId(): string | undefined;
   assertDescriptorNotEffectivelyArchived(descriptor: AgentDescriptor): void;
   getConversationHistory(agentId: string): ConversationEntryEvent[];
@@ -290,8 +290,8 @@ export class UserMessageCoordinator {
   }
 
   async prepareWorkerResult(assignment: import("../environment/control/orchestration/assignments.js").WorkerAssignment, resultText: string): Promise<NonNullable<import("../environment/control/command-service.js").InternalInput["prepared"]>> {
-    const worker = this.options.targeting.descriptors.get(assignment.workerThreadId);
-    const target = this.options.targeting.descriptors.get(assignment.parentThreadId);
+    const worker = this.options.targeting.getAgentForInternalUse(assignment.workerThreadId);
+    const target = this.options.targeting.getAgentForInternalUse(assignment.parentThreadId);
     if (!worker || worker.role !== "worker" || !target || target.role !== "manager" || worker.managerId !== target.agentId) throw new Error("Worker result owner conflicts");
     const envelope = `[workerResult] ${JSON.stringify({ workerAgentId: worker.agentId, workerDisplayName: worker.displayName, assignmentId: assignment.assignmentId })}\n${resultText.trim() || "Worker completed without a final text result."}`;
     const modelMessage = await this.options.agentMessages.prepareModelInboundMessage(target.agentId, { text: envelope, attachments: [] }, "internal");
@@ -516,7 +516,7 @@ export class UserMessageCoordinator {
     if (!resolvedTargetAgentId) {
       throw new Error("No manager is available. Create a manager first.");
     }
-    const target = this.options.targeting.descriptors.get(resolvedTargetAgentId);
+    const target = this.options.targeting.getAgentForInternalUse(resolvedTargetAgentId);
     if (!target) {
       throw new Error(`Unknown target agent: ${resolvedTargetAgentId}`);
     }
