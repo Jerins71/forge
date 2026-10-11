@@ -35,6 +35,15 @@ export class UnsupportedProviderBehaviorError extends Error {
   }
 }
 
+/** Same-scope open/resume found a different instruction revision or tool host; the runtime must be recreated or resumed, never rebound. */
+export class ProviderRefreshRequiredError extends Error {
+  readonly code = "PROVIDER_REFRESH_REQUIRED" as const;
+  constructor(readonly provider: string, readonly changed: "instructions" | "tools" | "both") {
+    super(`Provider ${provider} requires a refresh: ${changed} changed for an already-open binding.`);
+    this.name = "ProviderRefreshRequiredError";
+  }
+}
+
 /** Admission is explicit. This helper never chooses or dispatches a weaker fallback. */
 export function assertProviderRequirements(capabilities: ProviderCapabilities, requirements: ProviderRequirements = {}): void {
   const support: Record<Exclude<keyof ProviderRequirements, "instructionChannel">, boolean> = {
