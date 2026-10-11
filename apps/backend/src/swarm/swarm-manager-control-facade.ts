@@ -35,6 +35,10 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
     return this.getFacadeServices().agents.killControlledWorker(managerId, workerId);
   }
 
+  deleteControlledWorker(managerId: string, workerId: string): Promise<void> {
+    return this.getFacadeServices().agents.deleteControlledWorker(managerId, workerId);
+  }
+
   isSessionShutdownSafe(sessionId: string): boolean {
     const ids = [sessionId, ...this.getFacadeServices().registry.directory.listWorkersForSession(sessionId).map(worker => worker.agentId)];
     return ids.every(id => !this.getFacadeServices().runtime.runtimes.has(id) && !this.getFacadeServices().runtime.controller.isRuntimeShutdownQuarantined(id));
@@ -64,7 +68,7 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
     this.getFacadeServices().runtime.turns.installCore(port);
     this.getFacadeServices().registry.directory.installLifecycleStatus(agentId => port.read(agentId).status);
   }
-  reflectControlledTurns(): void { this.getFacadeServices().runtime.turns.reflectCore(); }
+  reflectControlledTurns(outcomes: readonly import("./turn-context-coordinator.js").CoreTurnOutcome[] = []): void { this.getFacadeServices().runtime.turns.reflectCore(outcomes); }
   installControlledChoicePort(port: import("./swarm-choice-service.js").CoreChoicePort): void { this.getFacadeServices().interactions.installCoreChoices(port); }
   enqueueControlledPresentation(agentId:string,runId:string,context:import("./turn-context-coordinator.js").InboundTurnContextInput): void {
     this.getFacadeServices().runtime.turns.register(agentId,{ ...context,turnId:runId });

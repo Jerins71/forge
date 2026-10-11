@@ -24,6 +24,7 @@ afterEach(async () => {
 async function environment(resendUndelivered = false) {
   const server = await startFixtureServer(0)
   server.seed.descriptor.capabilities.sessionLifecycle = true
+  Object.assign(server.seed.descriptor.capabilities, { workerDelete: true })
   server.seed.descriptor.capabilities.resendUndelivered = resendUndelivered
   cleanups.push(() => server.close())
   const registry = createEnvironmentRegistry({
@@ -66,13 +67,21 @@ describe('environment command identity', () => {
 
   // Sidebar workers can belong to a session whose detail is not mounted.
   // Delete must use that row's explicit owner, not silently return or target the open session.
-  it('kills an unmounted worker using its explicit owning session', async () => {
+  it('deletes an unmounted worker using its explicit owning session', async () => {
     const { server, facade } = await environment()
     server.seed.details!['background-session'] = { ...server.seed.details!['session-1']!, workers: [{ agentId: 'background-worker', title: 'Background worker', status: 'terminated' }] }
     facade.deleteAgent('background-worker', 'background-session')
-    await until(() => server.inputs.some(entry => entry.method === 'worker.kill'))
-    expect(server.inputs.find(entry => entry.method === 'worker.kill')!.input).toMatchObject({ workerId: 'background-worker', sessionId: 'background-session' })
-    await until(() => facade.getState().agents.some(agent => agent.agentId === 'background-worker' && agent.status === 'terminated'))
+    await until(() => server.inputs.some(entry => entry.method === 'worker.delete'))
+    expect(server.inputs.find(entry => entry.method === 'worker.delete')!.input).toMatchObject({ workerId: 'background-worker', sessionId: 'background-session' })
+    await until(() => !facade.getState().agents.some(agent => agent.agentId === 'background-worker'))
+  })
+
+  it('requires worker deletion capability before sending the new method', async () => {
+    const { server, client, facade } = await environment()
+    Object.assign(client.descriptor()!.capabilities, { workerDelete: false })
+    facade.deleteAgent('worker-1', 'session-1')
+    await until(() => Boolean(facade.getState().lastError?.includes('Update this environment')))
+    expect(server.inputs.some(entry => entry.method === 'worker.delete')).toBe(false)
   })
 
   it('hydrates an unmounted session worker list through the existing native projection', async () => {
@@ -160,7 +169,7 @@ describe('native environment lifecycle consumers', () => {
     ['session.fork', (f: ManagerWsClient) => f.forkSession('session-1', 'fork')],
     ['session.stopAll', (f: ManagerWsClient) => f.stopAllAgents('session-1')],
     ['session.choice.cancel', (f: ManagerWsClient) => f.sendChoiceCancel('session-1', 'choice-1')],
-    ['worker.kill', (f: ManagerWsClient) => f.deleteAgent('worker-1')],
+    ['worker.delete', (f: ManagerWsClient) => f.deleteAgent('worker-1')],
   ] as const)('%s uses a native receipt and no legacy request', async (method, invoke) => {
     const { server, facade } = await environment()
     server.transformOutbound = value => {

@@ -86,7 +86,7 @@ export interface SwarmManagerSessionFacadeServices {
   memory: MemoryCoordinator;
   agents: Pick<
     SwarmAgentLifecycleService,
-    "notifySpecialistRosterChanged" | "notifyNativeAuthChanged" | "resumeWorker" | "stopWorker" | "stopWorkerByUser" | "markTurnStoppedByUser" | "killControlledWorker"
+    "notifySpecialistRosterChanged" | "notifyNativeAuthChanged" | "resumeWorker" | "stopWorker" | "stopWorkerByUser" | "markTurnStoppedByUser" | "killControlledWorker" | "deleteControlledWorker"
   >;
   codexPlugin: CodexPluginDelegationCoordinator;
   messages: Pick<AgentMessageDispatcher<unknown>, "sendMessage" | "sendWorkerResult" | "extractWorkerRunResult">;
@@ -96,10 +96,10 @@ export interface SwarmManagerSessionFacadeServices {
 export interface SwarmManagerFacadeServices extends SwarmManagerSessionFacadeServices {
   secureSessions: SecureSessionsService;
   boot: Pick<SwarmBootCoordinator, "boot">;
-  /** Loaded/reconciled during boot; public facade exposes only read/dismiss. */
+  /** Loaded/reconciled during boot; persistence flush drains the same attention owner. */
   sessionAttention: Pick<
     SessionAttentionCoordinator,
-    "initialize" | "getSnapshot" | "dismissAttentionIds"
+    "initialize" | "flush" | "getSnapshot" | "dismissAttentionIds"
   >;
   recovery: Pick<RestartRecoveryCoordinator, "dismiss" | "getSnapshot" | "resume" | "installCore">;
   configuration: SwarmConfigurationCoordinator;

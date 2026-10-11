@@ -52,6 +52,7 @@ const capabilities: EnvironmentCapabilities = {
   terminal: true,
   cliTransport: true,
   sessionLifecycle: true,
+  workerDelete: true,
   projectPolicy: true,
   contextTransfers: true,
   resendUndelivered: true,

@@ -174,6 +174,14 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       else database.prepare("UPDATE effects SET state='cancelled' WHERE command_id=? AND state='pending' AND kind!='provider.release'").run(command.command_id);
     }
   };
+  const stopWorker = (tx: ControlTransaction, managerId: string, workerId: string, commandId: string) => {
+    ensureThread(tx, managerId);
+    const session = readSession(sink, managerId);
+    const now = options.clock();
+    if (!loadState(database).threads[workerId]) sink.commitCommand(tx, { type: "thread.create", commandId: `thread:${workerId}`, now, threadId: workerId, role: "worker", projectId: session.project_id, managerId });
+    sink.commitCommand(tx, { type: "thread.prepare_binding", commandId, now, threadId: workerId, bindingId: options.random() });
+    sink.commitCommand(tx, { type: "worker.stop", commandId, now, threadId: workerId, managerId, authorized: true });
+  };
   const lifecycleOperations = new Map<string, Promise<unknown>>();
   // These callbacks have no replayable effect. A lost process may have completed
   // a clear/fork; retain the interrupted claim rather than repeat destructive work.
@@ -273,7 +281,9 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     // A session that is still being launched does not exist for the preflight yet: answer that it is
     // busy, which callers retry, rather than that it is missing.
     if (input.intent !== "stop") for (const sessionId of sessionIds) { assertAdmissionAvailable(sessionId); assertSettled(sessionId); }
+    if (input.workerId) assertAdmissionAvailable(input.workerId);
     input.preflight?.();
+    const fencedIds = input.workerId ? [...sessionIds, input.workerId] : sessionIds;
     sink.transaction(tx => {
       for (const projectId of projectIds) assertAdmissionAvailable("project:" + projectId);
       for (const sessionId of sessionIds) {
@@ -296,7 +306,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         database.prepare("INSERT INTO command_receipts VALUES (?, 'running', 0, 0, ?)").run(input.commandId, JSON.stringify(receipt));
         sink.updateReceipt(tx, input.commandId, {});
       }
-      const lanes = [...sessionIds, ...projectIds.map(id => "project:" + id)];
+      const lanes = [...fencedIds, ...projectIds.map(id => "project:" + id)];
       for (const [ordinal, lane] of (lanes.length ? lanes : [""]).entries()) {
         database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,'lifecycle.admit',?,?,'claimed')")
           .run(input.commandId + ":" + ordinal, input.commandId, lane, ordinal, JSON.stringify({ kind: "lifecycle.admit", intent: input.intent, ambiguousDelivery: input.ambiguousDelivery, ...(ordinal === 0 && input.frozenRequest !== undefined ? { frozenRequest: input.frozenRequest } : {}) }));
@@ -318,7 +328,8 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       for (const lane of lanes) {
         const sessionId = sessionIds.includes(lane) ? lane : "";
         if (sessionId && input.intent === "stop") {
-          stopThread(tx, sessionId, input.commandId, input.command === "session.delete" || input.command === "delete_session");
+          if (input.workerId) stopWorker(tx, sessionId, input.workerId, input.commandId);
+          else stopThread(tx, sessionId, input.commandId, input.command === "session.delete" || input.command === "delete_session");
         }
         if (sessionId && input.intent === "resume") {
           const session = readSession(sink, sessionId);
@@ -334,7 +345,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     const work = (async () => {
       try {
         const deadline = Date.now() + 30_000;
-        while (sessionIds.some(sessionId => database.prepare("SELECT 1 FROM effects WHERE session_id=? AND state='claimed' AND command_id!=? LIMIT 1").get(sessionId, input.commandId))) {
+        while (fencedIds.some(sessionId => database.prepare("SELECT 1 FROM effects WHERE session_id=? AND state='claimed' AND command_id!=? LIMIT 1").get(sessionId, input.commandId))) {
           if (closed || Date.now() >= deadline) throw new ControlError("UNAVAILABLE", "Accepted session operation has not settled", false);
           await new Promise(resolve => setTimeout(resolve, 10));
         }
@@ -346,7 +357,8 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
             await new Promise(resolve => setTimeout(resolve, 25));
             await drainEffects();
           }
-          if (sessionIds.some(sessionId => loadState(database).threads[sessionId]?.shutdown !== "clean"))
+          const stoppedIds = input.workerId ? [input.workerId] : sessionIds;
+          if (stoppedIds.some(sessionId => loadState(database).threads[sessionId]?.shutdown !== "clean"))
             throw new ControlError("UNAVAILABLE", "Session writer shutdown remains quarantined", false);
         }
         const result = await operation();
@@ -356,7 +368,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           database.prepare("UPDATE effects SET state='done' WHERE command_id=? AND kind='lifecycle.admit'").run(input.commandId);
           database.prepare("UPDATE effects SET payload_json=? WHERE command_id=? AND ordinal=0").run(payload, input.commandId);
           if (input.receipt) sink.updateReceipt(tx, input.commandId, { state: "succeeded", result: result as CommandReceipt["result"] });
-          if (input.intent === "stop") for (const sessionId of sessionIds) {
+          if (input.intent === "stop" && !input.workerId) for (const sessionId of sessionIds) {
             if (database.prepare("SELECT 1 FROM control_sessions WHERE session_id=? AND deleted=0").get(sessionId)) setSessionStatus(sink, tx, sessionId, "stopped", options.clock);
           }
         });
@@ -603,9 +615,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         });
       } else if (method === "session.stop" || method === "worker.kill") {
         if (target?.workerId) {
-          if (!loadState(database).threads[target.workerId]) sink.commitCommand(tx, { type: "thread.create", commandId: `thread:${target.workerId}`, now, threadId: target.workerId, role: "worker", projectId: session!.project_id, managerId: sessionId });
-          sink.commitCommand(tx, { type: "thread.prepare_binding", commandId, now, threadId: target.workerId, bindingId: options.random() });
-          sink.commitCommand(tx, { type: "worker.stop", commandId, now, threadId: target.workerId, managerId: sessionId, authorized: true });
+          stopWorker(tx, sessionId, target.workerId, commandId);
         } else stopThread(tx, sessionId, commandId);
       }
       const receipt = sink.updateReceipt(tx, commandId, !inputId && effects.length === 0 && !database.prepare("SELECT 1 FROM effects WHERE command_id=? AND state IN ('pending','claimed')").get(commandId) ? { state: "succeeded" } : {});

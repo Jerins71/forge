@@ -550,6 +550,43 @@ describe("durable provider outbox", () => {
     expect((await f.core.controlService.getReceipt(principal, commandId))).toMatchObject({ state: "interrupted", delivery: "none" });
     expect(loadState(f.core.database).runs[`run-${commandId}`].state).toBe("terminal");
   });
+  it("commit observers receive terminal run facts once, only after a durable commit", async () => {
+    const f = await fixture(); const submitted = await f.core.controlService.submitInput({ commandId, threadId: "manager", message: { text: "Committed outcome", artifactIds: [] } });
+    await f.core.effectWorker.drain(); const state = loadState(f.core.database); const attempt = state.attempts[state.runs[submitted.runId].activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+    const batches: Array<ReadonlyArray<ReturnType<typeof loadState>["runs"][string]>> = [];
+    const detach = f.core.eventSink.subscribeCommit((runs?: ReadonlyArray<ReturnType<typeof loadState>["runs"][string]>) => { if (runs?.length) batches.push([...runs]); });
+    const observation = { type: "terminal" as const, scope: binding.scope, attemptId: attempt.attemptId, sequence: 1,
+      origin: { kind: "root" as const, conversation: binding.conversation }, terminalAuthority: "root_attempt" as const, outcome: "failed" as const };
+    expect(() => f.core.eventSink.transaction(tx => {
+      f.core.eventSink.commitCommand(tx, { type: "provider.observe", commandId: "rollback-outcome", now: f.options.clock(), observation });
+      throw new Error("Rollback outcome");
+    })).toThrow("Rollback outcome");
+    expect(batches).toEqual([]); expect(loadState(f.core.database).runs[submitted.runId].state).toBe("running");
+    f.core.controlService.record({ type: "provider.observe", commandId: "commit-outcome", now: f.options.clock(), observation });
+    expect(batches).toHaveLength(1); expect(batches[0]).toEqual([expect.objectContaining({ runId: submitted.runId, state: "terminal", outcome: "failed" })]);
+    f.core.controlService.record({ type: "provider.observe", commandId: "duplicate-outcome", now: f.options.clock(), observation });
+    f.core.controlService.record({ type: "thread.prepare_binding", commandId: "unrelated-commit", now: f.options.clock(), threadId: "manager", bindingId: "later-binding" });
+    expect(batches).toHaveLength(1); detach();
+  });
+  it("worker.delete fences its claimed canonical append without stopping the manager", async () => {
+    const f = await fixture(); let entered!: () => void; let release!: () => void; let mutated = false;
+    const enteredAppend = new Promise<void>(resolve => { entered = resolve; }); const heldAppend = new Promise<void>(resolve => { release = resolve; });
+    f.core.controlService.record({ type: "thread.create", commandId: "worker-thread", now: f.options.clock(), threadId: "worker", role: "worker", projectId: "project", managerId: "manager" });
+    f.options.swarm.applyInput = async input => { entered(); await heldAppend; return { entryId: input.inputId, runtimeMessage: { text: input.message.text } }; };
+    await f.core.controlService.submitInput({ commandId, threadId: "worker", message: { text: "held worker append", artifactIds: [] } });
+    const drain = f.core.effectWorker.drain(); await enteredAppend;
+    const mutation = f.core.controlService.admitLifecycle(principal, { commandId: "00000000-0000-4000-8000-000000000002", command: "worker.delete", sessionIds: ["manager"], workerId: "worker", intent: "stop", request: { workerId: "worker" } }, async () => {
+      expect(loadState(f.core.database).threads.worker.shutdown).toBe("clean"); mutated = true; return { completed: true };
+    });
+    const outcome = mutation.then(value => ({ value }), error => ({ error }));
+    const desired = loadState(f.core.database).threads.worker.desired; const mutatedBeforeRelease = mutated;
+    release(); await drain;
+    expect(desired).toBe("stopped"); expect(mutatedBeforeRelease).toBe(false);
+    expect(await outcome).toEqual({ value: { completed: true } });
+    expect(f.dispatches()).toBe(0);
+    expect(loadState(f.core.database).threads.manager.desired).toBe("running");
+    expect((readReceipt(f.core.eventSink, commandId))).toMatchObject({ state: "interrupted", delivery: "none" });
+  });
   it.each(["session.stop", "worker.kill"] as const)("%s stops the worker in the kernel while preserving its manager", async method => {
     const f = await fixture(); const stopped: string[] = [];
     f.options.swarm.resolveSession = agentId => agentId === "worker" ? { sessionId: "manager", workerId: "worker" } : { sessionId: agentId };

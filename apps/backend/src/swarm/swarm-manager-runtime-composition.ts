@@ -464,6 +464,7 @@ export class SwarmManagerRuntimeComposition {
       getRuntimeToken: (agentId) => this.runtimeController.getRuntimeToken(agentId),
       attention: {
         observePendingQueueChange: (agentId) => this.options.attention.reportPendingTurn(agentId),
+        observeRunOutcome: ({ agentId, outcome }) => this.options.attention.reportRunOutcome(agentId, outcome),
         releaseContinuationBarrier: (agentId) =>
           this.options.attention.reportContinuationAbandoned(agentId),
       },

@@ -19,6 +19,8 @@ export interface SessionAttentionReporterOptions {
   coordinator: SessionAttentionCoordinator;
   /** Committed descriptor lookup; undefined for unknown/removed agents. */
   getDescriptor: (agentId: string) => AgentDescriptor | undefined;
+  /** Core status, when installed, fences native idle/error observations until logical completion. */
+  getProjectedStatus?: (agentId: string) => AgentStatus | undefined;
   /** Current committed descriptor inventory for restart reconciliation. */
   getDescriptors: () => Iterable<AgentDescriptor>;
   /** Committed owning profile; undefined keeps the session ineligible. */
@@ -70,9 +72,18 @@ export class SessionAttentionReporter {
         ? { turnInitiator: turnSource === "user_input" || turnSource === "project_agent_input" ? "user" as const : "internal" as const }
         : {}),
       previousStatus: input.previousStatus,
-      nextStatus: input.nextStatus,
+      nextStatus: this.options.getProjectedStatus?.(input.agentId) ?? input.nextStatus,
       transitionedAt: input.transitionedAt,
     });
+  }
+
+  /** A committed logical outcome, including failures before provider dispatch, owns attention. */
+  async reportRunOutcome(agentId: string, outcome: "completed" | "failed"): Promise<void> {
+    const descriptor = this.options.getDescriptor(agentId);
+    if (!descriptor) return;
+    const sessionAgentId = descriptor.role === "worker" ? descriptor.managerId : descriptor.agentId;
+    const snapshot = this.snapshot(sessionAgentId);
+    if (snapshot) await this.options.coordinator.observeRunOutcome(snapshot, outcome);
   }
 
   /**

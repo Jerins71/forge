@@ -193,7 +193,9 @@ import type {
  */
 export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
   protected abstract getFacadeServices(): SwarmManagerFacadeServices;
-  flushPendingPersistence(): Promise<void> { return this.services.persistence.flushPendingHistoryCacheWrites(); }
+  async flushPendingPersistence(): Promise<void> {
+    await Promise.all([this.services.persistence.flushPendingHistoryCacheWrites(), this.services.sessionAttention.flush()]);
+  }
   getSessionPlanSnapshot(
     sessionAgentId: string,
     requestId?: string,

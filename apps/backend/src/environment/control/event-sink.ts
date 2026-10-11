@@ -13,7 +13,7 @@ import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js"
 import { decide } from "./orchestration/kernel.js";
 import { lineageSnapshot,sessionTransferCapabilities } from "./orchestration/transfers.js";
 import { loadState, projectLifecycle } from "./orchestration/store.js";
-import type { CoreCommand, Decision } from "./orchestration/types.js";
+import type { CoreCommand, Decision, Run } from "./orchestration/types.js";
 import { requestChoice, requestChoiceId, requestSession, requestAttention, storedChoice } from "./orchestration/request-projection.js";
 
 type ShellEvent = Extract<ShellStreamItem, { kind: "event" }>["event"];
@@ -53,7 +53,7 @@ export interface EventSink {
   append(tx: ControlTransaction, input: AppendEvent): number;
   /** Pure decision, retained facts, projections and outbox share the owning transaction. */
   commitCommand(tx: ControlTransaction, command: CoreCommand): Decision;
-  subscribeCommit(listener: () => void): () => void;
+  subscribeCommit(listener: (terminalRuns: readonly Run[]) => void): () => void;
   /** Reserves the real event sequence before encoding and storing its receipt. */
   updateReceipt(tx: ControlTransaction, commandId: string, patch: Partial<CommandReceipt>): CommandReceipt;
   subscribe(listener: (event: StoredEvent) => void): () => void;
@@ -75,9 +75,10 @@ const shellValidator = TypeCompiler.Compile(ShellEventSchema);
 const detailValidator = TypeCompiler.Compile(DetailEventSchema);
 export function createEventSink(database: Database, clock: () => number, random: () => string): EventSink {
   const listeners = new Set<(event: StoredEvent) => void>();
-  const commitListeners = new Set<() => void>();
+  const commitListeners = new Set<(terminalRuns: readonly Run[]) => void>();
   const committed: StoredEvent[] = [];
   let active: ControlTransaction | undefined;
+  let activeTerminalRuns: Run[] | undefined;
   let pending: StoredEvent[] = [];
   let publishing = false;
   let closed = false;
@@ -183,6 +184,7 @@ export function createEventSink(database: Database, clock: () => number, random:
       if (closed) throw new Error("Control event sink is closed");
       if (active || database.inTransaction) throw new Error("Nested control transactions are forbidden");
       const afterCommit: Array<()=>void> = [];
+      const terminalRuns: Run[] = [];
       const tx = { database,afterCommit(callback:()=>void) { afterCommit.push(callback); } };
       const beforeChanges = (database.prepare("SELECT total_changes() count").get() as { count: number }).count;
       pending = [];
@@ -192,6 +194,7 @@ export function createEventSink(database: Database, clock: () => number, random:
         result = database
           .transaction(() => {
             active = tx;
+            activeTerminalRuns = terminalRuns;
             const value = write(tx);
             if (value && typeof value === "object" && "then" in value) throw new Error("Control transactions must be synchronous");
             const bytes = pending.reduce((sum, event) => sum + event.payloadBytes, 0);
@@ -206,6 +209,7 @@ export function createEventSink(database: Database, clock: () => number, random:
         throw error;
       } finally {
         active = undefined;
+        activeTerminalRuns = undefined;
       }
       if (pruned) {
         journalCount = pruned.count;
@@ -238,7 +242,7 @@ export function createEventSink(database: Database, clock: () => number, random:
       }
       const changed = (database.prepare("SELECT total_changes() count").get() as { count: number }).count !== beforeChanges;
       for (const listener of changed ? [...commitListeners] : []) {
-        try { listener(); } catch { commitListeners.delete(listener); }
+        try { listener(terminalRuns); } catch { commitListeners.delete(listener); }
       }
       return result;
     },
@@ -254,6 +258,7 @@ export function createEventSink(database: Database, clock: () => number, random:
           .run(command.commandId, command.type, command.commandId, JSON.stringify(command), "threadId" in command ? command.threadId : null, command.now);
       }
       for (const event of decision.events) {
+        if (event.type === "run.terminal") activeTerminalRuns!.push(event.run);
         const threadId = "thread" in event ? event.thread.threadId : "run" in event ? event.run.threadId : "attempt" in event ? event.attempt.threadId : "request" in event ? event.request.threadId : "binding" in event ? event.binding.scope.threadId : null;
         const generation = "thread" in event ? event.thread.generation : "attempt" in event ? event.attempt.generation : "binding" in event ? event.binding.scope.generation : null;
         database.prepare("INSERT INTO lifecycle_events (event_id,command_id,thread_id,generation,event_type,event_json,created_at) VALUES (?,?,?,?,?,?,?)")

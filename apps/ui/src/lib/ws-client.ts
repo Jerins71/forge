@@ -515,13 +515,13 @@ export class ManagerWsClient {
     const workerId = agentId.trim()
     const sessionId = ownerSessionId ?? this.state.agents.find(agent => agent.agentId === workerId)?.managerId ?? this.environmentProjection?.session.sessionId ?? this.desiredAgentId
     if (!workerId || !sessionId) return
-    void this.lifecycle('worker.kill', { sessionId, workerId }).then(() => this.getSessionWorkers(sessionId)).catch(error => this.updateState({ lastError: error instanceof Error ? error.message : 'Worker kill failed' }))
+    void this.lifecycle('worker.delete', { sessionId, workerId }).then(() => this.getSessionWorkers(sessionId)).catch(error => this.updateState({ lastError: error instanceof Error ? error.message : 'Worker deletion failed' }))
   }
   async stopAllAgents(managerId: string): Promise<{ managerId: string; stoppedWorkerIds: string[]; managerStopped: boolean }> {
     const receipt = await this.lifecycle('session.stopAll', { sessionId: managerId })
     return { managerId, stoppedWorkerIds: receipt.result?.stoppedWorkerIds ?? [], managerStopped: receipt.result?.managerStopped ?? false }
   }
-  private async lifecycle<M extends Extract<CommandReceipt['method'], 'session.launch' | 'session.choose' | 'session.stop' | 'session.stopAll' | 'session.resume' | 'session.archive' | 'session.restore' | 'session.clear' | 'session.delete' | 'session.fork' | 'session.provider.switch' | 'session.mergeBack' | 'worker.continue' | 'session.choice.cancel' | 'worker.stop' | 'worker.resume' | 'worker.kill'>>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<CommandReceipt> {
+  private async lifecycle<M extends Extract<CommandReceipt['method'], 'session.launch' | 'session.choose' | 'session.stop' | 'session.stopAll' | 'session.resume' | 'session.archive' | 'session.restore' | 'session.clear' | 'session.delete' | 'session.fork' | 'session.provider.switch' | 'session.mergeBack' | 'worker.continue' | 'session.choice.cancel' | 'worker.stop' | 'worker.resume' | 'worker.kill' | 'worker.delete'>>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<CommandReceipt> {
     if (!this.environmentClient) throw new Error('A paired environment is required')
     const key = JSON.stringify([method, input])
     const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
@@ -531,7 +531,7 @@ export class ManagerWsClient {
       const started = Date.now()
       // A stop stays running while the environment waits for the runtime to exit, then succeeds or
       // explains why it could not. Outwait that bound; reporting a slow exit as a failure would be false.
-      const deadline = started + (method === 'session.stop' || method === 'worker.kill' ? 120_000 : 10_000)
+      const deadline = started + (method === 'session.stop' || method === 'worker.kill' || method === 'worker.delete' ? 120_000 : 10_000)
       while (receipt.state === 'accepted' || receipt.state === 'running') {
         if (Date.now() >= deadline) throw new EnvironmentRuntimeError('UNAVAILABLE', 'Session operation is still settling; retry to inspect its receipt', true)
         await new Promise(resolve => setTimeout(resolve, Date.now() - started < 10_000 ? 25 : 250))

@@ -1,3 +1,4 @@
+import type { RpcOutput } from '@forge/protocol/environment-v2';
 // Batch 8: paired CLI behavior against owned backends. Each case has a 15s cap;
 // wire evidence contains method names/IDs and counts, never credentials or messages.
 import { expect } from '@playwright/test';
@@ -181,8 +182,10 @@ async function uiConsumer(id: string) {
   const environment = registry.get(credential.environmentId);
   await until(() => environment.connection.getSnapshot().phase, phase => phase === 'online');
   const calls: { method: string; input: any; receipt: any }[] = [];
+  const requests: { method: string; input: any }[] = [];
   const request = environment.request.bind(environment);
   environment.request = (async (method: any, input: any, options: any) => {
+    if ('commandId' in input) requests.push({ method, input });
     const receipt = await request(method, input, options);
     if ('commandId' in input) calls.push({ method, input, receipt });
     return receipt;
@@ -191,7 +194,7 @@ async function uiConsumer(id: string) {
   const { ManagerWsClient } = await import(uiModulePath);
   const facade = new ManagerWsClient('', id, { environmentClient: environment });
   await until(() => facade.getState().conversationBootstrap.phase, phase => phase === 'ready');
-  return { facade, calls, dispose: async () => { facade.destroy(); await registry.dispose(); } };
+  return { facade, calls, requests, dispose: async () => { facade.destroy(); await registry.dispose(); } };
 }
 async function replayLifecycle(calls: { method: string; input: any; receipt: any }[]) {
   await controlEnvironment(manifest, manifest.environments[1]!.name, 'stop');
@@ -223,7 +226,7 @@ test('UI resume/fork/clear/archive/restore/delete consumers replay their receipt
     evidence.uiLifecycleReplay = ui.calls.map(call => call.method);
   } finally { await ui.dispose(); }
 });
-test('UI worker stop/resume/kill, choice cancel and stop-all preserve parent authority and replay', async () => {
+test('UI worker stop/resume/Delete, choice cancel and stop-all preserve parent authority and replay', async () => {
   const owner = await client.createSession({ profileId: projectId, label: 'UI worker owner' });
   const id = owner.session.agentId;
   const ui = await uiConsumer(id);
@@ -239,8 +242,9 @@ test('UI worker stop/resume/kill, choice cancel and stop-all preserve parent aut
     expect((await client.showAgent(choice.agentId)).agent.status).toBe('idle');
     await expect(fixtureRpcOnce(credential.baseUrl, admin, 'worker.kill', { commandId: randomUUID(), sessionId: projectId, workerId: choice.agentId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     ui.facade.deleteAgent(choice.agentId);
-    await until(() => ui.calls, calls => calls.some(call => call.method === 'worker.kill'));
-    expect((await client.showAgent(choice.agentId)).agent.status).toBe('terminated');
+    await until(() => ui.calls, calls => calls.some(call => call.method === 'worker.delete'));
+    await until(() => client.listAgents(projectId), reply => !reply.agents.some(agent => agent.agentId === choice.agentId));
+    await expect(client.showAgent(choice.agentId)).rejects.toMatchObject({ code: 'not_found' });
     expect((await sessionProjection(id)).status).not.toBe('stopped');
     await client.run({ command: 'run', target: { kind: 'session', agentId: id }, text: '[fixture:spawn]', timeoutMs: 5000 });
     const retainedWorker = (await client.listAgents(projectId)).agents.find(agent => agent.role === 'worker' && agent.managerId === id && agent.agentId !== choice.agentId)!;
@@ -313,8 +317,8 @@ test('authenticated CLI provenance overrides client claims and survives backend 
   evidence.serverDerivedCliProvenance = { cli: 'cli', forgedDesktop: 'web', restart: true };
 });
 
-for (const status of ['stopped', 'error'] as const) test(`UI kills a worker with its manager ${status} and replays the native receipt`, async () => {
-  const owner = await client.createSession({ profileId: projectId, label: 'Worker kill ' + status });
+for (const status of ['stopped', 'error'] as const) test(`UI deletes a worker with its manager ${status} and replays the native receipt`, async () => {
+  const owner = await client.createSession({ profileId: projectId, label: 'Worker Delete ' + status });
   const id = owner.session.agentId;
   const blocked = await client.run({ command: 'run', target: { kind: 'session', agentId: id }, text: '[fixture:spawn-choice]', timeoutMs: 5000 });
   const worker = blocked.blocked!.choices[0]!.agentId;
@@ -322,16 +326,16 @@ for (const status of ['stopped', 'error'] as const) test(`UI kills a worker with
   try {
     await controlEnvironment(manifest, manifest.environments[1]!.name, 'fixture', { operation: 'manager-status', sessionId: id, status });
     ui.facade.deleteAgent(worker);
-    await until(() => ui.calls, calls => calls.some(call => call.method === 'worker.kill'));
-    await until(() => client.showAgent(worker), reply => reply.agent.status === 'terminated');
+    await until(() => ui.calls, calls => calls.some(call => call.method === 'worker.delete'));
+    await until(() => client.listAgents(projectId), reply => !reply.agents.some(agent => agent.agentId === worker));
     await ui.dispose(); await replayLifecycle(ui.calls);
-    expect((await client.showAgent(worker)).agent.status).toBe('terminated');
-    evidence['uiWorkerKill_' + status] = { terminated: true, restartReplay: true };
+    await expect(client.showAgent(worker)).rejects.toMatchObject({ code: 'not_found' });
+    evidence['uiWorkerDelete_' + status] = { deleted: true, restartReplay: true };
   } finally { await ui.dispose(); }
 });
 
-test('UI worker kill joins the worker stop lane while manager sends are queued', async () => {
-  const owner = await client.createSession({ profileId: projectId, label: 'Worker kill queued input' }); const id = owner.session.agentId;
+test('UI worker Delete joins the worker stop lane while manager sends are queued', async () => {
+  const owner = await client.createSession({ profileId: projectId, label: 'Worker Delete queued input' }); const id = owner.session.agentId;
   const blocked = await client.run({ command: 'run', target: { kind: 'session', agentId: id }, text: '[fixture:spawn-choice]', timeoutMs: 5000 });
   const worker = blocked.blocked!.choices[0]!.agentId;
   const heldId = randomUUID(); const queuedId = randomUUID(); const environment = manifest.environments[1]!;
@@ -343,17 +347,43 @@ test('UI worker kill joins the worker stop lane while manager sends are queued',
     await until(() => controlEnvironment<{ reached: boolean }>(manifest, environment.name, 'fixture', { operation: 'hold-state' }), state => state.reached);
     await rpc.call('session.send', { commandId: queuedId, sessionId: id, message: { text: 'Preserve queued manager send', artifactIds: [] } });
     ui.facade.deleteAgent(worker);
-    await until(() => ui.calls, calls => calls.some(call => call.method === 'worker.kill'));
-    const kill = ui.calls.find(call => call.method === 'worker.kill')!;
-    await until(() => rpc.call('command.get', { commandId: kill.input.commandId }), receipt => receipt.state === 'accepted');
+    await until(() => ui.requests, requests => requests.some(call => call.method === 'worker.delete'));
+    const deletion = ui.requests.find(call => call.method === 'worker.delete')!;
+    await until(() => rpc.call('command.get', { commandId: deletion.input.commandId }), receipt => receipt.state === 'running');
     expect(await rpc.call('command.get', { commandId: queuedId })).toMatchObject({ state: 'accepted', delivery: 'pending' });
     await controlEnvironment(manifest, environment.name, 'fixture', { operation: 'release-dispatch' });
     await until(() => rpc.call('command.get', { commandId: queuedId }), receipt => receipt.state === 'succeeded');
-    await until(() => client.showAgent(worker), reply => reply.agent.status === 'terminated');
+    await until(() => client.listAgents(projectId), reply => !reply.agents.some(agent => agent.agentId === worker));
+    await until(() => ui.calls, calls => calls.some(call => call.method === 'worker.delete'));
     await ui.dispose(); await replayLifecycle(ui.calls);
     expect((await sessionProjection(id)).status).not.toBe('stopped');
-    evidence.uiWorkerKillQueuedSend = { preservedManagerInput: true, restartReplay: true };
+    evidence.uiWorkerDeleteQueuedSend = { preservedManagerInput: true, restartReplay: true };
   } finally { await controlEnvironment(manifest, environment.name, 'fixture', { operation: 'release-dispatch' }); rpc.close(); await ui.dispose(); }
+});
+
+test('worker.delete preserves completed result transfers and manager history through restart', async () => {
+  test.setTimeout(30_000);
+  const owner = await client.createSession({ profileId: projectId, label: 'Keep worker result after Delete' }); const id = owner.session.agentId;
+  await client.run({ command: 'run', target: { kind: 'session', agentId: id }, text: '[fixture:spawn]', timeoutMs: 5000 });
+  const history = () => fixtureRpcOnce<RpcOutput<'session.history'>>(credential.baseUrl, admin, 'session.history', { sessionId: id, turns: 20 });
+  const before = await until(history, reply => reply.items.some(item => item.kind === 'worker_result'));
+  const results = before.items.filter(item => item.kind === 'worker_result');
+  const workers = await fixtureRpcOnce(credential.baseUrl, admin, 'session.workers', { sessionId: id }); const workerId = workers.workers[0]!.agentId;
+  const observer = await openFixtureRpc(credential.baseUrl, admin);
+  const { subscriptionId } = await observer.call('session.subscribe', { sessionId: id });
+  await until(() => observer.frames.some(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean);
+  const input = { commandId: randomUUID(), sessionId: id, workerId };
+  expect(await fixtureRpcOnce(credential.baseUrl, admin, 'worker.delete', input)).toMatchObject({ state: 'succeeded' });
+  await until(() => observer.frames.some(frame => frame.subscriptionId === subscriptionId && frame.item?.event?.type === 'worker.remove' && frame.item.event.agentId === workerId), Boolean);
+  observer.close();
+  expect((await history()).items.filter(item => item.kind === 'worker_result')).toEqual(results);
+  await expect(fixtureRpcOnce(credential.baseUrl, admin, 'session.history', { sessionId: workerId, turns: 1 })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  const environment = manifest.environments[1]!;
+  await controlEnvironment(manifest, environment.name, 'stop'); await controlEnvironment(manifest, environment.name, 'start');
+  expect((await fixtureRpcOnce(credential.baseUrl, admin, 'session.workers', { sessionId: id })).workers).toEqual([]);
+  expect((await history()).items.filter(item => item.kind === 'worker_result')).toEqual(results);
+  expect(await fixtureRpcOnce(credential.baseUrl, admin, 'worker.delete', input)).toMatchObject({ state: 'succeeded' });
+  evidence.deletedWorkerResult = { workerId, resultIds: results.map(item => item.itemId), historyRetained: true, restart: true, receiptReplay: true };
 });
 
 test('revoked device fails closed without legacy fallback', async () => {

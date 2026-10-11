@@ -1,3 +1,4 @@
+import { SessionAttentionStore } from "../../swarm/session/session-attention-store.js";
 import { createDetailStream } from "../streams/detail-stream.js";
 import { createControlDescriptorPersistence } from './descriptor-persistence.js';
 import { createTestEnvironment } from '../../test-support/environment-auth.js';
@@ -662,6 +663,170 @@ it.each(["stopped", "error", "queued"] as const)("native worker.kill under %s ma
     if (state === "queued") expect(await core.controlService.getReceipt(principal, queuedId)).toMatchObject({ state: "succeeded", delivery: "dispatched" });
     expect(await lifecycle.execute(principal, "worker.kill", input)).toMatchObject({ state: "succeeded" });
   } finally { mirror.dispose(); await core.close(); }
+});
+
+it.each(["running", "stopped", "error", "queued"] as const)("worker.delete under %s manager removes only its fenced worker and replays after persistence", async state => {
+  const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
+  const { core } = await makeCore(f); core.effectWorker.start();
+  const principal = f.paired.principal;
+  const lifecycle = createSessionLifecycleRpc({ swarmManager: f.manager, control: core.controlService });
+  try {
+    const worker = await f.manager.spawnAgent(f.sessionId, { agentId: "delete-worker" });
+    const workerRuntime = f.manager.runtimeByAgentId.get(worker.agentId)!;
+    workerRuntime.busy = true;
+    await core.controlService.submitInput({ commandId: randomUUID(), threadId: worker.agentId, message: { text: "Work until deleted", artifactIds: [] } });
+    await core.effectWorker.drain();
+    expect(loadState(f.database).threads[worker.agentId].activeRunId).toBeDefined();
+    const queuedId = randomUUID();
+    if (state === "queued") await core.controlService.execute(principal, "session.send", { commandId: queuedId, sessionId: f.sessionId, message: { text: "Preserve the manager input", artifactIds: [] } });
+    else if (state === "stopped") {
+      await core.controlService.execute(principal, "session.stop", { commandId: randomUUID(), sessionId: f.sessionId });
+      await core.effectWorker.drain();
+    } else if (state === "error") {
+      f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true;
+      await core.controlService.execute(principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "Unknown manager transport", artifactIds: [] } });
+      await core.effectWorker.drain();
+      const current = loadState(f.database); const run = current.runs[current.threads[f.sessionId].activeRunId!];
+      core.controlService.record({ type: "attempt.unknown", commandId: randomUUID(), now: Date.now(), threadId: f.sessionId, attemptId: run.activeAttemptId });
+      await core.effectWorker.drain();
+    }
+    const input = { commandId: randomUUID(), sessionId: f.sessionId, workerId: worker.agentId };
+    await expect(lifecycle.execute(principal, "worker.delete", { ...input, commandId: randomUUID(), sessionId: "manager" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const receipt = await lifecycle.execute(principal, "worker.delete", input);
+    expect(receipt).toMatchObject({ state: "succeeded", method: "worker.delete" });
+    expect(f.manager.getAgent(worker.agentId)).toBeUndefined();
+    expect(workerRuntime.terminateCalls).toHaveLength(1);
+    expect(loadState(f.database).threads[worker.agentId]).toMatchObject({ desired: "stopped", shutdown: "clean" });
+    expect(f.database.prepare("SELECT deleted,descriptor_json FROM control_workers WHERE agent_id=?").get(worker.agentId)).toEqual({ deleted: 1, descriptor_json: null });
+    const detail = createDetailStream({ database: f.database, getDescriptor: () => f.environment.descriptor(), subscribeCommitted: listener => core.eventSink.subscribe(listener), withReadBarrier: fn => core.eventSink.readBarrier(fn).value });
+    expect((await detail.workers(principal, { sessionId: f.sessionId })).workers.some(row => row.agentId === worker.agentId)).toBe(false);
+    await expect(detail.detail(principal, { sessionId: worker.agentId }, new AbortController().signal).next()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const persisted = await createControlDescriptorPersistence({ database: f.database, eventSink: core.eventSink, dataDir: f.config.paths.dataDir, storeFilePath: f.config.paths.agentsStoreFile }).load();
+    expect(persisted.agents.some(agent => agent.agentId === worker.agentId)).toBe(false);
+    expect(f.database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(f.sessionId)).toEqual({ desired_state: state === "stopped" ? "stopped" : "running" });
+    if (state === "queued") expect(await core.controlService.getReceipt(principal, queuedId)).toMatchObject({ state: "succeeded", delivery: "dispatched" });
+    expect(await lifecycle.execute(principal, "worker.delete", input)).toEqual(receipt);
+  } finally { mirror.dispose(); await core.close(); }
+}, 15_000);
+
+it.each(["failed", "completed", "retry_completed"] as const)("attention follows authoritative run outcome %s", async outcome => {
+  const f = await fixture(); const runtime = f.manager.runtimeByAgentId.get(f.sessionId)!; runtime.busy = true;
+  const commandId = randomUUID();
+  await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "Attention outcome", artifactIds: [] } });
+  await f.core.effectWorker.drain();
+  const token = f.runtimeTokens.get(f.sessionId)!;
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "streaming", 0);
+  const state = loadState(f.database); const run = state.runs[`run-${commandId}`]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+  if (outcome === "retry_completed") f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+    type: "retry", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, attempt: 1, message: "Transient provider retry",
+  } });
+  f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+    type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 2, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: outcome === "failed" ? "failed" : "completed",
+  } });
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "idle", 0);
+  await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe(outcome === "failed" ? "work_failed" : "work_settled"));
+});
+
+it("attention cannot settle from native idle while its authoritative run is still running", async () => {
+  const f = await fixture(); const runtime = f.manager.runtimeByAgentId.get(f.sessionId)!; runtime.busy = true;
+  await f.core.controlService.execute(f.paired.principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "Still running", artifactIds: [] } });
+  await f.core.effectWorker.drain(); const token = f.runtimeTokens.get(f.sessionId)!;
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "streaming", 0);
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "idle", 0);
+  expect(loadState(f.database).threads[f.sessionId].activeRunId).toBeDefined();
+  expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)).toBeUndefined();
+});
+
+it("a failed canonical append raises work_failed without a provider or active presentation", async () => {
+  const f = await fixture(); const runtime = f.manager.runtimeByAgentId.get(f.sessionId)!;
+  runtime.appendCustomEntry = () => { throw new Error("Attention writer failure"); };
+  const commandId = randomUUID();
+  await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "Writer failure", artifactIds: [] } });
+  await f.core.effectWorker.drain();
+  expect(loadState(f.database).runs[`run-${commandId}`]).toMatchObject({ state: "terminal", outcome: "failed" });
+  expect(runtime.sendCalls).toHaveLength(0);
+  await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe("work_failed"));
+});
+
+it.each(["failed", "completed"] as const)("internal turn outcome %s only raises failure attention", async outcome => {
+  const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true; const commandId = randomUUID();
+  await f.core.controlService.submitInput({ commandId, threadId: f.sessionId, message: { text: "Internal turn", artifactIds: [] },
+    prepared: { runtimeMessage: { text: "Internal turn" }, presentation: { source: "agent_message", requiresVisibleResponse: false } } });
+  await f.core.effectWorker.drain(); const token = f.runtimeTokens.get(f.sessionId)!;
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "streaming", 0);
+  const state = loadState(f.database); const run = state.runs[`run-${commandId}`]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+  f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+    type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome,
+  } });
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "idle", 0);
+  if (outcome === "failed") await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe("work_failed"));
+  else expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)).toBeUndefined();
+});
+
+it.each(["failed", "completed"] as const)("worker outcome %s feeds its owning manager attention", async outcome => {
+  const f = await fixture(); const worker = await f.manager.spawnAgent(f.sessionId, { agentId: "attention-worker" });
+  f.manager.runtimeByAgentId.get(worker.agentId)!.busy = true; const commandId = randomUUID();
+  await f.core.controlService.submitInput({ commandId, threadId: worker.agentId, message: { text: "Worker attention", artifactIds: [] } });
+  await f.core.effectWorker.drain(); const token = f.runtimeTokens.get(worker.agentId)!;
+  await f.manager.handleRuntimeStatus(token, worker.agentId, "streaming", 0);
+  const state = loadState(f.database); const run = state.runs[`run-${commandId}`]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+  f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+    type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome,
+  } });
+  await f.manager.handleRuntimeStatus(token, worker.agentId, "idle", 0);
+  await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe(outcome === "failed" ? "work_failed" : "work_settled"));
+});
+
+it("environment persistence flush waits for committed terminal attention to reach disk", async () => {
+  const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true; const commandId = randomUUID();
+  await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "Durable failed attention", artifactIds: [] } });
+  await f.core.effectWorker.drain(); await f.manager.handleRuntimeStatus(f.runtimeTokens.get(f.sessionId)!, f.sessionId, "streaming", 0);
+  let entered!: () => void; let release!: () => void; let flushed = false;
+  const saving = new Promise<void>(resolve => { entered = resolve; }); const held = new Promise<void>(resolve => { release = resolve; });
+  const original = SessionAttentionStore.prototype.save;
+  const save = vi.spyOn(SessionAttentionStore.prototype, "save").mockImplementation(async function (this: SessionAttentionStore, state) { entered(); await held; return original.call(this, state); });
+  try {
+    const state = loadState(f.database); const run = state.runs[`run-${commandId}`]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+    f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+      type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: "failed",
+    } });
+    await saving;
+    const flushing = f.manager.flushPendingPersistence().then(() => { flushed = true; });
+    await new Promise(resolve => setTimeout(resolve, 10)); const flushedBeforeRelease = flushed;
+    release(); await flushing;
+    expect(flushedBeforeRelease).toBe(false);
+    const durable = await new SessionAttentionStore({ dataDir: f.config.paths.dataDir }).load();
+    expect(durable.sessions[f.sessionId].attention?.reason).toBe("work_failed");
+  } finally { release(); save.mockRestore(); }
+});
+
+it("a new successful turn replaces prior failure attention with work_settled", async () => {
+  const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true;
+  let failedId: string | undefined;
+  for (const outcome of ["failed", "completed"] as const) {
+    const commandId = randomUUID();
+    await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "New attention epoch", artifactIds: [] } });
+    await f.core.effectWorker.drain(); const token = f.runtimeTokens.get(f.sessionId)!;
+    await f.manager.handleRuntimeStatus(token, f.sessionId, "streaming", 0);
+    const state = loadState(f.database); const run = state.runs[`run-${commandId}`]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+    f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+      type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome,
+    } });
+    await f.manager.handleRuntimeStatus(token, f.sessionId, "idle", 0);
+    await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe(outcome === "failed" ? "work_failed" : "work_settled"));
+    const attentionId = f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)!.attentionId;
+    if (outcome === "failed") failedId = attentionId; else expect(attentionId).not.toBe(failedId);
+  }
+});
+
+it("Stop's interrupted run is never failure attention", async () => {
+  const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true; const commandId = randomUUID();
+  await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "Stop this", artifactIds: [] } });
+  await f.core.effectWorker.drain(); await f.manager.handleRuntimeStatus(f.runtimeTokens.get(f.sessionId)!, f.sessionId, "streaming", 0);
+  await f.core.controlService.execute(f.paired.principal, "session.stop", { commandId: randomUUID(), sessionId: f.sessionId }); await f.core.effectWorker.drain();
+  expect(loadState(f.database).runs[`run-${commandId}`].state).toBe("terminal");
+  expect(["interrupted", "cancelled"]).toContain(loadState(f.database).runs[`run-${commandId}`].outcome);
+  expect(f.manager.getSessionAttentionSnapshot().attentions.some(row => row.sessionAgentId === f.sessionId && row.reason === "work_failed")).toBe(false);
 });
 
 it.each([false, true])("durable send provenance derives CLI integration (%s), ignores client source and survives replay", async cli => {

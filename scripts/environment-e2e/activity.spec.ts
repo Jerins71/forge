@@ -175,6 +175,7 @@ test('assistant text streams while the turn runs and is replaced by the final me
 })
 
 test('provider retries and the final failure show as one status row, live and after reload', async ({ page }) => {
+  const attentions = () => controlEnvironment<Array<{ attentionId: string; reason: string }>>(manifest, 'env-a', 'fixture', { operation: 'attention-state', sessionId: fleet.a.sessionId })
   const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
   await rm(releaseFile(), { force: true })
   await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
@@ -195,6 +196,7 @@ test('provider retries and the final failure show as one status row, live and af
   await expect(status().last()).toHaveAttribute('data-activity-status', 'completed', { timeout: 30_000 })
   await expect(status().last()).toContainText('Recovered after 3 retries')
   expect(await status().count()).toBe(before)
+  await expect.poll(async () => (await attentions()).some(row => row.reason === 'work_failed')).toBe(false)
 
   // Failed: the provider gives up; the row turns into the failure with the retry count.
   await rm(releaseFile(), { force: true })
@@ -207,18 +209,22 @@ test('provider retries and the final failure show as one status row, live and af
   await expect(transcript(page)).not.toContainText('Agent error')
   await expect(transcript(page)).not.toContainText('Message may need to be resent')
   expect(await status().count()).toBe(before + 1)
+  await expect.poll(async () => (await attentions()).find(row => row.reason === 'work_failed')?.attentionId).toBeTruthy()
+  const failedAttention = (await attentions()).find(row => row.reason === 'work_failed')!
   const live = await status().allTextContents()
   await shot(page, 'retry-failed')
 
   await page.reload()
   await expect(status().last()).toContainText('Failed: The provider is rate limiting requests (429)', { timeout: 30_000 })
   expect(await status().allTextContents()).toEqual(live)
+  expect((await attentions()).find(row => row.reason === 'work_failed')).toEqual(failedAttention)
   await status().last().getByRole('button').click()
   await expect(status().last().getByTestId('activity-detail')).toContainText('Retried 3 times')
   // The raw provider text stays available in the details.
   await expect(status().last().getByTestId('activity-detail')).toContainText('exceeded retry limit, last status: 429 Too Many Requests')
   await shot(page, 'retry-failed-replayed')
   assertions.statusRows = live
+  assertions.terminalAttention = { retrySucceededWithoutFailure: true, failedAttention, stableAfterReload: true }
 
   // A rejected key cannot start working on a retry: the turn fails at once instead of riding out Codex's retries.
   const rows = await status().count()

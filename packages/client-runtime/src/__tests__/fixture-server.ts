@@ -188,6 +188,11 @@ export async function startFixtureServer(index = 0) {
           ...(method === 'worker.continue' ? { result: { sessionId: 'continued-session' } } : {}),
         }
         receipts.set(data.commandId, r)
+        if (method === 'worker.delete') {
+          const deletion = input as { sessionId: string; workerId: string }
+          const detail = seed.details?.[deletion.sessionId]
+          if (detail) detail.workers = detail.workers.filter(worker => worker.agentId !== deletion.workerId)
+        }
         if (lostAck) {
           lostAck = false
           socket.close(1013)

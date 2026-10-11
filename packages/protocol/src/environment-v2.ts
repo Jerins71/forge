@@ -98,6 +98,8 @@ export const EnvironmentCapabilitiesSchema = O({
   projectPolicy: Type.Optional(Type.Boolean()),
   cliTransport: Type.Optional(Type.Boolean()),
   sessionLifecycle: Type.Optional(Type.Boolean()),
+  /** Removing a worker retains result transfers already sent to its manager. */
+  workerDelete: Type.Optional(Type.Boolean()),
   sessionState: Type.Optional(Type.Boolean()),
   contextTransfers: Type.Optional(Type.Boolean()),
   resendUndelivered: Type.Optional(Type.Boolean()),
@@ -239,7 +241,7 @@ export const RpcErrorSchema = O({
 export type RpcError = Static<typeof RpcErrorSchema>
 export const CommandReceiptSchema = O({
   commandId: V2Uuid,
-  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact', 'browser.tab.open', 'browser.tab.activate', 'browser.tab.close', 'browser.recording.start', 'browser.recording.stop', 'session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.fork', 'session.provider.switch', 'session.mergeBack', 'worker.continue', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill', 'session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'),
+  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'settings.recommendedDefaults.apply', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact', 'browser.tab.open', 'browser.tab.activate', 'browser.tab.close', 'browser.recording.start', 'browser.recording.stop', 'session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.fork', 'session.provider.switch', 'session.mergeBack', 'worker.continue', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill', 'worker.delete', 'session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'),
   projectId: Type.Optional(V2Id),
   result: Type.Optional(O({ browserRecording: Type.Optional(BrowserRecordingV2Schema), tabId: Type.Optional(V2Id), stoppedWorkerIds: Type.Optional(Type.Array(V2Id, { maxItems: 1000 })), managerStopped: Type.Optional(Type.Boolean()), pinnedAt: Type.Optional(Type.Union([V2Time, Type.Null()])), terminatedWorkerIds: Type.Optional(Type.Array(V2Id, { maxItems: 1000 })), archivedAt: Type.Optional(V2Time), openAgentId: Type.Optional(V2Id), compacted: Type.Optional(Type.Boolean()), reason: Type.Optional(ShortText), projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })), profileIds: Type.Optional(Type.Array(V2Id, { maxItems: 10000 })), rosterId: Type.Optional(V2Id), rosterRevision: Type.Optional(V2Sequence) })),
   sessionId: NullableId,
@@ -455,6 +457,7 @@ export const rpcSchemas = {
   'worker.stop': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, workerId: V2Id }), CommandReceiptSchema, { receipt: true }),
   'worker.resume': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, workerId: V2Id }), CommandReceiptSchema, { receipt: true }),
   'worker.kill': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, workerId: V2Id }), CommandReceiptSchema, { receipt: true }),
+  'worker.delete': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, workerId: V2Id }), CommandReceiptSchema, { receipt: true }),
   'session.launch': defineRpc(LaunchSessionSchema, CommandReceiptSchema, { receipt: true }),
   'session.send': defineRpc(SendMessageSchema, CommandReceiptSchema, { receipt: true }),
   'session.choose': defineRpc(ChoiceResponseSchema, CommandReceiptSchema, { receipt: true }),
@@ -518,7 +521,7 @@ export const rpcScopes = {
   'environment.get': 'session:read', 'shell.subscribe': 'session:read', 'shell.page': 'session:read',
   'session.subscribe': 'session:read', 'session.history': 'session:read',
   'session.workers': 'session:read', 'session.content': 'session:read',
-  'session.resume': 'session:operate', 'session.archive': 'session:operate', 'session.restore': 'session:operate', 'session.clear': 'session:operate', 'session.delete': 'session:operate', 'session.fork': 'session:operate', 'session.provider.switch': 'session:operate', 'session.mergeBack': 'session:operate', 'worker.continue': 'session:operate', 'session.lineage.get': 'session:read', 'session.choice.cancel': 'session:operate', 'session.stopAll': 'session:operate', 'worker.stop': 'session:operate', 'worker.resume': 'session:operate', 'worker.kill': 'session:operate',
+  'session.resume': 'session:operate', 'session.archive': 'session:operate', 'session.restore': 'session:operate', 'session.clear': 'session:operate', 'session.delete': 'session:operate', 'session.fork': 'session:operate', 'session.provider.switch': 'session:operate', 'session.mergeBack': 'session:operate', 'worker.continue': 'session:operate', 'session.lineage.get': 'session:read', 'session.choice.cancel': 'session:operate', 'session.stopAll': 'session:operate', 'worker.stop': 'session:operate', 'worker.resume': 'session:operate', 'worker.kill': 'session:operate', 'worker.delete': 'session:operate',
   'session.launch': 'session:operate', 'session.send': 'session:operate',
   'session.choose': 'session:operate', 'session.stop': 'session:operate', 'command.get': 'session:read',
   'project.create': 'workspace:write', 'project.update': 'workspace:write',

@@ -1147,6 +1147,23 @@ export class SwarmAgentLifecycleService {
     await this.core.stopWorker({ managerId: manager.agentId, workerId: targetAgentId });
   }
 
+  /** The control owner has drained this worker's canonical/provider fence before removal. */
+  async deleteControlledWorker(managerId: string, workerId: string): Promise<void> {
+    const manager = this.options.descriptors.get(managerId);
+    const worker = this.options.descriptors.get(workerId);
+    if (!manager || manager.role !== "manager" || !worker || worker.role !== "worker" || worker.managerId !== managerId) {
+      throw new Error("Worker does not belong to this session");
+    }
+    await this.terminateDescriptor(worker, { abort: true, emitStatus: true });
+    if (worker.status !== "terminated") throw new Error("Worker shutdown is still settling");
+    this.deleteDescriptor(workerId);
+    // Forget its mounted detail/cache; canonical result transfers and the manager's history stay intact.
+    this.options.deleteConversationHistory(workerId, worker.sessionFile);
+    await this.options.refreshSessionMetaStatsBySessionId(managerId);
+    await this.options.saveStore();
+    this.options.emitAgentsSnapshot();
+  }
+
   /**
    * The user stopped this worker. The core is told before the runtime goes away, so when the
    * worker's run ends its manager receives "stopped by the user" as the result, instead of a
