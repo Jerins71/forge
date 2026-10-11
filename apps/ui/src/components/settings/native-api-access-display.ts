@@ -3,7 +3,8 @@ import type { NativeApiAccess } from '@forge/protocol'
 const PROBLEM = { bad_key: 'API key rejected', wrong_path: 'Wrong base URL path', unreachable: 'Router unreachable', error: 'Router error' } as const
 
 /** The card's headline in API-key mode: a check mark only after a connection test has passed. */
-export function apiKeyConnection(access: NativeApiAccess | undefined): { ok: boolean; label: string } {
+export function apiKeyConnection(access: NativeApiAccess | undefined, runtimeError?: string): { ok: boolean; label: string } {
+  if (runtimeError) return { ok: false, label: runtimeError }
   if (!access?.apiKeyConfigured) return { ok: false, label: 'API key needed' }
   if (!access.probe) return { ok: false, label: 'API key saved · not tested' }
   return access.probe.outcome === 'ok' ? { ok: true, label: 'Connected with an API key' } : { ok: false, label: PROBLEM[access.probe.outcome] }

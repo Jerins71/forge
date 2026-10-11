@@ -59,7 +59,7 @@ export function CodexNativeAuth({ apiClient }: { apiClient: SettingsApiClient })
   })
   const test = () => void request({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'test' }) })
   // With an API key the check mark means the last connection test passed, not that a key is saved.
-  const keyConnection = apiKeyConnection(status?.access)
+  const keyConnection = apiKeyConnection(status?.access, status?.phase === 'error' && !status.connected ? status.message : undefined)
   const usesApiKey = !status?.managedByBroker && status?.access?.mode === 'api_key'
 
   const copy = async (kind: 'code' | 'link') => {
