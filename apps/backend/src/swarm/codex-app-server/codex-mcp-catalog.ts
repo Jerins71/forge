@@ -14,6 +14,8 @@ import type { CodexAppServerClientPort } from "./types.js";
 
 const CATALOG_CACHE_TTL_MS = 30_000;
 const MCP_SERVER_STATUS_LIST_TIMEOUT_MS = 60_000;
+/** How long a page load waits for discovery before it is given whatever is ready. */
+const CATALOG_BROWSE_WAIT_MS = 2_000;
 const MAX_CATALOG_ENTRIES = 500;
 const MAX_TOOL_ARGS_BYTES = 16 * 1024;
 const CODEX_APPS_AGGREGATE_SERVER = "codex_apps";
@@ -98,6 +100,22 @@ export interface CodexMcpToolCallResult {
   redactedModelContentTruncated?: boolean;
 }
 
+interface DiscoveredPlugins {
+  client: CodexAppServerClientPort;
+  apps: CodexCatalogApp[];
+  plugins: CodexCatalogPlugin[];
+}
+
+/** What display can show before MCP status has answered: apps and plugins, no tools yet. */
+function pluginsOnlySnapshot(discovered: Pick<DiscoveredPlugins, "apps" | "plugins">): CodexCatalogSnapshot {
+  return {
+    apps: discovered.apps,
+    plugins: filterPluginsForPicker(discovered.plugins).slice(0, MAX_CATALOG_ENTRIES),
+    tools: [],
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 interface CatalogCacheEntry {
   expiresAt: number;
   snapshot: CodexCatalogSnapshot;
@@ -126,62 +144,111 @@ function buildToolSelector(serverName: string, toolName: string): string {
 
 export class CodexMcpCatalog {
   private cache: CatalogCacheEntry | undefined;
+  /** The one discovery in flight, however many callers are waiting on it. */
+  private discovery: { plugins: Promise<DiscoveredPlugins>; complete: Promise<CodexCatalogSnapshot> } | undefined;
 
-  constructor(private readonly getClient: () => Promise<CodexAppServerClientPort>) {}
+  constructor(
+    private readonly getClient: () => Promise<CodexAppServerClientPort>,
+    private readonly timing: { browseWaitMs?: number; cacheTtlMs?: number } = {},
+  ) {}
 
+  /** The complete catalog, including MCP tools, for resolving and calling tools. */
   async listCatalog(forceRefresh = false): Promise<CodexCatalogSnapshot> {
     if (!forceRefresh && this.cache && this.cache.expiresAt > Date.now()) {
       return this.cache.snapshot;
     }
 
-    const client = await this.getClient();
-    const apps = await this.fetchApps(client);
-    let plugins: CodexCatalogPlugin[];
-    try {
-      plugins = enrichPluginsFromApps(await this.fetchPlugins(client), apps);
-    } catch (error) {
-      if (this.cache) {
-        return this.cache.snapshot;
-      }
+    return this.discover().complete;
+  }
 
-      throw new Error(formatCatalogDiscoveryError("plugin/list", error));
+  /**
+   * The catalog for display. A cached snapshot is returned at once and refreshed in the background when
+   * stale. Without one, the caller waits a short time and is given what is ready by then: everything,
+   * the plugins without their tools, or nothing yet. The rest arrives with a later call, from the same discovery.
+   */
+  async browseCatalog(): Promise<CodexCatalogSnapshot> {
+    if (this.cache) {
+      if (this.cache.expiresAt <= Date.now()) this.discover();
+      return this.cache.snapshot;
     }
 
-    let tools: CodexCatalogMcpTool[];
+    const discovery = this.discover();
+    let discovered: DiscoveredPlugins | undefined;
+    // A failed plugin discovery is reported by the complete result, which settles first.
+    discovery.plugins.then((value) => { discovered = value; }, () => undefined);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ready = new Promise<CodexCatalogSnapshot>((resolve) => {
+      timer = setTimeout(
+        () => resolve(this.cache?.snapshot ?? pluginsOnlySnapshot(discovered ?? { apps: [], plugins: [] })),
+        this.timing.browseWaitMs ?? CATALOG_BROWSE_WAIT_MS,
+      );
+    });
     try {
-      tools = await this.fetchMcpTools(client, apps);
-    } catch (error) {
-      if (this.cache) {
-        return this.cache.snapshot;
+      return await Promise.race([discovery.complete, ready]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private discover(): NonNullable<CodexMcpCatalog["discovery"]> {
+    if (this.discovery) return this.discovery;
+
+    const plugins = (async (): Promise<DiscoveredPlugins> => {
+      const client = await this.getClient();
+      const apps = await this.fetchApps(client);
+      return { client, apps, plugins: enrichPluginsFromApps(await this.fetchPlugins(client), apps) };
+    })();
+    const complete = (async (): Promise<CodexCatalogSnapshot> => {
+      let discovered: DiscoveredPlugins;
+      try {
+        discovered = await plugins;
+      } catch (error) {
+        if (this.cache) {
+          return this.cache.snapshot;
+        }
+
+        throw new Error(formatCatalogDiscoveryError("plugin/list", error));
       }
 
-      const pickerPlugins = filterPluginsForPicker(plugins);
-      return {
-        apps,
+      let tools: CodexCatalogMcpTool[];
+      try {
+        tools = await this.fetchMcpTools(discovered.client, discovered.apps);
+      } catch (error) {
+        if (this.cache) {
+          return this.cache.snapshot;
+        }
+
+        return {
+          ...pluginsOnlySnapshot(discovered),
+          diagnostics: {
+            mcpToolsError: formatCatalogDiscoveryError("mcpServerStatus/list", error),
+          },
+        };
+      }
+
+      const enrichedPlugins = enrichPluginsWithCodexAppsToolScopes(discovered.plugins, tools);
+      const pickerPlugins = filterPluginsForPicker(enrichedPlugins);
+      const snapshot: CodexCatalogSnapshot = {
+        apps: discovered.apps,
         plugins: pickerPlugins.slice(0, MAX_CATALOG_ENTRIES),
-        tools: [],
+        tools: tools.slice(0, MAX_CATALOG_ENTRIES),
         fetchedAt: new Date().toISOString(),
-        diagnostics: {
-          mcpToolsError: formatCatalogDiscoveryError("mcpServerStatus/list", error),
-        },
       };
-    }
 
-    const enrichedPlugins = enrichPluginsWithCodexAppsToolScopes(plugins, tools);
-    const pickerPlugins = filterPluginsForPicker(enrichedPlugins);
-    const snapshot: CodexCatalogSnapshot = {
-      apps,
-      plugins: pickerPlugins.slice(0, MAX_CATALOG_ENTRIES),
-      tools: tools.slice(0, MAX_CATALOG_ENTRIES),
-      fetchedAt: new Date().toISOString(),
-    };
+      this.cache = {
+        expiresAt: Date.now() + (this.timing.cacheTtlMs ?? CATALOG_CACHE_TTL_MS),
+        snapshot,
+      };
 
-    this.cache = {
-      expiresAt: Date.now() + CATALOG_CACHE_TTL_MS,
-      snapshot,
-    };
-
-    return snapshot;
+      return snapshot;
+    })().finally(() => {
+      this.discovery = undefined;
+    });
+    // A background refresh has no caller to report to; its failure keeps the snapshot already cached.
+    plugins.catch(() => undefined);
+    complete.catch(() => undefined);
+    this.discovery = { plugins, complete };
+    return this.discovery;
   }
 
   resolvePlugin(selector: string, snapshot?: CodexCatalogSnapshot): CodexCatalogPlugin | undefined {

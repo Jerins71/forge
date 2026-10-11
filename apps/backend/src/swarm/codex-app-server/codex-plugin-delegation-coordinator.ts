@@ -117,6 +117,7 @@ export type CodexPluginAppServerPort = Pick<
   | "resolveCodexMcpToolInCatalog"
   | "filterCodexMcpToolsForAuthorizedSelectors"
   | "callCodexMcpToolByExactTool"
+  | "browseCodexCatalog"
   | "dispose"
 >;
 
@@ -478,7 +479,7 @@ export class CodexPluginDelegationCoordinator {
   async browseCatalog(managerAgentId: string): Promise<CodexCatalogSnapshot> {
     const manager = this.requireManagerForTools(managerAgentId);
     assertCodexMcpToolGateAllowed(evaluateCodexMcpCatalogBrowseGate({ manager }));
-    return this.options.appServer.listCodexMcpTools();
+    return this.options.appServer.browseCodexCatalog();
   }
 
   listRawTools(): never {
