@@ -1144,7 +1144,7 @@ test('F16/F22: native choice has stable Needs You attention and a lazy fork show
     expect(Object.values((await f.state()).bindings).some(binding => binding.scope.threadId === forkId)).toBe(false);
     const spawned = await f.send('[fixture:spawn]'); expect(await f.run(spawned.commandId)).toMatchObject({ outcome: 'completed' });
     const worker = await until<any>(async () => (await f.detail()).workers[0], Boolean);
-    await until(async () => (await f.state()).threads[worker.agentId]?.activeRunId, value => !value);
+    await until(async () => Object.values((await f.state()).runs).filter(run => run.threadId === worker.agentId), runs => runs.length > 0 && runs.every(run => run.state === 'terminal'));
     const continued = await f.rpc.call('worker.continue', { commandId: randomUUID(), sessionId: f.sessionId, workerId: worker.agentId, title: 'Continued context QA' });
     const continuedReceipt = await settled(continued.commandId, 0); expect(continuedReceipt.state).toBe('succeeded');
     const { subscriptionId: continuedSubscription } = await f.rpc.call('session.subscribe', { sessionId: (continuedReceipt.result as any).sessionId });
