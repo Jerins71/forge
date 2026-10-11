@@ -182,8 +182,10 @@ async function uiConsumer(id: string) {
   const environment = registry.get(credential.environmentId);
   await until(() => environment.connection.getSnapshot().phase, phase => phase === 'online');
   const calls: { method: string; input: any; receipt: any }[] = [];
+  const requests: { method: string; input: any }[] = [];
   const request = environment.request.bind(environment);
   environment.request = (async (method: any, input: any, options: any) => {
+    if ('commandId' in input) requests.push({ method, input });
     const receipt = await request(method, input, options);
     if ('commandId' in input) calls.push({ method, input, receipt });
     return receipt;
@@ -192,7 +194,7 @@ async function uiConsumer(id: string) {
   const { ManagerWsClient } = await import(uiModulePath);
   const facade = new ManagerWsClient('', id, { environmentClient: environment });
   await until(() => facade.getState().conversationBootstrap.phase, phase => phase === 'ready');
-  return { facade, calls, dispose: async () => { facade.destroy(); await registry.dispose(); } };
+  return { facade, calls, requests, dispose: async () => { facade.destroy(); await registry.dispose(); } };
 }
 async function replayLifecycle(calls: { method: string; input: any; receipt: any }[]) {
   await controlEnvironment(manifest, manifest.environments[1]!.name, 'stop');
@@ -345,13 +347,14 @@ test('UI worker Delete joins the worker stop lane while manager sends are queued
     await until(() => controlEnvironment<{ reached: boolean }>(manifest, environment.name, 'fixture', { operation: 'hold-state' }), state => state.reached);
     await rpc.call('session.send', { commandId: queuedId, sessionId: id, message: { text: 'Preserve queued manager send', artifactIds: [] } });
     ui.facade.deleteAgent(worker);
-    await until(() => ui.calls, calls => calls.some(call => call.method === 'worker.delete'));
-    const kill = ui.calls.find(call => call.method === 'worker.delete')!;
-    await until(() => rpc.call('command.get', { commandId: kill.input.commandId }), receipt => receipt.state === 'running');
+    await until(() => ui.requests, requests => requests.some(call => call.method === 'worker.delete'));
+    const deletion = ui.requests.find(call => call.method === 'worker.delete')!;
+    await until(() => rpc.call('command.get', { commandId: deletion.input.commandId }), receipt => receipt.state === 'running');
     expect(await rpc.call('command.get', { commandId: queuedId })).toMatchObject({ state: 'accepted', delivery: 'pending' });
     await controlEnvironment(manifest, environment.name, 'fixture', { operation: 'release-dispatch' });
     await until(() => rpc.call('command.get', { commandId: queuedId }), receipt => receipt.state === 'succeeded');
     await until(() => client.listAgents(projectId), reply => !reply.agents.some(agent => agent.agentId === worker));
+    await until(() => ui.calls, calls => calls.some(call => call.method === 'worker.delete'));
     await ui.dispose(); await replayLifecycle(ui.calls);
     expect((await sessionProjection(id)).status).not.toBe('stopped');
     evidence.uiWorkerDeleteQueuedSend = { preservedManagerInput: true, restartReplay: true };
