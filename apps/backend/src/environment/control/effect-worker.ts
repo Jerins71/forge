@@ -19,6 +19,10 @@ export interface EffectWorker {
   reconcileOnBoot(): Promise<void>;
 }
 const unavailable: RpcError = { code: "UNAVAILABLE", message: "Effect interrupted before completion", retryable: false };
+/** A slow runtime exit is retried in place; only a shutdown nothing can confirm is quarantined. */
+const RELEASE_RETRY_LIMIT = 20;
+const releaseRetryDelayMs = (attempt: number) => Math.min(2_000, 250 * 2 ** (attempt - 1));
+const unconfirmedRelease: RpcError = { code: "UNAVAILABLE", message: "The session runtime could not be confirmed stopped, so new work stays blocked. Stop the session again to retry, or restart Forge.", retryable: true };
 
 /** One outbox executor. Every native result returns through the decision/transaction owner. */
 export function createEffectWorker(sink: EventSink, options: ControlCoreOptions): EffectWorker {
@@ -46,6 +50,17 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     else if (state === "done" && !receipt.inputId && ["accepted", "running"].includes(receipt.state) && !database.prepare("SELECT 1 FROM effects WHERE command_id=? AND state IN ('pending','claimed')").get(row.command_id))
       sink.updateReceipt(tx, row.command_id, { state: "succeeded", error: null });
   });
+  let wake: NodeJS.Timeout | undefined;
+  /** The writer is not confirmed gone. Keep the drain owed and try again; quarantine once retries are spent. */
+  const retryRelease = (row: EffectRow, effect: Extract<ControlEffect, { kind: "provider.release" }>, reason: string) => {
+    if (row.attempt < RELEASE_RETRY_LIMIT) {
+      sink.transaction(() => database.prepare("UPDATE effects SET state='pending',claimed_boot_id=NULL,not_before=?,last_error_json=? WHERE effect_id=? AND state='claimed' AND claimed_boot_id=?")
+        .run(options.clock() + releaseRetryDelayMs(row.attempt), JSON.stringify({ ...unavailable, message: reason, retryable: true }), row.effect_id, bootId));
+      return;
+    }
+    record({ type: "binding.drained", ...result(row, "drain-failed"), threadId: effect.threadId, bindingId: effect.bindingId, status: "pending" });
+    settle(row, "interrupted", unconfirmedRelease);
+  };
   const fallbackSelections=new Map<string,Promise<void>>();
   const selectFallback=(threadId:string,attemptId:string,message:string):Promise<void>=>{
     const pending=fallbackSelections.get(attemptId);if(pending) return pending;
@@ -273,11 +288,14 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           record({ type: "request.responded", ...result(row, "responded"), threadId: effect.threadId, requestId: request.requestId }); break;
         }
         case "provider.release": {
+          // A drain owed to an earlier binding was already settled; never stop the thread's newer runtime for it.
+          const owner = loadState(database).threads[effect.threadId];
+          if (owner && owner.bindingId !== effect.bindingId) break;
           // Runtime cleanup may need to interrupt its native projection before close.
-          if (!(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.threadId })).stopped) throw new Error("Runtime writer shutdown is incomplete");
+          if (!(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.threadId })).stopped) { retryRelease(row, effect, "Runtime writer shutdown is incomplete"); return; }
           const resource = live.get(effect.bindingId);
           if (resource) { attemptedNative = true; await resource.adapter.close(resource.binding); const drained = await resource.adapter.drain(resource.binding);
-            if (drained.status !== "clean") { record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: drained.status }); settle(row, "interrupted", unavailable); return; }
+            if (drained.status !== "clean") { retryRelease(row, effect, "Provider binding drain is incomplete"); return; }
             resource.stop.abort(); live.delete(effect.bindingId);
           }
           record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: "clean" }); break;
@@ -311,10 +329,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       }
       settle(row, "done");
     } catch (error) {
-      if (effect.kind === "provider.release") {
-        record({ type: "binding.drained", ...result(row, "drain-failed"), threadId: effect.threadId, bindingId: effect.bindingId, status: "pending" });
-        settle(row, "interrupted", { ...unavailable, message: error instanceof Error ? error.message : String(error) }); return;
-      }
+      if (effect.kind === "provider.release") { retryRelease(row, effect, error instanceof Error ? error.message : String(error)); return; }
       if (effect.kind === "provider.respond" && error && typeof error === "object" && "code" in error && error.code === "PROVIDER_REQUEST_REJECTED") {
         record({ type: "request.expire", ...result(row, "expired"), threadId: effect.threadId, requestId: effect.requestId });
         settle(row, "interrupted", { code: "CONFLICT", message: "Provider request expired", retryable: false }); return;
@@ -345,14 +360,19 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         if (!active.size) break; await Promise.race(active);
       }
       await Promise.all(active);
-    })().finally(() => { draining = undefined; }); return draining;
+    })().finally(() => {
+      draining = undefined;
+      // Delayed effects have no commit to wake them; arm one timer for the earliest.
+      const next = started && !stopped ? (database.prepare("SELECT MIN(not_before) at FROM effects WHERE state='pending' AND kind!='lifecycle.admit' AND not_before>?").get(options.clock()) as { at: number | null }).at : null;
+      clearTimeout(wake); wake = next === null ? undefined : setTimeout(kick, Math.max(1, next - options.clock())); wake?.unref();
+    }); return draining;
   };
   const kick = () => { if (started && !stopped) queueMicrotask(() => { void worker.drain().catch(() => { started = false; }); }); };
   const worker: EffectWorker = {
     bootId,
     start() { if (!reconciled || stopped) throw new Error("Reconcile before starting effects"); started = true; unsubscribe ??= sink.subscribeCommit(kick); kick(); },
     drain: () => drainEffects(),
-    async stop() { stopped = true; started = false; unsubscribe?.(); for (const resource of live.values()) resource.stop.abort(); await draining; await Promise.allSettled([...observations,...fallbackSelections.values()]); },
+    async stop() { stopped = true; started = false; unsubscribe?.(); clearTimeout(wake); for (const resource of live.values()) resource.stop.abort(); await draining; await Promise.allSettled([...observations,...fallbackSelections.values()]); },
     async reconcileOnBoot() {
       if (reconciled) return; if (started || draining) throw new Error("Boot reconciliation precedes execution");
       rebuildLifecycleProjections(database);

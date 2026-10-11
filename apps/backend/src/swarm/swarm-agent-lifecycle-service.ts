@@ -1985,6 +1985,8 @@ export class SwarmAgentLifecycleService {
     options: AgentLifecycleStopSessionOptions
   ): Promise<{ terminatedWorkerIds: string[]; unsafeShutdownAgentIds: string[] }> {
     const descriptor = this.options.getRequiredSessionDescriptor(agentId);
+    // A repeated stop is the cleanup retry for a shutdown that is already reported as unconfirmed.
+    const cleanupRetry = this.options.isRuntimeShutdownQuarantined(agentId);
     await this.options.suppressSessionAttention(descriptor.agentId);
     const terminatedWorkerIds: string[] = [];
     const terminatedWorkerDescriptors: AgentDescriptor[] = [];
@@ -2058,10 +2060,12 @@ export class SwarmAgentLifecycleService {
 
     if (managerShutdownIncomplete) {
       unsafeShutdownAgentIds.push(agentId);
-      this.options.emitImmediateManualManagerStopNotice(
-        agentId,
-        MANUAL_MANAGER_STOP_INCOMPLETE_NOTICE,
-      );
+      if (!cleanupRetry) {
+        this.options.emitImmediateManualManagerStopNotice(
+          agentId,
+          MANUAL_MANAGER_STOP_INCOMPLETE_NOTICE,
+        );
+      }
     }
 
     if (unsafeShutdownAgentIds.length === 0) {

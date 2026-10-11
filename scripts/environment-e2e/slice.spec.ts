@@ -928,3 +928,35 @@ test('9.2.10 real paged snapshot barrier orders concurrent updates; overflowing 
     evidence.snapshotBarrier = { summaries: 1001, pages: pages.length, barrierSequence: snapshot.sequence, concurrentUpdates: 8, synchronizedBeforeUpdates: true, snapshotUnchanged: true, overflow: error!.error.code, socketSurvived: true, queueFramesMax: metrics.streamQueueFramesMax, queueBytesMax: metrics.streamQueueBytesMax };
   } finally { rpc.close(); }
 });
+
+test('a hung turn that ignores interrupt and SIGTERM is stopped, settled, and the session takes the next send', async () => {
+  const a = manifest.environments[0]!; const rpc = await openFixtureRpc(a.baseUrl, sessions[0]!);
+  const fixtureProcesses = async () => Promise.all((await readdir(join(a.checkout, '.fixture-codex'))).filter(file => /^process-\d+\.json$/.test(file))
+    .map(async file => JSON.parse(await readFile(join(a.checkout, '.fixture-codex', file), 'utf8')) as { pid: number; threadId: string | null; turnStarts: number; interrupts: number }));
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw error; } };
+  try {
+    const launch = { commandId: randomUUID(), projectId: projects[0]!.sessionId, title: 'Hung turn', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:hang]', artifactIds: [] } };
+    const sessionId = (await rpc.call('session.launch', launch)).sessionId as string;
+    expect(await settled(launch.commandId, 0)).toMatchObject({ state: 'succeeded', delivery: 'dispatched' });
+    const nativeThread = await until(() => readDb(db => Object.values(loadState(db).bindings).find(binding => binding.scope.threadId === sessionId)?.conversation.nativeId, 0), Boolean);
+    const hung = await until(async () => (await fixtureProcesses()).find(candidate => candidate.threadId === nativeThread && candidate.turnStarts === 1), Boolean);
+    expect(alive(hung!.pid)).toBe(true);
+    const stop = await rpc.call('session.stop', { commandId: randomUUID(), sessionId }); const stopStarted = Date.now();
+    // The receipt ends as succeeded; a hung process is never a reason to report the stop as failed.
+    const stopped = await settled(stop.commandId, 0); const stopMs = Date.now() - stopStarted;
+    expect(stopped, JSON.stringify(stopped)).toMatchObject({ state: 'succeeded', error: null });
+    expect(alive(hung!.pid)).toBe(false);
+    const ignoredInterrupts = (await fixtureProcesses()).find(candidate => candidate.pid === hung!.pid)!.interrupts; expect(ignoredInterrupts).toBeGreaterThan(0);
+    const afterStop = await readDb(db => loadState(db), 0);
+    expect(afterStop.threads[sessionId]).toMatchObject({ desired: 'stopped', shutdown: 'clean' }); expect(afterStop.threads[sessionId]!.activeRunId).toBeUndefined();
+    expect(afterStop.runs[`run-${launch.commandId}`]).toMatchObject({ state: 'terminal', outcome: 'cancelled' });
+    expect((await readDb(db => db.prepare("SELECT json_extract(summary_json,'$.status') status FROM control_sessions WHERE session_id=?").get(sessionId), 0) as { status: string }).status).toBe('stopped');
+    const send = await rpc.call('session.send', { commandId: randomUUID(), sessionId, message: { text: 'after the hung turn', artifactIds: [] } });
+    expect(await settled(send.commandId, 0)).toMatchObject({ state: 'succeeded', delivery: 'dispatched' });
+    const next = await until(() => readDb(db => loadState(db).runs[`run-${send.commandId}`], 0), run => run?.state === 'terminal');
+    expect(next).toMatchObject({ outcome: 'completed' });
+    const replacement = (await fixtureProcesses()).find(candidate => candidate.pid !== hung!.pid && candidate.turnStarts === 1 && alive(candidate.pid));
+    expect(replacement).toBeTruthy();
+    evidence.hungStop = { ignoredInterrupts, hungProcessKilled: true, stopReceipt: stopped.state, stopMs, stuckRun: 'cancelled', shutdown: 'clean', nextSend: next!.outcome, replacementProcess: true };
+  } finally { rpc.close(); }
+});

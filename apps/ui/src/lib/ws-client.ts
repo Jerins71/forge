@@ -479,10 +479,13 @@ export class ManagerWsClient {
     this.intentCommandIds.set(key, commandId)
     try {
       let receipt = await this.environmentClient.request(method, { ...input, commandId } as RpcInput<M>)
-      const deadline = Date.now() + 10_000
+      const started = Date.now()
+      // A stop stays running while the environment waits for the runtime to exit, then succeeds or
+      // explains why it could not. Outwait that bound; reporting a slow exit as a failure would be false.
+      const deadline = started + (method === 'session.stop' || method === 'worker.kill' ? 120_000 : 10_000)
       while (receipt.state === 'accepted' || receipt.state === 'running') {
         if (Date.now() >= deadline) throw new EnvironmentRuntimeError('UNAVAILABLE', 'Session operation is still settling; retry to inspect its receipt', true)
-        await new Promise(resolve => setTimeout(resolve, 25))
+        await new Promise(resolve => setTimeout(resolve, Date.now() - started < 10_000 ? 25 : 250))
         receipt = await this.environmentClient.request('command.get', { commandId })
       }
       this.intentCommandIds.delete(key)
@@ -647,6 +650,11 @@ export class ManagerWsClient {
 
   }
 
+  /** A session action's failure belongs to that session; it is shown only while that session is in view. */
+  reportSessionError(agentId: string, message: string): void {
+    const session = (id: string) => this.state.agents.find(agent => agent.agentId === id && agent.role === 'worker')?.managerId ?? id
+    if (this.state.targetAgentId && session(this.state.targetAgentId) === session(agentId)) this.updateState({ lastError: message })
+  }
   async stopSession(agentId: string): Promise<SessionActionResult> {
     const worker = this.state.agents.find(agent => agent.agentId === agentId && agent.role === 'worker')
     if (worker) await this.lifecycle('worker.stop', { sessionId: worker.managerId, workerId: agentId })
@@ -908,8 +916,8 @@ export class ManagerWsClient {
       void this.sessionState('session.readState.set', { sessionId, read: true }).catch(error => this.reportSessionStateError(error))
     this.detailLease = this.environmentClient.acquireDetail(sessionId)
     const store = this.detailLease.store
-    // Lineage belongs to one session; never present the previous session's while this one loads.
-    this.updateState({ sessionLineage: null, sessionTransferCapabilities: null })
+    // Lineage and a reported error belong to one session; never present the previous session's on this one.
+    this.updateState({ sessionLineage: null, sessionTransferCapabilities: null, ...(this.state.targetAgentId && this.state.targetAgentId !== sessionId ? { lastError: null } : {}) })
     let projection: DetailState['projection'] = null
     let transient: DetailState['transient'] = new Map()
     const apply = () => {

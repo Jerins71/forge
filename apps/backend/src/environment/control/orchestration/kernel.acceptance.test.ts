@@ -117,6 +117,19 @@ describe("authoritative run decisions", () => {
     f.run({ type: "thread.resume", commandId: "resume", now, threadId: "manager" });
     expect(f.state().threads.manager.generation).toBe(1);
   });
+  it.each(["pending", "quarantined"] as const)("settles a stopped thread's stuck run at the process boundary when its drain was %s", shutdown => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 0, "accepted");
+    f.run({ type: "thread.stop", commandId: "stop", now, threadId: "manager" });
+    if (shutdown === "quarantined") f.run({ type: "binding.drained", commandId: "unconfirmed", now, threadId: "manager", bindingId: "binding", status: "pending" });
+    expect(f.state().threads.manager).toMatchObject({ desired: "stopped", shutdown, activeRunId: "run-one" });
+    f.run({ type: "environment.recover", commandId: "boot", now, recoveryId: "boot", bootId: "boot", reports: [] });
+    // The user's stop was already recorded; a restart is not a second decision for them to make.
+    expect(f.state().threads.manager).toMatchObject({ desired: "stopped", shutdown: "clean" }); expect(f.state().threads.manager.activeRunId).toBeUndefined();
+    expect(f.state().runs["run-one"]).toMatchObject({ state: "terminal", outcome: "cancelled" }); expect(f.state().recovery).toBeNull();
+    f.run({ type: "thread.resume", commandId: "resume", now, threadId: "manager" });
+    f.submit("two"); const started = f.record("two");
+    expect(f.state().threads.manager.activeRunId).toBe("run-two"); expect(started.effects.map(effect => effect.kind)).toEqual(["runtime.acquire"]);
+  });
   it("admits canonical input during a switch drain and advances it in the replacement scope", () => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 1, "terminal");
     const state = f.state(); const pending = { ...state, threads: { manager: { ...state.threads.manager, shutdown: "pending" as const } } };

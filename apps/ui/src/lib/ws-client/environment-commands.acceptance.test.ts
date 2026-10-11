@@ -1,7 +1,7 @@
 // Guards command identity on the compatibility send path against a real runtime and WS fixture:
 // a submit owns one command ID across lost acknowledgments, reconnect recovery and explicit retry;
 // interrupted receipts are shown and never resubmitted unless the user resends (a new command).
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createEnvironmentRegistry,
   createMemoryCredentialStore,
@@ -137,6 +137,46 @@ describe('native environment lifecycle consumers', () => {
     await until(() => server.inputs.some(entry => entry.method === method))
     expect(server.inputs.filter(entry => entry.method.startsWith('legacy.'))).toEqual([])
     await operation
+  })
+})
+
+// A slow runtime exit keeps the stop receipt running; that is not a failure. A real stop
+// failure belongs to its session and must not follow the user to another one.
+describe('session stop reporting', () => {
+  it('waits for a stop that is still settling instead of reporting it as failed', async () => {
+    const { server, facade } = await environment()
+    let exited = false
+    server.transformOutbound = value => {
+      const frame = value as { output?: CommandReceipt }
+      return frame.output?.method === 'session.stop' && !exited ? { ...frame, output: { ...frame.output, state: 'running' } } : value
+    }
+    const polls = () => server.inputs.filter(entry => entry.method === 'command.get').length
+    const now = Date.now
+    let skew = 0
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now() + skew)
+    cleanups.push(() => clock.mockRestore())
+    let outcome = 'settling'
+    const stop = facade.stopSession('session-1').then(() => { outcome = 'stopped' }, (error: Error) => { outcome = error.message })
+    await until(() => polls() > 1)
+    skew = 11_000
+    const seen = polls()
+    await until(() => polls() > seen + 1 || outcome !== 'settling')
+    expect(outcome).toBe('settling')
+    exited = true
+    await stop
+    expect(outcome).toBe('stopped')
+    expect(new Set(server.inputs.filter(entry => entry.method === 'session.stop').map(entry => (entry.input as { commandId: string }).commandId)).size).toBe(1)
+  })
+  it('shows a stop failure only on its own session and drops it when another session is opened', async () => {
+    const { facade } = await environment()
+    facade.reportSessionError('session-2', 'Failed to stop session: runtime could not be confirmed stopped')
+    expect(facade.getState().lastError).toBeNull()
+    facade.reportSessionError('session-1', 'Failed to stop session: runtime could not be confirmed stopped')
+    expect(facade.getState().lastError).toBe('Failed to stop session: runtime could not be confirmed stopped')
+    facade.subscribeToAgent('session-2')
+    expect(facade.getState().targetAgentId === 'session-2' ? facade.getState().lastError : null).toBeNull()
+    await until(() => facade.getState().targetAgentId === 'session-2')
+    expect(facade.getState().lastError).toBeNull()
   })
 })
 

@@ -261,13 +261,10 @@ export function useSessionActions({
       try {
         await client.stopSession(agentId)
       } catch (error) {
-        setState((prev) => ({
-          ...prev,
-          lastError: `Failed to stop session: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        }))
+        client.reportSessionError(agentId, `Failed to stop session: ${error instanceof Error ? error.message : 'Unknown error'}`)
       }
     })()
-  }, [clientRef, setState])
+  }, [clientRef])
 
   const handleResumeSession = useCallback((agentId: string) => {
     const client = clientRef.current

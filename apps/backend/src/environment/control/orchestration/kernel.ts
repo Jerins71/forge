@@ -64,6 +64,8 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     for (const run of Object.values(state.runs)) {
       if (!["running", "recovery"].includes(run.state)) continue;
       const owner = thread(run.threadId); const attempt = state.attempts[run.activeAttemptId];
+      // A stop the user already asked for needs no second decision: the lost process is its confirmed drain.
+      if (processLost && owner.desired === "stopped" && owner.shutdown !== "clean" && owner.activeRunId === run.runId) { finish(run, "cancelled"); continue; }
       if (attempt.state === "created") {
         if (processLost) {
           emit({ type: "run.started", run: { ...run, state: "queued" } });

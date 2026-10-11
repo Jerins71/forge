@@ -1,7 +1,7 @@
 import { NATIVE_USAGE_ENTRY_TYPE, NativeUsageAccumulator, normalizeClaudeUsage, parseNativeUsageEntry, type NativeUsageRecord } from "../../../utils/native-usage-records.js";
 import type { Usage } from "@anthropic-ai/sdk/resources/messages";
 import { randomUUID, createHash } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { query, type Options as QueryOptions, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -60,6 +60,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   private readonly mapper = new ClaudeRuntimeEvents();
   private native!: Query;
   private reader: Promise<void> = Promise.resolve();
+  private child?: ChildProcess;
   private childExit: Promise<void> = Promise.resolve();
   private operations: Promise<unknown> = Promise.resolve();
   private state!: NativeState;
@@ -146,6 +147,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
       spawnClaudeCodeProcess(spawnOptions) {
         const child = spawn(spawnOptions.command, spawnOptions.args, { cwd: spawnOptions.cwd, env: spawnOptions.env,
           signal: spawnOptions.signal, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+        runtime.child = child;
         runtime.childExit = new Promise<void>(resolve => { child.once("exit", () => resolve()); child.once("error", () => { if (!child.pid) resolve(); }); });
         return child;
       },
@@ -235,7 +237,13 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     // Close, rather than just interrupt: native queued sends and background tasks
     // can survive an interrupt. Replacement waits for the real child exit.
     this.native?.close();
-    await deadline(Promise.all([this.childExit, this.reader.catch(() => undefined), this.bridge.drain()]), options?.shutdownTimeoutMs ?? 3_000);
+    // The SDK escalates on a slower schedule than this window, so a child hung on its
+    // provider stream would outlive it. Force only the owned child; its observed exit is still required.
+    const timeout = options?.shutdownTimeoutMs ?? 3_000;
+    const signal = (name: NodeJS.Signals) => { if (this.child && this.child.exitCode === null && this.child.signalCode === null) this.child.kill(name); };
+    const escalation = [setTimeout(signal, timeout / 3, "SIGTERM"), setTimeout(signal, timeout * 2 / 3, "SIGKILL")];
+    try { await deadline(Promise.all([this.childExit, this.reader.catch(() => undefined), this.bridge.drain()]), timeout); }
+    finally { for (const timer of escalation) clearTimeout(timer); }
     await this.operations;
     for (const input of [...this.sent.values(), ...this.followUps]) input.compact?.reject(new Error("Claude compaction stopped"));
     this.turnCompaction?.reject(new Error("Claude compaction stopped"));

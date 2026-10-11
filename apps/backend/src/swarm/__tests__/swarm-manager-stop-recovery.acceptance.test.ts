@@ -23,15 +23,17 @@ async function fixture() {
   runtime.providerAdapter.close = cleanup
   runtime.providerAdapter.drain = async () => ({ status: clean ? 'clean' : 'pending' })
   const stop = await environment.control.execute(paired.principal, 'session.stop', { commandId: randomUUID(), sessionId: 'manager' })
-  await vi.waitFor(async () => expect(await environment.control.getReceipt(paired.principal, stop.commandId)).toMatchObject({ state: 'interrupted' }))
-  expect(loadState(environment.database).threads.manager).toMatchObject({ desired: 'stopped', shutdown: 'quarantined' })
+  // Unconfirmed cleanup is retried in place: the stop stays in flight and the drain stays owed.
+  await vi.waitFor(() => expect(cleanup.mock.calls.length).toBeGreaterThan(1), { timeout: 10_000 })
+  expect(await environment.control.getReceipt(paired.principal, stop.commandId)).toMatchObject({ state: 'running', error: null })
+  expect(loadState(environment.database).threads.manager).toMatchObject({ desired: 'stopped', shutdown: 'pending' })
   await manager.stopAllAgents('manager', 'manager')
   expect(manager.getAgent('manager')?.status).toBe('stopped')
-  return { ...handle, manager, environment, paired, runtime, cleanupAttempt: cleanup, settle: () => { clean = true } }
+  return { ...handle, manager, environment, paired, runtime, stop, cleanupAttempt: cleanup, settle: () => { clean = true } }
 }
 
 describe('Stopped session recovery acceptance', () => {
-  it('recovers on new user input, rejects while cleanup is unsafe, and coalesces concurrent replacement creation', async () => {
+  it('settles a slow stop by itself, rejects input while cleanup is unsafe, and coalesces concurrent replacement creation', async () => {
     const f = await fixture()
     try {
       const before = await readFile(f.runtime.descriptor.sessionFile, 'utf8')
@@ -39,8 +41,8 @@ describe('Stopped session recovery acceptance', () => {
       expect(await readFile(f.runtime.descriptor.sessionFile, 'utf8')).toBe(before)
       expect(f.manager.runtimeCreationCountByAgentId.get('manager')).toBe(1)
       f.settle()
-      const retryStop = await f.environment.control.execute(f.paired.principal, 'session.stop', { commandId: randomUUID(), sessionId: 'manager' })
-      await vi.waitFor(async () => expect(await f.environment.control.getReceipt(f.paired.principal, retryStop.commandId)).toMatchObject({ state: 'succeeded' }))
+      // The user's one Stop settles by itself once cleanup can be confirmed.
+      await vi.waitFor(async () => expect(await f.environment.control.getReceipt(f.paired.principal, f.stop.commandId)).toMatchObject({ state: 'succeeded', error: null }), { timeout: 10_000 })
       expect(loadState(f.environment.database).threads.manager.shutdown).toBe('clean')
       await Promise.all([
         f.manager.handleUserMessage('First new input', { targetAgentId: 'manager' }),

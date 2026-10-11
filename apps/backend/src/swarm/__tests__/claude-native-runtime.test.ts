@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -39,6 +40,37 @@ async function fixture(root: string, options: { prompt?: string; onEnd?: () => P
 }
 
 describe("Claude native lifecycle", () => {
+  it("kills a child that ignores close and SIGTERM, and reports stopped only after it has exited", async () => {
+    const root = await mkdtemp(join(tmpdir(), "forge-claude-hung-")); const events: RuntimeSessionEvent[] = [];
+    let child!: ChildProcess; let output = ""; let waiting: ((result: IteratorResult<SDKMessage>) => void) | undefined; let ended = false;
+    // Hung on a provider stream: stdin close and SIGTERM are both ignored.
+    const hung = "process.on('SIGTERM',()=>process.stdout.write('term\\n'));process.stdin.on('end',()=>process.stdout.write('eof\\n'));process.stdin.resume();setInterval(()=>{},1000);process.stdout.write('ready\\n')";
+    const native = { backgroundTasks: vi.fn(async () => true), initializationResult: vi.fn(async () => ({})), supportedModels: vi.fn(async () => []),
+      close: vi.fn(() => { child.stdin!.end(); }),
+      [Symbol.asyncIterator]() { return this; }, next(): Promise<IteratorResult<SDKMessage>> {
+        return ended ? Promise.resolve({ done: true, value: undefined }) : new Promise(resolve => { waiting = resolve; });
+      } };
+    const runtime = await ClaudeAgentRuntime.create({ descriptor: { agentId: "owner", managerId: "owner", role: "manager", profileId: "fixture", cwd: root,
+      sessionFile: join(root, "session.jsonl"), model: { provider: "claude-native", modelId: "claude-opus-5-5", thinkingLevel: "medium" } } as AgentDescriptor,
+      systemPrompt: "Current Forge prompt", executable: "unused", env: {}, projectTrusted: false, tools: [], host: { requestUserChoice: vi.fn() },
+      callbacks: { onStatusChange: vi.fn(), onSessionEvent: (_id, event) => { events.push(event); }, onAgentEnd: vi.fn(), onRuntimeError: vi.fn() },
+      createQuery: args => {
+        child = args.options!.spawnClaudeCodeProcess!({ command: process.execPath, args: ["-e", hung], cwd: root, env: {}, signal: new AbortController().signal }) as ChildProcess;
+        child.stdout!.on("data", chunk => { output += String(chunk); });
+        child.once("exit", () => { ended = true; waiting?.({ done: true, value: undefined }); });
+        return native as never;
+      } });
+    try {
+      await vi.waitFor(() => expect(output).toContain("ready"));
+      await runtime.sendMessage("held turn");
+      const started = Date.now();
+      await runtime.terminate({ shutdownTimeoutMs: 1_500 });
+      expect(Date.now() - started).toBeLessThan(1_500);
+      expect(output).toContain("eof"); expect(output).toContain("term"); expect(child.signalCode).toBe("SIGKILL");
+      expect(() => process.kill(child.pid!, 0)).toThrow(); expect(runtime.getProviderDrainStatus()).toBe("clean"); expect(runtime.getStatus()).toBe("terminated");
+      expect(events.at(-1)).toEqual({ type: "agent_end" });
+    } finally { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); await rm(root, { recursive: true, force: true }); }
+  });
   it("blocks replacement until cleanup settles and allows a cleanup retry", async () => {
     const root = await mkdtemp(join(tmpdir(), "forge-claude-stop-")); const f = await fixture(root);
     try {

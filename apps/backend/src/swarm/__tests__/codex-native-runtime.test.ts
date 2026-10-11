@@ -85,6 +85,22 @@ describe("Native Codex manager", () => {
     expect(await f.runtime.providerAdapter.drain(binding)).toEqual({ status: "clean" });
   });
 
+  it("kills an app-server that ignores interrupt and settles its held turn within the stop window", async () => {
+    const f = await fixture();
+    await f.runtime.sendMessage("Work");
+    f.interruptCompletes(false);
+    const request = f.client.request.getMockImplementation()!;
+    // Hung on its provider stream: cleanup requests are never answered either.
+    f.client.request.mockImplementation((method: string, params: any) => method === "thread/backgroundTerminals/clean" ? new Promise(() => {}) : request(method, params));
+    const started = Date.now();
+    await expect(f.runtime.terminate({ shutdownTimeoutMs: 600 })).resolves.toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(600);
+    expect(f.client.request).toHaveBeenCalledWith("turn/interrupt", { threadId: "native-thread", turnId: "turn-1" });
+    expect(f.client.shutdown).toHaveBeenCalledOnce(); expect(f.auth.release).toHaveBeenCalledOnce();
+    expect(f.events.at(-1)).toEqual({ type: "agent_end" }); expect(f.runtime.getStatus()).toBe("terminated");
+    await expect(f.runtime.sendMessage("Unsafe replacement")).rejects.toThrow("stopped or unavailable");
+  });
+
   it("keeps stop blocked when process exit is unconfirmed and permits cleanup retry", async () => {
     const f = await fixture();
     await f.runtime.sendMessage("Work");

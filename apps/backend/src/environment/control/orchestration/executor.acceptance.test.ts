@@ -116,11 +116,12 @@ describe("durable provider outbox", () => {
   });
 
   it.each(["pending", "error"] as const)("quarantines %s runtime cleanup and interrupts the stop receipt before adapter close", async mode => {
-    const f = await fixture(); let closes = 0;
+    const f = await fixture(); let closes = 0; let now = f.options.clock(); f.options.clock = () => now;
     f.adapter.close = async () => { closes++; };
     f.options.swarm.stopSession = async () => { if (mode === "error") throw new Error("Runtime cleanup failed"); return { stopped: false }; };
     await f.core.controlService.submitInput({ commandId: "held", threadId: "manager", message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
-    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" }); await f.core.effectWorker.drain();
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" });
+    for (let round = 0; round < 40; round++) { await f.core.effectWorker.drain(); now += 5_000; }
     expect(closes).toBe(0); expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "interrupted" });
     expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "stopped", shutdown: "quarantined" });
     await expect(f.core.controlService.submitInput({ commandId: "replacement", threadId: "manager", message: { text: "replacement", artifactIds: [] } })).rejects.toThrow(/shutdown/i);
@@ -239,6 +240,70 @@ describe("durable provider outbox", () => {
     expect(order).toEqual(["runtime.stop", "adapter.close"]); expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded" });
     expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "stopped", shutdown: "clean" });
   });
+  it("keeps a slow shutdown tracked until the runtime exits, then settles the stuck run and admits the next send", async () => {
+    const f = await fixture(); let now = f.options.clock(); f.options.clock = () => now; let exited = false; let stops = 0;
+    f.options.swarm.stopSession = async () => { stops++; return { stopped: exited }; };
+    await f.core.controlService.submitInput({ commandId: "held", threadId: "manager", message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" }); await f.core.effectWorker.drain();
+    // Slow is not unsafe: the drain stays owed, the stop stays in flight, and nothing reports a failure.
+    expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "stopped", shutdown: "pending", activeRunId: "run-held" });
+    expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "running", error: null });
+    await f.core.effectWorker.drain(); expect(stops).toBe(1);
+    now += 5_000; await f.core.effectWorker.drain(); expect(stops).toBe(2);
+    expect(loadState(f.core.database).threads.manager.shutdown).toBe("pending");
+    exited = true; now += 5_000; await f.core.effectWorker.drain();
+    const settled = loadState(f.core.database);
+    expect(settled.threads.manager).toMatchObject({ desired: "stopped", shutdown: "clean" }); expect(settled.threads.manager.activeRunId).toBeUndefined();
+    expect(settled.runs["run-held"]).toMatchObject({ state: "terminal", outcome: "cancelled" });
+    expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded", error: null });
+    expect(JSON.parse((f.core.database.prepare("SELECT summary_json FROM control_sessions WHERE session_id='manager'").get() as { summary_json: string }).summary_json).status).toBe("stopped");
+    const next = "00000000-0000-4000-8000-000000000002";
+    await f.core.controlService.execute(principal, "session.send", { commandId: next, sessionId: "manager", message: { text: "again", artifactIds: [] } }); await f.core.effectWorker.drain();
+    expect(await f.core.controlService.getReceipt(principal, next)).toMatchObject({ state: "succeeded", delivery: "dispatched" });
+    expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "running", shutdown: "clean", activeRunId: `run-${next}` });
+    expect(f.dispatches()).toBe(2); expect(replayLifecycle(f.core.database)).toEqual(loadState(f.core.database));
+  });
+  it("quarantines only an unconfirmable shutdown, explains it, and recovers when the user stops again", async () => {
+    const f = await fixture(); let now = f.options.clock(); f.options.clock = () => now; let exited = false; let stops = 0;
+    f.options.swarm.stopSession = async () => { stops++; return { stopped: exited }; };
+    await f.core.controlService.submitInput({ commandId: "held", threadId: "manager", message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" });
+    for (let round = 0; round < 40; round++) { await f.core.effectWorker.drain(); now += 5_000; }
+    const attempts = stops; await f.core.effectWorker.drain(); expect(stops).toBe(attempts); expect(attempts).toBeGreaterThan(3); expect(attempts).toBeLessThan(40);
+    expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "stopped", shutdown: "quarantined", activeRunId: "run-held" });
+    const failed = await f.core.controlService.getReceipt(principal, commandId);
+    expect(failed).toMatchObject({ state: "interrupted", error: { code: "UNAVAILABLE", retryable: true } }); expect(failed.error!.message).toMatch(/could not be confirmed stopped.*Stop the session again/i);
+    const next = "00000000-0000-4000-8000-000000000002"; const send = { commandId: next, sessionId: "manager", message: { text: "again", artifactIds: [] } };
+    await expect(f.core.controlService.execute(principal, "session.send", send)).rejects.toMatchObject({ code: "CONFLICT" });
+    exited = true; const again = "00000000-0000-4000-8000-000000000003";
+    await f.core.controlService.execute(principal, "session.stop", { commandId: again, sessionId: "manager" }); await f.core.effectWorker.drain();
+    expect(await f.core.controlService.getReceipt(principal, again)).toMatchObject({ state: "succeeded", error: null });
+    expect(loadState(f.core.database).runs["run-held"]).toMatchObject({ state: "terminal", outcome: "cancelled" });
+    await f.core.controlService.execute(principal, "session.send", send); await f.core.effectWorker.drain();
+    expect(await f.core.controlService.getReceipt(principal, next)).toMatchObject({ state: "succeeded", delivery: "dispatched" }); expect(f.dispatches()).toBe(2);
+  });
+  it.each(["pending", "quarantined"] as const)("recovers a stopped thread whose drain was %s at restart without a recovery decision", async shutdown => {
+    const f = await fixture(); let now = f.options.clock(); f.options.clock = () => now; let stops = 0;
+    f.options.swarm.stopSession = async () => { stops++; return { stopped: false }; };
+    await f.core.controlService.submitInput({ commandId: "held", threadId: "manager", message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" }); await f.core.effectWorker.drain();
+    if (shutdown === "quarantined") for (let round = 0; round < 40; round++) { now += 5_000; await f.core.effectWorker.drain(); }
+    expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "stopped", shutdown, activeRunId: "run-held" });
+    await f.core.close(); const stopsBeforeBoot = stops;
+    // The old process is gone, so its writer is too. The runtime must not be stopped a second time.
+    f.options.swarm.stopSession = async () => { stops++; return { stopped: true }; };
+    const reboot = await f.open(); now += 5_000; await reboot.effectWorker.drain();
+    const recovered = loadState(reboot.database);
+    expect(recovered.threads.manager).toMatchObject({ desired: "stopped", shutdown: "clean" }); expect(recovered.threads.manager.activeRunId).toBeUndefined();
+    expect(recovered.runs["run-held"]).toMatchObject({ state: "terminal", outcome: "cancelled" }); expect(recovered.recovery).toBeNull();
+    expect(JSON.parse((reboot.database.prepare("SELECT summary_json FROM control_sessions WHERE session_id='manager'").get() as { summary_json: string }).summary_json).status).toBe("stopped");
+    if (shutdown === "pending") expect(readReceipt(reboot.eventSink, commandId)).toMatchObject({ state: "succeeded" });
+    const next = "00000000-0000-4000-8000-000000000002";
+    await reboot.controlService.execute(principal, "session.send", { commandId: next, sessionId: "manager", message: { text: "again", artifactIds: [] } }); await reboot.effectWorker.drain();
+    expect(readReceipt(reboot.eventSink, next)).toMatchObject({ state: "succeeded", delivery: "dispatched" });
+    expect(loadState(reboot.database).threads.manager).toMatchObject({ desired: "running", shutdown: "clean", activeRunId: `run-${next}` });
+    expect(stops).toBe(stopsBeforeBoot); expect(f.dispatches()).toBe(2);
+  });
   it("retains an idle worker after session stop on live and reboot projections, then dispatches a new assignment", async () => {
     const f = await fixture(); const order: string[] = []; const visible: string[] = [];
     f.core.eventSink.transaction(tx => f.core.eventSink.append(tx, { topic: "detail", sessionId: "manager", event: { type: "worker.upsert", worker: { agentId: "worker", title: "Worker", status: "idle" } } }));
@@ -299,10 +364,11 @@ describe("durable provider outbox", () => {
     });
   });
   it("retained worker continuation remains fenced while its session-stop drain is quarantined", async () => {
-    const f = await fixture();
+    const f = await fixture(); let now = f.options.clock(); f.options.clock = () => now;
     await f.core.controlService.submitInput({ commandId: "child", threadId: "worker", thread: { role: "worker", projectId: "project", managerId: "manager" }, message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
     f.options.swarm.stopSession = async input => ({ stopped: input.sessionId !== "worker" });
-    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" }); await f.core.effectWorker.drain();
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" });
+    for (let round = 0; round < 40; round++) { await f.core.effectWorker.drain(); now += 5_000; }
     expect(loadState(f.core.database).threads.worker).toMatchObject({ desired: "running", shutdown: "quarantined" });
     expect((await f.core.controlService.getReceipt(principal, commandId)).state).toBe("interrupted");
     await expect(f.core.controlService.submitInput({ commandId: "unsafe-continuation", threadId: "worker", message: { text: "continue", artifactIds: [] } })).rejects.toThrow(/shutdown/i);

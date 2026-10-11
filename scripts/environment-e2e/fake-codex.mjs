@@ -30,6 +30,8 @@ const pending = new Map();
 let requestId = 0;
 let threadId = 0;
 let active;
+// A turn hung on its provider stream: interrupts, cleanup, stdin close and SIGTERM all go unanswered.
+let hung = false;
 function write(path, value) {
   const parent = realpathSync(dirname(path));
   const owned = [checkout, nativeCheckout].some(root => {
@@ -66,6 +68,7 @@ async function runTurn(turn, text) {
   let reply = `fixture:${fixture.instanceId}:assistant reply`;
   try {
     if (text.includes('[fixture:hold]')) return;
+    if (text.includes('[fixture:hang]')) { hung = true; setInterval(() => {}, 1000); return; }
     if (text.includes('[fixture:detail]')) {
       await dynamicTool(turn, 'update_plan', { plan: [{ step: 'Verify typed detail', status: 'in_progress' }] });
       await dynamicTool(turn, 'create_goal', { objective: 'Verify the explicitly requested fixture goal', tokenBudget: 1 });
@@ -116,6 +119,8 @@ async function request(method, params = {}) {
     if (params.type !== 'apiKey' || params.apiKey !== 'forge-fixture-inert-not-a-provider-key') throw new Error('Fixture accepts synthetic identity only');
     return { type: 'apiKey' };
   }
+  if (hung && method === 'turn/interrupt') count('interrupts');
+  if (hung) return new Promise(() => {});
   if (method === 'thread/backgroundTerminals/clean') return {};
   if (method === 'account/read') return { account: null, requiresOpenaiAuth: false };
   if (method === 'model/list') return { data: [{ id: 'gpt-6-sol', model: 'gpt-6-sol', displayName: 'Fixture Codex',
@@ -196,5 +201,5 @@ input.on('line', line => {
   void request(message.method, message.params).then(result => send({ jsonrpc: '2.0', id: message.id, result }),
     () => send({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: 'Synthetic fixture request rejected' } }));
 });
-input.on('close', () => process.exit(0));
-process.on('SIGTERM', () => process.exit(0));
+input.on('close', () => { if (!hung) process.exit(0); });
+process.on('SIGTERM', () => { if (!hung) process.exit(0); });

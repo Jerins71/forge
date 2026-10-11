@@ -458,14 +458,24 @@ describe("durable control acceptance on real SQLite", () => {
     await f.core.effectWorker.drain();
     await f.core.controlService.execute(principal, "session.stop", { commandId: STOP, sessionId });
     await f.core.effectWorker.drain();
-    expect(await f.core.controlService.getReceipt(principal, STOP)).toMatchObject({ state: "interrupted" });
-    await expect(
+    const blocked = () => expect(
       f.core.controlService.execute(principal, "session.send", {
         commandId: SEND,
         sessionId,
         message: { text: "blocked", artifactIds: [] },
       }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
+    // Still stopping: the release is retried, and no writer is admitted meanwhile.
+    expect(await f.core.controlService.getReceipt(principal, STOP)).toMatchObject({ state: "running" });
+    await blocked();
+    let now = f.options.clock();
+    f.options.clock = () => now;
+    for (let round = 0; round < 40; round++) {
+      now += 5_000;
+      await f.core.effectWorker.drain();
+    }
+    expect(await f.core.controlService.getReceipt(principal, STOP)).toMatchObject({ state: "interrupted" });
+    await blocked();
   });
 
   it("rechecks profile revision and validates and pins artifacts within acceptance", async () => {
