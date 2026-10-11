@@ -21,6 +21,13 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
 
   releaseControlledWorker(workerId:string):Promise<void> { return this.getFacadeServices().agents.stopWorker(workerId); }
 
+  async releaseControlledProvider(agentId: string): Promise<boolean> {
+    const services = this.getFacadeServices();
+    const descriptor = services.registry.directory.getAgentForInternalUse(agentId);
+    if (descriptor) await services.runtime.controller.runRuntimeShutdown(descriptor, "terminate", { abort: true });
+    return !services.runtime.runtimes.has(agentId) && !services.runtime.controller.isRuntimeShutdownQuarantined(agentId);
+  }
+
   killControlledWorker(managerId: string, workerId: string): Promise<void> {
     return this.getFacadeServices().agents.killControlledWorker(managerId, workerId);
   }

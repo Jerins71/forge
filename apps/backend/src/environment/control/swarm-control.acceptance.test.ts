@@ -183,7 +183,7 @@ describe("controlled swarm canonical/provider boundaries", () => {
   it("retains ownership after restart and refuses unsafe runtime cleanup", async () => {
     const f = await fixture(); const descriptor = f.manager.getAgent(f.sessionId)!;
     expect(JSON.parse(await readFile(`${f.config.paths.dataDir}/profiles/manager/sessions/${f.sessionId}/meta.json`, "utf8")).controlCommandId).toBe(f.commandId);
-    const stop = vi.spyOn(f.manager, "stopSession").mockRejectedValue(new Error("Runtime shutdown is still pending"));
+    const stop = vi.spyOn(f.manager, "releaseControlledProvider").mockRejectedValue(new Error("Runtime shutdown is still pending"));
     await expect(f.adapter.stopSession({ commandId: randomUUID(), sessionId: descriptor.agentId })).rejects.toThrow("still pending"); stop.mockRestore();
     for (const agent of f.manager.listAgents().filter(agent => agent.role === "manager")) await f.manager.stopSession(agent.agentId);
     await f.environment.stop();
@@ -678,4 +678,20 @@ it.each([false, true])("durable send provenance derives CLI integration (%s), ig
     expect(await core.controlService.execute(principal, "session.send", input)).toMatchObject({ state: "succeeded" });
     expect(await countInputs(file, "input-" + input.commandId)).toBe(1);
   } finally { mirror.dispose(); await core.close(); }
+});
+
+// Recovery must drain only the failed provider. Stopping its manager's whole
+// session would cancel healthy workers and manufacture a manual Stop notice.
+it("releases a manager binding without stopping its healthy worker", async () => {
+  const f = await fixture();
+  const worker = await f.manager.spawnAgent(f.sessionId, { agentId: "healthy-worker" });
+  await f.core.effectWorker.drain();
+  const child = f.manager.runtimeByAgentId.get(worker.agentId)!;
+  const parent = f.manager.runtimeByAgentId.get(f.sessionId)!;
+  const before = (await f.manager.getConversationHistory(f.sessionId)).length;
+  expect(await f.adapter.stopSession({ commandId: randomUUID(), sessionId: f.sessionId })).toEqual({ stopped: true });
+  expect(parent.terminateCalls).toHaveLength(1);
+  expect(child.terminateCalls).toHaveLength(0);
+  expect(f.manager.runtimeByAgentId.has(worker.agentId)).toBe(true);
+  expect(await f.manager.getConversationHistory(f.sessionId)).toHaveLength(before);
 });

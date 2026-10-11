@@ -14,7 +14,7 @@ import { loadState } from "./orchestration/store.js";
 import { createCoreChoicePort } from "./orchestration/choice-port.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, controlService, workspaceService, artifactService }: {
-  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "getAgentForInternalUse" | "listProfiles" | "releaseControlledWorker" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner" | "installControlledChoicePort"> & Pick<SwarmManager,"installCoreAgentMessagePort"|"installCoreLineagePort"|"getConversationHistory"|"prepareLineageSession"|"resolveSpecialistFallbackModelForDescriptor">;
+  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "releaseControlledProvider" | "getAgentForInternalUse" | "listProfiles" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner" | "installControlledChoicePort"> & Pick<SwarmManager,"installCoreAgentMessagePort"|"installCoreLineagePort"|"getConversationHistory"|"prepareLineageSession"|"resolveSpecialistFallbackModelForDescriptor">;
   database: Database;
   eventSink: EventSink;
   controlService: EnvironmentControlService;
@@ -115,11 +115,9 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
     },
     async applyChoice(input) { return swarmManager.applyControlledChoice(input); },
     async stopSession(input) {
-      const descriptor = swarmManager.getAgentForInternalUse(input.sessionId);
-      if (!descriptor) return { stopped: true }; // An unmaterialized launch has no runtime to stop.
-      if (descriptor.role === "worker") await swarmManager.releaseControlledWorker(descriptor.agentId);
-      else await swarmManager.stopSession(input.sessionId);
-      return { stopped: swarmManager.isSessionShutdownSafe(input.sessionId) }; // Legacy stop can return while its writer remains quarantined.
+      // The core emits a release for each owned binding, including child Stop
+      // effects. Recovery of one dead provider must leave healthy workers alive.
+      return { stopped: await swarmManager.releaseControlledProvider(input.sessionId) };
     },
   };
 }
