@@ -7,7 +7,8 @@
 //     is one quiet "Switched to …" marker;
 //   - a plan card sits on the transcript column's edge within the shared width tokens.
 //   - a turn the user stopped says "Stopped by you";
-//   - a worker's provider failure is one status row in the worker view that names the provider and model.
+//   - a worker's provider failure is one failed row in the worker view, and the manager's card names it;
+//   - a manager waiting inside its turn receives its worker's result there and finishes.
 //   pnpm exec playwright test scripts/environment-e2e/polish.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
 import { mkdir, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
@@ -55,6 +56,13 @@ async function launch(title: string, text: string): Promise<string> {
   const launched = await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', { commandId, projectId: fleet.a.sessionId, title,
     workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text, artifactIds: [] } })
   await until(() => fixtureRpcOnce(fleet.a.baseUrl, admin, 'command.get', { commandId }), receipt => receipt.state === 'succeeded', 30_000)
+  return launched.sessionId!
+}
+/** A session whose first turn stays open: accepted, but not waited on to finish. */
+async function launchRunning(title: string, text: string): Promise<string> {
+  const commandId = randomUUID()
+  const launched = await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', { commandId, projectId: fleet.a.sessionId, title,
+    workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text, artifactIds: [] } })
   return launched.sessionId!
 }
 async function shellSession(sessionId: string): Promise<SessionSummary | undefined> {
@@ -349,11 +357,14 @@ test('a turn the user stopped says so, live and after reload', async ({ page }) 
   assertions.stoppedTurn = { sessionId, markers: 2, order: live, replayMatches: true }
 })
 
-test('a worker\'s provider failure is one status row that names the provider and model', async ({ page }) => {
+test('a worker\'s provider failure is one failed row in the worker view, and the manager\'s card names it', async ({ page }) => {
   const sessionId = await launch('Polish worker failure', '[fixture:spawn-fail] Start a worker whose provider fails')
   await open(page, sessionId)
-  // The manager is told once that the worker came back with nothing.
-  await expect(transcript(page).locator('[data-worker-result-source]')).toHaveCount(1, { timeout: 30_000 })
+  // The manager is told once, with the provider and model that failed.
+  const card = transcript(page).locator('[data-worker-result-source]')
+  await expect(card).toHaveCount(1, { timeout: 30_000 })
+  await expect(card).toContainText('codex-native/gpt-6-sol: Synthetic fixture scenario failed')
+  await expect(card).not.toContainText('settled without returning a final result')
   await shot(page, 'worker-failure-manager-card')
 
   const worker = page.locator('[data-worker-row]').filter({ hasText: /fail/i }).first()
@@ -361,16 +372,18 @@ test('a worker\'s provider failure is one status row that names the provider and
   await worker.click()
   await expect(transcript(page)).toContainText('Fail this assignment', { timeout: 15_000 })
   const failed = transcript(page).locator('[data-testid="activity-row"][data-activity-kind="status"]')
-  const failures = async () => ((await transcript(page).innerText()).match(/Synthetic fixture scenario failed/g) ?? []).length
   const once = async () => {
     await page.getByRole('button', { name: 'All', exact: true }).click()
     await expect(failed).toHaveCount(1, { timeout: 15_000 })
     await expect(failed).toHaveAttribute('data-activity-status', 'failed')
     // The row names the provider and model that failed, never the client library's generic label.
     await expect(failed).toContainText('Failed: codex-native/gpt-6-sol: Synthetic fixture scenario failed')
-    expect(await failures()).toBe(1)
+    // That row is the whole story: no second error message and no separate result record under it.
+    await expect(transcript(page)).not.toContainText('Agent error')
+    await expect(transcript(page)).not.toContainText('status: blocked')
+    await expect(transcript(page)).not.toContainText('settled without returning a final result')
     await expect(transcript(page)).not.toContainText('OpenAI API error')
-    await expect(transcript(page)).not.toContainText('Worker reply failed')
+    expect(((await transcript(page).innerText()).match(/Synthetic fixture scenario failed/g) ?? []).length).toBe(1)
   }
   await once()
   await shot(page, 'worker-failure-worker-view')
@@ -378,5 +391,30 @@ test('a worker\'s provider failure is one status row that names the provider and
   await expect(transcript(page)).toContainText('Fail this assignment', { timeout: 30_000 })
   await once()
   await shot(page, 'worker-failure-worker-view-reload')
-  assertions.workerFailure = { sessionId, failedRowsInWorkerView: 1, named: 'codex-native/gpt-6-sol' }
+  assertions.workerFailure = { sessionId, rowsInWorkerView: 1, named: 'codex-native/gpt-6-sol' }
+})
+
+test('a manager waiting inside its turn receives its worker\'s result and finishes', async ({ page }) => {
+  const sessionId = await launchRunning('Polish waiting manager', '[fixture:spawn-wait] Delegate, then wait for the result')
+  await open(page, sessionId)
+  // The worker finishes while the manager's turn is still open.
+  await expect(transcript(page).locator('[data-worker-result-source]')).toHaveCount(1, { timeout: 30_000 })
+  // The result reaches that turn, so the manager answers and the session comes to rest.
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  await expect.poll(async () => (await shellSession(sessionId))?.status, { timeout: 30_000 }).toBe('idle')
+  // It arrived as a steer into the one turn, not as a second turn after it.
+  const turns = async () => {
+    const rpc = await openFixtureRpc(fleet.a.baseUrl, admin)
+    try {
+      await rpc.call('session.subscribe', { sessionId })
+      const snapshot = await until<any>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
+      return snapshot.items.filter((item: any) => item.kind === 'worker_result').length
+    } finally { rpc.close() }
+  }
+  expect(await turns()).toBe(1)
+  await shot(page, 'waiting-manager-finished')
+  await page.reload()
+  await expect(transcript(page).locator('[data-worker-result-source]')).toHaveCount(1, { timeout: 30_000 })
+  await expect(transcript(page)).toContainText('assistant reply')
+  assertions.waitingManager = { sessionId, resultCards: 1, finished: true }
 })

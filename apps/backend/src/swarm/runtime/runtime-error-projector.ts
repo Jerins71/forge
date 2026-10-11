@@ -25,6 +25,8 @@ export interface RuntimeErrorProjectorDeps {
   emitConversationMessage(event: ConversationMessageEvent): void;
   /** Ends the turn's status row as failed; the row carries a readable message and the raw text. */
   reportProviderFailure(agentId: string, message: string): void;
+  /** The turn's failed status row already reports this agent's provider failure. */
+  providerFailureReported(agentId: string): boolean;
   logDebug(message: string, details?: unknown): void;
 }
 
@@ -118,6 +120,14 @@ export class RuntimeErrorProjector {
       && ["prompt_start", "prompt_dispatch", "runtime_exit", "startup", "thread_resume"].includes(error.phase)
     ) {
       this.deps.reportProviderFailure(agentId, message);
+      return;
+    }
+    // A worker whose failed status row already says what its provider did says it once.
+    if (
+      descriptor.role === "worker" && !userFacingMessage && !droppedPendingCount
+      && ["prompt_start", "prompt_dispatch", "runtime_exit", "startup", "thread_resume"].includes(error.phase)
+      && this.deps.providerFailureReported(agentId)
+    ) {
       return;
     }
 
