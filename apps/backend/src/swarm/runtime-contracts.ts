@@ -152,6 +152,7 @@ export interface RuntimeAcquisitionRequirements {
 }
 
 export interface RuntimeCreationOptions {
+  providerScope?: import("./runtime/provider-contract.js").ProviderOpenInput["scope"];
   /** Prepared by the prompt owner; provider adapters consume this instead of a bare string. */
   instructionBundle?: InstructionBundle;
   /** Ephemeral tool executors, hooks and security authority; never persist this object. */
