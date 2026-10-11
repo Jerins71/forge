@@ -45,8 +45,6 @@ export interface Attempt {
   delivery: "pending" | "dispatched" | "unknown";
   lastSequence: number;
   turn?: ProviderTurnRef;
-  interruptRequested?: boolean;
-  interruptAcknowledged?: boolean;
   outcome?: Run["outcome"];
 }
 export interface Request {
@@ -83,10 +81,9 @@ export type CoreCommand = Envelope & (
   | { type: "input.recorded"; threadId: string; inputId: string; entryId: string }
   | { type: "binding.acquired"; threadId: string; binding: ProviderBinding }
   | { type: "binding.drained"; threadId: string; bindingId: string; status: "clean" | "pending" }
-  | { type: "attempt.dispatch"; threadId: string; attemptId: string; authorized: boolean }
+  | { type: "attempt.dispatch"; threadId: string; attemptId: string; authorized: boolean; targetAttemptId?: string }
   | { type: "attempt.accepted"; threadId: string; attemptId: string; turn: ProviderTurnRef }
   | { type: "attempt.unknown"; threadId: string; attemptId: string }
-  | { type: "attempt.interrupt_acknowledged"; threadId: string; attemptId: string }
   | { type: "provider.observe"; observation: ProviderObservation }
   | { type: "request.respond"; threadId: string; requestId: string; response: unknown }
   | { type: "request.cancel" | "request.expire" | "request.responded"; threadId: string; requestId: string }
@@ -102,7 +99,7 @@ export type LifecycleEvent = { commandId: string; at: number } & (
   | AssignmentEvent
   | { type: "thread.created" | "thread.stopped" | "thread.resumed" | "thread.changed" | "compaction.requested" | "compaction.completed" | "compaction.failed"; thread: Thread }
   | { type: "input.accepted" | "input.recorded" | "run.started" | "run.terminal" | "run.recovery"; run: Run }
-  | { type: "attempt.created" | "attempt.dispatch_marked" | "attempt.accepted" | "attempt.terminal" | "attempt.unknown" | "attempt.observed" | "attempt.interrupted"; attempt: Attempt }
+  | { type: "attempt.created" | "attempt.dispatch_marked" | "attempt.accepted" | "attempt.terminal" | "attempt.unknown" | "attempt.observed"; attempt: Attempt }
   | { type: "binding.acquired"; binding: ProviderBinding }
   | { type: "request.opened" | "request.responding" | "request.resolved" | "request.expired" | "request.cancelled"; request: Request }
   | { type: "recovery.required" | "recovery.resolved"; recovery: RecoverySnapshot }
@@ -112,7 +109,7 @@ export type CoreEffect =
   | { kind: "transcript.append"; threadId: string; inputId: string; runId: string }
   | { kind: "runtime.acquire"; threadId: string; bindingId: string; generation: number }
   | { kind: "provider.start"; threadId: string; attemptId: string }
-  | { kind: "provider.interrupt"; threadId: string; attemptId: string }
+  | { kind: "provider.steer"; threadId: string; attemptId: string; targetAttemptId: string }
   | { kind: "provider.respond"; threadId: string; requestId: string; response: unknown }
   | { kind: "provider.release"; threadId: string; bindingId: string }
   | { kind: "provider.compact"; threadId: string; attemptId: string; instructions?: string }

@@ -196,14 +196,16 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   }
 
   /** Kernel admission is explicit; only the legacy sendMessage path makes queue decisions. */
-  async dispatchProviderTurn(input: RuntimeUserMessage, attemptId: string, turn?: ProviderTurnRef): Promise<void> {
-    await this.serialize(async () => {
+  async dispatchProviderTurn(input: RuntimeUserMessage, attemptId: string, turn?: ProviderTurnRef): Promise<string> {
+    return this.serialize(async () => {
       if (this.getProviderDrainStatus() !== "open") throw new ProviderDispatchRejectedError("closed");
       if (turn) this.options.providerSession!.assertTurn(turn);
       else if (this.turnOpen || this.sent.size || this.followUps.length) throw new ProviderDispatchRejectedError("busy");
       // Reuse the creator-prepared native projection exactly once for either path.
-      await this.submit({ id: randomUUID(), message: normalizeRuntimeUserMessage(input), activated: false, attemptId });
+      const id = randomUUID();
+      await this.submit({ id, message: normalizeRuntimeUserMessage(input), activated: false, attemptId });
       if (turn) this.backgroundForegroundCommands();
+      return id;
     });
   }
 

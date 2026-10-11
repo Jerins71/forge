@@ -218,7 +218,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         ORDER BY COALESCE(r.accepted_sequence,c.created_at),e.ordinal,e.effect_id LIMIT 1`).get(options.clock(), ...(kinds ?? [])) as EffectRow | undefined;
       if (!row) return;
       const effect: ControlEffect = JSON.parse(row.payload_json);
-      if (!["provider.release", "provider.interrupt"].includes(effect.kind) && !authorized(row.command_id)) {
+      if (!["provider.release"].includes(effect.kind) && !authorized(row.command_id)) {
         if (hasReceipt(row.command_id)) cancelCommand(sink, tx, row.command_id, { code: "FORBIDDEN", message: "Device revoked before effect execution", retryable: false }, options.clock);
         else database.prepare("UPDATE effects SET state='cancelled' WHERE effect_id=?").run(row.effect_id);
         continue;
@@ -271,12 +271,22 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           else record({ type: "attempt.unknown", ...result(row, "unknown"), threadId: effect.threadId, attemptId: attempt.attemptId });
           break;
         }
-        case "provider.interrupt": {
-          const attempt = loadState(database).attempts[effect.attemptId]; const resource = attempt && live.get(attempt.bindingId);
-          if (attempt?.turn && resource && attempt.state !== "terminal") {
-            attemptedNative = true; await resource.adapter.interrupt({ binding: resource.binding, attemptId: attempt.attemptId, turn: attempt.turn });
-            record({ type: "attempt.interrupt_acknowledged", ...result(row, "ack"), threadId: effect.threadId, attemptId: attempt.attemptId });
-          } break;
+        case "provider.steer": {
+          let state = loadState(database); const attempt = state.attempts[effect.attemptId];
+          if (!attempt || attempt.state !== "created" || state.runs[attempt.runId]?.activeAttemptId !== attempt.attemptId) { settle(row, "cancelled"); return; }
+          const run = state.runs[attempt.runId]; const resource = live.get(attempt.bindingId);
+          if (!resource) throw new Error("Steer has no live provider binding");
+          const input = prepared.get(run.runId) ?? await append(run);
+          // Fence against the exact active root immediately before native steering.
+          record({ type: "attempt.dispatch", ...result(row, "dispatch"), threadId: effect.threadId, attemptId: effect.attemptId, targetAttemptId: effect.targetAttemptId, authorized: authorized(run.commandId) });
+          state = loadState(database);
+          if (state.attempts[effect.attemptId].state !== "dispatching") { settle(row, "cancelled"); return; }
+          const target = state.attempts[effect.targetAttemptId];
+          attemptedNative = true;
+          const accepted = await resource.adapter.steer({ binding: resource.binding, runId: run.runId, attemptId: target.attemptId, turn: target.turn!, input });
+          if (accepted.status === "accepted") record({ type: "attempt.accepted", ...result(row, "accepted"), threadId: effect.threadId, attemptId: effect.attemptId, turn: accepted.turn });
+          else record({ type: "attempt.unknown", ...result(row, "unknown"), threadId: effect.threadId, attemptId: effect.attemptId });
+          break;
         }
         case "provider.respond": {
           const state = loadState(database); const request = state.requests[effect.requestId]; const owner = state.threads[effect.threadId];

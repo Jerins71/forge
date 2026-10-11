@@ -134,6 +134,8 @@ export class RuntimeEventProjector {
    * armed notice.  Reset at `agent_end`.
    */
   private readonly visibleManagerOutputAgentIds = new Set<string>();
+  /** Aborted/failed obligations cannot produce an empty completion notice. */
+  private readonly incompleteManagerAgentIds = new Set<string>();
   /** Managers that deliberately ended the current internal run with a `NO_REPLY` sentinel. */
   private readonly intentionalSilenceManagerAgentIds = new Set<string>();
   /**
@@ -291,6 +293,7 @@ export class RuntimeEventProjector {
     const descriptor = this.deps.descriptors.get(agentId);
     if (descriptor?.role === "manager" && event.type === "agent_start") {
       this.intentionalSilenceManagerAgentIds.delete(agentId);
+      this.incompleteManagerAgentIds.delete(agentId);
       this.lastProjectedCleanFinalByAgentId.delete(agentId);
     }
     if (descriptor?.role === "worker" && !transientTerminatedExpired && isPositiveWorkerRuntimeProgressEvent(event)) {
@@ -352,6 +355,13 @@ export class RuntimeEventProjector {
       event.type === "message_end" &&
       (managerStopReason === "error" || managerStopReason === "aborted" || managerErrorMessage !== undefined) &&
       isAbortLikeErrorMessage(managerErrorMessage ?? extractMessageText(event.message));
+
+    if (descriptor?.role === "manager" && (shouldSurfaceManualStopNotice || isContextRecoveryAbort ||
+      managerStopReason === "error" || managerStopReason === "aborted" || managerErrorMessage !== undefined ||
+      event.type === "turn_end" && event.meta?.outcome !== undefined && !["completed", "success"].includes(event.meta.outcome))) {
+      this.incompleteManagerAgentIds.add(agentId);
+      this.pendingSilentManagerNotices.delete(agentId);
+    }
 
     const effectiveEvent = (shouldSurfaceManualStopNotice || isContextRecoveryAbort)
       ? this.deps.stripManagerAbortErrorFromEvent(event)
@@ -588,7 +598,7 @@ export class RuntimeEventProjector {
       return;
     }
 
-    if (this.intentionalSilenceManagerAgentIds.has(agentId)) {
+    if (this.intentionalSilenceManagerAgentIds.has(agentId) || this.incompleteManagerAgentIds.has(agentId)) {
       this.pendingSilentManagerNotices.delete(agentId);
       if (effectiveEvent.type === "agent_end") {
         this.intentionalSilenceManagerAgentIds.delete(agentId);

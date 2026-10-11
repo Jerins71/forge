@@ -452,6 +452,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
       for (const fact of turn.mapper.finishProvider(this.origin(turn), this.turnRef(turn))) this.emit(turn, fact);
       turn.ended = true;
       turn.abort.abort();
+      // Project the old root's final output and settlement before the kernel can
+      // activate a queued successor and replace its output obligation.
+      if (!turn.parentTurn) await this.options.onNotification?.(method, params);
       const origin = this.origin(turn);
       const error = params.turn.error ? { code: "CODEX_TURN_FAILED", message: String(params.turn.error.message ?? "Native Codex turn failed") } : undefined;
       if (origin.kind === "child") this.emit(turn, { type: "terminal", origin, terminalAuthority: "native_child", outcome, ...(error ? { error } : {}) });
@@ -459,7 +462,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
       this.releaseTurn(turn);
     }
     // A native child never enters the old Forge worker/result lifecycle projection.
-    if (!turn.parentTurn) await this.options.onNotification?.(method, params);
+    if (!turn.parentTurn && method !== "turn/completed") await this.options.onNotification?.(method, params);
   }
 
   private correlate(params: Record<string, any>, allowChildStart = false): NativeTurn | undefined {
@@ -504,7 +507,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
   private dispatchFailure(turn: NativeTurn, error: unknown, endRejected = true): ProviderDispatchResult {
     const rejected = typeof (error as { code?: unknown })?.code === "number";
     if (rejected && endRejected) turn.ended = true;
-    this.emit(turn, { type: "error", origin: this.origin(turn), code: rejected ? "CODEX_REJECTED" : "CODEX_TRANSPORT",
+    if (endRejected || !rejected) this.emit(turn, { type: "error", origin: this.origin(turn), code: rejected ? "CODEX_REJECTED" : "CODEX_TRANSPORT",
       message: message(error), delivery: rejected ? "not_dispatched" : endRejected && turn.accepted ? "accepted" : "unknown" });
     if (rejected) throw Object.assign(new CodexProviderDispatchError(error),{code:(error as {code:number}).code});
     return endRejected && turn.accepted ? { status: "accepted", turn: this.turnRef(turn) } : { status: "unknown" };

@@ -202,10 +202,12 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
     }
     return result;
   };
+  const nonSteeringSessions = new Set<string>();
   const originalAcquire = SwarmManager.prototype.acquireControlledProvider;
   SwarmManager.prototype.acquireControlledProvider = async function (...args) {
     const acquired = await originalAcquire.apply(this, args);
     const adapter = acquired.adapter;
+    if (nonSteeringSessions.has(args[0].threadId)) acquired.binding.capabilities = { ...acquired.binding.capabilities, native: { ...acquired.binding.capabilities.native, steer: false } };
     const start = adapter.start.bind(adapter);
     const observe = adapter.observations.bind(adapter);
     let armedAttemptId: string | undefined;
@@ -263,6 +265,10 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       }
       if (input.operation === 'route-inventory') return webServer!.listRegisteredHttpRoutes().map((route, index) => ({ index, methods: route.methods, access: (route as unknown as { access?: unknown }).access ?? null }));
       if (input.operation === 'terminal-evidence') return terminalEvents;
+      if (input.operation === 'disable-native-steer') {
+        if (!input.sessionId || !manager?.getAgent(input.sessionId)) throw new Error('Missing fixture session');
+        nonSteeringSessions.add(input.sessionId); return { nativeSteer: false };
+      }
       if (input.operation === 'hold-dispatch') {
         if (!input.commandId || held) throw new Error('Invalid fixture hold');
         let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; });

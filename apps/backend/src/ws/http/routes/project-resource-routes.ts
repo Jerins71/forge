@@ -1,5 +1,5 @@
 import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
-import { lstat, mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative, resolve } from "node:path";
 import type {
   ActivateRepoProjectAgentRequest,
@@ -134,7 +134,14 @@ export function createProjectResourceRoutes(options: { swarmManager: SwarmManage
               sendCorsJson(request, response, 400, { error: before.warning });
               return;
             }
-            await seedProjectForgeScaffold(before);
+            const createdForgeDir = await seedProjectForgeScaffold(before);
+            if (createdForgeDir) {
+              const trustKey = await realpath(createdForgeDir);
+              if (!(await settingsStore.getTrust(trustKey))) {
+                await settingsStore.setTrust(trustKey, "trust", "forge-created");
+                await swarmManager.applyProjectResourceTrustChange(trustKey);
+              }
+            }
             const snapshot = await buildSnapshot({ resolver, settingsStore, swarmManager, context });
             const payload: ProjectResourceMutationResponse = { success: true, snapshot };
             applyCorsHeaders(request, response, PROJECT_RESOURCES_METHODS);
@@ -494,9 +501,15 @@ function parseSeedRequest(body: unknown): ProjectResourceSeedRequest {
   return { profileId: body.profileId, sessionAgentId: body.sessionAgentId };
 }
 
-async function seedProjectForgeScaffold(resolution: ProjectWorkspaceResolution): Promise<void> {
+async function seedProjectForgeScaffold(resolution: ProjectWorkspaceResolution): Promise<string | undefined> {
   const forgeDir = selectSeedForgeDir(resolution);
-  await ensureDirectory(forgeDir);
+  let created = false;
+  try { await mkdir(forgeDir); created = true; }
+  catch (error) {
+    if (!isEexistError(error)) throw error;
+    // Never infer trust from an existing directory (including a concurrent creator).
+    await ensureDirectory(forgeDir);
+  }
   await Promise.all([
     ensureDirectory(join(forgeDir, "skills")),
     ensureDirectory(join(forgeDir, "specialists")),
@@ -508,6 +521,7 @@ async function seedProjectForgeScaffold(resolution: ProjectWorkspaceResolution):
   ]);
   await writeFileIfMissing(join(forgeDir, "README.md"), PROJECT_FORGE_README);
   await writeFileIfMissing(join(forgeDir, "pi", "settings.json"), `${JSON.stringify({ packages: [] }, null, 2)}\n`);
+  return created ? forgeDir : undefined;
 }
 
 function selectSeedForgeDir(resolution: ProjectWorkspaceResolution): string {

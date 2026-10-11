@@ -67,7 +67,7 @@ async function runTurn(turn, text) {
   notify('turn/started', { threadId: turn.thread.id, turn: { id: turn.id, status: 'inProgress', items: [] } });
   let reply = `fixture:${fixture.instanceId}:assistant reply`;
   try {
-    if (text.includes('[fixture:hold]')) return;
+    if (text.includes('[fixture:hold]')) { turn.holding = true; return; }
     if (text.includes('[fixture:empty]')) { complete(turn); return; }
     if (text.includes('[fixture:error]')) throw new Error('Synthetic failed turn');
     if (text.includes('[fixture:hang]')) { hung = true; setInterval(() => {}, 1000); return; }
@@ -186,6 +186,7 @@ async function request(method, params = {}) {
     const text = (params.input ?? []).map(item => item.text ?? '').join('\n');
     if (text.includes('worker result')) count('workerResults');
     notify('item/completed', { ...context(active), item: { id: `${active.id}-steer-${counters.steers}`, type: 'userMessage', clientId: params.clientUserMessageId } });
+    if (active.holding) { const turn = active; turn.holding = false; setTimeout(() => void runTurn(turn, text), 15); }
     return { turnId: active.id };
   }
   if (method === 'turn/interrupt') { count('interrupts'); if (active) complete(active, 'interrupted'); return {}; }

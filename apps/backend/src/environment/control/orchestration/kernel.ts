@@ -41,9 +41,19 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
   };
   const advance = (id: string) => {
     const owner = thread(id);
-    if (owner.desired !== "running" || owner.shutdown !== "clean" || owner.activeRunId || owner.compaction || Object.values(state.runs).some(run => run.threadId === id && run.state === "recovery")) return;
+    if (owner.desired !== "running" || owner.shutdown !== "clean" || owner.compaction || Object.values(state.runs).some(run => run.threadId === id && run.state === "recovery")) return;
     if (state.recovery && !state.recovery.resumedAt && !state.recovery.dismissedAt && state.recovery.undeliveredReports.some(report => report.toAgentId === id)) return;
-    const next = Object.values(state.runs).filter(r => r.threadId === id && r.state === "queued").sort((a, b) => a.sequence - b.sequence)[0];
+    const queued = Object.values(state.runs).filter(r => r.threadId === id && r.state === "queued").sort((a, b) => a.sequence - b.sequence);
+    if (owner.activeRunId) {
+      const root = state.attempts[state.runs[owner.activeRunId].activeAttemptId];
+      if (!root.turn || root.state !== "accepted" || !state.bindings[root.bindingId]?.capabilities.native.steer) return;
+      for (const steer of queued.filter(run => run.delivery === "steer" && run.entryId)) {
+        emit({ type: "run.started", run: { ...steer, state: "running" } });
+        decision.effects.push({ kind: "provider.steer", threadId: id, attemptId: steer.activeAttemptId, targetAttemptId: root.attemptId });
+      }
+      return;
+    }
+    const next = queued[0];
     if (!next?.entryId) return;
     const attempt = state.attempts[next.activeAttemptId];
     emit({ type: "run.started", run: { ...next, state: "running" } });
@@ -118,7 +128,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       const request = state.requests[`${attempt.bindingId}:${owner.generation}:${observation.request.nativeId}`];
       if (request) emit({ type: observation.resolution === "expired" ? "request.expired" : observation.resolution === "cancelled" ? "request.cancelled" : "request.resolved", request: { ...request, state: observation.resolution === "expired" ? "expired" : observation.resolution === "cancelled" ? "cancelled" : "resolved" } });
     } else if (observation.origin.kind !== "root" || owner.activeRunId !== run.runId || run.activeAttemptId !== attempt.attemptId) { /* This observation has no root terminal authority. */ }
-    else if (observation.type === "accepted") emit({ type: "attempt.accepted", attempt: { ...state.attempts[attempt.attemptId], state: "accepted", delivery: "dispatched", turn: observation.turn } });
+    else if (observation.type === "accepted") { emit({ type: "attempt.accepted", attempt: { ...state.attempts[attempt.attemptId], state: "accepted", delivery: "dispatched", turn: observation.turn } }); advance(owner.threadId); }
     else if (observation.type === "terminal" && observation.terminalAuthority === "root_attempt") { finish(state.runs[run.runId], observation.outcome,true); advance(owner.threadId); }
     else if (observation.type === "error") {
       if (observation.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); }
@@ -143,13 +153,6 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       emit({ type: "attempt.created", attempt: { attemptId: command.attemptId, runId: command.runId, threadId: owner.threadId, bindingId: owner.bindingId ?? command.bindingId, generation: owner.generation, state: "created", delivery: "pending", lastSequence: -1 } });
       emit({ type: "thread.changed", thread: { ...owner, bindingId: owner.bindingId ?? command.bindingId, nextRunSequence: owner.nextRunSequence + 1 } });
       decision.effects.push({ kind: "transcript.append", threadId: owner.threadId, inputId: command.inputId, runId: command.runId });
-      if (command.delivery === "steer" && owner.activeRunId) {
-        const active = state.attempts[state.runs[owner.activeRunId].activeAttemptId];
-        if (active.turn && !active.interruptRequested) {
-          emit({ type: "attempt.interrupted", attempt: { ...active, interruptRequested: true } });
-          decision.effects.push({ kind: "provider.interrupt", threadId: owner.threadId, attemptId: active.attemptId });
-        }
-      }
       break;
     }
     case "run.cancel": {
@@ -174,7 +177,14 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     case "attempt.dispatch": {
       const attempt = state.attempts[command.attemptId]; if (!attempt || attempt.state !== "created") break;
       const owner = thread(command.threadId); const run = state.runs[attempt.runId];
-      if (!command.authorized || owner.desired !== "running" || owner.shutdown !== "clean" || owner.generation !== attempt.generation || owner.activeRunId !== run.runId) {
+      if (command.targetAttemptId && command.authorized && owner.desired === "running" && owner.shutdown === "clean" && owner.generation === attempt.generation) {
+        const root = owner.activeRunId && state.attempts[state.runs[owner.activeRunId].activeAttemptId];
+        if (!root || root.attemptId !== command.targetAttemptId || root.state !== "accepted" || !root.turn) {
+          // The root ended before dispatch. Preserve the canonical input as a follow-up.
+          emit({ type: "run.started", run: { ...run, state: "queued" } }); advance(owner.threadId); break;
+        }
+      }
+      if (!command.authorized || owner.desired !== "running" || owner.shutdown !== "clean" || owner.generation !== attempt.generation || (!command.targetAttemptId && owner.activeRunId !== run.runId)) {
         finish(run, "cancelled"); advance(owner.threadId); break;
       }
       if (!run.entryId || !state.bindings[attempt.bindingId]) throw new Error("Dispatch requires canonical input and acquired binding");
@@ -182,20 +192,19 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     }
     case "attempt.accepted": {
       const attempt = state.attempts[command.attemptId]; const owner = thread(command.threadId);
-      if (!attempt || attempt.state === "terminal" || owner.generation !== attempt.generation || owner.activeRunId !== attempt.runId) break;
-      emit({ type: "attempt.accepted", attempt: { ...attempt, state: "accepted", delivery: "dispatched", turn: command.turn } }); break;
+      if (!attempt || attempt.state === "terminal" || owner.generation !== attempt.generation || attempt.state !== "dispatching") break;
+      emit({ type: "attempt.accepted", attempt: { ...attempt, state: "accepted", delivery: "dispatched", turn: command.turn } });
+      if (owner.activeRunId !== attempt.runId) finish(state.runs[attempt.runId], "completed", true);
+      advance(owner.threadId); break;
     }
     case "attempt.unknown": requireRecovery(command.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); break;
-    case "attempt.interrupt_acknowledged": {
-      const attempt = state.attempts[command.attemptId]; if (attempt && attempt.state !== "terminal") emit({ type: "attempt.interrupted", attempt: { ...attempt, interruptAcknowledged: true } }); break;
-    }
     case "provider.observe": observe(command.observation); break;
     case "thread.stop": {
       const owner = thread(command.threadId);
       const needsDrain = !!owner.bindingId && (command.writerPending !== false || !!state.bindings[owner.bindingId]);
       const retained = command.retain === true && owner.role === "worker" && owner.desired === "running";
       emit({ type: "thread.stopped", thread: { ...owner, desired: retained ? "running" : "stopped", shutdown: needsDrain ? "pending" : "clean", ...(!needsDrain ? { bindingId: undefined } : {}) } });
-      for (const run of Object.values(state.runs)) if (run.threadId === owner.threadId && run.state === "queued") finish(run, "cancelled");
+      for (const run of Object.values(state.runs)) if (run.threadId === owner.threadId && (run.state === "queued" || run.state === "running" && run.runId !== owner.activeRunId)) finish(run, "cancelled");
       if (retained) {
         for (const assignment of Object.values(state.assignments)) if (assignment.workerThreadId === owner.threadId && ["assigned", "running"].includes(assignment.state))
           emit({ type: "assignment.cancelled", assignment: { ...assignment, state: "cancelled", terminalAt: command.now, outcome: "cancelled" } });

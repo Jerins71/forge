@@ -1089,6 +1089,45 @@ test('9.2.9 revoking this device on C shows Revoked and leaves A/B online', asyn
   assertions.revocation = { environmentId: c.environmentId, othersOnline: true }
 })
 
+test('F7: the busy manager composer delivers a real steer, keeps the root and shows one complete reply on reload', async ({ page }) => {
+  const { a } = fleet!
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  const environment = manifest.environments[0]!
+  const principal = await controlEnvironment<BootstrapSession>(manifest, environment.name, 'bootstrap')
+  const launchId = randomUUID()
+  const launched = await fixtureRpcOnce(a.baseUrl, principal, 'session.launch', { commandId: launchId, projectId: a.sessionId,
+    title: 'Busy composer QA', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:hold]', artifactIds: [] } })
+  await until(() => fixtureRpcOnce(a.baseUrl, principal, 'command.get', { commandId: launchId }), receipt => receipt.state === 'succeeded')
+  const Constructor = await loadConfiguredSqliteDatabaseConstructor()
+  const state = () => { const db = new Constructor(getEnvironmentDbPath(environment.dataDir), { readonly: true }); try { return loadState(db) } finally { db.close() } }
+  const nativeId = await until(() => Object.values(state().bindings).find(binding => binding.scope.threadId === launched.sessionId)?.conversation.nativeId, Boolean)
+  const counters = async () => {
+    const files = await readdir(join(environment.checkout, '.fixture-codex'))
+    const rows = await Promise.all(files.filter(file => /^process-\d+\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(environment.checkout, '.fixture-codex', file), 'utf8'))))
+    return rows.filter(row => row.threadId === nativeId).reduce((total, row) => ({ starts: total.starts + row.turnStarts, steers: total.steers + row.steers, interrupts: total.interrupts + row.interrupts }), { starts: 0, steers: 0, interrupts: 0 })
+  }
+  await page.goto(`${fleet!.uiUrl}/?agent=${launched.sessionId}`)
+  const composer = page.getByRole('combobox', { name: /^(Message |Send another message to )/ })
+  await expect(composer).toBeEnabled()
+  expect(state().runs[`run-${launchId}`].state).toBe('running')
+  const before = await counters()
+  await composer.fill('Composer correction while busy')
+  await composer.press('Enter')
+  await until(counters, count => count.steers === before.steers + 1)
+  await until(() => state().runs[`run-${launchId}`], run => run.state === 'terminal')
+  expect(await counters()).toEqual({ ...before, steers: before.steers + 1 })
+  expect(state().runs[`run-${launchId}`].outcome).toBe('completed')
+  await expect(page.getByText('Composer correction while busy', { exact: true })).toBeVisible()
+  await expect(page.getByText('fixture:env-a:assistant reply', { exact: true })).toBeVisible()
+  await expect(page.getByText('The manager completed this turn without a visible response.', { exact: true })).toHaveCount(0)
+  await shot(page, 'busy-composer-steered')
+  await page.reload()
+  await expect(page.getByText('Composer correction while busy', { exact: true })).toBeVisible()
+  await expect(page.getByText('fixture:env-a:assistant reply', { exact: true })).toBeVisible()
+  await expect(page.getByText('The manager completed this turn without a visible response.', { exact: true })).toHaveCount(0)
+  assertions.busyComposer = { counters: await counters(), root: 'completed', deliveredLive: true, deliveredAfterReload: true, emptyNotices: 0 }
+})
+
 test('narrow layout keeps Run on and Workspace reachable', async ({ page }) => {
   const { a } = fleet!
   await page.setViewportSize({ width: 390, height: 844 })

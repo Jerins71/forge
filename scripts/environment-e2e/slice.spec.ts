@@ -975,8 +975,9 @@ async function busySendFixture(index = 0) {
   const counters = async () => {
     const files = await readdir(join(environment.checkout, '.fixture-codex'));
     const counts = await Promise.all(files.filter(file => /^process-\d+\.json$/.test(file)).map(async file =>
-      JSON.parse(await readFile(join(environment.checkout, '.fixture-codex', file), 'utf8')) as { ownerAgentId: string; turnStarts: number; steers: number; interrupts: number }));
-    return counts.filter(count => count.ownerAgentId === sessionId).reduce((total, count) =>
+      JSON.parse(await readFile(join(environment.checkout, '.fixture-codex', file), 'utf8')) as { threadId: string; turnStarts: number; steers: number; interrupts: number }));
+    const nativeIds = new Set(Object.values((await state()).bindings).filter(binding => binding.scope.threadId === sessionId).map(binding => binding.conversation.nativeId));
+    return counts.filter(count => nativeIds.has(count.threadId)).reduce((total, count) =>
       ({ starts: total.starts + count.turnStarts, steers: total.steers + count.steers, interrupts: total.interrupts + count.interrupts }), { starts: 0, steers: 0, interrupts: 0 });
   };
   const detail = async () => {
@@ -989,13 +990,14 @@ async function busySendFixture(index = 0) {
     const before = (await counters()).starts;
     const sent = await send('[fixture:slow] Finish the entire reply.');
     await until(counters, count => count.starts === before + 1);
-    await until(async () => (await detail()).items, items => items.some((item: any) => item.kind === 'assistant' && item.runId === `run-${sent.commandId}`));
+    await until(async () => { const current = await state(); return current.attempts[current.runs[`run-${sent.commandId}`]?.activeAttemptId]?.turn; }, Boolean);
+    await new Promise(resolve => setTimeout(resolve, 50));
     return sent;
   };
   return { environment, rpc, sessionId, state, run, counters, detail, send, slow };
 }
 const silentNotice = 'The manager completed this turn without a visible response.';
-for (const delivery of [undefined, 'auto', 'followUp'] as const) {
+for (const delivery of ['followUp'] as const) {
   test(`F7: busy ${delivery ?? 'composer default'} send queues, preserves the reply and projects pending live/replay`, async () => {
     const f = await busySendFixture();
     try {
@@ -1011,25 +1013,43 @@ for (const delivery of [undefined, 'auto', 'followUp'] as const) {
       expect(await f.run(second.commandId)).toMatchObject({ outcome: 'completed' });
       expect(await f.counters()).toEqual({ starts: before.starts + 1, interrupts: 0, steers: 0 });
       const snapshot = await f.detail();
-      expect(snapshot.items.filter((item: any) => item.kind === 'assistant' && [first.commandId, second.commandId].some(id => item.runId === `run-${id}`))).toHaveLength(2);
+      expect(snapshot.items.filter((item: any) => item.kind === 'assistant' && item.text === 'fixture:env-a:assistant reply')).toHaveLength(2);
       expect(snapshot.items.some((item: any) => item.text === silentNotice)).toBe(false);
       expect(snapshot.session.pendingCount).toBe(0);
       evidence[`busySend-${delivery ?? 'default'}`] = { counters: await f.counters(), queuedLive: true, queuedReplay: true, completed: 2, emptyNotices: 0 };
     } finally { f.rpc.close(); }
   });
 }
-test('F7: explicit steer uses native steer and does not interrupt or start another turn', async () => {
+for (const delivery of [undefined, 'auto', 'steer'] as const) {
+  test(`F7: ${delivery ?? 'composer default'} uses native steer and leaves the running turn alive`, async () => {
+    const f = await busySendFixture();
+    try {
+      const first = await f.slow(); const before = await f.counters();
+      const steered = await f.send('Correction during this turn', delivery);
+      await until(f.counters, count => count.steers === before.steers + 1);
+      expect(await f.counters()).toEqual({ ...before, steers: before.steers + 1 });
+      expect(await settled(steered.commandId, 0)).toMatchObject({ state: 'succeeded', delivery: 'dispatched' });
+      expect((await f.state()).runs[`run-${first.commandId}`].state).toBe('running');
+      expect(await f.run(first.commandId)).toMatchObject({ outcome: 'completed' });
+      expect(await f.run(steered.commandId)).toMatchObject({ outcome: 'completed' });
+      expect((await f.detail()).items.some((item: any) => item.text === silentNotice)).toBe(false);
+      evidence[`steer-${delivery ?? 'default'}`] = { counters: await f.counters(), rootKeptRunning: true, emptyNotices: 0 };
+    } finally { f.rpc.close(); }
+  });
+}
+test('F7: a provider without native steering queues the default send without interruption', async () => {
   const f = await busySendFixture();
   try {
+    await controlEnvironment(manifest, f.environment.name, 'fixture', { operation: 'disable-native-steer', sessionId: f.sessionId });
     const first = await f.slow(); const before = await f.counters();
-    const steered = await f.send('Explicit correction during this turn', 'steer');
-    await until(f.counters, count => count.steers === before.steers + 1);
-    expect(await f.counters()).toEqual({ ...before, steers: before.steers + 1 });
-    expect(await settled(steered.commandId, 0)).toMatchObject({ state: 'succeeded', delivery: 'dispatched' });
+    const second = await f.send('Default send to a provider without native steering');
+    await until(async () => (await f.state()).runs[`run-${second.commandId}`]?.entryId, Boolean);
+    expect((await f.state()).runs[`run-${second.commandId}`].state).toBe('queued');
+    expect(await f.counters()).toEqual(before); expect((await f.detail()).session.pendingCount).toBe(1);
     expect(await f.run(first.commandId)).toMatchObject({ outcome: 'completed' });
-    expect(await f.run(steered.commandId)).toMatchObject({ outcome: 'completed' });
-    expect((await f.detail()).items.some((item: any) => item.text === silentNotice)).toBe(false);
-    evidence.explicitSteer = { counters: await f.counters(), emptyNotices: 0 };
+    expect(await f.run(second.commandId)).toMatchObject({ outcome: 'completed' });
+    expect(await f.counters()).toEqual({ ...before, starts: before.starts + 1 });
+    evidence.nonSteeringProvider = { counters: await f.counters(), queuedFollowUp: true };
   } finally { f.rpc.close(); }
 });
 test('F7: Stop interrupts and failed turns never gain an empty completion notice', async () => {

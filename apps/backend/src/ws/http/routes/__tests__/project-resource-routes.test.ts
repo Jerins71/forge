@@ -59,6 +59,18 @@ describe("project resource routes", () => {
     const payload = (await response.json()) as ProjectResourceMutationResponse;
     expect(payload.snapshot.resources.piExtensions.exists).toBe(true);
     expect(payload.snapshot.scaffold.missing).toEqual([]);
+    expect(payload.snapshot.trust.state).toBe("untrusted");
+  });
+
+  it("trusts only a scaffold directory exclusively created by the request", async () => {
+    const harness = await createHarness({ missingForge: true });
+    const seed = () => fetch(`${harness.baseUrl}/api/settings/project-resources/seed`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ profileId: "profile-a", sessionAgentId: "session-a" }) });
+    const created = await seed(); expect(created.status).toBe(200);
+    expect(((await created.json()) as ProjectResourceMutationResponse).snapshot.trust.state).toBe("trusted");
+    const block = await fetch(`${harness.baseUrl}/api/settings/project-resources/trust`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ profileId: "profile-a", sessionAgentId: "session-a", action: "block" }) });
+    expect(block.status).toBe(200);
+    const reseeded = await seed(); expect(reseeded.status).toBe(200);
+    expect(((await reseeded.json()) as ProjectResourceMutationResponse).snapshot.trust.state).toBe("blocked");
   });
 
   it("derives trust mutation path server-side from the session context", async () => {

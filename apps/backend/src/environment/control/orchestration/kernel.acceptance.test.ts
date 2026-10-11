@@ -60,14 +60,39 @@ describe("authoritative run decisions", () => {
     expect(f.state().runs["run-one"].outcome).toBe("completed");
     expect(terminal.effects.map(e => e.kind)).toContain("provider.start");
   });
-  it("steering interruption acknowledgment cannot settle the root or start queued work", () => {
+  it("steers canonical input into the active root without interruption or a second native start", () => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 1, "accepted");
+    const submitted = f.submit("two", "steer"); const recorded = f.record("two");
+    expect(submitted.effects).toEqual([{ kind: "transcript.append", threadId: "manager", inputId: "input-two", runId: "run-two" }]);
+    expect(recorded.effects).toEqual([{ kind: "provider.steer", threadId: "manager", attemptId: "attempt-two", targetAttemptId: "attempt-one" }]);
+    expect(f.state().threads.manager.activeRunId).toBe("run-one");
+    f.run({ type: "attempt.dispatch", commandId: "steer-dispatch", now, threadId: "manager", attemptId: "attempt-two", targetAttemptId: "attempt-one", authorized: true });
+    f.run({ type: "attempt.accepted", commandId: "steer-accepted", now, threadId: "manager", attemptId: "attempt-two", turn: f.state().attempts["attempt-one"].turn! });
+    expect(f.state().runs["run-two"]).toMatchObject({ state: "terminal", outcome: "completed" });
+    expect(f.state().runs["run-one"].state).toBe("running");
+    expect(f.observe("attempt-one", 2, "terminal").effects).toEqual([]);
+  });
+  it("queues a steer when the root ends before native dispatch", () => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 1, "accepted");
+    f.submit("two", "steer"); f.record("two"); f.observe("attempt-one", 2, "terminal");
+    const decision = f.run({ type: "attempt.dispatch", commandId: "stale-steer", now, threadId: "manager", attemptId: "attempt-two", targetAttemptId: "attempt-one", authorized: true });
+    expect(decision.effects).toEqual([{ kind: "provider.start", threadId: "manager", attemptId: "attempt-two" }]);
+    expect(f.state().threads.manager.activeRunId).toBe("run-two");
+    expect(f.state().attempts["attempt-two"].state).toBe("created");
+  });
+  it("a rejected steer fails its own input and keeps the root running", () => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 1, "accepted");
     f.submit("two", "steer"); f.record("two");
-    f.run({ type: "attempt.interrupt_acknowledged", commandId: "ack", now, threadId: "manager", attemptId: "attempt-one" });
-    expect(f.state().runs["run-one"].state).toBe("running");
-    expect(f.state().threads.manager.activeRunId).toBe("run-one");
-    f.observe("attempt-one", 2, "terminal");
-    expect(f.state().threads.manager.activeRunId).toBe("run-two");
+    f.run({ type: "effect.failed", commandId: "steer-failed", now, threadId: "manager", attemptId: "attempt-two", kind: "provider.steer", delivery: "not_dispatched" });
+    expect(f.state().threads.manager.activeRunId).toBe("run-one"); expect(f.state().runs["run-one"].state).toBe("running");
+    expect(f.state().runs["run-two"]).toMatchObject({ state: "terminal", outcome: "failed" });
+  });
+  it("keeps explicit steering queued when the provider cannot steer", () => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 1, "accepted");
+    const state = f.state(); state.bindings.binding.capabilities = { ...caps, native: { ...caps.native, steer: false } };
+    f.submit("two", "steer"); const recorded = f.record("two");
+    expect(recorded.effects).toEqual([]); expect(f.state().runs["run-two"].state).toBe("queued");
+    expect(f.observe("attempt-one", 2, "terminal").effects).toEqual([{ kind: "provider.start", threadId: "manager", attemptId: "attempt-two" }]);
   });
   it("ignores duplicate, out-of-order and old-generation observations", () => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 4, "accepted");

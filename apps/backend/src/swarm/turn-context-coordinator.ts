@@ -221,8 +221,10 @@ export class TurnContextCoordinator<TCodexGate=unknown,TCodexDelegation=unknown,
     const context=this.activeTurnByAgentId.get(agentId)?.parentContext;
     return context ? { ...context,outputTarget:cloneAssistantOutputTarget(context.outputTarget) } : undefined;
   }
-  hasPendingSupersedingUserInput(agentId:string,activeTurnId?:string):boolean {
-    return Boolean(this.core?.read(agentId).pendingRunIds.some(id=>id!==activeTurnId && this.contexts.get(agentId)?.get(id)?.source==="user_input"));
+  hasPendingSupersedingUserInput(_agentId:string,_activeTurnId?:string):boolean {
+    // The core keeps follow-ups queued and steers within the same native root.
+    // Neither delivery invalidates the running turn's visible output.
+    return false;
   }
   markProviderCycleActivated(_agentId:string):void {}
   getActiveExternalProjectAgentTurn(agentId:string):ActiveExternalProjectAgentTurn|undefined {

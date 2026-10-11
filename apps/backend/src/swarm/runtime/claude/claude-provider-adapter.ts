@@ -80,8 +80,8 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
   async steer(input: ProviderSteerInput) {
     this.assertTurn(input.binding, input.turn); this.assertUpdates(input);
     this.session!.enableObservations();
-    await this.assertBinding(input.binding).dispatchProviderTurn(input.input, input.attemptId, input.turn);
-    return { status: "unknown" as const };
+    const id = await this.assertBinding(input.binding).dispatchProviderTurn(input.input, input.attemptId, input.turn);
+    return this.session!.waitForInputAcceptance(id);
   }
   async interrupt(input: Parameters<ProviderAdapter["interrupt"]>[0]): Promise<void> {
     this.assertTurn(input.binding, input.turn);

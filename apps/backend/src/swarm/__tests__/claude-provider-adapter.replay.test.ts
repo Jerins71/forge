@@ -333,8 +333,9 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); const accepted = await f.observed("accepted:");
       expect(accepted).toMatchObject({ scope, attemptId: "attempt", origin: { kind: "root" } });
       if (accepted.type !== "accepted") throw new Error("Missing native acceptance");
-      expect(await f.adapter.steer({ binding, runId: "run", attemptId: "attempt", input: { text: "steer" }, turn: accepted.turn })).toEqual({ status: "unknown" });
-      await f.release("steered"); await f.release("child");
+      const steered = f.adapter.steer({ binding, runId: "run", attemptId: "attempt", input: { text: "steer" }, turn: accepted.turn });
+      await f.release("steered"); expect(await steered).toMatchObject({ status: "accepted" });
+      await f.release("child");
       const child = await f.observed("terminal:native_child"); expect(child).toMatchObject({ origin: { kind: "child", nativeAgentId: "native-child" } });
       expect(f.observations.some(value => value.type === "terminal" && value.terminalAuthority === "root_attempt")).toBe(false);
       expect(f.onAgentEnd).not.toHaveBeenCalled();

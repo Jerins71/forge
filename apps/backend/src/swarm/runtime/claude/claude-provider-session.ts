@@ -40,7 +40,11 @@ export class ClaudeProviderSession {
   waitForAcceptance(attemptId: string): Promise<ProviderDispatchResult> {
     const input = [...this.inputs].find(([, entry]) => entry.attemptId === attemptId);
     if (!input) return Promise.resolve({ status: "unknown" });
-    const [id, entry] = input;
+    return this.waitForInputAcceptance(input[0]);
+  }
+  waitForInputAcceptance(id: string): Promise<ProviderDispatchResult> {
+    const entry = this.inputs.get(id);
+    if (!entry) return Promise.resolve({ status: "unknown" });
     const turn: ProviderTurnRef = { ...this.binding.scope, kind: "turn", conversationId: this.binding.conversation.nativeId, nativeId: id };
     if (entry.accepted) return Promise.resolve({ status: "accepted", turn });
     if (entry.unknown || this.ended || this.terminalSeen || this.interrupted) return Promise.resolve({ status: "unknown" });
