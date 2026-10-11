@@ -214,13 +214,15 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
    */
   const bookkeeping = database.prepare(`SELECT 1 FROM effects e JOIN commands c USING(command_id) WHERE e.session_id=? AND e.kind='lifecycle.admit' AND e.state='claimed'
     AND c.method IN ('session.readState.set','project.readState.clear','session.attention.dismiss','session.message.pin','session.pins.clear','session.update') LIMIT 1`);
-  const settleBookkeeping = async (sessionIds: readonly string[]): Promise<void> => {
+  /** Undefined when nothing is in flight, so an uncontended command is admitted in the same tick as before. */
+  const settleBookkeeping = (sessionIds: readonly string[]): Promise<void> | undefined => {
     const lanes = sessionIds.flatMap(sessionId => {
       const owner = database.prepare("SELECT project_id FROM control_sessions WHERE session_id=?").get(sessionId) as { project_id: string } | undefined;
       return owner ? [sessionId, "project:" + owner.project_id] : [sessionId];
     });
+    if (!lanes.some(lane => bookkeeping.get(lane))) return undefined;
     const deadline = Date.now() + 2_000;
-    while (!closed && Date.now() < deadline && lanes.some(lane => bookkeeping.get(lane))) await new Promise(resolve => setTimeout(resolve, 5));
+    return (async () => { while (!closed && Date.now() < deadline && lanes.some(lane => bookkeeping.get(lane))) await new Promise(resolve => setTimeout(resolve, 5)); })();
   };
   /** A change must not run across a launch, input or stop the session accepted and has not finished applying. */
   const assertSettled = (sessionId: string): void => {
@@ -232,7 +234,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
     if (!principal.scopes.has(input.requiredScope ?? "session:operate") || options.isDeviceRevoked(principal.deviceSessionId))
       throw new ControlError("FORBIDDEN", "Session operation is not authorized");
     input = { ...input, sessionIds: [...input.sessionIds], projectIds: [...(input.projectIds ?? [])] };
-    await settleBookkeeping(input.sessionIds);
+    { const busy = settleBookkeeping(input.sessionIds); if (busy) await busy; }
     const method = input.receipt?.method ?? "lifecycle." + input.command;
     const request = canonicalRequest(method, input.request);
     const projectIds = [...new Set(input.projectIds ?? [])].sort();
@@ -651,7 +653,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         if (duplicate && !["running", "accepted"].includes(duplicate.state)) return duplicate;
         if (!options.policy) throw new ControlError("UNAVAILABLE", "Project policy is not composed");
         const normalized = JSON.parse(request.normalized) as RpcInput<import("./project-policy.js").PolicyMethod>;
-        if (!duplicate && "sessionId" in normalized) { await settleBookkeeping([normalized.sessionId]); assertAdmissionAvailable(normalized.sessionId); assertSettled(normalized.sessionId); }
+        if (!duplicate && "sessionId" in normalized) { { const busy = settleBookkeeping([normalized.sessionId]); if (busy) await busy; } assertAdmissionAvailable(normalized.sessionId); assertSettled(normalized.sessionId); }
         const prepared = duplicate ? { sessionIds: [], projectIds: [], intent: "inspect" as const, frozen: normalized } : await options.policy.prepare(method as import("./project-policy.js").PolicyMethod, normalized);
         await admitLifecycle(principal, { ...prepared, commandId: input.commandId, command: method, request: normalized, frozenRequest: prepared.frozen, requiredScope: rpcScopes[method], receipt: { method, ...("projectId" in prepared ? { projectId: prepared.projectId } : {}), ...("sessionId" in prepared ? { sessionId: prepared.sessionId } : {}) } }, () => options.policy!.apply(method as import("./project-policy.js").PolicyMethod, prepared.frozen));
         return readReceipt(sink, input.commandId);
@@ -695,7 +697,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
           readSession(sink, send.sessionId);
           await preflightRoute({ sessionId: send.sessionId, message: send.message });
         }
-        await settleBookkeeping([(normalized as RpcInput<"session.send">).sessionId]);
+        { const busy = settleBookkeeping([(normalized as RpcInput<"session.send">).sessionId]); if (busy) await busy; }
         return accept(principal, method as "session.send" | "session.choose" | "session.stop" | "worker.kill", normalized);
       }
       const launch = normalized as RpcInput<"session.launch">;
