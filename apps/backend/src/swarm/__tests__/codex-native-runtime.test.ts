@@ -8,7 +8,8 @@ import { CodexProviderAdapter } from "../runtime/codex/codex-provider-adapter.js
 import { nativeCodexEnvironment } from "../runtime/codex/codex-runtime-auth.js";
 import type { CodexAppServerClientHandlers } from "../codex-app-server/types.js";
 import type { AgentDescriptor } from "../types.js";
-import type { RuntimeSessionEvent } from "../runtime-contracts.js";
+import type { RuntimeSessionEvent, SwarmRuntimeCallbacks } from "../runtime-contracts.js";
+import { transitionAgentStatus } from "../agent-state-machine.js";
 import type { ChoiceAnswer, ChoiceQuestion } from "@forge/protocol";
 
 const roots: string[] = [];
@@ -16,6 +17,7 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, {
 
 async function fixture(options: { model?: AgentDescriptor["model"]; root?: string; agentId?: string; rejectResume?: boolean; prompt?: string;
   onEvent?: (event: RuntimeSessionEvent) => void; onAgentEnd?: () => Promise<void>; extraTool?: boolean;
+  onStatusChange?: SwarmRuntimeCallbacks["onStatusChange"]; onRuntimeError?: SwarmRuntimeCallbacks["onRuntimeError"];
   choiceHandler?: (agentId: string, questions: ChoiceQuestion[]) => Promise<ChoiceAnswer[]> } = {}) {
   const root = options.root ?? await mkdtemp(join(tmpdir(), "forge-native-codex-test-"));
   if (!options.root) roots.push(root);
@@ -54,8 +56,8 @@ async function fixture(options: { model?: AgentDescriptor["model"]; root?: strin
       return {};
     }),
   };
-  const runtime = await CodexAgentRuntime.create({ descriptor, callbacks: { onStatusChange: vi.fn(),
-    onSessionEvent: async (_id, event) => { events.push(event); options.onEvent?.(event); }, onRuntimeError: vi.fn(), onAgentEnd: options.onAgentEnd ?? vi.fn() },
+  const runtime = await CodexAgentRuntime.create({ descriptor, callbacks: { onStatusChange: options.onStatusChange ?? vi.fn(),
+    onSessionEvent: async (_id, event) => { events.push(event); options.onEvent?.(event); }, onRuntimeError: options.onRuntimeError ?? vi.fn(), onAgentEnd: options.onAgentEnd ?? vi.fn() },
     systemPrompt: options.prompt ?? "Forge integration only", codexHome, projectTrusted: false, auth,
     host: { requestUserChoice }, tools: [{ name: "fixture_tool", label: "Fixture", description: "Fixture tool",
       parameters: Type.Object({ value: Type.String() }, { additionalProperties: false }), execute: async (_id, args) => ({ content: [{ type: "text", text: args.value }], details: args }) },
@@ -67,11 +69,41 @@ async function fixture(options: { model?: AgentDescriptor["model"]; root?: strin
   return { root, nativePath, descriptor, runtime, client, auth, events, requestUserChoice,
     interruptCompletes: (value: boolean) => { interruptCompletes = value; },
     notify: (method: string, params: any) => handlers.onNotification?.(method, params),
+    exit: () => { disposed = true; handlers.onExit?.(new Error("Codex app-server exited (code=1, signal=null)")); },
     serverRequest: (method: string, params: any) => handlers.onRequest!(method, params),
   };
 }
 
 describe("Native Codex manager", () => {
+  // Exit failures: idle status must stay legal; a throwing projection callback
+  // must not escape the process-exit boundary as an unhandled rejection.
+  it("projects an idle native process exit without an illegal idle-to-error transition", async () => {
+    const statuses: string[] = [];
+    const f = await fixture({ onStatusChange: async (_id, status) => {
+      statuses.push(status); transitionAgentStatus("idle", status);
+    } });
+    f.exit();
+    await vi.waitFor(() => expect(statuses).toHaveLength(1));
+    expect(statuses).toEqual(["idle"]);
+    expect(f.runtime.getStatus()).toBe("idle");
+    await f.runtime.terminate();
+  });
+
+  it("contains a rejected status projection when the idle process exits", async () => {
+    const unhandled: unknown[] = [];
+    const listener = (error: unknown) => { unhandled.push(error); };
+    process.on("unhandledRejection", listener);
+    const status = vi.fn().mockRejectedValueOnce(new Error("Exit status projection failed")).mockResolvedValue(undefined);
+    const f = await fixture({ onStatusChange: status });
+    try {
+      f.exit();
+      await vi.waitFor(() => expect(status).toHaveBeenCalledOnce());
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+      await f.runtime.terminate();
+    } finally { process.off("unhandledRejection", listener); }
+  });
+
   it("stops an acknowledged controlled turn before its turn-start notification arrives", async () => {
     const open = vi.spyOn(CodexProviderAdapter.prototype, "open");
     const f = await fixture();

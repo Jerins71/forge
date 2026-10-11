@@ -111,7 +111,11 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
         this.events = this.events.then(() => this.onNotification(method, params)).catch(error => this.fail(error, this.active?.finishing === true));
         return this.events;
       },
-      onExit: error => { if (!this.closed) void this.fail(error, true); },
+      onExit: error => {
+        // Process callbacks cannot await projection. A failed callback must
+        // stay scoped to this dead runtime instead of rejecting globally.
+        if (!this.closed) void this.fail(error, true).catch(() => undefined);
+      },
     });
   }
 
@@ -461,7 +465,9 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       }
     }
     if (active) active.failed = true;
-    this.status = terminal && !this.client.isDisposed() ? "idle" : "error";
+    // A dead binding has no running turn. In particular an idle exit cannot
+    // manufacture the forbidden idle -> error lifecycle transition.
+    this.status = terminal ? "idle" : "error";
     await this.options.callbacks.onRuntimeError?.(this.descriptor.agentId, { ...normalizeRuntimeError(error), phase: "prompt_start" });
     await this.publishStatus();
     if (terminal && active) await this.options.callbacks.onAgentEnd?.(this.descriptor.agentId);
