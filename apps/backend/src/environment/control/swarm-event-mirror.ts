@@ -197,8 +197,15 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       if (page.page.completeness === "source_changed") throw rpcFailure("RESYNC_REQUIRED", "Canonical history source changed.");
       return [{ actor, prior: prior?.cursor, page }];
     });
-    const rows = pages.flatMap(({ actor, page }) => page.messages.map(entry => ({ actor, entry, projected: item(entry, sessionId)! })))
-      .sort((left, right) => left.entry.timestamp.localeCompare(right.entry.timestamp) || left.projected.itemId.localeCompare(right.projected.itemId));
+    const rows = pages.flatMap(({ actor, page }) => {
+      let orderTime = "";
+      return page.messages.map((entry, sourceIndex) => {
+        // Queued input retains admission time but is appended after the prior final.
+        // Keep each source's canonical order so its byte cursor cannot repeat rows.
+        if (entry.timestamp > orderTime) orderTime = entry.timestamp;
+        return { actor, entry, projected: item(entry, sessionId)!, orderTime, sourceIndex };
+      });
+    }).sort((left, right) => left.orderTime.localeCompare(right.orderTime) || left.actor.agentId.localeCompare(right.actor.agentId) || left.sourceIndex - right.sourceIndex);
     let turnId: string | undefined;
     for (const row of rows) {
       if (row.actor.role === "manager" && row.projected.kind === "user") turnId = row.projected.userTurnId;

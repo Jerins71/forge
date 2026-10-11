@@ -54,10 +54,71 @@ async function recoveryFixture() {
     const bindingIds = Object.fromEntries(Object.keys(state.threads).map(id => [id, `replacement-${id}-${recoveryId}`]));
     return commit(action === "resume" ? { type: "recovery.resume", commandId: `resolve-${recoveryId}`, now, recoveryId, attempts, bindingIds } : { type: "recovery.dismiss", commandId: `resolve-${recoveryId}`, now, recoveryId });
   };
-  return { db, published, start, dispatch, crash, resolve };
+  const finish = (runId: string) => {
+    const state = loadState(db); const run = state.runs[runId]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+    return commit({ type: "provider.observe", commandId: `finish-${attempt.attemptId}`, now, observation: { type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: "completed" } });
+  };
+  return { db, published, start, dispatch, crash, resolve, commit, finish };
+}
+
+async function resultRecoveryFixture(boundary: "pending" | "unknown" | "unsubmitted") {
+  const f = await recoveryFixture(); f.start("manager", "parent");
+  for (const id of ["one", "two"]) {
+    f.commit({ type: "thread.create", commandId: `worker-${id}`, now, threadId: id, projectId: "project", role: "worker", managerId: "manager" });
+    f.commit({ type: "worker.assign", commandId: `assign-${id}`, now, assignmentId: id, parentThreadId: "manager", parentRunId: "parent", workerThreadId: id, workerRunId: `worker-run-${id}`, inputId: `worker-input-${id}`, attemptId: `worker-attempt-${id}`, bindingId: `worker-binding-${id}`, input: { text: id, artifactIds: [] }, authorized: true, selection: { specialistId: "builder", provider: "codex", modelId: "fixture" } });
+    f.commit({ type: "input.recorded", commandId: `record-worker-${id}`, now, threadId: id, inputId: `worker-input-${id}`, entryId: `worker-input-entry-${id}` }); f.dispatch(`worker-run-${id}`); f.finish(`worker-run-${id}`);
+  }
+  if (boundary === "unsubmitted") {
+    f.finish("parent"); f.commit({ type: "thread.stop", commandId: "stop-parent", now, threadId: "manager" });
+    for (const owner of Object.values(loadState(f.db).threads)) if (owner.bindingId) f.commit({ type: "binding.drained", commandId: `drain-${owner.threadId}`, now, threadId: owner.threadId, bindingId: owner.bindingId, status: "clean" });
+  }
+  for (const id of ["one", "two"]) {
+    f.commit({ type: "worker.result", commandId: `result-${id}`, now, assignmentId: id, workerRunId: `worker-run-${id}`, resultRef: { threadId: id, runId: `worker-run-${id}`, entryId: `worker-final-${id}` }, input: { text: `result-${id}`, artifactIds: [] } });
+    if (boundary !== "unsubmitted") f.commit({ type: "input.recorded", commandId: `record-result-${id}`, now, threadId: "manager", inputId: `${id}:result:input`, entryId: `result-entry-${id}` });
+  }
+  if (boundary === "unknown") { f.finish("parent"); f.dispatch("one:result:run"); }
+  const reports = ["one", "two"].map(id => ({ deliveryId: `${id}:result`, fromAgentId: id, toAgentId: "manager", assignmentId: id }));
+  f.crash("first-crash", reports.slice(0, 1)); f.crash("second-crash", reports.slice(1));
+  expect(loadState(f.db).recovery?.undeliveredReports).toEqual(reports);
+  return f;
 }
 
 describe("retained lifecycle commit", () => {
+  it.each(["pending", "unknown", "unsubmitted"] as const)("dismisses the union of %s result transfers without losing canonical results or delivering later", async boundary => {
+    const f = await resultRecoveryFixture(boundary); const references = Object.values(loadState(f.db).assignments).map(assignment => assignment.resultRef);
+    f.resolve("dismiss");
+    for (const id of ["one", "two"]) {
+      expect(loadState(f.db).transfers[`${id}:result`].state).toBe("superseded");
+      if (boundary === "unsubmitted") expect(loadState(f.db).runs[`${id}:result:run`]).toBeUndefined();
+      else expect(loadState(f.db).runs[`${id}:result:run`].state).toBe("terminal");
+      expect(f.commit({ type: "assignment.deliver", commandId: `late-${id}`, now, assignmentId: id, authorized: true }).effects).toEqual([]);
+    }
+    expect(Object.values(loadState(f.db).assignments).map(assignment => assignment.resultRef)).toEqual(references);
+    f.crash("third-crash", []); expect(loadState(f.db).recovery?.dismissedAt).toBeTruthy();
+    const before = loadState(f.db); rebuildLifecycleProjections(f.db); expect(loadState(f.db)).toEqual(before);
+  });
+  it.each(["pending", "unknown", "unsubmitted"] as const)("resumes the union of %s result transfers in the new generation and consumes each exactly once", async boundary => {
+    const f = await resultRecoveryFixture(boundary); f.resolve("resume");
+    expect(f.resolve("resume").effects).toEqual([]);
+    if (boundary === "pending") { f.dispatch("parent"); f.finish("parent"); }
+    for (const id of ["one", "two"]) {
+      if (boundary === "unsubmitted") {
+        f.commit({ type: "assignment.deliver", commandId: `deliver-${id}`, now, assignmentId: id, authorized: true });
+        f.commit({ type: "input.recorded", commandId: `record-result-${id}`, now, threadId: "manager", inputId: `${id}:result:input`, entryId: `result-entry-${id}` });
+      }
+      const state = loadState(f.db); const run = state.runs[`${id}:result:run`]; const attemptId = run.activeAttemptId;
+      expect(state.assignments[id].parentGeneration).toBe(state.threads.manager.generation);
+      expect(state.transfers[`${id}:result`]).toMatchObject({ state: "pending", targetGeneration: state.threads.manager.generation, ...(boundary === "unsubmitted" ? {} : { consumingAttemptId: attemptId }) });
+      f.dispatch(run.runId);
+      f.commit({ type: "attempt.accepted", commandId: `accepted-${id}`, now, threadId: "manager", attemptId, turn: { ...loadState(f.db).bindings[loadState(f.db).attempts[attemptId].bindingId].scope, kind: "turn", conversationId: "native", nativeId: id } });
+      f.finish(run.runId);
+      expect(loadState(f.db).transfers[`${id}:result`]).toMatchObject({ state: "consumed", consumingAttemptId: attemptId });
+      expect(f.commit({ type: "assignment.deliver", commandId: `duplicate-${id}`, now, assignmentId: id, authorized: true }).effects).toEqual([]);
+    }
+    expect(Object.values(loadState(f.db).runs).filter(run => run.runId.endsWith(":result:run"))).toHaveLength(2);
+    f.crash("third-crash", []); expect(loadState(f.db).recovery?.resumedAt).toBeTruthy();
+    const before = loadState(f.db); rebuildLifecycleProjections(f.db); expect(loadState(f.db)).toEqual(before);
+  });
   it.each(["resume", "dismiss"] as const)("publishes a new recovery occurrence after %s and retains it on restart", async action => {
     const f = await recoveryFixture(); f.start("manager", "first-run"); f.crash("first-crash", []);
     f.resolve(action);

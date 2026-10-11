@@ -7,6 +7,7 @@ import { piProviderCapabilities } from "../../../swarm/runtime/pi/pi-provider-ad
 import { ProviderDispatchRejectedError, type ProviderAdapter, type ProviderBinding } from "../../../swarm/runtime/provider-contract.js";
 import type { ControlCoreOptions } from "../effect-types.js";
 import { loadState } from "./store.js";
+import { readReceipt } from "../command-service.js";
 import { createSwarmControlAdapter } from "../swarm-control-adapter.js";
 import { createArtifactService } from "../artifact-service.js";
 import { UserMessageCoordinator, type HandleUserMessageOptions, type UserMessageCoordinatorOptions } from "../../../swarm/user-message-coordinator.js";
@@ -62,15 +63,50 @@ describe("durable provider outbox", () => {
     expect(order).toEqual(["runtime.stop", "adapter.close"]); expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded" });
     expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "stopped", shutdown: "clean" });
   });
-  it("stops the manager and its owned worker in one kernel transaction, then releases their resources in order", async () => {
-    const f = await fixture(); const order: string[] = [];
-    await f.core.controlService.submitInput({ commandId: "parent", threadId: "manager", message: { text: "held", artifactIds: [] } });
-    await f.core.controlService.submitInput({ commandId: "child", threadId: "worker", thread: { role: "worker", projectId: "project", managerId: "manager" }, message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
-    f.options.swarm.stopSession = async input => { order.push(input.sessionId); if (input.sessionId === "manager") expect(loadState(f.core.database).threads.worker.desired).toBe("stopped"); return { stopped: true }; };
-    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" });
-    expect(loadState(f.core.database).threads.worker.desired).toBe("stopped"); await f.core.effectWorker.drain();
+  it("retains an idle worker after session stop on live and reboot projections, then dispatches a new assignment", async () => {
+    const f = await fixture(); const order: string[] = []; const visible: string[] = [];
+    f.core.eventSink.transaction(tx => f.core.eventSink.append(tx, { topic: "detail", sessionId: "manager", event: { type: "worker.upsert", worker: { agentId: "worker", title: "Worker", status: "idle" } } }));
+    f.core.eventSink.subscribe(event => { if (event.event.type === "worker.upsert") visible.push(event.event.worker.status); });
+    await f.core.controlService.submitInput({ commandId: "parent", threadId: "manager", message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.submitInput({ commandId: "child", threadId: "worker", thread: { role: "worker", projectId: "project", managerId: "manager" }, message: { text: "held", artifactIds: [] },
+      assignment: { assignmentId: "first", parentThreadId: "manager", parentRunId: "run-parent", selection: { provider: "pi", modelId: "fixture" } } }); await f.core.effectWorker.drain();
+    await f.core.controlService.submitInput({ commandId: "queued-child", threadId: "worker", message: { text: "queued", artifactIds: [] } });
+    f.options.swarm.stopSession = async input => { order.push(input.sessionId); return { stopped: true }; };
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" }); await f.core.effectWorker.drain();
+    const stopped = loadState(f.core.database);
+    expect(stopped.threads.manager).toMatchObject({ desired: "stopped", shutdown: "clean" });
+    expect(stopped.threads.worker).toMatchObject({ desired: "running", shutdown: "clean" });
+    expect(stopped.threads.worker.activeRunId).toBeUndefined(); expect(stopped.threads.worker.bindingId).toBeUndefined();
     expect(order).toEqual(["manager", "worker"]); expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded" });
-    expect(loadState(f.core.database).threads.worker.shutdown).toBe("clean"); expect(loadState(f.core.database).runs["run-child"].state).toBe("terminal");
+    for (const id of ["run-child", "run-queued-child"]) expect(stopped.runs[id]).toMatchObject({ state: "terminal", outcome: "cancelled" });
+    expect(stopped.assignments.first.state).toBe("cancelled"); expect(visible.at(-1)).toBe("idle");
+    const workerRow = (core: ControlCore) => JSON.parse((core.database.prepare("SELECT worker_json FROM control_workers WHERE agent_id='worker'").get() as { worker_json: string }).worker_json);
+    expect(workerRow(f.core).status).toBe("idle"); expect(projectLifecycleStatus(stopped, "worker")?.agentStatus).toBe("idle");
+    await f.core.close(); const reboot = await f.open();
+    expect(workerRow(reboot).status).toBe("idle"); expect(projectLifecycleStatus(loadState(reboot.database), "worker")?.agentStatus).toBe("idle");
+    await reboot.controlService.submitInput({ commandId: "resumed-parent", threadId: "manager", message: { text: "continue", artifactIds: [] } }); await reboot.effectWorker.drain();
+    const continuation = await reboot.controlService.submitInput({ commandId: "continued-child", threadId: "worker", message: { text: "reuse retained worker", artifactIds: [] },
+      assignment: { assignmentId: "second", parentThreadId: "manager", parentRunId: "run-resumed-parent", selection: { provider: "pi", modelId: "fixture" } } }); await reboot.effectWorker.drain();
+    expect(readReceipt(reboot.eventSink, "continued-child")).toMatchObject({ state: "succeeded", delivery: "dispatched" });
+    expect(loadState(reboot.database).runs[continuation.runId].state).toBe("running"); expect(f.dispatches()).toBe(4);
+  });
+  it("session deletion terminates retained workers in the same lifecycle transaction", async () => {
+    const f = await fixture();
+    await f.core.controlService.submitInput({ commandId: "child", threadId: "worker", thread: { role: "worker", projectId: "project", managerId: "manager" }, message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.admitLifecycle(principal, { commandId, command: "session.delete", sessionIds: ["manager"], intent: "stop", request: {} }, async () => {
+      expect(loadState(f.core.database).threads.worker).toMatchObject({ desired: "stopped", shutdown: "clean" });
+      expect(projectLifecycleStatus(loadState(f.core.database), "worker")?.agentStatus).toBe("terminated");
+    });
+  });
+  it("retained worker continuation remains fenced while its session-stop drain is quarantined", async () => {
+    const f = await fixture();
+    await f.core.controlService.submitInput({ commandId: "child", threadId: "worker", thread: { role: "worker", projectId: "project", managerId: "manager" }, message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    f.options.swarm.stopSession = async input => ({ stopped: input.sessionId !== "worker" });
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" }); await f.core.effectWorker.drain();
+    expect(loadState(f.core.database).threads.worker).toMatchObject({ desired: "running", shutdown: "quarantined" });
+    expect((await f.core.controlService.getReceipt(principal, commandId)).state).toBe("interrupted");
+    await expect(f.core.controlService.submitInput({ commandId: "unsafe-continuation", threadId: "worker", message: { text: "continue", artifactIds: [] } })).rejects.toThrow(/shutdown/i);
+    expect(f.dispatches()).toBe(1);
   });
   it("rebuilds provider images from pinned prepared-message attachments after restart", async () => {
     const f = await fixture(); const root = path.dirname(f.options.databasePath!);

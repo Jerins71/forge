@@ -12,11 +12,14 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { expect, type BrowserContext, type Page, type Request } from '@playwright/test'
 import { test as base } from './fixtures/test.js'
-import { readManifest, controlEnvironment } from './launch.js'
+import { readManifest, controlEnvironment, type FleetManifest } from './launch.js'
 import { startFaultProxy } from './fault-proxy.js'
 import { openFixtureRpc, until, fixtureRpcOnce } from './fixtures/rpc-client.js'
 import type { BootstrapSession } from './launch.js'
 import { ForgeClient } from '../../packages/cli/src/forge-client.js'
+import { getEnvironmentDbPath } from '../../apps/backend/src/swarm/storage/data-paths.js'
+import { loadConfiguredSqliteDatabaseConstructor } from '../../apps/backend/src/sqlite-database-loader.js'
+import { loadState } from '../../apps/backend/src/environment/control/orchestration/store.js'
 
 interface UiEnvironment { environmentId: string; label: string; baseUrl: string; projectTitle: string; sessionId: string }
 interface UiFleet {
@@ -55,6 +58,32 @@ let proxy: Awaited<ReturnType<typeof startFaultProxy>>
 const test = base.extend({
   page: async ({}, use) => { await use(sharedPage) },
 })
+
+async function driveShellStatus(manifest: FleetManifest, sessionId: string, status: 'streaming' | 'idle') {
+  const environment = manifest.environments[1]!
+  const session = await controlEnvironment<BootstrapSession>(manifest, environment.name, 'bootstrap')
+  const commandId = randomUUID()
+  await fixtureRpcOnce(environment.baseUrl, session, 'session.send', { commandId, sessionId,
+    message: { text: status === 'streaming' ? '[fixture:hold]' : 'Settle the shell burst fixture', artifactIds: [] },
+    delivery: status === 'streaming' ? 'auto' : 'steer' })
+  const receipt = await until(() => fixtureRpcOnce(environment.baseUrl, session, 'command.get', { commandId }), value => !['accepted', 'running'].includes(value.state))
+  expect(receipt.state).toBe('succeeded')
+  const Constructor = await loadConfiguredSqliteDatabaseConstructor()
+  const read = () => {
+    const database = new Constructor(getEnvironmentDbPath(environment.dataDir), { readonly: true })
+    try { return loadState(database) } finally { database.close() }
+  }
+  const state = await until(read, state => {
+    const run = Object.values(state.runs).find(run => run.commandId === commandId)
+    const attempt = run && state.attempts[run.activeAttemptId]
+    return !!run && !!attempt && (status === 'streaming'
+      ? run.state === 'running' && attempt.state === 'accepted' && attempt.delivery === 'dispatched'
+      : run.state === 'terminal' && run.outcome === 'completed' && !state.threads[sessionId]?.activeRunId)
+  })
+  expect(state.threads[sessionId]).toMatchObject({ desired: 'running', shutdown: 'clean' })
+  const run = Object.values(state.runs).find(run => run.commandId === commandId)!
+  assertions.shellBurstNative = [...(assertions.shellBurstNative as unknown[] ?? []), { commandId, sessionId, status, run: run.state, attempt: state.attempts[run.activeAttemptId].state }]
+}
 
 test.describe.configure({ mode: 'serial' })
 test.use({ environmentSuite: 'ui', screenshot: 'off', actionTimeout: 10000 })
@@ -512,6 +541,7 @@ test('9.2.5/6 explicitly mounted three views share sockets, release streams, and
   const metrics = await Promise.all(manifest.environments.map(environment => controlEnvironment<any>(manifest, environment.name, 'fixture', { operation: 'metrics' })))
   expect(metrics.map(value => value.sockets)).toEqual([1, 1, 1])
   expect(metrics.flatMap(value => value.subscriptions).filter(value => value.method === 'session.subscribe')).toHaveLength(3)
+  await driveShellStatus(manifest, b.sessionId, 'streaming')
   await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'shell-burst', sessionId: b.sessionId, count: 1 })
   await expect(page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${b.sessionId}"] [aria-label="running"]`)).toHaveCount(1)
   const freshness = await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())
@@ -533,6 +563,30 @@ test('9.2.5/6 explicitly mounted three views share sockets, release streams, and
   expect(cachedB.at(-1).fresh).toBe(true)
   assertions.cacheHydration = { environmentId: b.environmentId, staleCompleteThenFresh: cachedB }
   assertions.mountedViews = { sockets: metrics.map(value => value.sockets), explicitDetails: 3, releasedDetails: 0, shellFreshness: freshness, browserReloadCachedResume: { requestBytes: proxyAfter.ws.requestBytes - proxyBefore.ws.requestBytes, responseBytes: proxyAfter.ws.responseBytes - proxyBefore.ws.responseBytes } }
+})
+
+test('native choices expire after restart and remain readable without answer controls', async ({ page }) => {
+  const { a } = fleet!
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  const session = await controlEnvironment<BootstrapSession>(manifest, 'env-a', 'bootstrap')
+  const commandId = randomUUID()
+  const launched = await fixtureRpcOnce(a.baseUrl, session, 'session.launch', { commandId, projectId: a.sessionId,
+    title: 'Expired native choice', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:choice]', artifactIds: [] } })
+  await until(() => fixtureRpcOnce(a.baseUrl, session, 'command.get', { commandId }), receipt => receipt.state === 'succeeded')
+  await page.goto(`${fleet!.uiUrl}/?agent=${launched.sessionId}`)
+  await expect(page.getByText('Which synthetic option?', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible()
+  await fleet!.stop(a); await fleet!.start(a); await page.reload()
+  const row = page.locator('[data-choice-id]').filter({ hasText: 'Choice expired' })
+  await expect(row).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Submit', exact: true })).toHaveCount(0)
+  await row.getByRole('button').click()
+  await expect(row).toContainText('Which synthetic option?')
+  await expect(row.getByRole('radio')).toHaveCount(0)
+  await shot(page, 'native-choice-expired')
+  const recovery = (await fixtureRpcOnce(a.baseUrl, session, 'recovery.get', {})).recovery
+  if (recovery && !recovery.resumedAt && !recovery.dismissedAt) await fixtureRpcOnce(a.baseUrl, session, 'recovery.decide', { commandId: randomUUID(), recoveryId: recovery.recoveryId, action: 'dismiss' })
+  assertions.expiredNativeChoice = { sessionId: launched.sessionId, retainedQuestion: true, answerControls: 0, freshBootstrap: true }
 })
 
 test('Batch 5 displays persisted plans/goals and fresh recovery with native decisions', async ({ page }) => {
@@ -736,6 +790,7 @@ test('first send on primary and remote, target switches, remounts and background
   }
   await inboxRow(page, b).first().click()
   await expect(transcript).toContainText('Synthetic provider update')
+  await driveShellStatus(manifest, b.sessionId, 'idle')
   await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'shell-burst', sessionId: b.sessionId, count: 1, status: 'idle' })
   expect(renderErrors).toEqual([])
   expect(directApiRequests.slice(direct), 'requests that bypassed the environment client').toEqual([])
@@ -758,12 +813,14 @@ test('a session shows the shell status after its detail view is released', async
     await done.click()
     await expect(done).toHaveCount(0)
   }
+  await driveShellStatus(manifest, b.sessionId, 'streaming')
   await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'burst', sessionId: b.sessionId, count: 1 })
   const streaming = inboxRow(page, b).getByLabel('Manager streaming')
   await expect(streaming).toHaveCount(1)
   // The same environment now shows another session; the first one settles in the background.
   await inboxRow(page, b, launchedId).first().click()
   await expect(page).toHaveURL(new RegExp(`agent=${launchedId}`))
+  await driveShellStatus(manifest, b.sessionId, 'idle')
   await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'shell-burst', sessionId: b.sessionId, count: 1, status: 'idle' })
   await expect(streaming).toHaveCount(0)
   expect(renderErrors).toEqual([])
