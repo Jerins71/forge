@@ -180,14 +180,18 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
     return originalStop.apply(this, args);
   };
   const originalApply = SwarmManager.prototype.applyControlledInput;
-  SwarmManager.prototype.applyControlledInput = async function (text, input) {
+  SwarmManager.prototype.applyControlledInput = function (text, input) {
     const control = input.controlledInput;
-    const result = await originalApply.call(this, text, { ...input, controlledInput: {
+    if (!armed && held?.commandId !== control.commandId) return originalApply.call(this, text, input);
+    const result = originalApply.call(this, text, { ...input, controlledInput: {
       ...control,
       onLocator(locator) { hit('post-JSONL', control.commandId); control.onLocator?.(locator); },
     } });
     // Hold after canonical append and before the core's durable dispatch marker.
-    if (held?.commandId === control.commandId) { held.reached = true; await held.wait; }
+    if (held?.commandId === control.commandId) {
+      const hold = held;
+      return result.then(async value => { hold.reached = true; await hold.wait; return value; });
+    }
     return result;
   };
   const originalAcquire = SwarmManager.prototype.acquireControlledProvider;
@@ -197,12 +201,11 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
     const start = adapter.start.bind(adapter);
     acquired.adapter = new Proxy(adapter, {
       get(target, key) {
-        if (key === 'start') return async (input: Parameters<typeof start>[0]) => {
+        if (key === 'start') return (input: Parameters<typeof start>[0]) => {
           const commandId = input.runId.replace(/^run-/, '');
+          if (!armed || armed.commandId !== commandId) return start(input);
           hit('post-dispatch-marker', commandId);
-          const request = await start(input);
-          hit('post-provider-accept', commandId);
-          return request;
+          return start(input).then(request => { hit('post-provider-accept', commandId); return request; });
         };
         const member = Reflect.get(target, key);
         return typeof member === 'function' ? member.bind(target) : member;
