@@ -257,10 +257,10 @@ async function main() {
       }
       // Codex without a usable credential is not offered at all; Claude's runtime refuses to start.
       assert.match(blockedMessage, kind === 'codex' ? /Manager model is unavailable|no key is saved on this environment/ : /"state":"rejected"|no key is saved on this environment/);
-      if (kind === 'claude') assert.match((missing.body as ClaudeAuthStatus).message ?? '', /Claude is set to use an API key, but no key is saved on this environment/);
+      if (kind === 'claude') assert.match(missing.body.message ?? '', /Claude is set to use an API key, but no key is saved on this environment/);
       await new Promise(resolve => setTimeout(resolve, 2000));
       assert.equal(requests(kind).length, blockedAt, `${kind}: nothing is sent without the key`);
-      result.missingKey = { blocked: true, requestsSent: 0, settingsShows: kind === 'claude' ? (missing.body as ClaudeAuthStatus).message : 'API key needed (not connected)' };
+      result.missingKey = { blocked: true, requestsSent: 0, settingsShows: kind === 'claude' ? missing.body.message : 'API key needed (not connected)' };
       stored[`${kind}-native`].key = keys[kind];
       await writeFile(authFile, JSON.stringify(stored), { mode: 0o600 });
     }

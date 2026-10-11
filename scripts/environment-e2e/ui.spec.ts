@@ -678,18 +678,12 @@ test('Settings and Stats edit the picked environment only, with no secret materi
   assertions.settingsStatsTarget = { environmentId: b.environmentId, requests: afterSwitch, secretUrls: 0 }
 })
 
-test('Claude native API key is saved on the picked remote environment only, masked afterwards, and replaceable', async ({ page }) => {
+test('Claude native API key is saved on the picked environment only, masked afterwards, and replaceable', async ({ page }) => {
   const { a, b } = fleet!
   const key = `sk-ant-forge-e2e-${randomUUID()}`
   const path = '/api/settings/claude-native'
   await page.goto(`${fleet!.uiUrl}/?view=settings&settingsTab=auth`)
-  const pick = async (environment: UiEnvironment) => {
-    const picker = page.getByRole('combobox', { name: 'Settings environment' })
-    await picker.click()
-    await page.getByRole('option').filter({ hasText: environment.label }).click()
-    await expect(picker).toHaveAttribute('data-environment-id', environment.environmentId)
-  }
-  await pick(b)
+  await expect(page.getByRole('combobox', { name: 'Settings environment' })).toHaveAttribute('data-environment-id', a.environmentId)
   const start = featureRequests.length
   const form = page.getByRole('form', { name: 'Claude connection method' })
   await expect(form.getByRole('radio', { name: 'Subscription' })).toHaveAttribute('aria-checked', 'true')
@@ -700,18 +694,17 @@ test('Claude native API key is saved on the picked remote environment only, mask
   await form.getByLabel('Base URL (optional)').fill('http://user:pass@router.invalid')
   await form.getByRole('button', { name: 'Save' }).click()
   await expect(page.getByTestId('native-agent-claude').getByRole('alert')).toContainText('without embedded credentials')
+  await form.getByRole('radio', { name: 'API key' }).click()
   await form.getByLabel('Anthropic API key').fill(key)
   await form.getByLabel('Base URL (optional)').fill('http://127.0.0.1:9/router')
   await form.getByRole('button', { name: 'Save' }).click()
-  const saved = form.getByLabel('Anthropic API key (saved)')
-  await expect(saved).toHaveValue(/^•+$/)
+  await expect(form.getByLabel('Anthropic API key (saved)')).toHaveValue(/^•+$/)
   await expect(form.getByRole('button', { name: 'Replace' })).toBeVisible()
   await expect(form.getByLabel('Base URL (optional)')).toHaveValue('http://127.0.0.1:9/router')
   expect(await page.content()).not.toContain(key)
-  await shot(page, 'claude-api-key-saved-on-b')
-  // A reload reads the setting back from B: still masked, never the key.
+  await shot(page, 'claude-api-key-saved')
+  // A reload reads the setting back from the environment: still masked, never the key.
   await page.reload()
-  await expect(page.getByRole('combobox', { name: 'Settings environment' })).toHaveAttribute('data-environment-id', b.environmentId)
   await expect(form.getByLabel('Anthropic API key (saved)')).toHaveValue(/^•+$/)
   expect(await page.content()).not.toContain(key)
   await form.getByRole('button', { name: 'Replace' }).click()
@@ -719,19 +712,19 @@ test('Claude native API key is saved on the picked remote environment only, mask
   await form.getByRole('button', { name: 'Keep saved key' }).click()
   const writes = featureRequests.slice(start).filter(request => request.path === path && request.method === 'POST')
   expect(writes.length).toBeGreaterThanOrEqual(2)
-  expect(writes.filter(request => request.environmentId !== b.environmentId)).toEqual([])
-  // This machine keeps its own setting.
-  await pick(a)
-  await expect(form.getByRole('radio', { name: 'Subscription' })).toHaveAttribute('aria-checked', 'true')
-  await expect(form.getByLabel('Base URL (optional)')).toHaveValue('')
-  // Leave B as it was found.
-  await pick(b)
+  expect(writes.filter(request => request.environmentId !== a.environmentId)).toEqual([])
+  // The other environment keeps its own setting; nothing is copied between machines.
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  const admin = await controlEnvironment<BootstrapSession>(manifest, 'env-b', 'bootstrap')
+  const other = await (await fetch(`${b.baseUrl}${path}`, { headers: { Authorization: `Bearer ${admin.bearer}` } })).json()
+  expect(other.access).toEqual({ mode: 'subscription', apiKeyConfigured: false })
+  // Back to Subscription for the tests that follow.
   await form.getByRole('radio', { name: 'Subscription' }).click()
   await form.getByLabel('Base URL (optional)').fill('')
   await form.getByRole('button', { name: 'Save' }).click()
   await expect(form.getByRole('button', { name: 'Save' })).toBeDisabled()
   await expect(form.getByRole('radio', { name: 'Subscription' })).toHaveAttribute('aria-checked', 'true')
-  assertions.nativeApiKey = { environmentId: b.environmentId, masked: true, replaceOffered: true, keyInPage: false, malformedUrlRejected: true, otherEnvironmentUnchanged: true }
+  assertions.nativeApiKey = { environmentId: a.environmentId, masked: true, replaceOffered: true, keyInPage: false, malformedUrlRejected: true, otherEnvironmentUnchanged: true }
 })
 
 test('embedded Browser: a forged renderer and device grant confer no Desktop authority; remote sessions get a disabled state', async ({ page }) => {

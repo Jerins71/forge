@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { CodexRuntimeAuth } from "../runtime/codex/codex-runtime-auth.js";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// Saved API access is read from this environment's auth file; an empty one means Subscription.
+const root = mkdtempSync(join(tmpdir(), "forge-codex-native-auth-"));
+const config = { paths: { dataDir: root, sharedAuthFile: join(root, "auth.json"), authFile: join(root, "legacy-auth.json") } } as never;
 
 function fixture() {
   const credential = { type: "oauth", access: "fake-access", refresh: "private-refresh", accountId: "account-a", expires: Date.now() + 3600000 };
@@ -10,7 +17,7 @@ function fixture() {
       anthropic: { type: "api_key", key: "unrelated-private-key" },
     })) };
   const client = { request: vi.fn(async () => ({})) };
-  const auth = new CodexRuntimeAuth({ config: {} as never, descriptor: {} as never, pool: pool as never });
+  const auth = new CodexRuntimeAuth({ config, descriptor: {} as never, pool: pool as never });
   return { credential, pool, client, auth };
 }
 
@@ -26,7 +33,7 @@ describe("Native Codex Forge authentication", () => {
       report: vi.fn(async () => ({ ...handle, lease: { ...handle.lease, credential: { ...handle.lease.credential, access: "broker-replacement" } } })),
       release: vi.fn(async () => {}).mockRejectedValueOnce(new Error("temporary broker failure")),
     };
-    const auth = new CodexRuntimeAuth({ config: {} as never, descriptor: {} as never, pool: f.pool as never, broker: broker as never });
+    const auth = new CodexRuntimeAuth({ config, descriptor: {} as never, pool: f.pool as never, broker: broker as never });
     await auth.initialize();
     await auth.login(f.client as never);
     expect(f.pool.select).not.toHaveBeenCalled();
