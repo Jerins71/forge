@@ -1,6 +1,6 @@
 import { loadState } from "./orchestration/store.js";
 import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
-import { requestForChoice } from "./orchestration/request-projection.js";
+import { requestForChoice, requestAttention } from "./orchestration/request-projection.js";
 import { formatActivityContent, projectAgentMetadata } from "@forge/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, createReadStream, openSync, readSync, statSync } from "node:fs";
@@ -110,6 +110,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const model=state.threads[descriptor.agentId]?.model ?? descriptor.model;
     const nativeBinding=Object.values(state.bindings).filter(b=>b.scope.threadId===descriptor.agentId && b.capabilities.provider===runtimeProviderCapabilities(model.provider).provider).sort((a,b)=>b.scope.generation-a.scope.generation)[0];
     const lineage=state.threads[descriptor.agentId]?.lineage;
+    const occurrence = requestAttention(database, state, descriptor.agentId) ?? (attention ? { attentionId: attention.attentionId, reason: attention.reason, raisedAt: attention.raisedAt } : undefined);
     const lifecycle = projectLifecycleStatus(state, descriptor.agentId);
     const status = lifecycle ? lifecycle.sessionStatus : row?.desired_state === "stopped" ? swarmManager.isSessionShutdownSafe(descriptor.agentId) ? "stopped" : "stopping"
       : descriptor.status === "streaming" ? "running" : descriptor.status === "terminated" ? "stopped"
@@ -127,7 +128,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       contextMode: { effective: descriptor.contextModeOverride ?? swarmManager.listProfiles().find(p => p.profileId === descriptor.profileId)?.defaultContextMode ?? "summary", ...(descriptor.contextModeOverride ? { override: descriptor.contextModeOverride } : {}) },
       model: { provider: model.provider, modelId: model.modelId, thinkingLevel: model.thinkingLevel,
         origin: model.provider !== descriptor.model.provider || model.modelId !== descriptor.model.modelId || descriptor.modelOrigin === "session_override" ? "session_override" : "profile_default" },
-      ...(attention ? { attentionOccurrence: { attentionId: attention.attentionId, reason: attention.reason, raisedAt: attention.raisedAt } } : {}) };
+      ...(occurrence ? { attentionOccurrence: occurrence } : {}) };
   }
   function upsertSession(tx: ControlTransaction, sessionId: string, pendingCount?: number) {
     const descriptor = swarmManager.getAgentForInternalUse(sessionId);
