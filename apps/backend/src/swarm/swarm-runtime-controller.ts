@@ -469,11 +469,14 @@ export class SwarmRuntimeController {
 
     try {
       let prepared: Parameters<NonNullable<RuntimeCreationOptions["onProviderPrepared"]>>[0] | undefined;
-      const acquisition=this.providerCreationScope.getStore();
+      const inherited = this.providerCreationScope.getStore();
+      // Native callbacks can spawn another actor while retaining the creator's
+      // async context. Its locator and scope only belong to that original actor.
+      const acquisition = inherited?.scope.threadId === descriptor.agentId ? inherited : undefined;
       const creationOptions: RuntimeCreationOptions = {
         ...options,
         ...(secureRuntimeBinding ? { secureRuntimeBinding } : {}),
-        providerScope:this.providerCreationScope.getStore()?.scope ?? this.providerScopeOwner?.prepare(descriptor) ?? options?.providerScope,
+        providerScope:acquisition?.scope ?? this.providerScopeOwner?.prepare(descriptor) ?? options?.providerScope,
         providerConversation:acquisition ? acquisition.conversation:this.providerScopeOwner?.conversation?.(descriptor.agentId) ?? options?.providerConversation,
         onProviderPrepared: input => { prepared = input; options?.onProviderPrepared?.(input); },
       };
