@@ -67,10 +67,12 @@ describe('Session references acceptance', () => {
       await f.manager.stopSession(f.otherAgentId)
       await f.environment.stop()
       const rebooted = new TestSwarmManager(f.config)
-      await bootWithDefaultManager(rebooted, f.config)
+      const reopened = await bootWithDefaultManager(rebooted, f.config)
       await rebooted.sendMessage(f.otherAgentId, 'manager', 'Still linked after restart', 'auto')
       await vi.waitFor(() => expect(lastRuntimeText(rebooted, 'manager')).toContain('Still linked after restart'))
       expect(lastRuntimeText(rebooted, 'manager')).toContain('Still linked after restart')
+      await reopened.stop()
+      await rebooted.disposeHistoryRecall()
     } finally {
       await f.environment.stop()
       await f.manager.disposeHistoryRecall()
