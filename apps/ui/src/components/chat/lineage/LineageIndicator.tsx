@@ -35,7 +35,8 @@ export function LineageIndicator({ lineage: snapshot, resolveSessionLabel, onOpe
           aria-label={`Lineage: ${summary.label}`}
           title={summary.label}
           className={cn(
-            'inline-flex h-5 min-w-0 max-w-56 shrink items-center gap-1 rounded-md border px-1.5 text-[10px] font-medium transition-colors lg:max-w-80',
+            // Icon-only with a comfortable tap target on narrow screens; the label joins it from md up.
+            'inline-flex h-7 min-w-0 max-w-56 shrink-0 items-center gap-1 rounded-md border px-2 text-[10px] font-medium transition-colors md:h-5 md:shrink md:px-1.5 lg:max-w-80',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
             summary.tone === 'warning'
               ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 hover:bg-amber-500/15 dark:text-amber-400'

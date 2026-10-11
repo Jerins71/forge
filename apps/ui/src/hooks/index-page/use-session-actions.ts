@@ -537,6 +537,7 @@ export function useSessionActions({
     if (!client) return
     setMergeBackSessionId(sessionAgentId)
     void client.mergeBackSession(sessionAgentId)
+      .then(() => setState((prev) => ({ ...prev, lastSuccess: 'Merge back sent to the parent session.' })))
       .catch((error: unknown) => {
         setState((prev) => ({
           ...prev,

@@ -284,6 +284,19 @@ test('switching provider confirms a handoff of the same session and the popover 
   await shot(page, '07-lineage-popover-coverage')
   await page.keyboard.press('Escape')
 
+  // Narrow layout: the indicator stays reachable as an icon and its popover fits the viewport.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(lineageChip(page)).toBeVisible()
+  await lineageChip(page).click()
+  const narrow = page.getByRole('dialog').filter({ hasText: 'Context handoffs' })
+  await expect(narrow).toBeVisible()
+  const box = (await narrow.boundingBox())!
+  expect(box.x).toBeGreaterThanOrEqual(0)
+  expect(box.x + box.width).toBeLessThanOrEqual(390)
+  await shot(page, '07b-lineage-popover-narrow')
+  await page.keyboard.press('Escape')
+  await page.setViewportSize({ width: 1440, height: 900 })
+
   // A provider that refuses the handoff is reported with its reason; nothing else is attempted.
   contract.refuse.set('session.provider.switch', { code: 'CONFLICT', message: 'UNSUPPORTED: this provider does not accept portable context', retryable: false })
   await page.getByRole('button', { name: /Change session model/ }).click()
@@ -309,6 +322,8 @@ test('a fork merges back into its parent after confirmation, live and after relo
   expect(calls('session.mergeBack')).toEqual([])
   await dialog.getByRole('button', { name: 'Merge back', exact: true }).click()
   await expect.poll(() => calls('session.mergeBack')).toHaveLength(1)
+  await expect(page.getByText('Merge back sent to the parent session.')).toBeVisible()
+  await shot(page, '10b-merge-back-sent')
   // The target is inferred from the lineage parent; the client names only the fork.
   expect(calls('session.mergeBack')[0]).toEqual({ commandId: expect.any(String), sessionId: forkSessionId })
 
