@@ -27,7 +27,7 @@ export function createDetailStream(deps: StreamDependencies) {
       readBarrier(deps, () => {
         requireSession(input.sessionId);
         unsubscribe = deps.subscribeCommitted(event => {
-          if (event.sequence <= high || (event.eventType !== "recovery.upsert" && (event.sessionId !== input.sessionId || event.topic === "shell"))) return;
+          if (event.sequence <= high || (event.eventType !== "recovery.upsert" && (event.sessionId !== input.sessionId || (event.topic === "shell" && event.eventType !== "session.upsert")))) return;
           const item = { kind: "event", streamEpoch: epoch, sequence: event.sequence, event: event.event };
           try {
             if (encodedBytes(item) > EVENT_BYTES) throw new StreamFault("RESYNC_REQUIRED", "Event exceeds wire budget.");

@@ -8,6 +8,33 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanups.splice(0)) await close(); });
 
 describe("SQLite stream barrier through real socket", () => {
+  it("forwards only the subscribed session summary in both live and replay detail", async () => {
+    const streams = await streamFixture();
+    const abort = new AbortController();
+    cleanups.push(async () => { abort.abort(); await streams.close(); });
+    streams.sink.transaction(tx => {
+      streams.sink.append(tx, { topic: "shell", sessionId: "session", event: { type: "session.upsert", session: session() } });
+      streams.sink.append(tx, { topic: "shell", sessionId: "other", event: { type: "session.upsert", session: session("other") } });
+    });
+    const cursor = { streamEpoch: streams.sink.streamEpoch, afterSequence: streams.sink.highWater };
+    const live = streams.detailStream.detail(principal, { sessionId: "session", cursor }, abort.signal);
+    expect((await live.next()).value).toMatchObject({ kind: "synchronized", sequence: cursor.afterSequence });
+    const summary = { ...session(), attention: "result" as const };
+    streams.sink.transaction(tx => {
+      // Unrelated shell traffic must be filtered before serialization/queue budgeting.
+      for (let i = 0; i < 1000; i++) streams.sink.append(tx, { topic: "shell", sessionId: "other", event: { type: "session.upsert", session: session("other", `update ${i}`) } });
+      streams.sink.append(tx, { topic: "shell", sessionId: "session", event: { type: "session.upsert", session: summary } });
+    });
+    const replay = streams.detailStream.detail(principal, { sessionId: "session", cursor }, abort.signal);
+    const expected = { kind: "event", sequence: 1003, event: { type: "session.upsert", session: summary } };
+    expect((await replay.next()).value).toMatchObject(expected);
+    expect((await replay.next()).value).toMatchObject({ kind: "synchronized", sequence: 1003 });
+    expect((await live.next()).value).toMatchObject(expected);
+    abort.abort();
+    expect((await live.next()).done).toBe(true);
+    expect((await replay.next()).done).toBe(true);
+  });
+
   it("stages every shell page at H, queues final page result before synchronized, then concurrent writes", async () => {
     const streams = await streamFixture();
     streams.sink.transaction(tx => { for (let i = 0; i < 1001; i++) streams.sink.append(tx, { topic: "shell", sessionId: null, event: { type: "session.upsert", session: session(`s${String(i).padStart(4, "0")}`) } }); });
