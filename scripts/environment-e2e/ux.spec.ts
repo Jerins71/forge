@@ -212,6 +212,53 @@ test('a new thread on a paired machine starts with the chosen work mode and rost
   assertions.launchRemote = { environmentId: b.environmentId, ...launched }
 })
 
+test('a session on a paired machine is archived and deleted from its row, live and after reload', async ({ page }) => {
+  const { b } = fleet
+  const session = await bootstrap(b)
+  const projectId = (await shellSession(b, b.sessionId))!.projectId
+  const launch = async (title: string) => {
+    const commandId = randomUUID()
+    const receipt = await fixtureRpcOnce(b.baseUrl, session, 'session.launch', { commandId, projectId, title, workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: title, artifactIds: [] } })
+    await until(async () => (await shellSession(b, receipt.sessionId))?.status, status => status === 'idle', 30_000)
+    return receipt.sessionId as string
+  }
+  const archived = await launch('Remote session to archive')
+  const deleted = await launch('Remote session to delete')
+  const row = (sessionId: string) => page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${sessionId}"]`).filter({ visible: true })
+
+  await page.goto(fleet.uiUrl)
+  await expect(row(archived)).toHaveCount(1)
+  await expect(row(deleted)).toHaveCount(1)
+
+  // Archive: the same menu a local session has, applied on the machine that owns the session.
+  await row(archived).click({ button: 'right' })
+  await shot(page, 'remote-session-menu')
+  await page.getByRole('menuitem', { name: 'Archive', exact: true }).click()
+  await expect(row(archived)).toHaveCount(0)
+  await expect.poll(async () => (await shellSession(b, archived))?.archived).toBe(true)
+
+  // Delete asks first, then removes the session from that machine.
+  await row(deleted).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
+  await page.getByRole('button', { name: 'Delete session', exact: true }).click()
+  await expect(row(deleted)).toHaveCount(0)
+  await expect.poll(async () => (await shellSession(b, deleted)) ?? null).toBeNull()
+  await expect(page.getByRole('complementary').getByRole('alert')).toHaveCount(0)
+
+  await page.reload()
+  await expect(row(b.sessionId)).toHaveCount(1)
+  await expect(row(archived)).toHaveCount(0)
+  await expect(row(deleted)).toHaveCount(0)
+  // The project's own session keeps Archive but, as on this machine, is not deleted on its own.
+  await row(b.sessionId).click({ button: 'right' })
+  await expect(page.getByRole('menuitem', { name: 'Archive', exact: true })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'Delete', exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await shot(page, 'remote-session-removed')
+  assertions.remoteSessionMenu = { environmentId: b.environmentId, archived, deleted }
+  expect(renderErrors).toEqual([])
+})
+
 test('a spawned worker leaves one result in the manager chat, live and after reload', async ({ page }) => {
   const { a } = fleet
   await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(viewedSession())}`)
