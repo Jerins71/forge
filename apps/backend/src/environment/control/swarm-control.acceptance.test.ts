@@ -776,6 +776,25 @@ it.each(["failed", "completed"] as const)("worker outcome %s feeds its owning ma
   await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe(outcome === "failed" ? "work_failed" : "work_settled"));
 });
 
+it("a new successful turn replaces prior failure attention with work_settled", async () => {
+  const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true;
+  let failedId: string | undefined;
+  for (const outcome of ["failed", "completed"] as const) {
+    const commandId = randomUUID();
+    await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "New attention epoch", artifactIds: [] } });
+    await f.core.effectWorker.drain(); const token = f.runtimeTokens.get(f.sessionId)!;
+    await f.manager.handleRuntimeStatus(token, f.sessionId, "streaming", 0);
+    const state = loadState(f.database); const run = state.runs[`run-${commandId}`]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+    f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+      type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome,
+    } });
+    await f.manager.handleRuntimeStatus(token, f.sessionId, "idle", 0);
+    await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe(outcome === "failed" ? "work_failed" : "work_settled"));
+    const attentionId = f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)!.attentionId;
+    if (outcome === "failed") failedId = attentionId; else expect(attentionId).not.toBe(failedId);
+  }
+});
+
 it("Stop's interrupted run is never failure attention", async () => {
   const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true; const commandId = randomUUID();
   await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "Stop this", artifactIds: [] } });
