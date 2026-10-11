@@ -3,21 +3,22 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
-import { createCodexAppServerClient } from "../../codex-app-server/codex-app-server-client.js";
 import type { CodexAppServerClientFactory, CodexAppServerClientPort } from "../../codex-app-server/types.js";
 import { openSessionManagerWithSizeGuard } from "../../session/session-file-guard.js";
 import type { AgentContextUsage, AgentDescriptor, AgentStatus, RequestedDeliveryMode, SendMessageReceipt } from "../../types.js";
 import type { RuntimeCreationOptions, RuntimeSessionEvent, RuntimeShutdownOptions, RuntimeUserMessage, RuntimeUserMessageInput, SwarmAgentRuntime, SwarmRuntimeCallbacks } from "../../runtime-contracts.js";
 import { normalizeRuntimeError, normalizeRuntimeUserMessage } from "../runtime-utils.js";
 import { CodexRuntimeEvents } from "./codex-runtime-events.js";
-import { CodexRuntimeTools } from "./codex-runtime-tools.js";
-import { nativeCodexEnvironment, type CodexRuntimeAuth } from "./codex-runtime-auth.js";
+import type { CodexRuntimeAuth } from "./codex-runtime-auth.js";
 import { buildModelChangeRecoveryContext } from "../model-change-recovery-context.js";
 import { isConversationEntryEvent } from "../../session/conversation-validators.js";
 import { getCatalogContextWindow } from "@forge/protocol";
 import type { ChoiceQuestion, ChoiceAnswer } from "@forge/protocol";
-import { assertNativeCodexVersion, resolveNativeCodexBinary } from "./codex-native-binary.js";
-import { readNativeToolContract } from "./codex-tool-contract.js";
+import { CodexProviderAdapter, CodexProviderDispatchError } from "./codex-provider-adapter.js";
+import { createInstructionBundle } from "../instruction-bundle.js";
+import { bindRuntimeToolHost } from "../runtime-tool-plan.js";
+import type { SwarmToolHost } from "../../swarm-tool-host.js";
+import type { ProviderBinding, ProviderOpenInput, ToolHostBinding } from "../provider-contract.js";
 import { ChoiceRequestCancelledError } from "../../swarm-choice-service.js";
 
 export const NATIVE_CODEX_STATE = "swarm_native_codex_state";
@@ -28,6 +29,7 @@ interface QueuedInput {
   recorded?: boolean;
 }
 interface ActiveTurn {
+  attemptId: string;
   id?: string;
   startedAt: number;
   failed?: boolean;
@@ -47,8 +49,8 @@ interface Options {
   dataDir?: string;
   projectTrusted: boolean;
   auth: Pick<CodexRuntimeAuth, "login" | "refresh" | "release">;
-  tools: ConstructorParameters<typeof CodexRuntimeTools>[0]["tools"];
-  host: ConstructorParameters<typeof CodexRuntimeTools>[0]["host"];
+  tools: ToolHostBinding["tools"];
+  host: Pick<SwarmToolHost, "requestUserChoice">;
   creationOptions?: RuntimeCreationOptions;
   createClient?: CodexAppServerClientFactory;
 }
@@ -57,9 +59,11 @@ interface Options {
 export class CodexAgentRuntime implements SwarmAgentRuntime {
   readonly runtimeType = "codex" as const;
   readonly descriptor: AgentDescriptor;
-  private readonly client: CodexAppServerClientPort;
+  readonly providerAdapter: CodexProviderAdapter;
+  private providerBinding!: ProviderBinding;
+  private readonly providerInput: ProviderOpenInput;
+  private get client(): CodexAppServerClientPort { return this.providerAdapter.nativeClient; }
   private readonly session: SessionManager;
-  private readonly bridge: CodexRuntimeTools;
   private readonly queued: QueuedInput[] = [];
   private threadId = "";
   private hasStartedTurn = false;
@@ -86,38 +90,27 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       const usage = parseNativeUsageEntry(entry);
       if (usage) this.accounting.consume(usage);
     }
-    this.bridge = new CodexRuntimeTools({ tools: options.tools, agentId: this.descriptor.agentId,
-      host: options.host, emit: event => this.emit(event) });
-    this.client = (options.createClient ?? (handlers => createCodexAppServerClient(handlers, {
-      command: resolveNativeCodexBinary({ dataDir: options.dataDir }),
-      args: ["app-server", "--listen", "stdio://", "-c", 'cli_auth_credentials_store="ephemeral"'],
-      spawnOptions: { cwd: this.descriptor.cwd, env: nativeCodexEnvironment(options.codexHome) },
-    })))({
+    const scope = options.creationOptions?.providerScope ?? { threadId: this.descriptor.agentId, bindingId: `codex:${this.descriptor.agentId}`, generation: 0 };
+    this.providerInput = { scope, model: this.descriptor.model, required: options.creationOptions?.providerRequirements,
+      instructions: options.creationOptions?.instructionBundle ?? createInstructionBundle(this.descriptor, options.systemPrompt),
+      toolHost: options.creationOptions?.toolHostBinding ?? bindRuntimeToolHost({ descriptor: this.descriptor, tools: options.tools, mechanism: "dynamic_tools", scope }) };
+    const stored = this.getCustomEntries(NATIVE_CODEX_STATE).at(-1) as ThreadState | undefined;
+    this.providerAdapter = new CodexProviderAdapter({ codexHome: options.codexHome, dataDir: options.dataDir,
+      projectTrusted: options.projectTrusted, auth: options.auth, createClient: options.createClient,
+      previousPromptDigest: stored?.promptDigest, host: options.host, autoRespond: true,
+      toolEvents: event => this.emit(event),
       onNotification: (method, params) => {
-        this.events = this.events.then(() => this.onNotification(method, record(params))).catch(error => this.fail(error, this.active?.finishing === true));
+        this.events = this.events.then(() => this.onNotification(method, params)).catch(error => this.fail(error, this.active?.finishing === true));
         return this.events;
       },
-      onRequest: (method, params) => this.onRequest(method, record(params)),
       onExit: error => { if (!this.closed) void this.fail(error, true); },
     });
   }
 
   static async create(options: Options): Promise<CodexAgentRuntime> {
-    if (!options.createClient) await assertNativeCodexVersion(resolveNativeCodexBinary({ dataDir: options.dataDir }), nativeCodexEnvironment(options.codexHome));
     const runtime = new CodexAgentRuntime(options);
     try {
-      await runtime.client.connect();
-      await options.auth.login(runtime.client);
       const stored = runtime.getCustomEntries(NATIVE_CODEX_STATE).at(-1) as ThreadState | undefined;
-      const config: Record<string, unknown> = {
-        "shell_environment_policy.inherit": "core",
-        "cli_auth_credentials_store": "ephemeral",
-        "features.multi_agent": false,
-      };
-      if (options.projectTrusted) config[`projects.${JSON.stringify(options.descriptor.cwd)}.trust_level`] = "trusted";
-      const common = { model: options.descriptor.model.modelId, cwd: options.descriptor.cwd,
-        developerInstructions: options.systemPrompt, approvalPolicy: "never", sandbox: "danger-full-access", config,
-        allowProviderModelFallback: false };
       // Model switches use Forge's explicit historical recovery block. Ordinary restarts resume.
       // Codex does not persist an unused thread. Recreate that empty allocation
       // after settings recycle; never discard a thread that has accepted a turn.
@@ -131,20 +124,11 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       const forkFrom = reuse || !usable ? undefined
         : owned ? stored.forkFrom
         : stored.hasStartedTurn !== false && stored.cwd === options.descriptor.cwd ? stored.threadId : undefined;
-      const method = reuse ? "thread/resume" : forkFrom ? "thread/fork" : "thread/start";
-      const response = await runtime.client.request<any>(method, {
-        ...common,
-        ...(reuse ? { threadId: stored.threadId } : forkFrom ? { threadId: forkFrom, ephemeral: false }
-          : { dynamicTools: runtime.bridge.definitions(), ephemeral: false }),
-      });
-      if (typeof response?.thread?.id !== "string") throw new Error("Codex did not return a native thread identity");
-      runtime.threadId = response.thread.id;
-      if (response.model && response.model !== options.descriptor.model.modelId) {
-        throw new Error(`Codex selected ${response.model} instead of the requested ${options.descriptor.model.modelId}.`);
-      }
-      // A fork inherits the source thread's tool contract; tools this session does
-      // not offer (for example, delegation in a side chat) become unavailable.
-      if (reuse || forkFrom) runtime.bridge.restoreContract(await readNativeToolContract(response.thread.path, options.codexHome, runtime.threadId));
+      runtime.providerBinding = reuse
+        ? await runtime.providerAdapter.resume({ ...runtime.providerInput, conversation: { ...runtime.providerInput.scope, kind: "conversation", nativeId: stored.threadId } })
+        : forkFrom ? await runtime.providerAdapter.fork({ ...runtime.providerInput, source: { ...runtime.providerInput.scope, kind: "conversation", nativeId: forkFrom } })
+        : await runtime.providerAdapter.open(runtime.providerInput);
+      runtime.threadId = runtime.providerBinding.conversation.nativeId;
       runtime.hasStartedTurn = Boolean(reuse);
       if (!reuse && !forkFrom) {
         const recovery = options.creationOptions?.startupRecoveryContext?.blockText
@@ -158,24 +142,16 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
         }] });
       }
       const promptDigest = createHash("sha256").update(options.systemPrompt).digest("hex");
-      // A resumed or forked rollout retains earlier developer messages. Make a changed
-      // Forge contract explicit in native history; never silently retain an old posture.
-      // A fork always carries its source's contract, never this session's.
-      if (forkFrom || (reuse && stored.promptDigest !== promptDigest)) {
-        await runtime.client.request("thread/inject_items", { threadId: runtime.threadId, items: [{
-          type: "message", role: "developer", content: [{ type: "input_text",
-            text: `The following is the current Forge integration contract. It replaces earlier Forge integration instructions, including work routing. Native Codex instructions remain in effect.\n\n${options.systemPrompt}` }],
-        }] });
-      }
       runtime.appendCustomEntry(NATIVE_CODEX_STATE, { version: 1, threadId: runtime.threadId,
         ownerAgentId: options.descriptor.agentId, cwd: options.descriptor.cwd, promptDigest, hasStartedTurn: runtime.hasStartedTurn,
         ...(forkFrom ? { forkFrom } : {}) } satisfies ThreadState);
       return runtime;
     } catch (error) {
       runtime.closed = true;
-      try { await runtime.client.shutdown?.(); }
-      catch { throw new AggregateError([error], "Native Codex startup failed and subprocess cleanup is not confirmed."); }
-      finally { runtime.client.dispose(); await options.auth.release(); }
+      if (runtime.providerBinding) {
+        try { await runtime.providerAdapter.close(runtime.providerBinding); }
+        catch (cleanup) { throw new AggregateError([error, cleanup], "Native Codex startup failed and subprocess cleanup is not confirmed."); }
+      }
       throw error;
     }
   }
@@ -209,8 +185,11 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
         const active = this.active;
         active.pendingSteers.set(deliveryId, message);
         try {
-          await this.client.request("turn/steer", { threadId: this.threadId, expectedTurnId: active.id,
-            input: nativeInput(message), clientUserMessageId: deliveryId });
+          if (!active.id) throw new Error("Native Codex turn acceptance is uncertain");
+          const response = await this.providerAdapter.steer({ binding: this.providerBinding,
+            turn: { ...this.providerBinding.scope, kind: "turn", conversationId: this.threadId, nativeId: active.id },
+            runId: deliveryId, attemptId: active.attemptId, input: message });
+          if (response.status === "unknown") throw new Error("Native Codex steer acceptance is uncertain");
         } catch (error) {
           if (typeof (error as { code?: unknown })?.code === "number") active.pendingSteers.delete(deliveryId);
           throw error;
@@ -233,7 +212,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       await this.publishStatus();
       await this.emit({ type: "agent_start" });
       try {
-        await this.client.request("thread/compact/start", { threadId: this.threadId });
+        await this.providerAdapter.compact({ binding: this.providerBinding, attemptId: turn.attemptId });
       } catch (error) {
         await this.fail(error, typeof (error as { code?: unknown })?.code === "number");
         throw error;
@@ -261,17 +240,15 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
         throw new Error("Native Codex turn acceptance is uncertain; replacement remains blocked until its identity is confirmed.");
       }
       if (active?.id) {
-        await this.client.request("turn/interrupt", { threadId: this.threadId, turnId: active.id }, remaining());
+        await deadline(this.providerAdapter.interrupt({ binding: this.providerBinding, attemptId: active.attemptId,
+          turn: { ...this.providerBinding.scope, kind: "turn", conversationId: this.threadId, nativeId: active.id } }), remaining());
         await deadline(active.settled, remaining());
       }
       if (!this.client.isDisposed()) await this.client.request("thread/backgroundTerminals/clean", { threadId: this.threadId }, remaining());
-      await deadline(this.bridge.drain(), remaining());
       await deadline(this.events, remaining());
       // Forge detaches stopped runtimes. Release the native thread writer before
       // reporting cleanup complete so the next runtime can resume its history.
-      if (!this.client.shutdown) throw new Error("Native Codex client cannot confirm process exit");
-      await this.client.shutdown(remaining());
-      await this.options.auth.release();
+      await deadline(this.providerAdapter.close(this.providerBinding), remaining());
       this.closed = true;
       this.status = "idle";
       await this.publishStatus();
@@ -291,23 +268,21 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
 
   private async startTurn(message: RuntimeUserMessage, deliveryId: string, recorded = false): Promise<void> {
     this.dispatching = true;
-    const active = this.beginTurn();
+    const active = this.beginTurn(deliveryId);
     let submitted = false;
     try {
       await this.publishStatus();
       await this.emit({ type: "agent_start" });
       await this.emit({ type: "turn_start" });
-      await this.options.auth.login(this.client);
       // Activate Forge's queued input/output target before native output can
       // arrive. turn_start alone does not consume an inbound user message.
       await this.emit({ type: "message_start", message: { role: "user", content: message.text } });
       const text = [this.pinned ? `<forge_pinned_context>\n${this.pinned}\n</forge_pinned_context>` : undefined, message.text].filter(Boolean).join("\n\n");
       submitted = true;
-      const response = await this.client.request<any>("turn/start", { threadId: this.threadId,
-        input: nativeInput({ ...message, text }), model: this.descriptor.model.modelId,
-        effort: this.descriptor.model.thinkingLevel, clientUserMessageId: deliveryId });
-      if (typeof response?.turn?.id !== "string") throw new Error("Codex did not acknowledge a turn identity");
-      active.id = response.turn.id;
+      const response = await this.providerAdapter.start({ binding: this.providerBinding, runId: deliveryId,
+        attemptId: active.attemptId, input: { ...message, text } });
+      if (response.status !== "accepted") throw new Error("Codex did not acknowledge a turn identity");
+      active.id = response.turn.nativeId;
       this.markThreadStarted();
       if (!recorded) this.recordUser(message);
       if (!this.recoveryConsumed) {
@@ -316,7 +291,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       }
     } catch (error) {
       // A protocol rejection is acknowledged failure; a lost response is uncertain ownership.
-      await this.fail(error, !submitted || typeof (error as { code?: unknown })?.code === "number");
+      await this.fail(error, !submitted || error instanceof CodexProviderDispatchError || typeof (error as { code?: unknown })?.code === "number");
       throw error;
     }
     finally { this.dispatching = false; }
@@ -329,24 +304,13 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     this.appendCustomEntry(NATIVE_CODEX_STATE, { ...state, hasStartedTurn: true } satisfies ThreadState);
   }
 
-  private beginTurn(): ActiveTurn {
+  private beginTurn(attemptId: string = randomUUID()): ActiveTurn {
     let settle!: () => void;
-    const active: ActiveTurn = { startedAt: Date.now(), pendingSteers: new Map(), asyncQuestionIds: new Set(), abort: new AbortController(), mapper: new CodexRuntimeEvents(),
+    const active: ActiveTurn = { attemptId, startedAt: Date.now(), pendingSteers: new Map(), asyncQuestionIds: new Set(), abort: new AbortController(), mapper: new CodexRuntimeEvents(),
       settled: new Promise<void>(resolve => { settle = resolve; }), settle: () => settle() };
     this.active = active;
     this.status = "streaming";
     return active;
-  }
-
-  private async onRequest(method: string, params: Record<string, any>): Promise<unknown> {
-    if (method === "account/chatgptAuthTokens/refresh") return this.options.auth.refresh();
-    await this.events;
-    const active = this.active;
-    if (!active || params.threadId !== this.threadId || (active.id && params.turnId !== active.id)) {
-      throw new Error("Codex request is not owned by the active Forge turn");
-    }
-    return this.bridge.request(method, method === "item/fileChange/requestApproval"
-      ? { ...params, forgeFileChanges: active.mapper.fileChangeApproval(params.itemId) } : params, active.abort.signal);
   }
 
   private async onNotification(method: string, params: Record<string, any>): Promise<void> {
@@ -505,11 +469,6 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
   }
 }
 
-function nativeInput(message: RuntimeUserMessage) {
-  return [{ type: "text", text: message.text, text_elements: [] },
-    ...(message.images ?? []).map(image => ({ type: "image", url: `data:${image.mimeType};base64,${image.data}` }))];
-}
-function record(value: unknown): Record<string, any> { return value && typeof value === "object" ? value as Record<string, any> : {}; }
 
 function parseNativeAsyncQuestions(value: unknown): ChoiceQuestion[] | undefined {
   if (!Array.isArray(value) || value.length < 1 || value.length > 3) return undefined;

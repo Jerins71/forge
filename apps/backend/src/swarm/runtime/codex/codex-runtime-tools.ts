@@ -1,9 +1,11 @@
 import { Value } from "@sinclair/typebox/value";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { ChoiceQuestion } from "@forge/protocol";
+import type { ProviderToolCallRef, ChoiceQuestion } from "@forge/protocol";
 import type { RuntimeSessionEvent } from "../../runtime-contracts.js";
 import type { SwarmToolHost } from "../../swarm-tool-host.js";
 import { normalizeNativeToolContract, stableToolContract } from "./codex-tool-contract.js";
+
+import type { ToolHostBinding } from "../provider-contract.js";
 
 type Tool = ToolDefinition<any, any, any>;
 type NativeTool = { name: string; type: string; inputSchema: unknown };
@@ -16,18 +18,18 @@ export class CodexRuntimeTools {
   private legacyBudgetTools = new Set<string>();
 
   constructor(private readonly options: {
-    tools: Tool[];
+    toolHost: ToolHostBinding;
     agentId: string;
     host: Pick<SwarmToolHost, "requestUserChoice">;
-    emit(event: RuntimeSessionEvent): Promise<void>;
+    emit(event: RuntimeSessionEvent, ref?: ProviderToolCallRef): Promise<void>;
   }) {
-    this.tools = new Map(options.tools.map(tool => [tool.name, tool]));
+    this.tools = new Map(options.toolHost.tools.map(tool => [tool.name, tool]));
   }
 
   definitions() {
     return [{ type: "namespace", name: "forge", description: "Forge session coordination, task notes, history, and browser integration.",
-      tools: [...this.tools.values()].map(tool => ({ type: "function", name: tool.name,
-        description: tool.description, inputSchema: tool.parameters, deferLoading: false })) }];
+      tools: this.options.toolHost.snapshot.tools
+        .map(tool => ({ type: "function", name: tool.name, description: tool.description, inputSchema: tool.inputSchema, deferLoading: false })) }];
   }
 
   restoreContract(definitions: unknown): void {
@@ -53,17 +55,17 @@ export class CodexRuntimeTools {
     this.legacyBudgetTools = persisted.legacyBudgetTools;
   }
 
-  async drain(): Promise<void> { await Promise.allSettled([...this.pending]); }
+  async drain(): Promise<void> { while (this.pending.size) await Promise.allSettled([...this.pending]); }
 
-  async request(method: string, params: Record<string, any>, signal: AbortSignal): Promise<unknown> {
+  async request(method: string, params: Record<string, any>, signal: AbortSignal, ref?: ProviderToolCallRef): Promise<unknown> {
     if (signal.aborted) throw new Error("Codex turn was stopped");
-    const work = this.handleRequest(method, params, signal);
+    const work = this.handleRequest(method, params, signal, ref);
     this.pending.add(work);
     try { return await work; } finally { this.pending.delete(work); }
   }
 
-  private async handleRequest(method: string, params: Record<string, any>, signal: AbortSignal): Promise<unknown> {
-    if (method === "item/tool/call") return this.callTool(params, signal);
+  private async handleRequest(method: string, params: Record<string, any>, signal: AbortSignal, ref?: ProviderToolCallRef): Promise<unknown> {
+    if (method === "item/tool/call") return this.callTool(params, signal, ref);
     if (method === "item/tool/requestUserInput") {
       if (!Array.isArray(params.questions) || params.questions.some((q: any) => q.isSecret)) {
         throw new Error("Native Codex cannot collect secrets through ordinary questions. Use a supported Secure Session.");
@@ -106,7 +108,7 @@ export class CodexRuntimeTools {
     throw new Error(`Unsupported native Codex request: ${method}`);
   }
 
-  private async callTool(params: Record<string, any>, signal: AbortSignal): Promise<unknown> {
+  private async callTool(params: Record<string, any>, signal: AbortSignal, ref?: ProviderToolCallRef): Promise<unknown> {
     const tool = params.namespace === "forge" ? this.tools.get(params.tool) : undefined;
     if (!tool && params.namespace === "forge" && this.unavailableTools.has(params.tool)) {
       return { success: false, contentItems: [{ type: "inputText",
@@ -120,18 +122,24 @@ export class CodexRuntimeTools {
     }
     if (!Value.Check(tool.parameters, args)) throw new Error("Invalid Forge tool arguments");
     const toolCallId = String(params.callId);
-    await this.options.emit({ type: "tool_execution_start", toolName: tool.name, toolCallId, args: params.arguments });
+    await this.options.emit({ type: "tool_execution_start", toolName: tool.name, toolCallId, args: params.arguments }, ref);
     try {
-      const result = await tool.execute(toolCallId, args, signal, undefined, {} as never);
+      if (!ref) throw new Error("Forge tool call has no scoped native identity");
+      const onUpdate = (partialResult: unknown) => {
+        const update = this.options.emit({ type: "tool_execution_update", toolName: tool.name, toolCallId, partialResult }, ref);
+        this.pending.add(update);
+        void update.catch(() => undefined).finally(() => this.pending.delete(update));
+      };
+      const result = await this.options.toolHost.invoke({ ref, name: tool.name, args, signal, onUpdate, context: {} as never });
       if (signal.aborted) throw new Error("Codex turn was stopped");
       const isError = (result as { isError?: boolean }).isError === true;
-      await this.options.emit({ type: "tool_execution_end", toolName: tool.name, toolCallId, result, isError });
+      await this.options.emit({ type: "tool_execution_end", toolName: tool.name, toolCallId, result, isError }, ref);
       return { success: !isError, contentItems: result.content.map((block: any) => block.type === "image"
         ? { type: "inputImage", imageUrl: `data:${block.mimeType};base64,${block.data}` }
         : { type: "inputText", text: String(block.text ?? "").slice(0, 32_000) }) };
     } catch (error) {
       const result = { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }] };
-      await this.options.emit({ type: "tool_execution_end", toolName: tool.name, toolCallId, result, isError: true });
+      await this.options.emit({ type: "tool_execution_end", toolName: tool.name, toolCallId, result, isError: true }, ref);
       return { success: false, contentItems: [{ type: "inputText", text: result.content[0]!.text }] };
     }
   }
