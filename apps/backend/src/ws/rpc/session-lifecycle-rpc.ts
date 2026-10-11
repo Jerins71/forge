@@ -5,7 +5,7 @@ import type { SwarmManager } from '../../swarm/swarm-manager.js';
 import { requireNonSystemSessionProfile } from '../../swarm/system-profile-guards.js';
 import { StreamFault } from '../../environment/streams/stream-budget.js';
 
-export const lifecycleMethods = ['session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.fork', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill'] as const;
+export const lifecycleMethods = ['session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill'] as const;
 export type SessionLifecycleMethod = typeof lifecycleMethods[number];
 /** Native producers share the existing admission/effect lanes and domain policy. */
 export function createSessionLifecycleRpc({ swarmManager: swarm, control }: { swarmManager: SwarmManager; control: ControlService }) {
@@ -28,18 +28,16 @@ export function createSessionLifecycleRpc({ swarmManager: swarm, control }: { sw
       const projectId = target?.profileId ?? input.sessionId;
       const stop = method === 'session.archive' || method === 'session.clear' || method === 'session.delete' || method === 'session.stopAll';
       const sessionIds = [input.sessionId];
-      if (method === 'session.delete' || method === 'session.fork' && 'purpose' in input && input.purpose === 'side_chat')
+      if (method === 'session.delete')
         sessionIds.push(...swarm.listAgents().filter(d => d.role === 'manager' && d.sideChatSourceAgentId === input.sessionId).map(d => d.agentId));
-      const forkId = `v2-${input.commandId}`;
       await control.admitLifecycle(principal, {
         commandId: input.commandId, command: method, request: input,
         sessionIds, intent: stop ? 'stop' : method === 'session.resume' ? 'resume' : method === 'session.choice.cancel' ? 'cancel-choice' : 'inspect',
         ...('choiceId' in input ? { choiceId: input.choiceId } : {}),
-        receipt: { method, sessionId: method === 'session.fork' ? forkId : input.sessionId, projectId }, receiptReplay: true, requiredScope: rpcScopes[method],
-        ...(method === 'session.fork' ? { frozenRequest: { sessionId: forkId } } : {}),
+        receipt: { method, sessionId: input.sessionId, projectId }, receiptReplay: true, requiredScope: rpcScopes[method],
         preflight() {
           if (!target || target.role !== 'manager') throw new StreamFault('NOT_FOUND', 'Manager session not found');
-          if (method === 'session.clear' || method === 'session.delete' || method === 'session.archive' || method === 'session.restore' || method === 'session.fork') {
+          if (method === 'session.clear' || method === 'session.delete' || method === 'session.archive' || method === 'session.restore') {
             try { requireNonSystemSessionProfile(input.sessionId, swarm.listProfiles(), id => swarm.getAgent(id)); }
             catch { throw new StreamFault('FORBIDDEN', 'Cannot modify sessions in system-managed profiles'); }
           }
@@ -60,11 +58,6 @@ export function createSessionLifecycleRpc({ swarmManager: swarm, control }: { sw
           case 'session.restore': result = { ...result, ...await swarm.restoreSession(input.sessionId) }; break;
           case 'session.clear': await swarm.clearSessionConversation(input.sessionId); break;
           case 'session.delete': result = { ...result, ...await swarm.deleteSession(input.sessionId) }; break;
-          case 'session.fork': {
-            const fork = input as RpcInput<'session.fork'>;
-            const created = await swarm.forkSession(input.sessionId, { sessionAgentId: forkId, label: fork.title, fromMessageId: fork.fromItemId, sessionPurpose: fork.purpose });
-            result = { projectId: created.profile.profileId, sessionId: created.sessionAgent.agentId }; break;
-          }
           case 'session.choice.cancel': swarm.cancelChoiceRequest((input as RpcInput<'session.choice.cancel'>).choiceId, 'cancelled'); break;
           case 'session.stopAll': result = { ...result, ...await swarm.stopAllAgents(input.sessionId, input.sessionId) }; break;
           case 'worker.stop': await swarm.stopWorker((input as RpcInput<'worker.stop'>).workerId); break;

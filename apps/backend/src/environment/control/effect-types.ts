@@ -78,6 +78,8 @@ export interface EffectRow {
   last_error_json: string | null;
 }
 export interface ControlCoreOptions {
+  /** Isolated environment root for immutable portable handoff artifacts. */
+  dataDir?: string;
   databasePath?: string;
   /** Shared raw SQLite connection; the factory never opens a second connection when provided. */
   database?: Database;

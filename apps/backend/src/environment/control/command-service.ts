@@ -11,6 +11,7 @@ import {
   type ChoiceSummarySchema,
 } from "@forge/protocol/environment-v2";
 import type { Static } from "@sinclair/typebox";
+import { createLineageCommands, lineageMethods, type LineageMethod } from "./orchestration/lineage-commands.js";
 import type { ControlMethod, ControlService, LifecycleAdmission, Principal } from "./control-types.js";
 import type { ControlCoreOptions, ControlEffect, InputRoutePort, PreparedLaunch } from "./effect-types.js";
 import type { ControlTransaction, EventSink } from "./event-sink.js";
@@ -507,6 +508,11 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       return receipt;
     });
   };
+  const readAuthorizedReceipt = (principal:Principal,commandId:string) => {
+    const row=database.prepare("SELECT device_session_id FROM commands WHERE command_id=?").get(commandId) as {device_session_id:string}|undefined;
+    if(!row || row.device_session_id!==principal.deviceSessionId) throw new ControlError("NOT_FOUND","Command not found");
+    return readReceipt(sink,commandId);
+  };
   return {
     admitLifecycle,
     record(command) { sink.transaction(tx => sink.commitCommand(tx, command)); },
@@ -539,6 +545,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         return { runId, receipt: readReceipt(sink,input.commandId) };
       });
     },
+    readLineage(principal,input) { return createLineageCommands(sink,options,admitLifecycle,async (p,id) => readAuthorizedReceipt(p,id)).read(principal,input); },
     async readWorkspace(principal, method, input) {
       if (!principal.scopes.has(rpcScopes[method]) || options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Workspace read is not authorized");
       if (!TypeCompiler.Compile(rpcSchemas[method].input).Check(input)) throw new ControlError("INVALID_INPUT", "Invalid directory read");
@@ -546,6 +553,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
       return options.policy.read(method, input);
     },
     async execute(principal, method, input) {
+      if ((lineageMethods as readonly string[]).includes(method)) return createLineageCommands(sink,options,admitLifecycle,async (p,id) => readAuthorizedReceipt(p,id)).execute(principal,method as LineageMethod,input as RpcInput<LineageMethod>);
       if (!(method in validators)) {
         if (!TypeCompiler.Compile(rpcSchemas[method].input).Check(input)) throw new ControlError("INVALID_INPUT", "Invalid policy command");
         if (!principal.scopes.has(rpcScopes[method]) || options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Policy operation is not authorized");

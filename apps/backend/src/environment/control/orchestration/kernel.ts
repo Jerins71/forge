@@ -1,9 +1,10 @@
+import { decideTransfer, isTransferCommand, reconcileBindingCoverage } from "./transfers.js";
 import { decideAssignment, evolveAssignment, reconcileAssignments } from "./assignments.js";
 import type { ProviderObservation } from "@forge/protocol";
 import type { CoreCommand, CoreState, Decision, LifecycleEvent, Run } from "./types.js";
 
 export function emptyState(): CoreState {
-  return { threads: {}, runs: {}, attempts: {}, bindings: {}, requests: {}, assignments: {}, transfers: {}, recovery: null };
+  return { threads: {}, runs: {}, attempts: {}, bindings: {}, requests: {}, assignments: {}, transfers: {}, handoffs: {}, recovery: null };
 }
 /** The reducer is shared by live projection and retained-event replay. */
 export function evolve(state: CoreState, event: LifecycleEvent): CoreState {
@@ -12,6 +13,7 @@ export function evolve(state: CoreState, event: LifecycleEvent): CoreState {
   if ("attempt" in event) return { ...state, attempts: { ...state.attempts, [event.attempt.attemptId]: event.attempt } };
   if ("binding" in event) return { ...state, bindings: { ...state.bindings, [event.binding.scope.bindingId]: event.binding } };
   if ("request" in event) return { ...state, requests: { ...state.requests, [event.request.requestId]: event.request } };
+  if ("handoff" in event) return { ...state, handoffs: { ...state.handoffs, [event.handoff.handoffId]: event.handoff } };
   if ("assignment" in event || "transfer" in event) return evolveAssignment(state, event);
   return { ...state, recovery: event.recovery };
 }
@@ -121,7 +123,6 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       emit({ type: "input.accepted", run: { runId: command.runId, threadId: command.threadId, inputId: command.inputId, input: command.input, source: command.source, delivery: command.delivery, commandId: command.commandId, state: "queued", sequence: owner.nextRunSequence, activeAttemptId: command.attemptId } });
       emit({ type: "attempt.created", attempt: { attemptId: command.attemptId, runId: command.runId, threadId: owner.threadId, bindingId: owner.bindingId ?? command.bindingId, generation: owner.generation, state: "created", delivery: "pending", lastSequence: -1 } });
       emit({ type: "thread.changed", thread: { ...owner, bindingId: owner.bindingId ?? command.bindingId, nextRunSequence: owner.nextRunSequence + 1 } });
-      if (!owner.bindingId) decision.effects.push({ kind: "runtime.acquire", threadId: owner.threadId, bindingId: command.bindingId, generation: owner.generation });
       decision.effects.push({ kind: "transcript.append", threadId: owner.threadId, inputId: command.inputId, runId: command.runId });
       if (command.delivery === "steer" && owner.activeRunId) {
         const active = state.attempts[state.runs[owner.activeRunId].activeAttemptId];
@@ -239,7 +240,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
         const owner = thread(command.threadId); emit({ type: "thread.changed", thread: { ...owner, shutdown: "quarantined" } });
       } break;
     }
-    default: return decideAssignment(state, command);
+    default: return isTransferCommand(command) ? decideTransfer(state, command) : decideAssignment(state, command);
   }
-  return reconcileAssignments(initial, command, decision);
+  return reconcileBindingCoverage(initial, command, reconcileAssignments(initial, command, decision));
 }

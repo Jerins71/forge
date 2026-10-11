@@ -643,6 +643,10 @@ export function getEnvironmentArtifactDir(dataDir: string): string {
   return join(getSharedStateDir(dataDir), "environment", "artifacts");
 }
 
+export function getEnvironmentHandoffDir(dataDir: string): string {
+  return join(getSharedStateDir(dataDir), "environment", "handoffs");
+}
+
 export function getEnvironmentWorktreesDir(dataDir: string): string {
   return join(getSharedStateDir(dataDir), "environment", "worktrees");
 }

@@ -47,6 +47,10 @@ export function requestHandler(deps: RpcDependencies, principal: Principal, meth
     case "session.history": return deps.detailStream.history(principal, input as RpcInput<"session.history">);
     case "session.workers": return deps.detailStream.workers(principal, input as RpcInput<"session.workers">);
     case "session.content": return deps.detailStream.content(principal, input as RpcInput<"session.content">);
+    case "session.lineage.get":
+      if(!deps.control.readLineage) throw new StreamFault("UNAVAILABLE","Lineage read service is unavailable");
+      return deps.control.readLineage(principal,input as RpcInput<"session.lineage.get">);
+    case "session.fork": case "session.provider.switch": case "session.mergeBack": case "worker.continue": return deps.control.execute(principal,method,input as RpcInput<typeof method>);
     case "session.launch": return deps.control.execute(principal, method, input as RpcInput<typeof method>);
     case "session.send": return deps.control.execute(principal, method, input as RpcInput<typeof method>);
     case "session.choose": return deps.control.execute(principal, method, input as RpcInput<typeof method>);

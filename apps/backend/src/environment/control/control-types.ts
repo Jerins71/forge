@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type { ProviderScope, ProviderConversationRef } from "@forge/protocol";
-import type { ProviderAdapter, ProviderBinding } from "../../swarm/runtime/provider-contract.js";
+import type { ProviderAdapter, ProviderBinding, ProviderOpenInput } from "../../swarm/runtime/provider-contract.js";
 import type { RuntimeUserMessage } from "../../swarm/runtime-contracts.js";
 import type {
   CommandReceipt,
@@ -57,6 +57,7 @@ export interface LifecycleAdmission {
 /** Durable owner of session mutations and their lifecycle admission. */
 export interface ControlService {
   execute<M extends ControlMethod>(principal: Principal, method: M, input: RpcInput<M>): Promise<CommandReceipt>;
+  readLineage?(principal: Principal, input: RpcInput<"session.lineage.get">): Promise<RpcOutput<"session.lineage.get">> | RpcOutput<"session.lineage.get">;
   readWorkspace?<M extends import("./project-policy.js").DirectoryReadMethod>(principal: Principal, method: M, input: RpcInput<M>): Promise<RpcOutput<M>>;
   getReceipt(principal: Principal, commandId: string): Promise<CommandReceipt>;
   /** Synchronous lifecycle callbacks are journaled for retry, never automatically replayed. */
@@ -87,7 +88,12 @@ export interface SwarmControlPort {
     runId: string;
     prepared?: import("./command-service.js").InternalInput["prepared"];
   }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }>;
-  acquireProvider(scope: ProviderScope, conversation?: ProviderConversationRef): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
+  acquireProvider(scope: ProviderScope, conversation?: ProviderConversationRef, model?: import("../../swarm/types.js").AgentDescriptor["model"]): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
+  /** Returns an unopened target. Only the core may capability-check and invoke native fork. */
+  prepareProvider?(scope: ProviderScope, model?: import("../../swarm/types.js").AgentDescriptor["model"]): Promise<{ adapter: ProviderAdapter; input: ProviderOpenInput }>;
+  readTransferEntries?(threadId: string): Promise<import("../../swarm/types.js").ConversationEntryEvent[]>;
+  /** Descriptor/resources only: no provider, credential, or implicit tool-grant acquisition. */
+  prepareLineageSession?(input: { kind: "fork" | "continued_worker"; sourceThreadId: string; targetThreadId: string; commandId: string; title?: string; sourcePoint: import("@forge/protocol/environment-v2").ContextSourcePoint; model?: import("../../swarm/types.js").AgentDescriptor["model"]; purpose?: "side_chat" }): Promise<void>;
   enqueuePresentation?(threadId:string,runId:string,presentation:import("../../swarm/turn-context-coordinator.js").InboundTurnContextInput):void;
   extractWorkerResult?(threadId:string,runId:string,inputEntryId:string):Promise<{ entryId:string; resultText:string }>;
   applyChoice(input: {

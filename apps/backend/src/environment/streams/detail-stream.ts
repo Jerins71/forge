@@ -1,6 +1,8 @@
 import type {
   DetailStreamItem, RpcInput, RpcOutput, SessionSummary,
 } from "@forge/protocol/environment-v2";
+import { lineageSnapshot } from "../control/orchestration/transfers.js";
+import { loadState } from "../control/orchestration/store.js";
 import type { Principal } from "../control/control-types.js";
 import type { DetailSnapshot, WorkerSummary, ChoiceSummary } from "./stream-types.js";
 import { readBarrier, readMeta, readReplay, recentItems, type StreamDependencies } from "./shell-stream.js";
@@ -50,6 +52,7 @@ export function createDetailStream(deps: StreamDependencies) {
             return row ? JSON.parse(row.payload_json).snapshot : undefined;
           };
           const snapshot: DetailSnapshot = {
+            lineage: lineageSnapshot(loadState(deps.database),input.sessionId),
             plan: feature("plan.upsert"), goal: feature("goal.upsert"), recovery: deps.recovery?.() ?? null,
             session: requireSession(input.sessionId), items: recentItems(deps.database, input.sessionId).map(item => projectDetailItem(item)),
             workers: workers.workers, choices, historyCursor: initialized?.historyCursor ?? null, workersCursor: workers.nextPage,

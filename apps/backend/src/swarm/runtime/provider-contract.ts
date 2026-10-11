@@ -96,6 +96,10 @@ export interface ProviderBinding {
   capabilities: ProviderCapabilities;
   instructionRevision: string;
   toolContractRevision: string;
+  /** App-owned context coverage; live security and callback capabilities never enter this snapshot. */
+  model?: AgentModelDescriptor;
+  nativeRunIds?: string[];
+  contextCoverage?: Record<string, string[]>;
 }
 export interface ProviderResumeInput extends ProviderOpenInput { conversation: ProviderConversationRef; }
 export interface ProviderStartInput {

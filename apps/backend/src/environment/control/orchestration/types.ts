@@ -1,5 +1,5 @@
 import type { AssignmentCommand, AssignmentEvent, AssignmentEffect, WorkerAssignment } from "./assignments.js";
-import type { WorkerTransfer } from "./transfers.js";
+import type { Transfer, TransferCommand, LineageEvent } from "./transfers.js";
 import type { ProviderObservation, ProviderRequestLifetime, ProviderRequestRef, ProviderTurnRef } from "@forge/protocol";
 import type { RecoverySnapshot } from "@forge/protocol/environment-v2";
 import type { ProviderBinding } from "../../../swarm/runtime/provider-contract.js";
@@ -9,6 +9,8 @@ export interface Thread {
   threadId: string;
   role: "manager" | "worker";
   projectId: string;
+  model?: import("../../../swarm/types.js").AgentDescriptor["model"];
+  lineage?: import("@forge/protocol/environment-v2").ThreadLineage;
   managerId?: string;
   desired: "running" | "stopped";
   generation: number;
@@ -63,11 +65,13 @@ export interface CoreState {
   bindings: Record<string, ProviderBinding>;
   requests: Record<string, Request>;
   recovery: RecoverySnapshot | null;
+  handoffs: Record<string, import("@forge/protocol/environment-v2").ContextHandoff>;
   assignments: Record<string, WorkerAssignment>;
-  transfers: Record<string, WorkerTransfer>;
+  transfers: Record<string, Transfer>;
 }
 type Envelope = { commandId: string; now: number };
 export type CoreCommand = Envelope & (
+  | TransferCommand
   | AssignmentCommand
   | { type: "thread.create"; threadId: string; role: Thread["role"]; projectId: string; managerId?: string }
   | { type: "thread.stop" | "thread.resume"; threadId: string }
@@ -91,6 +95,7 @@ export type CoreCommand = Envelope & (
   | { type: "effect.failed"; threadId: string; attemptId?: string; kind: CoreEffect["kind"]; delivery: "not_dispatched" | "unknown" }
 );
 export type LifecycleEvent = { commandId: string; at: number } & (
+  | LineageEvent
   | AssignmentEvent
   | { type: "thread.created" | "thread.stopped" | "thread.resumed" | "thread.changed" | "compaction.requested" | "compaction.completed" | "compaction.failed"; thread: Thread }
   | { type: "input.accepted" | "input.recorded" | "run.started" | "run.terminal" | "run.recovery"; run: Run }

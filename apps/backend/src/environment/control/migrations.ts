@@ -197,13 +197,13 @@ export function migrateControlDatabase(database: Database, identity: { environme
   if (existing.length) {
     if (!existing.some(row => row.name === "environment_meta")) throw new Error("Incompatible environment control database; select a fresh data root");
     const meta = database.prepare("SELECT schema_version FROM environment_meta WHERE singleton=1").get() as { schema_version: number } | undefined;
-    if (meta?.schema_version !== 3) throw new Error("Incompatible environment control schema; select a fresh data root");
+    if (meta?.schema_version !== 4) throw new Error("Incompatible environment control schema; select a fresh data root");
     return;
   }
   database.transaction(() => {
     database.exec(INITIAL_SCHEMA);
     database.exec(LIFECYCLE_SCHEMA);
-    database.prepare("INSERT INTO environment_meta (singleton,schema_version,environment_id,stream_epoch) VALUES (1,3,?,?)").run(identity.environmentId, identity.streamEpoch);
+    database.prepare("INSERT INTO environment_meta (singleton,schema_version,environment_id,stream_epoch) VALUES (1,4,?,?)").run(identity.environmentId, identity.streamEpoch);
   }).immediate();
 }
 
@@ -229,7 +229,8 @@ CREATE TABLE orchestration_run_inputs (run_id TEXT PRIMARY KEY, prepared_json TE
 CREATE TABLE orchestration_assignments (assignment_id TEXT PRIMARY KEY, parent_thread_id TEXT NOT NULL, parent_run_id TEXT NOT NULL, worker_thread_id TEXT NOT NULL, state_json TEXT NOT NULL);
 CREATE INDEX orchestration_assignments_parent ON orchestration_assignments(parent_thread_id,parent_run_id);
 CREATE INDEX orchestration_assignments_worker ON orchestration_assignments(worker_thread_id);
-CREATE TABLE orchestration_transfers (transfer_id TEXT PRIMARY KEY, assignment_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('worker_input','worker_result')), source_thread_id TEXT NOT NULL, target_thread_id TEXT NOT NULL, state_json TEXT NOT NULL);
+CREATE TABLE orchestration_transfers (transfer_id TEXT PRIMARY KEY, assignment_id TEXT, kind TEXT NOT NULL CHECK(kind IN ('worker_input','worker_result','fork','provider_switch','merge_back')), source_thread_id TEXT NOT NULL, target_thread_id TEXT NOT NULL, state_json TEXT NOT NULL);
 CREATE INDEX orchestration_transfers_target ON orchestration_transfers(target_thread_id);
+CREATE TABLE orchestration_handoffs (handoff_id TEXT PRIMARY KEY, state_json TEXT NOT NULL);
 CREATE TABLE orchestration_recovery (singleton INTEGER PRIMARY KEY CHECK(singleton=1), snapshot_json TEXT NOT NULL);
 `;

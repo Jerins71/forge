@@ -5,6 +5,8 @@ import type { ControlCoreOptions, ControlEffect, EffectRow } from "./effect-type
 import type { EventSink } from "./event-sink.js";
 import { cancelCommand, readReceipt, setSessionStatus } from "./command-service.js";
 import { loadState, rebuildLifecycleProjections } from "./orchestration/store.js";
+import { isLineageTransfer, planTransferResolution, entryIdentity } from "./orchestration/transfers.js";
+import { materializeHandoff, readHandoff } from "./orchestration/handoff-materializer.js";
 import type { CoreCommand, CoreEffect, Run } from "./orchestration/types.js";
 
 export interface EffectWorker {
@@ -59,19 +61,79 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     observations.add(task); void task.finally(() => observations.delete(task));
   };
   const acquire = async (threadId: string, bindingId: string, generation: number) => {
-    const existing = live.get(bindingId); if (existing) return existing;
-    const prior = Object.values(loadState(database).bindings).filter(value => value.scope.threadId === threadId && value.scope.bindingId !== bindingId)
-      .sort((a,b) => a.scope.generation - b.scope.generation).at(-1)?.conversation;
-    const resource = await options.swarm.acquireProvider({ threadId, bindingId, generation }, prior);
+    const existing = live.get(bindingId);
+    let state = loadState(database); const owner = state.threads[threadId];
+    const attempt = owner.activeRunId ? state.attempts[state.runs[owner.activeRunId].activeAttemptId] : undefined;
+    const transfer = Object.values(state.transfers).find(t => isLineageTransfer(t) && t.targetThreadId === threadId && !["consumed","superseded"].includes(t.state));
+    if(existing && !transfer) return existing;
+    let nativeBinding: ProviderBinding | undefined; let nativeAdapter: ProviderAdapter | undefined;
+    let conversation = Object.values(state.bindings).filter(value => value.scope.threadId === threadId && value.scope.bindingId !== bindingId && (!owner.model || value.capabilities.provider === owner.model.provider && (!value.model || value.model.modelId === owner.model.modelId)))
+      .sort((a,b) => a.scope.generation-b.scope.generation).at(-1)?.conversation;
+    if (transfer && isLineageTransfer(transfer)) {
+      if (!attempt || ["unknown","dispatch_marked","failed"].includes(transfer.state)) throw new Error("Context transfer requires explicit recovery");
+      if (transfer.state !== "resolved") {
+        record({ type:"transfer.resolve",commandId:`resolve:${transfer.transferId}:${attempt.attemptId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId });
+        let attemptedFork = false;
+        try {
+          const target = options.swarm.prepareProvider ? await options.swarm.prepareProvider({threadId,bindingId,generation},owner.model ?? transfer.targetModel) : undefined;
+          state = loadState(database);
+          if (state.threads[threadId].generation !== generation || state.threads[threadId].desired !== "running" || state.attempts[attempt.attemptId].state !== "created" || !authorized(state.runs[attempt.runId].commandId)) throw new Error("Context transfer target was fenced");
+          const caps = target?.adapter.capabilities();
+          const plan = caps ? planTransferResolution(state,transfer,caps) : {strategy:"portable_context" as const,coveredEntryIds:[],coveredRunIds:[],prior:undefined,through:undefined};
+          conversation = plan.prior?.conversation ?? conversation;
+          if (plan.strategy === "native_fork" && target && target.adapter.fork && caps?.native.fork) {
+            const source = state.bindings[transfer.source.bindingId!];
+            try {
+              attemptedFork = true;
+              nativeBinding = await target.adapter.fork({...target.input,source:source.conversation,...(plan.through ? {through:plan.through}: {})});
+              nativeAdapter = target.adapter;
+            } catch (error) {
+              // A typed unsupported boundary is known not-dispatched, so portable transfer is safe.
+              if ((error as {code?:string}).code !== "UNSUPPORTED_PROVIDER_BEHAVIOR") throw error;
+              attemptedFork = false;
+            }
+          }
+          if (nativeBinding) record({type:"transfer.resolved",commandId:`resolved:${transfer.transferId}:${attempt.attemptId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId,strategy:"native_fork",binding:nativeBinding});
+          else {
+            if (!options.dataDir || !options.swarm.readTransferEntries) throw new Error("Portable handoff materializer is not composed");
+            const entries = await options.swarm.readTransferEntries(transfer.source.threadId);
+            const covered = new Set(plan.coveredEntryIds);
+            // Native terminal runs in the resumed provider already cover their canonical range.
+            const runs = Object.values(state.runs).filter(r=>r.threadId===transfer.source.threadId && r.entryId).sort((a,b)=>a.sequence-b.sequence);
+            for (let index=0; index<runs.length; index++) if (plan.coveredRunIds.includes(runs[index].runId)) {
+              const first = entries.findIndex(e=>entryIdentity(e)===runs[index].entryId);
+              const end = index+1<runs.length ? entries.findIndex(e=>entryIdentity(e)===runs[index+1].entryId) : transfer.source.sequence;
+              if(first>=0 && end>=first) for (const entry of entries.slice(first,end)) {const id=entryIdentity(entry);if(id) covered.add(id);}
+            }
+            const handoff = await materializeHandoff({dataDir:options.dataDir,transfer,entries,coveredEntryIds:[...covered],now:options.clock()});
+            record({type:"transfer.resolved",commandId:`resolved:${transfer.transferId}:${attempt.attemptId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId,strategy:plan.strategy === "native_fork" ? "portable_context" : plan.strategy,handoff:handoff.metadata});
+          }
+        } catch (error) {
+          record({type:"transfer.failed",commandId:`failed:${transfer.transferId}:${attempt.attemptId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId,error:{code:attemptedFork ? "DELIVERY_UNKNOWN" : "MATERIALIZATION_FAILED",message:attemptedFork ? "Native fork outcome is unknown; explicit recovery required" : error instanceof Error ? error.message : "Portable materialization failed"}});
+          throw error;
+        }
+      }
+      state = loadState(database);
+      const resolved = state.transfers[transfer.transferId];
+      if(!isLineageTransfer(resolved) || resolved.state !== "resolved") throw new Error("Context transfer resolution was fenced");
+      if (resolved.nativeBinding) {
+        nativeBinding = resolved.nativeBinding;
+        if (!nativeAdapter) throw new Error("Native fork resource was lost; explicit recovery required");
+      }
+    }
+    const latest=loadState(database).threads[threadId];
+    if(latest.generation!==generation || latest.desired!=="running" || latest.shutdown!=="clean") throw new Error("Runtime acquisition target was fenced");
+    const resource = existing ?? (nativeBinding && nativeAdapter ? {binding:nativeBinding,adapter:nativeAdapter} : await options.swarm.acquireProvider({threadId,bindingId,generation},conversation,owner.model));
     if (resource.binding.scope.threadId !== threadId || resource.binding.scope.bindingId !== bindingId || resource.binding.scope.generation !== generation) throw new Error("Acquired provider scope differs from authoritative scope");
-    const entry = { ...resource, stop: new AbortController() }; live.set(bindingId, entry);
-    startObservations(entry.binding, entry.adapter, entry.stop);
-    record({ type: "binding.acquired", commandId: `binding:${bindingId}:${generation}`, now: options.clock(), threadId, binding: entry.binding });
+    const previous=Object.values(loadState(database).bindings).find(b=>b.conversation.nativeId===conversation?.nativeId && b.capabilities.provider===resource.binding.capabilities.provider);
+    resource.binding={...resource.binding,model:owner.model ?? resource.binding.model,nativeRunIds:previous?.nativeRunIds ?? resource.binding.nativeRunIds,contextCoverage:previous?.contextCoverage ?? resource.binding.contextCoverage};
+    const entry = {...resource,stop:new AbortController()};live.set(bindingId,entry);
+    startObservations(entry.binding,entry.adapter,entry.stop);
+    record({type:"binding.acquired",commandId:`binding:${bindingId}:${generation}`,now:options.clock(),threadId,binding:entry.binding});
     return entry;
   };
   const append = async (run: Run) => {
     const state = loadState(database); const attempt = state.attempts[run.activeAttemptId];
-    await acquire(run.threadId, attempt.bindingId, attempt.generation);
     const row = database.prepare("SELECT prepared_json FROM orchestration_run_inputs WHERE run_id=?").get(run.runId) as { prepared_json:string } | undefined;
     const context = row ? JSON.parse(row.prepared_json) : undefined;
     const value = await options.swarm.applyInput({ prepared:context, commandId: run.commandId, inputId: run.inputId, sessionId: run.threadId, runGeneration: attempt.generation, message: run.input, source: run.source, delivery: run.delivery === "queue" ? "followUp" : "steer", runId: run.runId });
@@ -121,7 +183,13 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           if (!attempt || attempt.state !== "created") { settle(row, "cancelled"); return; }
           const run = state.runs[attempt.runId];
           const resource = await acquire(effect.threadId, attempt.bindingId, attempt.generation);
-          const input = prepared.get(run.runId) ?? await append(run);
+          let input = prepared.get(run.runId) ?? await append(run);
+          const transfer=Object.values(loadState(database).transfers).find(t=>isLineageTransfer(t) && t.targetThreadId===run.threadId && t.targetRunId===run.runId && t.state==="resolved");
+          if(transfer && isLineageTransfer(transfer) && transfer.handoffId) {
+            if(!options.dataDir) throw new Error("Handoff root missing");
+            const handoff=await readHandoff(options.dataDir,loadState(database).handoffs[transfer.handoffId]);
+            input={...input,text:handoff.text+"\n\nCurrent input:\n"+input.text};
+          }
           // No await between this committed fence and calling the provider method.
           record({ type: "attempt.dispatch", ...result(row, "dispatch"), threadId: effect.threadId, attemptId: effect.attemptId, authorized: authorized(run.commandId) });
           state = loadState(database);
@@ -174,7 +242,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         }
         case "recovery.deliver": {
           const transfer=loadState(database).transfers[effect.deliveryId];
-          if (transfer?.state === "pending") record({ type:"assignment.deliver",...result(row,"deliver"),assignmentId:transfer.assignmentId,authorized:authorized(row.command_id) });
+          if (transfer && !isLineageTransfer(transfer) && transfer.state === "pending") record({ type:"assignment.deliver",...result(row,"deliver"),assignmentId:transfer.assignmentId,authorized:authorized(row.command_id) });
           break;
         }
         case "choice.apply": {
@@ -214,7 +282,11 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       if (reconciled) return; if (started || draining) throw new Error("Boot reconciliation precedes execution");
       rebuildLifecycleProjections(database);
       const state=loadState(database);
-      const reports=Object.values(state.transfers).filter(transfer => transfer.kind === "worker_result" && !["consumed","superseded"].includes(transfer.state)).map(transfer => ({ deliveryId:transfer.transferId,fromAgentId:transfer.source.threadId,toAgentId:transfer.targetThreadId,turnId:transfer.source.runId,assignmentId:transfer.assignmentId }));
+      const reports=Object.values(state.transfers).filter(transfer => !isLineageTransfer(transfer) && transfer.kind === "worker_result" && !["consumed","superseded"].includes(transfer.state)).map(transfer => ({ deliveryId:transfer.transferId,fromAgentId:transfer.source.threadId,toAgentId:transfer.targetThreadId,turnId:transfer.source.runId,assignmentId:"assignmentId" in transfer ? transfer.assignmentId : undefined }));
+      for(const transfer of Object.values(state.transfers)) if(isLineageTransfer(transfer) && transfer.state === "resolving") {
+        const attempt=transfer.resolutionAttemptId && state.attempts[transfer.resolutionAttemptId];
+        if(attempt) record({type:"transfer.failed",commandId:`lost-resolution:${bootId}:${transfer.transferId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId,error:{code:"DELIVERY_UNKNOWN",message:"Context resolution interrupted; inspect before retrying"}});
+      }
       record({ type: "environment.recover", commandId: `boot:${bootId}`, now: options.clock(), bootId, recoveryId: options.random(), reports });
       for (const row of database.prepare("SELECT * FROM effects WHERE state='claimed' AND kind!='lifecycle.admit'").all() as EffectRow[]) {
         const effect: ControlEffect = JSON.parse(row.payload_json);

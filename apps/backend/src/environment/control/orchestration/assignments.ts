@@ -1,6 +1,6 @@
 import type { WorkerParentContext } from "../../../swarm/types.js";
 import { decide, evolve } from "./kernel.js";
-import { reconcileTransfer, type TransferEvent, type TransferPoint, type WorkerTransfer } from "./transfers.js";
+import { reconcileTransfer, isLineageTransfer, type TransferEvent, type TransferPoint, type WorkerTransfer } from "./transfers.js";
 import type { CoreCommand, CoreState, Decision, LifecycleEvent, Run } from "./types.js";
 
 export interface AssignmentSelection {
@@ -85,7 +85,7 @@ export function decideAssignment(initial: CoreState, command: CoreCommand & Assi
   const deliver = (assignment: WorkerAssignment) => {
     const transfer = state.transfers[assignment.resultTransferId ?? ""];
     const parent = state.threads[assignment.parentThreadId];
-    if (!transfer || transfer.state !== "pending" || !assignment.resultInput || assignment.invalidatedAt !== undefined ||
+    if (!transfer || isLineageTransfer(transfer) || transfer.state !== "pending" || !assignment.resultInput || assignment.invalidatedAt !== undefined ||
       !parent || parent.desired !== "running" || parent.shutdown !== "clean" || parent.generation !== assignment.parentGeneration || state.runs[transfer.targetRunId]) return;
     apply({ type: "run.submit", commandId: command.commandId, now: command.now, threadId: parent.threadId,
       runId: transfer.targetRunId, inputId: `${assignment.assignmentId}:result:input`, attemptId: `${assignment.assignmentId}:result:attempt`,
@@ -149,7 +149,7 @@ export function decideAssignment(initial: CoreState, command: CoreCommand & Assi
       if (!command.authorized) throw new Error("Authorized assignment clear required");
       for (const assignment of Object.values(state.assignments)) if (assignment.parentThreadId === command.threadId && assignment.invalidatedAt === undefined) {
         emit({ type: "assignment.invalidated", assignment: { ...assignment, invalidatedAt: command.now } });
-        for (const transfer of Object.values(state.transfers)) if (transfer.assignmentId === assignment.assignmentId && !["consumed", "unknown", "superseded"].includes(transfer.state)) {
+        for (const transfer of Object.values(state.transfers)) if (!isLineageTransfer(transfer) && transfer.assignmentId === assignment.assignmentId && !["consumed", "unknown", "superseded"].includes(transfer.state)) {
           // Possibly delivered input remains unknown; clearing cannot assert it was never received.
           emit({ type: transfer.state === "dispatch_marked" ? "transfer.unknown" : "transfer.superseded", transfer: { ...transfer, state: transfer.state === "dispatch_marked" ? "unknown" : "superseded" } });
         }

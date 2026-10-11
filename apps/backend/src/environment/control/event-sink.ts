@@ -9,6 +9,7 @@ import {
   type ShellStreamItem,
 } from "@forge/protocol/environment-v2";
 import { decide } from "./orchestration/kernel.js";
+import { lineageSnapshot } from "./orchestration/transfers.js";
 import { loadState, projectLifecycle } from "./orchestration/store.js";
 import type { CoreCommand, Decision } from "./orchestration/types.js";
 
@@ -291,6 +292,8 @@ export function createEventSink(database: Database, clock: () => number, random:
           .run(effectId, command.commandId, effect.threadId, effect.kind, ordinal++, JSON.stringify(effect));
       }
       const state = loadState(database);
+      const lineageThreads = new Set(decision.events.flatMap(event=>"transfer" in event ? [event.transfer.source.threadId,event.transfer.targetThreadId] : "handoff" in event ? [] : "thread" in event && event.thread.lineage ? [event.thread.threadId] : []));
+      for(const threadId of lineageThreads) sink.append(tx,{topic:"detail",sessionId:threadId,event:{type:"lineage.upsert",snapshot:lineageSnapshot(state,threadId)}});
       const changedThreads = new Set(decision.events.flatMap(event => "thread" in event ? [event.thread.threadId] : "run" in event ? [event.run.threadId] : "request" in event ? [event.request.threadId] : []));
       for (const threadId of changedThreads) {
         const thread = state.threads[threadId];
@@ -300,7 +303,7 @@ export function createEventSink(database: Database, clock: () => number, random:
         const run = thread.activeRunId ? state.runs[thread.activeRunId] : undefined;
         const status = thread.desired === "stopped" ? thread.shutdown === "clean" ? "stopped" : "stopping" : run?.state === "recovery" ? "interrupted" : run ? "running" : "idle";
         database.prepare("UPDATE control_sessions SET desired_state=?,run_generation=? WHERE session_id=?").run(thread.desired, thread.generation, threadId);
-        sink.append(tx, { topic: "shell", sessionId: threadId, event: { type: "session.upsert", session: { ...summary, status, pendingCount: Object.values(state.runs).filter(r => r.threadId === threadId && r.state === "queued").length } } });
+        sink.append(tx, { topic: "shell", sessionId: threadId, event: { type: "session.upsert", session: { ...summary, ...(thread.lineage ? {lineage:thread.lineage}:{}), status, pendingCount: Object.values(state.runs).filter(r => r.threadId === threadId && r.state === "queued").length } } });
       }
       return decision;
     },
