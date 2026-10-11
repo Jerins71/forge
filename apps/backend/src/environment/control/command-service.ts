@@ -300,6 +300,11 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         if (options.isDeviceRevoked(principal.deviceSessionId)) throw new ControlError("FORBIDDEN", "Device session was revoked");
         if (input.intent === "stop") {
           await drainEffects();
+          // A slow runtime exit keeps its release owed; wait for it inside the same bound instead of failing early.
+          while (!closed && Date.now() < deadline && database.prepare("SELECT 1 FROM effects WHERE command_id=? AND kind='provider.release' AND state IN ('pending','claimed') LIMIT 1").get(input.commandId)) {
+            await new Promise(resolve => setTimeout(resolve, 25));
+            await drainEffects();
+          }
           if (sessionIds.some(sessionId => loadState(database).threads[sessionId]?.shutdown !== "clean"))
             throw new ControlError("UNAVAILABLE", "Session writer shutdown remains quarantined", false);
         }

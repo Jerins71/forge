@@ -351,8 +351,8 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   )
 
   return (
-    <form onSubmit={handleSubmit} className="sticky bottom-0 shrink-0 bg-transparent px-3 pb-3 pt-2 md:px-6 md:pb-4" data-tour="chat-input">
-      <div className="mx-auto w-full max-w-[760px]">
+    <form onSubmit={handleSubmit} className="content-gutter sticky bottom-0 shrink-0 bg-transparent pb-3 pt-2 md:pb-4" data-tour="chat-input">
+      <div className="content-column">
       {/* Slash command autocomplete dropdown */}
       {slash.isSlashMenuOpen ? (
         <SlashCommandMenu
@@ -381,7 +381,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
         />
       ) : null}
 
-      <div className="glass-strong overflow-hidden rounded-[18px]">
+      <div className="glass-strong overflow-hidden rounded-[18px] transition-colors duration-150 focus-within:border-ring/50">
         {replyTarget ? (
           <div className="border-b border-hairline p-2 pb-1.5">
             <ReplyPreview target={replyTarget} onClear={onClearReplyTarget} />

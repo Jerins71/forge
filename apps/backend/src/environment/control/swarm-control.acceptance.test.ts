@@ -335,6 +335,32 @@ describe("controlled swarm canonical/provider boundaries", () => {
     expect(f.manager.isSessionShutdownSafe(sessionId)).toBe(true);
   });
 
+  it("settles a stop whose runtime exits after the shutdown window and then runs the next send on a new runtime", async () => {
+    const f = await fixture(true); const { core } = await makeCore(f);
+    const principal = { deviceSessionId: "fixture-device", scopes: new Set(["session:operate", "session:read", "workspace:write"] as const) };
+    f.database.prepare("INSERT INTO device_sessions (device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES ('fixture-device','fixture-token','fixture-proof','Fixture','cli','[]',0,0,?)").run(Date.now() + 86_400_000);
+    const launch = { commandId: randomUUID(), projectId: "manager", title: "Slow stop", workspaceStrategy: { kind: "current_checkout" as const }, initialMessage: { text: "first turn", artifactIds: [] } };
+    const sessionId = (await core.controlService.execute(principal, "session.launch", launch)).sessionId!; await core.reconcileOnBoot(); await core.effectWorker.drain();
+    const held = f.manager.runtimeByAgentId.get(sessionId)!; expect(held.sendCalls).toHaveLength(1);
+    // The real shutdown barrier owns this attempt; the runtime simply takes longer than its window to exit.
+    let exit!: () => void; const exited = new Promise<void>(resolve => { exit = resolve; });
+    const terminate = vi.spyOn(held, "terminate").mockImplementation(() => exited);
+    const stop = { commandId: randomUUID(), sessionId };
+    await core.controlService.execute(principal, "session.stop", stop); await core.effectWorker.drain();
+    expect(loadState(f.database).threads[sessionId]).toMatchObject({ desired: "stopped", shutdown: "pending" });
+    expect(await core.controlService.getReceipt(principal, stop.commandId)).toMatchObject({ state: "running", error: null });
+    const send = { commandId: randomUUID(), sessionId, message: { text: "after the slow stop", artifactIds: [] } };
+    await expect(core.controlService.execute(principal, "session.send", send)).rejects.toMatchObject({ code: "CONFLICT" });
+    exit();
+    await vi.waitFor(async () => { await core.effectWorker.drain(); expect((await core.controlService.getReceipt(principal, stop.commandId)).state).toBe("succeeded"); }, { timeout: 10_000, interval: 50 });
+    expect(terminate).toHaveBeenCalledOnce(); expect(f.manager.isSessionShutdownSafe(sessionId)).toBe(true);
+    expect(loadState(f.database).threads[sessionId]).toMatchObject({ desired: "stopped", shutdown: "clean" });
+    await core.controlService.execute(principal, "session.send", send); await core.effectWorker.drain();
+    expect(await core.controlService.getReceipt(principal, send.commandId)).toMatchObject({ state: "succeeded", delivery: "dispatched" });
+    const replacement = f.manager.runtimeByAgentId.get(sessionId)!; expect(replacement).not.toBe(held);
+    expect(replacement.sendCalls).toHaveLength(1); expect(held.sendCalls).toHaveLength(1);
+    expect(await countInputs(f.manager.getAgent(sessionId)!.sessionFile, `input-${send.commandId}`)).toBe(1);
+  }, 30_000);
   it("reopens the real DB/runtime after the canonical seam and never replays an ambiguous provider marker", async () => {
     const f = await fixture(); const core = f.core; const adapter = f.adapter;
     const principal = f.paired.principal;

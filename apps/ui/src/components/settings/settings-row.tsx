@@ -45,7 +45,7 @@ export function SettingsWithCTA({
         'flex items-start justify-between gap-4',
         {
           'flex-col gap-2': direction === 'col',
-          'flex-col sm:flex-row sm:items-center gap-3 sm:gap-6': direction === 'row',
+          'flex-col gap-3 @lg/settings:flex-row @lg/settings:items-center @lg/settings:gap-6': direction === 'row',
         },
       )}
     >

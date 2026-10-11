@@ -461,7 +461,7 @@ function LoadingIndicator({ streamingStartedAt }: { streamingStartedAt?: number 
 
   return (
     <div
-      className="mx-auto mt-3 flex w-full max-w-[760px] items-center gap-3.5"
+      className="content-column mt-3 flex items-center gap-3.5"
       role="status"
       aria-live="polite"
       aria-label="Assistant is working"
@@ -1596,14 +1596,14 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
         }}
         onScroll={handleScroll}
         className={cn(
-          'min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-6 md:px-6',
+          'content-gutter min-h-0 flex-1 overflow-y-auto pb-3 pt-6',
           '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent',
           '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent',
           '[scrollbar-width:thin] [scrollbar-color:transparent_transparent]',
           'hover:[&::-webkit-scrollbar-thumb]:bg-foreground/15 hover:[scrollbar-color:var(--glass-border)_transparent]',
         )}
       >
-        <div className="mx-auto w-full max-w-[760px]" style={{ height: totalSize, position: 'relative', width: '100%' }}>
+        <div className="content-column content-prose" style={{ height: totalSize, position: 'relative', width: '100%' }}>
           {renderIndexes.map((index) => {
             const row = rows[index]
             if (!row) return null

@@ -226,16 +226,30 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       if (active && !active.id && !this.client.isDisposed()) {
         throw new Error("Native Codex turn acceptance is uncertain; replacement remains blocked until its identity is confirmed.");
       }
-      if (active?.id) {
-        await deadline(this.providerAdapter.interrupt({ binding: this.providerBinding, attemptId: active.attemptId,
-          turn: { ...this.providerBinding.scope, kind: "turn", conversationId: this.threadId, nativeId: active.id } }), remaining());
-        await deadline(active.settled, remaining());
-      }
-      if (!this.client.isDisposed()) await this.client.request("thread/backgroundTerminals/clean", { threadId: this.threadId }, remaining());
-      await deadline(this.events, remaining());
+      // An app-server hung on its provider stream answers none of this. Bound the
+      // cooperative steps so the close below, which kills the owned process, still fits the window.
+      const cooperative = Date.now() + timeout / 3;
+      const cooperating = () => Math.max(1, Math.min(expires, cooperative) - Date.now());
+      try {
+        if (active?.id) {
+          await deadline(this.providerAdapter.interrupt({ binding: this.providerBinding, attemptId: active.attemptId,
+            turn: { ...this.providerBinding.scope, kind: "turn", conversationId: this.threadId, nativeId: active.id } }), cooperating());
+          await deadline(active.settled, cooperating());
+        }
+        if (!this.client.isDisposed()) await this.client.request("thread/backgroundTerminals/clean", { threadId: this.threadId }, cooperating());
+        await deadline(this.events, cooperating());
+      } catch { /* Unresponsive; the confirmed process exit below is what releases the writer. */ }
       // Forge detaches stopped runtimes. Release the native thread writer before
       // reporting cleanup complete so the next runtime can resume its history.
       await deadline(this.providerAdapter.close(this.providerBinding), remaining());
+      const held = this.active;
+      if (held) {
+        // The process died without ending its turn; end it here so the stopped turn is not left open.
+        this.active = undefined;
+        for (const event of held.mapper.finish()) await this.emit(event);
+        await this.emit({ type: "agent_end" });
+        held.settle();
+      }
       this.closed = true;
       this.status = "idle";
       await this.publishStatus();

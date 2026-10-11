@@ -16,7 +16,7 @@ export const WorkerBackBar = memo(function WorkerBackBar({
   secureStatus,
 }: WorkerBackBarProps) {
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-hairline bg-transparent px-3 py-2">
+    <div className="flex items-center justify-between gap-2 border-b border-hairline bg-transparent content-gutter py-2">
       <button
         type="button"
         className="inline-flex items-center gap-1.5 glass-inset rounded-full px-3 py-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
