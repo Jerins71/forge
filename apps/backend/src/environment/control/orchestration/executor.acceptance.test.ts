@@ -548,6 +548,24 @@ describe("durable provider outbox", () => {
     expect((await f.core.controlService.getReceipt(principal, commandId))).toMatchObject({ state: "interrupted", delivery: "none" });
     expect(loadState(f.core.database).runs[`run-${commandId}`].state).toBe("terminal");
   });
+  it("commit observers receive terminal run facts once, only after a durable commit", async () => {
+    const f = await fixture(); const submitted = await f.core.controlService.submitInput({ commandId, threadId: "manager", message: { text: "Committed outcome", artifactIds: [] } });
+    await f.core.effectWorker.drain(); const state = loadState(f.core.database); const attempt = state.attempts[state.runs[submitted.runId].activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+    const batches: Array<ReadonlyArray<ReturnType<typeof loadState>["runs"][string]>> = [];
+    const detach = f.core.eventSink.subscribeCommit((runs?: ReadonlyArray<ReturnType<typeof loadState>["runs"][string]>) => { if (runs?.length) batches.push([...runs]); });
+    const observation = { type: "terminal" as const, scope: binding.scope, attemptId: attempt.attemptId, sequence: 1,
+      origin: { kind: "root" as const, conversation: binding.conversation }, terminalAuthority: "root_attempt" as const, outcome: "failed" as const };
+    expect(() => f.core.eventSink.transaction(tx => {
+      f.core.eventSink.commitCommand(tx, { type: "provider.observe", commandId: "rollback-outcome", now: f.options.clock(), observation });
+      throw new Error("Rollback outcome");
+    })).toThrow("Rollback outcome");
+    expect(batches).toEqual([]); expect(loadState(f.core.database).runs[submitted.runId].state).toBe("running");
+    f.core.controlService.record({ type: "provider.observe", commandId: "commit-outcome", now: f.options.clock(), observation });
+    expect(batches).toHaveLength(1); expect(batches[0]).toEqual([expect.objectContaining({ runId: submitted.runId, state: "terminal", outcome: "failed" })]);
+    f.core.controlService.record({ type: "provider.observe", commandId: "duplicate-outcome", now: f.options.clock(), observation });
+    f.core.controlService.record({ type: "thread.prepare_binding", commandId: "unrelated-commit", now: f.options.clock(), threadId: "manager", bindingId: "later-binding" });
+    expect(batches).toHaveLength(1); detach();
+  });
   it("worker.delete fences its claimed canonical append without stopping the manager", async () => {
     const f = await fixture(); let entered!: () => void; let release!: () => void; let mutated = false;
     const enteredAppend = new Promise<void>(resolve => { entered = resolve; }); const heldAppend = new Promise<void>(resolve => { release = resolve; });

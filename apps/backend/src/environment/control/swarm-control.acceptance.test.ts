@@ -708,6 +708,84 @@ it.each(["running", "stopped", "error", "queued"] as const)("worker.delete under
   } finally { mirror.dispose(); await core.close(); }
 }, 15_000);
 
+it.each(["failed", "completed", "retry_completed"] as const)("attention follows authoritative run outcome %s", async outcome => {
+  const f = await fixture(); const runtime = f.manager.runtimeByAgentId.get(f.sessionId)!; runtime.busy = true;
+  const commandId = randomUUID();
+  await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "Attention outcome", artifactIds: [] } });
+  await f.core.effectWorker.drain();
+  const token = f.runtimeTokens.get(f.sessionId)!;
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "streaming", 0);
+  const state = loadState(f.database); const run = state.runs[`run-${commandId}`]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+  if (outcome === "retry_completed") f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+    type: "retry", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, attempt: 1, message: "Transient provider retry",
+  } });
+  f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+    type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 2, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: outcome === "failed" ? "failed" : "completed",
+  } });
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "idle", 0);
+  await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe(outcome === "failed" ? "work_failed" : "work_settled"));
+});
+
+it("attention cannot settle from native idle while its authoritative run is still running", async () => {
+  const f = await fixture(); const runtime = f.manager.runtimeByAgentId.get(f.sessionId)!; runtime.busy = true;
+  await f.core.controlService.execute(f.paired.principal, "session.send", { commandId: randomUUID(), sessionId: f.sessionId, message: { text: "Still running", artifactIds: [] } });
+  await f.core.effectWorker.drain(); const token = f.runtimeTokens.get(f.sessionId)!;
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "streaming", 0);
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "idle", 0);
+  expect(loadState(f.database).threads[f.sessionId].activeRunId).toBeDefined();
+  expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)).toBeUndefined();
+});
+
+it("a failed canonical append raises work_failed without a provider or active presentation", async () => {
+  const f = await fixture(); const runtime = f.manager.runtimeByAgentId.get(f.sessionId)!;
+  runtime.appendCustomEntry = () => { throw new Error("Attention writer failure"); };
+  const commandId = randomUUID();
+  await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "Writer failure", artifactIds: [] } });
+  await f.core.effectWorker.drain();
+  expect(loadState(f.database).runs[`run-${commandId}`]).toMatchObject({ state: "terminal", outcome: "failed" });
+  expect(runtime.sendCalls).toHaveLength(0);
+  await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe("work_failed"));
+});
+
+it.each(["failed", "completed"] as const)("internal turn outcome %s only raises failure attention", async outcome => {
+  const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true; const commandId = randomUUID();
+  await f.core.controlService.submitInput({ commandId, threadId: f.sessionId, message: { text: "Internal turn", artifactIds: [] },
+    prepared: { runtimeMessage: { text: "Internal turn" }, presentation: { source: "agent_message", requiresVisibleResponse: false } } });
+  await f.core.effectWorker.drain(); const token = f.runtimeTokens.get(f.sessionId)!;
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "streaming", 0);
+  const state = loadState(f.database); const run = state.runs[`run-${commandId}`]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+  f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+    type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome,
+  } });
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "idle", 0);
+  if (outcome === "failed") await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe("work_failed"));
+  else expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)).toBeUndefined();
+});
+
+it.each(["failed", "completed"] as const)("worker outcome %s feeds its owning manager attention", async outcome => {
+  const f = await fixture(); const worker = await f.manager.spawnAgent(f.sessionId, { agentId: "attention-worker" });
+  f.manager.runtimeByAgentId.get(worker.agentId)!.busy = true; const commandId = randomUUID();
+  await f.core.controlService.submitInput({ commandId, threadId: worker.agentId, message: { text: "Worker attention", artifactIds: [] } });
+  await f.core.effectWorker.drain(); const token = f.runtimeTokens.get(worker.agentId)!;
+  await f.manager.handleRuntimeStatus(token, worker.agentId, "streaming", 0);
+  const state = loadState(f.database); const run = state.runs[`run-${commandId}`]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+  f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+    type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome,
+  } });
+  await f.manager.handleRuntimeStatus(token, worker.agentId, "idle", 0);
+  await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe(outcome === "failed" ? "work_failed" : "work_settled"));
+});
+
+it("Stop's interrupted run is never failure attention", async () => {
+  const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true; const commandId = randomUUID();
+  await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "Stop this", artifactIds: [] } });
+  await f.core.effectWorker.drain(); await f.manager.handleRuntimeStatus(f.runtimeTokens.get(f.sessionId)!, f.sessionId, "streaming", 0);
+  await f.core.controlService.execute(f.paired.principal, "session.stop", { commandId: randomUUID(), sessionId: f.sessionId }); await f.core.effectWorker.drain();
+  expect(loadState(f.database).runs[`run-${commandId}`].state).toBe("terminal");
+  expect(["interrupted", "cancelled"]).toContain(loadState(f.database).runs[`run-${commandId}`].outcome);
+  expect(f.manager.getSessionAttentionSnapshot().attentions.some(row => row.sessionAgentId === f.sessionId && row.reason === "work_failed")).toBe(false);
+});
+
 it.each([false, true])("durable send provenance derives CLI integration (%s), ignores client source and survives replay", async cli => {
   const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
   const { core } = await makeCore(f);
