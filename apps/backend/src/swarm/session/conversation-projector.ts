@@ -462,6 +462,11 @@ export class ConversationProjector {
     this.activity.observeRetry({ ...fact, sessionId, timestamp: this.deps.now() });
   }
 
+  /** The actor's turn just ended in a provider failure that its status row already reports. */
+  hasRecentProviderFailure(actorId: string): boolean {
+    return this.activity.hasRecentFailure(actorId);
+  }
+
   /** Closes the rows a finished turn left open and persists them, including its retry or failure status. */
   settleProviderTurn(actorId: string, error?: string): void {
     const sessionId = resolveManagerContextId(this.deps.descriptors.get(actorId), actorId);

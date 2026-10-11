@@ -127,6 +127,8 @@ async function runTurn(turn, text) {
       await dynamicTool(turn, 'notes', { op: 'write', path: 'fixture-output.txt', text: 'synthetic-output '.repeat(3000) });
       await dynamicTool(turn, 'notes', { op: 'read', path: 'fixture-output.txt', maxChars: 16000 });
     }
+    // The provider process dies mid-turn.
+    if (text.includes('[fixture:crash]')) process.exit(1);
     if (text.includes('[fixture:retry')) {
       // The provider keeps rejecting the request and retries on its own; the turn is still running.
       for (let attempt = 1; attempt <= 3; attempt++) {

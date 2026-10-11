@@ -12,6 +12,8 @@ import type { AgentToolCallEvent } from "../types.js";
 const MAX_TRACKED_ITEMS = 256;
 /** Output deltas within this window coalesce into one live upsert per row. */
 const LIVE_UPDATE_INTERVAL_MS = 80;
+/** Reports of one turn failure arrive together; a later failure is a new one. */
+const FAILURE_REPORT_WINDOW_MS = 10_000;
 
 export interface ProviderTextFact {
   channel: "assistant" | "reasoning";
@@ -36,6 +38,7 @@ export class ActivityTimelineTracker {
   /** The open status row of each actor's current turn, and the retries it has counted. */
   private readonly status = new Map<string, Tracked>();
   private readonly attempts = new Map<string, number>();
+  private readonly failedAt = new Map<string, number>();
 
   constructor(private readonly publish: (item: TimelineActivity) => void, private readonly now: () => number = Date.now) {}
 
@@ -114,6 +117,7 @@ export class ActivityTimelineTracker {
 
   /** One status row per turn, updated in place while the provider retries a failing request. */
   observeRetry(fact: { actorId: string; sessionId: string; attempt: number; message: string; runId?: string; timestamp: string }): void {
+    this.failedAt.delete(fact.actorId);
     const tracked = this.statusRow(fact);
     const message = oneLine(fact.message);
     Object.assign(tracked.item, bounded("detail", `Attempt ${fact.attempt}\n${fact.message}`, "head"));
@@ -136,13 +140,16 @@ export class ActivityTimelineTracker {
     }
     const open = this.status.get(fact.actorId);
     if (!open && !fact.error) return finished;
+    // The adapter and the runtime can both report one failure; the first report is the row.
+    if (fact.error && this.hasRecentFailure(fact.actorId)) return finished;
+    if (fact.error) this.failedAt.set(fact.actorId, this.now());
     const tracked = open ?? this.statusRow(fact);
     const item = tracked.item;
     const attempts = this.attempts.get(item.itemId);
     this.status.delete(fact.actorId); this.attempts.delete(item.itemId);
     if (fact.error) {
       item.status = "failed";
-      item.summary = `Failed: ${oneLine(fact.error)}${attempts ? ` (after ${attempts} ${attempts === 1 ? "retry" : "retries"})` : ""}`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
+      item.summary = `Failed: ${readableProviderError(fact.error)}${attempts ? ` (after ${attempts} ${attempts === 1 ? "retry" : "retries"})` : ""}`.slice(0, ACTIVITY_SUMMARY_MAX_CHARS);
       Object.assign(item, bounded("detail", `${attempts ? `Retried ${attempts} ${attempts === 1 ? "time" : "times"}\n` : ""}${fact.error}`, "head"));
     } else {
       item.status = "completed";
@@ -152,6 +159,11 @@ export class ActivityTimelineTracker {
     this.publishNow(tracked);
     finished.push(item);
     return finished;
+  }
+
+  hasRecentFailure(actorId: string): boolean {
+    const at = this.failedAt.get(actorId);
+    return at !== undefined && this.now() - at < FAILURE_REPORT_WINDOW_MS;
   }
 
   private statusRow(fact: { actorId: string; sessionId: string; runId?: string; timestamp: string }): Tracked {
@@ -320,6 +332,17 @@ function bounded(field: "input" | "detail", text: string, keep: "head" | "tail")
   const max = field === "input" ? ACTIVITY_INPUT_MAX_CHARS : ACTIVITY_DETAIL_MAX_CHARS;
   if (text.length <= max) return { [field]: text };
   return { [field]: keep === "head" ? text.slice(0, max) : text.slice(-max), truncated: true };
+}
+
+/** One readable sentence for a provider failure; the raw text stays in the row's details. */
+export function readableProviderError(raw: string): string {
+  const text = oneLine(raw).replace(/[.\s]+$/, "");
+  if (/\b401\b|unauthori[sz]ed|(invalid|incorrect) api key|authentication/i.test(text)) return "The provider rejected the API key (401). Check the key in Settings → Authentication.";
+  if (/\b429\b|rate.?limit|too many requests/i.test(text)) return "The provider is rate limiting requests (429). Wait a moment, then send again.";
+  if (/\b404\b|not found/i.test(text)) return "The provider endpoint was not found (404). Check the base URL in Settings → Authentication.";
+  if (/exited \(code=|process exited|app-server exited/i.test(text)) return "The provider process stopped unexpectedly.";
+  if (/\b5\d\d\b|overloaded|unavailable/i.test(text)) return "The provider is unavailable right now. Try again shortly.";
+  return `${text.slice(0, 240)}.`;
 }
 
 function oneLine(text: string): string {

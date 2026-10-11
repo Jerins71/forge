@@ -62,6 +62,7 @@ export interface RuntimeEventProjectorDeps {
   conversationProjector: {
     captureConversationEventFromRuntime(agentId: string, event: RuntimeSessionEvent, options?: { turnId?: string }): void;
     emitConversationMessage(event: ConversationMessageEvent, options?: { routingReceipt?: MessageRoutingReceiptRecord }): void;
+    hasRecentProviderFailure?(agentId: string): boolean;
   };
   markSessionActivity(agentId: string, timestamp: string): void;
   maybeRecordModelCapacityBlock(
@@ -626,7 +627,8 @@ export class RuntimeEventProjector {
       const armed = this.pendingSilentManagerNotices.get(agentId);
       this.pendingSilentManagerNotices.delete(agentId);
       this.visibleManagerOutputAgentIds.delete(agentId);
-      if (armed) {
+      // A turn that failed already says so on its status row; it did not "complete without a response".
+      if (armed && !this.deps.conversationProjector.hasRecentProviderFailure?.(agentId)) {
         // The pi resample ladder re-dispatches a silent trigger as a fresh
         // run, so a genuinely silent obligation would otherwise emit this same
         // notice once per attempt.  Collapse consecutive identical notices;

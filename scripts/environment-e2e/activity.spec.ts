@@ -198,16 +198,39 @@ test('provider retries and the final failure show as one status row, live and af
   await expect(status().last()).toContainText('Retrying: unexpected status 401 Unauthorized: Invalid API key (attempt 3)')
   await writeFile(releaseFile(), 'release')
   await expect(status().last()).toHaveAttribute('data-activity-status', 'failed', { timeout: 30_000 })
-  await expect(status().last()).toContainText('Failed: unexpected status 401 Unauthorized: Invalid API key (after 3 retries)')
+  await expect(status().last()).toContainText('Failed: The provider rejected the API key (401). Check the key in Settings → Authentication. (after 3 retries)')
+  // Retries and the failure are that one row, not transcript messages.
+  await expect(transcript(page)).not.toContainText('Agent error')
+  await expect(transcript(page)).not.toContainText('Message may need to be resent')
   expect(await status().count()).toBe(before + 1)
   const live = await status().allTextContents()
   await shot(page, 'retry-failed')
 
   await page.reload()
-  await expect(status().last()).toContainText('Failed: unexpected status 401', { timeout: 30_000 })
+  await expect(status().last()).toContainText('Failed: The provider rejected the API key (401)', { timeout: 30_000 })
   expect(await status().allTextContents()).toEqual(live)
   await status().last().getByRole('button').click()
   await expect(status().last().getByTestId('activity-detail')).toContainText('Retried 3 times')
+  // The raw provider text stays available in the details.
+  await expect(status().last().getByTestId('activity-detail')).toContainText('unexpected status 401 Unauthorized: Invalid API key')
   await shot(page, 'retry-failed-replayed')
   assertions.statusRows = live
+})
+
+// Last: the fixture's provider process exits, and recovering the session is outside this suite.
+test('a provider process that dies mid-turn is one failed status row', async ({ page }) => {
+  const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.b.sessionId)}&env=${fleet.b.environmentId}`)
+  await expect(transcript(page)).toBeVisible()
+  await send(page, '[fixture:crash] Lose the provider')
+  await expect(status().last()).toHaveAttribute('data-activity-status', 'failed', { timeout: 30_000 })
+  await expect(status().last()).toContainText('Failed: The provider process stopped unexpectedly.')
+  expect(await status().count()).toBe(1)
+  await status().last().getByRole('button').click()
+  await expect(status().last().getByTestId('activity-detail')).toContainText('exited')
+  await page.waitForTimeout(1500)
+  await expect(transcript(page)).not.toContainText('without a visible response')
+  await expect(transcript(page)).not.toContainText('Agent error')
+  await shot(page, 'provider-crash')
+  assertions.providerCrash = await status().allTextContents()
 })

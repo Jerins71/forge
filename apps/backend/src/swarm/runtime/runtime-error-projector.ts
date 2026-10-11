@@ -23,6 +23,8 @@ export interface RuntimeErrorProjectorDeps {
     patch: Partial<AgentDescriptor>
   ): Promise<AgentDescriptor | undefined>;
   emitConversationMessage(event: ConversationMessageEvent): void;
+  /** Ends the turn's status row as failed; the row carries a readable message and the raw text. */
+  reportProviderFailure(agentId: string, message: string): void;
   logDebug(message: string, details?: unknown): void;
 }
 
@@ -108,6 +110,17 @@ export class RuntimeErrorProjector {
       return;
     }
 
+    // A provider retrying on its own is live status on the turn's one status row, never a transcript message.
+    if (error.details?.nativeRetry === true) return;
+    // A manager's provider failure is that row's failed state. A worker keeps its message: it is the result its manager reads.
+    if (
+      descriptor.role === "manager" && !userFacingMessage && !droppedPendingCount
+      && ["prompt_start", "prompt_dispatch", "runtime_exit", "startup", "thread_resume"].includes(error.phase)
+    ) {
+      this.deps.reportProviderFailure(agentId, message);
+      return;
+    }
+
     const text =
       userFacingMessage
       ?? (
@@ -131,7 +144,7 @@ export class RuntimeErrorProjector {
                   : `⚠️ Extension error: ${message}`
               : droppedPendingCount && droppedPendingCount > 0
                 ? `⚠️ Agent error${retryLabel}: ${message}. ${droppedPendingCount} queued message${droppedPendingCount === 1 ? "" : "s"} could not be delivered and were dropped. Please resend.`
-                : `⚠️ Agent error${retryLabel}: ${message}. Message may need to be resent.`
+                : `⚠️ Agent error${retryLabel}: ${message.replace(/[.\s]+$/, "")}. Message may need to be resent.`
       );
 
     this.deps.emitConversationMessage({

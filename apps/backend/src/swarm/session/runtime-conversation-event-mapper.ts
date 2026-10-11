@@ -52,7 +52,7 @@ export class RuntimeConversationEventMapper {
     }
 
     if (descriptor?.role === "manager") {
-      const managerErrorProjection = mapManagerRuntimeErrorConversationEvent(agentId, event, timestamp, turnId);
+      const managerErrorProjection = mapManagerRuntimeErrorConversationEvent(agentId, event, timestamp, turnId, descriptor);
       if (managerErrorProjection) {
         projections.push(managerErrorProjection);
       }
@@ -132,7 +132,7 @@ function mapNonManagerRuntimeEvent(
             ...(turnId ? { turnId } : {}),
             role: "system",
             text: buildWorkerErrorConversationText({
-              errorMessage: normalizedErrorMessage,
+              errorMessage: nameActualProvider(normalizedErrorMessage, descriptor),
               isContextOverflow
             }),
             timestamp,
@@ -214,7 +214,8 @@ function mapManagerRuntimeErrorConversationEvent(
   agentId: string,
   event: RuntimeSessionEvent,
   timestamp: string,
-  turnId?: string
+  turnId?: string,
+  descriptor?: AgentDescriptor
 ): ConversationMessageEvent | undefined {
   if (event.type !== "message_end") {
     return undefined;
@@ -241,7 +242,7 @@ function mapManagerRuntimeErrorConversationEvent(
     ...(turnId ? { turnId } : {}),
     role: "system",
     text: buildManagerErrorConversationText({
-      errorMessage: normalizedErrorMessage,
+      errorMessage: nameActualProvider(normalizedErrorMessage, descriptor),
       isContextOverflow
     }),
     timestamp,
@@ -599,15 +600,32 @@ function formatManagerErrorMessage(errorMessage: string): string {
 }
 
 function genericErrorHintSuffix(errorMessage: string): string {
-  if (classifyRuntimeCapacityError(errorMessage).isQuotaOrRateLimit) {
+  if (classifyRuntimeCapacityError(errorMessage).isQuotaOrRateLimit || !isAuthOrLimitError(errorMessage)) {
     return "";
   }
 
   return ` ${MANAGER_ERROR_GENERIC_HINT}`;
 }
 
+/** Auth and limit advice only fits an error that is about auth or limits. */
+function isAuthOrLimitError(errorMessage: string): boolean {
+  return /\b(401|403|429)\b|unauthori[sz]ed|forbidden|api key|authentication|rate.?limit|quota/i.test(errorMessage);
+}
+
+/**
+ * The OpenAI-compatible client labels every failure "OpenAI API error". Name the provider
+ * and model that actually failed instead.
+ */
+function nameActualProvider(errorMessage: string | undefined, descriptor?: AgentDescriptor): string | undefined {
+  if (!errorMessage || !descriptor) return errorMessage;
+  const actual = `${descriptor.model.provider}/${descriptor.model.modelId}`;
+  return /^OpenAI API error/i.test(errorMessage)
+    ? errorMessage.replace(/^OpenAI API error/i, `${actual} API error`)
+    : `${actual}: ${errorMessage}`;
+}
+
 function genericWorkerErrorHintSuffix(errorMessage: string): string {
-  if (classifyRuntimeCapacityError(errorMessage).isQuotaOrRateLimit) {
+  if (classifyRuntimeCapacityError(errorMessage).isQuotaOrRateLimit || !isAuthOrLimitError(errorMessage)) {
     return "";
   }
 
