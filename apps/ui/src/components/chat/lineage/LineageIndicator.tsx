@@ -75,7 +75,7 @@ export function LineageIndicator({ lineage: snapshot, resolveSessionLabel, onOpe
             <h2 className="text-[11px] font-medium uppercase tracking-wide text-subtle-foreground">Context handoffs</h2>
             <ul className="space-y-2.5">
               {transfers.slice(0, MAX_TRANSFERS).map((transfer) => (
-                <TransferRow key={transfer.transferId} transfer={transfer} handoff={handoffs.get(transfer.transferId)} />
+                <TransferRow key={transfer.transferId} transfer={transfer} handoff={handoffs.get(transfer.transferId)} resolveSessionLabel={resolveSessionLabel} />
               ))}
             </ul>
             {transfers.length > MAX_TRANSFERS ? (
@@ -88,8 +88,14 @@ export function LineageIndicator({ lineage: snapshot, resolveSessionLabel, onOpe
   )
 }
 
-function TransferRow({ transfer, handoff }: { transfer: ContextTransfer; handoff: ContextHandoff | undefined }) {
+function TransferRow({ transfer, handoff, resolveSessionLabel }: {
+  transfer: ContextTransfer
+  handoff: ContextHandoff | undefined
+  resolveSessionLabel?: (sessionId: string) => string | undefined
+}) {
   const kind = TRANSFER_KIND_LABELS[transfer.kind]
+  // Inherited context is reported per original thread; a handoff from one thread has only the flat totals.
+  const sources = handoff?.coverage.sources?.length ? handoff.coverage.sources : null
   const providers = transfer.sourceProvider || transfer.targetProvider
     ? `${transfer.sourceProvider ?? 'unknown'} → ${transfer.targetProvider ?? 'unknown'}`
     : null
@@ -108,11 +114,17 @@ function TransferRow({ transfer, handoff }: { transfer: ContextTransfer; handoff
       ) : null}
       {handoff ? (
         <>
-          <dl aria-label={`Handoff coverage for ${kind}`} className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/[0.04] px-2 py-1.5">
-            <CoverageCell label="Included" value={`${handoff.coverage.includedEntryIds.length} of ${handoff.coverage.requestedEntryIds.length}`} />
-            <CoverageCell label="Omitted" value={String(handoff.coverage.omittedEntryIds.length)} warn={handoff.coverage.omittedEntryIds.length > 0} />
-            <CoverageCell label="Truncated" value={String(handoff.coverage.partialEntryIds.length)} warn={handoff.coverage.partialEntryIds.length > 0} />
-          </dl>
+          {sources ? sources.map((source) => {
+            const sourceLabel = resolveSessionLabel?.(source.sourcePoint.threadId) ?? source.sourcePoint.threadId
+            return (
+              <div key={`${source.sourcePoint.threadId}:${source.sourcePoint.sequence}`} className="space-y-1">
+                <p className="truncate text-[11px] text-muted-foreground" title={source.sourcePoint.threadId}>
+                  {sourceLabel} · up to {describeBasePoint(source.sourcePoint)}
+                </p>
+                <CoverageCells label={`Handoff coverage for ${kind} from ${sourceLabel}`} coverage={source} />
+              </div>
+            )
+          }) : <CoverageCells label={`Handoff coverage for ${kind}`} coverage={handoff.coverage} />}
           <p className="text-[11px] text-muted-foreground">
             {handoff.budget.usedChars.toLocaleString('en-US')} of {handoff.budget.maxChars.toLocaleString('en-US')} characters
             {handoff.budget.truncated ? ' · budget reached' : ''}
@@ -125,6 +137,19 @@ function TransferRow({ transfer, handoff }: { transfer: ContextTransfer; handoff
         </>
       ) : null}
     </li>
+  )
+}
+
+function CoverageCells({ label, coverage }: {
+  label: string
+  coverage: Pick<ContextHandoff['coverage'], 'requestedEntryIds' | 'includedEntryIds' | 'omittedEntryIds' | 'partialEntryIds'>
+}) {
+  return (
+    <dl aria-label={label} className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/[0.04] px-2 py-1.5">
+      <CoverageCell label="Included" value={`${coverage.includedEntryIds.length} of ${coverage.requestedEntryIds.length}`} />
+      <CoverageCell label="Omitted" value={String(coverage.omittedEntryIds.length)} warn={coverage.omittedEntryIds.length > 0} />
+      <CoverageCell label="Truncated" value={String(coverage.partialEntryIds.length)} warn={coverage.partialEntryIds.length > 0} />
+    </dl>
   )
 }
 

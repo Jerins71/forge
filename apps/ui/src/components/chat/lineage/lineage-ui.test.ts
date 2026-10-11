@@ -133,6 +133,36 @@ describe('LineageIndicator', () => {
     click(getByRole(popover, 'button', { name: 'Open Builder' }))
     expect(onOpenSession).toHaveBeenCalledWith('parent-session')
   })
+  it('groups coverage by original thread when the handoff inherits context, with each exact source point', () => {
+    const snapshot = lineage()
+    snapshot.handoffs = [{
+      ...snapshot.handoffs[0]!,
+      coverage: {
+        ...snapshot.handoffs[0]!.coverage,
+        sources: [
+          { sourcePoint: { threadId: 'parent-session', sequence: 42, entryId: 'entry-42' }, requestedEntryIds: ['p1', 'p2', 'p3'], includedEntryIds: ['p1', 'p2'], omittedEntryIds: ['p3'], partialEntryIds: [] },
+          { sourcePoint: { threadId: 'session-1', sequence: 57 }, requestedEntryIds: ['e1'], includedEntryIds: [], omittedEntryIds: [], partialEntryIds: ['e1'] },
+        ],
+      },
+    }]
+    render(createElement(LineageIndicator, { lineage: snapshot, resolveSessionLabel: (id: string) => ({ 'parent-session': 'Builder', 'session-1': 'Fork' } as Record<string, string>)[id] }))
+    click(getByRole(container, 'button', { name: /^Lineage: / }))
+    const popover = getByRole(body(), 'dialog')
+    // The inherited parent and this session are reported separately; the flat total is not repeated.
+    expect(getByLabelText(popover, 'Handoff coverage for Provider switch from Builder').textContent).toBe('Included2 of 3Omitted1Truncated0')
+    expect(getByLabelText(popover, 'Handoff coverage for Provider switch from Fork').textContent).toBe('Included0 of 1Omitted0Truncated1')
+    expect(popover.querySelectorAll('[aria-label^="Handoff coverage"]')).toHaveLength(2)
+    expect(popover.textContent).toContain('Builder · up to message entry-42')
+    expect(popover.textContent).toContain('Fork · up to message #57')
+    expect(popover.textContent).toContain('120,000 of 120,000 characters · budget reached')
+  })
+  it('falls back to the flat coverage when the source list is empty', () => {
+    const snapshot = lineage()
+    snapshot.handoffs = [{ ...snapshot.handoffs[0]!, coverage: { ...snapshot.handoffs[0]!.coverage, sources: [] } }]
+    render(createElement(LineageIndicator, { lineage: snapshot, resolveSessionLabel: labels }))
+    click(getByRole(container, 'button', { name: /^Lineage: / }))
+    expect(getByLabelText(getByRole(body(), 'dialog'), 'Handoff coverage for Provider switch').textContent).toBe('Included2 of 4Omitted1Truncated1')
+  })
   it('shows a failed transfer with its typed reason', () => {
     render(createElement(LineageIndicator, { lineage: lineage({ lineage: null, handoffs: [], transfers: [{ ...lineage().transfers[0]!, state: 'failed', error: { code: 'UNSUPPORTED', message: 'cursor does not accept portable context' } }] }) }))
     click(getByRole(container, 'button', { name: 'Lineage: Switch from codex-native failed' }))

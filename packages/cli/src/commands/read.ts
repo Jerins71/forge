@@ -346,5 +346,15 @@ function formatLineage(snapshot: SessionLineageSnapshot): string {
     { header: 'TRUNCATED', value: (transfer) => handoffs.get(transfer.transferId)?.coverage.partialEntryIds.length },
     { header: 'BUDGET', value: (transfer) => { const budget = handoffs.get(transfer.transferId)?.budget; return budget ? `${budget.usedChars}/${budget.maxChars} chars${budget.truncated ? ' truncated' : ''}` : '' } },
   ])
-  return `${header}\n\n${table}`
+  // Inherited context is reported per original thread, each with its exact source point.
+  const sources = snapshot.handoffs.flatMap((handoff) => (handoff.coverage.sources ?? []).map((source) => ({ transferId: handoff.transferId, ...source })))
+  if (sources.length === 0) return `${header}\n\n${table}`
+  const sourceTable = formatTable(sources, [
+    { header: 'TRANSFER', value: (source) => source.transferId },
+    { header: 'SOURCE', value: (source) => `${source.sourcePoint.threadId}@${source.sourcePoint.sequence}${source.sourcePoint.entryId ? ` (${source.sourcePoint.entryId})` : ''}` },
+    { header: 'INCLUDED', value: (source) => `${source.includedEntryIds.length}/${source.requestedEntryIds.length}` },
+    { header: 'OMITTED', value: (source) => source.omittedEntryIds.length },
+    { header: 'TRUNCATED', value: (source) => source.partialEntryIds.length },
+  ])
+  return `${header}\n\n${table}\n\n${sourceTable}`
 }

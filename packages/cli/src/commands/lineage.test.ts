@@ -143,6 +143,24 @@ describe('forge sessions lineage', () => {
       '',
     ].join('\n'))
   })
+  it('lists coverage per original thread when a handoff inherits context', async () => {
+    const snapshot = lineageSnapshotFixture()
+    snapshot.handoffs[0]!.coverage.sources = [
+      { sourcePoint: { threadId: 'parent-session', sequence: 42, entryId: 'entry-42' }, requestedEntryIds: ['p1', 'p2', 'p3'], includedEntryIds: ['p1', 'p2'], omittedEntryIds: ['p3'], partialEntryIds: [] },
+      { sourcePoint: { threadId: 'session-1', sequence: 57 }, requestedEntryIds: ['e1'], includedEntryIds: [], omittedEntryIds: [], partialEntryIds: ['e1'] },
+    ]
+    const result = await run(['sessions', 'lineage', 'session-1'], { getSessionLineage: async () => snapshot })
+    expect(result.stdout.split('\n').slice(-6)).toEqual([
+      '',
+      'TRANSFER         SOURCE                        INCLUDED  OMITTED  TRUNCATED',
+      '---------------  ----------------------------  --------  -------  ---------',
+      'transfer-switch  parent-session@42 (entry-42)  2/3       1        0',
+      'transfer-switch  session-1@57                  0/1       0        1',
+      '',
+    ])
+    const json = await run(['sessions', 'lineage', 'session-1', '--json'], { getSessionLineage: async () => snapshot })
+    expect(JSON.parse(json.stdout).handoffs[0].coverage.sources).toEqual(snapshot.handoffs[0]!.coverage.sources)
+  })
   it('shows a typed transfer failure and a session with no lineage', async () => {
     const result = await run(['sessions', 'lineage', 'session-1'], { getSessionLineage: async () => ({
       threadId: 'session-1', lineage: null, handoffs: [],
