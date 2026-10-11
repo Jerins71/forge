@@ -1,3 +1,4 @@
+import type { CoreAgentMessagePort } from "./core-agent-message-port.js";
 import { blocksOpenRouterFallback } from "./runtime/pi/openrouter-request-policy.js";
 import type {
   DelegationRoster,
@@ -319,6 +320,10 @@ export interface SwarmAgentLifecycleServiceOptions {
 }
 
 export class SwarmAgentLifecycleService {
+  private core: CoreAgentMessagePort | undefined;
+
+  installCoreAgentMessages(core: CoreAgentMessagePort): void { this.core = core; }
+
   constructor(private readonly options: SwarmAgentLifecycleServiceOptions) {}
 
   private upsertDescriptor(descriptor: AgentDescriptor): void {
@@ -1137,32 +1142,8 @@ export class SwarmAgentLifecycleService {
       throw new Error(`Only owning manager can kill agent ${targetAgentId}`);
     }
 
-    await this.maybeSuppressSessionAttentionForWorkerTeardown(manager.agentId, targetAgentId);
-    let cleanupFailure: unknown;
-    try {
-      await this.terminateDescriptor(target, {
-        abort: true,
-        emitStatus: false,
-      });
-    } catch (error) {
-      cleanupFailure = error;
-    }
-    await this.options.saveStore();
-
-    this.options.logDebug("agent:kill", {
-      callerAgentId,
-      targetAgentId,
-      managerId: manager.agentId
-    });
-
-    const refreshedTarget = this.options.descriptors.get(targetAgentId) ?? target;
-    this.options.emitStatus(targetAgentId, refreshedTarget.status, 0);
-    this.options.emitAgentsSnapshot();
-    if (cleanupFailure) {
-      throw cleanupFailure instanceof Error
-        ? cleanupFailure
-        : new Error("agent_cleanup_failed");
-    }
+    if (!this.core) throw new Error("Core worker control is unavailable");
+    await this.core.stopWorker({ managerId: manager.agentId, workerId: targetAgentId });
   }
 
   async stopWorker(agentId: string): Promise<void> {

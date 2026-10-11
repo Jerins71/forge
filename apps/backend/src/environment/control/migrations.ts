@@ -174,19 +174,6 @@ CREATE TABLE IF NOT EXISTS control_turns (
   recovery_id TEXT,
   PRIMARY KEY(session_id, turn_id)
 );
-CREATE TABLE IF NOT EXISTS control_deliveries (
-  session_id TEXT NOT NULL,
-  delivery_id TEXT NOT NULL,
-  turn_id TEXT,
-  from_agent_id TEXT,
-  to_agent_id TEXT,
-  assignment_id TEXT,
-  content_ref_json TEXT,
-  pending_at TEXT,
-  state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','dispatching','acked')),
-  acked_at TEXT,
-  PRIMARY KEY(session_id, delivery_id)
-);
 CREATE TABLE IF NOT EXISTS control_recovery (
   recovery_id TEXT PRIMARY KEY,
   snapshot_json TEXT NOT NULL,

@@ -1,10 +1,5 @@
 import type { RecoverySnapshot } from "@forge/protocol/environment-v2";
-import {
-  recordRecoveryFact,
-  claimRecoveryDelivery, readRecoveryContent,
-  readRecoveryState,
-  type RecoveryTarget,
-} from "./recovery-state.js";
+import type { RecoveryTarget } from "./recovery-state.js";
 import type {
   AgentDescriptor,
   RequestedDeliveryMode,
@@ -25,11 +20,6 @@ export interface RestartRecoveryCoordinatorOptions {
     message: string,
     delivery: RequestedDeliveryMode,
     options: InternalSendOptions,
-  ) => Promise<SendMessageReceipt>;
-  sendWorkerResult: (
-    workerAgentId: string,
-    resultText: string,
-    expectedAssignmentId: string,
   ) => Promise<SendMessageReceipt>;
   now: () => string;
   onDecisionResolved?: () => void;
@@ -53,20 +43,4 @@ export class RestartRecoveryCoordinator {
   async dismiss(): Promise<RecoverySnapshot | null> { await this.core?.decide("dismiss"); this.options.onDecisionResolved?.(); return this.getSnapshot(); }
   async resume(): Promise<RecoverySnapshot | null> { await this.core?.decide("resume"); this.options.onDecisionResolved?.(); return this.getSnapshot(); }
 
-  /** Phase 4 replaces this last assignment-delivery resource with transfer effects. */
-  async deliverReport(deliveryId: string): Promise<void> {
-    const report = this.getSnapshot()?.undeliveredReports.find(report => report.deliveryId === deliveryId);
-    if (!report) throw new Error("Recovered result is unavailable");
-    const target = this.options.getSessionTarget(report.toAgentId);
-    if (!target) throw new Error("Recovered result target is unavailable");
-    const state = await readRecoveryState(target);
-    const pending = state.pendingDeliveries.get(deliveryId);
-    if (!pending?.contentRef || pending.state !== "pending") throw new Error("Recovered result delivery is ambiguous");
-    const message = await readRecoveryContent(pending.contentRef);
-    if (!message || !await claimRecoveryDelivery(target, deliveryId)) throw new Error("Recovered result could not be claimed");
-    const source = this.options.descriptors.get(report.fromAgentId);
-    if (source?.role === "worker" && report.assignmentId) await this.options.sendWorkerResult(source.agentId, message, report.assignmentId);
-    else await this.options.sendMessage(report.fromAgentId, report.toAgentId, message, "auto", { origin: "internal" });
-    await recordRecoveryFact(target, { t: "delivery_acked", deliveryId, at: this.options.now() });
-  }
 }

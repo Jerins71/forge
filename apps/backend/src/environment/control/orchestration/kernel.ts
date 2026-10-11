@@ -101,7 +101,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     } else if (observation.type === "request_resolved") {
       const request = state.requests[`${attempt.bindingId}:${owner.generation}:${observation.request.nativeId}`];
       if (request) emit({ type: observation.resolution === "expired" ? "request.expired" : "request.resolved", request: { ...request, state: observation.resolution === "expired" ? "expired" : "resolved" } });
-    } else if (observation.origin.kind !== "root" || owner.activeRunId !== run.runId || run.activeAttemptId !== attempt.attemptId) return;
+    } else if (observation.origin.kind !== "root" || owner.activeRunId !== run.runId || run.activeAttemptId !== attempt.attemptId) { /* This observation has no root terminal authority. */ }
     else if (observation.type === "accepted") emit({ type: "attempt.accepted", attempt: { ...state.attempts[attempt.attemptId], state: "accepted", delivery: "dispatched", turn: observation.turn } });
     else if (observation.type === "terminal" && observation.terminalAuthority === "root_attempt") { finish(state.runs[run.runId], observation.outcome); advance(owner.threadId); }
     else if (observation.type === "error") {

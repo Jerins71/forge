@@ -1,7 +1,7 @@
 import type { WorkerAssignment } from "../environment/control/orchestration/assignments.js";
 import type { PlanStepAssignment } from "./planning/plan-usage-tracker.js";
 import type { RuntimeUserMessage } from "./runtime-contracts.js";
-import type { AgentDescriptor, ConversationAttachment, RequestedDeliveryMode, SendMessageReceipt } from "./types.js";
+import type { AgentDescriptor, ConversationAttachment, RequestedDeliveryMode, SendMessageReceipt, WorkerParentContext } from "./types.js";
 import type { InboundTurnContextInput } from "./turn-context-coordinator.js";
 
 /** Internal command ingress supplied by the environment's existing core owner. */
@@ -23,6 +23,7 @@ export interface CoreAgentMessagePort {
     call?: { agentId: string; toolCallId: string };
     planAssignment?: PlanStepAssignment;
     requiresSecureRuntime?: boolean;
+    parentContext?: Pick<WorkerParentContext, "outputTarget" | "rootTurnId" | "parentRootTurnId">;
     presentation: Omit<InboundTurnContextInput<unknown>, "skipRecoveryTracking">;
   }): Promise<{ runId: string; receipt: SendMessageReceipt; assignment?: WorkerAssignment }>;
   /** Record/extract the canonical final for this exact terminal run, then worker.result. */

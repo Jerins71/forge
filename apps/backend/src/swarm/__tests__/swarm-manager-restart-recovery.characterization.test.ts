@@ -1,4 +1,3 @@
-import { writeFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import { createTempConfig, TestSwarmManager, bootWithDefaultManager } from '../../test-support/index.js';
 import { AgentDescriptorStore } from "../agents/agent-descriptor-store.js";
@@ -11,8 +10,6 @@ import {
 } from '../recovery-state.js'
 
 const NOW = '2026-07-13T12:00:00.000Z'
-const RECOVERED_REPORT = 'Recovered worker result from the persisted ledger.'
-const RECOVERED_DELIVERY_ID = 'worker-result:recovery-worker:persisted'
 
 interface RecoveryFixture {
   cleanup: () => Promise<void>
@@ -36,7 +33,6 @@ async function createRecoveryFixture(options?: { withRunningGraph?: boolean }): 
     ['manager', 'streaming'],
     [worker.agentId, 'streaming'],
   ]))
-  await persistWorkerParentContext(handle.config, worker.agentId)
   if (options?.withRunningGraph) {
     const planStore = new SessionPlanStore({
       dataDir: handle.config.paths.dataDir,
@@ -91,17 +87,6 @@ async function createRecoveryFixture(options?: { withRunningGraph?: boolean }): 
     kind: 'agent_message',
     at: NOW,
   })
-  await writeFile(handle.config.paths.agentsStoreFile + ".canonical-fixture.jsonl", JSON.stringify({ id: "fixture-result", data: { message: RECOVERED_REPORT } }) + "\n");
-  await recordRecoveryFact(target, {
-    t: 'delivery_pending',
-    turnId: 'manager-turn-before-restart',
-    deliveryId: RECOVERED_DELIVERY_ID,
-    from: worker.agentId,
-    to: 'manager',
-    contentRef: { file: handle.config.paths.agentsStoreFile + ".canonical-fixture.jsonl", entryId: "fixture-result" },
-    assignmentId: 'assignment:recovery-worker:persisted',
-    at: NOW,
-  })
 
   return {
     cleanup: handle.cleanup,
@@ -124,28 +109,6 @@ async function persistAgentStatuses(
   owner.replace(store); await owner.save();
 }
 
-async function persistWorkerParentContext(
-  config: SwarmConfig,
-  workerId: string,
-  assignmentId = 'assignment:recovery-worker:persisted',
-): Promise<void> {
-  const owner = new AgentDescriptorStore({ dataDir: config.paths.dataDir, storeFilePath: config.paths.agentsStoreFile });
-  const store = await owner.load();
-  store.agents = store.agents.map((agent) => agent.agentId === workerId
-    ? {
-        ...agent,
-        workerParentContext: {
-          schemaVersion: 1,
-          assignmentId,
-          managerId: 'manager',
-          assignedAt: NOW,
-          outputTarget: { kind: 'internal_only', reason: 'restart_recovery_test' },
-        },
-      }
-    : agent)
-  owner.replace(store); await owner.save();
-}
-
 describe('SwarmManager restart recovery characterization', () => {
   it('builds an isolated boot snapshot and records interrupted turns once', async () => {
     const fixture = await createRecoveryFixture()
@@ -160,22 +123,15 @@ describe('SwarmManager restart recovery characterization', () => {
         createdAt: NOW,
         interruptedManagers: ['manager'],
         interruptedWorkers: [fixture.workerId],
-        undeliveredReports: [{
-          deliveryId: RECOVERED_DELIVERY_ID,
-          fromAgentId: fixture.workerId,
-          toAgentId: 'manager',
-          turnId: 'manager-turn-before-restart',
-          assignmentId: 'assignment:recovery-worker:persisted',
-        }],
+        undeliveredReports: [],
       })
 
       snapshot!.interruptedManagers.push('mutated-manager')
       snapshot!.interruptedWorkers.length = 0
-      snapshot!.undeliveredReports[0]!.fromAgentId = 'mutated-worker'
       expect(recovered.getRestartRecoverySnapshot()).toMatchObject({
         interruptedManagers: ['manager'],
         interruptedWorkers: [fixture.workerId],
-        undeliveredReports: [{ fromAgentId: fixture.workerId }],
+        undeliveredReports: [],
       })
 
       const stateAfterFirstRecovery = await readRecoveryState(fixture.target);
