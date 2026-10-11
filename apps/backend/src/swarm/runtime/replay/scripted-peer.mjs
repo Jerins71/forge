@@ -1,7 +1,7 @@
 // A raw stdio peer. Forge still owns the actual readline/JSON-RPC parser.
 import { connect } from 'node:net';
 import { createInterface } from 'node:readline';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 if (process.argv.includes('--version')) { console.log('codex-cli 0.155.0'); process.exit(0); }
 const home = process.env.CODEX_HOME;
@@ -14,6 +14,13 @@ socket.write(JSON.stringify({ hello: true, pid: process.pid, bindings: { $cwd: p
 createInterface({ input: process.stdin }).on('line', line => {
   outbound = JSON.parse(line);
   if (outbound.method === 'thread/start') writeFileSync(rollout, JSON.stringify({ type: 'session_meta', payload: { id: 'unbound', dynamic_tools: outbound.params.dynamicTools } }) + '\n');
+  if (outbound.method === 'thread/resume') {
+    const prior = readdirSync(home).filter(name => name.startsWith('replay-rollout-')).find(name => {
+      try { return JSON.parse(readFileSync(join(home, name), 'utf8')).payload.id === outbound.params.threadId; } catch { return false; }
+    });
+    if (!prior) throw new Error('Replay resumed conversation has no retained native metadata');
+    copyFileSync(join(home, prior), rollout);
+  }
   socket.write(JSON.stringify({ frame: outbound }) + '\n');
 }).on('close', () => { socket.destroy(); process.exit(0); });
 });
