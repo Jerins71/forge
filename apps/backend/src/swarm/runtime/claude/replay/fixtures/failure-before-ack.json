@@ -1,0 +1,73 @@
+{
+  "provider": "claude",
+  "protocol": "agent-sdk/stdio-control",
+  "version": "0.3.280",
+  "scenario": "failure-before-ack",
+  "provenance": "Synthetic raw frames from the installed SDK wire contract; not captured from a real account. The real SDK, runtime and MCP server parse these frames.",
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "type": "control_request",
+        "request": {
+          "subtype": "initialize",
+          "sdkMcpServers": [
+            "forge"
+          ],
+          "appendSystemPrompt": "$prompt"
+        }
+      },
+      "capture": {
+        "$initId": [
+          "request_id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "$initId",
+          "response": {
+            "commands": [],
+            "models": [],
+            "agents": []
+          }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "type": "user",
+        "uuid": "$any",
+        "parent_tool_use_id": null,
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "work"
+            }
+          ]
+        }
+      },
+      "capture": {
+        "$inputId": [
+          "uuid"
+        ]
+      },
+      "label": "input"
+    },
+    {
+      "type": "runtime_exit",
+      "status": "error",
+      "error": {
+        "message": "transport lost"
+      },
+      "label": "failure"
+    }
+  ]
+}

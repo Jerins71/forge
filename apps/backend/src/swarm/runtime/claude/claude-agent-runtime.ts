@@ -1,12 +1,18 @@
 import { NATIVE_USAGE_ENTRY_TYPE, NativeUsageAccumulator, normalizeClaudeUsage, parseNativeUsageEntry, type NativeUsageRecord } from "../../../utils/native-usage-records.js";
 import type { Usage } from "@anthropic-ai/sdk/resources/messages";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { query, type Options as QueryOptions, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { SessionManager, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { getCatalogContextWindow } from "@forge/protocol";
+import type { ProviderScope } from "@forge/protocol";
+import type { ProviderBinding, ProviderOpenInput } from "../provider-contract.js";
+import { createInstructionBundle, renderProviderInstructions } from "../instruction-bundle.js";
+import { bindRuntimeToolHost } from "../runtime-tool-plan.js";
+import { ClaudeProviderAdapter } from "./claude-provider-adapter.js";
+import type { ClaudeProviderSession } from "./claude-provider-session.js";
 import { openSessionManagerWithSizeGuard } from "../../session/session-file-guard.js";
 import { isConversationEntryEvent } from "../../session/conversation-validators.js";
 import type { AgentContextUsage, AgentDescriptor, AgentStatus, RequestedDeliveryMode, SendMessageReceipt } from "../../types.js";
@@ -21,7 +27,7 @@ import { guardSecureRuntimeValue, SECURE_RUNTIME_GUARD_FAILURE_MESSAGE } from ".
 
 export const NATIVE_CLAUDE_STATE = "swarm_native_claude_state";
 interface NativeState { version: 1; sessionId: string; ownerAgentId: string; cwd: string; hasStartedTurn: boolean; forkFrom?: string }
-interface Input { id: ReturnType<typeof randomUUID>; message: RuntimeUserMessage; activated: boolean; compact?: { resolve(value: unknown): void; reject(error: Error): void } }
+interface Input { id: ReturnType<typeof randomUUID>; message: RuntimeUserMessage; activated: boolean; attemptId?: string; compact?: { resolve(value: unknown): void; reject(error: Error): void } }
 export interface ClaudeRuntimeOptions {
   descriptor: AgentDescriptor;
   systemPrompt: string;
@@ -33,12 +39,20 @@ export interface ClaudeRuntimeOptions {
   projectTrusted: boolean;
   creationOptions?: RuntimeCreationOptions;
   createQuery?: typeof query;
+  providerAdapter?: ClaudeProviderAdapter;
+  providerSession?: ClaudeProviderSession;
+  providerOpen?: ProviderOpenInput;
+  nativeConversation?: { resumeId?: string; forkFrom?: string; sessionId?: string };
+  /** Current lifecycle composition still routes choices through its existing owner. */
+  legacyChoices?: boolean;
+  onNativePrepared?: (runtime: ClaudeAgentRuntime, binding: ProviderBinding) => void;
 }
 
 /** A persistent native query owns the loop. Forge owns delivery, history, and cleanup. */
 export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   readonly runtimeType = "claude" as const;
   readonly descriptor: AgentDescriptor;
+  readonly providerAdapter: ClaudeProviderAdapter;
   private readonly session: SessionManager;
   private readonly abort = new AbortController();
   private readonly bridge: ClaudeRuntimeTools;
@@ -65,9 +79,11 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   private readonly accounting = new NativeUsageAccumulator();
   private readonly runtimeStartedAt = new Date().toISOString();
   private turnCompaction?: Input["compact"];
+  private providerOutcome: "completed" | "failed" | "cancelled" = "completed";
 
   private constructor(private readonly options: ClaudeRuntimeOptions) {
     this.descriptor = structuredClone(options.descriptor);
+    this.providerAdapter = options.providerAdapter!;
     ensureSessionHeader(this.descriptor);
     const session = openSessionManagerWithSizeGuard(this.descriptor.sessionFile, { context: "claude-native" });
     if (!session) throw new Error("Could not open the Forge session for native Claude; history was left unchanged.");
@@ -76,26 +92,42 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
       const usage = parseNativeUsageEntry(entry);
       if (usage) this.accounting.consume(usage);
     }
-    this.bridge = new ClaudeRuntimeTools({ ...options, agentId: this.descriptor.agentId,
+    this.bridge = new ClaudeRuntimeTools({ agentId: this.descriptor.agentId, host: options.host,
+      binding: options.creationOptions!.toolHostBinding!, session: options.providerSession!, legacyChoices: options.legacyChoices,
       signal: this.abort.signal, guard: value => this.guard(value) });
   }
 
   static async create(options: ClaudeRuntimeOptions): Promise<ClaudeAgentRuntime> {
+    const instructions = options.creationOptions?.instructionBundle ?? createInstructionBundle(options.descriptor, options.systemPrompt);
+    const scope: ProviderScope = options.creationOptions?.providerScope ?? options.providerOpen?.scope ?? { threadId: options.descriptor.agentId, bindingId: randomUUID(), generation: 0 };
+    const toolHost = options.creationOptions?.toolHostBinding ?? bindRuntimeToolHost({ descriptor: options.descriptor,
+      tools: options.tools, mechanism: "in_process_mcp", scope, secureRuntimeBinding: options.creationOptions?.secureRuntimeBinding });
+    return new ClaudeProviderAdapter({ ...options, legacyChoices: true }).legacyRuntime({ scope, model: options.descriptor.model, instructions, toolHost, required: options.creationOptions?.providerRequirements });
+  }
+
+  /** The adapter uses the existing native loop/session owner; no replay runtime replaces it. */
+  static async createNative(options: ClaudeRuntimeOptions): Promise<{ runtime: ClaudeAgentRuntime; binding: ProviderBinding }> {
     const runtime = new ClaudeAgentRuntime(options);
     const stored = runtime.getCustomEntries(NATIVE_CLAUDE_STATE).at(-1) as NativeState | undefined;
     const usable = stored?.version === 1 && stored.cwd === options.descriptor.cwd && !options.creationOptions?.startupRecoveryContext;
     const owned = usable && stored.ownerAgentId === options.descriptor.agentId;
-    const resume = owned && stored.hasStartedTurn;
+    const resume = !!options.nativeConversation?.resumeId || (owned && stored.hasStartedTurn && !options.nativeConversation?.forkFrom);
     // A latest-message fork keeps its source's native identity (message-bounded
     // forks omit it and rebuild from the bounded canonical copy). Fork that native
     // thread so the new session starts with the source's full context. Until the
     // first turn persists the fork, a restart forks the same source again.
-    const forkFrom = resume || !usable ? undefined : owned ? stored.forkFrom : stored.hasStartedTurn ? stored.sessionId : undefined;
-    runtime.state = resume ? stored : { version: 1, sessionId: randomUUID(), ownerAgentId: options.descriptor.agentId, cwd: options.descriptor.cwd, hasStartedTurn: false, ...(forkFrom ? { forkFrom } : {}) };
+    const forkFrom = options.nativeConversation?.forkFrom ?? (resume || !usable ? undefined : owned ? stored.forkFrom : stored.hasStartedTurn ? stored.sessionId : undefined);
+    runtime.state = options.nativeConversation?.resumeId ? { version: 1, sessionId: options.nativeConversation.resumeId, ownerAgentId: options.descriptor.agentId, cwd: options.descriptor.cwd, hasStartedTurn: true } : resume ? stored! : { version: 1, sessionId: options.nativeConversation?.sessionId ?? randomUUID(), ownerAgentId: options.descriptor.agentId, cwd: options.descriptor.cwd, hasStartedTurn: false, ...(forkFrom ? { forkFrom } : {}) };
     if (!resume && !forkFrom) runtime.recovery = options.creationOptions?.startupRecoveryContext?.blockText
       ?? buildModelChangeRecoveryContext({ descriptor: options.descriptor,
         entries: runtime.getCustomEntries("swarm_conversation_entry").filter(isConversationEntryEvent),
         modelContextWindow: getCatalogContextWindow(options.descriptor.model.modelId, options.descriptor.model.provider), existingPrompt: options.systemPrompt }).blockText;
+    const opened = options.providerOpen!;
+    const binding: ProviderBinding = { scope: opened.scope, conversation: { ...opened.scope, kind: "conversation", nativeId: runtime.state.sessionId },
+      capabilities: runtime.providerAdapter.capabilities(), instructionRevision: opened.instructions.revision,
+      toolContractRevision: createHash("sha256").update(JSON.stringify(opened.toolHost.snapshot)).digest("hex") };
+    options.providerSession!.bind(binding);
+    options.onNativePrepared?.(runtime, binding);
     const level = options.descriptor.model.thinkingLevel;
     const sdkOptions: QueryOptions = {
       cwd: options.descriptor.cwd, env: options.env, pathToClaudeCodeExecutable: options.executable,
@@ -104,7 +136,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
         : { sessionId: runtime.state.sessionId }),
       model: options.descriptor.model.modelId,
       effort: level as QueryOptions["effort"],
-      systemPrompt: { type: "preset", preset: "claude_code", append: options.systemPrompt },
+      ...renderProviderInstructions(opened.instructions, "claude"),
       settingSources: options.projectTrusted ? ["project", "local"] : [],
       settings: { autoMemoryEnabled: false },
       permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true,
@@ -141,13 +173,14 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
       }
       if (runtime.status === "error") throw new Error("Claude native exited during startup. Check its authentication and runtime configuration.");
       runtime.appendCustomEntry(NATIVE_CLAUDE_STATE, runtime.state);
-      return runtime;
+      return { runtime, binding };
     } catch (error) {
       await runtime.stopInFlight({ shutdownTimeoutMs: 10_000 });
       throw error;
     }
   }
 
+  getProviderDrainStatus(): "open" | "pending" | "clean" { return this.closed ? "clean" : this.stopping || this.status === "error" ? "pending" : "open"; }
   getStatus(): AgentStatus { return this.status; }
   getPendingCount(): number { return this.sent.size + this.followUps.length; }
   hasPendingInputDispatch(): boolean { return this.getPendingCount() > 0; }
@@ -157,10 +190,10 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   getCustomEntries(type: string): unknown[] { return this.session.getEntries().filter(e => e.type === "custom" && e.customType === type).map(e => (e as { data: unknown }).data); }
   appendCustomEntry(type: string, data?: unknown): string { return this.session.appendCustomEntry(type, data); }
 
-  async sendMessage(input: RuntimeUserMessageInput, mode: RequestedDeliveryMode = "auto"): Promise<SendMessageReceipt> {
+  async sendMessage(input: RuntimeUserMessageInput, mode: RequestedDeliveryMode = "auto", attemptId?: string): Promise<SendMessageReceipt> {
     return this.serialize(async () => {
       this.assertOpen();
-      const value: Input = { id: randomUUID(), message: normalizeRuntimeUserMessage(input), activated: false };
+      const value: Input = { id: randomUUID(), message: normalizeRuntimeUserMessage(input), activated: false, attemptId };
       const busy = this.turnOpen || this.sent.size > 0;
       if (busy && mode === "followUp") { this.followUps.push(value); await this.publishStatus(); }
       else {
@@ -177,14 +210,17 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     });
   }
 
-  async compact(instructions?: string): Promise<unknown> {
+  async interruptProvider(): Promise<void> { this.assertOpen(); await this.native.interrupt(); }
+
+  async compact(instructions?: string, attemptId?: string): Promise<unknown> {
     let resolve!: (value: unknown) => void;
     let reject!: (error: Error) => void;
     const result = new Promise((yes, no) => { resolve = yes; reject = no; });
     await this.serialize(async () => {
       this.assertOpen();
       if (this.turnOpen || this.sent.size || this.followUps.length) throw new Error("Wait for the Claude turn to finish before compacting.");
-      await this.submit({ id: randomUUID(), message: { text: `/compact${instructions?.trim() ? ` ${instructions.trim()}` : ""}` }, activated: false, compact: { resolve, reject } });
+      const id = randomUUID();
+      await this.submit({ id, attemptId, message: { text: `/compact${instructions?.trim() ? ` ${instructions.trim()}` : ""}` }, activated: false, compact: { resolve, reject } });
     });
     return result;
   }
@@ -205,20 +241,24 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     this.turnCompaction = undefined;
     this.sent.clear(); this.followUps.length = 0;
     const hadTurn = this.turnOpen;
+    this.providerOutcome = "cancelled";
     this.turnOpen = false;
-    this.closed = true;
     this.status = "idle";
     for (const event of this.mapper.finish(false, undefined, true)) await this.emit(event);
     if (hadTurn) {
       await this.emit({ type: "agent_end" });
     }
     await this.publishStatus();
+    this.options.providerSession?.finish();
+    this.closed = true;
   }
   async terminate(options?: RuntimeShutdownOptions): Promise<void> { await this.stopInFlight(options); this.status = "terminated"; await this.publishStatus(); }
   async shutdownForReplacement(options?: RuntimeShutdownOptions): Promise<void> { await this.stopInFlight(options); }
   async recycle(): Promise<void> { await this.stopInFlight(); }
 
   private async submit(input: Input): Promise<void> {
+    this.options.providerSession?.register(input.id, input.attemptId ?? input.id, input.attemptId !== undefined);
+    if (input.compact) this.options.providerSession?.compactionStarted();
     const first = !this.turnOpen && this.sent.size === 0;
     this.sent.set(input.id, input);
     this.status = "streaming";
@@ -257,7 +297,9 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   }
 
   private async handle(frame: SDKMessage): Promise<void> {
-    if (this.stopping || ("parent_tool_use_id" in frame && frame.parent_tool_use_id)) return;
+    if (this.stopping) return;
+    this.options.providerSession?.frame(frame);
+    if ("parent_tool_use_id" in frame && frame.parent_tool_use_id) return;
     if (frame.type === "system" && frame.subtype === "init" && frame.session_id !== this.state.sessionId) {
       throw new Error("Claude returned a different native session identity; refusing to replace the stored conversation.");
     }
@@ -309,8 +351,10 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
         percent: this.usage.tokens / this.contextWindow * 100 };
     }
     const success = !frame.is_error;
+    this.providerOutcome = success ? "completed" : "failed";
     for (const event of this.mapper.finish(success, success && frame.subtype === "success" ? frame.result : undefined)) await this.emit(event);
     const cost = Math.max(0, frame.total_cost_usd - this.previousCost); this.previousCost = frame.total_cost_usd;
+    this.options.providerSession?.usage(frame, cost);
     await this.emit({ type: "turn_end", toolResults: [], meta: { provider: this.descriptor.model.provider, modelId: this.descriptor.model.modelId,
       api: "claude-agent-sdk", providerSessionId: this.state.sessionId, durationMs: frame.duration_ms, durationApiMs: frame.duration_api_ms,
       outcome: frame.subtype, requestPayloadFidelity: "unavailable", costUsd: { total: cost }, usage: {
@@ -345,6 +389,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   }
   private async emit(event: RuntimeSessionEvent): Promise<void> {
     event = this.guard(event);
+    if (event.type === "agent_end") this.options.providerSession?.terminal(this.providerOutcome, this.turnError);
     if (event.type === "message_end") this.session.appendMessage({ ...event.message,
       api: "claude-agent-sdk", provider: this.descriptor.model.provider, model: this.descriptor.model.modelId,
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, timestamp: Date.now() } as never);
@@ -355,6 +400,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     this.status = "error";
     let message = SECURE_RUNTIME_GUARD_FAILURE_MESSAGE;
     try { message = this.guard(error instanceof Error ? error.message : String(error)); } catch { /* Never echo rejected guard input. */ }
+    this.options.providerSession?.failure(message);
     this.turnCompaction?.reject(new Error(message));
     for (const input of this.sent.values()) input.compact?.reject(new Error(message));
     await this.options.callbacks.onRuntimeError?.(this.descriptor.agentId, { phase: "runtime_exit", message });
