@@ -7,7 +7,7 @@
 //   scripts/environment-e2e/fixtures/ui-fleet.ts exports `openUiFleet(manifest)` returning UiFleet below.
 //   Grants are minted in the test process through each environment's authenticated session.
 //   Pairing request bodies and traces are excluded from artifacts.
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { expect, type BrowserContext, type Page, type Request } from '@playwright/test'
@@ -237,6 +237,8 @@ test('9.2.1 B pairs by link, C pairs by code, and consumed grants cannot be repl
   await page.getByLabel('Pairing code').fill(code.code!.toLowerCase().replace(/-/g, ''))
   // Needed later to list and revoke this device's session on C.
   await page.getByRole('dialog').getByRole('checkbox', { name: 'Manage pairing and devices' }).check()
+  // Needed later to set up Codex native on C from this device. B keeps the default permissions.
+  await page.getByRole('dialog').getByRole('checkbox', { name: 'Change settings' }).check()
   await page.getByRole('button', { name: 'Pair', exact: true }).click()
   await expect(page.getByTestId('pairing-success')).toContainText(c.label)
   await page.getByRole('button', { name: 'Done' }).click()
@@ -725,6 +727,65 @@ test('Claude native API key is saved on the picked environment only, masked afte
   await expect(form.getByRole('button', { name: 'Save' })).toBeDisabled()
   await expect(form.getByRole('radio', { name: 'Subscription' })).toHaveAttribute('aria-checked', 'true')
   assertions.nativeApiKey = { environmentId: a.environmentId, masked: true, replaceOffered: true, keyInPage: false, malformedUrlRejected: true, otherEnvironmentUnchanged: true }
+})
+
+test('remote Codex native: without "Change settings" the card says how to get access; with it, a key and URL saved from here are used by that machine\'s runtime', async ({ page }) => {
+  test.setTimeout(60_000)
+  const { b, c } = fleet!
+  const pick = async (environment: UiEnvironment) => {
+    const picker = page.getByRole('combobox', { name: 'Settings environment' })
+    await picker.click()
+    await page.getByRole('option').filter({ hasText: environment.label }).click()
+    await expect(picker).toHaveAttribute('data-environment-id', environment.environmentId)
+  }
+  await page.goto(`${fleet!.uiUrl}/?view=settings&settingsTab=auth`)
+  // B was paired with the default permissions, which leave out settings.
+  await pick(b)
+  await expect(page.getByTestId('native-agent-codex').getByRole('alert')).toContainText('pair it again with the permission enabled')
+  await expect(page.getByTestId('native-agent-claude').getByRole('alert')).toContainText('"Change settings"')
+  await shot(page, 'remote-settings-permission-needed')
+
+  // C was paired with "Change settings".
+  await pick(c)
+  const start = featureRequests.length
+  const form = page.getByRole('form', { name: 'Codex connection method' })
+  await expect(form.getByRole('radio', { name: 'Subscription' })).toHaveAttribute('aria-checked', 'true')
+  // The fixture Codex accepts one inert identity; the endpoint it is started with shows the settings took effect.
+  const key = 'forge-fixture-inert-not-a-provider-key', baseUrl = `http://127.0.0.1:9/${randomUUID()}/v1`
+  await form.getByRole('radio', { name: 'API key' }).click()
+  await form.getByLabel('OpenAI API key').fill(key)
+  await form.getByLabel('Base URL (optional)').fill(baseUrl)
+  await form.getByRole('button', { name: 'Save' }).click()
+  await expect(form.getByLabel('OpenAI API key (saved)')).toHaveValue(/^•+$/)
+  await expect(page.getByTestId('native-agent-codex')).toContainText('Using an API key')
+  expect(await page.content()).not.toContain(key)
+  const writes = featureRequests.slice(start).filter(request => request.path === '/api/settings/codex-native' && request.method === 'POST')
+  expect(writes.map(request => request.environmentId)).toEqual([c.environmentId])
+  await shot(page, 'remote-codex-api-key-saved')
+
+  // C's own runtime starts with that endpoint for the next turn of an existing session.
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  const admin = await controlEnvironment<BootstrapSession>(manifest, 'env-c', 'bootstrap')
+  const sent = await fixtureRpcOnce(c.baseUrl, admin, 'session.send', { commandId: randomUUID(), sessionId: c.sessionId, message: { text: 'Remote turn after the key was saved.', artifactIds: [] } })
+  await until(() => fixtureRpcOnce(c.baseUrl, admin, 'command.get', { commandId: sent.commandId }), receipt => receipt.state === 'succeeded', 30_000)
+  const stateDir = join(manifest.environments[2]!.checkout, '.fixture-codex')
+  const processes = () => readdir(stateDir).then(files => Promise.all(files.filter(file => /^process-\d+\.json$/.test(file)).map(async file => JSON.parse(await readFile(join(stateDir, file), 'utf8')))))
+  const used = await until<any>(async () => (await processes()).find(value => value.openaiBaseUrl === baseUrl && value.turnStarts > 0), Boolean, 30_000)
+  expect(used.instanceId).toBe('env-c')
+
+  // Remove key: API-key mode is then blocked with the reason, for this machine only.
+  await form.getByRole('button', { name: 'Remove key' }).click()
+  await expect(page.getByTestId('native-agent-codex')).toContainText('API key needed')
+  await expect(form.getByLabel('OpenAI API key', { exact: true })).toHaveValue('')
+  const blocked = await fixtureRpcOnce(c.baseUrl, admin, 'session.send', { commandId: randomUUID(), sessionId: c.sessionId, message: { text: 'Must not run.', artifactIds: [] } }).then(receipt => JSON.stringify(receipt), error => String(error.message))
+  expect(blocked).toContain('Codex is set to use an API key, but no key is saved on this environment')
+  // Leave C on Subscription with no base URL.
+  await form.getByRole('radio', { name: 'Subscription' }).click()
+  await form.getByLabel('Base URL (optional)').fill('')
+  await form.getByRole('button', { name: 'Save' }).click()
+  await expect(form.getByRole('button', { name: 'Save' })).toBeDisabled()
+  await expect(page.getByTestId('native-agent-codex')).not.toContainText('API key needed')
+  assertions.remoteNativeApiKey = { deniedEnvironmentId: b.environmentId, environmentId: c.environmentId, savedFromUi: true, runtimeStartedWithBaseUrl: true, keyRemoved: true, blockedMessage: true }
 })
 
 test('embedded Browser: a forged renderer and device grant confer no Desktop authority; remote sessions get a disabled state', async ({ page }) => {

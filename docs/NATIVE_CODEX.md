@@ -61,10 +61,17 @@ An optional **Base URL** sends Codex's requests through a router or proxy.
   endpoint.
 - Codex opens a WebSocket to the base URL first. A proxy without WebSocket support
   should answer the upgrade with `426 Upgrade Required`, which moves Codex to plain
-  HTTPS at once; other errors make Codex retry before it falls back.
+  HTTPS at once. With any other rejection (such as 404) Codex retries the WebSocket a
+  few times and then completes the turn over HTTPS; the session shows its
+  "Reconnecting…" notices and the first turn of each new process is slower.
 - The key is saved in that environment's `shared/config/auth/auth.json` under
-  `codex-native`. Settings never shows it again; use **Replace** to change it. Each
+  `codex-native`. Settings never shows it again; use **Replace** to change it or
+  **Remove key** to delete it. With API key selected and no key saved, sending a
+  message or creating a project is refused with a message that says so. Each
   environment keeps its own key and URL.
+- Changing these settings on a remote environment needs a device paired with the
+  **Change settings** permission. Desktop's managed hosts request it; a manual pairing
+  must tick it.
 - Saving a change refreshes idle sessions at once; a session that is working finishes
   its turn first.
 

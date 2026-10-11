@@ -20,7 +20,10 @@ if (homeFixture.instanceId !== fixture.instanceId) throw new Error('Fixture nati
 const stateDir = dirname(nativeHome);
 mkdirSync(stateDir, { recursive: true });
 const counterPath = join(stateDir, `process-${process.pid}.json`);
+// The endpoint Forge passed, if any. Not a credential.
+const baseUrlArgument = process.argv.find(value => value.startsWith('openai_base_url='));
 const counters = { formatVersion: 1, instanceId: fixture.instanceId, pid: process.pid, ownerAgentId: null, threadId: null,
+  openaiBaseUrl: baseUrlArgument ? JSON.parse(baseUrlArgument.slice('openai_base_url='.length)) : null,
   initialize: 0, threadStarts: 0, turnStarts: 0, compactions: 0, steers: 0, interrupts: 0, toolCalls: 0, choices: 0, workerSpawns: 0, workerResults: 0 };
 const threads = new Map();
 const pending = new Map();

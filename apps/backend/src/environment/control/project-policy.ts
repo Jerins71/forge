@@ -21,6 +21,8 @@ export function createProjectPolicy(swarm: SwarmManager, readModel?: (sessionId:
   };
   const sessions = (ids: string[]) => swarm.listAgents().filter(a => a.role === "manager" && ids.includes(a.profileId ?? a.agentId)).map(a => a.agentId);
   const freezeModel = async (model: RpcInput<"project.create">["model"], surface: "create" | "change") => {
+    const missingKey = model ? await swarm.describeMissingNativeApiKey?.(model.provider) : undefined;
+    if (missingKey) throw new ControlError("UNAVAILABLE", missingKey);
     const catalog = await swarm.getManagerSelectionCatalog();
     const selected = catalog.models.find(option => option.provider === model.provider && option.modelId === model.modelId && option.surfaces[surface]?.selectable);
     if (!selected) throw new ControlError("INVALID_INPUT", "Manager model is unavailable for this operation");

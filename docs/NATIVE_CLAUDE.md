@@ -53,7 +53,12 @@ both modes, so with Subscription the proxy must pass the Claude sign-in through.
   only one used; a missing key stops the session with a message instead of falling back.
 - The key is saved in that environment's `shared/config/auth/auth.json` under
   `claude-native`, beside its other provider credentials. Settings never shows it again;
-  use **Replace** to change it. Each environment keeps its own key and URL.
+  use **Replace** to change it or **Remove key** to delete it. With API key selected and
+  no key saved, sending a message or creating a project is refused with a message that
+  says so. Each environment keeps its own key and URL.
+- Changing these settings on a remote environment needs a device paired with the
+  **Change settings** permission. Desktop's managed hosts request it; a manual pairing
+  must tick it.
 - Saving a change refreshes idle sessions at once; a session that is working finishes
   its turn first.
 

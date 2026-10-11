@@ -143,7 +143,10 @@ export class AuthenticatedHttp {
       throw error
     }
     if (response.status === 403)
-      throw new EnvironmentRuntimeError('FORBIDDEN', 'Access denied')
+      throw new EnvironmentRuntimeError(
+        'FORBIDDEN',
+        'This device is not allowed to do that on this environment. In Settings > Environments, pair it again with the permission enabled (for settings: "Change settings").',
+      )
     return response
   }
   async json<T>(path: string, init?: RequestInit): Promise<T> {

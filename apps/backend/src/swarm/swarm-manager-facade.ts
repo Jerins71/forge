@@ -1,4 +1,5 @@
 import type { RecoverySnapshot } from "@forge/protocol/environment-v2";
+import { missingNativeApiKey } from "./runtime/native-api-access.js";
 import type { HistorySearchRequest, HistorySearchResponse, HistoryReadRequest, HistoryReadResponse } from "@forge/protocol";
 import { createHash } from "node:crypto";
 import type { AuthCredential } from "@earendil-works/pi-coding-agent";
@@ -1143,6 +1144,9 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
   recordToolSideEffect(callerAgentId: string, event: SwarmToolSideEffectEvent): void {
     this.services.observability.recordToolSideEffect(callerAgentId, event);
   }
+  /** Why this provider cannot run right now, when it is set to use an API key that is not saved. */
+  describeMissingNativeApiKey(provider: string): Promise<string | undefined> { return missingNativeApiKey(this.getConfig(), provider); }
+
   getConfig(): SwarmConfig {
     return this.services.host.config;
   }

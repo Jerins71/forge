@@ -123,7 +123,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
 
 /** Runs outside acceptance; unsupported routes cannot leave an accepted but unsendable input. */
 export function createControlledInputRoutePreflight({ swarmManager }: {
-  swarmManager: Pick<SwarmManager, "getAgentForInternalUse" | "listProfiles" | "isControlledInputPersistenceReady" | "assertControlledUserInputTargetable">;
+  swarmManager: Pick<SwarmManager, "getAgentForInternalUse" | "listProfiles" | "isControlledInputPersistenceReady" | "assertControlledUserInputTargetable"> & Partial<Pick<SwarmManager, "describeMissingNativeApiKey">>;
 }): InputRoutePort {
   return {
     async preflight(input) {
@@ -133,6 +133,9 @@ export function createControlledInputRoutePreflight({ swarmManager }: {
       if (descriptor) swarmManager.assertControlledUserInputTargetable(descriptor.agentId);
       const unsupported = parseCompactSlashCommand(input.message.text) || classifyCodexUserMessage(input.message.text).kind === "sidecar" || descriptor?.externalThread;
       const buffering = Boolean(input.sessionId && !swarmManager.isControlledInputPersistenceReady(input.sessionId));
+      // An API-key runtime with no key cannot start; say so before accepting input it could never deliver.
+      const missingKey = descriptor ? await swarmManager.describeMissingNativeApiKey?.(descriptor.model.provider) : undefined;
+      if (missingKey) return { ok: false, error: { code: "UNAVAILABLE", message: missingKey, retryable: false } };
       if (unsupported || buffering) return { ok: false, error: { code: "UNAVAILABLE", message: buffering ? "This new session has no persisted conversation yet. Start a new session or wait for its first response before sending." : "This input route cannot acknowledge durable control delivery.", retryable: false } };
       return { ok: true };
     },

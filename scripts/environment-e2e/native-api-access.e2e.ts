@@ -13,6 +13,8 @@
 //  8. The key comes back in a settings response or an RPC frame.
 //  9. The key is written to a log, session file, database, native CLI home, or process arguments.
 // 10. The saved key is readable by other users of the machine.
+// 11. A removed key stays on disk, or the block shows a generic error instead of saying what to do.
+// 12. Codex's own reconnect notices, sent while it falls back from a rejected WebSocket, fail the send.
 //
 // pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/native-api-access.e2e.ts
 import assert from 'node:assert/strict';
@@ -45,6 +47,8 @@ const models: Record<Kind, object> = {
 };
 
 const seen: Seen[] = [];
+let upgradeStatus = '426 Upgrade Required';
+let upgrades = 0;
 let hold: { kind: Kind; release: Promise<void>; open(): void } | undefined;
 function armHold(kind: Kind) {
   let open!: () => void;
@@ -110,7 +114,7 @@ async function main() {
   await rm(artifactRoot, { recursive: true, force: true });
   const stub = createServer((request, response) => { void provide(request, response).catch(() => response.destroy()); });
   // Codex tries a WebSocket first; 426 moves it straight to the HTTP request the stub serves.
-  stub.on('upgrade', (_request, socket) => socket.end('HTTP/1.1 426 Upgrade Required\r\nContent-Length: 0\r\n\r\n'));
+  stub.on('upgrade', (_request, socket) => { upgrades++; socket.end(`HTTP/1.1 ${upgradeStatus}\r\nContent-Length: 0\r\n\r\n`); });
   await new Promise<void>(resolve => stub.listen(0, '127.0.0.1', resolve));
   const stubUrl = `http://127.0.0.1:${(stub.address() as { port: number }).port}`;
   const baseUrls: Record<Kind, string> = { codex: `${stubUrl}/v1`, claude: `${stubUrl}/` };
@@ -249,32 +253,46 @@ async function main() {
       assert(requests(kind).slice(afterBack).every(entry => entry.credential === 'api-key'), `${kind}: the saved key is used again`);
       result.switchBack = { requests: requests(kind).length - afterBack, savedKeyReused: true };
 
-      // 6. API-key mode with the key gone stops with a clear message; it never borrows the subscription login.
-      const stored = JSON.parse(await readFile(authFile, 'utf8'));
-      stored[`${kind}-native`].key = '';
-      await writeFile(authFile, JSON.stringify(stored), { mode: 0o600 });
-      const missing = await settings<CodexAuthStatus>(kind);
-      assert.deepEqual(missing.body.access, { mode: 'api_key', apiKeyConfigured: false, baseUrl: baseUrls[kind] });
-      assert.equal(missing.body.connected, false);
+      // 6. Removing the key leaves API-key mode blocked with a clear message at every entry point; it never
+      // borrows the subscription login.
+      const removed = await configure(kind, { mode: 'api_key', removeApiKey: true });
+      assert.equal(removed.status, 200, JSON.stringify(removed.body));
+      assert.deepEqual(removed.body.access, { mode: 'api_key', apiKeyConfigured: false, baseUrl: baseUrls[kind] });
+      assert.equal(removed.body.connected, false);
+      assert.deepEqual(await filesContaining(environment.dataDir, keys[kind]), [], `${kind}: the removed key is gone from disk`);
+      const clear = new RegExp(`${kind === 'codex' ? 'Codex' : 'Claude'} is set to use an API key, but no key is saved on this environment`);
+      if (kind === 'claude') assert.match(removed.body.message ?? '', clear);
       const blockedAt = requests(kind).length;
-      const blocked = await rpc.call('project.create', { commandId: randomUUID(), title: `No key ${kind}`, cwd: environment.checkout, model: models[kind], secureSessionsEnabled: false }, randomUUID(), 60_000).catch(error => ({ state: 'rejected', error: { message: String(error.message) } }));
-      let blockedMessage = JSON.stringify(blocked);
-      if (blocked.state === 'succeeded') {
-        const blockedSession = blocked.result.sessionId as string;
-        await rpc.call('session.subscribe', { sessionId: blockedSession });
-        const sent = await rpc.call('session.send', { commandId: randomUUID(), sessionId: blockedSession, message: { text: 'This must not run.', artifactIds: [] } });
-        blockedMessage = JSON.stringify(await settled(sent.commandId));
-        blockedMessage += await until(() => JSON.stringify(rpc.frames), frames => frames.includes('no key is saved on this environment'), 60_000);
-      }
-      // Codex without a usable credential is not offered at all; Claude's runtime refuses to start.
-      assert.match(blockedMessage, kind === 'codex' ? /Manager model is unavailable|no key is saved on this environment/ : /"state":"rejected"|no key is saved on this environment/);
-      if (kind === 'claude') assert.match(missing.body.message ?? '', /Claude is set to use an API key, but no key is saved on this environment/);
+      const outcome = async (call: Promise<any>) => JSON.stringify(await call.then(async receipt => ['accepted', 'running'].includes(receipt.state) ? settled(receipt.commandId) : receipt, error => ({ rejected: String(error.message) })));
+      const blockedSend = await outcome(rpc.call('session.send', { commandId: randomUUID(), sessionId, message: { text: 'This must not run.', artifactIds: [] } }));
+      assert.match(blockedSend, clear, `${kind}: sending says why it cannot run`);
+      const blockedCreate = await outcome(rpc.call('project.create', { commandId: randomUUID(), title: `No key ${kind}`, cwd: environment.checkout, model: models[kind], secureSessionsEnabled: false }, randomUUID(), 60_000));
+      assert.match(blockedCreate, clear, `${kind}: creating a project says why it cannot run`);
       await new Promise(resolve => setTimeout(resolve, 2000));
       assert.equal(requests(kind).length, blockedAt, `${kind}: nothing is sent without the key`);
-      result.missingKey = { blocked: true, requestsSent: 0, settingsShows: kind === 'claude' ? missing.body.message : 'API key needed (not connected)' };
-      stored[`${kind}-native`].key = keys[kind];
-      await writeFile(authFile, JSON.stringify(stored), { mode: 0o600 });
+      result.missingKey = { removedThroughSettings: true, keyOnDisk: false, requestsSent: 0, sendError: clear.source, projectCreateError: clear.source };
+      assert.equal((await configure(kind, { mode: 'api_key', apiKey: keys[kind] })).status, 200);
+      await succeeded(await send('Fifth message, after saving the key again.'));
+      await until(() => requests(kind).slice(blockedAt).some(entry => entry.finished), Boolean, 120_000);
+      await idle(sessionId);
+      assert(requests(kind).slice(blockedAt).every(entry => entry.credential === 'api-key'));
     }
+
+    // A router that rejects Codex's WebSocket upgrade outright: Codex retries, then completes over HTTP.
+    // Those retries are not a failed send.
+    upgradeStatus = '404 Not Found';
+    const routed = await rpc.call('project.create', { commandId: randomUUID(), title: 'API access codex, no WebSocket', cwd: environment.checkout, model: models.codex, secureSessionsEnabled: false }, randomUUID(), 60_000);
+    assert.equal(routed.state, 'succeeded', JSON.stringify(routed));
+    await rpc.call('session.subscribe', { sessionId: routed.result.sessionId });
+    const upgradesBefore = upgrades, routedAt = seen.length;
+    const routedSend = await rpc.call('session.send', { commandId: randomUUID(), sessionId: routed.result.sessionId, message: { text: 'Through a router without WebSocket support.', artifactIds: [] } });
+    await succeeded(routedSend.commandId);
+    await until(() => seen.slice(routedAt).some(entry => entry.kind === 'codex' && entry.finished), Boolean, 120_000);
+    await idle(routed.result.sessionId);
+    assert(upgrades - upgradesBefore > 1, 'Codex retried the rejected WebSocket upgrade');
+    assert(seen.slice(routedAt).every(entry => entry.credential === 'api-key' && !entry.aborted));
+    evidence.codexWebSocketRejected = { upgradeStatus, upgradeAttempts: upgrades - upgradesBefore, sendReceipt: 'succeeded', completedOverHttp: true };
+    upgradeStatus = '426 Upgrade Required';
 
     // 8. Nothing sent to a client carries a key.
     const sentToClients = wire.join('\n') + JSON.stringify(rpc.frames);

@@ -16,5 +16,7 @@ export interface NativeApiAccess {
 export interface NativeApiAccessUpdate {
   mode: NativeAuthMode
   apiKey?: string
+  /** Delete the saved key. In API-key mode the runtime then stops until a key is saved. */
+  removeApiKey?: boolean
   baseUrl?: string
 }

@@ -443,7 +443,8 @@ export class CodexProviderAdapter implements ProviderAdapter {
       const tokens = params.tokenUsage?.last?.totalTokens, contextWindow = params.tokenUsage?.modelContextWindow;
       if (typeof tokens === "number" && typeof contextWindow === "number") this.emit(turn, { type: "context_usage", origin: this.origin(turn), tokens, contextWindow, percent: contextWindow ? tokens / contextWindow * 100 : 0 });
     }
-    if (method === "error") this.emit(turn, { type: "error", origin: this.origin(turn), code: "CODEX_PROVIDER", message: String(params.error?.message ?? "Provider request failed"), delivery: turn.accepted ? "accepted" : "unknown" });
+    // Codex reports its own reconnect attempts as errors that it will retry; the turn is still running.
+    if (method === "error" && params.willRetry !== true) this.emit(turn, { type: "error", origin: this.origin(turn), code: "CODEX_PROVIDER", message: String(params.error?.message ?? "Provider request failed"), delivery: turn.accepted ? "accepted" : "unknown" });
     if (method === "turn/completed") {
       const outcome = params.turn?.status;
       if (!["completed", "interrupted", "cancelled", "failed"].includes(outcome)) throw new Error("Codex terminal has no authoritative outcome");

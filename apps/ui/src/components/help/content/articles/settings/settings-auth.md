@@ -31,9 +31,9 @@ Provider auth changes propagate by recycling matching idle manager runtimes or d
 
 The **Claude & Codex** card sets how each native runtime connects on the selected environment. **Subscription** is the default and uses the sign-in on that card. **API key** uses a key you paste instead, billed to your Anthropic or OpenAI API account. The selected method is the only one used: if API key is selected and no key is saved, sessions stop with a message rather than using your subscription.
 
-A saved key is never shown again. Use **Replace** to enter a different one. **Base URL** is optional and sends that runtime's requests through a router or proxy; it applies to both methods. With Subscription, the proxy must pass your sign-in through to Anthropic or ChatGPT. For Codex, a proxy without WebSocket support should answer the upgrade request with `426 Upgrade Required`.
+A saved key is never shown again. Use **Replace** to enter a different one, or **Remove key** to delete it; with API key still selected, sessions on that environment are then refused with a message until a key is saved. **Base URL** is optional and sends that runtime's requests through a router or proxy; it applies to both methods. With Subscription, the proxy must pass your sign-in through to Anthropic or ChatGPT. For Codex, a proxy without WebSocket support should answer the upgrade request with `426 Upgrade Required`; with other rejections Codex retries a few times before continuing over HTTPS, so the first turn is slower.
 
-Each environment keeps its own key and base URL; nothing is copied between machines. After **Save**, idle sessions switch at once and a working session finishes its current turn first.
+Each environment keeps its own key and base URL; nothing is copied between machines. To change these on a remote environment, this device must be paired with the **Change settings** permission. After **Save**, idle sessions switch at once and a working session finishes its current turn first.
 
 ## OAuth login
 

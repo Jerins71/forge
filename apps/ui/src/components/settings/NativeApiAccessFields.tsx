@@ -67,10 +67,18 @@ export function NativeApiAccessFields({ runtime, access, busy, onSave }: {
               <Input id={keyId} readOnly value="••••••••••••" aria-label={`${provider} API key (saved)`} className="min-w-0 text-muted-foreground" />
             )}
             {access.apiKeyConfigured && !locked ? (
-              <Button type="button" variant="outline" size="sm" disabled={busy}
-                onClick={() => { setApiKey(''); setReplacing(!replacing) }}>
-                {replacing ? 'Keep saved key' : 'Replace'}
-              </Button>
+              <>
+                <Button type="button" variant="outline" size="sm" disabled={busy}
+                  onClick={() => { setApiKey(''); setReplacing(!replacing) }}>
+                  {replacing ? 'Keep saved key' : 'Replace'}
+                </Button>
+                {!replacing ? (
+                  <Button type="button" variant="outline" size="sm" disabled={busy}
+                    onClick={() => onSave({ mode: access.mode, removeApiKey: true })}>
+                    Remove key
+                  </Button>
+                ) : null}
+              </>
             ) : null}
           </div>
           <p className="text-xs text-muted-foreground">
