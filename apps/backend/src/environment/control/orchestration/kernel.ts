@@ -1,8 +1,9 @@
+import { decideAssignment, evolveAssignment, reconcileAssignments } from "./assignments.js";
 import type { ProviderObservation } from "@forge/protocol";
 import type { CoreCommand, CoreState, Decision, LifecycleEvent, Run } from "./types.js";
 
 export function emptyState(): CoreState {
-  return { threads: {}, runs: {}, attempts: {}, bindings: {}, requests: {}, recovery: null };
+  return { threads: {}, runs: {}, attempts: {}, bindings: {}, requests: {}, assignments: {}, transfers: {}, recovery: null };
 }
 /** The reducer is shared by live projection and retained-event replay. */
 export function evolve(state: CoreState, event: LifecycleEvent): CoreState {
@@ -11,6 +12,7 @@ export function evolve(state: CoreState, event: LifecycleEvent): CoreState {
   if ("attempt" in event) return { ...state, attempts: { ...state.attempts, [event.attempt.attemptId]: event.attempt } };
   if ("binding" in event) return { ...state, bindings: { ...state.bindings, [event.binding.scope.bindingId]: event.binding } };
   if ("request" in event) return { ...state, requests: { ...state.requests, [event.request.requestId]: event.request } };
+  if ("assignment" in event || "transfer" in event) return evolveAssignment(state, event);
   return { ...state, recovery: event.recovery };
 }
 
@@ -229,6 +231,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
         const owner = thread(command.threadId); emit({ type: "thread.changed", thread: { ...owner, shutdown: "quarantined" } });
       } break;
     }
+    default: return decideAssignment(state, command);
   }
-  return decision;
+  return reconcileAssignments(initial, command, decision);
 }
