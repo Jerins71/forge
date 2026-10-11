@@ -15,6 +15,7 @@ pnpm --filter @forge/protocol build
 pnpm e2e:env --environments 3 --provider fixture --smoke --out .internal/forge-v2-remote/harness-three.json
 pnpm e2e:env --environments 1 --provider fixture --native-smoke --out .internal/forge-v2-remote/harness-native.json
 pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/fixtures/proxy-self-test.ts
+pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/native-api-access.e2e.ts
 VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build
 pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/fixtures/ui-fleet-self-test.ts
 pnpm exec playwright test scripts/environment-e2e/slice.spec.ts scripts/environment-e2e/ui.spec.ts scripts/environment-e2e/load.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
@@ -35,6 +36,11 @@ startup/shutdown. Only owned ChildProcess objects receive shutdown/kill signals.
 Private 0600 Unix-socket lifecycle control lets UI test workers request stop/start
 from the launcher owner. Restart uses the original port and data root. Successful
 shutdown removes only the marked temp root; failure retains it and metadata.
+
+`native-api-access.e2e.ts` is the one run that uses the installed Codex CLI and the bundled
+Claude CLI instead of fixtures. Each runs behind a generated guard that leaves it only
+loopback, against a local provider stub, with keys and tokens generated for the run. It
+writes `.internal/forge-v2-remote/native-api-access/evidence.json`.
 
 ## Pending integration ports
 

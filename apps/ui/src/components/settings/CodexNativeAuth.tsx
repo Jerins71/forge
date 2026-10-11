@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react'
-import type { CodexAuthStatus } from '@forge/protocol'
+import type { CodexAuthStatus, NativeApiAccessUpdate } from '@forge/protocol'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { SettingsApiClient } from './settings-api-client'
+import { NativeApiAccessFields } from './NativeApiAccessFields'
 
 const endpoint = '/api/settings/codex-native'
 
@@ -52,6 +53,11 @@ export function CodexNativeAuth({ apiClient }: { apiClient: SettingsApiClient })
     body: JSON.stringify(action === 'cancel' ? { flowId: status?.flowId } : { action }),
   })
 
+  const configure = (access: NativeApiAccessUpdate) => void request({
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'configure', access }),
+  })
+  const usesApiKey = !status?.managedByBroker && status?.access?.mode === 'api_key'
+
   const copy = async (kind: 'code' | 'link') => {
     const value = kind === 'code' ? status?.userCode : status?.verificationUri
     if (!value) return
@@ -70,15 +76,16 @@ export function CodexNativeAuth({ apiClient }: { apiClient: SettingsApiClient })
           <p className="flex items-center gap-1.5 text-sm">
             {status?.connected ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" /> : null}
             {status?.managedByBroker ? 'Managed by the Forge Auth broker'
-              : status?.connected ? `Signed in · ${status.accounts.join(', ')}`
-                : status ? 'Not signed in' : 'Checking…'}
+              : usesApiKey ? (status?.connected ? 'Using an API key' : 'API key needed')
+                : status?.connected ? `Signed in · ${status.accounts.join(', ')}`
+                  : status ? 'Not signed in' : 'Checking…'}
           </p>
           <p className="text-xs text-muted-foreground">
-            {active ? 'Open the OpenAI page in any browser and enter the code below.' : 'Uses your ChatGPT subscription.'}
+            {active ? 'Open the OpenAI page in any browser and enter the code below.' : usesApiKey ? 'Uses your OpenAI API key.' : 'Uses your ChatGPT subscription.'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {status && !status.managedByBroker && !active ? (
+          {status && !status.managedByBroker && !usesApiKey && !active ? (
             <Button size="sm" variant={status.connected ? 'outline' : 'default'} disabled={busy} onClick={() => mutate('start')}>
               {status.connected ? 'Add account' : 'Sign in with ChatGPT'}
             </Button>
@@ -111,6 +118,9 @@ export function CodexNativeAuth({ apiClient }: { apiClient: SettingsApiClient })
           <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
           {status?.phase === 'verifying' ? 'Saving the account…' : 'Starting Codex sign-in…'}
         </p>
+      ) : null}
+      {status?.access && !status.managedByBroker && !active ? (
+        <NativeApiAccessFields runtime="Codex" access={status.access} busy={busy} onSave={configure} />
       ) : null}
       {error || status?.message ? <p role="alert" className="max-w-prose break-words text-sm text-foreground">{error ?? status?.message}</p> : null}
     </div>

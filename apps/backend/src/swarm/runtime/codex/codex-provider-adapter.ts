@@ -70,7 +70,7 @@ interface Options {
   codexHome: string;
   dataDir?: string;
   projectTrusted: boolean;
-  auth: Pick<CodexRuntimeAuth, "login" | "refresh" | "release">;
+  auth: Pick<CodexRuntimeAuth, "login" | "refresh" | "release" | "baseUrl">;
   createClient?: CodexAppServerClientFactory;
 
 
@@ -166,7 +166,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
       host: this.options.host ?? { requestUserChoice: async () => { throw new Error("Approval requires a scoped provider response"); } },
       emit: (event, ref) => this.onToolEvent(event, ref) });
     const client = (this.options.createClient ?? (handlers => createCodexAppServerClient(handlers, { command: binary!,
-      args: ["app-server", "--listen", "stdio://", "-c", 'cli_auth_credentials_store="ephemeral"'],
+      // Codex reads its endpoint from config, not OPENAI_BASE_URL. The key itself goes over stdio at login.
+      args: ["app-server", "--listen", "stdio://", "-c", 'cli_auth_credentials_store="ephemeral"',
+        ...(this.options.auth.baseUrl ? ["-c", `openai_base_url=${JSON.stringify(this.options.auth.baseUrl.replace(/\/+$/, ""))}`] : [])],
       spawnOptions: { cwd: input.instructions.project.cwd, env } })))({
       onNotification: (method, params) => {
         const s = this.state!;

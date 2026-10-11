@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { openaiCodexOAuthProvider, type OAuthCredentials } from "@earendil-works/pi-ai/oauth";
-import type { CodexAuthStatus, CredentialPoolState, PooledCredentialInfo } from "@forge/protocol";
+import type { CodexAuthStatus, CredentialPoolState, NativeApiAccessUpdate, PooledCredentialInfo } from "@forge/protocol";
+import type { SwarmConfig } from "../../types.js";
+import { describeNativeApiAccess, readNativeApiAccess, writeNativeApiAccess } from "../native-api-access.js";
 
 const PROVIDER = "openai-codex";
 /** The ChatGPT OAuth provider's headless method; works for any environment the browser cannot reach. */
@@ -13,6 +15,10 @@ export interface CodexAuthPorts {
   isOpenAIAuthBrokerModeActive?(): Promise<boolean>;
   /** Refresh usage and running Codex sessions after a new account lands. */
   onConnected?(): Promise<void>;
+  /** Where this environment's API key and base URL are saved. */
+  config: Pick<SwarmConfig, "paths">;
+  /** Running Codex sessions pick the new access up at their next idle boundary. */
+  onAccessChanged?(): Promise<void>;
 }
 
 interface SignInFlow {
@@ -32,12 +38,22 @@ export class CodexAuthService {
   constructor(private readonly ports: CodexAuthPorts) {}
 
   async status(): Promise<CodexAuthStatus> {
-    const [pool, managedByBroker] = await Promise.all([
+    const [pool, managedByBroker, access] = await Promise.all([
       this.ports.listCredentialPool(PROVIDER),
       this.ports.isOpenAIAuthBrokerModeActive?.() ?? Promise.resolve(false),
+      readNativeApiAccess(this.ports.config, "codex-native").then(describeNativeApiAccess),
     ]);
     const accounts = pool.credentials.filter((credential) => credential.enabled !== false).map((credential) => credential.label || credential.autoLabel || "ChatGPT account");
-    return { connected: managedByBroker || accounts.length > 0, accounts, managedByBroker, ...this.state };
+    const connected = managedByBroker || (access.mode === "api_key" ? access.apiKeyConfigured : accounts.length > 0);
+    return { connected, accounts, managedByBroker, access, ...this.state };
+  }
+
+  async configure(update: NativeApiAccessUpdate): Promise<CodexAuthStatus> {
+    if (await this.ports.isOpenAIAuthBrokerModeActive?.()) throw new Error("OpenAI sign-in is managed by the Forge Auth broker on this environment.");
+    await writeNativeApiAccess(this.ports.config, "codex-native", update);
+    try { await this.ports.onAccessChanged?.(); }
+    catch { throw new Error("Saved, but an existing Codex session could not refresh. Stop that session and retry your message to use the new setting."); }
+    return this.status();
   }
 
   async start(): Promise<CodexAuthStatus> {

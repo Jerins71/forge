@@ -462,12 +462,14 @@ export class SwarmWebSocketServer {
         void this.telemetryService?.sendOnStatsRefresh(allStats);
       },
     });
-    this.claudeAuthService = new ClaudeAuthService(this.swarmManager.getConfig(), () => this.swarmManager.notifyClaudeNativeAuthChanged());
+    this.claudeAuthService = new ClaudeAuthService(this.swarmManager.getConfig(), () => this.swarmManager.notifyNativeAuthChanged("claude-native"));
     this.nativeRuntimeUpdateService = new NativeRuntimeUpdateService({ dataDir: this.swarmManager.getConfig().paths.dataDir });
     this.codexAuthService = new CodexAuthService({
       listCredentialPool: provider => this.swarmManager.listCredentialPool(provider),
       addPooledCredential: (provider, credential) => this.swarmManager.addPooledCredential(provider, credential),
       isOpenAIAuthBrokerModeActive: () => this.swarmManager.isOpenAIAuthBrokerModeActive(),
+      config: this.swarmManager.getConfig(),
+      onAccessChanged: () => this.swarmManager.notifyNativeAuthChanged("codex-native"),
     });
     this.settingsRoutes = createSettingsRoutes({
       swarmManager: this.swarmManager,

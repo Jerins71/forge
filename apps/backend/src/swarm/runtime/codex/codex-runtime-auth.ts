@@ -9,6 +9,7 @@ import {
 } from "../../openai-auth/openai-auth-broker-runtime-service.js";
 import type { AgentDescriptor, SwarmConfig } from "../../types.js";
 import type { CodexAppServerClientPort } from "../../codex-app-server/types.js";
+import { missingNativeApiKeyMessage, readNativeApiAccess } from "../native-api-access.js";
 
 const PROVIDER = "openai-codex";
 
@@ -19,6 +20,9 @@ export class CodexRuntimeAuth {
   private lease?: OpenAIAuthBrokerLeaseHandle;
   private previousAccess?: string;
   private released = false;
+  private apiKey?: string;
+  /** Router or proxy for this runtime's OpenAI requests, in either mode. Not used with the broker. */
+  baseUrl?: string;
 
   constructor(private readonly options: {
     config: SwarmConfig;
@@ -33,6 +37,15 @@ export class CodexRuntimeAuth {
       const acquired = await broker.acquireForRuntime(this.options.descriptor);
       this.lease = acquired.handle;
       this.storage = acquired.authStorage;
+      return;
+    }
+    const access = await readNativeApiAccess(this.options.config, "codex-native");
+    this.baseUrl = access.baseUrl;
+    if (access.mode === "api_key") {
+      // The selected mode is the only one used: never a pooled or saved ChatGPT login.
+      if (!access.apiKey) throw new Error(missingNativeApiKeyMessage("codex-native"));
+      this.apiKey = access.apiKey;
+      this.storage = AuthStorage.inMemory();
       return;
     }
     if (pool && await pool.getTotalPoolSize(PROVIDER) > 0) {
@@ -78,11 +91,13 @@ export class CodexRuntimeAuth {
     if (this.lease) await this.options.broker?.release(this.lease, "native_runtime_shutdown");
     this.released = true;
     this.previousAccess = undefined;
+    this.apiKey = undefined;
     this.storage = undefined;
   }
 
   private async readCredential(forceRefresh = false): Promise<AuthCredential> {
     if (!this.storage || this.released) throw new Error("Codex native authentication is not initialized.");
+    if (this.apiKey) return { type: "api_key", key: this.apiKey };
     try {
       if (this.lease && this.options.broker) {
         this.lease = await this.options.broker.renewIfNeeded(this.lease);

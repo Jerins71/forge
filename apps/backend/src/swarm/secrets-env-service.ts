@@ -13,6 +13,7 @@ import { OpenAIAuthBrokerRuntimeService } from "./openai-auth/openai-auth-broker
 import { normalizeEnvVarName, type ParsedSkillEnvDeclaration } from "./skills/skill-frontmatter.js";
 import { writeJsonFileAtomic } from "../utils/atomic-files.js";
 import { isEnoentError } from "../utils/fs-errors.js";
+import { readNativeApiAccess } from "./runtime/native-api-access.js";
 import type {
   ForgeProviderCredentialAuthType,
   ForgeProviderCredentialSource,
@@ -443,6 +444,11 @@ export async function getManagedModelProviderCredentialAvailability(
 
   for (const definition of SETTINGS_AUTH_PROVIDER_DEFINITIONS) {
     for (const provider of definition.runtimeProviders ?? []) availability.set(provider, availability.get(definition.provider) ?? false);
+  }
+  // In API-key mode Codex native uses its own key, never the subscription accounts above.
+  if (!summaries.get("openai-codex")?.centralBroker) {
+    const access = await readNativeApiAccess(config, "codex-native");
+    if (access.mode === "api_key") availability.set("codex-native", Boolean(access.apiKey));
   }
   return availability;
 }

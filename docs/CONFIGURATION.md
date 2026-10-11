@@ -120,7 +120,7 @@ Legacy `MIDDLEMAN_SKILL_SHARE_BASE_URL` and `MIDDLEMAN_SKILL_SHARE_DISABLED` ali
 | `CURSOR_API_KEY` | — | Environment fallback for Cursor SDK API-key authentication. |
 | `FORGE_OPENAI_CODEX_TRANSPORT` | `sse` | Transport override for Pi-backed OpenAI Codex Responses models. Supported values: `sse` (stable reliability default and rollback path), `websocket`, `websocket-cached` (explicit experimental/canary opt-in; retries a fresh full-context WebSocket before falling back to SSE on pre-output close-before-completion failures), and `auto` (safe pre-start SSE fallback). Invalid values fail safe to `sse`. |
 | `CODEX_BIN` | auto-detected | Codex executable used by app-server integrations. [Native Codex managers](NATIVE_CODEX.md) require version 0.155 or newer and use their own Codex data home. |
-| `FORGE_CLAUDE_AUTH_MODE` | `cli` | [Native Claude managers](NATIVE_CLAUDE.md) use the local Claude subscription login. Set `api_key` to explicitly opt into Anthropic API billing. |
+| `FORGE_CLAUDE_AUTH_MODE` | unset | Unset: [native Claude managers](NATIVE_CLAUDE.md) use the Subscription or API-key choice saved in Settings. `cli` forces the local Claude subscription login; `api_key` forces Anthropic API billing from `ANTHROPIC_API_KEY`. |
 | `CLAUDE_BIN` | bundled | Optional absolute native Claude executable override. Remove it to use Forge's matched bundled runtime. |
 | `CLAUDE_CONFIG_DIR` | Claude default | Optional native Claude configuration/history directory; authenticate using the same value. |
 | `FORGE_OPENAI_CODEX_AUTH_MODE` | `local` | OpenAI/Codex auth source. Use `central_broker` to make Forge use the Forge Auth broker for OpenAI/Codex in v1. |

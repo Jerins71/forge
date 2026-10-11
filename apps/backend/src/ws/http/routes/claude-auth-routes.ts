@@ -2,8 +2,10 @@ import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { ClaudeAuthService } from "../../../swarm/runtime/claude/claude-auth-service.js";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
+import type { NativeApiAccessUpdate } from "@forge/protocol";
+import { isRecord } from "../../../utils/normalize.js";
 
-export function createClaudeAuthRoutes(service: Pick<ClaudeAuthService, "status" | "start" | "cancel" | "submitCode">): HttpRoute[] {
+export function createClaudeAuthRoutes(service: Pick<ClaudeAuthService, "status" | "start" | "cancel" | "submitCode" | "configure">): HttpRoute[] {
   const path = "/api/settings/claude-native";
   const methods = "GET, POST, DELETE, OPTIONS";
   return withEnvironmentRouteAccess([{ methods, matches: pathname => pathname === path, handle: async (request, response) => {
@@ -15,9 +17,11 @@ export function createClaudeAuthRoutes(service: Pick<ClaudeAuthService, "status"
       sendJson(response, 405, { error: "Method not allowed" }); return;
     }
     try {
-      const body = await readJsonBody(request, 8192) as { action?: unknown; flowId?: unknown; code?: unknown } | null;
+      const body = await readJsonBody(request, 8192) as { action?: unknown; flowId?: unknown; code?: unknown; access?: unknown } | null;
       if (request.method === "DELETE" && typeof body?.flowId === "string") {
         await service.cancel(body.flowId);
+      } else if (body?.action === "configure" && isRecord(body.access) && request.method === "POST") {
+        sendJson(response, 200, { ...await service.configure(body.access as unknown as NativeApiAccessUpdate) }); return;
       } else if (body?.action === "start" && request.method === "POST") {
         sendJson(response, 200, { ...await service.start() }); return;
       } else if (body?.action === "code" && typeof body.flowId === "string" && typeof body.code === "string" && request.method === "POST") {

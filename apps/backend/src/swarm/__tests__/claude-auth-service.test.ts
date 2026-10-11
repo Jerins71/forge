@@ -9,6 +9,7 @@ vi.mock("node:child_process", () => ({ spawn: mocks.spawn }));
 vi.mock("../runtime/claude/claude-runtime-environment.js", () => ({
   resolveClaudeExecutable: async () => "/bundled/claude",
   claudeRuntimeEnvironment: mocks.env, isClaudeSignedIn: mocks.signedIn,
+  resolveClaudeApiAccess: async () => ({ mode: "subscription" }),
 }));
 
 class Child extends EventEmitter {

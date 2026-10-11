@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react'
-import type { ClaudeAuthStatus } from '@forge/protocol'
+import type { ClaudeAuthStatus, NativeApiAccessUpdate } from '@forge/protocol'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { SettingsApiClient } from './settings-api-client'
+import { NativeApiAccessFields } from './NativeApiAccessFields'
 
 const endpoint = '/api/settings/claude-native'
 
@@ -75,6 +76,11 @@ export function ClaudeNativeAuth({ apiClient, inConversation = false, embedded =
       body: JSON.stringify({ action, flowId: status?.flowId, ...(action === 'code' ? { code: value } : {}) }) })
   }
 
+  const configure = (access: NativeApiAccessUpdate) => void request({
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'configure', access }),
+  })
+  const usesApiKey = status?.mode === 'api_key'
+
   return (
     <section aria-label="Claude native connection" className={embedded ? '' : inConversation
       ? 'border-b border-border bg-muted/30 px-4 py-3'
@@ -83,14 +89,15 @@ export function ClaudeNativeAuth({ apiClient, inConversation = false, embedded =
         <div className="min-w-0 space-y-1">
           <h3 className="flex items-center gap-2 text-sm font-medium">
             {status?.connected ? <Check className="size-4 text-success" aria-hidden="true" /> : null}
-            {status?.connected ? (embedded ? 'Signed in' : 'Claude connected') : inConversation ? 'Connect Claude to continue' : embedded ? (status ? 'Not signed in' : 'Checking…') : 'Claude native'}
+            {status?.connected ? (usesApiKey ? 'Using an API key' : embedded ? 'Signed in' : 'Claude connected') : inConversation ? 'Connect Claude to continue' : embedded ? (status ? (usesApiKey ? 'API key needed' : 'Not signed in') : 'Checking…') : 'Claude native'}
           </h3>
           <p className="max-w-prose text-xs text-muted-foreground">
             {status?.connected
               ? status.mode === 'api_key' ? 'Using your configured Anthropic API key.'
                 : inConversation ? 'Your subscription is connected. Send your message again to continue.' : 'Using your Claude subscription. Sign-in is shared with Claude Code on this computer.'
               : active ? 'Copy the sign-in link and open it in your preferred browser. To switch accounts, choose a different account there, then paste the authorization code below.'
-                : 'Use your Claude subscription. Sign-in is shared with Claude Code on this computer.'}
+                : usesApiKey ? 'Claude is set to use an Anthropic API key on this environment.'
+                  : 'Use your Claude subscription. Sign-in is shared with Claude Code on this computer.'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -126,6 +133,9 @@ export function ClaudeNativeAuth({ apiClient, inConversation = false, embedded =
             onFocus={event => event.currentTarget.select()} className="max-w-lg text-xs" />
           {copyError ? <p role="alert" className="max-w-prose text-sm">{copyError}</p> : null}
         </div>
+      ) : null}
+      {embedded && status?.access && !active ? (
+        <NativeApiAccessFields runtime="Claude" access={status.access} busy={busy} onSave={configure} />
       ) : null}
       {error || status?.message ? <p role="alert" className="mt-3 max-w-prose break-words text-sm text-foreground">{error ?? status?.message}</p> : null}
       {active && !status?.message ? <p role="status" className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">

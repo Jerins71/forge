@@ -46,6 +46,28 @@ and configures ephemeral credential storage; OAuth refresh tokens remain with
 Forge. The subprocess receives a small environment allowlist, not Forge's provider
 keys or secrets environment. This is credential hygiene, not a Secure Session boundary.
 
+### API key and base URL
+
+**Settings → Authentication → Codex native** chooses how Codex native connects on that
+environment: **Subscription** (the default: the ChatGPT accounts above) or **API key**.
+An optional **Base URL** sends Codex's requests through a router or proxy.
+
+- In API-key mode Forge logs the app-server in with the saved key over stdio and uses
+  no ChatGPT account. A missing key stops the session with a message instead of
+  falling back. Forge Auth broker mode, when active, takes precedence over both.
+- The base URL is passed as Codex's `openai_base_url` setting; Codex does not read
+  `OPENAI_BASE_URL`. It applies in both modes. With Subscription the proxy receives the
+  ChatGPT access token and account header and must forward them to ChatGPT's Codex
+  endpoint.
+- Codex opens a WebSocket to the base URL first. A proxy without WebSocket support
+  should answer the upgrade with `426 Upgrade Required`, which moves Codex to plain
+  HTTPS at once; other errors make Codex retry before it falls back.
+- The key is saved in that environment's `shared/config/auth/auth.json` under
+  `codex-native`. Settings never shows it again; use **Replace** to change it. Each
+  environment keeps its own key and URL.
+- Saving a change refreshes idle sessions at once; a session that is working finishes
+  its turn first.
+
 ## Prompts and continuity
 
 Codex retains its native base instructions, coding tools, repository instruction

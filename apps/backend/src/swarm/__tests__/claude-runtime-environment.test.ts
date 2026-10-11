@@ -19,10 +19,17 @@ afterEach(() => { exec.version = "2.1.280 (Claude Code)"; exec.loggedIn = false;
 
 describe("Claude native setup", () => {
   it("keeps native login separate and removes inherited provider/vault credentials", async () => {
-    const env = await claudeRuntimeEnvironment({} as SwarmConfig, { HOME: "/fixture/home", PATH: "/fixture/bin", CLAUDE_CONFIG_DIR: "/fixture/claude",
-      ANTHROPIC_API_KEY: "not-in-cli-mode", CLAUDE_CODE_OAUTH_TOKEN: "not-transferred", SECRET_PASSWORD: "not-inherited", OPENAI_API_KEY: "not-inherited" });
-    expect(env).toMatchObject({ HOME: "/fixture/home", PATH: "/fixture/bin", CLAUDE_CONFIG_DIR: "/fixture/claude" });
-    expect(JSON.stringify(env)).not.toContain("not-");
+    const root = await mkdtemp(join(tmpdir(), "forge-claude-auth-"));
+    try {
+      const config = { paths: { dataDir: root, sharedAuthFile: join(root, "auth.json"), authFile: join(root, "legacy-auth.json") } } as SwarmConfig;
+      const inherited = { HOME: "/fixture/home", PATH: "/fixture/bin", CLAUDE_CONFIG_DIR: "/fixture/claude",
+        ANTHROPIC_API_KEY: "not-in-cli-mode", ANTHROPIC_BASE_URL: "http://not-inherited.invalid", CLAUDE_CODE_OAUTH_TOKEN: "not-transferred", SECRET_PASSWORD: "not-inherited", OPENAI_API_KEY: "not-inherited" };
+      for (const source of [inherited, { ...inherited, FORGE_CLAUDE_AUTH_MODE: "cli" }]) {
+        const env = await claudeRuntimeEnvironment(config, source);
+        expect(env).toMatchObject({ HOME: "/fixture/home", PATH: "/fixture/bin", CLAUDE_CONFIG_DIR: "/fixture/claude" });
+        expect(JSON.stringify(env)).not.toContain("not-");
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
   it("requires explicit API billing mode and accepts a configured API endpoint only there", async () => {
     const root = await mkdtemp(join(tmpdir(), "forge-claude-auth-"));

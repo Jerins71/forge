@@ -47,7 +47,7 @@ interface Options {
   codexHome: string;
   dataDir?: string;
   projectTrusted: boolean;
-  auth: Pick<CodexRuntimeAuth, "login" | "refresh" | "release">;
+  auth: Pick<CodexRuntimeAuth, "login" | "refresh" | "release" | "baseUrl">;
   tools: ToolHostBinding["tools"];
   host: Pick<SwarmToolHost, "requestUserChoice">;
   creationOptions?: RuntimeCreationOptions;

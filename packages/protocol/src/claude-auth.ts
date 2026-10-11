@@ -1,7 +1,11 @@
-/** Native Claude credentials remain in Claude's own credential store. */
+import type { NativeApiAccess, NativeAuthMode } from './native-api-access.js';
+
+/** Native Claude subscription credentials remain in Claude's own credential store. */
 export interface ClaudeAuthStatus {
   connected: boolean;
-  mode: 'subscription' | 'api_key';
+  mode: NativeAuthMode;
+  /** Absent from backends that predate API-key settings. */
+  access?: NativeApiAccess;
   phase: 'idle' | 'starting' | 'waiting' | 'verifying' | 'error';
   flowId?: string;
   authorizationUrl?: string;

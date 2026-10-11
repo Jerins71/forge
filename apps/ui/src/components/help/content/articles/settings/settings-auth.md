@@ -27,6 +27,14 @@ If `FORGE_OPENAI_CODEX_AUTH_MODE` is set in the environment, it overrides the Se
 
 Provider auth changes propagate by recycling matching idle manager runtimes or deferring the recycle until busy runtimes are idle. This includes direct OAuth login changes, and credential pool strategy changes, so the common case does not require recreating sessions or restarting the backend.
 
+## Claude native and Codex native: subscription or API key
+
+The **Claude & Codex** card sets how each native runtime connects on the selected environment. **Subscription** is the default and uses the sign-in on that card. **API key** uses a key you paste instead, billed to your Anthropic or OpenAI API account. The selected method is the only one used: if API key is selected and no key is saved, sessions stop with a message rather than using your subscription.
+
+A saved key is never shown again. Use **Replace** to enter a different one. **Base URL** is optional and sends that runtime's requests through a router or proxy; it applies to both methods. With Subscription, the proxy must pass your sign-in through to Anthropic or ChatGPT. For Codex, a proxy without WebSocket support should answer the upgrade request with `426 Upgrade Required`.
+
+Each environment keeps its own key and base URL; nothing is copied between machines. After **Save**, idle sessions switch at once and a working session finishes its current turn first.
+
 ## OAuth login
 
 The current Anthropic and OpenAI pool cards add accounts through OAuth. Select **Add Account**, follow the browser authorization flow, then paste an authorization code or callback URL if prompted. OpenAI's local credential card is read-only while Forge Auth broker mode is active.

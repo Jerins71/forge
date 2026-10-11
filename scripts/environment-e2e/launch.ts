@@ -90,7 +90,9 @@ export async function verifyFleetHealth(manifest: FleetManifest): Promise<void> 
   }
 }
 
-export async function launchFleet(options: { environments?: number; out?: string; artifactRoot?: string; pairingHooks?: PairingHooks; backendEntry?: string } = {}) {
+export async function launchFleet(options: { environments?: number; out?: string; artifactRoot?: string; pairingHooks?: PairingHooks; backendEntry?: string;
+  /** Added to each owned backend's allowlisted environment, such as guarded native executables. Never credentials. */
+  backendEnv?: NodeJS.ProcessEnv } = {}) {
   const count = options.environments ?? 3;
   if (!Number.isInteger(count) || count < 1 || count > 26) throw new Error('Expected 1..26 environments');
   if (process.platform === 'win32') throw new Error('Fixture executable launcher on Windows is pending; do not use a shell shim for CODEX_BIN');
@@ -178,7 +180,7 @@ export async function launchFleet(options: { environments?: number; out?: string
       await command(['add', '.'], checkout, env);
       await command(['-c', 'user.name=Forge Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', `Mark ${name}`], checkout, env);
       const childEnv = { ...env, FORGE_DATA_DIR: dataDir, FORGE_HOST: '127.0.0.1', FORGE_PORT: '0',
-        FORGE_E2E_CHECKOUT: checkout, FORGE_INSTALLATION_STATE_DIR: installationStateDir, FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: '1', FORGE_ALLOWED_CLIENT_ORIGINS: `app://forge,http://127.0.0.1:${uiPort}`, CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs') };
+        FORGE_E2E_CHECKOUT: checkout, FORGE_INSTALLATION_STATE_DIR: installationStateDir, FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: '1', FORGE_ALLOWED_CLIENT_ORIGINS: `app://forge,http://127.0.0.1:${uiPort}`, CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs'), ...options.backendEnv };
       const entry = options.backendEntry ?? join(repositoryRoot, 'scripts/environment-e2e/fixtures/backend-process.ts');
       const args = entry.endsWith('.ts') ? ['--expose-gc', '--import', backendRequire.resolve('tsx'), entry] : ['--expose-gc', entry];
       const startEnvironment = async (): Promise<EnvironmentFixture> => {

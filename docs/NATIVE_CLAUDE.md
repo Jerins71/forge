@@ -41,13 +41,30 @@ model inputs, or Forge settings. An unfinished flow can be cancelled, expires af
 five minutes, and is stopped when the backend shuts down. A failed status check is
 reported separately from a signed-out account.
 
-Advanced environment settings:
+### API key and base URL
+
+**Settings → Authentication → Claude native** chooses how Claude native connects on
+that environment: **Subscription** (the default, described above) or **API key**. An
+optional **Base URL** sends Claude's requests through a router or proxy; it applies in
+both modes, so with Subscription the proxy must pass the Claude sign-in through.
+
+- In API-key mode the runtime receives `ANTHROPIC_API_KEY`, which Claude Code prefers
+  over a saved login. In Subscription mode it receives no key. The selected mode is the
+  only one used; a missing key stops the session with a message instead of falling back.
+- The key is saved in that environment's `shared/config/auth/auth.json` under
+  `claude-native`, beside its other provider credentials. Settings never shows it again;
+  use **Replace** to change it. Each environment keeps its own key and URL.
+- Saving a change refreshes idle sessions at once; a session that is working finishes
+  its turn first.
+
+Advanced environment settings. Setting `FORGE_CLAUDE_AUTH_MODE` overrides the saved
+choice and makes it read-only in Settings:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `FORGE_CLAUDE_AUTH_MODE` | `cli` | Native Claude login. Set `api_key` only when you explicitly want Anthropic API billing. |
+| `FORGE_CLAUDE_AUTH_MODE` | unset | Unset: use the choice saved in Settings. `cli`: native Claude login. `api_key`: Anthropic API billing with the variables below. |
 | `ANTHROPIC_API_KEY` | unset | In `api_key` mode, takes precedence over an Anthropic API-key credential in Forge Authentication settings. OAuth credentials are not used. |
-| `ANTHROPIC_BASE_URL` | Anthropic default | Optional HTTP(S) endpoint in `api_key` mode only. |
+| `ANTHROPIC_BASE_URL` | Anthropic default | Optional HTTP(S) endpoint when `FORGE_CLAUDE_AUTH_MODE=api_key`. |
 | `CLAUDE_CONFIG_DIR` | Claude default | Optional native Claude configuration/history directory. Log in with the same value; Forge does not copy credentials into it. |
 | `CLAUDE_BIN` | bundled executable | Optional absolute path to a native executable, requiring Claude Code 2.1.280 or newer. On Windows use `claude.exe`, not a `.cmd`, `.bat`, or `.ps1` wrapper. Remove the override to return to the bundled runtime. Settings updates an external executable through its own installer (`claude update`, npm, or Homebrew). |
 | `CLAUDE_CODE_GIT_BASH_PATH` | Claude detection | Optional Git for Windows Bash path. Native Claude shell tools on Windows require Git for Windows. |

@@ -7,6 +7,7 @@ import { ensureCanonicalAuthFilePath } from "../../storage/auth-storage-paths.js
 import type { SwarmConfig } from "../../types.js";
 import { CLAUDE_SIGN_IN_REQUIRED } from "@forge/protocol";
 import { bundledClaudeRuntime, selectClaudeRuntime } from "../runtime-updates/claude-managed-runtime.js";
+import { missingNativeApiKeyMessage, normalizeNativeBaseUrl, readNativeApiAccess, type ResolvedNativeApiAccess } from "../native-api-access.js";
 
 const execute = promisify(execFile);
 
@@ -31,25 +32,37 @@ export async function resolveClaudeExecutable(env = process.env, platform = proc
   }
 }
 
+/**
+ * FORGE_CLAUDE_AUTH_MODE on the backend process fixes the mode and takes its key and endpoint from
+ * that process; otherwise this environment's saved settings decide.
+ */
+export async function resolveClaudeApiAccess(config: SwarmConfig, source = process.env): Promise<ResolvedNativeApiAccess> {
+  const mode = source.FORGE_CLAUDE_AUTH_MODE;
+  if (mode === undefined) return readNativeApiAccess(config, "claude-native");
+  if (mode !== "cli" && mode !== "api_key") {
+    throw new Error("FORGE_CLAUDE_AUTH_MODE must be cli (native Claude login) or api_key (explicit Anthropic API billing).");
+  }
+  if (mode === "cli") return { mode: "subscription", lockedBy: "FORGE_CLAUDE_AUTH_MODE" };
+  const credential = AuthStorage.create(await ensureCanonicalAuthFilePath(config)).get("anthropic");
+  const apiKey = source.ANTHROPIC_API_KEY?.trim() || (credential?.type === "api_key" ? credential.key : undefined);
+  if (!apiKey) throw new Error("Claude native API-key mode requires ANTHROPIC_API_KEY or an Anthropic API key in Forge Authentication settings. Forge's Anthropic OAuth login cannot be used for this mode.");
+  return { mode: "api_key", apiKey, lockedBy: "FORGE_CLAUDE_AUTH_MODE",
+    ...(source.ANTHROPIC_BASE_URL ? { baseUrl: normalizeNativeBaseUrl(source.ANTHROPIC_BASE_URL, "ANTHROPIC_BASE_URL") } : {}) };
+}
+
 /** Provider auth is deliberate. Never transfer Pi OAuth or inherit vault/provider secrets. */
 export async function claudeRuntimeEnvironment(config: SwarmConfig, source = process.env): Promise<NodeJS.ProcessEnv> {
   const allow = new Set(["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TMP", "TEMP", "LANG", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_GIT_BASH_PATH"]);
   const env: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(source).filter(([key]) => allow.has(key.toUpperCase()) || /^LC_[A-Z_]+$/.test(key)));
   env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
-  const mode = source.FORGE_CLAUDE_AUTH_MODE ?? "cli";
-  if (mode === "api_key") {
-    const credential = AuthStorage.create(await ensureCanonicalAuthFilePath(config)).get("anthropic");
-    const key = source.ANTHROPIC_API_KEY?.trim() || (credential?.type === "api_key" ? credential.key : undefined);
-    if (!key) throw new Error("Claude native API-key mode requires ANTHROPIC_API_KEY or an Anthropic API key in Forge Authentication settings. Forge's Anthropic OAuth login cannot be used for this mode.");
-    env.ANTHROPIC_API_KEY = key;
-    if (source.ANTHROPIC_BASE_URL) {
-      const base = new URL(source.ANTHROPIC_BASE_URL);
-      if (!["http:", "https:"].includes(base.protocol) || base.username || base.password) throw new Error("ANTHROPIC_BASE_URL must be an HTTP(S) URL without embedded credentials.");
-      env.ANTHROPIC_BASE_URL = base.href;
-    }
-  } else if (mode !== "cli") {
-    throw new Error("FORGE_CLAUDE_AUTH_MODE must be cli (native Claude login) or api_key (explicit Anthropic API billing).");
+  const access = await resolveClaudeApiAccess(config, source);
+  // The selected mode is the only one the CLI can use: a key in the environment outranks a saved
+  // login, and without one the CLI has only its own login.
+  if (access.mode === "api_key") {
+    if (!access.apiKey) throw new Error(missingNativeApiKeyMessage("claude-native"));
+    env.ANTHROPIC_API_KEY = access.apiKey;
   }
+  if (access.baseUrl) env.ANTHROPIC_BASE_URL = access.baseUrl;
   return env;
 }
 

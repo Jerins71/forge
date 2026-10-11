@@ -2,9 +2,10 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import type { ClaudeAuthStatus } from "@forge/protocol";
+import type { ClaudeAuthStatus, NativeApiAccessUpdate } from "@forge/protocol";
 import type { SwarmConfig } from "../../types.js";
-import { claudeRuntimeEnvironment, isClaudeSignedIn, resolveClaudeExecutable } from "./claude-runtime-environment.js";
+import { claudeRuntimeEnvironment, isClaudeSignedIn, resolveClaudeApiAccess, resolveClaudeExecutable } from "./claude-runtime-environment.js";
+import { describeNativeApiAccess, writeNativeApiAccess } from "../native-api-access.js";
 
 interface LoginFlow {
   id: string;
@@ -14,7 +15,7 @@ interface LoginFlow {
   finish: () => void;
 }
 
-/** Owns one transient CLI login. No credentials or CLI output enter Forge history. */
+/** Owns one transient CLI login and this environment's API access. No credentials or CLI output enter Forge history. */
 export class ClaudeAuthService {
   private flow?: LoginFlow;
   private disposed = false;
@@ -22,21 +23,36 @@ export class ClaudeAuthService {
 
   constructor(private readonly config: SwarmConfig, private readonly onConnected?: () => Promise<void>) {}
 
+  /** Running sessions keep their work and pick the change up at their next idle boundary. */
+  async configure(update: NativeApiAccessUpdate): Promise<ClaudeAuthStatus> {
+    if (this.flow) throw new Error("Finish or cancel the Claude sign-in before changing how Claude connects.");
+    if ((await resolveClaudeApiAccess(this.config)).lockedBy) {
+      throw new Error("FORGE_CLAUDE_AUTH_MODE on this environment controls how Claude connects. Remove it to change this here.");
+    }
+    await writeNativeApiAccess(this.config, "claude-native", update);
+    this.state = { connected: false, mode: update.mode, phase: "idle" };
+    try { await this.onConnected?.(); }
+    catch { throw new Error("Saved, but an existing Claude session could not refresh. Stop that session and retry your message to use the new setting."); }
+    return this.status();
+  }
+
   async status(): Promise<ClaudeAuthStatus> {
     if (this.flow) return { ...this.state };
+    let access: ClaudeAuthStatus["access"];
     try {
+      access = describeNativeApiAccess(await resolveClaudeApiAccess(this.config));
       const env = await claudeRuntimeEnvironment(this.config);
       const connected = await isClaudeSignedIn(await resolveClaudeExecutable(process.env, process.platform, process.arch, this.config.paths.dataDir), env);
       // A flow may have started while this check was in flight.
       if (!this.flow) this.state = {
-        connected, mode: env.ANTHROPIC_API_KEY ? "api_key" : "subscription",
+        connected, mode: access.mode,
         phase: this.state.phase === "error" ? "error" : connected ? "idle" : this.state.phase,
         ...(this.state.message ? { message: this.state.message } : {}),
       };
     } catch (error) {
-      if (!this.flow) return { connected: false, mode: "subscription", phase: "error", message: safeSetupError(error) };
+      if (!this.flow) return { connected: false, mode: access?.mode ?? "subscription", phase: "error", message: safeSetupError(error), ...(access ? { access } : {}) };
     }
-    return { ...this.state };
+    return { ...this.state, ...(access ? { access } : {}) };
   }
 
   async start(): Promise<ClaudeAuthStatus> {
@@ -48,7 +64,7 @@ export class ClaudeAuthService {
     this.state = { connected: false, mode: "subscription", phase: "starting", flowId: flow.id };
     try {
       const env = await claudeRuntimeEnvironment(this.config);
-      if (env.ANTHROPIC_API_KEY) throw new Error("Forge is configured for API-key billing. Switch FORGE_CLAUDE_AUTH_MODE to cli before connecting a subscription.");
+      if (env.ANTHROPIC_API_KEY) throw new Error("Claude is set to use an API key on this environment. Switch it to Subscription before signing in.");
       const executable = await resolveClaudeExecutable(process.env, process.platform, process.arch, this.config.paths.dataDir);
       if (flow.stopped) { this.release(flow); return { ...this.state }; }
       // auth login has no --no-browser flag. BROWSER overrides its system opener

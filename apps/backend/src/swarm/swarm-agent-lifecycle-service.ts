@@ -312,6 +312,8 @@ export class SwarmAgentLifecycleService {
   private core: CoreAgentMessagePort | undefined;
 
   installCoreAgentMessages(core: CoreAgentMessagePort): void { this.core = core; }
+  private refreshProviderContext?: (agentId: string) => Promise<void>;
+  installCoreProviderRefresh(refresh: (agentId: string) => Promise<void>): void { this.refreshProviderContext = refresh; }
 
   constructor(private readonly options: SwarmAgentLifecycleServiceOptions) {}
 
@@ -2114,16 +2116,16 @@ export class SwarmAgentLifecycleService {
     return { terminatedWorkerIds, unsafeShutdownAgentIds };
   }
 
-  /** Saved CLI credentials changed; preserve active work and refresh at its existing idle boundary. */
-  async notifyClaudeNativeAuthChanged(): Promise<void> {
+  /** Saved CLI credentials or API access changed; active work finishes before its provider is replaced. */
+  async notifyNativeAuthChanged(provider: "claude-native" | "codex-native"): Promise<void> {
     const agents = [...this.options.descriptors.values()].filter(descriptor =>
-      descriptor.model.provider === "claude-native",
+      descriptor.model.provider === provider,
     );
     const results = await Promise.allSettled(agents.map(descriptor =>
       this.applyAgentRuntimeRecyclePolicy(descriptor.agentId, "auth_source_change"),
     ));
     const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Claude session refresh failed");
+    if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Native session refresh failed");
   }
 
   async applyManagerRuntimeRecyclePolicy(
@@ -2147,6 +2149,14 @@ export class SwarmAgentLifecycleService {
     if (!descriptor || isExternalThreadDescriptor(descriptor)) {
       this.clearPendingManagerRuntimeRecycle(agentId);
       return "none";
+    }
+
+    if (reason === "auth_source_change") {
+      // The core owns provider bindings: it replaces this one at the thread's next idle boundary
+      // and resumes the same conversation. Recycling the runtime here would strand that binding.
+      if (!this.refreshProviderContext) return "none";
+      await this.refreshProviderContext(agentId);
+      return "deferred";
     }
 
     if (reason === "idle_transition" && !this.options.runtimeRecoveryState.hasPendingManagerRuntimeRecycle(agentId)) {

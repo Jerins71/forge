@@ -148,7 +148,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private readonly sessionPlanCoordinator: SessionPlanCoordinator;
   private readonly compactionCoordinator: SwarmCompactionCoordinator;
   lineage?: import("./lineage-tools.js").CoreLineagePort;
-  installCoreLineagePort(port: import("./lineage-tools.js").CoreLineagePort): void { this.lineage=port; }
+  installCoreLineagePort(port: import("./lineage-tools.js").CoreLineagePort): void { this.lineage=port; this.lifecycleService.installCoreProviderRefresh(agentId => port.refreshContext(agentId)); }
   prepareLineageSession(input: Parameters<SwarmSessionService["prepareLineageSession"]>[0]) { return this.sessionService.prepareLineageSession(input); }
   private async setControlledProviderModel(threadId:string,model?:Pick<AgentModelDescriptor,"provider"|"modelId"> & Partial<Pick<AgentModelDescriptor,"thinkingLevel">>):Promise<void> {
     const descriptor=this.descriptors.get(threadId);if(!descriptor) throw new Error("Provider target is unavailable");

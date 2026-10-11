@@ -79,7 +79,7 @@ describe("Claude native process acceptance", () => {
       status: "idle", sessionFile: join(root, `${id}.jsonl`), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       model: { provider: "claude-native", modelId: "claude-sonnet-5", thinkingLevel: "high" } });
     const create = async (id = "owner", providerConversation?: ProviderConversationRef) => ClaudeAgentRuntime.create({ descriptor: descriptor(id), systemPrompt: "FORGE_APPEND_FIXTURE. Use Forge coordination tools.",
-      env: { ...await claudeRuntimeEnvironment({} as SwarmConfig), PATH: process.env.PATH, HOME: root, USERPROFILE: root, TMPDIR: tmpdir(), CLAUDE_CONFIG_DIR: config, ANTHROPIC_API_KEY: "sk-ant-fake-fixture",
+      env: { ...await claudeRuntimeEnvironment({} as SwarmConfig, { ...process.env, FORGE_CLAUDE_AUTH_MODE: "cli" }), PATH: process.env.PATH, HOME: root, USERPROFILE: root, TMPDIR: tmpdir(), CLAUDE_CONFIG_DIR: config, ANTHROPIC_API_KEY: "sk-ant-fake-fixture",
         ANTHROPIC_BASE_URL: `http://127.0.0.1:${address.port}`, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", FIXTURE_CANARY: canary },
       executable: await resolveClaudeExecutable({}), projectTrusted: false, host: { requestUserChoice }, creationOptions: { secureRuntimeBinding: binding, providerConversation },
       callbacks: { onStatusChange: vi.fn(), onAgentEnd: vi.fn(), onRuntimeError: (_id, error) => { errors.push(error); }, onSessionEvent: (_id, event) => { events.push(event); } },
