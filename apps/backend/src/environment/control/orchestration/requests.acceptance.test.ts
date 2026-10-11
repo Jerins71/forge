@@ -60,6 +60,25 @@ async function snapshotChoices(core: ControlCore) {
 }
 
 describe("authoritative native choices", () => {
+  // Provider-native requests bypass the legacy ChoiceService. Both shell live
+  // events and fresh bootstrap must carry the same stable Needs You occurrence.
+  it("projects a native choice as waiting with decision attention until it is answered", async () => {
+    const f = await fixture();
+    const sessions: Array<Record<string, unknown>> = [];
+    f.core.eventSink.subscribe(event => { if (event.event.type === "session.upsert") sessions.push(event.event.session); });
+    const request = f.publish(f.observation("user_input"));
+    const read = () => JSON.parse((f.core.database.prepare("SELECT summary_json FROM control_sessions WHERE session_id='manager'").get() as { summary_json: string }).summary_json);
+    expect(read()).toMatchObject({ status: "waiting", attention: "choice", attentionOccurrence: { reason: "decision_waiting" } });
+    const occurrence = read().attentionOccurrence;
+    expect(sessions.at(-1)).toMatchObject({ attentionOccurrence: occurrence, status: "waiting" });
+    rebuildLifecycleProjections(f.core.database);
+    expect(read().attentionOccurrence).toEqual(occurrence);
+    await f.core.controlService.execute(principal, "session.choose", { commandId: answerId, sessionId: "manager", choiceId: request.requestId, answers });
+    await f.core.effectWorker.drain();
+    expect(read().attentionOccurrence).toBeUndefined();
+    expect(read().status).toBe("running");
+  });
+
   it.each(["approval", "user_input"] as const)("projects and answers %s through the retained request and outbox", async kind => {
     const f = await fixture(); const published: unknown[] = [];
     f.core.eventSink.subscribe(event => { if (event.event.type === "choice.upsert") { expect(f.core.database.inTransaction).toBe(false); published.push(event.event.choice); } });
