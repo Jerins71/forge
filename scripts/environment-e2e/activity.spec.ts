@@ -6,7 +6,9 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
 import { test as base } from './fixtures/test.js'
-import { readManifest, repositoryRoot, type FleetManifest } from './launch.js'
+import { controlEnvironment, readManifest, repositoryRoot, type BootstrapSession, type FleetManifest } from './launch.js'
+import { openFixtureRpc, until } from './fixtures/rpc-client.js'
+import { randomUUID } from 'node:crypto'
 import { openUiFleet, type UiFleet } from './fixtures/ui-fleet.js'
 
 const evidenceRoot = join(repositoryRoot, '.internal/core/evidence/activity')
@@ -215,6 +217,66 @@ test('provider retries and the final failure show as one status row, live and af
   await expect(status().last().getByTestId('activity-detail')).toContainText('unexpected status 401 Unauthorized: Invalid API key')
   await shot(page, 'retry-failed-replayed')
   assertions.statusRows = live
+})
+
+test('a new project whose resources are seeded mid-turn settles and accepts its first message', async () => {
+  // As the create dialog does it: create the project, then seed its .forge resources. Seeding changes
+  // repository trust, which restarts the manager runtime while the provider is still inside the hidden
+  // onboarding turn, on an endpoint that ignores interrupts (as a real router did).
+  const environment = manifest.environments[2]!
+  const session = await controlEnvironment<BootstrapSession>(manifest, environment.name, 'bootstrap')
+  const turnDelay = join(environment.checkout, '.fixture-turn-delay-ms')
+  const ignoreInterrupt = join(environment.checkout, '.fixture-ignore-interrupt')
+  await writeFile(turnDelay, '60000'); await writeFile(ignoreInterrupt, '1')
+  const rpc = await openFixtureRpc(environment.baseUrl, session)
+  const status = async (sessionId: string) => {
+    const shell = await openFixtureRpc(environment.baseUrl, session)
+    try {
+      await shell.call('shell.subscribe', {})
+      const snapshot = await until<any>(() => shell.frames.filter(frame => frame.item?.kind === 'snapshot').at(-1)?.item.snapshot, Boolean)
+      return snapshot.sessions.find((row: any) => row.sessionId === sessionId)?.status as string | undefined
+    } finally { shell.close() }
+  }
+  try {
+    const project = await rpc.call('project.create', { commandId: randomUUID(), title: 'Seeded mid-turn', cwd: environment.checkout,
+      model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' }, secureSessionsEnabled: false }, randomUUID(), 60_000)
+    const sessionId = project.result.sessionId as string
+    await expect.poll(() => status(sessionId), { timeout: 15_000 }).toBe('running')
+    const seeded = await fetch(`${environment.baseUrl}/api/settings/project-resources/seed`, { method: 'POST',
+      headers: { Authorization: `Bearer ${session.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: project.result.projectId, sessionAgentId: sessionId }) })
+    expect(seeded.status).toBe(200)
+    await rm(turnDelay, { force: true })
+    // The session must not stay "running" on a provider that is gone: the restart settles it as stopped.
+    await expect.poll(() => status(sessionId), { timeout: 30_000 }).toBe('stopped')
+    await rm(ignoreInterrupt, { force: true })
+    const commandId = randomUUID()
+    await rpc.call('session.send', { commandId, sessionId, message: { text: 'First message', artifactIds: [] } })
+    const receipt = await until<any>(() => rpc.call('command.get', { commandId }), value => !['accepted', 'running'].includes(value.state), 30_000)
+    expect(receipt.state, JSON.stringify(receipt.error)).toBe('succeeded')
+    await expect.poll(() => status(sessionId), { timeout: 30_000 }).toBe('idle')
+    assertions.seededMidTurn = { firstMessage: receipt.state, finalStatus: await status(sessionId) }
+  } finally { rpc.close(); await rm(turnDelay, { force: true }); await rm(ignoreInterrupt, { force: true }) }
+})
+
+test('a reply cut off by a dying provider is marked as interrupted, live and after reload', async ({ page }) => {
+  const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
+  await expect(transcript(page)).toBeVisible()
+  const before = await status().count()
+  await send(page, '[fixture:crash-mid-reply] Stop halfway')
+  // The partial text stays, and it is followed by a marker so it cannot be read as a finished answer.
+  await expect(status()).toHaveCount(before + 1, { timeout: 30_000 })
+  await expect(status().last()).toHaveAttribute('data-activity-status', 'failed')
+  await expect(status().last()).toContainText('Reply interrupted: The provider process stopped unexpectedly.')
+  await expect(transcript(page)).toContainText('This reply stops halfway through its')
+  const order = () => transcript(page).evaluate(node => { const text = node.textContent ?? ''; return text.indexOf('This reply stops halfway through its') < text.lastIndexOf('Reply interrupted') })
+  expect(await order()).toBe(true)
+  await shot(page, 'reply-interrupted')
+  await page.reload()
+  await expect(status().last()).toContainText('Reply interrupted: The provider process stopped unexpectedly.', { timeout: 30_000 })
+  await expect(transcript(page)).toContainText('This reply stops halfway through its')
+  expect(await order()).toBe(true)
+  await shot(page, 'reply-interrupted-replayed')
 })
 
 // Last: the fixture's provider process exits, and recovering the session is outside this suite.

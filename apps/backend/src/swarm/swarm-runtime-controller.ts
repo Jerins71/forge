@@ -261,9 +261,14 @@ export class SwarmRuntimeController {
   private readonly secureRuntimeBindingsByRuntime = new Map<string, SecureRuntimeBinding>();
   private readonly secureRuntimeBindingsByRuntimeObject =
     new WeakMap<SwarmAgentRuntime, SecureRuntimeBinding>();
-  private providerScopeOwner?: { prepare(descriptor:AgentDescriptor):ProviderScope; conversation?(agentId:string):ProviderConversationRef|undefined; canRestore(agentId:string):boolean };
+  private providerScopeOwner?: { prepare(descriptor:AgentDescriptor):ProviderScope; conversation?(agentId:string):ProviderConversationRef|undefined; stop?(agentId:string):Promise<boolean>; canRestore(agentId:string):boolean };
   installProviderScopeOwner(owner:NonNullable<SwarmRuntimeController["providerScopeOwner"]>):void { this.providerScopeOwner=owner; }
   canRestoreControlledRuntime(agentId:string):boolean { return this.providerScopeOwner?.canRestore(agentId) ?? true; }
+  /**
+   * Ends a session's provider through the core that owns its binding, so the turn in flight gets its
+   * terminal and the next input starts a fresh binding. False when the core owns nothing for it.
+   */
+  async stopOwnedProvider(agentId:string):Promise<boolean> { return await this.providerScopeOwner?.stop?.(agentId) ?? false; }
   private readonly providerCreationScope = new AsyncLocalStorage<{scope:ProviderScope;conversation?:ProviderConversationRef}>();
   private readonly preparedProviderInputs = new Map<SwarmAgentRuntime, {
     runtimeToken: number;

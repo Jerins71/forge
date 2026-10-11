@@ -85,6 +85,8 @@ export interface ProjectExecutableTrustCoordinatorHost {
     contextUsage?: AgentContextUsage,
   ): void;
   emitTrustRuntimeRestartMessage(agentId: string, timestamp: string): void;
+  /** Stops the session's provider through the core that owns its binding. False when the core owns none. */
+  stopOwnedProvider(agentId: string): Promise<boolean>;
   saveStore(): Promise<void>;
   emitAgentsSnapshot(): void;
   now(): string;
@@ -494,6 +496,14 @@ export class ProjectExecutableTrustCoordinator {
 
   private async forceEvictManagerRuntime(descriptor: ProjectExecutableTrustManager): Promise<void> {
     this.options.runtimeRecovery.clearPendingManagerRuntimeRecycle(descriptor.agentId);
+    // The core owns this session's provider binding. Ending the runtime behind its back leaves the turn in
+    // flight without a terminal and the binding closed: the session stays "running" and every send is
+    // rejected. The core's own stop settles both, and the next input starts on the new trust policy.
+    const wasStreaming = descriptor.status === "streaming";
+    if (await this.options.host.stopOwnedProvider(descriptor.agentId)) {
+      if (wasStreaming) this.options.host.emitTrustRuntimeRestartMessage(descriptor.agentId, this.options.host.now());
+      return;
+    }
     const inFlightCreation = this.options.host.getRuntimeCreationPromise(descriptor.agentId);
     if (inFlightCreation) {
       this.options.host.deleteRuntimeCreationPromise(descriptor.agentId);

@@ -96,6 +96,11 @@ async function runTurn(turn, text) {
   notify('turn/started', { threadId: turn.thread.id, turn: { id: turn.id, status: 'inProgress', items: [] } });
   let reply = `fixture:${fixture.instanceId}:assistant reply`;
   try {
+    // A real provider takes seconds per turn. This marker makes every turn, including the hidden
+    // onboarding turn, take as long as it says, so work that overlaps a running turn can be tested.
+    const delay = join(checkout, '.fixture-turn-delay-ms');
+    if (existsSync(delay)) await pause(Number(readFileSync(delay, 'utf8')) || 0);
+    if (turn.done) return;
     if (text.includes('Your first job is to orient to THIS project.') && existsSync(join(checkout, '.fixture-onboarding-slow'))) await pause(1500);
     if (turn.done) return;
     if (text.includes('[fixture:hold]')) { turn.holding = true; return; }
@@ -164,6 +169,12 @@ async function runTurn(turn, text) {
     const item = { id: `${turn.id}-assistant`, type: 'agentMessage', text: '', phase: 'final_answer' };
     notify('item/started', { ...context(turn), item });
     const half = Math.floor(reply.length / 2);
+    if (text.includes('[fixture:crash-mid-reply]')) {
+      // The provider process dies with half a reply on screen.
+      notify('item/agentMessage/delta', { ...context(turn), itemId: item.id, delta: 'This reply stops halfway through its' });
+      await pause(400);
+      process.exit(1);
+    }
     if (text.includes('[fixture:stream]')) {
       // Hold the reply half-written so its partial text can be observed mid-stream.
       reply = `Streaming partial text arrives first, then the remainder completes the reply for ${fixture.instanceId}.`;
@@ -188,6 +199,11 @@ async function runTurn(turn, text) {
   }
 }
 function threadResponse(thread) { return { thread: { id: thread.id, path: thread.path, turns: [] }, model: thread.model }; }
+/** A real app-server takes time to start a thread and a turn; this marker makes the fixture do the same. */
+async function startDelay() {
+  const marker = join(checkout, '.fixture-start-delay-ms');
+  if (existsSync(marker)) await pause(Number(readFileSync(marker, 'utf8')) || 0);
+}
 async function request(method, params = {}) {
   if (method === 'initialize') { count('initialize'); return { userAgent: 'forge-fixture/1', platformFamily: process.platform }; }
   if (method === 'account/login/start') {
@@ -201,6 +217,7 @@ async function request(method, params = {}) {
   if (method === 'model/list') return { data: [{ id: 'gpt-6-sol', model: 'gpt-6-sol', displayName: 'Fixture Codex',
     description: 'Deterministic fixture', isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'high', description: 'Fixture' }], defaultReasoningEffort: 'high' }], nextCursor: null };
   if (method === 'thread/start') {
+    await startDelay();
     count('threadStarts');
     const id = `fixture-${fixture.instanceId}-${process.pid}-${++threadId}`;
     const rollouts = join(stateDir, 'native-home');
@@ -241,6 +258,7 @@ async function request(method, params = {}) {
   }
   if (method === 'thread/inject_items') return {};
   if (method === 'turn/start') {
+    await startDelay();
     const thread = threads.get(params.threadId);
     if (!thread || active) throw new Error('Unknown thread or turn already active');
     count('turnStarts');
@@ -261,7 +279,12 @@ async function request(method, params = {}) {
     if (active.holding) { const turn = active; turn.holding = false; setTimeout(() => void runTurn(turn, text), 15); }
     return { turnId: active.id };
   }
-  if (method === 'turn/interrupt') { count('interrupts'); if (active) complete(active, 'interrupted'); return {}; }
+  if (method === 'turn/interrupt') {
+    count('interrupts');
+    // Some endpoints accept an interrupt and never act on it; the turn simply keeps running.
+    if (existsSync(join(checkout, '.fixture-ignore-interrupt'))) return {};
+    if (active) complete(active, 'interrupted'); return {};
+  }
   throw new Error('Unsupported fixture JSON-RPC method');
 }
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });

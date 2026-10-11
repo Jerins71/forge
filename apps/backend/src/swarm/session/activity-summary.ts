@@ -38,7 +38,7 @@ export function buildActivitySummary(
 }
 
 /** A finished reasoning or status row, persisted in its actor's own history with bounded text. */
-export function buildTimelineSummary(item: TimelineActivity): ActivitySummaryEvent {
+export function buildTimelineSummary(item: TimelineActivity, timestamp?: string): ActivitySummaryEvent {
   return {
     type: "activity_summary",
     schemaVersion: 1,
@@ -47,7 +47,7 @@ export function buildTimelineSummary(item: TimelineActivity): ActivitySummaryEve
     actorAgentId: item.actorId,
     ...(item.runId ? { turnId: item.runId } : {}),
     // A status row is written when the turn ends but belongs where the trouble began, above the reply.
-    timestamp: item.kind === "status" ? item.startedAt : item.completedAt ?? item.startedAt,
+    timestamp: timestamp ?? (item.kind === "status" ? item.startedAt : item.completedAt ?? item.startedAt),
     kind: "tool_activity",
     status: item.status === "failed" ? "failed" : "completed",
     displaySummary: item.summary,
