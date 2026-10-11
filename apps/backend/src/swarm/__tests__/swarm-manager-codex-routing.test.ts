@@ -1,3 +1,6 @@
+import { loadState } from '../../environment/control/orchestration/store.js'
+import type { SessionManager } from '@earendil-works/pi-coding-agent'
+import { createTestEnvironment } from '../../test-support/environment-auth.js'
 
 
 import { describe, expect, it, vi } from "vitest";
@@ -7,7 +10,7 @@ import type {
 } from "../codex-app-server/types.js";
 
 import type { AgentDescriptor } from "../types.js";
-import { TestSwarmManager, bootWithDefaultManager } from "../../test-support/index.js";
+import { TestSwarmManager, bootWithDefaultManager as bootLegacyManager } from "../../test-support/index.js";
 import { createTempConfig } from "../../test-support/temp-config.js";
 
 class FakeCodexAppServerClient implements CodexAppServerClientPort {
@@ -212,13 +215,17 @@ describe("SwarmManager Codex mention routing", () => {
   });
 
   it("allows owning-manager follow-ups but blocks users and sibling workers for scoped Codex Plugin specialists", async () => {
-    const { config } = await createTempConfig();
+    const { config } = await createTempConfig({ sharedAuthContent: { "openai-codex": { type: "api_key", key: "forge-fixture-inert-not-a-provider-key" } } });
     const manager = createCodexEnabledManagerOnly(config);
-    await bootWithDefaultManager(manager, config);
+    const environment = await bootWithDefaultManager(manager, config);
+    const runtime = manager.runtimeByAgentId.get("manager")!; runtime.busy = true;
+    const initialize = manager.onCreateRuntime;
+    manager.onCreateRuntime = async input => { await initialize?.(input); input.runtime.busy = true; };
 
     await manager.handleUserMessage("@Codex -fireflies list meetings", {
       sourceContext: { channel: "web" },
     });
+    await vi.waitFor(() => expect(loadState(environment.database).threads.manager.activeRunId).toBeTruthy());
     await manager.spawnAgent("manager", {
       agentId: "codex-plugin-fireflies",
       specialist: "codex-plugin",
@@ -229,6 +236,7 @@ describe("SwarmManager Codex mention routing", () => {
     expect(worker).toBeDefined();
     expect(manager.getCodexPluginScopeForWorker(worker!.agentId)).toBeDefined();
     const workerRuntime = manager.runtimeByAgentId.get(worker!.agentId);
+    await vi.waitFor(() => expect(workerRuntime?.sendCalls).toHaveLength(1));
     const sendCountBefore = workerRuntime?.sendCalls.length ?? 0;
 
     await expect(
@@ -288,3 +296,20 @@ describe("SwarmManager Codex mention routing", () => {
     ).toBe(false);
   });
 });
+
+async function bootWithDefaultManager(manager: TestSwarmManager, config: Parameters<typeof bootLegacyManager>[1]) {
+  manager.onCreateRuntime = ({ runtime }) => {
+    // Native writer initialization is a provider resource fact, before core transcript append.
+    const native = (runtime as unknown as { sessionManager: SessionManager }).sessionManager
+    native.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'fixture ready' }] } as never)
+  }
+  const { environment } = await createTestEnvironment(manager, { boot: true })
+  if (!manager.getAgent(config.managerId ?? 'manager')) {
+    await manager.createManager(config.managerId ?? 'manager', { name: config.managerDisplayName ?? 'Manager', cwd: config.defaultCwd })
+  }
+  environment.start()
+  await vi.waitFor(() => expect(Object.values(loadState(environment.database).runs).every(run => run.state === 'terminal')).toBe(true))
+  const bootstrap = manager.runtimeByAgentId.get(config.managerId ?? 'manager')
+  if (bootstrap) { bootstrap.sendCalls = []; bootstrap.nextDeliveryId = 0 }
+  return environment
+}

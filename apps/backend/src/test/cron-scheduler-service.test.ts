@@ -111,6 +111,7 @@ describe('CronSchedulerService', () => {
     expect(options).toEqual({
       targetAgentId: 'manager',
       sourceContext: { channel: 'web' },
+      commandId: `schedule:schedule-1:${dueAt}`,
     })
 
     const stored = await readSchedulesFile(schedulesFile)

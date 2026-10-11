@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { makeTempConfig as buildTempConfig, TestSwarmManager, bootWithDefaultManager } from '../../test-support/index.js'
+import { loadState } from '../../environment/control/orchestration/store.js'
+import type { SessionManager } from '@earendil-works/pi-coding-agent'
+import { createTestEnvironment } from '../../test-support/environment-auth.js'
+import { describe, expect, it, vi } from 'vitest'
+import { makeTempConfig as buildTempConfig, TestSwarmManager, bootWithDefaultManager as bootLegacyManager } from '../../test-support/index.js'
 import type { SwarmConfig } from '../types.js'
 
 async function makeTempConfig(port = 8791): Promise<SwarmConfig> {
@@ -44,5 +47,23 @@ describe('SwarmManager archive gates', () => {
     await expect(manager.handleUserMessage('hello restored session', {
       targetAgentId: created.sessionAgent.agentId,
     })).resolves.toBeUndefined()
+    await vi.waitFor(() => expect(manager.runtimeByAgentId.get(created.sessionAgent.agentId)?.sendCalls).toHaveLength(1))
   })
 })
+
+async function bootWithDefaultManager(manager: TestSwarmManager, config: Parameters<typeof bootLegacyManager>[1]) {
+  manager.onCreateRuntime = ({ runtime }) => {
+    // Native writer initialization is a provider resource fact, before core transcript append.
+    const native = (runtime as unknown as { sessionManager: SessionManager }).sessionManager
+    native.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'fixture ready' }] } as never)
+  }
+  const { environment } = await createTestEnvironment(manager, { boot: true })
+  if (!manager.getAgent(config.managerId ?? 'manager')) {
+    await manager.createManager(config.managerId ?? 'manager', { name: config.managerDisplayName ?? 'Manager', cwd: config.defaultCwd })
+  }
+  environment.start()
+  await vi.waitFor(() => expect(Object.values(loadState(environment.database).runs).every(run => run.state === 'terminal')).toBe(true))
+  const bootstrap = manager.runtimeByAgentId.get(config.managerId ?? 'manager')
+  if (bootstrap) { bootstrap.sendCalls = []; bootstrap.nextDeliveryId = 0 }
+  return environment
+}

@@ -1,11 +1,14 @@
+import { loadState } from '../../environment/control/orchestration/store.js'
+import type { SessionManager } from '@earendil-works/pi-coding-agent'
+import { createTestEnvironment } from '../../test-support/environment-auth.js'
 
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentDescriptor, SwarmConfig } from '../types.js';
 import type { RuntimeCreationOptions, SwarmAgentRuntime } from '../runtime-contracts.js'
 import { makeTempConfig as buildTempConfig } from '../../test-support/index.js'
-import { FakeRuntime, TestSwarmManager as TestSwarmManagerBase, bootWithDefaultManager } from '../../test-support/index.js'
+import { FakeRuntime, TestSwarmManager as TestSwarmManagerBase, bootWithDefaultManager as bootLegacyManager } from '../../test-support/index.js'
 
 class TestSwarmManager extends TestSwarmManagerBase {
   protected override async createRuntimeForDescriptor(
@@ -34,7 +37,7 @@ describe('SwarmManager', () => {
   it('rehydrates work graph and active goal context through compaction and restart', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await bootWithDefaultManager(manager, config)
+    const environment = await bootWithDefaultManager(manager, config)
     await manager.createGoal('manager', 'goal-continuity', {
       objective: 'Preserve the durable objective',
     })
@@ -57,10 +60,14 @@ describe('SwarmManager', () => {
     expect(compactInstructions).toContain('[activeGoal] {"revision":1')
     expect(compactInstructions).toContain('"objective":"Preserve the durable objective"')
 
+    await manager.stopSession('manager')
+    await environment.stop()
     const rebooted = new TestSwarmManager(config)
     await bootWithDefaultManager(rebooted, config)
     await rebooted.handleUserMessage('Continue from durable state.', { targetAgentId: 'manager' })
-    const runtimeText = rebooted.runtimeByAgentId.get('manager')?.sendCalls.at(-1)?.message as string
+    await vi.waitFor(() => expect(rebooted.runtimeByAgentId.get('manager')?.sendCalls).toHaveLength(1))
+    const sent = rebooted.runtimeByAgentId.get('manager')?.sendCalls.at(-1)?.message
+    const runtimeText = typeof sent === 'string' ? sent : sent?.text ?? ''
     expect(runtimeText).toContain('[workingPlan] {"revision":1')
     expect(runtimeText).toContain('"coordinationMode":"graph"')
     expect(runtimeText).toContain('"id":"decision"')
@@ -77,3 +84,20 @@ describe('SwarmManager', () => {
     })
   })
 })
+
+async function bootWithDefaultManager(manager: TestSwarmManager, config: Parameters<typeof bootLegacyManager>[1]) {
+  manager.onCreateRuntime = ({ runtime }) => {
+    // Native writer initialization is a provider resource fact, before core transcript append.
+    const native = (runtime as unknown as { sessionManager: SessionManager }).sessionManager
+    native.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'fixture ready' }] } as never)
+  }
+  const { environment } = await createTestEnvironment(manager, { boot: true })
+  if (!manager.getAgent(config.managerId ?? 'manager')) {
+    await manager.createManager(config.managerId ?? 'manager', { name: config.managerDisplayName ?? 'Manager', cwd: config.defaultCwd })
+  }
+  environment.start()
+  await vi.waitFor(() => expect(Object.values(loadState(environment.database).runs).every(run => run.state === 'terminal')).toBe(true))
+  const bootstrap = manager.runtimeByAgentId.get(config.managerId ?? 'manager')
+  if (bootstrap) { bootstrap.sendCalls = []; bootstrap.nextDeliveryId = 0 }
+  return environment
+}
