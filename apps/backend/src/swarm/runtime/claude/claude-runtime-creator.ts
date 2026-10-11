@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { assembleNativeInstructionBundle } from "../../runtime-prompt-assembler.js";
 import { renderInstructionBundle } from "../instruction-bundle.js";
 import { createNativeSecureBashTool } from "../../secure-sessions/runtime/native-secure-bash-tool.js";
@@ -60,15 +61,17 @@ export class ClaudeRuntimeCreator {
       memory, contextFiles, secureSessionsEnabled,
     });
     const systemPrompt = renderInstructionBundle(instructionBundle);
+    const providerScope = options.creationOptions?.providerScope ?? { threadId: descriptor.agentId, bindingId: randomUUID(), generation: 0 };
     const toolHostBinding = bindRuntimeToolHost({ descriptor, tools, forgeExtensionHost: this.deps.forgeExtensionHost,
-      preparedForgeBindings: prepared, secureRuntimeBinding: options.creationOptions?.secureRuntimeBinding, mechanism: "in_process_mcp" });
-    const creationOptions = { ...options.creationOptions, instructionBundle, toolHostBinding };
+      preparedForgeBindings: prepared, secureRuntimeBinding: options.creationOptions?.secureRuntimeBinding, mechanism: "in_process_mcp", scope: providerScope });
+    const creationOptions = { ...options.creationOptions, providerScope, instructionBundle, toolHostBinding };
     const env = await claudeRuntimeEnvironment(this.deps.config);
     const executable = await resolveClaudeExecutable(process.env, process.platform, process.arch, this.deps.config.paths.dataDir);
     await assertClaudeSetup(executable, env, descriptor.cwd);
     const runtime = await ClaudeAgentRuntime.create({ descriptor, callbacks: options.callbacks,
       systemPrompt, env, executable, projectTrusted: trust.trusted, tools, host: this.deps.host,
       creationOptions });
+    options.creationOptions?.onProviderPrepared?.({ instructionBundle, toolHostBinding });
     if (prepared) this.deps.forgeExtensionHost.activateRuntimeBindings(prepared);
     recordRuntimePromptAndCreation({ observability: this.deps.observability, descriptor,
       runtimeToken: options.runtimeToken, runtimeType: "claude", forgeResolvedPrompt: options.systemPrompt,

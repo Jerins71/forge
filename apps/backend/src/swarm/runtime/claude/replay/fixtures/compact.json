@@ -1,0 +1,108 @@
+{
+  "provider": "claude",
+  "protocol": "agent-sdk/stdio-control",
+  "version": "0.3.280",
+  "scenario": "compact",
+  "provenance": "Synthetic raw frames from the installed SDK wire contract; not captured from a real account. The real SDK, runtime and MCP server parse these frames.",
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "type": "control_request",
+        "request": {
+          "subtype": "initialize",
+          "sdkMcpServers": [
+            "forge"
+          ],
+          "appendSystemPrompt": "$prompt"
+        }
+      },
+      "capture": {
+        "$initId": [
+          "request_id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "$initId",
+          "response": {
+            "commands": [],
+            "models": [],
+            "agents": []
+          }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "type": "user",
+        "uuid": "$any",
+        "parent_tool_use_id": null,
+        "message": {
+          "role": "user",
+          "content": "/compact Keep decisions"
+        }
+      },
+      "capture": {
+        "$inputId": [
+          "uuid"
+        ]
+      },
+      "label": "input"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "system",
+        "subtype": "status",
+        "status": "compacting",
+        "uuid": "compact-start",
+        "session_id": "$sessionId"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "system",
+        "subtype": "compact_boundary",
+        "compact_metadata": {
+          "trigger": "manual",
+          "pre_tokens": 1200
+        },
+        "uuid": "compact-end",
+        "session_id": "$sessionId"
+      },
+      "label": "boundary"
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "result": "Done",
+        "duration_ms": 3,
+        "duration_api_ms": 2,
+        "num_turns": 1,
+        "total_cost_usd": 0.001,
+        "usage": {
+          "input_tokens": 11,
+          "output_tokens": 2,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        },
+        "modelUsage": {},
+        "permission_denials": [],
+        "uuid": "result-1",
+        "session_id": "$sessionId"
+      },
+      "label": "terminal"
+    }
+  ]
+}
