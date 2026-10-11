@@ -261,6 +261,8 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     this.status = "idle";
     for (const event of this.mapper.finish(false, undefined, true)) await this.emit(event);
     if (hadTurn) {
+      // A turn the host stopped did not complete; say so before its end is judged for visible output.
+      await this.emit({ type: "turn_end", toolResults: [], meta: { outcome: "cancelled" } });
       await this.emit({ type: "agent_end" });
     }
     await this.publishStatus();
