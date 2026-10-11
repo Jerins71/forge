@@ -457,6 +457,8 @@ describe("durable provider outbox", () => {
   });
   it("persists the internal worker-result envelope and routing through recovery before dispatch", async () => {
     const f = await fixture(); const root = path.dirname(f.options.databasePath!);
+    // The result waits for the manager's turn to end: this provider cannot take input mid-turn.
+    f.adapter.capabilities().native.steer = false;
     const manager = { agentId: "manager", role: "manager", status: "idle", profileId: "project" } as AgentDescriptor;
     const worker = { ...manager, agentId: "worker", managerId: "manager", role: "worker", displayName: "Fixture Worker" } as AgentDescriptor;
     const canonical: Array<Record<string, unknown>> = [];

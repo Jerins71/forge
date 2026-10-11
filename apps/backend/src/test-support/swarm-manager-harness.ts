@@ -36,7 +36,8 @@ export class FakeRuntime implements SwarmAgentRuntime {
   private providerFacts:ProviderObservation[]=[];
   private wakeProvider?:()=>void;
   readonly providerAdapter:ProviderAdapter={
-    capabilities:()=>piProviderCapabilities(),
+    // This fake has no turn to steer into, so it says so: input that arrives mid-turn waits as the next input.
+    capabilities:()=>({...piProviderCapabilities(),native:{...piProviderCapabilities().native,steer:false}}),
     open:async input=>this.bindProvider(input.scope),resume:async input=>this.bindProvider(input.scope,input.conversation),
     start:async input=>{
       await this.sendMessage(input.input,"followUp");

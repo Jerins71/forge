@@ -1,3 +1,4 @@
+import type { ActivitySummaryEvent } from "@forge/protocol";
 import type { ConversationEntryEvent, ConversationMessageEvent } from "./types.js";
 
 const MAX_WORKER_RESULT_CHARS = 16_000;
@@ -14,6 +15,31 @@ export function selectWorkerRunFinal(history: ConversationEntryEvent[], runId: s
     if (entry.id && (entry.role === "assistant" || (entry.role === "system" && looksLikeWorkerError(entry))) && entry.source !== "worker_report" && (entry.text.trim() || entry.attachments?.length)) final = entry;
   }
   return final;
+}
+
+type FailedStatusRow = ActivitySummaryEvent & { timelineEntryId: string };
+
+/**
+ * The run's failed status row: what the worker shows when its provider failed without leaving a reply.
+ * It names the provider and model, so it is the result the manager reads instead of "returned nothing".
+ */
+export function selectWorkerRunFailure(history: ConversationEntryEvent[], runId: string, inputEntryId: string): FailedStatusRow | undefined {
+  const start = history.findIndex(entry => entry.type === "conversation_message" && entry.id === inputEntryId);
+  let failure: FailedStatusRow | undefined;
+  for (const entry of start < 0 ? history : history.slice(start + 1)) {
+    if (entry.type === "conversation_message" && entry.role === "user" && entry.turnId !== runId) { if (start >= 0) break; continue; }
+    if (entry.type !== "activity_summary" || entry.turnId !== runId) continue;
+    if (entry.status === "failed" && entry.activity?.kind === "status" && entry.timelineEntryId) failure = entry as FailedStatusRow;
+  }
+  return failure;
+}
+
+export function buildWorkerFailureResult(workerAgentId: string, failure: Pick<ActivitySummaryEvent, "displaySummary">): string {
+  return truncateWorkerResult([
+    "status: blocked",
+    `summary: Worker ${workerAgentId} failed: ${failure.displaySummary.replace(/^Failed:\s*/, "")}`,
+    "follow-up: Check the worker or retry the assignment.",
+  ].join("\n"));
 }
 
 export function buildWorkerResult(workerAgentId: string, finalMessage?: ConversationMessageEvent): string {

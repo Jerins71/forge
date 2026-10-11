@@ -473,6 +473,11 @@ export class ConversationProjector {
     for (const finished of this.activity.settleTurn({ actorId, sessionId, ...settled, timestamp: this.deps.now() })) this.emitActivitySummary(buildTimelineSummary(finished));
   }
 
+  /** Whether this actor's turn already ended in a failed status row. */
+  hasReportedProviderFailure(actorId: string, runId?: string): boolean {
+    return this.activity.hasRecentFailure(actorId, runId);
+  }
+
   emitAgentToolCall(event: AgentToolCallEvent): void {
     // The live row updates before the canonical entry, so a finished row is ready for its summary.
     const activity = this.activity.observeTool(event);

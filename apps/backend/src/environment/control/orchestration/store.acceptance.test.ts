@@ -9,6 +9,8 @@ import { createEventSink } from "../event-sink.js";
 import { loadState, rebuildLifecycleProjections } from "./store.js";
 import type { CoreCommand } from "./types.js";
 import { piProviderCapabilities } from "../../../swarm/runtime/pi/pi-provider-adapter.js";
+// These scenarios are about inputs that wait for the turn to end: a provider that cannot take input mid-turn.
+const QUEUEING_PROVIDER = { ...piProviderCapabilities(), native: { ...piProviderCapabilities().native, steer: false } };
 import type { RecoverySnapshot } from "@forge/protocol/environment-v2";
 
 const roots: string[] = []; const databases: Database[] = [];
@@ -44,7 +46,7 @@ async function recoveryFixture() {
     const attempt = loadState(db).attempts[loadState(db).runs[runId].activeAttemptId];
     const { threadId, bindingId, generation, attemptId } = attempt;
     const scope = { threadId, bindingId, generation };
-    commit({ type: "binding.acquired", commandId: `acquire-${attemptId}`, now, threadId, binding: { scope, conversation: { ...scope, kind: "conversation", nativeId: "native" }, capabilities: piProviderCapabilities(), instructionRevision: "prompt", toolContractRevision: "tools" } });
+    commit({ type: "binding.acquired", commandId: `acquire-${attemptId}`, now, threadId, binding: { scope, conversation: { ...scope, kind: "conversation", nativeId: "native" }, capabilities: QUEUEING_PROVIDER, instructionRevision: "prompt", toolContractRevision: "tools" } });
     commit({ type: "attempt.dispatch", commandId: `dispatch-${attemptId}`, now, threadId, attemptId, authorized: true });
   };
   const crash = (id: string, reports: RecoverySnapshot["undeliveredReports"]) => commit({ type: "environment.recover", commandId: id, now, recoveryId: id, bootId: id, reports });

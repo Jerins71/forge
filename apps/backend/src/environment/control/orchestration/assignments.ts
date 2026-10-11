@@ -97,8 +97,9 @@ export function decideAssignment(initial: CoreState, command: CoreCommand & Assi
     apply({ type: "run.submit", commandId: command.commandId, now: command.now, threadId: parent.threadId,
       runId: transfer.targetRunId, inputId: `${assignment.assignmentId}:result:input`, attemptId: `${assignment.assignmentId}:result:attempt`,
       bindingId: parent.bindingId ?? `${assignment.assignmentId}:result:binding`,
-      // A manager waiting inside its turn for a worker the user stopped would wait forever behind a queue: it is told now.
-      delivery: assignment.stoppedByUser ? "steer" : "queue", input: assignment.resultInput });
+      // A manager waiting inside its turn would never see a result queued behind it: results are steered into
+      // the running turn. A provider that cannot steer, or a turn that has just ended, takes it as the next input.
+      delivery: "steer", input: assignment.resultInput });
   };
   switch (command.type) {
     case "worker.assign": {

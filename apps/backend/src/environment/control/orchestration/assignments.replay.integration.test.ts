@@ -21,7 +21,9 @@ afterEach(async () => {
   for (const db of databases.splice(0)) if (db.open) db.close();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
-async function fixture() {
+/** `steer: false` is a provider that cannot take input mid-turn: results wait for the turn to end. */
+async function fixture(options: { steer?: boolean } = {}) {
+  const capabilities = { ...piProviderCapabilities(), native: { ...piProviderCapabilities().native, steer: options.steer ?? false } };
   const root = await mkdtemp(path.join(os.tmpdir(), "forge-assign-")); roots.push(root);
   const Constructor = await loadConfiguredSqliteDatabaseConstructor();
   let db = new Constructor(path.join(root, "control.sqlite")); databases.push(db);
@@ -43,7 +45,7 @@ async function fixture() {
   const ready = async (runId: string) => {
     await record(runId);
     const entry = state().runs[runId]; const attempt = state().attempts[entry.activeAttemptId];
-    run({ type: "binding.acquired", commandId: `binding-${runId}`, now, threadId: entry.threadId, binding: { scope: { threadId: entry.threadId, bindingId: attempt.bindingId, generation: attempt.generation }, conversation: { threadId: entry.threadId, bindingId: attempt.bindingId, generation: attempt.generation, kind: "conversation", nativeId: `native-${entry.threadId}` }, capabilities: piProviderCapabilities(), instructionRevision: "prompt", toolContractRevision: "tools" } });
+    run({ type: "binding.acquired", commandId: `binding-${runId}`, now, threadId: entry.threadId, binding: { scope: { threadId: entry.threadId, bindingId: attempt.bindingId, generation: attempt.generation }, conversation: { threadId: entry.threadId, bindingId: attempt.bindingId, generation: attempt.generation, kind: "conversation", nativeId: `native-${entry.threadId}` }, capabilities, instructionRevision: "prompt", toolContractRevision: "tools" } });
   };
   const dispatch = (runId: string) => {
     const entry = state().runs[runId];
@@ -124,6 +126,37 @@ describe("authoritative assignment replay", () => {
     expect(f.state().transfers["one:result"].state).not.toBe("superseded");
     // The manager may be waiting inside its turn: the result reaches that turn instead of queueing behind it.
     expect(f.state().runs["one:result:run"]).toMatchObject({ threadId: "manager", delivery: "steer" });
+  });
+  // Failure cases: a manager waiting inside its turn never sees its worker's result, because the result
+  // queues behind that turn; a provider that cannot steer loses the result instead of taking it after the turn.
+  it("steers a worker result into the manager's running turn, and queues it when the provider cannot steer or the turn has ended", async () => {
+    const f = await fixture({ steer: true });
+    f.assign("one"); await f.ready("run-one"); f.dispatch("run-one"); f.observe("run-one", "accepted"); f.observe("run-one", "terminal");
+    f.result("one");
+    const resultRun = "one:result:run";
+    expect(f.state().runs[resultRun]).toMatchObject({ threadId: "manager", delivery: "steer" });
+    // The manager's turn is still running: the recorded result is steered into it.
+    expect(f.state().runs.parent.state).toBe("running");
+    await f.record(resultRun);
+    expect(f.state().runs[resultRun].state).toBe("running");
+    const steers = () => f.db().prepare("SELECT payload_json FROM effects WHERE kind='provider.steer'").all().map((row: any) => JSON.parse(row.payload_json));
+    const attemptId = f.state().runs[resultRun].activeAttemptId;
+    expect(steers()).toEqual([expect.objectContaining({ threadId: "manager", attemptId, targetAttemptId: f.state().runs.parent.activeAttemptId })]);
+
+    // The turn ended before the steer reached it: the result is kept and becomes the manager's next input.
+    f.observe("parent", "terminal");
+    f.run({ type: "effect.failed", commandId: "stale-steer", now, threadId: "manager", attemptId, kind: "provider.steer", delivery: "not_dispatched", steerTargetEnded: true });
+    expect(f.state().runs[resultRun]).toMatchObject({ state: "running", delivery: "queue" });
+    expect(f.state().threads.manager.activeRunId).toBe(resultRun);
+    expect(f.state().transfers["one:result"].state).not.toBe("superseded");
+    f.dispatch(resultRun); f.observe(resultRun, "accepted");
+    expect(f.state().transfers["one:result"].state).toBe("consumed");
+
+    // A provider that cannot steer: the result waits as the manager's next input.
+    const plain = await fixture(); plain.assign("one"); await plain.ready("run-one"); plain.dispatch("run-one"); plain.observe("run-one", "accepted"); plain.observe("run-one", "terminal");
+    plain.result("one"); await plain.record(resultRun);
+    expect(plain.state().runs[resultRun]).toMatchObject({ state: "queued", delivery: "steer" });
+    expect(plain.db().prepare("SELECT COUNT(*) n FROM effects WHERE kind='provider.steer'").get()).toEqual({ n: 0 });
   });
   it("creates a fresh assignment on reuse, matches plan identity, and delivers duplicate results once", async () => {
     const f = await fixture(); f.assign("one", "first", "builder", { planId: "plan", stepId: "step" }); await f.ready("run-first"); f.dispatch("run-first"); f.observe("run-first", "accepted"); f.observe("run-first", "terminal");
