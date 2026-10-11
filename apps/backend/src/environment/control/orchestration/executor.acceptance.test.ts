@@ -7,6 +7,9 @@ import { piProviderCapabilities } from "../../../swarm/runtime/pi/pi-provider-ad
 import { ProviderDispatchRejectedError, type ProviderAdapter, type ProviderBinding } from "../../../swarm/runtime/provider-contract.js";
 import type { ControlCoreOptions } from "../effect-types.js";
 import { loadState } from "./store.js";
+import { createSwarmControlAdapter } from "../swarm-control-adapter.js";
+import { createArtifactService } from "../artifact-service.js";
+import type { HandleUserMessageOptions } from "../../../swarm/user-message-coordinator.js";
 const roots: string[] = []; const cores: ControlCore[] = [];
 afterEach(async () => { for (const core of cores.splice(0)) await core.close(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 const commandId = "00000000-0000-4000-8000-000000000001";
@@ -35,6 +38,33 @@ async function fixture() {
 const principal = { deviceSessionId: "device", scopes: new Set(["session:operate" as const]) };
 
 describe("durable provider outbox", () => {
+  it("persists every user input option and pinned attachment through restart before dispatch", async () => {
+    const f = await fixture(); let submit!: (text: string, options: HandleUserMessageOptions) => Promise<void>;
+    const delivered: Array<HandleUserMessageOptions> = []; const acquire = f.options.swarm.acquireProvider;
+    const descriptor = { agentId: "manager", role: "manager", profileId: "project", managerId: "manager", model: { provider: "pi", modelId: "fixture" } };
+    const swarm = {
+      installProviderScopeOwner() {}, installAuthoritativeInputOwner(callback: typeof submit) { submit = callback; }, installControlledTurnProjection() {}, reflectControlledTurns() {}, installCoreAgentMessagePort() {},
+      getAgentForInternalUse: () => descriptor, acquireControlledProvider: acquire,
+      async applyControlledInput(text: string, options: HandleUserMessageOptions) { delivered.push(options); return { entryId: "canonical", runtimeMessage: { text } }; },
+    } as unknown as Parameters<typeof createSwarmControlAdapter>[0]["swarmManager"];
+    const compose = (core: ControlCore) => {
+      const artifacts = createArtifactService({ database: core.database, dataDir: path.dirname(f.options.databasePath!) });
+      const adapter = createSwarmControlAdapter({ swarmManager: swarm, database: core.database, eventSink: core.eventSink, controlService: core.controlService, workspaceService: f.options.workspace, artifactService: artifacts });
+      Object.assign(f.options.swarm, adapter); f.options.artifacts = artifacts;
+    };
+    compose(f.core);
+    const options: HandleUserMessageOptions = { targetAgentId: "manager", delivery: "auto", sourceContext: { channel: "cli", messageId: "source-id" }, replyTo: { messageId: "reply-id" }, clientRequestId: "client-id", commandId: "user-input-command", sessionReferenceAgentIds: ["peer-1", "peer-2"],
+      attachments: [{ type: "text", mimeType: "text/plain", fileName: "input.txt", text: "Pinned input bytes" }] };
+    await submit("input with options", options); await f.core.close();
+    const second = await f.open(); compose(second); await second.effectWorker.drain();
+    const { attachments, ...metadata } = options;
+    expect(delivered).toHaveLength(1); expect(delivered[0]).toMatchObject(metadata);
+    expect(delivered[0].attachments).toEqual([expect.objectContaining(attachments![0])]);
+    expect(delivered[0].attachments?.[0].filePath).toContain("artifacts");
+    const saved = second.database.prepare("SELECT prepared_json FROM orchestration_run_inputs WHERE run_id=?").get("run-user-input-command") as { prepared_json: string };
+    expect(JSON.parse(saved.prepared_json).userOptions).toEqual(metadata);
+    expect((await second.controlService.submitInput({ commandId: "unrelated", threadId: "manager", message: { text: "queued", artifactIds: [] } })).receipt.delivery).toBe("pending");
+  });
   it("cancels an unmaterialized launch transactionally without creating or stopping a runtime", async () => {
     const f = await fixture(); let materialized = 0; let stops = 0;
     f.options.workspace.prepareLaunch = async input => ({ project: { projectId: "project", title: "Project", cwd: "/fixture", repository: null, isGit: false, defaultBranch: null, updatedAt: new Date(f.options.clock()).toISOString(), sortKey: "project", archived: false }, revision: "1", cwd: "/fixture", model: input.model,

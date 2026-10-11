@@ -76,7 +76,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     await acquire(run.threadId, attempt.bindingId, attempt.generation);
     const row = database.prepare("SELECT prepared_json FROM orchestration_run_inputs WHERE run_id=?").get(run.runId) as { prepared_json:string } | undefined;
     const context = row ? JSON.parse(row.prepared_json) : undefined;
-    const value = await options.swarm.applyInput({ prepared:context, commandId: run.commandId, inputId: run.inputId, sessionId: run.threadId, runGeneration: attempt.generation, message: run.input, source: run.source, delivery: run.delivery === "queue" ? "followUp" : "steer", runId: run.runId });
+    const value = await options.swarm.applyInput({ prepared:context?.runtimeMessage ? context : undefined, userOptions:context?.userOptions, commandId: run.commandId, inputId: run.inputId, sessionId: run.threadId, runGeneration: attempt.generation, message: run.input, source: run.source, delivery: run.delivery === "queue" ? "followUp" : "steer", runId: run.runId });
     prepared.set(run.runId, value.runtimeMessage);
     record({ type: "input.recorded", commandId: `recorded:${run.inputId}`, now: options.clock(), threadId: run.threadId, inputId: run.inputId, entryId: value.entryId });
     return value.runtimeMessage;
