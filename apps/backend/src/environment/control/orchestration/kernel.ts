@@ -79,7 +79,14 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       // The process boundary proves old writers are gone. In-process failures require drain.
       const nextBindingId = `binding:${command.commandId}:${owner.threadId}`;
       emit({ type: "thread.changed", thread: { ...owner, generation: owner.generation + 1, bindingId: nextBindingId, shutdown: "clean", compaction: undefined } });
-      for (const attempt of Object.values(state.attempts)) if (attempt.threadId === owner.threadId && attempt.state === "created") emit({ type: "attempt.created", attempt: { ...attempt, generation: owner.generation + 1, bindingId: nextBindingId } });
+      for (const attempt of Object.values(state.attempts)) {
+        const run = state.runs[attempt.runId];
+        if (attempt.threadId !== owner.threadId || attempt.state !== "created" || run.activeAttemptId !== attempt.attemptId || run.state === "terminal") continue;
+        const replacement = { ...attempt, attemptId: `attempt:${command.commandId}:${run.runId}`, generation: owner.generation + 1, bindingId: nextBindingId };
+        emit({ type: "attempt.created", attempt: replacement });
+        emit({ type: "run.started", run: { ...run, activeAttemptId: replacement.attemptId } });
+        emit({ type: "attempt.terminal", attempt: { ...attempt, state: "terminal", outcome: "cancelled" } });
+      }
     }
     const deliveries = new Map((pending?.undeliveredReports ?? []).map(r => [r.deliveryId, r]));
     for (const report of reports) deliveries.set(report.deliveryId, report);
@@ -233,7 +240,9 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       const owner = thread(command.threadId); if (owner.compaction?.attemptId !== command.attemptId) break;
       emit({ type: command.succeeded ? "compaction.completed" : "compaction.failed", thread: { ...owner, compaction: undefined } }); advance(owner.threadId); break;
     }
-    case "environment.recover": recover(command.recoveryId, command.bootId, command.reports, true); break;
+    case "environment.recover":
+      recover(command.recoveryId, command.bootId, command.reports, true);
+      for (const owner of Object.values(state.threads)) advance(owner.threadId); break;
     case "recovery.resume": case "recovery.dismiss": {
       const snapshot = state.recovery;
       if (!snapshot || snapshot.recoveryId !== command.recoveryId || snapshot.resumedAt || snapshot.dismissedAt) break;

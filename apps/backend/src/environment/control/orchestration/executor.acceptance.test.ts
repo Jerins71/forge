@@ -44,6 +44,30 @@ async function fixture() {
 const principal = { deviceSessionId: "device", scopes: new Set(["session:operate" as const]) };
 
 describe("durable provider outbox", () => {
+  it.each(["acquire", "pending-start", "claimed-start"] as const)("restarts a canonical run before its dispatch mark at %s without replaying a stale effect", async boundary => {
+    const f = await fixture(); const scopes: number[] = []; const acquire = f.options.swarm.acquireProvider;
+    f.options.swarm.acquireProvider = async (...args) => { scopes.push(args[0].generation); return acquire(...args); };
+    await f.core.controlService.execute(principal, "session.send", { commandId, sessionId: "manager", message: { text: "canonical", artifactIds: [] } });
+    const before = loadState(f.core.database); const oldAttempt = before.attempts[before.runs[`run-${commandId}`].activeAttemptId];
+    const run = before.runs[oldAttempt.runId];
+    await f.options.swarm.applyInput({ commandId, inputId: run.inputId, sessionId: "manager", runGeneration: 0, message: run.input, runId: run.runId });
+    f.core.controlService.record({ type: "input.recorded", commandId: "canonical-recorded", now: f.options.clock(), threadId: "manager", inputId: run.inputId, entryId: run.inputId });
+    if (boundary !== "acquire") {
+      const prepared = await acquire({ threadId: "manager", bindingId: oldAttempt.bindingId, generation: 0 });
+      f.core.controlService.record({ type: "binding.acquired", commandId: "native-prepared", now: f.options.clock(), threadId: "manager", binding: prepared.binding });
+    }
+    f.core.eventSink.transaction(tx => {
+      f.core.database.prepare("UPDATE effects SET state='done' WHERE kind='transcript.append' OR (? != 'acquire' AND kind='runtime.acquire')").run(boundary);
+      if (boundary === "claimed-start") f.core.database.prepare("UPDATE effects SET state='claimed',claimed_boot_id='previous-process' WHERE kind='provider.start'").run();
+      f.core.eventSink.updateReceipt(tx, commandId, { state: "running" });
+    });
+    await f.core.close(); const reboot = await f.open(); await reboot.effectWorker.drain();
+    expect(f.dispatches()).toBe(1); expect(scopes).toEqual([1]); expect(f.canonical.size).toBe(1);
+    expect(await reboot.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded", delivery: "dispatched", error: null });
+    const state = loadState(reboot.database); expect(state.threads.manager.activeRunId).toBe(run.runId);
+    expect(state.runs[run.runId].state).toBe("running"); expect(state.runs[run.runId].activeAttemptId).not.toBe(oldAttempt.attemptId); expect(state.recovery).toBeNull();
+  });
+
   it.each(["pending", "error"] as const)("quarantines %s runtime cleanup and interrupts the stop receipt before adapter close", async mode => {
     const f = await fixture(); let closes = 0;
     f.adapter.close = async () => { closes++; };

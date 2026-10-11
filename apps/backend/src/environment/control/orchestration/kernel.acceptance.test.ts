@@ -38,6 +38,18 @@ describe("authoritative run decisions", () => {
     expect(first.bindingId).toBe("prepared-binding");
   });
 
+  it.each([false, true])("restarts canonical pre-dispatch work with acquired=%s and fences its old attempt", acquired => {
+    const f = fixture(); f.submit("one"); f.record("one"); if (acquired) f.acquire();
+    const oldAttempt = f.state().runs["run-one"].activeAttemptId;
+    const reboot = f.run({ type: "environment.recover", commandId: "reboot", now, recoveryId: "reboot", bootId: "reboot", reports: [] });
+    const run = f.state().runs["run-one"]; const owner = f.state().threads.manager;
+    expect(owner.activeRunId).toBe(run.runId); expect(run.state).toBe("running"); expect(run.activeAttemptId).not.toBe(oldAttempt);
+    expect(reboot.effects).toContainEqual({ kind: "runtime.acquire", threadId: "manager", bindingId: owner.bindingId, generation: owner.generation });
+    expect(f.state().recovery).toBeNull();
+    expect(f.run({ type: "attempt.dispatch", commandId: "stale-dispatch", now, threadId: "manager", attemptId: oldAttempt, authorized: true }).events).toEqual([]);
+    expect(f.state().runs["run-one"].state).toBe("running");
+  });
+
   it("queues accepted input behind the current root and advances only on its terminal", () => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 1, "accepted");
     const queued = f.submit("two"); f.record("two");

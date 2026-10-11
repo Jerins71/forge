@@ -285,7 +285,7 @@ export function createEventSink(database: Database, clock: () => number, random:
           if (["attempt.accepted", "attempt.unknown"].includes(event.type) && database.prepare("SELECT 1 FROM command_receipts WHERE command_id=?").get(run.commandId)) {
             sink.updateReceipt(tx, run.commandId, event.type === "attempt.accepted" ? { state: "succeeded", delivery: "dispatched", error: null } : { state: "interrupted", delivery: "unknown", error: { code: "UNAVAILABLE", message: "Provider delivery is unknown; explicit recovery is required", retryable: false } });
           }
-          if (event.type === "attempt.terminal" && hasPendingReceipt(database, run.commandId)) sink.updateReceipt(tx, run.commandId,
+          if (event.type === "attempt.terminal" && event.attempt.attemptId === run.activeAttemptId && hasPendingReceipt(database, run.commandId)) sink.updateReceipt(tx, run.commandId,
             event.attempt.delivery === "dispatched" ? { state: "succeeded", delivery: "dispatched", error: null } : { state: event.attempt.outcome === "failed" ? "failed" : "interrupted", delivery: "none", error: { code: "CONFLICT", message: "Input was fenced before provider delivery", retryable: false } });
         }
         if ("recovery" in event) sink.append(tx, { topic: "shell", sessionId: null, event: { type: "recovery.upsert", recovery: event.recovery } });

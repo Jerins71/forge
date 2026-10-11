@@ -111,8 +111,9 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         case "session.ensure": await options.swarm.ensureSession(effect.input); break;
         case "runtime.acquire": {
           const owner = loadState(database).threads[effect.threadId];
-          if (owner?.desired !== "running" || owner.shutdown !== "clean") { settle(row, "cancelled"); return; }
-          await acquire(owner.threadId, owner.bindingId ?? effect.bindingId, owner.generation); break;
+          if (owner?.generation !== effect.generation || owner.bindingId !== effect.bindingId) { settle(row, "done"); return; }
+          if (owner.desired !== "running" || owner.shutdown !== "clean") { settle(row, "cancelled"); return; }
+          await acquire(owner.threadId, effect.bindingId, effect.generation); break;
         }
         case "transcript.append": {
           const run = loadState(database).runs[effect.runId];
@@ -121,8 +122,10 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         }
         case "provider.start": {
           let state = loadState(database); const attempt = state.attempts[effect.attemptId];
-          if (!attempt || attempt.state !== "created") { settle(row, "cancelled"); return; }
+          if (!attempt) { settle(row, "cancelled"); return; }
           const run = state.runs[attempt.runId];
+          if (run.activeAttemptId !== attempt.attemptId || state.threads[effect.threadId]?.generation !== attempt.generation) { settle(row, "done"); return; }
+          if (attempt.state !== "created") { settle(row, "cancelled"); return; }
           const resource = await acquire(effect.threadId, attempt.bindingId, attempt.generation);
           const input = prepared.get(run.runId) ?? await append(run);
           // No await between this committed fence and calling the provider method.
