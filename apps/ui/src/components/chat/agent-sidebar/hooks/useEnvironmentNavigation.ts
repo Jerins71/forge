@@ -26,11 +26,21 @@ export function useEnvironmentNavigation({ selectedSession, onSelectSession, onN
     if (!origin) throw new Error('Environment is unavailable')
     await origin.getClient().pinSession(session.sessionId, pinned)
   }, [])
+  const archive = useCallback(async (session: SessionRef) => {
+    const origin = originRegistry.getOrigin(session.environmentId)
+    if (!origin) throw new Error('Environment is unavailable')
+    await origin.getClient().archiveSession(session.sessionId)
+  }, [])
+  const remove = useCallback(async (session: SessionRef) => {
+    const origin = originRegistry.getOrigin(session.environmentId)
+    if (!origin) throw new Error('Environment is unavailable')
+    await origin.getClient().deleteSession(session.sessionId)
+  }, [])
   const unread = useCallback((session: SessionRef) => {
     originRegistry.getOrigin(session.environmentId)?.getClient().markUnread(session.sessionId)
   }, [])
   return useMemo(
-    () => context ? { selectedSession, onSelectSession: select, onNewSession: create, onRenameSession: rename, onPinSession: pin, onMarkUnread: unread } : undefined,
-    [context, selectedSession, select, create, rename, pin, unread],
+    () => context ? { selectedSession, onSelectSession: select, onNewSession: create, onRenameSession: rename, onPinSession: pin, onMarkUnread: unread, onArchiveSession: archive, onDeleteSession: remove } : undefined,
+    [context, selectedSession, select, create, rename, pin, unread, archive, remove],
   )
 }
