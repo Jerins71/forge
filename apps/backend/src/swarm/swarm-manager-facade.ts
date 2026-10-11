@@ -1126,29 +1126,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
     );
   }
 
-  maybeRecoverWorkerWithSpecialistFallback(
-    agentId: string,
-    errorMessage: string,
-    sourcePhase: "prompt_dispatch" | "prompt_start",
-    runtimeToken?: number,
-  ): Promise<boolean> {
-    return this.services.runtime.specialists.maybeRecoverWorkerWithSpecialistFallback({
-      agentId,
-      errorMessage,
-      sourcePhase,
-      runtimeToken,
-      handleRuntimeStatus: (token, targetAgentId, status, pendingCount, contextUsage) =>
-        this.services.runtime.lifecycle.handleRuntimeStatus(
-          token,
-          targetAgentId,
-          status,
-          pendingCount,
-          contextUsage,
-        ),
-      handleRuntimeAgentEnd: (token, targetAgentId) =>
-        this.services.runtime.lifecycle.handleRuntimeAgentEnd(token, targetAgentId),
-    });
-  }
   getWorkerActivity(
     agentId: string,
   ): ReturnType<SwarmRuntimeLifecycleCoordinator["getWorkerActivity"]> {

@@ -48,6 +48,9 @@ export function LineageIndicator({ lineage: snapshot, resolveSessionLabel, onOpe
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={8} collisionPadding={12} className="max-h-[min(70vh,28rem)] w-[min(22rem,calc(100vw-1.5rem))] overflow-y-auto p-3 text-xs [scrollbar-width:thin]">
+        {snapshot.truncated ? (
+          <p role="status" className="mb-2 text-[11px] text-subtle-foreground">Showing recent history</p>
+        ) : null}
         {lineage ? (
           <section className="space-y-1">
             <div className="flex items-start justify-between gap-2">

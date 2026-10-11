@@ -105,6 +105,11 @@ describe('lineage summary', () => {
 })
 
 describe('LineageIndicator', () => {
+  it('marks bounded backend snapshots as recent history', () => {
+    render(createElement(LineageIndicator, { lineage: lineage({ truncated: true }) }))
+    click(getByRole(container, 'button', { name: /^Lineage: / }))
+    expect(getByRole(body(), 'status').textContent).toBe('Showing recent history')
+  })
   it('renders nothing without lineage', () => {
     render(createElement(LineageIndicator, { lineage: null }))
     expect(container.innerHTML).toBe('')

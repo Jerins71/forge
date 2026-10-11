@@ -8,7 +8,6 @@ import type {
   RuntimeUserMessage,
   SmartCompactOptions,
   SmartCompactResult,
-  SpecialistFallbackReplaySnapshot,
   SwarmAgentRuntime,
 } from '../swarm/runtime-contracts.js'
 import type { ProjectExecutableTrustPlan } from '../swarm/project-executable-trust.js'
@@ -79,9 +78,7 @@ export class FakeRuntime implements SwarmAgentRuntime {
   onSendMessage:
     | ((message: string | RuntimeUserMessage, delivery: RequestedDeliveryMode) => Promise<void> | void)
     | undefined
-  specialistFallbackReplayMessage: RuntimeUserMessage | undefined
-  specialistFallbackReplaySnapshot: SpecialistFallbackReplaySnapshot | undefined
-  specialistFallbackReplayError: Error | undefined
+
 
   constructor(descriptor: AgentDescriptor, systemPrompt = '') {
     this.descriptor = descriptor
@@ -109,36 +106,6 @@ export class FakeRuntime implements SwarmAgentRuntime {
   isContextRecoveryInProgress(): boolean {
     return this.contextRecoveryInProgress
   }
-
-  async prepareForSpecialistFallbackReplay(): Promise<SpecialistFallbackReplaySnapshot | undefined> {
-    if (this.specialistFallbackReplayError) {
-      throw this.specialistFallbackReplayError
-    }
-
-    if (this.specialistFallbackReplaySnapshot) {
-      return {
-        messages: this.specialistFallbackReplaySnapshot.messages.map((message) => ({
-          text: message.text,
-          images: message.images?.map((image) => ({ ...image })) ?? [],
-        })),
-      }
-    }
-
-    if (!this.specialistFallbackReplayMessage) {
-      return undefined
-    }
-
-    return {
-      messages: [
-        {
-          text: this.specialistFallbackReplayMessage.text,
-          images: this.specialistFallbackReplayMessage.images?.map((image) => ({ ...image })) ?? [],
-        },
-      ],
-    }
-  }
-
-  async restorePreparedSpecialistFallbackReplay(): Promise<void> {}
 
   async sendMessage(message: string | RuntimeUserMessage, delivery: RequestedDeliveryMode = 'auto'): Promise<SendMessageReceipt> {
     this.sendCalls.push({ message, delivery })

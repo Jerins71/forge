@@ -24,9 +24,7 @@ import {
 } from "./runtime-contracts.js";
 import { shouldPreserveActiveTurnForRuntimeError } from "./runtime-error-lifecycle-policy.js";
 import {
-  RuntimeCallbackGate,
-  type RuntimeCallbackFallbackHandoffReplayHandlers,
-  type RuntimeCallbackFallbackHandoffSnapshot
+  RuntimeCallbackGate
 } from "./runtime/runtime-callback-gate.js";
 import { RuntimeBinding } from "./runtime/runtime-binding.js";
 import type { CompactionRuntimeSettingsProvider } from "./compaction-runtime-settings-provider.js";
@@ -49,13 +47,12 @@ import type { SwarmToolHost } from "./swarm-tool-host.js";
 import type { ModelCacheObservationEvent } from "@forge/protocol";
 import type {
   AgentContextUsage,
-  AgentDescriptor,
   AgentModelDescriptor,
+  AgentDescriptor,
   AgentStatus,
   ConversationMessageEvent,
   SwarmConfig
 } from "./types.js";
-import type { SwarmSpecialistFallbackManager } from "./swarm-specialist-fallback-manager.js";
 import type { ObservabilityFacade } from "../observability/observability-types.js";
 import type { MessageRoutingReceiptRecord } from "./session/message-routing-receipts.js";
 import type {
@@ -137,12 +134,6 @@ export interface SwarmRuntimeControllerHost extends SwarmToolHost {
     descriptor: AgentDescriptor;
     sessionDescriptor?: AgentDescriptor;
   }): Promise<ProjectExecutableTrustPlan>;
-  maybeRecoverWorkerWithSpecialistFallback(
-    agentId: string,
-    errorMessage: string,
-    sourcePhase: "prompt_dispatch" | "prompt_start",
-    runtimeToken?: number
-  ): Promise<boolean>;
   updateSessionMetaForWorkerDescriptor(
     descriptor: AgentDescriptor,
     resolvedSystemPrompt?: string | null
@@ -246,7 +237,6 @@ export class SwarmRuntimeController {
   readonly runtimeTokensByAgentId: Map<string, number>;
   readonly runtimeExtensionSnapshotsByAgentId: Map<string, AgentRuntimeExtensionSnapshot>;
 
-  private specialistFallbackManager: SwarmSpecialistFallbackManager | null = null;
   private readonly runtimeBinding: RuntimeBinding;
   private readonly runtimeCallbackGate: RuntimeCallbackGate;
   private readonly runtimeFactory: RuntimeFactory;
@@ -361,20 +351,6 @@ export class SwarmRuntimeController {
     });
   }
 
-  setSpecialistFallbackManager(manager: SwarmSpecialistFallbackManager): void {
-    this.specialistFallbackManager = manager;
-    manager.setFallbackHandoffController({
-      beginFallbackHandoff: (agentId, suppressedRuntimeToken) =>
-        this.beginFallbackHandoff(agentId, suppressedRuntimeToken),
-      endFallbackHandoff: (agentId, suppressedRuntimeToken) =>
-        this.endFallbackHandoff(agentId, suppressedRuntimeToken),
-      getFallbackHandoffSnapshot: (agentId, suppressedRuntimeToken) =>
-        this.getFallbackHandoffSnapshot(agentId, suppressedRuntimeToken),
-      reconcileBufferedCallbacksOnAbort: (agentId, suppressedRuntimeToken, handlers) =>
-        this.reconcileBufferedCallbacksOnAbort(agentId, suppressedRuntimeToken, handlers)
-    });
-  }
-
   listRuntimeExtensionSnapshots(): AgentRuntimeExtensionSnapshot[] {
     return this.runtimeBinding.listRuntimeExtensionSnapshots();
   }
@@ -462,29 +438,6 @@ export class SwarmRuntimeController {
     this.runtimeCallbackGate.clearInvalidatedManualStopMessageEndAllowance(agentId, runtimeToken);
   }
 
-  beginFallbackHandoff(agentId: string, suppressedRuntimeToken?: number): void {
-    this.runtimeCallbackGate.beginFallbackHandoff(agentId, suppressedRuntimeToken);
-  }
-
-  endFallbackHandoff(agentId: string, suppressedRuntimeToken?: number): void {
-    this.runtimeCallbackGate.endFallbackHandoff(agentId, suppressedRuntimeToken);
-  }
-
-  getFallbackHandoffSnapshot(
-    agentId: string,
-    suppressedRuntimeToken?: number
-  ): RuntimeCallbackFallbackHandoffSnapshot | undefined {
-    return this.runtimeCallbackGate.getFallbackHandoffSnapshot(agentId, suppressedRuntimeToken);
-  }
-
-  async reconcileBufferedCallbacksOnAbort(
-    agentId: string,
-    suppressedRuntimeToken: number | undefined,
-    handlers: RuntimeCallbackFallbackHandoffReplayHandlers
-  ): Promise<void> {
-    await this.runtimeCallbackGate.reconcileBufferedCallbacksOnAbort(agentId, suppressedRuntimeToken, handlers);
-  }
-
   async createRuntimeForDescriptor(
     descriptor: AgentDescriptor,
     systemPrompt: string,
@@ -517,11 +470,12 @@ export class SwarmRuntimeController {
 
     try {
       let prepared: Parameters<NonNullable<RuntimeCreationOptions["onProviderPrepared"]>>[0] | undefined;
+      const acquisition=this.providerCreationScope.getStore();
       const creationOptions: RuntimeCreationOptions = {
         ...options,
         ...(secureRuntimeBinding ? { secureRuntimeBinding } : {}),
         providerScope:this.providerCreationScope.getStore()?.scope ?? this.providerScopeOwner?.prepare(descriptor) ?? options?.providerScope,
-        providerConversation:this.providerCreationScope.getStore()?.conversation ?? this.providerScopeOwner?.conversation?.(descriptor.agentId) ?? options?.providerConversation,
+        providerConversation:acquisition ? acquisition.conversation:this.providerScopeOwner?.conversation?.(descriptor.agentId) ?? options?.providerConversation,
         onProviderPrepared: input => { prepared = input; options?.onProviderPrepared?.(input); },
       };
       const runtime = await this.runtimeFactory.createRuntimeForDescriptor(
@@ -562,9 +516,6 @@ export class SwarmRuntimeController {
     this.runtimeBinding.clearRuntimeToken(agentId, runtimeToken);
   }
 
-  restoreRuntimeTokenForFallbackRollback(agentId: string, runtimeToken: number): void {
-    this.runtimeBinding.restoreRuntimeTokenForFallbackRollback(agentId, runtimeToken);
-  }
 
   detachRuntime(agentId: string, runtimeToken?: number): boolean {
     const runtime = this.getRuntime(agentId);
@@ -847,8 +798,6 @@ export class SwarmRuntimeController {
           this.host.maybeRecordModelCapacityBlock(agentId, descriptor, error),
         dispatchRuntimeError: (runtimeToken, error) =>
           this.host.forgeExtensionHost.dispatchRuntimeError(createForgeBindingToken(runtimeToken), error),
-        maybeRecoverWorkerWithSpecialistFallback: (agentId, errorMessage, sourcePhase, runtimeToken) =>
-          this.maybeRecoverWorkerWithSpecialistFallback(agentId, errorMessage, sourcePhase, runtimeToken),
         incrementSessionCompactionCount: (profileId, sessionId, failureLogKey) =>
           this.host.incrementSessionCompactionCount(profileId, sessionId, failureLogKey),
         incrementWorkerCompactionCount: (agentId, failureLogKey) =>
@@ -891,8 +840,6 @@ export class SwarmRuntimeController {
         markSessionActivity: (agentId, timestamp) => this.host.markSessionActivity(agentId, timestamp),
         maybeRecordModelCapacityBlock: (agentId, descriptor, error) =>
           this.host.maybeRecordModelCapacityBlock(agentId, descriptor, error),
-        maybeRecoverWorkerWithSpecialistFallback: (agentId, errorMessage, sourcePhase, runtimeToken) =>
-          this.maybeRecoverWorkerWithSpecialistFallback(agentId, errorMessage, sourcePhase, runtimeToken),
         consumePendingManualManagerStopNoticeIfApplicable: (agentId, event) =>
           this.host.consumePendingManualManagerStopNoticeIfApplicable(agentId, event),
         stripManagerAbortErrorFromEvent: (event) => this.host.stripManagerAbortErrorFromEvent(event),
@@ -927,9 +874,6 @@ export class SwarmRuntimeController {
     pendingCount: number,
     contextUsage?: AgentContextUsage
   ): Promise<void> {
-    if (this.runtimeCallbackGate.bufferStatusDuringHandoff(agentId, runtimeToken, status, pendingCount, contextUsage)) {
-      return;
-    }
 
     if (this.shouldIgnoreRuntimeCallback(agentId, runtimeToken)) {
       return;
@@ -1181,9 +1125,6 @@ export class SwarmRuntimeController {
       return;
     }
 
-    if (this.runtimeCallbackGate.bufferAgentEndDuringHandoff(agentId, runtimeToken)) {
-      return;
-    }
 
     if (this.shouldIgnoreRuntimeCallback(agentId, runtimeToken)) {
       return;
@@ -1284,25 +1225,7 @@ export class SwarmRuntimeController {
     this.runtimeBinding.recordRuntimeExtensionSnapshot(agentId, snapshot);
   }
 
-  async resolveSpecialistFallbackModelForDescriptor(
-    descriptor: AgentDescriptor
-  ): Promise<AgentModelDescriptor | undefined> {
-    return this.specialistFallbackManager?.resolveSpecialistFallbackModelForDescriptor(descriptor);
-  }
 
-  private async maybeRecoverWorkerWithSpecialistFallback(
-    agentId: string,
-    errorMessage: string,
-    sourcePhase: "prompt_dispatch" | "prompt_start",
-    runtimeToken?: number
-  ): Promise<boolean> {
-    return this.host.maybeRecoverWorkerWithSpecialistFallback(
-      agentId,
-      errorMessage,
-      sourcePhase,
-      runtimeToken
-    );
-  }
 }
 
 function waitForRuntimeShutdownAttempt(

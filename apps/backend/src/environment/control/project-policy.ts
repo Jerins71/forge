@@ -12,7 +12,7 @@ export interface PolicyPort {
   apply(method: PolicyMethod, input: RpcInput<PolicyMethod>): Promise<NonNullable<CommandReceipt["result"]>>;
   read<M extends DirectoryReadMethod>(method: M, input: RpcInput<M>): Promise<RpcOutput<M>>;
 }
-export function createProjectPolicy(swarm: SwarmManager): PolicyPort {
+export function createProjectPolicy(swarm: SwarmManager, readModel?: (sessionId: string) => { provider: string } | undefined): PolicyPort {
   const project = (id: string) => {
     const profile = swarm.listProfiles().find(p => p.profileId === id);
     if (!profile) throw new ControlError("NOT_FOUND", "Project not found");
@@ -32,7 +32,7 @@ export function createProjectPolicy(swarm: SwarmManager): PolicyPort {
     if(!configure.model) return;
     const target=swarm.getAgent(configure.sessionId);
     const selection=configure.model.mode==="override" ? configure.model : swarm.listProfiles().find(p=>p.profileId===(target?.profileId ?? target?.agentId))?.defaultModel;
-    if(selection && target && selection.provider!==target.model.provider) throw new ControlError("CONFLICT","Cross-provider changes require session.provider.switch and an explicit handoff");
+    if(selection && target && selection.provider!==(readModel?.(configure.sessionId) ?? target.model).provider) throw new ControlError("CONFLICT","Cross-provider changes require session.provider.switch and an explicit handoff");
   };
   return {
     async prepare(method, input) {

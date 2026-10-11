@@ -9,16 +9,6 @@ export interface RuntimeErrorProjectorDeps {
   now(): string;
   maybeRecordModelCapacityBlock(agentId: string, descriptor: AgentDescriptor, error: RuntimeErrorEvent): void;
   dispatchRuntimeError(runtimeToken: number, error: RuntimeErrorEvent): Promise<void>;
-  /**
-   * Compatibility hook for legacy specialist fallback. A true return means recovery code outside
-   * this projector already handled the runtime error, so projection should suppress chat output.
-   */
-  maybeRecoverWorkerWithSpecialistFallback(
-    agentId: string,
-    errorMessage: string,
-    sourcePhase: "prompt_dispatch" | "prompt_start",
-    runtimeToken?: number
-  ): Promise<boolean>;
   incrementSessionCompactionCount(
     profileId: string,
     sessionId: string,
@@ -58,18 +48,6 @@ export class RuntimeErrorProjector {
     const forgeBindingRuntimeToken = runtimeToken ?? this.deps.getRuntimeToken(agentId);
     if (forgeBindingRuntimeToken !== undefined) {
       await this.deps.dispatchRuntimeError(forgeBindingRuntimeToken, normalizedError);
-    }
-
-    if (error.phase === "prompt_dispatch" || error.phase === "prompt_start") {
-      const recoveredWithFallback = await this.deps.maybeRecoverWorkerWithSpecialistFallback(
-        agentId,
-        appendRuntimeErrorClassificationDetails(message, error.details),
-        error.phase,
-        runtimeToken
-      );
-      if (recoveredWithFallback) {
-        return;
-      }
     }
 
     const attempt = readPositiveIntegerDetail(error.details, "attempt");
@@ -171,11 +149,6 @@ function readBooleanDetail(details: Record<string, unknown> | undefined, key: st
   return details?.[key] === true;
 }
 
-function appendRuntimeErrorClassificationDetails(message: string, details: Record<string, unknown> | undefined): string {
-  const detailParts = [readStringDetail(details, "errorName"), readStringDetail(details, "errorCode")]
-    .filter((value): value is string => !!value);
-  return detailParts.length > 0 ? `${message} (${detailParts.join(" ")})` : message;
-}
 
 function isCompactionSuccessRecoveryStage(stage: string | undefined): boolean {
   return stage === "auto_compaction_succeeded" || stage === "context_guard_compaction_succeeded";

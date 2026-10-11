@@ -19,7 +19,6 @@ import {
   type SetPinnedContentOptions,
   type SwarmAgentRuntime
 } from "./runtime-contracts.js";
-import type { ModelChangeContinuityRequest } from "./runtime/model-change-continuity.js";
 import {
   isRuntimeRecoveryActiveForRuntime,
   type ManagerRuntimeRecycleReason as RuntimeManagerRuntimeRecycleReason,
@@ -224,18 +223,6 @@ export interface SwarmAgentLifecycleServiceOptions {
   captureSessionRuntimePromptMeta: (
     descriptor: AgentDescriptor,
     resolvedSystemPrompt?: string | null
-  ) => Promise<void>;
-  prepareManagerRuntimeCreation?: (
-    descriptor: ProvisionedSessionDescriptor,
-    systemPrompt: string
-  ) => Promise<{
-    continuityRequest?: ModelChangeContinuityRequest;
-    runtimeCreationOptions?: RuntimeCreationOptions;
-  }>;
-  appendAppliedModelChangeContinuity?: (
-    descriptor: ProvisionedSessionDescriptor,
-    request: ModelChangeContinuityRequest,
-    runtime: SwarmAgentRuntime
   ) => Promise<void>;
   attachRuntime: (agentId: string, runtime: SwarmAgentRuntime) => void;
   saveStore: () => Promise<void>;
@@ -2474,70 +2461,12 @@ export class SwarmAgentLifecycleService {
       return runtimeBeforeCreate;
     }
 
-    const managerRuntimeCreation = descriptor.role === "manager"
-      ? await this.options.prepareManagerRuntimeCreation?.(descriptor as ProvisionedSessionDescriptor, systemPrompt)
-      : undefined;
-
-    const shouldDeferCursorStartupRecoveryAppliedMarker =
-      descriptor.role === "manager" &&
-      managerRuntimeCreation?.continuityRequest?.targetModel.runtimeKind === "cursor-sdk" &&
-      Boolean(managerRuntimeCreation.runtimeCreationOptions?.startupRecoveryContext);
-
-    const deferredContinuityRequest = managerRuntimeCreation?.continuityRequest;
-    const deferredRecoveryRuntimeRef: { current?: SwarmAgentRuntime } = {};
-    const managerRuntimeCreationOptions =
-      shouldDeferCursorStartupRecoveryAppliedMarker && deferredContinuityRequest
-        ? {
-            ...managerRuntimeCreation?.runtimeCreationOptions,
-            onStartupRecoveryConsumed: async () => {
-              try {
-                if (this.options.getRuntimeToken(descriptor.agentId) !== runtimeToken) {
-                  return;
-                }
-
-                const attachedRuntime = this.options.runtimes.get(descriptor.agentId);
-                if (!attachedRuntime || attachedRuntime !== deferredRecoveryRuntimeRef.current) {
-                  return;
-                }
-
-                const attachDescriptorForApplied = this.options.descriptors.get(descriptor.agentId);
-                if (!attachDescriptorForApplied || attachDescriptorForApplied.role !== "manager") {
-                  return;
-                }
-
-                await this.options.appendAppliedModelChangeContinuity?.(
-                  attachDescriptorForApplied as ProvisionedSessionDescriptor,
-                  deferredContinuityRequest,
-                  attachedRuntime
-                );
-              } catch (error) {
-                this.options.logDebug("manager:model_change_continuity:cursor_first_send_applied_write_error", {
-                  agentId: descriptor.agentId,
-                  requestId: deferredContinuityRequest.requestId,
-                  message: error instanceof Error ? error.message : String(error)
-                });
-              }
-            }
-          }
-        : managerRuntimeCreation?.runtimeCreationOptions;
-    const requestedCreationOptions: RuntimeCreationOptions | undefined =
-      requirements?.secureRuntimeRequired
-        ? { secureRuntimeRequired: true }
-        : undefined;
-    const runtimeCreationOptions = requestedCreationOptions
-      ? {
-          ...managerRuntimeCreationOptions,
-          ...requestedCreationOptions,
-        }
-      : managerRuntimeCreationOptions;
-
     const runtime = await this.options.createRuntimeForDescriptor(
       descriptor,
       systemPrompt,
       runtimeToken,
-      runtimeCreationOptions
+      requirements?.secureRuntimeRequired ? { secureRuntimeRequired:true } : undefined
     );
-    deferredRecoveryRuntimeRef.current = runtime;
     if (descriptor.role === "manager") {
       await this.options.syncPinnedContentForManagerRuntime(descriptor as ProvisionedSessionDescriptor, { runtime });
     }
@@ -2594,32 +2523,6 @@ export class SwarmAgentLifecycleService {
       });
       this.options.clearRuntimeToken(descriptor.agentId, runtimeToken);
       throw new Error(`Runtime token is stale for agent: ${descriptor.agentId}`);
-    }
-
-    if (
-      attachDescriptor.role === "manager" &&
-      managerRuntimeCreation?.continuityRequest &&
-      !shouldDeferCursorStartupRecoveryAppliedMarker
-    ) {
-      try {
-        await this.options.appendAppliedModelChangeContinuity?.(
-          attachDescriptor as ProvisionedSessionDescriptor,
-          managerRuntimeCreation.continuityRequest,
-          runtime
-        );
-      } catch (error) {
-        this.options.logDebug("manager:model_change_continuity:applied_write_error", {
-          agentId: attachDescriptor.agentId,
-          requestId: managerRuntimeCreation.continuityRequest.requestId,
-          message: error instanceof Error ? error.message : String(error)
-        });
-        await runtime.terminate({
-          abort: true,
-          shutdownTimeoutMs: DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS,
-        });
-        this.options.clearRuntimeToken(descriptor.agentId, runtimeToken);
-        throw error;
-      }
     }
 
     const postWriteDescriptor = this.options.descriptors.get(descriptor.agentId);

@@ -7,12 +7,14 @@ import type { SwarmControlPort } from "./control-types.js";
 import type { EventSink } from "./event-sink.js";
 import type { InputRoutePort, WorkspacePort } from "./effect-types.js";
 import type { EnvironmentControlService } from "./command-service.js";
+import { createCoreLineagePort } from "./orchestration/lineage-tool-port.js";
 import { createCoreAgentMessagePort } from "./orchestration/agent-message-port.js";
 import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
 import { loadState } from "./orchestration/store.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, controlService, workspaceService, artifactService }: {
-  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "getAgentForInternalUse" | "listProfiles" | "releaseControlledWorker" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner"> & Pick<SwarmManager,"installCoreAgentMessagePort">;
+  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "stopSession" | "isSessionShutdownSafe" | "getAgentForInternalUse" | "listProfiles" | "releaseControlledWorker" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner"> & Pick<SwarmManager,"installCoreAgentMessagePort"|"installCoreLineagePort"|"getConversationHistory"|"prepareLineageSession"|"resolveSpecialistFallbackModelForDescriptor">;
+
   database: Database;
   eventSink: EventSink;
   controlService: EnvironmentControlService;
@@ -24,7 +26,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
   void workspaceService;
   swarmManager.installProviderScopeOwner({
     prepare(descriptor) {
-      if (!loadState(database).threads[descriptor.agentId]) controlService.record({ type:"thread.create",commandId:`thread:${descriptor.agentId}`,now:Date.now(),threadId:descriptor.agentId,role:descriptor.role,projectId:descriptor.profileId ?? descriptor.managerId,managerId:descriptor.role === "worker" ? descriptor.managerId : undefined });
+      if (!loadState(database).threads[descriptor.agentId]) controlService.record({ type:"thread.create",commandId:`thread:${descriptor.agentId}`,now:Date.now(),threadId:descriptor.agentId,role:descriptor.role,model:descriptor.model,projectId:descriptor.profileId ?? descriptor.managerId,managerId:descriptor.role === "worker" ? descriptor.managerId : undefined });
       controlService.record({ type:"thread.prepare_binding",commandId:`prepare:${crypto.randomUUID()}`,now:Date.now(),threadId:descriptor.agentId,bindingId:crypto.randomUUID() });
       const thread=loadState(database).threads[descriptor.agentId];
       return { threadId:thread.threadId,bindingId:thread.bindingId!,generation:thread.generation };
@@ -56,6 +58,8 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
   eventSink.subscribeCommit(() => swarmManager.reflectControlledTurns());
   const messages = createCoreAgentMessagePort({ controlService,sink:eventSink,artifacts:artifactService,swarm:swarmManager,clock:Date.now,random:()=>crypto.randomUUID() });
   swarmManager.installCoreAgentMessagePort(messages);
+  const readTransferEntries=async (threadId:string)=>swarmManager.getConversationHistory(threadId);
+  swarmManager.installCoreLineagePort?.(createCoreLineagePort(eventSink,controlService,{getAgent:id=>swarmManager.getAgentForInternalUse(id),readEntries:readTransferEntries,clock:Date.now,random:()=>crypto.randomUUID()}));
   return {
     resolveSession(agentId) {
       const descriptor = swarmManager.getAgentForInternalUse(agentId);
@@ -73,7 +77,14 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
       const final=inputEntryId ? swarmManager.extractWorkerRunResult(threadId,runId,inputEntryId) : { resultText:`status: blocked\nsummary: Worker ${threadId} settled without a canonical input.\nfollow-up: Check the worker or retry the assignment.` };
       return final.entryId ? { entryId:final.entryId,resultText:final.resultText } : swarmManager.appendControlledBlockedResult(threadId,runId,final.resultText);
     },
-    acquireProvider: (scope, conversation, model) => swarmManager.acquireControlledProvider(scope, conversation, model),
+    acquireProvider: (scope, conversation,model) => swarmManager.acquireControlledProvider(scope, conversation,model),
+    readTransferEntries,
+    prepareLineageSession: input=>swarmManager.prepareLineageSession(input),
+    selectProviderFallback: async (threadId,currentModel)=>{
+      const descriptor=swarmManager.getAgentForInternalUse(threadId);if(!descriptor) return;
+      const fallback=await swarmManager.resolveSpecialistFallbackModelForDescriptor(descriptor);
+      return fallback && (fallback.provider!==currentModel?.provider || fallback.modelId!==currentModel?.modelId) ? fallback:undefined;
+    },
     async applyInput(input) {
       const attachments = await artifactService.attachmentsForInput(input.inputId);
       const sourceKey = `input:${input.inputId}`;

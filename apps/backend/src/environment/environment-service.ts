@@ -24,6 +24,7 @@ import { loadEnvironmentIdentity, EnvironmentIdentityMismatch, type IdentityOpti
 import { createEnvironmentAccess, type EnvironmentAccess } from "./access/access-service.js";
 import { applyAccessMigrations } from "./access/access-migrations.js";
 import type { ExposurePolicy } from "./exposure-policy.js";
+import { loadState } from "./control/orchestration/store.js";
 import { createProjectPolicy } from "./control/project-policy.js";
 import { createControlDescriptorPersistence } from "./control/descriptor-persistence.js";
 import { createControlCore, type ControlCore } from "./control/database.js";
@@ -63,7 +64,7 @@ export async function createEnvironmentService(options: {
   swarmManager: SwarmManager;
   unreadTracker: UnreadTracker;
   exposure: ExposurePolicy;
-  identityOptions?: Pick<IdentityOptions, "installationStateDir" | "label">;
+  identityOptions?: Pick<IdentityOptions, "installationStateDir" | "label" | "capabilities">;
   localBrowserOrigin?: (request: import("node:http").IncomingMessage) => boolean;
 }): Promise<EnvironmentService> {
   const { config, swarmManager, unreadTracker, exposure } = options;
@@ -86,26 +87,24 @@ export async function createEnvironmentService(options: {
   try {
     const workspaceService = createWorkspaceService({ database, dataDir: config.paths.dataDir, swarmManager });
     const artifactService = createArtifactService({ database, dataDir: config.paths.dataDir, swarmManager });
-    // The lazy port breaks only the construction cycle; effects start after this const is assigned.
-    const swarm: SwarmControlPort = {
-      resolveSession: (agentId) => adapter.resolveSession!(agentId),
-      ensureSession: (input) => adapter.ensureSession(input),
-      applyInput: (input) => adapter.applyInput(input),
-      enqueuePresentation:(threadId,runId,presentation)=>adapter.enqueuePresentation?.(threadId,runId,presentation),
-      prepareWorkerResult: (assignment,resultText) => { if (!adapter.prepareWorkerResult) throw new Error("Worker result preparation port missing"); return adapter.prepareWorkerResult(assignment,resultText); },
-      extractWorkerResult: (threadId,runId,inputEntryId) => { if (!adapter.extractWorkerResult) throw new Error("Worker extraction port missing"); return adapter.extractWorkerResult(threadId,runId,inputEntryId); },
-      acquireProvider: (scope,conversation,model) => adapter.acquireProvider(scope,conversation,model),
-      applyChoice: (input) => adapter.applyChoice(input),
-      stopSession: (input) => adapter.stopSession(input),
-    };
+    // Resolve the whole port lazily so new members and every argument (including model)
+    // reach the installed adapter without maintaining a second method inventory.
+    const swarm = new Proxy<SwarmControlPort>(Object.create(null), {
+      get(_target, key) {
+        const member = Reflect.get(adapter, key);
+        return typeof member === "function" ? member.bind(adapter) : member;
+      },
+    });
+
     core = await createControlCore({
       database,
+      dataDir: config.paths.dataDir,
       clock: Date.now,
       random: randomUUID,
       swarm,
       workspace: workspaceService,
       artifacts: artifactService,
-      policy: createProjectPolicy(swarmManager),
+      policy: createProjectPolicy(swarmManager, id => loadState(database).threads[id]?.model),
       inputRoute: createControlledInputRoutePreflight({ swarmManager }),
       isDeviceRevoked: (id) => {
         const row = database.prepare("SELECT revoked_at,expires_at FROM device_sessions WHERE device_session_id=?").get(id) as

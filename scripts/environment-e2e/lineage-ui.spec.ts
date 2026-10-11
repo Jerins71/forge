@@ -1,478 +1,299 @@
-// Visible-UI acceptance for lineage and context transfer (core plan phase 5, client surfaces).
-// The built UI runs against a fresh harness fleet. The backend half of the contract lands separately,
-// so this spec supplies it at the browser's RPC socket: it advertises `contextTransfers`, adds lineage
-// to the detail snapshot and live stream, and answers the four transfer commands with typed receipts.
-// Everything else is the real environment. Replace the socket fixture with the real backend at integration.
-//   VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build
-//   pnpm exec playwright test scripts/environment-e2e/lineage-ui.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
+// Production UI + ordinary backend composition, durable kernel and SQLite store.
+// Native Codex uses its transport fixture; native Claude uses a local model SSE
+// endpoint. There are no socket response overrides or injected lineage snapshots.
+import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { expect, type BrowserContext, type Page, type WebSocketRoute } from '@playwright/test'
-import type { CommandReceipt, SessionLineageSnapshot } from '@forge/protocol/environment-v2'
+import { expect, type BrowserContext, type Page } from '@playwright/test'
+import type { CommandReceipt, DetailStreamItem, SessionLineageSnapshot } from '@forge/protocol/environment-v2'
 import { test as base } from './fixtures/test.js'
-import { repositoryRoot } from './launch.js'
-import type { UiFleet } from './fixtures/ui-fleet.js'
+import { controlEnvironment, readManifest, repositoryRoot, type FleetManifest } from './launch.js'
+import { openFixtureRpc, until } from './fixtures/rpc-client.js'
+import { openUiFleet, readLaunchEvidence, type UiFleet } from './fixtures/ui-fleet.js'
+
+type DetailSnapshot = Extract<DetailStreamItem, { kind: 'snapshot' }>['snapshot']
 
 const evidenceRoot = join(repositoryRoot, '.internal/core/evidence')
 const UNAVAILABLE = 'Update this environment to transfer context between conversations'
-const WORKER = { agentId: 'lineage-fixture-worker', title: 'Lineage researcher', status: 'terminated' as const }
-const RUN_ITEM = { itemId: 'lineage-fixture-item', userTurnId: 'lineage-fixture-turn', kind: 'assistant' as const, text: 'Fixture reply that closes a run.', contentRef: null, artifacts: [], commandId: null, runId: 'run-fixture-7' }
-const TRANSFER_METHODS = new Set(['session.provider.switch', 'session.mergeBack', 'worker.continue'])
-
-/** The backend half of the contract, held in the test process. */
-const contract = {
-  contextTransfers: true,
-  lineage: new Map<string, SessionLineageSnapshot>(),
-  /** What each session's provider declares it can transfer; absent means it reports nothing. */
-  capabilities: new Map<string, { fork: boolean; nativeFork: boolean; throughTurnFork: boolean; providerSwitch: boolean }>(),
-  calls: [] as Array<{ method: string; input: Record<string, any> }>,
-  /** A typed refusal for the next command of this method. */
-  refuse: new Map<string, CommandReceipt['error']>(),
-  continuedSessionId: '',
-  streams: new Map<string, { sessionId: string; route: WebSocketRoute; streamEpoch: string; sequence: number }>(),
-}
 const assertions: Record<string, unknown> = {}
 const renderErrors: string[] = []
+const observed: Array<{ method: string; input: Record<string, any> }> = []
+const receipts = new Map<string, CommandReceipt>()
+const METHODS = new Set(['session.fork', 'session.provider.switch', 'session.mergeBack', 'worker.continue', 'session.configure'])
 let fleet: UiFleet
+let manifest: FleetManifest
 let context: BrowserContext
 let sharedPage: Page
-let sequence = 1_000_000
-
+let rpc: Awaited<ReturnType<typeof openFixtureRpc>>
+let legacyRpc: Awaited<ReturnType<typeof openFixtureRpc>>
 const test = base.extend({ page: async ({}, use) => { await use(sharedPage) } })
 test.describe.configure({ mode: 'serial' })
-test.use({ environmentSuite: 'ui', screenshot: 'off', actionTimeout: 10_000 })
+test.use({ environmentSuite: 'lineage-ui', screenshot: 'off', actionTimeout: 10_000 })
 
-function receipt(method: string, input: Record<string, any>, result?: CommandReceipt['result']): CommandReceipt {
-  const error = contract.refuse.get(method) ?? null
-  contract.refuse.delete(method)
-  const now = new Date().toISOString()
-  return {
-    commandId: input.commandId, method: method as CommandReceipt['method'], sessionId: input.sessionId, state: error ? 'failed' : 'succeeded',
-    acceptedSequence: ++sequence, updatedSequence: sequence, acceptedAt: now, updatedAt: now, inputId: null, delivery: 'none', error,
-    ...(result && !error ? { result } : {}),
-  }
-}
-function forkLineage(threadId: string, parentThreadId: string, entryId: string): SessionLineageSnapshot {
-  const basePoint = { threadId: parentThreadId, sequence: 42, entryId }
-  return {
-    threadId, lineage: { parentThreadId, rootThreadId: parentThreadId, relationship: 'fork', transferId: 'transfer-fork', basePoint },
-    transfers: [{ transferId: 'transfer-fork', kind: 'fork', source: basePoint, basePoint, targetThreadId: threadId, sourceProvider: 'codex-native', targetProvider: 'codex-native', strategy: 'native_fork', state: 'consumed', createdAt: 1, consumedAt: 1 }],
-    handoffs: [],
-  }
-}
-/** A provider switch whose portable handoff omitted one entry and truncated another. */
-function withProviderSwitch(snapshot: SessionLineageSnapshot, targetProvider: string): SessionLineageSnapshot {
-  const transferId = `transfer-switch-${snapshot.transfers.length}`
-  return {
-    ...snapshot,
-    transfers: [...snapshot.transfers, { transferId, kind: 'provider_switch', source: { threadId: snapshot.threadId, sequence: 57 }, targetThreadId: snapshot.threadId, sourceProvider: 'codex-native', targetProvider, strategy: 'portable_context', state: 'resolved', createdAt: snapshot.transfers.length + 1, handoffId: `handoff-${transferId}` }],
-    handoffs: [...snapshot.handoffs, {
-      handoffId: `handoff-${transferId}`, transferId, artifactRef: `handoff-artifact-${transferId}`, sha256: 'c0ffee'.repeat(10) + 'beef', createdAt: 2,
-      provenance: { source: 'canonical_jsonl', renderer: 'forge-portable-v1', credentials: 'excluded', toolGrants: 'excluded' },
-      coverage: {
-        sourceThreadId: snapshot.threadId, requestedEntryIds: ['e1', 'e2', 'e3', 'e4', 'e5', 'e6'], includedEntryIds: ['e1', 'e2', 'e3', 'e4'], omittedEntryIds: ['e5'], partialEntryIds: ['e6'],
-        // A switch on a fork inherits the parent's context, so coverage is reported per original thread.
-        ...(snapshot.lineage ? { sources: [
-          { sourcePoint: snapshot.lineage.basePoint, requestedEntryIds: ['e1', 'e2', 'e3', 'e4'], includedEntryIds: ['e1', 'e2', 'e3'], omittedEntryIds: ['e4'], partialEntryIds: [] },
-          { sourcePoint: { threadId: snapshot.threadId, sequence: 57 }, requestedEntryIds: ['e5', 'e6'], includedEntryIds: ['e5'], omittedEntryIds: [], partialEntryIds: ['e6'] },
-        ] } : {}),
-      },
-      budget: { maxChars: 120000, usedChars: 120000, truncated: true },
-    }],
-  }
-}
-/** Drops the browser's cached shell so the next load bootstraps every session summary afresh. */
-async function resetShellCache(page: Page) {
-  await page.goto('about:blank')
-  const response = await page.request.post(`${fleet.uiUrl}/__forge_e2e_platform`, { headers: { origin: fleet.uiUrl }, data: { operation: 'clear', input: { environmentId: fleet.a.environmentId } } })
-  expect((await response.json()).ok).toBe(true)
-}
-/** Publishes the session's lineage on its live detail stream, as `lineage.upsert`. */
-function publishLineage(sessionId: string) {
-  const snapshot = contract.lineage.get(sessionId)
-  for (const [subscriptionId, stream] of contract.streams)
-    if (stream.sessionId === sessionId && snapshot)
-      stream.route.send(JSON.stringify({ type: 'stream', subscriptionId, item: { kind: 'event', streamEpoch: stream.streamEpoch, sequence: stream.sequence, event: { type: 'lineage.upsert', snapshot } } }))
-}
-
-async function installContract(page: Page, baseUrl: string) {
-  const patchDescriptor = <T extends { capabilities?: Record<string, unknown> }>(descriptor: T): T =>
-    descriptor?.capabilities ? { ...descriptor, capabilities: { ...descriptor.capabilities, contextTransfers: contract.contextTransfers } } : descriptor
-  await page.route(`${baseUrl}/api/v2/environment`, async route => {
-    const response = await route.fetch()
-    await route.fulfill({ response, json: patchDescriptor(await response.json()) })
-  })
-  // Fixture fleets hold one provider identity; every catalog model is selectable so a handoff can be chosen.
-  await page.route('**/__forge_e2e_platform', async route => {
-    const message = route.request().postDataJSON() as { operation?: string; input?: { path?: string } }
-    if (message.operation !== 'request' || !message.input?.path?.startsWith('/api/settings/manager-selection-catalog')) return route.continue()
-    const response = await route.fetch()
-    const result = await response.json()
-    if (result?.ok && result.value?.status === 200) {
-      const catalog = JSON.parse(result.value.body)
-      for (const model of catalog.models ?? []) model.surfaces = { create: { selectable: true }, change: { selectable: true } }
-      result.value.body = JSON.stringify(catalog)
-    }
-    await route.fulfill({ response, json: result })
-  })
-  await page.routeWebSocket(url => url.href.startsWith(baseUrl.replace(/^http/, 'ws')) && url.pathname === '/api/v2/rpc', route => {
-    const server = route.connectToServer()
-    const subscribing = new Map<string, string>()
-    const describing = new Set<string>()
-    route.onMessage(message => {
-      const frame = JSON.parse(String(message))
-      if (frame.type === 'request') {
-        const input = frame.input as Record<string, any>
-        if (frame.method === 'session.subscribe') subscribing.set(frame.requestId, input.sessionId)
-        if (frame.method === 'environment.get') describing.add(frame.requestId)
-        if (TRANSFER_METHODS.has(frame.method)) {
-          contract.calls.push({ method: frame.method, input })
-          const output = receipt(frame.method, input, frame.method === 'worker.continue' ? { sessionId: contract.continuedSessionId } : undefined)
-          route.send(JSON.stringify({ type: 'result', requestId: frame.requestId, output }))
-          if (output.state === 'succeeded' && frame.method === 'session.provider.switch') {
-            contract.lineage.set(input.sessionId, withProviderSwitch(contract.lineage.get(input.sessionId) ?? { threadId: input.sessionId, lineage: null, transfers: [], handoffs: [] }, input.model.provider))
-            publishLineage(input.sessionId)
-          }
-          return
-        }
-        // The real environment performs the fork; the source point and model are the contract's to honor.
-        if (frame.method === 'session.fork') contract.calls.push({ method: frame.method, input })
-      }
-      server.send(message)
-    })
-    // The sidebar lists a session's workers only when its summary counts them.
-    const countWorker = (session: { sessionId?: string; workerCount?: number; transferCapabilities?: unknown } | undefined) => {
-      if (session?.sessionId === fleet.a.sessionId) session.workerCount = Math.max(session.workerCount ?? 0, 1)
-      const capabilities = session?.sessionId ? contract.capabilities.get(session.sessionId) : undefined
-      if (session && capabilities) session.transferCapabilities = capabilities
-    }
-    server.onMessage(message => {
-      const frame = JSON.parse(String(message))
-      for (const session of frame.item?.snapshot?.sessions ?? frame.output?.snapshot?.sessions ?? []) countWorker(session)
-      countWorker(frame.item?.snapshot?.session)
-      countWorker(frame.item?.event?.session)
-      if (frame.type === 'result' && describing.delete(frame.requestId)) frame.output = patchDescriptor(frame.output)
-      if (frame.type === 'result' && subscribing.has(frame.requestId)) {
-        contract.streams.set(frame.output.subscriptionId, { sessionId: subscribing.get(frame.requestId)!, route, streamEpoch: '', sequence: 0 })
-        subscribing.delete(frame.requestId)
-      }
-      const stream = frame.type === 'stream' ? contract.streams.get(frame.subscriptionId) : undefined
-      if (stream && typeof frame.item?.sequence === 'number') {
-        stream.streamEpoch = frame.item.streamEpoch
-        stream.sequence = Math.max(stream.sequence, frame.item.sequence)
-        if (frame.item.kind === 'snapshot') {
-          const lineage = contract.lineage.get(stream.sessionId)
-          if (lineage) frame.item.snapshot.lineage = lineage
-          if (stream.sessionId === fleet.a.sessionId) {
-            frame.item.snapshot.workers = [...frame.item.snapshot.workers, WORKER]
-            // One settled item that reports its run, so a run fork point can be offered.
-            frame.item.snapshot.items = [...frame.item.snapshot.items, { ...RUN_ITEM, actorId: stream.sessionId, timestamp: frame.item.snapshot.session.updatedAt }]
-          }
-        }
-      }
-      if (frame.type === 'result' && Array.isArray(frame.output?.workers) && contract.streams.size) {
-        // session.workers pages the same roster the detail snapshot carries.
-        if (!frame.output.workers.some((worker: { agentId: string }) => worker.agentId === WORKER.agentId)) frame.output.workers = [...frame.output.workers, WORKER]
-      }
-      route.send(JSON.stringify(frame))
-    })
-    route.onClose(() => { for (const [id, stream] of contract.streams) if (stream.route === route) contract.streams.delete(id) })
-  })
-}
-
-async function shot(page: Page, name: string) {
-  const path = join(evidenceRoot, `${name}.png`)
-  await page.screenshot({ path })
-  assertions[`screenshot:${name}`] = path
-}
+const calls = (method: string) => observed.filter(call => call.method === method).map(call => call.input)
 const transcript = (page: Page) => page.locator('[data-chat-transcript-surface]').filter({ visible: true }).first()
-const openSession = async (page: Page, sessionId: string) => {
-  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(sessionId)}`)
+const lineageChip = (page: Page) => page.getByRole('button', { name: /^Lineage: / })
+async function openSession(page: Page, sessionId: string, environmentId?: string) {
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(sessionId)}${environmentId ? `&env=${environmentId}` : ''}`)
   await expect(transcript(page)).toBeVisible()
 }
-const lineageChip = (page: Page) => page.getByRole('button', { name: /^Lineage: / })
-const calls = (method: string) => contract.calls.filter(call => call.method === method).map(call => call.input)
-async function sendMessage(page: Page, text: string) {
-  const composer = page.getByRole('combobox', { name: /^(Message |Send another message to )/ })
-  await composer.fill(text)
+async function shot(page: Page, name: string) {
+  const path = join(evidenceRoot, `lineage-real-${name}.png`)
+  await page.screenshot({ path }); assertions[`screenshot:${name}`] = path
+}
+async function detail(sessionId: string, client = rpc): Promise<DetailSnapshot> {
+  const subscription = await client.call('session.subscribe', { sessionId })
+  const frame = await until(() => client.frames.find(frame => frame.subscriptionId === subscription.subscriptionId && frame.item?.kind === 'snapshot'), Boolean)
+  client.socket.send(JSON.stringify({ type: 'unsubscribe', subscriptionId: subscription.subscriptionId }))
+  return frame!.item.snapshot
+}
+const lineage = (sessionId: string) => rpc.call<SessionLineageSnapshot>('session.lineage.get', { sessionId })
+async function sendMessage(page: Page, text: string, reply = 'assistant reply') {
+  await page.getByRole('combobox', { name: /^(Message |Send another message to )/ }).fill(text)
   await page.keyboard.press('Enter')
   await expect(transcript(page)).toContainText(text)
+  await expect(transcript(page)).toContainText(reply, { timeout: 30_000 })
+  const sessionId = new URL(page.url()).searchParams.get('agent')!
+  await until(() => detail(sessionId, new URL(page.url()).searchParams.get('env') === fleet.c.environmentId ? legacyRpc : rpc), snapshot => snapshot.session.status === 'idle')
 }
-const forkButton = (page: Page) => page.getByRole('button', { name: 'Fork from this message' }).first()
+async function selectModel(page: Page, query: string) {
+  await page.getByRole('button', { name: /Change session model/ }).click()
+  await page.getByLabel('Search models').fill(query)
+  await page.getByRole('option').filter({ hasText: query }).first().click()
+}
+async function successful(method: string, index: number): Promise<CommandReceipt> {
+  await expect.poll(() => calls(method).length).toBeGreaterThan(index)
+  const commandId = calls(method)[index]!.commandId
+  const receipt = await until(() => receipts.get(commandId), receipt => Boolean(receipt && !['accepted', 'running'].includes(receipt.state)))
+  if (!receipt) throw new Error('Missing browser command receipt')
+  expect(receipt.state, JSON.stringify(receipt.error)).toBe('succeeded')
+  receipts.set(commandId, receipt); return receipt
+}
 
 test.beforeAll(async ({ browser, environmentManifest }) => {
   await mkdir(evidenceRoot, { recursive: true })
-  const { openUiFleet } = await import('./fixtures/ui-fleet.js')
+  manifest = await readManifest(environmentManifest)
   fleet = await openUiFleet(environmentManifest)
+  const auth = await controlEnvironment<any>(manifest, manifest.environments[0]!.name, 'bootstrap')
+  rpc = await openFixtureRpc(fleet.a.baseUrl, auth)
+  const legacyAuth = await controlEnvironment<any>(manifest, manifest.environments[2]!.name, 'bootstrap')
+  legacyRpc = await openFixtureRpc(fleet.c.baseUrl, legacyAuth)
   context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   sharedPage = await context.newPage()
-  sharedPage.on('pageerror', error => { renderErrors.push(error.message) })
-  await installContract(sharedPage, fleet.a.baseUrl)
+  sharedPage.on('pageerror', error => renderErrors.push(error.message))
+  // Observe requests without intercepting, changing or supplying any response.
+  sharedPage.on('websocket', socket => {
+    socket.on('framesent', event => {
+      try { const frame = JSON.parse(String(event.payload)); if (frame.type === 'request' && METHODS.has(frame.method)) observed.push({ method: frame.method, input: frame.input }) }
+      catch { /* Non-JSON frames are outside the selected command evidence. */ }
+    })
+    socket.on('framereceived', event => {
+      try {
+        const frame = JSON.parse(String(event.payload))
+        const receipt = frame.type === 'result' ? frame.output : frame.item?.event?.type === 'receipt.upsert' ? frame.item.event.receipt : null
+        if (receipt?.commandId && METHODS.has(receipt.method)) receipts.set(receipt.commandId, receipt)
+      } catch { /* Observe only typed receipts; retain no other frames. */ }
+    })
+  })
 })
 test.afterAll(async () => {
-  await writeFile(join(evidenceRoot, 'lineage-ui-assertions.json'), `${JSON.stringify(assertions, null, 2)}\n`)
-  await context?.close()
-  await fleet?.dispose()
+  await writeFile(join(evidenceRoot, 'lineage-ui-real-backend-assertions.json'), `${JSON.stringify({ assertions, commands: observed, receipts: [...receipts.values()], renderErrors }, null, 2)}\n`)
+  rpc?.close(); legacyRpc?.close(); await context?.close(); await fleet?.dispose()
 })
-test.afterEach(() => { expect(renderErrors).toEqual([]) })
+test.afterEach(() => expect(renderErrors).toEqual([]))
 
 let forkSessionId = ''
+let parentItemId = ''
+let parentRunId = ''
+let workerId = ''
 
-test('fork from a message selects a source point and a model, and the fork shows its lineage live and after reload', async ({ page }) => {
-  const { a } = fleet
-  await openSession(page, a.sessionId)
-  await sendMessage(page, 'Lineage acceptance message')
-  await expect(lineageChip(page)).toHaveCount(0)
-  await shot(page, '00-session-without-lineage')
-
-  await forkButton(page).click({ force: true })
-  const dialog = page.getByRole('dialog', { name: 'Fork Session' })
-  await expect(dialog.getByRole('radio', { name: /This message/ })).toHaveAttribute('aria-checked', 'true')
-  await expect(dialog).toContainText('Same as this session')
-  await shot(page, '01-fork-dialog-source-point')
-  await dialog.getByRole('radio', { name: /Latest stable point/ }).click()
-  await dialog.getByRole('button', { name: /Change session model/ }).click()
-  await page.getByLabel('Search models').fill('Opus')
-  await shot(page, '02-fork-dialog-model-picker')
-  await page.getByRole('option').filter({ hasText: 'Opus' }).first().click()
-  await expect(dialog).not.toContainText('Same as this session')
-  await dialog.getByPlaceholder('Session name (optional)').fill('Lineage fork')
-  await shot(page, '03-fork-dialog-ready')
-
-  const before = new URL(page.url()).searchParams.get('agent')
-  await dialog.getByRole('button', { name: 'Fork', exact: true }).click()
-  await expect.poll(() => new URL(page.url()).searchParams.get('agent')).not.toBe(before)
-  forkSessionId = new URL(page.url()).searchParams.get('agent')!
-  const [fork] = calls('session.fork')
-  expect(fork).toMatchObject({ sessionId: a.sessionId, title: 'Lineage fork', sourcePoint: { kind: 'latest_stable' }, model: { provider: expect.any(String), modelId: expect.stringContaining('opus') } })
-  // The source point replaces the legacy item cut.
-  expect(fork).not.toHaveProperty('fromItemId')
-
-  // Live: the environment reports the fork's lineage on its detail stream.
-  contract.lineage.set(forkSessionId, forkLineage(forkSessionId, a.sessionId, 'entry-42'))
-  await expect.poll(() => [...contract.streams.values()].some(stream => stream.sessionId === forkSessionId && stream.streamEpoch)).toBe(true)
-  publishLineage(forkSessionId)
-  await expect(lineageChip(page)).toContainText('Forked from')
-  await expect(lineageChip(page)).toContainText('at message entry-42')
-  await shot(page, '04-lineage-indicator-fork')
-
-  // Reload: a fresh bootstrap carries the same lineage with no live event.
-  await page.reload()
-  await expect(lineageChip(page)).toContainText('at message entry-42')
-  assertions.fork = { input: fork, forkSessionId, lineageLive: true, lineageAfterReload: true }
-})
-
-test('switching provider confirms a handoff of the same session and the popover shows its coverage', async ({ page }) => {
-  await openSession(page, forkSessionId)
-  const before = page.url()
-  await page.getByRole('button', { name: /Change session model/ }).click()
-  await page.getByLabel('Search models').fill('Opus')
-  await page.getByRole('option').filter({ hasText: 'Opus' }).first().click()
-  const dialog = page.getByRole('dialog', { name: /^Hand off to / })
-  await expect(dialog).toContainText('This is a handoff, not a new chat')
-  await expect(dialog).toContainText('Credentials and tool grants are not transferred')
-  await shot(page, '05-provider-handoff-confirmation')
-  expect(calls('session.provider.switch')).toEqual([])
-  await dialog.getByRole('button', { name: 'Hand off', exact: true }).click()
-
-  await expect(lineageChip(page)).toContainText('switched from codex-native')
-  const [switched] = calls('session.provider.switch')
-  expect(switched).toMatchObject({ sessionId: forkSessionId, model: { provider: expect.any(String), modelId: expect.stringContaining('opus') } })
-  // The same conversation: no navigation, and no model override stood in for the handoff.
-  expect(page.url()).toBe(before)
-  await shot(page, '06-lineage-indicator-switched')
-
-  await lineageChip(page).click()
-  const popover = page.getByRole('dialog').filter({ hasText: 'Context handoffs' })
-  // The fork inherited its parent's context: coverage is grouped by original thread, not flattened.
-  const coverage = popover.getByLabel(/^Handoff coverage for Provider switch from /)
-  await expect(coverage).toHaveCount(2)
-  await expect(coverage.nth(0)).toHaveText('Included3 of 4Omitted1Truncated0')
-  await expect(coverage.nth(1)).toHaveText('Included1 of 2Omitted0Truncated1')
-  await expect(popover).toContainText('up to message entry-42')
-  await expect(popover).toContainText('up to message #57')
-  await expect(popover).toContainText('120,000 of 120,000 characters · budget reached')
-  await expect(popover).toContainText('canonical_jsonl')
-  await expect(popover).toContainText('forge-portable-v1')
-  await expect(popover).toContainText('Credentials excluded')
-  await expect(popover).toContainText('Tool grants excluded')
-  await shot(page, '07-lineage-popover-coverage')
-  await page.keyboard.press('Escape')
-
-  // Narrow layout: the indicator stays reachable as an icon and its popover fits the viewport.
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(lineageChip(page)).toBeVisible()
-  await lineageChip(page).click()
-  const narrow = page.getByRole('dialog').filter({ hasText: 'Context handoffs' })
-  await expect(narrow).toBeVisible()
-  const box = (await narrow.boundingBox())!
-  expect(box.x).toBeGreaterThanOrEqual(0)
-  expect(box.x + box.width).toBeLessThanOrEqual(390)
-  await shot(page, '07b-lineage-popover-narrow')
-  await page.keyboard.press('Escape')
-  await page.setViewportSize({ width: 1440, height: 900 })
-
-  // A provider that refuses the handoff is reported with its reason; nothing else is attempted.
-  contract.refuse.set('session.provider.switch', { code: 'CONFLICT', message: 'UNSUPPORTED: this provider does not accept portable context', retryable: false })
-  await page.getByRole('button', { name: /Change session model/ }).click()
-  await page.getByLabel('Search models').fill('Sonnet')
-  await page.getByRole('option').filter({ hasText: 'Sonnet' }).first().click()
-  await page.getByRole('dialog', { name: /^Hand off to / }).getByRole('button', { name: 'Hand off', exact: true }).click()
-  await expect(page.getByText('Failed to hand off session: UNSUPPORTED: this provider does not accept portable context')).toBeVisible()
-  await shot(page, '08-provider-handoff-refused')
-  expect(calls('session.provider.switch')).toHaveLength(2)
-  assertions.providerSwitch = { input: switched, sameSession: true, coverageBySource: ['parent: included 3 of 4, omitted 1', 'fork: included 1 of 2, truncated 1'], refusalShown: true }
-})
-
-test('a fork merges back into its parent after confirmation, live and after reload', async ({ page }) => {
-  await openSession(page, forkSessionId)
-  await page.getByRole('button', { name: 'More actions' }).click()
-  const item = page.getByRole('menuitem', { name: /^Merge back into / })
-  await expect(item).toBeEnabled()
-  await shot(page, '09-merge-back-menu')
-  await item.click()
-  const dialog = page.getByRole('dialog', { name: /^Merge back into / })
-  await expect(dialog).toContainText('nothing in the parent is replaced')
-  await shot(page, '10-merge-back-confirmation')
-  expect(calls('session.mergeBack')).toEqual([])
-  await dialog.getByRole('button', { name: 'Merge back', exact: true }).click()
-  await expect.poll(() => calls('session.mergeBack')).toHaveLength(1)
-  await expect(page.getByText('Merge back sent to the parent session.')).toBeVisible()
-  await shot(page, '10b-merge-back-sent')
-  // The target is inferred from the lineage parent; the client names only the fork.
-  expect(calls('session.mergeBack')[0]).toEqual({ commandId: expect.any(String), sessionId: forkSessionId })
-
-  // The parent's popover opens the session the fork came from.
-  await lineageChip(page).click()
-  await page.getByRole('dialog').filter({ hasText: 'Context handoffs' }).getByRole('button', { name: /^Open / }).click()
-  await expect.poll(() => new URL(page.url()).searchParams.get('agent')).toBe(fleet.a.sessionId)
-  await expect(lineageChip(page)).toHaveCount(0)
-  await page.getByRole('button', { name: 'More actions' }).click()
-  await expect(page.getByRole('menuitem', { name: /^Merge back into / })).toHaveCount(0)
-  await page.keyboard.press('Escape')
-
-  // A provider's typed UNSUPPORTED on the latest merge-back disables the action with that reason.
-  const lineage = contract.lineage.get(forkSessionId)!
-  contract.lineage.set(forkSessionId, { ...lineage, transfers: [...lineage.transfers, { transferId: 'transfer-merge', kind: 'merge_back', source: { threadId: forkSessionId, sequence: 60 }, basePoint: lineage.lineage!.basePoint, targetThreadId: fleet.a.sessionId, strategy: 'unresolved', state: 'failed', createdAt: 99, error: { code: 'UNSUPPORTED', message: 'the parent provider cannot accept a merge' } }] })
-  await openSession(page, forkSessionId)
-  await page.getByRole('button', { name: 'More actions' }).click()
-  const refused = page.getByRole('menuitem', { name: /^Merge back into / })
-  await expect(refused).toBeDisabled()
-  await expect(refused).toContainText('UNSUPPORTED: the parent provider cannot accept a merge')
-  await shot(page, '11-merge-back-unsupported')
-  await page.keyboard.press('Escape')
-  expect(calls('session.mergeBack')).toHaveLength(1)
-  assertions.mergeBack = { input: calls('session.mergeBack')[0], parentHasNoMergeBack: true, unsupportedDisabled: true }
-})
-
-test('a finished worker continues as a normal conversation from its sidebar row', async ({ page }) => {
-  contract.continuedSessionId = forkSessionId
+test('fork from an exact message selects a model and shows durable lineage live and after reload', async ({ page }) => {
   await openSession(page, fleet.a.sessionId)
-  const worker = page.locator('[data-worker-row]').filter({ hasText: WORKER.title }).first()
-  if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
-  await expect(worker).toBeVisible()
-  await worker.click({ button: 'right' })
-  const item = page.getByRole('menuitem', { name: 'Continue as conversation' })
-  await expect(item).toBeEnabled()
-  await shot(page, '12-continue-worker-menu')
-  await item.click()
-  // The receipt names the new conversation; the UI opens it as a normal session.
-  await expect.poll(() => new URL(page.url()).searchParams.get('agent')).toBe(forkSessionId)
-  expect(calls('worker.continue')).toEqual([{ commandId: expect.any(String), sessionId: fleet.a.sessionId, workerId: WORKER.agentId }])
-  await expect(page.getByRole('combobox', { name: /^(Message |Send another message to )/ })).toBeEnabled()
-  await shot(page, '13-continued-worker-conversation')
-  assertions.continueWorker = { input: calls('worker.continue')[0], openedSessionId: forkSessionId }
-})
-
-test('a run fork point is offered, and a provider that declares it cannot fork or hand off is refused before the click', async ({ page }) => {
-  const { a } = fleet
-  await openSession(page, a.sessionId)
-  await expect(transcript(page)).toContainText(RUN_ITEM.text)
-  const sent = calls('session.fork').length
+  await sendMessage(page, 'Lineage acceptance exact source message')
+  const source = await detail(fleet.a.sessionId)
+  const item = source.items.filter(item => item.kind === 'assistant').at(-1)!
+  expect(item.runId).toBeTruthy(); parentRunId = item.runId!; parentItemId = item.itemId
+  await expect(lineageChip(page)).toHaveCount(0)
   await page.getByRole('button', { name: 'Fork from this message' }).last().click({ force: true })
   const dialog = page.getByRole('dialog', { name: 'Fork Session' })
-  await dialog.getByRole('radio', { name: /End of this run/ }).click()
-  await shot(page, '17-fork-dialog-run-point')
-  await dialog.getByPlaceholder('Session name (optional)').fill('Run fork')
+  await expect(dialog.getByRole('radio', { name: /This message/ })).toHaveAttribute('aria-checked', 'true')
+  await selectModel(page, 'Opus')
+  await dialog.getByPlaceholder('Session name (optional)').fill('Lineage fork')
+  await shot(page, '01-exact-fork-model')
   await dialog.getByRole('button', { name: 'Fork', exact: true }).click()
-  await expect.poll(() => calls('session.fork').length).toBe(sent + 1)
-  expect(calls('session.fork').at(-1)).toMatchObject({ sessionId: a.sessionId, title: 'Run fork', sourcePoint: { kind: 'run', runId: RUN_ITEM.runId } })
-  expect(calls('session.fork').at(-1)).not.toHaveProperty('fromItemId')
-
-  // The parent's provider now declares it can neither fork nor hand off.
-  contract.capabilities.set(a.sessionId, { fork: false, nativeFork: false, throughTurnFork: false, providerSwitch: false })
-  contract.capabilities.set(forkSessionId, { fork: false, nativeFork: false, throughTurnFork: false, providerSwitch: true })
-  const before = contract.calls.length
-  await resetShellCache(page)
-  await openSession(page, a.sessionId)
-  const fork = page.getByRole('button', { name: 'Fork from this message' }).last()
-  await expect(fork).toBeDisabled()
-  await expect(fork).toHaveAttribute('title', "This session's provider cannot fork")
-  await page.getByRole('button', { name: /Change session model/ }).click()
-  await page.getByLabel('Search models').fill('Opus')
-  const other = page.getByRole('option').filter({ hasText: 'Opus' }).first()
-  await expect(other).toHaveAttribute('aria-disabled', 'true')
-  await expect(other).toContainText("This session's provider cannot hand off to another provider")
-  await shot(page, '18-provider-switch-declared-unsupported')
-  await other.click({ force: true })
-  await expect(page.getByRole('dialog', { name: /^Hand off to / })).toHaveCount(0)
-  await page.keyboard.press('Escape')
-  // The sidebar reads the same declaration from each session's summary.
-  await page.getByRole('complementary').getByText('Lineage fork', { exact: true }).last().click({ button: 'right' })
-  const item = page.getByRole('menuitem', { name: 'Fork', exact: true })
-  await expect(item).toBeDisabled()
-  await expect(item).toHaveAttribute('title', "This session's provider cannot fork")
-  await shot(page, '19-fork-declared-unsupported')
-  await page.keyboard.press('Escape')
-
-  // A fork whose provider cannot fork cannot hand its work back either.
-  const lineage = contract.lineage.get(forkSessionId)!
-  contract.lineage.set(forkSessionId, { ...lineage, transfers: lineage.transfers.filter(transfer => transfer.kind !== 'merge_back') })
-  await openSession(page, forkSessionId)
-  await page.getByRole('button', { name: 'More actions' }).click()
-  const merge = page.getByRole('menuitem', { name: /^Merge back into / })
-  await expect(merge).toBeDisabled()
-  await expect(merge).toContainText("This session's provider cannot fork")
-  await shot(page, '20-merge-back-declared-unsupported')
-  await page.keyboard.press('Escape')
-  expect(contract.calls.slice(before)).toEqual([])
-  contract.capabilities.clear()
-  await resetShellCache(page)
-  assertions.capabilities = { runForkInput: calls('session.fork').at(-1), forkDisabled: true, providerSwitchDisabled: true, sidebarForkDisabled: true, mergeBackDisabled: true, commandsSent: 0 }
+  const receipt = await successful('session.fork', 0)
+  forkSessionId = receipt.result!.sessionId!
+  await expect.poll(() => new URL(page.url()).searchParams.get('agent')).toBe(forkSessionId)
+  expect(calls('session.fork')[0]).toMatchObject({ sessionId: fleet.a.sessionId, sourcePoint: { kind: 'message', entryId: parentItemId }, model: { provider: 'claude-native' } })
+  expect(calls('session.fork')[0]).not.toHaveProperty('fromItemId')
+  const pending = await lineage(forkSessionId)
+  expect(pending.threadId).toBe(forkSessionId)
+  expect(pending.lineage!.basePoint.entryId).toBe(parentItemId)
+  expect(pending.transfers[0]!.state).toBe('pending')
+  expect((await readLaunchEvidence(manifest.environments[0]!, forkSessionId)).dispatches).toBe(0)
+  await expect(lineageChip(page)).toContainText(`at message ${parentItemId}`)
+  await page.reload()
+  await expect(lineageChip(page)).toContainText(`at message ${parentItemId}`)
+  await sendMessage(page, 'Continue the portable Claude fork', 'Claude lineage fixture reply.')
+  const consumed = await until(() => lineage(forkSessionId), snapshot => snapshot.transfers[0]!.state === 'consumed')
+  expect(consumed.transfers[0]!.strategy).toBe('portable_context')
+  await shot(page, '02-fork-live-and-replay')
+  assertions.fork = { input: calls('session.fork')[0], receipt, lazy: true, consumed, replay: true }
 })
 
-test('without contextTransfers every action is disabled with its reason and nothing falls back', async ({ page }) => {
-  contract.contextTransfers = false
-  const sent = contract.calls.length
+test('provider switching keeps the session and exposes real handoff coverage and provider provenance', async ({ page }) => {
   await openSession(page, forkSessionId)
-  await expect(lineageChip(page)).toBeVisible()
-
-  await page.getByRole('button', { name: 'More actions' }).click()
-  const merge = page.getByRole('menuitem', { name: /^Merge back into / })
-  await expect(merge).toBeDisabled()
-  await expect(merge).toContainText(UNAVAILABLE)
-  await shot(page, '14-unavailable-merge-back')
+  const before = page.url()
+  await selectModel(page, 'Sol')
+  const dialog = page.getByRole('dialog', { name: /^Hand off to / })
+  await expect(dialog).toContainText('Credentials and tool grants are not transferred')
+  await shot(page, '03-provider-confirmation')
+  expect(calls('session.provider.switch')).toEqual([])
+  await dialog.getByRole('button', { name: 'Hand off', exact: true }).click()
+  await successful('session.provider.switch', 0)
+  expect(page.url()).toBe(before)
+  await expect(lineageChip(page)).toContainText('switched from claude')
+  await sendMessage(page, 'Continue after the explicit provider handoff')
+  const snapshot = await until(() => lineage(forkSessionId), snapshot => snapshot.transfers.some(t => t.kind === 'provider_switch' && t.state === 'consumed'))
+  const transfer = snapshot.transfers.find(t => t.kind === 'provider_switch')!
+  const handoff = snapshot.handoffs.find(h => h.transferId === transfer.transferId)!
+  expect(handoff.coverage.sources!.map(s => s.sourcePoint.threadId).sort()).toEqual([fleet.a.sessionId, forkSessionId].sort())
+  expect(handoff.provenance).toMatchObject({ source: 'canonical_jsonl', credentials: 'excluded', toolGrants: 'excluded' })
+  await lineageChip(page).click()
+  const popover = page.getByRole('dialog').filter({ hasText: 'Context handoffs' })
+  await expect(popover.getByLabel(/^Handoff coverage for Provider switch from /)).toHaveCount(2)
+  await expect(popover).toContainText('Credentials excluded')
+  await expect(popover).toContainText('Tool grants excluded')
+  await shot(page, '04-coverage')
   await page.keyboard.press('Escape')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await lineageChip(page).click()
+  const narrow = page.getByRole('dialog').filter({ hasText: 'Context handoffs' })
+  const box = (await narrow.boundingBox())!
+  expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(390)
+  await shot(page, '05-narrow-coverage')
+  await page.keyboard.press('Escape'); await page.setViewportSize({ width: 1440, height: 900 })
+  await page.reload(); await expect(lineageChip(page)).toContainText('switched from claude')
+  // Same-provider model configuration uses configure; cross-provider configure is refused.
+  await expect(rpc.call('session.configure', { commandId: randomUUID(), sessionId: forkSessionId, model: { mode: 'override', provider: 'claude-native', modelId: 'claude-sonnet-5' } })).rejects.toThrow('session.provider.switch')
+  const configured = await rpc.call<CommandReceipt>('session.configure', { commandId: randomUUID(), sessionId: forkSessionId, model: { mode: 'override', provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' } })
+  expect(configured.state).toBe('succeeded')
+  await sendMessage(page, 'Continue after the same-provider model configuration')
+  assertions.providerSwitch = { input: calls('session.provider.switch')[0], sameSession: true, handoff, crossProviderConfigureRefused: true, sameProviderConfigure: configured }
+})
 
+test('portable merge-back has a stable parent base and survives replay', async ({ page }) => {
+  await openSession(page, forkSessionId)
+  const basePoint = (await lineage(forkSessionId)).lineage!.basePoint
+  await page.getByRole('button', { name: 'More actions' }).click()
+  await page.getByRole('menuitem', { name: /^Merge back into / }).click()
+  const dialog = page.getByRole('dialog', { name: /^Merge back into / })
+  await expect(dialog).toContainText('nothing in the parent is replaced')
+  await dialog.getByRole('button', { name: 'Merge back', exact: true }).click()
+  const receipt = await successful('session.mergeBack', 0)
+  await expect(page.getByText('Merge back sent to the parent session.')).toBeVisible()
+  const merged = (await lineage(forkSessionId)).transfers.find(t => t.kind === 'merge_back')!
+  expect(merged.basePoint).toEqual(basePoint); expect(merged.targetThreadId).toBe(fleet.a.sessionId)
   await openSession(page, fleet.a.sessionId)
-  await sendMessage(page, 'Lineage acceptance message on an older environment')
-  await forkButton(page).click({ force: true })
+  await sendMessage(page, 'Consume the portable merge-back')
+  expect((await lineage(fleet.a.sessionId)).transfers.find(t => t.transferId === merged.transferId)!.state).toBe('consumed')
+  await openSession(page, forkSessionId); await page.reload()
+  expect((await lineage(forkSessionId)).transfers.find(t => t.kind === 'merge_back')!.basePoint).toEqual(basePoint)
+  await shot(page, '06-merge-back-replay')
+  assertions.mergeBack = { receipt, basePoint, merged, consumed: true }
+})
+
+test('an idle completed worker continues into the receipt new conversation and accepts normal input', async ({ page }) => {
+  await openSession(page, fleet.a.sessionId)
+  await sendMessage(page, '[fixture:spawn] Complete the lineage worker', 'worker spawned')
+  const source = await until(() => detail(fleet.a.sessionId), snapshot => snapshot.workers.some(worker => worker.agentId === 'fixture-worker' && worker.status === 'idle'), 30_000)
+  workerId = source.workers.find(worker => worker.agentId === 'fixture-worker')!.agentId
+  const worker = page.locator('[data-worker-row]').filter({ hasText: /Fixture Worker|fixture-worker/ }).first()
+  if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
+  await worker.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Continue as conversation' }).click()
+  const receipt = await successful('worker.continue', 0)
+  const sessionId = receipt.result!.sessionId!
+  expect(sessionId).not.toBe(workerId)
+  await expect.poll(() => new URL(page.url()).searchParams.get('agent')).toBe(sessionId)
+  await expect(lineageChip(page)).toContainText('Continued from a worker')
+  await sendMessage(page, 'Continue the finished worker as a conversation')
+  expect((await detail(sessionId)).session.sessionId).toBe(sessionId)
+  await shot(page, '07-continued-worker')
+  assertions.continueWorker = { input: calls('worker.continue')[0], receipt, idleWorkerAllowed: true, normalInput: true }
+})
+
+test('run fork points use real run IDs and portable merge remains available without through-turn native fork', async ({ page }) => {
+  await openSession(page, fleet.a.sessionId)
+  // The original reply's actual detail run ID is still offered at its exact row.
+  const buttons = page.getByRole('button', { name: 'Fork from this message' })
+  await buttons.first().click({ force: true })
+  const dialog = page.getByRole('dialog', { name: 'Fork Session' })
+  await dialog.getByRole('radio', { name: /End of this run/ }).click()
+  await dialog.getByPlaceholder('Session name (optional)').fill('Run fork')
+  await shot(page, '08-run-fork')
+  const before = calls('session.fork').length
+  await dialog.getByRole('button', { name: 'Fork', exact: true }).click()
+  const receipt = await successful('session.fork', before)
+  expect(calls('session.fork').at(-1)).toMatchObject({ sourcePoint: { kind: 'run', runId: parentRunId } })
+  expect(calls('session.fork').at(-1)).not.toHaveProperty('fromItemId')
+  const snapshot = await lineage(receipt.result!.sessionId!)
+  expect(snapshot.lineage!.basePoint.runId).toBe(parentRunId)
+  // Claude declares through-turn native fork unsupported, but the normal
+  // portable transfer capability still permits both fork and merge-back.
+  await openSession(page, forkSessionId)
+  await selectModel(page, 'Opus')
+  await page.getByRole('dialog', { name: /^Hand off to / }).getByRole('button', { name: 'Hand off', exact: true }).click()
+  await successful('session.provider.switch', 1)
+  await sendMessage(page, 'Return to Claude with uncovered context', 'Claude lineage fixture reply.')
+  const caps = (await detail(forkSessionId)).session.transferCapabilities!
+  expect(caps.throughTurnFork).toBe(false); expect(caps.fork).toBe(true)
+  await page.getByRole('button', { name: 'More actions' }).click()
+  await expect(page.getByRole('menuitem', { name: /^Merge back into / })).toBeEnabled()
+  await page.keyboard.press('Escape')
+  assertions.capabilities = { input: calls('session.fork').at(-1), caps, portableMergeEnabled: true }
+})
+
+test('an environment without contextTransfers disables actions with its explicit reason', async ({ page }) => {
+  await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=environments`)
+  await expect(page.getByRole('list', { name: 'Environments' })).toBeVisible()
+  const grant = await fleet.mintGrant(fleet.c, 'link')
+  await page.getByRole('button', { name: 'Add environment' }).click()
+  await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(grant.pairingUrl!)
+  await page.getByRole('button', { name: 'Pair', exact: true }).click()
+  await expect(page.locator(`li[data-environment-id="${fleet.c.environmentId}"]`)).toHaveAttribute('data-environment-status', 'online')
+  await openSession(page, fleet.c.sessionId, fleet.c.environmentId)
+  await sendMessage(page, 'Lineage acceptance on a legacy-capability environment')
+  const before = observed.length
+  await page.getByRole('button', { name: 'Fork from this message' }).last().click({ force: true })
   const dialog = page.getByRole('dialog', { name: 'Fork Session' })
   await expect(dialog.getByRole('radio', { name: /Latest stable point/ })).toBeDisabled()
   await expect(dialog.getByRole('button', { name: /Change session model/ })).toBeDisabled()
   await expect(dialog.getByRole('note')).toHaveText(UNAVAILABLE)
-  await shot(page, '15-unavailable-fork-dialog')
+  await shot(page, '09-unavailable')
   await dialog.getByRole('button', { name: 'Cancel' }).click()
+  expect(observed.slice(before)).toEqual([])
+  assertions.unavailable = { environmentId: fleet.c.environmentId, reason: UNAVAILABLE, commandsSent: 0 }
+})
 
-  const worker = page.locator('[data-worker-row]').filter({ hasText: WORKER.title }).first()
-  if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
-  await worker.click({ button: 'right' })
-  const item = page.getByRole('menuitem', { name: /Continue as conversation/ })
-  await expect(item).toBeDisabled()
-  await expect(item).toContainText(UNAVAILABLE)
-  await shot(page, '16-unavailable-continue-worker')
-  await page.keyboard.press('Escape')
-
-  expect(contract.calls.slice(sent)).toEqual([])
-  assertions.unavailable = { reason: UNAVAILABLE, mergeBackDisabled: true, forkOptionsDisabled: true, continueWorkerDisabled: true, commandsSent: 0 }
+test('a bounded real backend lineage snapshot marks recent history live and after reload', async ({ page }) => {
+  test.setTimeout(180_000)
+  // Ordinary fork RPC commands create independent lazy children. They add real
+  // durable transfers until the source's bounded projection omits older rows.
+  await openSession(page, forkSessionId)
+  let snapshot = await lineage(forkSessionId)
+  let created = 0
+  while (!snapshot.truncated && created < 250) {
+    const receipt = await rpc.call<CommandReceipt>('session.fork', { commandId: randomUUID(), sessionId: forkSessionId, sourcePoint: { kind: 'latest_stable' }, title: `Bounded lineage child ${++created}` })
+    expect(receipt.state, JSON.stringify(receipt.error)).toBe('succeeded')
+    snapshot = await lineage(forkSessionId)
+  }
+  expect(snapshot.truncated).toBe(true)
+  await lineageChip(page).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Showing recent history' })).toBeVisible()
+  await shot(page, '10-truncated-live')
+  await page.keyboard.press('Escape'); await page.reload(); await lineageChip(page).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Showing recent history' })).toBeVisible()
+  await shot(page, '11-truncated-replay')
+  assertions.truncated = { created, transfersShown: snapshot.transfers.length, truncated: snapshot.truncated, live: true, replay: true }
 })

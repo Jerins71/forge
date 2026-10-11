@@ -25,7 +25,7 @@ describe("production Codex controlled-send replay", () => {
 
   it("reconciles a crash after JSONL append before locator commit", async () => {
     const result = await runControlledSendReplay("append-before-locator");
-    expect(result.unusedHostReleased).toBe(true);
+    expect(result.providerStartedBeforeCrash).toBe(false);
     expect(result.crashBoundary).toMatchObject({ appendPersisted: true, locatorCommitted: false });
     expect(result.counts).toEqual({ acceptedInputs: 1, receipts: 1, canonicalInputs: 1, providerDispatches: 1 });
     expect(result.receipt.delivery).toBe("dispatched");

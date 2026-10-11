@@ -69,12 +69,6 @@ export interface RuntimeEventProjectorDeps {
     descriptor: AgentDescriptor,
     error: { phase: "prompt_start"; message: string }
   ): void;
-  maybeRecoverWorkerWithSpecialistFallback(
-    agentId: string,
-    errorMessage: string,
-    sourcePhase: "prompt_start",
-    runtimeToken?: number
-  ): Promise<boolean>;
   consumePendingManualManagerStopNoticeIfApplicable(agentId: string, event: RuntimeSessionEvent): boolean;
   stripManagerAbortErrorFromEvent(event: RuntimeSessionEvent): RuntimeSessionEvent;
   isRuntimeRecoveryActive(agentId: string): boolean;
@@ -343,15 +337,6 @@ export class RuntimeEventProjector {
           message: errorText
         });
 
-        const recoveredWithFallback = await this.deps.maybeRecoverWorkerWithSpecialistFallback(
-          agentId,
-          errorText,
-          "prompt_start",
-          runtimeToken
-        );
-        if (recoveredWithFallback) {
-          return;
-        }
       }
     }
 

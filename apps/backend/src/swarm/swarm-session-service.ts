@@ -130,7 +130,7 @@ export class SwarmSessionService {
       const profile = this.options.profiles.get(input.projectId); if (!profile) throw new Error("Controlled project is missing.");
       // Existing admission checks reject unsafe/pending cleanup; getOrCreate never installs a competing writer.
       await this.options.provisioner.provisionSession({ descriptor: existing as ProvisionedSessionDescriptor, retainOnError: true,
-        initializeRuntime: undefined });
+        initializeRuntime: async () => { if (existing.status !== "stopped") await this.options.getOrCreateRuntimeForDescriptor(existing); } });
       await this.options.saveStore(); return { profile: { ...profile }, sessionAgent: cloneDescriptor(existing) };
     }
     const dataDir = this.options.dataDir; if (!dataDir) throw new Error("Controlled session data directory is missing.");
@@ -186,7 +186,7 @@ export class SwarmSessionService {
       descriptor: sessionDescriptor,
       retainOnError: Boolean(sessionDescriptor.controlCommandId),
       beforeRuntime: sessionDescriptor.controlCommandId ? this.options.saveStore : undefined,
-      initializeRuntime: sessionDescriptor.controlCommandId ? undefined : async () => {
+      initializeRuntime: async () => {
         const runtime = await this.options.getOrCreateRuntimeForDescriptor(sessionDescriptor);
         sessionDescriptor.contextUsage = runtime.getContextUsage();
       }

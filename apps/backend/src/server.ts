@@ -50,7 +50,7 @@ export interface StartServerOptions {
   logger?: Partial<ServerLogger>;
   onReady?: (info: ServerReadyInfo) => Promise<void> | void;
   secureControlToken?: string;
-  environmentIdentity?: { installationStateDir?: string; label?: string };
+  environmentIdentity?: Pick<import("./environment/identity.js").IdentityOptions, "installationStateDir" | "label" | "capabilities">;
 }
 
 export interface StartedServer extends ServerReadyInfo {

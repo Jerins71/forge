@@ -14,12 +14,10 @@ import type { CodexMcpToolGateEvaluation } from "./codex-app-server/codex-mcp-to
 import type { ForgeExtensionHost } from "./forge-extension-host.js";
 import { SessionGoalCoordinator } from "./goals/session-goal-coordinator.js";
 import { loadOnboardingState } from "./onboarding-state.js";
-import { modelCatalogService } from "./catalog/model-catalog-service.js";
 import type { SwarmObservabilityCoordinator } from "./swarm-observability-coordinator.js";
 import type { SessionPlanCoordinator } from "./planning/session-plan-coordinator.js";
 import { ProjectExecutableTrustCoordinator } from "./project-executable-trust-coordinator.js";
 import { RestartRecoveryCoordinator } from "./restart-recovery-coordinator.js";
-import { ModelChangeStartupRecoveryCoordinator } from "./runtime/model-change-startup-recovery-coordinator.js";
 import type { RuntimeRecoveryState } from "./runtime/runtime-recovery-state.js";
 import type { RuntimeAcquisitionRequirements, RuntimeCreationOptions, SwarmAgentRuntime } from "./runtime-contracts.js";
 import type { SecretsEnvService } from "./secrets-env-service.js";
@@ -46,13 +44,12 @@ import {
   createRuntimeLifecycleControllerHostCallbacks,
   SwarmRuntimeLifecycleCoordinator,
 } from "./swarm-runtime-lifecycle-coordinator.js";
-import { SwarmSpecialistFallbackManager } from "./swarm-specialist-fallback-manager.js";
+import { SpecialistFallbackPolicy } from "./specialist-fallback-policy.js";
 import type { SwarmToolHost } from "./swarm-tool-host.js";
 import { SwarmWorkerHealthService } from "./swarm-worker-health-service.js";
 import { getManagedModelProviderCredentialAvailability } from "./secrets-env-service.js";
 import { migrateLegacyProfileKnowledgeToReferenceDoc } from "./reference-docs.js";
 import { TurnContextCoordinator } from "./turn-context-coordinator.js";
-import { createWorkGraphModelRerouteRecorder } from "./planning/work-graph-worker-observations.js";
 import type {
   AgentDescriptor,
   AgentModelDescriptor,
@@ -230,9 +227,8 @@ export class SwarmManagerRuntimeComposition {
   readonly restartRecovery: RestartRecoveryCoordinator;
   readonly runtimeController: SwarmRuntimeController;
   readonly assistantOutput: AssistantOutputRouter;
-  readonly modelChangeStartupRecovery: ModelChangeStartupRecoveryCoordinator;
   readonly workerHealth: SwarmWorkerHealthService;
-  readonly specialistFallback: SwarmSpecialistFallbackManager;
+  readonly specialistFallback: SpecialistFallbackPolicy;
 
   private plans: SessionPlanCoordinator | undefined;
   private goalCoordinator: SessionGoalCoordinator | undefined;
@@ -259,16 +255,8 @@ export class SwarmManagerRuntimeComposition {
       now: state.now,
       logDebug: options.events.logDebug,
     });
-    this.modelChangeStartupRecovery = new ModelChangeStartupRecoveryCoordinator({
-      now: state.now,
-      logDebug: options.events.logDebug,
-      getEffectiveContextWindow: (modelId, provider) =>
-        modelCatalogService.getEffectiveContextWindow(modelId, provider),
-      hasPinnedContent: (agentId) => options.foundation.sessionPins.hasPinnedContent(agentId),
-    });
     this.workerHealth = this.createWorkerHealth();
     this.specialistFallback = this.createSpecialistFallback();
-    this.runtimeController.setSpecialistFallbackManager(this.specialistFallback);
   }
   get runtimes(): Map<string, SwarmAgentRuntime> {
     return this.runtimeController.runtimes;
@@ -399,23 +387,6 @@ export class SwarmManagerRuntimeComposition {
       getSwarmContextFiles: runtimeResources.getSwarmContextFiles,
       resolveProjectExecutableTrustPlanForRuntime: (input) =>
         this.requireProjectExecutableTrust().resolvePlanForRuntime(input),
-      maybeRecoverWorkerWithSpecialistFallback: (agentId, errorMessage, sourcePhase, runtimeToken) =>
-        this.specialistFallback.maybeRecoverWorkerWithSpecialistFallback({
-          agentId,
-          errorMessage,
-          sourcePhase,
-          runtimeToken,
-          handleRuntimeStatus: (token, targetAgentId, status, pendingCount, contextUsage) =>
-            this.requireRuntimeLifecycle().handleRuntimeStatus(
-              token,
-              targetAgentId,
-              status,
-              pendingCount,
-              contextUsage,
-            ),
-          handleRuntimeAgentEnd: (token, targetAgentId) =>
-            this.requireRuntimeLifecycle().handleRuntimeAgentEnd(token, targetAgentId),
-        }),
       updateSessionMetaForWorkerDescriptor: (descriptor, prompt) =>
         this.requireServices().memory.updateSessionMetaForWorkerDescriptor(descriptor, prompt),
       refreshSessionMetaStatsBySessionId: (sessionId, sessionFile) =>
@@ -477,55 +448,9 @@ export class SwarmManagerRuntimeComposition {
     });
   }
 
-  private createSpecialistFallback(): SwarmSpecialistFallbackManager {
-    const { state, resolution, events } = this.options;
-    return new SwarmSpecialistFallbackManager({
-      dataDir: state.config.paths.dataDir,
-      descriptors: state.descriptors,
-      runtimes: this.runtimeController.runtimes,
-      getRuntime: (agentId) => this.runtimeController.getRuntime(agentId),
-      isRuntime: (agentId, runtime) => this.runtimeController.isRuntime(agentId, runtime),
-      getRuntimeToken: (agentId) => this.runtimeController.getRuntimeToken(agentId),
-      clearRuntimeToken: (agentId, token) => this.requireRuntimeLifecycle().clearRuntimeToken(agentId, token),
-      restoreRuntimeTokenForFallbackRollback: (agentId, token) => this.runtimeController.restoreRuntimeTokenForFallbackRollback(agentId, token),
-      hasSecureRuntimeBinding: (runtime) => this.runtimeController.hasSecureRuntimeBinding(runtime),
-      isSecureRuntimeBindingValid: (runtime) => this.runtimeController.isSecureRuntimeBindingValid(runtime),
-      isSecureRuntimeBindingUsable: (agentId, runtime) => this.runtimeController.isSecureRuntimeBindingUsable(agentId, runtime),
-      getRuntimeCreationPromise: (agentId) => this.runtimeController.getRuntimeCreationPromise(agentId),
-      setRuntimeCreationPromise: (agentId, promise) => this.runtimeController.setRuntimeCreationPromise(agentId, promise),
-      clearRuntimeCreationPromiseIfCurrent: (agentId, promise) => this.runtimeController.clearRuntimeCreationPromiseIfCurrent(agentId, promise),
-      workerHealthService: this.workerHealth,
-      now: state.now,
-      resolveSpecialistRosterForProfile: resolution.resolveSpecialistRosterForProfile,
-      resolveSpecialistRosterForManager: resolution.resolveSpecialistRosterForManager,
-      resolveSpawnModelWithCapacityFallback: resolution.resolveSpawnModelWithCapacityFallback,
-      resolveSystemPromptForDescriptor: resolution.resolveSystemPromptForDescriptor,
-      injectWorkerIdentityContext: resolution.injectWorkerIdentityContext,
-      createRuntimeForDescriptor: (descriptor, prompt, token, creationOptions) =>
-        this.options.runtimeFactory.createRuntimeForDescriptor(
-          descriptor,
-          prompt,
-          token,
-          creationOptions,
-        ),
-      attachRuntime: (agentId, runtime) => this.runtimeController.attachRuntime(agentId, runtime),
-      detachRuntime: (agentId, token) => this.requireRuntimeLifecycle().detachRuntime(agentId, token),
-      detachRuntimeIfMatches: (agentId, runtime, token) => this.runtimeController.detachRuntimeIfMatches(agentId, runtime, token),
-      updateSessionMetaForWorkerDescriptor: (descriptor, prompt) =>
-        this.requireServices().memory.updateSessionMetaForWorkerDescriptor(descriptor, prompt ?? undefined),
-      refreshSessionMetaStatsBySessionId: (agentId) =>
-        this.requireServices().memory.refreshSessionMetaStatsBySessionId(agentId),
-      recordWorkGraphWorkerModelReroute: createWorkGraphModelRerouteRecorder({ descriptors: state.descriptors, getPlans: () => this.requirePlans() }),
-      saveStore: events.saveStore,
-      patchDescriptor: this.options.descriptors.transactionPatchDescriptor,
-      patchDescriptorInLiveMaps: this.options.descriptors.patchDescriptorInLiveMaps,
-      emitStatus: events.emitStatus,
-      emitAgentsSnapshot: events.emitAgentsSnapshot,
-      listWorkersForSession: (sessionAgentId) =>
-        this.requireServices().directory.listWorkersForSession(sessionAgentId),
-      emitSessionWorkersSnapshot: events.emitSessionWorkersSnapshot,
-      logDebug: events.logDebug,
-    });
+  private createSpecialistFallback(): SpecialistFallbackPolicy {
+    const {state,resolution}=this.options;
+    return new SpecialistFallbackPolicy({dataDir:state.config.paths.dataDir,descriptors:state.descriptors,resolveSpecialistRosterForProfile:resolution.resolveSpecialistRosterForProfile,resolveSpecialistRosterForManager:resolution.resolveSpecialistRosterForManager,resolveSpawnModelWithCapacityFallback:resolution.resolveSpawnModelWithCapacityFallback});
   }
 
   private createTurnContext() {
@@ -616,9 +541,6 @@ export class SwarmManagerRuntimeComposition {
       refreshSessionMetaStatsBySessionId: (agentId) => services.memory.refreshSessionMetaStatsBySessionId(agentId),
       refreshSessionMetaStats: (descriptor) => services.memory.refreshSessionMetaStats(descriptor),
       captureSessionRuntimePromptMeta: (descriptor, prompt) => services.memory.captureSessionRuntimePromptMeta(descriptor, prompt),
-      prepareManagerRuntimeCreation: (descriptor, prompt) => this.modelChangeStartupRecovery.prepareManagerRuntimeCreation(descriptor, prompt),
-      appendAppliedModelChangeContinuity: (descriptor, request, runtime) =>
-        this.modelChangeStartupRecovery.appendAppliedModelChangeContinuity(descriptor, request, runtime),
       attachRuntime: (agentId, runtime) => this.runtimeController.attachRuntime(agentId, runtime),
       saveStore: events.saveStore,
       suppressSessionAttention: (sessionAgentId) =>

@@ -77,8 +77,11 @@ async function makeCore(f: Awaited<ReturnType<typeof fixture>>, manager = f.mana
   if (manager === f.manager && database === f.database && !f.coreClosed) return { core: f.core, adapter: f.adapter, artifacts: f.artifacts };
   const workspace = createWorkspaceService({ database, dataDir: f.config.paths.dataDir, swarmManager: manager });
   const artifacts = createArtifactService({ database, dataDir: f.config.paths.dataDir, swarmManager: manager });
-  const core = await createControlCore({ database, clock: Date.now, random: randomUUID,
-    swarm: { resolveSession: id => adapter.resolveSession!(id), ensureSession: input => adapter.ensureSession(input), applyInput: input => adapter.applyInput(input), acquireProvider:(scope,conversation,model)=>adapter.acquireProvider(scope,conversation,model),enqueuePresentation:(threadId,runId,presentation)=>adapter.enqueuePresentation!(threadId,runId,presentation),extractWorkerResult:(threadId,runId,entryId)=>adapter.extractWorkerResult!(threadId,runId,entryId), applyChoice: input => adapter.applyChoice(input), stopSession: input => adapter.stopSession(input) },
+  const swarm = new Proxy<SwarmControlPort>(Object.create(null), {
+    get(_target,key) { const member=Reflect.get(adapter,key);return typeof member==='function' ? member.bind(adapter):member; },
+  });
+  const core = await createControlCore({ database, dataDir:f.config.paths.dataDir, clock: Date.now, random: randomUUID,
+    swarm,
     policy: createProjectPolicy(manager), workspace, artifacts, isDeviceRevoked: () => false, inputRoute: createControlledInputRoutePreflight({ swarmManager: manager }) });
   const adapter = createSwarmControlAdapter({ swarmManager: manager, database, eventSink: core.eventSink, controlService:core.controlService,workspaceService: workspace, artifactService: artifacts });
   manager.installDescriptorPersistence(createControlDescriptorPersistence({ database, eventSink: core.eventSink, dataDir: f.config.paths.dataDir, storeFilePath: f.config.paths.agentsStoreFile }));
@@ -161,6 +164,8 @@ describe("controlled swarm canonical/provider boundaries", () => {
     const state = loadState(f.database); const run = state.runs[`run-${ambiguous}`]; const attempt = state.attempts[run.activeAttemptId];
     const result = await f.adapter.applyInput({ ...f.input, commandId: ambiguous, inputId: run.inputId, runId: run.runId, runGeneration: attempt.generation });
     f.core.controlService.record({ type: "input.recorded", commandId: "ambiguous-recorded", now: Date.now(), threadId: f.sessionId, inputId: run.inputId, entryId: result.entryId });
+    const resource=await f.adapter.acquireProvider({threadId:f.sessionId,bindingId:attempt.bindingId,generation:attempt.generation});
+    f.core.controlService.record({type:'binding.acquired',commandId:'ambiguous-acquired',now:Date.now(),threadId:f.sessionId,binding:resource.binding});
     f.core.controlService.record({ type: "attempt.dispatch", commandId: "ambiguous-marked", now: Date.now(), threadId: f.sessionId, attemptId: attempt.attemptId, authorized: true });
     await f.core.close(); const { core } = await makeCore(f); await core.reconcileOnBoot(); await core.effectWorker.drain();
     expect(await core.controlService.getReceipt(principal, ambiguous)).toMatchObject({ state: "interrupted", delivery: "unknown" });
@@ -395,8 +400,10 @@ it("native resume/fork/clear/delete and cancellation replay one persisted result
   const { core } = await makeCore(f); await core.reconcileOnBoot(); core.effectWorker.start();
   const principal = { deviceSessionId: "cli", scopes: new Set(["session:operate", "session:read"] as const) };
   const lifecycle = createSessionLifecycleRpc({ swarmManager: f.manager, control: core.controlService });
-  const call = async (method: Parameters<typeof lifecycle.execute>[1], input: object) => {
-    const receipt = await lifecycle.execute(principal, method, input);
+  const call = async (method: Parameters<typeof lifecycle.execute>[1] | 'session.fork', input: object) => {
+    const receipt = method==='session.fork'
+      ? await core.controlService.execute(principal,method,input as Parameters<typeof core.controlService.execute<'session.fork'>>[2])
+      : await lifecycle.execute(principal, method, input);
     for (let i = 0; i < 100; i++) {
       const current = await core.controlService.getReceipt(principal, receipt.commandId);
       if (!["accepted", "running"].includes(current.state)) return current;

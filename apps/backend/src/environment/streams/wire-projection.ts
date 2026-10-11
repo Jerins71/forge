@@ -14,7 +14,7 @@ const shellCheck = TypeCompiler.Compile(ShellStreamItemSchema);
 const itemCheck = TypeCompiler.Compile(DetailItemSchema);
 const cursorCheck = TypeCompiler.Compile(StreamCursorSchema);
 const shellTypes = new Set(["recovery.upsert", "project.upsert", "project.remove", "session.upsert", "session.remove"]);
-const detailTypes = new Set(["plan.upsert", "goal.upsert", "recovery.upsert", "item.upsert", "worker.upsert", "worker.remove", "choice.upsert", "receipt.upsert", "session.upsert", "detail.reset"]);
+const detailTypes = new Set(["lineage.upsert", "plan.upsert", "goal.upsert", "recovery.upsert", "item.upsert", "worker.upsert", "worker.remove", "choice.upsert", "receipt.upsert", "session.upsert", "detail.reset"]);
 
 /** Pure client-copyable decoder: an invalid known event must never become unknown. */
 export function decodeStreamItem(topic: "shell", value: unknown): ShellStreamItem | UnknownStreamItem;

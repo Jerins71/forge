@@ -1422,20 +1422,3 @@ function normalizeOptionalMetadataValue(value: string | undefined): string | und
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
-
-
-
-export function createDeferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (reason?: unknown) => void;
-} {
-  let resolve = (_value: T) => {};
-  let reject = (_reason?: unknown) => {};
-  const promise = new Promise<T>((nextResolve, nextReject) => {
-    resolve = nextResolve;
-    reject = nextReject;
-  });
-
-  return { promise, resolve, reject };
-}

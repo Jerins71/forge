@@ -14,7 +14,6 @@ import { isConversationEntryEvent } from "../../swarm/session/conversation-valid
 import { createConversationHistorySeamCursor, readConversationHistoryPage } from "../../swarm/session/conversation-page-reader.js";
 import { sessionTransferCapabilities } from "./orchestration/transfers.js";
 import { runtimeProviderCapabilities } from "../../swarm/runtime/provider-selection.js";
-import type { ProviderBinding } from "../../swarm/runtime/provider-contract.js";
 import type { Principal } from "./control-types.js";
 import { CONVERSATION_ENTRY_TYPE } from "../../swarm/session/conversation-timeline.js";
 import type { ControlTransaction, EventSink } from "./event-sink.js";
@@ -87,7 +86,8 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const attention = swarmManager.getSessionAttentionSnapshot().attentions.find(attention => attention.sessionAgentId === descriptor.agentId);
     const row = database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(descriptor.agentId) as { desired_state: string } | undefined;
     const state=loadState(database);
-    const nativeBinding=Object.values(state.bindings).filter(b=>b.scope.threadId===descriptor.agentId && b.capabilities.provider===runtimeProviderCapabilities(descriptor.model.provider).provider).sort((a,b)=>b.scope.generation-a.scope.generation)[0];
+    const model=state.threads[descriptor.agentId]?.model ?? descriptor.model;
+    const nativeBinding=Object.values(state.bindings).filter(b=>b.scope.threadId===descriptor.agentId && b.capabilities.provider===runtimeProviderCapabilities(model.provider).provider).sort((a,b)=>b.scope.generation-a.scope.generation)[0];
     const lineage=state.threads[descriptor.agentId]?.lineage;
     const lifecycle = projectLifecycleStatus(state, descriptor.agentId);
     const status = lifecycle ? lifecycle.sessionStatus : row?.desired_state === "stopped" ? swarmManager.isSessionShutdownSafe(descriptor.agentId) ? "stopped" : "stopping"
@@ -104,8 +104,8 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       workspace: { ...(prior?.workspace ?? { kind: "current_checkout", branch: null }), cwd: descriptor.cwd },
       ...(descriptor.managerPosture ? { delegation: { managerPosture: descriptor.managerPosture, managerPostureOrigin: descriptor.managerPostureOrigin ?? "product_default", rosterId: descriptor.delegationRosterId, rosterOrigin: descriptor.delegationRosterOrigin } } : {}),
       contextMode: { effective: descriptor.contextModeOverride ?? swarmManager.listProfiles().find(p => p.profileId === descriptor.profileId)?.defaultContextMode ?? "summary", ...(descriptor.contextModeOverride ? { override: descriptor.contextModeOverride } : {}) },
-      model: { provider: descriptor.model.provider, modelId: descriptor.model.modelId, thinkingLevel: descriptor.model.thinkingLevel,
-        origin: descriptor.modelOrigin === "session_override" ? "session_override" : "profile_default" },
+      model: { provider: model.provider, modelId: model.modelId, thinkingLevel: model.thinkingLevel,
+        origin: model.provider !== descriptor.model.provider || model.modelId !== descriptor.model.modelId || descriptor.modelOrigin === "session_override" ? "session_override" : "profile_default" },
       ...(attention ? { attentionOccurrence: { attentionId: attention.attentionId, reason: attention.reason, raisedAt: attention.raisedAt } } : {}) };
   }
   function upsertSession(tx: ControlTransaction, sessionId: string, pendingCount?: number) {

@@ -104,6 +104,20 @@ describe('durable lineage with the real kernel, SQLite store and outbox',()=>{
     f.record({type:'transfer.create',commandId:'descendant-switch',now,transferId:'descendant-switch',kind:'provider_switch',source:f.point('grandchild'),targetThreadId:'grandchild',targetModel:model('claude'),authorized:true});await f.core().effectWorker.drain();await f.submit('grandchild','switched');expect(f.starts.at(-1)!.text).toContain('request root');expect(f.starts.at(-1)!.text).toContain('request child');
     await f.boot();expect(f.state().handoffs[h.handoffId]).toEqual(h);
   });
+  it.each(['missing','noop'] as const)('fails closed when the lazy fork provisioner is %s',async kind=>{
+    const f=await fixture();
+    const summary={sessionId:'source',projectId:'project',title:'Source',status:'idle',attention:'none',unread:0,workerCount:0,updatedAt:new Date(now).toISOString(),sortKey:'source',archived:false,workspace:{kind:'current_checkout',cwd:f.root,branch:null}};
+    f.core().database.prepare("INSERT INTO control_sessions(session_id,project_id,desired_state,summary_json,updated_sequence) VALUES ('source','project','running',?,0)").run(JSON.stringify(summary));
+    if(kind==='noop') f.options.swarm.prepareLineageSession=async()=>{};
+    const principal={deviceSessionId:'ui',scopes:new Set(['session:operate'] as const)};
+    const input={commandId:'55555555-5555-4555-8555-555555555555',sessionId:'source'};
+    const receipt=await f.core().controlService.execute(principal,'session.fork',input);
+    expect(receipt).toMatchObject({state:'failed',error:{code:'UNAVAILABLE'}});
+    expect(await f.core().controlService.execute(principal,'session.fork',input)).toEqual(receipt);
+    expect(f.state().threads[`v2-${input.commandId}`]).toBeUndefined();
+    expect(Object.values(f.state().transfers)).toHaveLength(0);
+    expect(f.counts().opens).toBe(0);
+  });
   it('routes exact fork RPC and tools through shared admission, receipts, live lineage and replay',async()=>{
     const f=await fixture();const r=await f.submit('source','rpc');f.terminal(r.runId);
     const summary={sessionId:'source',projectId:'project',title:'Source',status:'idle',attention:'none',unread:0,workerCount:0,updatedAt:new Date(now).toISOString(),sortKey:'source',archived:false,workspace:{kind:'current_checkout',cwd:f.root,branch:null}};
@@ -158,6 +172,9 @@ describe('durable lineage with the real kernel, SQLite store and outbox',()=>{
       const summary=JSON.parse((f.core().database.prepare("SELECT summary_json FROM control_sessions WHERE session_id='source'").get() as {summary_json:string}).summary_json);expect(summary.transferCapabilities).toEqual({fork:true,nativeFork:true,throughTurnFork:true,providerSwitch:true});
       const point=f.point('source',{kind:'message',entryId:items()[0].itemId});expect(point.entryId).toBe(items()[0].itemId);
       f.entries.source.push(entry('source','detail-live',run.runId,'live'));await write();manager.emit('conversation_message',f.entries.source.at(-1));expect(items().at(-1)).toMatchObject({itemId:'detail-live',runId:run.runId});
+      f.record({type:'transfer.create',commandId:'visible-pending-model',now,transferId:'visible-pending-model',kind:'provider_switch',source:f.point(),targetThreadId:'source',targetModel:model('claude'),authorized:true});
+      manager.emit('agent_status',{agentId:'source',status:'idle',timestamp:stamp});
+      const switched=JSON.parse((f.core().database.prepare("SELECT summary_json FROM control_sessions WHERE session_id='source'").get() as {summary_json:string}).summary_json);expect(switched.model.provider).toBe('claude-native');
     } finally {mirror.dispose();}
   });
   it('accepts sourcePoint-only and legacy fromItemId-only forks, and continues an unused idle worker with a result session ID',async()=>{

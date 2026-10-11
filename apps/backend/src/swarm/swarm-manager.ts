@@ -1,3 +1,4 @@
+import { supportsSecureRuntimeProvider } from "./secure-sessions/runtime/secure-runtime-provider-policy.js";
 import type { CoreAgentMessagePort } from "./core-agent-message-port.js";
 import type { HistorySearchService } from "./history-recall/index.js";
 import { mkdir } from "node:fs/promises";
@@ -38,7 +39,7 @@ import { ForgeExtensionHost } from "./forge-extension-host.js";
 import { RuntimeRecoveryState } from "./runtime/runtime-recovery-state.js";
 import { SwarmRuntimeController } from "./swarm-runtime-controller.js";
 import { SwarmRuntimeLifecycleCoordinator } from "./swarm-runtime-lifecycle-coordinator.js";
-import { SwarmSpecialistFallbackManager } from "./swarm-specialist-fallback-manager.js";
+import { SpecialistFallbackPolicy } from "./specialist-fallback-policy.js";
 import {
   getManagedModelProviderCredentialAvailability,
   SecretsEnvService
@@ -133,7 +134,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private readonly runtimeLifecycleCoordinator: SwarmRuntimeLifecycleCoordinator;
   private readonly restartRecoveryCoordinator: RestartRecoveryCoordinator;
   private readonly bootCoordinator: SwarmBootCoordinator;
-  private readonly specialistFallbackManager: SwarmSpecialistFallbackManager;
+  private readonly specialistFallbackManager: SpecialistFallbackPolicy;
   private readonly managerBootstrapCoordinator: ManagerBootstrapCoordinator;
   private readonly profileSessionBookkeepingCoordinator: ProfileSessionBookkeepingCoordinator;
   private readonly configurationCoordinator: SwarmConfigurationCoordinator;
@@ -146,6 +147,24 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private readonly userMessageCoordinator: UserMessageCoordinator;
   private readonly sessionPlanCoordinator: SessionPlanCoordinator;
   private readonly compactionCoordinator: SwarmCompactionCoordinator;
+  lineage?: import("./lineage-tools.js").CoreLineagePort;
+  installCoreLineagePort(port: import("./lineage-tools.js").CoreLineagePort): void { this.lineage=port; }
+  prepareLineageSession(input: Parameters<SwarmSessionService["prepareLineageSession"]>[0]) { return this.sessionService.prepareLineageSession(input); }
+  private async setControlledProviderModel(threadId:string,model?:Pick<AgentModelDescriptor,"provider"|"modelId"> & Partial<Pick<AgentModelDescriptor,"thinkingLevel">>):Promise<void> {
+    const descriptor=this.descriptors.get(threadId);if(!descriptor) throw new Error("Provider target is unavailable");
+    if(model && (descriptor.model.provider!==model.provider || descriptor.model.modelId!==model.modelId || model.thinkingLevel!==undefined && descriptor.model.thinkingLevel!==model.thinkingLevel)) {
+      if(this.runtimes.has(threadId)) throw new Error("Model replacement requires confirmed provider shutdown");
+      const updated = await this.descriptorStoreAdapter.patchDescriptor(threadId,{model:{...descriptor.model,...model},status:descriptor.status==="stopped"?"idle":descriptor.status});
+      if (descriptor.role === "worker") {
+        const manager = this.descriptors.get(descriptor.managerId);
+        if (manager?.profileId) await this.sessionPlanCoordinator.recordWorkGraphWorkerModelReroute({agentId:manager.agentId,profileId:manager.profileId},threadId,updated.model);
+      }
+    } else if(descriptor.status==="stopped") await this.descriptorStoreAdapter.patchDescriptor(threadId,{status:"idle"});
+  }
+  override async acquireControlledProvider(scope: import("@forge/protocol").ProviderScope,conversation?:import("@forge/protocol").ProviderConversationRef,model?:Pick<AgentModelDescriptor,"provider"|"modelId"> & Partial<Pick<AgentModelDescriptor,"thinkingLevel">>) {
+    await this.setControlledProviderModel(scope.threadId,model);
+    return this.runtimeController.acquireProvider(scope,()=>this.userMessageCoordinator.acquireRuntime(scope.threadId),conversation);
+  }
   installCoreAgentMessagePort(port: CoreAgentMessagePort): void {
     this.agentMessageDispatcher.installCoreAgentMessages(port);
     this.lifecycleService.installCoreAgentMessages(port);
@@ -839,6 +858,8 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         this.codexPluginDelegationCoordinator.applySpecialistAvailability(roster, managerAgentId),
       applyManagerRuntimeRecyclePolicy: (agentId, reason) =>
         this.projectExecutableTrustCoordinator.applyManagerRuntimeRecyclePolicy(agentId, reason),
+      switchProviderContext: async (agentId,model) => { if(!this.lineage) throw new Error("Durable context transfer owner is unavailable");await this.lineage.switchContext(agentId,model); },
+      canUseSecureModel: (model) => supportsSecureRuntimeProvider(model.provider),
       emitModelChangeNotice: (agentId, sourceModel, targetModel) =>
         this.conversationProjector.emitConversationMessage(createModelChangeNoticeEvent(agentId, sourceModel, targetModel, this.now())),
       now: this.now,

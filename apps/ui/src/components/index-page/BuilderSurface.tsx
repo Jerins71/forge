@@ -1846,7 +1846,7 @@ export function BuilderSurface({
         parentLabel: resolveSessionLabel(lineageParentId) ?? lineageParentId,
         onMergeBack: () => session.handleMergeBack(activeAgentId),
         inProgress: session.mergeBackSessionId === activeAgentId,
-        disabledReason: contextTransferUnavailableReason ?? providerRefusals.fork ?? mergeBackUnsupportedReason(sessionLineage) ?? undefined,
+        disabledReason: contextTransferUnavailableReason ?? mergeBackUnsupportedReason(sessionLineage) ?? undefined,
       }
     : null
 

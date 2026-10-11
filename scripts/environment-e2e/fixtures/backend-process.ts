@@ -43,7 +43,7 @@ config.defaultCwd = checkout;
 config.cwdAllowlistRoots = [resolve(checkout, '..')];
 const authFile = getSharedAuthFilePath(config.paths.dataDir);
 await mkdir(dirname(authFile), { recursive: true });
-await writeFile(authFile, JSON.stringify({ 'openai-codex': { type: 'api_key', key: 'forge-fixture-inert-not-a-provider-key' } }), { mode: 0o600 });
+await writeFile(authFile, JSON.stringify({ 'openai-codex': { type: 'api_key', key: 'forge-fixture-inert-not-a-provider-key' }, ...(process.env.FORGE_E2E_LINEAGE === '1' ? { anthropic: { type: 'api_key', key: 'sk-ant-fake-fixture' } } : {}) }), { mode: 0o600 });
 // The native contract reader checks that rollout metadata is inside CODEX_HOME.
 // Resolve that isolated home into the checkout so the fake writes only there.
 const nativeHome = getNativeCodexHome(config.paths.dataDir);
@@ -59,7 +59,7 @@ await saveSharedSpecialist(config.paths.dataDir, 'fixture-worker', {
   provider: 'codex-native', modelId: 'gpt-6-sol', reasoningLevel: 'high',
   promptBody: 'Return the synthetic fixture worker result.',
 });
-lifecycle.server = await startServer({ config, environmentIdentity: { label: fixture.instanceId }, onReady: ({ port, environment }) => {
+lifecycle.server = await startServer({ config, environmentIdentity: { label: fixture.instanceId, ...(process.env.FORGE_E2E_LINEAGE === '1' && fixture.instanceId === 'env-c' ? { capabilities: { projectAgentMetadata: true, sessionState: true, shellResume: true, sessionDetail: true, durableCommands: true, newWorktree: true, artifactUpload: true, terminal: true, cliTransport: true, sessionLifecycle: true, projectPolicy: true, contextTransfers: false } } : {}) }, onReady: ({ port, environment }) => {
   if (process.connected) process.send?.({ type: 'ready', port, dataDir: config.paths.dataDir, environment }, () => {});
 } });
 installEnvironmentParentBootstrap({ authorizedPhysicalParent, createGrant: () => lifecycle.server!.createBootstrapGrant() });

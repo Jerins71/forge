@@ -114,10 +114,6 @@ export type RuntimeGenerationEvent =
       meta?: RuntimeGenerationCallMeta;
     };
 
-export interface SpecialistFallbackReplaySnapshot {
-  messages: RuntimeUserMessage[];
-}
-
 export interface RuntimeCodexTransportDebugStats {
   requests: number;
   connectionsCreated: number;
@@ -307,8 +303,6 @@ export interface SwarmAgentRuntime {
   setPinnedContent?(content: string | undefined, options?: SetPinnedContentOptions): void | Promise<void>;
   isContextRecoveryInProgress?(): boolean;
   isContextRecoveryActive?(): boolean;
-  prepareForSpecialistFallbackReplay?(): Promise<SpecialistFallbackReplaySnapshot | undefined>;
-  restorePreparedSpecialistFallbackReplay?(): Promise<void>;
 
   sendMessage(
     input: RuntimeUserMessageInput,

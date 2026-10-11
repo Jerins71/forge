@@ -316,7 +316,7 @@ export function createEventSink(database: Database, clock: () => number, random:
         const attention = Object.values(state.requests).some(request => request.threadId === threadId && request.state === "pending") ? "choice" : run ? "none" : terminal?.type === "run.terminal" ? terminal.run.outcome === "completed" ? "result" : terminal.run.outcome === "failed" ? "error" : "none" : summary.attention;
         const status = lifecycleStatus.sessionStatus;
         database.prepare("UPDATE control_sessions SET desired_state=?,run_generation=? WHERE session_id=?").run(thread.desired, thread.generation, threadId);
-        sink.append(tx, { topic: "shell", sessionId: threadId, event: { type: "session.upsert", session: { ...summary, transferCapabilities:sessionTransferCapabilities(binding), ...(thread.lineage ? {lineage:thread.lineage}:{}), status, attention, pendingCount: Object.values(state.runs).filter(r => r.threadId === threadId && r.state === "queued").length } } });
+        sink.append(tx, { topic: "shell", sessionId: threadId, event: { type: "session.upsert", session: { ...summary, ...(thread.model ? { model: { ...thread.model, origin: thread.model.provider !== summary.model?.provider || thread.model.modelId !== summary.model?.modelId ? "session_override" : summary.model.origin } } : {}), transferCapabilities:sessionTransferCapabilities(binding), ...(thread.lineage ? {lineage:thread.lineage}:{}), status, attention, pendingCount: Object.values(state.runs).filter(r => r.threadId === threadId && r.state === "queued").length } } });
       }
       return decision;
     },

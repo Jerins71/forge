@@ -323,7 +323,7 @@ export class UserMessageCoordinator {
       const classification = target.role === "manager" ? this.options.codex.plugin.classifyAndPreflightUserTurn(target as ManagerDescriptor, text, sourceContext) : { kind: "none" } as const;
       await this.options.goals.noteUserTurn(target);
       const guidance = await linkSessionReferences(this.options.sessionReferences, target, options.sessionReferenceAgentIds);
-      const appended = await this.appendUserMessage(target, text, attachments, sourceContext, replyTo, options.clientRequestId, options.controlledInput);
+      const appended = await this.appendUserMessage(target, text, attachments, sourceContext, replyTo, options.clientRequestId, options.controlledInput, options.runId);
       const prepared = target.role === "manager" ? this.options.codex.plugin.prepareUserTurn({ manager: target as ManagerDescriptor, text, sourceContext, classification, userMessageId: appended.event.id }) : {};
       const outputTarget = this.options.assistantOutput.resolveTargetForUserInput(sourceContext);
       const visible = formatInboundUserMessageForManager(text, sourceContext, outputTarget, replyTo);
@@ -541,6 +541,7 @@ export class UserMessageCoordinator {
     replyTo?: ConversationReplyTarget,
     clientRequestId?: string,
     controlledInput?: ControlledInputContext,
+    turnId?: string,
   ): Promise<AppendConversationUserMessageResult> {
     const receivedAt = this.options.now();
     const managerContextId = target.role === "manager" ? target.agentId : target.managerId;
@@ -559,6 +560,7 @@ export class UserMessageCoordinator {
       sourceContext,
       clientRequestId,
       controlledInput,
+      turnId,
       attachments,
       replyTo,
     });

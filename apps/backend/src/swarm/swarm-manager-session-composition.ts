@@ -15,13 +15,6 @@ import {
 } from "./project-agent-sharing-service.js";
 import type { SwarmAgentRuntime } from "./runtime-contracts.js";
 import type { AgentDirectory } from "./agent-directory.js";
-import { CURSOR_SDK_RUNTIME_STATE_ENTRY_TYPE } from "./runtime/cursor-sdk/cursor-sdk-agent-runtime.js";
-import { NATIVE_CLAUDE_STATE } from "./runtime/claude/claude-agent-runtime.js";
-import { NATIVE_CODEX_STATE } from "./runtime/codex/codex-agent-runtime.js";
-import { CURSOR_SDK_USAGE_ENTRY_TYPE } from "../utils/cursor-sdk-usage-records.js";
-import { GENERATION_MEASUREMENT_ENTRY_TYPE } from "../utils/generation-measurement-records.js";
-import { PI_INITIAL_MODEL_INPUT_CAPTURE_ENTRY_TYPE } from "./runtime/initial-model-input-capture.js";
-import { copySessionHistoryForFork } from "./session/conversation-timeline.js";
 import {
   SessionProvisioner,
   type SessionProvisionerOptions,
@@ -37,7 +30,6 @@ import { SwarmSessionService, type SwarmSessionServiceOptions } from "./swarm-se
 import { resolveDelegationRosterSettings } from "./specialists/delegation-roster-store.js";
 import type { AgentDescriptor, ManagerProfile, SwarmConfig } from "./types.js";
 
-const LEGACY_CLAUDE_RUNTIME_STATE_ENTRY_TYPE = "swarm_claude_session_state";
 
 export interface SwarmManagerSessionCompositionState {
   config: SwarmConfig;
@@ -56,7 +48,7 @@ export interface SwarmManagerSessionCompositionServices {
 }
 
 type ProvisionerOwnedKeys = "dataDir" | "runtimes" | "forgetPinnedMessages" | "conversationProjector";
-type SessionOwnedKeys = "profiles" | "runtimes" | "getDescriptor" | "provisioner" | "prepareSessionCreation" | "resolveGlobalDelegationRosterId" | "deleteProjectAgentRecord" | "copySessionHistoryForFork" | "copyPinnedMessagesForFork" | "resetConversationHistory";
+type SessionOwnedKeys = "profiles" | "runtimes" | "getDescriptor" | "provisioner" | "prepareSessionCreation" | "resolveGlobalDelegationRosterId" | "deleteProjectAgentRecord" | "copyPinnedMessagesForFork" | "resetConversationHistory";
 type ProjectAgentOwnedKeys = "dataDir" | "descriptors" | "provisioner" | "now" | "prepareSessionCreation";
 type SharingOwnedKeys = "dataDir" | "now" | "getProfiles" | "getDescriptor" | "getDescriptors";
 type ProjectCoordinatorOwnedKeys = "config" | "descriptors" | "profiles" | "projectAgents" | "sharing" | "now";
@@ -140,24 +132,7 @@ export function createSwarmManagerSessionComposition(
       (await resolveDelegationRosterSettings(state.config.paths.dataDir)).defaultRosterId,
     deleteProjectAgentRecord: (profileId, handle) =>
       deleteProjectAgentRecord(state.config.paths.dataDir, profileId, handle),
-    copySessionHistoryForFork: (sourceSessionFile, targetSessionFile, fromMessageId) =>
-      copySessionHistoryForFork({
-        sourceSessionFile,
-        targetSessionFile,
-        fromMessageId,
-        omittedCustomTypes: [
-          LEGACY_CLAUDE_RUNTIME_STATE_ENTRY_TYPE,
-          CURSOR_SDK_RUNTIME_STATE_ENTRY_TYPE,
-          CURSOR_SDK_USAGE_ENTRY_TYPE,
-          GENERATION_MEASUREMENT_ENTRY_TYPE,
-          PI_INITIAL_MODEL_INPUT_CAPTURE_ENTRY_TYPE,
-          // A native thread identity survives only a latest-message fork, where the
-          // runtime forks that thread natively. Native threads cannot end at an
-          // arbitrary Forge message, so bounded forks rebuild from the canonical copy.
-          ...(fromMessageId ? [NATIVE_CLAUDE_STATE, NATIVE_CODEX_STATE] : []),
-        ],
-      }),
-    copyPinnedMessagesForFork: (source, forked) => services.pins.copyPinsForFork(source, forked),
+    copyPinnedMessagesForFork: (source, forked, point) => services.pins.copyPinsForFork(source, forked, point),
     resetConversationHistory: (agentId) => services.conversations.resetConversationHistory(agentId),
     invalidateHistory: (id) => services.history?.invalidateSource({ sessionAgentId: id, actorAgentId: id }),
   });

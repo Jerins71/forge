@@ -51,39 +51,6 @@ function buildSessionHeader(cwd: string, id = "session-header"): string {
   });
 }
 
-function buildConversationEntry(id: string, text = id): string {
-  return buildConversationMessageEntry({ wrapperId: id, dataId: id, text });
-}
-
-function buildConversationMessageEntry(options: {
-  wrapperId?: string;
-  dataId?: string;
-  text?: string;
-  parentId?: string | null;
-}): string {
-  const data: Record<string, unknown> = {
-    type: "conversation_message",
-    agentId: "manager",
-    role: "assistant",
-    text: options.text ?? options.dataId ?? options.wrapperId,
-    timestamp: FIXED_NOW,
-    source: "system"
-  };
-
-  if (options.dataId !== undefined) {
-    data.id = options.dataId;
-  }
-
-  return JSON.stringify({
-    type: "custom",
-    customType: CONVERSATION_ENTRY_TYPE,
-    ...(options.wrapperId !== undefined ? { id: options.wrapperId } : {}),
-    parentId: options.parentId ?? null,
-    timestamp: FIXED_NOW,
-    data
-  });
-}
-
 describe("ConversationTimeline", () => {
   it("creates a missing canonical session file with a header and first conversation entry", async () => {
     const root = await createTempDir("conversation-timeline-");

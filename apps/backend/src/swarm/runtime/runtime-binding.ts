@@ -36,9 +36,6 @@ export class RuntimeBinding {
     return this.runtimeTokensByAgentId.get(agentId);
   }
 
-  restoreRuntimeTokenForFallbackRollback(agentId: string, runtimeToken: number): void {
-    this.runtimeTokensByAgentId.set(agentId, runtimeToken);
-  }
 
   isCurrentRuntimeToken(agentId: string, runtimeToken: number): boolean {
     return this.runtimeTokensByAgentId.get(agentId) === runtimeToken;

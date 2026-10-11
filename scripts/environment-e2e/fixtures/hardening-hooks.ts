@@ -180,17 +180,35 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
     return originalStop.apply(this, args);
   };
   const originalApply = SwarmManager.prototype.applyControlledInput;
-  SwarmManager.prototype.applyControlledInput = function (text, input) {
+  SwarmManager.prototype.applyControlledInput = async function (text, input) {
     const control = input.controlledInput;
-    return originalApply.call(this, text, { ...input, controlledInput: {
+    const result = await originalApply.call(this, text, { ...input, controlledInput: {
       ...control,
       onLocator(locator) { hit('post-JSONL', control.commandId); control.onLocator?.(locator); },
-      async beforeDispatch() {
-        if (held?.commandId === control.commandId) { held.reached = true; await held.wait; }
-        const result = await control.beforeDispatch(); if (result === 'dispatch') hit('post-dispatch-marker', control.commandId); return result;
-      },
-      async onDispatchAccepted() { hit('post-provider-accept', control.commandId); await control.onDispatchAccepted(); },
     } });
+    // Hold after canonical append and before the core's durable dispatch marker.
+    if (held?.commandId === control.commandId) { held.reached = true; await held.wait; }
+    return result;
+  };
+  const originalAcquire = SwarmManager.prototype.acquireControlledProvider;
+  SwarmManager.prototype.acquireControlledProvider = async function (...args) {
+    const acquired = await originalAcquire.apply(this, args);
+    const adapter = acquired.adapter;
+    const start = adapter.start.bind(adapter);
+    acquired.adapter = new Proxy(adapter, {
+      get(target, key) {
+        if (key === 'start') return async (input: Parameters<typeof start>[0]) => {
+          const commandId = input.runId.replace(/^run-/, '');
+          hit('post-dispatch-marker', commandId);
+          const request = await start(input);
+          hit('post-provider-accept', commandId);
+          return request;
+        };
+        const member = Reflect.get(target, key);
+        return typeof member === 'function' ? member.bind(target) : member;
+      },
+    });
+    return acquired;
   };
   return {
     arm(input: { commandId: string; boundary: CrashBoundary }) {

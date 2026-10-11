@@ -55,6 +55,7 @@ export function createLineageCommands(sink:EventSink,options:ControlCoreOptions,
         if(kind==='fork') {
           if(!options.swarm.prepareLineageSession) throw new ControlError('UNAVAILABLE','Lazy lineage session provisioner is unavailable');
           await options.swarm.prepareLineageSession({kind:method==='worker.continue'?'continued_worker':'fork',commandId:input.commandId,sourceThreadId:sourceId,targetThreadId:targetId,title:'title' in input ? input.title:undefined,sourcePoint:point,historical:!!point.messageBounded || !point.nativeLatest,model,...('purpose' in input ? {purpose:input.purpose}: {})});
+          if(!sink.database.prepare('SELECT 1 FROM control_sessions WHERE session_id=? AND deleted=0').get(targetId)) throw new ControlError('UNAVAILABLE','Lazy lineage provisioner did not create the target conversation');
         }
         sink.transaction(tx=>sink.commitCommand(tx,command));
         return {sessionId:targetId,projectId:source.projectId};

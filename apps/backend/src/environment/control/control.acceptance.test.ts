@@ -190,7 +190,7 @@ describe("durable control acceptance on real SQLite", () => {
     expect(await f.core.controlService.execute(principal, "session.launch", launch)).toEqual(receipt);
     expect(f.counts().preflightCount).toBe(1);
     for (const table of ["commands", "control_sessions", "workspace_reservations", "control_inputs"]) expect(count(f.core, table)).toBe(1);
-    expect(count(f.core, "effects")).toBe(4);
+    expect(count(f.core, "effects")).toBe(3);
     expect(count(f.core, "events")).toBe(events);
     await expect(f.core.controlService.execute(principal, "session.launch", { ...launch, title: "changed" })).rejects.toMatchObject({
       code: "CONFLICT",
@@ -483,7 +483,7 @@ describe("durable control acceptance on real SQLite", () => {
     await f.core.controlService.execute(principal, "session.launch", launch);
     expect(f.counts().preflightCount).toBe(2);
     expect(count(f.core, "commands")).toBe(1);
-    expect(count(f.core, "effects")).toBe(4);
+    expect(count(f.core, "effects")).toBe(3);
   });
 
   it("keeps epoch/high water and command knowledge after journal prefix retention", async () => {
@@ -588,7 +588,7 @@ describe("durable control acceptance on real SQLite", () => {
     await expect(f.core.controlService.execute(principal, "session.send", { ...input, commandId: STOP })).rejects.toMatchObject(error);
     expect(count(f.core, "commands")).toBe(2);
     expect(count(f.core, "control_inputs")).toBe(2);
-    expect(count(f.core, "effects")).toBe(5);
+    expect(count(f.core, "effects")).toBe(4);
     expect(count(f.core, "events")).toBe(eventCount);
     expect(calls).toBe(2);
   });

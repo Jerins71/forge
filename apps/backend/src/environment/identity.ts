@@ -53,6 +53,7 @@ const capabilities: EnvironmentCapabilities = {
   cliTransport: true,
   sessionLifecycle: true,
   projectPolicy: true,
+  contextTransfers: true,
 };
 function describe(file: EnvironmentIdentityFile, options: IdentityOptions): EnvironmentIdentity {
   const descriptor: EnvironmentDescriptor = {

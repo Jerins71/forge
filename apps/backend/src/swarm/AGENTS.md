@@ -53,8 +53,7 @@ Treat those items as separate follow-up changes, not reasons to broaden unrelate
 - `swarm-agent-lifecycle-service.ts` - manager/worker stop, resume, spawn, rename, pin, and runtime lifecycle coordination.
 - `swarm-runtime-controller.ts` - runtime event handling, message/tool/status routing, and shutdown/recovery coordination.
 - `swarm-runtime-controller-host-adapter.ts` - compiler-checked, lazy-safe adapter between the manager facade and runtime controller.
-- `swarm-manager-runtime-composition.ts` - explicit three-phase runtime composition root for controller/health/fallback, planning/compaction, and turn/lifecycle/trust/session/boot completion; preserves the constructor's late-bound callback order.
-- `swarm-specialist-fallback-manager.ts` - specialist fallback selection, replay, and handoff recovery.
+- `swarm-manager-runtime-composition.ts` - explicit three-phase runtime composition root for controller/health, planning/compaction, and turn/lifecycle/trust/session/boot completion; preserves the constructor's late-bound callback order.
 - `swarm-worker-health-service.ts` - worker stall detection and transient runtime-error grace handling.
 - `planning/session-plan-coordinator.ts` - live checklist/work-graph plan state, persistence, usage accounting, summary projection, and runtime context.
 - `remote-update-awareness/` - local Builder Git remote-update observation, scheduling, SQLite-backed settings/state, and bounded incoming-change tracking.
@@ -93,7 +92,7 @@ Treat the explicit `SwarmManagerFacade` application API as stable. Any signature
   and retry its cleanup in-process; only allow replacement after cleanup is confirmed. A whole-app restart
   is a last resort for an unrecoverable process boundary, not routine session recovery.
 - Boot ordering matters. Session/meta hydration, prompt/runtime setup, and lifecycle recovery are intentionally sequenced; do not reorder casually.
-- Specialist fallback replay must preserve buffered callbacks and prepared replay snapshots so the replacement runtime sees the same work stream.
+- Provider fallback is a durable core transfer after proved non-dispatch. Runtime callbacks are fenced by generation and attempt; unknown dispatch cannot be replayed.
 - The `SwarmManager` file and constructor ESLint budgets are ratchets. Lower them after extractions; do not raise them to land a feature.
 - History recall indexes autonomously after local Builder hydration and prefers recent sources. Partial catalogs must not purge live sources. Newest searches may use a bounded chronological prefix only when it contains enough matches; otherwise the complete FTS-led query runs and relevance ranking is unchanged. Unreadable sources are `degraded` or `unavailable`, not endless `building`. System-profile, internal-purpose, plugin, and external-thread runtimes stay excluded; Secure Sessions secrets stay out of indexed text. Pause waits for bounded current work, then gates background indexing and search/read catch-up while conversation recording, cached hits, and canonical reads remain available. The dispatcher acknowledgement-before-durable-queue gap is unchanged.
 
