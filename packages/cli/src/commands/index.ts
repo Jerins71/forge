@@ -11,6 +11,7 @@ import {
   handleChoicesMutationCommand,
   handleProjectAgentsMutationCommand,
   handleSessionsMutationCommand,
+  handleWorkersMutationCommand,
 } from './mutations.js'
 import { parseArgs } from './parser.js'
 import {
@@ -82,6 +83,8 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
           : await handleSessionsCommand(context)
       case 'agents':
         return await handleAgentsCommand(context)
+      case 'workers':
+        return await handleWorkersMutationCommand(context)
       case 'project-agents':
         return args.positionals[1] === 'send'
           ? await handleProjectAgentsMutationCommand(context)
@@ -135,6 +138,8 @@ function isSessionMutationAction(action: string | undefined): boolean {
     action === 'stop' ||
     action === 'resume' ||
     action === 'fork' ||
+    action === 'switch' ||
+    action === 'merge-back' ||
     action === 'compact' ||
     action === 'smart-compact' ||
     action === 'rename' ||

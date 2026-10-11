@@ -1,6 +1,7 @@
 import { projectPanelRevealRequest } from './ws-client/browser-state'
 import { projectFeatureEvent } from './ws-client/environment-feature-projection'
-import type { RpcInput, RpcOutput } from '@forge/protocol/environment-v2'
+import type { ContextSourceSelector, RpcInput, RpcOutput } from '@forge/protocol/environment-v2'
+import { contextTransferAvailability, type ForkTransferSelection, type SessionTransferModel } from './ws-client/context-transfers'
 import { EnvironmentRuntimeError, type EnvironmentClient, type DetailState } from '@forge/client-runtime'
 import {
   projectShell,
@@ -471,7 +472,7 @@ export class ManagerWsClient {
     const receipt = await this.lifecycle('session.stopAll', { sessionId: managerId })
     return { managerId, stoppedWorkerIds: receipt.result?.stoppedWorkerIds ?? [], managerStopped: receipt.result?.managerStopped ?? false }
   }
-  private async lifecycle<M extends Extract<CommandReceipt['method'], 'session.launch' | 'session.choose' | 'session.stop' | 'session.stopAll' | 'session.resume' | 'session.archive' | 'session.restore' | 'session.clear' | 'session.delete' | 'session.fork' | 'session.choice.cancel' | 'worker.stop' | 'worker.resume' | 'worker.kill'>>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<CommandReceipt> {
+  private async lifecycle<M extends Extract<CommandReceipt['method'], 'session.launch' | 'session.choose' | 'session.stop' | 'session.stopAll' | 'session.resume' | 'session.archive' | 'session.restore' | 'session.clear' | 'session.delete' | 'session.fork' | 'session.provider.switch' | 'session.mergeBack' | 'worker.continue' | 'session.choice.cancel' | 'worker.stop' | 'worker.resume' | 'worker.kill'>>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<CommandReceipt> {
     if (!this.environmentClient) throw new Error('A paired environment is required')
     const key = JSON.stringify([method, input])
     const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
@@ -713,8 +714,10 @@ export class ManagerWsClient {
 
   }
 
-  async forkSession(sourceAgentId: string, label?: string, fromMessageId?: string, options?: { sessionPurpose?: 'side_chat' }): Promise<SessionForkedResult> {
-    const receipt = await this.lifecycle('session.fork', { sessionId: sourceAgentId, ...(label ? { title: label } : {}), ...(fromMessageId ? { fromItemId: fromMessageId } : {}), ...(options?.sessionPurpose ? { purpose: options.sessionPurpose } : {}) })
+  /** A source point or model makes the fork a context transfer; the source point then replaces the legacy item cut. */
+  async forkSession(sourceAgentId: string, label?: string, fromMessageId?: string, options?: { sessionPurpose?: 'side_chat' } & ForkTransferSelection): Promise<SessionForkedResult> {
+    if (options?.sourcePoint || options?.model) this.requireContextTransfers()
+    const receipt = await this.lifecycle('session.fork', { sessionId: sourceAgentId, ...(label ? { title: label } : {}), ...(options?.sourcePoint ? { sourcePoint: options.sourcePoint } : fromMessageId ? { fromItemId: fromMessageId } : {}), ...(options?.model ? { model: options.model } : {}), ...(options?.sessionPurpose ? { purpose: options.sessionPurpose } : {}) })
     const sessionId = receipt.result?.sessionId ?? receipt.sessionId
     if (!sessionId) throw new Error('Session fork has no reserved identity')
     const shell = this.environmentClient!.shell.getSnapshot()
@@ -722,6 +725,37 @@ export class ManagerWsClient {
     const summary = shell.sessions.get(sessionId) ?? (source && { ...source, sessionId, title: label ?? source.title, status: 'idle' as const, archived: false, updatedAt: receipt.updatedAt })
     if (!summary) throw new Error('Session fork is awaiting shell synchronization')
     return { sourceAgentId, newSessionAgent: projectSession(summary, shell) }
+  }
+
+  /** The run a mounted detail item belongs to, when the environment reports it. */
+  itemRunId(itemId: string): string | undefined {
+    return this.environmentProjection?.items.find(item => item.itemId === itemId)?.runId
+  }
+  private requireContextTransfers(): void {
+    const availability = contextTransferAvailability(this.environmentClient)
+    if (!availability.available) throw new Error(availability.reason)
+  }
+  /** Hands the same session off to another provider or model; never a new conversation. */
+  async switchSessionProvider(agentId: string, model: SessionTransferModel): Promise<SessionActionResult> {
+    this.requireContextTransfers()
+    await this.lifecycle('session.provider.switch', { sessionId: agentId, model })
+    return { agentId }
+  }
+  /** The environment infers the target from the session's lineage parent. */
+  async mergeBackSession(agentId: string, sourcePoint?: ContextSourceSelector): Promise<SessionActionResult> {
+    this.requireContextTransfers()
+    await this.lifecycle('session.mergeBack', { sessionId: agentId, ...(sourcePoint ? { sourcePoint } : {}) })
+    return { agentId }
+  }
+  /** Continues a finished worker as a normal conversation whose identity comes from the receipt. */
+  async continueWorker(workerId: string, title?: string): Promise<{ workerId: string; sessionAgentId: string }> {
+    this.requireContextTransfers()
+    const sessionId = this.state.agents.find(agent => agent.agentId === workerId && agent.role === 'worker')?.managerId
+    if (!sessionId) throw new Error('Worker is not part of a loaded session')
+    const receipt = await this.lifecycle('worker.continue', { sessionId, workerId, ...(title ? { title } : {}) })
+    const sessionAgentId = receipt.result?.sessionId
+    if (!sessionAgentId) throw new Error('Continued worker has no conversation identity')
+    return { workerId, sessionAgentId }
   }
 
   private projectAgentFeatures() {
@@ -874,6 +908,8 @@ export class ManagerWsClient {
       void this.sessionState('session.readState.set', { sessionId, read: true }).catch(error => this.reportSessionStateError(error))
     this.detailLease = this.environmentClient.acquireDetail(sessionId)
     const store = this.detailLease.store
+    // Lineage belongs to one session; never present the previous session's while this one loads.
+    this.updateState({ sessionLineage: null, sessionTransferCapabilities: null })
     let projection: DetailState['projection'] = null
     let transient: DetailState['transient'] = new Map()
     const apply = () => {
@@ -884,6 +920,12 @@ export class ManagerWsClient {
         if (projection?.plan) this.handleServerEvent({ type: 'session_plan_snapshot', sessionAgentId: sessionId, profileId: projection.session.projectId, ...projection.plan })
         if (projection?.goal) this.handleServerEvent({ type: 'session_goal_snapshot', sessionAgentId: sessionId, profileId: projection.session.projectId, ...projection.goal })
         if (projection?.recovery !== undefined) this.updateState({ restartRecovery: projection.recovery })
+        const capabilities = projection?.session.transferCapabilities ?? null, previous = this.state.sessionTransferCapabilities
+        this.updateState({
+          sessionLineage: projection?.lineage ?? null,
+          // The same declaration keeps its identity so consumers do not re-render on every detail tick.
+          sessionTransferCapabilities: capabilities && previous && JSON.stringify(capabilities) === JSON.stringify(previous) ? previous : capabilities,
+        })
         const projectedMessages = projectDetailMessages(detail)
         const echoes = this.outbox?.pendingMessages(sessionId, projectedCommandIds(projection)) ?? []
         this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))

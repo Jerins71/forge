@@ -46,9 +46,11 @@ const SESSION_ROW_REF_EQUAL_KEYS: (keyof SessionRowItemProps)[] = [
   'archiveDisabledReason',
   'onRename',
   'onFork',
+  'getForkDisabledReason',
   'onMarkUnread',
   'onStopWorker',
   'onResumeWorker',
+  'workerContinuation',
   'highlightQuery',
   'onPinSession',
   'onPromoteToProjectAgent',
@@ -99,9 +101,11 @@ export const SessionRowItem = React.memo(function SessionRowItem({
   archiveDisabledReason,
   onRename,
   onFork,
+  getForkDisabledReason,
   onMarkUnread,
   onStopWorker,
   onResumeWorker,
+  workerContinuation,
   highlightQuery,
   onPinSession,
   onPromoteToProjectAgent,
@@ -193,6 +197,7 @@ export const SessionRowItem = React.memo(function SessionRowItem({
           archiveDisabledReason,
           onRename,
           onFork,
+          getForkDisabledReason,
           onMarkUnread,
           onPinSession,
           onPromoteToProjectAgent,
@@ -363,6 +368,8 @@ export const SessionRowItem = React.memo(function SessionRowItem({
                           onDelete={() => onDeleteAgent(worker.agentId)}
                           onStop={onStopWorker ? () => onStopWorker(worker.agentId) : undefined}
                           onResume={onResumeWorker ? () => onResumeWorker(worker.agentId) : undefined}
+                          onContinue={workerContinuation ? () => workerContinuation.onContinue(worker.agentId) : undefined}
+                          continueDisabledReason={workerContinuation?.disabledReason}
                           highlightQuery={highlightQuery}
                         />
                       </li>

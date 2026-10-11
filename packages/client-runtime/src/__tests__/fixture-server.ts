@@ -10,8 +10,27 @@ import {
   type RpcClientFrame,
   type ShellStreamItem,
   type DetailStreamItem,
+  type SessionLineageSnapshot,
 } from '@forge/protocol/environment-v2'
 import { defaultFixtureSeeds, type FixtureEnvironmentSeed } from '../fixture.js'
+/** A fork of `parent` whose provider switch produced one truncated portable handoff. */
+export function lineageSnapshotFixture(threadId = 'session-1', parentThreadId = 'parent-session'): SessionLineageSnapshot {
+  const basePoint = { threadId: parentThreadId, sequence: 42, entryId: 'entry-42' }
+  return {
+    threadId,
+    lineage: { parentThreadId, rootThreadId: parentThreadId, relationship: 'fork', transferId: 'transfer-fork', basePoint },
+    transfers: [
+      { transferId: 'transfer-switch', kind: 'provider_switch', source: { threadId, sequence: 57 }, targetThreadId: threadId, sourceProvider: 'codex-native', targetProvider: 'claude-native', strategy: 'portable_context', state: 'resolved', createdAt: 2, handoffId: 'handoff-1' },
+      { transferId: 'transfer-fork', kind: 'fork', source: basePoint, basePoint, targetThreadId: threadId, strategy: 'native_fork', state: 'consumed', createdAt: 1, consumedAt: 1 },
+    ],
+    handoffs: [{
+      handoffId: 'handoff-1', transferId: 'transfer-switch', artifactRef: 'handoff-artifact-1', sha256: 'a'.repeat(64), createdAt: 2,
+      provenance: { source: 'canonical_jsonl', renderer: 'forge-portable-v1', credentials: 'excluded', toolGrants: 'excluded' },
+      coverage: { sourceThreadId: threadId, requestedEntryIds: ['e1', 'e2', 'e3', 'e4'], includedEntryIds: ['e1', 'e2'], omittedEntryIds: ['e3'], partialEntryIds: ['e4'] },
+      budget: { maxChars: 120000, usedChars: 120000, truncated: true },
+    }],
+  }
+}
 export async function startFixtureServer(index = 0) {
   const seed: FixtureEnvironmentSeed = structuredClone(defaultFixtureSeeds()[0])
   seed.descriptor.capabilities.sessionLifecycle = true
@@ -158,6 +177,8 @@ export async function startFixtureServer(index = 0) {
           inputId: null,
           delivery: 'pending',
           error: null,
+          // The continued worker's conversation is a new identity carried by the receipt.
+          ...(method === 'worker.continue' ? { result: { sessionId: 'continued-session' } } : {}),
         }
         receipts.set(data.commandId, r)
         if (lostAck) {
@@ -166,6 +187,13 @@ export async function startFixtureServer(index = 0) {
           return
         }
         if (!holdReceiptAck) result(r)
+        return
+      }
+      if (method === 'session.lineage.get') {
+        const sessionId = (input as { sessionId: string }).sessionId
+        const detail = seed.details![sessionId]
+        if (!detail) return error('NOT_FOUND')
+        result(detail.lineage ?? { threadId: sessionId, lineage: null, transfers: [], handoffs: [] })
         return
       }
       if (method === 'session.workers') {
@@ -232,7 +260,8 @@ export async function startFixtureServer(index = 0) {
           item({
             kind: 'snapshot',
             streamEpoch: descriptor.streamEpoch,
-            sequence: 1,
+            // A complete snapshot is materialized at the current high water; paged shells stage from 1.
+            sequence: pages ? 1 : sequence,
             snapshot:
               method === 'shell.subscribe'
                 ? {

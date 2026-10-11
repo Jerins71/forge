@@ -2,7 +2,8 @@ import { isClaudeSignInRequired } from '@forge/protocol'
 import type { EnvironmentClient } from '@forge/client-runtime'
 import { memo, useState, useCallback } from 'react'
 import { isUserVisibleAssistantConversationMessage } from '@forge/protocol'
-import { Copy, Check, GitFork, Pin, Reply, Layers, CircleCheck, Sparkles } from 'lucide-react'
+import { Copy, Check, Pin, Reply, Layers, CircleCheck, Sparkles } from 'lucide-react'
+import { ForkButton } from './ForkButton'
 import { MarkdownMessage } from '@/components/chat/MarkdownMessage'
 import type { ArtifactReference } from '@/lib/artifacts'
 import { copyTextToClipboard } from '@/lib/clipboard'
@@ -53,20 +54,6 @@ function CopyButton({ text }: { text: string }) {
       title={copied ? 'Copied' : 'Copy message'}
     >
       {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-    </button>
-  )
-}
-
-function ForkButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex size-5 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:text-foreground"
-      aria-label="Fork from this message"
-      title="Fork from this message"
-    >
-      <GitFork className="size-3" />
     </button>
   )
 }
@@ -122,6 +109,8 @@ interface ConversationMessageRowProps {
   feedbackLegacyTargetId?: string
   onArtifactClick?: (artifact: ArtifactReference) => void
   onForkFromMessage?: (messageId: string) => void
+  /** Why this session cannot be forked; the fork action stays visible, disabled, with this tooltip. */
+  forkDisabledReason?: string
   onPinMessage?: (messageId: string, pinned: boolean) => void
   onStopExternalThread?: (sidecarAgentId: string) => void
   canStopExternalThread?: boolean
@@ -164,6 +153,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
   feedbackLegacyTargetId,
   onArtifactClick,
   onForkFromMessage,
+  forkDisabledReason,
   onPinMessage,
   onStopExternalThread,
   canStopExternalThread,
@@ -434,17 +424,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
                 </button>
               ) : null}
               {onForkFromMessage ? (
-                <button
-                  type="button"
-                  onClick={() => onForkFromMessage(forkMessageId)}
-                  className={cn(
-                    'inline-flex size-5 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:text-foreground',
-                  )}
-                  aria-label="Fork from this message"
-                  title="Fork from this message"
-                >
-                  <GitFork className="size-3" />
-                </button>
+                <ForkButton onClick={() => onForkFromMessage(forkMessageId)} disabledReason={forkDisabledReason} />
               ) : null}
             </div>
           ) : null}
@@ -539,7 +519,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
             />
           ) : null}
           {onForkFromMessage ? (
-            <ForkButton onClick={() => onForkFromMessage(assistantForkMessageId)} />
+            <ForkButton onClick={() => onForkFromMessage(assistantForkMessageId)} disabledReason={forkDisabledReason} />
           ) : null}
           {showFeedback ? (
             <MessageFeedback

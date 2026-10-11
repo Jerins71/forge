@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { EnvironmentClient } from '@forge/client-runtime'
-import { ClipboardList, FolderOpen, GitBranch, Loader2, Menu, Minimize2, MoreHorizontal, Package, ScrollText, Sparkles, Square, SquareTerminal, Trash2 } from 'lucide-react'
+import { ClipboardList, FolderOpen, GitBranch, GitMerge, Loader2, Menu, Minimize2, MoreHorizontal, Package, ScrollText, Sparkles, Square, SquareTerminal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -12,7 +12,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ContextWindowIndicator } from '@/components/chat/ContextWindowIndicator'
+import { LineageIndicator } from '@/components/chat/lineage/LineageIndicator'
 import { PinNavigator } from '@/components/chat/PinNavigator'
 import { SystemPromptDialog } from '@/components/chat/message-list/SystemPromptDialog'
 import { MessageFeedback } from '@/components/chat/message-list/MessageFeedback'
@@ -26,6 +28,16 @@ import type {
   AgentSessionPurpose,
   GenerationThroughputLiveMeasurement,
 } from '@forge/protocol'
+import type { SessionLineageSnapshot } from '@forge/protocol/environment-v2'
+
+/** Returning a fork's work to its lineage parent; present only for a session that has one. */
+export interface ChatHeaderMergeBack {
+  parentLabel: string
+  onMergeBack: () => void
+  inProgress?: boolean
+  /** Why merge-back is refused; the action stays visible, disabled, with this text. */
+  disabledReason?: string
+}
 
 export type MessageSourceView = 'web' | 'all'
 
@@ -44,6 +56,11 @@ interface ChatHeaderProps {
   activeAgentRole?: 'manager' | 'worker' | null
   activeAgentCreatedAt?: string | null
   activeAgentUpdatedAt?: string | null
+  /** Lineage, transfers and handoffs of the active session. */
+  lineage?: SessionLineageSnapshot | null
+  resolveSessionLabel?: (sessionId: string) => string | undefined
+  onOpenLineageSession?: (sessionId: string) => void
+  mergeBack?: ChatHeaderMergeBack | null
   channelView: MessageSourceView
   onChannelViewChange: (view: MessageSourceView) => void
   showSessionAudit?: boolean
@@ -165,6 +182,10 @@ export function ChatHeader({
   activeAgentRole,
   activeAgentCreatedAt,
   activeAgentUpdatedAt,
+  lineage,
+  resolveSessionLabel,
+  onOpenLineageSession,
+  mergeBack,
   channelView,
   onChannelViewChange,
   showSessionAudit = false,
@@ -231,6 +252,7 @@ export function ChatHeader({
   const isFramelessDesktop = false
   const terminalShortcutLabel = isMacPlatform ? '⌘`' : 'Ctrl+`'
   const [promptOpen, setPromptOpen] = useState(false)
+  const [mergeBackConfirmOpen, setMergeBackConfirmOpen] = useState(false)
   return (
     <header
       className={cn(
@@ -311,6 +333,7 @@ export function ChatHeader({
               <span className="truncate">{archetypeLabel}</span>
             </Badge>
           ) : null}
+          <LineageIndicator lineage={lineage} resolveSessionLabel={resolveSessionLabel} onOpenSession={onOpenLineageSession} />
           <span aria-hidden="true" className="hidden shrink-0 text-muted-foreground md:inline">
             ·
           </span>
@@ -442,7 +465,7 @@ export function ChatHeader({
         ) : null}
 
         {/* ── Three-dots dropdown: secondary actions ── */}
-        {(showCompact || showSmartCompact || showNewChat || showStopAll || (showSessionAudit && onOpenSessionAudit)) ? (
+        {(showCompact || showSmartCompact || showNewChat || showStopAll || mergeBack || (showSessionAudit && onOpenSessionAudit)) ? (
           <>
             <Separator orientation="vertical" className="hidden sm:block mx-0.5 h-[18px] bg-hairline" />
             <DropdownMenu>
@@ -501,6 +524,26 @@ export function ChatHeader({
                       <Sparkles className="size-3.5" />
                     )}
                     {smartCompactInProgress ? 'Smart compacting…' : 'Smart compact'}
+                  </DropdownMenuItem>
+                ) : null}
+
+                {mergeBack ? (
+                  <DropdownMenuItem
+                    onSelect={() => setMergeBackConfirmOpen(true)}
+                    disabled={Boolean(mergeBack.disabledReason) || mergeBack.inProgress}
+                    className="items-start gap-2 text-xs"
+                  >
+                    {mergeBack.inProgress ? (
+                      <Loader2 className="mt-0.5 size-3.5 animate-spin" />
+                    ) : (
+                      <GitMerge className="mt-0.5 size-3.5" />
+                    )}
+                    <span className="flex min-w-0 flex-col">
+                      <span>{mergeBack.inProgress ? 'Merging back…' : `Merge back into ${mergeBack.parentLabel}`}</span>
+                      {mergeBack.disabledReason ? (
+                        <span className="max-w-56 whitespace-normal text-[11px] text-muted-foreground">{mergeBack.disabledReason}</span>
+                      ) : null}
+                    </span>
                   </DropdownMenuItem>
                 ) : null}
 
@@ -646,6 +689,34 @@ export function ChatHeader({
       </div>
       {/* Spacer for frameless window controls (minimize/maximize/close) */}
       {isFramelessDesktop && <div className="w-[140px] shrink-0" />}
+
+      {mergeBack && mergeBackConfirmOpen ? (
+        <Dialog open onOpenChange={(open) => { if (!open) setMergeBackConfirmOpen(false) }}>
+          <DialogContent className="max-w-sm p-4">
+            <DialogHeader className="mb-3">
+              <DialogTitle>Merge back into {mergeBack.parentLabel}?</DialogTitle>
+              <DialogDescription>
+                What this fork added since it branched is handed to &ldquo;{mergeBack.parentLabel}&rdquo; as context. This
+                fork stays as it is, and nothing in the parent is replaced.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex items-center justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setMergeBackConfirmOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  setMergeBackConfirmOpen(false)
+                  mergeBack.onMergeBack()
+                }}
+              >
+                Merge back
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
 
       {activeAgentId ? (
         <SystemPromptDialog

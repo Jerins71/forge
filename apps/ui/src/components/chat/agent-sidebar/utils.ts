@@ -104,6 +104,7 @@ export function buildSessionContextMenuActions(
     archiveDisabledReason: session.isDefault ? DEFAULT_SESSION_ARCHIVE_DISABLED_REASON : undefined,
     onRename: source.onRequestRenameSession ? () => source.onRequestRenameSession?.(sid) : undefined,
     onFork: source.onForkSession ? () => source.onForkSession?.(sid) : undefined,
+    getForkDisabledReason: source.forkDisabledReasonFor ? () => source.forkDisabledReasonFor?.(sid) : undefined,
     onMarkUnread: source.onMarkUnread ? () => source.onMarkUnread?.(sid) : undefined,
     onPinSession: source.onPinSession,
     onPromoteToProjectAgent: source.onPromoteToProjectAgent

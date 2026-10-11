@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { isChoiceAnswer, type ChoiceAnswer } from '@forge/protocol/choices'
+import type { ContextSourceSelector } from '@forge/protocol/environment-v2'
 
 import { CliError } from '../output.js'
 import { EXIT_CODES } from '../version.js'
@@ -23,6 +24,30 @@ export async function readMessageInput(value: string | undefined, cwd: string): 
       code: 'message_file_read_failed',
     })
   }
+}
+
+/** `latest`, `run:<runId>` or `message:<entryId>`; the environment resolves it to a frozen canonical point. */
+export function parseSourcePoint(value: string | undefined): ContextSourceSelector | undefined {
+  if (value === undefined) return undefined
+  if (value === 'latest' || value === 'latest_stable') return { kind: 'latest_stable' }
+  const separator = value.indexOf(':')
+  const kind = value.slice(0, separator), id = value.slice(separator + 1)
+  if (separator > 0 && id && kind === 'run') return { kind, runId: id }
+  if (separator > 0 && id && kind === 'message') return { kind, entryId: id }
+  throw usage('--source must be latest, run:<runId> or message:<entryId>.')
+}
+
+export interface ModelSelection { provider: string; modelId: string; thinkingLevel?: string }
+
+export function parseModelSelection(model: string | undefined, reasoning: string | undefined): ModelSelection | undefined {
+  if (model === undefined) {
+    if (reasoning !== undefined) throw usage('--reasoning requires --model <provider>/<modelId>.')
+    return undefined
+  }
+  const separator = model.indexOf('/')
+  const provider = model.slice(0, separator), modelId = model.slice(separator + 1)
+  if (separator <= 0 || !modelId) throw usage('--model must be <provider>/<modelId>.')
+  return { provider, modelId, ...(reasoning ? { thinkingLevel: reasoning } : {}) }
 }
 
 export function parseAnswersJson(value: string | undefined): ChoiceAnswer[] {

@@ -13,7 +13,7 @@ const shellTypes = new Set([
   'session.remove',
 ])
 const detailTypes = new Set([
-  'plan.upsert', 'goal.upsert', 'recovery.upsert',
+  'lineage.upsert', 'plan.upsert', 'goal.upsert', 'recovery.upsert',
   'item.upsert',
   'worker.upsert',
   'worker.remove',

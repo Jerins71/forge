@@ -48,6 +48,7 @@ import {
   filterAgentsAfterSessionArchive,
 } from '@/lib/agent-hierarchy'
 import { requestGuardedAgentTransition } from '@/components/index-page/builder-file-editor-guard-actions'
+import type { ForkTransferSelection } from '@/lib/ws-client/context-transfers'
 import { isReplyTargetLoadedInMessages } from '@/components/index-page/reply-target-utils'
 import { parseCompactSlashCommand, parseSideSlashCommand } from '@/hooks/index-page/use-slash-commands'
 import { useFileEditorCoordinator } from '@/components/file-browser/use-file-editor-coordinator'
@@ -98,7 +99,7 @@ export function useSessionActions({
   messageListRef,
 }: UseSessionActionsOptions) {
   const [replyTarget, setReplyTarget] = useState<ConversationReplyTargetInput | null>(null)
-  const [messageForkTarget, setMessageForkTarget] = useState<{ messageId: string; messageTimestamp?: string } | null>(null)
+  const [messageForkTarget, setMessageForkTarget] = useState<{ messageId: string; messageTimestamp?: string; runId?: string } | null>(null)
 
   useEffect(() => {
     setReplyTarget(null)
@@ -503,10 +504,10 @@ export function useSessionActions({
       (m) => m.type === 'conversation_message' && ((m.id?.trim() || m.timestamp) === messageId),
     )
     const timestamp = msg?.timestamp
-    setMessageForkTarget({ messageId, messageTimestamp: timestamp })
-  }, [activeAgentId, visibleMessages])
+    setMessageForkTarget({ messageId, messageTimestamp: timestamp, runId: clientRef.current?.itemRunId(messageId) })
+  }, [activeAgentId, clientRef, visibleMessages])
 
-  const handleConfirmMessageFork = useCallback((name?: string) => {
+  const handleConfirmMessageFork = useCallback((name?: string, transfer?: ForkTransferSelection) => {
     const client = clientRef.current
     if (!client || !activeAgentId || !messageForkTarget) return
 
@@ -516,7 +517,7 @@ export function useSessionActions({
     requestGuardedAgentTransition(fileEditorCoordinator, activeAgentId, () => {
       void (async () => {
         try {
-          const result = await client.forkSession(activeAgentId, name, messageId)
+          const result = await client.forkSession(activeAgentId, name, messageId, transfer)
           navigateToRoute({ view: 'chat', environmentId:clientRef.current?.getEnvironmentClient()?.environmentId, agentId: result.newSessionAgent.agentId })
           client.subscribeToAgent(result.newSessionAgent.agentId, { reason: 'fork' })
         } catch (error) {
@@ -528,6 +529,65 @@ export function useSessionActions({
       })()
     })
   }, [clientRef, activeAgentId, fileEditorCoordinator, messageForkTarget, navigateToRoute, setState])
+
+  const [mergeBackSessionId, setMergeBackSessionId] = useState<string | null>(null)
+
+  const handleMergeBack = useCallback((sessionAgentId: string) => {
+    const client = clientRef.current
+    if (!client) return
+    setMergeBackSessionId(sessionAgentId)
+    void client.mergeBackSession(sessionAgentId)
+      .then(() => setState((prev) => ({ ...prev, lastSuccess: 'Merge back sent to the parent session.' })))
+      .catch((error: unknown) => {
+        setState((prev) => ({
+          ...prev,
+          lastError: `Failed to merge back: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        }))
+      })
+      .finally(() => setMergeBackSessionId((current) => (current === sessionAgentId ? null : current)))
+  }, [clientRef, setState])
+
+  /** A handoff of the same session to another provider; a refusal is reported, never retried as a model override. */
+  const handleSwitchSessionProvider = useCallback(async (
+    sessionAgentId: string,
+    modelSelection: ManagerExactModelSelection,
+    reasoningLevel?: ManagerReasoningLevel,
+  ) => {
+    const client = clientRef.current
+    if (!client) return
+    try {
+      await client.switchSessionProvider(sessionAgentId, {
+        provider: modelSelection.provider,
+        modelId: modelSelection.modelId,
+        ...(reasoningLevel ? { thinkingLevel: reasoningLevel } : {}),
+      })
+    } catch (error) {
+      setState((previous) => ({
+        ...previous,
+        lastError: `Failed to hand off session: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      }))
+    }
+  }, [clientRef, setState])
+
+  const handleContinueWorker = useCallback((workerId: string) => {
+    const client = clientRef.current
+    if (!client) return
+
+    requestGuardedAgentTransition(fileEditorCoordinator, workerId, () => {
+      void (async () => {
+        try {
+          const result = await client.continueWorker(workerId)
+          navigateToRoute({ view: 'chat', environmentId:clientRef.current?.getEnvironmentClient()?.environmentId, agentId: result.sessionAgentId })
+          client.subscribeToAgent(result.sessionAgentId, { reason: 'fork' })
+        } catch (error) {
+          setState((prev) => ({
+            ...prev,
+            lastError: `Failed to continue worker: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }))
+        }
+      })()
+    })
+  }, [clientRef, fileEditorCoordinator, navigateToRoute, setState])
 
   const handleRequestSessionWorkers = useCallback((sessionAgentId: string) => {
     const client = clientRef.current
@@ -769,6 +829,10 @@ export function useSessionActions({
     handleForkSession,
     handleForkFromMessage,
     handleConfirmMessageFork,
+    mergeBackSessionId,
+    handleMergeBack,
+    handleSwitchSessionProvider,
+    handleContinueWorker,
     handleRequestSessionWorkers,
     handleMarkUnread,
     handleMarkAllRead,
