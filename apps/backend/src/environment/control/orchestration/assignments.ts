@@ -31,13 +31,14 @@ export interface WorkerAssignment {
   resultTransferId?: string;
   resultRef?: TransferPoint;
   resultInput?: Run["input"];
+  resultPrepared?: import("../command-service.js").InternalInput["prepared"];
   parentContext?: WorkerParentContext;
   invalidatedAt?: number;
 }
 export type AssignmentCommand =
   | { type: "worker.assign"; assignmentId: string; parentThreadId: string; parentRunId: string; workerThreadId: string; workerRunId: string; inputId: string; attemptId: string; bindingId: string; input: Run["input"]; authorized: boolean; selection: AssignmentSelection; planStep?: WorkerAssignment["planStep"]; parentContext?: Pick<WorkerParentContext, "outputTarget" | "rootTurnId" | "parentRootTurnId"> }
   | { type: "worker.stop"; threadId: string; managerId: string; authorized: boolean }
-  | { type: "worker.result"; assignmentId: string; workerRunId: string; resultRef: TransferPoint; input: Run["input"] }
+  | { type: "worker.result"; assignmentId: string; workerRunId: string; resultRef: TransferPoint; input: Run["input"]; prepared?: WorkerAssignment["resultPrepared"] }
   | { type: "assignment.deliver"; assignmentId: string; authorized: boolean }
   | { type: "assignments.clear"; threadId: string; authorized: boolean };
 export type AssignmentEvent =
@@ -131,7 +132,7 @@ export function decideAssignment(initial: CoreState, command: CoreCommand & Assi
         return decision;
       }
       if (state.runs[assignment.workerRunId]?.state !== "terminal") throw new Error("Worker result requires a terminal core run");
-      const recorded = { ...assignment, resultRef: command.resultRef, resultInput: command.input, resultTransferId: `${assignment.assignmentId}:result` };
+      const recorded = { ...assignment, resultRef: command.resultRef, resultInput: command.input, resultPrepared: command.prepared, resultTransferId: `${assignment.assignmentId}:result` };
       emit({ type: "assignment.result_recorded", assignment: recorded });
       const transfer: WorkerTransfer = { transferId: recorded.resultTransferId, assignmentId: assignment.assignmentId, kind: "worker_result", source: command.resultRef,
         targetThreadId: assignment.parentThreadId, targetGeneration: assignment.parentGeneration, targetRunId: `${assignment.assignmentId}:result:run`, strategy: "canonical_input",

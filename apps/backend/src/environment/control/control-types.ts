@@ -90,6 +90,7 @@ export interface SwarmControlPort {
   }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }>;
   acquireProvider(scope: ProviderScope, conversation?: ProviderConversationRef, model?: Pick<import("../../swarm/types.js").AgentModelDescriptor, "provider" | "modelId">): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
   enqueuePresentation?(threadId:string,runId:string,presentation:import("../../swarm/turn-context-coordinator.js").InboundTurnContextInput):void;
+  prepareWorkerResult?(assignment: import("./orchestration/assignments.js").WorkerAssignment, resultText: string): Promise<NonNullable<import("./command-service.js").InternalInput["prepared"]>>;
   extractWorkerResult?(threadId:string,runId:string,inputEntryId:string):Promise<{ entryId:string; resultText:string }>;
   applyChoice(input: {
     commandId: string;

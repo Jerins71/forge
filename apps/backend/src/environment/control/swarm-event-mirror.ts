@@ -15,6 +15,7 @@ import { createConversationHistorySeamCursor, readConversationHistoryPage } from
 import type { Principal } from "./control-types.js";
 import { CONVERSATION_ENTRY_TYPE } from "../../swarm/session/conversation-timeline.js";
 import type { ControlTransaction, EventSink } from "./event-sink.js";
+import { receiptIdentity } from "./event-sink.js";
 
 type DetailItem = Extract<Extract<DetailStreamItem, { kind: "event" }>["event"], { type: "item.upsert" }>["item"];
 type ChoiceSummary = Extract<Extract<DetailStreamItem, { kind: "event" }>["event"], { type: "choice.upsert" }>["choice"];
@@ -120,14 +121,15 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const id = entry.timelineEntryId ?? ("id" in entry && typeof entry.id === "string" ? entry.id : undefined);
     if (!id) return null;
     const text = "text" in entry && typeof entry.text === "string" ? entry.text : "displaySummary" in entry && typeof entry.displaySummary === "string" ? entry.displaySummary : "";
-    const user = entry.type === "conversation_message" && entry.role === "user";
+    const workerResult = entry.type === "conversation_message" && entry.source === "worker_report";
+    const user = entry.type === "conversation_message" && entry.role === "user" && !workerResult;
     return { itemId: id, userTurnId: user ? entry.id ?? id : userTurns.get(sessionId) ?? ("turnId" in entry ? entry.turnId : undefined) ?? id,
-      actorId: "actorAgentId" in entry ? entry.actorAgentId : entry.agentId,
-      kind: entry.type === "conversation_message" ? user ? "user" : "assistant" : entry.type === "agent_message" ? "worker_result" : entry.type === "agent_tool_call" ? "tool" : "activity",
+      actorId: workerResult && entry.sourceWorkerId ? entry.sourceWorkerId : "actorAgentId" in entry ? entry.actorAgentId : entry.agentId,
+      kind: workerResult ? "worker_result" : entry.type === "conversation_message" ? user ? "user" : "assistant" : entry.type === "agent_message" ? "worker_result" : entry.type === "agent_tool_call" ? "tool" : "activity",
       pinned: swarmManager.getPinnedMessageIds(sessionId)?.has(entry.type === "conversation_message" ? entry.id ?? id : id) ?? false,
       timestamp: entry.timestamp, ...(entry.type === "conversation_message" ? { source: entry.source } : {}), text: text.slice(0, 8192), contentRef: text.length > 8192 ? id : null,
       artifacts: (wireProjection.artifacts?.(entry, sessionId) ?? []).slice(0, 20),
-      commandId: entry.type === "conversation_message" ? entry.controlCommandId ?? null : null };
+      commandId: entry.type === "conversation_message" && entry.controlCommandId ? receiptIdentity(entry.controlCommandId) : null };
   }
   function canonical(tx: ControlTransaction, entry: ConversationEntryEvent, descriptor: AgentDescriptor, evidence: Source, projectedItem?: DetailItem) {
     const sessionId = actors.get(descriptor.agentId) ?? (descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId);

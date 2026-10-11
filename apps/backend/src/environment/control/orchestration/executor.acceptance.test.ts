@@ -12,6 +12,7 @@ import { createArtifactService } from "../artifact-service.js";
 import { UserMessageCoordinator, type HandleUserMessageOptions, type UserMessageCoordinatorOptions } from "../../../swarm/user-message-coordinator.js";
 import { ConversationAttachmentService } from "../../../swarm/conversation-attachment-service.js";
 import { projectLifecycleStatus } from "./lifecycle-projection.js";
+import { AssistantOutputRouter } from "../../../swarm/assistant-output-router.js";
 import { AgentDirectory } from "../../../swarm/agent-directory.js";
 import type { AgentDescriptor } from "../../../swarm/types.js";
 const roots: string[] = []; const cores: ControlCore[] = [];
@@ -69,6 +70,41 @@ describe("durable provider outbox", () => {
     f.adapter.start = async input => { nativeInput = input.input; return { status: "accepted", turn: { ...input.binding.scope, kind: "turn", conversationId: "native", nativeId: "turn" } }; };
     await second.effectWorker.drain();
     expect(nativeInput).toEqual({ text: "Prepared text with guidance.", images: [{ mimeType: "image/png", data: Buffer.from("fixture image bytes").toString("base64") }] });
+  });
+  it("persists the internal worker-result envelope and routing through recovery before dispatch", async () => {
+    const f = await fixture(); const root = path.dirname(f.options.databasePath!);
+    const manager = { agentId: "manager", role: "manager", status: "idle", profileId: "project" } as AgentDescriptor;
+    const worker = { ...manager, agentId: "worker", managerId: "manager", role: "worker", displayName: "Fixture Worker" } as AgentDescriptor;
+    const canonical: Array<Record<string, unknown>> = [];
+    const coordinator = new UserMessageCoordinator({ targeting: { descriptors: new Map([["manager", manager], ["worker", worker]]), assertDescriptorNotEffectivelyArchived() {} },
+      attachments: new ConversationAttachmentService({ dataDir: root, uploadsDir: path.join(root, "uploads") }),
+      codex: { plugin: { assertWorkerNotUserTargetable() { throw new Error("Internal result must bypass the user gate"); } } },
+      projectAgents: { async preflightRuntime() {} }, runtime: { withRuntimeAdmission: async (_id: string, work: () => Promise<unknown>) => work() },
+      agentMessages: { async prepareModelInboundMessage(_id: string, input: { text: string }, origin: string) { expect(origin).toBe("internal"); return input.text; } },
+      assistantOutput: new AssistantOutputRouter({} as ConstructorParameters<typeof AssistantOutputRouter>[0]),
+      inboundConversation: { async append(_target: unknown, input: Record<string, unknown>) { canonical.push(input); const entryId = (input.controlledInput as { inputId: string }).inputId; return { event: { id: entryId, timelineEntryId: entryId }, runtimeAttachments: [] }; } },
+      turns: { async enqueue() {} },
+    } as unknown as UserMessageCoordinatorOptions);
+    f.options.swarm.extractWorkerResult = async () => ({ entryId: "worker-final", resultText: "status: done\nsummary: Finished the bounded task." });
+    f.options.swarm.prepareWorkerResult = (assignment, resultText) => coordinator.prepareWorkerResult(assignment, resultText);
+    await f.core.controlService.submitInput({ commandId: "parent", threadId: "manager", message: { text: "parent", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.submitInput({ commandId: "worker", threadId: "worker", thread: { role: "worker", managerId: "manager", projectId: "project" }, message: { text: "worker", artifactIds: [] },
+      assignment: { assignmentId: "assignment", parentThreadId: "manager", parentRunId: "run-parent", selection: { provider: "pi", modelId: "fixture" }, parentContext: { outputTarget: { kind: "internal_only", reason: "result-fixture" }, rootTurnId: "parent-root" } } }); await f.core.effectWorker.drain();
+    const terminal = (core: ControlCore, threadId: string) => { const state = loadState(core.database); const run = state.runs[state.threads[threadId].activeRunId!]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+      core.controlService.record({ type: "provider.observe", commandId: `terminal-${threadId}`, now: f.options.clock(), observation: { type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation, turn: attempt.turn }, terminalAuthority: "root_attempt", outcome: "completed" } }); };
+    terminal(f.core, "worker"); await f.core.effectWorker.drain();
+    const row = f.core.database.prepare("SELECT prepared_json FROM orchestration_run_inputs WHERE run_id='assignment:result:run'").get() as { prepared_json: string } | undefined;
+    expect(row).toBeDefined(); const prepared = JSON.parse(row!.prepared_json);
+    expect(prepared.runtimeMessage.text).toContain("[workerResult]"); expect(prepared.runtimeMessage.text).toContain("Fixture Worker");
+    expect(prepared.presentation).toMatchObject({ source: "worker_result", routeOrigin: "worker_result", sourceWorkerId: "worker", parentRootTurnId: "parent-root", assistantOutputTarget: { kind: "internal_only", reason: "result-fixture" } });
+    terminal(f.core, "manager"); await f.core.close(); const reboot = await f.open();
+    expect(JSON.parse((reboot.database.prepare("SELECT prepared_json FROM orchestration_run_inputs WHERE run_id='assignment:result:run'").get() as typeof row & {}).prepared_json)).toEqual(prepared);
+    const state = loadState(reboot.database);
+    reboot.controlService.record({ type: "recovery.resume", commandId: "resume-result", now: f.options.clock(), recoveryId: state.recovery!.recoveryId, attempts: { "assignment:result:run": "result-retry" }, bindingIds: { manager: "result-binding" } });
+    f.options.swarm.applyInput = input => coordinator.applyControlledInput(input.message.text, { targetAgentId: input.sessionId, runId: input.runId, controlledInput: { inputId: input.inputId, commandId: input.commandId, contentHash: "fixture" }, prepared: input.prepared });
+    let nativeText = ""; f.adapter.start = async input => { nativeText = input.input.text; return { status: "accepted", turn: { ...input.binding.scope, kind: "turn", conversationId: "native", nativeId: "result-turn" } }; };
+    await reboot.effectWorker.drain(); expect(nativeText).toBe(prepared.runtimeMessage.text);
+    expect(canonical).toEqual([expect.objectContaining({ role: "system", source: "worker_report", sourceWorkerId: "worker", text: "status: done\nsummary: Finished the bounded task." })]);
   });
   it("persists every user input option and pinned attachment through restart before dispatch", async () => {
     const f = await fixture(); let submit!: (text: string, options: HandleUserMessageOptions) => Promise<void>;

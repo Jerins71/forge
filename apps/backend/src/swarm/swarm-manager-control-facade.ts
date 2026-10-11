@@ -32,6 +32,8 @@ export abstract class SwarmManagerControlFacade extends SwarmManagerSessionAtten
 
   assertControlledUserInputTargetable(agentId: string): void { this.getFacadeServices().userMessages.assertUserInputTargetable(agentId); }
 
+  prepareControlledWorkerResult(assignment: Parameters<UserMessageCoordinator["prepareWorkerResult"]>[0], resultText: string) { return this.getFacadeServices().userMessages.prepareWorkerResult(assignment, resultText); }
+
   applyControlledInput(text: string, options: Parameters<UserMessageCoordinator["applyControlledInput"]>[1]): ReturnType<UserMessageCoordinator["applyControlledInput"]> {
     return this.getFacadeServices().userMessages.applyControlledInput(text, options);
   }

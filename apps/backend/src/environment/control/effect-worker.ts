@@ -170,7 +170,9 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           if (!assignment || assignment.resultRef || assignment.invalidatedAt !== undefined) break;
           if (!options.swarm.extractWorkerResult) throw new Error("Canonical worker result extraction is not composed");
           const final = await options.swarm.extractWorkerResult(effect.threadId,effect.workerRunId,loadState(database).runs[effect.workerRunId].entryId ?? "");
-          record({ type:"worker.result",...result(row,"result"),assignmentId:effect.assignmentId,workerRunId:effect.workerRunId,
+          if (!options.swarm.prepareWorkerResult) throw new Error("Internal worker result preparation is not composed");
+          const prepared = await options.swarm.prepareWorkerResult(assignment, final.resultText);
+          record({ type:"worker.result",prepared,...result(row,"result"),assignmentId:effect.assignmentId,workerRunId:effect.workerRunId,
             resultRef:{ threadId:effect.threadId,runId:effect.workerRunId,entryId:final.entryId },input:{ text:final.resultText,artifactIds:[] } });
           break;
         }

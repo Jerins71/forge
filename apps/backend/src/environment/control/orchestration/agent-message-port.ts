@@ -11,7 +11,7 @@ import { loadState } from "./store.js";
 export function createCoreAgentMessagePort({ controlService,sink,artifacts,swarm,random,clock }: {
   controlService:EnvironmentControlService; sink:EventSink;
   artifacts:Pick<ArtifactService,"prepareInternalInput">;
-  swarm:Pick<SwarmManager,"extractWorkerRunResult"|"appendControlledBlockedResult">;
+  swarm:Pick<SwarmManager,"extractWorkerRunResult"|"prepareControlledWorkerResult"|"appendControlledBlockedResult">;
   random:()=>string; clock:()=>number;
 }): CoreAgentMessagePort {
   const receiptFor = (targetAgentId:string,deliveryId:string):SendMessageReceipt => ({ targetAgentId,deliveryId,acceptedMode:"followUp" });
@@ -43,7 +43,8 @@ export function createCoreAgentMessagePort({ controlService,sink,artifacts,swarm
       const extracted=state.runs[assignment.workerRunId].entryId ? swarm.extractWorkerRunResult(assignment.workerThreadId,assignment.workerRunId,state.runs[assignment.workerRunId].entryId!) : { resultText:`status: blocked\nsummary: Worker ${assignment.workerThreadId} settled without a canonical input.\nfollow-up: Check the worker or retry the assignment.` };
       const final=extracted.entryId ? { entryId:extracted.entryId,resultText:extracted.resultText } : await swarm.appendControlledBlockedResult(assignment.workerThreadId,assignment.workerRunId,extracted.resultText);
       if (final.resultText !== input.resultText) throw new Error("Worker result differs from the canonical final");
-      controlService.record({ type:"worker.result",commandId:`${assignment.assignmentId}:result:${final.entryId}`,now:clock(),assignmentId:assignment.assignmentId,workerRunId:assignment.workerRunId,
+      const prepared = await swarm.prepareControlledWorkerResult(assignment, final.resultText);
+      controlService.record({ type:"worker.result",prepared,commandId:`${assignment.assignmentId}:result:${final.entryId}`,now:clock(),assignmentId:assignment.assignmentId,workerRunId:assignment.workerRunId,
         resultRef:{ threadId:assignment.workerThreadId,runId:assignment.workerRunId,entryId:final.entryId },input:{ text:final.resultText,artifactIds:[] } });
       return receiptFor(assignment.parentThreadId,assignment.resultTransferId ?? `${assignment.assignmentId}:result`);
     },
