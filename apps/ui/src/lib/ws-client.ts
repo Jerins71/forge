@@ -888,7 +888,7 @@ export class ManagerWsClient {
         const echoes = this.outbox?.pendingMessages(sessionId, projectedCommandIds(projection)) ?? []
         this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))
         this.updateState({
-          messages: [...projectedMessages,...echoes,...(projection?.choices??[]).filter(c=>c.status==='pending').map(c=>({type:'choice_request' as const,agentId:c.agentId,choiceId:c.choiceId,status:'pending' as const,questions:c.questions,timestamp:projection!.session.updatedAt}))],
+          messages: [...projectedMessages,...echoes,...(projection?.choices??[]).filter(c=>c.status!=='answered').map(c=>({type:'choice_request' as const,agentId:c.agentId,choiceId:c.choiceId,status:c.status==='interrupted'?'expired' as const:c.status,questions:c.questions,timestamp:projection!.session.updatedAt}))],
           commandStatuses: this.outbox?.statuses(),
           pendingChoiceIds:new Set((projection?.choices??[]).filter(c=>c.status==='pending').map(c=>c.choiceId)),
           agents: projectSessionWorkers(this.state.agents, projection?.workers ?? [], sessionId, this.environmentClient!.shell.getSnapshot()),

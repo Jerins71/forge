@@ -565,6 +565,30 @@ test('9.2.5/6 explicitly mounted three views share sockets, release streams, and
   assertions.mountedViews = { sockets: metrics.map(value => value.sockets), explicitDetails: 3, releasedDetails: 0, shellFreshness: freshness, browserReloadCachedResume: { requestBytes: proxyAfter.ws.requestBytes - proxyBefore.ws.requestBytes, responseBytes: proxyAfter.ws.responseBytes - proxyBefore.ws.responseBytes } }
 })
 
+test('native choices expire after restart and remain readable without answer controls', async ({ page }) => {
+  const { a } = fleet!
+  const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
+  const session = await controlEnvironment<BootstrapSession>(manifest, 'env-a', 'bootstrap')
+  const commandId = randomUUID()
+  const launched = await fixtureRpcOnce(a.baseUrl, session, 'session.launch', { commandId, projectId: a.sessionId,
+    title: 'Expired native choice', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:choice]', artifactIds: [] } })
+  await until(() => fixtureRpcOnce(a.baseUrl, session, 'command.get', { commandId }), receipt => receipt.state === 'succeeded')
+  await page.goto(`${fleet!.uiUrl}/?agent=${launched.sessionId}`)
+  await expect(page.getByText('Which synthetic option?', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible()
+  await fleet!.stop(a); await fleet!.start(a); await page.reload()
+  const row = page.locator('[data-choice-id]').filter({ hasText: 'Choice expired' })
+  await expect(row).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Submit', exact: true })).toHaveCount(0)
+  await row.getByRole('button').click()
+  await expect(row).toContainText('Which synthetic option?')
+  await expect(row.getByRole('radio')).toHaveCount(0)
+  await shot(page, 'native-choice-expired')
+  const recovery = (await fixtureRpcOnce(a.baseUrl, session, 'recovery.get', {})).recovery
+  if (recovery && !recovery.resumedAt && !recovery.dismissedAt) await fixtureRpcOnce(a.baseUrl, session, 'recovery.decide', { commandId: randomUUID(), recoveryId: recovery.recoveryId, action: 'dismiss' })
+  assertions.expiredNativeChoice = { sessionId: launched.sessionId, retainedQuestion: true, answerControls: 0, freshBootstrap: true }
+})
+
 test('Batch 5 displays persisted plans/goals and fresh recovery with native decisions', async ({ page }) => {
   const { a } = fleet!
   const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)

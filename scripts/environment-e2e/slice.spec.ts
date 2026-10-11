@@ -316,7 +316,7 @@ test('9.2.8 stop, controlled resume and fork mirrored to shell', async () => {
       await settled(pending.commandId);
       const oldChoice = await until<any>(() => next.frames.map(frame => frame.item?.event).find(event => event?.type === 'choice.upsert' && event.choice.status === 'pending')?.choice, Boolean);
       await controlEnvironment(manifest, b().name, 'stop'); await controlEnvironment(manifest, b().name, 'start');
-      expect((await readDb(db => db.prepare('SELECT state FROM control_choices WHERE choice_id=?').get(oldChoice.choiceId)) as { state: string }).state).toBe('interrupted');
+      expect((await readDb(db => db.prepare('SELECT state FROM control_choices WHERE choice_id=?').get(oldChoice.choiceId)) as { state: string }).state).toBe('expired');
       await expect(fixtureRpcOnce(b().baseUrl, sessions[1]!, 'session.choose', { commandId: randomUUID(), sessionId: launchedSessionId, choiceId: oldChoice.choiceId, answers: [{ questionId: oldChoice.questions[0].id, selectedOptionIds: [oldChoice.questions[0].options[0].id] }] })).rejects.toMatchObject({ code: 'CONFLICT' });
       evidence.stopResumeFork = { activeTurnStopped: true, restartStoppedState: true, controlledResume: true, forkShellMirrored: true, pendingChoiceRestart: true, writerExclusion: 'covered-control-acceptance' };
     } finally { next.close(); }
