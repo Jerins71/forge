@@ -62,6 +62,7 @@ describe("CodexMcpCatalog browse", () => {
     expect(Date.now() - started).toBeLessThan(WAIT + 500);
     expect(partial.plugins.map(plugin => plugin.selector)).toContain("fireflies");
     expect(partial.tools).toEqual([]);
+    expect(partial.complete).toBe(false);
     // More page loads while the slow part is pending add no requests.
     expect((await catalog.browseCatalog()).tools).toEqual([]);
     expect(client.count("plugin/list")).toBe(1);
@@ -78,10 +79,13 @@ describe("CodexMcpCatalog browse", () => {
     expect(Date.now() - started).toBeLessThan(WAIT + 500);
     expect(empty).toMatchObject({ apps: [], plugins: [], tools: [] });
     expect(empty.diagnostics).toBeUndefined();
+    // Unfinished is a state, not an error: the client is told so it can ask again.
+    expect(empty.complete).toBe(false);
     client.release(); await settle(5);
     const full = await catalog.browseCatalog();
     expect(full.plugins).toHaveLength(1);
     expect(full.tools).toHaveLength(1);
+    expect(full.complete).toBeUndefined();
     expect(client.count("plugin/list")).toBe(1);
   });
 

@@ -5,6 +5,7 @@ import {
   ensureCodexCatalogWarm,
   fetchCodexCatalogWithCache,
   getCachedCodexCatalog,
+  subscribeCodexCatalog,
 } from '@/lib/codex-catalog-cache'
 import {
   CODEX_MENTION_HANDLE,
@@ -121,6 +122,11 @@ export function useMentions({
       setCodexCatalogErrorMessage(undefined)
     }
 
+    // A catalog answered before discovery finished is refetched once; show the rest when it lands.
+    const unsubscribe = subscribeCodexCatalog(environmentClient, managerAgentId, (snapshot) => {
+      if (!cancelled) setCodexPluginSuggestions(mapPluginsToSuggestions(snapshot.plugins ?? []))
+    })
+
     void fetchCodexCatalogWithCache(environmentClient, managerAgentId, { forceRefresh: true }).then((result) => {
       if (cancelled) {
         return
@@ -144,6 +150,7 @@ export function useMentions({
 
     return () => {
       cancelled = true
+      unsubscribe()
     }
   }, [codexToolMode, enableCodexMention, environmentClient, managerAgentId, mapPluginsToSuggestions])
 
