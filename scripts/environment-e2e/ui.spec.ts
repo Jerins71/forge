@@ -1270,10 +1270,11 @@ test('F15/F16: a native choice reaches Needs You and a background worker can be 
   await page.goto(`${fleet!.uiUrl}/?view=inbox`)
   await openInbox(page)
   await expect(page.getByTestId('rooms-inbox')).toBeVisible()
-  await expect(page.locator('[data-inbox-section="needs-you"]').filter({ visible: true }).getByText(a.projectTitle, { exact: true })).toBeVisible()
+  const decisionRow = page.locator('[data-inbox-section="needs-you"]').filter({ visible: true }).locator(`[data-inbox-row="${a.environmentId}::${a.sessionId}"]`)
+  await expect(decisionRow).toContainText('decision needed')
   await shot(page, 'native-choice-needs-you')
   await page.reload()
-  await expect(page.locator('[data-inbox-section="needs-you"]').filter({ visible: true }).getByText(a.projectTitle, { exact: true })).toBeVisible()
+  await expect(decisionRow).toContainText('decision needed')
   await fixtureRpcOnce(a.baseUrl, principal, 'session.stop', { commandId: randomUUID(), sessionId: a.sessionId })
   assertions.backgroundWorkerAndAttention = { deletedFromOtherChat: true, correctOwnerSession: true, nativeChoiceCommand: choice.commandId, needsYouLive: true, needsYouAfterReload: true }
 })
