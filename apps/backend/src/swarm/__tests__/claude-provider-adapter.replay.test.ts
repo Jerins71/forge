@@ -29,9 +29,14 @@ vi.mock("../runtime/claude/claude-runtime-environment.js", () => ({
 const here = fileURLToPath(new URL("../runtime/claude/", import.meta.url));
 const peerExecutable = fileURLToPath(new URL("../runtime/claude/replay/claude-peer.mjs", import.meta.url));
 const scope = { threadId: "owner", bindingId: "binding", generation: 7 };
-async function fixture(scenario: string, options: { root?: string; prompt?: string; tools?: boolean; matchAnyPrompt?: boolean; scope?: ProviderScope } = {}) {
+async function fixture(scenario: string, options: { root?: string; prompt?: string; tools?: boolean; matchAnyPrompt?: boolean; unrelatedEcho?: boolean; scope?: ProviderScope } = {}) {
   const root = options.root ?? await mkdtemp(join(tmpdir(), "forge-claude-provider-"));
   const transcript = JSON.parse(await readFile(join(here, "replay/fixtures", `${scenario}.json`), "utf8")) as ReplayTranscript;
+  if (options.unrelatedEcho) {
+    const index = transcript.entries.findIndex(entry => entry.type === "emit_inbound" && entry.label === "accepted");
+    transcript.entries.splice(index, 0, { type: "emit_inbound", label: null, frame: { type: "user", uuid: "foreign-input", session_id: "$sessionId", parent_tool_use_id: null, user_message_uuid: "foreign-input", message: { role: "user", content: [{ type: "text", text: "Foreign input echo" }] } } }, { type: "emit_inbound", label: "unrelated", frame: { type: "assistant", uuid: "unrelated-message", session_id: "$sessionId", parent_tool_use_id: null,
+      message: { id: "unrelated-message", role: "assistant", type: "message", model: "claude-opus-5-5", content: [{ type: "text", text: "Unrelated earlier message" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } } });
+  }
   const inputScope = options.scope ?? scope;
   const prompt = options.prompt ?? "Forge instructions\nKeep native coding tools.";
   const answer = [{ questionId: "q", selectedOptionIds: [], text: "chosen" }];
@@ -91,6 +96,38 @@ const start = (f: Awaited<ReturnType<typeof fixture>>, binding: Awaited<ReturnTy
 describe("Claude frozen provider contract through real SDK transport", () => {
   // Glue failure modes: direct starts bypass native activation, duplicate legacy activation,
   // missing canonical assistant output or end callbacks, and busy starts implicitly steer/queue.
+  // Native queue acceptance can fail, close, abort or stay silent. A foreign
+  // frame cannot prove consumption of this attempt's registered input UUID.
+  it("keeps start pending until this input's native echo, rather than another message", async () => {
+    const f = await fixture("one-turn", { unrelatedEcho: true });
+    try {
+      const binding = await f.open(); let settled = false;
+      const dispatched = start(f, binding).then(result => { settled = true; return result; });
+      await f.release("unrelated"); await f.observed("message:complete");
+      expect(settled).toBe(false);
+      await f.release("accepted");
+      const result = await dispatched; expect(result).toMatchObject({ status: "accepted", turn: { nativeId: expect.any(String) } });
+      await f.release("terminal"); await f.observed("terminal:root_attempt");
+    } finally { await f.close(); await f.cleanup(); }
+  });
+  it("bounds a silent start and settles it as unknown", async () => {
+    const f = await fixture("one-turn");
+    try {
+      const binding = await f.open(); vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const dispatched = start(f, binding);
+      await f.harness.signals.wait("1:accepted:held");
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await dispatched).toEqual({ status: "unknown" });
+    } finally { vi.useRealTimers(); await f.close(); await f.cleanup(); }
+  });
+  it("settles a pending start as unknown when the native session is closed", async () => {
+    const f = await fixture("one-turn");
+    try {
+      const binding = await f.open(); const dispatched = start(f, binding);
+      await watchdog("held native echo", f.harness.signals.wait("1:accepted:held"));
+      await f.adapter.close(binding); expect(await dispatched).toEqual({ status: "unknown" });
+    } finally { await f.close(); await f.cleanup(); }
+  });
   it("returns a durable latest fork locator and resumes it with the SDK forkSession flag",async()=>{
     const source=await fixture("idle");const binding=await source.open();
     await expect(source.adapter.fork({binding,through:{...scope,kind:"turn",conversationId:binding.conversation.nativeId,nativeId:"historical"}})).rejects.toMatchObject({code:"PROVIDER_BEHAVIOR_UNSUPPORTED"});
@@ -145,10 +182,10 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       const inputs = prepared.mock.calls[0]![0];
       const binding = await adapter.open({ scope: kernelScope, model: descriptor.model, instructions: inputs.instructionBundle, toolHost: inputs.toolHostBinding });
       expect(runtime.getStatus()).toBe("idle");
-      if (dispatch === "adapter") await adapter.start({ binding, runId, attemptId: "kernel-attempt", input: { text: "work" } });
-      else await runtime.sendMessage({ text: "work" });
+      const dispatched = dispatch === "adapter" ? adapter.start({ binding, runId, attemptId: "kernel-attempt", input: { text: "work" } }) : runtime.sendMessage({ text: "work" });
+      await watchdog("queued input", f.harness.signals.wait("1:accepted:held"));
       expect(runtime.getStatus()).toBe("streaming");
-      await f.release("accepted"); await f.release("terminal"); await watchdog("projected end", signals.wait("end"));
+      await f.release("accepted"); await dispatched; await f.release("terminal"); await watchdog("projected end", signals.wait("end"));
       expect(runtime.getStatus()).toBe("idle");
       expect(statuses[0]).toBe("streaming"); expect(statuses.at(-1)).toBe("idle");
       expect(events.filter(event => event.type === "agent_start")).toHaveLength(1);
@@ -202,8 +239,8 @@ describe("Claude frozen provider contract through real SDK transport", () => {
         observations.push(observation);
         if (observation.type === "terminal") signals.observe("terminal", undefined);
       } })();
-      await adapter.start({ binding, runId: "new-run", attemptId: "new-attempt", input: { text: "work" } });
-      await f.release("accepted"); await f.release("terminal"); await watchdog("resumed terminal", signals.wait("terminal"));
+      const dispatched = adapter.start({ binding, runId: "new-run", attemptId: "new-attempt", input: { text: "work" } });
+      await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); await f.release("terminal"); await watchdog("resumed terminal", signals.wait("terminal"));
       expect(observations.length).toBeGreaterThan(0);
       const nativeReplies = f.harness.trace.filter(entry => entry.direction === "inbound" && (entry.frame as { session_id?: string }).session_id);
       expect(nativeReplies).toHaveLength(2);
@@ -226,7 +263,8 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       const binding = await f.open();
       const stale = { ...binding, scope: { ...binding.scope, generation: binding.scope.generation + 1 } };
       await expect(start(f, stale)).rejects.toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "stale_scope", delivery: "not_dispatched" });
-      await start(f, binding);
+      const dispatched = start(f, binding);
+      await watchdog("queued input", f.harness.signals.wait("1:accepted:held"));
       const rejected = () => f.adapter.start({ binding, runId: "second-run", attemptId: "second-attempt", input: { text: "must not dispatch" } });
       const expectBusy = async () => {
         const error = await rejected().catch(error => error);
@@ -234,7 +272,7 @@ describe("Claude frozen provider contract through real SDK transport", () => {
         expect(error).toMatchObject({ code: "PROVIDER_DISPATCH_REJECTED", reason: "busy", delivery: "not_dispatched" });
       };
       await expectBusy();
-      await f.release("accepted"); await f.observed("accepted:");
+      await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); await f.observed("accepted:");
       await expectBusy();
       await f.release("terminal"); await f.observed("terminal:root_attempt");
       expect(f.observations.every(observation => observation.attemptId === "attempt")).toBe(true);
@@ -274,8 +312,8 @@ describe("Claude frozen provider contract through real SDK transport", () => {
   it("acknowledges native consumption, steers, and keeps child terminals out of root authority", async () => {
     const f = await fixture("start-steer-children");
     try {
-      const binding = await f.open(); expect(await start(f, binding)).toEqual({ status: "unknown" });
-      await f.release("accepted"); const accepted = await f.observed("accepted:");
+      const binding = await f.open(); const dispatched = start(f, binding);
+      await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); const accepted = await f.observed("accepted:");
       expect(accepted).toMatchObject({ scope, attemptId: "attempt", origin: { kind: "root" } });
       if (accepted.type !== "accepted") throw new Error("Missing native acceptance");
       expect(await f.adapter.steer({ binding, runId: "run", attemptId: "attempt", input: { text: "steer" }, turn: accepted.turn })).toEqual({ status: "unknown" });
@@ -293,7 +331,7 @@ describe("Claude frozen provider contract through real SDK transport", () => {
     try {
       const binding = await f.open();
       for (const turn of [1, 2]) {
-        await start(f, binding, `attempt-${turn}`); await f.release(`accepted${turn}`); await f.release(`terminal${turn}`);
+        const dispatched = start(f, binding, `attempt-${turn}`); await f.release(`accepted${turn}`); expect(await dispatched).toMatchObject({ status: "accepted" }); await f.release(`terminal${turn}`);
         await f.observed(`attempt-${turn}:terminal`);
       }
       const native = f.runtimeOptions.callbacks.onSessionEvent.mock.calls.map(call => call[1] as { type: string; meta?: { costUsd?: { total: number } } })
@@ -305,7 +343,7 @@ describe("Claude frozen provider contract through real SDK transport", () => {
   it("routes permission and child question requests through scoped live callbacks", async () => {
     const f = await fixture("approval");
     try {
-      const binding = await f.open(); await start(f, binding); await f.release("accepted"); await f.release("approval");
+      const binding = await f.open(); const dispatched = start(f, binding); await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); await f.release("approval");
       const request = await f.observed("approval-1"); if (request.type !== "request_opened") throw new Error("Missing request");
       await expect(f.adapter.respond({ binding, request: { ...request.request, generation: 6 }, lifetime: request.lifetime, response: [] })).rejects.toThrow();
       await f.adapter.respond({ binding, request: request.request, lifetime: request.lifetime, response: [{ questionId: "permission", selectedOptionIds: ["allow"] }] });
@@ -321,7 +359,7 @@ describe("Claude frozen provider contract through real SDK transport", () => {
   it("expires SDK-cancelled approvals and cannot revive their callbacks", async () => {
     const f = await fixture("expired-approval");
     try {
-      const binding = await f.open(); await start(f, binding); await f.release("accepted"); await f.release("approval");
+      const binding = await f.open(); const dispatched = start(f, binding); await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); await f.release("approval");
       const request = await f.observed("expired-1"); if (request.type !== "request_opened") throw new Error("Missing request");
       await f.release("cancel"); await f.observed("expired-1:cancelled");
       await expect(f.adapter.respond({ binding, request: request.request, lifetime: request.lifetime, response: [] })).rejects.toThrow();
@@ -332,14 +370,14 @@ describe("Claude frozen provider contract through real SDK transport", () => {
     const f = await fixture("one-turn");
     let resumed: Awaited<ReturnType<typeof fixture>> | undefined;
     try {
-      const binding = await f.open(); await start(f, binding); await f.release("accepted"); await f.release("terminal"); await f.observed("terminal:root_attempt"); await f.close();
+      const binding = await f.open(); const dispatched = start(f, binding); await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); await f.release("terminal"); await f.observed("terminal:root_attempt"); await f.close();
       resumed = await fixture("one-turn", { root: f.root, prompt: "Changed Forge instructions", tools: true, scope: { ...scope, bindingId: "resumed-binding", generation: 8 } });
       const restored = await resumed.open(binding.conversation);
       expect(restored.conversation.nativeId).toBe(binding.conversation.nativeId);
       expect(restored.instructionRevision).not.toBe(binding.instructionRevision);
       expect(restored.toolContractRevision).not.toBe(binding.toolContractRevision);
       expect(await resumed.adapter.resume({ ...resumed.input, conversation: binding.conversation })).toBe(restored);
-      await start(resumed, restored, "resumed-attempt"); await resumed.release("accepted"); await resumed.release("terminal"); await resumed.observed("terminal:root_attempt");
+      const resumedDispatch = start(resumed, restored, "resumed-attempt"); await resumed.release("accepted"); expect(await resumedDispatch).toMatchObject({ status: "accepted" }); await resumed.release("terminal"); await resumed.observed("terminal:root_attempt");
       for (const observation of resumed.observations) {
         expect(observation.scope).toEqual(resumed.input.scope);
         expect(observation.origin.conversation).toMatchObject(resumed.input.scope);
@@ -358,7 +396,7 @@ describe("Claude frozen provider contract through real SDK transport", () => {
   it("reports transport loss with honest delivery and drains the exited process", async () => {
     const f = await fixture("failure");
     try {
-      const binding = await f.open(); await start(f, binding); await f.release("accepted"); await f.observed("accepted:");
+      const binding = await f.open(); const dispatched = start(f, binding); await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); await f.observed("accepted:");
       await f.release("failure"); expect(await f.observed("error:")).toMatchObject({ delivery: "accepted", code: "CLAUDE_TRANSPORT_ERROR" });
       expect(f.observations.some(value => value.type === "terminal" && value.outcome === "completed")).toBe(false);
     } finally { await f.close(); await f.cleanup(); }
@@ -373,7 +411,7 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       const equivalentInputs = { ...f.input, instructions: createInstructionBundle(f.descriptor, "Forge instructions\nKeep native coding tools."), toolHost: equivalentHost };
       expect(await f.adapter.open(equivalentInputs)).toBe(binding);
       expect(await f.adapter.resume({ ...equivalentInputs, conversation: binding.conversation })).toBe(binding);
-      await start(f, binding); await f.release("accepted"); await f.release("tool");
+      const dispatched = start(f, binding); await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); await f.release("tool");
       await watchdog("MCP result", f.harness.signals.wait("1:mcp-call-response"));
       expect(invoke.mock.calls[0]![0].ref).toMatchObject({ ...scope, nativeId: "forge-choice", conversationId: binding.conversation.nativeId });
       expect(f.host.requestUserChoice).toHaveBeenCalledWith("owner", [{ id: "q", question: "Choose" }]);
@@ -386,7 +424,7 @@ describe("Claude frozen provider contract through real SDK transport", () => {
   it("acknowledges interrupt separately from terminal and fences stale attempt identity", async () => {
     const f = await fixture("interrupt");
     try {
-      const binding = await f.open(); await start(f, binding); await f.release("accepted");
+      const binding = await f.open(); const dispatched = start(f, binding); await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" });
       const accepted = await f.observed("accepted:"); if (accepted.type !== "accepted") throw new Error("Missing acceptance");
       await expect(f.adapter.interrupt({ binding, attemptId: "stale-attempt", turn: accepted.turn })).rejects.toThrow();
       await f.adapter.interrupt({ binding, attemptId: "attempt", turn: accepted.turn });
@@ -397,15 +435,15 @@ describe("Claude frozen provider contract through real SDK transport", () => {
   it("reports missing native consumption as unknown delivery", async () => {
     const f = await fixture("failure-before-ack");
     try {
-      const binding = await f.open(); expect(await start(f, binding)).toEqual({ status: "unknown" });
-      await f.release("failure"); expect(await f.observed("error:")).toMatchObject({ delivery: "unknown" });
+      const binding = await f.open(); const dispatched = start(f, binding);
+      await f.release("failure"); expect(await dispatched).toEqual({ status: "unknown" }); expect(await f.observed("error:")).toMatchObject({ delivery: "unknown" });
       expect(f.observations.some(value => value.type === "accepted")).toBe(false);
     } finally { await f.close(); await f.cleanup(); }
   });
   it("preserves native text and reasoning deltas with stable item refs", async () => {
     const f = await fixture("streaming");
     try {
-      const binding = await f.open(); await start(f, binding); await f.release("streaming"); await f.release("terminal"); await f.observed("terminal:root_attempt");
+      const binding = await f.open(); const dispatched = start(f, binding); await f.release("streaming"); expect(await dispatched).toMatchObject({ status: "accepted" }); await f.release("terminal"); await f.observed("terminal:root_attempt");
       expect(f.observations.filter(value => value.type === "message" && value.phase === "delta")).toMatchObject([
         { channel: "reasoning", text: "Reasoning", item: { nativeId: "stream-message:0" } },
         { channel: "assistant", text: "Streaming answer", item: { nativeId: "stream-message:1" } },
@@ -420,7 +458,7 @@ describe("Claude frozen provider contract through real SDK transport", () => {
     const invoke = vi.spyOn(f.input.toolHost, "invoke");
     f.host.requestUserChoice.mockImplementation(() => { invoked(); return new Promise(resolve => { finish = resolve; }); });
     try {
-      const binding = await f.open(); await start(f, binding); await f.release("accepted"); await f.release("tool");
+      const binding = await f.open(); const dispatched = start(f, binding); await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); await f.release("tool");
       await watchdog("tool invocation", invocation);
       await watchdog("MCP cancellation", f.harness.signals.wait("1:mcp-cancel-response"));
       expect(invoke.mock.calls[0]![0].signal!.aborted).toBe(true);
@@ -443,8 +481,8 @@ describe("Claude frozen provider contract through real SDK transport", () => {
         if (observation.type === "request_opened") signals.observe(observation.request.nativeId, observation);
         if (observation.type === "terminal") signals.observe("terminal", observation);
       } })();
-      await adapter.start({ binding, runId: "run", attemptId: "kernel-attempt", input: { text: "work" } });
-      await f.release("accepted"); await f.release("approval");
+      const dispatched = adapter.start({ binding, runId: "run", attemptId: "kernel-attempt", input: { text: "work" } });
+      await f.release("accepted"); expect(await dispatched).toMatchObject({ status: "accepted" }); await f.release("approval");
       const request = await watchdog("kernel request", signals.wait("approval-1")); if (request.type !== "request_opened") throw new Error("Missing approval");
       expect(f.host.requestUserChoice).not.toHaveBeenCalled();
       await adapter.respond({ binding, request: request.request, lifetime: request.lifetime, response: [{ questionId: "permission", selectedOptionIds: ["allow"] }] });

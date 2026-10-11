@@ -1,6 +1,6 @@
 import type { CanUseTool, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ChoiceAnswer, ChoiceQuestion, ProviderObservation, ProviderRequestRef, ProviderTurnRef } from "@forge/protocol";
-import type { ProviderBinding, ProviderRespondInput } from "../provider-contract.js";
+import type { ProviderBinding, ProviderDispatchResult, ProviderRespondInput } from "../provider-contract.js";
 
 type Fact = ProviderObservation extends infer O ? O extends ProviderObservation ? Omit<O, "scope" | "attemptId" | "sequence"> : never : never;
 type Origin = ProviderObservation["origin"];
@@ -15,7 +15,7 @@ export class ClaudeProviderSession {
   private wake?: () => void;
   private ended = false;
   private reading = false;
-  private readonly inputs = new Map<string, { attemptId: string; accepted: boolean; managed: boolean }>();
+  private readonly inputs = new Map<string, { attemptId: string; accepted: boolean; managed: boolean; unknown?: boolean; dispatch?: { promise: Promise<ProviderDispatchResult>; resolve(result: ProviderDispatchResult): void; timer: ReturnType<typeof setTimeout> } }>();
   private current?: { attemptId: string; turn: ProviderTurnRef; accepted: boolean; managed: boolean };
   private readonly tools = new Map<string, { name: string; origin: Origin; turn: ProviderTurnRef }>();
   private readonly tasks = new Map<string, { parent: ProviderTurnRef; agent: boolean; toolId?: string }>();
@@ -28,13 +28,40 @@ export class ClaudeProviderSession {
 
   bind(binding: ProviderBinding): void { this.binding = binding; }
   register(id: string, attemptId: string, managed: boolean): void {
-    if (this.terminalSeen) { this.inputs.clear(); this.tools.clear(); this.tasks.clear(); this.blocks.clear(); this.messages.clear(); }
+    if (this.terminalSeen) { this.settleDispatches(); this.inputs.clear(); this.tools.clear(); this.tasks.clear(); this.blocks.clear(); this.messages.clear(); }
     this.inputs.set(id, { attemptId, accepted: false, managed });
     const turn: ProviderTurnRef = { ...this.binding.scope, kind: "turn", conversationId: this.binding.conversation.nativeId, nativeId: id };
     if (!this.current || this.terminalSeen) this.current = { attemptId, turn, accepted: false, managed };
     this.terminalSeen = false;
   }
   enableObservations(): void { this.observing = true; }
+  /** Queue writes are not native consumption. Resolve only the registered input
+   * UUID for this attempt; transport loss, abort and silence remain unknown. */
+  waitForAcceptance(attemptId: string): Promise<ProviderDispatchResult> {
+    const input = [...this.inputs].find(([, entry]) => entry.attemptId === attemptId);
+    if (!input) return Promise.resolve({ status: "unknown" });
+    const [id, entry] = input;
+    const turn: ProviderTurnRef = { ...this.binding.scope, kind: "turn", conversationId: this.binding.conversation.nativeId, nativeId: id };
+    if (entry.accepted) return Promise.resolve({ status: "accepted", turn });
+    if (entry.unknown || this.ended || this.terminalSeen || this.interrupted) return Promise.resolve({ status: "unknown" });
+    if (!entry.dispatch) {
+      let resolve!: (result: ProviderDispatchResult) => void;
+      const promise = new Promise<ProviderDispatchResult>(done => { resolve = done; });
+      const timer = setTimeout(() => {
+        const pending = entry.dispatch; entry.dispatch = undefined; entry.unknown = true;
+        pending?.resolve({ status: "unknown" });
+      }, 30_000);
+      entry.dispatch = { promise, resolve, timer };
+    }
+    return entry.dispatch.promise;
+  }
+  private settleDispatches(): void {
+    for (const entry of this.inputs.values()) {
+      if (!entry.accepted) entry.unknown = true;
+      const pending = entry.dispatch; entry.dispatch = undefined;
+      if (pending) { clearTimeout(pending.timer); pending.resolve({ status: "unknown" }); }
+    }
+  }
   assertTurn(turn: ProviderTurnRef, attemptId?: string): void {
     if (!this.current || this.terminalSeen || turn.nativeId !== this.current.turn.nativeId
       || (attemptId !== undefined && attemptId !== this.current.attemptId)) throw new Error("Claude turn or attempt is no longer active.");
@@ -44,14 +71,14 @@ export class ClaudeProviderSession {
     return { ...this.binding.scope, kind: "tool_call" as const, conversationId: this.binding.conversation.nativeId,
       turnId: this.tools.get(id)?.turn.nativeId ?? this.current.turn.nativeId, nativeId: id };
   }
-  interrupt(): void { this.interrupted = true; for (const request of this.requests.values()) request.cancel(); }
+  interrupt(): void { this.interrupted = true; this.settleDispatches(); for (const request of this.requests.values()) request.cancel(); }
   compactionStarted(): void {
     if (this.compacting) return;
     this.compacting = true; this.publish({ type: "compaction", origin: this.origin(), phase: "started" });
   }
   terminal(outcome: "completed" | "failed" | "cancelled", message?: string): void {
     if (!this.current || this.terminalSeen) return;
-    this.terminalSeen = true;
+    this.terminalSeen = true; this.settleDispatches();
     for (const request of this.requests.values()) request.cancel();
     if (this.compacting) {
       this.compacting = false; this.publish({ type: "compaction", origin: this.origin(), phase: outcome === "completed" ? "completed" : "failed" });
@@ -62,13 +89,14 @@ export class ClaudeProviderSession {
     this.interrupted = false;
   }
   failure(message: string): void {
+    this.settleDispatches();
     if (!this.current) return;
     for (const request of this.requests.values()) request.cancel();
     if (this.compacting) { this.compacting = false; this.publish({ type: "compaction", origin: this.origin(), phase: "failed" }); }
     this.publish({ type: "error", origin: this.origin(), code: "CLAUDE_TRANSPORT_ERROR", message,
       delivery: this.current.accepted ? "accepted" : "unknown" });
   }
-  finish(): void { for (const request of this.requests.values()) request.cancel(); this.ended = true; this.wake?.(); }
+  finish(): void { this.settleDispatches(); for (const request of this.requests.values()) request.cancel(); this.ended = true; this.wake?.(); }
 
   async *observations(signal?: AbortSignal): AsyncIterable<ProviderObservation> {
     if (this.reading) throw new Error("Claude observations already have a reader.");
@@ -139,7 +167,12 @@ export class ClaudeProviderSession {
         if (!entry) continue;
         const turn: ProviderTurnRef = { ...this.binding.scope, kind: "turn", conversationId: this.binding.conversation.nativeId, nativeId: id };
         this.current = { attemptId: entry.attemptId, turn, accepted: true, managed: entry.managed };
-        if (!entry.accepted) { entry.accepted = true; this.publish({ type: "accepted", origin: this.origin(), turn }); }
+        if (!entry.accepted) {
+          entry.accepted = true;
+          const pending = entry.dispatch; entry.dispatch = undefined;
+          if (pending) { clearTimeout(pending.timer); pending.resolve({ status: "accepted", turn }); }
+          this.publish({ type: "accepted", origin: this.origin(), turn });
+        }
       }
     }
     const currentOrigin = parent ? origin : this.origin();

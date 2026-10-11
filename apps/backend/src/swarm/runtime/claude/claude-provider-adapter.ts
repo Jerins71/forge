@@ -74,8 +74,8 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     const runtime = this.assertBinding(input.binding); this.assertUpdates(input);
     this.session!.enableObservations();
     await runtime.dispatchProviderTurn(input.input, input.attemptId);
-    // Streaming-input queue writes do not prove consumption. Echoes produce accepted observations.
-    return { status: "unknown" as const };
+    // Streaming-input queue writes do not prove consumption. Await this input's native echo; the session bounds silence and settles failure/closure.
+    return this.session!.waitForAcceptance(input.attemptId);
   }
   async steer(input: ProviderSteerInput) {
     this.assertTurn(input.binding, input.turn); this.assertUpdates(input);
