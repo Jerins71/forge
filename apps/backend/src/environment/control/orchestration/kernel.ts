@@ -243,7 +243,28 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
           emit({ type: "thread.changed", thread: { ...owner, activeRunId: undefined, bindingId: undefined } });
         }
       }
-      if (command.type === "recovery.resume") for (const report of snapshot.undeliveredReports) decision.effects.push({ kind: "recovery.deliver", threadId: report.toAgentId, deliveryId: report.deliveryId, recoveryId: snapshot.recoveryId });
+      for (const report of snapshot.undeliveredReports) {
+        const transfer = state.transfers[report.deliveryId];
+        if (transfer && !["consumed", "superseded"].includes(transfer.state)) {
+          const targetRun = state.runs[transfer.targetRunId];
+          if (command.type === "recovery.dismiss") {
+            if (targetRun && targetRun.state !== "terminal") finish(targetRun, "dismissed");
+            emit({ type: "transfer.superseded", transfer: { ...transfer, state: "superseded" } });
+          } else {
+            if (thread(transfer.targetThreadId).shutdown !== "clean") throw new Error("Recovery requires confirmed writer shutdown");
+            if (thread(transfer.targetThreadId).desired === "stopped") {
+              const resumed = decide(state, { type: "thread.resume", commandId: command.commandId, now: command.now, threadId: transfer.targetThreadId });
+              for (const event of resumed.events) emit(event);
+              decision.effects.push(...resumed.effects);
+            }
+            const owner = thread(transfer.targetThreadId);
+            const assignment = state.assignments[transfer.assignmentId];
+            emit({ type: "transfer.created", transfer: { ...transfer, state: "pending", targetGeneration: owner.generation, consumingAttemptId: targetRun?.activeAttemptId } });
+            if (assignment) emit({ type: "assignment.result_recorded", assignment: { ...assignment, parentGeneration: owner.generation } });
+          }
+        }
+        if (command.type === "recovery.resume") decision.effects.push({ kind: "recovery.deliver", threadId: report.toAgentId, deliveryId: report.deliveryId, recoveryId: snapshot.recoveryId });
+      }
       emit({ type: "recovery.resolved", recovery: { ...snapshot, [command.type === "recovery.resume" ? "resumedAt" : "dismissedAt"]: new Date(command.now).toISOString() } });
       for (const owner of Object.values(state.threads)) advance(owner.threadId); break;
     }
