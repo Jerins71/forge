@@ -69,6 +69,14 @@ async function commandMethods(environment: UiEnvironment, sessionId: string): Pr
     return (database.prepare("SELECT method FROM commands WHERE session_id=? AND method LIKE 'session.%' ORDER BY created_at").all(sessionId) as { method: string }[]).map(row => row.method)
   } finally { database.close() }
 }
+/** The sessions that received a sent message, from the environment's own command journal. */
+async function sendTargets(environment: UiEnvironment, text: string): Promise<string[]> {
+  const Constructor = await loadConfiguredSqliteDatabaseConstructor()
+  const database = new Constructor(getEnvironmentDbPath(fixture(environment).dataDir), { readonly: true })
+  try {
+    return (database.prepare("SELECT session_id FROM commands WHERE method='session.send' AND json_extract(normalized_json,'$.message.text')=?").all(text) as { session_id: string }[]).map(row => row.session_id)
+  } finally { database.close() }
+}
 async function logicalGroupKey(page: Page): Promise<string> {
   await page.goto(fleet.uiUrl)
   const projectRow = page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first()
@@ -151,6 +159,36 @@ test('a new thread starts with the work mode and roster chosen in its composer',
   await shot(page, 'new-thread-session')
 })
 
+test('a thread started from an open session takes the pane, and follow-up messages go to it', async ({ page }) => {
+  const { a } = fleet
+  const openSessionId = viewedSession()
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(openSessionId)}`)
+  await expect(transcript(page)).toBeVisible()
+  await send(page, 'Marker in the open session')
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+
+  // In-app navigation, as a user does it: the previous session is still mounted when the launch lands.
+  await page.getByRole('complementary').getByRole('button', { name: /^New session for / }).filter({ visible: true }).first().click()
+  await expect(page.getByTestId('launch-workspace')).toBeVisible()
+  await page.getByRole('combobox', { name: 'Message agent...' }).fill('First message of the new thread')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/agent=v2-/)
+  const newSessionId = new URL(page.url()).searchParams.get('agent')!
+  expect(newSessionId).not.toBe(openSessionId)
+
+  // Header, transcript and composer all belong to the new thread.
+  await expect(page.getByRole('heading', { level: 1 }).filter({ visible: true }).first()).toContainText('First message of the new thread')
+  await expect(transcript(page)).toContainText('First message of the new thread')
+  await expect(transcript(page)).not.toContainText('Marker in the open session')
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  await send(page, 'Follow-up to the new thread')
+  await expect.poll(() => sendTargets(a, 'Follow-up to the new thread')).toEqual([newSessionId])
+  expect(await sendTargets(a, 'Marker in the open session')).toEqual([openSessionId])
+  await shot(page, 'launch-from-open-session')
+  assertions.launchFromOpenSession = { openSessionId, newSessionId, followUpTarget: await sendTargets(a, 'Follow-up to the new thread') }
+  expect(renderErrors).toEqual([])
+})
+
 test('a new thread on a paired machine starts with the chosen work mode and roster', async ({ page }) => {
   const { b } = fleet
   await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=environments`)
@@ -181,13 +219,15 @@ test('a spawned worker leaves one result in the manager chat, live and after rel
   const rpc = await openFixtureRpc(a.baseUrl, await bootstrap(a))
   try {
     await rpc.call('session.subscribe', { sessionId: viewedSession() })
+    const replies = async () => ((await transcript(page).innerText()).match(/assistant reply/g) ?? []).length
+    const repliesBefore = await replies()
     await send(page, '[fixture:spawn] Delegate the fixture task')
     await expect(transcript(page)).toContainText('worker spawned', { timeout: 30_000 })
     const cards = () => transcript(page).locator('[data-worker-result-source]')
     await expect(cards()).toHaveCount(1, { timeout: 30_000 })
     // The manager answers the delivered result with its own reply.
     await expect.poll(async () => (await shellSession(a, viewedSession()))?.status, { timeout: 30_000 }).not.toBe('running')
-    await expect.poll(async () => ((await transcript(page).innerText()).match(/assistant reply/g) ?? []).length, { timeout: 30_000 }).toBe(2)
+    await expect.poll(replies, { timeout: 30_000 }).toBe(repliesBefore + 1)
 
     const read = async () => {
       const text = await transcript(page).innerText()
@@ -219,6 +259,35 @@ test('a spawned worker leaves one result in the manager chat, live and after rel
     expect(replay).toEqual(expected)
     assertions.workerResult = { live, replay, wire: { live: [...liveResults], history: replayed } }
   } finally { rpc.close() }
+  expect(renderErrors).toEqual([])
+})
+
+test('the worker view shows the worker\'s own transcript and status, read-only', async ({ page }) => {
+  await page.goto(`${fleet.uiUrl}/?agent=fixture-worker`)
+  await expect(transcript(page)).toBeVisible()
+  // The worker's own output; nothing of the manager's conversation.
+  await expect(transcript(page)).toContainText(':worker result', { timeout: 30_000 })
+  const text = await transcript(page).innerText()
+  expect(text).not.toContain('worker spawned')
+  expect(text).not.toContain('Delegate the fixture task')
+  expect((text.match(/:worker result/g) ?? []).length).toBe(1)
+  await expect(transcript(page).locator('[data-worker-result-source]')).toHaveCount(0)
+  await expect(page.getByRole('heading', { level: 1 }).filter({ visible: true }).first()).toContainText('fixture-worker')
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  const input = page.getByRole('combobox', { name: /Workers are read-only/ })
+  await expect(input).toBeDisabled()
+  await shot(page, 'worker-view')
+
+  // The same after a reload, and nothing overflows the page in the All view.
+  await page.reload()
+  await expect(transcript(page)).toContainText(':worker result', { timeout: 30_000 })
+  expect(((await transcript(page).innerText()).match(/:worker result/g) ?? []).length).toBe(1)
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await page.getByRole('button', { name: 'All', exact: true }).click()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  expect(await transcript(page).evaluate(node => [...node.querySelectorAll('button')].every(button => button.scrollWidth <= button.clientWidth + 1))).toBe(true)
+  await shot(page, 'worker-view-all')
+  assertions.workerView = { transcript: 'worker only', composer: 'read-only', alerts: 0 }
   expect(renderErrors).toEqual([])
 })
 

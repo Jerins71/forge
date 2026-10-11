@@ -73,6 +73,11 @@ export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
     setLaunchTarget(target)
   }, [finishedProjectId, setLaunchTarget, setupEnvironmentId])
 
+  // Checkouts of one repository can carry different project names; the thread starts in the chosen one.
+  const targetProjectId = launch.target?.projectId
+  const selectTargetTitle = useCallback((shell: ShellState) => (targetProjectId ? shell.projects.get(targetProjectId)?.title ?? null : null), [targetProjectId])
+  const targetTitle = useEnvironmentSelector(launch.target?.environmentId ?? '', 'shell', selectTargetTitle)
+
   if (!group) {
     return <EmptyState title="Project not found" detail="This project is no longer available on any paired environment." />
   }
@@ -85,7 +90,7 @@ export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
         <div className={COMPOSER_COLUMN}>
           <div className="pb-6 text-center">
             <p className="eyebrow mb-2">New thread</p>
-            <h1 className="truncate text-[30px] font-medium leading-tight tracking-[-0.025em] text-foreground">{group.title}</h1>
+            <h1 className="truncate text-[30px] font-medium leading-tight tracking-[-0.025em] text-foreground">{targetTitle ?? group.title}</h1>
             <p className="mx-auto mt-1.5 max-w-md text-[13.5px] text-muted-foreground">Start a new thread. Choose the machine below, then send your first message.</p>
           </div>
           {launch.error ? (

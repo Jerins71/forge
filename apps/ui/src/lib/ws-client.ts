@@ -6,8 +6,6 @@ import { EnvironmentRuntimeError, type EnvironmentClient, type DetailState } fro
 import {
   projectShell,
   projectSession,
-  projectDetailMessages,
-  projectDetailActivity,
   projectItems,
   projectActivityItems,
   projectWorker,
@@ -897,9 +895,11 @@ export class ManagerWsClient {
  this.updateState({ conversationPageLoading: true, lastError: null });
  try {
  const page = await this.environmentClient.request('session.history', { sessionId: agentId, before: cursor, turns: Math.min(20, Math.max(1, limit ?? 20)) });
- const messages = projectItems(page.items, agentId);
+ const ownerId = this.environmentProjection?.session.sessionId ?? agentId;
+ const items = page.items.filter(item => ownerId === agentId || item.actorId === agentId);
+ const messages = projectItems(items, agentId, ownerId);
  const result: ConversationPageResult = { agentId, messages, page: { hasOlder: !!page.nextCursor, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}), completeness: 'complete', source: 'canonical' } };
- if (this.state.targetAgentId === agentId) this.updateState({ messages: [...messages, ...this.state.messages], activityMessages: [...projectActivityItems(page.items, agentId), ...this.state.activityMessages], conversationPage: result.page, conversationPageLoading: false, conversationHistoryMutation: { revision: (this.state.conversationHistoryMutation?.revision ?? 0) + 1, kind: 'prepend' } });
+ if (this.state.targetAgentId === agentId) this.updateState({ messages: [...messages, ...this.state.messages], activityMessages: [...projectActivityItems(items, ownerId), ...this.state.activityMessages], conversationPage: result.page, conversationPageLoading: false, conversationHistoryMutation: { revision: (this.state.conversationHistoryMutation?.revision ?? 0) + 1, kind: 'prepend' } });
  return result;
  } catch (error) { if (this.state.targetAgentId === agentId) this.updateState({ conversationPageLoading: false, lastError: error instanceof Error ? error.message : String(error) }); throw error; }
  }
@@ -980,17 +980,20 @@ export class ManagerWsClient {
           // The same declaration keeps its identity so consumers do not re-render on every detail tick.
           sessionTransferCapabilities: capabilities && previous && JSON.stringify(capabilities) === JSON.stringify(previous) ? previous : capabilities,
         })
-        const projectedMessages = projectDetailMessages(detail)
+        // A worker is mounted through its owning session and shows only its own rows.
+        const ownerId = projection?.session.sessionId ?? sessionId
+        const items = (projection?.items ?? []).filter(item => ownerId === sessionId || item.actorId === sessionId)
+        const projectedMessages = projectItems(items, sessionId, ownerId)
         const echoes = this.outbox?.pendingMessages(sessionId, projectedCommandIds(projection)) ?? []
         this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))
         this.updateState({
           messages: [...projectedMessages,...echoes,...(projection?.choices??[]).filter(c=>c.status!=='answered').map(c=>({type:'choice_request' as const,agentId:c.agentId,choiceId:c.choiceId,status:c.status==='interrupted'?'expired' as const:c.status,questions:c.questions,timestamp:projection!.session.updatedAt}))],
           commandStatuses: this.outbox?.statuses(),
           pendingChoiceIds:new Set((projection?.choices??[]).filter(c=>c.status==='pending').map(c=>c.choiceId)),
-          agents: projectSessionWorkers(this.state.agents, projection?.workers ?? [], sessionId, this.environmentClient!.shell.getSnapshot()),
+          agents: projectSessionWorkers(this.state.agents, projection?.workers ?? [], ownerId, this.environmentClient!.shell.getSnapshot()),
           conversationPage:projection?{hasOlder:!!projection.historyCursor,...(projection.historyCursor?{nextCursor:projection.historyCursor}:{}),completeness:'complete',source:'canonical'}:null,
           conversationPageLoading:false,
-          activityMessages: projectDetailActivity(detail),
+          activityMessages: projectActivityItems(items, ownerId),
           conversationHistoryMutation: {
             revision:
               (this.state.conversationHistoryMutation?.revision ?? 0) + 1,

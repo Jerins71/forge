@@ -2680,10 +2680,13 @@ export function BuilderSurface({
                   onSubmitted: session.handleMessageInputSubmitted,
                   isLoading,
                   onStop: activeAgentId && conversationActionsEnabled ? () => session.handleStopSession(activeAgentId) : undefined,
-                  disabled: !state.connected || !activeAgentId || hasActivePendingChoice || !conversationActionsEnabled,
+                  // A worker takes its input from its manager; its own view is for reading.
+                  disabled: !state.connected || !activeAgentId || hasActivePendingChoice || !conversationActionsEnabled || activeAgent?.role === 'worker',
                   placeholderOverride: hasActivePendingChoice
                     ? 'Respond to the choice above or click Skip…'
-                    : undefined,
+                    : activeAgent?.role === 'worker' && state.connected
+                      ? 'Workers are read-only. Message the manager, or continue this worker as a conversation.'
+                      : undefined,
                   allowWhileLoading: true,
                   agentLabel: activeAgentLabel,
                   environmentClient,

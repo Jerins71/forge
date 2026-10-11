@@ -128,15 +128,16 @@ function isDeliveredWorkerResult(item: DetailItem): boolean {
 
 /**
  * The chat of one agent. A session's detail also carries its workers' own messages, under the worker
- * as actor; those belong to the worker's view, so only `agentId`'s messages and the results delivered
- * to it are projected here.
+ * as actor, and a worker is read through its session's detail. So only `agentId`'s messages are
+ * projected: the manager's chat adds the results delivered to it, a worker's chat is the worker alone.
  */
 export function projectItems(
   items: NonNullable<DetailState['projection']>['items'],
   agentId: string,
+  sessionId: string = agentId,
 ): ConversationMessageEvent[] {
   return items
-    .filter((i) => i.kind === 'worker_result' ? isDeliveredWorkerResult(i) : (i.kind === 'user' || i.kind === 'assistant') && i.actorId === agentId)
+    .filter((i) => i.kind === 'worker_result' ? agentId === sessionId && isDeliveredWorkerResult(i) : (i.kind === 'user' || i.kind === 'assistant') && i.actorId === agentId)
     .map((i) => ({
       type: 'conversation_message',
       id: i.itemId,
@@ -175,13 +176,6 @@ export function projectActivityItems(
     }))
 }
 
-export function projectDetailActivity(state: DetailState): EnvironmentActivityEntry[] {
-  return projectActivityItems(
-    state.projection?.items ?? [],
-    state.projection?.session.sessionId ?? '',
-  )
-}
-
 const ARTIFACT_FILE_REF_PREFIX = 'artifact:'
 
 /** V2 artifacts travel as attachment metadata whose file reference names the environment artifact. */
@@ -200,14 +194,6 @@ export function artifactIdFromFileRef(fileRef: string): string | null {
   return fileRef.startsWith(ARTIFACT_FILE_REF_PREFIX) ? fileRef.slice(ARTIFACT_FILE_REF_PREFIX.length) : null
 }
 
-export function projectDetailMessages(
-  state: DetailState,
-): ConversationMessageEvent[] {
-  return projectItems(
-    state.projection?.items ?? [],
-    state.projection?.session.sessionId ?? '',
-  )
-}
 /** Replaces one session's workers with its detail projection, reusing unchanged descriptors and the list itself. */
 export function projectSessionWorkers(
   agents: AgentDescriptor[],
