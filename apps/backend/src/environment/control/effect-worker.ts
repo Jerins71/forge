@@ -99,16 +99,18 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
         let attemptedFork = false;
         try {
           const sourceBinding=transfer.source.bindingId ? state.bindings[transfer.source.bindingId]:undefined;
+          const sourceResource=sourceBinding && live.get(sourceBinding.scope.bindingId);
+          const currentSource=sourceResource && sourceResource.binding.scope.generation===state.threads[transfer.source.threadId]?.generation;
           const caps=targetCapabilities;
-          const plan=planTransferResolution(state,transfer,caps);
+          const candidate=planTransferResolution(state,transfer,caps);
+          const staleNativeSource=candidate.strategy==="native_fork" && !currentSource;
+          const plan=staleNativeSource ? {...candidate,strategy:"portable_context" as const}:candidate;
           if (state.threads[threadId].generation !== generation || state.threads[threadId].desired !== "running" || state.attempts[attempt.attemptId].state !== "created" || !authorized(state.runs[attempt.runId].commandId)) throw new Error("Context transfer target was fenced");
-          record({ type:"transfer.resolve",commandId:`resolve:${transfer.transferId}:${attempt.attemptId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId,strategy:plan.strategy,...(transfer.kind==="fork" && plan.strategy!=="native_fork" ? {error:{code:"UNSUPPORTED" as const,message:transfer.source.messageBounded ? "Native turn boundaries cannot prove this exact message cutoff; portable context selected" : caps?.native.forkThroughTurn === false ? "Native through-turn fork unsupported; exact latest boundary is not provable; portable context selected" : "Provider capabilities or source binding cannot prove a native fork boundary; portable context selected"}}:{}) });
+          record({ type:"transfer.resolve",commandId:`resolve:${transfer.transferId}:${attempt.attemptId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId,strategy:plan.strategy,...(transfer.kind==="fork" && plan.strategy!=="native_fork" ? {error:{code:staleNativeSource ? "SOURCE_UNAVAILABLE" as const : "UNSUPPORTED" as const,message:staleNativeSource ? "Native fork source has no current live binding; portable context selected without acquiring or changing the source runtime" : transfer.source.messageBounded ? "Native turn boundaries cannot prove this exact message cutoff; portable context selected" : caps?.native.forkThroughTurn === false ? "Native through-turn fork unsupported; exact latest boundary is not provable; portable context selected" : "Provider capabilities or source binding cannot prove a native fork boundary; portable context selected"}}:{}) });
           conversation = plan.prior?.conversation ?? conversation;
-          if (plan.strategy === "native_fork" && sourceBinding && caps?.native.fork) {
-            const source = state.bindings[transfer.source.bindingId!];
+          if (plan.strategy === "native_fork" && sourceBinding && sourceResource && currentSource && caps?.native.fork) {
+            const source = sourceBinding;
             try {
-              const activeSource=live.get(source.scope.bindingId);
-              const sourceResource=activeSource ?? await options.swarm.acquireProvider(source.scope,source.conversation,source.model);
               if (!sourceResource.adapter.capabilities().native.fork || !sourceResource.adapter.fork) throw Object.assign(new Error("Native source fork unsupported"),{code:"PROVIDER_BEHAVIOR_UNSUPPORTED"});
               const latestState=loadState(database);
               if(latestState.threads[threadId].generation!==generation || latestState.threads[threadId].desired!=="running" || latestState.attempts[attempt.attemptId].state!=="created") throw new Error("Native fork target was fenced");
@@ -124,14 +126,9 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
                 contextCoverage[point.threadId]=source.contextCoverage[point.threadId].filter(id=>ids.has(id));
               }
               nativeFork={conversation:forkedConversation,nativeRunIds,contextCoverage};
-              // Commit the public locator before target creation or source cleanup; restart resumes it.
+              // Commit the public locator before target creation; restart resumes it.
               record({type:"transfer.resolved",commandId:`resolved:${transfer.transferId}:${attempt.attemptId}`,now:options.clock(),transferId:transfer.transferId,attemptId:attempt.attemptId,strategy:"native_fork",nativeFork});
               attemptedFork=false;
-              if(!activeSource) {
-                await sourceResource.adapter.close(sourceResource.binding);
-                if((await sourceResource.adapter.drain(sourceResource.binding)).status!=="clean") throw new Error("Temporary source fork runtime requires confirmed shutdown");
-                await options.swarm.stopSession({sessionId:source.scope.threadId,commandId:`fork-source-release:${transfer.transferId}`});
-              }
             } catch (error) {
               // A typed unsupported boundary is known not-dispatched, so portable transfer is safe.
               if ((error as {code?:string}).code !== "PROVIDER_BEHAVIOR_UNSUPPORTED") throw error;

@@ -268,6 +268,33 @@ test('run fork points use real run IDs and portable merge remains available with
   assertions.capabilities = { input: calls('session.fork').at(-1), caps, portableMergeEnabled: true }
 })
 
+test('forking an older Codex run after switching to Claude preserves the source next send', async ({ page }) => {
+  const sourceId = fleet.a.sessionId
+  await openSession(page, sourceId)
+  await sendMessage(page, 'Native source seed before provider switch')
+  const source = await detail(sourceId)
+  const oldRun = source.items.filter(item => item.kind === 'assistant' && item.text?.includes('assistant reply') && item.runId).at(-1)!.runId!
+  const switched = await rpc.call<CommandReceipt>('session.provider.switch', { commandId: randomUUID(), sessionId: sourceId, model: { provider: 'claude-native', modelId: 'claude-sonnet-5', thinkingLevel: 'low' } })
+  expect(switched.state, JSON.stringify(switched.error)).toBe('succeeded')
+  await until(() => detail(sourceId), snapshot => snapshot.session.status === 'idle')
+  await sendMessage(page, 'Current Claude source after switch', 'Claude lineage fixture reply.')
+  const receipt = await rpc.call<CommandReceipt>('session.fork', {
+    commandId: randomUUID(), sessionId: sourceId, sourcePoint: { kind: 'run', runId: oldRun },
+    model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'low' }, title: 'Historical provider fork',
+  })
+  expect(receipt.state, JSON.stringify(receipt.error)).toBe('succeeded')
+  const targetId = receipt.result!.sessionId!
+  await openSession(page, targetId)
+  await sendMessage(page, 'Consume the historical Codex cutoff')
+  await openSession(page, sourceId)
+  await sendMessage(page, 'The current Claude source still works', 'Claude lineage fixture reply.')
+  const transfer = (await lineage(targetId)).transfers.find(value => value.kind === 'fork')!
+  expect(transfer).toMatchObject({ state: 'consumed', strategy: 'portable_context', error: { code: 'SOURCE_UNAVAILABLE' } })
+  expect((await detail(sourceId)).session.model?.provider).toBe('claude-native')
+  assertions.staleSourceFork = { sourceId, targetId, oldRun, strategy: transfer.strategy, sourceNextSend: 'completed' }
+  await shot(page, '12-stale-source-next-send')
+})
+
 test('an environment without contextTransfers disables actions with its explicit reason', async ({ page }) => {
   await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=environments`)
   await expect(page.getByRole('list', { name: 'Environments' })).toBeVisible()

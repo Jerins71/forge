@@ -1,4 +1,4 @@
-import { decideTransfer, isTransferCommand, reconcileBindingCoverage } from "./transfers.js";
+import { decideTransfer, isTransferCommand, isLineageTransfer, reconcileBindingCoverage } from "./transfers.js";
 import { decideAssignment, evolveAssignment, reconcileAssignments } from "./assignments.js";
 import type { ProviderObservation } from "@forge/protocol";
 import type { CoreCommand, CoreState, Decision, LifecycleEvent, Run } from "./types.js";
@@ -252,7 +252,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       }
       for (const report of snapshot.undeliveredReports) {
         const transfer = state.transfers[report.deliveryId];
-        if (transfer && !["consumed", "superseded"].includes(transfer.state)) {
+        if (transfer && !isLineageTransfer(transfer) && !["consumed", "superseded"].includes(transfer.state)) {
           const targetRun = state.runs[transfer.targetRunId];
           if (command.type === "recovery.dismiss") {
             if (targetRun && targetRun.state !== "terminal") finish(targetRun, "dismissed");

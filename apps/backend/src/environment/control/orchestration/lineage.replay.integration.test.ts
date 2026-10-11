@@ -10,7 +10,7 @@ import { createControlCore, type ControlCore } from '../database.js';
 import { loadState, rebuildLifecycleProjections, replayLifecycle } from './store.js';
 import { resolveSourcePoint, planTransferResolution, lineageSnapshot } from './transfers.js';
 import { materializeHandoff, readHandoff } from './handoff-materializer.js';
-import { type ProviderAdapter, type ProviderBinding } from '../../../swarm/runtime/provider-contract.js';
+import { ProviderDispatchRejectedError, type ProviderAdapter, type ProviderBinding } from '../../../swarm/runtime/provider-contract.js';
 import { CodexProviderAdapter } from '../../../swarm/runtime/codex/codex-provider-adapter.js';
 import { ClaudeProviderAdapter } from '../../../swarm/runtime/claude/claude-provider-adapter.js';
 import { piProviderCapabilities } from '../../../swarm/runtime/pi/pi-provider-adapter.js';
@@ -74,6 +74,24 @@ describe('durable lineage with the real kernel, SQLite store and outbox',()=>{
     f.fork('target',f.point('source',{kind:'message',entryId:`input-${run.runId}`}));await f.submit('target','target-consumer');expect(consumers).toBe(1);
   });
   it('honors a historical native run point and a message-bounded portable point',async()=>{const f=await fixture();const one=await f.submit('source','one');f.terminal(one.runId);const two=await f.submit('source','two');f.terminal(two.runId);f.fork('native',f.point('source',{kind:'run',runId:one.runId}));await f.submit('native','native-input');expect(f.nativeForks[0]).toMatchObject({through:{nativeId:`turn-${one.runId}`}});expect(f.state().transfers['fork-native'].strategy).toBe('native_fork');f.fork('message',f.point('source',{kind:'message',entryId:`input-${one.runId}`}));await f.submit('message','message-input');const text=f.starts.find(s=>s.threadId==='message')!.text;expect(text).toContain('request one');expect(text).not.toContain('answer');expect(text).not.toContain('request two');expect(f.state().transfers['fork-message'].strategy).toBe('portable_context');});
+  it('forks an older run after a provider switch without replacing or closing the current source runtime',async()=>{
+    const f=await fixture();const old=await f.submit('source','before-switch');f.terminal(old.runId);
+    f.record({type:'transfer.create',commandId:'switch-current',now,transferId:'switch-current',kind:'provider_switch',source:f.point(),targetThreadId:'source',targetModel:model('claude'),authorized:true});
+    await f.core().effectWorker.drain();const current=await f.submit('source','after-switch');f.terminal(current.runId);
+    const generation=f.state().threads.source.generation;const acquire=f.options.swarm.acquireProvider!;const start=f.adapter.start;
+    let closed=false;let sourceAcquisitions=0;let sourceStops=0;
+    // Model the real controller: acquisition under an old scope replaces the
+    // source's current runtime, leaving its live adapter closed.
+    f.options.swarm.acquireProvider=async(scope,conversation,m)=>{if(scope.threadId==='source'){sourceAcquisitions++;if(scope.generation!==generation)closed=true;}return acquire(scope,conversation,m);};
+    f.options.swarm.stopSession=async input=>{if(input.sessionId==='source'){sourceStops++;closed=true;}return {stopped:true};};
+    f.adapter.start=async input=>{if(input.binding.scope.threadId==='source' && closed)throw new ProviderDispatchRejectedError('closed');return start(input);};
+    f.fork('historical',f.point('source',{kind:'run',runId:old.runId}));await f.submit('historical','historical-input');
+    const next=await f.submit('source','source-still-works');expect(f.state().runs[next.runId].state).toBe('running');
+    expect(sourceAcquisitions).toBe(0);expect(sourceStops).toBe(0);expect(f.counts().forks).toBe(0);
+    expect(f.state().transfers['fork-historical']).toMatchObject({strategy:'portable_context',error:{code:'SOURCE_UNAVAILABLE',message:expect.stringContaining('current live binding')}});
+    const text=f.starts.find(value=>value.threadId==='historical')!.text;expect(text).toContain('answer');expect(text).not.toContain('request after-switch');
+    expect(f.state().threads.source).toMatchObject({generation,model:model('claude')});
+  });
   it('records the source-fork ref before target creation and resumes it across two crashes without another fork',async()=>{
     const f=await fixture();const run=await f.submit('source','seed');f.terminal(run.runId);f.fork('target');
     await f.core().controlService.submitInput({commandId:'send-crash',threadId:'target',message:{text:'after crash',artifactIds:[]}});
