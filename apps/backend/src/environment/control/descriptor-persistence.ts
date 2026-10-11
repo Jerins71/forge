@@ -1,21 +1,15 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { Database } from "better-sqlite3";
 import type { AgentDescriptorPersistence } from "../../swarm/agents/agent-descriptor-store.js";
-import { decodeAgentsStoreFile } from "../../swarm/agents/descriptor-store/descriptor-codec.js";
 import type { AgentsStoreFile, AgentDescriptor, ManagerProfile } from "../../swarm/types.js";
 import type { ProjectSummary, SessionSummary } from "@forge/protocol/environment-v2";
 import { createEventSink, type EventSink } from "./event-sink.js";
 import { randomUUID } from "node:crypto";
-import { dirname } from "node:path";
-import { getProjectAgentConfigPath, getProjectAgentPromptPath } from "../../swarm/storage/data-paths.js";
 import { withEnvironmentDatabase } from "./database.js";
-import { prepareRecoveryImport } from "../../swarm/recovery-state.js";
 import { cloneDescriptorForPersistence } from "../../swarm/agents/descriptor-store/descriptor-clone.js";
 
 /** The existing descriptor port now stores backend metadata on control rows. JSONL/resources remain files. */
 export function createControlDescriptorPersistence(options: { database: Database; eventSink: EventSink; dataDir: string; storeFilePath: string }): AgentDescriptorPersistence {
   const { database, eventSink } = options;
-  const imported = () => (database.prepare("SELECT descriptors_imported FROM environment_meta WHERE singleton=1").get() as { descriptors_imported: number }).descriptors_imported !== 0;
   const persist = (store: AgentsStoreFile, before?: () => void) => eventSink.transaction(tx => {
     before?.();
     store = { ...store, agents: store.agents.map(withoutInlinePrompt) };
@@ -50,57 +44,14 @@ export function createControlDescriptorPersistence(options: { database: Database
       database.prepare("UPDATE control_sessions SET descriptor_version=2 WHERE session_id=?").run(descriptor.agentId);
     }
     for (const row of database.prepare("SELECT session_id,agent_id FROM control_workers WHERE descriptor_json IS NOT NULL").all() as { session_id: string; agent_id: string }[]) if (!agents.has(row.agent_id)) database.prepare("UPDATE control_workers SET deleted=1,descriptor_json=NULL WHERE session_id=? AND agent_id=?").run(row.session_id, row.agent_id);
-    database.prepare("UPDATE environment_meta SET descriptors_imported=1 WHERE singleton=1").run();
   });
-  let adoption: Promise<void> | undefined;
-  const adopt = () => adoption ??= (async () => {
-    if (!imported()) {
-      let source: Buffer | undefined;
-      try { source = await readFile(options.storeFilePath); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-      let store: AgentsStoreFile = { agents: [], profiles: [] };
-      const raw = source?.toString("utf8");
-      if (source !== undefined) {
-        const backup = `${options.storeFilePath}.v2-before-policy-adoption`;
-        try { await writeFile(backup, source, { flag: "wx", mode: 0o600 }); }
-        catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-          if (!(await readFile(backup)).equals(source)) throw new Error("Descriptor source differs from its preserved backup; import is gated");
-        }
-        const parsed: unknown = JSON.parse(raw!);
-        if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as AgentsStoreFile).agents)) throw new Error("Invalid descriptor source; import is gated");
-        const decoded = decodeAgentsStoreFile(raw!, { ...options, warn: () => {} });
-        if (decoded.skippedDescriptorCount) throw new Error("Invalid descriptors; partial import is gated");
-        store = decoded.store;
-        const ids = store.agents.map(a => a.agentId);
-        const profiles = (store.profiles ?? []).map(p => p.profileId);
-        if (new Set(ids).size !== ids.length || new Set(profiles).size !== profiles.length || profiles.some(id => typeof id !== "string" || !id)) throw new Error("Invalid or duplicate descriptor identities; import is gated");
-      }
-      // The complete snapshot commits atomically with the import marker.
-      await preserveInlinePrompts(options.dataDir, store.agents);
-      const imports = await Promise.all(store.agents.filter(a => a.role === "manager").map(a => prepareRecoveryImport(database, { dataDir: options.dataDir, profileId: a.profileId ?? a.agentId, sessionAgentId: a.agentId })));
-      if (source && !(await readFile(options.storeFilePath)).equals(source)) throw new Error("Descriptor source changed during import; runtime is gated");
-      persist(store, () => { for (const applyImport of imports) applyImport(); });
-    }
-    if ((database.prepare("SELECT descriptor_version FROM environment_meta WHERE singleton=1").get() as { descriptor_version: number }).descriptor_version < 2) {
-      const legacy = (database.prepare("SELECT descriptor_json FROM control_sessions WHERE descriptor_json IS NOT NULL UNION ALL SELECT descriptor_json FROM control_workers WHERE descriptor_json IS NOT NULL").all() as { descriptor_json: string }[]).map(row => JSON.parse(row.descriptor_json) as AgentDescriptor);
-      await preserveInlinePrompts(options.dataDir, legacy);
-      eventSink.transaction(() => {
-        for (const table of ["control_sessions", "control_workers"]) {
-          database.prepare(`UPDATE ${table} SET descriptor_json=json_remove(descriptor_json, '$.projectAgent.systemPrompt'),descriptor_version=2 WHERE descriptor_json IS NOT NULL`).run();
-        }
-        database.prepare("UPDATE environment_meta SET descriptor_version=2 WHERE singleton=1").run();
-      });
-    }
-  })();
   return {
     async load() {
-      await adopt();
       const profiles = (database.prepare("SELECT profile_json FROM control_projects WHERE deleted=0 AND profile_json IS NOT NULL").all() as { profile_json: string }[]).map(row => JSON.parse(row.profile_json) as ManagerProfile);
       const agents = [...(database.prepare("SELECT descriptor_json FROM control_sessions WHERE deleted=0 AND descriptor_json IS NOT NULL").all() as { descriptor_json: string }[]), ...(database.prepare("SELECT descriptor_json FROM control_workers WHERE descriptor_json IS NOT NULL").all() as { descriptor_json: string }[])].map(row => JSON.parse(row.descriptor_json) as AgentDescriptor);
       return { agents, profiles };
     },
-    async save(store) { await adopt(); persist(store); },
+    async save(store) { persist(store); },
   };
 }
 
@@ -117,23 +68,4 @@ export function createStandaloneDescriptorPersistence(options: { dataDir: string
     finally { sink.close(); }
   });
   return { load: () => run(owner => owner.load()), save: store => run(owner => owner.save(store)) };
-}
-
-/** Legacy inline prose is carried to files using exclusive creation. Existing authored bytes always win. */
-async function preserveInlinePrompts(dataDir: string, descriptors: AgentDescriptor[]): Promise<void> {
-  for (const descriptor of descriptors) {
-    const agent = descriptor.projectAgent;
-    if (descriptor.role !== "manager" || !agent || agent.systemPrompt === undefined || agent.source?.type === "repo") continue;
-    const profileId = descriptor.profileId ?? descriptor.agentId;
-    const prompt = getProjectAgentPromptPath(dataDir, profileId, agent.handle);
-    const config = getProjectAgentConfigPath(dataDir, profileId, agent.handle);
-    await mkdir(dirname(prompt), { recursive: true });
-    // If a definition already exists, its prompt (including intentional absence) is authoritative.
-    try { await readFile(config); continue; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    try { await writeFile(prompt, agent.systemPrompt, { flag: "wx", mode: 0o600 }); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-    try { await writeFile(config, JSON.stringify({ version: 1, agentId: descriptor.agentId, handle: agent.handle, whenToUse: agent.whenToUse, capabilities: agent.capabilities, creatorSessionId: agent.creatorSessionId, promotedAt: descriptor.createdAt, updatedAt: descriptor.updatedAt }) + "\n", { flag: "wx", mode: 0o600 }); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-  }
 }

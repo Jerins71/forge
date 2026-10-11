@@ -7,6 +7,9 @@ import {
   type DetailStreamItem,
   type ShellStreamItem,
 } from "@forge/protocol/environment-v2";
+import { decide } from "./orchestration/kernel.js";
+import { loadState, projectLifecycle } from "./orchestration/store.js";
+import type { CoreCommand, Decision } from "./orchestration/types.js";
 
 type ShellEvent = Extract<ShellStreamItem, { kind: "event" }>["event"];
 type DetailEvent = Extract<DetailStreamItem, { kind: "event" }>["event"];
@@ -42,6 +45,9 @@ export interface EventSink {
   transaction<T>(write: (tx: ControlTransaction) => T): T;
   /** Inserts and projects atomically. Duplicate source keys return the original sequence without publication. */
   append(tx: ControlTransaction, input: AppendEvent): number;
+  /** Pure decision, retained facts, projections and outbox share the owning transaction. */
+  commitCommand(tx: ControlTransaction, command: CoreCommand): Decision;
+  subscribeCommit(listener: () => void): () => void;
   /** Reserves the real event sequence before encoding and storing its receipt. */
   updateReceipt(tx: ControlTransaction, commandId: string, patch: Partial<CommandReceipt>): CommandReceipt;
   subscribe(listener: (event: StoredEvent) => void): () => void;
@@ -63,6 +69,7 @@ const shellValidator = TypeCompiler.Compile(ShellEventSchema);
 const detailValidator = TypeCompiler.Compile(DetailEventSchema);
 export function createEventSink(database: Database, clock: () => number, random: () => string): EventSink {
   const listeners = new Set<(event: StoredEvent) => void>();
+  const commitListeners = new Set<() => void>();
   const committed: StoredEvent[] = [];
   let active: ControlTransaction | undefined;
   let pending: StoredEvent[] = [];
@@ -220,10 +227,49 @@ export function createEventSink(database: Database, clock: () => number, random:
           publishing = false;
         }
       }
+      for (const listener of [...commitListeners]) {
+        try { listener(); } catch { commitListeners.delete(listener); }
+      }
       return result;
     },
     append(tx, input) {
       return insert(tx, input, () => input.event);
+    },
+    commitCommand(tx, command) {
+      requireTransaction(tx);
+      const decision = decide(loadState(database), command);
+      if (!decision.events.length && !decision.effects.length) return decision;
+      if (!database.prepare("SELECT 1 FROM commands WHERE command_id=?").get(command.commandId)) {
+        database.prepare("INSERT INTO commands VALUES (?, 'core', ?, ?, ?, ?, ?)")
+          .run(command.commandId, command.type, command.commandId, JSON.stringify(command), "threadId" in command ? command.threadId : null, command.now);
+      }
+      for (const event of decision.events) {
+        const threadId = "thread" in event ? event.thread.threadId : "run" in event ? event.run.threadId : "attempt" in event ? event.attempt.threadId : "request" in event ? event.request.threadId : "binding" in event ? event.binding.scope.threadId : null;
+        const generation = "thread" in event ? event.thread.generation : "attempt" in event ? event.attempt.generation : "binding" in event ? event.binding.scope.generation : null;
+        database.prepare("INSERT INTO lifecycle_events (event_id,command_id,thread_id,generation,event_type,event_json,created_at) VALUES (?,?,?,?,?,?,?)")
+          .run(random(), command.commandId, threadId, generation, event.type, JSON.stringify(event), command.now);
+        projectLifecycle(database, event);
+        if (event.type === "input.recorded") database.prepare("UPDATE control_inputs SET canonical_entry_id=?,append_state='recorded' WHERE input_id=?").run(event.run.entryId, event.run.inputId);
+        if ("attempt" in event) {
+          const run = loadState(database).runs[event.attempt.runId];
+          const delivery = event.attempt.state === "dispatching" ? "dispatching" : event.attempt.delivery;
+          database.prepare("UPDATE control_inputs SET delivery_state=? WHERE input_id=?").run(delivery, run.inputId);
+          if (["attempt.accepted", "attempt.unknown"].includes(event.type) && database.prepare("SELECT 1 FROM command_receipts WHERE command_id=?").get(run.commandId)) {
+            sink.updateReceipt(tx, run.commandId, event.type === "attempt.accepted" ? { state: "succeeded", delivery: "dispatched", error: null } : { state: "interrupted", delivery: "unknown", error: { code: "UNAVAILABLE", message: "Provider delivery is unknown; explicit recovery is required", retryable: false } });
+          }
+        }
+        if ("recovery" in event) sink.append(tx, { topic: "shell", sessionId: null, event: { type: "recovery.upsert", recovery: event.recovery } });
+      }
+      let ordinal = (database.prepare("SELECT COALESCE(MAX(ordinal),-1)+1 ordinal FROM effects WHERE command_id=?").get(command.commandId) as { ordinal: number }).ordinal;
+      for (const effect of decision.effects) {
+        const effectId = `${command.commandId}:${ordinal}`;
+        database.prepare("INSERT INTO effects (effect_id,command_id,session_id,kind,ordinal,payload_json,state) VALUES (?,?,?,?,?,?,'pending')")
+          .run(effectId, command.commandId, effect.threadId, effect.kind, ordinal++, JSON.stringify(effect));
+      }
+      return decision;
+    },
+    subscribeCommit(listener) {
+      commitListeners.add(listener); return () => commitListeners.delete(listener);
     },
     updateReceipt(tx, commandId, patch) {
       requireTransaction(tx);
@@ -269,6 +315,7 @@ export function createEventSink(database: Database, clock: () => number, random:
     close() {
       closed = true;
       listeners.clear();
+      commitListeners.clear();
     },
   };
   return sink;

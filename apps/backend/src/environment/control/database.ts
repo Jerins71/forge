@@ -1,4 +1,4 @@
-import { access, mkdir, link, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Database } from "better-sqlite3";
@@ -64,35 +64,9 @@ export async function createControlCore(options: ControlCoreOptions & { dataDir?
   }
 }
 
-/** Backup is outside the migration transaction; a failed backup gates all new schema writes. */
+/** Initialization deliberately has no legacy import or migration path. */
 export async function prepareControlDatabase(database: Database, identity: { environmentId: string; streamEpoch: string }): Promise<void> {
-  const hasMeta = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='environment_meta'").get();
-  const version = hasMeta ? (database.prepare("SELECT schema_version FROM environment_meta WHERE singleton=1").get() as { schema_version: number } | undefined)?.schema_version : undefined;
-  if (version === 1 && database.name !== ":memory:") {
-    const backup = `${database.name}.v2-before-descriptor-recovery`;
-    try { await access(backup); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      const temporary = `${backup}.${randomUUID()}.tmp`;
-      try {
-        await database.backup(temporary);
-        await validateBackup(temporary);
-        await link(temporary, backup);
-      } finally { await rm(temporary, { force: true }); }
-    }
-    await validateBackup(backup);
-  }
   migrateControlDatabase(database, identity);
-}
-
-async function validateBackup(file: string): Promise<void> {
-  const Constructor = await loadConfiguredSqliteDatabaseConstructor();
-  const backup = new Constructor(file, { readonly: true, fileMustExist: true });
-  try {
-    if (backup.pragma("integrity_check", { simple: true }) !== "ok") throw new Error("Control database backup failed integrity verification; runtime is gated");
-    const version = backup.prepare("SELECT schema_version FROM environment_meta WHERE singleton=1").get() as { schema_version: number } | undefined;
-    if (version?.schema_version !== 1) throw new Error("Control database backup has an unexpected schema; runtime is gated");
-  } finally { backup.close(); }
 }
 
 /** Standalone tools use the same DB and schema as the composed environment owner. */

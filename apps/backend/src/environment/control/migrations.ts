@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS environment_meta (
   stream_epoch TEXT NOT NULL,
   high_water_sequence INTEGER NOT NULL DEFAULT 0,
   retained_after_sequence INTEGER NOT NULL DEFAULT 0,
-  imported INTEGER NOT NULL DEFAULT 0
+  descriptor_version INTEGER NOT NULL DEFAULT 2
 );
 CREATE TABLE IF NOT EXISTS commands (
   command_id TEXT PRIMARY KEY,
@@ -43,7 +43,10 @@ CREATE TABLE IF NOT EXISTS command_receipts (
 CREATE TABLE IF NOT EXISTS control_projects (
   project_id TEXT PRIMARY KEY,
   summary_json TEXT NOT NULL,
-  updated_sequence INTEGER NOT NULL
+  updated_sequence INTEGER NOT NULL,
+  profile_version INTEGER NOT NULL DEFAULT 1,
+  profile_json TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS control_sessions (
   session_id TEXT PRIMARY KEY,
@@ -52,7 +55,10 @@ CREATE TABLE IF NOT EXISTS control_sessions (
   desired_state TEXT NOT NULL CHECK (desired_state IN ('running','stopped')),
   run_generation INTEGER NOT NULL DEFAULT 0,
   summary_json TEXT NOT NULL,
-  updated_sequence INTEGER NOT NULL
+  updated_sequence INTEGER NOT NULL,
+  descriptor_version INTEGER NOT NULL DEFAULT 2,
+  descriptor_json TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS control_inputs (
   input_id TEXT PRIMARY KEY,
@@ -88,6 +94,9 @@ CREATE TABLE IF NOT EXISTS control_workers (
   agent_id TEXT NOT NULL,
   worker_json TEXT NOT NULL,
   updated_sequence INTEGER NOT NULL,
+  descriptor_version INTEGER NOT NULL DEFAULT 2,
+  descriptor_json TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (session_id, agent_id)
 );
 CREATE TABLE IF NOT EXISTS effects (
@@ -162,6 +171,7 @@ CREATE TABLE IF NOT EXISTS control_turns (
   stalled_at TEXT,
   recovery_note TEXT,
   recovery_at TEXT,
+  recovery_id TEXT,
   PRIMARY KEY(session_id, turn_id)
 );
 CREATE TABLE IF NOT EXISTS control_deliveries (
@@ -180,11 +190,8 @@ CREATE TABLE IF NOT EXISTS control_deliveries (
 CREATE TABLE IF NOT EXISTS control_recovery (
   recovery_id TEXT PRIMARY KEY,
   snapshot_json TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS recovery_imports (
-  session_id TEXT PRIMARY KEY,
-  source_records INTEGER NOT NULL
+  created_at TEXT NOT NULL,
+  decision_applied INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS pairing_grants (
@@ -221,36 +228,39 @@ CREATE TABLE IF NOT EXISTS device_sessions (
 );
 `;
 
-/** Additive initial migration: no file-backed content or existing identity is rewritten. */
+/** A fresh versioned schema: incompatible databases are preserved and rejected. */
 export function migrateControlDatabase(database: Database, identity: { environmentId: string; streamEpoch: string }): void {
-  database
-    .transaction(() => {
-      database.exec(INITIAL_SCHEMA);
-      database
-        .prepare(
-          `INSERT OR IGNORE INTO environment_meta
-      (singleton, schema_version, environment_id, stream_epoch) VALUES (1, 1, ?, ?)`,
-        )
-        .run(identity.environmentId, identity.streamEpoch);
-      const columns: [string, string, string][] = [
-        ["environment_meta", "descriptors_imported", "INTEGER NOT NULL DEFAULT 0"],
-        ["environment_meta", "descriptor_version", "INTEGER NOT NULL DEFAULT 0"],
-        ["control_projects", "profile_version", "INTEGER NOT NULL DEFAULT 1"],
-        ["control_sessions", "descriptor_version", "INTEGER NOT NULL DEFAULT 1"],
-        ["control_workers", "descriptor_version", "INTEGER NOT NULL DEFAULT 1"],
-        ["control_turns", "recovery_id", "TEXT"],
-        ["control_recovery", "decision_applied", "INTEGER NOT NULL DEFAULT 0"],
-        ["control_projects", "profile_json", "TEXT"], ["control_projects", "deleted", "INTEGER NOT NULL DEFAULT 0"],
-        ["control_sessions", "descriptor_json", "TEXT"], ["control_sessions", "deleted", "INTEGER NOT NULL DEFAULT 0"],
-        ["control_workers", "descriptor_json", "TEXT"], ["control_workers", "deleted", "INTEGER NOT NULL DEFAULT 0"],
-      ];
-      for (const [table, column, definition] of columns) {
-        const known = database.pragma(`table_info(${table})`) as { name: string }[];
-        if (!known.some(field => field.name === column)) database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-      }
-      const meta = database.prepare("SELECT schema_version FROM environment_meta WHERE singleton = 1").get() as { schema_version: number };
-      if (![1, 2].includes(meta.schema_version)) throw new Error("Unsupported environment control schema version");
-      database.prepare("UPDATE environment_meta SET schema_version=2 WHERE singleton=1").run();
-    })
-    .immediate();
+  const existing = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[];
+  if (existing.length) {
+    if (!existing.some(row => row.name === "environment_meta")) throw new Error("Incompatible environment control database; select a fresh data root");
+    const meta = database.prepare("SELECT schema_version FROM environment_meta WHERE singleton=1").get() as { schema_version: number } | undefined;
+    if (meta?.schema_version !== 3) throw new Error("Incompatible environment control schema; select a fresh data root");
+    return;
+  }
+  database.transaction(() => {
+    database.exec(INITIAL_SCHEMA);
+    database.exec(LIFECYCLE_SCHEMA);
+    database.prepare("INSERT INTO environment_meta (singleton,schema_version,environment_id,stream_epoch) VALUES (1,3,?,?)").run(identity.environmentId, identity.streamEpoch);
+  }).immediate();
 }
+
+const LIFECYCLE_SCHEMA = `
+CREATE TABLE lifecycle_events (
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL UNIQUE,
+  command_id TEXT NOT NULL,
+  thread_id TEXT,
+  generation INTEGER,
+  event_type TEXT NOT NULL,
+  event_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX lifecycle_thread_sequence ON lifecycle_events(thread_id,sequence);
+CREATE TABLE orchestration_threads (thread_id TEXT PRIMARY KEY, state_json TEXT NOT NULL);
+CREATE TABLE orchestration_runs (run_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, input_id TEXT NOT NULL UNIQUE, state_json TEXT NOT NULL);
+CREATE INDEX orchestration_runs_thread ON orchestration_runs(thread_id);
+CREATE TABLE orchestration_attempts (attempt_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, thread_id TEXT NOT NULL, state_json TEXT NOT NULL);
+CREATE TABLE orchestration_bindings (binding_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, generation INTEGER NOT NULL, state_json TEXT NOT NULL);
+CREATE TABLE orchestration_requests (request_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, attempt_id TEXT NOT NULL, state_json TEXT NOT NULL);
+CREATE TABLE orchestration_recovery (singleton INTEGER PRIMARY KEY CHECK(singleton=1), snapshot_json TEXT NOT NULL);
+`;
