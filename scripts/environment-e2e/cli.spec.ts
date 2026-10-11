@@ -57,6 +57,7 @@ test.beforeAll(async () => {
   credentialFile = join(environment.installationStateDir, 'cli-credential.json');
   await writeFile(credentialFile, JSON.stringify(credential), { mode: 0o600 });
   client = new ForgeClient({ credential, WebSocketImpl: RecordingSocket } as any);
+  await until(() => client.showSession(projectId), response => response.session.status === 'idle');
 });
 test.afterAll(async () => {
   expect(endpoints.every(path => path === '/api/v2/rpc')).toBe(true);

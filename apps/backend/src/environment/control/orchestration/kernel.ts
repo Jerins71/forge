@@ -323,7 +323,12 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
         const attempt = state.attempts[command.attemptId];
         if (attempt.state === "terminal" || attempt.state === "unknown" || state.runs[attempt.runId].activeAttemptId !== attempt.attemptId) break;
         if (command.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); }
-        else { finish(state.runs[attempt.runId], "failed"); advance(command.threadId); }
+        else if (command.kind === "provider.steer" && command.steerTargetEnded && thread(command.threadId).desired === "running" && thread(command.threadId).shutdown === "clean") {
+          // A proven rejected steer never entered the native turn. Preserve its input as a follow-up.
+          emit({ type: "attempt.created", attempt: { ...attempt, state: "created", delivery: "pending" } });
+          emit({ type: "run.started", run: { ...state.runs[attempt.runId], state: "queued", delivery: "queue" } });
+          advance(command.threadId);
+        } else { finish(state.runs[attempt.runId], "failed"); advance(command.threadId); }
       } else if (command.kind === "provider.release") {
         const owner = thread(command.threadId); emit({ type: "thread.changed", thread: { ...owner, shutdown: "quarantined" } });
       } break;

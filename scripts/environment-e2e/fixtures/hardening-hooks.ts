@@ -267,7 +267,16 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       if (input.operation === 'terminal-evidence') return terminalEvents;
       if (input.operation === 'disable-native-steer') {
         if (!input.sessionId || !manager?.getAgent(input.sessionId)) throw new Error('Missing fixture session');
-        nonSteeringSessions.add(input.sessionId); return { nativeSteer: false };
+        nonSteeringSessions.add(input.sessionId);
+        // Project creation can acquire its binding before the test configures the provider.
+        const database = new Constructor(databasePath);
+        try {
+          for (const binding of Object.values(loadState(database).bindings).filter(value => value.scope.threadId === input.sessionId)) {
+            const configured = { ...binding, capabilities: { ...binding.capabilities, native: { ...binding.capabilities.native, steer: false } } };
+            database.prepare('UPDATE orchestration_bindings SET state_json=? WHERE binding_id=?').run(JSON.stringify(configured), binding.scope.bindingId);
+          }
+        } finally { database.close(); }
+        return { nativeSteer: false };
       }
       if (input.operation === 'hold-dispatch') {
         if (!input.commandId || held) throw new Error('Invalid fixture hold');

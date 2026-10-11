@@ -583,7 +583,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
   private active(ref: ProviderTurnRef, attemptId: string): NativeTurn {
     this.assertTurnScope(ref);
     const turn = this.state!.root;
-    if (!turn || turn.ended || turn.id !== ref.nativeId || turn.attemptId !== attemptId) throw new Error("Codex native turn or attempt is stale");
+    if (!turn || turn.ended || turn.id !== ref.nativeId || turn.attemptId !== attemptId) throw new ProviderDispatchRejectedError("stale_scope");
     return turn;
   }
 }
