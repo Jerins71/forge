@@ -152,12 +152,13 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
           record({ type: "request.responded", ...result(row, "responded"), threadId: effect.threadId, requestId: request.requestId }); break;
         }
         case "provider.release": {
+          // Runtime cleanup may need to interrupt its native projection before close.
+          if (!(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.threadId })).stopped) throw new Error("Runtime writer shutdown is incomplete");
           const resource = live.get(effect.bindingId);
           if (resource) { attemptedNative = true; await resource.adapter.close(resource.binding); const drained = await resource.adapter.drain(resource.binding);
             if (drained.status !== "clean") { record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: drained.status }); settle(row, "interrupted", unavailable); return; }
             resource.stop.abort(); live.delete(effect.bindingId);
           }
-          if (!(await options.swarm.stopSession({ commandId: row.command_id, sessionId: effect.threadId })).stopped) throw new Error("Runtime writer shutdown is incomplete");
           record({ type: "binding.drained", ...result(row, "drain"), threadId: effect.threadId, bindingId: effect.bindingId, status: "clean" }); break;
         }
         case "provider.compact": {

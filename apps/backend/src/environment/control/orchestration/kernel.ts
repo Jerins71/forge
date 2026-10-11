@@ -186,6 +186,11 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       for (const run of Object.values(state.runs)) if (run.threadId === owner.threadId && run.state === "queued") finish(run, "cancelled");
       if (needsDrain) decision.effects.push({ kind: "provider.release", threadId: owner.threadId, bindingId: owner.bindingId! });
       else if (owner.activeRunId && state.runs[owner.activeRunId].state !== "terminal") finish(state.runs[owner.activeRunId], "cancelled");
+      if (owner.role === "manager") for (const worker of Object.values(state.threads).filter(candidate => candidate.managerId === owner.threadId && (candidate.desired !== "stopped" || candidate.shutdown !== "clean"))) {
+        const stopped = decide(state, { ...command, threadId: worker.threadId, writerPending: !!worker.bindingId });
+        for (const event of stopped.events) emit(event);
+        decision.effects.push(...stopped.effects);
+      }
       break;
     }
     case "binding.drained": {

@@ -43,6 +43,25 @@ async function fixture() {
 const principal = { deviceSessionId: "device", scopes: new Set(["session:operate" as const]) };
 
 describe("durable provider outbox", () => {
+  it("settles runtime cleanup before closing the adapter binding", async () => {
+    const f = await fixture(); let nativeClosed = false; const order: string[] = [];
+    f.adapter.close = async () => { nativeClosed = true; order.push("adapter.close"); };
+    f.options.swarm.stopSession = async () => { order.push("runtime.stop"); if (nativeClosed) throw new Error("Runtime cannot interrupt a closed native binding"); return { stopped: true }; };
+    await f.core.controlService.submitInput({ commandId: "held", threadId: "manager", message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" }); await f.core.effectWorker.drain();
+    expect(order).toEqual(["runtime.stop", "adapter.close"]); expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded" });
+    expect(loadState(f.core.database).threads.manager).toMatchObject({ desired: "stopped", shutdown: "clean" });
+  });
+  it("stops the manager and its owned worker in one kernel transaction, then releases their resources in order", async () => {
+    const f = await fixture(); const order: string[] = [];
+    await f.core.controlService.submitInput({ commandId: "parent", threadId: "manager", message: { text: "held", artifactIds: [] } });
+    await f.core.controlService.submitInput({ commandId: "child", threadId: "worker", thread: { role: "worker", projectId: "project", managerId: "manager" }, message: { text: "held", artifactIds: [] } }); await f.core.effectWorker.drain();
+    f.options.swarm.stopSession = async input => { order.push(input.sessionId); if (input.sessionId === "manager") expect(loadState(f.core.database).threads.worker.desired).toBe("stopped"); return { stopped: true }; };
+    await f.core.controlService.execute(principal, "session.stop", { commandId, sessionId: "manager" });
+    expect(loadState(f.core.database).threads.worker.desired).toBe("stopped"); await f.core.effectWorker.drain();
+    expect(order).toEqual(["manager", "worker"]); expect(await f.core.controlService.getReceipt(principal, commandId)).toMatchObject({ state: "succeeded" });
+    expect(loadState(f.core.database).threads.worker.shutdown).toBe("clean"); expect(loadState(f.core.database).runs["run-child"].state).toBe("terminal");
+  });
   it("rebuilds provider images from pinned prepared-message attachments after restart", async () => {
     const f = await fixture(); const root = path.dirname(f.options.databasePath!);
     const descriptor = { agentId: "manager", role: "manager", status: "idle", profileId: "project" } as AgentDescriptor;
