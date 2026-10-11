@@ -8,6 +8,7 @@ import type { EventSink } from "./event-sink.js";
 import type { InputRoutePort, WorkspacePort } from "./effect-types.js";
 import type { EnvironmentControlService } from "./command-service.js";
 import { createCoreAgentMessagePort } from "./orchestration/agent-message-port.js";
+import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
 import { loadState } from "./orchestration/store.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, controlService, workspaceService, artifactService }: {
@@ -50,7 +51,7 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
   });
   swarmManager.installControlledTurnProjection({ read(agentId) {
     const state = loadState(database);
-    return { activeRunId:state.threads[agentId]?.activeRunId,pendingRunIds:Object.values(state.runs).filter(run => run.threadId === agentId && run.state === "queued").sort((a,b)=>a.sequence-b.sequence).map(run=>run.runId) };
+    return { status:projectLifecycleStatus(state,agentId)?.agentStatus,activeRunId:state.threads[agentId]?.activeRunId,pendingRunIds:Object.values(state.runs).filter(run => run.threadId === agentId && run.state === "queued").sort((a,b)=>a.sequence-b.sequence).map(run=>run.runId) };
   } });
   eventSink.subscribeCommit(() => swarmManager.reflectControlledTurns());
   const messages = createCoreAgentMessagePort({ controlService,sink:eventSink,artifacts:artifactService,swarm:swarmManager,clock:Date.now,random:()=>crypto.randomUUID() });

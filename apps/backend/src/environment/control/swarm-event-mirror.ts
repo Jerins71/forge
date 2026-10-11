@@ -1,3 +1,5 @@
+import { loadState } from "./orchestration/store.js";
+import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
 import { projectAgentMetadata } from "@forge/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, createReadStream, openSync, readSync, statSync } from "node:fs";
@@ -80,8 +82,8 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const pending = swarmManager.getPendingChoiceRequestsForSession(descriptor.agentId).length > 0 || Boolean(database.prepare("SELECT 1 FROM control_choices WHERE session_id=? AND state='pending' LIMIT 1").get(descriptor.agentId));
     const attention = swarmManager.getSessionAttentionSnapshot().attentions.find(attention => attention.sessionAgentId === descriptor.agentId);
     const row = database.prepare("SELECT desired_state FROM control_sessions WHERE session_id=?").get(descriptor.agentId) as { desired_state: string } | undefined;
-    const lifecycle = database.prepare("SELECT state_json FROM orchestration_threads WHERE thread_id=?").get(descriptor.agentId) as { state_json: string } | undefined;
-    const status = lifecycle ? prior?.status ?? "idle" : row?.desired_state === "stopped" ? swarmManager.isSessionShutdownSafe(descriptor.agentId) ? "stopped" : "stopping"
+    const lifecycle = projectLifecycleStatus(loadState(database), descriptor.agentId);
+    const status = lifecycle ? lifecycle.sessionStatus : row?.desired_state === "stopped" ? swarmManager.isSessionShutdownSafe(descriptor.agentId) ? "stopped" : "stopping"
       : descriptor.status === "streaming" ? "running" : descriptor.status === "terminated" ? "stopped"
         : descriptor.status === "idle" && pending ? "waiting" : descriptor.status;
     return { projectAgent: descriptor.projectAgent ? projectAgentMetadata(descriptor.projectAgent) : null, sessionId: descriptor.agentId, projectId: descriptor.profileId ?? descriptor.agentId,
@@ -107,7 +109,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
   }
   function upsertWorker(tx: ControlTransaction, descriptor: AgentDescriptor) {
     indexDescriptor(descriptor);
-    const worker = { agentId: descriptor.agentId, title: descriptor.displayName.slice(0, 256), status: descriptor.status };
+    const worker = { agentId: descriptor.agentId, title: descriptor.displayName.slice(0, 256), status: projectLifecycleStatus(loadState(database), descriptor.agentId)?.agentStatus ?? descriptor.status };
     const prior = database.prepare("SELECT worker_json FROM control_workers WHERE session_id=? AND agent_id=? AND deleted=0").get(descriptor.managerId, descriptor.agentId) as { worker_json: string } | undefined;
     if (JSON.stringify(worker) !== prior?.worker_json) eventSink.append(tx, { topic: "detail", sessionId: descriptor.managerId, event: { type: "worker.upsert", worker } });
   }

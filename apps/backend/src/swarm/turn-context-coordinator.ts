@@ -117,7 +117,7 @@ export interface CodexTurnScopePort<
   clearForRuntimeReset(agentId: string): void;
 }
 
-export interface CoreTurnProjection { activeRunId?:string; pendingRunIds:readonly string[]; }
+export interface CoreTurnProjection { status?: AgentDescriptor["status"]; activeRunId?:string; pendingRunIds:readonly string[]; }
 export interface CoreTurnProjectionPort { read(agentId:string):CoreTurnProjection; }
 
 export interface QueuedInboundTurnHandle {
