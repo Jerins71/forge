@@ -17,6 +17,7 @@ import { ExternalThreadContextCard } from './ExternalThreadContextCard'
 import { ProjectAgentMessageRow } from './ProjectAgentMessageRow'
 import { ReplyPreview } from './ReplyPreview'
 import type { ConversationMessageEntry } from './types'
+import { parseWorkerReport, type WorkerReportStatus } from './worker-report'
 
 // These canonical notices predate structured notice kinds. Match complete text
 // so both live events and saved transcripts improve without downgrading failures.
@@ -28,6 +29,13 @@ const CONTEXT_TRANSITIONS = new Map<string, 'started' | 'completed'>([
   ['Compacting manager context...', 'started'],
   ['Compaction complete.', 'completed'],
 ])
+
+const WORKER_REPORT_TONES: Record<WorkerReportStatus, { label: string; chip: string; border: string }> = {
+  done: { label: 'Done', chip: 'bg-success/15 text-success', border: 'border-success/30' },
+  partial: { label: 'Partial', chip: 'bg-foreground/[0.08] text-muted-foreground', border: '' },
+  blocked: { label: 'Blocked', chip: 'bg-danger/15 text-danger', border: 'border-danger/35' },
+  failed: { label: 'Failed', chip: 'bg-danger/15 text-danger', border: 'border-danger/35' },
+}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -209,28 +217,60 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
     if (message.source === 'worker_report') {
       const sourceWorkerId = message.sourceWorkerId?.trim()
       const workerLabel = sourceWorkerId ? `Worker result · ${sourceWorkerId}` : 'Worker result'
+      // Parsed from the message text, so the live card and the replayed one are the same.
+      const report = hasText ? parseWorkerReport(normalizedText) : null
+      const tone = report ? WORKER_REPORT_TONES[report.status] : null
 
       return (
         <div
-          className="glass-inset rise-in rounded-xl px-3.5 py-2.5 text-sm text-foreground/90"
+          className={cn(
+            'glass-inset rise-in max-w-[var(--prose-measure)] rounded-xl px-3.5 py-2.5 text-sm text-foreground/90',
+            tone?.border,
+          )}
           data-worker-result-source={sourceWorkerId || undefined}
+          data-worker-result-status={report?.status}
         >
-          <div className="eyebrow break-words !text-primary">
-            {workerLabel}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {report && tone ? (
+              <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium leading-4', tone.chip)}>
+                {tone.label}
+              </span>
+            ) : null}
+            <span className="eyebrow break-words !text-primary">{workerLabel}</span>
+            {timestampLabel ? (
+              <span className="ml-auto font-mono text-[11px] text-subtle-foreground">{timestampLabel}</span>
+            ) : null}
           </div>
-          <div className="mt-1 space-y-2">
-            {hasText ? (
+          <div className="mt-1.5 space-y-2">
+            {report ? (
+              <>
+                {report.summary ? (
+                  <p className="whitespace-pre-wrap break-words leading-relaxed">{report.summary}</p>
+                ) : null}
+                {report.details.length > 0 ? (
+                  <dl className="space-y-1 text-[13px] leading-relaxed">
+                    {report.details.map((detail) => (
+                      <div key={detail.label} className="flex gap-3">
+                        <dt className="w-16 shrink-0 capitalize text-subtle-foreground">{detail.label}</dt>
+                        <dd className="min-w-0 flex-1 whitespace-pre-wrap break-words text-muted-foreground">{detail.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
+                {report.followUp ? (
+                  <div className="border-t border-hairline pt-2 text-[13px] leading-relaxed">
+                    <span className="eyebrow mr-2">Follow-up</span>
+                    <span className="whitespace-pre-wrap break-words text-muted-foreground">{report.followUp}</span>
+                  </div>
+                ) : null}
+              </>
+            ) : hasText ? (
               <p className="whitespace-pre-wrap break-words leading-relaxed">
                 {normalizedText}
               </p>
             ) : null}
             <MessageAttachments attachments={attachments} isUser={false} environmentClient={environmentClient} />
           </div>
-          {timestampLabel ? (
-            <div className="mt-1 font-mono text-[11px] text-subtle-foreground">
-              <span>{timestampLabel}</span>
-            </div>
-          ) : null}
         </div>
       )
     }
@@ -363,7 +403,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
       <div className="flex flex-col items-end">
         <div
           className={cn(
-            'max-w-[82%] rounded-2xl rounded-br-md border px-4 pb-2 pt-3 text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]',
+            'group/user max-w-[82%] rounded-2xl rounded-br-md border px-4 pb-2 pt-3 text-foreground shadow-[inset_0_1px_0_var(--glass-highlight)]',
             isCliMessage
               ? 'border-compacting/30 bg-compacting/10'
               : 'border-hairline bg-foreground/[0.06]',
@@ -410,6 +450,11 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
                   {timestampLabel}
                 </p>
               ) : null}
+              {/* Quiet until the bubble is hovered or focused; devices without hover always show them. */}
+              <span className={cn(
+                'flex items-center gap-1.5 transition-opacity duration-150',
+                !message.pinned && 'opacity-0 group-hover/user:opacity-100 group-focus-within/user:opacity-100 [@media(hover:none)]:opacity-100',
+              )}>
               {onReplyToMessage && message.id?.trim() ? (
                 <ReplyButton
                   userTone
@@ -435,6 +480,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
               {onForkFromMessage ? (
                 <ForkButton onClick={() => onForkFromMessage(forkMessageId)} disabledReason={forkDisabledReason} />
               ) : null}
+              </span>
             </div>
           ) : null}
         </div>
@@ -464,12 +510,12 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
   const assistantName = activeAgentDisplayName?.trim() || 'Assistant'
 
   return (
-    <div className="flex min-w-0 gap-3.5">
-    <span
-      aria-hidden="true"
-      className="mt-px flex size-[26px] shrink-0 items-center justify-center rounded-lg border border-hairline bg-primary/15 text-primary"
-    >
-      <Sparkles className="size-3.5" strokeWidth={1.75} />
+    <div className="-ml-[var(--transcript-inset)] flex min-w-0">
+    {/* The avatar hangs in the transcript inset, so the reply text starts on the shared edge. */}
+    <span aria-hidden="true" className="w-[var(--transcript-inset)] shrink-0">
+      <span className="mt-px flex size-[26px] items-center justify-center rounded-lg border border-hairline bg-primary/15 text-primary">
+        <Sparkles className="size-3.5" strokeWidth={1.75} />
+      </span>
     </span>
     <div
       className={cn(

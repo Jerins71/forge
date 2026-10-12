@@ -466,7 +466,7 @@ function LoadingIndicator({ streamingStartedAt }: { streamingStartedAt?: number 
       aria-live="polite"
       aria-label="Assistant is working"
     >
-      <div className="flex items-center gap-2 pl-[40px]">
+      <div className="flex items-center gap-2">
         <span className="live-dot live-dot-animated" aria-hidden="true" />
         {elapsedLabel ? (
           <span className="font-mono text-[11.5px] tabular-nums text-subtle-foreground">{elapsedLabel}</span>
@@ -1614,7 +1614,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
                 data-index={index}
                 data-row-id={row.id}
                 ref={measureMountedRow}
-                className="pb-3.5"
+                className="pb-3.5 pl-[var(--transcript-inset)]"
                 style={{
                   position: 'absolute',
                   top: 0,

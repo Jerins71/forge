@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { EnvironmentClient } from '@forge/client-runtime'
-import { ClipboardList, FolderOpen, GitBranch, GitMerge, Loader2, Menu, Minimize2, MoreHorizontal, Package, ScrollText, Sparkles, Square, SquareTerminal, Trash2 } from 'lucide-react'
+import { ArrowLeftRight, ClipboardList, FolderOpen, GitBranch, GitMerge, Loader2, Menu, Minimize2, MoreHorizontal, Package, ScrollText, Sparkles, Square, SquareTerminal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -29,6 +29,9 @@ import type {
   GenerationThroughputLiveMeasurement,
 } from '@forge/protocol'
 import type { SessionLineageSnapshot } from '@forge/protocol/environment-v2'
+
+/** Below this header width the secondary controls live in the … menu. */
+const COMPACT_HEADER_WIDTH = 720
 
 /** Returning a fork's work to its lineage parent; present only for a session that has one. */
 export interface ChatHeaderMergeBack {
@@ -253,8 +256,25 @@ export function ChatHeader({
   const terminalShortcutLabel = isMacPlatform ? '⌘`' : 'Ctrl+`'
   const [promptOpen, setPromptOpen] = useState(false)
   const [mergeBackConfirmOpen, setMergeBackConfirmOpen] = useState(false)
+  // A narrow header keeps the title readable: its secondary controls move into the … menu.
+  // Measured on the header itself, so an open sidebar or side panel counts.
+  const headerRef = useRef<HTMLElement>(null)
+  const [compact, setCompact] = useState(false)
+  useEffect(() => {
+    const header = headerRef.current
+    if (!header || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry?.contentRect.width ?? 0
+      if (width > 0) setCompact(width < COMPACT_HEADER_WIDTH)
+    })
+    observer.observe(header)
+    return () => observer.disconnect()
+  }, [])
+  const canViewModelInput = channelView === 'all' && Boolean(activeAgentId)
   return (
     <header
+      ref={headerRef}
+      data-compact={compact ? 'true' : undefined}
       className={cn(
         'sticky top-0 z-10 flex h-[62px] w-full shrink-0 items-center justify-between gap-2 overflow-hidden border-b bg-transparent content-gutter',
         isAgentCreator
@@ -262,7 +282,7 @@ export function ChatHeader({
           : 'border-hairline',
       )}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-2 md:gap-3">
+      <div className="flex min-w-[12rem] flex-1 items-center gap-2 md:gap-3">
         {/* Mobile hamburger */}
         {onToggleMobileSidebar ? (
           <Button
@@ -381,8 +401,8 @@ export function ChatHeader({
         )}
       >
         {/* ── Inline: channel toggle + context window ── */}
-        <div className="hidden sm:inline-flex items-center gap-1">
-          {channelView === 'all' && activeAgentId ? (
+        <div className={cn('items-center gap-1', compact ? 'hidden' : 'hidden sm:inline-flex')}>
+          {canViewModelInput ? (
             <TooltipProvider delayDuration={200}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -465,7 +485,7 @@ export function ChatHeader({
         ) : null}
 
         {/* ── Three-dots dropdown: secondary actions ── */}
-        {(showCompact || showSmartCompact || showNewChat || showStopAll || mergeBack || (showSessionAudit && onOpenSessionAudit)) ? (
+        {(compact || showCompact || showSmartCompact || showNewChat || showStopAll || mergeBack || (showSessionAudit && onOpenSessionAudit)) ? (
           <>
             <Separator orientation="vertical" className="hidden sm:block mx-0.5 h-[18px] bg-hairline" />
             <DropdownMenu>
@@ -487,6 +507,20 @@ export function ChatHeader({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" sideOffset={6} className="min-w-44">
+                {compact ? (
+                  <>
+                    <DropdownMenuItem onClick={() => onChannelViewChange(channelView === 'web' ? 'all' : 'web')} className="gap-2 text-xs">
+                      <ArrowLeftRight className="size-3.5" />
+                      {channelView === 'web' ? 'Show all channels' : 'Show web messages only'}
+                    </DropdownMenuItem>
+                    {canViewModelInput ? (
+                      <DropdownMenuItem onClick={() => setPromptOpen(true)} className="gap-2 text-xs">
+                        <ScrollText className="size-3.5" />
+                        View initial model input
+                      </DropdownMenuItem>
+                    ) : null}
+                  </>
+                ) : null}
                 {showSessionAudit && onOpenSessionAudit ? (
                   <DropdownMenuItem
                     onClick={onOpenSessionAudit}

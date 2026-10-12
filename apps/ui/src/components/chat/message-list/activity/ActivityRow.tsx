@@ -76,7 +76,7 @@ export const ActivityRow = memo(function ActivityRow({ row, expanded, onToggle, 
         <div className={activityRowClassName} role={running ? 'status' : undefined}>{line}</div>
       )}
       {expanded && expandable ? (
-        <div id={detailId} role="region" aria-label={`Details: ${label}`} className="mb-1.5 ml-7 mr-1" data-testid="activity-detail">
+        <div id={detailId} role="region" aria-label={`Details: ${label}`} className="mb-1.5 ml-[25px] mr-1" data-testid="activity-detail">
           {visibleText !== undefined ? (
             <>
               {clipped && row.kind !== 'reasoning' ? <ShowMore onClick={() => setShowAll(true)} label="Show earlier output" /> : null}

@@ -53,9 +53,19 @@ export function RoomsInbox({
   } | null
 }) {
   const [recentExpanded, setRecentExpanded] = useState(false)
+  const [needsYouExpanded, setNeedsYouExpanded] = useState(false)
   useEffect(() => {
     setRecentExpanded(false)
+    setNeedsYouExpanded(false)
   }, [searchQuery])
+  // A long Needs you list must not push Recent and Projects off the screen.
+  const needsYouVisible = needsYouExpanded ? sections.needsYou : sections.needsYou.slice(0, MAX_NEEDS_YOU_ITEMS)
+  const needsYouHiddenCount = sections.needsYou.length - needsYouVisible.length
+  // With one project in view, naming it on every row is noise: the status takes the avatar's place.
+  const singleProject = new Set(
+    [...sections.needsYou, ...sections.active, ...sections.recent]
+      .map((session) => `${session.identity.originId}::${session.identity.profileId}`),
+  ).size <= 1
   const recentVisibility = visibleRecentSessions(sections.recent, recentExpanded, selected)
   // The shared tree is the authoritative Projects-mode render model: it may
   // contain a session/worker-only search match, an inactive Project Agent, or
@@ -128,7 +138,7 @@ export function RoomsInbox({
               {dismissError}
             </p>
           ) : null}
-          {sections.needsYou.map((session) => (
+          {needsYouVisible.map((session) => (
             <InboxSessionRow
               key={`${session.identity.originId}::${session.identity.sessionAgentId}`}
               session={session}
@@ -137,11 +147,22 @@ export function RoomsInbox({
               onAcknowledge={() => onAcknowledgeNeedsYou(session)}
               showDone
               section="needs-you"
+              singleProject={singleProject}
               muted={isMuted(session)}
               now={now}
               sessionMenu={resolveSessionMenu?.(session) ?? null}
             />
           ))}
+          {needsYouHiddenCount > 0 || needsYouExpanded ? (
+            <button
+              type="button"
+              onClick={() => setNeedsYouExpanded((expanded) => !expanded)}
+              aria-expanded={needsYouExpanded}
+              className="sidebar-room-inbox-more focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+            >
+              {needsYouExpanded ? 'Show less' : `Show ${needsYouHiddenCount} more`}
+            </button>
+          ) : null}
         </InboxSection>
       ) : null}
 
@@ -154,6 +175,7 @@ export function RoomsInbox({
               selected={selected}
               onSelectSession={onSelectSession}
               section="active"
+              singleProject={singleProject}
               muted={isMuted(session)}
               now={now}
               sessionMenu={resolveSessionMenu?.(session) ?? null}
@@ -180,6 +202,7 @@ export function RoomsInbox({
               selected={selected}
               onSelectSession={onSelectSession}
               section="recent"
+              singleProject={singleProject}
               muted={isMuted(session)}
               now={now}
               sessionMenu={resolveSessionMenu?.(session) ?? null}
@@ -228,6 +251,8 @@ export function RoomsInbox({
     </div>
   )
 }
+
+const MAX_NEEDS_YOU_ITEMS = 6
 
 function visibleRecentSessions(
   recent: RoomsInboxSessionViewModel[],
@@ -312,6 +337,7 @@ function InboxSessionRow({
   onAcknowledge,
   showDone = false,
   section,
+  singleProject = false,
   muted = false,
   now,
   sessionMenu,
@@ -322,6 +348,7 @@ function InboxSessionRow({
   onAcknowledge?: () => void
   showDone?: boolean
   section: 'needs-you' | 'active' | 'recent'
+  singleProject?: boolean
   muted?: boolean
   now?: Date
   sessionMenu?: {
@@ -337,6 +364,7 @@ function InboxSessionRow({
     ? formatRoomsInboxRelativeTime(session.timestamp, now)
     : ''
   const reasonClass = session.reason
+  const statusPill = inboxStatusPill(session)
 
   const row = (
     <div
@@ -356,20 +384,26 @@ function InboxSessionRow({
         onClick={() => onSelectSession(session.identity)}
         className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
-        <SidebarRoomAvatar
-          label={session.profileName}
-          toneKey={session.identity.profileId}
-        />
+        {singleProject ? (
+          <span className="sidebar-room-inbox-leading">
+            {statusPill ?? <span className="sidebar-room-inbox-idle-dot" aria-hidden="true" />}
+          </span>
+        ) : (
+          <SidebarRoomAvatar
+            label={session.profileName}
+            toneKey={session.identity.profileId}
+          />
+        )}
         <span className="min-w-0 flex-1">
           <span className="sidebar-room-inbox-title">{session.label}</span>
           <span className={cn('sidebar-room-inbox-reason', `sidebar-room-inbox-reason--${reasonClass}`)}>
-            {session.profileName} · {presentation.subtitle}
+            {singleProject ? presentation.subtitle : `${session.profileName} · ${presentation.subtitle}`}
           </span>
         </span>
         <span className="sidebar-room-inbox-trailing">
           {session.pinnedAt ? <Pin className="sidebar-room-inbox-marker" aria-label="Pinned" /> : null}
           {muted ? <BellOff className="sidebar-room-inbox-marker" aria-label="Muted" /> : null}
-          <InboxStatusPill session={session} />
+          {singleProject ? null : statusPill}
           {session.identity.originId !== primaryOriginId ? <Globe className="sidebar-room-remote-marker" aria-label="Remote project" /> : null}
           {relativeTime ? <span className="sidebar-room-inbox-relative-time">{relativeTime}</span> : null}
         </span>
@@ -404,7 +438,7 @@ function InboxSessionRow({
   )
 }
 
-function InboxStatusPill({ session }: { session: RoomsInboxSessionViewModel }) {
+function inboxStatusPill(session: RoomsInboxSessionViewModel) {
   if (session.reason === 'decision_waiting') {
     return <span className="sidebar-room-status-pill sidebar-room-status-pill--awaiting" aria-label="Decision needed">?</span>
   }

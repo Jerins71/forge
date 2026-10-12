@@ -18,7 +18,7 @@ export function WorkTimer({ startedAt, endedAt }: { startedAt: string; endedAt?:
   const end = endedAt ? Date.parse(endedAt) : now
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null
   return (
-    <div className="mb-1 border-b border-border/50 px-1 pb-1.5 text-[12.5px] text-subtle-foreground" data-testid="activity-work-timer">
+    <div className="mb-1 border-b border-border/50 pb-1.5 text-[12.5px] text-subtle-foreground" data-testid="activity-work-timer">
       {endedAt ? 'Worked for ' : 'Working for '}
       <span className="tabular-nums">{formatWorkDuration(end - start)}</span>
     </div>
@@ -44,7 +44,7 @@ export const ActivityGroup = memo(function ActivityGroup({ groupId, rows, open, 
   const Icon = ACTIVITY_ICONS[groupKind(rows)]
   const failed = rows.some((row) => row.status === 'failed')
   return (
-    <div className="w-full py-0.5 pl-[40px]" data-testid="activity-group" data-activity-group-open={expanded ? 'true' : 'false'}>
+    <div className="w-full py-0.5" data-testid="activity-group" data-activity-group-open={expanded ? 'true' : 'false'}>
       {turn ? <WorkTimer startedAt={turn.startedAt} endedAt={turn.endedAt} /> : null}
       {open ? null : (
         <button type="button" className={cn(activityRowClassName, 'cursor-pointer')} aria-expanded={expanded} aria-controls={listId} onClick={() => onToggle(groupId)} data-testid="activity-group-header">

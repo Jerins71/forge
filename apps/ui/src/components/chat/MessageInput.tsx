@@ -558,7 +558,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
       </div>
 
       <div
-        className="mt-2 hidden justify-center px-1.5 font-mono text-[11px] text-subtle-foreground sm:flex"
+        className="mt-2 hidden justify-center px-1.5 font-mono text-xs text-muted-foreground sm:flex"
         aria-hidden="true"
       >
         <span>
