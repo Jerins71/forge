@@ -304,21 +304,22 @@ test('9.2.2 A/B group by repository into one project row, manual split/merge wor
   assertions.grouping = { mergedUnderPrimary: true, splitAndMerged: true, independent: c.environmentId }
 })
 
-test('remote sessions explain Secure Sessions availability without calling the remote vault, including after reload', async ({ page }) => {
+test('remote sessions show no Secure Sessions chip and never call the remote vault, including after reload', async ({ page }) => {
   const { b } = fleet!
   const requestStart = featureRequests.length
   await page.goto(`${fleet!.uiUrl}/?agent=${b.sessionId}&env=${b.environmentId}`)
-  const chip = page.getByRole('button', { name: /Secure session: Secure Sessions are not available on remote machines/ })
-  await expect(chip).toBeVisible()
-  await chip.click()
-  await expect(page.getByText('Secure Sessions are not available on remote machines. Open a session on This machine to use them.', { exact: true })).toBeVisible()
-  await shot(page, 'secure-sessions-remote-unavailable')
-  await page.keyboard.press('Escape')
+  // Secure Sessions can't be turned on for a remote session, so the composer carries no chip for them.
+  const composer = page.getByRole('combobox', { name: /^(Message |Send another message to )/ })
+  const chip = page.getByRole('button', { name: /^(Secure session|Secrets|Project secrets)\b/ })
+  await expect(composer).toBeVisible()
+  await expect(chip).toHaveCount(0)
+  await shot(page, 'secure-sessions-remote-hidden')
   await page.reload()
-  await expect(chip).toBeVisible()
+  await expect(composer).toBeVisible()
+  await expect(chip).toHaveCount(0)
   const secureCalls = featureRequests.slice(requestStart).filter(r => r.environmentId === b.environmentId && /^\/api\/(secure-|settings\/secure-)/.test(r.path))
   expect(secureCalls).toEqual([])
-  assertions.secureSessionsRemote = { environmentId: b.environmentId, explicitUnavailable: true, reloadVerified: true, remoteSecureCalls: 0 }
+  assertions.secureSessionsRemote = { environmentId: b.environmentId, chipHidden: true, reloadVerified: true, remoteSecureCalls: 0 }
 })
 
 test('9.2.3 Run on B with a new worktree and an attachment uploaded to B; environment and workspace lock', async ({ page }) => {

@@ -35,6 +35,12 @@ async function shot(page: Page, name: string) {
   const path = join(evidenceRoot, `${name}.png`)
   await page.screenshot({ path }); assertions[`screenshot:${name}`] = path
 }
+/** The composer at a 1440-wide desktop viewport. */
+async function composerShot(page: Page, name: string) {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await shot(page, name)
+  await page.setViewportSize({ width: 1280, height: 900 })
+}
 async function send(page: Page, text: string) {
   await expect(composer(page)).toBeEnabled()
   await composer(page).fill(text)
@@ -119,10 +125,16 @@ test('a new thread starts from its composer', async ({ page }) => {
   await expect(page.getByTestId('run-on-picker')).toContainText('This machine')
   // The composer offers the model only.
   await expect(page.getByTestId('composer-context').getByRole('button', { name: /work mode|roster/i })).toHaveCount(0)
+  await composerShot(page, 'composer-new-thread')
   const launched = await launchThread(page, fleet.a, 'Start a plain thread')
   localSessionId = launched.sessionId
   assertions.launchLocal = launched
   await shot(page, 'new-thread-session')
+  // A native session's composer has no context-management chip (the harness compacts) and no Secure
+  // Sessions chip while they can't be turned on here.
+  await composerShot(page, 'composer-session')
+  await expect(page.getByRole('button', { name: /^Context management:/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^(Secure session|Secrets|Project secrets)\b/ })).toHaveCount(0)
 })
 
 test('a worker preset added in Settings is still there after a reload', async ({ page }) => {
@@ -219,6 +231,9 @@ test('a new thread starts on a paired machine', async ({ page }) => {
   await expect(runOn).toContainText(b.label)
   const launched = await launchThread(page, b, 'Start a plain thread remotely')
   await expect(page).toHaveURL(new RegExp(`env=${b.environmentId}`))
+  // Secure Sessions can't run on a paired machine, so its composer carries no "Unavailable" chip.
+  await composerShot(page, 'composer-remote-session')
+  await expect(page.getByRole('button', { name: /^(Secure session|Secrets|Project secrets)\b/ })).toHaveCount(0)
   assertions.launchRemote = { environmentId: b.environmentId, ...launched }
 })
 
