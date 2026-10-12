@@ -406,3 +406,76 @@ test('a provider process that dies mid-turn is one failed status row', async ({ 
   await shot(page, 'provider-crash')
   assertions.providerCrash = await status().allTextContents()
 })
+
+/** A session on Claude: the real bundled Claude Code, against the fleet's scripted model. */
+async function launchClaude(title: string, text: string) {
+  const admin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments[0]!.name, 'bootstrap')
+  const launch = { commandId: randomUUID(), projectId: fleet.a.sessionId, title, workspaceStrategy: { kind: 'current_checkout' },
+    model: { provider: 'claude-native', modelId: 'claude-sonnet-5', thinkingLevel: 'low' }, initialMessage: { text, artifactIds: [] } }
+  const { sessionId } = await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', launch)
+  await until(() => fixtureRpcOnce(fleet.a.baseUrl, admin, 'command.get', { commandId: launch.commandId }), receipt => receipt.state === 'succeeded', 60_000)
+  return sessionId as string
+}
+const stopButton = (page: Page) => page.getByRole('button', { name: 'Stop', exact: true })
+
+test('a plain Claude turn replies and settles idle', async ({ page }) => {
+  const sessionId = await launchClaude('Claude smoke', 'Say hello from Claude')
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(sessionId)}`)
+  await expect(transcript(page)).toContainText('Claude lineage fixture reply.', { timeout: 60_000 })
+  await expect(stopButton(page)).toHaveCount(0, { timeout: 30_000 })
+  assertions.claudeSmoke = { sessionId }
+})
+
+test('a scheduled Claude wake-up is a wait, not a stall: its row and the footer count down, live and after reload, and settle when it fires', async ({ page }) => {
+  test.setTimeout(420_000)
+  const sessionId = await launchClaude('Claude wake-up', '[fixture:wakeup] Check the build again in two minutes')
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(sessionId)}`)
+  await expect(transcript(page)).toContainText('Waiting for the scheduled check.', { timeout: 60_000 })
+  const footer = page.getByTestId('scheduled-wakeup-footer')
+  const wakeRow = page.locator('[data-testid="activity-row"][data-wake-at]').first()
+  const counting = /Scheduled wake-up · \d{1,2}:\d{2}\s?[AP]M \(in \d+ min\)/
+  const waiting = /Waiting for scheduled follow-up · \d{1,2}:\d{2}\s?[AP]M \(in \d+ min\)/
+  const readWait = async () => {
+    await expect(footer).toHaveText(waiting, { timeout: 30_000 })
+    // A finished run folds into its group; the wake-up row is inside it.
+    if (await wakeRow.count() === 0) await page.getByTestId('activity-group-header').last().click()
+    await expect(wakeRow).toContainText(counting)
+    // Forge never reports a turn that is waiting on its own schedule as stuck.
+    await expect(page.locator('[data-system-marker="manager_stalled"]')).toHaveCount(0)
+    await expect(transcript(page)).not.toContainText('runtime update')
+    await expect(stopButton(page)).toBeVisible()
+    return { footer: await footer.textContent(), row: await wakeRow.textContent(), wakeAt: await wakeRow.getAttribute('data-wake-at') }
+  }
+  const live = await readWait()
+  // The reason is in the row's details.
+  await wakeRow.getByRole('button').click()
+  await expect(wakeRow.getByTestId('activity-detail')).toContainText('Check the fixture build again')
+  await shot(page, 'scheduled-wakeup')
+  // The countdown is live: the footer moves to the next minute without any new event.
+  await expect.poll(() => footer.textContent(), { timeout: 75_000, intervals: [1_000] }).not.toBe(live.footer)
+
+  await page.reload()
+  await expect(transcript(page)).toContainText('Waiting for the scheduled check.', { timeout: 30_000 })
+  const replayed = await readWait()
+  expect(replayed.wakeAt).toBe(live.wakeAt)
+  await shot(page, 'scheduled-wakeup-replayed')
+
+  // The wake-up fires: Claude resumes, the countdown clears, and the turn settles.
+  await expect(transcript(page)).toContainText('Woke up: the scheduled check ran.', { timeout: 240_000 })
+  await expect(footer).toHaveCount(0, { timeout: 30_000 })
+  await expect(stopButton(page)).toHaveCount(0, { timeout: 30_000 })
+  const settledRows = async () => {
+    if (await wakeRow.count() === 0) await page.getByTestId('activity-group-header').first().click()
+    await expect(wakeRow).toContainText(/Scheduled wake-up · \d{1,2}:\d{2}\s?[AP]M/)
+    await expect(wakeRow).not.toContainText('(in ')
+    await expect(page.locator('[data-system-marker="manager_stalled"]')).toHaveCount(0)
+  }
+  await settledRows()
+  await page.reload()
+  await expect(transcript(page)).toContainText('Woke up: the scheduled check ran.', { timeout: 30_000 })
+  await expect(footer).toHaveCount(0)
+  await settledRows()
+  await shot(page, 'scheduled-wakeup-fired')
+  assertions.scheduledWakeup = { sessionId, live, replayed }
+  expect(renderErrors).toEqual([])
+})
