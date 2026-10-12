@@ -2,7 +2,7 @@ import { isClaudeSignInRequired } from '@forge/protocol'
 import type { EnvironmentClient } from '@forge/client-runtime'
 import { memo, useState, useCallback } from 'react'
 import { isUserVisibleAssistantConversationMessage } from '@forge/protocol'
-import { ArrowLeftRight, CircleStop, Copy, Check, Pin, Reply, Layers, CircleCheck, Sparkles } from 'lucide-react'
+import { ArrowLeftRight, CircleStop, Copy, Check, Pin, Reply, Layers, CircleCheck, Sparkles, TriangleAlert } from 'lucide-react'
 import { ForkButton } from './ForkButton'
 import { MarkdownMessage } from '@/components/chat/MarkdownMessage'
 import type { ArtifactReference } from '@/lib/artifacts'
@@ -124,6 +124,8 @@ interface ConversationMessageRowProps {
   onPinMessage?: (messageId: string, pinned: boolean) => void
   onStopExternalThread?: (sidecarAgentId: string) => void
   canStopExternalThread?: boolean
+  /** Stops the stalled turn a `manager_stalled` notice reports; absent once it is no longer running. */
+  onStopTurn?: () => void
   onReplyToMessage?: (message: ConversationMessageEntry) => void
   onReplyPreviewClick?: (messageId: string) => void
   isReplyTargetLoaded?: (messageId: string) => boolean
@@ -168,6 +170,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
   onPinMessage,
   onStopExternalThread,
   canStopExternalThread,
+  onStopTurn,
   onReplyToMessage,
   onReplyPreviewClick,
   isReplyTargetLoaded,
@@ -326,6 +329,25 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
           <span className="min-w-0 break-words">{normalizedText}</span>
           {timestampLabel ? (
             <time dateTime={message.timestamp} className="shrink-0 font-mono text-[11px]">{timestampLabel}</time>
+          ) : null}
+        </div>
+      )
+    }
+
+    // Forge's own status, not something the agent said: the turn has gone quiet for too long.
+    if (message.systemNoticeKind === 'manager_stalled') {
+      return (
+        <div data-system-marker="manager_stalled" role="status" className="flex items-center gap-2 rounded-lg border border-attention/25 bg-attention-surface px-3 py-1.5 text-[13px] text-foreground/85">
+          <TriangleAlert className="size-3.5 shrink-0 text-attention" aria-hidden="true" />
+          <span className="shrink-0 font-medium text-attention">Forge</span>
+          <span className="min-w-0 flex-1 break-words">{normalizedText}</span>
+          {onStopTurn ? (
+            <button type="button" onClick={onStopTurn} className="shrink-0 rounded-md border border-hairline px-2 py-0.5 text-[12px] font-medium hover:bg-foreground/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+              Stop turn
+            </button>
+          ) : null}
+          {timestampLabel ? (
+            <time dateTime={message.timestamp} className="shrink-0 font-mono text-[11px] text-subtle-foreground">{timestampLabel}</time>
           ) : null}
         </div>
       )

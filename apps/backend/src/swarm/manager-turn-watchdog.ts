@@ -27,6 +27,8 @@ interface ManagerTurnState {
   lastProgressAt: number;
   tier: 0 | 1 | 2 | 3;
   openToolCalls: Set<string>;
+  /** Provider-declared waits: a scheduled wake-up or a task left running in the background. */
+  waits: Set<string>;
   recoveryHoldUntil: number | null;
 }
 
@@ -72,10 +74,12 @@ export class ManagerTurnWatchdog {
         this.recordProgress(agentId);
         break;
       case "tool_execution_update":
+        if (event.executionState === "background") state.waits.add(event.toolCallId);
         this.recordProgress(agentId);
         break;
       case "tool_execution_end":
         state.openToolCalls.delete(event.toolCallId);
+        state.waits.delete(event.toolCallId);
         this.recordProgress(agentId);
         break;
       case "auto_compaction_start":
@@ -131,10 +135,10 @@ export class ManagerTurnWatchdog {
         continue;
       }
 
-      if (this.options.hasPendingChoicesForSession(agentId)) {
-        // Waiting for an explicit user choice is healthy, intentional inactivity.
-        // Exclude that time from the stall ladder so answering a long-lived
-        // choice cannot immediately produce a stale warning.
+      if (this.options.hasPendingChoicesForSession(agentId) || state.waits.size > 0) {
+        // Waiting for an explicit user choice, a scheduled wake-up or a background task is
+        // healthy, intentional inactivity. Exclude that time from the stall ladder so the
+        // turn that resumes afterwards cannot immediately produce a stale warning.
         state.lastProgressAt = nowMs;
         state.tier = 0;
         continue;
@@ -203,6 +207,7 @@ export class ManagerTurnWatchdog {
       lastProgressAt: nowMs,
       tier: 0,
       openToolCalls: new Set(),
+      waits: new Set(),
       recoveryHoldUntil: null,
     });
   }
@@ -225,8 +230,8 @@ export class ManagerTurnWatchdog {
 
     const text =
       tier === 2
-        ? "The manager still has not produced a runtime update for this turn. It may be stuck; you can wait or recycle the runtime if needed."
-        : "The manager appears stuck. Use ⋮ → Stop All, then retry the request.";
+        ? "No activity from the agent for 5 minutes. It may be stuck: keep waiting, or stop the turn."
+        : "No activity from the agent for 10 minutes. Stop the turn, then retry the request.";
 
     this.options.emitConversationMessage({
       type: "conversation_message",
@@ -236,6 +241,8 @@ export class ManagerTurnWatchdog {
       text,
       timestamp: this.options.now(),
       source: "system",
+      // Forge's notice, never the model's reply: clients draw it as a status row with a stop action.
+      systemNoticeKind: "manager_stalled",
     });
   }
 }

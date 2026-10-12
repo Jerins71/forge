@@ -140,7 +140,7 @@ export interface ConversationReplyTargetInput {
  * error, and must not masquerade as manager prose.
  */
 /** `assignment` is presentation only: a worker's internal input, shown as a card and never persisted. */
-export type SystemNoticeKind = 'worker_outcome_backstop' | 'model_change' | 'worker_stopped' | 'turn_stopped' | 'assignment'
+export type SystemNoticeKind = 'worker_outcome_backstop' | 'model_change' | 'worker_stopped' | 'turn_stopped' | 'assignment' | 'manager_stalled'
 
 /**
  * The result a manager receives for a worker the user stopped. The manager model reads it as that

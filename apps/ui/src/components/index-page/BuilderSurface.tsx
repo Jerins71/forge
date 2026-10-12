@@ -2540,6 +2540,7 @@ export function BuilderSurface({
                   forkDisabledReason: providerRefusals.fork,
                   onPinMessage: conversationActionsEnabled && isActiveManager && activeAgentId ? session.handlePinMessage : undefined,
                   onStopExternalThread: conversationActionsEnabled ? session.handleStopSession : undefined,
+                  onStopSession: conversationActionsEnabled ? session.handleStopSession : undefined,
                   onReplyToMessage: conversationActionsEnabled ? session.handleReplyToMessage : undefined,
                   getVote: conversationActionsEnabled && feedbackProfileId ? feedback.getVote : undefined,
                   hasComment: conversationActionsEnabled && feedbackProfileId ? feedback.hasComment : undefined,

@@ -1,18 +1,23 @@
 import { Clock3, LoaderCircle } from 'lucide-react'
 import type { ManagerToolActivityEvent } from '@forge/protocol'
+import { useWakeLabel } from './message-list/activity/use-wake-label'
 
 interface ManagerToolActivityIndicatorProps {
   activity?: ManagerToolActivityEvent | null
   pendingCount?: number
+  /** When the latest scheduled wake-up resumes the agent, from its persisted tool call. */
+  wakeAt?: string
 }
 
 /**
  * Shows what is still going on outside the turn's own rows: commands left running in the
  * background, a scheduled follow-up, and messages the agent has not picked up yet.
  */
-export function ManagerToolActivityIndicator({ activity, pendingCount = 0 }: ManagerToolActivityIndicatorProps) {
+export function ManagerToolActivityIndicator({ activity, pendingCount = 0, wakeAt }: ManagerToolActivityIndicatorProps) {
   const backgroundCount = activity?.backgroundCount ?? 0
   const scheduledWakeupCount = activity?.scheduledWakeupCount ?? 0
+  // Only while the wake-up is pending: once it fires the count clears and the countdown with it.
+  const wakeLabel = useWakeLabel(scheduledWakeupCount > 0 ? wakeAt : undefined)
   if (backgroundCount > 0 || scheduledWakeupCount > 0) {
     return (
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-y border-hairline bg-foreground/[0.02] content-gutter py-1.5 font-mono text-[11.5px] text-subtle-foreground"
@@ -24,7 +29,7 @@ export function ManagerToolActivityIndicator({ activity, pendingCount = 0 }: Man
         {scheduledWakeupCount > 0 ? (
           <span className="flex items-center gap-1.5" title="The agent will resume automatically for its scheduled check.">
             <Clock3 className="size-3.5 shrink-0" aria-hidden="true" />
-            <span>Waiting for scheduled follow-up</span>
+            <span data-testid="scheduled-wakeup-footer">Waiting for scheduled follow-up{wakeLabel ? ` · ${wakeLabel}` : ''}</span>
           </span>
         ) : null}
         {pendingCount > 0 ? (

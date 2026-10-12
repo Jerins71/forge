@@ -22,8 +22,8 @@ import type { ControlTransaction, EventSink } from "./event-sink.js";
 import { receiptIdentity } from "./event-sink.js";
 
 type DetailItem = Extract<Extract<DetailStreamItem, { kind: "event" }>["event"], { type: "item.upsert" }>["item"];
-/** A model switch or a user-stopped worker travels as an ordinary item whose source tells clients to draw a marker, not a reply. */
-const MARKER_NOTICE_KINDS = new Set(["model_change", "worker_stopped", "turn_stopped"]);
+/** A model switch, a user-stopped worker or a stalled turn travels as an ordinary item whose source tells clients to draw a notice, not a reply. */
+const MARKER_NOTICE_KINDS = new Set(["model_change", "worker_stopped", "turn_stopped", "manager_stalled"]);
 type ChoiceSummary = Extract<Extract<DetailStreamItem, { kind: "event" }>["event"], { type: "choice.upsert" }>["choice"];
 export interface MirrorWireProjection {
   project(profile: ManagerProfile): Promise<ProjectSummary>;
@@ -60,6 +60,7 @@ function activityMetadata(entry: ActivitySummaryEvent, sessionId: string): NonNu
     ...(entry.toolName ? { toolName: entry.toolName.slice(0, 128) } : {}),
     ...(activity?.truncated ? { truncated: true } : {}), ...(activity?.hidden ? { hidden: true } : {}),
     ...(activity?.exitCode !== undefined ? { exitCode: activity.exitCode } : {}),
+    ...(activity?.wakeAt ? { wakeAt: activity.wakeAt } : {}),
   };
 }
 /** The row's expandable text. A truncated tool row reads its fuller result from the raw entry already in history. */

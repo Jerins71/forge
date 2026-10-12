@@ -175,6 +175,7 @@ function isConversationMessageEvent(value: unknown): value is ConversationMessag
     && maybe.systemNoticeKind !== "model_change"
     && maybe.systemNoticeKind !== "worker_stopped"
     && maybe.systemNoticeKind !== "turn_stopped"
+    && maybe.systemNoticeKind !== "manager_stalled"
   ) {
     return false;
   }

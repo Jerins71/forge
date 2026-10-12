@@ -185,7 +185,7 @@ export function ChatWorkspace({
             <TerminalPanel {...terminalPanelProps} />
           </div>
 
-          <ManagerToolActivityIndicator activity={managerToolActivity} pendingCount={pendingInputCount} />
+          <ManagerToolActivityIndicator activity={managerToolActivity} pendingCount={pendingInputCount} wakeAt={latestWakeAt(messageListProps.messages)} />
 
           <MessageInput ref={messageInputRef} {...messageInputProps} />
         </>
@@ -237,4 +237,13 @@ function RestartRecoveryBanner({
       </div>
     </div>
   )
+}
+
+/** The resume time of the latest scheduled wake-up in the transcript, read from its persisted tool row. */
+function latestWakeAt(messages: ChatWorkspaceProps['messageListProps']['messages']): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const entry = messages[index]!
+    if (entry.type === 'activity_summary' && entry.activity?.wakeAt) return entry.activity.wakeAt
+  }
+  return undefined
 }
