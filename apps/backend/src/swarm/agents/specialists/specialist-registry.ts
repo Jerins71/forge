@@ -231,7 +231,10 @@ export async function seedBuiltins(dataDir: string): Promise<void> {
   const builtinFiles = await listMarkdownFiles(builtinDir);
 
   for (const removedFile of REMOVED_BUILTIN_SPECIALIST_FILES) {
-    await unlink(join(sharedDir, removedFile)).catch((error) => {
+    // Only Forge's own copy is removed; a user-authored file with the same name is theirs.
+    const removedPath = join(sharedDir, removedFile);
+    if ((await parseSpecialistFile(removedPath))?.frontmatter.builtin !== true) continue;
+    await unlink(removedPath).catch((error) => {
       if (!isEnoentError(error)) {
         throw error;
       }

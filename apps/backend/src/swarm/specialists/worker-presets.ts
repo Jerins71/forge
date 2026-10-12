@@ -146,9 +146,70 @@ export function formatWorkerPresetBlock(presets: readonly WorkerPreset[]): strin
   ].join("\n");
 }
 
+/** The one preset Forge ships. */
+export const DEFAULT_WORKER_PRESET: WorkerPreset = {
+  name: "plan-consultant",
+  provider: "codex-native",
+  modelId: "gpt-6-astra",
+  reasoningLevel: "xhigh",
+  note: "Consult on a specific consequential decision or critique a proposed plan.",
+};
+
+/** Rosters Forge generated (Balanced, Default, Hands-on support) rather than the user. */
+const SHIPPED_ROSTER_ID = /^(?:balanced|default|hands-on-support(?:-\d+)?)$/;
+
+/** Every guidance text Forge shipped for its roster routes; an edited text marks a user change. */
+const SHIPPED_ROUTE_GUIDANCE: Readonly<Record<string, readonly string[]>> = {
+  "quick-scout": [
+    "Cheap lookups, file discovery, and bounded source gathering.",
+    "Use for cheap lookups, file discovery, and bounded source gathering when low cost matters more than depth.",
+    "Use for a small, well-specified implementation change with narrow scope and clear acceptance criteria when lower cost or latency matters.",
+  ],
+  "fast-builder": [
+    "Well-specified implementation and focused fixes with clear acceptance.",
+    "Use when the outcome is well specified, bounded, and has clear acceptance criteria. Prefer when low latency materially improves the workflow.",
+    "Use for the normal feature, bug-fix, or refactor path when the work is understood and needs a capable implementation owner.",
+  ],
+  planner: [
+    "Use for decomposition, implementation planning, sequencing, scope and risk analysis, and decision preparation before substantial work.",
+  ],
+  "research-analyst": [
+    "Ordinary planning, source gathering, analysis, and balanced synthesis.",
+    "Use for ordinary planning, research, implementation, and synthesis that need balanced capability, cost, and speed.",
+    "Use for source-backed investigation, documentation lookup, fact-checking, and focused technical analysis.",
+  ],
+  "independent-critic": [
+    "Correctness, regression, security, and design review where independent judgment matters.",
+    "Use when independent judgment, provider diversity, correctness, regression, security, or design review materially improves confidence.",
+    "Use for an independent review of a proposed or completed change when correctness, regressions, API/design quality, security, or maintainability could affect acceptance.",
+  ],
+  "deep-reasoner": [
+    "Difficult architecture, cross-cutting implementation, ambiguous remediation, and high-risk synthesis.",
+    "Use for architecturally ambiguous, high-risk, cross-cutting work or difficult synthesis where the stronger model is justified.",
+    "Use only when a normal specialist lacks a credible path: architecturally ambiguous, high-risk, cross-cutting work, or difficult synthesis with evidence that stronger reasoning is justified.",
+  ],
+  "plan-consultant": [
+    "Consult on a specific consequential decision or critique a proposed plan. Supply existing findings and the unresolved question; retain implementation and integration with the manager.",
+  ],
+  "independent-reviewer": [
+    "Request one focused review of a major feature or concrete acceptance risk. Return actionable findings and evidence for the manager to resolve.",
+  ],
+  researcher: [
+    "Answer a bounded question with source-backed findings that let the manager continue. Use for independent research when briefing and acceptance cost less than doing it directly.",
+  ],
+};
+
+function isShippedRoute(roster: Record<string, unknown>, route: Record<string, unknown>): boolean {
+  if (typeof roster.rosterId !== "string" || !SHIPPED_ROSTER_ID.test(roster.rosterId)) return false;
+  const guidance = typeof route.useWhen === "string" ? route.useWhen.trim().replace(/\s+/g, " ") : "";
+  return SHIPPED_ROUTE_GUIDANCE[route.routeId as string]?.includes(guidance) ?? false;
+}
+
 /**
- * One-time boot migration from delegation rosters. Runs only while worker-presets.json is
- * missing, reads the old files tolerantly, and leaves them in place.
+ * One-time boot migration from delegation rosters; a fresh install gets the same treatment.
+ * Runs only while worker-presets.json is missing, reads the old files tolerantly, and leaves
+ * them in place. Routes Forge shipped are dropped unless the user edited their guidance, and
+ * the default preset is added unless a preset already has its name.
  */
 export async function migrateDelegationRostersToWorkerPresets(dataDir: string, agentsStoreFile: string): Promise<boolean> {
   try {
@@ -176,6 +237,7 @@ export async function migrateDelegationRostersToWorkerPresets(dataDir: string, a
   for (const roster of primary ? [primary, ...rosters.filter((entry) => entry !== primary)] : rosters) {
     for (const route of Array.isArray(roster.routes) ? roster.routes : []) {
       if (!isRecord(route) || !isWorkerPresetName(route.routeId) || names.has(route.routeId)) continue;
+      if (isShippedRoute(roster, route)) continue;
       const provider = nonEmptyString(route.provider);
       const modelId = nonEmptyString(route.modelId);
       if (!provider || !modelId || !isReasoningLevel(route.reasoningLevel)) continue;
@@ -185,6 +247,7 @@ export async function migrateDelegationRostersToWorkerPresets(dataDir: string, a
     }
   }
 
+  if (!names.has(DEFAULT_WORKER_PRESET.name)) presets.push({ ...DEFAULT_WORKER_PRESET });
   await writeJsonFileAtomic(getWorkerPresetsPath(dataDir), { version: 2, presets } satisfies WorkerPresetSettings);
   return true;
 }
