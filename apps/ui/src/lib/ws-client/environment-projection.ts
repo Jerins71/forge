@@ -51,6 +51,11 @@ export function projectSession(
       : previous?.model ?? pendingModel,
     modelOrigin: session.model?.origin ?? previous?.modelOrigin,
     contextModeOverride: session.contextMode?.override,
+    contextUsage: session.contextUsage
+      ? (previous?.contextUsage?.tokens === session.contextUsage.tokens && previous.contextUsage.contextWindow === session.contextUsage.contextWindow
+          ? previous.contextUsage
+          : { ...session.contextUsage, percent: session.contextUsage.tokens / session.contextUsage.contextWindow * 100 })
+      : undefined,
     sessionFile: previous?.sessionFile ?? '',
     workerCount: session.workerCount,
     activeWorkerCount: session.activeWorkerCount ?? previous?.activeWorkerCount,

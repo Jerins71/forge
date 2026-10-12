@@ -173,6 +173,8 @@ export const SessionSummarySchema = O({
   model: Type.Optional(O({ provider: ShortText, modelId: ShortText, thinkingLevel: ShortText,
     origin: E('profile_default', 'session_override') })),
   contextMode: Type.Optional(O({ effective: E('summary', 'fresh'), override: Type.Optional(E('summary', 'fresh')) })),
+  /** The provider's last report of tokens in context; absent until it reports. */
+  contextUsage: Type.Optional(O({ tokens: Type.Integer({ minimum: 0 }), contextWindow: Type.Integer({ minimum: 1 }) })),
   // The server attention occurrence behind `attention: 'result'`; Inbox › Needs You lists and dismisses it.
   attentionOccurrence: Type.Optional(O({ attentionId: Type.String({ minLength: 1, maxLength: 256 }),
     reason: E(...SESSION_ATTENTION_REASONS), raisedAt: V2Time })),

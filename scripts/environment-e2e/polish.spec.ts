@@ -9,7 +9,9 @@
 //   - a turn the user stopped says "Stopped by you";
 //   - a worker's provider failure is one failed row in the worker view, and the manager's card names it;
 //     the worker's view shows none of the manager's choices, and header and sidebar both say Failed;
-//   - a manager waiting inside its turn receives its worker's result there and finishes.
+//   - a manager waiting inside its turn receives its worker's result there and finishes;
+//   - the header meter shows the provider's reported context usage, and `/compact` in the composer
+//     compacts (refusing Codex instructions, or a running turn), local and remote.
 //   pnpm exec playwright test scripts/environment-e2e/polish.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
@@ -66,8 +68,8 @@ async function launchRunning(title: string, text: string): Promise<string> {
     workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text, artifactIds: [] } })
   return launched.sessionId!
 }
-async function shellSession(sessionId: string): Promise<SessionSummary | undefined> {
-  const rpc = await openFixtureRpc(fleet.a.baseUrl, admin)
+async function shellSession(sessionId: string, environment = fleet.a, session = admin): Promise<SessionSummary | undefined> {
+  const rpc = await openFixtureRpc(environment.baseUrl, session)
   try {
     await rpc.call('shell.subscribe', {})
     const snapshot = await until<{ sessions: SessionSummary[] } | undefined>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
@@ -509,4 +511,58 @@ test('a manager waiting inside its turn receives its worker\'s result and finish
   await expect(transcript(page).locator('[data-worker-result-source]')).toHaveCount(1, { timeout: 30_000 })
   await expect(transcript(page)).toContainText('assistant reply')
   assertions.waitingManager = { sessionId, resultCards: 1, finished: true }
+})
+
+test('the header meter shows the provider\'s context usage, and /compact compacts from the composer, local and remote', async ({ page }) => {
+  const meter = page.getByRole('button', { name: /^Context window / })
+  const remoteAdmin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments[1]!.name, 'bootstrap')
+  const results: Record<string, unknown> = {}
+  for (const [environment, session] of [[fleet.a, admin], [fleet.b, remoteAdmin]] as const) {
+    const commandId = randomUUID()
+    const launched = await fixtureRpcOnce(environment.baseUrl, session, 'session.launch', { commandId, projectId: environment.sessionId, title: 'Polish meter',
+      workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Say hello', artifactIds: [] } })
+    await until(() => fixtureRpcOnce(environment.baseUrl, session, 'command.get', { commandId }), receipt => receipt.state === 'succeeded', 30_000)
+    const sessionId = launched.sessionId!
+    const usage = async () => (await shellSession(sessionId, environment, session))?.contextUsage
+    await page.goto(`${fleet.uiUrl}/?env=${encodeURIComponent(environment.environmentId)}&agent=${encodeURIComponent(sessionId)}`)
+    await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+
+    // The provider reported 32,000 of 128,000 tokens: 25%, live and after reload.
+    await expect(meter).toHaveAttribute('aria-label', /^Context window 25% full, 32K of 128K tokens used$/, { timeout: 15_000 })
+    expect(await usage()).toEqual({ tokens: 32_000, contextWindow: 128_000 })
+    await page.reload()
+    await expect(meter).toHaveAttribute('aria-label', /^Context window 25% full/, { timeout: 30_000 })
+
+    // /compact is listed with a description.
+    await composer(page).fill('/comp')
+    const option = page.getByRole('button', { name: /^\/compact\b/ })
+    await expect(option).toContainText('Compact this session\'s context')
+    await composer(page).fill('')
+
+    // Codex compacts with its own prompt: instructions are refused, nothing is sent as a message.
+    await composer(page).fill('/compact keep the plan')
+    await page.keyboard.press('Enter')
+    await expect(page.getByText(/Codex compacts with its own prompt/).first()).toBeVisible({ timeout: 15_000 })
+
+    // Compacting while a turn runs says the session is still working.
+    await send(page, '[fixture:hold] Hold this turn open')
+    await expect.poll(async () => (await shellSession(sessionId, environment, session))?.status, { timeout: 15_000 }).toBe('running')
+    await composer(page).fill('/compact')
+    await page.keyboard.press('Enter')
+    await expect(page.getByText(/still working/i).first()).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('button', { name: 'Stop', exact: true }).click()
+    await expect.poll(async () => (await shellSession(sessionId, environment, session))?.status, { timeout: 30_000 }).not.toBe('running')
+
+    // Bare /compact compacts; the provider's next report drops the meter to 5%.
+    await composer(page).fill('/compact')
+    await page.keyboard.press('Enter')
+    await expect(meter).toHaveAttribute('aria-label', /^Context window 5% full, 6.4K of 128K tokens used$/, { timeout: 30_000 })
+    expect(await usage()).toEqual({ tokens: 6_400, contextWindow: 128_000 })
+    await expect(transcript(page)).not.toContainText('/compact')
+    await page.reload()
+    await expect(meter).toHaveAttribute('aria-label', /^Context window 5% full/, { timeout: 30_000 })
+    await shot(page, `context-meter-${environment === fleet.a ? 'local' : 'remote'}`)
+    results[environment.environmentId] = { sessionId, before: '25%', after: '5%' }
+  }
+  assertions.contextMeter = results
 })

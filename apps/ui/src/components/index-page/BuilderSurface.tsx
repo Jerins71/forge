@@ -131,7 +131,7 @@ import {
   getProjectAgentSuggestions,
   shouldLoadExternalProjectAgentDirectory,
 } from '@/hooks/index-page/project-agent-suggestions'
-import { SIDE_SLASH_COMMAND, useSlashCommands } from '@/hooks/index-page/use-slash-commands'
+import { COMPACT_SLASH_COMMAND, SIDE_SLASH_COMMAND, useSlashCommands } from '@/hooks/index-page/use-slash-commands'
 import { useOnboardingState } from '@/hooks/use-onboarding-state'
 import { useConversationThroughputDisplayPreference } from '@/hooks/use-conversation-throughput-display-preference'
 import { useDynamicFavicon } from '@/hooks/use-dynamic-favicon'
@@ -958,7 +958,7 @@ export function BuilderSurface({
     Boolean(onboardingState && onboardingState.status !== 'pending')
 
   const { slashCommands } = useSlashCommands({ settingsClient: selectedSettingsClient, activeView })
-  const builderSlashCommands = useMemo(() => [SIDE_SLASH_COMMAND, ...slashCommands], [slashCommands])
+  const builderSlashCommands = useMemo(() => [COMPACT_SLASH_COMMAND, SIDE_SLASH_COMMAND, ...slashCommands], [slashCommands])
 
   // Project creation and sidebar project actions address the primary environment.
   const localSidebarManager = useManagerActions({
