@@ -9,6 +9,8 @@ export class ClaudeRuntimeEvents {
   private readonly tools = new Map<string, string>();
   private readonly background = new Map<string, string>();
   private readonly taskTools = new Map<string, string>();
+  /** Inputs whose consumption was already reported. */
+  private readonly consumed = new Set<string>();
 
   hasBackgroundWork(): boolean { return this.background.size > 0; }
 
@@ -39,10 +41,15 @@ export class ClaudeRuntimeEvents {
   map(frame: SDKMessage): RuntimeSessionEvent[] {
     if ("parent_tool_use_id" in frame && frame.parent_tool_use_id) return [];
     const events: RuntimeSessionEvent[] = [];
-    // The native echo of an input is its consumption.
-    const echoes = "user_message_uuids" in frame && frame.user_message_uuids ? frame.user_message_uuids.length
-      : "user_message_uuid" in frame && frame.user_message_uuid ? 1 : 0;
-    for (let index = 0; index < echoes; index++) events.push({ type: "input_consumed" });
+    // Every frame of a step names the inputs it answers. An input is consumed at the first frame that names
+    // it: the start of the step that takes it in, after the reply before it ended. That reply closes first.
+    const ids = "user_message_uuids" in frame && frame.user_message_uuids ? frame.user_message_uuids
+      : "user_message_uuid" in frame && frame.user_message_uuid ? [frame.user_message_uuid] : [];
+    const consumed = ids.filter(id => !this.consumed.has(id));
+    if (consumed.length) {
+      events.push(...this.flush(false));
+      for (const id of consumed) { this.consumed.add(id); events.push({ type: "input_consumed" }); }
+    }
     if (frame.type === "system" && frame.subtype === "task_started" && frame.is_backgrounded && frame.tool_use_id && this.tools.has(frame.tool_use_id)) {
       this.background.set(frame.tool_use_id, frame.task_id);
       events.push({ type: "tool_execution_update", toolName: this.tools.get(frame.tool_use_id)!, toolCallId: frame.tool_use_id,
