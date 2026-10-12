@@ -631,6 +631,75 @@ test('the session in view stays read and out of Needs you across turns', async (
   expect(renderErrors).toEqual([])
 })
 
+test('the sidebar keeps its dragged width, and Recent its collapsed state, across reloads', async ({ page }) => {
+  const sidebarShots = join(repositoryRoot, '.internal/sidebar')
+  await mkdir(sidebarShots, { recursive: true })
+  const sidebarShot = async (name: string) => {
+    const path = join(sidebarShots, `${name}.png`)
+    await page.screenshot({ path }); assertions[`screenshot:${name}`] = path
+  }
+  const showInbox = () => page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
+  const aside = page.locator('aside[data-tour="sidebar"]')
+  const width = async () => Math.round((await aside.boundingBox())!.width)
+  const handle = page.getByTestId('sidebar-resize-handle')
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(viewedSession())}`)
+  await showInbox()
+  const initial = await width()
+
+  // Dragging the handle resizes the column live, and the width survives a reload.
+  const box = (await handle.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + 300)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 160, box.y + 300, { steps: 10 })
+  await expect.poll(width).toBeGreaterThan(initial + 100)
+  await sidebarShot('resize-dragging')
+  await page.mouse.up()
+  const dragged = await width()
+  await page.reload()
+  await showInbox()
+  await expect.poll(width).toBe(dragged)
+  await sidebarShot('resize-kept-after-reload')
+
+  // Arrow keys resize from the focused handle; double-click restores the default width.
+  await handle.focus()
+  await page.keyboard.press('ArrowLeft')
+  await expect.poll(width).toBe(dragged - 16)
+  await handle.dblclick()
+  await expect.poll(width).toBe(initial)
+  await page.reload()
+  await expect.poll(width).toBe(initial)
+
+  // The handle is a desktop affordance: the narrow overlay sidebar has none.
+  await page.setViewportSize({ width: 700, height: 900 })
+  await expect(handle).toHaveCount(0)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await expect(handle).toHaveCount(1)
+
+  // Recent collapses from its heading and stays collapsed (then expanded) across reloads.
+  await showInbox()
+  const recent = page.locator('[data-inbox-section="recent"]').filter({ visible: true })
+  const toggle = recent.getByRole('button', { name: 'Recent', exact: true })
+  const rows = recent.locator('[data-inbox-row]')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(rows.first()).toBeVisible()
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(rows).toHaveCount(0)
+  await page.reload()
+  await showInbox()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(rows).toHaveCount(0)
+  await sidebarShot('recent-collapsed-after-reload')
+  await toggle.click()
+  await page.reload()
+  await showInbox()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(rows.first()).toBeVisible()
+  await sidebarShot('recent-expanded-after-reload')
+  assertions.sidebarResize = { initial, dragged, keyboardStep: 16 }
+  expect(renderErrors).toEqual([])
+})
+
 test('skipping a choice ends the turn, and a message sent while it was open is delivered, with no recovery', async ({ page }) => {
   const { a } = fleet
   const session = await bootstrap(a)

@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { BellOff, CheckCheck, ChevronDown, ChevronUp, CircleAlert, Globe, Inbox, Pin } from 'lucide-react'
+import { BellOff, CheckCheck, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Globe, Inbox, Pin } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
 import type { SessionRow } from '@/lib/agent-hierarchy'
 import { RemoteSessionMenu } from './RemoteSessionMenu'
+import { useCollapsedInboxSections } from './hooks/useCollapsedInboxSections'
 import { SessionContextMenu, type SessionContextMenuActions } from './SessionContextMenu'
 import { SidebarRoomAvatar } from './shared'
 import { formatRoomsInboxRelativeTime, presentRoomsInboxReason } from './rooms-inbox-presenter'
@@ -54,6 +55,7 @@ export function RoomsInbox({
 }) {
   const [recentExpanded, setRecentExpanded] = useState(false)
   const [needsYouExpanded, setNeedsYouExpanded] = useState(false)
+  const { collapsedSections, toggleSectionCollapsed } = useCollapsedInboxSections()
   useEffect(() => {
     setRecentExpanded(false)
     setNeedsYouExpanded(false)
@@ -85,6 +87,11 @@ export function RoomsInbox({
 
   // A filter that matches nothing is not an empty Inbox; the sessions are still there.
   const filter = searchQuery?.trim()
+  // Search shows every match, so a collapsed section opens while a filter is active.
+  const collapsible = (section: string) => ({
+    collapsed: !filter && collapsedSections.has(section),
+    onToggleCollapsed: () => toggleSectionCollapsed(section),
+  })
   if (isEmpty && filter) {
     return (
       <section className="flex flex-1 flex-col items-center justify-center gap-1 px-4 py-10 text-center" data-testid="rooms-inbox-no-match">
@@ -119,6 +126,7 @@ export function RoomsInbox({
         <InboxSection
           title="Needs you"
           testId="needs-you"
+          {...collapsible('needs-you')}
           action={(
             <button
               type="button"
@@ -167,7 +175,7 @@ export function RoomsInbox({
       ) : null}
 
       {sections.active.length > 0 ? (
-        <InboxSection title="Active" detail={`${sections.activeWorkerCount} worker${sections.activeWorkerCount === 1 ? '' : 's'}`} testId="active">
+        <InboxSection title="Active" detail={`${sections.activeWorkerCount} worker${sections.activeWorkerCount === 1 ? '' : 's'}`} testId="active" {...collapsible('active')}>
           {sections.active.map((session) => (
             <InboxSessionRow
               key={`${session.identity.originId}::${session.identity.sessionAgentId}`}
@@ -194,7 +202,7 @@ export function RoomsInbox({
       ) : null}
 
       {sections.recent.length > 0 ? (
-        <InboxSection title="Recent" testId="recent">
+        <InboxSection title="Recent" testId="recent" {...collapsible('recent')}>
           {recentVisibility.visible.map((session) => (
             <InboxSessionRow
               key={`${session.identity.originId}::${session.identity.sessionAgentId}`}
@@ -299,33 +307,58 @@ function InboxSection({
   detail,
   action,
   testId,
+  collapsed = false,
+  onToggleCollapsed,
   children,
 }: {
   title: string
   detail?: string
   action?: ReactNode
   testId: string
+  collapsed?: boolean
+  onToggleCollapsed?: () => void
   children: ReactNode
 }) {
+  const detailBadge = detail ? (
+    <span className={cn(
+      'sidebar-room-inbox-section-detail',
+      testId === 'active' ? 'sidebar-room-inbox-section-detail--active' : undefined,
+    )}>
+      {testId === 'active' ? <span className="sidebar-room-active-dot" aria-hidden="true" /> : null}
+      {detail}
+    </span>
+  ) : null
+
   return (
     <section
       data-inbox-section={testId}
       className={cn('sidebar-room-inbox-section', `sidebar-room-inbox-section--${testId}`)}
     >
       <div className="sidebar-room-inbox-section-header">
-        <h2 className="sidebar-room-inbox-section-label">{title}</h2>
-        {detail ? (
-          <span className={cn(
-            'sidebar-room-inbox-section-detail',
-            testId === 'active' ? 'sidebar-room-inbox-section-detail--active' : undefined,
-          )}>
-            {testId === 'active' ? <span className="sidebar-room-active-dot" aria-hidden="true" /> : null}
-            {detail}
-          </span>
-        ) : null}
+        {onToggleCollapsed ? (
+          <h2 className="flex min-w-0 flex-1">
+            <button
+              type="button"
+              aria-expanded={!collapsed}
+              onClick={onToggleCollapsed}
+              className="sidebar-room-inbox-section-toggle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+            >
+              {collapsed
+                ? <ChevronRight className="size-3 shrink-0 text-[var(--sidebar-room-muted)]" aria-hidden="true" />
+                : <ChevronDown className="size-3 shrink-0 text-[var(--sidebar-room-muted)]" aria-hidden="true" />}
+              <span className="sidebar-room-inbox-section-label">{title}</span>
+              {detailBadge}
+            </button>
+          </h2>
+        ) : (
+          <>
+            <h2 className="sidebar-room-inbox-section-label">{title}</h2>
+            {detailBadge}
+          </>
+        )}
         {action ? <span className="ml-auto">{action}</span> : null}
       </div>
-      <div className="sidebar-room-inbox-section-rows">{children}</div>
+      {collapsed ? null : <div className="sidebar-room-inbox-section-rows">{children}</div>}
     </section>
   )
 }
