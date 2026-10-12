@@ -56,14 +56,38 @@ const GROUP_LABELS: Record<TimelineActivityKind, (count: number) => string> = {
   message: () => 'Replied',
 }
 
-/** The collapsed header for finished rows: "Ran 2 commands, changed 1 file". */
-export function summarizeActivityGroup(rows: readonly ActivityRowModel[]): string {
+const LIVE_GROUP_LABELS: Record<TimelineActivityKind, (count: number) => string> = {
+  ...GROUP_LABELS,
+  command: (count) => `Running ${plural(count, 'command', 'commands')}`,
+  file_edit: (count) => `Changing ${plural(count, 'file', 'files')}`,
+  file_read: (count) => `Reading ${plural(count, 'file', 'files')}`,
+  search: (count) => (count === 1 ? 'Searching' : `Searching ${count} times`),
+  web: (count) => (count === 1 ? 'Using the web' : `Using the web ${count} times`),
+  agent: (count) => `Making ${plural(count, 'agent call', 'agent calls')}`,
+  tool: (count) => `Using ${plural(count, 'tool', 'tools')}`,
+  reasoning: () => 'Thinking',
+}
+
+/** The collapsed header for finished rows: "Ran 2 commands, changed 1 file"; while the turn runs, "Running 2 commands". */
+export function summarizeActivityGroup(rows: readonly ActivityRowModel[], live = false): string {
+  const labels = live ? LIVE_GROUP_LABELS : GROUP_LABELS
   const counts = new Map<TimelineActivityKind, number>()
   for (const row of rows) counts.set(row.kind, (counts.get(row.kind) ?? 0) + 1)
   // The header names the work; thinking is named only when it is all there was.
   const work = [...counts.keys()].filter((kind) => kind !== 'reasoning')
-  const parts = (work.length ? work : [...counts.keys()]).map((kind) => GROUP_LABELS[kind](counts.get(kind)!))
+  const parts = (work.length ? work : [...counts.keys()]).map((kind) => labels[kind](counts.get(kind)!))
   return parts.map((part, index) => (index === 0 ? part : part.charAt(0).toLowerCase() + part.slice(1))).join(', ')
+}
+
+/** The step a live group is on: the newest running row, else the newest row. */
+export function currentActivityRow(rows: readonly ActivityRowModel[]): ActivityRowModel | undefined {
+  for (let index = rows.length - 1; index >= 0; index -= 1) if (rows[index]!.status === 'running') return rows[index]
+  return rows.at(-1)
+}
+
+/** A row that needs the reader's attention stays in view while its live group is folded. */
+export function needsAttention(row: ActivityRowModel): boolean {
+  return row.status === 'failed' || Boolean(row.wakeAt)
 }
 
 /** The icon of the group header: the kind every row shares, or the first kind of work. */
