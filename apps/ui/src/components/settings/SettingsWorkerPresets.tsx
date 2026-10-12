@@ -85,7 +85,7 @@ export function SettingsWorkerPresets({ apiClient, modelConfigChangeKey }: {
 
   const reasoningOptions = (row: Row) =>
     findCatalogModel(catalog, row.provider, row.modelId)?.reasoningOptions
-    ?? MANAGER_REASONING_LEVELS.map((id) => ({ id, label: id }))
+    ?? MANAGER_REASONING_LEVELS.map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) }))
 
   const update = (key: number, patch: Partial<WorkerPreset>) =>
     setRows((current) => current?.map((row) => (row.key === key ? { ...row, ...patch } : row)) ?? null)
@@ -125,8 +125,8 @@ export function SettingsWorkerPresets({ apiClient, modelConfigChangeKey }: {
 
   return (
     <SettingsSection
-      label="Worker presets"
-      description="Named models a manager can start workers on. The manager picks a preset by name when it delegates."
+      label="Presets"
+      description="The manager picks a preset by name when it delegates. Workers started without one run on the manager's own model."
       cta={(
         <div className="flex items-center gap-2">
           {dirty ? <span className="hidden text-xs text-muted-foreground @lg/settings:inline">Unsaved changes</span> : null}
