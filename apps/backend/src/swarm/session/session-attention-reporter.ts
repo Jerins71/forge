@@ -83,7 +83,7 @@ export class SessionAttentionReporter {
     if (!descriptor) return;
     const sessionAgentId = descriptor.role === "worker" ? descriptor.managerId : descriptor.agentId;
     const snapshot = this.snapshot(sessionAgentId);
-    if (snapshot) await this.options.coordinator.observeRunOutcome(snapshot, outcome);
+    if (snapshot) await this.options.coordinator.observeRunOutcome(snapshot, outcome, descriptor.role === "worker" ? "owned_worker" : "manager");
   }
 
   /**

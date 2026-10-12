@@ -277,14 +277,27 @@ export class SessionAttentionCoordinator {
     }));
   }
 
-  /** Only final logical failures latch the epoch; provider retries are not terminal outcomes. */
-  async observeRunOutcome(session: SessionAttentionSessionSnapshot, outcome: "completed" | "failed"): Promise<void> {
+  /**
+   * Only final logical failures latch the epoch; provider retries are not terminal outcomes.
+   * A completed manager run supersedes an earlier settled failure, as long as no owned worker
+   * is still errored, even when no streaming edge armed an epoch for it. It resolves like Done.
+   */
+  async observeRunOutcome(
+    session: SessionAttentionSessionSnapshot,
+    outcome: "completed" | "failed",
+    source: "manager" | "owned_worker" = "manager",
+  ): Promise<void> {
     await this.runNatural(async () => this.applyMutation(async state => {
       const sessionAgentId = session.manager.agentId;
       if (!this.sessionIsEligible(session)) return retireFromState(state, sessionAgentId);
       const current = state.sessions[sessionAgentId];
       if (!current || current.phase !== "working") {
-        return outcome === "failed" ? this.raiseForInternalTurn(state, session, true) : { value: undefined };
+        if (outcome === "failed") return this.raiseForInternalTurn(state, session, true);
+        if (source !== "manager" || session.hasTerminallyErroredWorker || !current) return { value: undefined };
+        if (toAttention(sessionAgentId, current)?.reason !== "work_failed") return { value: undefined };
+        const next = cloneSessionAttentionState(state);
+        next.sessions[sessionAgentId] = { ...current, attention: { ...current.attention!, dismissedAt: this.now() } };
+        return { value: undefined, state: next, changes: [{ sessionAgentId, attention: null }] };
       }
       const record = { ...current, ...(outcome === "failed" ? { hadError: true } : {}) };
       if (normalizeCount(session.pendingTurnContextCount) === 0) delete record.awaitingContinuation;
