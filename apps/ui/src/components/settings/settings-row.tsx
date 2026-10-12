@@ -28,6 +28,19 @@ export function SettingsSection({
   )
 }
 
+/**
+ * Stacks a tab's sections, and flows them into two columns once the settings pane has room for
+ * two readable cards side by side. Columns rather than a grid, so cards of unequal height pack
+ * without gaps. Use it for tabs made of short, independent sections.
+ */
+export function SettingsSectionGrid({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="columns-[34rem] gap-5 [&>*]:break-inside-avoid">
+      {children}
+    </div>
+  )
+}
+
 export function SettingsWithCTA({
   label,
   description,

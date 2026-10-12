@@ -2,7 +2,7 @@ import { Activity, ArrowLeft, ChevronLeft, Search, Bell, Settings, KeyRound, Wre
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { HelpTrigger } from '@/components/help/HelpTrigger'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { SettingsTab } from './settings-target'
 
@@ -73,7 +73,7 @@ interface SettingsLayoutProps {
   onTabChange: (tab: SettingsTab) => void
   onBack?: () => void
   children: React.ReactNode
-  /** Class that sets `--content-max` for the content area. Defaults to the form measure. */
+  /** Class that sets `--content-max` for the content area. Defaults to the settings measure. */
   contentWidthClassName?: string
   /** Filter nav items to only these tabs. When omitted, all tabs are shown. */
   availableTabs?: SettingsTab[]
@@ -124,6 +124,12 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onBack])
 
+  // The narrow tab strip scrolls sideways; keep the active tab in view.
+  const tabStripRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    tabStripRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ inline: 'center', block: 'nearest' })
+  }, [activeTab])
+
   return (
     <div className="app-canvas @container/settings-shell flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       {/* Mobile: compact header + horizontal scrolling tab bar */}
@@ -147,7 +153,11 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
         {headerAccessory}
         <HelpTrigger contextKey={`settings.${activeTab}`} size="sm" variant="ghost" />
       </header>
-      <nav aria-label="Settings sections" className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline px-2 pb-1.5 @3xl/settings-shell:hidden">
+      <nav
+        ref={tabStripRef}
+        aria-label="Settings sections"
+        className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline pb-1.5 pl-2 pr-10 [mask-image:linear-gradient(to_right,black_calc(100%-3rem),transparent)] [scrollbar-width:none] @3xl/settings-shell:hidden [&::-webkit-scrollbar]:hidden"
+      >
         {visibleItems.map((item) => {
           const isActive = activeTab === item.id
           return (
@@ -155,6 +165,7 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
               key={item.id}
               type="button"
               onClick={() => onTabChange(item.id)}
+              aria-current={isActive ? 'page' : undefined}
               className={cn(
                 'flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors duration-150',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
@@ -182,14 +193,14 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
               type="button"
               onClick={onBack}
               aria-label="Back to chat"
-              className="mb-2 flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="mb-2 flex w-full shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               <ChevronLeft className="size-3.5" strokeWidth={1.75} />
               Back to sessions
               <kbd className="ml-auto rounded-[5px] border border-hairline px-1.5 py-px font-mono text-[10.5px] text-subtle-foreground">esc</kbd>
             </button>
           ) : null}
-          <div className="mb-2 flex h-[34px] items-center gap-2 rounded-[10px] border border-hairline bg-foreground/[0.04] px-2.5 focus-within:ring-2 focus-within:ring-ring/50">
+          <div className="mb-2 flex h-[34px] shrink-0 items-center gap-2 rounded-[10px] border border-hairline bg-foreground/[0.04] px-2.5 focus-within:ring-2 focus-within:ring-ring/50">
             <Search className="size-3.5 shrink-0 text-subtle-foreground" strokeWidth={1.75} aria-hidden="true" />
             <input
               type="search"
@@ -252,9 +263,10 @@ export function SettingsLayout({ activeTab, onTabChange, onBack, children, conte
         >
           <div
             className={cn(
-              'content-frame pb-10 pt-5 @3xl/settings-shell:pt-7',
+              // Left-aligned to the nav, not centred: a wide window shows more settings, not more margin.
+              'w-full max-w-[calc(var(--content-max)+2.5rem)] px-4 pb-10 pt-5 @3xl/settings-shell:px-5 @3xl/settings-shell:pt-7',
               fillHeight ? 'flex min-h-0 flex-1 flex-col' : null,
-              contentWidthClassName || 'content-form',
+              contentWidthClassName || 'content-settings',
             )}
           >
             <div className="mb-5 flex shrink-0 items-start justify-between gap-3">

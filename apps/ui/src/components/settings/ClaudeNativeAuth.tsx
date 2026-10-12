@@ -107,7 +107,7 @@ export function ClaudeNativeAuth({ apiClient, inConversation = false, embedded =
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {status && status.mode === 'subscription' && !active ? (
-            <Button size="sm" disabled={busy} onClick={() => mutate('start')}>{status.connected ? 'Switch account' : 'Sign in to Claude'}</Button>
+            <Button size="sm" variant={status.connected ? 'outline' : 'default'} disabled={busy} onClick={() => mutate('start')}>{status.connected ? 'Switch account' : 'Sign in to Claude'}</Button>
           ) : null}
           {active ? <Button variant="outline" size="sm" disabled={busy} onClick={() => mutate('cancel')}>Cancel sign-in</Button> : null}
           {!active || error ? <Button variant="outline" size="sm" disabled={busy} onClick={() => void request()}>
@@ -125,7 +125,7 @@ export function ClaudeNativeAuth({ apiClient, inConversation = false, embedded =
             </Button>
             <a className={buttonVariants({ variant: 'outline', size: 'sm' })} href={status.authorizationUrl} target="_blank" rel="noreferrer">Open Claude sign-in <ExternalLink className="size-3.5" aria-hidden="true" /></a>
           </div>
-          <form className="max-w-lg space-y-2" onSubmit={event => { event.preventDefault(); mutate('code') }}>
+          <form className="max-w-xl space-y-2" onSubmit={event => { event.preventDefault(); mutate('code') }}>
             <label htmlFor={codeId} className="text-xs text-muted-foreground">After authorizing on the Claude page, paste the complete authorization code here.</label>
             <div className="flex gap-2">
               <Input id={codeId} type="password" value={code} onChange={event => setCode(event.target.value)}
@@ -135,7 +135,7 @@ export function ClaudeNativeAuth({ apiClient, inConversation = false, embedded =
             </div>
           </form>
           <Input aria-label="Claude sign-in link" readOnly value={status.authorizationUrl}
-            onFocus={event => event.currentTarget.select()} className="max-w-lg text-xs" />
+            onFocus={event => event.currentTarget.select()} className="max-w-xl text-xs" />
           {copyError ? <p role="alert" className="max-w-prose text-sm">{copyError}</p> : null}
         </div>
       ) : null}

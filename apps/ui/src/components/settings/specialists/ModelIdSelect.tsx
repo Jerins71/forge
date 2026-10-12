@@ -20,6 +20,7 @@ export function ModelIdSelect({
   presets,
   placeholder,
   allowNone,
+  showUnavailable,
 }: {
   modelId: string
   provider: string
@@ -28,6 +29,8 @@ export function ModelIdSelect({
   presets: ModelPresetInfo[]
   placeholder?: string
   allowNone?: boolean
+  /** Name a saved model the loaded catalog no longer offers, instead of guessing a label. */
+  showUnavailable?: boolean
 }) {
   const groups = useMemo(() => groupModelsByProvider(models), [models])
 
@@ -66,7 +69,8 @@ export function ModelIdSelect({
       <SelectTrigger className="w-full text-xs">
         <span className="truncate">
           {controlledValue
-            ? (itemTextByValue.get(controlledValue) ?? getModelDisplayLabel(modelId, presets, provider))
+            ? (itemTextByValue.get(controlledValue)
+              ?? (showUnavailable && models.length > 0 ? `${provider}/${modelId} (unavailable)` : getModelDisplayLabel(modelId, presets, provider)))
             : (placeholder ?? 'Select model')}
         </span>
       </SelectTrigger>
