@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { projectItems, projectSession, projectShell } from './environment-projection'
+import { choicesForView, projectItems, projectSession, projectShell, withChoicesInTimelineOrder } from './environment-projection'
 import { defaultFixtureSeeds } from '@forge/client-runtime'
 
 it('renders sidebar ordering metadata and message pins from fresh and live projections', () => {
@@ -29,4 +29,13 @@ it('keeps a session that is still shutting down distinct from an idle or stopped
   expect(stopped.stoppingSessionIds.size).toBe(0)
   expect(stopped.agents[0].status).toBe('stopped')
   expect(projectShell(shellWith('idle'), []).stoppingSessionIds.size).toBe(0)
+})
+
+it("shows a worker only its own choices, not the manager's settled ones", () => {
+  const choice = (choiceId: string, agentId: string) => ({ choiceId, agentId, status: 'answered', questions: [], answers: [], requestedAt: '2026-10-11T20:41:00.000Z' }) as unknown as Parameters<typeof choicesForView>[0][number]
+  const choices = [choice('manager-blue', 'session'), choice('worker-own', 'ok-fast-builder')]
+  expect(choicesForView(choices, 'ok-fast-builder', 'session').map(c => c.choiceId)).toEqual(['worker-own'])
+  // The manager's chat keeps every choice asked in its session.
+  expect(choicesForView(choices, 'session').map(c => c.choiceId)).toEqual(['manager-blue', 'worker-own'])
+  expect(withChoicesInTimelineOrder([], choicesForView(choices, 'ok-fast-builder', 'session')).map(row => 'choiceId' in row ? row.choiceId : null)).toEqual(['worker-own'])
 })

@@ -283,6 +283,8 @@ export const WorkerSummarySchema = O({
   /** The model the worker runs on, and the preset it was started from, if any. */
   model: Type.Optional(O({ provider: ShortText, modelId: ShortText, thinkingLevel: ShortText })),
   preset: Type.Optional(ShortText),
+  /** When the worker was started; workers are listed in this order. */
+  createdAt: Type.Optional(V2Time),
 })
 export const DetailItemSchema = O({
   itemId: V2Id, userTurnId: V2Id, actorId: V2Id,

@@ -1,5 +1,5 @@
 import { loadState } from "./orchestration/store.js";
-import { projectLifecycleStatus, projectWorkerStatus } from "./orchestration/lifecycle-projection.js";
+import { projectLifecycleStatus, projectWorkerStatus, workerCreatedAt } from "./orchestration/lifecycle-projection.js";
 import { requestForChoice, requestAttention, withChoiceTimes } from "./orchestration/request-projection.js";
 import { formatActivityContent, projectAgentMetadata } from "@forge/protocol";
 import { createHash, randomUUID } from "node:crypto";
@@ -144,7 +144,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     indexDescriptor(descriptor);
     const preset = descriptor.specialistDisplayName ?? descriptor.specialistId;
     const worker = { agentId: descriptor.agentId, title: descriptor.displayName.slice(0, 256), status: projectWorkerStatus(loadState(database), descriptor.agentId) ?? descriptor.status,
-      model: { provider: descriptor.model.provider, modelId: descriptor.model.modelId, thinkingLevel: descriptor.model.thinkingLevel }, ...(preset ? { preset: preset.slice(0, 256) } : {}) };
+      model: { provider: descriptor.model.provider, modelId: descriptor.model.modelId, thinkingLevel: descriptor.model.thinkingLevel }, ...(preset ? { preset: preset.slice(0, 256) } : {}), ...workerCreatedAt(descriptor.createdAt) };
     const prior = database.prepare("SELECT worker_json FROM control_workers WHERE session_id=? AND agent_id=? AND deleted=0").get(descriptor.managerId, descriptor.agentId) as { worker_json: string } | undefined;
     if (JSON.stringify(worker) !== prior?.worker_json) eventSink.append(tx, { topic: "detail", sessionId: descriptor.managerId, event: { type: "worker.upsert", worker } });
   }

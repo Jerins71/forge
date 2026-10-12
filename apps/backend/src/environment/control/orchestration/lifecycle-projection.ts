@@ -28,3 +28,27 @@ export function projectWorkerStatus(state: CoreState, threadId: string): AgentSt
   const latest = Object.values(state.runs).filter(run => run.threadId === threadId).sort((a, b) => b.sequence - a.sequence)[0];
   return latest?.outcome === "failed" ? "error" : status;
 }
+
+/** A worker's start time as its summary carries it; a value that is not a wire timestamp is left out. */
+export function workerCreatedAt(createdAt: unknown): { createdAt?: string } {
+  return typeof createdAt === "string" && createdAt.length <= 32 && /^\d{4}-\d{2}-\d{2}T.*Z$/.test(createdAt) ? { createdAt } : {};
+}
+
+/**
+ * A worker summary as read. Workers recorded before summaries carried their model, preset, start
+ * time or failed state are completed from their stored descriptor and the lifecycle, where those exist.
+ */
+export function readWorkerSummary<T extends { agentId: string; status: AgentStatus; model?: unknown; preset?: string; createdAt?: string }>(
+  stored: T, descriptor: { model?: { provider?: unknown; modelId?: unknown; thinkingLevel?: unknown }; specialistDisplayName?: unknown; specialistId?: unknown; createdAt?: unknown } | undefined, state: CoreState,
+): T {
+  const worker = { ...stored };
+  const model = descriptor?.model;
+  if (!worker.model && typeof model?.provider === "string" && typeof model.modelId === "string" && model.provider && model.modelId) {
+    worker.model = { provider: model.provider.slice(0, 256), modelId: model.modelId.slice(0, 256), thinkingLevel: typeof model.thinkingLevel === "string" ? model.thinkingLevel.slice(0, 256) : "" };
+  }
+  const preset = descriptor?.specialistDisplayName ?? descriptor?.specialistId;
+  if (worker.preset === undefined && typeof preset === "string" && preset) worker.preset = preset.slice(0, 256);
+  if (worker.createdAt === undefined) Object.assign(worker, workerCreatedAt(descriptor?.createdAt));
+  if (worker.status === "idle") worker.status = projectWorkerStatus(state, worker.agentId) ?? worker.status;
+  return worker;
+}

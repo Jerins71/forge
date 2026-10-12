@@ -3,6 +3,7 @@ import type {
 } from "@forge/protocol/environment-v2";
 import { lineageSnapshot } from "../control/orchestration/transfers.js";
 import { loadState } from "../control/orchestration/store.js";
+import { readWorkerSummary } from "../control/orchestration/lifecycle-projection.js";
 import type { Principal } from "../control/control-types.js";
 import type { DetailSnapshot, WorkerSummary, ChoiceSummary } from "./stream-types.js";
 import { readBarrier, readMeta, readReplay, recentItems, type StreamDependencies } from "./shell-stream.js";
@@ -89,8 +90,11 @@ export function createDetailStream(deps: StreamDependencies) {
   }
 
   function workersPage(sessionId: string, offset: number): RpcOutput<"session.workers"> {
-    const rows = deps.database.prepare("SELECT worker_json FROM control_workers WHERE session_id = ? AND deleted=0 ORDER BY agent_id LIMIT 101 OFFSET ?").all(sessionId, offset) as { worker_json: string }[];
-    const workers = rows.slice(0, 100).map(row => JSON.parse(row.worker_json) as WorkerSummary);
+    // Started order, oldest first: the same order a client keeps for live upserts.
+    const rows = deps.database.prepare(`SELECT worker_json,descriptor_json FROM control_workers WHERE session_id = ? AND deleted=0
+      ORDER BY COALESCE(json_extract(worker_json,'$.createdAt'),json_extract(descriptor_json,'$.createdAt'),''),agent_id LIMIT 101 OFFSET ?`).all(sessionId, offset) as { worker_json: string; descriptor_json: string | null }[];
+    const state = loadState(deps.database);
+    const workers = rows.slice(0, 100).map(row => readWorkerSummary(JSON.parse(row.worker_json) as WorkerSummary, row.descriptor_json ? JSON.parse(row.descriptor_json) : undefined, state));
     const meta = readMeta(deps.database);
     return { workers, nextPage: rows.length > 100 ? Buffer.from(JSON.stringify({ sessionId, offset: offset + 100, epoch: meta.stream_epoch })).toString("base64url") : null };
   }

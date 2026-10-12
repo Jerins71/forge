@@ -173,6 +173,18 @@ export function projectItems(
 }
 
 /**
+ * The choices one agent's chat shows. A session's detail carries every choice asked in it, the
+ * manager's and its workers'; a worker is read through that detail and shows only its own.
+ */
+export function choicesForView(
+  choices: NonNullable<DetailState['projection']>['choices'],
+  agentId: string,
+  sessionId: string = agentId,
+): NonNullable<DetailState['projection']>['choices'] {
+  return agentId === sessionId ? choices : choices.filter((choice) => choice.agentId === agentId)
+}
+
+/**
  * Choices sit where they were asked and keep that time, whatever happens to them later. One with no
  * recorded time (from an older environment) follows the messages, as it always did, and shows no time.
  */
@@ -269,7 +281,7 @@ export function projectSessionWorkers(
       const projected = projectWorker(worker, sessionId, shell)
       const previous = byId.get(worker.agentId)
       return previous?.role === 'worker' && previous.managerId === sessionId
-        && previous.status === projected.status && previous.displayName === projected.displayName
+        && previous.status === projected.status && previous.displayName === projected.displayName && previous.createdAt === projected.createdAt
         && previous.specialistDisplayName === projected.specialistDisplayName && previous.model.provider === projected.model.provider
         && previous.model.modelId === projected.model.modelId && previous.model.thinkingLevel === projected.model.thinkingLevel
         ? previous
@@ -291,7 +303,8 @@ export function projectWorker(
     displayName: worker.title,
     role: 'worker',
     status: worker.status,
-    createdAt: manager?.updatedAt ?? '',
+    // A worker recorded before summaries carried its start time sorts first, by ID; never by the session's last update.
+    createdAt: worker.createdAt ?? '',
     updatedAt: manager?.updatedAt ?? '',
     cwd: manager?.workspace.cwd ?? '',
     model: worker.model ?? pendingModel,

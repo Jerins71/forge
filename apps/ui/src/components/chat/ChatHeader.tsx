@@ -130,7 +130,7 @@ interface ChatHeaderProps {
   isFeedbackSubmitting?: boolean
 }
 
-function formatAgentStatus(status: AgentStatus | null): string {
+export function formatAgentStatus(status: AgentStatus | null, role?: 'manager' | 'worker' | null): string {
   if (!status) return 'Idle'
 
   switch (status) {
@@ -143,7 +143,8 @@ function formatAgentStatus(status: AgentStatus | null): string {
     case 'stopped':
       return 'Stopped'
     case 'error':
-      return 'Error'
+      // The sidebar calls a worker whose turn failed "Failed"; the header says the same.
+      return role === 'worker' ? 'Failed' : 'Error'
   }
 }
 
@@ -241,7 +242,7 @@ export function ChatHeader({
   isFeedbackSubmitting,
 }: ChatHeaderProps) {
   const isStreaming = connected && activeAgentStatus === 'streaming'
-  const statusLabel = !connected ? 'Reconnecting' : activeAgentStopping ? 'Stopping…' : formatAgentStatus(activeAgentStatus)
+  const statusLabel = !connected ? 'Reconnecting' : activeAgentStopping ? 'Stopping…' : formatAgentStatus(activeAgentStatus, activeAgentRole)
   const durationLabel =
     activeAgentRole === 'worker' &&
     (activeAgentStatus === 'terminated' || activeAgentStatus === 'stopped' || activeAgentStatus === 'idle') &&
