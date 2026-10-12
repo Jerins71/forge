@@ -143,6 +143,8 @@ export async function makeWsServerTempConfig(port: number): Promise<SwarmConfig>
   return buildTempConfig({
     prefix: 'swarm-ws-test-',
     port,
+    // Workers are admitted only on a provider with credentials; an inert key stands in for one.
+    sharedAuthContent: { 'openai-codex': { type: 'api_key', key: 'forge-fixture-inert-not-a-provider-key' } },
   })
 }
 

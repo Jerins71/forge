@@ -40,7 +40,7 @@ async function createFixtureEnvironment(manager: TestSwarmManager) {
   });
   try { return { ...await createTestEnvironment(manager, { boot: true }), core }; } finally { capture.mockRestore(); }
 }
-async function fixture(auth = false) {
+async function fixture(auth = true) {
   const config = await makeTempConfig({ prefix: "v2-swarm-", omitSharedAuthFile: !auth, ...(auth ? { sharedAuthContent: { "openai-codex": { type: "api_key", key: "forge-fixture-inert-not-a-provider-key" } } } : {}), omitSharedSecretsFile: true });
   const manager = new TestSwarmManager(config);
   const runtimeTokens = new Map<string, number>();
