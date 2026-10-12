@@ -149,6 +149,34 @@ describe("Native Codex manager", () => {
     await expect(f.runtime.sendMessage("Unsafe replacement")).rejects.toThrow("stopped or unavailable");
   });
 
+  it("freezes the reply at Stop while the provider keeps streaming until its interrupt lands", async () => {
+    const f = await fixture();
+    await f.runtime.sendMessage("Write an essay");
+    const context = { threadId: "native-thread", turnId: "turn-1" };
+    await f.notify("turn/started", { threadId: "native-thread", turn: { id: "turn-1", status: "inProgress", items: [] } });
+    await f.notify("item/agentMessage/delta", { ...context, itemId: "essay", delta: "Shown before Stop." });
+    f.interruptCompletes(false);
+    const request = f.client.request.getMockImplementation()!;
+    // A router that answers the interrupt late: the provider streams on, then ends the turn.
+    f.client.request.mockImplementation(async (method: string, params: any) => {
+      if (method !== "turn/interrupt") return request(method, params);
+      await f.notify("item/agentMessage/delta", { ...context, itemId: "essay", delta: " Streamed after Stop." });
+      await f.notify("item/started", { ...context, item: { id: "late-reasoning", type: "reasoning", summary: [] } });
+      await f.notify("item/agentMessage/delta", { ...context, itemId: "late-reply", delta: "A second reply after Stop." });
+      await f.notify("item/completed", { ...context, item: { id: "essay", type: "agentMessage", text: "Shown before Stop. Streamed after Stop." } });
+      await f.notify("turn/completed", { threadId: "native-thread", turn: { id: "turn-1", status: "interrupted" } });
+      return {};
+    });
+    const before = f.events.length;
+    await f.runtime.stopInFlight();
+    const after = f.events.slice(before);
+    const texts = after.flatMap(event => "message" in event && event.message && Array.isArray(event.message.content)
+      ? event.message.content.flatMap(part => part.type === "text" ? [part.text] : []) : []);
+    expect(texts.join("\n")).not.toContain("after Stop");
+    expect(after.filter(event => event.type === "message_start")).toEqual([]);
+    expect(after.find(event => event.type === "message_end")).toMatchObject({ message: { content: [{ type: "text", text: "Shown before Stop." }] } });
+  });
+
   it("keeps stop blocked when process exit is unconfirmed and permits cleanup retry", async () => {
     const f = await fixture();
     await f.runtime.sendMessage("Work");

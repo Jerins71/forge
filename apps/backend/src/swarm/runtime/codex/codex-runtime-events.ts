@@ -10,13 +10,17 @@ export class CodexRuntimeEvents {
   private readonly tools = new Map<string, string>();
   private readonly completed = new Set<string>();
   private readonly fileChanges = new Map<string, string>();
+  private frozen = false;
+
+  /** A user Stop: the turn shows what it had streamed until now; the provider's output before its interrupt lands is not shown. */
+  freeze(): void { this.frozen = true; }
 
   fileChangeApproval(itemId: string): string | undefined { return this.fileChanges.get(itemId); }
 
   map(method: string, params: Record<string, any>): RuntimeSessionEvent[] {
     const item = params.item;
     const id = String(item?.id ?? params.itemId ?? "");
-    if (!id || this.completed.has(id)) return [];
+    if (!id || this.completed.has(id) || this.frozen) return [];
     // Input steered into the turn abandons the reply being streamed: Codex never completes that item.
     // End it here, before the answer, so the turn's last message is the answer. The input is consumed here.
     if (item?.type === "userMessage") {

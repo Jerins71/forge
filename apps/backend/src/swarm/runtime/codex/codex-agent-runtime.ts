@@ -220,6 +220,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     if (this.closed) return;
     this.stopping = true;
     this.queued.length = 0;
+    this.active?.mapper.freeze();
     const timeout = options?.shutdownTimeoutMs ?? 3_000;
     const expires = Date.now() + timeout;
     const remaining = () => Math.max(1, expires - Date.now());
