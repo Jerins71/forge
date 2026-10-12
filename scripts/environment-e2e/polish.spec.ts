@@ -473,6 +473,8 @@ test('a worker\'s provider failure is one failed row in the worker view, and the
     // The header and the sidebar name the state the same way.
     await expect(page.locator('[aria-label="Agent status: failed"]')).toHaveCount(1)
     await expect(page.locator('[aria-label="Agent status: error"]')).toHaveCount(0)
+    // A reload collapses the session's workers in the sidebar.
+    if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
     await expect(worker.locator('[aria-label="Failed"]')).toHaveCount(1)
   }
   await once()
