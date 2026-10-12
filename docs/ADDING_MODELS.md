@@ -24,9 +24,9 @@ A catalog entry makes a model selectable only where its visibility and provider 
 - [`apps/backend/src/swarm/catalog/`](../apps/backend/src/swarm/catalog/) for catalog merging, projection, request behavior, and local overrides;
 - [`apps/backend/src/swarm/swarm-manager-utils.ts`](../apps/backend/src/swarm/swarm-manager-utils.ts) for the synthetic Pi bridge and OpenAI Codex capacity fallback chain;
 - [`apps/backend/src/swarm/project-agent-coordinator.ts`](../apps/backend/src/swarm/project-agent-coordinator.ts) for the bounded project-agent-analysis candidate policy; and
-- [`apps/backend/src/swarm/agents/specialists/`](../apps/backend/src/swarm/agents/specialists/) and rosters for explicit model/fallback choices.
+- saved worker presets and specialist files, which name a model explicitly.
 
-Do not retune all specialists simply because a stronger model exists. A roster specialist is an explicit execution policy; change its primary, availability fallback, or escalation route only when the product decision calls for it. Preserve existing persisted descriptors and compatibility aliases unless the migration explicitly replaces them.
+Do not retune worker presets simply because a stronger model exists. A worker preset is an explicit user choice; Forge does not rewrite it. Preserve existing persisted descriptors and compatibility aliases unless the migration explicitly replaces them.
 
 ### User-added OpenRouter overlays
 
@@ -51,16 +51,16 @@ pnpm model-catalog:audit
 pnpm quality:changed
 ```
 
-Add or update targeted tests for the model entry, projection/availability behavior, and any explicit fallback or specialist policy you changed. If the protocol package was changed, build it before backend tests that consume its built export:
+Add or update targeted tests for the model entry, projection/availability behavior, and any explicit fallback policy you changed. If the protocol package was changed, build it before backend tests that consume its built export:
 
 ```bash
 (cd packages/protocol && pnpm build)
 ```
 
-Also verify selector behavior with the relevant provider credentials or entitlement state. Catalog availability, provider authentication, and manager/specialist visibility are separate gates.
+Also verify selector behavior with the relevant provider credentials or entitlement state. Catalog availability, provider authentication, and manager/worker visibility are separate gates.
 
 ## Related references
 
 - [Model Catalog](MODEL_CATALOG.md) — catalog architecture, override semantics, and audit output
-- [Specialists](SPECIALISTS.md) — rosters, specialists, and fallback policy
+- [Worker presets](SPECIALISTS.md) — the saved model choices a manager can name for a worker
 - [Quality](QUALITY.md) — supported validation tiers

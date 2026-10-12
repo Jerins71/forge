@@ -59,17 +59,10 @@ context settings and [the recall contract](../packages/protocol/src/history-reca
 
 ## Execution ownership
 
-The selected work mode changes execution ownership, not the collaboration, permission, verification,
-or delivery contract. Existing selections and the default are preserved:
-
-| Work mode | Execution preference |
-| --- | --- |
-| Delegate first | Workers own substantive execution. The manager directly performs bounded read-only orientation and acceptance, then integrates the result. Shell/browser access is not an indirect mutation exception. |
-| Adaptive | Start directly. Delegate bounded work when the complete path improves time, cost, or necessary independent assurance, including briefing, context transfer, acceptance, and likely rework. |
-| Hands-on | Retain direct execution and the critical path. Delegate for an explicit user request, a missing capability, or a separable assignment with concrete benefit. |
-
-Adaptive is the reference mode for behavior comparisons; this does not change existing work-mode
-preferences. Roster availability chooses who to use after deciding whether delegation is worthwhile.
+The manager works directly. It spawns a worker when the user asks or when a worker clearly helps:
+separable parallel work, a different model, or an independent check. A [worker preset](SPECIALISTS.md)
+chooses the worker's model after deciding that a worker is worthwhile; with no worker preset the
+worker uses the manager's own model.
 Give workers explicit context and one owned outcome. Continue independent work without duplicate
 ownership, repeated monitoring, or transcript inspection.
 
@@ -80,15 +73,15 @@ important boundary: Forge dispatches graph-owned work, so the manager must not d
 
 ## What the model receives
 
-`SwarmPromptService` resolves the base, selected posture, specialist roster, Project Agent directory,
+`SwarmPromptService` resolves the base, worker preset list, Project Agent directory,
 optional model instructions, references, and the applicable delivery contract. Runtime assembly adds
 repository context, memory, skills, and runtime-specific capabilities.
 
 | Surface | Base selection and additions |
 | --- | --- |
-| Ordinary Builder manager | A nonempty session prompt replaces the archetype. Otherwise the registry resolves profile override, repository override, then installed built-in. Selected posture and required routing remain composed. |
+| Ordinary Builder manager | A nonempty session prompt replaces the archetype. Otherwise the registry resolves profile override, repository override, then installed built-in. Required routing remains composed. |
 | Project Agent | The installed Project Agent operating contract remains the base. Session, repository, profile, or descriptor role instructions are appended according to existing role precedence. |
-| Worker | Its worker or specialist contract remains independently owned. It does not receive the manager's entire conversation or peer directory. |
+| Worker | Its worker contract, or its specialist file's instructions, remains independently owned. It does not receive the manager's entire conversation or peer directory. |
 
 The prompt preview reports the actual source of ordinary session replacements, even when an unused
 archetype is absent. It lists inherited `AGENTS.md`/`CLAUDE.md` context in discovery order, preferring
@@ -146,9 +139,9 @@ contracts. They verify the resources the model receives; text assertions alone c
 a model behaves more thoughtfully or reliably.
 
 Compare baseline and revised prompts on synthetic tasks with observable outputs and tool traces.
-Keep model, work mode, tool capabilities, scenario data, and budgets fixed when comparing a prompt
-change. Evaluate context-mode changes separately before combining them. Use Adaptive for the primary
-comparison and include focused Delegate first, Hands-on, and peer-routing regression cases.
+Keep model, tool capabilities, scenario data, and budgets fixed when comparing a prompt
+change. Evaluate context-mode changes separately before combining them. Include focused direct-work,
+worker-spawn, and peer-routing regression cases.
 
 | Scenario | Acceptance evidence |
 | --- | --- |

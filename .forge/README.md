@@ -3,7 +3,7 @@
 This directory contains shared, agent-facing resources for this repository.
 
 - `skills/`: project skills that agents can use as workflow instructions.
-- `specialists/`: project-specific specialist definitions.
+- `specialists/`: project-specific specialist files. Each appears as a worker preset and carries its own worker instructions.
 - `reference/`: passive markdown context and repository notes.
 - `extensions/`: Forge extensions. These are executable and require trust. If they rewrite shell commands, quote or escape injected output before it reaches `bash`.
 - `pi/extensions/` and `pi/settings.json`: Pi extensions and package config. These are executable and require trust. For smoke tests and custom tools, list repo Pi extensions explicitly in `pi/settings.json` so loading stays deterministic.

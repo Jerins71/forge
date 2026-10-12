@@ -1,258 +1,71 @@
-# Worker Delegation
+# Worker presets
 
-Forge keeps manager ownership separate from worker configuration:
+The manager works directly. It spawns a worker when you ask for one or when a worker clearly helps: separable parallel work, a different model, or an independent check.
 
-- **Work mode** decides whether the manager executes directly or delegates.
-- **Roster** chooses the active team of specialists.
-- **Specialist** combines a task type and output contract with model, reasoning, use/avoid guidance, fallback, and escalation behavior.
+A **worker preset** is a saved model choice the manager can name when it spawns a worker. Worker presets are one flat, global list. They are unrelated to the model family presets (`pi-fable`, `pi-opus`, and similar) described in [Model Catalog](MODEL_CATALOG.md).
 
-The manager-facing `spawn_agent` tool accepts a required concrete `initialMessage`. It normally chooses a task type and lets Forge use that task's default roster specialist. It may name another specialist when its current `useWhen` guidance clearly fits a cheaper, independent, or stronger executor. Saved standalone custom specialists remain available through `customSpecialist`. The persisted `mode`, `route`, tier, effort, and execution-policy inputs remain internal compatibility paths for existing work.
+## Fields
 
-Work-graph nodes use the same optional named-specialist override. Forge pins the roster revision, requested and resolved route, concrete model, reasoning, fallback, and escalation target when an attempt starts. Running attempts therefore do not change when a roster is edited or a session selects another roster. Graph size, fan-in, planning, research, or review alone never selects the strongest specialist.
-
-## Work Mode
-
-**Delegate first** delegates project mutations, sustained investigation, multi-step analysis, and substantial implementation while retaining small read-only orientation and acceptance checks.
-
-**Adaptive** starts with direct execution. It delegates when the expected improvement in completion time, total cost, or necessary independent assurance outweighs briefing, context transfer, waiting, acceptance, and likely rework. Quick workers suit self-contained low-risk work that is cheap to explain and verify; available parallelism or a cheaper model alone does not justify a handoff.
-
-**Hands-on** is the product default. It keeps investigation, implementation, and validation with the manager, including the critical path. Complexity, ambiguity, multiple files or steps, and worktree isolation alone do not trigger delegation. Workers are used for explicit user requests, required capabilities unavailable directly, or clearly separable assignments with a concrete benefit over continuing directly.
-
-Work mode decides whether to delegate; the roster selects the worker after that decision. Skills do not impose a separate work mode. Once ownership is working, preserve it; do not hand off merely because orientation ended or a backend restart occurred. Workers receive explicit assignment context, not an automatic copy of the manager conversation.
-
-A project can set its default work mode. A session can inherit that default or override it from the compact work-mode control beside Send. Changing work mode during a session replaces the manager runtime before its next turn, so the next request may miss the prompt cache once. It does not stop workers or rewrite an active work graph.
-
-## Task Types
-
-| Mode | Purpose |
+| Field | Meaning |
 |---|---|
-| `general` | Build and execute: implementation, debugging, and other outcome-focused work |
-| `plan` | Task breakdown, sequencing, design analysis, and risks |
-| `correctness-review` | Bugs, edge cases, invariants, and contract validation |
-| `design-review` | Maintainability, API design, architecture fit, and consistency |
-| `research` | Fact-checking, documentation, and source-backed investigation |
+| `name` | Lowercase slug (letters, digits, hyphens; up to 64 characters). Unique across the list. |
+| `provider` / `modelId` | The model the worker runs on. |
+| `reasoningLevel` | The reasoning level for that model. |
+| `note` | Optional one-line hint shown to the manager and in Settings (up to 300 characters). |
 
-## Rosters and Specialists
+Manage the list under **Settings → Worker presets**. Forge stores it in `<dataDir>/shared/config/worker-presets.json`.
 
-A roster is a reusable team of complete specialists. It is not a set of live workers, a permissions bundle, or graph topology. Each specialist is stored internally as a delegation route and contains:
+## Spawning workers
 
-- a stable ID and label;
-- one task type and its shared instruction prompt;
-- concise `useWhen` and optional `avoidWhen` guidance;
-- the primary provider, model, and reasoning level;
-- an optional availability fallback; and
-- an optional capability-escalation route for a later attempt.
+`spawn_agent` takes a required `initialMessage`, plus optional `preset`, `cwd`, `planStepId`, and `requiresSecureRuntime`.
 
-Each roster names one default specialist per task type and may contain alternatives for the same task. Build & execute supplies the compatibility fallback for an incomplete mapping, but Forge does not expose that fallback as a separate user choice. The manager normally uses the task default. It names an alternative up front only when its guidance clearly matches a cheaper, independent, or stronger executor; capability escalation is reserved for a later attempt after evidence that the selected specialist was inadequate.
+- With a `preset`, the worker uses that worker preset's model and reasoning.
+- With no `preset`, the worker uses the manager's own model.
 
-The selection order is global default → project default → session override. New sessions inherit their project. A session override stays local to that session and is not remembered for later sessions. Roster changes affect only pending or future attempts.
+Workers receive the assignment in `initialMessage`, not a copy of the manager conversation. Each worker's final response returns to the manager automatically; the manager verifies and integrates it.
 
-Forge supplies the manager a compact versioned `[delegationRoster]` context. The roster is intentionally outside the stable system-prompt prefix so switching rosters does not rewrite the cached prompt. Work mode is different: it is part of the system prompt because it changes the manager's operating policy.
+## Specialist files
 
-Configure rosters under **Settings → Delegation → Rosters**. New installations use the **Default** roster: Plan consultant (`openai-codex/gpt-6-astra`, xhigh), Independent reviewer (`anthropic/claude-fable-5-1`, low), and Researcher (`xai/grok-4.6`, high). It is paired with Hands-on mode so the manager owns implementation and integration while specialists handle bounded consultation, independent review, or research. Existing installations can opt into this complete set from the one-time post-update dialog.
+User-authored specialist markdown files also appear as worker presets, and additionally carry their own worker instructions:
 
-Worker results return automatically. Accepting a result means verifying and integrating it; sending thanks or an acceptance notice to a completed worker starts a new assignment. Send follow-ups only for concrete remaining work or necessary questions. For continuing work, the manager records accepted findings and decisions in its own `checkpoint.md`, with evidence and verification status.
+- Shared: `<dataDir>/shared/specialists/<handle>.md`
+- Profile: `<dataDir>/profiles/<profileId>/specialists/<handle>.md`
+- Repository: `<repo>/.forge/specialists/<handle>.md`
 
-## Multi-model Coordination Skill
-
-Forge ships `multi-model-coordination` for work that explicitly benefits from independent perspectives and evidence-based synthesis. It is not loaded as a mandatory workflow for ordinary work. The manager reads exactly one matching scenario reference when the user requests a panel, competing approaches, adversarial review, model/provider diversity, or when a consequential ambiguous choice clearly earns the extra coordination.
-
-The built-in scenarios are parallel exploration, adversarial review, competing solutions, research panel, and thorough code review. Each reference is self-contained: YAML metadata declares autonomous activation and confirmation behavior, while the body includes selection guidance, one example graph, synthesis rules, and adaptation guidance. The example is a topology starting point rather than a fixed template.
-
-Managers normally synthesize two to four bounded accepted results themselves. Synthesis compares claims, assumptions, and evidence quality rather than contributor identity or vote count; it preserves material dissent and verifies the decisive claim before converging.
-
-## How It Works
-
-Each built-in task-instruction prompt or custom specialist is a **markdown file with YAML frontmatter**. The filename (without `.md`) becomes its internal handle (kebab-case). Shipped task-instruction prompts normally omit `modelId` because their model comes from the selected delegation route. A custom specialist is a complete fixed execution template and may include `modelId`, `provider`, reasoning, and fallback to own model selection directly.
-
-## File Locations
-
-- **Global specialists** (shared across all profiles): `~/.forge/shared/specialists/<handle>.md`
-- **Workspace specialists** (repo-scoped passive resources): `<repo>/.forge/specialists/<handle>.md`
-- **Project-specific specialists**: `~/.forge/profiles/<profileId>/specialists/<handle>.md`
-
-Project specialists shadow global ones with the same filename. Forge seeds the shipped task-instruction prompts into the global directory on startup.
-
-## Frontmatter Fields
-
-```yaml
----
-# Required: human-readable name shown in UI and badges
-displayName: Backend Engineer
-# Required: hex color (click color swatch in UI to pick)
-color: "#2563eb"
-# Required: whether the manager can use this specialist
-enabled: true
-# Required: guidance for the manager on when to pick this specialist
-whenToUse: "Backend/core implementation, TypeScript refactors, debugging server routes"
-# Optional: default tier when this lens is selected without tier
-defaultTier: fast
-# Optional: direct custom specialist model override
-modelId: gpt-5.5
-# Optional with modelId: runtime provider
-provider: openai-codex
-# Optional with modelId: defaults to model preset default
-reasoningLevel: high
-# Optional: model if primary is unavailable (can be cross-provider)
-fallbackModelId: gpt-5.5
-# Optional: reasoning for fallback (defaults to primary)
-fallbackReasoningLevel: medium
-# Optional: keep your edits to a builtin; Forge will not overwrite it on startup
-pinned: true
-# Internal: marks Forge-shipped specialists (do not set manually)
-builtin: true
----
-```
-
-Every frontmatter value must fit on one line. The parser reads `key: value` pairs line by line and does not support YAML block scalars (`>-`, `|`), so a multi-line `whenToUse` is read as the literal text `>-` and the continuation lines are dropped. Put comments on their own lines as shown above; trailing inline comments are treated as part of the field value.
-
-A legacy `TargetSpace` key from the removed Collaboration surface is tolerated and ignored; every specialist resolves for the Builder.
-
-`defaultTier` can be one of `light`, `fast`, `standard`, `deep`, or `max`. It remains part of the persisted compatibility format and supplies a default for direct custom-specialist use when no model is stored.
-
-## Stored Tier Compatibility
-
-| Tier | Default Model | Reasoning | Fallback |
-|---|---|---|---|
-| `light` | `openai-codex/gpt-6-luna` | low | `openai-codex/gpt-5.5` low |
-| `fast` | `cursor-sdk/composer-2.5` | none | `openai-codex/gpt-5.5` high |
-| `standard` | `openai-codex/gpt-5.5` | medium | `openai-codex/gpt-5.5` medium |
-| `deep` | `openai-codex/gpt-5.5` | high | `openai-codex/gpt-5.5` medium |
-| `max` | `openai-codex/gpt-5.5` | xhigh | `openai-codex/gpt-5.5` medium |
-
-Tier settings remain global at `~/.forge/shared/specialists/tier-configs.json` for persisted workers and compatibility. When `~/.forge/shared/config/delegation-rosters.json` does not exist, Forge selects the Default roster and retains the tier-derived Balanced roster as an alternative. Saving rosters writes that compatibility file; normal manager delegation then uses specialists rather than tier names.
-
-## Shipped Task Instructions and Dedicated Capabilities
-
-Forge uses four editable builtin prompts for non-general task types:
-
-- `planner` (`defaultTier: deep`)
-- `code-reviewer` (`defaultTier: deep`)
-- `code-reviewer-2` (`defaultTier: deep`)
-- `researcher` (`defaultTier: standard`)
-
-Build & execute workers use the worker archetype prompt. The legacy `architect` prompt remains readable for existing descriptors, but new architecture work uses `mode: general` with `route` omitted or a clearly matching named route. Codex Plugin delegation is a dedicated contextual tool and server-owned authorization path, not a normal task type or custom specialist.
-
-Older builtin handles and tier/lens inputs are still rewritten internally for compatibility. They are not exposed in the current manager tool schema.
-
-## Available Models
-
-| Model ID | Display Name | Provider | Supported Reasoning Levels |
-|---|---|---|---|
-| `gpt-6-astra` | GPT-6 Astra | OpenAI Codex | low, medium, high, xhigh, max |
-| `gpt-6-sol` | GPT-6 Sol | OpenAI Codex | low, medium, high, xhigh, max, ultra |
-| `gpt-6-luna` | GPT-6 Luna | OpenAI Codex | low, medium, high, xhigh, max |
-| `gpt-5.5` | GPT-5.5 | OpenAI Codex | none, low, medium, high, xhigh |
-| `claude-fable-5-1` | Claude Fable 5.1 (default) | Anthropic | low, medium, high, xhigh, max |
-| `claude-fable-5` | Claude Fable 5 | Anthropic | low, medium, high, xhigh, max |
-| `claude-opus-5` | Claude Opus 5 | Anthropic | none, low, medium, high, xhigh, max |
-| `claude-opus-4-8` | Claude Opus 4.8 | Anthropic | low, medium, high |
-| `claude-opus-4-6` | Claude Opus 4.6 | Anthropic | low, medium, high |
-| `claude-sonnet-5` | Claude Sonnet 5 | Anthropic | low, medium, high |
-| `composer-2.5` | Composer 2.5 | Cursor SDK | none |
-| `grok-4.5` | Grok 4.5 | Cursor SDK | low, medium, high |
-| `grok-4.5-fast` | Grok 4.5 Fast | Cursor SDK | low, medium, high |
-| `grok-4.6` | Grok 4.6 (native default) | xAI | API key: low, medium, high, xhigh; OAuth: authenticated metadata, or low, medium, high fallback |
-| `grok-4.5` | Grok 4.5 | xAI | API key: low, medium, high, xhigh; OAuth: authenticated metadata, or low, medium, high fallback |
-| `grok-build` | Grok Build (account entitlement) | xAI OAuth | authenticated account metadata |
-| `grok-composer-2.5-fast` | Grok Composer 2.5 Fast (account entitlement) | xAI OAuth | authenticated account metadata |
-
-**Notes:**
-- The table above shows models currently available in the Forge catalog. Some models listed in upstream Pi releases may not yet be curated into Forge.
-- For the authoritative, up-to-date model list with availability status, see **Settings → Models** in the UI.
-- Claude models use the native `anthropic` provider. Former Claude SDK specialist frontmatter is unavailable and must be changed manually; Forge does not rewrite user-authored specialist files.
-- The visible `pi-fable` preset selects `anthropic/claude-fable-5-1` at `high` by default for manager and specialist selection; `claude-fable-5` remains an explicit variant. Fable 5.1 has a 1M context window, 128k max output, and lower $0.25/MTok cache reads. It uses always-on adaptive thinking, so Forge exposes low, medium, high, xhigh, and max but not none. It also rejects forced `tool_choice` values (`any` or a named tool); Forge's normal automatic tool path remains supported. Fable 5.1 is a Covered Model requiring 30-day provider retention and is unavailable under ZDR unless Anthropic expressly authorizes it.
-- The visible `pi-opus` preset selects `anthropic/claude-opus-5` at `high` by default for manager and specialist selection. Claude Opus 5 is the Opus family default; Claude Opus 4.8 remains an explicit variant. Catalog limits are 1M context and 128k max output tokens. Thinking is on by default; Forge `none` disables it. Unlike Fable, Opus 5 supports `none` as well as low, medium, high, xhigh, and max. Do not combine disabled thinking with xhigh or max (the provider returns 400). Unlike Fable 5, Opus 5 has no special 30-day Covered Model retention requirement in Forge docs. Do not treat provider refusals as automatic model fallback.
-- Manager and specialist selectors expose `pi-sonnet` for native Anthropic Sonnet 5.
-- Native xAI `grok-4.6` is the family default and `grok-4.5` remains an explicit variant. Both are available for normal manager create, change, and exact per-session override selectors when xAI auth is configured, as well as specialist and explicit worker spawn choices. API-key auth supports low, medium, high, and xhigh reasoning; OAuth starts with a low/medium/high fallback, then authenticated account metadata is authoritative for available reasoning choices. OAuth discovery can add exactly `grok-build` and `grok-composer-2.5-fast` when the active account is entitled; those models remain OAuth-only worker/specialist choices excluded from normal manager selectors, disappear if discovery or entitlement validation fails, and are hidden or rejected under API-key auth. Native xAI `grok-composer-2.5-fast` is distinct from Cursor SDK `composer-2.5`. Settings manages one direct, non-pooled xAI credential slot, so configuring one method replaces the other. `XAI_API_KEY` remains an environment fallback when no Settings-managed xAI credential is configured; it is not a second account, and a stored OAuth refresh failure does not fall through to it. xAI/Grok remains ineligible for manager compaction.
-- Cursor SDK models can appear in manager and worker-profile selectors when credentials and model visibility allow them. The legacy stored `fast` tier targets Composer 2.5 with a Codex fallback; Composer exposes only Cursor's `fast` toggle and stores reasoning as `none`. Cursor Grok 4.5 uses the SDK model id `grok-4.5` plus curated-from-live-discovery `effort` and `fast` params; Forge keeps `grok-4.5-fast` as a separate catalog id for attribution. Runtime containment is provider-local and fail-closed: attributed transient transport or throttle failures can retry once before output, auth/permission/cancel/user-state failures are contained and projected without retry, and unattributed/generic/protocol/config failures remain fatal. Usage is captured from turn-ended deltas into session custom entries, then included in stats/token analytics/telemetry provider inference and omitted from forks.
-- To audit model catalog drift against Pi upstream, run `pnpm model-catalog:audit`.
-
-## System Prompt
-
-The markdown body below the frontmatter is a custom specialist's **full standalone system prompt**. It is not layered on top of hidden role prompts. Keep it short and include only the rules the worker actually needs:
-
-```
-You are a worker agent in a swarm.
-- Own the assigned outcome and verify it in proportion to risk.
-- Your final assistant response is returned to the manager automatically.
-- Use `send_message_to_agent` to your owning manager for requested interim answers, blockers, or findings that change the approach. Context-only updates need no acknowledgment. Do not also send the final result through the tool.
-- You are not user-facing.
-- End users see only manager-owned user-visible outputs: final web/session replies projected from plain assistant text as `assistant_output`, direct-web progress projected as `assistant_progress`, explicit routed `speak_to_user` deliveries for non-web or exceptional cases, and structured choice UI.
-- Incoming messages prefixed with "SYSTEM:" are internal control/context updates, not direct end-user chat.
-- Persistent memory for this runtime is at ${SWARM_MEMORY_FILE} and is auto-loaded into context.
-- Workers read their owning manager's memory file.
-- Only write memory when explicitly asked to remember/update/forget durable information.
-- Follow the memory skill workflow before editing the memory file, and never store secrets in memory.
-```
-
-Then add the custom specialist's role and output contract. Forge's shipped task-instruction prompts are different: their editable markdown is a role delta layered after a small stable Forge worker contract. This keeps SYSTEM-message handling, memory safety, action boundaries, and manager-owned delivery consistent without repeating those rules in every mode file.
-
-The existing worker health sweep sends at most one internal ownership-review notice per running assignment per runtime after ten minutes, even while tools remain active. The manager can request a focused interim reply and decide whether to continue, narrow, redirect, or take over. Ordinary activity-based stall handling remains separate.
-
-## Example
+| File | Worker preset |
+|---|---|
+| Handle (filename without `.md`) | `name` |
+| `whenToUse` | `note` |
+| Markdown body | That worker's instructions |
 
 ```markdown
 ---
-displayName: Payments Expert
-color: "#7c3aed"
-enabled: true
 whenToUse: Payment provider integration analysis and implementation
 modelId: grok-4.5
 provider: cursor-sdk
+reasoningLevel: high
 ---
 You are the payments integration worker. Own the assigned payment-provider outcome, inspect the real code path, and verify changes with focused tests.
 
 You are not user-facing. Return status, summary, changed files, verification, and remaining risks to the manager.
 ```
 
-## Managing Specialists
+Every frontmatter value must fit on one line. The parser reads `key: value` pairs line by line and does not support YAML block scalars (`>-`, `|`). Put comments on their own lines; a trailing inline comment is read as part of the value.
 
-### Settings UI
+The old keys `defaultTier`, `fallbackModelId`, `fallbackReasoningLevel`, `color`, `pinned`, and `webSearch` are ignored. Forge never rewrites these files. When a specialist file and a saved worker preset share a name, the file wins.
 
-Go to **Settings → Delegation** to manage worker delegation:
+## Upgrading
 
-- **Rosters**: Manage complete specialists and their task instructions, model, reasoning, availability fallback, capability escalation, and the global default roster.
-- **Global scope**: View and edit shared specialists. Create new global specialists. Builtins are editable but cannot be deleted.
-- **Project scope**: View inherited specialists and create project-specific overrides or new project-only specialists.
+On first boot after the upgrade, Forge converts each existing roster entry into a worker preset once: the name is the route id, the model and reasoning are unchanged, and the note is the first sentence of its `useWhen` guidance.
 
-Click any specialist card to expand and edit it. Changes are saved per-file.
+These are gone: work modes, task types, rosters and routes, `useWhen`/`avoidWhen` guidance, automatic fallback models, escalation to a stronger worker, effort tiers, the builtin `planner`, `code-reviewer`, `code-reviewer-2`, `researcher`, and `architect` role prompts, the post-update recommended-defaults offer, and the per-turn `[delegationRoster]` context.
 
-**Actions:**
-- **Clone**: Duplicate a specialist to create a new variant with different settings
-- **Edit handle**: Rename the specialist's handle (kebab-case identifier)
-- **Pin**: Pin frequently-used specialists to the top of the list
-- **Color picker**: Click the color swatch to choose a custom badge color
+## Codex Plugin
 
-### Fallback Models
+Codex Plugin delegation is unchanged and is not a worker preset. It is available only when a user turn includes an active `@Codex` plugin selector, and Forge binds the dedicated worker to the server-stored selector scope. Scoped plugin tools return bounded preview and metadata only; full connector exports are written as redacted session artifacts. An explicit retry or continuation turn can reuse a stopped or failed worker's stored scope; unrelated turns require a fresh selector tag.
 
-Each roster specialist, and each direct custom specialist with its own model, can optionally define a fallback model. If the primary model is unavailable (rate limited, auth error, capacity), fallback happens transparently inside worker/runtime recovery rather than as a manager-level retry. The fallback binding is pinned when the attempt starts.
+## Related
 
-Only exhausted fallback failures surface upward.
-
-**Availability fallback is not capability escalation.** A provider outage or rate limit may use the configured fallback at equivalent intended capability; it must not silently buy a stronger specialist. Capability escalation creates a new attempt with the specialist explicitly linked for that purpose.
-
-**Cross-provider fallback is supported**: You can use a model from a different provider as your fallback (e.g., primary `grok-4.5`, fallback `gpt-5.5`). This is exercised silently inside runtime recovery and is useful for provider outages or rate limit mitigation.
-
-OpenRouter provider routing is a separate control. Shared defaults and exact-model overrides in **Settings → Models** constrain which OpenRouter endpoints may serve the next call. Hard OpenRouter filters (required ZDR, denied collection, allowlist, exclusions, price ceilings, quantizations, required parameters, or disabled OpenRouter endpoint fallback) suppress this Forge automatic model fallback because there is no equivalent-policy contract across models or providers. Preferences-only settings such as preferred provider order or sort do not. OpenRouter endpoint fallback (`allow_fallbacks`) is not this specialist fallback. Shared required ZDR and disallowed collection cannot be weakened per model. These filters apply only to OpenRouter inference routing, not local transcripts, tools, or non-OpenRouter summarization/compaction. See [OpenRouter routing and privacy](MODEL_CATALOG.md#openrouter-routing-and-privacy).
-
-Codex Plugin delegation is contextual. It is available only when a user turn includes an active `@Codex` plugin selector, and Forge binds the dedicated worker to the server-stored selector scope. Normal scoped plugin tools return bounded preview/metadata only. Full connector exports, such as Fireflies transcripts or summaries, must use the scoped export artifact tool, which writes redacted JSON artifacts under the session and returns only path/metadata plus a bounded preview. If that scoped worker is stopped or fails, Forge can authorize retry only for an explicit retry/continuation turn that refers to the same Codex/plugin context; unrelated turns require a fresh selector tag.
-
-### Resolution Order
-
-When resolving specialist definitions for a Builder project:
-1. Project-specific specialists (in `~/.forge/profiles/<profileId>/specialists/`)
-2. Workspace specialists that either introduce a new handle or explicitly override a non-builtin global specialist with `forgePrecedence: override` (in `<repo>/.forge/specialists/`)
-3. Global specialists (in `~/.forge/shared/specialists/`)
-
-Project files shadow global files with the same handle. Workspace specialists are passive project resources and do not override builtins.
-
-### Native Claude and Codex workers
-
-Local Builder rosters can select **Claude native** and **Codex native** as primary or availability-fallback models. These workers run through the same native runtimes as native managers, with their assigned specialist instructions and Forge-owned completion delivery. They inherit the owning session's project trust, memory, and Secure Sessions authority; choosing a native model does not grant manager tools or permission to launch a second delegation system.
-
-Claude native uses the connection in **Settings → Authentication → Claude native**. Codex native uses Forge's OpenAI connection and requires the Codex executable. Native selections are stored with their provider, so changing a roster preserves the selected runtime across reloads. Existing roster choices are unchanged. Internal/system workers remain outside this native Builder support.
-
-Native models can be fallback targets, and native primary workers use configured fallbacks for eligible availability failures during setup. Once a native turn starts, Forge does not replay it automatically on a different model; the native engine handles its own retries and unresolved failures return to the manager. This preserves the native runtime's existing execution and shutdown behavior.
-
-Usage reporting groups native and Pi executions of the same model together. Overview includes managers and workers; Token Analytics remains scoped to workers and includes native specialists. Native provider counters are persisted independently of assistant text, and older counts are recovered from retained native histories linked to Forge sessions on this machine. Missing native history cannot be reconstructed. Response throughput is a separate measurement and is unavailable for native requests without generation timing records; token totals do not imply measured tokens per second.
+- [Model Catalog](MODEL_CATALOG.md) — available models, reasoning levels, and OpenRouter routing
+- [Project resources](PROJECT_RESOURCES.md) — repository `.forge/specialists/`
+- [Secure Sessions](SECURE_SESSIONS.md) — `requiresSecureRuntime`

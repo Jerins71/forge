@@ -28,7 +28,7 @@ export const gettingStartedArticles: HelpArticle[] = [
     id: 'getting-started-first-session',
     title: 'Your First Chat Session',
     category: 'getting-started',
-    summary: 'Create a manager, send a message, and see how Work Mode owns or delegates execution.',
+    summary: 'Create a manager, send a message, and see how it works directly or spawns workers.',
     content: gettingStartedFirstSessionContent,
     keywords: [
       'first session',
@@ -40,10 +40,6 @@ export const gettingStartedArticles: HelpArticle[] = [
       'sessions',
       'profiles',
       'chat',
-      'work mode',
-      'delegate first',
-      'adaptive',
-      'hands-on',
     ],
     relatedIds: [
       'getting-started',

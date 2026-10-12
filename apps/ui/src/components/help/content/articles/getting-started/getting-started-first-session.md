@@ -30,7 +30,7 @@ Type in the chat input at the bottom. Start with something concrete:
 - "Add dark mode support to the settings page"
 - "Review the last three PRs and summarize the changes"
 
-The manager reads your message and owns the outcome. Work Mode decides whether it executes directly or spawns workers: Hands-on (default) keeps the critical path while explicit delegation remains available, Adaptive starts directly and hands off only when the total path improves, and Delegate first delegates substantive execution. Workers, when used, execute focused tasks and report evidence; the manager remains accountable and performs the smallest focused check needed before reporting an accepted result or material blocker. You may see fewer routine status updates while it focuses on useful outcomes.
+The manager reads your message and owns the outcome. It works directly and spawns workers when you ask or when a worker clearly helps: separable parallel work, a different model, or an independent check. Workers, when used, execute focused tasks and report evidence; the manager remains accountable and performs the smallest focused check needed before reporting an accepted result or material blocker. You may see fewer routine status updates while it focuses on useful outcomes.
 
 ## Watch workers run
 
