@@ -310,7 +310,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
             this.eventCoordinator.emitSessionActiveToolsSnapshot(this.sessionActiveTools.recordToolCall(payload)); this.eventCoordinator.emitManagerToolActivityForToolCall(payload);
           }
         },
-        getPinnedMessageIds: (agentId) => this.sessionPinCoordinator.getPinnedMessageIds(agentId),
+        getPinnedMessageIds: (agentId) => this.sessionPinCoordinator.getPinnedMessageIds(agentId), isHiddenTurn: (agentId) => this.turnContextCoordinator.isActiveTurnHidden(agentId),
       },
       sessionPlan: {
         emitSnapshot: (event) => this.emit("session_plan_snapshot", event),

@@ -226,6 +226,11 @@ export class TurnContextCoordinator<TCodexGate=unknown,TCodexDelegation=unknown,
     const activeRunId=this.core?.read(agentId).activeRunId;
     return activeRunId ? this.contexts.get(agentId)?.get(activeRunId)?.source : undefined;
   }
+  /** Whether the running turn is a bootstrap delivery (project onboarding and the like), whose reply is never shown. */
+  isActiveTurnHidden(agentId:string):boolean {
+    const activeRunId=this.core?.read(agentId).activeRunId;
+    return Boolean(activeRunId && this.contexts.get(agentId)?.get(activeRunId)?.internalDeliveryKind);
+  }
   getPendingContextCount(agentId:string):number { return this.core?.read(agentId).pendingRunIds.length ?? 0; }
   getActiveWorkerParentContext(agentId:string):ActiveWorkerParentContext|undefined {
     const context=this.activeTurnByAgentId.get(agentId)?.parentContext;

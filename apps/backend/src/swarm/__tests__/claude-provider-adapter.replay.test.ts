@@ -694,15 +694,17 @@ describe("Claude frozen provider contract through real SDK transport", () => {
     } finally { await f.close(); await f.cleanup(); }
   });
   // Ways this can fail: the CLI's ten backed-off retries of a refused key run to the end; the failure is
-  // reported as a retry, as an interrupt, or more than once.
+  // reported as a retry, as an interrupt, more than once, or as a delivery nobody can vouch for.
   it("ends the turn at once when the endpoint refuses the key", async () => {
     const f = await fixture("refused-key");
     try {
-      const binding = await f.open(); void start(f, binding).catch(() => undefined);
+      const binding = await f.open(); const dispatched = start(f, binding);
       await f.release("refused"); await f.release("terminal");
       expect(await f.observed("terminal:root_attempt")).toMatchObject({ outcome: "failed", error: { message: "401 authentication failed" } });
       expect(f.observations.filter(value => value.type === "retry")).toEqual([]);
-      expect(f.observations.filter(value => value.type === "error")).toMatchObject([{ message: "401 authentication failed" }]);
+      // The endpoint answered for this input, so its delivery is known: it fails, it does not ask for restart recovery.
+      expect(f.observations.filter(value => value.type === "error")).toMatchObject([{ message: "401 authentication failed", delivery: "accepted" }]);
+      expect(await dispatched).toMatchObject({ status: "accepted" });
     } finally { await f.close(); await f.cleanup(); }
   });
   it("preserves native text and reasoning deltas with stable item refs", async () => {

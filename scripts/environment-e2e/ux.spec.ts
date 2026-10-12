@@ -3,7 +3,7 @@
 // after reload), admission never surfaces a "still settling" error, a running turn can be stopped from
 // the composer, and the session in view stays read and out of "Needs you".
 //   pnpm exec playwright test scripts/environment-e2e/ux.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
-import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -497,6 +497,8 @@ test('a new project opens clean: no settling error and nothing in Needs you', as
   // The scripted Codex peer only runs in a directory that carries its environment's marker.
   const directory = await mkdtemp(join(tmpdir(), 'forge-ux-project-'))
   await copyFile(join(fixture(fleet.a).checkout, '.fixture-environment.json'), join(directory, '.fixture-environment.json'))
+  // The hidden onboarding turn inspects the repository: commands, reasoning and a file change.
+  await writeFile(join(directory, '.fixture-onboarding-activity'), '')
   await page.goto(fleet.uiUrl)
   await page.getByRole('complementary').getByTitle('Create project').filter({ visible: true }).first().click()
   const dialog = page.getByRole('dialog', { name: 'Create project' })
@@ -515,10 +517,22 @@ test('a new project opens clean: no settling error and nothing in Needs you', as
   await expect.poll(async () => (await shellSession(fleet.a, sessionId))?.status, { timeout: 30_000 }).toBe('idle')
   await expect.poll(async () => { const summary = await shellSession(fleet.a, sessionId); return { unread: summary?.unread, attention: summary?.attentionOccurrence ?? null } }, { timeout: 15_000 }).toEqual({ unread: 0, attention: null })
   await expect(page.getByRole('alert')).toHaveCount(0)
+  // The work of a turn the user never sees is not listed in their transcript, live or after reload.
+  expect(await readFile(join(directory, 'fixture-provider-marker.txt'), 'utf8')).toContain('turns=')
+  await expect(page.getByTestId('activity-row')).toHaveCount(0)
+  await expect(transcript(page)).not.toContainText(/Ran \d+ commands?/)
+  await page.reload()
+  await expect(composer(page)).toBeEnabled()
+  await expect(page.getByTestId('activity-row')).toHaveCount(0)
+  await expect(transcript(page)).not.toContainText(/Ran \d+ commands?/)
+  // Control: the same work in a turn the user sent is listed.
+  await composer(page).fill('[fixture:activity] Show the work of a turn I sent')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('activity-row').filter({ hasText: 'ls -la' })).toBeVisible({ timeout: 30_000 })
   await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
   await expect(page.locator(`[data-testid="needs-you"] [data-inbox-row$="::${sessionId}"]`)).toHaveCount(0)
   await shot(page, 'new-project-clean')
-  assertions.newProject = { sessionId, alerts: 0, needsYou: 0 }
+  assertions.newProject = { sessionId, alerts: 0, needsYou: 0, onboardingActivityRows: 0, userTurnActivityRows: true }
 })
 
 test('a running turn is stopped from the composer button and with Escape', async ({ page }) => {
