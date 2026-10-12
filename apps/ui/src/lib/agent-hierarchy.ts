@@ -8,12 +8,6 @@ function byCreatedAtThenId(a: AgentDescriptor, b: AgentDescriptor): number {
   return a.agentId.localeCompare(b.agentId)
 }
 
-function byCreatedAtDescThenId(a: AgentDescriptor, b: AgentDescriptor): number {
-  const createdOrder = b.createdAt.localeCompare(a.createdAt)
-  if (createdOrder !== 0) return createdOrder
-  return a.agentId.localeCompare(b.agentId)
-}
-
 function isActiveAgent(agent: AgentDescriptor): boolean {
   return ACTIVE_STATUSES.has(agent.status)
 }
@@ -254,7 +248,8 @@ export function buildProfileTreeRows(
     const previousRow = options.previousRows?.find(row => row.profile.profileId === profile.profileId)
     const previousSessions = new Map(previousRow?.sessions.map(row => [row.sessionAgent.agentId, row]))
     const sessionRows: SessionRow[] = sortedSessions.map((session) => {
-      const workers = (workersByManager.get(session.agentId) ?? []).sort(byCreatedAtDescThenId)
+      // Workers keep the order they were started in, oldest first, live and after a reload.
+      const workers = (workersByManager.get(session.agentId) ?? []).sort(byCreatedAtThenId)
       const isDefault = session.agentId === profile.defaultSessionAgentId
       const previous = previousSessions.get(session.agentId)
       return previous?.sessionAgent === session && previous.isDefault === isDefault && previous.workers.length === workers.length && workers.every((worker, index) => worker === previous.workers[index])
@@ -293,7 +288,7 @@ export function buildProfileTreeRows(
       profile: syntheticProfile,
       sessions: [{
         sessionAgent: manager,
-        workers: (workersByManager.get(manager.agentId) ?? []).sort(byCreatedAtDescThenId),
+        workers: (workersByManager.get(manager.agentId) ?? []).sort(byCreatedAtThenId),
         isDefault: true,
       }],
     })

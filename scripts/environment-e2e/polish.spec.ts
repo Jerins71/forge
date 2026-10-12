@@ -8,6 +8,7 @@
 //   - a plan card sits on the transcript column's edge within the shared width tokens.
 //   - a turn the user stopped says "Stopped by you";
 //   - a worker's provider failure is one failed row in the worker view, and the manager's card names it;
+//     the worker's view shows none of the manager's choices, and header and sidebar both say Failed;
 //   - a manager waiting inside its turn receives its worker's result there and finishes.
 //   pnpm exec playwright test scripts/environment-e2e/polish.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
 import { mkdir, rm, writeFile } from 'node:fs/promises'
@@ -435,8 +436,13 @@ test('a message sent while a reply is streaming is answered below the reply it c
 })
 
 test('a worker\'s provider failure is one failed row in the worker view, and the manager\'s card names it', async ({ page }) => {
-  const sessionId = await launch('Polish worker failure', '[fixture:spawn-fail] Start a worker whose provider fails')
+  // The manager first settles a choice of its own: the worker's view must not show it.
+  const sessionId = await launchRunning('Polish worker failure', '[fixture:choice] [fixture:spawn-fail] Start a worker whose provider fails')
   await open(page, sessionId)
+  await expect(page.getByText('Which synthetic option?', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: /^Wait/ }).click()
+  await page.getByRole('button', { name: 'Submit', exact: true }).click()
+  await expect(transcript(page).locator('[data-choice-id]').filter({ hasText: 'You chose Wait' })).toHaveCount(1, { timeout: 30_000 })
   // The manager is told once, with the provider and model that failed.
   const card = transcript(page).locator('[data-worker-result-source]')
   await expect(card).toHaveCount(1, { timeout: 30_000 })
@@ -461,6 +467,13 @@ test('a worker\'s provider failure is one failed row in the worker view, and the
     await expect(transcript(page)).not.toContainText('settled without returning a final result')
     await expect(transcript(page)).not.toContainText('OpenAI API error')
     expect(((await transcript(page).innerText()).match(/Synthetic fixture scenario failed/g) ?? []).length).toBe(1)
+    // The manager's settled choice belongs to the manager's chat, not the worker's.
+    await expect(transcript(page).locator('[data-choice-id]')).toHaveCount(0)
+    await expect(transcript(page)).not.toContainText('You chose')
+    // The header and the sidebar name the state the same way.
+    await expect(page.locator('[aria-label="Agent status: failed"]')).toHaveCount(1)
+    await expect(page.locator('[aria-label="Agent status: error"]')).toHaveCount(0)
+    await expect(worker.locator('[aria-label="Failed"]')).toHaveCount(1)
   }
   await once()
   await shot(page, 'worker-failure-worker-view')
@@ -468,7 +481,7 @@ test('a worker\'s provider failure is one failed row in the worker view, and the
   await expect(transcript(page)).toContainText('Fail this assignment', { timeout: 30_000 })
   await once()
   await shot(page, 'worker-failure-worker-view-reload')
-  assertions.workerFailure = { sessionId, rowsInWorkerView: 1, named: 'codex-native/gpt-6-sol' }
+  assertions.workerFailure = { sessionId, rowsInWorkerView: 1, named: 'codex-native/gpt-6-sol', managerChoiceInWorkerView: false, headerStatus: 'Failed' }
 })
 
 test('a manager waiting inside its turn receives its worker\'s result and finishes', async ({ page }) => {

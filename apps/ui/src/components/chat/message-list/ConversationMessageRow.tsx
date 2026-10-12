@@ -247,30 +247,27 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
           <div className="mt-1.5 space-y-2">
             {report ? (
               <>
-                {report.summary ? (
-                  <p className="whitespace-pre-wrap break-words leading-relaxed">{report.summary}</p>
-                ) : null}
+                {report.summary ? <MarkdownMessage content={report.summary} /> : null}
                 {report.details.length > 0 ? (
                   <dl className="space-y-1 text-[13px] leading-relaxed">
                     {report.details.map((detail) => (
                       <div key={detail.label} className="flex gap-3">
                         <dt className="w-16 shrink-0 capitalize text-subtle-foreground">{detail.label}</dt>
-                        <dd className="min-w-0 flex-1 whitespace-pre-wrap break-words text-muted-foreground">{detail.value}</dd>
+                        <dd className="min-w-0 flex-1 break-words text-muted-foreground"><MarkdownMessage content={detail.value} /></dd>
                       </div>
                     ))}
                   </dl>
                 ) : null}
                 {report.followUp ? (
                   <div className="border-t border-hairline pt-2 text-[13px] leading-relaxed">
-                    <span className="eyebrow mr-2">Follow-up</span>
-                    <span className="whitespace-pre-wrap break-words text-muted-foreground">{report.followUp}</span>
+                    <span className="eyebrow">Follow-up</span>
+                    <div className="break-words text-muted-foreground"><MarkdownMessage content={report.followUp} /></div>
                   </div>
                 ) : null}
               </>
             ) : hasText ? (
-              <p className="whitespace-pre-wrap break-words leading-relaxed">
-                {normalizedText}
-              </p>
+              // The body is the worker's own markdown, drawn as a message's is.
+              <MarkdownMessage content={normalizedText} />
             ) : null}
             <MessageAttachments attachments={attachments} isUser={false} environmentClient={environmentClient} />
           </div>

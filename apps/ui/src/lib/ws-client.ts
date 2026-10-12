@@ -11,6 +11,7 @@ import {
   projectActivityItems,
   projectWorker,
   projectSessionWorkers,
+  choicesForView,
 } from './ws-client/environment-projection'
 import { LiveActivityStore } from './ws-client/live-activity-store'
 import { getCatalogModelsByFamily } from '@forge/protocol'
@@ -972,13 +973,14 @@ export class ManagerWsClient {
         // A worker is mounted through its owning session and shows only its own rows.
         const ownerId = projection?.session.sessionId ?? sessionId
         const items = (projection?.items ?? []).filter(item => ownerId === sessionId || item.actorId === sessionId)
+        const choices = choicesForView(projection?.choices ?? [], sessionId, ownerId)
         const projectedMessages = projectItems(items, sessionId, ownerId)
         const echoes = this.outbox?.pendingMessages(sessionId, projectedCommandIds(projection)) ?? []
         this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))
         this.updateState({
-          messages: [...withChoicesInTimelineOrder(projectedMessages, projection?.choices ?? [], !!projection?.historyCursor), ...echoes],
+          messages: [...withChoicesInTimelineOrder(projectedMessages, choices, !!projection?.historyCursor), ...echoes],
           commandStatuses: this.outbox?.statuses(),
-          pendingChoiceIds:new Set((projection?.choices??[]).filter(c=>c.status==='pending').map(c=>c.choiceId)),
+          pendingChoiceIds:new Set(choices.filter(c=>c.status==='pending').map(c=>c.choiceId)),
           agents: projectSessionWorkers(this.state.agents, projection?.workers ?? [], ownerId, this.environmentClient!.shell.getSnapshot()),
           conversationPage:projection?{hasOlder:!!projection.historyCursor,...(projection.historyCursor?{nextCursor:projection.historyCursor}:{}),completeness:'complete',source:'canonical'}:null,
           conversationPageLoading:false,
