@@ -39,6 +39,9 @@ describe("readable provider errors", () => {
     expect(readableProviderError("unexpected status 401 Unauthorized: Invalid API key")).toMatch(/rejected the API key \(401\)/);
     expect(readableProviderError("exceeded retry limit, last status: 429 Too Many Requests")).toMatch(/rate limiting requests \(429\)/);
     expect(readableProviderError("unexpected status 404 Not Found: Unknown error")).toMatch(/endpoint was not found \(404\)/);
+    // A key the endpoint knows but will not serve, as Codex, Claude and Pi each report it.
+    for (const refused of ["unexpected status 403 Forbidden: This key may not use the requested model.", "Failed to authenticate. API Error: 403 Your API key does not have permission to use the specified resource.", "403 This key may not use the requested model."])
+      expect(readableProviderError(refused)).toBe("The provider refused this API key (403). Check the key and what it is allowed to use in Settings → Authentication.");
     expect(readableProviderError("Codex app-server exited (code=1, signal=null)")).toBe("The provider process stopped unexpectedly.");
   });
 });

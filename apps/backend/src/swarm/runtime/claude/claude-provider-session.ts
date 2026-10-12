@@ -24,6 +24,10 @@ export class ClaudeProviderSession {
   private readonly requests = new Map<string, { ref: ProviderRequestRef; resolve(answers: ChoiceAnswer[]): void; cancel(): void }>();
   private compacting = false;
   private interrupted = false;
+  /** The endpoint refused the credentials: the turn was cut short and ends as this failure. */
+  private refused: string | undefined;
+  /** Asks the native process to stop the turn this session cut short. */
+  onRefused: (() => void) | undefined;
   private terminalSeen = false;
 
   bind(binding: ProviderBinding): void { this.binding = binding; }
@@ -91,9 +95,10 @@ export class ClaudeProviderSession {
       this.compacting = false; this.publish({ type: "compaction", origin: this.origin(), phase: outcome === "completed" ? "completed" : "failed" });
     }
     this.publish({ type: "terminal", origin: { kind: "root", conversation: this.binding.conversation, turn: this.current.turn },
-      terminalAuthority: "root_attempt", outcome: this.interrupted ? "interrupted" : outcome,
-      ...(message ? { error: { code: "CLAUDE_TURN_ERROR", message } } : {}) });
-    this.interrupted = false;
+      // A turn this session cut short over refused credentials failed; nobody interrupted it.
+      terminalAuthority: "root_attempt", outcome: this.refused ? "failed" : this.interrupted ? "interrupted" : outcome,
+      ...(this.refused ?? message ? { error: { code: "CLAUDE_TURN_ERROR", message: (this.refused ?? message)! } } : {}) });
+    this.interrupted = false; this.refused = undefined;
   }
   failure(message: string): void {
     this.settleDispatches();
@@ -253,8 +258,15 @@ export class ClaudeProviderSession {
     }
     if (frame.type === "system") {
       if (frame.subtype === "status" && frame.status === "compacting") this.compactionStarted();
-      if (frame.subtype === "api_retry") this.publish({ type: "retry", origin: currentOrigin, attempt: Math.max(1, frame.attempt), maxAttempts: Math.max(1, frame.max_retries), delayMs: frame.retry_delay_ms,
-        message: [frame.error_status, String(frame.error ?? "request failed").replaceAll("_", " ")].filter(Boolean).join(" ") });
+      if (frame.subtype === "api_retry" && !this.refused) {
+        const message = [frame.error_status, String(frame.error ?? "request failed").replaceAll("_", " ")].filter(Boolean).join(" ");
+        if (frame.error_status === 401 || frame.error_status === 403) {
+          // The CLI retries a refused key ten times with a growing delay; no retry can make it work, so the turn ends now.
+          this.refused = message;
+          this.failure(message);
+          this.onRefused?.();
+        } else this.publish({ type: "retry", origin: currentOrigin, attempt: Math.max(1, frame.attempt), maxAttempts: Math.max(1, frame.max_retries), delayMs: frame.retry_delay_ms, message });
+      }
       if (frame.subtype === "compact_boundary") {
         this.compacting = false; this.publish({ type: "compaction", origin: currentOrigin, phase: "completed", payload: JSON.parse(JSON.stringify(frame.compact_metadata)) });
       }

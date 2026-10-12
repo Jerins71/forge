@@ -186,11 +186,12 @@ async function runTurn(turn, text) {
         return;
       }
     }
-    if (text.includes('[fixture:reject]')) {
+    if (text.includes('[fixture:reject')) {
+      const refused = text.includes('[fixture:reject-403]') ? { status: 403, details: 'unexpected status 403 Forbidden: This key may not use the requested model., url: http://127.0.0.1:1/v1/responses' }
+        : { status: 401, details: 'unexpected status 401 Unauthorized: Incorrect API key provided., url: http://127.0.0.1:1/v1/responses' };
       // The endpoint rejects the key, and Codex would keep retrying a request that cannot succeed.
       for (let attempt = 1; !turn.done; attempt++) {
-        notify('error', { ...context(turn), error: { message: `Reconnecting... ${Math.min(attempt, 5)}/5`, codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 401 } },
-          additionalDetails: 'unexpected status 401 Unauthorized: Incorrect API key provided., url: http://127.0.0.1:1/v1/responses' }, willRetry: true });
+        notify('error', { ...context(turn), error: { message: `Reconnecting... ${Math.min(attempt, 5)}/5`, codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: refused.status } }, additionalDetails: refused.details }, willRetry: true });
         await pause(200);
       }
       return;

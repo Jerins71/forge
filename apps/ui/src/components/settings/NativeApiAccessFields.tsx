@@ -131,7 +131,7 @@ export function NativeApiAccessFields({ runtime, access, busy, onSave, onTest }:
       {probe && !changed ? (
         <div role="status" aria-label={`${runtime} connection test`} data-outcome={probe.outcome} className="flex flex-col gap-2 text-xs">
           <p className={probe.outcome === 'ok' ? 'text-foreground' : 'font-medium text-foreground'}>
-            {probe.outcome === 'ok' ? '✓ ' : '✕ '}{probe.message}
+            {probe.outcome === 'ok' ? '✓ ' : probe.outcome === 'rate_limited' ? '⚠ ' : '✕ '}{probe.message}
           </p>
           {probe.suggestedBaseUrl && !locked ? (
             <Button type="button" variant="outline" size="sm" className="w-fit" disabled={busy}

@@ -11,8 +11,11 @@ export async function createPiModelPeer(transcript: ReplayTranscript) {
   socket.write(JSON.stringify({ hello: true }) + "\n");
   const responses: ServerResponse[] = [];
   createInterface({ input: socket }).on("line", line => {
-    const message = JSON.parse(line) as { exit?: number; frame?: { chunk?: unknown; end?: boolean } };
+    const message = JSON.parse(line) as { exit?: number; frame?: { chunk?: unknown; end?: boolean; status?: number; body?: unknown } };
     if (message.exit !== undefined) { responses[0]?.destroy(); return; }
+    // An HTTP error instead of a stream, as a router answers a refused key or a rate limit.
+    if (message.frame?.status !== undefined) { responses.shift()?.writeHead(message.frame.status, { "content-type": "application/json" }).end(JSON.stringify(message.frame.body ?? {})); return; }
+    if (responses[0] && !responses[0].headersSent) { responses[0].writeHead(200, { "content-type": "text/event-stream" }); responses[0].flushHeaders(); }
     if (message.frame?.chunk !== undefined) responses[0]?.write(`data: ${JSON.stringify(message.frame.chunk)}\n\n`);
     if (message.frame?.end) { responses[0]?.write("data: [DONE]\n\n"); responses.shift()?.end(); }
   });
@@ -24,8 +27,6 @@ export async function createPiModelPeer(transcript: ReplayTranscript) {
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
     requests.push(body);
     responses.push(res);
-    res.writeHead(200, { "content-type": "text/event-stream" });
-    res.flushHeaders();
     socket.write(JSON.stringify({ frame: { method: req.method, path: req.url, body } }) + "\n");
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));

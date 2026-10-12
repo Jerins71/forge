@@ -238,6 +238,11 @@ test('provider retries and the final failure show as one status row, live and af
   await send(page, 'Reply after the rejected key')
   await expect.poll(async () => { const text = await transcript(page).innerText(); return text.lastIndexOf('assistant reply') > text.lastIndexOf('Reply after the rejected key') }, { timeout: 30_000 }).toBe(true)
   assertions.rejectedKeyRow = await status().last().textContent()
+  // The same for a key the endpoint knows but will not serve.
+  await send(page, '[fixture:reject-403] Use a key the endpoint will not serve')
+  await expect(status().last()).toContainText('Failed: The provider refused this API key (403).', { timeout: 10_000 })
+  await expect(status().last()).not.toContainText('retr')
+  expect(await status().count()).toBe(rows + 2)
 })
 
 test('a session restarted by a trust change mid-turn settles to idle and accepts its next message', async () => {
