@@ -14,7 +14,7 @@ import { SettingsSecrets } from '@/components/settings/SettingsSecrets'
 import { SettingsModels } from '@/components/settings/SettingsModels'
 import { SettingsSkills } from '@/components/settings/SettingsSkills'
 import { SettingsPrompts } from '@/components/settings/SettingsPrompts'
-import { SettingsSpecialists } from '@/components/settings/SettingsSpecialists'
+import { SettingsWorkerPresets } from '@/components/settings/SettingsWorkerPresets'
 import { SettingsProjectResources } from '@/components/settings/SettingsProjectResources'
 import { SettingsProjectSettings, type ProjectSettingsActions } from '@/components/settings/SettingsProjectSettings'
 import { SettingsSlashCommands } from '@/components/settings/SettingsSlashCommands'
@@ -30,7 +30,7 @@ import type { AgentDescriptor, ManagerProfile } from '@forge/protocol'
 
 function getSettingsContentWidthClassName(activeTab: SettingsTab): string | undefined {
   if (activeTab === 'skills') return '[--content-max:100%]'
-  if (activeTab === 'specialists') return '[--content-max:96rem]'
+  if (activeTab === 'presets') return '[--content-max:100%]'
   return undefined
 }
 
@@ -41,7 +41,6 @@ interface SettingsPanelProps {
   managers: AgentDescriptor[]
   profiles: ManagerProfile[]
   promptChangeKey: number
-  specialistChangeKey: number
   modelConfigChangeKey: number
   connectionEpoch?: number
   onBack?: () => void
@@ -71,7 +70,6 @@ export function SettingsPanel({
   managers,
   profiles,
   promptChangeKey,
-  specialistChangeKey,
   modelConfigChangeKey,
   connectionEpoch,
   onBack,
@@ -192,14 +190,8 @@ export function SettingsPanel({
           previewSession={previewSession}
         />
       )}
-      {activeTab === 'specialists' && (
-        <SettingsSpecialists
-          apiClient={apiClient}
-          profiles={profiles}
-          previewSession={previewSession}
-          specialistChangeKey={specialistChangeKey}
-          modelConfigChangeKey={modelConfigChangeKey}
-        />
+      {activeTab === 'presets' && (
+        <SettingsWorkerPresets apiClient={apiClient} modelConfigChangeKey={modelConfigChangeKey} />
       )}
       {isProjectSettings && selectedProject ? (
         <SettingsProjectSettings

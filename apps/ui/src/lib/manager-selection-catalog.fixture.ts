@@ -2,7 +2,6 @@ import {
   MANAGER_SELECTION_CATALOG_VERSION,
   type ManagerModelOption,
   type ManagerSelectionCatalogResponse,
-  type WorkModeOption,
 } from '@forge/protocol'
 
 function reasoning(
@@ -53,27 +52,6 @@ function model(
     },
   }
 }
-
-export const DEFAULT_WORK_MODES: WorkModeOption[] = [
-  {
-    id: 'delegation_first',
-    label: 'Delegate first',
-    description: 'Delegates substantial implementation while retaining small read-only orientation.',
-    selectable: true,
-  },
-  {
-    id: 'adaptive',
-    label: 'Adaptive',
-    description: 'Chooses ownership outcome by outcome.',
-    selectable: true,
-  },
-  {
-    id: 'hands_on',
-    label: 'Hands-on',
-    description: 'Owns one cohesive bounded outcome directly.',
-    selectable: true,
-  },
-]
 
 export function makeManagerSelectionCatalog(
   overrides: Partial<ManagerSelectionCatalogResponse> = {},
@@ -203,14 +181,12 @@ export function makeManagerSelectionCatalog(
         defaultReasoningId: 'high',
       }),
     ],
-    workModes: DEFAULT_WORK_MODES,
     defaults: {
       createManagerModel: {
         provider: 'codex-native',
         modelId: 'gpt-6-sol',
         reasoningId: 'high',
       },
-      workModeId: 'hands_on',
     },
     ...overrides,
   }

@@ -19,7 +19,7 @@ export type SettingsTab =
   | 'models'
   | 'skills'
   | 'prompts'
-  | 'specialists'
+  | 'presets'
   | 'project-resources'
   | 'slash-commands'
   | 'extensions'
@@ -46,7 +46,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
   'models',
   'skills',
   'prompts',
-  'specialists',
+  'presets',
   'project-resources',
   'slash-commands',
   'extensions',

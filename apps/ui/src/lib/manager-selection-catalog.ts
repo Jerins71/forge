@@ -3,9 +3,7 @@ import {
   MANAGER_REASONING_LEVELS,
   MANAGER_SELECTION_CATALOG_LIMITS,
   MANAGER_SELECTION_CATALOG_VERSION,
-  WORK_MODE_UNAVAILABLE_REASONS,
   getCatalogModel,
-  isWorkModeId,
   type ManagerModelOption,
   type ManagerModelSurface,
   type ManagerModelSurfaceState,
@@ -14,8 +12,6 @@ import {
   type ManagerSelectionCatalogDefaults,
   type ManagerSelectionCatalogResponse,
   type ManagerSelectionReasoningOption,
-  type WorkModeOption,
-  type WorkModeUnavailableReason,
 } from '@forge/protocol'
 import {
   encodeManagerModelValue,
@@ -34,7 +30,7 @@ export class ManagerSelectionCatalogDecodeError extends Error {
   }
 }
 
-/** Decode one validated V1 snapshot. Never merges bundled client inventories. */
+/** Decode one validated snapshot. Never merges bundled client inventories. */
 export function decodeManagerSelectionCatalog(value: unknown): ManagerSelectionCatalogResponse {
   if (!isRecord(value)) {
     throw new ManagerSelectionCatalogDecodeError()
@@ -45,35 +41,22 @@ export function decodeManagerSelectionCatalog(value: unknown): ManagerSelectionC
   if (!isBoundedString(value.revision, MANAGER_SELECTION_CATALOG_LIMITS.maxRevisionLength)) {
     throw new ManagerSelectionCatalogDecodeError()
   }
-  if (!Array.isArray(value.models) || !Array.isArray(value.workModes) || !isRecord(value.defaults)) {
+  if (!Array.isArray(value.models) || !isRecord(value.defaults)) {
     throw new ManagerSelectionCatalogDecodeError()
   }
 
-  if (
-    value.models.length > MANAGER_SELECTION_CATALOG_LIMITS.maxModels
-    || value.workModes.length > MANAGER_SELECTION_CATALOG_LIMITS.maxWorkModes
-  ) {
+  if (value.models.length > MANAGER_SELECTION_CATALOG_LIMITS.maxModels) {
     throw new ManagerSelectionCatalogDecodeError()
   }
 
   const models = value.models.map(decodeModelOption)
-  const workModes = value.workModes.map(decodeWorkModeOption)
   const defaults = decodeDefaults(value.defaults)
-  if (
-    models.some((model) => model === undefined)
-    || workModes.some((workMode) => workMode === undefined)
-    || !defaults
-  ) {
+  if (models.some((model) => model === undefined) || !defaults) {
     throw new ManagerSelectionCatalogDecodeError()
   }
 
   const decodedModels = models as ManagerModelOption[]
-  const decodedWorkModes = workModes as WorkModeOption[]
-  if (
-    hasDuplicateModelIdentity(decodedModels)
-    || hasDuplicateWorkModeId(decodedWorkModes)
-    || !defaultsReferenceCatalog(defaults, decodedModels, decodedWorkModes)
-  ) {
+  if (hasDuplicateModelIdentity(decodedModels) || !defaultsReferenceCatalog(defaults, decodedModels)) {
     throw new ManagerSelectionCatalogDecodeError()
   }
 
@@ -81,7 +64,6 @@ export function decodeManagerSelectionCatalog(value: unknown): ManagerSelectionC
     version: MANAGER_SELECTION_CATALOG_VERSION,
     revision: value.revision,
     models: decodedModels,
-    workModes: decodedWorkModes,
     defaults,
   }
 }
@@ -193,35 +175,6 @@ export function catalogReasoningLevels(
 ): ManagerReasoningLevel[] | undefined {
   const option = findCatalogModel(catalog, provider, modelId)
   return option?.reasoningOptions.map((reasoning) => reasoning.id)
-}
-
-export function workModeLabel(
-  catalog: ManagerSelectionCatalogResponse | null | undefined,
-  id: string | undefined,
-): string {
-  if (!id) return 'Work mode'
-  const advertised = catalog?.workModes.find((workMode) => workMode.id === id)
-  if (advertised) return advertised.label
-  return formatUnknownWorkModeId(id)
-}
-
-export function projectWorkModeOptions(
-  catalog: ManagerSelectionCatalogResponse | null | undefined,
-  currentId: string | undefined,
-): WorkModeOption[] {
-  const advertised = catalog?.workModes ?? []
-  if (!currentId) return advertised
-  if (advertised.some((workMode) => workMode.id === currentId)) return advertised
-  return [
-    ...advertised,
-    {
-      id: currentId,
-      label: formatUnknownWorkModeId(currentId),
-      description: '',
-      selectable: false,
-      unavailableReason: 'unsupported',
-    },
-  ]
 }
 
 function projectModelRow(
@@ -338,39 +291,8 @@ function decodeSurfaceState(value: unknown): ManagerModelSurfaceState | undefine
   }
 }
 
-function decodeWorkModeOption(value: unknown): WorkModeOption | undefined {
-  if (!isRecord(value) || !isWorkModeId(value.id)) return undefined
-  if (
-    !isBoundedString(value.label, MANAGER_SELECTION_CATALOG_LIMITS.maxLabelLength)
-    || !isBoundedString(value.description, MANAGER_SELECTION_CATALOG_LIMITS.maxDescriptionLength)
-    || typeof value.selectable !== 'boolean'
-  ) {
-    return undefined
-  }
-  if (value.selectable) {
-    if (value.unavailableReason !== undefined) return undefined
-    return {
-      id: value.id,
-      label: value.label,
-      description: value.description,
-      selectable: true,
-    }
-  }
-  if (!isWorkModeUnavailableReason(value.unavailableReason)) return undefined
-  return {
-    id: value.id,
-    label: value.label,
-    description: value.description,
-    selectable: false,
-    unavailableReason: value.unavailableReason,
-  }
-}
-
 function decodeDefaults(value: Record<string, unknown>): ManagerSelectionCatalogDefaults | undefined {
-  if (!isWorkModeId(value.workModeId)) return undefined
-  if (value.createManagerModel === undefined) {
-    return { workModeId: value.workModeId }
-  }
+  if (value.createManagerModel === undefined) return {}
   if (!isRecord(value.createManagerModel)) return undefined
   const createManagerModel = value.createManagerModel
   if (
@@ -381,7 +303,6 @@ function decodeDefaults(value: Record<string, unknown>): ManagerSelectionCatalog
     return undefined
   }
   return {
-    workModeId: value.workModeId,
     createManagerModel: {
       provider: createManagerModel.provider,
       modelId: createManagerModel.modelId,
@@ -395,19 +316,10 @@ function hasDuplicateModelIdentity(models: readonly ManagerModelOption[]): boole
   return new Set(identities).size !== identities.length
 }
 
-function hasDuplicateWorkModeId(workModes: readonly WorkModeOption[]): boolean {
-  const ids = workModes.map((workMode) => workMode.id)
-  return new Set(ids).size !== ids.length
-}
-
 function defaultsReferenceCatalog(
   defaults: ManagerSelectionCatalogDefaults,
   models: readonly ManagerModelOption[],
-  workModes: readonly WorkModeOption[],
 ): boolean {
-  const defaultWorkMode = workModes.find((workMode) => workMode.id === defaults.workModeId)
-  if (!defaultWorkMode?.selectable) return false
-
   const modelDefault = defaults.createManagerModel
   if (!modelDefault) return true
   const model = models.find((candidate) =>
@@ -415,15 +327,6 @@ function defaultsReferenceCatalog(
   )
   return model?.surfaces.create?.selectable === true
     && model.reasoningOptions.some((reasoning) => reasoning.id === modelDefault.reasoningId)
-}
-
-function formatUnknownWorkModeId(id: string): string {
-  if (id === 'delegation_first') return 'Delegate first'
-  if (id === 'adaptive') return 'Adaptive'
-  if (id === 'hands_on') return 'Hands-on'
-  const words = id.replaceAll(/[_-]+/g, ' ').trim()
-  if (!words) return id
-  return words.replaceAll(/\b\w/g, (character) => character.toUpperCase())
 }
 
 function normalizeReasoningLevel(level: string | undefined): ManagerReasoningLevel | undefined {
@@ -439,11 +342,6 @@ function isManagerReasoningLevel(value: unknown): value is ManagerReasoningLevel
 function isManagerModelUnavailableReason(value: unknown): value is ManagerModelUnavailableReason {
   return typeof value === 'string'
     && (MANAGER_MODEL_UNAVAILABLE_REASONS as readonly string[]).includes(value)
-}
-
-function isWorkModeUnavailableReason(value: unknown): value is WorkModeUnavailableReason {
-  return typeof value === 'string'
-    && (WORK_MODE_UNAVAILABLE_REASONS as readonly string[]).includes(value)
 }
 
 function isBoundedString(value: unknown, maxLength: number): value is string {

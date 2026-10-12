@@ -65,8 +65,7 @@ function AttemptDetails({ attempt }: { attempt: WorkGraphAttempt }) {
   return <div className="mt-2 space-y-2">
     <dl className="grid grid-cols-1 gap-x-3 gap-y-1 text-muted-foreground sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] [&>dt]:font-medium [&>dd]:mb-2 [&>dd]:min-w-0 [&>dd]:[overflow-wrap:break-word]">
       <dt>Worker</dt><dd>{attempt.workerId || 'Not recorded'}</dd>
-      <dt>Specialist</dt><dd>{attempt.resolvedRouteLabel ?? attempt.resolvedRouteId ?? attempt.executionPolicy ?? 'Not recorded'}</dd>
-      <dt>Requested route</dt><dd>{attempt.requestedRoute ?? 'Not recorded'}</dd>
+      <dt>Preset</dt><dd>{attempt.preset ?? 'Manager model'}</dd>
       <dt>Model</dt><dd>{attempt.model ? `${attempt.model.provider} / ${attempt.model.modelId}` : 'Not recorded'}</dd>
       {attempt.model?.thinkingLevel ? <><dt>Reasoning</dt><dd>{attempt.model.thinkingLevel}</dd></> : null}
       <dt>Started</dt><dd><Timestamp value={attempt.startedAt} /></dd>

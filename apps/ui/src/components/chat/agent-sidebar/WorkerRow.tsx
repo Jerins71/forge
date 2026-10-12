@@ -2,7 +2,6 @@ import { MessageSquarePlus, Pause, Play, Trash2 } from 'lucide-react'
 import React from 'react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { SpecialistBadge } from '../SpecialistBadge'
 import { cn } from '@/lib/utils'
 import { isCodexAppServerExternalThreadDescriptor } from '@forge/protocol'
 import { CodexExternalThreadIcon, HighlightedText } from './shared'
@@ -75,12 +74,8 @@ export const WorkerRow = React.memo(function WorkerRow({
                   <span className={cn('min-w-0 flex-1 truncate text-sm leading-5', roomsV2 ? 'text-xs leading-4' : undefined)}>
                     {highlightQuery ? <HighlightedText text={name} query={highlightQuery} /> : name}
                   </span>
-                  {agent.specialistId && agent.specialistDisplayName && agent.specialistColor ? (
-                    <SpecialistBadge
-                      displayName={agent.specialistDisplayName}
-                      color={agent.specialistColor}
-                      className="shrink-0"
-                    />
+                  {agent.specialistId ? (
+                    <span className="shrink-0 text-[10.5px] text-muted-foreground">{agent.specialistDisplayName ?? agent.specialistId}</span>
                   ) : null}
                 </button>
               </TooltipTrigger>

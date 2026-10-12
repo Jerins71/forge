@@ -58,7 +58,7 @@ import {
 } from '@forge/protocol'
 import { fetchModelPresets } from '@/lib/model-preset'
 import { fetchCompactionSettings, updateCompactionSettings } from '@/components/settings/compaction-settings-api'
-import { PROVIDER_LABELS } from '@/components/settings/specialists/types'
+import { PROVIDER_LABELS } from '@/components/settings/specialists/utils'
 import { formatReasoningLevel } from '@/lib/reasoning-level-labels'
 import type { SettingsApiClient } from './settings-api-client'
 

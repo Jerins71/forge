@@ -35,7 +35,6 @@ import type {
   ConversationReplyTargetInput,
   ManagerExactModelSelection,
   ManagerReasoningLevel,
-  WorkModeId,
   SessionProjectAgentInput,
 } from '@forge/protocol'
 import type { ManagerWsClient } from '@/lib/ws-client'
@@ -643,47 +642,6 @@ export function useSessionActions({
     }
   }, [clientRef, setState])
 
-  const handleUpdateProjectDelegationDefaults = useCallback(async (
-    profileId: string,
-    updates: {
-      managerPosture?: WorkModeId | null
-      delegationRosterId?: string | null
-    },
-  ) => {
-    const client = clientRef.current
-    if (!client) return
-    try {
-      await client.updateProjectDelegationDefaults(profileId, updates)
-    } catch (error) {
-      setState((previous) => ({
-        ...previous,
-        lastError: `Failed to update project delegation defaults: ${
-          error instanceof Error ? error.message : 'Unknown error'
-        }`,
-      }))
-      throw error
-    }
-  }, [clientRef, setState])
-
-  const handleUpdateSessionDelegation = useCallback(async (
-    sessionAgentId: string,
-    updates: Parameters<ManagerWsClient['updateSessionDelegation']>[1],
-  ) => {
-    const client = clientRef.current
-    if (!client) return
-    try {
-      await client.updateSessionDelegation(sessionAgentId, updates)
-    } catch (error) {
-      setState((previous) => ({
-        ...previous,
-        lastError: `Failed to update session delegation: ${
-          error instanceof Error ? error.message : 'Unknown error'
-        }`,
-      }))
-      throw error
-    }
-  }, [clientRef, setState])
-
   const handleUpdateManagerCwd = useCallback(async (managerId: string, cwd: string) => {
     const client = clientRef.current
     if (!client) throw new Error('WebSocket is not connected.')
@@ -835,8 +793,6 @@ export function useSessionActions({
     handleMarkAllRead,
     handleUpdateManagerModel,
     handleUpdateSessionModel,
-    handleUpdateProjectDelegationDefaults,
-    handleUpdateSessionDelegation,
     handleUpdateManagerCwd,
     handleBrowseDirectoryForCwd,
     handleValidateDirectoryForCwd,

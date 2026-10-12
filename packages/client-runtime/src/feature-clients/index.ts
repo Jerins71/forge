@@ -11,7 +11,6 @@ import type {
   GitPullRequestMergeRequest,
   GitPullRequestMergeResult,
   GitRepoTarget,
-  ApplyRecommendedManagerDefaultsResponse,
   FileListResult,
   FileCountResult,
   FileSearchResult,
@@ -267,9 +266,6 @@ export interface EnvironmentFeatureClients {
     ): Promise<SessionAuditEntryDetailResponse>
   }
   models: {
-    applyRecommendedDefaults(
-      signal?: AbortSignal,
-    ): Promise<ApplyRecommendedManagerDefaultsResponse>
     catalog(
       profileId?: string,
       signal?: AbortSignal,
@@ -504,7 +500,7 @@ export function createFeatureClients(
   const checkSetting = (path: string) => {
     if (/^\/api\/(profiles|agents)\/[^/?]+\/context-mode$/.test(path) || /^\/api\/agents\/[^/?]+\/context-artifacts$/.test(path)) return
     if (
-      !/^\/api\/(settings|stats|auth|skills|specialists|prompts|extensions|slash-commands|secure-sessions|secure-secrets|onboarding|observability|credentials|model-catalog|git\/remote-update-awareness|history\/index|repository-checkouts|reboot|terminals\/(?:available-shells|settings)|transcribe|provider-usage|v1\/profiles\/[^/?]+\/sessions\/[^/?]+\/feedback)(\/|\?|$)/.test(
+      !/^\/api\/(settings|stats|auth|skills|prompts|extensions|slash-commands|secure-sessions|secure-secrets|onboarding|observability|credentials|model-catalog|git\/remote-update-awareness|history\/index|repository-checkouts|reboot|terminals\/(?:available-shells|settings)|transcribe|provider-usage|v1\/profiles\/[^/?]+\/sessions\/[^/?]+\/feedback)(\/|\?|$)/.test(
         path,
       )
     )
@@ -607,11 +603,6 @@ export function createFeatureClients(
         ),
     },
     models: {
-      applyRecommendedDefaults: async (_signal) => {
-        const receipt = await rpc.request('settings.recommendedDefaults.apply', { commandId: crypto.randomUUID() })
-        if (receipt.state !== 'succeeded' || !receipt.result?.profileIds || !receipt.result.rosterId || receipt.result.rosterRevision === undefined) throw new Error(receipt.error?.message ?? 'Recommended defaults were interrupted')
-        return { profileIds: receipt.result.profileIds, rosterId: receipt.result.rosterId, rosterRevision: receipt.result.rosterRevision }
-      },
       catalog: (p, s) =>
         get('/api/settings/manager-selection-catalog', { profileId: p }, s),
     },

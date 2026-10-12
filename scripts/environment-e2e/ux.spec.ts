@@ -1,5 +1,5 @@
-// Core UX in the built UI against real backends and the scripted Codex peer: a new thread starts with
-// the chosen work mode and roster, a spawned worker leaves one result in the manager chat (live and
+// Core UX in the built UI against real backends and the scripted Codex peer: a new thread starts
+// from its composer, a worker preset persists, a spawned worker leaves one result in the manager chat (live and
 // after reload), admission never surfaces a "still settling" error, a running turn can be stopped from
 // the composer, and the session in view stays read and out of "Needs you".
 //   pnpm exec playwright test scripts/environment-e2e/ux.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
@@ -7,7 +7,7 @@ import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
+import { expect, type BrowserContext, type Page } from '@playwright/test'
 import type { SessionSummary, CommandReceipt } from '@forge/protocol/environment-v2'
 import { test as base } from './fixtures/test.js'
 import { controlEnvironment, readManifest, repositoryRoot, type BootstrapSession, type FleetManifest } from './launch.js'
@@ -31,8 +31,6 @@ test.use({ environmentSuite: 'ux', screenshot: 'off', actionTimeout: 10_000 })
 const transcript = (page: Page) => page.locator('[data-chat-transcript-surface]').filter({ visible: true }).first()
 const composer = (page: Page) => page.getByRole('combobox', { name: /^(Message |Send another message to )/ })
 const settlingAlert = (page: Page) => page.getByRole('alert').filter({ hasText: /settling/i })
-const workPicker = (scope: Page | Locator) => scope.getByRole('button', { name: /^Work mode: / })
-const workSettings = (page: Page) => page.getByRole('dialog', { name: 'Session work settings' })
 async function shot(page: Page, name: string) {
   const path = join(evidenceRoot, `${name}.png`)
   await page.screenshot({ path }); assertions[`screenshot:${name}`] = path
@@ -82,53 +80,19 @@ async function logicalGroupKey(page: Page): Promise<string> {
   const projectRow = page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first()
   return (await projectRow.getAttribute('data-logical-project'))!
 }
-/** Picks a work mode and a roster that are not the project defaults; returns what was chosen. */
-async function chooseWork(page: Page, scope: Page | Locator) {
-  await workPicker(scope).click()
-  const settings = workSettings(page)
-  const modes = settings.locator('fieldset').first().locator('label')
-  const rosters = settings.locator('fieldset').nth(1).locator('label')
-  await expect(rosters).toHaveCount(2)
-  // The project default is marked the same way as in an existing session's popover.
-  await expect(modes.filter({ hasText: 'Project default' })).toHaveCount(1)
-  await expect(rosters.filter({ hasText: 'Project default' })).toHaveCount(1)
-  const mode = modes.filter({ hasNotText: 'Project default' }).last()
-  const managerPosture = await mode.locator('input').getAttribute('value')
-  await mode.click()
-  await expect(mode.locator('input')).toBeChecked()
-  const roster = rosters.filter({ hasNotText: 'Project default' }).first()
-  const rosterId = await roster.locator('input').getAttribute('value')
-  await roster.click()
-  await expect(roster.locator('input')).toBeChecked()
-  await expect(settings.getByRole('alert')).toHaveCount(0)
-  await page.keyboard.press('Escape')
-  await expect(settings).toHaveCount(0)
-  return { managerPosture: managerPosture!, rosterId: rosterId! }
-}
-/** Launches from the new-thread composer with a chosen work mode and roster, then proves the session uses them. */
-async function launchWithWork(page: Page, environment: UiEnvironment, text: string) {
-  const launch = page.getByTestId('launch-workspace')
-  await expect(launch).toBeVisible()
-  const chosen = await chooseWork(page, launch)
-  await shot(page, `new-thread-work-${fixture(environment).name}`)
+/** Launches from the new-thread composer and proves one launch command started the session. */
+async function launchThread(page: Page, environment: UiEnvironment, text: string) {
+  await expect(page.getByTestId('launch-workspace')).toBeVisible()
   await page.getByRole('combobox', { name: 'Message agent...' }).fill(text)
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/agent=v2-/)
   const sessionId = new URL(page.url()).searchParams.get('agent')!
   await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
-  const summary = await shellSession(environment, sessionId)
-  expect(summary?.delegation).toEqual({ managerPosture: chosen.managerPosture, managerPostureOrigin: 'session_override', rosterId: chosen.rosterId, rosterOrigin: 'session_override' })
-  // Applied by the launch itself: no follow-up configuration command exists.
   const methods = await commandMethods(environment, sessionId)
   expect(methods.filter(method => method === 'session.launch')).toHaveLength(1)
   expect(methods).not.toContain('session.configure')
-  // The session's own popover shows the same choice.
-  await workPicker(page).click()
-  await expect(workSettings(page).locator(`input[value="${chosen.managerPosture}"]`)).toBeChecked()
-  await expect(workSettings(page).locator(`input[value="${chosen.rosterId}"]`)).toBeChecked()
-  await page.keyboard.press('Escape')
   await expect(page.getByRole('alert')).toHaveCount(0)
-  return { sessionId, ...chosen }
+  return { sessionId }
 }
 
 test.beforeAll(async ({ browser, environmentManifest }) => {
@@ -149,14 +113,47 @@ test.afterAll(async () => {
 let localSessionId = ''
 const viewedSession = () => localSessionId || fleet.a.sessionId
 
-test('a new thread starts with the work mode and roster chosen in its composer', async ({ page }) => {
+test('a new thread starts from its composer', async ({ page }) => {
   const key = await logicalGroupKey(page)
   await page.goto(`${fleet.uiUrl}/?launch=${encodeURIComponent(key)}`)
   await expect(page.getByTestId('run-on-picker')).toContainText('This machine')
-  const launched = await launchWithWork(page, fleet.a, 'Start with chosen work settings')
+  // The composer offers the model only.
+  await expect(page.getByTestId('composer-context').getByRole('button', { name: /work mode|roster/i })).toHaveCount(0)
+  const launched = await launchThread(page, fleet.a, 'Start a plain thread')
   localSessionId = launched.sessionId
   assertions.launchLocal = launched
   await shot(page, 'new-thread-session')
+})
+
+test('a worker preset added in Settings is still there after a reload', async ({ page }) => {
+  await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=presets`)
+  await expect(page.getByTestId('worker-presets-empty')).toContainText("manager's own model")
+  await page.getByTestId('worker-preset-add').click()
+  const row = page.getByTestId('worker-preset-row')
+  await expect(row).toHaveCount(1)
+  // An invalid name is rejected inline before anything is saved.
+  await row.getByRole('textbox', { name: 'Name' }).fill('Fast Worker')
+  await expect(row.getByRole('alert')).toContainText('lowercase')
+  await row.getByRole('textbox', { name: 'Name' }).fill('fast-worker')
+  await expect(row.getByRole('alert')).toHaveCount(0)
+  const model = row.getByRole('combobox').first()
+  if ((await model.innerText()).includes('Select model')) {
+    await model.click()
+    await page.getByRole('option').first().click()
+  }
+  await row.getByRole('textbox', { name: 'Note' }).fill('Quick edits and searches')
+  await page.getByTestId('worker-preset-save').click()
+  await expect(page.getByTestId('worker-preset-save')).toBeDisabled()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  const chosenModel = await model.innerText()
+
+  await page.reload()
+  await expect(row).toHaveCount(1)
+  await expect(row.getByRole('textbox', { name: 'Name' })).toHaveValue('fast-worker')
+  await expect(row.getByRole('textbox', { name: 'Note' })).toHaveValue('Quick edits and searches')
+  await expect(row.getByRole('combobox').first()).toHaveText(chosenModel)
+  await shot(page, 'worker-presets')
+  assertions.workerPreset = { name: 'fast-worker', model: chosenModel }
 })
 
 test('a thread started from an open session takes the pane, and follow-up messages go to it', async ({ page }) => {
@@ -189,7 +186,7 @@ test('a thread started from an open session takes the pane, and follow-up messag
   expect(renderErrors).toEqual([])
 })
 
-test('a new thread on a paired machine starts with the chosen work mode and roster', async ({ page }) => {
+test('a new thread starts on a paired machine', async ({ page }) => {
   const { b } = fleet
   await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=environments`)
   await expect(page.getByRole('list', { name: 'Environments' })).toBeVisible()
@@ -207,7 +204,7 @@ test('a new thread on a paired machine starts with the chosen work mode and rost
   await page.keyboard.press('Enter')
   await page.getByRole('option').filter({ hasText: b.label }).first().click()
   await expect(runOn).toContainText(b.label)
-  const launched = await launchWithWork(page, b, 'Start remotely with chosen work settings')
+  const launched = await launchThread(page, b, 'Start a plain thread remotely')
   await expect(page).toHaveURL(new RegExp(`env=${b.environmentId}`))
   assertions.launchRemote = { environmentId: b.environmentId, ...launched }
 })

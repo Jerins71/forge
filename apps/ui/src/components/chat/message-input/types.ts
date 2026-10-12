@@ -5,11 +5,8 @@ import type {
   ConversationAttachment,
   ConversationReplyTargetInput,
   ManagerExactModelSelection,
-  ManagerPostureOrigin,
   ManagerReasoningLevel,
-  DelegationRosterOrigin,
   SessionModelUpdateMode,
-  WorkModeId,
 } from '@forge/protocol'
 import type { RefObject } from 'react'
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
@@ -58,40 +55,6 @@ export interface SessionModelPickerConfig {
   ) => void | Promise<void>
 }
 
-export interface SessionCoordinationPickerConfig {
-  originId: string
-  httpClientRef: RefObject<SettingsApiClient | null>
-  sessionAgentId: string
-  profileId: string
-  managerPosture?: WorkModeId
-  managerPostureOrigin?: ManagerPostureOrigin
-  projectDefaultManagerPosture?: WorkModeId
-  delegationRosterId?: string
-  delegationRosterOrigin?: DelegationRosterOrigin
-  projectDefaultDelegationRosterId?: string
-  disabled?: boolean
-  /** Show the work mode beside the icon at any width; the session composer shows it only when wide. */
-  showLabel?: boolean
-  /** Bump from `model_config_changed` so the catalog fetch refreshes. */
-  modelConfigChangeKey?: number
-  /** Bump from transport reconnect so a new server projection is fetched. */
-  connectionEpoch?: number
-  onUpdateProjectDefaults: (
-    profileId: string,
-    updates: {
-      managerPosture?: WorkModeId | null
-      delegationRosterId?: string | null
-    },
-  ) => void | Promise<void>
-  onUpdateSession: (
-    sessionAgentId: string,
-    updates: {
-      managerPosture?: { mode: 'inherit' } | { mode: 'override'; value: WorkModeId }
-      delegationRoster?: { mode: 'inherit' } | { mode: 'override'; rosterId: string }
-    },
-  ) => void | Promise<void>
-}
-
 export interface SessionContextModePickerConfig {
   originId: string
   httpClientRef: RefObject<SettingsApiClient | null>
@@ -126,8 +89,6 @@ export interface MessageInputProps {
   onClearReplyTarget?: () => void
   /** Builder manager sessions only: compact access to the existing session model override flow. */
   sessionModelPicker?: SessionModelPickerConfig
-  /** Builder manager sessions only: work mode and roster controls. */
-  sessionCoordinationPicker?: SessionCoordinationPickerConfig
   /** Local eligible Builder managers only: project/session context-mode control. */
   sessionContextModePicker?: SessionContextModePickerConfig
   /** Builder-local Secure Session controls. Transport and secret values stay outside the composer. */

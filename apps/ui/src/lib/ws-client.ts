@@ -17,7 +17,7 @@ import { getCatalogModelsByFamily } from '@forge/protocol'
 import type { CommandReceipt } from '@forge/protocol/environment-v2'
 import { EnvironmentOutbox } from './ws-client/environment-outbox'
 import { whenSettled } from './settled-request'
-import type { CodexElicitationDecision, CodexElicitationPersistScope, SessionGoalControlAction, SessionProjectAgentInput, WorkModeId } from '@forge/protocol'
+import type { CodexElicitationDecision, CodexElicitationPersistScope, SessionGoalControlAction, SessionProjectAgentInput } from '@forge/protocol'
 import type { ConversationSubscriptionReason } from './ws-client/types'
 import { applyLoadedModelCacheVisualizationSetting as reduceLoadedModelCacheVisualizationSetting } from './ws-client/model-cache-visualization-state'
 const GENERATION_TERMINAL_SETTLE_MS = 5_000
@@ -596,17 +596,6 @@ export class ManagerWsClient {
 
   }
 
-  async updateProjectDelegationDefaults(
-    profileId: string,
-    updates: {
-      managerPosture?: WorkModeId | null
-      delegationRosterId?: string | null
-    },
-  ): Promise<{ profileId: string }> {
-    await this.policy('project.update', { projectId: profileId, patch: { delegationDefaults: { ...(updates.managerPosture !== undefined ? { managerPosture: updates.managerPosture as 'delegation_first' | 'adaptive' | 'hands_on' | null } : {}), ...(updates.delegationRosterId !== undefined ? { rosterId: updates.delegationRosterId } : {}) } } })
-    return { profileId }
-
-  }
 
   async updateManagerCwd(managerId: string, cwd: string): Promise<{ managerId: string; cwd: string }> {
     await this.policy('project.update', { projectId: managerId, patch: { cwd } })
@@ -681,23 +670,6 @@ export class ManagerWsClient {
 
   }
 
-  async updateSessionDelegation(
-    sessionAgentId: string,
-    updates: {
-      managerPosture?: { mode: 'inherit' } | {
-        mode: 'override'
-        value: WorkModeId
-      }
-      delegationRoster?: { mode: 'inherit' } | {
-        mode: 'override'
-        rosterId: string
-      }
-    },
-  ): Promise<{ sessionAgentId: string }> {
-    await this.policy('session.configure', { sessionId: sessionAgentId, delegation: updates as RpcInput<'session.configure'>['delegation'] })
-    return { sessionAgentId }
-
-  }
 
   /** A session action's failure belongs to that session; it is shown only while that session is in view. */
   reportSessionError(agentId: string, message: string): void {
