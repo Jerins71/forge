@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { ChevronDown, ChevronRight, Ellipsis, Gauge, Loader2, Search, Star } from 'lucide-react'
+import { ChevronDown, ChevronRight, Ellipsis, Gauge, LayoutGrid, Loader2, Search, Star } from 'lucide-react'
 import {
   MANAGER_REASONING_LEVELS,
   type ManagerReasoningLevel,
@@ -245,7 +245,7 @@ function ModelPickerPanel({ rows, currentKey, initialTab, loading, error, onRetr
 }) {
   const [favorites, setFavorites] = useState(readFavorites)
   const favoriteSet = useMemo(() => new Set(favorites), [favorites])
-  const [tab, setTab] = useState<ModelPickerTab>(() => (favorites.length > 0 ? 'favorites' : initialTab))
+  const [tab, setTab] = useState<ModelPickerTab>(() => (favorites.length > 0 ? 'favorites' : 'all'))
   const [query, setQuery] = useState('')
   const currentIsLegacy = rows.some((row) => row.key === currentKey && !row.featured && row.tab !== 'other')
   const [legacyOpen, setLegacyOpen] = useState(currentIsLegacy)
@@ -260,7 +260,7 @@ function ModelPickerPanel({ rows, currentKey, initialTab, loading, error, onRetr
 
   const tabs = useMemo(() => {
     const present = new Set(rows.map((row) => row.tab))
-    return (['favorites', 'codex', 'claude', 'other'] as const).filter((candidate) => candidate === 'favorites' || present.has(candidate))
+    return (['favorites', 'all', 'codex', 'claude', 'other'] as const).filter((candidate) => candidate === 'favorites' || candidate === 'all' || present.has(candidate))
   }, [rows])
 
   const searching = query.trim().length > 0
@@ -272,10 +272,16 @@ function ModelPickerPanel({ rows, currentKey, initialTab, loading, error, onRetr
     if (tab === 'favorites') {
       return { current: favorites.map((key) => rows.find((row) => row.key === key)).filter((row): row is ModelPickerRow => Boolean(row)), legacy: [] }
     }
+    if (tab === 'all') {
+      // Every provider's current models, grouped by provider with the current one first.
+      const rank = (row: ModelPickerRow) => (row.tab === initialTab ? 0 : 1)
+      const listed = rows.filter((row) => row.tab !== 'other')
+      return { current: listed.filter((row) => row.featured).sort((a, b) => rank(a) - rank(b)), legacy: listed.filter((row) => !row.featured).sort((a, b) => rank(a) - rank(b)) }
+    }
     const inTab = rows.filter((row) => row.tab === tab)
     if (tab === 'other') return { current: inTab, legacy: [] }
     return { current: inTab.filter((row) => row.featured), legacy: inTab.filter((row) => !row.featured) }
-  }, [favorites, query, rows, searching, tab])
+  }, [favorites, initialTab, query, rows, searching, tab])
   const visible = legacyOpen ? [...current, ...legacy] : current
 
   useEffect(() => { setHighlight(0) }, [tab, query])
@@ -354,14 +360,14 @@ function ModelPickerPanel({ rows, currentKey, initialTab, loading, error, onRetr
             type="button"
             role="tab"
             aria-selected={!searching && tab === candidate}
-            aria-label={candidate === 'favorites' ? 'Favorites' : candidate === 'codex' ? 'Codex' : candidate === 'claude' ? 'Claude' : 'Other providers'}
+            aria-label={candidate === 'favorites' ? 'Favorites' : candidate === 'all' ? 'All providers' : candidate === 'codex' ? 'Codex' : candidate === 'claude' ? 'Claude' : 'Other providers'}
             onClick={() => { setTab(candidate); setQuery(''); setLegacyOpen(false) }}
             className={cn(
               'relative inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground',
               !searching && tab === candidate && 'text-foreground before:absolute before:-left-1.5 before:top-1.5 before:h-5 before:w-0.5 before:rounded-full before:bg-primary',
             )}
           >
-            {candidate === 'favorites' ? <Star className="size-4" strokeWidth={1.75} /> : <ProviderMark tab={candidate} className="size-4" />}
+            {candidate === 'favorites' ? <Star className="size-4" strokeWidth={1.75} /> : candidate === 'all' ? <LayoutGrid className="size-4" strokeWidth={1.75} /> : <ProviderMark tab={candidate} className="size-4" />}
           </button>
         ))}
       </div>

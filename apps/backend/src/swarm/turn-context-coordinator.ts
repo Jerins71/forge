@@ -236,10 +236,12 @@ export class TurnContextCoordinator<TCodexGate=unknown,TCodexDelegation=unknown,
     const context=this.activeTurnByAgentId.get(agentId)?.parentContext;
     return context ? { ...context,outputTarget:cloneAssistantOutputTarget(context.outputTarget) } : undefined;
   }
-  hasPendingSupersedingUserInput(_agentId:string,_activeTurnId?:string):boolean {
-    // The core keeps follow-ups queued and steers within the same native root.
-    // Neither delivery invalidates the running turn's visible output.
-    return false;
+  hasPendingSupersedingUserInput(agentId:string,_activeTurnId?:string):boolean {
+    // The core keeps follow-ups queued and steers within the same native root, so a visible turn's
+    // output stands. A hidden onboarding turn's greeting does not: a user message queued behind it
+    // gets the real answer, and the greeting would only precede that answer.
+    if (!this.isActiveTurnHidden(agentId)) return false;
+    return (this.core?.read(agentId).pendingRunIds ?? []).some(id => this.contexts.get(agentId)?.get(id)?.source === "user_input");
   }
   markProviderCycleActivated(_agentId:string):void {}
   getActiveExternalProjectAgentTurn(agentId:string):ActiveExternalProjectAgentTurn|undefined {

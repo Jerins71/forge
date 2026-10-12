@@ -108,6 +108,7 @@ export async function startFixtureServer(index = 0) {
   const refusals: Array<{ code: string; message: string; retryable: boolean }> = []
   let browserGeneration = 0
   let raceBrowserHydration = false
+  let denyBrowserHost = false
   const browserSnapshot = { schemaVersion: 2, sessionAgentId: 'session-1', profileId: 'forge', hostingState: 'hosted', revision: 1, tabs: [], activeTabId: null, defaultTabId: null, panelVisible: false, recentActions: [], createdAt: '2026-10-09T00:00:00.000Z', updatedAt: '2026-10-09T00:00:00.000Z' }
   function resultAlreadyBrowser(socket: WebSocket, subscriptionId: string) { send(socket, { type: 'stream', subscriptionId, item: { snapshot: browserSnapshot } }) }
   // Embedded browser host commands, reassembled from browser.host.send parts.
@@ -243,6 +244,10 @@ export async function startFixtureServer(index = 0) {
         else finish()
         return
       }
+      if (method === 'browser.host.attach' && denyBrowserHost) {
+        error('FORBIDDEN')
+        return
+      }
       if (
         method === 'shell.subscribe' ||
         method === 'session.subscribe' ||
@@ -332,6 +337,7 @@ export async function startFixtureServer(index = 0) {
     refuseNext: (...errors: Array<{ code: string; message: string; retryable: boolean }>) => { refusals.push(...errors) },
     browserHostCommands,
     raceBrowserHydration: () => { raceBrowserHydration = true },
+    denyBrowserHost: () => { denyBrowserHost = true },
     subscriptions,
     get connections() {
       return connections

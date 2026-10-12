@@ -619,6 +619,25 @@ it("preserves project onboarding under admission and never bootstraps a duplicat
   expect(send).toHaveBeenCalledTimes(1);
 });
 
+it("drops the onboarding greeting when the user's message is already queued behind it", async () => {
+  const f = await fixture(true); const { core } = await makeCore(f);
+  cleanup.unshift(() => core.close());
+  const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady(); cleanup.unshift(async () => mirror.dispose());
+  // The new session's onboarding turn stays running, as a real provider's would while it orients.
+  const created = f.manager.onCreateRuntime;
+  f.manager.onCreateRuntime = async input => { await created?.(input); (input.runtime as unknown as { busy: boolean }).busy = true; };
+  const principal = { deviceSessionId: "policy-device", scopes: new Set(["workspace:write"] as const) };
+  const receipt = await core.controlService.execute(principal, "project.create", { commandId: randomUUID(), title: "Greeting", cwd: f.config.defaultCwd, model: { provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "high" } });
+  await core.effectWorker.drain();
+  const sessionId = receipt.result!.sessionId!;
+  // The onboarding turn is still running; alone, its greeting is the user's welcome.
+  expect(loadState(core.database).threads[sessionId]?.activeRunId).toBeDefined();
+  expect(await f.manager.publishToUser(sessionId, "Hi - what would you like to build?", "speak_to_user")).toMatchObject({ published: true });
+  await core.controlService.execute(f.paired.principal, "session.send", { commandId: randomUUID(), sessionId, message: { text: "What is the package name?", artifactIds: [] } });
+  await core.effectWorker.drain();
+  expect(await f.manager.publishToUser(sessionId, "Hi - what would you like to build?", "speak_to_user")).toMatchObject({ published: false, reason: "superseded_by_user_input" });
+});
+
 it("marks lost policy claims interrupted on restart and never repeats the callback", async () => {
   const f = await fixture(true); let { core } = await makeCore(f);
   const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();

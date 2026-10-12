@@ -1,6 +1,6 @@
 import type { ManagerModelSelectRow } from '@/lib/manager-model-selection'
 
-export type ModelPickerTab = 'favorites' | 'codex' | 'claude' | 'other'
+export type ModelPickerTab = 'favorites' | 'all' | 'codex' | 'claude' | 'other'
 
 /** Current models, in display order. Everything else on these providers is listed under Legacy models. */
 const FEATURED_MODELS: Record<string, { isNew?: boolean }> = {
@@ -17,7 +17,7 @@ const FEATURED_ORDER = Object.keys(FEATURED_MODELS)
 export interface ModelPickerRow extends ManagerModelSelectRow {
   name: string
   providerLabel: string
-  tab: Exclude<ModelPickerTab, 'favorites'>
+  tab: Exclude<ModelPickerTab, 'favorites' | 'all'>
   featured: boolean
   isNew: boolean
 }
@@ -28,7 +28,8 @@ export function toModelPickerRow(row: ManagerModelSelectRow): ModelPickerRow {
   return {
     ...row,
     name: row.displayName.replace(/\s*\((?:Claude|Codex) native\)$/, ''),
-    providerLabel: tab === 'codex' ? 'Codex' : tab === 'claude' ? 'Claude' : row.providerDisplayName,
+    // The same model can run on the Claude CLI or straight on the Anthropic API, so say which.
+    providerLabel: tab === 'codex' ? 'Codex' : tab === 'claude' ? 'Claude (subscription CLI)' : row.provider === 'anthropic' ? 'Anthropic API' : row.providerDisplayName,
     tab,
     featured: Boolean(featured),
     isNew: Boolean(featured?.isNew),

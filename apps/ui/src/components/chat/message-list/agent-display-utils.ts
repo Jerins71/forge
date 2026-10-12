@@ -1,4 +1,4 @@
-import type { AgentDescriptor } from '@forge/protocol'
+import { getCatalogModel, type AgentDescriptor } from '@forge/protocol'
 
 /** Resolved display metadata for an agent, suitable for rendering in tool/message rows. */
 export interface AgentDisplayMeta {
@@ -9,6 +9,8 @@ export interface AgentDisplayMeta {
   secondaryLabel: string | null
   /** Full title including raw agentId and all metadata for tooltip/audit. */
   title: string
+  /** Who speaks in this agent's replies: its model, never the session title (often the first prompt). */
+  assistantLabel: string
 }
 
 /**
@@ -47,6 +49,9 @@ export function buildAgentDisplayMap(agents: AgentDescriptor[]): Map<string, Age
       primaryLabel,
       secondaryLabel,
       title: titleParts.join(' — '),
+      assistantLabel: agent.model?.modelId
+        ? (getCatalogModel(agent.model.modelId, agent.model.provider)?.displayName ?? agent.model.modelId).replace(/\s*\((?:Claude|Codex) native\)$/, '')
+        : primaryLabel,
     })
   }
 
