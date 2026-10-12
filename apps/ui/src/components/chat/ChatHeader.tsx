@@ -29,6 +29,7 @@ import type {
   GenerationThroughputLiveMeasurement,
 } from '@forge/protocol'
 import type { SessionLineageSnapshot } from '@forge/protocol/environment-v2'
+import { formatAgentStatus } from './agent-status'
 
 /** Below this header width the secondary controls live in the … menu. */
 const COMPACT_HEADER_WIDTH = 720
@@ -128,24 +129,6 @@ interface ChatHeaderProps {
   ) => Promise<void>
   onSessionFeedbackClearComment?: (scope: 'message' | 'session', targetId: string) => Promise<void>
   isFeedbackSubmitting?: boolean
-}
-
-export function formatAgentStatus(status: AgentStatus | null, role?: 'manager' | 'worker' | null): string {
-  if (!status) return 'Idle'
-
-  switch (status) {
-    case 'streaming':
-      return 'Streaming'
-    case 'idle':
-      return 'Idle'
-    case 'terminated':
-      return 'Terminated'
-    case 'stopped':
-      return 'Stopped'
-    case 'error':
-      // The sidebar calls a worker whose turn failed "Failed"; the header says the same.
-      return role === 'worker' ? 'Failed' : 'Error'
-  }
 }
 
 function ChannelToggleButton({

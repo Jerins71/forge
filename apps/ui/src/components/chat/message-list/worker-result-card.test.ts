@@ -4,7 +4,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it } from 'vitest'
 import { ConversationMessageRow } from './ConversationMessageRow'
-import { formatAgentStatus } from '../ChatHeader'
+import { formatAgentStatus } from '../agent-status'
 
 const card = (text: string) => renderToStaticMarkup(createElement(ConversationMessageRow, { message: {
   type: 'conversation_message', id: 'result', agentId: 'session', role: 'system', source: 'worker_report', sourceWorkerId: 'reviewer',
