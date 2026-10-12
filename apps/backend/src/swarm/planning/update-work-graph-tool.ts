@@ -26,8 +26,7 @@ export interface UpdateWorkGraphResult extends SessionPlanSnapshot {
   dispatched: Array<{
     nodeId: string
     workerId: string
-    requestedRoute: string
-    resolvedRouteId?: string
+    preset?: string
   }>
   dispatchFailures: Array<{ nodeId: string; message: string }>
   cancelledWorkerIds: string[]
@@ -88,11 +87,11 @@ export const updateWorkGraphToolSchema = Type.Object({
       maxLength: MAX_WORK_GRAPH_ACCEPTANCE_LENGTH,
       description: 'Smallest manager-verifiable check that proves this independently acceptable outcome before marking it completed.',
     })),
-    route: Type.Optional(Type.String({
+    preset: Type.Optional(Type.String({
       minLength: 1,
       maxLength: 64,
-      pattern: '^(auto|[a-z0-9][a-z0-9-]{0,63})$',
-      description: 'Named specialist from the active roster. Omit for the node kind default; name one only when its guidance clearly fits.',
+      pattern: '^[a-z0-9][a-z0-9-]*$',
+      description: 'Worker preset name from the preset list in your instructions. Omit to run the node on your own model.',
     })),
   }, { additionalProperties: false }), {
     minItems: 1,
@@ -114,7 +113,7 @@ export function buildUpdateWorkGraphTool(
       'If one bounded planning investigation is needed before the graph is knowable, accept that result first and do not create speculative downstream nodes.',
       'Forge automatically dispatches ready non-decision nodes. Do not combine graph-owned work with update_plan or manual spawn_agent calls.',
       'Worker success moves a node to awaiting_review; personally verify its result, then use accept_work_graph_node to complete only that node and release dependents.',
-      'Use waiting decision nodes for user gates. Re-submit a blocked node as pending to retry it; Forge uses the prior route capability-escalation target when one was configured.',
+      'Use waiting decision nodes for user gates. Re-submit a blocked node as pending to retry it; change its preset first if a different model should take it.',
     ].join(' '),
     parameters: updateWorkGraphToolSchema,
     async execute(toolCallId, params) {

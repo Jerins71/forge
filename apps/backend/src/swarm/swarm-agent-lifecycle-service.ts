@@ -1,15 +1,8 @@
 import type { AssignmentSelection } from "../environment/control/orchestration/assignments.js";
 import type { CoreAgentMessagePort } from "./core-agent-message-port.js";
-import { blocksOpenRouterFallback } from "./runtime/pi/openrouter-request-policy.js";
-import type {
-  DelegationRoster,
-  DelegationRoute,
-  EffortTier,
-  ManagerExactModelSelection,
-  TierConfig,
-} from "@forge/protocol";
+import type { ManagerExactModelSelection } from "@forge/protocol";
 import { getSessionFilePath, getWorkerSessionFilePath } from "./data-paths.js";
-import { normalizeThinkingLevelForModelDescriptor, resolveModelDescriptorFromPreset, inferProviderFromModelId, parseSwarmModelPreset, parseSwarmReasoningLevel, assertSwarmModelIdNotRetired } from "./catalog/model-presets.js";
+import { normalizeThinkingLevelForModelDescriptor, resolveModelDescriptorFromPreset, parseSwarmModelPreset, parseSwarmReasoningLevel, assertSwarmModelIdNotRetired } from "./catalog/model-presets.js";
 import {
   DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS,
   type RuntimeAcquisitionRequirements,
@@ -55,21 +48,11 @@ import {
   normalizeAgentId,
   normalizeOptionalAgentId,
   normalizeOptionalModelId,
-  resolveNextCapacityFallbackModelId,
-  shouldRetrySpecialistSpawnWithFallback
+  resolveNextCapacityFallbackModelId
 } from "./swarm-manager-utils.js";
 import { resolveExactManagerModelSelection } from "./catalog/manager-model-selection.js";
 import { resolveModelCredentialProvider } from "./secrets-env-service.js";
 import { modelCatalogService } from "./catalog/model-catalog-service.js";
-import {
-  getTierAttributionId,
-  normalizeEffortTier,
-  resolveLegacySpecialistRewrite,
-  resolveTierConfig,
-  resolveTierConfigs,
-  DEFAULT_TIER_CONFIGS,
-  EFFORT_TIER_ORDER,
-} from "./agents/specialists/specialist-registry.js";
 import {
   assertForgeRuntimeEligibleDescriptor,
   interruptExternalThreadWorkerDescriptor,
@@ -77,24 +60,16 @@ import {
   shouldPreserveExternalThreadWorkerOnSessionStop,
   shouldInterruptExternalThreadSidecar,
 } from "./external-thread-compatibility.js";
-import { isBuiltinModePromptId } from "./worker-mode-prompt.js";
 import type { SecureWorkerLifecyclePort } from "./secure-sessions/secure-session-lifecycle-port.js";
-import { resolveDelegationRoute } from "./specialists/delegation-roster-store.js";
-import { getWorkerBehaviorModeLensId } from "./specialists/delegation-policy.js";
+import {
+  mergeWorkerPresets,
+  readWorkerPresetSettings,
+  specialistsToWorkerPresets,
+  type ResolvedWorkerPreset,
+} from "./specialists/worker-presets.js";
 import { RETIRED_PROFILE_IDS } from "./agents/descriptor-store/descriptor-codec.js";
 
 const MANAGER_ARCHETYPE_ID = "manager";
-
-function getDefaultReasoningLevelForModel(provider: string, modelId: string): string {
-  return modelCatalogService.getModel(modelId, provider)?.defaultReasoningLevel ?? "xhigh";
-}
-
-function getDelegationTierDisplayName(tier: EffortTier, configuredName: string): string {
-  if (tier === "fast") return "Support";
-  if (tier === "standard") return "Routine";
-  if (tier === "deep") return "Deep";
-  return configuredName;
-}
 
 interface ResolvedSpecialistDefinitionLike {
   specialistId: string;
@@ -105,15 +80,12 @@ interface ResolvedSpecialistDefinitionLike {
   modelId?: string;
   provider?: string;
   reasoningLevel?: SwarmReasoningLevel;
-  fallbackModelId?: string;
-  fallbackProvider?: string;
-  fallbackReasoningLevel?: SwarmReasoningLevel;
+  builtin?: boolean;
   webSearch?: boolean;
   promptBody: string;
   available: boolean;
   availabilityCode?: string;
   availabilityMessage?: string;
-  defaultTier?: EffortTier;
 }
 
 interface ModelCapacityBlockLike {
@@ -572,40 +544,30 @@ export class SwarmAgentLifecycleService {
     const agentId = this.options.generateUniqueAgentId(requestedAgentId);
     const createdAt = this.options.now();
     const managerProfileId = manager.profileId ?? manager.agentId;
-    const rawSpecialist = input.specialist?.trim();
-    const requestedTier = normalizeEffortTier(input.tier);
-    const rawLens = input.lens?.trim();
-    let requestedLensId = rawLens ? await this.options.normalizeSpecialistHandle(rawLens) : undefined;
-    const requestedRoute = input.route?.trim();
-    let requestedSpecialistId: string | undefined;
-    let tierSelection: { tier: EffortTier; lens?: string; legacySpecialistId?: string } | undefined;
-
-    if (rawSpecialist) {
-      requestedSpecialistId = await this.options.normalizeSpecialistHandle(rawSpecialist);
-      const rewrite = requestedSpecialistId ? resolveLegacySpecialistRewrite(requestedSpecialistId) : undefined;
-      if (rewrite) {
-        tierSelection = {
-          ...rewrite,
-          legacySpecialistId: requestedSpecialistId,
-        };
-        requestedSpecialistId = undefined;
+    let preset: ResolvedWorkerPreset | undefined;
+    if (input.preset !== undefined) {
+      const requested = input.preset.trim();
+      const presets = await this.resolveWorkerPresetsForManager(manager);
+      preset = presets.find((entry) => entry.name === requested);
+      if (!preset) {
+        throw new Error(
+          presets.length > 0
+            ? `Unknown preset "${requested}". Valid presets: ${presets.map((entry) => entry.name).join(", ")}. Omit preset to use your own model.`
+            : `Unknown preset "${requested}". No presets are configured; omit preset to use your own model.`
+        );
       }
-    }
-
-    if (input.tier !== undefined && !requestedTier) {
-      throw new Error(`spawn_agent.tier must be one of ${EFFORT_TIER_ORDER.join("|")}`);
-    }
-
-    if (!tierSelection && requestedTier) {
-      tierSelection = { tier: requestedTier, ...(requestedLensId ? { lens: requestedLensId } : {}) };
-    } else if (tierSelection && requestedLensId) {
-      tierSelection = { ...tierSelection, lens: requestedLensId };
-    } else if (!tierSelection && requestedLensId && !requestedRoute) {
-      tierSelection = { tier: "standard", lens: requestedLensId };
+    } else if (input.specialist !== undefined) {
+      // Internal only: Forge-owned builtin instructions (the Codex plugin worker) on the manager's model.
+      const specialistId = await this.options.normalizeSpecialistHandle(input.specialist);
+      const specialist = (await this.resolveSpecialistRoster(manager)).find((entry) => entry.specialistId === specialistId);
+      if (!specialist || !specialist.enabled) {
+        throw new Error(`Unknown specialist: ${input.specialist}`);
+      }
+      [preset] = specialistsToWorkerPresets([{ ...specialist, builtin: false }], manager.model);
     }
 
     if (
-      (requestedSpecialistId || tierSelection || requestedRoute) &&
+      preset &&
       (
         input.model !== undefined ||
         input.modelId !== undefined ||
@@ -613,278 +575,33 @@ export class SwarmAgentLifecycleService {
         input.archetypeId !== undefined
       )
     ) {
-      throw new Error(
-        "Cannot combine specialist/route/tier mode with model, prompt, or archetype overrides."
-      );
-    }
-
-    if (requestedSpecialistId && (input.tier !== undefined || requestedLensId || requestedRoute)) {
-      throw new Error("Cannot combine a saved custom specialist with a roster specialist, legacy tier, or task mode.");
-    }
-    if (requestedRoute && input.tier !== undefined) {
-      throw new Error("Cannot combine route with legacy tier selection.");
+      throw new Error("Cannot combine a preset with model, prompt, or archetype overrides.");
     }
 
     let model: AgentModelDescriptor;
     let archetypeId: string | undefined;
-    let specialist: ResolvedSpecialistDefinitionLike | undefined;
-    let specialistFallbackModel: AgentModelDescriptor | undefined;
     let explicitSystemPrompt: string | undefined;
     let webSearch = false;
-    let selectedTierConfig: TierConfig | undefined;
-    let selectedDelegationRoster: DelegationRoster | undefined;
-    let selectedDelegationRoute: DelegationRoute | undefined;
 
-    const resolveRoster = async () => this.options.resolveSpecialistRosterForManager
-      ? await this.options.resolveSpecialistRosterForManager(manager)
-      : await this.options.resolveSpecialistRosterForProfile(managerProfileId);
-
-    if (requestedRoute) {
-      const behaviorMode = input.behaviorMode ?? "general";
-      const resolved = await resolveDelegationRoute(
-        this.options.dataDir,
-        manager,
-        requestedRoute,
-        behaviorMode,
-      );
-      selectedDelegationRoster = resolved.roster;
-      selectedDelegationRoute = resolved.route;
-      const taskBehaviorMode = requestedRoute === "auto"
-        ? behaviorMode
-        : selectedDelegationRoute.behaviorMode;
-      if (taskBehaviorMode) {
-        const specialistId = getWorkerBehaviorModeLensId(taskBehaviorMode);
-        requestedLensId = specialistId
-          ? await this.options.normalizeSpecialistHandle(specialistId)
-          : undefined;
+    if (preset) {
+      // Only a model the user chose is checked: a file that names none runs on the manager's,
+      // and the internal Codex plugin worker is bound to its own runtime after spawn.
+      const usesManagerModel = preset.provider === manager.model.provider && preset.modelId === manager.model.modelId;
+      if (input.preset !== undefined && !usesManagerModel && !modelCatalogService.isKnownModelId(preset.modelId, preset.provider)) {
+        throw new Error(`Preset "${preset.name}" uses a model that is not available: ${preset.provider}/${preset.modelId}.`);
       }
-
-      if (requestedLensId) {
-        const roster = await resolveRoster();
-        specialist = roster.find((entry) => entry.specialistId === requestedLensId);
-        if (!specialist) {
-          throw new Error(`Unknown lens: ${requestedLensId}. See manager system prompt for available modes.`);
-        }
-        if (!specialist.enabled) {
-          throw new Error(`Lens "${requestedLensId}" is disabled for this profile. Enable it before spawning.`);
-        }
-        if (!specialist.available && !isBuiltinModePromptId(requestedLensId)) {
-          const reason = specialist.availabilityMessage?.trim()
-            || specialist.availabilityCode
-            || "unavailable with current auth/configuration";
-          throw new Error(`Lens "${requestedLensId}" is currently unavailable: ${reason}`);
-        }
-      }
-
       model = {
-        provider: selectedDelegationRoute.provider,
-        modelId: selectedDelegationRoute.modelId,
-        thinkingLevel: selectedDelegationRoute.reasoningLevel,
+        provider: preset.provider,
+        modelId: preset.modelId,
+        thinkingLevel: parseSwarmReasoningLevel(input.reasoningLevel, "spawn_agent.reasoningLevel") ?? preset.reasoningLevel,
       };
       model.thinkingLevel = normalizeThinkingLevelForModelDescriptor(model);
-      const routePrimaryCapacityBlocked = Boolean(
-        this.getActiveModelCapacityBlock(model.provider, model.modelId),
-      );
-
-      if (selectedDelegationRoute.availabilityFallback) {
-        specialistFallbackModel = {
-          provider: selectedDelegationRoute.availabilityFallback.provider,
-          modelId: selectedDelegationRoute.availabilityFallback.modelId,
-          thinkingLevel: selectedDelegationRoute.availabilityFallback.reasoningLevel,
-        };
-        specialistFallbackModel.thinkingLevel =
-          normalizeThinkingLevelForModelDescriptor(specialistFallbackModel);
-      }
-      model = routePrimaryCapacityBlocked && specialistFallbackModel && !blocksOpenRouterFallback(model)
-        ? { ...specialistFallbackModel }
-        : this.resolveSpawnModelWithCapacityFallback(model);
-
-      archetypeId = undefined;
-      explicitSystemPrompt = undefined;
-      if (specialist?.webSearch) webSearch = true;
-    } else if (tierSelection) {
-      let tierConfig = await resolveTierConfig(this.options.dataDir, tierSelection.tier);
-      selectedTierConfig = tierConfig;
-      const roster = this.options.resolveSpecialistRosterForManager
-        ? await this.options.resolveSpecialistRosterForManager(manager)
-        : await this.options.resolveSpecialistRosterForProfile(managerProfileId);
-      const lensId = tierSelection.lens;
-      if (lensId) {
-        specialist = roster.find((entry) => entry.specialistId === lensId);
-        if (!specialist) {
-          throw new Error(
-            `Unknown lens: ${lensId}. See manager system prompt for available lenses.`
-          );
-        }
-        if (!specialist.enabled) {
-          throw new Error(`Lens "${lensId}" is disabled for this profile. Enable it before spawning.`);
-        }
-        if (
-          !specialist.available &&
-          !(input.policyControlledModel === true && isBuiltinModePromptId(lensId))
-        ) {
-          const reason =
-            specialist.availabilityMessage?.trim() ||
-            (specialist.availabilityCode
-              ? `availability code: ${specialist.availabilityCode}`
-              : "unavailable with current auth/configuration");
-          throw new Error(`Lens "${lensId}" is currently unavailable: ${reason}`);
-        }
-        if (!input.tier && !tierSelection.legacySpecialistId && specialist.defaultTier) {
-          tierSelection = { ...tierSelection, tier: specialist.defaultTier };
-          tierConfig = await resolveTierConfig(this.options.dataDir, specialist.defaultTier);
-          selectedTierConfig = tierConfig;
-        }
-      }
-
-      // New mode + policy delegation lets the policy exclusively own model,
-      // reasoning, and fallback. Legacy direct specialist/tier calls retain
-      // their saved model behavior for compatibility.
-      const modelConfig = input.policyControlledModel === true || !specialist?.modelId
-        ? tierConfig
-        : {
-            provider: specialist.provider || inferProviderFromModelId(specialist.modelId),
-            modelId: specialist.modelId,
-            reasoningLevel: specialist.reasoningLevel,
-            fallbackModelId: specialist.fallbackModelId,
-            fallbackProvider: specialist.fallbackProvider,
-            fallbackReasoningLevel: specialist.fallbackReasoningLevel,
-          };
-      if (!modelConfig.provider) {
-        throw new Error(`Tier "${tierSelection.tier}" has an unknown modelId provider mapping: ${modelConfig.modelId}`);
-      }
-
-      const reasoningLevelOverride = parseSwarmReasoningLevel(
-        input.reasoningLevel,
-        "spawn_agent.reasoningLevel"
-      );
-      model = {
-        provider: modelConfig.provider,
-        modelId: modelConfig.modelId,
-        thinkingLevel: reasoningLevelOverride
-          ?? modelConfig.reasoningLevel
-          ?? getDefaultReasoningLevelForModel(modelConfig.provider, modelConfig.modelId),
-      };
-      model.thinkingLevel = normalizeThinkingLevelForModelDescriptor(model);
-      model = this.resolveSpawnModelWithCapacityFallback(model);
-
-      if (modelConfig.fallbackModelId) {
-        const inferredFallbackProvider = modelConfig.fallbackProvider || inferProviderFromModelId(modelConfig.fallbackModelId);
-        if (inferredFallbackProvider) {
-          specialistFallbackModel = {
-            provider: inferredFallbackProvider,
-            modelId: modelConfig.fallbackModelId,
-            thinkingLevel: modelConfig.fallbackReasoningLevel ?? model.thinkingLevel
-          };
-          specialistFallbackModel.thinkingLevel = normalizeThinkingLevelForModelDescriptor(specialistFallbackModel);
-          specialistFallbackModel = this.resolveSpawnModelWithCapacityFallback(specialistFallbackModel);
-        }
-      }
-
-      archetypeId = undefined;
-      // Resolve the prompt after descriptor attribution so shipped behavior
-      // modes receive the stable worker core while custom specialists remain
-      // standalone.
-      explicitSystemPrompt = undefined;
-      if (specialist?.webSearch) {
-        webSearch = true;
-      }
-    } else if (requestedSpecialistId) {
-      const roster = await resolveRoster();
-      specialist = roster.find((entry) => entry.specialistId === requestedSpecialistId);
-      if (!specialist) {
-        throw new Error(
-          `Unknown specialist: ${requestedSpecialistId}. See manager system prompt for available specialists.`
-        );
-      }
-
-      if (!specialist.enabled) {
-        throw new Error(
-          `Specialist "${requestedSpecialistId}" is disabled for this profile. Enable it before spawning.`
-        );
-      }
-
-      if (!specialist.available) {
-        const reason =
-          specialist.availabilityMessage?.trim() ||
-          (specialist.availabilityCode
-            ? `availability code: ${specialist.availabilityCode}`
-            : "unavailable with current auth/configuration");
-        throw new Error(`Specialist "${requestedSpecialistId}" is currently unavailable: ${reason}`);
-      }
-
-      if (!specialist.modelId) {
-        const tier = specialist.defaultTier ?? "standard";
-        tierSelection = { tier, lens: specialist.specialistId, legacySpecialistId: requestedSpecialistId };
-        const tierConfig = await resolveTierConfig(this.options.dataDir, tier);
-        selectedTierConfig = tierConfig;
-        const reasoningLevelOverride = parseSwarmReasoningLevel(
-          input.reasoningLevel,
-          "spawn_agent.reasoningLevel"
-        );
-        model = {
-          provider: tierConfig.provider,
-          modelId: tierConfig.modelId,
-          thinkingLevel: reasoningLevelOverride ?? tierConfig.reasoningLevel ?? "xhigh",
-        };
-        model.thinkingLevel = normalizeThinkingLevelForModelDescriptor(model);
-        model = this.resolveSpawnModelWithCapacityFallback(model);
-        if (tierConfig.fallbackModelId) {
-          specialistFallbackModel = {
-            provider: tierConfig.fallbackProvider ?? inferProviderFromModelId(tierConfig.fallbackModelId) ?? tierConfig.provider,
-            modelId: tierConfig.fallbackModelId,
-            thinkingLevel: tierConfig.fallbackReasoningLevel ?? model.thinkingLevel,
-          };
-          specialistFallbackModel.thinkingLevel = normalizeThinkingLevelForModelDescriptor(specialistFallbackModel);
-          specialistFallbackModel = this.resolveSpawnModelWithCapacityFallback(specialistFallbackModel);
-        }
-        archetypeId = undefined;
-        explicitSystemPrompt = specialist.promptBody;
-        if (specialist.webSearch) {
-          webSearch = true;
-        }
+      if (preset.instructions) {
+        explicitSystemPrompt = preset.instructions;
       } else {
-        const inferredProvider = specialist.provider || inferProviderFromModelId(specialist.modelId);
-        if (!inferredProvider) {
-        throw new Error(
-          `Specialist "${requestedSpecialistId}" has an unknown modelId provider mapping: ${specialist.modelId}`
-        );
+        archetypeId = await this.options.resolveSpawnWorkerArchetypeId(input, agentId, managerProfileId);
       }
-
-        const reasoningLevelOverride = parseSwarmReasoningLevel(
-        input.reasoningLevel,
-        "spawn_agent.reasoningLevel"
-      );
-
-        const defaultReasoningLevel = getDefaultReasoningLevelForModel(
-          inferredProvider,
-          specialist.modelId,
-        );
-
-        model = {
-        provider: inferredProvider,
-        modelId: specialist.modelId,
-        thinkingLevel: reasoningLevelOverride ?? specialist.reasoningLevel ?? defaultReasoningLevel
-      };
-        model.thinkingLevel = normalizeThinkingLevelForModelDescriptor(model);
-        model = this.resolveSpawnModelWithCapacityFallback(model);
-
-        if (specialist.fallbackModelId) {
-        const inferredFallbackProvider = specialist.fallbackProvider || inferProviderFromModelId(specialist.fallbackModelId);
-        if (inferredFallbackProvider) {
-          specialistFallbackModel = {
-            provider: inferredFallbackProvider,
-            modelId: specialist.fallbackModelId,
-            thinkingLevel: specialist.fallbackReasoningLevel ?? model.thinkingLevel
-          };
-          specialistFallbackModel.thinkingLevel = normalizeThinkingLevelForModelDescriptor(specialistFallbackModel);
-          specialistFallbackModel = this.resolveSpawnModelWithCapacityFallback(specialistFallbackModel);
-        }
-      }
-
-        archetypeId = undefined;
-        explicitSystemPrompt = specialist.promptBody;
-      }
+      webSearch = preset.webSearch === true;
     } else {
       const requestedModel = this.resolveSpawnModel(input, manager.model);
       model = this.resolveSpawnModelWithCapacityFallback(requestedModel);
@@ -893,20 +610,8 @@ export class SwarmAgentLifecycleService {
       webSearch = input.webSearch === true;
     }
 
-    if (
-      input.requiresSecureRuntime
-      && !supportsSecureRuntimeProvider(model.provider)
-    ) {
-      if (
-        specialistFallbackModel
-        && !blocksOpenRouterFallback(model)
-        && supportsSecureRuntimeProvider(specialistFallbackModel.provider)
-      ) {
-        model = { ...specialistFallbackModel };
-        specialistFallbackModel = undefined;
-      } else {
-        throw new Error(SECURE_RUNTIME_PROVIDER_UNSUPPORTED_MESSAGE);
-      }
+    if (input.requiresSecureRuntime && !supportsSecureRuntimeProvider(model.provider)) {
+      throw new Error(SECURE_RUNTIME_PROVIDER_UNSUPPORTED_MESSAGE);
     }
 
     const descriptor: AgentDescriptor = {
@@ -933,56 +638,17 @@ export class SwarmAgentLifecycleService {
       ...(webSearch ? { webSearch: true } : {})
     };
 
-    if (tierSelection) {
-      const tierDisplayName = getDelegationTierDisplayName(
-        tierSelection.tier,
-        selectedTierConfig?.displayName ?? DEFAULT_TIER_CONFIGS[tierSelection.tier].displayName,
-      );
-      descriptor.specialistTier = tierSelection.tier;
-      if (tierSelection.lens) {
-        descriptor.specialistLens = tierSelection.lens;
-      }
-      descriptor.specialistId = getTierAttributionId(tierSelection.tier, tierSelection.lens);
-      descriptor.specialistDisplayName = specialist
-        ? `${tierDisplayName} — ${specialist.displayName}`
-        : tierDisplayName;
-      descriptor.specialistColor = specialist?.color ?? selectedTierConfig?.color ?? DEFAULT_TIER_CONFIGS[tierSelection.tier].color;
-      if (specialist?.webSearch) {
-        descriptor.webSearch = true;
-      }
-    } else if (selectedDelegationRoster && selectedDelegationRoute) {
-      descriptor.delegationRosterId = selectedDelegationRoster.rosterId;
-      descriptor.delegationRosterRevision = selectedDelegationRoster.revision;
-      descriptor.delegationRouteId = selectedDelegationRoute.routeId;
-      descriptor.delegationRouteLabel = selectedDelegationRoute.label;
-      if (requestedLensId) {
-        descriptor.specialistLens = requestedLensId;
-      }
-      descriptor.specialistId = `route:${selectedDelegationRoute.routeId}`;
-      descriptor.specialistDisplayName = selectedDelegationRoute.label;
-      descriptor.specialistColor = selectedDelegationRoute.color ?? "#7c3aed";
-      if (specialistFallbackModel) {
-        descriptor.delegationFallbackModel = { ...specialistFallbackModel };
-      }
-      if (selectedDelegationRoute.capabilityEscalationRouteId) {
-        descriptor.delegationCapabilityEscalationRouteId =
-          selectedDelegationRoute.capabilityEscalationRouteId;
-      }
-      if (specialist?.webSearch) descriptor.webSearch = true;
-    } else if (specialist) {
-      descriptor.specialistId = specialist.specialistId;
-      descriptor.specialistDisplayName = specialist.displayName;
-      descriptor.specialistColor = specialist.color;
-      if (specialist.webSearch) {
-        descriptor.webSearch = true;
-      }
+    if (preset) {
+      descriptor.specialistId = preset.name;
+      descriptor.specialistDisplayName = preset.displayName ?? preset.name;
+      if (preset.color) descriptor.specialistColor = preset.color;
     }
 
     await this.options.prepareWorkerDescriptorForSpawn?.({
       callerAgentId,
       input,
       descriptor,
-      specialistId: specialist?.specialistId,
+      specialistId: preset?.name,
     });
 
     this.upsertDescriptor(descriptor);
@@ -1020,29 +686,7 @@ export class SwarmAgentLifecycleService {
 
         const runtimeSystemPrompt = this.options.injectWorkerIdentityContext(descriptor, baseSystemPrompt);
 
-        let runtime: SwarmAgentRuntime;
-        try {
-          runtime = await this.options.createRuntimeForDescriptor(descriptor, runtimeSystemPrompt);
-        } catch (error) {
-          if (specialistFallbackModel && shouldRetrySpecialistSpawnWithFallback(error, descriptor.model)) {
-            const previousModel = { ...descriptor.model };
-            descriptor.model = { ...specialistFallbackModel };
-            this.upsertDescriptor(descriptor);
-            await this.options.saveStore();
-
-            this.options.logDebug("agent:spawn:specialist_fallback_retry", {
-              agentId,
-              specialistId: specialist?.specialistId,
-              previousModel,
-              fallbackModel: descriptor.model,
-              error: error instanceof Error ? error.message : String(error)
-            });
-
-            runtime = await this.options.createRuntimeForDescriptor(descriptor, runtimeSystemPrompt);
-          } else {
-            throw error;
-          }
-        }
+        const runtime = await this.options.createRuntimeForDescriptor(descriptor, runtimeSystemPrompt);
 
         this.options.attachRuntime(agentId, runtime);
 
@@ -1958,26 +1602,30 @@ export class SwarmAgentLifecycleService {
   async resolveWorkerAssignmentSelection(worker: AgentDescriptor, requiresSecureRuntime: boolean, maxConcurrent?: number): Promise<AssignmentSelection> {
     const manager = this.options.descriptors.get(worker.managerId);
     if (worker.role !== "worker" || !manager || manager.role !== "manager") throw new Error("Assignment worker owner conflicts");
-    const roster = this.options.resolveSpecialistRosterForManager
-      ? await this.options.resolveSpecialistRosterForManager(manager)
-      : await this.options.resolveSpecialistRosterForProfile(manager.profileId ?? manager.agentId);
-    const specialist = roster.find(entry => entry.specialistId === (worker.specialistLens ?? worker.specialistId));
-    const tier = worker.specialistTier ? await resolveTierConfig(this.options.dataDir, worker.specialistTier) : undefined;
-    const fallbackId = specialist?.fallbackModelId ?? tier?.fallbackModelId;
-    const fallbackProvider = specialist?.fallbackProvider ?? tier?.fallbackProvider ?? (fallbackId ? inferProviderFromModelId(fallbackId) : undefined);
-    const fallback = worker.delegationFallbackModel ?? (fallbackId && fallbackProvider ? { provider: fallbackProvider, modelId: fallbackId } : undefined);
     const availability = await this.options.getManagedModelProviderAvailability();
-    const models = [worker.model, ...(fallback && !blocksOpenRouterFallback(worker.model) ? [fallback] : [])];
+    const model = worker.model;
     return {
-      specialistId: worker.specialistId, rosterId: worker.delegationRosterId, rosterRevision: worker.delegationRosterRevision,
-      routeId: worker.delegationRouteId, provider: worker.model.provider, modelId: worker.model.modelId, maxConcurrent,
-      // Pure policy receives the ordered conjunction of availability/capacity/security facts.
-      candidates: models.map(model => ({ provider: model.provider, modelId: model.modelId,
-        available: specialist?.enabled !== false && specialist?.availabilityCode !== "invalid_model"
-          && availability.get(resolveModelCredentialProvider(model)) === true && !this.getActiveModelCapacityBlock(model.provider, model.modelId)
+      specialistId: worker.specialistId, provider: model.provider, modelId: model.modelId, maxConcurrent,
+      candidates: [{ provider: model.provider, modelId: model.modelId,
+        available: availability.get(resolveModelCredentialProvider(model)) === true && !this.getActiveModelCapacityBlock(model.provider, model.modelId)
           && (!requiresSecureRuntime || supportsSecureRuntimeProvider(model.provider)),
-      })),
+      }],
     };
+  }
+
+  private resolveSpecialistRoster(manager: AgentDescriptor): Promise<ResolvedSpecialistDefinitionLike[]> {
+    return this.options.resolveSpecialistRosterForManager
+      ? this.options.resolveSpecialistRosterForManager(manager)
+      : this.options.resolveSpecialistRosterForProfile(manager.profileId ?? manager.agentId);
+  }
+
+  /** The global preset list plus user-authored specialist files; a file wins a name collision. */
+  async resolveWorkerPresetsForManager(manager: AgentDescriptor): Promise<ResolvedWorkerPreset[]> {
+    const [settings, roster] = await Promise.all([
+      readWorkerPresetSettings(this.options.dataDir),
+      this.resolveSpecialistRoster(manager),
+    ]);
+    return mergeWorkerPresets(settings.presets, specialistsToWorkerPresets(roster, manager.model));
   }
 
   resolveSpawnModelWithCapacityFallback(model: AgentModelDescriptor): AgentModelDescriptor {
@@ -2350,8 +1998,6 @@ export class SwarmAgentLifecycleService {
     options?: { persist?: boolean; publish?: boolean },
   ): Promise<void> {
     const rosterById = new Map(roster.map((entry) => [entry.specialistId, entry]));
-    const tierConfigs = await resolveTierConfigs(this.options.dataDir);
-    const tierConfigsById = new Map(tierConfigs.map((config) => [config.tier, config]));
     let changed = false;
 
     for (const descriptor of this.options.descriptors.values()) {
@@ -2364,38 +2010,6 @@ export class SwarmAgentLifecycleService {
       }
 
       if (managerId && descriptor.managerId !== managerId) {
-        continue;
-      }
-
-      if (descriptor.specialistTier) {
-        const tierConfig = tierConfigsById.get(descriptor.specialistTier) ?? DEFAULT_TIER_CONFIGS[descriptor.specialistTier];
-        const tierDisplayName = getDelegationTierDisplayName(descriptor.specialistTier, tierConfig.displayName);
-        const lensId = normalizeOptionalAgentId(
-          descriptor.specialistLens ?? descriptor.specialistId?.split(":")[1],
-        )?.toLowerCase();
-        const specialist = lensId ? rosterById.get(lensId) : undefined;
-        if (lensId && !specialist) {
-          continue;
-        }
-
-        const specialistId = getTierAttributionId(descriptor.specialistTier, lensId);
-        const specialistDisplayName = specialist
-          ? `${tierDisplayName} — ${specialist.displayName}`
-          : tierDisplayName;
-        const specialistColor = specialist?.color ?? tierConfig.color;
-        if (
-          descriptor.specialistId === specialistId &&
-          descriptor.specialistDisplayName === specialistDisplayName &&
-          descriptor.specialistColor === specialistColor
-        ) {
-          continue;
-        }
-
-        descriptor.specialistId = specialistId;
-        descriptor.specialistDisplayName = specialistDisplayName;
-        descriptor.specialistColor = specialistColor;
-        this.upsertDescriptor(descriptor);
-        changed = true;
         continue;
       }
 

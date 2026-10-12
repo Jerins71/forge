@@ -24,7 +24,6 @@ async function setup() {
     prepareSessionCreation: () => ({ profile, sessionDescriptor: fork, sessionNumber: 2 }),
     provisioner: { provisionSession: async (input: { beforeRuntime: () => Promise<void>; initializeRuntime: () => Promise<void> }) => { await input.beforeRuntime(); await input.initializeRuntime() } },
     getOrCreateRuntimeForDescriptor: async () => ({ getContextUsage: () => undefined }),
-    resolveGlobalDelegationRosterId: async () => 'balanced',
     copyPinnedMessagesForFork: vi.fn(async () => undefined),
     writeForkedSessionMemoryHeader: vi.fn(async () => undefined), saveStore: vi.fn(async () => undefined),
     emitSessionLifecycle: vi.fn(), emitAgentsSnapshot: vi.fn(), emitProfilesSnapshot: vi.fn(),

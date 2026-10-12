@@ -25,7 +25,6 @@ import type { SwarmEventCoordinator } from "./swarm-event-coordinator.js";
 import type { SwarmObservabilityCoordinator } from "./swarm-observability-coordinator.js";
 import type { SwarmRuntimeController } from "./swarm-runtime-controller.js";
 import type { SwarmRuntimeLifecycleCoordinator } from "./swarm-runtime-lifecycle-coordinator.js";
-import type { SpecialistFallbackPolicy } from "./specialist-fallback-policy.js";
 import type { TurnContextCoordinator } from "./turn-context-coordinator.js";
 import type { UserMessageCoordinator } from "./user-message-coordinator.js";
 import type { SwarmAgentRuntime } from "./runtime-contracts.js";
@@ -49,10 +48,6 @@ export interface SwarmManagerFacadeRuntimeServices {
     | "handleRuntimeError"
     | "handleRuntimeSessionEvent"
     | "handleRuntimeStatus"
-  >;
-  specialists: Pick<
-    SpecialistFallbackPolicy,
-    "resolveSpecialistFallbackModelForDescriptor"
   >;
   turns: Pick<
     TurnContextCoordinator<unknown, unknown, unknown>,

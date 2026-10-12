@@ -2,7 +2,7 @@ import { migrateDataDirectory } from "../../data-migration.js";
 import type { AgentDescriptor, AgentsStoreFile, ManagerProfile, SwarmConfig } from "../../types.js";
 import type { ProfileBootReconciler } from "./profile-boot-reconciler.js";
 import { prunePersistedWorkerSidecars } from "./worker-boot-recovery.js";
-import { resolveDelegationRosterSettings } from "../../specialists/delegation-roster-store.js";
+import { migrateDelegationRostersToWorkerPresets } from "../../specialists/worker-presets.js";
 
 interface BootReconcilerOptions {
   config: SwarmConfig;
@@ -20,6 +20,8 @@ export class BootReconciler {
   constructor(private readonly options: BootReconcilerOptions) {}
 
   async loadAndReconcilePersistedStore(): Promise<AgentsStoreFile> {
+    // Before the store is decoded: decoding drops the roster references the migration counts.
+    await migrateDelegationRostersToWorkerPresets(this.options.config.paths.dataDir, this.options.config.paths.agentsStoreFile);
     let loaded = await this.options.loadStore();
     const migration = await migrateDataDirectory({ dataDir: this.options.config.paths.dataDir, agentsStoreFile: this.options.config.paths.agentsStoreFile }, loaded.agents, loaded.profiles ?? [], { debug: this.options.logDebug, info: this.options.logDebug, warn: this.options.logDebug });
     loaded = { ...loaded, agents: migration.updatedAgents };
@@ -38,19 +40,11 @@ export class BootReconciler {
     await this.options.preloadSessionPlanStates();
 
     const normalizedSessionModelState = this.options.profileReconciler.reconcileProfilesOnBoot();
-    const delegationRosterSettings = await resolveDelegationRosterSettings(
-      this.options.config.paths.dataDir,
-    );
-    const normalizedDelegationState =
-      this.options.profileReconciler.reconcileDelegationStateOnBoot(
-        delegationRosterSettings.defaultRosterId,
-      );
     const normalizedContextModeState = this.options.profileReconciler.normalizeContextModeStateOnBoot();
     if (
       migration.migrated ||
       workerSidecarPruneResult.pruned ||
       normalizedSessionModelState ||
-      normalizedDelegationState ||
       normalizedContextModeState
     ) {
       await this.options.saveStore();

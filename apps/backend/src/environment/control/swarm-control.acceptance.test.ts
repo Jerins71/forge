@@ -544,13 +544,11 @@ it("typed secure presentation sends worker metadata to its owning manager", asyn
 
 describe("Phase 2 project/policy commands", () => {
   const cases: [string, Record<string, unknown>][] = [
-    ["settings.recommendedDefaults.apply", {}],
     ["workspace.directories.create", { parentPath: ".", name: "typed-dir" }],
     ["project.create", { title: "Typed project", cwd: ".", model: { provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "high" } }],
     ["project.update", { projectId: "manager", patch: { title: "Renamed" } }],
     ["project.update", { projectId: "manager", patch: { cwd: "." } }],
     ["project.update", { projectId: "manager", patch: { modelDefault: { provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "high" } } }],
-    ["project.update", { projectId: "manager", patch: { delegationDefaults: { managerPosture: "hands_on" } } }],
     ["project.update", { projectId: "manager", patch: { contextMode: "fresh" } }],
     ["project.archive", { projectId: "manager" }],
     ["project.restore", { projectId: "manager" }],
@@ -558,7 +556,6 @@ describe("Phase 2 project/policy commands", () => {
     ["project.reorder", { projectIds: ["manager"] }],
     ["session.configure", { sessionId: "manager", model: { mode: "inherit" } }],
     ["session.configure", { sessionId: "manager", model: { mode: "override", provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "high" } }],
-    ["session.configure", { sessionId: "manager", delegation: { managerPosture: { mode: "override", value: "hands_on" } } }],
     ["session.configure", { sessionId: "manager", contextMode: "fresh" }],
   ];
   it.each(cases)("moves %s %j into receipt-backed control", async (method, fields) => {
@@ -566,7 +563,6 @@ describe("Phase 2 project/policy commands", () => {
     cleanup.unshift(() => core.close());
     const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady(); cleanup.unshift(async () => mirror.dispose());
     const principal = { deviceSessionId: "policy-device", scopes: new Set(["workspace:write", "session:operate", "settings:admin"] as const) };
-    if (method === "settings.recommendedDefaults.apply") vi.spyOn(f.manager, "applyRecommendedManagerDefaults").mockResolvedValue({ profileIds: ["manager"], rosterId: "fixture", rosterRevision: 1 });
     const request = { commandId: randomUUID(), ...fields, ...(fields.cwd ? { cwd: f.config.defaultCwd } : {}), ...(fields.parentPath ? { parentPath: f.config.defaultCwd } : {}), ...(fields.patch && (fields.patch as { cwd?: string }).cwd ? { patch: { ...(fields.patch as object), cwd: f.config.defaultCwd } } : {}) };
     const receipt = await core.controlService.execute(principal, method as "session.stop", request as never);
     expect(receipt.state).toBe("succeeded");

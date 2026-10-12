@@ -5,7 +5,7 @@ import type { LifecycleAdmission } from "./control-types.js";
 import { ControlError } from "./command-service.js";
 import type { SwarmReasoningLevel } from "../../swarm/types.js";
 
-export type PolicyMethod = Exclude<Extract<CommandReceipt["method"], `project.${string}` | "session.configure" | "settings.recommendedDefaults.apply" | "workspace.directories.create">, "project.readState.clear">;
+export type PolicyMethod = Exclude<Extract<CommandReceipt["method"], `project.${string}` | "session.configure" | "workspace.directories.create">, "project.readState.clear">;
 export type DirectoryReadMethod = "workspace.directories.list" | "workspace.directories.validate";
 export interface PolicyPort {
   prepare(method: PolicyMethod, input: RpcInput<PolicyMethod>): Promise<Pick<LifecycleAdmission, "sessionIds" | "projectIds" | "intent"> & { frozen: RpcInput<PolicyMethod>; projectId?: string; sessionId?: string }>;
@@ -53,10 +53,10 @@ export function createProjectPolicy(swarm: SwarmManager, readModel?: (sessionId:
         requireNonSystemSessionProfile(configure.sessionId, swarm.listProfiles(), id => swarm.getAgent(id));
         requireSameProvider(configure);
         if (target.archivedAt) throw new ControlError("CONFLICT", "Restore the session before configuring it");
-        if (!configure.model && !configure.delegation && configure.contextMode === undefined) throw new ControlError("INVALID_INPUT", "Configuration is empty");
+        if (!configure.model && configure.contextMode === undefined) throw new ControlError("INVALID_INPUT", "Configuration is empty");
         return { sessionIds: [configure.sessionId], projectIds: [target.profileId ?? target.agentId], intent: "inspect", frozen: { ...configure, ...(configure.model?.mode === "override" ? { model: { mode: "override", ...await freezeModel(configure.model, "change") } } : {}) }, sessionId: configure.sessionId };
       }
-      const projectIds = method === "project.reorder" ? (input as RpcInput<"project.reorder">).projectIds : method === "settings.recommendedDefaults.apply" ? swarm.listProfiles().filter(p => p.profileType !== "system").map(p => p.profileId) : [(input as RpcInput<"project.update">).projectId];
+      const projectIds = method === "project.reorder" ? (input as RpcInput<"project.reorder">).projectIds : [(input as RpcInput<"project.update">).projectId];
       for (const id of projectIds) project(id);
       const frozen = structuredClone(input);
       if (method === "project.update" && (frozen as RpcInput<"project.update">).patch.cwd) {
@@ -83,7 +83,6 @@ export function createProjectPolicy(swarm: SwarmManager, readModel?: (sessionId:
           if (patch.title !== undefined) await swarm.renameProfile(projectId, patch.title);
           if (patch.cwd !== undefined) await swarm.updateManagerCwd(projectId, patch.cwd);
           if (patch.modelDefault) await swarm.updateProfileDefaultExactModel(projectId, patch.modelDefault, patch.modelDefault.thinkingLevel as SwarmReasoningLevel | undefined);
-          if (patch.delegationDefaults) await swarm.updateProjectDelegationDefaults(projectId, { ...(patch.delegationDefaults.managerPosture !== undefined ? { managerPosture: patch.delegationDefaults.managerPosture } : {}), ...(patch.delegationDefaults.rosterId !== undefined ? { delegationRosterId: patch.delegationDefaults.rosterId } : {}) });
           if (patch.contextMode !== undefined) await swarm.updateProjectContextMode(projectId, patch.contextMode);
           return { projectId };
         }
@@ -92,7 +91,6 @@ export function createProjectPolicy(swarm: SwarmManager, readModel?: (sessionId:
           requireSameProvider(configure);
           if (configure.model?.mode === "inherit") await swarm.updateSessionModel(configure.sessionId, "inherit");
           else if (configure.model?.mode === "override") await swarm.updateSessionExactModel(configure.sessionId, configure.model, configure.model.thinkingLevel as SwarmReasoningLevel | undefined);
-          if (configure.delegation) await swarm.updateSessionDelegation(configure.sessionId, configure.delegation);
           if (configure.contextMode !== undefined) await swarm.updateSessionContextMode(configure.sessionId, configure.contextMode);
           return { sessionId: configure.sessionId };
         }
@@ -108,7 +106,6 @@ export function createProjectPolicy(swarm: SwarmManager, readModel?: (sessionId:
           const { projectId } = input as RpcInput<typeof method>; await swarm.deleteManager("", projectId); return { projectId };
         }
         case "project.reorder": await swarm.reorderProfiles((input as RpcInput<typeof method>).projectIds); return {};
-        case "settings.recommendedDefaults.apply": return await swarm.applyRecommendedManagerDefaults();
         case "workspace.directories.create": {
           const create = input as RpcInput<typeof method>; return { path: (await swarm.createDirectory(create.parentPath, create.name)).path };
         }

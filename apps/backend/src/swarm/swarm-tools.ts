@@ -21,11 +21,6 @@ import { buildUpdatePlanTool } from "./planning/update-plan-tool.js";
 import { buildUpdateWorkGraphTool } from "./planning/update-work-graph-tool.js";
 import { buildGoalTools } from "./goals/goal-tools.js";
 import { buildSecureSessionTools } from "./secure-sessions/secure-session-tools.js";
-import {
-  resolveManagerDelegation,
-  translateManagerDelegationError,
-  WORKER_BEHAVIOR_MODES,
-} from "./specialists/delegation-policy.js";
 
 export type { SwarmToolHost } from "./swarm-tool-host.js";
 
@@ -70,10 +65,6 @@ function planStepIdSchema(description: string) {
     description,
   });
 }
-
-const workerBehaviorModeSchema = Type.Union(
-  WORKER_BEHAVIOR_MODES.map((mode) => Type.Literal(mode)),
-);
 
 function includeListAgentsEntry(agent: AgentDescriptor, includeTerminated: boolean): boolean {
   if (includeTerminated) {
@@ -308,7 +299,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
       name: "send_message_to_agent",
       label: "Send Message To Agent",
       description:
-        "Send a message to another agent by id. Messaging a completed worker starts another assignment: send only concrete remaining work or a necessary question, never thanks, acceptance notices, or closure acknowledgments. Workers may message only their own manager for requested interim answers, findings that change the approach, questions, or blockers; final results are delivered automatically. Returns immediately with a delivery receipt. If target is busy, queued delivery is accepted as steer. When assigning or reassigning a worker to one current plan step, pass its stable id in planStepId. Set requiresSecureRuntime=true when this assignment needs granted Secure Sessions material; Forge fails closed before delivery if the target cannot use the secure boundary.",
+        "Send a message to another agent by id. A message to a finished worker starts a new assignment, so send only remaining work or a necessary question, never thanks or acknowledgments. Workers may message only their own manager, for a requested interim answer, a finding that changes the approach, a question, or a blocker; final results are delivered automatically. Returns at once with a delivery receipt; a busy target receives it as a steer. Pass planStepId when the assignment supports one current plan step. Set requiresSecureRuntime when the assignment needs granted Secure Sessions material; delivery fails rather than run without it.",
       parameters: Type.Object({
         targetAgentId: Type.String({ description: "Agent id to receive the message." }),
         message: Type.String({ description: "Message text to deliver." }),
@@ -413,56 +404,48 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
       name: "spawn_agent",
       label: "Spawn Agent",
       description:
-        "Delegate one concrete outcome to an independent worker. Name a route to use a complete specialist from the active roster, including its task instructions and model. Otherwise choose a task mode and omit route to use that task's default specialist. Set requiresSecureRuntime=true when the assignment must use granted Secure Sessions material; Forge selects a compatible configured fallback and fails closed rather than dispatching insecurely. Use customSpecialist only for a saved custom specialist, without mode or route. The call returns after the assignment is accepted.",
+        "Start a worker on one bounded outcome. The worker knows nothing of this conversation: put the goal, the context it needs, constraints, the files it owns, and what done looks like in initialMessage. preset picks the model and reasoning from the preset list in your instructions; omit it to use your own model. Returns once the worker has started; its result arrives later as a [workerResult] message, so do not wait or poll. Set requiresSecureRuntime when the task needs granted Secure Sessions material; the spawn fails rather than run without it.",
       parameters: Type.Object({
         agentId: Type.String({
           description:
             "Required agent identifier. Normalized to lowercase kebab-case; collisions are suffixed numerically."
         }),
+        initialMessage: Type.String({ description: "The worker's full brief: goal, context, constraints, owned files, and what done looks like." }),
+        preset: Type.Optional(Type.String({
+          minLength: 1,
+          maxLength: 64,
+          pattern: "^[a-z0-9][a-z0-9-]*$",
+          description: "Worker preset name from the preset list in your instructions. Omit to use your own model.",
+        })),
+        cwd: Type.Optional(Type.String({ description: "Optional working directory override." })),
         planStepId: Type.Optional(planStepIdSchema(
           "Stable id of the current plan step this worker assignment supports. Omit for general or cross-cutting work."
         )),
-        mode: Type.Optional(workerBehaviorModeSchema),
-        route: Type.Optional(Type.String({
-          minLength: 1,
-          maxLength: 64,
-          pattern: "^(auto|[a-z0-9][a-z0-9-]{0,63})$",
-          description: "Named specialist from the active roster. Omit to use the selected task mode's default specialist.",
-        })),
-        customSpecialist: Type.Optional(
-          Type.String({ description: "Saved custom specialist handle. Mutually exclusive with mode and route." })
-        ),
-        cwd: Type.Optional(Type.String({ description: "Optional working directory override." })),
         requiresSecureRuntime: Type.Optional(
           Type.Boolean({
-            description:
-              "Require Secure Sessions for this worker's initial assignment. Fails closed if Team Secure Mode or a compatible secure runtime is unavailable.",
+            description: "Require Secure Sessions for this worker. The spawn fails if a secure runtime is unavailable.",
           }),
         ),
-        initialMessage: Type.String({ description: "Concrete task and expected outcome for the worker." }),
       }),
       async execute(_toolCallId, params) {
         const parsed = params as {
           agentId: string;
-          planStepId?: string;
-          mode?: "general" | "plan" | "correctness-review" | "design-review" | "research";
-          route?: string;
-          customSpecialist?: string;
-          cwd?: string;
-          requiresSecureRuntime?: boolean;
           initialMessage: string;
+          preset?: string;
+          cwd?: string;
+          planStepId?: string;
+          requiresSecureRuntime?: boolean;
         };
 
-        const resolvedDelegation = resolveManagerDelegation(parsed);
-        const spawnInput = resolvedDelegation.spawnInput;
-        if (parsed.planStepId) spawnInput.planStep = parsed.planStepId;
-
-        let spawned: AgentDescriptor;
-        try {
-          spawned = await host.spawnAgent(descriptor.agentId, spawnInput);
-        } catch (error) {
-          throw translateManagerDelegationError(error, resolvedDelegation);
-        }
+        const spawnInput: SpawnAgentInput = {
+          agentId: parsed.agentId,
+          initialMessage: parsed.initialMessage,
+          ...(parsed.preset ? { preset: parsed.preset } : {}),
+          ...(parsed.cwd ? { cwd: parsed.cwd } : {}),
+          ...(parsed.planStepId ? { planStep: parsed.planStepId } : {}),
+          ...(parsed.requiresSecureRuntime ? { requiresSecureRuntime: true } : {}),
+        };
+        const spawned = await host.spawnAgent(descriptor.agentId, spawnInput);
         recordToolSideEffect(host, descriptor, {
           toolName: "spawn_agent",
           toolCallId: _toolCallId,
@@ -472,15 +455,9 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
           metadata: {
             spawnedAgentId: spawned.agentId,
             planStepId: parsed.planStepId,
-            specialist: spawnInput.specialist,
-            tier: spawnInput.tier,
-            lens: spawnInput.lens,
-            requestedMode: resolvedDelegation.requestedMode,
-            requestedRoute: resolvedDelegation.requestedRoute,
+            preset: spawnInput.preset,
             modelProvider: spawned.model.provider,
             modelId: spawned.model.modelId,
-            resolvedRouteId: spawned.delegationRouteId,
-            rosterRevision: spawned.delegationRosterRevision,
           },
         });
 

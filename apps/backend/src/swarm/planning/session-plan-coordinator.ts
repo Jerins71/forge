@@ -135,8 +135,7 @@ export class SessionPlanCoordinator {
           status: node.status,
           dependsOn: [...node.dependsOn],
           ...(node.acceptanceCriteria ? { acceptanceCriteria: node.acceptanceCriteria } : {}),
-          route: node.route,
-          ...(node.effort ? { effort: node.effort } : {}),
+          ...(node.preset ? { preset: node.preset } : {}),
         })),
       }
       const snapshot = await this.writeGraph(owner, explanation, workGraph)

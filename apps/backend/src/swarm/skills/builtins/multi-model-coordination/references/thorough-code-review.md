@@ -34,8 +34,7 @@ well-bounded diff that one focused review can cover.
       "kind": "review",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "Every reported finding has a tight source location, impact, and reproducible failure path.",
-      "route": "auto"
+      "acceptanceCriteria": "Every reported finding has a tight source location, impact, and reproducible failure path."
     },
     {
       "id": "review-security",
@@ -44,8 +43,7 @@ well-bounded diff that one focused review can cover.
       "kind": "review",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "Every finding is reachable through the changed surface and supported by a concrete attack or misuse path.",
-      "route": "auto"
+      "acceptanceCriteria": "Every finding is reachable through the changed surface and supported by a concrete attack or misuse path."
     },
     {
       "id": "review-design",
@@ -54,8 +52,7 @@ well-bounded diff that one focused review can cover.
       "kind": "design-review",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "Concerns identify a concrete cost and the smallest viable correction; preferences are excluded.",
-      "route": "auto"
+      "acceptanceCriteria": "Concerns identify a concrete cost and the smallest viable correction; preferences are excluded."
     },
     {
       "id": "review-operations",
@@ -64,8 +61,7 @@ well-bounded diff that one focused review can cover.
       "kind": "review",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "Findings name the affected runtime path and focused validation that demonstrates the risk.",
-      "route": "auto"
+      "acceptanceCriteria": "Findings name the affected runtime path and focused validation that demonstrates the risk."
     }
   ]
 }

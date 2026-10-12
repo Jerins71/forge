@@ -165,7 +165,6 @@ export async function createEnvironmentService(options: {
             sortKey: String(profile.sortOrder ?? profile.createdAt),
             archived: Boolean(profile.archivedAt),
             defaultSessionId: profile.defaultSessionAgentId,
-            delegationDefaults: { managerPosture: profile.defaultManagerPosture, rosterId: profile.defaultDelegationRosterId },
             contextMode: profile.defaultContextMode ?? "summary",
             defaultModel: { provider: profile.defaultModel.provider, modelId: profile.defaultModel.modelId, thinkingLevel: profile.defaultModel.thinkingLevel },
           };

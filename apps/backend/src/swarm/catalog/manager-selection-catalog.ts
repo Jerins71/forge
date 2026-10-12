@@ -1,16 +1,13 @@
 import { createHash } from "node:crypto";
 import {
-  DEFAULT_MANAGER_POSTURE,
   FORGE_MODEL_CATALOG,
   MANAGER_SELECTION_CATALOG_LIMITS,
   MANAGER_SELECTION_CATALOG_VERSION,
-  WORK_MODE_DEFINITIONS,
   type ManagerModelOption,
   type ManagerModelSurface,
   type ManagerModelSurfaceState,
   type ManagerSelectionCatalogResponse,
   type ManagerSelectionReasoningOption,
-  type WorkModeOption,
 } from "@forge/protocol";
 import {
   evaluateExactManagerModelSelection,
@@ -55,15 +52,10 @@ export function buildManagerSelectionCatalog(
     ...discoveredOptions,
     ...openRouterOptions,
   ]).slice(0, MANAGER_SELECTION_CATALOG_LIMITS.maxModels);
-  const workModes = buildWorkModeOptions();
-  const defaults = {
-    ...buildCreateManagerModelDefault(models, providerAvailability),
-    workModeId: DEFAULT_MANAGER_POSTURE,
-  };
+  const defaults = buildCreateManagerModelDefault(models, providerAvailability);
   const content: CatalogWithoutRevision = {
     version: MANAGER_SELECTION_CATALOG_VERSION,
     models,
-    workModes,
     defaults,
   };
 
@@ -166,22 +158,6 @@ function reasoningLabel(id: string, supportedLevels: readonly string[]): string 
   if (id === "max") return "Max";
   if (id === "ultra") return "Ultra";
   return id;
-}
-
-function buildWorkModeOptions(): WorkModeOption[] {
-  return WORK_MODE_DEFINITIONS
-    .filter((definition) =>
-      isBoundedString(definition.id, MANAGER_SELECTION_CATALOG_LIMITS.maxWorkModeIdLength)
-      && isBoundedString(definition.label, MANAGER_SELECTION_CATALOG_LIMITS.maxLabelLength)
-      && isBoundedString(definition.description, MANAGER_SELECTION_CATALOG_LIMITS.maxDescriptionLength),
-    )
-    .slice(0, MANAGER_SELECTION_CATALOG_LIMITS.maxWorkModes)
-    .map((definition) => ({
-      id: definition.id,
-      label: definition.label,
-      description: definition.description,
-      selectable: definition.selectable,
-    }));
 }
 
 function buildCreateManagerModelDefault(

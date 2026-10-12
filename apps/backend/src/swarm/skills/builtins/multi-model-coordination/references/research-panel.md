@@ -34,8 +34,7 @@ authoritative source directly answers the question.
       "kind": "research",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "Material claims are tied to current primary sources and dates.",
-      "route": "auto"
+      "acceptanceCriteria": "Material claims are tied to current primary sources and dates."
     },
     {
       "id": "research-practice",
@@ -44,8 +43,7 @@ authoritative source directly answers the question.
       "kind": "research",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "The result identifies credible real-world evidence and labels its limitations.",
-      "route": "auto"
+      "acceptanceCriteria": "The result identifies credible real-world evidence and labels its limitations."
     },
     {
       "id": "research-disconfirm",
@@ -54,8 +52,7 @@ authoritative source directly answers the question.
       "kind": "research",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "The result either finds concrete contradictory evidence or documents a bounded unsuccessful search.",
-      "route": "auto"
+      "acceptanceCriteria": "The result either finds concrete contradictory evidence or documents a bounded unsuccessful search."
     }
   ]
 }

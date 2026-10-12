@@ -7,7 +7,6 @@ import {
   slugifySessionName,
 } from "./swarm-manager-utils.js";
 import type { AgentDescriptor, AgentModelDescriptor, ManagerProfile } from "./types.js";
-import { DEFAULT_MANAGER_POSTURE, type ManagerPosture } from "@forge/protocol";
 
 const SESSION_ID_SUFFIX_SEPARATOR = "--s";
 const ROOT_SESSION_NUMBER = 1;
@@ -21,8 +20,6 @@ export interface SessionCreationOptions {
   reconcileOwnedDirectory?: boolean;
   sessionPurpose?: AgentDescriptor["sessionPurpose"];
   cli?: AgentDescriptor["cli"];
-  managerPosture?: ManagerPosture;
-  delegationRosterId?: string;
 }
 
 export interface SessionCreationBaseDescriptor {
@@ -31,10 +28,6 @@ export interface SessionCreationBaseDescriptor {
   cwd: string;
   archetypeId?: AgentDescriptor["archetypeId"];
   sessionSystemPrompt?: string;
-  managerPosture?: AgentDescriptor["managerPosture"];
-  managerPostureOrigin?: AgentDescriptor["managerPostureOrigin"];
-  delegationRosterId?: AgentDescriptor["delegationRosterId"];
-  delegationRosterOrigin?: AgentDescriptor["delegationRosterOrigin"];
 }
 
 export type PreparedManagerSessionDescriptor = AgentDescriptor & {
@@ -91,16 +84,6 @@ export class SessionDescriptorFactory {
         ...(templateDescriptor.sessionSystemPrompt !== undefined
           ? { sessionSystemPrompt: templateDescriptor.sessionSystemPrompt }
           : {}),
-        managerPosture: profile.defaultManagerPosture ?? DEFAULT_MANAGER_POSTURE,
-        managerPostureOrigin: profile.defaultManagerPosture
-          ? "project_default"
-          : "product_default",
-        ...(profile.defaultDelegationRosterId
-          ? {
-              delegationRosterId: profile.defaultDelegationRosterId,
-              delegationRosterOrigin: "project_default" as const,
-            }
-          : {}),
       },
       options,
     );
@@ -136,21 +119,6 @@ export class SessionDescriptorFactory {
         identity.profile.profileId,
         identity.sessionAgentId,
       ),
-      managerPosture: options?.managerPosture ?? base.managerPosture ?? DEFAULT_MANAGER_POSTURE,
-      managerPostureOrigin: options?.managerPosture
-        ? "session_override"
-        : base.managerPostureOrigin ?? "product_default",
-      ...(options?.delegationRosterId
-        ? {
-            delegationRosterId: options.delegationRosterId,
-            delegationRosterOrigin: "session_override" as const,
-          }
-        : base.delegationRosterId
-          ? {
-              delegationRosterId: base.delegationRosterId,
-              delegationRosterOrigin: base.delegationRosterOrigin ?? "project_default",
-            }
-          : {}),
       ...(base.archetypeId !== undefined ? { archetypeId: base.archetypeId } : {}),
       ...(shouldApplyBaseSessionSystemPrompt
         ? { sessionSystemPrompt: base.sessionSystemPrompt }

@@ -127,7 +127,6 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       createdAt: descriptor.createdAt, pinnedAt: descriptor.pinnedAt ?? null, lastUsedAt: descriptor.lastUserMessageAt ?? null,
       updatedAt: descriptor.updatedAt, sortKey: descriptor.createdAt, archived: Boolean(descriptor.archivedAt),
       workspace: { ...(prior?.workspace ?? { kind: "current_checkout", branch: null }), cwd: descriptor.cwd },
-      ...(descriptor.managerPosture ? { delegation: { managerPosture: descriptor.managerPosture, managerPostureOrigin: descriptor.managerPostureOrigin ?? "product_default", rosterId: descriptor.delegationRosterId, rosterOrigin: descriptor.delegationRosterOrigin } } : {}),
       contextMode: { effective: descriptor.contextModeOverride ?? swarmManager.listProfiles().find(p => p.profileId === descriptor.profileId)?.defaultContextMode ?? "summary", ...(descriptor.contextModeOverride ? { override: descriptor.contextModeOverride } : {}) },
       model: { provider: model.provider, modelId: model.modelId, thinkingLevel: model.thinkingLevel,
         origin: model.provider !== descriptor.model.provider || model.modelId !== descriptor.model.modelId || descriptor.modelOrigin === "session_override" ? "session_override" : "profile_default" },

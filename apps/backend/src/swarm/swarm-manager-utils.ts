@@ -1,4 +1,3 @@
-import { blocksOpenRouterFallback } from "./runtime/pi/openrouter-request-policy.js";
 import { createHash } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
 import { isEnoentError } from "../utils/fs-errors.js";
@@ -8,7 +7,6 @@ import { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import {
   PROJECT_AGENT_CAPABILITIES,
   isContextMode,
-  isManagerPosture,
   type AgentRuntimeExtensionSnapshot,
   type ConversationReplyTarget,
   type SessionMemoryMergeFailureStage
@@ -22,7 +20,6 @@ import {
   isConversationImageAttachment,
   isConversationTextAttachment
 } from "./session/conversation-validators.js";
-import { classifyRuntimeCapacityError } from "./runtime/runtime-utils.js";
 import {
   normalizeAgentStatus,
   type AgentStatusInput
@@ -261,67 +258,6 @@ export function validateAgentDescriptor(value: unknown): AgentDescriptor | strin
     value.modelOrigin !== "session_override"
   ) {
     return 'modelOrigin must be "profile_default" or "session_override" when provided';
-  }
-
-  if (value.managerPosture !== undefined && !isManagerPosture(value.managerPosture)) {
-    return 'managerPosture must be "delegation_first", "adaptive", or "hands_on" when provided';
-  }
-
-  if (
-    value.managerPostureOrigin !== undefined &&
-    value.managerPostureOrigin !== "product_default" &&
-    value.managerPostureOrigin !== "project_default" &&
-    value.managerPostureOrigin !== "session_override"
-  ) {
-    return "managerPostureOrigin is invalid when provided";
-  }
-
-  if (value.delegationRosterId !== undefined && !isNonEmptyString(value.delegationRosterId)) {
-    return "delegationRosterId must be a non-empty string when provided";
-  }
-
-  if (
-    value.delegationRosterOrigin !== undefined &&
-    value.delegationRosterOrigin !== "global_default" &&
-    value.delegationRosterOrigin !== "project_default" &&
-    value.delegationRosterOrigin !== "session_override"
-  ) {
-    return "delegationRosterOrigin is invalid when provided";
-  }
-
-  if (value.delegationRouteId !== undefined && !isNonEmptyString(value.delegationRouteId)) {
-    return "delegationRouteId must be a non-empty string when provided";
-  }
-  if (value.delegationRouteLabel !== undefined && !isNonEmptyString(value.delegationRouteLabel)) {
-    return "delegationRouteLabel must be a non-empty string when provided";
-  }
-  if (
-    value.delegationRosterRevision !== undefined &&
-    (
-      typeof value.delegationRosterRevision !== "number" ||
-      !Number.isInteger(value.delegationRosterRevision) ||
-      value.delegationRosterRevision < 1
-    )
-  ) {
-    return "delegationRosterRevision must be a positive integer when provided";
-  }
-  if (
-    value.delegationCapabilityEscalationRouteId !== undefined &&
-    !isNonEmptyString(value.delegationCapabilityEscalationRouteId)
-  ) {
-    return "delegationCapabilityEscalationRouteId must be a non-empty string when provided";
-  }
-  if (value.delegationFallbackModel !== undefined) {
-    if (!isRecord(value.delegationFallbackModel)) {
-      return "delegationFallbackModel must be an object when provided";
-    }
-    if (
-      !isNonEmptyString(value.delegationFallbackModel.provider) ||
-      !isNonEmptyString(value.delegationFallbackModel.modelId) ||
-      !isNonEmptyString(value.delegationFallbackModel.thinkingLevel)
-    ) {
-      return "delegationFallbackModel must contain provider, modelId, and thinkingLevel";
-    }
   }
 
   if (value.pinnedAt !== undefined && typeof value.pinnedAt !== "string") {
@@ -761,81 +697,6 @@ export function resolveNextCapacityFallbackModelId(provider: string, modelId: st
   }
 
   return OPENAI_CODEX_CAPACITY_FALLBACK_CHAIN[index + 1];
-}
-
-export function shouldRetrySpecialistSpawnWithFallback(
-  error: unknown,
-  attemptedModel: Pick<AgentModelDescriptor, "provider" | "modelId">
-): boolean {
-  if (blocksOpenRouterFallback(attemptedModel)) return false;
-  const message = error instanceof Error ? error.message : String(error);
-  const capacity = classifyRuntimeCapacityError(message);
-  if (capacity.isQuotaOrRateLimit) {
-    return true;
-  }
-
-  const normalizedMessage = message.trim().toLowerCase();
-  const authIndicators = [
-    "authentication",
-    "unauthorized",
-    "invalid api key",
-    "api key",
-    "missing auth",
-    "no auth",
-    "forbidden",
-    "permission denied",
-    "access denied",
-    "oauth"
-  ];
-
-  const isAuthError = authIndicators.some((indicator) => normalizedMessage.includes(indicator));
-  if (isAuthError) {
-    return true;
-  }
-
-  const provider = attemptedModel.provider.trim().toLowerCase();
-  const modelId = attemptedModel.modelId.trim().toLowerCase();
-
-  if (provider === "cursor-sdk" && isCursorSdkFallbackEligibleError(error, normalizedMessage)) {
-    return true;
-  }
-
-  return normalizedMessage.includes(provider) && normalizedMessage.includes(modelId) && normalizedMessage.includes("auth");
-}
-
-function isCursorSdkFallbackEligibleError(error: unknown, normalizedMessage: string): boolean {
-  const errorName = error instanceof Error ? error.name.toLowerCase() : "";
-  const errorCode = typeof (error as { code?: unknown })?.code === "string"
-    ? ((error as { code: string }).code).toLowerCase()
-    : "";
-  const haystack = `${errorName} ${errorCode} ${normalizedMessage}`;
-
-  return [
-    "cursorsdkunavailableerror",
-    "authenticationerror",
-    "ratelimiterror",
-    "configurationerror",
-    "agentbusyerror",
-    "integrationnotconnectederror",
-    "networkerror",
-    "unknownagenterror",
-    "cursor sdk runtime is unavailable",
-    "@cursor/sdk could not be loaded",
-    "native binding",
-    "sqlite",
-    "unauthenticated",
-    "err_not_logged_in",
-    "not logged in",
-    "invalid api key",
-    "cannot use this model",
-    "unsupported cursor sdk model",
-    "agent busy",
-    "integration not connected",
-    "network",
-    "timeout",
-    "dns",
-    "tls"
-  ].some((indicator) => haystack.includes(indicator));
 }
 
 export function clampModelCapacityBlockDurationMs(durationMs: number): number | undefined {

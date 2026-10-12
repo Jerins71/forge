@@ -78,7 +78,6 @@ export interface SwarmControlPort {
     cwd: string;
     cli?: RpcInput<"session.launch">["cli"];
     model?: { provider: string; modelId: string; thinkingLevel?: string };
-    delegation?: RpcInput<"session.launch">["delegation"];
   }): Promise<{ materialized: true }>;
   applyInput(input: {
     commandId: string;
@@ -94,7 +93,6 @@ export interface SwarmControlPort {
     userOptions?: import("./command-service.js").InternalInput["userOptions"];
   }): Promise<{ entryId: string; runtimeMessage: RuntimeUserMessage }>;
   acquireProvider(scope: ProviderScope, conversation?: ProviderConversationRef, model?: Pick<import("../../swarm/types.js").AgentModelDescriptor,"provider"|"modelId"> & Partial<Pick<import("../../swarm/types.js").AgentModelDescriptor,"thinkingLevel">>): Promise<{ adapter: ProviderAdapter; binding: ProviderBinding }>;
-  selectProviderFallback?(threadId: string, currentModel?: import("../../swarm/types.js").AgentDescriptor["model"]): Promise<import("../../swarm/types.js").AgentDescriptor["model"] | undefined>;
   readTransferEntries?(threadId: string): Promise<import("../../swarm/types.js").ConversationEntryEvent[]>;
   /** Descriptor/resources only: no provider, credential, or implicit tool-grant acquisition. */
   prepareLineageSession?(input: { kind: "fork" | "continued_worker"; sourceThreadId: string; targetThreadId: string; commandId: string; title?: string; historical?: boolean; sourcePoint: import("@forge/protocol/environment-v2").ContextSourcePoint; model?: import("../../swarm/types.js").AgentDescriptor["model"]; purpose?: "side_chat" }): Promise<void>;

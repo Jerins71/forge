@@ -1,4 +1,3 @@
-import { SpecialistFallbackPolicy } from "../specialist-fallback-policy.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { installPiProviderContextImageResize } from "../runtime/pi/pi-runtime-creator.js";
 import type { SecureRuntimeBinding } from "../secure-sessions/runtime/secure-runtime-binding.js";
@@ -13,7 +12,6 @@ import { modelCatalogService } from "../catalog/model-catalog-service.js";
 import { writeOpenRouterModels } from "../catalog/openrouter-models.js";
 import { getOpenRouterModelsPath } from "../data-paths.js";
 import { PiGenerationTelemetryAdapter } from "../runtime/generation-telemetry.js";
-import { shouldRetrySpecialistSpawnWithFallback } from "../swarm-manager-utils.js";
 
 let root: string;
 let bodies: Record<string, unknown>[];
@@ -106,15 +104,4 @@ describe("OpenRouter request boundary (real Pi HTTP serialization, synthetic tra
     expect(bodies).toHaveLength(0);
   });
 
-  it.each([{ zdr: true }, { only: ["azure"] }])("blocks cross-model/provider fallback with hard policy %j", async (policy) => {
-    await save(policy);
-    expect(shouldRetrySpecialistSpawnWithFallback(new Error("429 rate limit"), { provider: "openrouter", modelId: model.id })).toBe(false);
-    expect(shouldRetrySpecialistSpawnWithFallback(new Error("invalid api key"), { provider: "openrouter", modelId: model.id })).toBe(false);
-    expect(shouldRetrySpecialistSpawnWithFallback(new Error("429 rate limit"), { provider: "openai", modelId: "gpt-4.1" })).toBe(true);
-    const capacity=vi.fn(model=>model);
-    const worker={role:'worker',model:{provider:'openrouter',modelId:model.id},delegationFallbackModel:{provider:'openai',modelId:'gpt-4.1'}} as import('../types.js').AgentDescriptor;
-    const fallback = new SpecialistFallbackPolicy({descriptors:new Map(),resolveSpecialistRosterForProfile:async()=>[],resolveSpawnModelWithCapacityFallback:capacity});
-    expect(await fallback.resolveSpecialistFallbackModelForDescriptor(worker)).toBeUndefined();expect(capacity).not.toHaveBeenCalled();
-
-  });
 });

@@ -17,12 +17,7 @@ async function readLastSeenVersion(): Promise<LastSeenVersionData | null> {
     const raw = await readFile(getLastSeenVersionPath(), 'utf-8')
     const data = JSON.parse(raw) as Partial<LastSeenVersionData>
     if (typeof data.version !== 'string' || data.version.length === 0) return null
-    return {
-      version: data.version,
-      ...(Array.isArray(data.seenPromptIds)
-        ? { seenPromptIds: data.seenPromptIds.filter((id): id is string => typeof id === 'string') }
-        : {}),
-    }
+    return { version: data.version }
   } catch {
     return null
   }

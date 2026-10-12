@@ -17,7 +17,7 @@ async function fixture() {
   const store=new TaskNotesStore({dataDir});const notes=(id='source')=>store.forActor({profileId:'project',sessionAgentId:id,actorAgentId:id});await notes().write({path:'checkpoint.md',text:'at fork'});
   const runtime=vi.fn(async()=>{throw new Error('lazy fork must not start');}),copyHistory=vi.fn(),copyAccess=vi.fn(async()=>vi.fn());
   const options={dataDir,profiles:new Map([['project',profile]]),runtimes:new Map(),getRequiredSessionDescriptor:()=>source,getDescriptor:(id:string)=>id==='source'?source:target,
-    prepareSessionCreation:()=>({profile,sessionDescriptor:target,sessionNumber:2}),resolveGlobalDelegationRosterId:async()=>'balanced',
+    prepareSessionCreation:()=>({profile,sessionDescriptor:target,sessionNumber:2}),
     provisioner:{provisionSession:async(input:{beforeRuntime?:()=>Promise<void>;initializeRuntime?:()=>Promise<void>})=>{await mkdir(join(dataDir,'target'),{recursive:true});await input.beforeRuntime?.();await input.initializeRuntime?.();}},
     getOrCreateRuntimeForDescriptor:runtime,copySessionHistoryForFork:copyHistory,copySecureAccessForFork:copyAccess,
     copyPinnedMessagesForFork:vi.fn(async()=>{await notes().write({path:'checkpoint.md',text:'later'});}),writeForkedSessionMemoryHeader:vi.fn(async()=>{}),saveStore:vi.fn(async()=>{}),emitSessionLifecycle:vi.fn(),emitAgentsSnapshot:vi.fn(),emitProfilesSnapshot:vi.fn(),now:()=>source.createdAt,

@@ -83,9 +83,6 @@ export interface CodexPluginSpecialistDefinition {
   modelId?: string;
   provider?: string;
   reasoningLevel?: SwarmReasoningLevel;
-  fallbackModelId?: string;
-  fallbackProvider?: string;
-  fallbackReasoningLevel?: SwarmReasoningLevel;
   webSearch?: boolean;
   promptBody: string;
   available: boolean;
@@ -975,9 +972,6 @@ function createVirtualSpecialistDefinition(): CodexPluginSpecialistDefinition {
     modelId: "gpt-5.5",
     provider: "openai",
     reasoningLevel: "high",
-    fallbackModelId: "gpt-5.5",
-    fallbackProvider: "openai",
-    fallbackReasoningLevel: "medium",
     webSearch: false,
     promptBody: buildCodexPluginWorkerPrompt(),
     available: true,

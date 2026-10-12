@@ -34,8 +34,7 @@ work.
       "kind": "review",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "Every finding names the violated invariant and includes focused evidence or a concrete reproduction.",
-      "route": "auto"
+      "acceptanceCriteria": "Every finding names the violated invariant and includes focused evidence or a concrete reproduction."
     },
     {
       "id": "challenge-operations",
@@ -44,8 +43,7 @@ work.
       "kind": "design-review",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "The result covers operational failure and recovery with evidence, not generic concerns.",
-      "route": "auto"
+      "acceptanceCriteria": "The result covers operational failure and recovery with evidence, not generic concerns."
     },
     {
       "id": "challenge-simplicity",
@@ -54,8 +52,7 @@ work.
       "kind": "design-review",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "The result identifies specific removable complexity or explains why the design is already minimal.",
-      "route": "auto"
+      "acceptanceCriteria": "The result identifies specific removable complexity or explains why the design is already minimal."
     }
   ]
 }

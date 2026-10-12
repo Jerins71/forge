@@ -21,7 +21,7 @@ purpose and graph shape and ask before creating the graph.
 
 ## When not to use
 
-- for routine delegation that the active roster already handles;
+- for routine work one worker, or you, can already handle;
 - merely because work is large, important, or graph-shaped;
 - to create several workers that repeat the same prompt without a reason for independence;
 - when one focused worker plus manager acceptance is enough.
@@ -31,8 +31,8 @@ purpose and graph shape and ask before creating the graph.
 1. Read exactly one best-fit scenario reference.
 2. Treat its graph as a topology example, not a fixed template. Keep the smallest useful graph.
 3. Give parallel nodes distinct questions, lenses, evidence requirements, or solution constraints.
-4. Omit `route` for the active preset's task default. Select named model policies only when their current
-   `[delegationRoster]` guidance clearly fits; never invent model or route ids.
+4. Omit `preset` to run a node on your own model. Name a preset only when its note in the worker preset
+   list in your instructions clearly fits; never invent preset names or model ids.
 5. Keep contributors independent until their leaf results are accepted. Do not reveal other
    contributors' conclusions in their initial tasks.
 6. The manager owns acceptance and normally owns synthesis for two to four bounded results. Add a
@@ -68,7 +68,7 @@ recommended next action. Never collapse unresolved disagreement into false conse
 
 ## Guardrails
 
-- Keep graph mutations manager-owned and use only routes present in `[delegationRoster]`.
+- Keep graph mutations manager-owned and use only presets from the worker preset list in your instructions.
 - Do not create parallel writers for one artifact or expose another contributor's conclusion early.
 - Do not spend more agents merely to increase vote count.
 

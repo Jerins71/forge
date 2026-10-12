@@ -23,7 +23,7 @@ export function createControlDescriptorPersistence(options: { database: Database
     for (const profile of store.profiles ?? []) {
       const descriptor = store.agents.find(a => a.agentId === profile.defaultSessionAgentId);
       const prior = database.prepare("SELECT summary_json FROM control_projects WHERE project_id=?").get(profile.profileId) as { summary_json: string } | undefined;
-      const summary: ProjectSummary = { ...(prior ? JSON.parse(prior.summary_json) : { repository: null, isGit: false, defaultBranch: null }), projectId: profile.profileId, title: profile.displayName, cwd: descriptor?.cwd ?? options.dataDir, updatedAt: profile.updatedAt, sortKey: String(profile.sortOrder ?? profile.createdAt), archived: Boolean(profile.archivedAt), defaultModel: profile.defaultModel, defaultSessionId: profile.defaultSessionAgentId, delegationDefaults: { ...(profile.defaultManagerPosture ? { managerPosture: profile.defaultManagerPosture } : {}), ...(profile.defaultDelegationRosterId ? { rosterId: profile.defaultDelegationRosterId } : {}) }, contextMode: profile.defaultContextMode ?? "summary" };
+      const summary: ProjectSummary = { ...(prior ? withoutLegacyDelegation(JSON.parse(prior.summary_json)) : { repository: null, isGit: false, defaultBranch: null }), projectId: profile.profileId, title: profile.displayName, cwd: descriptor?.cwd ?? options.dataDir, updatedAt: profile.updatedAt, sortKey: String(profile.sortOrder ?? profile.createdAt), archived: Boolean(profile.archivedAt), defaultModel: profile.defaultModel, defaultSessionId: profile.defaultSessionAgentId, contextMode: profile.defaultContextMode ?? "summary" };
       if (profile.profileType === "system") database.prepare("INSERT INTO control_projects (project_id,summary_json,updated_sequence) VALUES (?,?,0) ON CONFLICT(project_id) DO UPDATE SET summary_json=excluded.summary_json").run(profile.profileId, JSON.stringify(summary));
       else if (JSON.stringify(summary) !== prior?.summary_json) eventSink.append(tx, { topic: "shell", sessionId: null, event: { type: "project.upsert", project: summary } });
       database.prepare("UPDATE control_projects SET profile_json=?,deleted=0 WHERE project_id=?").run(JSON.stringify(profile), profile.profileId);
@@ -35,9 +35,9 @@ export function createControlDescriptorPersistence(options: { database: Database
         continue;
       }
       const row = database.prepare("SELECT summary_json,desired_state FROM control_sessions WHERE session_id=?").get(descriptor.agentId) as { summary_json: string; desired_state: string } | undefined;
-      const prior: SessionSummary | undefined = row && JSON.parse(row.summary_json);
+      const prior: SessionSummary | undefined = row && withoutLegacyDelegation(JSON.parse(row.summary_json));
       const profile = (store.profiles ?? []).find(p => p.profileId === descriptor.profileId);
-      const summary: SessionSummary = { ...(prior ?? { attention: "none", unread: 0, workerCount: 0 }), sessionId: descriptor.agentId, projectId: descriptor.profileId ?? descriptor.agentId, title: descriptor.sessionLabel ?? descriptor.displayName, status: row?.desired_state === "stopped" ? prior!.status : descriptor.status === "streaming" ? "running" : descriptor.status === "terminated" ? "stopped" : descriptor.status, updatedAt: descriptor.updatedAt, sortKey: descriptor.updatedAt, archived: Boolean(descriptor.archivedAt), workspace: { ...(prior?.workspace ?? { kind: "current_checkout", branch: null }), cwd: descriptor.cwd }, model: { ...descriptor.model, origin: descriptor.modelOrigin === "session_override" ? "session_override" : "profile_default" }, ...(descriptor.managerPosture ? { delegation: { managerPosture: descriptor.managerPosture, managerPostureOrigin: descriptor.managerPostureOrigin ?? "product_default", rosterId: descriptor.delegationRosterId, rosterOrigin: descriptor.delegationRosterOrigin } } : {}), contextMode: { effective: descriptor.contextModeOverride ?? profile?.defaultContextMode ?? "summary", ...(descriptor.contextModeOverride ? { override: descriptor.contextModeOverride } : {}) } };
+      const summary: SessionSummary = { ...(prior ?? { attention: "none", unread: 0, workerCount: 0 }), sessionId: descriptor.agentId, projectId: descriptor.profileId ?? descriptor.agentId, title: descriptor.sessionLabel ?? descriptor.displayName, status: row?.desired_state === "stopped" ? prior!.status : descriptor.status === "streaming" ? "running" : descriptor.status === "terminated" ? "stopped" : descriptor.status, updatedAt: descriptor.updatedAt, sortKey: descriptor.updatedAt, archived: Boolean(descriptor.archivedAt), workspace: { ...(prior?.workspace ?? { kind: "current_checkout", branch: null }), cwd: descriptor.cwd }, model: { ...descriptor.model, origin: descriptor.modelOrigin === "session_override" ? "session_override" : "profile_default" }, contextMode: { effective: descriptor.contextModeOverride ?? profile?.defaultContextMode ?? "summary", ...(descriptor.contextModeOverride ? { override: descriptor.contextModeOverride } : {}) } };
       if (profile?.profileType === "system") database.prepare("INSERT INTO control_sessions (session_id,project_id,desired_state,summary_json,updated_sequence) VALUES (?,?,'running',?,0) ON CONFLICT(session_id) DO UPDATE SET summary_json=excluded.summary_json").run(descriptor.agentId, descriptor.profileId, JSON.stringify(summary));
       else if (JSON.stringify(summary) !== row?.summary_json) eventSink.append(tx, { topic: "shell", sessionId: descriptor.agentId, event: { type: "session.upsert", session: summary } });
       database.prepare("UPDATE control_sessions SET descriptor_json=?,deleted=0 WHERE session_id=?").run(JSON.stringify(descriptor), descriptor.agentId);
@@ -73,4 +73,10 @@ export function createStandaloneDescriptorPersistence(options: { dataDir: string
     finally { sink.close(); }
   });
   return { load: () => run(owner => owner.load()), save: store => run(owner => owner.save(store)) };
+}
+
+/** Summaries written before worker presets carried the removed work mode and roster. */
+function withoutLegacyDelegation<T extends object>(summary: T): T {
+  const { delegation: _delegation, delegationDefaults: _delegationDefaults, ...rest } = summary as T & { delegation?: unknown; delegationDefaults?: unknown };
+  return rest as T;
 }

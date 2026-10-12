@@ -28,7 +28,7 @@ exports[`Pi provider adapter on the native production path > records pre-migrati
     "get_context_remaining",
     "new_context",
   ],
-  "promptSha256": "87ef758c6476e1620f68e2da09edde0dc538e24d43d1ae192e6c258c75b7f14a",
-  "schemaSha256": "382a9fccd1b8e673b9ed1ec585eefcadb0e247f2c261a68ffacb63b9a948da77",
+  "promptSha256": "6804ab3e2e0c8a7a67f7b5349d656785746b0f2621fd0ce045f399512e69bf87",
+  "schemaSha256": "f4d9f9a828c830f2a94355483845d67a44fa7d56a03b832a97520903fa27db6e",
 }
 `;

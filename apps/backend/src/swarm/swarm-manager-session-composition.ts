@@ -27,7 +27,6 @@ import {
   type SwarmProjectAgentServiceOptions,
 } from "./swarm-project-agent-service.js";
 import { SwarmSessionService, type SwarmSessionServiceOptions } from "./swarm-session-service.js";
-import { resolveDelegationRosterSettings } from "./specialists/delegation-roster-store.js";
 import type { AgentDescriptor, ManagerProfile, SwarmConfig } from "./types.js";
 
 
@@ -48,7 +47,7 @@ export interface SwarmManagerSessionCompositionServices {
 }
 
 type ProvisionerOwnedKeys = "dataDir" | "runtimes" | "forgetPinnedMessages" | "conversationProjector";
-type SessionOwnedKeys = "profiles" | "runtimes" | "getDescriptor" | "provisioner" | "prepareSessionCreation" | "resolveGlobalDelegationRosterId" | "deleteProjectAgentRecord" | "copyPinnedMessagesForFork" | "resetConversationHistory";
+type SessionOwnedKeys = "profiles" | "runtimes" | "getDescriptor" | "provisioner" | "prepareSessionCreation" | "deleteProjectAgentRecord" | "copyPinnedMessagesForFork" | "resetConversationHistory";
 type ProjectAgentOwnedKeys = "dataDir" | "descriptors" | "provisioner" | "now" | "prepareSessionCreation";
 type SharingOwnedKeys = "dataDir" | "now" | "getProfiles" | "getDescriptor" | "getDescriptors";
 type ProjectCoordinatorOwnedKeys = "config" | "descriptors" | "profiles" | "projectAgents" | "sharing" | "now";
@@ -128,8 +127,6 @@ export function createSwarmManagerSessionComposition(
     provisioner,
     prepareSessionCreation: (profileId, creationOptions) =>
       services.descriptorFactory.prepareSessionCreation(profileId, creationOptions),
-    resolveGlobalDelegationRosterId: async () =>
-      (await resolveDelegationRosterSettings(state.config.paths.dataDir)).defaultRosterId,
     deleteProjectAgentRecord: (profileId, handle) =>
       deleteProjectAgentRecord(state.config.paths.dataDir, profileId, handle),
     copyPinnedMessagesForFork: (source, forked, point) => services.pins.copyPinsForFork(source, forked, point),

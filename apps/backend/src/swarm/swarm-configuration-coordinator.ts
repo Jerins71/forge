@@ -289,30 +289,12 @@ export class SwarmConfigurationCoordinator {
     await this.settings.updateSessionModel(sessionAgentId, mode, modelPreset, reasoningLevel);
   }
 
-  updateProjectDelegationDefaults(
-    profileId: string,
-    updates: Parameters<SwarmSettingsService["updateProjectDelegationDefaults"]>[1],
-  ): Promise<void> {
-    return this.settings.updateProjectDelegationDefaults(profileId, updates);
+  getWorkerPresetSettings() {
+    return this.settings.getWorkerPresetSettings();
   }
 
-  getDelegationRosterSettings() {
-    return this.settings.getDelegationRosterSettings();
-  }
-
-  saveDelegationRosterSettings(input: unknown) {
-    return this.settings.saveDelegationRosterSettings(input);
-  }
-
-  applyRecommendedManagerDefaults() {
-    return this.settings.applyRecommendedManagerDefaults();
-  }
-
-  updateSessionDelegation(
-    sessionAgentId: string,
-    updates: Parameters<SwarmSettingsService["updateSessionDelegation"]>[1],
-  ): Promise<void> {
-    return this.settings.updateSessionDelegation(sessionAgentId, updates);
+  saveWorkerPresetSettings(input: unknown) {
+    return this.settings.saveWorkerPresetSettings(input);
   }
 
   updateProjectSecureSessionsEnabled(profileId: string, enabled: boolean): Promise<void> {
@@ -593,18 +575,6 @@ export class SwarmConfigurationCoordinator {
 
   resolveSkillRosterForDescriptor(descriptor: AgentDescriptor): Promise<SkillMetadata[] | null> {
     return this.promptResources.resolveSkillRosterForDescriptor(descriptor);
-  }
-
-  buildDelegationRosterModelContext(descriptor: AgentDescriptor): Promise<string> {
-    return this.promptResources.buildDelegationRosterModelContext(descriptor);
-  }
-
-  async appendDelegationRosterModelContext(
-    descriptor: AgentDescriptor,
-    text: string,
-  ): Promise<string> {
-    const context = await this.buildDelegationRosterModelContext(descriptor);
-    return text.trim().length > 0 ? `${text}\n\n${context}` : context;
   }
 
   resolveProjectAgentSystemPromptOverride(

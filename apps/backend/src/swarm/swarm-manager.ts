@@ -39,7 +39,6 @@ import { ForgeExtensionHost } from "./forge-extension-host.js";
 import { RuntimeRecoveryState } from "./runtime/runtime-recovery-state.js";
 import { SwarmRuntimeController } from "./swarm-runtime-controller.js";
 import { SwarmRuntimeLifecycleCoordinator } from "./swarm-runtime-lifecycle-coordinator.js";
-import { SpecialistFallbackPolicy } from "./specialist-fallback-policy.js";
 import {
   getManagedModelProviderCredentialAvailability,
   SecretsEnvService
@@ -134,7 +133,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private readonly runtimeLifecycleCoordinator: SwarmRuntimeLifecycleCoordinator;
   private readonly restartRecoveryCoordinator: RestartRecoveryCoordinator;
   private readonly bootCoordinator: SwarmBootCoordinator;
-  private readonly specialistFallbackManager: SpecialistFallbackPolicy;
   private readonly managerBootstrapCoordinator: ManagerBootstrapCoordinator;
   private readonly profileSessionBookkeepingCoordinator: ProfileSessionBookkeepingCoordinator;
   private readonly configurationCoordinator: SwarmConfigurationCoordinator;
@@ -276,7 +274,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
     this.restartRecoveryCoordinator = runtimeComposition.restartRecovery;
     this.runtimeController = runtimeComposition.runtimeController;
     this.assistantOutputRouter = runtimeComposition.assistantOutput;
-    this.specialistFallbackManager = runtimeComposition.specialistFallback;
     this.runtimes = runtimeComposition.runtimes;
     this.runtimeCreationPromisesByAgentId = runtimeComposition.runtimeCreationPromisesByAgentId;
     this.runtimeTokensByAgentId = runtimeComposition.runtimeTokensByAgentId;
@@ -456,7 +453,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       runtime: {
         controller: this.runtimeController,
         lifecycle: this.runtimeLifecycleCoordinator,
-        specialists: this.specialistFallbackManager,
         turns: this.turnContextCoordinator,
         assistantOutput: this.assistantOutputRouter,
         activeTools: this.sessionActiveTools, managerToolActivity: this.managerToolActivity,
@@ -1103,7 +1099,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
           this.sessionPlanCoordinator.recordWorkerAssignment(owner, assignment, input),
       },
       goals: { appendToManagerInput: (owner, text) => goals.appendToManagerInput(owner, text) },
-      delegation: { appendToManagerInput: (owner, text) => this.configurationCoordinator.appendDelegationRosterModelContext(owner, text) },
       projectAgents: {
         authorizeExternalDelivery: (input) => this.projectAgentSharingService.authorizeExternalDelivery(input),
         recordExternalContact: (sourceAgentId, targetProfileId, targetSessionAgentId) =>
