@@ -10,7 +10,7 @@
 //   - a worker's provider failure is one failed row in the worker view, and the manager's card names it;
 //   - a manager waiting inside its turn receives its worker's result there and finishes.
 //   pnpm exec playwright test scripts/environment-e2e/polish.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
@@ -356,7 +356,19 @@ test('a turn the user stopped says so, live and after reload', async ({ page }) 
   await expect(marker(page, 'turn_stopped')).toHaveCount(2, { timeout: 30_000 })
   expect({ first: await rowIndex(marker(page, 'turn_stopped').first()), second: await rowIndex(marker(page, 'turn_stopped').last()) }).toEqual(live)
   await shot(page, 'turn-stopped-reload')
-  assertions.stoppedTurn = { sessionId, markers: 2, order: live, replayMatches: true }
+
+  // A provider slow to act on the stop: the header says the stop is in progress, then that it settled.
+  const ignoreInterrupt = join(manifest.environments[0]!.checkout, '.fixture-ignore-interrupt')
+  await writeFile(ignoreInterrupt, '1')
+  try {
+    await send(page, '[fixture:hold] Hold a turn the provider is slow to stop')
+    await expect.poll(status, { timeout: 15_000 }).toBe('running')
+    await stop.click()
+    await expect(page.getByLabel('Agent status: stopping…')).toBeVisible({ timeout: 15_000 })
+    await shot(page, 'turn-stopping-header')
+    await expect(page.getByLabel('Agent status: stopped')).toBeVisible({ timeout: 30_000 })
+  } finally { await rm(ignoreInterrupt, { force: true }) }
+  assertions.stoppedTurn = { sessionId, markers: 2, order: live, replayMatches: true, header: ['stopping…', 'stopped'] }
 })
 
 test('a reply stopped mid-stream keeps the text already shown, then says it was stopped, live and after reload', async ({ page }) => {

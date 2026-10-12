@@ -17,6 +17,7 @@ export class SessionFeaturePublisher {
     private environmentControl: {
         access: EnvironmentAccessPort;
         control: ControlService;
+        launchMaterialized?: (sessionId: string) => Promise<void>;
     } | null = null;
     readonly browserHost: BrowserHostRpc;
     browser!: ReturnType<typeof createBrowserWorkspaceRpc>;
@@ -34,6 +35,7 @@ export class SessionFeaturePublisher {
     setEnvironmentControl(deps: {
         access: EnvironmentAccessPort;
         control: ControlService;
+        launchMaterialized?: (sessionId: string) => Promise<void>;
     }): void {
         this.environmentControl = deps;
         this.browser = createBrowserWorkspaceRpc({ service: this.browserAutomationService, host: this.browserHost, control: deps.control, resolveSession: id => this.resolveBrowserProfile(id) });
@@ -48,6 +50,7 @@ export class SessionFeaturePublisher {
     async *detailFeatures(principal: Principal, input: RpcInput<"session.features.subscribe">, signal: AbortSignal): AsyncGenerator<DetailFeatureStreamItem> {
         this.environmentControl?.access.authorize(principal, ["session:read"]);
         const sessionId = input.sessionId;
+        await this.environmentControl?.launchMaterialized?.(sessionId);
         const descriptor = this.swarmManager.getAgent(sessionId);
         if (!descriptor)
             throw new StreamFault("NOT_FOUND", "Unknown session");

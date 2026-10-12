@@ -2427,6 +2427,7 @@ export function BuilderSurface({
                   activeAgentArchetypeId: activeAgent?.archetypeId,
                   activeAgentSessionPurpose: activeAgent?.sessionPurpose,
                   activeAgentStatus,
+                  activeAgentStopping: !!activeAgentId && state.stoppingSessionIds.has(activeAgentId),
                   activeAgentRole: activeAgent?.role ?? null,
                   activeAgentCreatedAt: activeAgent?.createdAt ?? null,
                   activeAgentUpdatedAt: activeAgent?.updatedAt ?? null,

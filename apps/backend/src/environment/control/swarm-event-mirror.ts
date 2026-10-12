@@ -38,6 +38,8 @@ export interface SwarmEventMirror {
   attach(): void;
   reconcileBeforeReady(): Promise<void>;
   ensureDetailInitialized(sessionId: string): Promise<{ historyCursor: string | null }>;
+  /** Settles once an acknowledged launch has its swarm session, or at once when none is pending. */
+  launchMaterialized(sessionId: string): Promise<void>;
   readHistory(principal: Principal, input: RpcInput<"session.history">): Promise<RpcOutput<"session.history">>;
   readContent(principal: Principal, input: RpcInput<"session.content">): Promise<RpcOutput<"session.content">>;
   dispose(): void;
@@ -414,6 +416,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       }
       errors.clear();
     },
+    launchMaterialized,
     ensureDetailInitialized(sessionId) {
       const existing = initializing.get(sessionId); if (existing) return existing;
       const work = (async () => {

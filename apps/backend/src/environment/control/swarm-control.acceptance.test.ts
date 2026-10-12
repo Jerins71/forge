@@ -518,6 +518,29 @@ it("typed terminal catalog fans out to shared mounted scopes and stops after rel
   } finally { for (const controller of controllers) controller.abort(); for (const stream of streams) await stream.return?.(); }
 });
 
+it("a feature stream opened while its launch materializes receives live features", async () => {
+  const f = await fixture(); const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady();
+  const principal = { deviceSessionId: "launch-feature-device", scopes: new Set(["session:read", "session:operate", "workspace:write"] as const) };
+  f.database.prepare("INSERT INTO device_sessions (device_session_id,token_hash,proof_thumbprint,device_name,kind,scopes_json,created_at,last_seen_at,expires_at) VALUES ('launch-feature-device','fixture-token','fixture-proof','Fixture','cli','[]',0,0,?)").run(Date.now() + 86_400_000);
+  const handler = new SessionFeaturePublisher({ swarmManager: f.manager, listTerminalsForSession: () => [] });
+  handler.setEnvironmentControl({ access: { authorize: () => {} } as never, control: f.core.controlService, launchMaterialized: mirror.launchMaterialized });
+  const controller = new AbortController();
+  try {
+    const receipt = await f.core.controlService.execute(principal, "session.launch", { commandId: randomUUID(), projectId: "manager", title: "Launching", workspaceStrategy: { kind: "current_checkout" } });
+    const sessionId = receipt.sessionId!;
+    expect(f.manager.getAgent(sessionId)).toBeUndefined();
+    const stream = handler.detailFeatures(principal, { sessionId }, controller.signal)[Symbol.asyncIterator]();
+    const first = stream.next();
+    await f.core.effectWorker.drain();
+    expect((await first).value).toMatchObject({ event: { type: "terminals.snapshot" } });
+    handler.publish({ type: "terminal_closed", sessionAgentId: "manager", terminalId: "launch-terminal", reason: "user_closed" });
+    let item;
+    do { item = (await stream.next()).value; } while (item?.event.type !== "terminal.closed");
+    expect(item).toMatchObject({ event: { type: "terminal.closed", scopeId: "manager" } });
+    await stream.return?.();
+  } finally { controller.abort(); mirror.dispose(); }
+}, 15_000);
+
 it("typed secure presentation sends worker metadata to its owning manager", async () => {
   const f = await fixture();
   const worker = await f.manager.spawnAgent("manager", { agentId: "secure-detail-worker" });
@@ -821,7 +844,7 @@ it("Stop's interrupted run is never failure attention", async () => {
   await f.core.effectWorker.drain(); await f.manager.handleRuntimeStatus(f.runtimeTokens.get(f.sessionId)!, f.sessionId, "streaming", 0);
   await f.core.controlService.execute(f.paired.principal, "session.stop", { commandId: randomUUID(), sessionId: f.sessionId }); await f.core.effectWorker.drain();
   expect(loadState(f.database).runs[`run-${commandId}`].state).toBe("terminal");
-  expect(["interrupted", "cancelled"]).toContain(loadState(f.database).runs[`run-${commandId}`].outcome);
+  expect(loadState(f.database).runs[`run-${commandId}`].outcome).toBe("cancelled");
   expect(f.manager.getSessionAttentionSnapshot().attentions.some(row => row.sessionAgentId === f.sessionId && row.reason === "work_failed")).toBe(false);
 });
 

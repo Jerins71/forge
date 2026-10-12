@@ -211,7 +211,7 @@ export async function createEnvironmentService(options: {
         };
         const shellStream = createShellStream(dependencies);
         const detailStream = createDetailStream(dependencies);
-        sessionFeatures.setEnvironmentControl({ access: auth, control: owner.controlService });
+        sessionFeatures.setEnvironmentControl({ access: auth, control: owner.controlService, launchMaterialized: (sessionId) => source.launchMaterialized(sessionId) });
 
         const unavailable = () => {
           throw new StreamFault("UNAVAILABLE", "Terminal service is unavailable");
