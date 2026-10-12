@@ -152,6 +152,8 @@ test('a worker preset added in Settings is still there after a reload', async ({
 
   await page.reload()
   await expect(rows).toHaveCount(before + 1)
+  // Nothing edited since the reload: Save stays off.
+  await expect(page.getByTestId('worker-preset-save')).toBeDisabled()
   await expect(row.getByRole('textbox', { name: 'Name' })).toHaveValue('fast-worker')
   await expect(row.getByRole('textbox', { name: 'Note' })).toHaveValue('Quick edits and searches')
   await expect(row.getByRole('combobox').first()).toHaveText(chosenModel)
@@ -185,6 +187,14 @@ test('a thread started from an open session takes the pane, and follow-up messag
   await expect.poll(() => sendTargets(a, 'Follow-up to the new thread')).toEqual([newSessionId])
   expect(await sendTargets(a, 'Marker in the open session')).toEqual([openSessionId])
   await shot(page, 'launch-from-open-session')
+
+  // The sent first message never comes back as the next new thread's draft, even after a reload.
+  for (const reload of [false, true]) {
+    if (reload) await page.reload()
+    await page.getByRole('complementary').getByRole('button', { name: /^New session for / }).filter({ visible: true }).first().click()
+    await expect(page.getByTestId('launch-workspace')).toBeVisible()
+    await expect(page.getByRole('combobox', { name: 'Message agent...' })).toHaveValue('')
+  }
   assertions.launchFromOpenSession = { openSessionId, newSessionId, followUpTarget: await sendTargets(a, 'Follow-up to the new thread') }
   expect(renderErrors).toEqual([])
 })

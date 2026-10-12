@@ -25,9 +25,24 @@ export function persistFormatMode(value: boolean): void {
   }
 }
 
+// --- Shared draft maps ---
+// Every composer reads and writes the same two maps. A per-composer copy would go stale as soon as
+// another composer changed a draft, and persisting it would bring a sent or cleared draft back.
+
+let textDrafts: Record<string, string> | null = null
+let attachmentDrafts: Record<string, PendingAttachment[]> | null = null
+
+export function sharedTextDrafts(): Record<string, string> {
+  return (textDrafts ??= loadDrafts())
+}
+
+export function sharedAttachmentDrafts(): Record<string, PendingAttachment[]> {
+  return (attachmentDrafts ??= loadAttachmentDrafts())
+}
+
 // --- Text drafts ---
 
-export function loadDrafts(): Record<string, string> {
+function loadDrafts(): Record<string, string> {
   try {
     const raw = localStorage.getItem(DRAFTS_STORAGE_KEY)
     if (!raw) return {}
@@ -51,7 +66,7 @@ export function persistDrafts(drafts: Record<string, string>): void {
 
 // --- Attachment drafts ---
 
-export function loadAttachmentDrafts(): Record<string, PendingAttachment[]> {
+function loadAttachmentDrafts(): Record<string, PendingAttachment[]> {
   try {
     const raw = localStorage.getItem(ATTACHMENT_DRAFTS_STORAGE_KEY)
     if (!raw) return {}
@@ -86,9 +101,24 @@ export function persistAttachmentDrafts(drafts: Record<string, PendingAttachment
   }
 }
 
-// --- Environment purge ---
+// --- Removal ---
 
-const purgeListeners = new Set<(environmentId: string) => void>()
+const removalListeners = new Set<(matches: (key: string) => boolean) => void>()
+
+/** Drops every matching draft, persisted and in open composers. */
+function removeDrafts(matches: (key: string) => boolean): void {
+  for (const drafts of [sharedTextDrafts(), sharedAttachmentDrafts()]) {
+    for (const key of Object.keys(drafts)) if (matches(key)) delete drafts[key]
+  }
+  persistDrafts(sharedTextDrafts())
+  persistAttachmentDrafts(sharedAttachmentDrafts())
+  for (const listener of removalListeners) listener(matches)
+}
+
+/** A draft that has been delivered, such as the first message of a launched session. */
+export function clearDraft(draftKey: string): void {
+  removeDrafts((key) => key === draftKey)
+}
 
 /** Draft keys qualified with `qualifiedKey(environmentId, …)` belong to that environment. */
 export function isEnvironmentDraftKey(key: string, environmentId: string): boolean {
@@ -97,16 +127,12 @@ export function isEnvironmentDraftKey(key: string, environmentId: string): boole
 
 /** A revoked device loses its protected drafts for that environment, including open composers. */
 export function purgeEnvironmentDrafts(environmentId: string): void {
-  const drop = <T>(drafts: Record<string, T>) =>
-    Object.fromEntries(Object.entries(drafts).filter(([key]) => !isEnvironmentDraftKey(key, environmentId)))
-  persistDrafts(drop(loadDrafts()))
-  persistAttachmentDrafts(drop(loadAttachmentDrafts()))
-  for (const listener of purgeListeners) listener(environmentId)
+  removeDrafts((key) => isEnvironmentDraftKey(key, environmentId))
 }
 
-export function subscribeEnvironmentDraftPurge(listener: (environmentId: string) => void): () => void {
-  purgeListeners.add(listener)
+export function subscribeDraftRemoval(listener: (matches: (key: string) => boolean) => void): () => void {
+  removalListeners.add(listener)
   return () => {
-    purgeListeners.delete(listener)
+    removalListeners.delete(listener)
   }
 }

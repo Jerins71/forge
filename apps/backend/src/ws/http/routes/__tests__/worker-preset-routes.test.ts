@@ -3,7 +3,14 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FORGE_MODEL_CATALOG } from "@forge/protocol";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+
+// Credentials are the secrets service's concern; here only the model's own provider is signed in.
+const SIGNED_IN = Object.values(FORGE_MODEL_CATALOG.models)[0]!.provider;
+vi.mock("../../../../swarm/secrets-env-service.js", () => ({
+  getManagedModelProviderCredentialAvailability: async () => new Map([[SIGNED_IN, true]]),
+  resolveModelCredentialProvider: (model: { provider: string }) => model.provider,
+}));
 import { modelCatalogService } from "../../../../swarm/catalog/model-catalog-service.js";
 import { readWorkerPresetSettings, saveWorkerPresetSettings } from "../../../../swarm/specialists/worker-presets.js";
 import type { SwarmManager } from "../../../../swarm/swarm-manager.js";
@@ -18,6 +25,7 @@ async function start(): Promise<{ url: string; dataDir: string }> {
   const dataDir = await mkdtemp(join(tmpdir(), "worker-preset-routes-"));
   // The production settings service does exactly this, plus recycling managers.
   const swarmManager = {
+    getConfig: () => ({}),
     getWorkerPresetSettings: () => readWorkerPresetSettings(dataDir),
     saveWorkerPresetSettings: (input: unknown) =>
       saveWorkerPresetSettings(dataDir, input, (modelId, provider) => modelCatalogService.isKnownModelId(modelId, provider)),
@@ -39,16 +47,23 @@ async function start(): Promise<{ url: string; dataDir: string }> {
 const put = (url: string, body: unknown) =>
   fetch(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
-it("reads an empty list, saves a valid one, and reads it back", async () => {
+it("reads an empty list, saves a valid one, and reads it back marked by provider sign-in", async () => {
   const { url, dataDir } = await start();
-  const model = Object.values(FORGE_MODEL_CATALOG.models)[0];
-  const settings = { version: 2, presets: [{ name: "builder", provider: model.provider, modelId: model.modelId, reasoningLevel: "high", note: "Bounded work." }] };
+  const models = Object.values(FORGE_MODEL_CATALOG.models);
+  const model = models[0]!;
+  const other = models.find((entry) => entry.provider !== SIGNED_IN)!;
+  const settings = { version: 2, presets: [
+    { name: "builder", provider: model.provider, modelId: model.modelId, reasoningLevel: "high", note: "Bounded work." },
+    { name: "independent-reviewer", provider: other.provider, modelId: other.modelId, reasoningLevel: "high" },
+  ] };
+  const answered = { version: 2, presets: [{ ...settings.presets[0], available: true }, { ...settings.presets[1], available: false }] };
 
   expect(await (await fetch(url)).json()).toEqual({ version: 2, presets: [] });
   const saved = await put(url, settings);
   expect(saved.status).toBe(200);
-  expect(await saved.json()).toEqual(settings);
-  expect(await (await fetch(url)).json()).toEqual(settings);
+  expect(await saved.json()).toEqual(answered);
+  expect(await (await fetch(url)).json()).toEqual(answered);
+  // Availability is an answer, never stored.
   expect(await readWorkerPresetSettings(dataDir)).toEqual(settings);
 });
 
