@@ -117,6 +117,13 @@ async function runTurn(turn, text) {
       await dynamicTool(turn, 'update_plan', { plan: [{ step: 'Verify typed detail', status: 'in_progress' }] });
       await dynamicTool(turn, 'create_goal', { objective: 'Verify the explicitly requested fixture goal', tokenBudget: 1 });
     }
+    if (text.includes('[fixture:artifact]')) {
+      // Files the session made outside its project, as an agent writing to /tmp does.
+      const card = `/tmp/forge-fixture-${fixture.instanceId}-card.png`, notes = `/tmp/forge-fixture-${fixture.instanceId}-notes.md`;
+      writeFileSync(card, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64'));
+      writeFileSync(notes, `# Fixture notes\n\nfixture:${fixture.instanceId}:artifact text\n`);
+      reply = `fixture:${fixture.instanceId}:artifacts [action card](${card}) and [notes](${notes})`;
+    }
     if (text.includes('[fixture:choice]')) {
       count('choices');
       const result = await ask('item/tool/requestUserInput', { ...context(turn), itemId: `${turn.id}-choice`, questions: [{

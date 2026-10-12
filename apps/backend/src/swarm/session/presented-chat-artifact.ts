@@ -442,7 +442,8 @@ export async function findUniquePresentedConversationMessage(
       if (data && typeof data === "object" && (data as { type?: unknown }).type === "conversation_message" && !isConversationEntryEvent(data)) fail("corrupt_transcript");
       if (!isConversationEntryEvent(data) || data.type !== "conversation_message") return;
       const hydrated = backfillConversationMessageEntryId(data, (wrapper as { id?: unknown }).id);
-      if (hydrated.type === "conversation_message" && hydrated.id === messageId) found.push(hydrated);
+      // A Forge V2 detail item names the message by its timeline id (swarm-event-mirror), older readers by its entry id.
+      if (hydrated.type === "conversation_message" && (hydrated.id === messageId || hydrated.timelineEntryId === messageId)) found.push(hydrated);
     };
     for (;;) {
       let bytesRead = 0;

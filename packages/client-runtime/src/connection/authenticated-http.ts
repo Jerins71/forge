@@ -142,7 +142,9 @@ export class AuthenticatedHttp {
       this.onUnauthorized?.(error)
       throw error
     }
-    if (response.status === 403)
+    // Only the access layer's own refusal is about this device's permissions; a route's 403 (a path it
+    // will not read) is the route's answer and keeps its own message.
+    if (response.status === 403 && (await isAccessRefusal(response)))
       throw new EnvironmentRuntimeError(
         'FORBIDDEN',
         'This device is not allowed to do that on this environment. In Settings > Environments, pair it again with the permission enabled (for settings: "Change settings").',
@@ -254,5 +256,15 @@ export class AuthenticatedHttp {
         'Invalid socket ticket',
       )
     return result.ticket
+  }
+}
+
+/** The access layer answers `{ error: { code: 'FORBIDDEN', ... } }`; routes answer with a string error. */
+async function isAccessRefusal(response: Response): Promise<boolean> {
+  try {
+    const body = (await response.clone().json()) as { error?: { code?: unknown } }
+    return body?.error?.code === 'FORBIDDEN'
+  } catch {
+    return true
   }
 }
