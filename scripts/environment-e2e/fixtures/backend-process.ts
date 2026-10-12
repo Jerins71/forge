@@ -43,7 +43,7 @@ config.defaultCwd = checkout;
 config.cwdAllowlistRoots = [resolve(checkout, '..')];
 const authFile = getSharedAuthFilePath(config.paths.dataDir);
 await mkdir(dirname(authFile), { recursive: true });
-await writeFile(authFile, JSON.stringify({ 'openai-codex': { type: 'api_key', key: 'forge-fixture-inert-not-a-provider-key' }, ...(process.env.FORGE_E2E_LINEAGE === '1' ? { anthropic: { type: 'api_key', key: 'sk-ant-fake-fixture' } } : {}) }), { mode: 0o600 });
+await writeFile(authFile, JSON.stringify({ 'openai-codex': { type: 'api_key', key: 'forge-fixture-inert-not-a-provider-key' }, ...(process.env.FORGE_E2E_CLAUDE === '1' ? { anthropic: { type: 'api_key', key: 'sk-ant-fake-fixture' } } : {}) }), { mode: 0o600 });
 // The native contract reader checks that rollout metadata is inside CODEX_HOME.
 // Resolve that isolated home into the checkout so the fake writes only there.
 const nativeHome = getNativeCodexHome(config.paths.dataDir);
