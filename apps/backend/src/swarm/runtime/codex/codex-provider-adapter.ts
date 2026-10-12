@@ -4,7 +4,7 @@ import type { ProviderCapabilities, ProviderConversationRef, ProviderObservation
   ProviderScope, ProviderToolCallRef, ProviderTurnRef } from "@forge/protocol";
 import { createCodexAppServerClient } from "../../codex-app-server/codex-app-server-client.js";
 import type { CodexAppServerClientFactory, CodexAppServerClientPort } from "../../codex-app-server/types.js";
-import type { RuntimeSessionEvent } from "../../runtime-contracts.js";
+import { CompactionRejectedError, type RuntimeSessionEvent } from "../../runtime-contracts.js";
 import type { SwarmToolHost } from "../../swarm-tool-host.js";
 import { normalizeCodexUsage } from "../../../utils/native-usage-records.js";
 import { assertProviderRequirements, ProviderDispatchRejectedError, ProviderRefreshRequiredError, ProviderRequestRejectedError, UnsupportedProviderBehaviorError, type ProviderAdapter, type ProviderBinding,
@@ -306,7 +306,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
   async compact(input: { binding: ProviderBinding; attemptId: string; instructions?: string }): Promise<void> {
     const s = this.owned(input.binding);
     if (input.instructions?.trim()) throw new UnsupportedProviderBehaviorError("codex", "nativeCompact");
-    if (s.root && !s.root.ended) throw new Error("Wait for the native Codex turn to finish before compacting.");
+    if (s.root && !s.root.ended) throw new CompactionRejectedError("Codex is still working. Compact again when the current turn finishes.", true);
     const turn = this.begin(s.binding.conversation, input.attemptId, true);
     s.root = turn;
     await this.track((async () => {

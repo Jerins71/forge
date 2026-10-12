@@ -20,9 +20,11 @@ Open the **⋮ menu** in the chat header for:
 
 - **Compact context** — on Summary, compacts older context; on Context v2, starts another window from the saved continuation state without an AI summarizing pass.
 
-A manually compacted idle manager stays idle. On Context v2, manual compaction requires the manager to be idle; retry after active work settles. During compaction or recovery, the menu indicator spins and the session row shows a violet `C` badge. Continue the conversation normally once the transition finishes.
+Native Claude and Codex sessions compact through their own harness. To give Claude instructions, type `/compact <instructions>` in the composer. Codex uses its own compaction prompt and refuses instructions with a message saying so.
 
-Successful Compact and Context v2 start and completion notices appear in live and replayed transcripts as muted informational **Context update** rows, not amber **System** attention rows. Failures and unavailable transitions stay amber.
+A manually compacted idle manager stays idle. Compaction waits for the current turn: while a reply is running, Forge tells you to compact again when it finishes. During compaction or recovery, the menu indicator spins and the session row shows a violet `C` badge. Continue the conversation normally once the transition finishes.
+
+A manual Compact adds one **Compaction complete.** row. Context v2 start and completion notices appear in live and replayed transcripts as muted informational **Context update** rows, not amber **System** attention rows. Failures and unavailable transitions stay amber.
 
 ## Recovering earlier evidence
 

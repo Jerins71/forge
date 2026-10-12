@@ -257,6 +257,14 @@ export interface SwarmRuntimeCallbacks {
   getLastUserFacingManagerOutputAt?: (agentId: string) => number | undefined;
 }
 
+/** Compaction was refused before anything reached the provider; the message is shown to the user as is. */
+export class CompactionRejectedError extends Error {
+  constructor(message: string, readonly retryable = false) {
+    super(message);
+    this.name = "CompactionRejectedError";
+  }
+}
+
 export interface RuntimeShutdownOptions {
   abort?: boolean;
   shutdownTimeoutMs?: number;

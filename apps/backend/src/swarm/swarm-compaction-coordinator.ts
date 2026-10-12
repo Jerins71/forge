@@ -67,7 +67,6 @@ export class SwarmCompactionCoordinator {
       sourceContext,
       customInstructionsPreview: previewForLog(customInstructions ?? ""),
     });
-    this.emitSystemMessage(agentId, "Compacting manager context...", sourceContext);
 
     try {
       const result = await runtime.compact(customInstructions);

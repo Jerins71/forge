@@ -5,6 +5,8 @@ import {
 } from '@forge/protocol/environment-v2';
 import type { SwarmManager } from '../../swarm/swarm-manager.js';
 import type { ControlService, Principal } from '../../environment/control/control-types.js';
+import { ControlError } from '../../environment/control/command-service.js';
+import { CompactionRejectedError } from '../../swarm/runtime-contracts.js';
 import { recoveryProjection } from '../../environment/streams/wire-projection.js';
 import { StreamFault } from '../../environment/streams/stream-budget.js';
 import { requireNonSystemSessionProfile } from '../../swarm/system-profile-guards.js';
@@ -60,7 +62,9 @@ export function createDetailFeatureRpc({ swarmManager: swarm, control, compactio
           await swarm.controlSessionGoal(sessionId!, goal.action === 'edit' ? { action: goal.action, objective: goal.objective, tokenBudget: goal.tokenBudget } : { action: goal.action });
         } else {
           const compact = input as RpcInput<'session.compact'>;
-          await swarm.compactAgentContext(sessionId!, { customInstructions: compact.customInstructions, sourceContext: { channel: compact.source ?? compactionSource, messageId: compact.commandId }, trigger: (compact.source ?? compactionSource) === "cli" ? "cli" : "api" });
+          // A refusal never reached the provider, so the receipt fails with its message instead of an unknown outcome.
+          await swarm.compactAgentContext(sessionId!, { customInstructions: compact.customInstructions, sourceContext: { channel: compact.source ?? compactionSource, messageId: compact.commandId }, trigger: (compact.source ?? compactionSource) === "cli" ? "cli" : "api" })
+            .catch(error => { throw error instanceof CompactionRejectedError ? new ControlError('CONFLICT', error.message, error.retryable) : error; });
           return { compacted: true };
         }
         return {};
