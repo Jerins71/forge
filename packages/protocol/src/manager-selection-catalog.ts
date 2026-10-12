@@ -1,26 +1,19 @@
 import type { ManagerReasoningLevel } from './agents.js'
-import {
-  DEFAULT_DELEGATION_ROSTER_ID,
-  WORK_MODE_ID_MAX_LENGTH,
-  type WorkModeId,
-} from './delegation.js'
 import type { ManagerModelSurface } from './model-catalog-helpers.js'
 
 /** Version of the standalone manager-selection discovery resource. */
-export const MANAGER_SELECTION_CATALOG_VERSION = 1 as const
+export const MANAGER_SELECTION_CATALOG_VERSION = 2 as const
 
 /**
- * Wire bounds for manager-selection catalog V1. Servers enforce these before
+ * Wire bounds for the manager-selection catalog. Servers enforce these before
  * returning a projection; clients can use the same limits when decoding it.
  */
 export const MANAGER_SELECTION_CATALOG_LIMITS = {
   maxModels: 128,
-  maxWorkModes: 16,
   maxReasoningOptionsPerModel: 8,
   maxProviderIdLength: 64,
   maxModelIdLength: 256,
   maxFamilyIdLength: 64,
-  maxWorkModeIdLength: WORK_MODE_ID_MAX_LENGTH,
   maxLabelLength: 160,
   maxDescriptionLength: 512,
   maxRevisionLength: 80,
@@ -56,19 +49,6 @@ export interface ManagerModelOption {
   surfaces: Partial<Record<ManagerModelSurface, ManagerModelSurfaceState>>
 }
 
-export const WORK_MODE_UNAVAILABLE_REASONS = ['deprecated', 'unsupported'] as const
-export type WorkModeUnavailableReason = (typeof WORK_MODE_UNAVAILABLE_REASONS)[number]
-
-export type WorkModeOption = {
-  /** Opaque, bounded transport identity. Backend commands still narrow this to ManagerPosture. */
-  id: WorkModeId
-  label: string
-  description: string
-} & (
-  | { selectable: true; unavailableReason?: never }
-  | { selectable: false; unavailableReason: WorkModeUnavailableReason }
-)
-
 export interface ManagerSelectionCatalogDefaults {
   /** Omitted when the server's normal product default is not currently selectable. */
   createManagerModel?: {
@@ -76,7 +56,6 @@ export interface ManagerSelectionCatalogDefaults {
     modelId: string
     reasoningId: ManagerReasoningLevel
   }
-  workModeId: WorkModeId
 }
 
 /** Member-readable, secret-free projection used to render manager selection controls. */
@@ -85,22 +64,5 @@ export interface ManagerSelectionCatalogResponse {
   /** Opaque content revision. It changes when any projected choice/default/status changes. */
   revision: string
   models: ManagerModelOption[]
-  workModes: WorkModeOption[]
   defaults: ManagerSelectionCatalogDefaults
-}
-
-export const RECOMMENDED_MANAGER_DEFAULTS = {
-  model: {
-    provider: 'codex-native',
-    modelId: 'gpt-6-sol',
-    reasoningId: 'high',
-  },
-  workModeId: 'hands_on',
-  rosterId: DEFAULT_DELEGATION_ROSTER_ID,
-} as const
-
-export interface ApplyRecommendedManagerDefaultsResponse {
-  profileIds: string[]
-  rosterId: string
-  rosterRevision: number
 }

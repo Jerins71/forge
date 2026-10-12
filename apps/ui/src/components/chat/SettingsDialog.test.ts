@@ -34,7 +34,7 @@ vi.mock('@/components/settings/SettingsProjectSettings', () => ({
 }))
 vi.mock('@/components/settings/SettingsSkills', () => ({ SettingsSkills: () => createElement('div', null, 'Skills') }))
 vi.mock('@/components/settings/SettingsPrompts', () => ({ SettingsPrompts: () => createElement('div', null, 'Prompts') }))
-vi.mock('@/components/settings/SettingsSpecialists', () => ({ SettingsSpecialists: () => createElement('div', null, 'Specialists') }))
+vi.mock('@/components/settings/SettingsWorkerPresets', () => ({ SettingsWorkerPresets: () => createElement('div', null, 'Worker presets') }))
 vi.mock('@/components/settings/SettingsSlashCommands', () => ({ SettingsSlashCommands: () => createElement('div', null, 'Slash Commands') }))
 vi.mock('@/components/settings/SettingsExtensions', () => ({ SettingsExtensions: () => createElement('div', null, 'Extensions') }))
 vi.mock('@/components/settings/SettingsAbout', () => ({ SettingsAbout: () => createElement('div', null, 'About') }))
@@ -82,7 +82,6 @@ function makeProps(overrides: {
     managers: overrides.managers ?? [],
     profiles: overrides.profiles ?? [],
     promptChangeKey: 0,
-    specialistChangeKey: 0,
     modelConfigChangeKey: 0,
     initialTab: overrides.initialTab,
     contextProfileId: overrides.contextProfileId,

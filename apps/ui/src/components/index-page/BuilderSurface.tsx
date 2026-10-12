@@ -1890,30 +1890,6 @@ export function BuilderSurface({
         }
       : undefined
 
-  const sessionCoordinationPicker =
-    isActiveManager
-    && activeAgent
-    && activeAgentProfile
-    && isSessionModelPickerEligible(activeAgent, activeAgentProfile)
-      ? {
-          originId: selectedEnvironmentId ?? '',
-          httpClientRef,
-          sessionAgentId: activeAgent.agentId,
-          profileId: activeAgentProfile.profileId,
-          managerPosture: activeAgent.managerPosture,
-          managerPostureOrigin: activeAgent.managerPostureOrigin,
-          projectDefaultManagerPosture: activeAgentProfile.defaultManagerPosture,
-          delegationRosterId: activeAgent.delegationRosterId,
-          delegationRosterOrigin: activeAgent.delegationRosterOrigin,
-          projectDefaultDelegationRosterId: activeAgentProfile.defaultDelegationRosterId,
-          disabled: !state.connected,
-          modelConfigChangeKey: state.modelConfigChangeKey,
-          connectionEpoch: state.connectionEpoch,
-          onUpdateProjectDefaults: session.handleUpdateProjectDelegationDefaults,
-          onUpdateSession: session.handleUpdateSessionDelegation,
-        }
-      : undefined
-
   const localSidebarSession = useSessionActions({
     clientRef: primary.clientRef,
     fileEditorCoordinator: panels.fileEditorCoordinator,
@@ -2344,7 +2320,6 @@ export function BuilderSurface({
                 managers={settingsManagers}
                 profiles={state.profiles}
                 promptChangeKey={state.promptChangeKey}
-                specialistChangeKey={state.specialistChangeKey}
                 modelConfigChangeKey={state.modelConfigChangeKey}
                 connectionEpoch={state.connectionEpoch}
                 onBack={() =>
@@ -2700,7 +2675,6 @@ export function BuilderSurface({
                   replyTarget,
                   onClearReplyTarget: () => setReplyTarget(null),
                   sessionModelPicker,
-                  sessionCoordinationPicker,
                   sessionContextModePicker,
                   secureSessionPicker,
                 }}
@@ -2780,7 +2754,6 @@ export function BuilderSurface({
       </div>
 
       <GlobalDialogs
-        postUpdateSource={primarySettingsClient}
         artifactPanelProps={{
           artifact: panels.activeArtifact,
           environmentClient,

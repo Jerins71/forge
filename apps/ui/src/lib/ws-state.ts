@@ -154,8 +154,6 @@ export interface ManagerWsState {
   hasReceivedProfilesSnapshot: boolean
   /** Monotonically increasing counter bumped on prompt-related WS events */
   promptChangeKey: number
-  /** Monotonically increasing counter bumped on specialist_roster_changed WS events */
-  specialistChangeKey: number
   /** Monotonically increasing counter bumped on model_config_changed WS events */
   modelConfigChangeKey: number
   /** Prompt/model cache visualization toggle; defaults to off. */
@@ -235,7 +233,6 @@ export function createInitialManagerWsState(targetAgentId: string | null): Manag
     hasReceivedAgentsSnapshot: false,
     hasReceivedProfilesSnapshot: false,
     promptChangeKey: 0,
-    specialistChangeKey: 0,
     modelConfigChangeKey: 0,
     modelCacheVisualizationEnabled: false,
     remoteUpdateAwarenessSnapshot: null,

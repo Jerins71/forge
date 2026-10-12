@@ -463,13 +463,6 @@ function ToolExecutionLogRow({
               className="mr-1.5 inline-flex items-center gap-1 glass-inset rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground"
               title={actorDisplay?.title ?? rawActorId}
             >
-              {actorDisplay?.specialistColor ? (
-                <span
-                  className="inline-block size-1.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: actorDisplay.specialistColor }}
-                  aria-hidden="true"
-                />
-              ) : null}
               {actorLabel}
             </span>
           ) : null}

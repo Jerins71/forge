@@ -7,9 +7,7 @@
  */
 
 import {
-  DEFAULT_MANAGER_POSTURE,
   MANAGER_SELECTION_CATALOG_VERSION,
-  WORK_MODE_DEFINITIONS,
   type ManagerModelOption,
   type ManagerModelSurface,
   type ManagerSelectionCatalogResponse,
@@ -48,12 +46,6 @@ export function reconstructLegacyManagerSelectionCatalog(input: {
     version: MANAGER_SELECTION_CATALOG_VERSION,
     revision: LEGACY_MANAGER_SELECTION_CATALOG_REVISION,
     models,
-    workModes: WORK_MODE_DEFINITIONS.map((definition) => ({
-      id: definition.id,
-      label: definition.label,
-      description: definition.description,
-      selectable: definition.selectable,
-    })),
     defaults: {
       ...(firstCreate
         ? {
@@ -64,7 +56,6 @@ export function reconstructLegacyManagerSelectionCatalog(input: {
             },
           }
         : {}),
-      workModeId: DEFAULT_MANAGER_POSTURE,
     },
   }
 }

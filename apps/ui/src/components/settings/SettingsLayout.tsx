@@ -38,7 +38,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'models', label: 'Models', icon: <Cpu {...ICON_PROPS} />, description: 'Providers, models and runtimes available to agents.' },
       { id: 'auth', label: 'Authentication', icon: <KeyRound {...ICON_PROPS} />, description: 'Sign in to providers and manage credentials.' },
-      { id: 'specialists', label: 'Delegation', icon: <UserCog {...ICON_PROPS} />, description: 'Specialists agents can delegate work to.' },
+      { id: 'presets', label: 'Worker presets', icon: <UserCog {...ICON_PROPS} />, description: 'Named models a manager can start workers on.' },
       { id: 'prompts', label: 'Prompts', icon: <FileText {...ICON_PROPS} />, description: 'System prompts and instructions.' },
       { id: 'skills', label: 'Skills', icon: <Wrench {...ICON_PROPS} />, description: 'Reusable skills available to agents.' },
       { id: 'slash-commands', label: 'Slash Commands', icon: <Terminal {...ICON_PROPS} />, description: 'Custom commands for the composer.' },

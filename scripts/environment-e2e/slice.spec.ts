@@ -588,13 +588,12 @@ test('Batch 2 typed project policy survives lost acknowledgement, replay and res
     expect((await rpc.call('project.create', create)).result).toEqual({ projectId, sessionId: projectId });
     commands.push('project.create');
     await expect(rpc.call('project.update', { commandId: randomUUID(), projectId, patch: { title: 'Rejected', unsupported: true } })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
-    await command('project.update', { projectId, patch: { title: 'Policy restored', cwd: b().checkout, modelDefault: model, delegationDefaults: { managerPosture: 'hands_on' }, contextMode: 'fresh' } });
-    await command('session.configure', { sessionId: projectId, model: { mode: 'override', ...model }, contextMode: 'summary', delegation: { managerPosture: { mode: 'override', value: 'hands_on' } } });
-    await command('session.configure', { sessionId: projectId, model: { mode: 'inherit' }, contextMode: null, delegation: { managerPosture: { mode: 'inherit' } } });
+    await command('project.update', { projectId, patch: { title: 'Policy restored', cwd: b().checkout, modelDefault: model, contextMode: 'fresh' } });
+    await command('session.configure', { sessionId: projectId, model: { mode: 'override', ...model }, contextMode: 'summary' });
+    await command('session.configure', { sessionId: projectId, model: { mode: 'inherit' }, contextMode: null });
     await command('project.reorder', { projectIds: [projectId, ...projects.filter((_, i) => i === 1).map(p => p.sessionId)] });
     await command('project.archive', { projectId });
     await command('project.restore', { projectId });
-    await command('settings.recommendedDefaults.apply', {});
     const headers = { Authorization: `Bearer ${sessions[1]!.bearer}`, 'Content-Type': 'application/json' };
     expect((await fetch(`${b().baseUrl}/api/profiles/${projectId}/context-mode`, { method: 'PUT', headers, body: JSON.stringify({ mode: 'fresh', commandId: randomUUID() }) })).ok).toBe(true);
     const persisted = await readDb(db => ({ commands: (db.prepare('SELECT count(*) n FROM commands WHERE command_id=?').get(create.commandId) as { n: number }).n, profile: db.prepare('SELECT profile_json FROM control_projects WHERE project_id=?').get(projectId) }));

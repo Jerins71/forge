@@ -35,7 +35,7 @@ import { createFeatureClients } from './feature-clients/index.js'
 import { CONTEXT_TRANSFERS_UNAVAILABLE, EnvironmentRuntimeError, unavailable } from './errors.js'
 const CachedProjectsSchema = Type.Array(ProjectSummarySchema)
 const CachedSessionsSchema = Type.Array(SessionSummarySchema)
-function requiresProjectPolicy(method: string): boolean { return (method.startsWith('project.') && method !== 'project.readState.clear') || method === 'session.configure' || method.startsWith('workspace.directories.') || method === 'settings.recommendedDefaults.apply' }
+function requiresProjectPolicy(method: string): boolean { return (method.startsWith('project.') && method !== 'project.readState.clear') || method === 'session.configure' || method.startsWith('workspace.directories.') }
 const sessionStateMethods = new Set(['session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'])
 const sessionLifecycleMethods = new Set(['session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.fork', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill', 'worker.delete'])
 const contextTransferMethods = new Set(['session.provider.switch', 'session.mergeBack', 'worker.continue', 'session.lineage.get'])

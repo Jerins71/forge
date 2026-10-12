@@ -28,7 +28,6 @@ export type UpdateStatus =
 export interface PostUpdateInfo {
   previousVersion: string
   currentVersion: string
-  offerRecommendedDefaults: boolean
 }
 export interface CliInstallResult { success: boolean; installedPath: string; binDir: string; pathIncluded: boolean; pathInstructions: string | null; error?: string }
 export interface StreamDeckPluginStatus { supported: boolean; isPackaged: boolean; bundled: boolean; streamDeckInstalled: boolean; pluginVersion: string }

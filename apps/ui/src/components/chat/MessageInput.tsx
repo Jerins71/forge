@@ -12,7 +12,6 @@ import { VoiceRecordingBar } from './message-input/VoiceRecordingBar'
 import { ComposerTextarea } from './message-input/ComposerTextarea'
 import { SecureSessionPicker } from './message-input/SecureSessionPicker'
 import { SessionModelPicker } from './message-input/SessionModelPicker'
-import { SessionCoordinationPicker } from './message-input/SessionCoordinationPicker'
 import { SessionContextModePicker } from './message-input/SessionContextModePicker'
 import { useDraft } from './message-input/hooks/use-draft'
 import { useSlashCommands } from './message-input/hooks/use-slash-commands'
@@ -29,7 +28,6 @@ export type {
   MessageInputHandle,
   MessageInputProps,
   SecureSessionPickerConfig,
-  SessionCoordinationPickerConfig,
   SessionContextModePickerConfig,
   SessionModelPickerConfig,
 } from './message-input/types'
@@ -55,7 +53,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     replyTarget,
     onClearReplyTarget,
     sessionModelPicker,
-    sessionCoordinationPicker,
     sessionContextModePicker,
     secureSessionPicker,
   },
@@ -465,9 +462,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
             {/* One row. Secondary controls drop to icons below 50rem; send actions stay pinned right. */}
             <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {secureSessionPicker ? <SecureSessionPicker config={secureSessionPicker} /> : null}
-              {sessionCoordinationPicker
-                ? <SessionCoordinationPicker config={sessionCoordinationPicker} />
-                : null}
               {sessionContextModePicker
                 ? <SessionContextModePicker config={sessionContextModePicker} />
                 : null}

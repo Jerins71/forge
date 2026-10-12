@@ -5,10 +5,8 @@ export interface AgentDisplayMeta {
   agentId: string
   /** Human-readable primary label: displayName or agentId fallback. */
   primaryLabel: string
-  /** Secondary metadata line: specialist, model/provider, reasoning level. */
+  /** Secondary metadata line: preset, model/provider, reasoning level. */
   secondaryLabel: string | null
-  /** Specialist color for optional visual accent. */
-  specialistColor: string | null
   /** Full title including raw agentId and all metadata for tooltip/audit. */
   title: string
 }
@@ -24,9 +22,8 @@ export function buildAgentDisplayMap(agents: AgentDescriptor[]): Map<string, Age
     const primaryLabel = agent.displayName?.trim() || agent.agentId
     const parts: string[] = []
 
-    if (agent.specialistDisplayName?.trim()) {
-      parts.push(agent.specialistDisplayName.trim())
-    }
+    const preset = agent.specialistDisplayName?.trim() || agent.specialistId
+    if (preset) parts.push(preset)
 
     if (agent.model) {
       const modelParts: string[] = []
@@ -49,7 +46,6 @@ export function buildAgentDisplayMap(agents: AgentDescriptor[]): Map<string, Age
       agentId: agent.agentId,
       primaryLabel,
       secondaryLabel,
-      specialistColor: agent.specialistColor?.trim() || null,
       title: titleParts.join(' — '),
     })
   }

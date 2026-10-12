@@ -14,9 +14,9 @@ it('addresses project mutations without a selected session and gates unsupported
   expect(request).toHaveBeenCalledTimes(1)
 })
 it('projects default-session identity, order and exact policy on bootstrap and live replacement', () => {
-  const projects = new Map([['p', { projectId: 'p', title: 'Project', cwd: '/fixture', updatedAt: '2026-10-10T00:00:00Z', sortKey: '3', archived: false, repository: null, isGit: false, defaultBranch: null, defaultSessionId: 'default', delegationDefaults: { managerPosture: 'hands_on', rosterId: 'roster' }, contextMode: 'fresh' as const }]])
+  const projects = new Map([['p', { projectId: 'p', title: 'Project', cwd: '/fixture', updatedAt: '2026-10-10T00:00:00Z', sortKey: '3', archived: false, repository: null, isGit: false, defaultBranch: null, defaultSessionId: 'default', contextMode: 'fresh' as const }]])
   const shell = { projects, sessions: new Map(), sessionIdsByProject: new Map(), complete: true } as unknown as Parameters<typeof projectShell>[0]
   const first = projectShell(shell, []).profiles[0]
-  expect(first).toMatchObject({ defaultSessionAgentId: 'default', defaultContextMode: 'fresh', defaultManagerPosture: 'hands_on', defaultDelegationRosterId: 'roster', sortOrder: 3 })
+  expect(first).toMatchObject({ defaultSessionAgentId: 'default', defaultContextMode: 'fresh', sortOrder: 3 })
   expect(projectShell(shell, [], [first]).profiles[0]).toEqual(first)
 })
