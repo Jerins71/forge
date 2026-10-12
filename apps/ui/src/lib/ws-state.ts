@@ -115,6 +115,8 @@ export interface ManagerWsState {
   generationThroughputTombstonesByMeasurementId: Record<string, number>
   generationThroughputTombstoneOrder: string[]
   agents: AgentDescriptor[]
+  /** Sessions whose stop has not settled; their agent status reads idle until the runtime exits. */
+  stoppingSessionIds: ReadonlySet<string>
   loadedSessionIds: Set<string>
   /** Authoritative worker roster received during the current socket connection. */
   workerMetadataSessionIds: Set<string>
@@ -207,6 +209,7 @@ export function createInitialManagerWsState(targetAgentId: string | null): Manag
     generationThroughputTombstonesByMeasurementId: {},
     generationThroughputTombstoneOrder: [],
     agents: [],
+    stoppingSessionIds: new Set(),
     loadedSessionIds: new Set(),
     workerMetadataSessionIds: new Set(),
     profiles: [],

@@ -56,6 +56,8 @@ interface ChatHeaderProps {
   activeAgentArchetypeId?: string | null
   activeAgentSessionPurpose?: AgentSessionPurpose | null
   activeAgentStatus: AgentStatus | null
+  /** The session's stop has not settled yet. */
+  activeAgentStopping?: boolean
   activeAgentRole?: 'manager' | 'worker' | null
   activeAgentCreatedAt?: string | null
   activeAgentUpdatedAt?: string | null
@@ -182,6 +184,7 @@ export function ChatHeader({
   activeAgentArchetypeId,
   activeAgentSessionPurpose,
   activeAgentStatus,
+  activeAgentStopping,
   activeAgentRole,
   activeAgentCreatedAt,
   activeAgentUpdatedAt,
@@ -238,7 +241,7 @@ export function ChatHeader({
   isFeedbackSubmitting,
 }: ChatHeaderProps) {
   const isStreaming = connected && activeAgentStatus === 'streaming'
-  const statusLabel = connected ? formatAgentStatus(activeAgentStatus) : 'Reconnecting'
+  const statusLabel = !connected ? 'Reconnecting' : activeAgentStopping ? 'Stopping…' : formatAgentStatus(activeAgentStatus)
   const durationLabel =
     activeAgentRole === 'worker' &&
     (activeAgentStatus === 'terminated' || activeAgentStatus === 'stopped' || activeAgentStatus === 'idle') &&

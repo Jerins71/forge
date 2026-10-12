@@ -163,7 +163,7 @@ export class ManagerWsClient {
       )
       const updateShell = () => {
         const shell = client.shell.getSnapshot();
-        this.updateState({ ...projectShell(shell, this.state.agents, this.state.profiles, this.state.unreadCounts, this.state.sessionAttentions), restartRecovery: shell.recovery ?? null });
+        this.updateState({ ...projectShell(shell, this.state.agents, this.state.profiles, this.state.unreadCounts, this.state.sessionAttentions, this.state.stoppingSessionIds), restartRecovery: shell.recovery ?? null });
         this.keepViewedSessionRead()
       }
       updateShell()

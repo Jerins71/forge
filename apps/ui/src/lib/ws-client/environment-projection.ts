@@ -60,7 +60,7 @@ export function projectSession(
   }
   return previous && Object.keys(next).every(key => next[key as keyof AgentDescriptor] === previous[key as keyof AgentDescriptor]) ? previous : next
 }
-export function projectShell(shell: ShellState, previous: AgentDescriptor[], previousProfiles: ManagerProfile[] = [], previousUnread: Record<string, number> = {}, previousAttentions: Record<string, SessionAttention> = {}) {
+export function projectShell(shell: ShellState, previous: AgentDescriptor[], previousProfiles: ManagerProfile[] = [], previousUnread: Record<string, number> = {}, previousAttentions: Record<string, SessionAttention> = {}, previousStopping: ReadonlySet<string> = new Set()) {
   const byId = new Map(previous.map((a) => [a.agentId, a]))
   // The shell lists sessions only; the mounted detail's workers are kept across shell updates.
   const agents = [
@@ -98,10 +98,13 @@ export function projectShell(shell: ShellState, previous: AgentDescriptor[], pre
       : { ...occurrence, sessionAgentId: s.sessionId, profileId: s.projectId }
   }
   const attentionKeys = Object.keys(sessionAttentions)
+  // `AgentStatus` has no shutting-down value, so a stop that has not settled is carried beside the agents.
+  const stopping = new Set([...shell.sessions.values()].filter(s => s.status === 'stopping').map(s => s.sessionId))
   return {
     agents: sameItems(agents, previous) ? previous : agents,
     profiles: sameItems(profiles, previousProfiles) ? previousProfiles : profiles,
     unreadCounts: Object.keys(previousUnread).length === sessionCount && Object.keys(unreadCounts).every(key => unreadCounts[key] === previousUnread[key]) ? previousUnread : unreadCounts,
+    stoppingSessionIds: stopping.size === previousStopping.size && [...stopping].every(id => previousStopping.has(id)) ? previousStopping : stopping,
     sessionAttentionAvailable: true,
     // A complete shell is the whole session and project inventory; no other event reports it here.
     hasReceivedAgentsSnapshot: shell.complete,
