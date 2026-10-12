@@ -412,7 +412,15 @@ test('a message sent while a reply is streaming is answered below the reply it c
     // The list it cut short keeps what was shown, and ends above that answer rather than below it.
     await expect(transcript(page)).toContainText('Synthetic list line 20')
     await expect(transcript(page)).not.toContainText('Synthetic list line 300')
-    expect(await rowIndex(answer())).toBeGreaterThan(await rowIndex(textRow(page, 'Synthetic list line 20')))
+    // The steered message takes its place where the provider consumed it: request, cut reply, steer, answer.
+    const order = [
+      await rowIndex(transcript(page).getByText('[fixture:list] Write a 300 line list', { exact: true })),
+      await rowIndex(textRow(page, 'Synthetic list line 20')),
+      await rowIndex(transcript(page).getByText('stop and reply DONE', { exact: true })),
+      await rowIndex(answer()),
+    ]
+    expect(order).toEqual([...order].sort((left, right) => left - right))
+    expect(new Set(order).size).toBe(4)
   }
   await check()
   await expect.poll(async () => (await shellSession(sessionId))?.status, { timeout: 30_000 }).toBe('idle')
@@ -421,7 +429,7 @@ test('a message sent while a reply is streaming is answered below the reply it c
   await expect(transcript(page)).toContainText('stop and reply DONE', { timeout: 30_000 })
   await check()
   await shot(page, 'reply-steered-reload')
-  assertions.steeredReply = { sessionId, answered: true, answerBelowCutReply: true, replayMatches: true }
+  assertions.steeredReply = { sessionId, answered: true, order: ["request", "cut reply", "steer", "answer"], replayMatches: true }
 })
 
 test('a worker\'s provider failure is one failed row in the worker view, and the manager\'s card names it', async ({ page }) => {
