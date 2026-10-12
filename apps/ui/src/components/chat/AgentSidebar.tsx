@@ -831,7 +831,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       data-sidebar-layout={sidebarLayout}
       className={cn(
         'flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground',
-        'max-md:w-full md:w-[20rem] md:min-w-[20rem] md:shrink-0',
+        'max-md:w-full md:w-[clamp(16rem,20vw,26rem)] md:shrink-0',
       )}
     >
       {roomsV2 ? (

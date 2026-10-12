@@ -1,5 +1,5 @@
 import { createElement, isValidElement, memo, useCallback, useMemo, useState, type ReactNode } from 'react'
-import { Check, ChevronRight, ClipboardCopy, Copy, FileCode2, FileText, FileType, ZoomIn } from 'lucide-react'
+import { Check, ChevronRight, ClipboardCopy, Copy, FileCode2, FileText, FileType, WrapText, ZoomIn } from 'lucide-react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
@@ -90,34 +90,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
           )
         }
 
-        return (
-          <div className={cn('group/code relative', isDocument ? 'my-5' : 'my-2')}>
-            {language ? (
-              <div className="flex items-center justify-between rounded-t-xl border border-b-0 border-hairline bg-foreground/[0.04] px-3 py-1.5">
-                <span className="font-mono text-[11px] font-medium text-muted-foreground">{language}</span>
-                <CodeBlockCopyButton code={normalizedCode} />
-              </div>
-            ) : (
-              <span className="absolute right-2 top-2 z-10 opacity-0 transition-opacity duration-150 group-hover/code:opacity-100">
-                <CodeBlockCopyButton code={normalizedCode} />
-              </span>
-            )}
-            <div
-              className={cn(
-                'glass-inset w-full',
-                language ? 'rounded-b-xl rounded-t-none' : 'rounded-xl',
-              )}
-            >
-              <pre className="overflow-x-auto p-4">
-                <HighlightedCode
-                  code={normalizedCode}
-                  language={language}
-                  className={cn('font-mono text-foreground/90', isDocument ? 'text-[13px] leading-6' : 'text-[12.5px] leading-5')}
-                />
-              </pre>
-            </div>
-          </div>
-        )
+        return <CodeBlock code={normalizedCode} language={language} isDocument={isDocument} />
       }
 
       return (
@@ -341,7 +314,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
             pre: renderPre,
             table({ children }) {
               return (
-                <div className={cn('my-4 w-full overflow-x-auto', isDocument && 'my-5')}>
+                <div className={cn('scroll-thin my-4 w-full max-w-full overflow-x-auto', isDocument && 'my-5')}>
                   <table className="w-full border-collapse text-sm">
                     {children}
                   </table>
@@ -419,6 +392,58 @@ function HighlightedCode({ code, language, className }: { code: string; language
   const html = useMemo(() => (language ? highlightCode(code, language) : null), [code, language])
   if (html === null) return <code className={className}>{code}</code>
   return <code className={cn('syntax-highlight', className)} dangerouslySetInnerHTML={{ __html: html }} />
+}
+
+/** A fenced block. Long lines scroll sideways by default; the toggle wraps them instead. */
+function CodeBlock({ code, language, isDocument }: { code: string; language: string | null; isDocument: boolean }) {
+  const [wrap, setWrap] = useState(false)
+  const actions = (
+    <span className="flex items-center gap-0.5">
+      <button
+        type="button"
+        onClick={() => setWrap((value) => !value)}
+        className={cn(
+          'inline-flex size-6 items-center justify-center rounded-md transition-colors',
+          wrap ? 'bg-foreground/[0.08] text-foreground' : 'text-subtle-foreground hover:text-foreground',
+        )}
+        aria-label="Wrap long lines"
+        aria-pressed={wrap}
+        title={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
+      >
+        <WrapText className="size-3.5" />
+      </button>
+      <CodeBlockCopyButton code={code} />
+    </span>
+  )
+
+  return (
+    <div className={cn('code-block group/code relative', isDocument ? 'my-5' : 'my-2')}>
+      {language ? (
+        <div className="flex items-center justify-between rounded-t-xl border border-b-0 border-hairline bg-foreground/[0.04] px-3 py-1.5">
+          <span className="font-mono text-[11px] font-medium text-muted-foreground">{language}</span>
+          {actions}
+        </div>
+      ) : (
+        <span className="absolute right-2 top-2 z-10 opacity-0 transition-opacity duration-150 group-hover/code:opacity-100 group-focus-within/code:opacity-100">
+          {actions}
+        </span>
+      )}
+      <div
+        className={cn(
+          'glass-inset w-full',
+          language ? 'rounded-b-xl rounded-t-none' : 'rounded-xl',
+        )}
+      >
+        <pre className={cn('scroll-thin p-4', wrap ? 'whitespace-pre-wrap break-words' : 'overflow-x-auto')}>
+          <HighlightedCode
+            code={code}
+            language={language}
+            className={cn('font-mono text-foreground/90', isDocument ? 'text-[13px] leading-6' : 'text-[12.5px] leading-5')}
+          />
+        </pre>
+      </div>
+    </div>
+  )
 }
 
 function CodeBlockCopyButton({ code }: { code: string }) {

@@ -23,7 +23,7 @@ export function LiveActivityRows({ store, actorId, expandedIds, onToggle, loadCo
   const rows = useMemo(() => items.filter((item) => item.actorId === actorId).map(liveActivityRow), [items, actorId])
   if (rows.length === 0) return null
   return (
-    <div className="w-full py-0.5 pl-[40px]" data-testid="live-activity">
+    <div className="w-full py-0.5" data-testid="live-activity">
       {turnStartedAt ? <WorkTimer startedAt={turnStartedAt} /> : null}
       <div className="flex min-w-0 flex-col">
         {rows.map((row) => row.kind === 'message' ? (

@@ -166,6 +166,8 @@ export function useActiveAgent({
     if (!activeAgent) return activeAgentId ?? 'No active agent'
     // For session agents, show profile name + session label
     if (activeAgentProfileName && activeAgentSessionLabel) {
+      // A session named after its project would read "Project › Project".
+      if (activeAgentSessionLabel === activeAgentProfileName) return activeAgentProfileName
       return `${activeAgentProfileName} › ${activeAgentSessionLabel}`
     }
     return activeAgent.displayName ?? activeAgentId ?? 'No active agent'
