@@ -150,6 +150,8 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     // Each finished tool or reasoning row is one activity summary; raw tool-call entries stay in the audit log.
     if (!["conversation_message", "activity_summary", "agent_message"].includes(entry.type)) return null;
     if (entry.type === "conversation_message" && entry.terminal === false) return null;
+    // A steer the provider has not consumed is shown as queued; its consumption entry is its transcript place.
+    if (entry.type === "conversation_message" && entry.steerPending) return null;
     // Each worker message is also copied into its manager's transcript for the legacy All view. The session
     // detail already carries the worker's own entry, so the copy is not a second item, and not a result.
     if (entry.type === "conversation_message" && entry.source === "worker_report" && entry.excludeFromModelContext) return null;
@@ -179,7 +181,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       const head = database.prepare("SELECT user_turn_id FROM detail_items WHERE session_id=? ORDER BY updated_sequence DESC LIMIT 1").get(sessionId) as { user_turn_id: string } | undefined;
       if (head) userTurns.set(sessionId, head.user_turn_id);
     }
-    if (descriptor.role === "manager" && entry.type === "conversation_message" && entry.role === "user") userTurns.set(sessionId, entry.id ?? entry.timelineEntryId!);
+    if (descriptor.role === "manager" && entry.type === "conversation_message" && entry.role === "user" && !entry.steerPending) userTurns.set(sessionId, entry.id ?? entry.timelineEntryId!);
     const projected = projectedItem ?? item(entry, sessionId);
     if (projected && descriptor.role === "worker" && !projectedItem) projected.userTurnId = userTurns.get(sessionId) ?? projected.userTurnId;
     if (projected) eventSink.append(tx, { topic: "detail", sessionId,

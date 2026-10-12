@@ -103,6 +103,7 @@ export interface PreparedInboundConversationPayload {
   controlledInput?: ControlledInputContext;
   projectAgentContext?: ConversationMessageEvent["projectAgentContext"];
   turnId?: string;
+  steerPending?: boolean;
   role?: "user" | "assistant" | "system";
   sourceWorkerId?: string;
   attachments?: ConversationAttachment[];
@@ -156,6 +157,7 @@ export class InboundConversationAppender {
       projectAgentContext:
         payload.source === "project_agent_input" ? payload.projectAgentContext : undefined,
       replyTo: payload.source === "user_input" ? payload.replyTo : undefined,
+      ...(payload.steerPending ? { steerPending: true as const } : {}),
     };
 
     if (payload.controlledInput) {
@@ -323,7 +325,9 @@ export class UserMessageCoordinator {
       const classification = target.role === "manager" ? this.options.codex.plugin.classifyAndPreflightUserTurn(target as ManagerDescriptor, text, sourceContext) : { kind: "none" } as const;
       await this.options.goals.noteUserTurn(target);
       const guidance = await linkSessionReferences(this.options.sessionReferences, target, options.sessionReferenceAgentIds);
-      const appended = await this.appendUserMessage(target, text, attachments, sourceContext, replyTo, options.clientRequestId, options.controlledInput, options.runId);
+      // Input steered into a running turn takes its transcript place when the provider consumes it.
+      const steerPending = options.delivery === "steer" && target.status === "streaming";
+      const appended = await this.appendUserMessage(target, text, attachments, sourceContext, replyTo, options.clientRequestId, options.controlledInput, options.runId, steerPending);
       const prepared = target.role === "manager" ? this.options.codex.plugin.prepareUserTurn({ manager: target as ManagerDescriptor, text, sourceContext, classification, userMessageId: appended.event.id }) : {};
       const outputTarget = this.options.assistantOutput.resolveTargetForUserInput(sourceContext);
       const visible = formatInboundUserMessageForManager(text, sourceContext, outputTarget, replyTo);
@@ -542,6 +546,7 @@ export class UserMessageCoordinator {
     clientRequestId?: string,
     controlledInput?: ControlledInputContext,
     turnId?: string,
+    steerPending?: boolean,
   ): Promise<AppendConversationUserMessageResult> {
     const receivedAt = this.options.now();
     const managerContextId = target.role === "manager" ? target.agentId : target.managerId;
@@ -561,6 +566,7 @@ export class UserMessageCoordinator {
       clientRequestId,
       controlledInput,
       turnId,
+      steerPending,
       attachments,
       replyTo,
     });

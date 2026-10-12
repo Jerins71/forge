@@ -39,6 +39,10 @@ export class ClaudeRuntimeEvents {
   map(frame: SDKMessage): RuntimeSessionEvent[] {
     if ("parent_tool_use_id" in frame && frame.parent_tool_use_id) return [];
     const events: RuntimeSessionEvent[] = [];
+    // The native echo of an input is its consumption.
+    const echoes = "user_message_uuids" in frame && frame.user_message_uuids ? frame.user_message_uuids.length
+      : "user_message_uuid" in frame && frame.user_message_uuid ? 1 : 0;
+    for (let index = 0; index < echoes; index++) events.push({ type: "input_consumed" });
     if (frame.type === "system" && frame.subtype === "task_started" && frame.is_backgrounded && frame.tool_use_id && this.tools.has(frame.tool_use_id)) {
       this.background.set(frame.tool_use_id, frame.task_id);
       events.push({ type: "tool_execution_update", toolName: this.tools.get(frame.tool_use_id)!, toolCallId: frame.tool_use_id,

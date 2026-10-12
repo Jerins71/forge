@@ -41,7 +41,7 @@ export type EnvironmentActivityEntry = AgentActivityEntry & { contentRef?: strin
 
 /** Delivery state of a user message submitted to a V2 environment, keyed by its command ID. */
 export interface MessageCommandStatus {
-  state: 'sending' | 'accepted' | 'not_confirmed' | 'failed' | 'interrupted'
+  state: 'sending' | 'accepted' | 'queued' | 'not_confirmed' | 'failed' | 'interrupted'
   detail: string | null
   /** `retry` reuses the same command; `resend` creates a new one. */
   action: 'retry' | 'resend' | null

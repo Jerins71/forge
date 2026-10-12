@@ -561,6 +561,7 @@ export class ConversationProjector {
   }
 
   captureConversationEventFromRuntime(agentId: string, event: RuntimeSessionEvent, options?: { turnId?: string }): void {
+    if (event.type === "input_consumed") return this.placeConsumedSteer(agentId);
     // A manager's failed model reply is the turn's failed status row: a readable line, the raw text in its details.
     if (this.deps.descriptors.get(agentId)?.role === "manager") {
       const failure = managerReplyFailure(event);
@@ -587,6 +588,20 @@ export class ConversationProjector {
           break;
       }
     }
+  }
+
+  /**
+   * The oldest steered input not yet placed takes its transcript place now, below any reply the runtime
+   * already closed. The send record stays durable; this entry is what the transcript shows.
+   */
+  private placeConsumedSteer(agentId: string): void {
+    const history = this.getConversationHistory(agentId);
+    const placed = new Set(history.flatMap(entry => entry.type === "conversation_message" && entry.consumedFrom ? [entry.consumedFrom] : []));
+    const pending = history.find((entry): entry is ConversationMessageEvent =>
+      entry.type === "conversation_message" && entry.steerPending === true && !!entry.id && !placed.has(entry.id));
+    if (!pending) return;
+    const { steerPending: _pending, timelineEntryId: _entry, timelineSequence: _sequence, ...message } = pending;
+    this.emitConversationMessage({ ...message, id: `${pending.id}:consumed`, consumedFrom: pending.id, timestamp: this.deps.now() });
   }
 
   private emitConversationEntry(
