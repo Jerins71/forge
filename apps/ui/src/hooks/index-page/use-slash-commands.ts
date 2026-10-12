@@ -42,6 +42,16 @@ export const SIDE_SLASH_COMMAND: SlashCommand = {
   updatedAt: '',
 }
 
+/** Built-in `/compact` menu entry; instructions after the command are passed to compaction. */
+export const COMPACT_SLASH_COMMAND: SlashCommand = {
+  id: 'builtin:compact',
+  name: 'compact',
+  prompt: '/compact ',
+  description: "Compact this session's context, with optional instructions",
+  createdAt: '',
+  updatedAt: '',
+}
+
 export function parseCompactSlashCommand(
   text: string,
 ): { customInstructions?: string } | null {

@@ -301,9 +301,12 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
         )
         return
       }
-      if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
+      const selected = slash.filteredSlashCommands[slash.slashSelectedIndex]
+      // A fully typed built-in command (`/compact`) is sent on Enter; selecting it would change nothing.
+      if (event.key === 'Enter' && !event.shiftKey && selected && selected.prompt.trim() === input.trim()) {
+        slash.setIsSlashMenuOpen(false)
+      } else if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
         event.preventDefault()
-        const selected = slash.filteredSlashCommands[slash.slashSelectedIndex]
         if (selected) slash.selectSlashCommand(selected)
         return
       }

@@ -132,6 +132,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       contextMode: { effective: descriptor.contextModeOverride ?? swarmManager.listProfiles().find(p => p.profileId === descriptor.profileId)?.defaultContextMode ?? "summary", ...(descriptor.contextModeOverride ? { override: descriptor.contextModeOverride } : {}) },
       model: { provider: model.provider, modelId: model.modelId, thinkingLevel: model.thinkingLevel,
         origin: model.provider !== descriptor.model.provider || model.modelId !== descriptor.model.modelId || descriptor.modelOrigin === "session_override" ? "session_override" : "profile_default" },
+      ...(descriptor.contextUsage && descriptor.contextUsage.contextWindow >= 1 ? { contextUsage: { tokens: Math.max(0, Math.round(descriptor.contextUsage.tokens)), contextWindow: Math.round(descriptor.contextUsage.contextWindow) } } : {}),
       ...(occurrence ? { attentionOccurrence: occurrence } : {}) };
   }
   function upsertSession(tx: ControlTransaction, sessionId: string, pendingCount?: number) {

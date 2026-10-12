@@ -243,7 +243,7 @@ async function runTurn(turn, text) {
     }
     notify('item/completed', { ...context(turn), item: { ...item, text: reply } });
     notify('thread/tokenUsage/updated', { threadId: turn.thread.id, turnId: turn.id,
-      tokenUsage: { total: { inputTokens: 10, outputTokens: 10, totalTokens: 20 }, last: { totalTokens: 20 }, modelContextWindow: 128000 } });
+      tokenUsage: { total: { inputTokens: 10, outputTokens: 10, totalTokens: 20 }, last: { totalTokens: 32000 }, modelContextWindow: 128000 } });
     complete(turn);
   } catch {
     if (!turn.done) {
@@ -306,6 +306,9 @@ async function request(method, params = {}) {
       const item = { id: `${turn.id}-item`, type: 'contextCompaction' };
       notify('item/started', { ...context(turn), item });
       notify('item/completed', { ...context(turn), item });
+      // A compacted thread is smaller; the header meter follows this report.
+      notify('thread/tokenUsage/updated', { threadId: thread.id, turnId: turn.id,
+        tokenUsage: { total: { inputTokens: 10, outputTokens: 10, totalTokens: 20 }, last: { totalTokens: 6400 }, modelContextWindow: 128000 } });
       complete(turn);
     }, 15);
     return {};
