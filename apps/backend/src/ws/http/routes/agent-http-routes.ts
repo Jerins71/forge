@@ -95,7 +95,7 @@ async function handleCompactAgentHttpRequest(
     const receipt = await createDetailFeatureRpc({ swarmManager, control }).execute(requireHttpPrincipal(request), "session.compact", {
       commandId, sessionId: agentId, mode: "manual", customInstructions,
     }) as CommandReceipt;
-    if (receipt.state !== "succeeded") { sendJson(response, 409, { error: "Compaction outcome is unknown", receipt }); return; }
+    if (receipt.state !== "succeeded") { sendJson(response, 409, { error: receipt.error?.message ?? "Compaction outcome is unknown", receipt }); return; }
     const result = receipt.result;
 
     sendJson(response, 200, {
