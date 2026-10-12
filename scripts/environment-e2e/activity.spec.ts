@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
 import { test as base } from './fixtures/test.js'
 import { controlEnvironment, readManifest, repositoryRoot, type BootstrapSession, type FleetManifest } from './launch.js'
-import { openFixtureRpc, until } from './fixtures/rpc-client.js'
+import { fixtureRpcOnce, openFixtureRpc, until } from './fixtures/rpc-client.js'
 import { randomUUID } from 'node:crypto'
 import { openUiFleet, type UiFleet } from './fixtures/ui-fleet.js'
 
@@ -243,6 +243,35 @@ test('provider retries and the final failure show as one status row, live and af
   await expect(status().last()).toContainText('Failed: The provider refused this API key (403).', { timeout: 10_000 })
   await expect(status().last()).not.toContainText('retr')
   expect(await status().count()).toBe(rows + 2)
+})
+
+test('a successful turn after a failure and a model switch clears the failure, live and after reload', async ({ page }) => {
+  // As after a weekly limit: the first turn fails, the user switches the model, and the next turn succeeds.
+  const admin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments[0]!.name, 'bootstrap')
+  const settled = async (commandId: string) => { await until(() => fixtureRpcOnce(fleet.a.baseUrl, admin, 'command.get', { commandId }), receipt => receipt.state === 'succeeded', 30_000) }
+  const launch = { commandId: randomUUID(), projectId: fleet.a.sessionId, title: 'Failure then success', workspaceStrategy: { kind: 'current_checkout' },
+    initialMessage: { text: '[fixture:reject] Hit a limit', artifactIds: [] } }
+  const { sessionId } = await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', launch)
+  await settled(launch.commandId)
+  const attention = async () => (await controlEnvironment<Array<{ reason: string }>>(manifest, 'env-a', 'fixture', { operation: 'attention-state', sessionId }))[0]?.reason
+  await expect.poll(attention, { timeout: 30_000 }).toBe('work_failed')
+  // Open another session so this one's row stays in Needs you.
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
+  const failed = () => page.locator(`[data-inbox-row$="::${sessionId}"] [aria-label="Run failed"]`)
+  await expect(failed()).toHaveCount(1)
+  const configure = { commandId: randomUUID(), sessionId, model: { mode: 'override', provider: 'codex-native', modelId: 'gpt-6-luna', thinkingLevel: 'high' } }
+  await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.configure', configure)
+  await settled(configure.commandId)
+  const resend = { commandId: randomUUID(), sessionId, message: { text: 'Try again on another model', artifactIds: [] } }
+  await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.send', resend)
+  await settled(resend.commandId)
+  await expect.poll(attention, { timeout: 30_000 }).not.toBe('work_failed')
+  await expect(failed()).toHaveCount(0)
+  await page.reload()
+  await expect(transcript(page)).toBeVisible()
+  await expect(failed()).toHaveCount(0)
+  await shot(page, 'failure-resolved-by-success')
+  assertions.failureResolvedBySuccess = { sessionId, attention: (await attention()) ?? null }
 })
 
 test('a session restarted by a trust change mid-turn settles to idle and accepts its next message', async () => {
