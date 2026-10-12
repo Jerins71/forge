@@ -15,7 +15,7 @@ import { ClaudeProviderAdapter } from "./claude-provider-adapter.js";
 import type { ClaudeProviderSession } from "./claude-provider-session.js";
 import { openSessionManagerWithSizeGuard } from "../../session/session-file-guard.js";
 import type { AgentContextUsage, AgentDescriptor, AgentStatus, RequestedDeliveryMode, SendMessageReceipt } from "../../types.js";
-import type { RuntimeCreationOptions, RuntimeSessionEvent, RuntimeShutdownOptions, RuntimeUserMessage, RuntimeUserMessageInput, SwarmAgentRuntime, SwarmRuntimeCallbacks } from "../../runtime-contracts.js";
+import { CompactionRejectedError, type RuntimeCreationOptions, type RuntimeSessionEvent, type RuntimeShutdownOptions, type RuntimeUserMessage, type RuntimeUserMessageInput, type SwarmAgentRuntime, type SwarmRuntimeCallbacks } from "../../runtime-contracts.js";
 import type { SwarmToolHost } from "../../swarm-tool-host.js";
 import { normalizeRuntimeUserMessage } from "../runtime-utils.js";
 import { ClaudeRuntimeTools } from "./claude-runtime-tools.js";
@@ -227,13 +227,12 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     const result = new Promise((yes, no) => { resolve = yes; reject = no; });
     await this.serialize(async () => {
       this.assertOpen();
-      if (this.turnOpen || this.sent.size || this.followUps.length) throw new Error("Wait for the Claude turn to finish before compacting.");
+      if (this.turnOpen || this.sent.size || this.followUps.length) throw new CompactionRejectedError("Claude is still working. Compact again when the current turn finishes.", true);
       const id = randomUUID();
       await this.submit({ id, attemptId, message: { text: `/compact${instructions?.trim() ? ` ${instructions.trim()}` : ""}` }, activated: false, compact: { resolve, reject } });
     });
     return result;
   }
-  async smartCompact(instructions?: string): Promise<{ compacted: true }> { await this.compact(instructions); return { compacted: true }; }
 
   async stopInFlight(options?: RuntimeShutdownOptions): Promise<void> {
     if (this.closed) return;

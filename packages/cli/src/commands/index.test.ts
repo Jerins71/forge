@@ -99,7 +99,6 @@ function mockClient(overrides: { status?: CliStatusResponse } = {}): ForgeClient
     getSessionLineage: async () => ({ threadId: 'session-1', lineage: null, transfers: [], handoffs: [] }),
     continueWorker: async () => ({ workerId: 'worker-1', sourceSessionAgentId: 'session-1', sessionAgentId: 'session-2' }),
     compactSession: async () => compactionResult({ action: 'compact', outcome: 'compacted', compacted: true }),
-    smartCompactSession: async () => compactionResult({ action: 'smart_compact', outcome: 'compacted', compacted: true }),
     answerChoice: async () => ({ choiceId: 'choice-1', sessionAgentId: 'session-1', status: 'answered' }),
     cancelChoice: async () => ({ choiceId: 'choice-1', sessionAgentId: 'session-1', status: 'cancelled' }),
   }

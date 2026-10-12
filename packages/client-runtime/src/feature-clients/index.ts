@@ -278,7 +278,6 @@ export interface EnvironmentFeatureClients {
       input?: { customInstructions?: string },
       signal?: AbortSignal,
     ): Promise<void>
-    smartCompact(agentId: Target, signal?: AbortSignal): Promise<void>
     systemPrompt(
       agentId: Target,
       signal?: AbortSignal,
@@ -634,10 +633,6 @@ export function createFeatureClients(
     sessions: {
       compact: async (agentId, input = {}, _signal) => {
         const receipt = await rpc.request('session.compact', { commandId: crypto.randomUUID(), sessionId: id(agentId), mode: 'manual', ...input })
-        if (receipt.state !== 'succeeded') throw new Error(receipt.error?.message ?? 'Compaction outcome is unknown')
-      },
-      smartCompact: async (agentId, _signal) => {
-        const receipt = await rpc.request('session.compact', { commandId: crypto.randomUUID(), sessionId: id(agentId), mode: 'smart' })
         if (receipt.state !== 'succeeded') throw new Error(receipt.error?.message ?? 'Compaction outcome is unknown')
       },
       systemPrompt: (agentId, signal) =>

@@ -109,16 +109,8 @@ export async function handleSessionsMutationCommand(context: CommandContext): Pr
       writeCompactionResult(context, result)
       return EXIT_CODES.success
     }
-    case 'smart-compact': {
-      const agentId = requireArg(arg, 'agentId')
-      const customInstructions = normalizeCustomInstructions(context.args.options.instructions)
-      const client = await context.createClient()
-      const result = await client.smartCompactSession(agentId, { customInstructions })
-      writeCompactionResult(context, result)
-      return EXIT_CODES.success
-    }
     default:
-      throw usage('Usage: forge sessions create|send|wait|stop|resume|fork|switch|merge-back|compact|smart-compact|rename|pin|unpin|clear|delete ...')
+      throw usage('Usage: forge sessions create|send|wait|stop|resume|fork|switch|merge-back|compact|rename|pin|unpin|clear|delete ...')
   }
 }
 
@@ -232,7 +224,6 @@ function writeCompactionResult(context: CommandContext, result: CliSessionCompac
     profileId: result.profileId,
     outcome: result.outcome,
     compacted: result.compacted,
-    reason: result.reason,
     customInstructionsProvided: result.customInstructionsProvided,
     completedAt: result.completedAt,
   }

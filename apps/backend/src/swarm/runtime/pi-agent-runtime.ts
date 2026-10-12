@@ -39,8 +39,6 @@ import type {
   RuntimeShutdownOptions,
   RuntimeUserMessage,
   RuntimeUserMessageInput,
-  SmartCompactOptions,
-  SmartCompactResult,
   SwarmAgentRuntime,
   SwarmRuntimeCallbacks
 } from "../runtime-contracts.js";
@@ -925,128 +923,6 @@ export class AgentRuntime implements SwarmAgentRuntime {
     }
   }
 
-  async smartCompact(customInstructions?: string, options?: SmartCompactOptions): Promise<SmartCompactResult> {
-    this.ensureNotTerminated();
-    const liveMode = this.resolveEffectiveContextMode();
-    if (liveMode === "fresh") {
-      this.assertFreshManualIdle();
-      if (this.isContextRecoveryActive() || this.manualCompactionInProgress) {
-        throw new Error("Context recovery is already in progress");
-      }
-      const attempt = this.beginContextModeAttempt();
-      this.beginContextRecovery();
-      try {
-        await this.compact(customInstructions);
-        return { compacted: true };
-      } finally {
-        this.endContextRecovery();
-        this.guardAbortController = undefined;
-        if (attempt.owner) {
-          this.releaseContextModeAttempt(attempt.id);
-        }
-        await this.flushRecoveryBufferedMessages();
-      }
-    }
-
-    if (this.isContextRecoveryActive()) {
-      throw new Error("Context recovery is already in progress");
-    }
-
-    const resumeAfterCompaction =
-      options?.resumeAfterCompaction ?? (options?.skipResumeIfIdle ? this.shouldResumeAfterManualSmartCompact() : true);
-
-    this.beginContextRecovery();
-    this.guardAbortController = new AbortController();
-    const signal = this.guardAbortController.signal;
-
-    const handoffFilePath = buildHandoffFilePath(this.descriptor);
-
-    this.logContextGuard("smart_compact_started", {
-      handoffFilePath,
-      wasStreaming: this.session.isStreaming,
-      resumeAfterCompaction
-    });
-
-    let handoffContent: string | undefined;
-    let completed = false;
-    let compacted = false;
-    let reason: string | undefined;
-
-    try {
-      // If streaming, abort current turn first
-      if (this.session.isStreaming) {
-        try {
-          await withTimeout(this.session.abort(), CONTEXT_GUARD_ABORT_TIMEOUT_MS, "smart_compact_abort");
-        } catch (error) {
-          await this.reportContextGuardError(error, { stage: "smart_compact_abort_failed" });
-          return { compacted: false, reason: "Failed to abort current turn" };
-        }
-      }
-
-      if (signal.aborted) return { compacted: false, reason: "Aborted" };
-
-      // Run handoff turn
-      handoffContent = await this.runHandoffTurn(handoffFilePath, signal);
-
-      if (signal.aborted) return { compacted: false, reason: "Aborted" };
-
-      // Compact
-      try {
-        const beforeCompactionEntries = this.getCompactionEntryKeys();
-        await withTimeout(this.compact(customInstructions), this.getCompactionTimeoutMs(), "smart_compact_compact", {
-          onTimeout: () => this.abortCompactionSafely("smart_compact_compact_timeout_abort")
-        });
-        compacted = this.getNewCompactionEntries(beforeCompactionEntries).length > 0;
-        if (!compacted) {
-          reason = "Compaction completed without writing a compaction record";
-          await this.reportContextGuardError(new Error(reason), {
-            stage: "smart_compact_compaction_failed",
-            handoffWritten: handoffContent !== undefined
-          });
-        }
-      } catch (error) {
-        const normalized = normalizeRuntimeError(error);
-        if (isAlreadyCompactedError(normalized.message)) {
-          reason = "runtime_already_compacted";
-        } else {
-          reason = normalized.message;
-          await this.reportContextGuardError(error, {
-            stage: "smart_compact_compaction_failed",
-            handoffWritten: handoffContent !== undefined,
-            ...getForgeCompactionFailureDetails(error)
-          });
-        }
-        // Continue through cleanup even if compaction failed or was skipped.
-      }
-
-      if (signal.aborted) return { compacted: false, reason: "Aborted" };
-
-      if (resumeAfterCompaction && compacted) {
-        try {
-          const resumePrompt = buildResumePrompt(handoffContent);
-          await this.session.prompt(resumePrompt);
-        } catch (error) {
-          await this.reportContextGuardError(error, { stage: "smart_compact_resume_failed" });
-        }
-      }
-
-      completed = true;
-    } finally {
-      await this.cleanupGuard(handoffFilePath, {
-        retainHandoff: handoffContent !== undefined && !compacted
-      });
-      if (completed) {
-        this.logContextGuard("smart_compact_completed", {
-          compacted,
-          handoffWritten: handoffContent !== undefined,
-          handoffContentLength: handoffContent?.length ?? 0
-        });
-      }
-    }
-
-    return compacted ? { compacted: true } : { compacted: false, reason: reason ?? "compaction_not_performed" };
-  }
-
   async compact(customInstructions?: string): Promise<unknown> {
     this.ensureNotTerminated();
     const liveMode = this.resolveEffectiveContextMode();
@@ -1104,17 +980,6 @@ export class AgentRuntime implements SwarmAgentRuntime {
     enhanced.name = "ForgePiCompactionFailure";
     (enhanced as Error & { details?: Record<string, unknown> }).details = failure.details;
     return enhanced;
-  }
-
-  private shouldResumeAfterManualSmartCompact(): boolean {
-    return (
-      this.session.isStreaming ||
-      this.promptDispatchPending ||
-      this.status === "streaming" ||
-      this.pendingDeliveries.length > 0 ||
-      this.recoveryBufferedMessages.length > 0 ||
-      this.currentTurnReplayMessages.length > 0
-    );
   }
 
   private abortCompactionSafely(stage: string): void {
@@ -2141,7 +2006,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
         contextWindow: triggeringUsage.contextWindow,
         contextPercent: triggeringUsage.percent,
         userFacingMessage: willPrepareHandoff
-          ? "Context is getting full — preparing handoff for automatic smart compaction."
+          ? "Context is getting full — preparing handoff for automatic compaction."
           : "Context limit reached — running recovery compaction now."
       }
     });
@@ -2282,7 +2147,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
           contextWindow: details.contextWindow,
           compactionEntryId: entry.id ?? entry.key,
           userFacingMessage: details.handoffWritten
-            ? "Automatic smart compaction complete."
+            ? "Automatic compaction complete."
             : "Recovery compaction complete."
         }
       });

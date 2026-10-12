@@ -453,7 +453,6 @@ export const chatArticles: HelpArticle[] = [
       'context',
       'token',
       'summary',
-      'smart compact',
       'auto',
       'pin',
       'context v2',

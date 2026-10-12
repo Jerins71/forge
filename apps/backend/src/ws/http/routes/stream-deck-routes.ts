@@ -46,7 +46,7 @@ interface StreamDeckRouteSwarmManager {
   stopSession(agentId: string): Promise<{ terminatedWorkerIds: string[] }>;
   resumeSession(agentId: string): Promise<void>;
   isSessionShutdownSafe(agentId: string): boolean;
-  smartCompactAgentContext(
+  compactAgentContext(
     agentId: string,
     options?: {
       sourceContext?: { channel: "cli"; channelId?: string; messageId?: string };
@@ -364,12 +364,12 @@ export async function executeStreamDeckAction(
     }));
   }
 
-  if (action.type === "smart_compact") {
-    await options.swarmManager.smartCompactAgentContext(session.agentId, {
+  if (action.type === "compact") {
+    await options.swarmManager.compactAgentContext(session.agentId, {
       sourceContext: { channel: "cli", channelId: "stream-deck", messageId: action.requestId },
       trigger: "cli",
     });
-    return success(action, session.agentId, "Smart compaction started");
+    return success(action, session.agentId, "Compaction complete");
   }
 
   const previous = options.unreadTracker.markRead(session.profileId ?? session.agentId, session.agentId);

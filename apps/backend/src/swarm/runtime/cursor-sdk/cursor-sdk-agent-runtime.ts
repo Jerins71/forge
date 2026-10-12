@@ -12,8 +12,6 @@ import type {
   RuntimeTurnMeta,
   RuntimeUserMessage,
   RuntimeUserMessageInput,
-  SmartCompactOptions,
-  SmartCompactResult,
   SwarmAgentRuntime,
   SwarmRuntimeCallbacks
 } from "../../runtime-contracts.js";
@@ -289,11 +287,6 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
   }
 
   async compact(): Promise<unknown> {
-    this.ensureNotTerminated();
-    throw new UnsupportedProviderBehaviorError("cursor-sdk", "nativeCompact");
-  }
-
-  async smartCompact(_customInstructions?: string, _options?: SmartCompactOptions): Promise<SmartCompactResult> {
     this.ensureNotTerminated();
     throw new UnsupportedProviderBehaviorError("cursor-sdk", "nativeCompact");
   }

@@ -69,7 +69,6 @@ import type {
   RuntimeCodexTransportDebugDiagnostics,
   RuntimeErrorEvent,
   RuntimeSessionEvent,
-  SmartCompactResult,
 } from "./runtime-contracts.js";
 import type { SessionCreationOptions } from "./session-descriptor-factory.js";
 import type {
@@ -458,13 +457,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
     options?: CompactAgentContextOptions,
   ): Promise<unknown> {
     return this.services.memory.compact(agentId, options);
-  }
-
-  smartCompactAgentContext(
-    agentId: string,
-    options?: CompactAgentContextOptions,
-  ): Promise<SmartCompactResult> {
-    return this.services.memory.smartCompact(agentId, options);
   }
 
   appendConversationUserMessage(

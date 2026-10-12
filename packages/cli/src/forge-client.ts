@@ -98,7 +98,6 @@ export interface ForgeClientLike {
   getSessionLineage(agentId: string): Promise<SessionLineageSnapshot>
   continueWorker(workerId: string, options?: { sessionAgentId?: string; label?: string }): Promise<{ workerId: string; sourceSessionAgentId: string; sessionAgentId: string }>
   compactSession(agentId: string, options?: ClientCompactionOptions): Promise<CliSessionCompactionResult>
-  smartCompactSession(agentId: string, options?: ClientCompactionOptions): Promise<CliSessionCompactionResult>
   answerChoice(choiceId: string, answers: ChoiceAnswer[], sessionAgentId?: string): Promise<CliChoiceRouteResult>
   cancelChoice(choiceId: string, sessionAgentId?: string): Promise<CliChoiceRouteResult>
 }
@@ -306,16 +305,11 @@ export class ForgeClient implements ForgeClientLike {
       return { workerId, sourceSessionAgentId, sessionAgentId }
     })
   }
-  compactSession(agentId: string, options: ClientCompactionOptions = {}): Promise<CliSessionCompactionResult> { return this.compact(agentId, 'manual', options) }
-  smartCompactSession(agentId: string, options: ClientCompactionOptions = {}): Promise<CliSessionCompactionResult> { return this.compact(agentId, 'smart', options) }
-  private async compact(agentId: string, mode: 'manual' | 'smart', options: ClientCompactionOptions): Promise<CliSessionCompactionResult> {
+  compactSession(agentId: string, options: ClientCompactionOptions = {}): Promise<CliSessionCompactionResult> {
     return this.withEnvironment(async client => {
       const customInstructions = options.customInstructions?.trim() || undefined
-      const receipt = await this.control(client, 'session.compact', { commandId: randomUUID(), sessionId: agentId, mode, source: 'cli', ...(customInstructions ? { customInstructions } : {}) })
-      const compacted = receipt.result?.compacted ?? true
-      const reason = receipt.result?.reason
-      const skipped = reason === 'claude_runtime_below_compaction_threshold' || reason === 'claude_runtime_context_usage_unknown' || reason === 'runtime_already_compacted'
-      return { action: mode === 'manual' ? 'compact' : 'smart_compact', sessionAgentId: agentId, profileId: (await this.showSession(agentId)).session.profileId, outcome: compacted ? 'compacted' : skipped ? 'skipped' : 'not_reduced', compacted, ...(!compacted && reason ? { reason } : {}), customInstructionsProvided: !!customInstructions, completedAt: receipt.updatedAt }
+      const receipt = await this.control(client, 'session.compact', { commandId: randomUUID(), sessionId: agentId, mode: 'manual', source: 'cli', ...(customInstructions ? { customInstructions } : {}) })
+      return { action: 'compact', sessionAgentId: agentId, profileId: (await this.showSession(agentId)).session.profileId, outcome: 'compacted', compacted: true, customInstructionsProvided: !!customInstructions, completedAt: receipt.updatedAt }
     })
   }
   async answerChoice(choiceId: string, answers: ChoiceAnswer[], sessionAgentId?: string): Promise<CliChoiceRouteResult> {

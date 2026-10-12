@@ -10,6 +10,7 @@ import { createAgentHttpRoutes } from '../http/routes/agent-http-routes.js';
 import { bindHttpPrincipal } from './http-principal.js';
 import { loadState } from '../../environment/control/orchestration/store.js';
 import { streamFixture, principal, session } from './__tests__/fixtures.js';
+import { CompactionRejectedError } from '../../swarm/runtime-contracts.js';
 
 // Failure cases: duplicate/lost acknowledgements repeat compaction or recovery;
 // stale elicitation resumes a dead Promise; form values enter the command/event
@@ -27,7 +28,7 @@ async function fixture() {
     resumeRestartRecovery: vi.fn(async () => loadState(streams.database).recovery), dismissRestartRecovery: vi.fn(async () => loadState(streams.database).recovery),
     emit: vi.fn(),
     controlSessionGoal: vi.fn(async () => ({ revision: 1, goal: null })),
-    compactAgentContext: vi.fn(async () => undefined), smartCompactAgentContext: vi.fn(async () => ({ compacted: true })),
+    compactAgentContext: vi.fn(async () => undefined),
     getPendingCodexElicitationsForManager: () => [{ elicitationId: 'pending', managerAgentId: 'session', sidecarAgentId: 'sidecar', threadId: 'thread', turnId: 'turn' }],
     respondToCodexElicitation: vi.fn(() => true),
   };
@@ -61,6 +62,12 @@ describe('detail control acceptance', () => {
     expect(await f.rpc.execute(principal, 'session.compact', input)).toMatchObject({ state: 'interrupted', delivery: 'unknown' });
     expect(await f.rpc.execute(principal, 'session.compact', input)).toMatchObject({ state: 'interrupted', delivery: 'unknown' });
     expect(f.swarm.compactAgentContext).toHaveBeenCalledTimes(1);
+  });
+  it('fails compaction with the runtime refusal when nothing reached the provider', async () => {
+    const f = await fixture();
+    f.swarm.compactAgentContext.mockRejectedValue(new CompactionRejectedError('Claude is still working. Compact again when the current turn finishes.', true));
+    expect(await f.rpc.execute(principal, 'session.compact', { commandId, sessionId: 'session', mode: 'manual' })).toMatchObject({
+      state: 'failed', error: { code: 'CONFLICT', message: 'Claude is still working. Compact again when the current turn finishes.', retryable: true } });
   });
   it('routes HTTP compaction through the same receipt owner and preserves admission statuses', async () => {
     const f = await fixture();

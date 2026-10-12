@@ -101,8 +101,6 @@ export function useManagerActions({
   handleCloseDeleteManagerDialog: () => void
   isCompactingManager: boolean
   handleCompactManager: (customInstructions?: string) => Promise<void>
-  isSmartCompactingManager: boolean
-  handleSmartCompactManager: () => Promise<void>
   isStoppingAllAgents: boolean
   handleStopAllAgents: () => Promise<void>
 } {
@@ -154,12 +152,10 @@ export function useManagerActions({
   const [isDeletingManager, setIsDeletingManager] = useState(false)
 
   const [compactingAgentId, setCompactingAgentId] = useState<string | null>(null)
-  const [smartCompactingAgentId, setSmartCompactingAgentId] = useState<string | null>(null)
   const [isStoppingAllAgents, setIsStoppingAllAgents] = useState(false)
 
   // Only report compaction in-progress when viewing the session that triggered it
   const isCompactingManager = compactingAgentId !== null && compactingAgentId === activeAgentId
-  const isSmartCompactingManager = smartCompactingAgentId !== null && smartCompactingAgentId === activeAgentId
 
   const handleNewManagerNameChange = useCallback((value: string) => {
     setNameTouched(true)
@@ -252,29 +248,6 @@ export function useManagerActions({
       }))
     } finally {
       setCompactingAgentId(null)
-    }
-  }, [activeAgentId, environmentClient, isActiveManager, setState])
-
-  const handleSmartCompactManager = useCallback(async () => {
-    if (!isActiveManager || !activeAgentId || !environmentClient) {
-      return
-    }
-
-    setSmartCompactingAgentId(activeAgentId)
-
-    try {
-      await environmentClient.features.sessions.smartCompact(activeAgentId)
-      setState((previous) => ({
-        ...previous,
-        lastError: null,
-      }))
-    } catch (error) {
-      setState((previous) => ({
-        ...previous,
-        lastError: `Failed to smart compact manager context: ${toErrorMessage(error)}`,
-      }))
-    } finally {
-      setSmartCompactingAgentId(null)
     }
   }, [activeAgentId, environmentClient, isActiveManager, setState])
 
@@ -675,8 +648,6 @@ export function useManagerActions({
     handleCloseDeleteManagerDialog,
     isCompactingManager,
     handleCompactManager,
-    isSmartCompactingManager,
-    handleSmartCompactManager,
     isStoppingAllAgents,
     handleStopAllAgents,
   }

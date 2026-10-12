@@ -47,7 +47,6 @@ export const settingsArticles: HelpArticle[] = [
       'SuperGrok',
       'weekly',
       'compaction',
-      'smart compact',
       'reasoning',
       'timeout',
       'context management',

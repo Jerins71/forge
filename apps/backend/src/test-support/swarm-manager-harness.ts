@@ -6,8 +6,6 @@ import type {
   RuntimeCreationOptions,
   RuntimeShutdownOptions,
   RuntimeUserMessage,
-  SmartCompactOptions,
-  SmartCompactResult,
   SwarmAgentRuntime,
 } from '../swarm/runtime-contracts.js'
 import type { ProjectExecutableTrustPlan } from '../swarm/project-executable-trust.js'
@@ -68,14 +66,12 @@ export class FakeRuntime implements SwarmAgentRuntime {
   stopInFlightCalls: Array<RuntimeShutdownOptions | undefined> = []
   sendCalls: Array<{ message: string | RuntimeUserMessage; delivery: RequestedDeliveryMode }> = []
   compactCalls: Array<string | undefined> = []
-  smartCompactCalls: Array<{ customInstructions?: string; options?: SmartCompactOptions }> = []
   recycleCalls = 0
   nextDeliveryId = 0
   busy = false
   contextRecoveryInProgress = false
   terminateMutatesDescriptorStatus = true
   sendMessageError: Error | undefined
-  smartCompactResult: SmartCompactResult = { compacted: true }
   onSendMessage:
     | ((message: string | RuntimeUserMessage, delivery: RequestedDeliveryMode) => Promise<void> | void)
     | undefined
@@ -135,11 +131,6 @@ export class FakeRuntime implements SwarmAgentRuntime {
       status: 'ok',
       customInstructions: customInstructions ?? null,
     }
-  }
-
-  async smartCompact(customInstructions?: string, options?: SmartCompactOptions): Promise<SmartCompactResult> {
-    this.smartCompactCalls.push({ customInstructions, options })
-    return this.smartCompactResult
   }
 
   async stopInFlight(options?: RuntimeShutdownOptions): Promise<void> {

@@ -6,7 +6,7 @@ import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { CodexAppServerClientFactory, CodexAppServerClientPort } from "../../codex-app-server/types.js";
 import { openSessionManagerWithSizeGuard } from "../../session/session-file-guard.js";
 import type { AgentContextUsage, AgentDescriptor, AgentStatus, RequestedDeliveryMode, SendMessageReceipt } from "../../types.js";
-import type { RuntimeCreationOptions, RuntimeSessionEvent, RuntimeShutdownOptions, RuntimeUserMessage, RuntimeUserMessageInput, SwarmAgentRuntime, SwarmRuntimeCallbacks } from "../../runtime-contracts.js";
+import { CompactionRejectedError, type RuntimeCreationOptions, type RuntimeSessionEvent, type RuntimeShutdownOptions, type RuntimeUserMessage, type RuntimeUserMessageInput, type SwarmAgentRuntime, type SwarmRuntimeCallbacks } from "../../runtime-contracts.js";
 import { normalizeRuntimeError, normalizeRuntimeUserMessage } from "../runtime-utils.js";
 import { CodexRuntimeEvents } from "./codex-runtime-events.js";
 import type { CodexRuntimeAuth } from "./codex-runtime-auth.js";
@@ -195,10 +195,10 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
 
   async compact(customInstructions?: string): Promise<unknown> {
     this.assertOpen();
-    if (customInstructions?.trim()) throw new Error("Native Codex manages its own compaction prompt; custom compaction instructions are unavailable.");
+    if (customInstructions?.trim()) throw new CompactionRejectedError("Codex compacts with its own prompt and does not accept custom instructions. Use Compact context without instructions.");
     const active = await this.serialize(async () => {
       this.assertOpen();
-      if (this.active) throw new Error("Wait for the native Codex turn to finish before compacting.");
+      if (this.active) throw new CompactionRejectedError("Codex is still working. Compact again when the current turn finishes.", true);
       const turn = this.beginTurn();
       await this.publishStatus();
       await this.emit({ type: "agent_start" });
@@ -214,7 +214,6 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     if (active.failed || this.status === "error" || active.abort.signal.aborted) throw new Error("Native Codex compaction did not complete.");
     return {};
   }
-  async smartCompact(customInstructions?: string): Promise<{ compacted: true }> { await this.compact(customInstructions); return { compacted: true }; }
 
   async stopInFlight(options?: RuntimeShutdownOptions): Promise<void> {
     if (this.closed) return;

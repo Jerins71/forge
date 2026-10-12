@@ -62,7 +62,7 @@ forge sessions list --profile <profileId>
 forge sessions create --profile <profileId> --label "CLI task"
 forge sessions send <agentId> --message "Summarize the current repo state"
 forge sessions transcript <agentId> --limit 50
-forge sessions smart-compact <agentId> --json
+forge sessions compact <agentId> --json
 forge run --profile <profileId> --message "Run the requested automation" --json
 forge launch --profile <profileId> --message @prompt.md
 forge wait <agentId> --timeout 10m --stop-on-timeout
@@ -80,9 +80,9 @@ Durations accept milliseconds by default or `ms`, `s`, and `m` suffixes. Example
 
 ## Session compaction
 
-`forge sessions compact <agentId> [--instructions <text>]` triggers manual context compaction for a manager session. `forge sessions smart-compact <agentId> [--instructions <text>]` asks the runtime to compact only when useful. Both use native `session.compact` receipts. They follow the session's effective context policy: Summary keeps the current handoff/resume path, while Context v2 uses a deterministic checkpoint, skips the Smart LLM handoff, rejects busy manual attempts until idle, and leaves an idle manager idle. On Context v2, older transcript remains on disk for the agent-only `history` tool (`sessions`, `search`, `read`); there is no human history drawer.
+`forge sessions compact <agentId> [--instructions <text>]` triggers manual context compaction for a manager session through a native `session.compact` receipt, on whichever environment owns the session. Native Claude sessions run `/compact [instructions]` in the Claude Code CLI. Native Codex sessions use the app server's own compaction and reject `--instructions`. Pi-backed sessions follow the effective context policy: Summary compacts older context, while Context v2 uses a deterministic checkpoint. Compaction waits for the current turn: a busy session is rejected with a message to retry once the turn finishes. On Context v2, older transcript remains on disk for the agent-only `history` tool (`sessions`, `search`, `read`); there is no human history drawer.
 
-The CLI waits for the backend compaction mutation to finish or fail, then prints the normalized result. JSON output includes `action`, `sessionAgentId`, `profileId` when available, `outcome` (`compacted`, `skipped`, or `not_reduced`), `compacted`, `reason` when no compaction happened, `customInstructionsProvided`, and `completedAt`. Human output prints the same compact summary. Context before/after values are shown only if the server includes them.
+The CLI waits for the backend compaction mutation to finish or fail, then prints the normalized result. JSON output includes `action`, `sessionAgentId`, `profileId` when available, `outcome` (`compacted`), `compacted`, `customInstructionsProvided`, and `completedAt`. Human output prints the same compact summary. Context before/after values are shown only if the server includes them.
 
 Compaction requires a manager and a runtime that supports it. Context v2 is executable only by supported ordinary Pi Builder managers (OpenAI/Codex or Anthropic). Receipt recovery uses the original command ID after a dropped response. Interrupted receipts remain inspectable and are never automatically replayed as a new operation.
 

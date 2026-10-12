@@ -421,7 +421,7 @@ const defineRpc = <I extends TSchema, R extends TSchema, S extends TSchema | und
 
 export const rpcSchemas = {
   'session.goal.control': defineRpc(Type.Union([O({ commandId: V2Uuid, sessionId: V2Id, ...GoalControlV2Schema.anyOf[0].properties }), O({ commandId: V2Uuid, sessionId: V2Id, ...GoalControlV2Schema.anyOf[1].properties })]), CommandReceiptSchema, { receipt: true }),
-  'session.compact': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, mode: E('manual','smart'), source: Type.Optional(Type.Literal('cli')), customInstructions: Type.Optional(Type.String({ maxLength: 32768 })) }), CommandReceiptSchema, { receipt: true }),
+  'session.compact': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, mode: Type.Literal('manual'), source: Type.Optional(Type.Literal('cli')), customInstructions: Type.Optional(Type.String({ maxLength: 32768 })) }), CommandReceiptSchema, { receipt: true }),
   'session.elicitation.url': defineRpc(O({ sessionId: V2Id, elicitationId: V2Id, generation: V2Id }), O({ url: Type.String({ minLength: 1, maxLength: 8192 }) })),
   'session.elicitation.respond': defineRpc(ElicitationRespondV2Schema, V2Empty),
   'session.features.subscribe': defineRpc(O({ sessionId: V2Id }), SubscribeResult, { stream: DetailFeatureStreamItemSchema }),

@@ -257,21 +257,12 @@ export interface SwarmRuntimeCallbacks {
   getLastUserFacingManagerOutputAt?: (agentId: string) => number | undefined;
 }
 
-export type SmartCompactResult =
-  | {
-      /** Whether the smart-compaction flow actually reduced context by calling compact(). */
-      compacted: true;
-    }
-  | {
-      /** Whether smart compaction was skipped or finished without reducing context. */
-      compacted: false;
-      /** Machine-readable or human-readable reason why no compaction occurred. */
-      reason: string;
-    };
-
-export interface SmartCompactOptions {
-  resumeAfterCompaction?: boolean;
-  skipResumeIfIdle?: boolean;
+/** Compaction was refused before anything reached the provider; the message is shown to the user as is. */
+export class CompactionRejectedError extends Error {
+  constructor(message: string, readonly retryable = false) {
+    super(message);
+    this.name = "CompactionRejectedError";
+  }
 }
 
 export interface RuntimeShutdownOptions {
@@ -312,8 +303,6 @@ export interface SwarmAgentRuntime {
   ): Promise<SendMessageReceipt>;
 
   compact(customInstructions?: string): Promise<unknown>;
-
-  smartCompact(customInstructions?: string, options?: SmartCompactOptions): Promise<SmartCompactResult>;
 
   stopInFlight(options?: RuntimeShutdownOptions): Promise<void>;
 

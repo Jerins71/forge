@@ -457,13 +457,13 @@ Upgrading from Forge V1? Cortex and Knowledge v2 were removed in V2. Their files
 
 Forge is designed to run unsupervised. Here's how it handles failure cases.
 
-### Smart Compaction
+### Compaction
 
 If you've used Claude Code, you know the pain: the context window fills up, it compacts, and suddenly the agent has amnesia. It doesn't know what it was doing, what's been tried, or what the plan was.
 
-Forge continues according to the session's effective context policy. **Summary** remains the default. Compact and Smart compact both follow that policy; there is no separate intent switch on the Compact actions.
+Forge continues according to the session's effective context policy. **Summary** remains the default. Compact context follows that policy.
 
-On **Summary**, Smart compaction works as before:
+On **Summary**, automatic compaction works like this:
 
 1. **Early trigger** — When context usage hits ~84–88% (visible on the context meter dial in the chat), the system auto-stops the session agent.
 2. **Handoff file** — Before compaction, the agent writes a markdown handoff file capturing current state, in-progress work, decisions made, and next steps.
@@ -472,9 +472,9 @@ On **Summary**, Smart compaction works as before:
 5. **Pinned messages** — Any messages you've pinned (up to 10 per session) are preserved verbatim in the summary under a dedicated "Preserved Messages (Pinned)" section.
 6. **Resume** — If compaction happened while the session was active, interrupted, or waiting on dispatch, the agent comes back with the detailed recent context, a high-level summary of older work, pinned messages, and the handoff file.
 
-On **Context v2**, Compact and Smart compact skip that Smart LLM handoff and instead write a deterministic checkpoint: current goal/plan, pins, and unconsumed tool-result references. Older transcript remains on disk and is recoverable with the agent-only `history` tool. Context v2 is experimental and executable only by supported ordinary Pi Builder managers (OpenAI/Codex or Anthropic). System profiles, Cursor SDK, plugin/external threads, and workers cannot run it; workers inherit the owning manager. A project can still save Context v2 as a preference even when the current runtime cannot execute it.
+On **Context v2**, Compact context skips that handoff and instead write a deterministic checkpoint: current goal/plan, pins, and unconsumed tool-result references. Older transcript remains on disk and is recoverable with the agent-only `history` tool. Context v2 is experimental and executable only by supported ordinary Pi Builder managers (OpenAI/Codex or Anthropic). System profiles, Cursor SDK, plugin/external threads, and workers cannot run it; workers inherit the owning manager. A project can still save Context v2 as a preference even when the current runtime cannot execute it.
 
-If you trigger Smart compact manually on **Summary** while the Pi-backed manager is already idle, it compacts and stays idle afterward. If it was active, interrupted, or dispatch-pending, it resumes after compaction. On **Context v2**, a busy manual Compact or Smart compact is rejected until streaming, tools, and prompt dispatch settle; retry when idle. An idle Context v2 manager stays idle after a successful manual transition. Saving Summary or Context v2 does not reset the current window; it applies at the next context transition. While compaction or context recovery is active, the session row shows a violet pulsing `C` badge in the sidebar. **Settings → General → Compaction** still controls the compaction model, reasoning, and timeout for supported Pi-backed OpenAI/Codex and Anthropic manager compaction runtimes only, not Cursor SDK, xAI/Grok, or user-added OpenRouter manager models; OpenRouter manager eligibility is a separate policy and OpenRouter models are not compaction choices. Context continuation itself lives in **Project Settings → Context management**, with an optional session inherit/override beside Send.
+A manual Compact context is rejected while a turn is running; retry when the session is idle. An idle manager stays idle after a successful manual transition. Native Claude and Codex sessions compact through their own harness: Claude runs `/compact` (custom instructions allowed), Codex uses app-server compaction (no custom instructions). Saving Summary or Context v2 does not reset the current window; it applies at the next context transition. While compaction or context recovery is active, the session row shows a violet pulsing `C` badge in the sidebar. **Settings → General → Compaction** still controls the compaction model, reasoning, and timeout for supported Pi-backed OpenAI/Codex and Anthropic manager compaction runtimes only, not Cursor SDK, xAI/Grok, or user-added OpenRouter manager models; OpenRouter manager eligibility is a separate policy and OpenRouter models are not compaction choices. Context continuation itself lives in **Project Settings → Context management**, with an optional session inherit/override beside Send.
 
 Sessions can compact 50+ times and still maintain full continuity. You can just keep going indefinitely.
 
@@ -501,9 +501,9 @@ While a runtime is live, the context meter follows runtime status rather than a 
 
 ### Context Window Indicator
 
-The small dial icon in the chat header shows current context utilization. When the runtime is live, that live status is authoritative for the meter. Watch it creep up during long sessions. When Summary Smart compact triggers during active work, you'll see a brief pause while the handoff and summary are generated, a violet pulsing `C` appears on the session row, then work resumes. Context v2 automatic transitions happen at native threshold or overflow points and skip that Smart LLM handoff. Successful Compact and Context v2 start and completion notices appear in live and replayed transcripts as muted informational **Context update** rows rather than amber **System** attention rows. Failures and unavailable transitions remain amber.
+The small dial icon in the chat header shows current context utilization. When the runtime is live, that live status is authoritative for the meter. Watch it creep up during long sessions. When Summary automatic compaction triggers during active work, you'll see a brief pause while the handoff and summary are generated, a violet pulsing `C` appears on the session row, then work resumes. Context v2 automatic transitions happen at native threshold or overflow points and skip that handoff. A manual Compact adds one **Compaction complete.** row; Context v2 start and completion notices appear in live and replayed transcripts as muted informational **Context update** rows rather than amber **System** attention rows. Failures and unavailable transitions remain amber.
 
-You can also trigger compaction manually from the three-dot menu (**⋯ → Compact context** or **⋯ → Smart compact**) if you want to proactively clear space. Both actions follow the session's effective context policy. Pinned messages are preserved during manual compaction the same way they are during automatic compaction. On Summary, if the manager is already idle, a manual Smart compact leaves it idle afterward on Pi-backed managers. On Context v2, retry Compact when idle; an idle manager stays idle.
+You can also trigger compaction manually from the three-dot menu (**⋯ → Compact context**) if you want to proactively clear space. It follows the session's effective context policy. Pinned messages are preserved during manual compaction the same way they are during automatic compaction. Retry Compact when idle; an idle manager stays idle.
 
 ### Worker Results
 

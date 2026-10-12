@@ -160,7 +160,6 @@ async function createHarness(): Promise<Harness> {
   const services = {
     compaction: {
       compact: vi.fn(async () => ({ compacted: true })),
-      smartCompact: vi.fn(async () => ({ compacted: true } as const)),
     },
     memory: {
       ensureAgentMemoryFile: vi.fn(async () => undefined),
