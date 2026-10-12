@@ -384,6 +384,32 @@ test('a reply stopped mid-stream keeps the text already shown, then says it was 
   assertions.stoppedReply = { sessionId, partialKept: true, emptyCompletionNotice: false, replayMatches: true }
 })
 
+test('a message sent while a reply is streaming is answered below the reply it cut short, live and after reload', async ({ page }) => {
+  const sessionId = await launch('Polish steered reply', 'Say hello first')
+  await open(page, sessionId)
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  await send(page, '[fixture:list] Write a 300 line list')
+  await expect(transcript(page)).toContainText('Synthetic list line 20', { timeout: 30_000 })
+  await send(page, 'stop and reply DONE')
+  const answer = () => transcript(page).getByText('DONE', { exact: true })
+  const check = async () => {
+    // The steered message gets its answer in the same turn.
+    await expect(answer()).toBeVisible({ timeout: 30_000 })
+    // The list it cut short keeps what was shown, and ends above that answer rather than below it.
+    await expect(transcript(page)).toContainText('Synthetic list line 20')
+    await expect(transcript(page)).not.toContainText('Synthetic list line 300')
+    expect(await rowIndex(answer())).toBeGreaterThan(await rowIndex(textRow(page, 'Synthetic list line 20')))
+  }
+  await check()
+  await expect.poll(async () => (await shellSession(sessionId))?.status, { timeout: 30_000 }).toBe('idle')
+  await shot(page, 'reply-steered-live')
+  await page.reload()
+  await expect(transcript(page)).toContainText('stop and reply DONE', { timeout: 30_000 })
+  await check()
+  await shot(page, 'reply-steered-reload')
+  assertions.steeredReply = { sessionId, answered: true, answerBelowCutReply: true, replayMatches: true }
+})
+
 test('a worker\'s provider failure is one failed row in the worker view, and the manager\'s card names it', async ({ page }) => {
   const sessionId = await launch('Polish worker failure', '[fixture:spawn-fail] Start a worker whose provider fails')
   await open(page, sessionId)
